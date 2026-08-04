@@ -1,14 +1,26 @@
-"""A tour of ``TaskContext`` — inputs, deps, config, workspace helpers.
+"""A tour of ``TaskContext`` — inputs bind by name, ``ctx`` carries the workdir.
 
 Matches ``docs/guide/task-context.md``.
 
-Shows how the same context object delivers all of:
+A task body declares the runtime values it consumes as **named parameters**; the
+engine binds them from the merged map {build-time config} | {upstream outputs |
+run params} (dynamic inputs win):
 
-* ``ctx.inputs``  — typed output from the upstream task
-* ``ctx.deps``    — runtime-injected dependencies (passed via ``deps=`` kwarg)
-* ``ctx.config``  — active ``ProfileConfig`` exposed as a read-only mapping
-* ``ctx.artifact`` / ``ctx.log`` / ``ctx.set_result`` — workspace helpers
-  (available because the workflow is driven inside ``with run.start()``)
+* a root task's sweep params arrive as named params (``base`` below);
+* a downstream task's single upstream output binds positionally to its sole free
+  parameter (``value`` below);
+* build-time / profile ``config`` fields bind by name (``scale`` below).
+
+The only data surface left on the ``TaskContext`` itself is:
+
+* ``ctx.workdir`` — a content-addressed scratch directory for this task
+  (``None`` when no workspace run is attached). Keep the leading ``ctx``
+  parameter only when the body writes there.
+
+There is no ``ctx.inputs`` / ``ctx.config`` / ``ctx.run_context`` and no
+``ctx.deps``: a task cannot climb up to the Run or the workspace. Workspace
+helpers (``set_result`` / ``artifact`` / ``log``) live on the driver-side
+``RunContext`` instead.
 
 Run directly::
 
@@ -18,67 +30,51 @@ Run directly::
 from __future__ import annotations
 
 import asyncio
-import json
 import tempfile
-from dataclasses import dataclass
 from pathlib import Path
 
 import molexp as me
 from molexp.profile import ProfileConfig
-from molexp.workflow import Task, TaskContext, WorkflowBuilder
-
-
-@dataclass
-class Deps:
-    """Injected dependencies — anything you'd otherwise thread manually."""
-
-    prefix: str
+from molexp.workflow import Task, TaskContext, WorkflowCompiler, WorkflowRuntime
 
 
 class Seed(Task):
-    """Root task: produces the initial value."""
+    """Root task: the run param ``base`` binds by name; ``ctx.workdir`` is used."""
 
-    async def execute(self, ctx: TaskContext[None, Deps, None]) -> int:
-        return 1
+    async def execute(self, ctx: TaskContext, base: int = 1) -> int:
+        if ctx.workdir is not None:
+            (ctx.workdir / "seed.txt").write_text(str(base))
+        return base
 
 
 class Record(Task):
-    """Downstream task: reads ``ctx.inputs``, ``ctx.deps``, ``ctx.config``."""
+    """Downstream task: ``value`` is the upstream output; ``scale`` is config."""
 
-    async def execute(self, ctx: TaskContext[None, Deps, int]) -> int:
-        label = f"{ctx.deps.prefix}-{ctx.inputs}"
-        scale = ctx.config.get("scale", 1)
-        value = ctx.inputs * scale
-
-        rc = ctx.run_context
-        if rc is not None:
-            rc.artifact.save(f"{label}.json", {"value": value})
-            rc.log("record").append(label)
-            rc.set_result(label, value)
-        return value
+    async def execute(self, ctx: TaskContext, value: int, scale: int = 1) -> int:
+        return value * scale
 
 
-# Module-scope so ``set_workflow`` can capture an entrypoint stable
-# across CLI re-imports.
-spec = WorkflowBuilder(name="counter").add(Seed()).add(Record(), depends_on=["seed"]).build()
+# Module scope so the compiled artifact is importable across CLI re-imports.
+compiled = WorkflowCompiler(name="counter").add(Seed()).add(Record(), depends_on=["seed"]).compile()
 
 
 async def main() -> None:
     root = Path(tempfile.mkdtemp(prefix="molexp-ctx-"))
     ws = me.Workspace(root, name="ctx-demo")
-    project = ws.add_project("demo")
-    exp = project.add_experiment("counter")
-    spec.bind_to(exp)
+    exp = ws.project("demo").experiment("counter").run(compiled, params={"base": [1]})
 
-    run = exp.add_run()
+    run = exp.list_runs()[0]
     cfg = ProfileConfig({"scale": 10}, name="smoke")
     with run.start(profile_config=cfg) as ctx:
-        result = await spec.execute(run_context=ctx, deps=Deps(prefix="step"))
+        result = await WorkflowRuntime().execute(compiled, run_context=ctx)
+        # Workspace helpers are driver-side, on the RunContext.
+        ctx.set_result("record", result.outputs["record"])
+        ctx.artifact.save("record.json", {"value": result.outputs["record"]})
+        ctx.log("record").append(f"value={result.outputs['record']}")
 
-    run_json = json.loads((run.run_dir / "run.json").read_text())
     print(f"status:  {result.status}")
     print(f"outputs: {result.outputs}")
-    print(f"results: {run_json['context']['results']}")
+    print(f"result:  {run.get_result('record')}")
 
 
 if __name__ == "__main__":

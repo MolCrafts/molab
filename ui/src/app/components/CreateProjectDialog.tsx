@@ -1,7 +1,6 @@
 import { Plus } from "lucide-react";
 import { useState } from "react";
 import { workspaceApi } from "@/app/state/api";
-import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -13,6 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { WorkbenchAction, WorkbenchIconAction } from "@/components/workbench";
 
 interface CreateProjectDialogProps {
   onProjectCreated: () => void;
@@ -48,19 +48,24 @@ export function CreateProjectDialog({ onProjectCreated }: CreateProjectDialogPro
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="ghost" size="icon" className="h-7 w-7" aria-label="New project">
+        <WorkbenchIconAction
+          label="New project"
+          kind="ghost"
+          className="h-control-compact w-control-compact"
+          aria-label="New project"
+        >
           <Plus className="h-4 w-4" />
-        </Button>
+        </WorkbenchIconAction>
       </DialogTrigger>
-      <DialogContent className="sm:max-w-[425px]">
+      <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Create Project</DialogTitle>
           <DialogDescription>Create a new project to organize your experiments.</DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit}>
           <div className="grid gap-4 py-4">
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="name" className="text-right">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-4 sm:items-center sm:gap-4">
+              <Label htmlFor="name" className="text-left sm:text-right">
                 Name
               </Label>
               <Input
@@ -71,12 +76,16 @@ export function CreateProjectDialog({ onProjectCreated }: CreateProjectDialogPro
                 required
               />
             </div>
-            {error && <div className="text-sm text-red-500 col-span-4 text-center">{error}</div>}
+            {error && (
+              <div className="text-body-lg text-status-failed-foreground col-span-4 text-center">
+                {error}
+              </div>
+            )}
           </div>
           <DialogFooter>
-            <Button type="submit" disabled={isLoading}>
+            <WorkbenchAction kind="primary" size="default" type="submit" disabled={isLoading}>
               {isLoading ? "Creating..." : "Create Project"}
-            </Button>
+            </WorkbenchAction>
           </DialogFooter>
         </form>
       </DialogContent>

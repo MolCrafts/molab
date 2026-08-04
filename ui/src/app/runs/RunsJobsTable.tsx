@@ -1,138 +1,285 @@
-import { Table2 } from "lucide-react";
-import type { JSX } from "react";
-
-import { StatusBadge } from "@/app/components/entity";
+import { ArrowDown, ArrowUp, ArrowUpDown, ChevronLeft, ChevronRight, Table2 } from "lucide-react";
+import type { JSX, ReactNode } from "react";
+import { useEffect, useMemo } from "react";
+import { EmptyState } from "@/app/components/entity";
+import { ROW_PADDING_DEFAULT } from "@/app/components/entity/density";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import { RunStatusBadge, WorkbenchAction, WorkbenchIconAction } from "@/components/workbench";
 import { formatDuration, formatRelative } from "@/lib/format-time";
+import { cn } from "@/lib/utils";
 
+import {
+  computeRunDurationSeconds,
+  type JobsSort,
+  type JobsSortKey,
+  nextJobsSort,
+  PAGE_SIZE_OPTIONS,
+  paginate,
+  sortJobs,
+} from "./jobsTable";
 import type { WorkspaceRunRow } from "./types";
 
 interface RunsJobsTableProps {
   rows: WorkspaceRunRow[];
   selectedRunId: string | null;
   onSelectRun: (run: WorkspaceRunRow) => void;
+  sort: JobsSort;
+  onSortChange: (next: JobsSort) => void;
+  page: number;
+  pageSize: number;
+  onPageChange: (page: number) => void;
+  onPageSizeChange: (pageSize: number) => void;
 }
 
-const computeRunDurationSeconds = (run: WorkspaceRunRow): number | null => {
-  const start = run.executions
-    .map((e) => (e.startedAt ? new Date(e.startedAt).getTime() : NaN))
-    .filter((v) => !Number.isNaN(v))
-    .sort((a, b) => a - b)[0];
-  if (typeof start !== "number") return null;
-  const end = run.finishedAt ? new Date(run.finishedAt).getTime() : Date.now();
-  if (Number.isNaN(end)) return null;
-  return Math.max(0, (end - start) / 1000);
-};
+interface ColumnDef {
+  key: JobsSortKey;
+  label: string;
+  align?: "left" | "right";
+  className?: string;
+}
+
+const COLUMNS: ColumnDef[] = [
+  { key: "status", label: "Status", className: "w-32" },
+  { key: "name", label: "Run" },
+  { key: "project", label: "Project · Experiment" },
+  { key: "backend", label: "Backend" },
+  { key: "attempts", label: "Attempts", align: "right" },
+  { key: "duration", label: "Duration", align: "right" },
+  { key: "submitted", label: "Submitted", align: "right" },
+];
 
 /**
- * Compact runs table — minimum viable Jobs tab body. PR2 will add column
- * sorting, pagination, per-row "..." menus and URL-persisted state.
+ * Workspace Jobs table — sortable columns + client-side pagination.
+ * Sort / page state is owned by the parent (URL-backed).
  */
 export const RunsJobsTable = ({
   rows,
   selectedRunId,
   onSelectRun,
+  sort,
+  onSortChange,
+  page,
+  pageSize,
+  onPageChange,
+  onPageSizeChange,
 }: RunsJobsTableProps): JSX.Element => {
+  const sorted = useMemo(() => sortJobs(rows, sort), [rows, sort]);
+  const slice = useMemo(() => paginate(sorted, page, pageSize), [sorted, page, pageSize]);
+
+  // Parent may still hold a page past the end after a filter shrink.
+  useEffect(() => {
+    if (slice.page !== page) onPageChange(slice.page);
+  }, [slice.page, page, onPageChange]);
+
   if (rows.length === 0) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-2 rounded-md border border-dashed border-border bg-card p-10 text-center text-xs text-muted-foreground">
-        <Table2 className="h-5 w-5 opacity-40" />
-        <p>No runs match the current filters.</p>
+      <div className="flex h-full min-h-60 items-center justify-center border-y border-dashed border-border/70">
+        <EmptyState
+          icon={<Table2 className="h-5 w-5" />}
+          title="No matching runs"
+          description="Adjust filters in the sidebar, or clear them to see the full workspace."
+        />
       </div>
     );
   }
 
+  const rangeStart = slice.totalItems === 0 ? 0 : (slice.page - 1) * slice.pageSize + 1;
+  const rangeEnd = Math.min(slice.page * slice.pageSize, slice.totalItems);
+
   return (
-    <div className="rounded-md border border-border/60 bg-card">
-      <div className="overflow-x-auto">
-        <table className="w-full text-xs">
-          <thead className="border-b border-border bg-muted/30">
-            <tr className="text-[10px] uppercase tracking-wide text-muted-foreground">
-              <Th className="w-[120px]">Status</Th>
-              <Th>Run</Th>
-              <Th>Project · Experiment</Th>
-              <Th>Backend</Th>
-              <Th className="text-right">Attempts</Th>
-              <Th className="text-right">Duration</Th>
-              <Th className="text-right">Submitted</Th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-border/60">
-            {rows.map((run) => {
+    <div className="flex flex-col gap-3">
+      <div className="overflow-x-auto border-y border-border/70">
+        <Table className="w-full text-body">
+          <TableHeader className="sticky top-0 z-10 border-b border-border/60 bg-background">
+            <TableRow className="text-label text-muted-foreground">
+              {COLUMNS.map((col) => (
+                <SortableTh
+                  key={col.key}
+                  column={col}
+                  active={sort.key === col.key}
+                  dir={sort.dir}
+                  onClick={() => onSortChange(nextJobsSort(sort, col.key))}
+                />
+              ))}
+            </TableRow>
+          </TableHeader>
+          <TableBody className="divide-y divide-border/50">
+            {slice.items.map((run) => {
               const isSelected = run.id === selectedRunId;
               const duration = computeRunDurationSeconds(run);
               return (
-                <tr
+                <TableRow
                   key={run.id}
+                  tabIndex={0}
+                  aria-label={`Open run ${run.name || run.id}`}
+                  aria-selected={isSelected}
                   onClick={() => onSelectRun(run)}
-                  className={
-                    isSelected
-                      ? "cursor-pointer bg-info-soft/60"
-                      : "cursor-pointer hover:bg-accent/40"
-                  }
+                  onKeyDown={(event) => {
+                    if (
+                      event.target !== event.currentTarget ||
+                      (event.key !== "Enter" && event.key !== " ")
+                    ) {
+                      return;
+                    }
+                    event.preventDefault();
+                    onSelectRun(run);
+                  }}
+                  className={cn(
+                    "cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring",
+                    isSelected ? "bg-accent/5" : "hover:bg-muted/40",
+                  )}
                 >
-                  <Td className="align-top">
-                    <StatusBadge status={run.status} size="sm" dot />
+                  <Td className="align-middle">
+                    <RunStatusBadge status={run.status} size="sm" />
                   </Td>
-                  <Td className="align-top">
+                  <Td className="align-middle">
                     <div className="min-w-0">
                       <p className="truncate font-medium text-foreground">{run.name || run.id}</p>
                       <p
-                        className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground"
+                        className="mt-1 truncate font-mono text-micro text-muted-foreground"
                         title={run.id}
                       >
                         {run.id}
                       </p>
                     </div>
                   </Td>
-                  <Td className="align-top text-muted-foreground">
+                  <Td className="align-middle text-muted-foreground">
                     <div className="min-w-0">
                       <p className="truncate text-foreground">{run.projectName}</p>
-                      <p className="truncate">{run.experimentName}</p>
+                      <p className="truncate text-label">{run.experimentName}</p>
                     </div>
                   </Td>
-                  <Td className="align-top text-muted-foreground">
+                  <Td className="align-middle text-muted-foreground">
                     {run.backend ? (
                       <div className="min-w-0">
                         <p className="truncate text-foreground">{run.backend}</p>
-                        {run.cluster && <p className="truncate">{run.cluster}</p>}
+                        {run.cluster && (
+                          <p className="truncate font-mono text-micro">{run.cluster}</p>
+                        )}
                       </div>
                     ) : (
                       <span>—</span>
                     )}
                   </Td>
-                  <Td className="text-right tabular-nums text-muted-foreground">
+                  <Td className="text-right align-middle tabular-nums text-muted-foreground">
                     {run.executionCount}
                   </Td>
-                  <Td className="text-right tabular-nums text-muted-foreground">
+                  <Td className="text-right align-middle font-mono text-label tabular-nums text-muted-foreground">
                     {formatDuration(duration)}
                   </Td>
-                  <Td className="text-right text-muted-foreground">
+                  <Td className="text-right align-middle text-label text-muted-foreground">
                     {formatRelative(run.createdAt)}
                   </Td>
-                </tr>
+                </TableRow>
               );
             })}
-          </tbody>
-        </table>
+          </TableBody>
+        </Table>
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-3 text-label text-muted-foreground">
+        <div className="tabular-nums">
+          {rangeStart}–{rangeEnd} of {slice.totalItems}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-2">
+            <span>Rows</span>
+            <Select
+              value={String(pageSize)}
+              onValueChange={(value) => onPageSizeChange(Number.parseInt(value, 10))}
+            >
+              <SelectTrigger size="sm" className="w-18" aria-label="Rows per page">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PAGE_SIZE_OPTIONS.map((size) => (
+                  <SelectItem key={size} value={String(size)}>
+                    {size}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex items-center gap-1">
+            <WorkbenchIconAction
+              label="Previous page"
+              type="button"
+              disabled={slice.page <= 1}
+              onClick={() => onPageChange(slice.page - 1)}
+            >
+              <ChevronLeft className="h-3.5 w-3.5" />
+            </WorkbenchIconAction>
+            <span className="min-w-18 text-center tabular-nums">
+              {slice.page} / {slice.totalPages}
+            </span>
+            <WorkbenchIconAction
+              label="Next page"
+              type="button"
+              disabled={slice.page >= slice.totalPages}
+              onClick={() => onPageChange(slice.page + 1)}
+            >
+              <ChevronRight className="h-3.5 w-3.5" />
+            </WorkbenchIconAction>
+          </div>
+        </div>
       </div>
     </div>
   );
 };
 
-const Th = ({
-  children,
-  className,
+const SortableTh = ({
+  column,
+  active,
+  dir,
+  onClick,
 }: {
-  children: React.ReactNode;
-  className?: string;
-}): JSX.Element => (
-  <th className={`px-3 py-2 text-left font-semibold ${className ?? ""}`}>{children}</th>
-);
+  column: ColumnDef;
+  active: boolean;
+  dir: JobsSort["dir"];
+  onClick: () => void;
+}): JSX.Element => {
+  const Icon = !active ? ArrowUpDown : dir === "asc" ? ArrowUp : ArrowDown;
+  return (
+    <TableHead
+      className={cn(
+        `${ROW_PADDING_DEFAULT} font-medium`,
+        column.align === "right" ? "text-right" : "text-left",
+        column.className,
+      )}
+    >
+      <WorkbenchAction
+        kind="ghost"
+        size="content"
+        type="button"
+        onClick={onClick}
+        className={cn(
+          "inline-flex items-center gap-1 transition-colors hover:text-foreground",
+          column.align === "right" && "flex-row-reverse",
+          active ? "text-foreground" : "text-muted-foreground",
+        )}
+      >
+        {column.label}
+        <Icon className="h-3 w-3 opacity-70" aria-hidden="true" />
+        <span className="sr-only">{active ? `sorted ${dir}` : "sort"}</span>
+      </WorkbenchAction>
+    </TableHead>
+  );
+};
 
-const Td = ({
-  children,
-  className,
-}: {
-  children: React.ReactNode;
-  className?: string;
-}): JSX.Element => <td className={`px-3 py-2 ${className ?? ""}`}>{children}</td>;
+const Td = ({ children, className }: { children: ReactNode; className?: string }): JSX.Element => (
+  <TableCell className={cn(ROW_PADDING_DEFAULT, className)}>{children}</TableCell>
+);

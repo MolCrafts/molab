@@ -66,7 +66,7 @@ Candidates considered:
 
 - **(A) Frozen pydantic type, serialized to a `handoff:` section
   inside `manifest.yaml` — RECOMMENDED DEFAULT.** In-process
-  consumers read `AgentRunResult.mode_state["plan"]["handoff"]`;
+  consumers read `AgentRunResult.loop_state["plan"]["handoff"]`;
   on-disk consumers read `manifest.yaml`.
 - (B) On-disk YAML manifest only (no in-process pydantic mirror).
 - (C) Frozen pydantic type only (no on-disk persistence; consumer
@@ -108,3 +108,37 @@ by the relevant sub-spec rather than recorded permanently.
 - **Empty `src/molexp/sweep/` package** with no `__init__.py`.
   Either reserved for a future spec or leftover; track outside
   this chain.
+
+## 2026-05-05 — molexp-specific axes the generic mol plugin does not cover
+
+*(Migrated from the retired `.agent/open-questions.md` during the /mol:bootstrap v0.3.0 layout consolidation.)*
+
+Three project-local agents were retired together with the `/molexp-*`
+skill suite:
+
+- `molexp-designer` — UI visual quality, information density, design
+  tokens, accessibility (no equivalent in the `mol` plugin's agent set).
+- `molexp-integrity` — experiment reproducibility, atomic-write
+  correctness, param-space determinism, concurrent-run safety
+  (closest generic agent: `mol:scientist`, but it targets numerical
+  correctness, not workflow integrity).
+- `molexp-security` — prompt-injection surfaces, secret handling,
+  API auth, LLM output sanitization, FastAPI input validation
+  (no equivalent in the `mol` plugin).
+
+Decide whether to:
+1. propose these as generic `mol` plugin agents (designer, integrity,
+   security) so other mol-family projects benefit, or
+2. reintroduce them locally if and when the gap actually bites.
+
+The retired agent definitions can be recovered from git history if
+needed (commit `d05fe29` and earlier).
+
+## pure-task-context-03 / polymer_electrolyte (closed 2026-07-10)
+
+`pure-task-context-03-build-flow-rewrite` was closed as **blocked**: the target
+script `/Users/roykid/work/molcrafts/polymer_electrolyte/build_flow.py` is not
+present in this environment. molexp-side contract is already `ctx.workdir`
+(first-class) + named task params, not `ctx.inputs["workdir"]`. If/when that
+script returns, rewrite against current TaskContext (`ctx.workdir` + named
+parameters), not the older inputs-workdir draft.

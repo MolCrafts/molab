@@ -5,11 +5,8 @@ Everything in this module is internal — command modules import from it.
 
 from __future__ import annotations
 
-import hashlib
-import os
-import platform
-from datetime import datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from rich import print as rprint
 from rich.console import Console
@@ -17,7 +14,16 @@ from rich.console import Console
 from molexp._typing import JSONValue
 from molexp.plugins.submit_molq.metadata import normalize_executor_info
 from molexp.workspace import Workspace
+
+if TYPE_CHECKING:
+    from molexp.workspace.fs import FileSystem
+
+# Zombie-run reaping moved into the workspace layer (run-recovery bug 5) so
+# the CLI and the server verbs consult ONE policy; these re-exports keep the
+# historical ``molexp.cli._common`` import path working.
 from molexp.workspace.run import Run
+from molexp.workspace.run_ops import HEARTBEAT_STALE_SECONDS
+from molexp.workspace.run_reaper import pid_alive, reap_zombie_run
 
 console = Console()
 
@@ -39,8 +45,18 @@ def status_color(status: str) -> str:
     return _STATUS_COLORS.get(str(status).lower(), "white")
 
 
-def get_workspace(path: Path | None = None) -> Workspace:
-    """Load the workspace at *path* (default: current directory)."""
+def get_workspace(
+    path: Path | str | None = None,
+    *,
+    fs: FileSystem | None = None,
+) -> Workspace:
+    """Load the workspace at *path* (default: current directory).
+
+    Pass *fs* for remote roots (``RemoteFileSystem``).  Without *fs*, the
+    local filesystem is used — the historical local-only behaviour.
+    """
+    if fs is not None:
+        return Workspace(path if path is not None else ".", fs=fs)
     return Workspace(path or Path.cwd())
 
 
@@ -51,64 +67,31 @@ def deterministic_run_id(params: dict[str, JSONValue]) -> str:
     idempotent across repeated ``molexp run`` invocations.  The caller
     decides which fields to include (for profile-aware IDs, mix in
     the profile name / config hash).
+
+    Delegates to :func:`molexp.workspace.utils.derive_run_id` — the single
+    canonicalization shared with ``Experiment.add_runs`` — keeping this name
+    and its 16-char output stable for existing CLI callers.
     """
-    raw = "|".join(f"{k}={v!r}" for k, v in sorted(params.items()))
-    return hashlib.sha256(raw.encode()).hexdigest()[:16]
+    from molexp.workspace.utils import derive_run_id
+
+    return derive_run_id(params)
 
 
-def pid_alive(pid: int) -> bool:
-    """Return ``True`` if a process with *pid* exists on this host."""
-    if pid <= 0:
-        return False
-    try:
-        os.kill(pid, 0)
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-    return True
-
-
-def reap_zombie_run(run: Run) -> bool:
-    """Mark a stale ``RUNNING`` run as ``FAILED`` if its owner is dead.
-
-    Returns ``True`` when the run was reaped (status flipped from
-    ``running`` to ``failed``), ``False`` when a live owner is detected.
-    """
-    from molexp.workspace.models import ErrorInfo
-    from molexp.workspace.run import RunStatus
-
-    labels = dict(run.metadata.labels)
-    pid_str = labels.get("pid")
-    host = labels.get("host")
-    same_host = host == platform.node()
-
-    if same_host and pid_str and pid_str.isdigit() and pid_alive(int(pid_str)):
-        return False
-
-    now = datetime.now()
-    for key in ("pid", "host", "heartbeat"):
-        labels.pop(key, None)
-    run._update_metadata(
-        status=RunStatus.FAILED,
-        finished_at=now,
-        labels=labels,
-        error=ErrorInfo(
-            type="ZombieRun",
-            message=(
-                f"Run was left in 'running' state by a prior invocation "
-                f"(pid={pid_str or '?'} host={host or '?'}) that did not "
-                "finish cleanly.  Automatically marked FAILED."
-            ),
-            timestamp=now,
-        ),
-    )
-    return True
+# Backward-compatible alias — the canonical constant lives in
+# ``molexp.workspace.run_ops.HEARTBEAT_STALE_SECONDS`` (one source of truth
+# for the cross-host staleness threshold).
+CROSS_HOST_HEARTBEAT_STALE_SECONDS = HEARTBEAT_STALE_SECONDS
 
 
 def run_executor_info(run: Run) -> dict[str, str]:
-    """Return normalized executor metadata for a workspace run."""
-    return normalize_executor_info(run.metadata.executor_info, run.metadata.labels)
+    """Return normalized executor metadata for a workspace run.
+
+    Ownership (pid/host) now lives in the OKF ``_ops`` sidecar (wsokf-10); it
+    is surfaced as label fallbacks for ``normalize_executor_info``, which only
+    consults scheduler-shaped keys (never pid/host), so an empty labels map is
+    sufficient here.
+    """
+    return normalize_executor_info(run.metadata.executor_info, {})
 
 
 __all__ = [

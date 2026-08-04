@@ -18,7 +18,28 @@ export default defineConfig(({ command }) => {
       },
     },
     tools: {
+      // flowgram's free-layout-editor uses inversify DI, which relies on legacy
+      // (stage-2) decorators + emitted decorator metadata at runtime. Enable the
+      // SWC transforms so the canvas core's DI wiring resolves in the bundle.
+      swc: {
+        jsc: {
+          parser: {
+            syntax: 'typescript',
+            tsx: true,
+            decorators: true,
+          },
+          transform: {
+            legacyDecorator: true,
+            decoratorMetadata: true,
+          },
+        },
+      },
       rspack: {
+        // ``@molcrafts/molrs`` is a wasm-pack *bundler*-target package: its JS
+        // does ``import * as wasm from "./molrs_bg.wasm"``. Without WebAssembly
+        // module support rspack leaves that import undefined, so molvis-core's
+        // ``Frame.frame_new`` is missing and trajectory rendering crashes.
+        experiments: { asyncWebAssembly: true },
         resolve: {
           // Workaround for the published @molcrafts/molvis-core@0.0.7 tarball:
           // its trajectory worker is spawned via
@@ -48,15 +69,20 @@ export default defineConfig(({ command }) => {
       },
     },
     server: {
-      proxy: {
-        '/api': {
-          target: `http://localhost:${(() => {
-            const arg = process.argv.find(a => a.startsWith('--api-port='));
-            return arg ? arg.split('=')[1] : '8000';
-          })()}`,
-          changeOrigin: true,
-        },
-      },
+      // Mock mode is self-contained. Leaving the Python proxy enabled there
+      // turns any intentionally unimplemented fixture into a noisy HPM
+      // connection error when no backend is running.
+      proxy: useMock
+        ? {}
+        : {
+            // API target for `npm run dev` / `molexp serve --dev`.
+            // Prefer MOLEXP_API_PORT (set by the Python CLI); do not pass
+            // --api-port on the rsbuild argv — CAC rejects unknown options.
+            '/api': {
+              target: `http://localhost:${process.env.MOLEXP_API_PORT || '8000'}`,
+              changeOrigin: true,
+            },
+          },
     },
   };
 });

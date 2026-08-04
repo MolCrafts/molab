@@ -4,14 +4,17 @@ from __future__ import annotations
 
 import io
 import mimetypes
+from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
-from molexp.workspace import Workspace
+from molexp._typing import JSONValue
+from molexp.workspace import ContextFocus, Workspace, assemble_workspace_context
+from molexp.workspace.events import WorkspaceEvent, WorkspaceEventType, read_workspace_events
 from molexp.workspace.fs_cached import CachedRemoteFileSystem, prefetch_workspace_indices
 from molexp.workspace.fs_local import LocalFileSystem
 
@@ -27,17 +30,22 @@ from ..schemas import (
     FileContentResponse,
     TargetTestCheck,
     TargetTestResponse,
+    WorkspaceContextResponse,
     WorkspaceInfoResponse,
     WorkspaceOpenLocalRequest,
     WorkspaceOpenRequest,
     WorkspaceRunRow,
     WorkspaceRunsResponse,
+    WorkspaceSummaryResponse,
     WorkspaceTargetCreateRequest,
     WorkspaceTargetListResponse,
     WorkspaceTargetResponse,
     compute_workspace_runs_stats,
 )
 from ..workspace_targets import WorkspaceTarget
+
+if TYPE_CHECKING:
+    from molexp.harness.schemas import ApprovalDecision, ApprovalRequest
 
 
 class DirectoryCreateRequest(BaseModel):
@@ -52,6 +60,61 @@ class FileContentUpdateRequest(BaseModel):
 
 
 router = APIRouter(prefix="/workspace", tags=["workspace"])
+
+# The activity stream mounts at the literal ``/api/events`` (no ``/workspace``
+# prefix) — same flat-router precedent as ``plans.flat_router``.
+events_router = APIRouter(tags=["workspace"])
+
+
+class WorkspaceEventResponse(BaseModel):
+    """One workspace-timeline event (read side of the event spine).
+
+    The ONE wire shape for spine reads — the per-run route
+    (``GET /runs/{run_id}/events``) aliases this model, so the two surfaces
+    can never drift (vision-loop-12).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    seq: int
+    type: str
+    actor: str
+    created_at: datetime
+    payload: dict[str, JSONValue]
+    refs: list[str]
+
+    @classmethod
+    def from_event(cls, event: WorkspaceEvent) -> WorkspaceEventResponse:
+        """The one event→wire mapping (both routes call this — no drift)."""
+        return cls(
+            id=event.id,
+            seq=event.seq,
+            type=event.type,
+            actor=event.actor,
+            created_at=event.created_at,
+            payload=event.payload,
+            refs=event.refs,
+        )
+
+
+@events_router.get("/events", response_model=list[WorkspaceEventResponse])
+def get_workspace_events(
+    type: WorkspaceEventType | None = Query(default=None, description="Keep only this event type"),
+    ref: str | None = Query(default=None, description="Keep only events referencing this id"),
+    limit: int = Query(default=50, ge=1, le=500),
+    workspace: Workspace = Depends(get_workspace),
+) -> list[WorkspaceEventResponse]:
+    """The workspace-wide activity stream, newest first.
+
+    The global read over the event spine — the same shared
+    :func:`molexp.workspace.events.read_workspace_events` code path the
+    per-run route and ``molexp runs info`` use. A workspace with no timeline
+    yet answers ``[]`` without creating the DB (reading is side-effect free).
+    """
+    events = read_workspace_events(workspace.root, type=type, ref=ref, limit=limit)
+    return [WorkspaceEventResponse.from_event(e) for e in events]
+
 
 MAX_TEXT_BYTES = 2_000_000
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg"}
@@ -100,11 +163,50 @@ def resolve_workspace_path_via_fs(workspace, path_str: str) -> str:  # noqa: ANN
 @router.get("/info", response_model=WorkspaceInfoResponse)
 def get_workspace_info(workspace=Depends(get_workspace)) -> WorkspaceInfoResponse:  # noqa: ANN001
     """Get workspace information."""
+    fs = getattr(workspace, "_fs", None)
+    is_cached = isinstance(fs, CachedRemoteFileSystem)
     return WorkspaceInfoResponse(
         root=str(workspace.root),
         projectCount=len(workspace.list_projects()),
         assetCount=len(workspace.assets.list()),
+        connected=fs.connected if is_cached else None,
+        indexed=fs.indexed if is_cached else None,
+        ready=fs.ready if is_cached else None,
     )
+
+
+@router.get("/context", response_model=WorkspaceContextResponse)
+def get_workspace_context(
+    project_id: str | None = Query(default=None, alias="projectId"),
+    experiment_id: str | None = Query(default=None, alias="experimentId"),
+    run_id: str | None = Query(default=None, alias="runId"),
+    workspace=Depends(get_workspace),  # noqa: ANN001
+) -> WorkspaceContextResponse:
+    """The canonical structural workspace read-model (integration.md §1).
+
+    A read-only projection assembled from authoritative workspace state — the one
+    shape agents/planners/CLI/UI observe. ``ContextFocus`` is supplied by the
+    caller via optional query params and is never persisted. ``/runs`` remains the
+    specialized detailed run view (richer per-execution rows); this endpoint is the
+    canonical *structure* and stays consistent with it.
+    """
+    focus = ContextFocus(project_id=project_id, experiment_id=experiment_id, run_id=run_id)
+    context = assemble_workspace_context(workspace, focus=focus)
+    return WorkspaceContextResponse.from_context(context)
+
+
+@router.get("/copilot", response_model=WorkspaceSummaryResponse)
+def get_workspace_copilot(workspace=Depends(get_workspace)) -> WorkspaceSummaryResponse:  # noqa: ANN001
+    """The read-only Workspace Copilot summary — structured state + ranked next-actions.
+
+    A pure projection over the canonical ``WorkspaceContext``; it mutates nothing.
+    Next-actions are **advisory** and separated from execution — high-risk ones are
+    flagged ``requiresProposal`` (they must go through a ``ChangeProposal`` first).
+    """
+    from molexp.harness.copilot import summarize_workspace
+
+    summary = summarize_workspace(assemble_workspace_context(workspace))
+    return WorkspaceSummaryResponse.from_summary(summary)
 
 
 @router.get("/runs", response_model=WorkspaceRunsResponse)
@@ -169,21 +271,45 @@ def list_workspace_files(
 ) -> dict:
     """Return a nested file tree rooted at the requested path.
 
+    Routes through ``workspace._fs`` so remote workspaces (and the
+    :class:`CachedRemoteFileSystem` mirror) work the same as local ones.
+
     With ``include=catalog``, file nodes that match a registered asset
     are enriched with ``assetId``, ``assetKind``, ``producerRunId`` and
     ``producerTaskId`` so the UI can render lineage chips inline.
+
+    Children matching the workspace ``.gitignore`` cascade (plus a safety
+    floor for ``node_modules`` / ``.git`` / venvs) are omitted so git-managed
+    workspaces do not dump dependency trees into the UI.
     """
-    root = Path(workspace.root).resolve()
-    requested = resolve_workspace_path(root, path.lstrip("/"))
-    if not requested.exists():
+    from molexp.workspace.gitignore import load_gitignore_matcher
+
+    fs = workspace._fs
+    root = resolve_workspace_path_via_fs(workspace, "")
+    requested = resolve_workspace_path_via_fs(workspace, path.lstrip("/"))
+    if not fs.exists(requested):
         raise HTTPException(status_code=404, detail="Path not found")
 
+    # Remote trees pay one SSH RTT per node. A deep walk over hundreds of run
+    # dirs (trajectory.pt etc.) freezes the UI bootstrap. Cap remote depth
+    # server-side; clients expand path-by-path for deeper levels.
+    effective_depth = max_depth
+    if isinstance(fs, CachedRemoteFileSystem) and max_depth > 4:
+        effective_depth = 4
+
+    # gitignore matcher is path-string based; pass the logical root.
+    ignore = load_gitignore_matcher(Path(str(workspace.root)), fs=fs)
+
     include_set = {part.strip() for part in (include or "").split(",") if part.strip()}
-    asset_index_by_abs: dict[Path, dict] = {}
-    if "catalog" in include_set:
+    # Catalog enrichment is local-path keyed; skip on non-local FS for now
+    # (remote asset scans still work via the catalog API, not inline chips).
+    asset_index_by_abs: dict[str, dict] = {}
+    if "catalog" in include_set and isinstance(fs, LocalFileSystem):
+        from molexp.workspace.assets import scan
+
         from ._scope import resolve_scope_dir
 
-        for asset in workspace.catalog.query_assets():
+        for asset in scan.scan_assets(workspace.root):
             scope_dir = resolve_scope_dir(workspace, asset.scope)
             if scope_dir is None:
                 continue
@@ -191,7 +317,7 @@ def list_workspace_files(
                 abs_path = (scope_dir / asset.path).resolve()
             except OSError:
                 continue
-            asset_index_by_abs[abs_path] = {
+            asset_index_by_abs[str(abs_path)] = {
                 "assetId": asset.asset_id,
                 "assetKind": asset.kind,  # type: ignore[attr-defined]
                 "producerRunId": asset.producer.run_id if asset.producer else None,
@@ -199,35 +325,92 @@ def list_workspace_files(
                 "hasPreviewSidecar": resolve_sidecar(abs_path) is not None,
             }
 
-    def build_node(node_path: Path, depth: int) -> dict[str, Any]:
-        is_file = node_path.is_file()
+    root_norm = root.rstrip("/") or "/"
+
+    def _rel_for(node_path: str) -> str | None:
+        node = node_path.rstrip("/") or "/"
+        if node == root_norm:
+            return ""
+        prefix = root_norm + "/"
+        if not node.startswith(prefix):
+            return None
+        return node[len(prefix) :]
+
+    def build_node(
+        node_path: str, depth: int, *, _visited: set[str] | None = None
+    ) -> dict[str, Any]:
+        visited = _visited if _visited is not None else set()
+        try:
+            real = fs.resolve(node_path)
+        except OSError:
+            real = node_path
+        if real in visited:
+            return {
+                "id": node_path,
+                "name": fs.basename(node_path) or node_path,
+                "path": node_path,
+                "type": "folder",
+                "size": None,
+                "modified": None,
+                "children": [],
+            }
+        visited.add(real)
+
+        try:
+            st = fs.stat(node_path)
+            is_file = st.is_file
+        except OSError:
+            return {
+                "id": node_path,
+                "name": fs.basename(node_path) or node_path,
+                "path": node_path,
+                "type": "folder",
+                "size": None,
+                "modified": None,
+                "children": [],
+            }
+
         node: dict[str, Any] = {
-            "id": str(node_path),
-            "name": node_path.name or str(node_path),
-            "path": str(node_path),
+            "id": node_path,
+            "name": fs.basename(node_path) or node_path,
+            "path": node_path,
             "type": "file" if is_file else "folder",
-            "size": node_path.stat().st_size if is_file else None,
-            "modified": node_path.stat().st_mtime,
+            "size": st.size if is_file else None,
+            "modified": st.mtime,
         }
         if asset_index_by_abs:
-            try:
-                resolved = node_path.resolve()
-            except OSError:
-                resolved = node_path
-            enrich = asset_index_by_abs.get(resolved)
+            enrich = asset_index_by_abs.get(real)
             if enrich is not None:
                 node.update(enrich)
-        if not is_file and depth < max_depth:
-            children = []
-            for child in sorted(node_path.iterdir(), key=lambda p: (p.is_file(), p.name)):
-                children.append(build_node(child, depth + 1))
+        if not is_file and depth < effective_depth:
+            children: list[dict[str, Any]] = []
+            try:
+                names = fs.listdir(node_path)
+            except OSError:
+                names = []
+            # One remote RTT per child via build_node→stat only — do NOT
+            # pre-probe is_file (that doubled SSH traffic and hung depth-8
+            # walks over run trees). Sort by name; type comes from stat.
+            for name in sorted(names):
+                child = fs.join(node_path, name)
+                rel = _rel_for(child)
+                if rel is None:
+                    continue
+                # Cheap is_dir guess for ignore (avoid extra SSH): dotted names
+                # that are not hidden dirs are treated as files.
+                looks_like_file = "." in name and not name.startswith(".")
+                if ignore.is_ignored(rel, is_dir=not looks_like_file):
+                    continue
+                children.append(build_node(child, depth + 1, _visited=visited))
+            # Dirs first, then files (stable by name within each group).
+            children.sort(key=lambda c: (c.get("type") == "file", c.get("name") or ""))
             node["children"] = children
         else:
             node["children"] = []
         return node
 
     root_node = build_node(requested, 0)
-    return {"path": str(requested), "children": root_node.get("children", [])}
+    return {"path": requested, "children": root_node.get("children", [])}
 
 
 @router.get("/file", response_model=FileContentResponse)
@@ -296,13 +479,19 @@ def open_workspace(
     """
     if isinstance(request, WorkspaceOpenLocalRequest):
         path = Path(request.path).expanduser().resolve()
+        created = False
         if not path.exists():
             if not request.create_if_missing:
                 raise HTTPException(status_code=404, detail="Workspace path not found")
             path.mkdir(parents=True, exist_ok=True)
+            created = True
 
         set_workspace_path_override(path)
         workspace = Workspace(path)
+        if created:
+            # Only a just-created directory is materialized — opening an
+            # existing path must never write workspace.json on its own.
+            workspace.materialize()
         return WorkspaceInfoResponse(
             root=str(workspace.root),
             projectCount=len(workspace.list_projects()),
@@ -323,6 +512,28 @@ def open_workspace(
     fs = target_to_filesystem_for_workspace_target(target)
     set_active_workspace_descriptor(target.name)
     workspace = Workspace(target.root_path, fs=fs)
+    # Pin-until-refresh: warm → local only; cold → SSH + async index walk.
+    # Explicit refresh is POST /api/workspace/cache/refresh (blocking index).
+    if isinstance(fs, CachedRemoteFileSystem):
+        warnings = fs.prepare(workspace, block_index=False)
+        # Cold open may still be indexing in the background — don't block the
+        # response on a full tree walk (that was the slow path).
+        if fs.indexed:
+            project_count = len(workspace.list_projects())
+            asset_count = len(workspace.assets.list())
+        else:
+            project_count = 0
+            asset_count = 0
+        return WorkspaceInfoResponse(
+            root=str(workspace.root),
+            projectCount=project_count,
+            assetCount=asset_count,
+            warnings=[f"{w.path}: {w.reason}" for w in warnings],
+            connected=fs.connected,
+            indexed=fs.indexed,
+            ready=fs.ready,
+        )
+
     warnings = prefetch_workspace_indices(workspace)
     return WorkspaceInfoResponse(
         root=str(workspace.root),
@@ -572,8 +783,126 @@ def refresh_workspace_cache(
     """
     fs = _require_cached_fs(workspace)
     dropped = fs.invalidate(request.path, scope=request.scope)
-    warnings = prefetch_workspace_indices(workspace)
+    # User-initiated: blocking rebuild so the response reflects the new tree.
+    warnings = (
+        fs.index(workspace) if request.path is None else prefetch_workspace_indices(workspace)
+    )
     return CacheControlResponse(
         dropped=dropped,
         warnings=[f"{w.path}: {w.reason}" for w in warnings],
+    )
+
+
+# ── Guarded curation (deterministic, LLM-free) — curate-unify-03 ──────────────
+
+
+class CurateRequest(BaseModel):
+    """A structured, LLM-free destructive-curation request.
+
+    Builds a §8 ``ChangeProposal`` directly from typed args and drives it through
+    the shared ``run_curation_proposal`` backend (the same one the CLI + NL flow
+    use). ``approve`` defaults to ``False`` so a destructive mutation over HTTP
+    never auto-executes — the proposal is recorded and refused unless the caller
+    opts in.
+    """
+
+    op: Literal["move_run", "delete_folder", "rehome_asset"]
+    run: str | None = None
+    target_experiment: str | None = None
+    folder: str | None = None
+    asset: str | None = None
+    source: dict[str, str] | None = None
+    target: dict[str, str] | None = None
+    action: str = "copy"
+    approve: bool = False
+    project: str = "curations"
+    experiment: str = "curate"
+
+
+class CurateResponse(BaseModel):
+    """The gated-execution outcome for a deterministic curation request."""
+
+    proposalId: str
+    status: str
+    reason: str | None = None
+    resultArtifactIds: list[str] = Field(default_factory=list)
+
+
+async def _curate_reject_approver(request: ApprovalRequest) -> ApprovalDecision:
+    from datetime import UTC, datetime
+
+    from molexp.harness.schemas import ApprovalDecision
+
+    return ApprovalDecision(
+        request_id=request.id,
+        granted=False,
+        decided_by="http-operator",
+        decided_at=datetime.now(tz=UTC),
+        reason="approve=false",
+    )
+
+
+async def _curate_grant_approver(request: ApprovalRequest) -> ApprovalDecision:
+    """Grant carried by the HTTP request body's explicit ``approve: true``.
+
+    An explicit per-request decision by the HTTP caller — NOT a silent
+    default — so ``decided_by`` names the caller, never "auto-approver".
+    """
+    from datetime import UTC, datetime
+
+    from molexp.harness.schemas import ApprovalDecision
+
+    return ApprovalDecision(
+        request_id=request.id,
+        granted=True,
+        decided_by="http-operator",
+        decided_at=datetime.now(tz=UTC),
+        reason="approve=true (explicit in the request body)",
+    )
+
+
+@router.post("/curate", response_model=CurateResponse)
+async def curate_workspace(
+    request: CurateRequest,
+    workspace=Depends(get_workspace),  # noqa: ANN001
+) -> CurateResponse:
+    """Gate + execute one deterministic destructive-curation op (single stack).
+
+    Shares the ``run_curation_proposal`` backend with ``molexp curate`` (Python ≡
+    UI). ``approve=false`` (default) records the proposal and refuses; ``true``
+    executes the mutation. Either way the §8 ``change_proposal`` artifact is the audit.
+    """
+    from molexp.services.curate_runtime import build_curation_proposal, run_curation_proposal
+    from molexp.workspace.utils import derive_run_id
+
+    try:
+        proposal = build_curation_proposal(
+            request.op,
+            run=request.run,
+            target_experiment=request.target_experiment,
+            folder=request.folder,
+            asset=request.asset,
+            source=request.source,
+            target=request.target,
+            action=request.action,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    params: dict[str, Any] = {"mode": "curate-propose", "op": request.op, "proposal": proposal.id}
+    audit_run = (
+        workspace.add_project(request.project)
+        .add_experiment(request.experiment)
+        .add_run(params, id=derive_run_id(params))
+    )
+    approver = _curate_grant_approver if request.approve else _curate_reject_approver
+    result = await run_curation_proposal(
+        proposal, workspace=workspace, run=audit_run, approve=approver
+    )
+    outcome = result.execution_result
+    return CurateResponse(
+        proposalId=proposal.id,
+        status=outcome.status if outcome is not None else "failed",
+        reason=outcome.reason if outcome is not None else None,
+        resultArtifactIds=list(outcome.result_artifact_ids) if outcome is not None else [],
     )

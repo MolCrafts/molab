@@ -9,20 +9,21 @@ import {
   AlertCircle,
   CheckCircle2,
   Code,
-  Database,
   GitCompareArrows,
   Hash,
   ListChecks,
   Settings,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import type { RunExecutionResponse } from "@/api/generated/models/RunExecutionResponse";
 import type { WorkflowSnapshotResponse } from "@/api/generated/models/WorkflowSnapshotResponse";
-import type { WorkflowStepInfo } from "@/api/generated/models/WorkflowStepInfo";
-import { KeyValueGrid, StatusBadge } from "@/app/components/entity";
+import { KeyValueGrid } from "@/app/components/entity";
 import { workspaceApi } from "@/app/state/api";
 import type { RunSummary } from "@/app/types";
-import { Badge } from "@/components/ui/badge";
+import { WorkbenchTag } from "@/components/workbench";
+import { normalizeTaskGraph } from "@/components/workflow/flowgram-document";
+import type { TaskGraphJson } from "@/components/workflow/task-graph-ir";
+import { WorkflowGraph } from "@/components/workflow/workflow-graph";
 
 // Local shape used by the diff viewer only. The backend no longer exposes a
 // per-task snapshot schema; the diff fixture is kept for the experiment-level
@@ -361,15 +362,15 @@ function computeDiff(
 
 const DiffStatusBadge = ({ status }: { status: FieldStatus }): JSX.Element => {
   const styles: Record<FieldStatus, string> = {
-    unchanged: "bg-emerald-500/10 text-emerald-700 border-emerald-500/20",
-    modified: "bg-amber-500/10 text-amber-700 border-amber-500/20",
-    added: "bg-blue-500/10 text-blue-700 border-blue-500/20",
-    removed: "bg-red-500/10 text-red-700 border-red-500/20",
+    unchanged: "border-diff-unchanged/20 bg-diff-unchanged-soft text-diff-unchanged-foreground",
+    modified: "border-diff-modified/20 bg-diff-modified-soft text-diff-modified-foreground",
+    added: "border-diff-added/20 bg-diff-added-soft text-diff-added-foreground",
+    removed: "border-diff-removed/20 bg-diff-removed-soft text-diff-removed-foreground",
   };
   return (
-    <Badge variant="outline" className={`text-xs ${styles[status]}`}>
+    <WorkbenchTag meaning="metadata" className={`text-label ${styles[status]}`}>
       {status}
-    </Badge>
+    </WorkbenchTag>
   );
 };
 
@@ -385,13 +386,13 @@ const ConfigValue = ({
   if (oldVal === undefined && newVal === undefined) return null;
   const changed = oldVal !== newVal;
   return (
-    <div className="flex items-start gap-2 text-xs leading-relaxed">
-      <span className="text-muted-foreground min-w-[100px] shrink-0">{label}</span>
+    <div className="flex items-start gap-2 text-label leading-relaxed">
+      <span className="text-muted-foreground min-w-24 shrink-0">{label}</span>
       {changed ? (
         <span className="font-mono">
-          <span className="line-through text-red-500/70">{oldVal ?? "—"}</span>
-          <span className="mx-1.5 text-muted-foreground">&rarr;</span>
-          <span className="text-emerald-600 font-semibold">{newVal ?? "—"}</span>
+          <span className="line-through text-diff-removed-foreground/70">{oldVal ?? "—"}</span>
+          <span className="mx-2 text-muted-foreground">&rarr;</span>
+          <span className="font-semibold text-diff-added-foreground">{newVal ?? "—"}</span>
         </span>
       ) : (
         <span className="font-mono text-foreground">{newVal ?? "—"}</span>
@@ -452,14 +453,14 @@ const CodeDiffBlock = ({ oldCode, newCode }: { oldCode: string; newCode: string 
   const lines = useMemo(() => computeLineDiff(oldCode, newCode), [oldCode, newCode]);
 
   return (
-    <pre className="text-xs font-mono rounded overflow-x-auto max-h-72 bg-slate-950 p-3">
+    <pre className="text-label font-mono rounded-control overflow-x-auto max-h-72 bg-canvas p-3">
       {lines.map((line) => {
         const bgClass =
           line.type === "removed"
-            ? "bg-red-500/15 text-red-300"
+            ? "bg-diff-removed-soft text-diff-removed-foreground"
             : line.type === "added"
-              ? "bg-emerald-500/15 text-emerald-300"
-              : "text-slate-400";
+              ? "bg-diff-added-soft text-diff-added-foreground"
+              : "text-muted-foreground";
         const prefix = line.type === "removed" ? "- " : line.type === "added" ? "+ " : "  ";
         return (
           <div
@@ -485,25 +486,25 @@ const DiffCard = ({ diff }: { diff: TaskDiff }): JSX.Element => {
   const allKeys = Array.from(new Set([...Object.keys(oldCfg), ...Object.keys(newCfg)]));
 
   return (
-    <div className="rounded-md border p-4 bg-card space-y-3">
+    <div className="rounded-control border p-4 bg-card space-y-3">
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Hash className="h-4 w-4 text-muted-foreground" />
-          <span className="font-mono text-sm font-medium">{diff.taskId}</span>
-          <Badge variant="outline" className="text-xs">
+          <span className="font-mono text-body-lg font-medium">{diff.taskId}</span>
+          <WorkbenchTag meaning="metadata" className="text-label">
             {diff.taskType}
-          </Badge>
+          </WorkbenchTag>
         </div>
         <DiffStatusBadge status={diff.status} />
       </div>
 
       {/* Change indicators */}
       {diff.status !== "unchanged" && (
-        <div className="flex items-center gap-3 text-xs">
+        <div className="flex items-center gap-3 text-label">
           <span
             className={`flex items-center gap-1 ${
-              diff.codeChanged ? "text-amber-600" : "text-muted-foreground"
+              diff.codeChanged ? "text-diff-modified-foreground" : "text-muted-foreground"
             }`}
           >
             <Code className="h-3.5 w-3.5" />
@@ -511,7 +512,7 @@ const DiffCard = ({ diff }: { diff: TaskDiff }): JSX.Element => {
           </span>
           <span
             className={`flex items-center gap-1 ${
-              diff.configChanged ? "text-amber-600" : "text-muted-foreground"
+              diff.configChanged ? "text-diff-modified-foreground" : "text-muted-foreground"
             }`}
           >
             <Settings className="h-3.5 w-3.5" />
@@ -522,15 +523,17 @@ const DiffCard = ({ diff }: { diff: TaskDiff }): JSX.Element => {
 
       {/* Hash diff */}
       {diff.status === "modified" && (
-        <div className="grid grid-cols-2 gap-3 text-xs">
+        <div className="grid grid-cols-2 gap-3 text-label">
           <div>
             <p className="text-muted-foreground uppercase mb-1">Code Hash</p>
             <p className="font-mono">
               {diff.codeChanged ? (
                 <>
-                  <span className="line-through text-red-500/70">{diff.oldSnapshot?.codeHash}</span>
+                  <span className="line-through text-diff-removed-foreground/70">
+                    {diff.oldSnapshot?.codeHash}
+                  </span>
                   <br />
-                  <span className="text-emerald-600 font-semibold">
+                  <span className="font-semibold text-diff-added-foreground">
                     {diff.newSnapshot?.codeHash}
                   </span>
                 </>
@@ -544,11 +547,11 @@ const DiffCard = ({ diff }: { diff: TaskDiff }): JSX.Element => {
             <p className="font-mono">
               {diff.configChanged ? (
                 <>
-                  <span className="line-through text-red-500/70">
+                  <span className="line-through text-diff-removed-foreground/70">
                     {diff.oldSnapshot?.configHash}
                   </span>
                   <br />
-                  <span className="text-emerald-600 font-semibold">
+                  <span className="font-semibold text-diff-added-foreground">
                     {diff.newSnapshot?.configHash}
                   </span>
                 </>
@@ -562,8 +565,8 @@ const DiffCard = ({ diff }: { diff: TaskDiff }): JSX.Element => {
 
       {/* Config field-level diff */}
       {diff.status === "modified" && diff.configChanged && allKeys.length > 0 && (
-        <div className="border-t pt-3 space-y-1.5">
-          <p className="text-xs text-muted-foreground uppercase mb-2">Config Diff</p>
+        <div className="border-t pt-3 space-y-2">
+          <p className="text-label text-muted-foreground uppercase mb-2">Config Diff</p>
           {allKeys.map((key) => (
             <ConfigValue
               key={key}
@@ -581,7 +584,7 @@ const DiffCard = ({ diff }: { diff: TaskDiff }): JSX.Element => {
         diff.oldSnapshot?.codeSource &&
         diff.newSnapshot?.codeSource && (
           <div className="border-t pt-3">
-            <p className="text-xs text-muted-foreground uppercase mb-2">Code Diff</p>
+            <p className="text-label text-muted-foreground uppercase mb-2">Code Diff</p>
             <CodeDiffBlock
               oldCode={diff.oldSnapshot.codeSource}
               newCode={diff.newSnapshot.codeSource}
@@ -592,16 +595,16 @@ const DiffCard = ({ diff }: { diff: TaskDiff }): JSX.Element => {
       {/* Added task */}
       {diff.status === "added" && diff.newSnapshot?.configData && (
         <div>
-          <p className="text-xs text-muted-foreground uppercase mb-1">Config (new)</p>
-          <pre className="text-xs font-mono bg-emerald-500/5 border border-emerald-500/20 rounded p-2 overflow-x-auto max-h-32">
+          <p className="text-label text-muted-foreground uppercase mb-1">Config (new)</p>
+          <pre className="max-h-32 overflow-x-auto rounded-control border border-diff-added/20 bg-diff-added-soft p-2 font-mono text-label">
             {JSON.stringify(diff.newSnapshot.configData, null, 2)}
           </pre>
         </div>
       )}
       {diff.status === "added" && diff.newSnapshot?.codeSource && (
         <div>
-          <p className="text-xs text-muted-foreground uppercase mb-1">Source Code (new)</p>
-          <pre className="text-xs font-mono bg-emerald-500/5 border border-emerald-500/20 rounded p-3 overflow-x-auto max-h-48 text-emerald-800">
+          <p className="text-label text-muted-foreground uppercase mb-1">Source Code (new)</p>
+          <pre className="max-h-48 overflow-x-auto rounded-control border border-diff-added/20 bg-diff-added-soft p-3 font-mono text-label text-diff-added-foreground">
             {diff.newSnapshot.codeSource}
           </pre>
         </div>
@@ -610,16 +613,16 @@ const DiffCard = ({ diff }: { diff: TaskDiff }): JSX.Element => {
       {/* Removed task */}
       {diff.status === "removed" && diff.oldSnapshot?.configData && (
         <div>
-          <p className="text-xs text-muted-foreground uppercase mb-1">Config (removed)</p>
-          <pre className="text-xs font-mono bg-red-500/5 border border-red-500/20 rounded p-2 overflow-x-auto max-h-32 line-through">
+          <p className="text-label text-muted-foreground uppercase mb-1">Config (removed)</p>
+          <pre className="max-h-32 overflow-x-auto rounded-control border border-diff-removed/20 bg-diff-removed-soft p-2 font-mono text-label line-through">
             {JSON.stringify(diff.oldSnapshot.configData, null, 2)}
           </pre>
         </div>
       )}
       {diff.status === "removed" && diff.oldSnapshot?.codeSource && (
         <div>
-          <p className="text-xs text-muted-foreground uppercase mb-1">Source Code (removed)</p>
-          <pre className="text-xs font-mono bg-red-500/5 border border-red-500/20 rounded p-3 overflow-x-auto max-h-48 line-through text-red-800">
+          <p className="text-label text-muted-foreground uppercase mb-1">Source Code (removed)</p>
+          <pre className="max-h-48 overflow-x-auto rounded-control border border-diff-removed/20 bg-diff-removed-soft p-3 font-mono text-label text-diff-removed-foreground line-through">
             {diff.oldSnapshot.codeSource}
           </pre>
         </div>
@@ -627,7 +630,7 @@ const DiffCard = ({ diff }: { diff: TaskDiff }): JSX.Element => {
 
       {/* Unchanged */}
       {diff.status === "unchanged" && (
-        <p className="text-xs text-muted-foreground italic">
+        <p className="text-label text-muted-foreground italic">
           No changes — snapshot key{" "}
           <span className="font-mono">{diff.newSnapshot?.snapshotKey}</span>
         </p>
@@ -648,21 +651,25 @@ const DiffSummaryBar = ({ diffs }: { diffs: TaskDiff[] }): JSX.Element => {
   }, [diffs]);
 
   return (
-    <div className="flex items-center gap-4 text-xs">
+    <div className="flex items-center gap-4 text-label">
       {counts.modified > 0 && (
-        <span className="flex items-center gap-1 text-amber-600">
+        <span className="flex items-center gap-1 text-diff-modified-foreground">
           <AlertCircle className="h-3.5 w-3.5" />
           {counts.modified} modified
         </span>
       )}
       {counts.added > 0 && (
-        <span className="flex items-center gap-1 text-blue-600">+ {counts.added} added</span>
+        <span className="flex items-center gap-1 text-diff-added-foreground">
+          + {counts.added} added
+        </span>
       )}
       {counts.removed > 0 && (
-        <span className="flex items-center gap-1 text-red-600">- {counts.removed} removed</span>
+        <span className="flex items-center gap-1 text-diff-removed-foreground">
+          - {counts.removed} removed
+        </span>
       )}
       {counts.unchanged > 0 && (
-        <span className="flex items-center gap-1 text-emerald-600">
+        <span className="flex items-center gap-1 text-diff-unchanged-foreground">
           <CheckCircle2 className="h-3.5 w-3.5" />
           {counts.unchanged} unchanged
         </span>
@@ -676,14 +683,14 @@ const DiffSummaryBar = ({ diffs }: { diffs: TaskDiff[] }): JSX.Element => {
 // ============================================================================
 
 interface RunSnapshotPanelProps {
-  run: Pick<RunSummary, "id" | "projectId" | "experimentId" | "workflowSnapshot">;
+  run: Pick<RunSummary, "id" | "projectId" | "experimentId" | "workflowSnapshot" | "status">;
 }
 
 const snapshotMissing = <span className="italic text-muted-foreground">—</span>;
 
 const snapshotMonoValue = (value: string | null | undefined): JSX.Element =>
   value ? (
-    <span className="break-all font-mono text-xs text-foreground">{value}</span>
+    <span className="break-all font-mono text-label text-foreground">{value}</span>
   ) : (
     snapshotMissing
   );
@@ -692,53 +699,36 @@ const SnapshotHeader = ({
   snapshot,
 }: {
   snapshot: WorkflowSnapshotResponse | null;
-}): JSX.Element => (
-  <div className="rounded-md border border-border/70 bg-card p-4">
-    <div className="mb-3 flex items-center gap-2 text-sm font-medium">
-      <Hash className="h-4 w-4 text-muted-foreground" />
-      Workflow snapshot
-    </div>
-    {snapshot ? (
-      <KeyValueGrid
-        items={[
-          { label: "Source", value: snapshotMonoValue(snapshot.source) },
-          { label: "Git commit", value: snapshotMonoValue(snapshot.gitCommit) },
-          { label: "Code hash", value: snapshotMonoValue(snapshot.codeHash) },
-          { label: "Config hash", value: snapshotMonoValue(snapshot.configHash) },
-        ]}
-      />
-    ) : (
-      <p className="text-xs italic text-muted-foreground">
-        No workflow snapshot was recorded for this run.
-      </p>
-    )}
-  </div>
-);
+}): JSX.Element => {
+  const headingId = useId();
 
-const WorkflowStepRow = ({ step }: { step: WorkflowStepInfo }): JSX.Element => {
-  const status = step.status ?? "pending";
-  const outputEntries = Object.entries(step.outputs ?? {});
   return (
-    <div className="rounded-md border border-border/70 bg-card p-3">
-      <div className="flex items-center justify-between text-xs">
-        <span className="font-mono text-muted-foreground">step #{step.index}</span>
-        <StatusBadge status={status} size="sm" />
-      </div>
-      {outputEntries.length > 0 && (
-        <div className="mt-2 space-y-1">
-          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Outputs</p>
-          <pre className="max-h-40 overflow-x-auto rounded bg-muted/40 p-2 font-mono text-[11px]">
-            {JSON.stringify(step.outputs, null, 2)}
-          </pre>
-        </div>
+    <section className="border-y border-border/60 py-3" aria-labelledby={headingId}>
+      <h3 id={headingId} className="mb-3 flex items-center gap-2 text-body-lg font-medium">
+        <Hash className="h-4 w-4 text-muted-foreground" />
+        Workflow snapshot
+      </h3>
+      {snapshot ? (
+        <KeyValueGrid
+          items={[
+            { label: "Source", value: snapshotMonoValue(snapshot.source) },
+            { label: "Git commit", value: snapshotMonoValue(snapshot.gitCommit) },
+            { label: "Code hash", value: snapshotMonoValue(snapshot.codeHash) },
+            { label: "Config hash", value: snapshotMonoValue(snapshot.configHash) },
+          ]}
+        />
+      ) : (
+        <p className="text-label italic text-muted-foreground">
+          No workflow snapshot was recorded for this run.
+        </p>
       )}
-    </div>
+    </section>
   );
 };
 
 /**
- * Displays the immutable workflow snapshot + live per-step execution status
- * for the latest attempt of a single run.
+ * Displays the immutable workflow snapshot + live runtime workflow graph for
+ * the latest attempt of a single run.
  */
 export const RunSnapshotPanel = ({ run }: RunSnapshotPanelProps): JSX.Element => {
   const [execution, setExecution] = useState<RunExecutionResponse | null>(null);
@@ -747,40 +737,56 @@ export const RunSnapshotPanel = ({ run }: RunSnapshotPanelProps): JSX.Element =>
 
   useEffect(() => {
     let cancelled = false;
+    let interval: ReturnType<typeof setInterval> | null = null;
     setLoading(true);
     setError(null);
-    workspaceApi
-      .getRunExecution(run.projectId, run.experimentId, run.id)
-      .then((data) => {
-        if (cancelled) return;
-        setExecution(data);
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        setError(err instanceof Error ? err.message : "Failed to load workflow execution");
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+    const load = (): void => {
+      workspaceApi
+        .getRunExecution(run.projectId, run.experimentId, run.id)
+        .then((data) => {
+          if (cancelled) return;
+          setExecution(data);
+          setError(null);
+        })
+        .catch((err) => {
+          if (cancelled) return;
+          setError(err instanceof Error ? err.message : "Failed to load workflow execution");
+        })
+        .finally(() => {
+          if (!cancelled) setLoading(false);
+        });
+    };
+    load();
+    if (run.status === "running") {
+      interval = setInterval(load, 1000);
+    }
     return () => {
       cancelled = true;
+      if (interval) clearInterval(interval);
     };
-  }, [run.id, run.projectId, run.experimentId]);
+  }, [run.experimentId, run.id, run.projectId, run.status]);
 
-  const steps = execution?.steps ?? [];
+  const graph = useMemo<TaskGraphJson | null>(() => {
+    return execution?.workflow ? normalizeTaskGraph(execution.workflow) : null;
+  }, [execution]);
 
   return (
     <div className="flex h-full flex-col overflow-y-auto">
       <div className="flex items-center justify-between border-b bg-background px-6 py-4">
         <div className="flex items-center gap-2">
           <ListChecks className="h-4 w-4 text-muted-foreground" />
-          <span className="text-sm font-medium">
-            Workflow steps
-            <span className="ml-1 font-normal text-muted-foreground">({steps.length})</span>
+          <span className="text-body-lg font-medium">
+            Workflow graph
+            <span className="ml-1 font-normal text-muted-foreground">
+              ({graph?.task_configs.length ?? 0})
+            </span>
           </span>
         </div>
         {execution?.execution_id && (
-          <span className="font-mono text-xs text-muted-foreground" title={execution.execution_id}>
+          <span
+            className="font-mono text-label text-muted-foreground"
+            title={execution.execution_id}
+          >
             {execution.execution_id}
           </span>
         )}
@@ -788,24 +794,22 @@ export const RunSnapshotPanel = ({ run }: RunSnapshotPanelProps): JSX.Element =>
       <div className="flex-1 space-y-3 p-6">
         <SnapshotHeader snapshot={run.workflowSnapshot ?? null} />
         {loading ? (
-          <p className="text-xs italic text-muted-foreground">Loading workflow execution…</p>
+          <p className="text-label italic text-muted-foreground">Loading workflow execution…</p>
         ) : error ? (
-          <div className="flex items-center gap-2 rounded-md border border-rose-500/30 bg-rose-500/5 p-3 text-xs text-rose-700">
+          <div className="flex items-center gap-2 border-y border-status-failed/30 bg-status-failed-soft px-3 py-3 text-label text-status-failed-foreground">
             <AlertCircle className="h-4 w-4" />
             {error}
           </div>
-        ) : steps.length === 0 ? (
-          <div className="flex flex-col items-center justify-center gap-3 py-12 text-muted-foreground">
-            <Database className="h-10 w-10 opacity-20" />
-            <p className="text-sm">
+        ) : graph === null ? (
+          <div className="flex flex-col items-center justify-center gap-3 py-8 text-muted-foreground">
+            <ListChecks className="h-10 w-10 opacity-20" />
+            <p className="text-body-lg">
               No workflow execution state yet. The run hasn't materialized a workflow.json file.
             </p>
           </div>
         ) : (
-          <div className="space-y-2">
-            {steps.map((step) => (
-              <WorkflowStepRow key={`step-${step.index}`} step={step} />
-            ))}
+          <div className="min-h-canvas-min">
+            <WorkflowGraph ir={graph} height={480} />
           </div>
         )}
       </div>
@@ -851,7 +855,7 @@ export const SnapshotDiffPanel = ({
         <div className="flex items-center gap-3 flex-wrap">
           <div className="flex items-center gap-2">
             <GitCompareArrows className="h-4 w-4 text-muted-foreground" />
-            <span className="text-sm font-medium">Compare</span>
+            <span className="text-body-lg font-medium">Compare</span>
           </div>
 
           <Select value={baseId} onValueChange={setBaseId}>
@@ -867,7 +871,7 @@ export const SnapshotDiffPanel = ({
             </SelectContent>
           </Select>
 
-          <span className="text-muted-foreground text-sm">&rarr;</span>
+          <span className="text-muted-foreground text-body-lg">&rarr;</span>
 
           <Select value={targetId} onValueChange={setTargetId}>
             <SelectTrigger size="sm">
@@ -885,7 +889,7 @@ export const SnapshotDiffPanel = ({
           {ready && <DiffSummaryBar diffs={diffs} />}
         </div>
         {baseId === targetId && baseId !== "" && (
-          <p className="text-xs text-amber-600 mt-2">
+          <p className="text-label text-status-warning-foreground mt-2">
             Base and target are the same run — select different runs to see a diff.
           </p>
         )}
@@ -896,10 +900,10 @@ export const SnapshotDiffPanel = ({
         {!ready ? (
           <div className="flex flex-col items-center justify-center h-full gap-3 text-muted-foreground">
             <GitCompareArrows className="h-10 w-10 opacity-20" />
-            <p className="text-sm">Select two different runs to compare their snapshots.</p>
+            <p className="text-body-lg">Select two different runs to compare their snapshots.</p>
           </div>
         ) : diffs.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No tasks to compare.</p>
+          <p className="text-body-lg text-muted-foreground">No tasks to compare.</p>
         ) : (
           diffs.map((diff) => <DiffCard key={diff.taskId} diff={diff} />)
         )}

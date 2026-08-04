@@ -14,27 +14,36 @@
 import {
   AlertCircle,
   CheckCircle2,
+  ChevronRight,
   Edit3,
   KeyRound,
   Lock,
   Plus,
+  Save,
   Server,
   Trash2,
+  Unplug,
+  Wrench,
   Zap,
 } from "lucide-react";
 import type { JSX } from "react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
+import { AgentUnavailableError, resetAgentProbes } from "@/app/state/agentProbe";
 import {
+  type ApiAgentTool,
+  type ApiAgentToolList,
   type ApiMcpOAuthStatus,
   type ApiMcpScope,
   type ApiMcpSecretList,
   type ApiMcpServer,
   type ApiMcpServerList,
   type ApiMcpServerTestResult,
+  type ApiMcpToolGroup,
   agentAdminApi,
   type McpOAuth2AuthInput,
   type McpServerSpecInput,
   type McpServerUpsertInput,
+  mcpSource,
 } from "@/app/state/api";
 import { emitMcpConfigChanged } from "@/app/state/mcpEvents";
 import {
@@ -47,9 +56,8 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Code as InlineCode } from "@/components/ui/code";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import {
   Dialog,
   DialogContent,
@@ -71,6 +79,10 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
+import { WorkbenchAction, WorkbenchIconAction, WorkbenchTag } from "@/components/workbench";
+import { cn } from "@/lib/utils";
+import { KnowledgeSourcesPanel } from "./KnowledgeSourcesPanel";
+import { UnavailableCapability } from "./UnavailableCapability";
 
 const SECRET_REF_RE = /\$\{SECRET:([A-Za-z_]\w*)\}/g;
 const NAME_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
@@ -103,13 +115,11 @@ const collectRefs = (values: string[]): string[] => {
 // Encapsulate the patterns used in 3+ places so the markup below stays scannable.
 
 const Code = ({ children }: { children: React.ReactNode }): JSX.Element => (
-  <code className="rounded bg-muted px-1 text-xs">{children}</code>
+  <InlineCode className="rounded-control bg-muted px-1 text-label">{children}</InlineCode>
 );
 
 const ErrorBanner = ({ children }: { children: React.ReactNode }): JSX.Element => (
-  <div className="rounded border border-destructive/40 bg-destructive/10 px-2 py-1 text-xs text-destructive">
-    {children}
-  </div>
+  <div className="bg-destructive/10 px-2 py-1 text-label text-destructive">{children}</div>
 );
 
 interface StatusBadgeProps {
@@ -119,20 +129,14 @@ interface StatusBadgeProps {
 }
 
 const StatusBadge = ({ tone, children, title }: StatusBadgeProps): JSX.Element => {
-  const className =
-    tone === "success"
-      ? "border-success/40 bg-success-soft text-success-foreground"
-      : tone === "destructive"
-        ? "border-destructive/40 bg-destructive/10 text-destructive"
-        : "";
   return (
-    <Badge
-      variant={tone === "muted" ? "secondary" : "outline"}
-      className={`${className} text-xs`}
+    <WorkbenchTag
+      meaning={tone === "success" ? "completed" : tone === "destructive" ? "failed" : "category"}
+      className="text-label"
       title={title}
     >
       {children}
-    </Badge>
+    </WorkbenchTag>
   );
 };
 
@@ -153,16 +157,14 @@ const IconButton = ({
 }: IconButtonProps): JSX.Element => (
   <Tooltip>
     <TooltipTrigger asChild>
-      <Button
-        size="sm"
-        variant="ghost"
+      <WorkbenchIconAction
+        label={label}
         disabled={disabled}
         onClick={onClick}
-        aria-label={label}
         className={tone === "destructive" ? "text-destructive hover:text-destructive" : ""}
       >
         <Icon className="size-4" />
-      </Button>
+      </WorkbenchIconAction>
     </TooltipTrigger>
     <TooltipContent>{label}</TooltipContent>
   </Tooltip>
@@ -174,8 +176,10 @@ const IconButton = ({
 
 export const McpServersTab = (): JSX.Element => {
   const [data, setData] = useState<ApiMcpServerList | null>(null);
+  const [toolData, setToolData] = useState<ApiAgentToolList>({ tools: [], mcpGroups: [] });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [unavailable, setUnavailable] = useState(false);
   const [scopeFilter, setScopeFilter] = useState<ScopeFilter>("all");
   const [editing, setEditing] = useState<EditState | null>(null);
   const [pendingDelete, setPendingDelete] = useState<ApiMcpServer | null>(null);
@@ -185,10 +189,19 @@ export const McpServersTab = (): JSX.Element => {
   const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setUnavailable(false);
     try {
-      setData(await agentAdminApi.listMcpServers());
+      // Servers are required; tools are best-effort so a tools 503 never bricks MCP settings.
+      const servers = await agentAdminApi.listMcpServers();
+      setData(servers);
+      try {
+        setToolData(await agentAdminApi.listToolsAndGroups());
+      } catch {
+        setToolData({ tools: [], mcpGroups: [] });
+      }
     } catch (err) {
-      setError(String(err));
+      if (err instanceof AgentUnavailableError) setUnavailable(true);
+      else setError(String(err));
     } finally {
       setLoading(false);
     }
@@ -230,6 +243,7 @@ export const McpServersTab = (): JSX.Element => {
     try {
       const result = await agentAdminApi.testMcpServer(server.name, server.scope);
       setTestResults((r) => ({ ...r, [key]: result }));
+      if (result.ok) setToolData(await agentAdminApi.listToolsAndGroups());
     } catch (err) {
       setTestResults((r) => ({
         ...r,
@@ -249,13 +263,15 @@ export const McpServersTab = (): JSX.Element => {
   }, []);
 
   return (
-    <div className="flex h-full flex-col gap-3 px-4 pb-4">
-      <p className="text-xs text-muted-foreground">
+    <div className="mx-auto flex h-full w-full max-w-5xl flex-col gap-4 px-4 py-5 sm:px-6 sm:py-6">
+      <p className="text-label text-muted-foreground">
         MCP servers expose external tools to the agent. Configuration is layered:{" "}
         <strong>Workspace</strong> entries override <strong>User</strong> entries with the same name
         (VSCode-style). Secrets live in a separate keyring; reference them with{" "}
         <Code>$&#123;SECRET:NAME&#125;</Code> in env or header values.
       </p>
+
+      <KnowledgeSourcesPanel />
 
       <div className="flex items-center justify-between gap-3">
         <Tabs value={scopeFilter} onValueChange={(v) => setScopeFilter(v as ScopeFilter)}>
@@ -265,8 +281,9 @@ export const McpServersTab = (): JSX.Element => {
             <TabsTrigger value="workspace">Workspace</TabsTrigger>
           </TabsList>
         </Tabs>
-        <Button
-          size="sm"
+        <WorkbenchIconAction
+          label="Add MCP server"
+          disabled={unavailable}
           onClick={() =>
             setEditing({
               mode: "create",
@@ -276,12 +293,12 @@ export const McpServersTab = (): JSX.Element => {
             })
           }
         >
-          <Plus className="mr-1 size-3.5" /> Add server
-        </Button>
+          <Plus className="size-3.5" />
+        </WorkbenchIconAction>
       </div>
 
       {data && (
-        <p className="text-xs text-muted-foreground">
+        <p className="text-label text-muted-foreground">
           <span>Workspace: </span>
           <Code>{data.workspacePath}</Code>
           <span className="mx-1">·</span>
@@ -290,6 +307,16 @@ export const McpServersTab = (): JSX.Element => {
         </p>
       )}
       {error && <ErrorBanner>{error}</ErrorBanner>}
+      {unavailable && (
+        <UnavailableCapability
+          title="MCP configuration unavailable"
+          description="This server does not expose MCP administration. Existing server-side MCP configuration is unaffected; install the optional agent backend to manage it here."
+          onRetry={() => {
+            resetAgentProbes();
+            void refresh();
+          }}
+        />
+      )}
 
       <ScrollArea className="flex-1">
         <div className="flex flex-col gap-2 pr-2">
@@ -300,13 +327,12 @@ export const McpServersTab = (): JSX.Element => {
               <Skeleton className="h-24 w-full" />
             </>
           )}
-          {!loading && filtered.length === 0 && (
+          {!loading && !unavailable && filtered.length === 0 && (
             <div className="flex flex-col items-center gap-2 py-6 text-center">
               <Server className="size-8 text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">No servers at this scope.</p>
-              <Button
-                size="sm"
-                variant="outline"
+              <p className="text-body-lg text-muted-foreground">No servers at this scope.</p>
+              <WorkbenchIconAction
+                label="Add MCP server"
                 onClick={() =>
                   setEditing({
                     mode: "create",
@@ -316,19 +342,25 @@ export const McpServersTab = (): JSX.Element => {
                   })
                 }
               >
-                <Plus className="mr-1 size-3.5" /> Add server
-              </Button>
+                <Plus className="size-3.5" />
+              </WorkbenchIconAction>
             </div>
           )}
           {!loading &&
+            !unavailable &&
             filtered.map((server) => {
               const key = `${server.scope}:${server.name}`;
+              const source = mcpSource(server.name);
               return (
                 <ServerCard
                   key={key}
                   server={server}
                   test={testResults[key] ?? null}
                   busy={busy[key] ?? false}
+                  tools={toolData.tools.filter((tool) => tool.source === source)}
+                  toolGroup={
+                    toolData.mcpGroups.find((group) => group.server === server.name) ?? null
+                  }
                   onEdit={() =>
                     setEditing({
                       mode: "edit",
@@ -395,6 +427,8 @@ interface ServerCardProps {
   server: ApiMcpServer;
   test: ApiMcpServerTestResult | null;
   busy: boolean;
+  tools: ApiAgentTool[];
+  toolGroup: ApiMcpToolGroup | null;
   onEdit: () => void;
   onDelete: () => void;
   onTest: () => void;
@@ -404,31 +438,51 @@ const ServerCard = ({
   server,
   test,
   busy,
+  tools,
+  toolGroup,
   onEdit,
   onDelete,
   onTest,
 }: ServerCardProps): JSX.Element => {
   const hasUnresolved = server.unresolvedSecrets.length > 0;
+  const [expanded, setExpanded] = useState(false);
+  const reportedToolCount = toolGroup?.toolCount ?? test?.toolCount ?? tools.length;
   return (
-    <Card className={server.shadowed ? "border-dashed bg-muted/30" : ""}>
-      <CardHeader className="pb-2">
+    <section className={cn("bg-surface/60", server.shadowed ? "bg-muted/30 opacity-80" : "")}>
+      <header className="pb-2 px-3 pt-3">
         <div className="flex flex-wrap items-center gap-2">
+          <WorkbenchIconAction
+            label={`${expanded ? "Collapse" : "Expand"} ${server.name}`}
+            className="size-7"
+            aria-expanded={expanded}
+            onClick={() => setExpanded((value) => !value)}
+          >
+            <ChevronRight
+              className={`size-4 transition-transform ${expanded ? "rotate-90" : ""}`}
+            />
+          </WorkbenchIconAction>
           <Server className="size-4 text-muted-foreground" />
-          <CardTitle className="font-mono text-sm">{server.name}</CardTitle>
-          <Badge variant="outline" className="text-xs">
+          <h3 className="font-mono text-body-lg font-medium text-foreground">{server.name}</h3>
+          <WorkbenchTag meaning="metadata" className="text-label">
             {server.transport || "?"}
-          </Badge>
-          <Badge variant="secondary" className="text-xs">
-            {SCOPE_LABEL[server.scope]}
-          </Badge>
+          </WorkbenchTag>
+          <WorkbenchTag className="text-label">{SCOPE_LABEL[server.scope]}</WorkbenchTag>
+          {server.knowledgeSources && server.knowledgeSources.length > 0 && (
+            <WorkbenchTag
+              className="text-label"
+              title={`MOLMCP_SOURCES=${server.knowledgeSources.join(",")}`}
+            >
+              sources: {server.knowledgeSources.join(", ")}
+            </WorkbenchTag>
+          )}
           {server.shadowed && (
-            <Badge
-              variant="outline"
-              className="text-xs"
+            <WorkbenchTag
+              meaning="metadata"
+              className="text-label"
               title="A Workspace entry with the same name overrides this one."
             >
               shadowed
-            </Badge>
+            </WorkbenchTag>
           )}
           {server.auth?.type === "oauth2" && (
             <StatusBadge
@@ -443,9 +497,9 @@ const ServerCard = ({
             </StatusBadge>
           )}
           {!server.valid && (
-            <Badge variant="destructive" className="text-xs">
+            <WorkbenchTag meaning="failed" className="text-label">
               invalid
-            </Badge>
+            </WorkbenchTag>
           )}
           <div className="ml-auto flex gap-1">
             <IconButton
@@ -464,100 +518,171 @@ const ServerCard = ({
             />
           </div>
         </div>
-      </CardHeader>
-      <CardContent className="space-y-1 pt-0 text-xs">
-        {!server.valid && server.invalidReason && (
-          <p className="text-destructive">{server.invalidReason}</p>
-        )}
-        <dl className="grid grid-cols-[auto_1fr] gap-x-2 gap-y-0.5">
-          {server.transport === "stdio" ? (
-            <>
-              <dt className="text-muted-foreground">command</dt>
-              <dd>
-                <code className="break-all">{server.command ?? "—"}</code>
-              </dd>
-              {server.args.length > 0 && (
-                <>
-                  <dt className="text-muted-foreground">args</dt>
-                  <dd className="break-all">
-                    <code>{server.args.join(" ")}</code>
-                  </dd>
-                </>
-              )}
-              {server.envKeys.length > 0 && (
-                <>
-                  <dt className="text-muted-foreground">env</dt>
-                  <dd>
-                    <code>{server.envKeys.join(", ")}</code>
-                  </dd>
-                </>
-              )}
-            </>
-          ) : (
-            <>
-              <dt className="text-muted-foreground">url</dt>
-              <dd className="break-all">
-                <code>{server.url ?? "—"}</code>
-              </dd>
-              {server.headerKeys.length > 0 && (
-                <>
-                  <dt className="text-muted-foreground">headers</dt>
-                  <dd>
-                    <code>{server.headerKeys.join(", ")}</code>
-                  </dd>
-                </>
-              )}
-            </>
+      </header>
+      {expanded && (
+        <div className="px-3 pb-3 space-y-3 pt-0 text-label">
+          {!server.valid && server.invalidReason && (
+            <p className="text-destructive">{server.invalidReason}</p>
           )}
-        </dl>
-        {server.secretRefs.length > 0 && (
-          <div className="flex flex-wrap items-center gap-1 pt-1">
-            <KeyRound className="size-3 text-muted-foreground" />
-            <span className="text-muted-foreground">secrets:</span>
-            {server.secretRefs.map((key) => {
-              const missing = server.unresolvedSecrets.includes(key);
-              return (
-                <StatusBadge
-                  key={key}
-                  tone={missing ? "destructive" : "success"}
-                  title={missing ? "Set this secret in the editor or User scope." : "Resolved"}
-                >
-                  {key}
-                </StatusBadge>
-              );
-            })}
-          </div>
-        )}
-        {hasUnresolved && (
-          <p className="flex items-center gap-1 text-xs text-destructive">
-            <AlertCircle className="size-3" />
-            Runtime will skip this server until missing secrets are set.
-          </p>
-        )}
-        {test && (
-          <div
-            className={
-              "mt-1 rounded border px-2 py-1 text-xs " +
-              (test.ok
-                ? "border-success/40 bg-success-soft text-success-foreground"
-                : "border-destructive/40 bg-destructive/10 text-destructive")
-            }
-          >
-            {test.ok ? (
-              <span className="flex items-center gap-1">
-                <CheckCircle2 className="size-3" />
-                connected · {test.toolCount} tools · {test.latencyMs} ms
-              </span>
+          <dl className="grid grid-cols-(--definition-grid-columns) gap-x-2 gap-y-1">
+            {server.transport === "stdio" ? (
+              <>
+                <dt className="text-muted-foreground">command</dt>
+                <dd>
+                  <InlineCode className="break-all">{server.command ?? "—"}</InlineCode>
+                </dd>
+                {server.args.length > 0 && (
+                  <>
+                    <dt className="text-muted-foreground">args</dt>
+                    <dd className="break-all">
+                      <InlineCode>{server.args.join(" ")}</InlineCode>
+                    </dd>
+                  </>
+                )}
+                {server.envKeys.length > 0 && (
+                  <>
+                    <dt className="text-muted-foreground">env</dt>
+                    <dd>
+                      <InlineCode>{server.envKeys.join(", ")}</InlineCode>
+                    </dd>
+                  </>
+                )}
+              </>
             ) : (
-              <span className="flex items-center gap-1">
-                <AlertCircle className="size-3" />
-                {test.error ?? "Test failed"}
-              </span>
+              <>
+                <dt className="text-muted-foreground">url</dt>
+                <dd className="break-all">
+                  <InlineCode>{server.url ?? "—"}</InlineCode>
+                </dd>
+                {server.headerKeys.length > 0 && (
+                  <>
+                    <dt className="text-muted-foreground">headers</dt>
+                    <dd>
+                      <InlineCode>{server.headerKeys.join(", ")}</InlineCode>
+                    </dd>
+                  </>
+                )}
+              </>
+            )}
+          </dl>
+          {server.secretRefs.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1 pt-1">
+              <KeyRound className="size-3 text-muted-foreground" />
+              <span className="text-muted-foreground">secrets:</span>
+              {server.secretRefs.map((key) => {
+                const missing = server.unresolvedSecrets.includes(key);
+                return (
+                  <StatusBadge
+                    key={key}
+                    tone={missing ? "destructive" : "success"}
+                    title={missing ? "Set this secret in the editor or User scope." : "Resolved"}
+                  >
+                    {key}
+                  </StatusBadge>
+                );
+              })}
+            </div>
+          )}
+          {hasUnresolved && (
+            <p className="flex items-center gap-1 text-label text-destructive">
+              <AlertCircle className="size-3" />
+              Runtime will skip this server until missing secrets are set.
+            </p>
+          )}
+          {test && (
+            <div
+              className={
+                "mt-1 border-y px-2 py-1 text-label " +
+                (test.ok
+                  ? "border-success/40 bg-success-soft text-success-foreground"
+                  : "border-destructive/40 bg-destructive/10 text-destructive")
+              }
+            >
+              {test.ok ? (
+                <span className="flex items-center gap-1">
+                  <CheckCircle2 className="size-3" />
+                  connected · {test.toolCount} tools · {test.latencyMs} ms
+                </span>
+              ) : (
+                <span className="flex items-center gap-1">
+                  <AlertCircle className="size-3" />
+                  {test.error ?? "Test failed"}
+                </span>
+              )}
+            </div>
+          )}
+          <div className="space-y-2 border-t border-border pt-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <h4 className="text-label font-semibold uppercase tracking-wide text-muted-foreground">
+                Capabilities
+              </h4>
+              <WorkbenchTag meaning="metadata" className="gap-1 text-label">
+                <Wrench className="size-3" /> Tools · {reportedToolCount}
+              </WorkbenchTag>
+              {server.auth?.type === "oauth2" && (
+                <WorkbenchTag meaning="metadata" className="text-label">
+                  OAuth 2.0
+                </WorkbenchTag>
+              )}
+            </div>
+            {toolGroup && !toolGroup.ok && (
+              <ErrorBanner>{toolGroup.error ?? "Tool discovery failed."}</ErrorBanner>
             )}
           </div>
-        )}
-      </CardContent>
-    </Card>
+          <div className="space-y-2">
+            <h4 className="text-label font-semibold uppercase tracking-wide text-muted-foreground">
+              Tools
+            </h4>
+            {tools.length === 0 ? (
+              <p className="border-y border-dashed border-border/60 py-2 text-muted-foreground">
+                {test?.ok
+                  ? "This server reported no tools."
+                  : "No tools discovered. Test the connection to refresh this server's capabilities."}
+              </p>
+            ) : (
+              <div className="divide-y divide-border/60 border-y border-border/60">
+                {tools.map((tool) => (
+                  <Collapsible key={tool.name} className="py-2">
+                    <CollapsibleTrigger className="flex w-full justify-start gap-2 text-left">
+                      <InlineCode className="font-mono text-label">{tool.name}</InlineCode>
+                      {tool.parameters.length > 0 && (
+                        <span className="text-micro text-muted-foreground">
+                          {tool.parameters.length} parameter
+                          {tool.parameters.length === 1 ? "" : "s"}
+                        </span>
+                      )}
+                      {tool.requiresApproval && (
+                        <WorkbenchTag meaning="failed" className="ml-auto text-micro">
+                          approval
+                        </WorkbenchTag>
+                      )}
+                    </CollapsibleTrigger>
+                    <CollapsibleContent className="space-y-2 pt-2 text-muted-foreground">
+                      {tool.description && (
+                        <p className="whitespace-pre-line">{tool.description}</p>
+                      )}
+                      {tool.parameters.length > 0 && (
+                        <dl className="grid grid-cols-(--definition-grid-columns) gap-x-2 gap-y-1 border-t border-border/60 pt-2">
+                          {tool.parameters.map((parameter) => (
+                            <div key={parameter.name} className="contents">
+                              <dt className="font-mono text-foreground">{parameter.name}</dt>
+                              <dd>
+                                {parameter.annotation}
+                                {!parameter.required && " · optional"}
+                              </dd>
+                            </div>
+                          ))}
+                        </dl>
+                      )}
+                    </CollapsibleContent>
+                  </Collapsible>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+    </section>
   );
 };
 
@@ -614,11 +739,19 @@ const rowsToMap = (rows: KvRow[]): Record<string, string> => {
 
 const serverToSpec = (server: ApiMcpServer): McpServerSpecInput => {
   if (server.transport === "stdio") {
+    // Prefer public env literals from the API (e.g. MOLMCP_SOURCES); secret keys
+    // keep ${SECRET:…} placeholders so we never invent values.
+    const env: Record<string, string> = { ...(server.env ?? {}) };
+    for (const k of server.envKeys) {
+      if (!(k in env)) {
+        env[k] = `\${SECRET:${k}}`;
+      }
+    }
     return {
       type: "stdio",
       command: server.command ?? "",
       args: [...server.args],
-      env: Object.fromEntries(server.envKeys.map((k) => [k, `\${SECRET:${k}}`])),
+      env,
     };
   }
   // For http variants we don't see header values from the API (only keys);
@@ -644,6 +777,8 @@ const ServerEditor = ({
   onCancel,
   onSaved,
 }: ServerEditorProps): JSX.Element => {
+  const fieldId = useId();
+  const id = (name: string): string => `${fieldId}-${name}`;
   const [name, setName] = useState(state.name);
   const [scope, setScope] = useState<ApiMcpScope>(state.scope);
   const [spec, setSpec] = useState<McpServerSpecInput>(state.spec);
@@ -814,42 +949,47 @@ const ServerEditor = ({
 
   return (
     <Dialog open onOpenChange={(open) => !open && !saving && onCancel()}>
-      <DialogContent className="max-h-[90vh] max-w-2xl overflow-hidden">
+      <DialogContent className="max-h-dialog-viewport-tall max-w-2xl overflow-hidden">
         <DialogHeader>
           <DialogTitle>
             {state.mode === "create" ? (
               "Add MCP server"
             ) : (
               <span>
-                Edit <code className="font-mono">{state.name}</code>
+                Edit <InlineCode className="font-mono">{state.name}</InlineCode>
               </span>
             )}
           </DialogTitle>
         </DialogHeader>
-        <ScrollArea className="max-h-[65vh] pr-2">
+        <ScrollArea className="max-h-dialog-scroll-compact pr-2">
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <Label className="text-xs">Name</Label>
+                <Label htmlFor={id("name")} className="text-label">
+                  Name
+                </Label>
                 <Input
+                  id={id("name")}
                   value={name}
                   onChange={(e) => setName(e.target.value)}
                   placeholder="github-search"
                   disabled={state.mode === "edit"}
                   className="font-mono"
                 />
-                <p className="mt-1 text-xs text-muted-foreground">
+                <p className="mt-1 text-label text-muted-foreground">
                   Lowercase letters, digits, underscore, hyphen.
                 </p>
               </div>
               <div>
-                <Label className="text-xs">Scope</Label>
+                <Label htmlFor={id("scope")} className="text-label">
+                  Scope
+                </Label>
                 <Select
                   value={scope}
                   onValueChange={(v) => setScope(v as ApiMcpScope)}
                   disabled={state.mode === "edit"}
                 >
-                  <SelectTrigger>
+                  <SelectTrigger id={id("scope")}>
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -861,12 +1001,14 @@ const ServerEditor = ({
             </div>
 
             <div>
-              <Label className="text-xs">Transport</Label>
+              <Label htmlFor={id("transport")} className="text-label">
+                Transport
+              </Label>
               <Select
                 value={spec.type}
                 onValueChange={(v) => handleTransportChange(v as TransportType)}
               >
-                <SelectTrigger>
+                <SelectTrigger id={id("transport")}>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -882,8 +1024,11 @@ const ServerEditor = ({
             {isStdio ? (
               <>
                 <div>
-                  <Label className="text-xs">Command</Label>
+                  <Label htmlFor={id("command")} className="text-label">
+                    Command
+                  </Label>
                   <Input
+                    id={id("command")}
                     value={spec.command}
                     onChange={(e) => setSpec({ ...spec, command: e.target.value })}
                     placeholder="npx"
@@ -891,18 +1036,51 @@ const ServerEditor = ({
                   />
                 </div>
                 <div>
-                  <Label className="text-xs">Args (one per line)</Label>
+                  <Label htmlFor={id("args")} className="text-label">
+                    Args (one per line)
+                  </Label>
                   <Textarea
+                    id={id("args")}
                     rows={4}
                     value={argsText}
                     onChange={(e) => setArgsText(e.target.value)}
                     placeholder={"-y\n@modelcontextprotocol/server-github"}
-                    className="font-mono text-xs"
+                    className="font-mono text-label"
                   />
-                  <p className="mt-1 text-xs text-muted-foreground">
+                  <p className="mt-1 text-label text-muted-foreground">
                     <Code>$&#123;workspaceRoot&#125;</Code> is expanded at runtime.
                   </p>
                 </div>
+                {(name === "molmcp" || name.includes("molmcp")) && (
+                  <div className="rounded-control border border-info/30 bg-info-soft/20 px-3 py-2">
+                    <Label className="text-label font-medium">MOLMCP_SOURCES (package pin)</Label>
+                    <p className="mb-1.5 text-micro text-muted-foreground">
+                      Comma-separated packages molmcp may expose. Leave empty for all. Prefer the
+                      Knowledge sources panel above for a default pin applied to every plan.
+                    </p>
+                    <Input
+                      className="font-mono text-label"
+                      placeholder="molpy,molvis,molplot"
+                      value={envRows.find((r) => r.key === "MOLMCP_SOURCES")?.value ?? ""}
+                      onChange={(e) => {
+                        const v = e.target.value;
+                        setEnvRows((rows) => {
+                          const rest = rows.filter((r) => r.key !== "MOLMCP_SOURCES");
+                          if (!v.trim()) return rest;
+                          const existing = rows.find((r) => r.key === "MOLMCP_SOURCES");
+                          return [
+                            ...rest,
+                            {
+                              uid: existing?.uid ?? _kvUid(),
+                              key: "MOLMCP_SOURCES",
+                              value: v,
+                            },
+                          ];
+                        });
+                      }}
+                    />
+                  </div>
+                )}
                 <KvEditor
                   label="Environment variables"
                   rows={envRows}
@@ -913,8 +1091,11 @@ const ServerEditor = ({
             ) : (
               <>
                 <div>
-                  <Label className="text-xs">URL</Label>
+                  <Label htmlFor={id("url")} className="text-label">
+                    URL
+                  </Label>
                   <Input
+                    id={id("url")}
                     value={(spec as { url: string }).url}
                     onChange={(e) =>
                       setSpec({
@@ -944,11 +1125,11 @@ const ServerEditor = ({
             )}
 
             {referencedKeys.length > 0 && (
-              <div className="rounded-md border bg-muted/40 p-3">
-                <div className="mb-2 flex items-center gap-2 text-xs font-medium">
+              <section className="border-t border-border/60 pt-3">
+                <div className="mb-2 flex items-center gap-2 text-label font-medium">
                   <KeyRound className="size-3" /> Referenced secrets
                 </div>
-                <p className="mb-2 text-xs text-muted-foreground">
+                <p className="mb-2 text-label text-muted-foreground">
                   Plaintext values stay on this machine, written to <Code>.mcp_secrets.json</Code>{" "}
                   at the chosen scope.
                 </p>
@@ -957,8 +1138,8 @@ const ServerEditor = ({
                     const isSet = setKeys.has(key);
                     return (
                       <div key={key} className="flex flex-col gap-1">
-                        <div className="flex items-center gap-2 text-xs">
-                          <code>{key}</code>
+                        <div className="flex items-center gap-2 text-label">
+                          <InlineCode>{key}</InlineCode>
                           <StatusBadge tone={isSet ? "success" : "destructive"}>
                             {isSet ? "set" : "missing"}
                           </StatusBadge>
@@ -966,6 +1147,7 @@ const ServerEditor = ({
                         <div className="flex items-center gap-2">
                           <Input
                             type="password"
+                            aria-label={`Secret value for ${key}`}
                             placeholder={isSet ? "Type to replace…" : "Paste secret value"}
                             value={secretDrafts[key] ?? ""}
                             onChange={(e) =>
@@ -973,33 +1155,37 @@ const ServerEditor = ({
                             }
                             autoComplete="off"
                           />
-                          <Button
+                          <WorkbenchIconAction
+                            label={`Save secret ${key}`}
                             type="button"
-                            size="sm"
-                            variant="outline"
                             disabled={!secretDrafts[key]}
                             onClick={() => void handleSecretSave(key)}
                           >
-                            Save
-                          </Button>
+                            <Save className="size-4" />
+                          </WorkbenchIconAction>
                         </div>
                       </div>
                     );
                   })}
                 </div>
-              </div>
+              </section>
             )}
 
             {error && <ErrorBanner>{error}</ErrorBanner>}
           </div>
         </ScrollArea>
         <DialogFooter>
-          <Button variant="ghost" onClick={onCancel} disabled={saving}>
+          <WorkbenchAction kind="ghost" size="default" onClick={onCancel} disabled={saving}>
             Cancel
-          </Button>
-          <Button onClick={() => void handleSubmit()} disabled={saving}>
+          </WorkbenchAction>
+          <WorkbenchAction
+            kind="primary"
+            size="default"
+            onClick={() => void handleSubmit()}
+            disabled={saving}
+          >
             {saving ? "Saving…" : state.mode === "create" ? "Create" : "Save"}
-          </Button>
+          </WorkbenchAction>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -1179,6 +1365,8 @@ const HttpAuthSection = ({
   oauthConnected,
   onOauthChanged,
 }: HttpAuthSectionProps): JSX.Element => {
+  const fieldId = useId();
+  const id = (name: string): string => `${fieldId}-${name}`;
   const slug = secretSlug(serverName);
   const onModeChange = (next: AuthMode) => {
     // Switching mode preserves typed credentials so users don't lose work
@@ -1191,10 +1379,12 @@ const HttpAuthSection = ({
     <div className="space-y-2">
       <div className="flex items-center gap-2">
         <Lock className="size-3.5 text-muted-foreground" />
-        <Label className="text-xs">Authentication</Label>
+        <Label htmlFor={id("mode")} className="text-label">
+          Authentication
+        </Label>
       </div>
       <Select value={auth.mode} onValueChange={(v) => onModeChange(v as AuthMode)}>
-        <SelectTrigger>
+        <SelectTrigger id={id("mode")}>
           <SelectValue />
         </SelectTrigger>
         <SelectContent>
@@ -1207,9 +1397,12 @@ const HttpAuthSection = ({
       </Select>
 
       {auth.mode === "bearer" && (
-        <div className="space-y-1 rounded-md border bg-muted/40 p-3">
-          <Label className="text-xs">Token</Label>
+        <div className="space-y-1 border-t border-border/60 pt-3">
+          <Label htmlFor={id("bearer-token")} className="text-label">
+            Token
+          </Label>
           <Input
+            id={id("bearer-token")}
             type="password"
             placeholder="Paste access token"
             value={auth.bearerToken}
@@ -1217,7 +1410,7 @@ const HttpAuthSection = ({
             autoComplete="off"
             className="font-mono"
           />
-          <p className="text-xs text-muted-foreground">
+          <p className="text-label text-muted-foreground">
             Stored as <Code>{slug}_TOKEN</Code> in the secret keyring; sent as{" "}
             <Code>Authorization: Bearer …</Code>.
           </p>
@@ -1225,11 +1418,14 @@ const HttpAuthSection = ({
       )}
 
       {auth.mode === "basic" && (
-        <div className="space-y-2 rounded-md border bg-muted/40 p-3">
+        <div className="space-y-2 border-t border-border/60 pt-3">
           <div className="grid grid-cols-2 gap-2">
             <div>
-              <Label className="text-xs">Username</Label>
+              <Label htmlFor={id("username")} className="text-label">
+                Username
+              </Label>
               <Input
+                id={id("username")}
                 value={auth.basicUser}
                 onChange={(e) => setAuth({ ...auth, basicUser: e.target.value })}
                 autoComplete="off"
@@ -1237,8 +1433,11 @@ const HttpAuthSection = ({
               />
             </div>
             <div>
-              <Label className="text-xs">Password</Label>
+              <Label htmlFor={id("password")} className="text-label">
+                Password
+              </Label>
               <Input
+                id={id("password")}
                 type="password"
                 value={auth.basicPass}
                 onChange={(e) => setAuth({ ...auth, basicPass: e.target.value })}
@@ -1247,7 +1446,7 @@ const HttpAuthSection = ({
               />
             </div>
           </div>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-label text-muted-foreground">
             Encoded as <Code>{slug}_BASIC</Code> = base64(user:pass); sent as{" "}
             <Code>Authorization: Basic …</Code>.
           </p>
@@ -1255,10 +1454,13 @@ const HttpAuthSection = ({
       )}
 
       {auth.mode === "apikey" && (
-        <div className="space-y-2 rounded-md border bg-muted/40 p-3">
+        <div className="space-y-2 border-t border-border/60 pt-3">
           <div>
-            <Label className="text-xs">Header name</Label>
+            <Label htmlFor={id("api-key-header")} className="text-label">
+              Header name
+            </Label>
             <Input
+              id={id("api-key-header")}
               value={auth.apiKeyHeader}
               onChange={(e) => setAuth({ ...auth, apiKeyHeader: e.target.value })}
               placeholder="X-API-Key"
@@ -1266,8 +1468,11 @@ const HttpAuthSection = ({
             />
           </div>
           <div>
-            <Label className="text-xs">Value</Label>
+            <Label htmlFor={id("api-key-value")} className="text-label">
+              Value
+            </Label>
             <Input
+              id={id("api-key-value")}
               type="password"
               placeholder="Paste API key"
               value={auth.apiKeyValue}
@@ -1276,7 +1481,7 @@ const HttpAuthSection = ({
               className="font-mono"
             />
           </div>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-label text-muted-foreground">
             Stored as <Code>{slug}_API_KEY</Code>; sent in the named header.
           </p>
         </div>
@@ -1335,19 +1540,19 @@ const HeaderRows = ({
     ) : null;
   }
   return (
-    <details className="rounded-md border bg-muted/20 p-2">
-      <summary className="cursor-pointer text-xs text-muted-foreground">
+    <Collapsible className="border-y border-border/60">
+      <CollapsibleTrigger className="py-2 text-label text-muted-foreground">
         Additional headers ({rows.length})
-      </summary>
-      <div className="mt-2">
+      </CollapsibleTrigger>
+      <CollapsibleContent className="border-t border-border/60 py-2">
         <KvEditor
           label="Extra headers"
           rows={rows}
           setRows={setRows}
           valuePlaceholder="literal value or ${SECRET:KEY}"
         />
-      </div>
-    </details>
+      </CollapsibleContent>
+    </Collapsible>
   );
 };
 
@@ -1390,6 +1595,9 @@ const OAuthConnectPanel = ({
   connected,
   onChanged,
 }: OAuthConnectPanelProps): JSX.Element => {
+  const fieldId = useId();
+  const scopesId = `${fieldId}-scopes`;
+  const clientId = `${fieldId}-client-id`;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [progress, setProgress] = useState<string | null>(null);
@@ -1436,35 +1644,41 @@ const OAuthConnectPanel = ({
   }, [serverName, scope, onChanged]);
 
   return (
-    <div className="space-y-2 rounded-md border bg-muted/40 p-3">
+    <div className="space-y-2 border-t border-border/60 pt-3">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-xs font-medium">Status:</span>
+        <span className="text-label font-medium">Status:</span>
         <StatusBadge tone={connected ? "success" : "muted"}>
           {connected ? "connected" : "not connected"}
         </StatusBadge>
         {!serverPersisted && (
-          <span className="text-xs text-muted-foreground">
+          <span className="text-label text-muted-foreground">
             Save the server first, then click Connect.
           </span>
         )}
       </div>
       <div>
-        <Label className="text-xs">Scopes (one per line, optional)</Label>
+        <Label htmlFor={scopesId} className="text-label">
+          Scopes (one per line, optional)
+        </Label>
         <Textarea
+          id={scopesId}
           rows={3}
           value={oauthScopesText}
           onChange={(e) => setOauthScopesText(e.target.value)}
           placeholder={"openid\nemail\noffline_access"}
-          className="font-mono text-xs"
+          className="font-mono text-label"
         />
-        <p className="mt-1 text-xs text-muted-foreground">
+        <p className="mt-1 text-label text-muted-foreground">
           Leave empty to let the IdP pick. <Code>offline_access</Code> is recommended for long-lived
           sessions (refresh tokens).
         </p>
       </div>
       <div>
-        <Label className="text-xs">Client ID (optional)</Label>
+        <Label htmlFor={clientId} className="text-label">
+          Client ID (optional)
+        </Label>
         <Input
+          id={clientId}
           value={oauthClientId}
           onChange={(e) => setOauthClientId(e.target.value)}
           placeholder="leave empty for Dynamic Client Registration"
@@ -1472,26 +1686,27 @@ const OAuthConnectPanel = ({
         />
       </div>
       <div className="flex items-center gap-2">
-        <Button
+        <WorkbenchAction
+          kind="primary"
+          size="compact"
           type="button"
-          size="sm"
           disabled={busy || !serverPersisted}
           onClick={() => void connect()}
         >
           {connected ? "Reconnect" : "Connect"}
-        </Button>
+        </WorkbenchAction>
         {connected && (
-          <Button
+          <WorkbenchIconAction
+            label="Disconnect MCP server"
+            className="text-destructive hover:bg-destructive/10 hover:text-destructive"
             type="button"
-            size="sm"
-            variant="outline"
             disabled={busy}
             onClick={() => void disconnect()}
           >
-            Disconnect
-          </Button>
+            <Unplug className="size-4" />
+          </WorkbenchIconAction>
         )}
-        {progress && <span className="text-xs text-muted-foreground">{progress}</span>}
+        {progress && <span className="text-label text-muted-foreground">{progress}</span>}
       </div>
       {error && <ErrorBanner>{error}</ErrorBanner>}
     </div>
@@ -1575,27 +1790,29 @@ const KvEditor = ({ label, rows, setRows, valuePlaceholder }: KvEditorProps): JS
   const add = () => setRows([...rows, { uid: _kvUid(), key: "", value: "" }]);
 
   return (
-    <div>
+    <fieldset>
       <div className="mb-1 flex items-center justify-between">
-        <Label className="text-xs">{label}</Label>
-        <Button type="button" size="sm" variant="ghost" onClick={add}>
-          <Plus className="mr-1 size-3" /> Add
-        </Button>
+        <legend className="text-label font-medium">{label}</legend>
+        <WorkbenchIconAction label={`Add ${label} entry`} onClick={add}>
+          <Plus className="size-3" />
+        </WorkbenchIconAction>
       </div>
       {rows.length === 0 ? (
-        <p className="text-xs text-muted-foreground">None.</p>
+        <p className="text-label text-muted-foreground">None.</p>
       ) : (
         <div className="space-y-1">
           {rows.map((row) => (
             <div key={row.uid} className="flex items-center gap-2">
               <Input
                 value={row.key}
+                aria-label={`${label} key`}
                 onChange={(e) => update(row.uid, { key: e.target.value })}
                 placeholder="KEY"
                 className="font-mono"
               />
               <Input
                 value={row.value}
+                aria-label={`${label} value for ${row.key || "new key"}`}
                 onChange={(e) => update(row.uid, { value: e.target.value })}
                 placeholder={valuePlaceholder}
                 className="font-mono"
@@ -1610,6 +1827,6 @@ const KvEditor = ({ label, rows, setRows, valuePlaceholder }: KvEditorProps): JS
           ))}
         </div>
       )}
-    </div>
+    </fieldset>
   );
 };

@@ -12,32 +12,12 @@ export class AgentService {
      * @returns any Successful Response
      * @throws ApiError
      */
-    public static agentDisabledApiApiAgentPathPut(
-        path: string,
-    ): CancelablePromise<any> {
-        return __request(OpenAPI, {
-            method: 'PUT',
-            url: '/api/api/agent/{path}',
-            path: {
-                'path': path,
-            },
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
-     * Agent Disabled
-     * @param path
-     * @returns any Successful Response
-     * @throws ApiError
-     */
-    public static agentDisabledApiApiAgentPathPut1(
+    public static agentDisabledApiAgentPathDelete(
         path: string,
     ): CancelablePromise<any> {
         return __request(OpenAPI, {
             method: 'DELETE',
-            url: '/api/api/agent/{path}',
+            url: '/api/agent/{path}',
             path: {
                 'path': path,
             },
@@ -52,32 +32,12 @@ export class AgentService {
      * @returns any Successful Response
      * @throws ApiError
      */
-    public static agentDisabledApiApiAgentPathPut2(
-        path: string,
-    ): CancelablePromise<any> {
-        return __request(OpenAPI, {
-            method: 'POST',
-            url: '/api/api/agent/{path}',
-            path: {
-                'path': path,
-            },
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
-     * Agent Disabled
-     * @param path
-     * @returns any Successful Response
-     * @throws ApiError
-     */
-    public static agentDisabledApiApiAgentPathPut3(
+    public static agentDisabledApiAgentPathDelete1(
         path: string,
     ): CancelablePromise<any> {
         return __request(OpenAPI, {
             method: 'GET',
-            url: '/api/api/agent/{path}',
+            url: '/api/agent/{path}',
             path: {
                 'path': path,
             },
@@ -92,12 +52,52 @@ export class AgentService {
      * @returns any Successful Response
      * @throws ApiError
      */
-    public static agentDisabledApiApiAgentPathPut4(
+    public static agentDisabledApiAgentPathDelete2(
         path: string,
     ): CancelablePromise<any> {
         return __request(OpenAPI, {
             method: 'PATCH',
-            url: '/api/api/agent/{path}',
+            url: '/api/agent/{path}',
+            path: {
+                'path': path,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * Agent Disabled
+     * @param path
+     * @returns any Successful Response
+     * @throws ApiError
+     */
+    public static agentDisabledApiAgentPathDelete3(
+        path: string,
+    ): CancelablePromise<any> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/agent/{path}',
+            path: {
+                'path': path,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * Agent Disabled
+     * @param path
+     * @returns any Successful Response
+     * @throws ApiError
+     */
+    public static agentDisabledApiAgentPathDelete4(
+        path: string,
+    ): CancelablePromise<any> {
+        return __request(OpenAPI, {
+            method: 'PUT',
+            url: '/api/agent/{path}',
             path: {
                 'path': path,
             },

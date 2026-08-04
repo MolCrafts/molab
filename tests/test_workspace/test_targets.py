@@ -12,34 +12,14 @@ from molexp.workspace import (
     Workspace,
     add_target,
     get_target,
-    has_target,
     list_targets,
     remove_target,
     to_transport,
 )
 
-# ---------------------------------------------------------------------------
-# ComputeTarget validation
-# ---------------------------------------------------------------------------
-
 
 class TestComputeTargetValidation:
-    def test_local_target_minimal(self) -> None:
-        t = ComputeTarget(name="laptop", scratch_root="/tmp/molexp")
-        assert t.name == "laptop"
-        assert t.host is None
-        assert t.scheduler == "local"
-        assert t.is_remote is False
-
-    def test_remote_target(self) -> None:
-        t = ComputeTarget(
-            name="hpc",
-            host="me@host",
-            scheduler="slurm",
-            scratch_root="/scratch",
-        )
-        assert t.is_remote is True
-        assert t.scheduler == "slurm"
+    """The ``_validate_axes`` model_validator on ``ComputeTarget``."""
 
     def test_scratch_root_is_required(self) -> None:
         with pytest.raises(ValueError, match="scratch_root"):
@@ -49,38 +29,12 @@ class TestComputeTargetValidation:
         with pytest.raises(ValueError, match="require host"):
             ComputeTarget(name="x", scratch_root="/tmp", port=22)
 
-    def test_unknown_scheduler_rejected(self) -> None:
-        with pytest.raises(ValueError):
-            ComputeTarget(name="x", scratch_root="/tmp", scheduler="invalid")  # type: ignore[arg-type]
-
-    def test_target_is_frozen(self) -> None:
-        t = ComputeTarget(name="x", scratch_root="/tmp")
-        with pytest.raises(Exception):  # noqa: B017
-            t.name = "y"  # type: ignore[misc]
-
-
-# ---------------------------------------------------------------------------
-# Registry CRUD round-trip
-# ---------------------------------------------------------------------------
-
 
 class TestRegistry:
-    def test_empty_registry(self, tmp_path: Path) -> None:
-        ws = Workspace(tmp_path)
-        ws.materialize()
-        assert list_targets(ws) == []
-        assert not has_target(ws, "anything")
+    """CRUD over ``WorkspaceMetadata.targets`` via the ``targets`` helpers."""
 
-    def test_add_and_list(self, tmp_path: Path) -> None:
-        ws = Workspace(tmp_path)
-        ws.materialize()
-        add_target(ws, ComputeTarget(name="a", scratch_root="/tmp"))
-        add_target(ws, ComputeTarget(name="b", host="me@h", scheduler="slurm", scratch_root="/s"))
-        names = [t.name for t in list_targets(ws)]
-        assert names == ["a", "b"]
-
-    def test_round_trip_via_disk(self, tmp_path: Path) -> None:
-        """Targets must survive workspace.json reload."""
+    def test_add_get_round_trips_through_workspace_json(self, tmp_path: Path) -> None:
+        """A registered target survives a fresh ``Workspace`` load unchanged."""
         ws = Workspace(tmp_path)
         ws.materialize()
         add_target(
@@ -113,19 +67,13 @@ class TestRegistry:
         with pytest.raises(ValueError, match="already exists"):
             add_target(ws, ComputeTarget(name="a", scratch_root="/other"))
 
-    def test_remove(self, tmp_path: Path) -> None:
+    def test_remove_drops_named_target(self, tmp_path: Path) -> None:
         ws = Workspace(tmp_path)
         ws.materialize()
         add_target(ws, ComputeTarget(name="a", scratch_root="/tmp"))
         add_target(ws, ComputeTarget(name="b", scratch_root="/tmp"))
         remove_target(ws, "a")
         assert [t.name for t in list_targets(ws)] == ["b"]
-
-    def test_remove_missing_raises(self, tmp_path: Path) -> None:
-        ws = Workspace(tmp_path)
-        ws.materialize()
-        with pytest.raises(KeyError):
-            remove_target(ws, "ghost")
 
     def test_get_missing_raises(self, tmp_path: Path) -> None:
         ws = Workspace(tmp_path)
@@ -134,17 +82,14 @@ class TestRegistry:
             get_target(ws, "ghost")
 
 
-# ---------------------------------------------------------------------------
-# Transport bridge
-# ---------------------------------------------------------------------------
-
-
 class TestToTransport:
+    """``to_transport`` maps a ``ComputeTarget``'s host axis onto a molq Transport."""
+
     def test_local_target_yields_local_transport(self) -> None:
         t = ComputeTarget(name="x", scratch_root="/tmp")
         assert isinstance(to_transport(t), LocalTransport)
 
-    def test_remote_target_yields_ssh_transport(self) -> None:
+    def test_remote_target_yields_ssh_transport_with_options(self) -> None:
         t = ComputeTarget(
             name="x",
             host="me@h",

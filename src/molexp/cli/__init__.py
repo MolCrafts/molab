@@ -1,11 +1,13 @@
 """molexp CLI — flat command tree.
 
-Top-level verbs (``run`` / ``serve`` / ``monitor`` / ``explore`` / ``info`` /
-``exec`` / ``shell`` / ``sync`` / ``push`` / ``pull`` / ``init`` / ``agent``)
-and noun groups (``project`` / ``experiment`` / ``runs`` / ``asset`` /
-``target`` / ``session`` / ``config`` / ``mcp``) register directly on the app.
-Each workspace-bound command takes a ``-t/--target`` option (default: cwd) via
-:mod:`molexp.cli._target`. There is no ``workspace`` god-group.
+Top-level verbs (``run`` / ``serve`` / ``monitor`` / ``explore`` / ``context`` /
+``info`` / ``exec`` / ``shell`` / ``sync`` / ``push`` / ``pull`` / ``init`` /
+``agent`` / ``plan``) and noun groups (``project`` / ``experiment`` / ``runs`` /
+``asset`` / ``target`` / ``session`` / ``config`` / ``mcp`` / ``curate`` /
+``git`` / ``knowledge``) register directly on the app. Each workspace-bound
+commands resolve their execution target via :mod:`molexp.cli._target`;
+``serve`` deliberately accepts only local ``-ws/--workspace`` paths. There is
+no ``workspace`` god-group.
 """
 
 from __future__ import annotations
@@ -19,6 +21,7 @@ from molexp.cli._app import app
 from molexp.cli.init_cmd import init as _init_cmd
 
 # ── Verbs — self-register on `app` via @app.command when imported ─────────────
+from molexp.cli.workspace import context as _context
 from molexp.cli.workspace import explore as _explore
 from molexp.cli.workspace import lifecycle as _lifecycle
 from molexp.cli.workspace import monitor as _monitor
@@ -28,17 +31,25 @@ from molexp.cli.workspace import sync as _sync
 
 app.command(name="init")(_init_cmd)
 
-from molexp.cli.agent_cmd import agent as _agent_cmd  # noqa: E402
+from molexp.cli.agent_cmd import agent_app as _agent_app  # noqa: E402
 
-app.command(name="agent")(_agent_cmd)
+app.add_typer(_agent_app, name="agent")
+
+from molexp.cli.plan_cmd import plan as _plan_cmd  # noqa: E402
+
+app.command(name="plan")(_plan_cmd)
+
+from molexp.cli.curate_cmd import curate_app as _curate_app  # noqa: E402
+
+app.add_typer(_curate_app, name="curate")
 
 # ── Noun groups (resource CRUD) — flat at top level ──────────────────────────
 from molexp.cli.prune import register as _register_prune  # noqa: E402
 from molexp.cli.target_cmd import target_app  # noqa: E402
+from molexp.cli.workspace.mcp_config import mcp_app  # noqa: E402
 from molexp.cli.workspace.resources import (  # noqa: E402
     asset_app,
     experiment_app,
-    mcp_app,
     project_app,
     run_app,
 )
@@ -51,6 +62,11 @@ app.add_typer(asset_app, name="asset")
 app.add_typer(target_app, name="target")
 app.add_typer(mcp_app, name="mcp")
 
+# ── git checkpoint projection group ──────────────────────────────────────────
+from molexp.cli.git_cmd import git_app  # noqa: E402
+
+app.add_typer(git_app, name="git")
+
 # ── session + config groups ──────────────────────────────────────────────────
 from molexp.cli.session_cmd import session_app  # noqa: E402
 
@@ -59,6 +75,11 @@ app.add_typer(session_app, name="session")
 from molexp.cli.config_cmd import config_app  # noqa: E402
 
 app.add_typer(config_app, name="config")
+
+# ── knowledge group (OKF notes + literature) ─────────────────────────────────
+from molexp.cli.knowledge_cmd import knowledge_app  # noqa: E402
+
+app.add_typer(knowledge_app, name="knowledge")
 
 # ── Third-party CLI plugin discovery ─────────────────────────────────────────
 _logger = get_logger(__name__)

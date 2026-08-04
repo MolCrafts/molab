@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Discriminator, Field, Tag
+from pydantic import BaseModel, ConfigDict, Discriminator, Field, Tag
 
 # ── Workspace ───────────────────────────────────────────────────────────────
 
@@ -41,7 +41,9 @@ def _workspace_open_discriminator(v: object) -> str:
     if isinstance(v, dict):
         kind = cast(dict[str, object], v).get("kind")
         return str(kind) if kind is not None else "local"
-    return str(getattr(v, "kind", "local"))
+    if hasattr(v, "kind"):
+        return str(v.kind)
+    return "local"
 
 
 WorkspaceOpenRequest = Annotated[
@@ -99,8 +101,65 @@ class RunCreateRequest(BaseModel):
     )
 
 
+class RunHarvestRequest(BaseModel):
+    """Harvest a terminal run into a sourced KnowledgeItem under its experiment."""
+
+    kind: Literal[
+        "Observation",
+        "Decision",
+        "Assumption",
+        "Constraint",
+        "Finding",
+        "FailureAnalysis",
+        "ProtocolNote",
+        "ParameterRationale",
+        "OpenQuestion",
+    ] = Field(..., description="Knowledge kind")
+    narrative: str = Field(..., description="Non-empty interpretation")
+    created_by: str = Field(default="ui", description="Author string")
+    name: str | None = Field(default=None, description="Optional KnowledgeItem name")
+    results: dict[str, Any] | None = Field(
+        default=None, description="Optional headline results table"
+    )
+
+
+class RunStartRequest(BaseModel):
+    """Body for the ``run`` (start) verb on a pending run.
+
+    A pending run is target-less (the create+dispatch contract dispatches a
+    targeted run immediately), so Start must supply the compute target to
+    execute on. ``None`` falls back to any target already recorded on the run;
+    when neither resolves, the route 422s (target-less runs are started with
+    ``molexp run`` on the host).
+    """
+
+    target: str | None = Field(
+        default=None,
+        description="Compute target name to start the run on (must exist in the workspace registry)",
+    )
+    parameters: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "Run inputs to apply before starting (the workflow's root inputs). "
+            "None keeps the run's existing parameters; a pending run has not been "
+            "hashed yet, so editing inputs here is safe."
+        ),
+    )
+
+
 class RunStatusUpdateRequest(BaseModel):
     status: str = Field(..., description="New status value")
+
+
+class WorkflowDocumentRequest(BaseModel):
+    """Edited workflow IR document posted by the free-layout canvas.
+
+    ``document`` is the wire IR (``{task_configs, links, entries, loops,
+    parallels, ...}``) matching ``workflow/schema/workflow.json``. The route
+    validates it through ``WorkflowCodec.ir_to_spec`` before persisting.
+    """
+
+    document: dict[str, Any] = Field(..., description="Workflow IR document")
 
 
 # ── Execution ───────────────────────────────────────────────────────────────
@@ -141,14 +200,23 @@ class DataAssetRegisterRequest(BaseModel):
 
 
 class GoalCreateRequest(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     description: str = Field(..., description="Natural language goal description")
     constraints: dict[str, Any] = Field(default_factory=dict)
     success_criteria: list[str] = Field(default_factory=list)
-    plan_mode: bool = Field(
-        False,
+    # Mount scope (vision-loop-11): the entity this session is attached to.
+    # A session mounted on a run/experiment receives that entity's state as
+    # a system-prompt context block; unresolvable ids 404 (never downgraded).
+    project_id: str | None = Field(None, alias="projectId")
+    experiment_id: str | None = Field(None, alias="experimentId")
+    run_id: str | None = Field(None, alias="runId")
+    mode: Literal["chat", "plan"] = Field(
+        "chat",
         description=(
-            "When true, the runtime registers only read-only tools and asks "
-            "the agent to emit a structured plan instead of executing."
+            "Agent for the first turn. 'chat' = interactive loop; "
+            "'plan' = auditable Plan Mode pipeline. Canonical field — no "
+            "plan_mode alias."
         ),
     )
     instructions_override: str | None = Field(
@@ -173,6 +241,10 @@ class UserMessageCreateRequest(BaseModel):
     """Mid-session chat message from the user to the agent."""
 
     content: str = Field(..., description="User's message")
+    mode: Literal["chat", "plan"] = Field(
+        "chat",
+        description="Agent used for this turn; replies to a pending request keep its agent.",
+    )
     request_id: str | None = Field(
         None,
         description=(
@@ -261,11 +333,11 @@ class SkillLaunchRequest(BaseModel):
     """Materialize a skill into a Goal and start a session."""
 
     parameters: dict[str, Any] = Field(default_factory=dict)
-    plan_mode: bool | None = Field(
+    mode: Literal["chat", "plan"] | None = Field(
         None,
         description=(
-            "Override the skill's ``default_plan_mode``. ``None`` (default) "
-            "honors the skill's setting."
+            "Override the skill's default mode. ``None`` (default) honors "
+            "the skill's ``default_plan_mode`` (plan when true, else chat)."
         ),
     )
 

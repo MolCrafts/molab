@@ -1,8 +1,8 @@
 """DataAsset — user-imported inputs (datasets, models, external files).
 
 Lives at ``{scope}/assets/<asset_id>/payload/``.  ``DataAssetLibrary``
-replaces the old ``AssetLibrary`` as the import surface; the catalog
-registration side is orchestrated from the scope entity.
+replaces the old ``AssetLibrary`` as the import surface; each imported
+asset is recorded authoritatively as ``{scope}/assets/<asset_id>/asset.json``.
 """
 
 from __future__ import annotations
@@ -13,14 +13,10 @@ import shutil
 from datetime import datetime
 from os import PathLike
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import Any, Literal
 
 from ..utils import compute_content_hash, generate_asset_id
 from .base import Asset, AssetScope, Producer
-
-if TYPE_CHECKING:
-    from ..catalog.index import AssetCatalog
-
 
 ImportAction = Literal["copy", "move", "symlink", "hardlink", "reference"]
 
@@ -48,25 +44,33 @@ class DataAssetLibrary:
     The library is responsible for:
       * materializing the imported content under ``{scope_dir}/assets/<asset_id>/payload/``
       * constructing the ``DataAsset`` record
-      * delegating registration (manifest + catalog) to the scope entity
-
-    ``catalog`` is optional — passing ``None`` leaves callers responsible
-    for registration (useful for tests).
+      * writing the authoritative ``{scope_dir}/assets/<asset_id>/asset.json`` record
     """
 
     def __init__(
         self,
         scope_dir: str | PathLike[str],
         scope: AssetScope,
-        catalog: AssetCatalog | None = None,
+        *,
+        event_root: Path | None = None,
     ) -> None:
         # Coerce to pathlib.Path — DataAssetLibrary does genuine local I/O
         # (shutil.copy2, os.link, symlink_to); callers can pass molexp.Path
         # or str.  Remote DataAsset storage is not supported by this class.
         self.scope_dir = Path(scope_dir)
         self.scope = scope
-        self.catalog = catalog
         self.root = self.scope_dir / "assets"
+        # Workspace root for the event spine; None (the default) keeps the
+        # library emit-free (vision-loop-12 — the owning Folder passes it).
+        self._event_root = event_root
+
+    def _emit_added(self, asset: DataAsset) -> None:
+        """Best-effort ``asset.added`` on the spine (non-fatal by contract)."""
+        if self._event_root is None:
+            return
+        from ._events import emit_asset_added
+
+        emit_asset_added(self._event_root, asset, name=asset.name)
 
     def import_asset(
         self,
@@ -128,9 +132,7 @@ class DataAssetLibrary:
         with open(asset_dir / "asset.json", "w") as f:  # noqa: PTH123
             json.dump(asset.model_dump(mode="json"), f, indent=2)
 
-        if self.catalog is not None:
-            self.catalog.register(asset)
-
+        self._emit_added(asset)
         return asset
 
     def register_in_place(
@@ -145,8 +147,9 @@ class DataAssetLibrary:
         ``path`` points at ``src`` where it already lives (relative to the
         scope directory). This keeps the original filename, so a same-stem
         sidecar (``qm9.tar.bz2`` ↔ ``qm9.py``) stays a real sibling of the
-        resolved path. The reference is recorded in the catalog index only —
-        there is no ``assets/<id>/`` payload directory.
+        resolved path. The reference is recorded authoritatively as
+        ``assets/<id>/asset.json`` (record only — no ``payload/`` directory,
+        since the file stays where it already lives).
 
         Args:
             name: Asset display name.
@@ -185,8 +188,14 @@ class DataAssetLibrary:
             content_hash=content_hash,
         )
 
-        if self.catalog is not None:
-            self.catalog.register(asset)
+        # Authoritative on-disk record (no payload/ dir — the file stays in
+        # place); the scanner reads assets/<id>/asset.json.
+        asset_dir = self.root / asset.asset_id
+        asset_dir.mkdir(parents=True, exist_ok=True)
+        with open(asset_dir / "asset.json", "w") as f:  # noqa: PTH123
+            json.dump(asset.model_dump(mode="json"), f, indent=2)
+
+        self._emit_added(asset)
 
         return asset
 

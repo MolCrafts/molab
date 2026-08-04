@@ -1,7 +1,8 @@
 """Asset routes — unified typed Asset API under ``/api/assets``.
 
 The old routes only served ``DataAsset`` uploads.  The new surface is
-backed by the workspace ``AssetCatalog`` and supports every kind
+backed by the workspace manifest scanner (``assets.scan``, reading the
+authoritative per-scope ``assets.json``) and supports every kind
 (``data``, ``artifact``, ``log``, ``checkpoint``, …).
 """
 
@@ -14,7 +15,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import PlainTextResponse, StreamingResponse
 
-from molexp.workspace.assets import AssetScope, LogAsset, lineage
+from molexp.workspace.assets import AssetScope, LogAsset, lineage, scan
 
 from ..dependencies import get_workspace
 from ..exceptions import AssetNotFoundError, InvalidPathError
@@ -31,7 +32,7 @@ router = APIRouter(prefix="/assets", tags=["assets"])
 
 
 def _require_asset(workspace, asset_id: str):  # noqa: ANN001, ANN202
-    asset = workspace.catalog.get(asset_id)
+    asset = scan.get_asset(workspace.root, asset_id)
     if asset is None:
         raise AssetNotFoundError(asset_id)
     return asset
@@ -53,17 +54,35 @@ def list_assets(
     scope_kind: str | None = None,
     run_id: str | None = None,
     task_id: str | None = None,
+    content_hash: str | None = None,
     limit: int = 100,
     workspace=Depends(get_workspace),  # noqa: ANN001
 ) -> list[AssetResponse]:
-    """Query assets from the workspace catalog with optional filters."""
+    """Query assets from the workspace catalog with optional filters.
+
+    ``content_hash`` answers via the ONE existing lookup
+    (:func:`molexp.workspace.assets.scan.find_by_content_hash`) — a 0/1-element
+    list in the uniform response shape, no second query path.
+    """
+    if content_hash is not None:
+        found = scan.find_by_content_hash(workspace.root, content_hash)
+        return (
+            [
+                AssetResponse.from_model(
+                    found, has_preview_sidecar=asset_has_sidecar(workspace, found)
+                )
+            ]
+            if found is not None
+            else []
+        )
     scope = None
     if scope_kind == "workspace":
         scope = AssetScope(kind="workspace", ids=())
     # Note: project/experiment/run scoping is better served by the
     # per-scope routes below (they carry the full ids tuple).
 
-    assets = workspace.catalog.query_assets(
+    assets = scan.scan_assets(
+        workspace.root,
         kind=kind,
         scope=scope,
         producer_run=run_id,
@@ -93,7 +112,7 @@ def get_asset_lineage(asset_id: str, workspace=Depends(get_workspace)) -> AssetL
     _require_asset(workspace, asset_id)
 
     def _node(aid: str) -> AssetLineageNode | None:
-        a = workspace.catalog.get(aid)
+        a = scan.get_asset(workspace.root, aid)
         if a is None:
             return None
         return AssetLineageNode(id=a.asset_id, name=a.name, kind=a.kind, scope_kind=a.scope.kind)

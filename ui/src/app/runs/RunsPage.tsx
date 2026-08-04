@@ -1,10 +1,10 @@
 import { LayoutGrid, ListChecks, RefreshCw } from "lucide-react";
 import type { JSX, ReactNode } from "react";
-import { Fragment, useCallback, useMemo } from "react";
+import { Fragment, useCallback, useEffect, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { EntityHeader } from "@/app/components/entity";
+import { DashboardCard, EmptyState, EntityHeader } from "@/app/components/entity";
+import { runPath } from "@/app/entities/paths";
 import type { WorkspaceSnapshot } from "@/app/types";
-import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -15,9 +15,9 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
+import { WorkbenchIconAction } from "@/components/workbench";
 import { formatRelative } from "@/lib/format-time";
 import { cn } from "@/lib/utils";
-
 import {
   applyFilters,
   computeActivityBuckets,
@@ -30,7 +30,16 @@ import {
 } from "./aggregates";
 import { DashboardPanel } from "./DashboardPanel";
 import { parseFilterParams, toggleArrayFilter, writeFilterParams } from "./filterParams";
-import { RunInspector } from "./inspector/RunInspector";
+import type { RunInspectorRegistration } from "./inspector/RunInspector";
+import {
+  DEFAULT_JOBS_SORT,
+  DEFAULT_PAGE_SIZE,
+  formatJobsSort,
+  type JobsSort,
+  parseJobsSort,
+  parsePage,
+  parsePageSize,
+} from "./jobsTable";
 import { RunsActivityChart } from "./RunsActivityChart";
 import { RunsAggregateRow } from "./RunsAggregateRow";
 import { RunsGanttChart } from "./RunsGanttChart";
@@ -42,21 +51,39 @@ import { type GanttMode, RunsTimelineView } from "./RunsTimelineView";
 import type { WorkspaceExecutionRow, WorkspaceRunRow, WorkspaceRunsFilters } from "./types";
 import { useDashboardLayout } from "./useDashboardLayout";
 import { useWorkspaceRuns } from "./useWorkspaceRuns";
+import { WorkspaceActivityFeed } from "./WorkspaceActivityFeed";
 
 interface RunsPageProps {
   snapshot: WorkspaceSnapshot;
+  onInspectorChange: (registration: RunInspectorRegistration | null) => void;
 }
 
-type DashboardPanelId = "kpi" | "status" | "aggregate" | "activity" | "gantt";
+type DashboardPanelId = "kpi" | "status" | "aggregate" | "activity" | "feed" | "gantt";
 
-const DASHBOARD_PANEL_IDS: DashboardPanelId[] = ["kpi", "status", "aggregate", "activity", "gantt"];
+const DASHBOARD_PANEL_IDS: DashboardPanelId[] = [
+  "kpi",
+  "status",
+  "aggregate",
+  "activity",
+  "feed",
+  "gantt",
+];
 
 const DASHBOARD_PANEL_LABELS: Record<DashboardPanelId, string> = {
-  kpi: "KPI strip",
+  kpi: "Key metrics",
   status: "Status mix",
-  aggregate: "Backends & failing experiments",
-  activity: "Activity chart",
-  gantt: "Gantt chart",
+  aggregate: "Backends & failures",
+  activity: "Activity",
+  feed: "Workspace activity",
+  gantt: "Gantt",
+};
+
+const DASHBOARD_PANEL_DESCRIPTIONS: Partial<Record<DashboardPanelId, string>> = {
+  status: "Click a segment to filter",
+  aggregate: "Backend load and experiments with the most failures",
+  activity: "Last 24 hours",
+  feed: "Recent workspace events",
+  gantt: "Click a bar to inspect",
 };
 
 const DASHBOARD_LAYOUT_STORAGE_KEY = "molexp.runs.dashboard.layout.v2";
@@ -68,7 +95,15 @@ const parseGanttMode = (raw: string | null): GanttMode =>
 
 const writeRunsParams = (
   prev: URLSearchParams,
-  patch: { tab?: RunsTab; runId?: string | null; executionId?: string | null; mode?: GanttMode },
+  patch: {
+    tab?: RunsTab;
+    runId?: string | null;
+    executionId?: string | null;
+    mode?: GanttMode;
+    sort?: JobsSort | null;
+    page?: number | null;
+    pageSize?: number | null;
+  },
 ): URLSearchParams => {
   const next = new URLSearchParams(prev);
   if (patch.tab !== undefined) {
@@ -87,10 +122,31 @@ const writeRunsParams = (
     if (patch.mode === "runs") next.delete("mode");
     else next.set("mode", patch.mode);
   }
+  if (patch.sort !== undefined) {
+    if (
+      patch.sort === null ||
+      (patch.sort.key === DEFAULT_JOBS_SORT.key && patch.sort.dir === DEFAULT_JOBS_SORT.dir)
+    ) {
+      next.delete("sort");
+    } else {
+      next.set("sort", formatJobsSort(patch.sort));
+    }
+  }
+  if (patch.page !== undefined) {
+    if (patch.page === null || patch.page <= 1) next.delete("page");
+    else next.set("page", String(patch.page));
+  }
+  if (patch.pageSize !== undefined) {
+    if (patch.pageSize === null || patch.pageSize === DEFAULT_PAGE_SIZE) next.delete("pageSize");
+    else next.set("pageSize", String(patch.pageSize));
+  }
   return next;
 };
 
-export const RunsPage = ({ snapshot: _snapshot }: RunsPageProps): JSX.Element => {
+export const RunsPage = ({
+  snapshot: _snapshot,
+  onInspectorChange,
+}: RunsPageProps): JSX.Element => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const filters = useMemo<WorkspaceRunsFilters>(
@@ -102,6 +158,9 @@ export const RunsPage = ({ snapshot: _snapshot }: RunsPageProps): JSX.Element =>
   const ganttMode = parseGanttMode(searchParams.get("mode"));
   const selectedRunId = searchParams.get("runId");
   const selectedExecutionId = searchParams.get("executionId");
+  const jobsSort = useMemo(() => parseJobsSort(searchParams.get("sort")), [searchParams]);
+  const jobsPage = useMemo(() => parsePage(searchParams.get("page")), [searchParams]);
+  const jobsPageSize = useMemo(() => parsePageSize(searchParams.get("pageSize")), [searchParams]);
 
   const layout = useDashboardLayout<DashboardPanelId>(
     DASHBOARD_LAYOUT_STORAGE_KEY,
@@ -147,6 +206,29 @@ export const RunsPage = ({ snapshot: _snapshot }: RunsPageProps): JSX.Element =>
     [setSearchParams],
   );
 
+  const setJobsSort = useCallback(
+    (next: JobsSort): void => {
+      setSearchParams((prev) => writeRunsParams(prev, { sort: next, page: 1 }), { replace: true });
+    },
+    [setSearchParams],
+  );
+
+  const setJobsPage = useCallback(
+    (next: number): void => {
+      setSearchParams((prev) => writeRunsParams(prev, { page: next }), { replace: true });
+    },
+    [setSearchParams],
+  );
+
+  const setJobsPageSize = useCallback(
+    (next: number): void => {
+      setSearchParams((prev) => writeRunsParams(prev, { pageSize: next, page: 1 }), {
+        replace: true,
+      });
+    },
+    [setSearchParams],
+  );
+
   const selectRun = useCallback(
     (run: WorkspaceRunRow): void => {
       setSearchParams((prev) => writeRunsParams(prev, { runId: run.id, executionId: null }), {
@@ -154,6 +236,24 @@ export const RunsPage = ({ snapshot: _snapshot }: RunsPageProps): JSX.Element =>
       });
     },
     [setSearchParams],
+  );
+
+  // Feed link targets (vision-loop-12): the activity feed hands back plain
+  // ids/paths, not row objects.
+  const knownRunIds = useMemo(() => new Set(rows.map((row) => row.id)), [rows]);
+  const selectRunById = useCallback(
+    (runId: string): void => {
+      setSearchParams((prev) => writeRunsParams(prev, { runId, executionId: null }), {
+        replace: true,
+      });
+    },
+    [setSearchParams],
+  );
+  const openKnowledge = useCallback(
+    (path: string): void => {
+      navigate(`/knowledge/${path.split("/").map(encodeURIComponent).join("/")}`);
+    },
+    [navigate],
   );
 
   const selectExecution = useCallback(
@@ -181,11 +281,38 @@ export const RunsPage = ({ snapshot: _snapshot }: RunsPageProps): JSX.Element =>
 
   const navigateToRun = useCallback(
     (run: WorkspaceRunRow): void => {
-      navigate(
-        `/projects/${encodeURIComponent(run.projectId)}/experiments/${encodeURIComponent(run.experimentId)}/runs/${encodeURIComponent(run.id)}`,
-      );
+      navigate(runPath(run.projectId, run.experimentId, run.id));
     },
     [navigate],
+  );
+
+  useEffect(() => {
+    if (!selectedRun) {
+      onInspectorChange(null);
+      return;
+    }
+
+    onInspectorChange({
+      run: selectedRun,
+      selectedExecutionId,
+      onSelectExecution: setSelectedExecutionId,
+      onClear: clearSelection,
+      onOpenRun: navigateToRun,
+    });
+  }, [
+    clearSelection,
+    navigateToRun,
+    onInspectorChange,
+    selectedExecutionId,
+    selectedRun,
+    setSelectedExecutionId,
+  ]);
+
+  useEffect(
+    () => () => {
+      onInspectorChange(null);
+    },
+    [onInspectorChange],
   );
 
   const handleSelectBackend = (backend: string): void => {
@@ -226,121 +353,126 @@ export const RunsPage = ({ snapshot: _snapshot }: RunsPageProps): JSX.Element =>
         );
       case "activity":
         return <RunsActivityChart buckets={activity} />;
+      case "feed":
+        return (
+          <WorkspaceActivityFeed
+            knownRunIds={knownRunIds}
+            onSelectRun={selectRunById}
+            onOpenKnowledge={openKnowledge}
+          />
+        );
       case "gantt":
         return (
-          <>
-            <RunsGanttChart
-              rows={filteredRuns}
-              mode={ganttMode}
-              onSelectRun={selectRun}
-              onSelectExecution={selectExecution}
-            />
-            <p className="mt-2 text-[11px] italic text-muted-foreground">
-              Click a bar to load it in the inspector. Faded bars are queued / pending.
-            </p>
-          </>
+          <RunsGanttChart
+            rows={filteredRuns}
+            mode={ganttMode}
+            onSelectRun={selectRun}
+            onSelectExecution={selectExecution}
+          />
         );
     }
   };
 
   const headerSummary = truncated
     ? `Showing first ${rows.length} runs (truncated). Narrow filters or raise the limit.`
-    : `${filteredRuns.length} of ${rows.length} runs match current filters.`;
+    : `${filteredRuns.length} of ${rows.length} runs match current filters`;
 
   return (
-    <div className="flex h-full min-h-0 flex-1">
-      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        <EntityHeader
-          icon={ListChecks}
-          title="Runs"
-          subtitle={headerSummary}
-          actions={
-            <>
-              {tab === "overview" && (
-                <PanelManager
-                  allIds={DASHBOARD_PANEL_IDS}
-                  hiddenIds={layout.hiddenIds}
-                  onToggle={layout.toggleVisibility}
-                  onReset={layout.reset}
-                />
-              )}
-              <span className="text-xs text-muted-foreground">
-                Last synced {lastSyncedAt ? formatRelative(lastSyncedAt.toISOString()) : "—"}
-              </span>
-              <Button
-                type="button"
-                size="icon"
-                variant="ghost"
-                onClick={refresh}
-                disabled={loading}
-                aria-label={loading ? "Refreshing" : "Refresh"}
-                title={loading ? "Refreshing…" : "Refresh"}
-                className="h-7 w-7 text-muted-foreground hover:text-foreground"
-              >
-                <RefreshCw className={cn("h-3.5 w-3.5", loading && "animate-spin")} />
-              </Button>
-            </>
-          }
-        />
-        <div className="border-b border-border bg-background px-4 md:px-6">
-          <RunsTabBar value={tab} onChange={setTab} />
-        </div>
-
-        <div className="min-h-0 flex-1 overflow-y-auto p-4 md:p-6">
-          {error && (
-            <div className="mb-4 rounded border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-              {error}
-            </div>
-          )}
-
-          {tab === "overview" && (
-            <div className="space-y-4">
-              {layout.rows.map((row) => (
-                <DashboardRowView
-                  key={row.id}
-                  rowId={row.id}
-                  panels={row.panels}
-                  renderPanel={renderPanel}
-                  labels={DASHBOARD_PANEL_LABELS}
-                  onReorder={layout.reorder}
-                  onRemove={layout.hide}
-                />
-              ))}
-              {layout.rows.length === 0 && (
-                <div className="rounded border border-dashed border-border p-6 text-center text-xs text-muted-foreground">
-                  All panels hidden. Use the layout menu above to restore them.
-                </div>
-              )}
-            </div>
-          )}
-
-          {tab === "jobs" && (
-            <RunsJobsTable
-              rows={filteredRuns}
-              selectedRunId={selectedRunId}
-              onSelectRun={selectRun}
-            />
-          )}
-
-          {tab === "timeline" && (
-            <RunsTimelineView
-              rows={filteredRuns}
-              mode={ganttMode}
-              onModeChange={setGanttMode}
-              onSelectRun={selectRun}
-              onSelectExecution={selectExecution}
-            />
-          )}
-        </div>
+    <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
+      <EntityHeader
+        icon={ListChecks}
+        title="Runs"
+        subtitle={headerSummary}
+        actions={
+          <>
+            {tab === "overview" && (
+              <PanelManager
+                allIds={DASHBOARD_PANEL_IDS}
+                hiddenIds={layout.hiddenIds}
+                onToggle={layout.toggleVisibility}
+                onReset={layout.reset}
+              />
+            )}
+            <span className="hidden text-label text-muted-foreground sm:inline">
+              Synced {lastSyncedAt ? formatRelative(lastSyncedAt.toISOString()) : "—"}
+            </span>
+            <WorkbenchIconAction
+              label={loading ? "Refreshing runs" : "Refresh runs"}
+              kind="ghost"
+              type="button"
+              onClick={refresh}
+              disabled={loading}
+              title={loading ? "Refreshing…" : "Refresh"}
+              size="default"
+              className="text-muted-foreground hover:text-foreground"
+            >
+              <RefreshCw className={cn("h-3.5 w-3.5", loading && "mol-motion-progress-spin")} />
+            </WorkbenchIconAction>
+          </>
+        }
+      />
+      <div className="shrink-0 border-b border-border/60 bg-background px-4">
+        <RunsTabBar value={tab} onChange={setTab} />
       </div>
 
-      <RunInspector
-        run={selectedRun}
-        selectedExecutionId={selectedExecutionId}
-        onSelectExecution={setSelectedExecutionId}
-        onClear={clearSelection}
-        onOpenRun={navigateToRun}
-      />
+      <div className="min-h-0 flex-1 overflow-y-auto p-4 md:p-4">
+        {error && (
+          <DashboardCard title="Could not load runs" variant="destructive" className="mb-4">
+            <p className="text-body-lg text-destructive">{error}</p>
+          </DashboardCard>
+        )}
+
+        {tab === "overview" && (
+          <div className="space-y-4">
+            {layout.rows.map((row) => (
+              <DashboardRowView
+                key={row.id}
+                rowId={row.id}
+                panels={row.panels}
+                renderPanel={renderPanel}
+                labels={DASHBOARD_PANEL_LABELS}
+                descriptions={DASHBOARD_PANEL_DESCRIPTIONS}
+                onReorder={layout.reorder}
+                onRemove={layout.hide}
+              />
+            ))}
+            {layout.rows.length === 0 && (
+              <div className="flex min-h-48 items-center justify-center border-y border-dashed border-border/70">
+                <EmptyState
+                  density="compact"
+                  icon={<LayoutGrid className="h-5 w-5" />}
+                  title="All panels hidden"
+                  description="Use Layout in the header to restore the dashboard panels."
+                />
+              </div>
+            )}
+          </div>
+        )}
+
+        {tab === "jobs" && (
+          <RunsJobsTable
+            rows={filteredRuns}
+            selectedRunId={selectedRunId}
+            onSelectRun={selectRun}
+            sort={jobsSort}
+            onSortChange={setJobsSort}
+            page={jobsPage}
+            pageSize={jobsPageSize}
+            onPageChange={setJobsPage}
+            onPageSizeChange={setJobsPageSize}
+          />
+        )}
+
+        {tab === "timeline" && (
+          <RunsTimelineView
+            rows={filteredRuns}
+            mode={ganttMode}
+            onModeChange={setGanttMode}
+            onSelectRun={selectRun}
+            onSelectExecution={selectExecution}
+          />
+        )}
+      </div>
     </div>
   );
 };
@@ -357,15 +489,17 @@ const PanelManager = ({ allIds, hiddenIds, onToggle, onReset }: PanelManagerProp
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button size="sm" variant="outline" title="Layout">
-          <LayoutGrid className="mr-1.5 h-3.5 w-3.5" />
-          Layout
+        <WorkbenchIconAction
+          label={hiddenIds.length > 0 ? `Layout, ${hiddenIds.length} panels hidden` : "Layout"}
+          className="relative"
+        >
+          <LayoutGrid className="h-3.5 w-3.5" />
           {hiddenIds.length > 0 && (
-            <span className="ml-1 rounded-full bg-muted px-1.5 text-[10px] font-medium tabular-nums text-muted-foreground">
+            <span className="absolute -right-1 -top-1 min-w-4 rounded-full bg-accent px-1 text-micro font-medium tabular-nums text-accent-foreground">
               {hiddenIds.length}
             </span>
           )}
-        </Button>
+        </WorkbenchIconAction>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-56">
         <DropdownMenuLabel>Panels</DropdownMenuLabel>
@@ -391,6 +525,7 @@ interface DashboardRowViewProps {
   panels: DashboardPanelId[];
   renderPanel: (id: DashboardPanelId) => ReactNode;
   labels: Record<DashboardPanelId, string>;
+  descriptions: Partial<Record<DashboardPanelId, string>>;
   onReorder: ReturnType<typeof useDashboardLayout<DashboardPanelId>>["reorder"];
   onRemove: ReturnType<typeof useDashboardLayout<DashboardPanelId>>["hide"];
 }
@@ -400,6 +535,7 @@ const DashboardRowView = ({
   panels,
   renderPanel,
   labels,
+  descriptions,
   onReorder,
   onRemove,
 }: DashboardRowViewProps): JSX.Element => {
@@ -409,6 +545,8 @@ const DashboardRowView = ({
       <DashboardPanel
         id={panelId}
         title={labels[panelId]}
+        description={descriptions[panelId]}
+        bare={panelId === "kpi"}
         onReorder={onReorder}
         onRemove={onRemove}
       >
@@ -421,17 +559,25 @@ const DashboardRowView = ({
     <ResizablePanelGroup
       direction="horizontal"
       autoSaveId={`molexp.runs.dashboard.row.${rowId}`}
-      className="!h-auto min-h-[180px] gap-2"
+      autoSavePanelIds={panels}
+      className="!h-auto min-h-44 gap-2"
     >
       {panels.map((panelId, idx) => (
         <Fragment key={panelId}>
           {idx > 0 && (
             <ResizableHandle withHandle className="!w-1 bg-transparent hover:bg-border/60" />
           )}
-          <ResizablePanel defaultSize={100 / panels.length} minSize={15} className="min-w-0">
+          <ResizablePanel
+            id={panelId}
+            defaultSize={100 / panels.length}
+            minSize={15}
+            className="min-w-0"
+          >
             <DashboardPanel
               id={panelId}
               title={labels[panelId]}
+              description={descriptions[panelId]}
+              bare={panelId === "kpi"}
               onReorder={onReorder}
               onRemove={onRemove}
             >

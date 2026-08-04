@@ -1,5 +1,7 @@
 import type { JSX, ReactNode } from "react";
 
+import { cn } from "@/lib/utils";
+
 export type EmptyStateDensity = "default" | "compact" | "inline";
 
 export interface EmptyStateProps {
@@ -11,21 +13,9 @@ export interface EmptyStateProps {
 }
 
 const CONTAINER: Record<EmptyStateDensity, string> = {
-  default: "flex flex-col items-center gap-2 py-12 text-center",
-  compact: "flex flex-col items-center gap-2 py-6 text-center",
+  default: "flex flex-col items-center gap-3 py-8 text-center",
+  compact: "flex flex-col items-center gap-2 py-8 text-center",
   inline: "px-2 py-1 text-left",
-};
-
-const TITLE: Record<EmptyStateDensity, string> = {
-  default: "text-sm text-muted-foreground",
-  compact: "text-xs text-muted-foreground",
-  inline: "text-xs text-muted-foreground",
-};
-
-const DESCRIPTION: Record<EmptyStateDensity, string> = {
-  default: "text-xs text-muted-foreground/70",
-  compact: "text-[11px] text-muted-foreground/70",
-  inline: "text-[11px] text-muted-foreground/70",
 };
 
 export const EmptyState = ({
@@ -37,10 +27,33 @@ export const EmptyState = ({
 }: EmptyStateProps): JSX.Element => {
   return (
     <div className={CONTAINER[density]}>
-      {icon && <div className="text-muted-foreground/40">{icon}</div>}
-      <p className={TITLE[density]}>{title}</p>
-      {description && <p className={DESCRIPTION[density]}>{description}</p>}
-      {action && <div className="mt-2">{action}</div>}
+      {icon && density !== "inline" && (
+        <div className="flex size-10 items-center justify-center text-muted-foreground/50">
+          {icon}
+        </div>
+      )}
+      {icon && density === "inline" && <div className="mb-1 text-muted-foreground/40">{icon}</div>}
+      <div className={cn(density === "inline" ? "space-y-1" : "max-w-sm space-y-1")} role="status">
+        <p
+          className={cn(
+            "font-medium text-foreground",
+            density === "default" ? "text-body" : "text-label",
+          )}
+        >
+          {title}
+        </p>
+        {description && (
+          <p
+            className={cn(
+              "text-muted-foreground",
+              density === "default" ? "text-body leading-relaxed" : "text-label leading-relaxed",
+            )}
+          >
+            {description}
+          </p>
+        )}
+      </div>
+      {action && <div className={cn(density === "default" ? "mt-1" : "mt-1")}>{action}</div>}
     </div>
   );
 };

@@ -1,6 +1,10 @@
+import { RotateCcw } from "lucide-react";
 import type { JSX } from "react";
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 
+import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
+import { WorkbenchAction, WorkbenchIconAction } from "@/components/workbench";
 import { cn } from "@/lib/utils";
 
 import type { FacetCount, FacetSnapshot } from "./aggregates";
@@ -51,7 +55,7 @@ export const RunsFacetPanel = ({
   return (
     <div className="space-y-4 px-1 pb-4">
       <FacetGroup title="Quick views">
-        <div className="space-y-0.5">
+        <div className="space-y-1">
           {QUICK_VIEWS.map((view) => {
             const count = facets.quickView[view.id];
             const checked = filters.quickView?.includes(view.id) ?? false;
@@ -115,13 +119,13 @@ export const RunsFacetPanel = ({
       )}
 
       {active && (
-        <button
-          type="button"
+        <WorkbenchIconAction
+          label="Reset filters"
           onClick={() => onFiltersChange({})}
-          className="w-full rounded border border-border px-2 py-1.5 text-[11px] text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
+          className="text-muted-foreground"
         >
-          Reset filters
-        </button>
+          <RotateCcw className="size-3.5" />
+        </WorkbenchIconAction>
       )}
     </div>
   );
@@ -134,9 +138,7 @@ interface FacetGroupProps {
 
 const FacetGroup = ({ title, children }: FacetGroupProps): JSX.Element => (
   <div>
-    <div className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-      {title}
-    </div>
+    <div className="mb-2 text-label font-medium text-muted-foreground">{title}</div>
     {children}
   </div>
 );
@@ -156,27 +158,24 @@ const FacetCheckboxRow = ({
   onToggle,
   title,
 }: FacetCheckboxRowProps): JSX.Element => {
+  const id = useId();
   const dimmed = count === 0 && !checked;
   return (
-    <label
+    <div
       title={title}
       className={cn(
-        "flex cursor-pointer items-center justify-between rounded px-1.5 py-1 text-xs transition-colors hover:bg-muted/40",
+        "flex items-center justify-between rounded-control px-2 py-1 text-label transition-colors hover:bg-interactive/60",
         dimmed && "cursor-default opacity-40 hover:bg-transparent",
       )}
     >
       <span className="flex min-w-0 items-center gap-2">
-        <input
-          type="checkbox"
-          checked={checked}
-          disabled={dimmed}
-          onChange={onToggle}
-          className="h-3 w-3 cursor-pointer rounded border border-border accent-primary"
-        />
-        <span className="truncate">{label}</span>
+        <Checkbox id={id} checked={checked} disabled={dimmed} onCheckedChange={onToggle} />
+        <Label htmlFor={id} className="min-w-0 cursor-pointer truncate font-normal">
+          {label}
+        </Label>
       </span>
-      <span className="ml-2 shrink-0 tabular-nums text-[10px] text-muted-foreground">{count}</span>
-    </label>
+      <span className="ml-2 shrink-0 tabular-nums text-micro text-muted-foreground">{count}</span>
+    </div>
   );
 };
 
@@ -215,7 +214,7 @@ const CheckboxFacetGroup = ({
   if (merged.length === 0) {
     return (
       <FacetGroup title={title}>
-        <div className="px-1.5 py-1 text-[11px] italic text-muted-foreground">no values</div>
+        <div className="px-2 py-1 text-micro italic text-muted-foreground">no values</div>
       </FacetGroup>
     );
   }
@@ -225,7 +224,7 @@ const CheckboxFacetGroup = ({
 
   return (
     <FacetGroup title={title}>
-      <div className="space-y-0.5">
+      <div className="space-y-1">
         {visible.map((option) => (
           <FacetCheckboxRow
             key={option.value}
@@ -236,13 +235,14 @@ const CheckboxFacetGroup = ({
           />
         ))}
         {merged.length > COLLAPSE_THRESHOLD && (
-          <button
-            type="button"
+          <WorkbenchAction
+            kind="link"
+            size="compact"
             onClick={() => setExpanded((prev) => !prev)}
-            className="ml-1 mt-0.5 text-[10px] uppercase tracking-wide text-muted-foreground hover:text-foreground"
+            className="ml-1 mt-1 h-auto px-0 text-label text-muted-foreground hover:text-foreground"
           >
             {expanded ? "Show fewer" : `Show ${merged.length - COLLAPSE_THRESHOLD} more`}
-          </button>
+          </WorkbenchAction>
         )}
       </div>
     </FacetGroup>

@@ -1,12 +1,6 @@
 import { useCallback, useMemo } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import type {
-  BreadcrumbItem,
-  LeftPanelView,
-  ObjectView,
-  Selection,
-  WorkspaceSnapshot,
-} from "@/app/types";
+import type { LeftPanelView, ObjectView, Selection, WorkspaceSnapshot } from "@/app/types";
 
 const sectionRootByView: Record<LeftPanelView, string> = {
   projects: "/projects",
@@ -15,6 +9,7 @@ const sectionRootByView: Record<LeftPanelView, string> = {
   workflow: "/workflows",
   asset: "/assets",
   agent: "/agent-tasks",
+  knowledge: "/knowledge",
   settings: "/settings",
 };
 
@@ -61,6 +56,9 @@ export const getLeftPanelViewFromPath = (pathname: string): LeftPanelView => {
   if (pathname.startsWith("/agent-tasks")) {
     return "agent";
   }
+  if (pathname.startsWith("/knowledge")) {
+    return "knowledge";
+  }
   if (pathname.startsWith("/settings")) {
     return "settings";
   }
@@ -70,10 +68,10 @@ export const getLeftPanelViewFromPath = (pathname: string): LeftPanelView => {
 const parseObjectView = (raw: string | null): ObjectView | undefined => {
   if (
     raw === "overview" ||
+    raw === "executions" ||
     raw === "logs" ||
     raw === "metrics" ||
-    raw === "scheduler" ||
-    raw === "snapshot"
+    raw === "scheduler"
   ) {
     return raw;
   }
@@ -85,6 +83,18 @@ const buildSelectionFromLocation = (
   searchParams: URLSearchParams,
 ): Selection | null => {
   const objectView = parseObjectView(searchParams.get("tab"));
+
+  const taskMatch = pathname.match(
+    /^\/projects\/([^/]+)\/experiments\/([^/]+)\/runs\/([^/]+)\/tasks\/([^/]+)$/,
+  );
+  if (taskMatch) {
+    return {
+      objectType: "task",
+      taskId: decodeURIComponent(taskMatch[4]),
+      runId: decodeURIComponent(taskMatch[3]),
+      objectId: decodeURIComponent(taskMatch[4]),
+    };
+  }
 
   const projectRunMatch = pathname.match(
     /^\/projects\/([^/]+)\/experiments\/([^/]+)\/runs\/([^/]+)$/,
@@ -131,9 +141,17 @@ const buildSelectionFromLocation = (
   }
 
   if (pathname === "/agent-tasks/new") {
+    const projectId = searchParams.get("project");
     return {
       objectType: "agent",
       objectId: "new",
+      scope: projectId
+        ? {
+            projectId,
+            experimentId: searchParams.get("experiment") ?? undefined,
+            runId: searchParams.get("run") ?? undefined,
+          }
+        : undefined,
     };
   }
 
@@ -143,6 +161,13 @@ const buildSelectionFromLocation = (
       objectType: "agent",
       objectId: decodeURIComponent(agentMatch[1]),
     };
+  }
+
+  if (pathname === "/knowledge" || pathname.startsWith("/knowledge/")) {
+    // The concept's bundle-relative path (which may contain "/") is the rest
+    // after "/knowledge/"; bare "/knowledge" is the browse overview.
+    const rest = pathname === "/knowledge" ? "" : pathname.slice("/knowledge/".length);
+    return { objectType: "knowledge", objectId: decodeURIComponent(rest) };
   }
 
   if (pathname.startsWith("/workspace")) {
@@ -179,14 +204,36 @@ const getSelectionPath = (selection: Selection | null, snapshot: WorkspaceSnapsh
       const params = new URLSearchParams({ tab: selection.objectView });
       return `${path}?${params.toString()}`;
     }
+    case "task": {
+      const run = snapshot.runs.find((item) => item.id === selection.runId);
+      if (!run) {
+        return "/projects";
+      }
+      return `/projects/${encodeURIComponent(run.projectId)}/experiments/${encodeURIComponent(run.experimentId)}/runs/${encodeURIComponent(run.id)}/tasks/${encodeURIComponent(selection.taskId)}`;
+    }
     case "workflow":
       return `/workflows/${encodeURIComponent(selection.workflowId)}`;
     case "asset":
       return `/assets/${encodeURIComponent(selection.objectId)}`;
-    case "agent":
-      return selection.objectId === "new"
-        ? "/agent-tasks/new"
-        : `/agent-tasks/${encodeURIComponent(selection.objectId)}`;
+    case "agent": {
+      if (selection.objectId !== "new") {
+        return `/agent-tasks/${encodeURIComponent(selection.objectId)}`;
+      }
+      const scope = selection.scope;
+      if (!scope) {
+        return "/agent-tasks/new";
+      }
+      const params = new URLSearchParams({ project: scope.projectId });
+      if (scope.experimentId) params.set("experiment", scope.experimentId);
+      if (scope.runId) params.set("run", scope.runId);
+      return `/agent-tasks/new?${params.toString()}`;
+    }
+    case "knowledge":
+      // objectId is a bundle-relative path (may contain "/"); keep the slashes
+      // readable in the URL by encoding each segment, not the whole string.
+      return selection.objectId
+        ? `/knowledge/${selection.objectId.split("/").map(encodeURIComponent).join("/")}`
+        : "/knowledge";
     case "workspace-file": {
       const params = new URLSearchParams({
         file: selection.filePath,
@@ -203,240 +250,9 @@ const getSelectionPath = (selection: Selection | null, snapshot: WorkspaceSnapsh
   }
 };
 
-const buildBreadcrumbs = (
-  selection: Selection | null,
-  snapshot: WorkspaceSnapshot,
-  leftPanelView: LeftPanelView,
-): BreadcrumbItem[] => {
-  if (!selection) {
-    if (leftPanelView === "projects") {
-      return [{ label: "Projects" }];
-    }
-    if (leftPanelView === "runs") {
-      return [{ label: "Runs" }];
-    }
-    if (leftPanelView === "workflow") {
-      return [{ label: "Workflows" }];
-    }
-    if (leftPanelView === "asset") {
-      return [{ label: "Assets" }];
-    }
-    if (leftPanelView === "agent") {
-      return [{ label: "Agent Tasks" }];
-    }
-    if (leftPanelView === "settings") {
-      return [{ label: "Settings" }];
-    }
-    return [{ label: "Workspace" }];
-  }
-
-  switch (selection.objectType) {
-    case "project": {
-      const project = snapshot.projects.find((item) => item.id === selection.objectId);
-      return [
-        { label: "Projects", to: "/projects" },
-        { label: project?.name ?? selection.objectId },
-      ];
-    }
-    case "experiment": {
-      const experiment = snapshot.experiments.find((item) => item.id === selection.objectId);
-      const project = experiment
-        ? snapshot.projects.find((item) => item.id === experiment.projectId)
-        : null;
-      return [
-        { label: "Projects", to: "/projects" },
-        ...(project
-          ? [
-              {
-                label: project.name,
-                to: `/projects/${encodeURIComponent(project.id)}`,
-              },
-            ]
-          : []),
-        { label: experiment?.name ?? selection.objectId },
-      ];
-    }
-    case "run": {
-      const run = snapshot.runs.find((item) => item.id === selection.objectId);
-      const experiment = run
-        ? snapshot.experiments.find((item) => item.id === run.experimentId)
-        : null;
-      const project = run ? snapshot.projects.find((item) => item.id === run.projectId) : null;
-      return [
-        { label: "Projects", to: "/projects" },
-        ...(project
-          ? [
-              {
-                label: project.name,
-                to: `/projects/${encodeURIComponent(project.id)}`,
-              },
-            ]
-          : []),
-        ...(project && experiment
-          ? [
-              {
-                label: experiment.name,
-                to: `/projects/${encodeURIComponent(project.id)}/experiments/${encodeURIComponent(experiment.id)}`,
-              },
-            ]
-          : []),
-        { label: run?.name ?? selection.objectId },
-      ];
-    }
-    case "workflow": {
-      const workflow = snapshot.workflows.find((item) => item.id === selection.workflowId);
-      return [
-        { label: "Workflows", to: "/workflows" },
-        { label: workflow?.name ?? selection.workflowId },
-      ];
-    }
-    case "asset": {
-      const asset = snapshot.assets.find((item) => item.id === selection.objectId);
-      return [{ label: "Assets", to: "/assets" }, { label: asset?.name ?? selection.objectId }];
-    }
-    case "agent": {
-      if (selection.objectId === "new") {
-        return [{ label: "Agent Tasks", to: "/agent-tasks" }, { label: "New Task" }];
-      }
-      if (selection.objectId === "settings") {
-        return [{ label: "Agent Tasks", to: "/agent-tasks" }, { label: "Settings" }];
-      }
-
-      const session = snapshot.agentSessions.find((item) => item.id === selection.objectId);
-      return [
-        { label: "Agent Tasks", to: "/agent-tasks" },
-        { label: session?.goal ?? selection.objectId },
-      ];
-    }
-    case "workspace-file":
-      return [
-        { label: "Workspace", to: "/workspace" },
-        { label: selection.filePath.split("/").pop() ?? selection.filePath },
-      ];
-  }
-};
-
-const buildContextMeta = (
-  selection: Selection | null,
-  snapshot: WorkspaceSnapshot,
-  leftPanelView: LeftPanelView,
-): { title: string; subtitle: string; statusLabel?: string } => {
-  if (!selection) {
-    switch (leftPanelView) {
-      case "projects":
-        return {
-          title: "Projects",
-          subtitle: "Browse projects, experiments, and runs from a single hierarchy.",
-        };
-      case "runs":
-        return {
-          title: "Runs",
-          subtitle: "All runs across the workspace, expandable to inspect each execution attempt.",
-        };
-      case "workspace":
-        return {
-          title: "Workspace",
-          subtitle: "Explore source files and workspace artifacts.",
-        };
-      case "workflow":
-        return {
-          title: "Workflows",
-          subtitle: "Inspect workflow definitions and graph structure.",
-        };
-      case "asset":
-        return {
-          title: "Assets",
-          subtitle: "Review generated and imported project assets.",
-        };
-      case "agent":
-        return {
-          title: "Agent Tasks",
-          subtitle: "Current goals and task history.",
-        };
-      case "settings":
-        return {
-          title: "Settings",
-          subtitle: "Workspace-level configuration: compute targets, profiles, integrations.",
-        };
-    }
-  }
-
-  switch (selection.objectType) {
-    case "project": {
-      const project = snapshot.projects.find((item) => item.id === selection.objectId);
-      return {
-        title: project?.name ?? selection.objectId,
-        subtitle: project?.summary || "Project overview",
-        statusLabel: project?.status,
-      };
-    }
-    case "experiment": {
-      const experiment = snapshot.experiments.find((item) => item.id === selection.objectId);
-      return {
-        title: experiment?.name ?? selection.objectId,
-        subtitle: experiment?.workflowFile || experiment?.summary || "Experiment overview",
-        statusLabel: experiment?.status,
-      };
-    }
-    case "run": {
-      const run = snapshot.runs.find((item) => item.id === selection.objectId);
-      return {
-        title: run?.name ?? selection.objectId,
-        subtitle: run?.summary || "Run overview",
-        statusLabel: run?.status,
-      };
-    }
-    case "workflow": {
-      const workflow = snapshot.workflows.find((item) => item.id === selection.workflowId);
-      return {
-        title: workflow?.name ?? selection.workflowId,
-        subtitle: workflow?.summary || "Workflow overview",
-        statusLabel: workflow?.status,
-      };
-    }
-    case "asset": {
-      const asset = snapshot.assets.find((item) => item.id === selection.objectId);
-      return {
-        title: asset?.name ?? selection.objectId,
-        subtitle: asset?.summary || "Asset overview",
-        statusLabel: asset?.status,
-      };
-    }
-    case "agent": {
-      if (selection.objectId === "settings") {
-        return {
-          title: "Agent settings",
-          subtitle: "Provider, skills, tools, and MCP servers",
-        };
-      }
-      const session = snapshot.agentSessions.find((item) => item.id === selection.objectId);
-      return {
-        title:
-          selection.objectId === "new" ? "New Agent Task" : (session?.goal ?? selection.objectId),
-        subtitle:
-          selection.objectId === "new"
-            ? "Create a new agent task."
-            : `${session?.eventCount ?? 0} events`,
-        statusLabel: session?.status,
-      };
-    }
-    case "workspace-file":
-      return {
-        title: selection.filePath.split("/").pop() ?? selection.filePath,
-        subtitle: selection.filePath,
-      };
-  }
-};
-
 export interface NavigationState {
-  breadcrumbs: BreadcrumbItem[];
-  canNavigateUp: boolean;
-  contextStatusLabel?: string;
-  contextSubtitle: string;
-  contextTitle: string;
   leftPanelView: LeftPanelView;
   selection: Selection | null;
-  navigateUp: () => void;
   setLeftPanelView: (view: LeftPanelView) => void;
   setSelection: (selection: Selection | null) => void;
 }
@@ -455,16 +271,6 @@ export const useNavigationState = (snapshot: WorkspaceSnapshot): NavigationState
   const selection = useMemo(
     () => buildSelectionFromLocation(location.pathname, searchParams),
     [location.pathname, searchParams],
-  );
-
-  const breadcrumbs = useMemo(
-    () => buildBreadcrumbs(selection, snapshot, leftPanelView),
-    [selection, snapshot, leftPanelView],
-  );
-
-  const contextMeta = useMemo(
-    () => buildContextMeta(selection, snapshot, leftPanelView),
-    [selection, snapshot, leftPanelView],
   );
 
   const setSelection = useCallback(
@@ -507,20 +313,9 @@ export const useNavigationState = (snapshot: WorkspaceSnapshot): NavigationState
     [navigate, selection, snapshot],
   );
 
-  const navigateUp = useCallback((): void => {
-    const parent = breadcrumbs[breadcrumbs.length - 2];
-    navigate(parent?.to ?? sectionRootByView[leftPanelView]);
-  }, [breadcrumbs, navigate, leftPanelView]);
-
   return {
-    breadcrumbs,
-    canNavigateUp: breadcrumbs.length > 1,
-    contextStatusLabel: contextMeta.statusLabel,
-    contextSubtitle: contextMeta.subtitle,
-    contextTitle: contextMeta.title,
     leftPanelView,
     selection,
-    navigateUp,
     setLeftPanelView,
     setSelection,
   };

@@ -1,4 +1,6 @@
-import type { ReactNode } from "react";
+import { type ReactNode, useId } from "react";
+
+import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 
 interface OverviewPageProps {
@@ -12,13 +14,13 @@ export const OverviewPage = ({ children, aside, className }: OverviewPageProps):
     <div className={cn("flex-1 overflow-auto", className)}>
       <div
         className={cn(
-          "grid min-h-full gap-x-10 gap-y-8 p-4 md:p-6",
-          aside && "xl:grid-cols-[minmax(0,1fr)_minmax(280px,360px)]",
+          "grid min-h-full gap-x-8 gap-y-8 p-4 md:p-6",
+          aside && "xl:grid-cols-(--overview-grid-columns)",
         )}
       >
-        <div className="min-w-0 space-y-7">{children}</div>
+        <div className="min-w-0 space-y-8">{children}</div>
         {aside && (
-          <aside className="min-w-0 space-y-7 border-t border-border/70 pt-6 xl:border-l xl:border-t-0 xl:pl-8 xl:pt-0">
+          <aside className="min-w-0 space-y-6 border-t border-border/60 pt-6 xl:border-l xl:border-t-0 xl:pl-8 xl:pt-0">
             {aside}
           </aside>
         )}
@@ -40,16 +42,21 @@ export const OverviewSection = ({
   children,
   className,
 }: OverviewSectionProps): JSX.Element => {
+  const headingId = useId();
+
   return (
-    <section
-      className={cn("border-t border-border/70 pt-4 first:border-t-0 first:pt-0", className)}
-    >
-      <div className="mb-3">
-        <h3 className="text-[11px] font-semibold uppercase text-muted-foreground">{title}</h3>
+    <section className={cn("space-y-3", className)} aria-labelledby={headingId}>
+      <div>
+        <h3 id={headingId} className="text-body-lg font-medium text-foreground">
+          {title}
+        </h3>
         {description && (
-          <p className="mt-1 max-w-2xl text-sm leading-5 text-muted-foreground">{description}</p>
+          <p className="mt-1 max-w-2xl text-body-lg leading-relaxed text-muted-foreground">
+            {description}
+          </p>
         )}
       </div>
+      <Separator className="opacity-60" />
       {children}
     </section>
   );
@@ -67,12 +74,12 @@ export const OverviewHighlight = ({
   detail,
 }: OverviewHighlightProps): JSX.Element => {
   return (
-    <div className="border-l-2 border-foreground/20 pl-3">
-      <div className="text-[11px] font-medium uppercase text-muted-foreground">{label}</div>
-      <div className="mt-0.5 min-w-0 break-words text-lg font-semibold leading-6 text-foreground">
+    <div className="border-l border-border/70 py-1 pl-3">
+      <div className="text-label text-muted-foreground">{label}</div>
+      <div className="mt-1 min-w-0 break-words text-heading font-semibold tracking-tight text-foreground">
         {value}
       </div>
-      {detail && <div className="mt-1 text-xs leading-5 text-muted-foreground">{detail}</div>}
+      {detail && <div className="mt-1 text-label leading-5 text-muted-foreground">{detail}</div>}
     </div>
   );
 };
@@ -82,5 +89,5 @@ interface OverviewHighlightGridProps {
 }
 
 export const OverviewHighlightGrid = ({ children }: OverviewHighlightGridProps): JSX.Element => {
-  return <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-1">{children}</div>;
+  return <div className="grid gap-x-4 gap-y-3 sm:grid-cols-2 xl:grid-cols-1">{children}</div>;
 };

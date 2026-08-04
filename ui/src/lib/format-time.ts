@@ -3,6 +3,8 @@
  * scheduler dashboards, and other timeline views.
  */
 
+import { formatDateTime } from "@/lib/datetime";
+
 export const formatDuration = (seconds: number | null): string => {
   if (seconds === null || Number.isNaN(seconds) || seconds < 0) {
     return "—";
@@ -20,6 +22,32 @@ export const formatDuration = (seconds: number | null): string => {
   return `${s}s`;
 };
 
+/**
+ * Compact duration for inline rows (tool calls, turn footers): sub-10s keeps
+ * one decimal ("0.8s"), sub-minute rounds to whole seconds ("42s"), longer
+ * spans collapse to "1m07s" / "2h05m". Returns "" for unusable input so
+ * callers can simply skip rendering.
+ */
+export const formatDurationCompact = (seconds: number | null): string => {
+  if (seconds === null || Number.isNaN(seconds) || seconds < 0) {
+    return "";
+  }
+  if (seconds < 10) {
+    return `${seconds.toFixed(1)}s`;
+  }
+  if (seconds < 60) {
+    return `${Math.round(seconds)}s`;
+  }
+  const total = Math.floor(seconds);
+  const h = Math.floor(total / 3600);
+  const m = Math.floor((total % 3600) / 60);
+  const s = total % 60;
+  if (h > 0) {
+    return `${h}h${m.toString().padStart(2, "0")}m`;
+  }
+  return `${m}m${s.toString().padStart(2, "0")}s`;
+};
+
 export const formatRelative = (iso: string | null): string => {
   if (!iso) return "—";
   const ts = new Date(iso).getTime();
@@ -31,9 +59,7 @@ export const formatRelative = (iso: string | null): string => {
   return `${Math.floor(delta / 86400)}d ago`;
 };
 
-export const formatTimestamp = (iso: string | null): string => {
-  if (!iso) return "—";
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return iso;
-  return d.toLocaleString();
-};
+// One wall-clock spelling app-wide: delegate to the shared formatter instead
+// of locale-dependent `toLocaleString()` (which rendered "02/07/2026, …" next
+// to ISO strings elsewhere on the same screen).
+export const formatTimestamp = (iso: string | null): string => formatDateTime(iso);

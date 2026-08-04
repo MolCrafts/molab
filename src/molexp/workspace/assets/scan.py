@@ -1,0 +1,349 @@
+"""Manifest-scanning asset query layer — replaces the derived SQLite catalog.
+
+The authoritative source for assets is each scope's ``assets.json``
+(:class:`~molexp.workspace.assets.manifest.AssetManifest`). This module answers
+the cross-cutting asset queries that the old ``AssetCatalog`` served — but by
+scanning those manifests directly, so there is no second on-disk index to keep
+in sync (the One-source-of-truth law: every index is derived; here we drop the
+index entirely rather than rebuild it).
+
+For a research workspace the asset count is small, so a full scan per query is
+cheap and always reflects on-disk truth. Each :class:`~molexp.workspace.assets.base.Asset`
+carries its own :class:`~molexp.workspace.assets.base.AssetScope`, so filtering
+is done on the asset itself — no scope→directory reconstruction is needed for
+reads. Results are ordered deterministically by ``(created_at, asset_id)``.
+"""
+
+from __future__ import annotations
+
+import json
+from collections.abc import Iterator
+from datetime import datetime
+from os import PathLike
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+from ..utils import generate_asset_id
+from ._adapter import parse_asset
+from .base import Asset, AssetScope, Producer
+from .manifest import MANIFEST_FILENAME, AssetManifest
+
+if TYPE_CHECKING:
+    from ..fs import FileSystem
+
+_SCOPE_KIND_RANK: dict[str, int] = {
+    "workspace": 0,
+    "project": 1,
+    "experiment": 2,
+    "run": 3,
+}
+
+
+def _iter_scope_dirs(root: Path) -> Iterator[Path]:
+    """Yield every scope directory that may hold an ``assets.json``.
+
+    Order: workspace root, then each project, experiment, and run in sorted
+    path order (deterministic, independent of filesystem walk order).
+    """
+    yield root
+    projects_dir = root / "projects"
+    if not projects_dir.is_dir():
+        return
+    for proj_dir in sorted(projects_dir.iterdir()):
+        if not proj_dir.is_dir():
+            continue
+        yield proj_dir
+        experiments_dir = proj_dir / "experiments"
+        if not experiments_dir.is_dir():
+            continue
+        for exp_dir in sorted(experiments_dir.iterdir()):
+            if not exp_dir.is_dir():
+                continue
+            yield exp_dir
+            runs_dir = exp_dir / "runs"
+            if not runs_dir.is_dir():
+                continue
+            for run_dir in sorted(runs_dir.iterdir()):
+                if run_dir.is_dir():
+                    yield run_dir
+
+
+def _iter_scope_dirs_fs(fs: FileSystem, root: str) -> Iterator[str]:
+    """FileSystem analogue of :func:`_iter_scope_dirs` for remote roots."""
+    yield root
+    projects_dir = fs.join(root, "projects")
+    if not fs.is_dir(projects_dir):
+        return
+    for proj_name in sorted(fs.listdir(projects_dir)):
+        proj_dir = fs.join(projects_dir, proj_name)
+        if not fs.is_dir(proj_dir):
+            continue
+        yield proj_dir
+        experiments_dir = fs.join(proj_dir, "experiments")
+        if not fs.is_dir(experiments_dir):
+            continue
+        for exp_name in sorted(fs.listdir(experiments_dir)):
+            exp_dir = fs.join(experiments_dir, exp_name)
+            if not fs.is_dir(exp_dir):
+                continue
+            yield exp_dir
+            runs_dir = fs.join(exp_dir, "runs")
+            if not fs.is_dir(runs_dir):
+                continue
+            for run_name in sorted(fs.listdir(runs_dir)):
+                run_dir = fs.join(runs_dir, run_name)
+                if fs.is_dir(run_dir):
+                    yield run_dir
+
+
+def _load_data_assets(scope_dir: Path) -> Iterator[Asset]:
+    """Yield ``DataAsset``s stored as ``<scope_dir>/assets/<id>/asset.json``.
+
+    User-imported ``DataAsset``s are written one-per-directory by
+    :class:`~molexp.workspace.assets.data.DataAssetLibrary` rather than into the
+    scope's ``assets.json`` manifest, so they are an authoritative source the
+    scanner must read alongside the manifest.
+    """
+    data_dir = scope_dir / "assets"
+    if not data_dir.is_dir():
+        return
+    for asset_dir in sorted(data_dir.iterdir()):
+        record = asset_dir / "asset.json"
+        if not record.is_file():
+            continue
+        try:
+            with open(record) as fh:  # noqa: PTH123
+                yield parse_asset(json.load(fh))
+        except (OSError, ValueError):
+            continue
+
+
+def _load_data_assets_fs(fs: FileSystem, scope_dir: str) -> Iterator[Asset]:
+    """FileSystem analogue of :func:`_load_data_assets`."""
+    data_dir = fs.join(scope_dir, "assets")
+    if not fs.is_dir(data_dir):
+        return
+    for asset_name in sorted(fs.listdir(data_dir)):
+        record = fs.join(data_dir, asset_name, "asset.json")
+        if not fs.is_file(record):
+            continue
+        try:
+            yield parse_asset(json.loads(fs.read_text(record)))
+        except (OSError, ValueError, TypeError):
+            continue
+
+
+def _load_manifest_assets_fs(fs: FileSystem, scope_dir: str) -> Iterator[Asset]:
+    """Load ``assets.json`` through *fs* (remote-safe read path)."""
+    path = fs.join(scope_dir, MANIFEST_FILENAME)
+    if not fs.exists(path):
+        return
+    try:
+        data = json.loads(fs.read_text(path))
+    except (OSError, ValueError, TypeError):
+        return
+    raw_assets = data.get("assets", {}) if isinstance(data, dict) else {}
+    if not isinstance(raw_assets, dict):
+        return
+    for entry in raw_assets.values():
+        try:
+            yield parse_asset(entry)
+        except (ValueError, TypeError, KeyError):
+            continue
+
+
+def _all_assets(root: Path) -> list[Asset]:
+    """Load every asset across all scopes under ``root``.
+
+    Two authoritative sources per scope: the ``assets.json`` manifest
+    (run-produced artifacts / logs / checkpoints) and the per-asset
+    ``assets/<id>/asset.json`` files (user-imported ``DataAsset``s).
+    Deduplicated by ``asset_id`` (manifest wins).
+    """
+    out: list[Asset] = []
+    seen: set[str] = set()
+    for scope_dir in _iter_scope_dirs(root):
+        for asset in AssetManifest(scope_dir).load().values():
+            if asset.asset_id not in seen:
+                seen.add(asset.asset_id)
+                out.append(asset)
+        for asset in _load_data_assets(scope_dir):
+            if asset.asset_id not in seen:
+                seen.add(asset.asset_id)
+                out.append(asset)
+    return out
+
+
+def _all_assets_fs(fs: FileSystem, root: str) -> list[Asset]:
+    """Load every asset under *root* through *fs* (local or remote)."""
+    out: list[Asset] = []
+    seen: set[str] = set()
+    for scope_dir in _iter_scope_dirs_fs(fs, root):
+        for asset in _load_manifest_assets_fs(fs, scope_dir):
+            if asset.asset_id not in seen:
+                seen.add(asset.asset_id)
+                out.append(asset)
+        for asset in _load_data_assets_fs(fs, scope_dir):
+            if asset.asset_id not in seen:
+                seen.add(asset.asset_id)
+                out.append(asset)
+    return out
+
+
+def _collect_assets(root: str | PathLike[str], fs: FileSystem | None) -> list[Asset]:
+    """Dispatch to Path-based or FileSystem-based asset collection."""
+    if fs is not None:
+        return _all_assets_fs(fs, str(root))
+    return _all_assets(Path(root))
+
+
+def _sorted(assets: list[Asset]) -> list[Asset]:
+    return sorted(assets, key=lambda a: (a.created_at, a.asset_id))
+
+
+def _kind_value(kind: str | type[Asset] | None) -> str | None:
+    """Normalize a ``kind`` filter (str or Asset subclass) to its string value."""
+    if kind is None:
+        return None
+    if isinstance(kind, str):
+        return kind
+    try:
+        return kind.model_fields["kind"].default  # type: ignore[attr-defined]
+    except (AttributeError, KeyError):
+        return None
+
+
+def _scope_matches(asset_scope: AssetScope, scope: AssetScope, recursive: bool) -> bool:
+    """Mirror ``AssetCatalog`` scope filtering (exact, or recursive prefix)."""
+    if not recursive:
+        return asset_scope.kind == scope.kind and asset_scope.ids == scope.ids
+    arank = _SCOPE_KIND_RANK.get(asset_scope.kind)
+    srank = _SCOPE_KIND_RANK.get(scope.kind, 0)
+    if arank is None or arank < srank:
+        return False
+    n = len(scope.ids)
+    return asset_scope.ids[:n] == scope.ids
+
+
+def scan_assets(
+    root: str | PathLike[str],
+    *,
+    kind: str | type[Asset] | None = None,
+    scope: AssetScope | None = None,
+    producer_run: str | None = None,
+    producer_task: str | None = None,
+    tag: tuple[str, str] | None = None,
+    limit: int | None = None,
+    recursive: bool = False,
+    fs: FileSystem | None = None,
+) -> list[Asset]:
+    """Query assets across all manifests, mirroring ``AssetCatalog.query_assets``.
+
+    With ``recursive=True`` and a ``scope``, the match includes any sub-scope
+    whose ids extend the given scope's ids. Results are ordered by
+    ``(created_at, asset_id)``.
+
+    Pass *fs* (e.g. a remote :class:`~molexp.workspace.fs_remote.RemoteFileSystem`)
+    to scan without assuming a local path exists for *root*.
+    """
+    kind_str = _kind_value(kind)
+    out: list[Asset] = []
+    for asset in _sorted(_collect_assets(root, fs)):
+        if kind_str is not None and getattr(asset, "kind", None) != kind_str:
+            continue
+        if scope is not None and not _scope_matches(asset.scope, scope, recursive):
+            continue
+        producer = asset.producer
+        if producer_run and (producer is None or producer.run_id != producer_run):
+            continue
+        if producer_task and (producer is None or producer.task_id != producer_task):
+            continue
+        if tag is not None:
+            tk, tv = tag
+            if asset.tags.get(tk) != tv:
+                continue
+        out.append(asset)
+        if limit is not None and len(out) >= limit:
+            break
+    return out
+
+
+def get_asset(
+    root: str | PathLike[str],
+    asset_id: str,
+    *,
+    fs: FileSystem | None = None,
+) -> Asset | None:
+    """Return the asset with ``asset_id`` from any scope, else ``None``."""
+    for asset in _collect_assets(root, fs):
+        if asset.asset_id == asset_id:
+            return asset
+    return None
+
+
+def find_by_content_hash(
+    root: str | PathLike[str],
+    content_hash: str,
+    *,
+    fs: FileSystem | None = None,
+) -> Asset | None:
+    """Return the earliest asset whose ``content_hash`` matches, else ``None``.
+
+    Content-addressed lookup used by the workflow cache's re-registration path:
+    a match means the bytes are present somewhere in the workspace.
+    """
+    if not content_hash:
+        return None
+    for asset in _sorted(_collect_assets(root, fs)):
+        if asset.content_hash == content_hash:
+            return asset
+    return None
+
+
+def reregister_artifact(
+    root: str | PathLike[str],
+    scope_dir: str | PathLike[str],
+    *,
+    name: str | None,
+    content_hash: str,
+    target_scope: AssetScope,
+    producer_task: str | None = None,
+    inputs: tuple[str, ...] = (),
+) -> Asset | None:
+    """Idempotently re-register a content-addressed artifact into ``target_scope``.
+
+    Looks the artifact up by ``content_hash`` across the workspace; if found,
+    writes a fresh artifact row into ``scope_dir``'s manifest pointing at the
+    SAME path + ``content_hash`` (no recompute, no byte recopy). Returns the new
+    asset, or ``None`` when the bytes are absent (fresh workspace) so the caller
+    can skip gracefully. Idempotent on ``(name, content_hash)`` within the scope.
+    """
+    source = find_by_content_hash(root, content_hash)
+    if source is None:
+        return None
+    manifest = AssetManifest(scope_dir)
+    for existing in manifest.load().values():
+        if (
+            getattr(existing, "kind", None) == "artifact"
+            and existing.content_hash == content_hash
+            and existing.scope == target_scope
+            and existing.name == name
+        ):
+            return existing
+    now = datetime.now()
+    clone = source.model_copy(
+        update={
+            "asset_id": generate_asset_id(),
+            "name": name,
+            "scope": target_scope,
+            "created_at": now,
+            "updated_at": now,
+            "producer": Producer(
+                run_id=target_scope.ids[-1] if target_scope.ids else None,
+                task_id=producer_task,
+                inputs=inputs,
+            ),
+        }
+    )
+    manifest.register(clone)
+    return clone

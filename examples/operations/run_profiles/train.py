@@ -24,38 +24,42 @@ from __future__ import annotations
 from pathlib import Path
 
 import molexp as me
-from molexp.workflow import promote_callable
+from molexp.workflow import WorkflowCompiler
 
 WORKSPACE_ROOT = Path(__file__).resolve().parent / "_workspace"
 
-
-def train(ctx: me.RunContext) -> None:
-    # The framework treats profile contents as opaque user data.
-    # Read whatever fields your task needs, with sane defaults.
-    epochs = ctx.config.get("epochs", 100)
-    dataset = ctx.config.get("dataset", "qm9")
-    lr = ctx.config.get("optimizer", {}).get("lr", 1e-3)
-    batch = ctx.config.get("batch_size", 32)
-
-    if ctx.config.get("skip_heavy_compute"):
-        # Single "pretend to train" iteration so the example stays fast.
-        ctx.set_result("mode", "lightweight")
-    else:
-        ctx.set_result("mode", "full")
-
-    ctx.set_result("profile", ctx.config.name)
-    ctx.set_result("epochs", epochs)
-    ctx.set_result("dataset", dataset)
-    ctx.set_result("lr", lr)
-    ctx.set_result("batch_size", batch)
-    ctx.log("train").append(
-        f"profile={ctx.config.name} dataset={dataset} epochs={epochs} batch={batch} lr={lr}"
-    )
+wf = WorkflowCompiler(name="train")
 
 
-ws = me.Workspace(WORKSPACE_ROOT, name="run-profiles-demo")
-project = ws.add_project("demo")
-exp = project.add_experiment("train")
-promote_callable(train, name="train").bind_to(exp)
+@wf.task
+async def train(
+    dataset: str = "qm9",
+    epochs: int = 100,
+    batch_size: int = 32,
+    optimizer: dict | None = None,
+    skip_heavy_compute: bool = False,
+) -> dict:
+    # The framework treats profile contents as opaque user data. Each field a
+    # task needs is declared as a named parameter and bound by name from the
+    # run's build-time config (the merged molcfg profile), with a default so the
+    # task also runs with no profile selected. A nested block like
+    # ``optimizer: {lr: ...}`` arrives whole as the ``optimizer`` parameter. The
+    # chosen profile name is recorded on the run record, not read here.
+    lr = (optimizer or {}).get("lr", 1e-3)
+    mode = "lightweight" if skip_heavy_compute else "full"
 
-me.entry(ws)
+    return {
+        "mode": mode,
+        "dataset": dataset,
+        "epochs": epochs,
+        "lr": lr,
+        "batch_size": batch_size,
+    }
+
+
+(
+    me.Workspace(WORKSPACE_ROOT, name="run-profiles-demo")
+    .project("demo")
+    .experiment("train")
+    .run(wf.compile(), params={"seed": [0]})
+)

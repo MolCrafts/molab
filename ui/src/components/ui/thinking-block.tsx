@@ -1,12 +1,15 @@
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { Brain } from "lucide-react";
+import type { JSX } from "react";
 import { useState } from "react";
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 
 /**
- * Collapsible, dimmed reasoning block (spec 03).
+ * Collapsible, dimmed reasoning block.
  *
- * Default-collapsed, prefixed `💭`, dim/italic so it reads as the agent's
- * private chain-of-thought — distinct from the answer. While the turn is still
- * streaming reasoning it shows a "Thinking…" affordance. Renders nothing when
+ * Default-collapsed so reasoning reads as the agent's private
+ * chain-of-thought — distinct from the answer. While the turn is still
+ * streaming it shows a pulsing "Thinking…" affordance; expanded, the
+ * raw reasoning renders in a quiet bordered well. Renders nothing when
  * there is no reasoning text.
  */
 export const ThinkingBlock = ({
@@ -19,21 +22,28 @@ export const ThinkingBlock = ({
   const [expanded, setExpanded] = useState(false);
   if (!thinking) return null;
   return (
-    <div className="text-muted-foreground">
-      <button
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
-        className="flex items-center gap-1 text-xs italic transition-colors hover:text-foreground"
-        aria-label={expanded ? "Collapse thinking" : "Expand thinking"}
+    <Collapsible open={expanded} onOpenChange={setExpanded} className="text-muted-foreground">
+      <CollapsibleTrigger
+        className="flex items-center gap-2 rounded-control px-1 py-1 text-label transition-colors hover:text-foreground"
+        aria-expanded={expanded}
+        aria-label={expanded ? "Collapse reasoning" : "Expand reasoning"}
       >
-        {expanded ? <ChevronDown className="h-3 w-3" /> : <ChevronRight className="h-3 w-3" />}
-        <span>💭 {streaming ? "Thinking…" : "Thinking"}</span>
-      </button>
-      {expanded && (
-        <pre className="mt-1 whitespace-pre-wrap rounded-md bg-muted/40 px-3 py-2 text-[11px] italic text-muted-foreground">
+        <Brain className="h-3 w-3" />
+        <span className={streaming ? "italic text-muted-foreground" : "italic"}>
+          {streaming ? "Thinking…" : "Thought process"}
+        </span>
+        {streaming ? (
+          <span
+            className="inline-block h-1.5 w-1.5 rounded-full bg-status-running mol-motion-progress-pulse"
+            aria-hidden
+          />
+        ) : null}
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <pre className="mt-1 whitespace-pre-wrap rounded-control border border-border/50 bg-muted/40 px-3 py-2 text-micro italic leading-relaxed text-muted-foreground">
           {thinking}
         </pre>
-      )}
-    </div>
+      </CollapsibleContent>
+    </Collapsible>
   );
 };

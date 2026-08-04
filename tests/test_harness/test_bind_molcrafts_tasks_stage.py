@@ -1,4 +1,10 @@
-"""Tests for BindMolcraftsTasks stage (Phase 8). Mirrors ExtractWorkflowIR."""
+"""``BindMolcraftsTasks`` — plan step 5: bind IR tasks to a BoundWorkflow.
+
+Fail-fast on a missing gateway; builds the ``bound_workflow_binder`` call spec
+off the latest ``workflow_ir``; threads the upstream ``capability_catalog`` (from
+ResolveCapabilities) through ``prompt_artifact_id`` when present; returns a
+``bound_workflow`` ref parented on the IR.
+"""
 
 from __future__ import annotations
 
@@ -47,18 +53,18 @@ def ctx_no_gw(tmp_path: Path):
     from molexp.harness.core.run_context import HarnessRunContext
     from molexp.harness.store.file_artifact_store import FileArtifactStore
     from molexp.harness.store.sqlite_event_log import SQLiteEventLog
-    from molexp.harness.store.sqlite_provenance_store import SQLiteProvenanceStore
+    from molexp.harness.store.sqlite_lineage_store import SQLiteArtifactLineageStore
 
     db = tmp_path / "events.sqlite"
     a = FileArtifactStore(root=tmp_path / "artifacts")
     e = SQLiteEventLog(path=db)
-    p = SQLiteProvenanceStore(path=db, artifact_store=a)
+    p = SQLiteArtifactLineageStore(path=db, artifact_store=a)
     return HarnessRunContext(
         run_id="run-bind",
         workspace_root=tmp_path,
         artifact_store=a,
         event_log=e,
-        provenance_store=p,
+        lineage_store=p,
     )
 
 
@@ -68,90 +74,111 @@ def ctx_with_gw(tmp_path: Path):
     from molexp.harness.gateways.stub import StubAgentGateway
     from molexp.harness.store.file_artifact_store import FileArtifactStore
     from molexp.harness.store.sqlite_event_log import SQLiteEventLog
-    from molexp.harness.store.sqlite_provenance_store import SQLiteProvenanceStore
+    from molexp.harness.store.sqlite_lineage_store import SQLiteArtifactLineageStore
 
     db = tmp_path / "events.sqlite"
     a = FileArtifactStore(root=tmp_path / "artifacts")
     e = SQLiteEventLog(path=db)
-    p = SQLiteProvenanceStore(path=db, artifact_store=a)
+    p = SQLiteArtifactLineageStore(path=db, artifact_store=a)
     stub = StubAgentGateway(artifact_store=a)
     return HarnessRunContext(
         run_id="run-bind",
         workspace_root=tmp_path,
         artifact_store=a,
         event_log=e,
-        provenance_store=p,
+        lineage_store=p,
         agent_gateway=stub,
     )
 
 
-def test_bind_molcrafts_tasks_name() -> None:
-    from molexp.harness.stages.bind_molcrafts_tasks import BindMolcraftsTasks
+class TestBindMolcraftsTasks:
+    def test_fails_fast_when_gateway_missing(self, ctx_no_gw) -> None:
+        from molexp.harness.errors import StageExecutionError
+        from molexp.harness.stages.bind_molcrafts_tasks import BindMolcraftsTasks
 
-    assert BindMolcraftsTasks.name == "bind_molcrafts_tasks"
+        _seed_workflow_ir_ref(ctx_no_gw.artifact_store)
+        with pytest.raises(StageExecutionError) as exc:
+            asyncio.run(BindMolcraftsTasks().run(ctx_no_gw))
+        assert "agent_gateway" in str(exc.value)
 
+    def test_builds_binder_call_spec_without_catalog(self, ctx_with_gw) -> None:
+        from molexp.harness.gateways.gateway import AgentGateway
+        from molexp.harness.schemas import AgentCallResult, AgentCallSpec, BoundWorkflow
+        from molexp.harness.stages.bind_molcrafts_tasks import BindMolcraftsTasks
 
-def test_bind_molcrafts_tasks_is_stage() -> None:
-    from molexp.harness.core.stage import Stage
-    from molexp.harness.stages.bind_molcrafts_tasks import BindMolcraftsTasks
+        ir_ref = _seed_workflow_ir_ref(ctx_with_gw.artifact_store)
+        real_gw = ctx_with_gw.agent_gateway
+        real_gw.register(
+            agent_name="bound_workflow_binder",
+            output=_bound_workflow_canned(),
+            output_kind="bound_workflow",
+        )
+        captured: list[AgentCallSpec] = []
 
-    assert issubclass(BindMolcraftsTasks, Stage)
+        class Capturing:
+            async def call(self, spec: AgentCallSpec) -> AgentCallResult:
+                captured.append(spec)
+                return await real_gw.call(spec)
 
+        object.__setattr__(ctx_with_gw, "_frozen", False)
+        ctx_with_gw.agent_gateway = cast(AgentGateway, Capturing())
+        object.__setattr__(ctx_with_gw, "_frozen", True)
 
-def test_bind_fail_fast_when_gateway_missing(ctx_no_gw) -> None:
-    from molexp.harness.errors import StageExecutionError
-    from molexp.harness.stages.bind_molcrafts_tasks import BindMolcraftsTasks
+        asyncio.run(BindMolcraftsTasks().run(ctx_with_gw))
 
-    _seed_workflow_ir_ref(ctx_no_gw.artifact_store)
-    stage = BindMolcraftsTasks()
-    with pytest.raises(StageExecutionError) as exc:
-        asyncio.run(stage.run(ctx_no_gw))
-    assert "agent_gateway" in str(exc.value)
+        assert len(captured) == 1
+        spec = captured[0]
+        assert spec.agent_name == "bound_workflow_binder"
+        assert spec.input_artifact_ids == [ir_ref.id]
+        assert spec.output_schema == BoundWorkflow.model_json_schema()
+        # No capability_catalog on the ctx → no catalog threaded.
+        assert spec.prompt_artifact_id is None
 
+    def test_returns_bound_workflow_ref_parented_on_the_ir(self, ctx_with_gw) -> None:
+        from molexp.harness.stages.bind_molcrafts_tasks import BindMolcraftsTasks
 
-def test_bind_builds_correct_spec(ctx_with_gw) -> None:
-    from molexp.harness.gateways.gateway import AgentGateway
-    from molexp.harness.schemas import AgentCallResult, AgentCallSpec, BoundWorkflow
-    from molexp.harness.stages.bind_molcrafts_tasks import BindMolcraftsTasks
+        ir_ref = _seed_workflow_ir_ref(ctx_with_gw.artifact_store)
+        ctx_with_gw.agent_gateway.register(
+            agent_name="bound_workflow_binder",
+            output=_bound_workflow_canned(),
+            output_kind="bound_workflow",
+        )
+        ref = asyncio.run(BindMolcraftsTasks().run(ctx_with_gw))
+        assert ref.kind == "bound_workflow"
+        assert ir_ref.id in ref.parent_ids
 
-    ir_ref = _seed_workflow_ir_ref(ctx_with_gw.artifact_store)
-    real_gw = ctx_with_gw.agent_gateway
-    real_gw.register(
-        agent_name="bound_workflow_binder",
-        output=_bound_workflow_canned(),
-        output_kind="bound_workflow",
-    )
-    captured: list[AgentCallSpec] = []
+    def test_threads_existing_capability_catalog_as_prompt(self, ctx_with_gw) -> None:
+        """The stage threads the latest capability_catalog (from ResolveCapabilities)."""
+        from molexp.harness.gateways.gateway import AgentGateway
+        from molexp.harness.schemas import AgentCallResult, AgentCallSpec
+        from molexp.harness.stages.bind_molcrafts_tasks import BindMolcraftsTasks
 
-    class Capturing:
-        async def call(self, spec: AgentCallSpec) -> AgentCallResult:
-            captured.append(spec)
-            return await real_gw.call(spec)
+        store = ctx_with_gw.artifact_store
+        _seed_workflow_ir_ref(store)
+        catalog_ref = store.put_text(
+            kind="capability_catalog",
+            text="## Available molcrafts capabilities\n\n- molpy.core.cg.CoarseGrain",
+            created_by="stage:resolve_capabilities",
+            parent_ids=[],
+        )
+        real_gw = ctx_with_gw.agent_gateway
+        real_gw.register(
+            agent_name="bound_workflow_binder",
+            output=_bound_workflow_canned(),
+            output_kind="bound_workflow",
+        )
+        captured: list[AgentCallSpec] = []
 
-    object.__setattr__(ctx_with_gw, "_frozen", False)
-    ctx_with_gw.agent_gateway = cast(AgentGateway, Capturing())
-    object.__setattr__(ctx_with_gw, "_frozen", True)
+        class Capturing:
+            async def call(self, spec: AgentCallSpec) -> AgentCallResult:
+                captured.append(spec)
+                return await real_gw.call(spec)
 
-    stage = BindMolcraftsTasks()
-    asyncio.run(stage.run(ctx_with_gw))
+        object.__setattr__(ctx_with_gw, "_frozen", False)
+        ctx_with_gw.agent_gateway = cast(AgentGateway, Capturing())
+        object.__setattr__(ctx_with_gw, "_frozen", True)
 
-    assert len(captured) == 1
-    spec = captured[0]
-    assert spec.agent_name == "bound_workflow_binder"
-    assert spec.input_artifact_ids == [ir_ref.id]
-    assert spec.output_schema == BoundWorkflow.model_json_schema()
+        asyncio.run(BindMolcraftsTasks().run(ctx_with_gw))
 
-
-def test_bind_returns_bound_workflow_ref(ctx_with_gw) -> None:
-    from molexp.harness.stages.bind_molcrafts_tasks import BindMolcraftsTasks
-
-    ir_ref = _seed_workflow_ir_ref(ctx_with_gw.artifact_store)
-    ctx_with_gw.agent_gateway.register(
-        agent_name="bound_workflow_binder",
-        output=_bound_workflow_canned(),
-        output_kind="bound_workflow",
-    )
-    stage = BindMolcraftsTasks()
-    ref = asyncio.run(stage.run(ctx_with_gw))
-    assert ref.kind == "bound_workflow"
-    assert ir_ref.id in ref.parent_ids
+        assert len(captured) == 1
+        assert captured[0].prompt_artifact_id == catalog_ref.id

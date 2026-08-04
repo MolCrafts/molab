@@ -47,11 +47,11 @@ import asyncio
 import contextlib
 from collections.abc import AsyncIterator, Callable, Mapping
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from mollog import get_logger
 
-from molexp.agent.events import AgentEvent, AsyncIteratorEventSink, ModeCompletedEvent
+from molexp.agent.events import AgentEvent, AsyncIteratorEventSink, LoopCompletedEvent
 from molexp.agent.execution_env import LocalExecutionEnv
 from molexp.agent.loop import AgentRunResult
 from molexp.agent.router import ModelTier, Router, TierModels
@@ -103,6 +103,7 @@ class AgentRunner:
         router: Router | None = None,
         tools: tuple[Tool[None] | Callable[..., Any], ...] = (),
         workspace: Path | None = None,
+        session_anchor: Path | None = None,
     ) -> None:
         supplied = sum(x is not None for x in (model, models, router))
         if supplied == 0:
@@ -119,6 +120,9 @@ class AgentRunner:
         self.loop = loop
         self.tools = tools
         self.workspace = workspace
+        # Where the on-disk Agent/session folders mount (vision-loop-11 scoped
+        # sessions anchor at the mounted entity dir); defaults to `workspace`.
+        self.session_anchor = session_anchor
         self._router: Router | None = router
         self._tier_models: TierModels | None
         if router is not None:
@@ -147,7 +151,7 @@ class AgentRunner:
 
         Drains the loop's :data:`AgentEvent` stream, accumulates every
         event, and folds the terminal
-        :class:`~molexp.agent.events.ModeCompletedEvent` into
+        :class:`~molexp.agent.events.LoopCompletedEvent` into
         the returned result (whose ``events`` field carries the whole
         stream).
         """
@@ -253,21 +257,21 @@ class AgentRunner:
         """Lazily mount the persistent :class:`Agent` folder for this runner."""
         if self._agent_folder is not None:
             return self._agent_folder
-        if self.workspace is None:
+        anchor = self.session_anchor if self.session_anchor is not None else self.workspace
+        if anchor is None:
             return None
         try:
             from molexp.agent.folders import Agent as AgentFolder
-            from molexp.workspace import Workspace
 
-            ws = Workspace(self.workspace)
+            # The agent is a workspace Concept rooted at the anchor path (the
+            # workspace root, or the mounted entity dir for scoped sessions);
+            # construction is I/O-free and idempotent (same path → same dir),
+            # and add_session lazily materializes it.
             agent_name = getattr(self.loop, "name", "") or "default"
-            if ws.has_folder(agent_name, cls=AgentFolder):
-                self._agent_folder = ws.get_folder(agent_name, cls=AgentFolder)
-            else:
-                self._agent_folder = cast(AgentFolder, ws.add_folder(AgentFolder(name=agent_name)))
+            self._agent_folder = AgentFolder(name=agent_name, root_path=Path(anchor))
         except OSError as exc:
             _LOG.warning(
-                f"[runner] could not open Agent folder for {self.workspace!r}: "
+                f"[runner] could not open Agent folder for {anchor!r}: "
                 f"{exc!r}; sessions will be in-memory only."
             )
             return None
@@ -296,12 +300,13 @@ class AgentRunner:
     def _build_execution_env(self) -> LocalExecutionEnv:
         """Construct the :class:`LocalExecutionEnv` for the harness.
 
-        The scratch dir lives under the workspace when one is configured
-        (``<workspace>/.agent-scratch``), otherwise under a process-temp
-        directory.
+        Scratch is colocated with the loop's on-disk Agent folder when a
+        workspace is configured (``<workspace>/<loop.name>/.scratch``),
+        otherwise under a process-temp directory.
         """
         if self.workspace is not None:
-            scratch = Path(self.workspace) / ".agent-scratch"
+            agent_name = getattr(self.loop, "name", "") or "agent"
+            scratch = Path(self.workspace) / agent_name / ".scratch"
         else:
             import tempfile
 
@@ -341,17 +346,17 @@ def _result_from_stream(events: tuple[AgentEvent, ...]) -> AgentRunResult:
     """Fold an accumulated event stream into the terminal :class:`AgentRunResult`.
 
     The loop's terminal
-    :class:`~molexp.agent.events.ModeCompletedEvent` carries the
+    :class:`~molexp.agent.events.LoopCompletedEvent` carries the
     result's JSON dump in ``result``; we rebuild the typed result from
     it and attach the whole stream as ``events``.
     """
-    terminal: ModeCompletedEvent | None = None
+    terminal: LoopCompletedEvent | None = None
     for event in events:
-        if isinstance(event, ModeCompletedEvent):
+        if isinstance(event, LoopCompletedEvent):
             terminal = event
     if terminal is None:
         raise RuntimeError(
-            "the loop's event stream ended without a ModeCompletedEvent; "
+            "the loop's event stream ended without a LoopCompletedEvent; "
             "every AgentLoop.run must yield one as its terminal event."
         )
     if terminal.result is not None:

@@ -1,0 +1,76 @@
+"""Tests for ``molexp.git.worktree.GitWorktreeManager``.
+
+Each test sets up a real bare git repo in ``tmp_path`` (so worktree
+operations exercise the actual ``git worktree`` plumbing) and drives the
+async manager API. A ``git`` binary on PATH is required.
+"""
+
+from __future__ import annotations
+
+import shutil
+import subprocess
+from pathlib import Path
+
+from molexp.git import GitWorktreeManager
+
+
+def _init_seed_repo(tmp_path: Path) -> Path:
+    """Init a non-bare repo with one commit; return its working dir.
+
+    The ``GitWorktreeManager`` operates on this checkout; its worktrees
+    are added beside the checkout, sharing the underlying ``.git/``.
+    """
+    seed = tmp_path / "seed"
+    seed.mkdir()
+    subprocess.run(["git", "init", "-q", "-b", "main", str(seed)], check=True)
+    subprocess.run(["git", "-C", str(seed), "config", "user.email", "test@example.com"], check=True)
+    subprocess.run(["git", "-C", str(seed), "config", "user.name", "Test"], check=True)
+    (seed / "README.md").write_text("seed\n")
+    subprocess.run(["git", "-C", str(seed), "add", "README.md"], check=True)
+    subprocess.run(
+        ["git", "-C", str(seed), "commit", "-q", "-m", "seed"],
+        check=True,
+        env={
+            "GIT_AUTHOR_NAME": "T",
+            "GIT_AUTHOR_EMAIL": "t@x",
+            "GIT_COMMITTER_NAME": "T",
+            "GIT_COMMITTER_EMAIL": "t@x",
+            "PATH": "/usr/bin:/bin:/usr/local/bin",
+        },
+    )
+    return seed
+
+
+class TestGitWorktreeManager:
+    async def test_add_creates_worktree_sharing_the_object_db(self, tmp_path: Path):
+        seed = _init_seed_repo(tmp_path)
+        wt_path = tmp_path / "wt-issue-1"
+        mgr = GitWorktreeManager(seed)
+
+        await mgr.add("claude/issue-1", wt_path)
+
+        assert wt_path.is_dir()
+        assert (wt_path / "README.md").is_file()
+        # The .git in the worktree is a *file* (gitlink), not a dir — proof
+        # the object DB is shared with the seed repo.
+        git_pointer = wt_path / ".git"
+        assert git_pointer.is_file(), ".git in a worktree should be a gitlink file, not a dir"
+        assert "gitdir:" in git_pointer.read_text()
+
+    async def test_list_remove_and_prune_track_worktree_lifecycle(self, tmp_path: Path):
+        seed = _init_seed_repo(tmp_path)
+        wt_path = tmp_path / "wt-issue-2"
+        mgr = GitWorktreeManager(seed)
+
+        await mgr.add("claude/issue-2", wt_path)
+        assert str(wt_path) in {str(p) for p in await mgr.list()}
+
+        await mgr.remove(wt_path)
+        assert not wt_path.exists()
+
+        # A worktree dir deleted out-of-band (rm -rf) is cleaned up by prune.
+        other = tmp_path / "wt-stale"
+        await mgr.add("claude/stale", other)
+        shutil.rmtree(other)
+        await mgr.prune()
+        assert all("wt-stale" not in str(p) for p in await mgr.list())

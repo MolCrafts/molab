@@ -5,8 +5,9 @@ from __future__ import annotations
 import io
 import json
 import os
+import posixpath
 from collections.abc import Iterable
-from typing import IO, Any
+from typing import IO, Any, cast
 
 from molq.transport import Transport
 
@@ -24,13 +25,28 @@ class RemoteFileSystem:
     """
 
     def __init__(self, transport: Transport) -> None:
-        self._t = transport
+        # molq.transport.Transport is a narrow Protocol; this class also uses
+        # filesystem ops (is_dir/listdir/rename/copy/stat/…) that the concrete
+        # transports provide but the Protocol doesn't statically declare. Widen
+        # to Any so the dynamic surface resolves without changing runtime behavior.
+        self._t: Any = transport
 
     # ── Path ops (static — string manipulation only) ────────────────────
 
     @staticmethod
     def join(*parts: PathArg) -> str:
-        return "/".join(os.fspath(p).strip("/") for p in parts if p)
+        """POSIX-join path segments, preserving an absolute remote root.
+
+        Remote workspaces live at absolute paths (``/home/...``).  A naive
+        ``"/".join(p.strip("/") ...)`` drops the leading slash and turns
+        marker checks like ``exists(<root>/workspace.json)`` into relative
+        lookups that always miss — which is why ``molexp info -ws host:/abs``
+        reported "No workspace found" even when the file was present.
+        """
+        cleaned = [os.fspath(p) for p in parts if p]
+        if not cleaned:
+            return ""
+        return posixpath.join(*cleaned)
 
     @staticmethod
     def dirname(path: PathArg) -> str:
@@ -95,8 +111,8 @@ class RemoteFileSystem:
         self._t.copytree(os.fspath(src), os.fspath(dst))
 
     def stat(self, path: PathArg) -> StatResult:
-        d = self._t.stat(os.fspath(path))
-        return StatResult(**d)  # type: ignore[arg-type]
+        d = cast("dict[str, Any]", self._t.stat(os.fspath(path)))
+        return StatResult(**d)
 
     def lstat(self, path: PathArg) -> StatResult:
         return self.stat(path)

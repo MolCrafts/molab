@@ -1,13 +1,25 @@
-import React from "react";
+// reflect-metadata MUST be imported before any flowgram canvas module so the
+// editor's inversify DI containers see the emitted decorator metadata.
+import "reflect-metadata";
 import ReactDOM from "react-dom/client";
-import { BrowserRouter } from "react-router-dom";
+import { createBrowserRouter, RouterProvider } from "react-router-dom";
+import { RouteErrorBoundary } from "@/app/layout/RouteErrorBoundary";
+import { ToastProvider } from "@/components/ui/toast";
 import { bootPlugins } from "@/plugins/runtime";
 import App from "./App";
 import "./styles/tailwind.css";
-// xyflow's stylesheet is loaded once at the app entry so individual
-// renderer modules can stay CSS-free — this matters for the node-side
-// test runner which does not understand .css imports.
-import "@xyflow/react/dist/style.css";
+
+// A data router (vs. the plain <BrowserRouter>) is required so in-app navigation
+// can be intercepted with `useBlocker` — e.g. to confirm before discarding
+// unsaved workflow-graph edits. App reads `location` directly, so a single
+// splat route renders the whole SPA.
+//
+// `errorElement` replaces React Router's bare "Unexpected Application Error!"
+// overlay with a styled screen covering 404s and unreachable-backend
+// (`Failed to fetch`) failures that escape the in-app ErrorBoundary.
+const router = createBrowserRouter([
+  { path: "*", element: <App />, errorElement: <RouteErrorBoundary /> },
+]);
 
 const rootElement = document.getElementById("root");
 
@@ -33,11 +45,15 @@ enableMocking().then(() => {
   bootPlugins();
 
   const root = ReactDOM.createRoot(rootElement);
+  // No <React.StrictMode>: its dev-only double-mount re-initializes
+  // @flowgram.ai/free-layout-editor's inversify container, which then throws
+  // "Ambiguous match found for serviceIdentifier: FlowRendererRegistry" on
+  // every workflow-graph surface. Production builds never double-mount, so
+  // this changes dev behavior only. Re-enable if flowgram becomes
+  // StrictMode-safe upstream.
   root.render(
-    <React.StrictMode>
-      <BrowserRouter>
-        <App />
-      </BrowserRouter>
-    </React.StrictMode>,
+    <ToastProvider>
+      <RouterProvider router={router} />
+    </ToastProvider>,
   );
 });

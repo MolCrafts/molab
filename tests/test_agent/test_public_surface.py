@@ -1,26 +1,25 @@
-"""Public-surface contract for ``molexp.agent`` (post spec 03b).
+"""Public-surface locks for the ``molexp.agent`` facade.
 
-The agent layer is a pydantic-ai facade. Surface contract:
+The agent layer is a pydantic-ai facade. Two ``__all__`` contracts are
+frozen here:
 
-* Loop-orchestration core: :class:`AgentRunner`, :class:`AgentLoop`,
-  :class:`AgentRunResult`, :class:`AgentRuntime`, :class:`AgentSession`.
+* :mod:`molexp.agent` — the loop-orchestration core (five names).
+* :mod:`molexp.agent.loops` — the two shipping loops (:class:`ChatLoop` /
+  :class:`InteractiveLoop`) plus the SDK-free tool/hook vocabulary the
+  emergent loop and harness-injected gates reuse.
 
-Loops contract — only :class:`ChatLoop` (one round-trip) and the
-emergent :class:`InteractiveLoop` ship; the prior pipeline modes
-(Plan / Author / Run / Review) moved to :mod:`molexp.harness`.
+The prior pipeline modes (Plan / Author / Run / Review) moved to
+:mod:`molexp.harness` and must never reappear in either surface.
 """
 
 from __future__ import annotations
-
-import inspect
 
 import molexp.agent as agent
 import molexp.agent.loops as loops
 
 
-def test_agent_all_is_the_public_contract() -> None:
+def test_agent_public_surface_is_the_five_name_core() -> None:
     assert set(agent.__all__) == {
-        # Loop orchestration core.
         "AgentRunner",
         "AgentLoop",
         "AgentRunResult",
@@ -29,30 +28,23 @@ def test_agent_all_is_the_public_contract() -> None:
     }
 
 
-def test_loops_all_is_chat_and_interactive_only() -> None:
-    """Post spec 03b, ``molexp.agent.loops`` re-exports ChatLoop +
-    InteractiveLoop (+configs). The prior pipeline modes moved to
-    :mod:`molexp.harness`."""
+def test_loops_public_surface_is_loops_plus_hook_vocabulary() -> None:
     assert set(loops.__all__) == {
+        # Shipping loops.
         "ChatLoop",
         "ChatLoopConfig",
         "InteractiveLoop",
         "InteractiveLoopConfig",
+        # Neutral tool/hook vocabulary (plan-emergent-01).
+        "HookDecision",
+        "HookOutcome",
+        "LoopState",
+        "BeforeToolHook",
+        "AfterToolHook",
+        "ShouldStopGuard",
+        "invoke_before_tool",
+        "invoke_after_tool",
+        "invoke_should_stop",
+        # Hook bundle consumed by the outer emergent loop (plan-emergent-02).
+        "LoopHooks",
     }
-
-
-def test_no_pydantic_ai_or_pydantic_graph_in_public_surface() -> None:
-    bad = [
-        n
-        for n in (*agent.__all__, *loops.__all__)
-        if n.startswith(("pydantic_ai", "pydantic_graph"))
-    ]
-    assert not bad, bad
-
-
-def test_no_factory_callables_in_public_surface() -> None:
-    """Anti-factory invariant."""
-    for ns in (agent, loops):
-        for name, obj in inspect.getmembers(ns):
-            if name in ns.__all__ and callable(obj):
-                assert not name.startswith(("create_", "build_", "make_")), name

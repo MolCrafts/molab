@@ -1,12 +1,18 @@
-import { Play } from "lucide-react";
+import { Plus } from "lucide-react";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useState } from "react";
 import type { TargetResponse } from "@/api/generated/models/TargetResponse";
 import { ExperimentsService } from "@/api/generated/services/ExperimentsService";
 import { TargetsService } from "@/api/generated/services/TargetsService";
+import { ParametersForm } from "@/app/runs/ParametersForm";
+import {
+  type InputField,
+  parseInputSchema,
+  SchemaForm,
+  schemaDefaults,
+} from "@/app/runs/SchemaForm";
 import { AddTargetDialog } from "@/app/settings/AddTargetDialog";
 import { workspaceApi } from "@/app/state/api";
-import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -25,7 +31,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
+import { WorkbenchAction, WorkbenchIconAction } from "@/components/workbench";
 
 const NO_TARGET_VALUE = "__none__";
 
@@ -33,7 +39,8 @@ interface CreateRunDialogProps {
   projectId: string;
   experimentId: string;
   workflowFile: string;
-  onRunCreated: () => void;
+  /** Called with the new run id so the parent can navigate into it. */
+  onRunCreated: (runId: string) => void;
   open?: boolean;
   onOpenChange?: (open: boolean) => void;
   trigger?: ReactNode;
@@ -49,7 +56,8 @@ export function CreateRunDialog({
   trigger,
 }: CreateRunDialogProps) {
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
-  const [parameters, setParameters] = useState("{}");
+  const [parameters, setParameters] = useState<Record<string, unknown>>({});
+  const [inputSchema, setInputSchema] = useState<InputField[] | null>(null);
   const [target, setTarget] = useState<string>(NO_TARGET_VALUE);
   const [targets, setTargets] = useState<TargetResponse[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -75,6 +83,9 @@ export function CreateRunDialog({
     )
       .then((exp) => {
         if (exp.defaultTarget) setTarget(exp.defaultTarget);
+        const schema = parseInputSchema(exp.workflow);
+        setInputSchema(schema);
+        if (schema) setParameters(schemaDefaults(schema));
       })
       .catch(() => {
         // experiment may not yet be readable; ignore
@@ -87,17 +98,17 @@ export function CreateRunDialog({
     setError(null);
 
     try {
-      await workspaceApi.createRun(projectId, experimentId, {
-        parameters: JSON.parse(parameters),
+      const created = await workspaceApi.createRun(projectId, experimentId, {
+        parameters,
         target: target === NO_TARGET_VALUE ? null : target,
       });
 
       setOpen(false);
-      setParameters("{}");
+      setParameters({});
       setTarget(NO_TARGET_VALUE);
-      onRunCreated();
+      onRunCreated(created.id);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to launch run");
+      setError(err instanceof Error ? err.message : "Failed to create");
     } finally {
       setIsLoading(false);
     }
@@ -107,23 +118,24 @@ export function CreateRunDialog({
     <Dialog open={open} onOpenChange={setOpen}>
       {trigger === undefined ? (
         <DialogTrigger asChild>
-          <Button size="sm" className="gap-1">
-            <Play className="h-3.5 w-3.5" />
-            Run
-          </Button>
+          <WorkbenchIconAction label="New run">
+            <Plus className="h-3.5 w-3.5" />
+          </WorkbenchIconAction>
         </DialogTrigger>
       ) : (
         trigger && <DialogTrigger asChild>{trigger}</DialogTrigger>
       )}
-      <DialogContent className="sm:max-w-[500px]">
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Launch Run</DialogTitle>
-          <DialogDescription>Execute workflow for experiment {experimentId}.</DialogDescription>
+          <DialogTitle>New run</DialogTitle>
+          <DialogDescription className="sr-only">
+            Parameters and optional compute target.
+          </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit}>
           <div className="grid gap-4 py-4">
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="run-workflow" className="text-right">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-4 sm:items-center sm:gap-4">
+              <Label htmlFor="run-workflow" className="text-left sm:text-right">
                 Workflow
               </Label>
               <Input
@@ -133,23 +145,23 @@ export function CreateRunDialog({
                 className="col-span-3 bg-muted"
               />
             </div>
-            <div className="grid grid-cols-4 items-center gap-4">
-              <Label htmlFor="run-params" className="text-right">
-                Parameters (JSON)
-              </Label>
-              <Textarea
-                id="run-params"
-                value={parameters}
-                onChange={(e) => setParameters(e.target.value)}
-                className="col-span-3 font-mono text-xs"
-                rows={6}
-              />
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-4 sm:items-start sm:gap-4">
+              <p className="pt-2 text-left text-label font-medium sm:text-right">
+                {inputSchema ? "Inputs" : "Parameters"}
+              </p>
+              <div className="col-span-3">
+                {inputSchema ? (
+                  <SchemaForm schema={inputSchema} value={parameters} onChange={setParameters} />
+                ) : (
+                  <ParametersForm value={parameters} onChange={setParameters} />
+                )}
+              </div>
             </div>
-            <div className="grid grid-cols-4 items-start gap-4">
-              <Label htmlFor="run-target" className="pt-2 text-right">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-4 sm:items-start sm:gap-4">
+              <Label htmlFor="run-target" className="pt-2 text-left sm:text-right">
                 Target
               </Label>
-              <div className="col-span-3 space-y-1.5">
+              <div className="col-span-3 space-y-2">
                 <Select value={target} onValueChange={setTarget}>
                   <SelectTrigger id="run-target">
                     <SelectValue placeholder="No target — local in-process" />
@@ -160,7 +172,7 @@ export function CreateRunDialog({
                       <SelectItem key={t.name} value={t.name}>
                         <span className="flex items-center gap-2">
                           <span className="font-medium">{t.name}</span>
-                          <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                          <span className="text-micro uppercase tracking-wide text-muted-foreground">
                             {t.isRemote ? "remote" : "local"}
                           </span>
                         </span>
@@ -170,12 +182,9 @@ export function CreateRunDialog({
                 </Select>
                 <AddTargetDialog
                   trigger={
-                    <button
-                      type="button"
-                      className="text-xs text-muted-foreground transition-colors hover:text-foreground"
-                    >
-                      + Add new target…
-                    </button>
+                    <WorkbenchIconAction label="Add new target">
+                      <Plus className="size-3.5" />
+                    </WorkbenchIconAction>
                   }
                   onCreated={(t) => {
                     void refreshTargets();
@@ -184,12 +193,16 @@ export function CreateRunDialog({
                 />
               </div>
             </div>
-            {error && <div className="text-sm text-red-500 col-span-4 text-center">{error}</div>}
+            {error && (
+              <div className="text-body-lg text-status-failed-foreground col-span-4 text-center">
+                {error}
+              </div>
+            )}
           </div>
           <DialogFooter>
-            <Button type="submit" disabled={isLoading}>
-              {isLoading ? "Launching..." : "Launch Run"}
-            </Button>
+            <WorkbenchAction kind="primary" type="submit" disabled={isLoading}>
+              {isLoading ? "…" : "Create"}
+            </WorkbenchAction>
           </DialogFooter>
         </form>
       </DialogContent>

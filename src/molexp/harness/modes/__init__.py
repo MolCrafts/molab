@@ -1,11 +1,10 @@
-"""Concrete :class:`molexp.harness.Mode` subclasses.
+"""Harness mode orchestrators.
 
-Ships :class:`PlanMode` — the idea→experiment-plan→WorkflowIR→runnable
-``molexp.workflow`` source pipeline.
+* :class:`ChatMode` — InteractiveLoop, scratch-only, no default land
+* :class:`PlanOrchestrator` — two-phase planning → workflow realization
 """
 
-from __future__ import annotations
+from molexp.harness.modes.chat import ChatMode, chat_loop_config
+from molexp.harness.modes.plan_orchestrator import PlanOrchestrator
 
-from molexp.harness.modes.plan import PlanMode
-
-__all__ = ["PlanMode"]
+__all__ = ["ChatMode", "PlanOrchestrator", "chat_loop_config"]

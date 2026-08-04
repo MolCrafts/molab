@@ -1,17 +1,16 @@
 """``GenerateExperimentReport`` — second stage of the §3 pipeline.
 
-Builds an :class:`AgentCallSpec` that asks the configured
-:class:`AgentGateway` for a structured :class:`ExperimentReport` derived
+Builds an :class:`AgentCallSpec` that asks the gateway on
+``ctx.agent_gateway`` for a structured :class:`ExperimentReport` derived
 from the given ``user_plan`` artifact, then returns the gateway's parsed
 ``output_artifact`` unchanged. The gateway is responsible for persisting
-both the parsed output and the raw response and for wiring
-``parent_ids`` so :class:`StageRunner` materializes the
-``user_plan → experiment_report`` ``derived_from`` edge automatically.
+both the parsed output and the raw response and for wiring ``parent_ids``
+so the audit bracket materializes the ``user_plan → experiment_report``
+``derived_from`` edge automatically.
 
-Phase 2 wires the gateway via constructor injection (not through
-:class:`HarnessRunContext`) because the real LLM-backed gateway impl is
-still Phase 5+; once it lands, the gateway moves into the context and this
-stage's constructor loses the ``gateway`` arg.
+Fail-fast: if ``ctx.agent_gateway is None``, the stage raises
+:class:`StageExecutionError` rather than NPE-ing midway through the
+:class:`AgentCallSpec` construction.
 """
 
 from __future__ import annotations
@@ -21,7 +20,7 @@ from typing import ClassVar
 from molexp.harness.core.run_context import HarnessRunContext
 from molexp.harness.core.stage import Stage
 from molexp.harness.errors import StageExecutionError
-from molexp.harness.schemas import AgentCallSpec, ArtifactRef, ExperimentReport
+from molexp.harness.schemas import AgentCallSpec, ExperimentReport, PlanArtifactRef
 from molexp.harness.stages._resolve import require_latest
 
 __all__ = ["GenerateExperimentReport"]
@@ -32,15 +31,16 @@ class GenerateExperimentReport(Stage):
 
     name: ClassVar[str] = "generate_experiment_report"
 
-    async def run(self, ctx: HarnessRunContext) -> ArtifactRef:
+    async def run(self, ctx: HarnessRunContext) -> PlanArtifactRef:
         if ctx.agent_gateway is None:
             raise StageExecutionError(
                 "GenerateExperimentReport requires ctx.agent_gateway to be set"
             )
         user_plan = require_latest(ctx, "user_plan", stage=self.name)
+        knowledge = require_latest(ctx, "knowledge_context", stage=self.name)
         spec = AgentCallSpec(
             agent_name="experiment_report_writer",
-            input_artifact_ids=[user_plan.id],
+            input_artifact_ids=[user_plan.id, knowledge.id],
             output_schema=ExperimentReport.model_json_schema(),
         )
         result = await ctx.agent_gateway.call(spec)

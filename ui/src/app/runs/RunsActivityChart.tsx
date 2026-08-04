@@ -1,7 +1,7 @@
 import type { JSX } from "react";
 import { useMemo } from "react";
 
-import { MolvisBarChart } from "@/lib/charts";
+import { MolplotBarChart } from "@/plugins/molplot";
 
 import type { ActivityBucket } from "./aggregates";
 
@@ -10,10 +10,10 @@ interface RunsActivityChartProps {
 }
 
 const SERIES_COLORS = {
-  succeeded: "#10b981",
-  failed: "#ef4444",
-  cancelled: "#71717a",
-  started: "#3b82f6",
+  succeeded: "var(--status-completed)",
+  failed: "var(--status-failed)",
+  cancelled: "var(--status-cancelled)",
+  started: "var(--status-running)",
 };
 
 const formatHour = (date: Date): string =>
@@ -21,11 +21,14 @@ const formatHour = (date: Date): string =>
 
 export const RunsActivityChart = ({ buckets }: RunsActivityChartProps): JSX.Element => {
   const config = useMemo(() => {
-    const xs = buckets.map((bucket) => bucket.hour.toISOString());
+    // Pre-formatted category labels as x values: molplot renders ISO-string
+    // dates on a discrete scale and then feeds `tickformat` to the NUMBER
+    // format parser ("invalid format: %H:00" crash). A categorical axis with
+    // ready-made labels sidesteps that vendor path entirely.
     const labels = buckets.map((bucket) => formatHour(bucket.hour));
 
     const mkPoints = (sel: (b: ActivityBucket) => number) =>
-      buckets.map((bucket, i) => ({ x: xs[i], y: sel(bucket), text: labels[i] }));
+      buckets.map((bucket, i) => ({ x: labels[i], y: sel(bucket), text: labels[i] }));
 
     return {
       mode: "stack" as const,
@@ -34,8 +37,6 @@ export const RunsActivityChart = ({ buckets }: RunsActivityChartProps): JSX.Elem
       bargap: 0.1,
       modebar: false,
       xAxis: {
-        dtype: "date" as const,
-        tickformat: "%H:00",
         nticks: 12,
       },
       yAxis: {
@@ -92,19 +93,17 @@ export const RunsActivityChart = ({ buckets }: RunsActivityChartProps): JSX.Elem
   );
 
   return (
-    <div className="rounded border border-border bg-background p-3">
-      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
-        <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-          Activity · last 24h
-        </div>
-        <div className="flex flex-wrap gap-x-3 text-[10px] text-muted-foreground">
-          <LegendDot color={SERIES_COLORS.started} label={`Started ${totals.started}`} />
-          <LegendDot color={SERIES_COLORS.succeeded} label={`Succeeded ${totals.succeeded}`} />
-          <LegendDot color={SERIES_COLORS.failed} label={`Failed ${totals.failed}`} />
-          <LegendDot color={SERIES_COLORS.cancelled} label={`Cancelled ${totals.cancelled}`} />
-        </div>
+    <div className="space-y-3">
+      <div className="flex flex-wrap gap-x-4 gap-y-1 text-label text-muted-foreground">
+        <LegendDot color={SERIES_COLORS.started} label={`Started ${totals.started}`} />
+        <LegendDot color={SERIES_COLORS.succeeded} label={`Succeeded ${totals.succeeded}`} />
+        <LegendDot color={SERIES_COLORS.failed} label={`Failed ${totals.failed}`} />
+        <LegendDot color={SERIES_COLORS.cancelled} label={`Cancelled ${totals.cancelled}`} />
       </div>
-      <MolvisBarChart config={config} style={{ width: "100%", height: "200px" }} />
+      <MolplotBarChart
+        config={config}
+        style={{ width: "100%", height: "var(--spacing-chart-sm)" }}
+      />
     </div>
   );
 };
@@ -115,10 +114,10 @@ interface LegendDotProps {
 }
 
 const LegendDot = ({ color, label }: LegendDotProps): JSX.Element => (
-  <span className="inline-flex items-center gap-1">
+  <span className="inline-flex items-center gap-2">
     <span
       aria-hidden="true"
-      className="inline-block h-2 w-2 rounded-full"
+      className="inline-block h-1.5 w-1.5 rounded-full"
       style={{ backgroundColor: color }}
     />
     {label}

@@ -1,8 +1,9 @@
 import type { JSX } from "react";
 import { useMemo } from "react";
-
-import { MolvisBarChart } from "@/lib/charts";
+import { WorkbenchAction } from "@/components/workbench";
+import { CHART_CLUSTER_PALETTE } from "@/lib/chart-tokens";
 import { cn } from "@/lib/utils";
+import { MolplotBarChart } from "@/plugins/molplot";
 
 import type { BackendDistributionEntry, FailingExperimentEntry } from "./aggregates";
 
@@ -33,17 +34,7 @@ interface BackendDistributionChartProps {
   onSelectBackend: (backend: string) => void;
 }
 
-const CLUSTER_PALETTE = [
-  "#3b82f6",
-  "#8b5cf6",
-  "#10b981",
-  "#f59e0b",
-  "#ef4444",
-  "#06b6d4",
-  "#a855f7",
-  "#84cc16",
-];
-
+/** Categorical series colors (not status — constitution §8 chart freedom). */
 const BackendDistributionChart = ({
   distribution,
   onSelectBackend,
@@ -56,7 +47,7 @@ const BackendDistributionChart = ({
       return {
         id: clusterName,
         label,
-        color: CLUSTER_PALETTE[index % CLUSTER_PALETTE.length],
+        color: CHART_CLUSTER_PALETTE[index % CHART_CLUSTER_PALETTE.length],
         hovertemplate: `<b>%{y}</b> · ${label}<br>%{x} runs<extra></extra>`,
         points: backends.map((backend) => {
           const match = distribution.find(
@@ -80,23 +71,23 @@ const BackendDistributionChart = ({
 
   if (distribution.length === 0) {
     return (
-      <PanelShell title="Backend / cluster distribution">
+      <Section title="Backends">
         <EmptyMessage>No active runs to break down.</EmptyMessage>
-      </PanelShell>
+      </Section>
     );
   }
 
   return (
-    <PanelShell title="Backend / cluster distribution">
-      <MolvisBarChart
+    <Section title="Backends">
+      <MolplotBarChart
         config={config}
         onBarClick={(event) => {
           const backend = event.customdata;
           if (typeof backend === "string") onSelectBackend(backend);
         }}
-        style={{ width: "100%", height: "160px" }}
+        style={{ width: "100%", height: "var(--spacing-chart-xs)" }}
       />
-    </PanelShell>
+    </Section>
   );
 };
 
@@ -108,67 +99,68 @@ interface TopFailingListProps {
 const TopFailingList = ({ entries, onSelect }: TopFailingListProps): JSX.Element => {
   if (entries.length === 0) {
     return (
-      <PanelShell title="Top failing experiments">
+      <Section title="Top failing">
         <EmptyMessage>No failed runs in the current view.</EmptyMessage>
-      </PanelShell>
+      </Section>
     );
   }
   const maxFailed = entries[0]?.failedCount ?? 1;
   return (
-    <PanelShell title="Top failing experiments">
-      <ul className="divide-y divide-border/40">
+    <Section title="Top failing">
+      <ul className="space-y-1">
         {entries.map((entry) => {
           const failedRatio = entry.failedCount / Math.max(entry.totalCount, 1);
           return (
             <li key={entry.experimentId}>
-              <button
+              <WorkbenchAction
+                kind="ghost"
+                size="content"
                 type="button"
                 onClick={() => onSelect(entry)}
-                className="group flex w-full items-center gap-2 px-1 py-1.5 text-left transition-colors hover:bg-muted/40"
+                className="group flex w-full items-center gap-3 rounded-control px-2 py-2 text-left transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               >
                 <div className="min-w-0 flex-1">
-                  <div className="truncate text-xs font-medium text-foreground">
+                  <div className="truncate text-body-lg font-medium text-foreground">
                     {entry.experimentName}
                   </div>
-                  <div className="truncate text-[10px] text-muted-foreground">
+                  <div className="truncate text-label text-muted-foreground">
                     {entry.projectName}
                   </div>
                 </div>
-                <div className="flex w-16 flex-col items-end">
-                  <div className="text-xs font-semibold text-destructive">
-                    {entry.failedCount}/{entry.totalCount}
+                <div className="flex w-20 flex-col items-end gap-1">
+                  <div className="text-label font-medium tabular-nums text-destructive">
+                    {entry.failedCount}
+                    <span className="text-muted-foreground">/{entry.totalCount}</span>
                   </div>
-                  <div className="mt-0.5 h-1 w-full overflow-hidden rounded bg-muted">
+                  <div className="h-1 w-full overflow-hidden rounded-full bg-muted">
                     <div
-                      className={cn("h-full bg-destructive/70")}
+                      className={cn("h-full rounded-full bg-destructive/70")}
                       style={{ width: `${(entry.failedCount / maxFailed) * 100}%` }}
                     />
                     <span className="sr-only">{Math.round(failedRatio * 100)}% failure</span>
                   </div>
                 </div>
-              </button>
+              </WorkbenchAction>
             </li>
           );
         })}
       </ul>
-    </PanelShell>
+    </Section>
   );
 };
 
-interface PanelShellProps {
+interface SectionProps {
   title: string;
   children: JSX.Element | JSX.Element[];
 }
 
-const PanelShell = ({ title, children }: PanelShellProps): JSX.Element => (
-  <div className="rounded border border-border bg-background p-3">
-    <div className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-      {title}
-    </div>
+const Section = ({ title, children }: SectionProps): JSX.Element => (
+  <div className="min-w-0 space-y-3">
+    <h4 className="text-label font-medium text-muted-foreground">{title}</h4>
     {children}
   </div>
 );
 
 const EmptyMessage = ({ children }: { children: string }): JSX.Element => (
-  <div className="py-6 text-center text-xs italic text-muted-foreground">{children}</div>
+  <p className="py-6 text-center text-body-lg text-muted-foreground">{children}</p>
 );

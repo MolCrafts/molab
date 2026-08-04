@@ -1,36 +1,37 @@
 /**
  * AgentSettingsViewer — read/write management for the agent runtime.
  *
- * Three top-level tabs (per agent-harness UI lockstep spec §8):
+ * Surfaces: model (Chat/Plan overview + providers), instructions, skills,
+ * MCP. Chat vs Plan is switched in the composer; this page does not duplicate
+ * that control. Network-backed tabs mount independently so a missing
+ * agent-admin service yields one quiet state instead of repeated 503s.
  *
- *   - Agent          — agent-core configuration: instructions, slash
- *                      commands, native tools (stacked sections).
- *   - Model providers — LLM provider/model + API key (registry-driven).
- *   - Tool sources    — pluggable tool sources (today: MCP servers).
- *
- * The tab descriptors live in `agent_settings/tabs.ts` so they can be
- * unit-tested without pulling in the full component graph.
+ * Tab descriptors live in `agent_settings/tabs.ts` for unit tests without
+ * the full component graph.
  */
 
 import {
   AlertCircle,
+  Bot,
+  BrainCircuit,
   CheckCircle2,
+  ChevronRight,
   Cpu,
   Database,
   Eye,
   EyeOff,
   FileText,
+  Pencil,
   PlayCircle,
   Plus,
   Settings,
   Slash,
   Trash2,
-  Wrench,
   Zap,
 } from "lucide-react";
-import type { JSX } from "react";
-import { useCallback, useEffect, useState } from "react";
-import { EntityPage } from "@/app/components/entity";
+import type { JSX, ReactNode } from "react";
+import { useCallback, useEffect, useId, useMemo, useState } from "react";
+import { EmptyState, EntityPage } from "@/app/components/entity";
 import { McpServersTab } from "@/app/renderers/agent_settings/McpServersTab";
 import {
   baseUrlPlaceholder,
@@ -40,35 +41,33 @@ import {
   supportsBaseUrl,
 } from "@/app/renderers/agent_settings/providerRegistry";
 import { AGENT_SETTINGS_TABS, type AgentSettingsTabDef } from "@/app/renderers/agent_settings/tabs";
+import { UnavailableCapability } from "@/app/renderers/agent_settings/UnavailableCapability";
+import { AgentUnavailableError, resetAgentProbes } from "@/app/state/agentProbe";
 import {
   type ApiAgentProvider,
   type ApiAgentProviderTestResult,
-  type ApiAgentTool,
-  type ApiAgentToolList,
-  type ApiMcpToolGroup,
+  type ApiModelTier,
+  type ApiProviderConfiguration,
   type ApiProviderName,
   type ApiSkill,
+  type ApiTierModels,
   agentAdminApi,
-  isMcpSource,
-  mcpSource,
-  NATIVE_SOURCE,
   type ProviderUpdateInput,
   RESERVED_SLASH_NAMES,
   type SkillUpsertInput,
   SLASH_NAME_PATTERN,
 } from "@/app/state/api";
-import { onMcpConfigChanged } from "@/app/state/mcpEvents";
-import { useNavigationState } from "@/app/state/useNavigationState";
-import type { WorkspaceSnapshot } from "@/app/types";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Code as InlineCode } from "@/components/ui/code";
+import { ConfirmDialog } from "@/components/ui/confirm-dialog";
 import {
-  Accordion,
-  AccordionContent,
-  AccordionItem,
-  AccordionTrigger,
-} from "@/components/ui/accordion";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -80,6 +79,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { WorkbenchAction, WorkbenchIconAction, WorkbenchTag } from "@/components/workbench";
 
 interface SkillFormState {
   name: string;
@@ -144,15 +144,14 @@ const validateSlashName = (name: string): string | null => {
 };
 
 interface AgentSettingsViewerProps {
-  /** Workspace snapshot — required for shared header navigation. */
-  snapshot: WorkspaceSnapshot;
   onLaunchSession?: (sessionId: string) => void;
 }
 
 const TAB_ICON: Record<AgentSettingsTabDef["value"], typeof Settings> = {
-  agent: Settings,
-  providers: Cpu,
-  "tool-sources": Database,
+  model: Cpu,
+  instructions: FileText,
+  skills: Slash,
+  mcp: Database,
 };
 
 const renderTabContent = (
@@ -160,20 +159,26 @@ const renderTabContent = (
   onLaunchSession?: (sessionId: string) => void,
 ): JSX.Element => {
   switch (contentKey) {
-    case "agent-core":
-      return <AgentCoreTab onLaunchSession={onLaunchSession} />;
     case "providers-form":
       return <ProviderTab />;
+    case "instructions-form":
+      return (
+        <SettingsScroll>
+          <InstructionsTab />
+        </SettingsScroll>
+      );
+    case "skills-list":
+      return (
+        <SettingsScroll wide>
+          <SkillsTab onLaunchSession={onLaunchSession} />
+        </SettingsScroll>
+      );
     case "mcp-servers":
       return <McpServersTab />;
   }
 };
 
-export const AgentSettingsViewer = ({
-  snapshot,
-  onLaunchSession,
-}: AgentSettingsViewerProps): JSX.Element => {
-  const { breadcrumbs, canNavigateUp, navigateUp } = useNavigationState(snapshot);
+export const AgentSettingsViewer = ({ onLaunchSession }: AgentSettingsViewerProps): JSX.Element => {
   const tabs = AGENT_SETTINGS_TABS.map((def) => {
     const Icon = TAB_ICON[def.value];
     return {
@@ -188,66 +193,40 @@ export const AgentSettingsViewer = ({
   });
   return (
     <EntityPage
-      breadcrumbs={breadcrumbs}
-      canNavigateUp={canNavigateUp}
-      onNavigateUp={navigateUp}
       icon={Settings}
       title="Agent settings"
-      subtitle="Agent core, model providers, tool sources"
+      subtitle="Model, instructions, skills, MCP tools, and knowledge package scope"
       tabs={tabs}
     />
   );
 };
 
-// ─── Agent core tab (instructions + commands + native tools, stacked) ──────
-
-interface AgentCoreTabProps {
-  onLaunchSession?: (sessionId: string) => void;
-}
-
-const AgentCoreTab = ({ onLaunchSession }: AgentCoreTabProps): JSX.Element => {
-  return (
-    <div className="space-y-6">
-      <section aria-labelledby="agent-core-instructions">
-        <div className="mb-2 flex items-center gap-2">
-          <FileText className="h-4 w-4 text-muted-foreground" />
-          <h2 id="agent-core-instructions" className="text-base font-semibold">
-            Instructions
-          </h2>
-        </div>
-        <InstructionsTab />
-      </section>
-
-      <section aria-labelledby="agent-core-commands">
-        <div className="mb-2 flex items-center gap-2">
-          <Slash className="h-4 w-4 text-muted-foreground" />
-          <h2 id="agent-core-commands" className="text-base font-semibold">
-            Commands
-          </h2>
-        </div>
-        <CommandsTab onLaunchSession={onLaunchSession} />
-      </section>
-
-      <section aria-labelledby="agent-core-tools">
-        <div className="mb-2 flex items-center gap-2">
-          <Wrench className="h-4 w-4 text-muted-foreground" />
-          <h2 id="agent-core-tools" className="text-base font-semibold">
-            Native tools
-          </h2>
-        </div>
-        <ToolsTab />
-      </section>
+const SettingsScroll = ({
+  children,
+  wide = false,
+}: {
+  children: React.ReactNode;
+  wide?: boolean;
+}) => (
+  <ScrollArea className="flex-1">
+    <div className={`mx-auto w-full ${wide ? "max-w-5xl" : "max-w-4xl"} px-4 py-5 sm:px-6 sm:py-6`}>
+      {children}
     </div>
-  );
-};
+  </ScrollArea>
+);
 
 // ─── Provider tab ──────────────────────────────────────────────────────────
 //
-// Field schema, labels, and per-provider hints are owned by
-// `providerRegistry.ts` (registry-driven per spec §7.1 / ac-005). This
-// file holds no provider-name literals as switching keys; new providers
-// are introduced by shipping a model plugin and updating the registry,
-// not by editing this component.
+// Layout (user-facing):
+//   1. Providers — API keys / base URLs (vendors)
+//   2. Agents — which model Chat / Plan call (maps to router tiers)
+//
+// Wire mapping (unchanged backend):
+//   Chat + Plan review  → models.default (+ legacy agent.model)
+//   Plan authoring      → models.heavy
+//   Light routing       → models.cheap
+//
+// Field schema / labels live in `providerRegistry.ts`.
 
 const providerLabel = (registry: ProviderRegistryResponse, name: string): string =>
   findRegistryEntry(registry, name)?.label ?? name;
@@ -255,50 +234,55 @@ const providerLabel = (registry: ProviderRegistryResponse, name: string): string
 const providerModelHint = (registry: ProviderRegistryResponse, name: string): string =>
   findRegistryEntry(registry, name)?.modelHint ?? "";
 
+/** UI rows for agent model assignment (not the internal tier jargon). */
+const AGENT_MODEL_ROWS: readonly {
+  tier: ApiModelTier;
+  agent: "Chat" | "Plan";
+  label: string;
+}[] = [
+  { tier: "default", agent: "Chat", label: "Model" },
+  { tier: "heavy", agent: "Plan", label: "Authoring" },
+  { tier: "cheap", agent: "Plan", label: "Light" },
+];
+
+const emptyTierModels = (): ApiTierModels => ({ cheap: "", default: "", heavy: "" });
+
+/** Split ``provider:model``; bare ids use ``fallbackProvider``. */
+const parseQualifiedModel = (
+  value: string,
+  fallbackProvider: ApiProviderName | "",
+): { provider: ApiProviderName | ""; modelId: string } => {
+  const text = value.trim();
+  if (text.includes(":")) {
+    const [p, ...rest] = text.split(":");
+    return { provider: p as ApiProviderName, modelId: rest.join(":") };
+  }
+  return { provider: fallbackProvider, modelId: text };
+};
+
+const qualifyModel = (provider: string, modelId: string): string => {
+  const id = modelId.trim();
+  if (!id) return "";
+  if (id.includes(":")) return id;
+  return provider ? `${provider}:${id}` : id;
+};
+
 const ProviderTab = (): JSX.Element => {
-  // Until backend Phase 3 ships `/api/agent/admin/providers`, the UI
-  // bootstraps from the bundled defaults. Once the route is live and
-  // wired through `agentAdminApi`, this becomes the fallback while the
-  // network response is in flight.
   const registry = DEFAULT_PROVIDER_REGISTRY;
   const [config, setConfig] = useState<ApiAgentProvider | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [draft, setDraft] = useState<{
-    provider: ApiProviderName;
-    model: string;
-    baseUrl: string;
-    apiKey: string;
-    revealKey: boolean;
-  }>({
-    // Initial provider comes from the registry, not a literal — adding a
-    // new provider in the registry shifts the default automatically.
-    provider: DEFAULT_PROVIDER_REGISTRY.providers[0].name as ApiProviderName,
-    model: "",
-    baseUrl: "",
-    apiKey: "",
-    revealKey: false,
-  });
-  const [saving, setSaving] = useState(false);
-  const [saveOk, setSaveOk] = useState(false);
-  const [testing, setTesting] = useState(false);
-  const [testResult, setTestResult] = useState<ApiAgentProviderTestResult | null>(null);
+  const [unavailable, setUnavailable] = useState(false);
 
   const refresh = useCallback(async () => {
     setLoading(true);
     setError(null);
+    setUnavailable(false);
     try {
-      const next = await agentAdminApi.getProvider();
-      setConfig(next);
-      setDraft((d) => ({
-        ...d,
-        provider: next.provider,
-        model: next.model,
-        baseUrl: next.baseUrl,
-        // Preserve any pending key the user typed; reset only when initial load.
-      }));
+      setConfig(await agentAdminApi.getProvider());
     } catch (err) {
-      setError(String(err));
+      if (err instanceof AgentUnavailableError) setUnavailable(true);
+      else setError(String(err));
     } finally {
       setLoading(false);
     }
@@ -308,292 +292,404 @@ const ProviderTab = (): JSX.Element => {
     void refresh();
   }, [refresh]);
 
-  const handleSave = useCallback(async () => {
-    setSaving(true);
-    setError(null);
-    setSaveOk(false);
-    setTestResult(null);
-    try {
-      const patch: ProviderUpdateInput = {
-        provider: draft.provider,
-        model: draft.model.trim(),
-        baseUrl: draft.baseUrl.trim(),
-      };
-      // Only send apiKey if user actually typed one. Empty string clears.
-      if (draft.apiKey !== "") {
-        patch.apiKey = draft.apiKey;
-      }
-      const updated = await agentAdminApi.updateProvider(patch);
-      setConfig(updated);
-      setDraft((d) => ({
-        ...d,
-        apiKey: "", // clear after save so the field doesn't linger
-        revealKey: false,
-        provider: updated.provider,
-        model: updated.model,
-        baseUrl: updated.baseUrl,
-      }));
-      setSaveOk(true);
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setSaving(false);
-    }
-  }, [draft]);
-
-  const handleClearKey = useCallback(async () => {
-    if (!window.confirm("Clear the stored API key? Sessions will fall back to env vars.")) return;
-    setSaving(true);
-    setError(null);
-    setSaveOk(false);
-    setTestResult(null);
-    try {
-      const updated = await agentAdminApi.updateProvider({ apiKey: "" });
-      setConfig(updated);
-      setDraft((d) => ({ ...d, apiKey: "", revealKey: false }));
-      setSaveOk(true);
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setSaving(false);
-    }
-  }, []);
-
-  const handleTest = useCallback(async () => {
-    setTesting(true);
-    setTestResult(null);
-    setError(null);
-    try {
-      const patch: ProviderUpdateInput = {
-        provider: draft.provider,
-        model: draft.model.trim(),
-        baseUrl: draft.baseUrl.trim(),
-      };
-      if (draft.apiKey !== "") {
-        patch.apiKey = draft.apiKey;
-      }
-      setTestResult(await agentAdminApi.testProvider(patch));
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setTesting(false);
-    }
-  }, [draft]);
-
   if (loading) {
     return (
-      <div className="px-4 pb-4 pt-2 text-sm text-muted-foreground">Loading provider config…</div>
+      <div className="px-4 py-3 text-body-lg text-muted-foreground">Loading model config…</div>
+    );
+  }
+  if (unavailable) {
+    return (
+      <SettingsScroll>
+        <UnavailableCapability
+          title="Model configuration unavailable"
+          description="This server does not expose agent model administration."
+          onRetry={() => {
+            resetAgentProbes();
+            void refresh();
+          }}
+        />
+      </SettingsScroll>
     );
   }
 
   const supported =
-    config?.supportedProviders ?? (registry.providers.map((p) => p.name) as ApiProviderName[]);
-  // The registry's field schema decides whether a provider exposes a
-  // base URL field (e.g. proxy / mirror / self-hosted gateway).
-  const showBaseUrl = supportsBaseUrl(registry, draft.provider);
+    config?.supportedProviders ??
+    (registry.providers.map((entry) => entry.name) as ApiProviderName[]);
+  const configurations = config?.configurations ?? [];
+  const globalModels = config?.models ?? emptyTierModels();
+
+  const fallbackProvider = (config?.provider as ApiProviderName) || supported[0] || "deepseek";
 
   return (
     <ScrollArea className="h-full">
-      <div className="flex flex-col gap-4 px-4 pb-6 pt-2">
-        <p className="text-sm text-muted-foreground">
-          Choose which LLM the agent should call and supply your API key. The key is stored at{" "}
-          <code className="rounded bg-muted px-1">.agent_provider.json</code> in the workspace root
-          and never leaves this machine.
-        </p>
+      <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-4 py-5 sm:px-6 sm:py-6">
+        {error && <p className="text-label text-destructive">{error}</p>}
 
-        <SavedProviderList config={config} supported={supported} />
-
-        <Card className="border-border">
-          <CardHeader className="pb-2">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-sm">Active configuration</CardTitle>
-              {config?.apiKeySet ? (
-                <Badge variant="default" className="gap-1 text-[10px]">
-                  <CheckCircle2 className="h-3 w-3" /> Key configured
-                </Badge>
-              ) : (
-                <Badge variant="secondary" className="text-[10px]">
-                  No key — falls back to env vars
-                </Badge>
-              )}
-            </div>
-          </CardHeader>
-          <CardContent className="space-y-3 pt-0">
-            <div>
-              <Label className="text-xs">Provider</Label>
-              <Select
-                value={draft.provider}
-                onValueChange={(value) =>
-                  setDraft((d) => ({ ...d, provider: value as ApiProviderName }))
-                }
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {supported.map((p) => (
-                    <SelectItem key={p} value={p}>
-                      {providerLabel(registry, p)}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div>
-              <Label className="text-xs">Model</Label>
-              <Input
-                value={draft.model}
-                onChange={(e) => setDraft({ ...draft, model: e.target.value })}
-                placeholder={providerModelHint(registry, draft.provider)}
-              />
-              <p className="mt-1 text-[10px] text-muted-foreground">
-                {providerModelHint(registry, draft.provider)}
-              </p>
-            </div>
-
-            {showBaseUrl && (
-              <div>
-                <Label className="text-xs">Base URL (optional)</Label>
-                <Input
-                  value={draft.baseUrl}
-                  onChange={(e) => setDraft({ ...draft, baseUrl: e.target.value })}
-                  placeholder={baseUrlPlaceholder(registry, draft.provider)}
-                />
-              </div>
-            )}
-
-            <div>
-              <Label className="text-xs">API key</Label>
-              <div className="flex gap-2">
-                <Input
-                  type={draft.revealKey ? "text" : "password"}
-                  value={draft.apiKey}
-                  onChange={(e) => setDraft({ ...draft, apiKey: e.target.value })}
-                  placeholder={
-                    config?.apiKeySet
-                      ? `Stored: ${config.apiKeyPreview} — type to replace`
-                      : "Paste your API key"
+        {/* 1. Vendors first */}
+        <section className="space-y-3">
+          <h2 className="text-base font-semibold">Providers</h2>
+          <div className="space-y-2">
+            {supported.map((provider) => {
+              const stored = configurations.find((entry) => entry.provider === provider);
+              const usedBy = AGENT_MODEL_ROWS.filter(({ tier }) =>
+                (globalModels[tier] || "").startsWith(`${provider}:`),
+              ).map(({ agent, label }) => `${agent} · ${label}`);
+              return (
+                <CredentialCard
+                  key={provider}
+                  provider={provider}
+                  usedByTiers={usedBy}
+                  initial={
+                    stored ?? {
+                      provider,
+                      models: emptyTierModels(),
+                      baseUrl: "",
+                      apiKeyPreview: "",
+                      apiKeySet: false,
+                    }
                   }
-                  autoComplete="off"
+                  registry={registry}
+                  onChanged={setConfig}
                 />
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  onClick={() => setDraft((d) => ({ ...d, revealKey: !d.revealKey }))}
-                  title={draft.revealKey ? "Hide" : "Reveal"}
-                >
-                  {draft.revealKey ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </Button>
-              </div>
-              <p className="mt-1 text-[10px] text-muted-foreground">
-                Leaving the field blank keeps the existing key.
-              </p>
-            </div>
+              );
+            })}
+          </div>
+        </section>
 
-            {error && <p className="text-xs text-destructive">{error}</p>}
-            {saveOk && !error && (
-              <p className="text-xs text-emerald-600">Saved. New sessions will use this config.</p>
-            )}
-
-            {testResult && <ProviderTestResult result={testResult} />}
-
-            <div className="flex flex-wrap items-center justify-between gap-2 pt-1">
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={saving || !config?.apiKeySet}
-                onClick={() => void handleClearKey()}
-              >
-                Clear stored key
-              </Button>
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={testing || saving || (!config?.apiKeySet && draft.apiKey === "")}
-                  onClick={() => void handleTest()}
-                  title="Send a minimal request to verify the key and model"
-                >
-                  <Zap className="mr-1 h-4 w-4" />
-                  {testing ? "Testing…" : "Test connection"}
-                </Button>
-                <Button size="sm" disabled={saving} onClick={() => void handleSave()}>
-                  {saving ? "Saving…" : "Save"}
-                </Button>
-              </div>
-            </div>
-          </CardContent>
-        </Card>
+        {/* 2. Per-agent model assignment */}
+        <AgentModelTable
+          supported={supported}
+          initial={globalModels}
+          fallbackProvider={fallbackProvider}
+          registry={registry}
+          onChanged={setConfig}
+        />
       </div>
     </ScrollArea>
   );
 };
 
-const SavedProviderList = ({
-  config,
+/** Per-agent model picks — Chat / Plan rows, not abstract tier names. */
+const AgentModelTable = ({
   supported,
+  initial,
+  fallbackProvider,
+  registry,
+  onChanged,
 }: {
-  config: ApiAgentProvider | null;
   supported: ApiProviderName[];
+  initial: ApiTierModels;
+  fallbackProvider: ApiProviderName;
+  registry: ProviderRegistryResponse;
+  onChanged: (config: ApiAgentProvider) => void;
 }): JSX.Element => {
+  const [rows, setRows] = useState(
+    () =>
+      Object.fromEntries(
+        AGENT_MODEL_ROWS.map(({ tier }) => {
+          const parsed = parseQualifiedModel(initial[tier] || "", fallbackProvider);
+          return [tier, parsed];
+        }),
+      ) as Record<ApiModelTier, { provider: ApiProviderName | ""; modelId: string }>,
+  );
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  const [testResult, setTestResult] = useState<ApiAgentProviderTestResult | null>(null);
+
+  useEffect(() => {
+    setRows(
+      Object.fromEntries(
+        AGENT_MODEL_ROWS.map(({ tier }) => {
+          const parsed = parseQualifiedModel(initial[tier] || "", fallbackProvider);
+          return [tier, parsed];
+        }),
+      ) as Record<ApiModelTier, { provider: ApiProviderName | ""; modelId: string }>,
+    );
+  }, [initial, fallbackProvider]);
+
+  const models: ApiTierModels = {
+    cheap: qualifyModel(rows.cheap.provider, rows.cheap.modelId),
+    default: qualifyModel(rows.default.provider, rows.default.modelId),
+    heavy: qualifyModel(rows.heavy.provider, rows.heavy.modelId),
+  };
+  const complete = AGENT_MODEL_ROWS.every(({ tier }) => models[tier].includes(":"));
+
+  const submit = async (mode: "save" | "test"): Promise<void> => {
+    setBusy(true);
+    setError(null);
+    setSaved(false);
+    setTestResult(null);
+    try {
+      // Primary (default) is also the legacy agent.model used by chat sessions.
+      const input: ProviderUpdateInput = { models, model: models.default };
+      if (mode === "test") {
+        setTestResult(await agentAdminApi.testProvider(input));
+      } else {
+        onChanged(await agentAdminApi.updateProvider(input));
+        setSaved(true);
+      }
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const chatRows = AGENT_MODEL_ROWS.filter((r) => r.agent === "Chat");
+  const planRows = AGENT_MODEL_ROWS.filter((r) => r.agent === "Plan");
+
+  const renderRow = (row: (typeof AGENT_MODEL_ROWS)[number]): JSX.Element => (
+    <div
+      key={row.tier}
+      className="grid items-center gap-2 py-2 sm:grid-cols-(--entity-meta-grid-columns) sm:gap-3"
+    >
+      <p className="text-label font-medium text-foreground">{row.label}</p>
+      <Select
+        value={rows[row.tier].provider}
+        onValueChange={(provider) =>
+          setRows((value) => ({
+            ...value,
+            [row.tier]: {
+              ...value[row.tier],
+              provider: provider as ApiProviderName,
+            },
+          }))
+        }
+      >
+        <SelectTrigger
+          className="h-control-comfortable w-full bg-muted/50 text-label"
+          aria-label={`${row.agent} ${row.label} provider`}
+        >
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          {supported.map((name) => (
+            <SelectItem key={name} value={name}>
+              {providerLabel(registry, name)}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Input
+        value={rows[row.tier].modelId}
+        onChange={(event) =>
+          setRows((value) => ({
+            ...value,
+            [row.tier]: { ...value[row.tier], modelId: event.target.value },
+          }))
+        }
+        placeholder={providerModelHint(registry, rows[row.tier].provider || fallbackProvider)}
+        className="border-0 bg-muted/50 font-mono text-label shadow-none focus-visible:ring-2 focus-visible:ring-ring/40"
+        aria-label={`${row.agent} ${row.label} model id`}
+      />
+    </div>
+  );
+
   return (
-    <Card className="border-border">
-      <CardHeader className="pb-2">
-        <CardTitle className="text-sm">Saved keys</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-1.5 pt-0">
-        {supported.map((provider) => {
-          const isActive = config?.provider === provider;
-          const hasKey = isActive && Boolean(config?.apiKeySet);
-          return (
-            <div
-              key={provider}
-              className={
-                "flex items-center gap-3 rounded-md border px-3 py-2 text-sm " +
-                (hasKey
-                  ? "border-emerald-500/40 bg-emerald-500/5"
-                  : isActive
-                    ? "border-primary/40 bg-primary/5"
-                    : "border-border/60 bg-card")
-              }
-            >
-              <div className="min-w-0 flex-1">
-                <div className="flex items-center gap-2">
-                  <span className="text-sm font-medium">
-                    {providerLabel(DEFAULT_PROVIDER_REGISTRY, provider)}
-                  </span>
-                  {isActive && (
-                    <Badge variant="outline" className="h-4 text-[10px]">
-                      Active
-                    </Badge>
-                  )}
-                </div>
-                {hasKey && config ? (
-                  <p className="mt-0.5 truncate font-mono text-[11px] text-muted-foreground">
-                    {config.model} · {config.apiKeyPreview}
-                  </p>
-                ) : (
-                  <p className="mt-0.5 text-[11px] text-muted-foreground">
-                    {isActive ? "No key saved — using env vars" : "Not configured"}
-                  </p>
-                )}
-              </div>
-              {hasKey ? (
-                <Badge variant="default" className="gap-1 text-[10px]">
-                  <CheckCircle2 className="h-3 w-3" /> Saved
-                </Badge>
-              ) : (
-                <Badge variant="secondary" className="text-[10px]">
-                  Empty
-                </Badge>
-              )}
+    <section className="space-y-3">
+      <h2 className="text-base font-semibold">Agents</h2>
+
+      <div className="space-y-0.5 bg-surface/60 px-3 py-2">
+        <div className="flex items-center gap-2 py-1.5">
+          <Bot className="size-3.5 text-muted-foreground" aria-hidden />
+          <h3 className="text-body-lg font-medium">Chat</h3>
+        </div>
+        {chatRows.map(renderRow)}
+      </div>
+
+      <div className="space-y-0.5 bg-info-soft/20 px-3 py-2">
+        <div className="flex items-center gap-2 py-1.5">
+          <BrainCircuit className="size-3.5 text-info" aria-hidden />
+          <h3 className="text-body-lg font-medium">Plan</h3>
+        </div>
+        {planRows.map(renderRow)}
+      </div>
+
+      {error && <p className="text-label text-destructive">{error}</p>}
+      {saved && (
+        <p className="flex items-center gap-1 text-label text-success-foreground">
+          <CheckCircle2 className="size-3.5" /> Saved.
+        </p>
+      )}
+      {testResult && <ProviderTestResult result={testResult} />}
+      <div className="flex justify-end gap-2">
+        <WorkbenchIconAction
+          label="Test provider configuration"
+          disabled={busy || !complete}
+          onClick={() => void submit("test")}
+        >
+          <Zap className="size-4" />
+        </WorkbenchIconAction>
+        <WorkbenchAction
+          kind="primary"
+          size="compact"
+          disabled={busy || !complete}
+          onClick={() => void submit("save")}
+        >
+          {busy ? "Saving…" : "Save"}
+        </WorkbenchAction>
+      </div>
+    </section>
+  );
+};
+
+/** Per-provider API key / base URL only. */
+const CredentialCard = ({
+  provider,
+  usedByTiers,
+  initial,
+  registry,
+  onChanged,
+}: {
+  provider: ApiProviderName;
+  usedByTiers: string[];
+  initial: ApiProviderConfiguration;
+  registry: ProviderRegistryResponse;
+  onChanged: (config: ApiAgentProvider) => void;
+}): JSX.Element => {
+  const fieldId = useId();
+  const baseUrlId = `${fieldId}-base-url`;
+  const apiKeyId = `${fieldId}-api-key`;
+  const [expanded, setExpanded] = useState(usedByTiers.length > 0 || initial.apiKeySet);
+  const [baseUrl, setBaseUrl] = useState(initial.baseUrl);
+  const [apiKey, setApiKey] = useState("");
+  const [revealKey, setRevealKey] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [saved, setSaved] = useState(false);
+  const [confirmClearKey, setConfirmClearKey] = useState(false);
+  const showBaseUrl = supportsBaseUrl(registry, provider);
+
+  useEffect(() => {
+    setBaseUrl(initial.baseUrl);
+  }, [initial]);
+
+  const submit = async (mode: "save" | "clear"): Promise<void> => {
+    setBusy(true);
+    setError(null);
+    setSaved(false);
+    try {
+      const input: ProviderUpdateInput = {
+        provider,
+        baseUrl: baseUrl.trim(),
+      };
+      if (mode === "clear") input.apiKey = "";
+      else if (apiKey !== "") input.apiKey = apiKey;
+      onChanged(await agentAdminApi.updateProvider(input));
+      setApiKey("");
+      setRevealKey(false);
+      setSaved(true);
+    } catch (err) {
+      setError(String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="bg-surface/60">
+      <header className="px-3 py-2.5">
+        <WorkbenchAction
+          kind="ghost"
+          size="content"
+          type="button"
+          className="flex w-full items-center gap-3 text-left"
+          aria-expanded={expanded}
+          onClick={() => setExpanded((value) => !value)}
+        >
+          <Cpu className="size-4 text-muted-foreground" />
+          <div className="min-w-0 flex-1">
+            <h3 className="text-body-lg font-medium text-foreground">
+              {providerLabel(registry, provider)}
+            </h3>
+            <p className="mt-0.5 truncate text-label text-muted-foreground">
+              {initial.apiKeySet ? `Key ${initial.apiKeyPreview}` : "No stored key"}
+              {usedByTiers.length > 0 ? ` · ${usedByTiers.join(" · ")}` : ""}
+            </p>
+          </div>
+          {usedByTiers.length > 0 && <WorkbenchTag className="text-micro">In use</WorkbenchTag>}
+          <ChevronRight className={`size-4 transition-transform ${expanded ? "rotate-90" : ""}`} />
+        </WorkbenchAction>
+      </header>
+      {expanded && (
+        <div className="space-y-4 px-3 pb-3 pt-1">
+          {showBaseUrl && (
+            <div>
+              <Label htmlFor={baseUrlId} className="text-label">
+                Base URL
+              </Label>
+              <Input
+                id={baseUrlId}
+                value={baseUrl}
+                onChange={(event) => setBaseUrl(event.target.value)}
+                placeholder={baseUrlPlaceholder(registry, provider)}
+              />
             </div>
-          );
-        })}
-      </CardContent>
-    </Card>
+          )}
+          <div>
+            <Label htmlFor={apiKeyId} className="text-label">
+              API key
+            </Label>
+            <div className="flex gap-2">
+              <Input
+                id={apiKeyId}
+                type={revealKey ? "text" : "password"}
+                value={apiKey}
+                onChange={(event) => setApiKey(event.target.value)}
+                placeholder={
+                  initial.apiKeySet
+                    ? `Stored: ${initial.apiKeyPreview} — type to replace`
+                    : "Paste API key"
+                }
+                autoComplete="off"
+              />
+              <WorkbenchIconAction
+                label={revealKey ? "Hide API key" : "Show API key"}
+                kind="ghost"
+                type="button"
+                onClick={() => setRevealKey((value) => !value)}
+              >
+                {revealKey ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+              </WorkbenchIconAction>
+            </div>
+          </div>
+          {error && <p className="text-label text-destructive">{error}</p>}
+          {saved && (
+            <p className="flex items-center gap-1 text-label text-success-foreground">
+              <CheckCircle2 className="size-3.5" /> Credentials saved.
+            </p>
+          )}
+          <ConfirmDialog
+            open={confirmClearKey}
+            onOpenChange={setConfirmClearKey}
+            title={`Clear ${providerLabel(registry, provider)} API key?`}
+            description="This provider will fall back to its environment variable."
+            confirmLabel="Clear key"
+            destructive
+            onConfirm={() => void submit("clear")}
+          />
+          <div className="flex flex-wrap justify-between gap-2">
+            <WorkbenchIconAction
+              label="Clear API key"
+              className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+              disabled={busy || !initial.apiKeySet}
+              onClick={() => setConfirmClearKey(true)}
+            >
+              <Trash2 className="size-4" />
+            </WorkbenchIconAction>
+            <WorkbenchAction
+              kind="primary"
+              size="compact"
+              disabled={busy}
+              onClick={() => void submit("save")}
+            >
+              {busy ? "Saving…" : "Save credentials"}
+            </WorkbenchAction>
+          </div>
+        </div>
+      )}
+    </section>
   );
 };
 
@@ -602,26 +698,26 @@ const ProviderTestResult = ({ result }: { result: ApiAgentProviderTestResult }):
   return (
     <div
       className={
-        "rounded border px-3 py-2 text-xs " +
+        "border-y px-3 py-2 text-label " +
         (ok
-          ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-700"
+          ? "border-success/30 bg-success-soft text-success-foreground"
           : "border-destructive/40 bg-destructive/10 text-destructive")
       }
     >
       <div className="flex items-center gap-2 font-medium">
         {ok ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
         {ok ? "Connection OK" : "Connection failed"}
-        <span className="ml-auto font-mono text-[10px] opacity-80">
+        <span className="ml-auto font-mono text-micro opacity-80">
           {result.provider}:{result.model} · {result.latencyMs} ms
         </span>
       </div>
       {ok && result.reply && (
-        <pre className="mt-1 whitespace-pre-wrap break-words font-mono text-[11px] opacity-80">
+        <pre className="mt-1 whitespace-pre-wrap break-words font-mono text-micro opacity-80">
           {result.reply}
         </pre>
       )}
       {!ok && result.error && (
-        <p className="mt-1 break-words font-mono text-[11px]">{result.error}</p>
+        <p className="mt-1 break-words font-mono text-micro">{result.error}</p>
       )}
     </div>
   );
@@ -641,6 +737,7 @@ const InstructionsTab = (): JSX.Element => {
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [unavailable, setUnavailable] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -653,7 +750,9 @@ const InstructionsTab = (): JSX.Element => {
         setDraft(next.instructions);
       })
       .catch((err) => {
-        if (!cancelled) setError(String(err));
+        if (cancelled) return;
+        if (err instanceof AgentUnavailableError) setUnavailable(true);
+        else setError(String(err));
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -678,8 +777,9 @@ const InstructionsTab = (): JSX.Element => {
     }
   }, [draft]);
 
+  const [confirmClear, setConfirmClear] = useState(false);
+
   const handleClear = useCallback(async () => {
-    if (!window.confirm("Clear the workspace-default instructions?")) return;
     setSaving(true);
     setError(null);
     try {
@@ -695,68 +795,206 @@ const InstructionsTab = (): JSX.Element => {
   }, []);
 
   if (loading) {
-    return <div className="px-4 pt-2 text-sm text-muted-foreground">Loading instructions…</div>;
+    return <p className="text-body-lg text-muted-foreground">Loading instructions…</p>;
+  }
+
+  if (unavailable) {
+    return (
+      <UnavailableCapability
+        title="Workspace instructions unavailable"
+        description="This server does not expose editable agent instructions. Add instructions through the server configuration, or install the agent administration dependencies."
+        onRetry={() => {
+          resetAgentProbes();
+          setUnavailable(false);
+          setLoading(true);
+          agentAdminApi
+            .getProvider()
+            .then((next) => {
+              setConfig(next);
+              setDraft(next.instructions);
+            })
+            .catch((err) => {
+              if (err instanceof AgentUnavailableError) setUnavailable(true);
+              else setError(String(err));
+            })
+            .finally(() => setLoading(false));
+        }}
+      />
+    );
   }
 
   const dirty = (config?.instructions ?? "") !== draft;
 
   return (
-    <ScrollArea className="h-full">
-      <div className="flex flex-col gap-3 px-4 pb-6 pt-2">
-        <p className="text-sm text-muted-foreground">
-          Workspace-default system prompt addendum. Appended to the molexp built-in preamble for
-          every new session. Skills can layer additional instructions on top, and individual
-          sessions may override the whole stack via the chat hero.
-        </p>
+    <div className="flex flex-col gap-3">
+      <p className="text-body-lg text-muted-foreground">
+        Workspace-default system prompt addendum. Appended to the molexp built-in preamble for every
+        new session. Skills can layer additional instructions on top, and individual sessions may
+        override the whole stack from the chat input.
+      </p>
 
-        <Card className="border-border">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm">Workspace instructions</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3 pt-0">
-            <Textarea
-              rows={10}
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              placeholder={
-                "Always cite source data with project/experiment/run ids.\n" +
-                "Prefer existing workflow templates before writing new code."
-              }
-              className="font-mono text-xs"
-            />
-            <p className="text-[10px] text-muted-foreground">
-              Saved alongside the provider credentials; never sent to the model directly — only
-              attached as the agent's system prompt.
+      <section className="space-y-3 border-t border-border/60 pt-3">
+        <header>
+          <h3 className="text-body-lg font-medium text-foreground">Workspace instructions</h3>
+        </header>
+        <div className="space-y-3">
+          <Textarea
+            rows={10}
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            placeholder={
+              "Always cite source data with project/experiment/run ids.\n" +
+              "Prefer existing workflow templates before writing new code."
+            }
+            className="font-mono text-label"
+          />
+          <p className="text-micro text-muted-foreground">
+            Saved alongside the provider credentials; never sent to the model directly — only
+            attached as the agent's system prompt.
+          </p>
+          {error && <p className="text-label text-destructive">{error}</p>}
+          {savedAt && !error && (
+            <p className="flex items-center gap-1 text-label text-success-foreground">
+              <CheckCircle2 className="h-3.5 w-3.5 text-success" />
+              Saved. New sessions will use these instructions.
             </p>
-            {error && <p className="text-xs text-destructive">{error}</p>}
-            {savedAt && !error && (
-              <p className="text-xs text-emerald-600">
-                Saved. New sessions will use these instructions.
-              </p>
-            )}
-            <div className="flex justify-between gap-2 pt-1">
-              <Button
-                variant="ghost"
-                size="sm"
-                disabled={saving || (config?.instructions ?? "") === ""}
-                onClick={() => void handleClear()}
-              >
-                Clear
-              </Button>
-              <Button size="sm" disabled={saving || !dirty} onClick={() => void handleSave()}>
-                {saving ? "Saving…" : "Save"}
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
-    </ScrollArea>
+          )}
+          <ConfirmDialog
+            open={confirmClear}
+            onOpenChange={setConfirmClear}
+            title="Clear the workspace instructions?"
+            description="New sessions will start from the molexp built-in preamble only."
+            confirmLabel="Clear instructions"
+            destructive
+            onConfirm={() => void handleClear()}
+          />
+          <div className="flex justify-between gap-2 pt-1">
+            <WorkbenchIconAction
+              label="Clear workspace instructions"
+              className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+              disabled={saving || (config?.instructions ?? "") === ""}
+              onClick={() => setConfirmClear(true)}
+            >
+              <Trash2 className="size-4" />
+            </WorkbenchIconAction>
+            <WorkbenchAction
+              kind="primary"
+              size="compact"
+              disabled={saving || !dirty}
+              onClick={() => void handleSave()}
+            >
+              {saving ? "Saving…" : "Save"}
+            </WorkbenchAction>
+          </div>
+        </div>
+      </section>
+    </div>
   );
 };
 
-// ─── Commands tab (formerly Skills) ────────────────────────────────────────
+// ─── Skills ────────────────────────────────────────────────────────────────
 
-const CommandsTab = ({
+/** Unique `{{placeholder}}` names in a goal template, in first-seen order. */
+const templatePlaceholders = (goalTemplate: string): string[] =>
+  Array.from(goalTemplate.matchAll(/\{\{\s*([A-Za-z_]\w*)\s*\}\}/g))
+    .map((m) => m[1])
+    .filter((v, i, a) => a.indexOf(v) === i);
+
+/**
+ * Parameter form shown before launching a skill whose goal template
+ * carries `{{placeholders}}` — replaces the old chain of window.prompt
+ * calls with one in-app dialog.
+ */
+const SkillLaunchDialog = ({
+  skill,
+  onOpenChange,
+  onLaunch,
+}: {
+  skill: ApiSkill;
+  onOpenChange: (open: boolean) => void;
+  onLaunch: (params: Record<string, string>) => Promise<void>;
+}): JSX.Element => {
+  const placeholders = useMemo(() => templatePlaceholders(skill.goalTemplate), [skill]);
+  const [values, setValues] = useState<Record<string, string>>({});
+  const [launching, setLaunching] = useState(false);
+
+  const handleLaunch = async (): Promise<void> => {
+    setLaunching(true);
+    try {
+      await onLaunch(values);
+      onOpenChange(false);
+    } finally {
+      setLaunching(false);
+    }
+  };
+
+  return (
+    <Dialog open onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Launch {skill.name}</DialogTitle>
+          <DialogDescription className="font-mono text-label">
+            {skill.goalTemplate}
+          </DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          {placeholders.map((key) => (
+            <div key={key}>
+              <Label htmlFor={`param-${key}`} className="font-mono text-label">
+                {`{{${key}}}`}
+              </Label>
+              <Input
+                id={`param-${key}`}
+                value={values[key] ?? ""}
+                onChange={(e) => setValues((v) => ({ ...v, [key]: e.target.value }))}
+                autoFocus={key === placeholders[0]}
+              />
+            </div>
+          ))}
+        </div>
+        <DialogFooter>
+          <WorkbenchAction kind="ghost" size="compact" onClick={() => onOpenChange(false)}>
+            Cancel
+          </WorkbenchAction>
+          <WorkbenchAction
+            kind="primary"
+            size="compact"
+            disabled={launching}
+            onClick={() => void handleLaunch()}
+          >
+            <PlayCircle className="mr-1 h-4 w-4" />
+            {launching ? "Launching…" : "Launch session"}
+          </WorkbenchAction>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+};
+
+const CapabilityListHeader = ({
+  title,
+  description,
+  count,
+  actions,
+}: {
+  title: string;
+  description: ReactNode;
+  count: string;
+  actions: ReactNode;
+}): JSX.Element => (
+  <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
+    <div className="min-w-0 space-y-1">
+      <div className="flex items-center gap-2">
+        <h3 className="text-body-lg font-medium text-foreground">{title}</h3>
+        <WorkbenchTag className="text-micro font-normal">{count}</WorkbenchTag>
+      </div>
+      <div className="max-w-2xl text-body-lg text-muted-foreground">{description}</div>
+    </div>
+    <div className="flex shrink-0 items-center gap-2">{actions}</div>
+  </div>
+);
+
+const SkillsTab = ({
   onLaunchSession,
 }: {
   onLaunchSession?: (sessionId: string) => void;
@@ -766,6 +1004,8 @@ const CommandsTab = ({
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<ApiSkill | null>(null);
   const [showForm, setShowForm] = useState(false);
+  const [deleting, setDeleting] = useState<ApiSkill | null>(null);
+  const [launchingSkill, setLaunchingSkill] = useState<ApiSkill | null>(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -785,7 +1025,6 @@ const CommandsTab = ({
 
   const handleDelete = useCallback(
     async (skill: ApiSkill) => {
-      if (!window.confirm(`Delete skill "${skill.name}"?`)) return;
       try {
         await agentAdminApi.deleteSkill(skill.id);
         await refresh();
@@ -796,17 +1035,8 @@ const CommandsTab = ({
     [refresh],
   );
 
-  const handleLaunch = useCallback(
-    async (skill: ApiSkill) => {
-      const params: Record<string, string> = {};
-      const placeholders = Array.from(skill.goalTemplate.matchAll(/\{\{\s*([A-Za-z_]\w*)\s*\}\}/g))
-        .map((m) => m[1])
-        .filter((v, i, a) => a.indexOf(v) === i);
-      for (const key of placeholders) {
-        const value = window.prompt(`Value for {{${key}}}:`);
-        if (value === null) return;
-        params[key] = value;
-      }
+  const launchWithParams = useCallback(
+    async (skill: ApiSkill, params: Record<string, string>) => {
       try {
         const session = await agentAdminApi.launchSkill(skill.id, params);
         onLaunchSession?.(session.sessionId);
@@ -817,25 +1047,42 @@ const CommandsTab = ({
     [onLaunchSession],
   );
 
+  const handleLaunch = useCallback(
+    (skill: ApiSkill): void => {
+      if (templatePlaceholders(skill.goalTemplate).length === 0) {
+        void launchWithParams(skill, {});
+        return;
+      }
+      setLaunchingSkill(skill);
+    },
+    [launchWithParams],
+  );
+
   return (
-    <div className="flex h-full flex-col px-4 pb-4">
-      <div className="mb-3 flex items-center justify-between gap-3">
-        <p className="text-sm text-muted-foreground">
-          Saved goal templates. Use <code className="rounded bg-muted px-1">{"{{name}}"}</code>{" "}
-          placeholders for parameters; commands with a slash name are also invokable from the chat
-          input as <code className="rounded bg-muted px-1">/&lt;name&gt;</code>.
-        </p>
-        <Button
-          size="sm"
-          onClick={() => {
-            setEditing(null);
-            setShowForm(true);
-          }}
-        >
-          <Plus className="mr-1 h-4 w-4" /> New command
-        </Button>
-      </div>
-      {error && <p className="mb-2 text-xs text-destructive">{error}</p>}
+    <div className="flex flex-col">
+      <CapabilityListHeader
+        title="Skills"
+        description={
+          <>
+            Reusable workflows and domain instructions. Use
+            <InlineCode className="mx-1 rounded-control bg-muted px-1">{"{{name}}"}</InlineCode>
+            placeholders; a slash name makes the skill invokable from chat.
+          </>
+        }
+        count={`${skills.length} configured`}
+        actions={
+          <WorkbenchIconAction
+            label="New skill"
+            onClick={() => {
+              setEditing(null);
+              setShowForm(true);
+            }}
+          >
+            <Plus className="h-4 w-4" />
+          </WorkbenchIconAction>
+        }
+      />
+      {error && <p className="mb-2 text-label text-destructive">{error}</p>}
       {showForm && (
         <SkillForm
           initial={editing}
@@ -850,94 +1097,112 @@ const CommandsTab = ({
           }}
         />
       )}
-      <ScrollArea className="mt-2 flex-1">
-        <div className="flex flex-col gap-2 pr-2">
-          {loading && <p className="text-sm text-muted-foreground">Loading…</p>}
-          {!loading && skills.length === 0 && (
-            <p className="text-sm text-muted-foreground">
-              No skills yet. Create one to save common goals for one-click launches.
-            </p>
-          )}
-          {skills.map((skill) => (
-            <Card key={skill.id} className="border-border">
-              <CardHeader className="pb-2">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex items-center gap-2 min-w-0">
-                    {skill.slashName ? (
-                      <Badge
-                        variant="outline"
-                        className="font-mono text-[11px]"
-                        title="Type this in chat to invoke"
-                      >
-                        /{skill.slashName}
-                      </Badge>
-                    ) : (
-                      <Badge variant="secondary" className="text-[10px]">
-                        launcher only
-                      </Badge>
-                    )}
-                    <CardTitle className="truncate text-sm">{skill.name}</CardTitle>
-                    {skill.defaultPlanMode && (
-                      <Badge variant="outline" className="text-[10px]">
-                        plan
-                      </Badge>
-                    )}
-                  </div>
-                  <div className="flex gap-1">
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => void handleLaunch(skill)}
-                      title="Launch session from this skill"
+      <ConfirmDialog
+        open={deleting !== null}
+        onOpenChange={(open) => {
+          if (!open) setDeleting(null);
+        }}
+        title={`Delete "${deleting?.name ?? ""}"?`}
+        description="The reusable workflow and its slash name are removed. Existing tasks are not affected."
+        confirmLabel="Delete skill"
+        destructive
+        onConfirm={() => {
+          if (deleting) void handleDelete(deleting);
+          setDeleting(null);
+        }}
+      />
+      {launchingSkill && (
+        <SkillLaunchDialog
+          skill={launchingSkill}
+          onOpenChange={(open) => {
+            if (!open) setLaunchingSkill(null);
+          }}
+          onLaunch={(params) => launchWithParams(launchingSkill, params)}
+        />
+      )}
+      <div className="flex flex-col gap-2">
+        {loading && <p className="text-body-lg text-muted-foreground">Loading…</p>}
+        {!loading && skills.length === 0 && (
+          <EmptyState
+            density="compact"
+            icon={<Slash className="h-5 w-5" />}
+            title="No skills yet"
+            description="Create a reusable workflow to launch it here or invoke it as /name from chat."
+          />
+        )}
+        {skills.map((skill) => (
+          <section key={skill.id} className="bg-surface/60">
+            <header className="pb-2 px-3 pt-3">
+              <div className="flex items-start justify-between gap-2">
+                <div className="flex items-center gap-2 min-w-0">
+                  {skill.slashName ? (
+                    <WorkbenchTag
+                      meaning="metadata"
+                      className="font-mono text-micro"
+                      title="Type this in chat to invoke"
                     >
-                      <PlayCircle className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => {
-                        setEditing(skill);
-                        setShowForm(true);
-                      }}
-                      title="Edit"
-                    >
-                      Edit
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => void handleDelete(skill)}
-                      title="Delete"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
+                      /{skill.slashName}
+                    </WorkbenchTag>
+                  ) : (
+                    <WorkbenchTag className="text-micro">launcher only</WorkbenchTag>
+                  )}
+                  <h3 className="truncate text-body-lg font-medium text-foreground">
+                    {skill.name}
+                  </h3>
+                  {skill.defaultPlanMode && (
+                    <WorkbenchTag meaning="metadata" className="text-micro">
+                      plan
+                    </WorkbenchTag>
+                  )}
                 </div>
-              </CardHeader>
-              <CardContent className="pt-0">
-                {skill.description && (
-                  <p className="mb-2 text-xs text-muted-foreground">{skill.description}</p>
-                )}
-                <pre className="mb-2 whitespace-pre-wrap rounded bg-muted px-2 py-1 text-xs">
-                  {skill.goalTemplate}
-                </pre>
-                {skill.instructions && (
-                  <p className="mb-2 text-[11px] italic text-muted-foreground">
-                    +{skill.instructions.length} chars of additional instructions
-                  </p>
-                )}
-                <div className="flex flex-wrap gap-1">
-                  {skill.tags.map((tag) => (
-                    <Badge key={tag} variant="secondary" className="text-[10px]">
-                      {tag}
-                    </Badge>
-                  ))}
+                <div className="flex gap-1">
+                  <WorkbenchIconAction
+                    label={`Launch ${skill.name}`}
+                    onClick={() => handleLaunch(skill)}
+                  >
+                    <PlayCircle className="h-4 w-4" />
+                  </WorkbenchIconAction>
+                  <WorkbenchIconAction
+                    label={`Edit ${skill.name}`}
+                    onClick={() => {
+                      setEditing(skill);
+                      setShowForm(true);
+                    }}
+                  >
+                    <Pencil className="h-4 w-4" />
+                  </WorkbenchIconAction>
+                  <WorkbenchIconAction
+                    label={`Delete ${skill.name}`}
+                    onClick={() => setDeleting(skill)}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </WorkbenchIconAction>
                 </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      </ScrollArea>
+              </div>
+            </header>
+            <div className="px-3 pb-3 pt-0">
+              {skill.description && (
+                <p className="mb-2 text-label text-muted-foreground">{skill.description}</p>
+              )}
+              <pre className="mb-2 whitespace-pre-wrap rounded-control bg-muted px-2 py-1 text-label">
+                {skill.goalTemplate}
+              </pre>
+              {skill.instructions && (
+                <p className="mb-2 text-micro italic text-muted-foreground">
+                  +{skill.instructions.length} chars of additional instructions
+                </p>
+              )}
+              <div className="flex flex-wrap gap-1">
+                {skill.tags.map((tag) => (
+                  <WorkbenchTag key={tag} className="text-micro">
+                    {tag}
+                  </WorkbenchTag>
+                ))}
+              </div>
+            </div>
+          </section>
+        ))}
+      </div>
     </div>
   );
 };
@@ -951,6 +1216,8 @@ const SkillForm = ({
   onCancel: () => void;
   onSaved: () => Promise<void>;
 }): JSX.Element => {
+  const fieldId = useId();
+  const id = (name: string): string => `${fieldId}-${name}`;
   const [form, setForm] = useState<SkillFormState>(() =>
     initial
       ? {
@@ -998,27 +1265,33 @@ const SkillForm = ({
   }, [form, initial, onSaved, slashError]);
 
   return (
-    <Card className="mb-2 border-primary/40">
-      <CardHeader className="pb-2">
-        <CardTitle className="text-sm">{initial ? "Edit command" : "New command"}</CardTitle>
-      </CardHeader>
-      <CardContent className="space-y-2">
+    <section className="mb-2 border-y border-accent/40 py-3">
+      <header className="pb-2">
+        <h3 className="text-body-lg font-medium text-foreground">
+          {initial ? "Edit skill" : "New skill"}
+        </h3>
+      </header>
+      <div className="space-y-2">
         <div>
-          <Label className="text-xs">Name</Label>
+          <Label htmlFor={id("name")} className="text-label">
+            Name
+          </Label>
           <Input
+            id={id("name")}
             value={form.name}
             onChange={(e) => setForm({ ...form, name: e.target.value })}
             placeholder="Plot energy vs temperature"
           />
         </div>
         <div>
-          <Label className="text-xs">
+          <Label htmlFor={id("slash-name")} className="text-label">
             Slash name (optional) — invokes as{" "}
-            <code className="rounded bg-muted px-1">/&lt;name&gt;</code>
+            <InlineCode className="rounded-control bg-muted px-1">/&lt;name&gt;</InlineCode>
           </Label>
           <div className="flex items-center gap-2">
-            <span className="select-none font-mono text-sm text-muted-foreground">/</span>
+            <span className="select-none font-mono text-body-lg text-muted-foreground">/</span>
             <Input
+              id={id("slash-name")}
               value={form.slashName}
               onChange={(e) => setForm({ ...form, slashName: e.target.value })}
               placeholder="plot-energy"
@@ -1026,25 +1299,31 @@ const SkillForm = ({
             />
           </div>
           {slashError ? (
-            <p className="mt-1 text-[10px] text-destructive">{slashError}</p>
+            <p className="mt-1 text-micro text-destructive">{slashError}</p>
           ) : (
-            <p className="mt-1 text-[10px] text-muted-foreground">
+            <p className="mt-1 text-micro text-muted-foreground">
               Reserved: {RESERVED_SLASH_NAMES.join(", ")}. Leave empty to keep this as
               launcher-only.
             </p>
           )}
         </div>
         <div>
-          <Label className="text-xs">Description</Label>
+          <Label htmlFor={id("description")} className="text-label">
+            Description
+          </Label>
           <Input
+            id={id("description")}
             value={form.description}
             onChange={(e) => setForm({ ...form, description: e.target.value })}
             placeholder="Optional summary"
           />
         </div>
         <div>
-          <Label className="text-xs">Goal template — use {"{{param}}"} for placeholders</Label>
+          <Label htmlFor={id("goal-template")} className="text-label">
+            Goal template — use {"{{param}}"} for placeholders
+          </Label>
           <Textarea
+            id={id("goal-template")}
             rows={3}
             value={form.goalTemplate}
             onChange={(e) => setForm({ ...form, goalTemplate: e.target.value })}
@@ -1052,32 +1331,34 @@ const SkillForm = ({
           />
         </div>
         <div>
-          <Label className="text-xs">
+          <Label htmlFor={id("instructions")} className="text-label">
             Additional instructions (optional) — appended to the system prompt
           </Label>
           <Textarea
+            id={id("instructions")}
             rows={3}
             value={form.instructions}
             onChange={(e) => setForm({ ...form, instructions: e.target.value })}
             placeholder="When plotting, prefer Plotly scatter and label units explicitly."
-            className="font-mono text-xs"
+            className="font-mono text-label"
           />
         </div>
         <div className="flex items-center gap-2">
-          <input
-            id="defaultPlanMode"
-            type="checkbox"
+          <Checkbox
+            id={id("default-plan-mode")}
             checked={form.defaultPlanMode}
-            onChange={(e) => setForm({ ...form, defaultPlanMode: e.target.checked })}
-            className="h-3.5 w-3.5"
+            onCheckedChange={(checked) => setForm({ ...form, defaultPlanMode: Boolean(checked) })}
           />
-          <Label htmlFor="defaultPlanMode" className="text-xs">
-            Launch in plan mode by default (read-only inspection, agent emits a plan)
+          <Label htmlFor={id("default-plan-mode")} className="text-label">
+            Launch with the auditable nine-stage Plan agent by default
           </Label>
         </div>
         <div>
-          <Label className="text-xs">Constraints (one per line)</Label>
+          <Label htmlFor={id("constraints")} className="text-label">
+            Constraints (one per line)
+          </Label>
           <Textarea
+            id={id("constraints")}
             rows={2}
             value={form.constraints}
             onChange={(e) => setForm({ ...form, constraints: e.target.value })}
@@ -1085,8 +1366,11 @@ const SkillForm = ({
           />
         </div>
         <div>
-          <Label className="text-xs">Success criteria (one per line)</Label>
+          <Label htmlFor={id("success-criteria")} className="text-label">
+            Success criteria (one per line)
+          </Label>
           <Textarea
+            id={id("success-criteria")}
             rows={2}
             value={form.successCriteria}
             onChange={(e) => setForm({ ...form, successCriteria: e.target.value })}
@@ -1094,258 +1378,31 @@ const SkillForm = ({
           />
         </div>
         <div>
-          <Label className="text-xs">Tags (comma-separated)</Label>
+          <Label htmlFor={id("tags")} className="text-label">
+            Tags (comma-separated)
+          </Label>
           <Input
+            id={id("tags")}
             value={form.tags}
             onChange={(e) => setForm({ ...form, tags: e.target.value })}
             placeholder="plot, sweep"
           />
         </div>
-        {error && <p className="text-xs text-destructive">{error}</p>}
+        {error && <p className="text-label text-destructive">{error}</p>}
         <div className="flex justify-end gap-2 pt-1">
-          <Button variant="ghost" size="sm" onClick={onCancel} disabled={saving}>
+          <WorkbenchAction kind="ghost" size="compact" onClick={onCancel} disabled={saving}>
             Cancel
-          </Button>
-          <Button size="sm" onClick={() => void handleSubmit()} disabled={saving}>
+          </WorkbenchAction>
+          <WorkbenchAction
+            kind="primary"
+            size="compact"
+            onClick={() => void handleSubmit()}
+            disabled={saving}
+          >
             {saving ? "Saving…" : "Save"}
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
-  );
-};
-
-// ─── Tools tab ─────────────────────────────────────────────────────────────
-
-// Groups native tools under "native"; each MCP server's tools under
-// "mcp:<name>" so the UI renders one collapsible section per source.
-// ``mcpGroups`` carries per-server status so a broken MCP still shows its
-// heading + the error rather than silently disappearing.
-type SortMode = "server" | "name";
-
-interface ToolGroup {
-  /** Display key — "native" or "mcp:<server>". */
-  source: string;
-  /** Friendly label rendered in the section header. */
-  label: string;
-  /** True for MCP servers; native tools never carry server status. */
-  isMcp: boolean;
-  ok: boolean;
-  error: string | null;
-  tools: ApiAgentTool[];
-}
-
-const buildGroups = (data: ApiAgentToolList): Map<string, ToolGroup> => {
-  const groups = new Map<string, ToolGroup>();
-  groups.set(NATIVE_SOURCE, {
-    source: NATIVE_SOURCE,
-    label: "Native tools",
-    isMcp: false,
-    ok: true,
-    error: null,
-    tools: [],
-  });
-  // Pre-create a group per MCP server so we render even when toolCount=0
-  // (e.g. unreachable). Tools then drop into their group below.
-  for (const grp of data.mcpGroups) {
-    const key = mcpSource(grp.server);
-    groups.set(key, {
-      source: key,
-      label: grp.server,
-      isMcp: true,
-      ok: grp.ok,
-      error: grp.error,
-      tools: [],
-    });
-  }
-  for (const tool of data.tools) {
-    const key = isMcpSource(tool.source) ? tool.source : NATIVE_SOURCE;
-    const grp = groups.get(key);
-    if (grp) grp.tools.push(tool);
-  }
-  return groups;
-};
-
-const sortGroups = (groups: Map<string, ToolGroup>, mode: SortMode): ToolGroup[] => {
-  const arr = Array.from(groups.values());
-  // Native always pinned first; MCP groups sort alphabetically by name.
-  arr.sort((a, b) => {
-    if (a.source === NATIVE_SOURCE && b.source !== NATIVE_SOURCE) return -1;
-    if (b.source === NATIVE_SOURCE && a.source !== NATIVE_SOURCE) return 1;
-    if (mode === "server") return a.label.localeCompare(b.label);
-    return 0;
-  });
-  if (mode === "name") {
-    for (const g of arr) g.tools.sort((a, b) => a.name.localeCompare(b.name));
-  }
-  return arr;
-};
-
-// One group's heading + collapsible tool rows. Headings stay static
-// (always visible) so the user can see all servers at a glance; only the
-// per-tool details collapse, keeping the list scannable in the common case
-// where most rows are uninteresting metadata.
-const ToolGroupSection = ({ group }: { group: ToolGroup }): JSX.Element => {
-  return (
-    <div className="space-y-1">
-      <div className="flex items-center gap-2">
-        <h3 className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-          {group.label}
-        </h3>
-        {group.isMcp && (
-          <Badge variant={group.ok ? "outline" : "destructive"} className="text-[10px]">
-            {group.ok ? `${group.tools.length} tools` : "unreachable"}
-          </Badge>
-        )}
-      </div>
-      {group.isMcp && group.error && (
-        <p className="rounded border border-destructive/40 bg-destructive/10 px-2 py-1 text-xs text-destructive">
-          {group.error}
-        </p>
-      )}
-      {group.tools.length === 0 && !group.isMcp && (
-        <p className="text-xs text-muted-foreground">No tools.</p>
-      )}
-      {group.tools.length > 0 && (
-        <Accordion type="multiple" className="rounded border bg-card">
-          {group.tools.map((tool) => (
-            <AccordionItem
-              key={`${group.source}:${tool.name}`}
-              value={`${group.source}:${tool.name}`}
-              className="border-b last:border-b-0 px-3"
-            >
-              <AccordionTrigger className="py-1.5">
-                <div className="flex flex-1 items-center gap-2 overflow-hidden">
-                  <code className="truncate font-mono text-xs">{tool.name}</code>
-                  {tool.parameters.length > 0 && (
-                    <span className="shrink-0 text-[10px] text-muted-foreground">
-                      ({tool.parameters.length} param{tool.parameters.length === 1 ? "" : "s"})
-                    </span>
-                  )}
-                  {tool.description && (
-                    <span className="truncate text-[11px] font-normal text-muted-foreground">
-                      — {firstSentence(tool.description)}
-                    </span>
-                  )}
-                  {tool.requiresApproval && (
-                    <Badge variant="destructive" className="ml-auto shrink-0 text-[10px]">
-                      approval
-                    </Badge>
-                  )}
-                </div>
-              </AccordionTrigger>
-              <AccordionContent className="space-y-2 pb-2 text-xs">
-                {tool.description && (
-                  <p className="whitespace-pre-line text-muted-foreground">{tool.description}</p>
-                )}
-                {tool.parameters.length > 0 && (
-                  <div className="flex flex-col gap-0.5 rounded bg-muted/30 p-2">
-                    {tool.parameters.map((p) => (
-                      <div key={p.name} className="flex items-center gap-2">
-                        <code className="text-foreground">{p.name}</code>
-                        <span className="text-muted-foreground">{p.annotation}</span>
-                        {!p.required && (
-                          <span className="text-[10px] text-muted-foreground">optional</span>
-                        )}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </AccordionContent>
-            </AccordionItem>
-          ))}
-        </Accordion>
-      )}
-    </div>
-  );
-};
-
-// First sentence (or first 80 chars) of a tool's description — keeps the
-// collapsed row useful without bloating it.
-const firstSentence = (s: string): string => {
-  const trimmed = s.trim().split(/\n/)[0] ?? "";
-  const dot = trimmed.indexOf(". ");
-  if (dot > 0 && dot < 120) return trimmed.slice(0, dot + 1);
-  return trimmed.length > 80 ? `${trimmed.slice(0, 78)}…` : trimmed;
-};
-
-const ToolsTab = (): JSX.Element => {
-  const [data, setData] = useState<ApiAgentToolList>({ tools: [], mcpGroups: [] });
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [sort, setSort] = useState<SortMode>("server");
-  const [reloadTick, setReloadTick] = useState(0);
-
-  // Bus listener: any MCP-config mutation in this window forces a re-fetch
-  // so users don't have to flip tabs to see new tools after editing a server.
-  useEffect(() => onMcpConfigChanged(() => setReloadTick((t) => t + 1)), []);
-
-  // reloadTick is a deliberate re-fetch trigger (incremented by
-  // onMcpConfigChanged); the effect body doesn't read it but its
-  // identity change drives the re-run.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: deliberate trigger
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    agentAdminApi
-      .listToolsAndGroups()
-      .then((d) => {
-        if (!cancelled) setData(d);
-      })
-      .catch((err) => {
-        if (!cancelled) setError(String(err));
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [reloadTick]);
-
-  const groups = sortGroups(buildGroups(data), sort);
-  const totalTools = data.tools.length;
-  const totalMcp = data.mcpGroups.length;
-  const failingMcp = data.mcpGroups.filter((g: ApiMcpToolGroup) => !g.ok).length;
-
-  return (
-    <div className="flex h-full flex-col px-4 pb-4">
-      <div className="mb-2 flex items-center justify-between gap-3">
-        <p className="text-sm text-muted-foreground">
-          {totalTools} tool{totalTools === 1 ? "" : "s"} across {totalMcp + 1} source
-          {totalMcp + 1 === 1 ? "" : "s"}
-          {failingMcp > 0 && (
-            <span className="ml-2 text-destructive">· {failingMcp} server failed</span>
-          )}
-        </p>
-        <div className="flex items-center gap-2">
-          <Label className="text-xs text-muted-foreground">Sort by</Label>
-          <select
-            value={sort}
-            onChange={(e) => setSort(e.target.value as SortMode)}
-            className="rounded border bg-background px-2 py-1 text-xs"
-          >
-            <option value="server">Server / domain</option>
-            <option value="name">Tool name</option>
-          </select>
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            disabled={loading}
-            onClick={() => setReloadTick((t) => t + 1)}
-          >
-            Refresh
-          </Button>
+          </WorkbenchAction>
         </div>
       </div>
-      {error && <p className="mb-2 text-xs text-destructive">{error}</p>}
-      <ScrollArea className="flex-1">
-        <div className="flex flex-col gap-3 pr-2">
-          {loading && <p className="text-sm text-muted-foreground">Loading…</p>}
-          {!loading && groups.map((group) => <ToolGroupSection key={group.source} group={group} />)}
-        </div>
-      </ScrollArea>
-    </div>
+    </section>
   );
 };

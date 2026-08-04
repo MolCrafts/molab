@@ -1,10 +1,10 @@
-"""``InteractiveLoop`` — emergent loop, sink-driven (spec 03b).
+"""``InteractiveLoop`` — the emergent, sink-driven tool loop (spec 03b).
 
 Drives the loop through :class:`AgentRunner` with a scripted fake
-:class:`~molexp.agent.router.Router`. After spec 03b the ``/plan``
-slash-command delegation is gone (PlanMode left the agent layer);
-InteractiveLoop is purely the emergent tool loop translated into
-sink events.
+:class:`~molexp.agent.router.Router`. Covers the loop's own responsibilities:
+translating :data:`AgenticChunk`\\ s into :data:`AgentEvent`\\ s, mounting the
+default tool set (and keeping lifecycle tools off), surfacing reasoning
+chunks, and persisting each turn onto the session entry tree.
 """
 
 from __future__ import annotations
@@ -17,8 +17,8 @@ import pytest
 
 from molexp.agent.events import (
     AgentEvent,
-    ModeCompletedEvent,
-    ModeStartedEvent,
+    LoopCompletedEvent,
+    LoopStartedEvent,
     ThinkingDeltaEvent,
     TokenDeltaEvent,
     ToolCallCompletedEvent,
@@ -41,17 +41,15 @@ from molexp.agent.session_entry import MessageEntry
 from molexp.agent.session_storage import InMemorySessionStorage
 from molexp.agent.types import UsageBreakdown
 
+pytestmark = pytest.mark.asyncio
+
 
 class _ScriptedRouter:
-    """Fake :class:`~molexp.agent.router.Router` for the InteractiveLoop tests.
-
-    ``stream_agentic`` replays a fixed chunk script that includes one
-    tool round-trip. ``complete_text`` / ``complete_structured`` are
-    inert (the emergent loop only touches ``stream_agentic``).
-    """
+    """Fake Router replaying a fixed chunk script with one tool round-trip."""
 
     def __init__(self) -> None:
         self.stream_agentic_calls = 0
+        self.last_tools: tuple[Any, ...] = ()
 
     async def stream_agentic(
         self,
@@ -59,10 +57,13 @@ class _ScriptedRouter:
         prompt: str,
         system: str = "",
         tools: tuple[Any, ...] = (),
+        toolsets: tuple[Any, ...] = (),
         tier: ModelTier = ModelTier.DEFAULT,
         message_history: tuple[Any, ...] = (),
     ) -> AsyncIterator[AgenticChunk]:
+        del toolsets  # optional MCP toolsets; scripted path ignores them
         self.stream_agentic_calls += 1
+        self.last_tools = tools
         yield TextDeltaChunk(text="Looking ")
         yield TextDeltaChunk(text="into it. ")
         yield ToolCallChunk(tool_name="read_file", args_summary="path=README.md")
@@ -90,32 +91,6 @@ class _ScriptedRouter:
         return UsageBreakdown()
 
 
-def _loop(tmp_path: Path) -> InteractiveLoop:
-    return InteractiveLoop(config=InteractiveLoopConfig(workspace_root=tmp_path))
-
-
-def _kinds(events: list[AgentEvent]) -> list[type]:
-    return [type(event) for event in events]
-
-
-@pytest.mark.asyncio
-async def test_emergent_loop_translates_chunks_to_events(tmp_path: Path) -> None:
-    router = _ScriptedRouter()
-    runner = AgentRunner(loop=_loop(tmp_path), router=router)  # type: ignore[arg-type]
-    session = Session(storage=InMemorySessionStorage(), session_id="emergent")
-
-    events = [ev async for ev in runner.run_events(session, "inspect the project")]
-
-    assert router.stream_agentic_calls == 1
-    kinds = _kinds(events)
-    assert ModeStartedEvent in kinds
-    assert TokenDeltaEvent in kinds
-    assert ToolCallStartedEvent in kinds
-    assert ToolCallCompletedEvent in kinds
-    assert isinstance(events[-1], ModeCompletedEvent)
-    assert events[-1].text == "Looking into it. Done."
-
-
 class _ThinkingRouter(_ScriptedRouter):
     """A scripted router whose turn opens with a reasoning chunk.
 
@@ -130,100 +105,93 @@ class _ThinkingRouter(_ScriptedRouter):
         prompt: str,
         system: str = "",
         tools: tuple[Any, ...] = (),
+        toolsets: tuple[Any, ...] = (),
         tier: ModelTier = ModelTier.DEFAULT,
         message_history: tuple[Any, ...] = (),
     ) -> AsyncIterator[AgenticChunk]:
+        del tools, toolsets
         self.stream_agentic_calls += 1
         yield ThinkingDeltaChunk(text="weighing the options")
         yield TextDeltaChunk(text="The answer.")
         yield FinalChunk(text="The answer.")
 
 
-@pytest.mark.asyncio
-async def test_emergent_loop_surfaces_thinking_event(tmp_path: Path) -> None:
-    router = _ThinkingRouter()
-    runner = AgentRunner(loop=_loop(tmp_path), router=router)  # type: ignore[arg-type]
-    session = Session(storage=InMemorySessionStorage(), session_id="thinking")
-
-    events = [ev async for ev in runner.run_events(session, "decide")]
-
-    thinking = [e for e in events if isinstance(e, ThinkingDeltaEvent)]
-    assert thinking, "ThinkingDeltaChunk must map to a ThinkingDeltaEvent"
-    assert thinking[0].text == "weighing the options"
-
-    def first(kind: type) -> int:
-        return next(i for i, e in enumerate(events) if isinstance(e, kind))
-
-    # reasoning streams before the answer text, before the terminal result
-    assert first(ThinkingDeltaEvent) < first(TokenDeltaEvent) < first(ModeCompletedEvent)
-    # the final answer never includes the reasoning text
-    assert isinstance(events[-1], ModeCompletedEvent)
-    assert events[-1].text == "The answer."
+def _loop(tmp_path: Path) -> InteractiveLoop:
+    return InteractiveLoop(config=InteractiveLoopConfig(workspace_root=tmp_path))
 
 
-@pytest.mark.asyncio
-async def test_emergent_loop_event_ordering(tmp_path: Path) -> None:
-    router = _ScriptedRouter()
-    runner = AgentRunner(loop=_loop(tmp_path), router=router)  # type: ignore[arg-type]
-    session = Session(storage=InMemorySessionStorage(), session_id="ordering")
-
-    events = [ev async for ev in runner.run_events(session, "inspect")]
-
-    def first(kind: type) -> int:
-        return next(i for i, e in enumerate(events) if isinstance(e, kind))
-
-    assert (
-        first(ModeStartedEvent)
-        < first(TokenDeltaEvent)
-        < first(ToolCallStartedEvent)
-        < first(ToolCallCompletedEvent)
-        < first(ModeCompletedEvent)
-    )
+def _kinds(events: list[AgentEvent]) -> list[type]:
+    return [type(event) for event in events]
 
 
-@pytest.mark.asyncio
-async def test_tool_call_events_carry_names_and_summaries(tmp_path: Path) -> None:
-    router = _ScriptedRouter()
-    runner = AgentRunner(loop=_loop(tmp_path), router=router)  # type: ignore[arg-type]
-    session = Session(storage=InMemorySessionStorage(), session_id="toolnames")
-
-    events = [ev async for ev in runner.run_events(session, "inspect")]
-
-    started = next(e for e in events if isinstance(e, ToolCallStartedEvent))
-    completed = next(e for e in events if isinstance(e, ToolCallCompletedEvent))
-    assert started.tool_name == "read_file"
-    assert "README.md" in started.args_summary
-    assert completed.tool_name == "read_file"
-    assert completed.ok is True
+def _tool_names(tools: tuple[Any, ...]) -> set[str]:
+    return {getattr(t, "__name__", "") for t in tools}
 
 
-@pytest.mark.asyncio
-async def test_emergent_loop_persists_user_and_assistant_turns(tmp_path: Path) -> None:
-    router = _ScriptedRouter()
-    runner = AgentRunner(loop=_loop(tmp_path), router=router)  # type: ignore[arg-type]
-    session = Session(storage=InMemorySessionStorage(), session_id="turns")
+class TestInteractiveLoop:
+    async def test_translates_chunks_to_sink_events(self, tmp_path: Path) -> None:
+        router = _ScriptedRouter()
+        runner = AgentRunner(loop=_loop(tmp_path), router=router)  # type: ignore[arg-type]
+        session = Session(storage=InMemorySessionStorage(), session_id="emergent")
 
-    async for _ in runner.run_events(session, "what is here?"):
-        pass
+        events = [ev async for ev in runner.run_events(session, "inspect the project")]
 
-    messages = [e.message for e in session.path_to_root() if isinstance(e, MessageEntry)]
-    roles_contents = [(m.role, m.content) for m in messages]
-    assert ("user", "what is here?") in roles_contents
-    assert ("assistant", "Looking into it. Done.") in roles_contents
+        assert router.stream_agentic_calls == 1
+        kinds = _kinds(events)
+        assert LoopStartedEvent in kinds
+        assert TokenDeltaEvent in kinds
+        assert ToolCallStartedEvent in kinds
+        assert ToolCallCompletedEvent in kinds
+        assert isinstance(events[-1], LoopCompletedEvent)
+        assert events[-1].text == "Looking into it. Done."
 
+    async def test_default_mode_mounts_chat_tools_and_omits_lifecycle(self, tmp_path: Path) -> None:
+        """Chat Mode default: scratch tools mount; no ensure/land; lifecycle stays off."""
+        router = _ScriptedRouter()
+        loop = InteractiveLoop(
+            config=InteractiveLoopConfig(workspace_root=tmp_path, operation_mode="chat")
+        )
+        runner = AgentRunner(loop=loop, router=router)  # type: ignore[arg-type]
+        session = Session(storage=InMemorySessionStorage(), session_id="code-tools")
 
-@pytest.mark.asyncio
-async def test_run_returns_terminal_result(tmp_path: Path) -> None:
-    router = _ScriptedRouter()
-    runner = AgentRunner(loop=_loop(tmp_path), router=router)  # type: ignore[arg-type]
-    session = Session(storage=InMemorySessionStorage(), session_id="result")
+        _ = [ev async for ev in runner.run_events(session, "write a script")]
 
-    result = await runner.run(session, "inspect")
+        names = _tool_names(router.last_tools)
+        assert {"code_write", "code_run", "workspace_inspect", "discover"}.issubset(names)
+        assert "workspace_ensure" not in names
+        assert "run_land" not in names
+        assert "cancel_run" not in names
+        assert "harvest_run" not in names
 
-    assert result.text == "Looking into it. Done."
-    assert any(isinstance(e, TokenDeltaEvent) for e in result.events)
+    async def test_surfaces_thinking_chunk_before_answer(self, tmp_path: Path) -> None:
+        router = _ThinkingRouter()
+        runner = AgentRunner(loop=_loop(tmp_path), router=router)  # type: ignore[arg-type]
+        session = Session(storage=InMemorySessionStorage(), session_id="thinking")
 
+        events = [ev async for ev in runner.run_events(session, "decide")]
 
-def test_interactive_loop_name() -> None:
-    loop = InteractiveLoop()
-    assert loop.name == "interactive"
+        thinking = [e for e in events if isinstance(e, ThinkingDeltaEvent)]
+        assert thinking, "ThinkingDeltaChunk must map to a ThinkingDeltaEvent"
+        assert thinking[0].text == "weighing the options"
+
+        def first(kind: type) -> int:
+            return next(i for i, e in enumerate(events) if isinstance(e, kind))
+
+        # reasoning streams before the answer text, before the terminal result
+        assert first(ThinkingDeltaEvent) < first(TokenDeltaEvent) < first(LoopCompletedEvent)
+        # the final answer never includes the reasoning text
+        assert isinstance(events[-1], LoopCompletedEvent)
+        assert events[-1].text == "The answer."
+
+    async def test_persists_user_and_assistant_turns_to_entry_tree(self, tmp_path: Path) -> None:
+        router = _ScriptedRouter()
+        runner = AgentRunner(loop=_loop(tmp_path), router=router)  # type: ignore[arg-type]
+        session = Session(storage=InMemorySessionStorage(), session_id="turns")
+
+        async for _ in runner.run_events(session, "what is here?"):
+            pass
+
+        messages = [e.message for e in session.path_to_root() if isinstance(e, MessageEntry)]
+        roles_contents = [(m.role, m.content) for m in messages]
+        assert ("user", "what is here?") in roles_contents
+        assert ("assistant", "Looking into it. Done.") in roles_contents

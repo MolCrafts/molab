@@ -9,9 +9,10 @@ layer:
 - ``molexp.plugins`` (optional capabilities)
 - ``molexp.server``, ``molexp.cli``, ``molexp.sweep`` (application shell)
 
-Additionally, ``pydantic_graph`` must only be imported from
-``workflow/_pydantic_graph/`` — the rest of the workflow layer is
-pg-agnostic and reachable without the dependency.
+Additionally, ``pydantic_graph`` must not be imported anywhere —
+molexp dropped the dependency; the engine under ``workflow/_engine/``
+is molexp-owned (see also ``test_engine_boundary.py`` for the
+src/-wide scan).
 
 History: until 2026-05-09 this guard *also* forbade
 ``molexp.workspace`` imports. The rectification spec inverts that
@@ -21,6 +22,7 @@ direction; workflow now uses workspace for caching + persistence.
 from __future__ import annotations
 
 import ast
+import re
 from pathlib import Path
 
 WORKFLOW_ROOT = Path(__file__).resolve().parents[2] / "src" / "molexp" / "workflow"
@@ -30,6 +32,7 @@ FORBIDDEN_PREFIXES: tuple[str, ...] = (
     "molexp.plugins",
     "molexp.server",
     "molexp.cli",
+    "molexp.services",
     "molexp.sweep",
 )
 
@@ -80,27 +83,30 @@ def test_workflow_forbids_upstream_and_application_layers() -> None:
     )
 
 
-def test_pydantic_graph_imports_confined_to_pydantic_graph_subtree() -> None:
-    """``pydantic_graph`` may only appear under ``workflow/_pydantic_graph/``."""
-    hits = _imports_of("pydantic_graph", WORKFLOW_ROOT)
-    allowed = WORKFLOW_ROOT / "_pydantic_graph"
-    bad = [
-        f"{path.relative_to(WORKFLOW_ROOT)}:{lineno}: {module}"
-        for path, lineno, module in hits
-        if allowed not in path.parents
-    ]
-    assert not bad, "pydantic_graph imports outside workflow/_pydantic_graph/:\n  " + "\n  ".join(
-        bad
-    )
+def test_compiled_graph_is_layer_private() -> None:
+    """No layer above ``workflow`` may read ``CompiledWorkflow.graph``.
 
-
-def test_workflow_imports_from_workspace_are_allowed() -> None:
-    """Sanity guard: the inversion is *expected*, not banned.
-
-    After rectification, workflow imports workspace for caching +
-    persistence backing. This test does not require any specific
-    workspace import to exist (workflow may legitimately have zero on
-    a transient commit), but documents that none of the workspace
-    prefixes appear in ``FORBIDDEN_PREFIXES`` above.
+    ``.graph`` holds a layer-private ``LoweredGraph`` (live task callables);
+    only the workflow runtime reads it. Layers above workflow must use the
+    public codec / introspection surface, never ``compiled.graph``. This
+    guards the architect's N1 note on the build+compile merge (spec
+    workflow-refactor-02).
     """
-    assert "molexp.workspace" not in FORBIDDEN_PREFIXES
+    src_root = Path(__file__).resolve().parents[2] / "src" / "molexp"
+    upper_layers = ("server", "cli", "harness", "agent", "sweep", "plugins")
+    offenders: list[str] = []
+    for layer in upper_layers:
+        layer_root = src_root / layer
+        if not layer_root.exists():
+            continue
+        for py in layer_root.rglob("*.py"):
+            if "__pycache__" in py.parts:
+                continue
+            for lineno, line in enumerate(py.read_text(encoding="utf-8").splitlines(), 1):
+                if re.search(r"\.graph\b", line) and not line.lstrip().startswith("#"):
+                    offenders.append(f"{py.relative_to(src_root)}:{lineno}: {line.strip()}")
+    assert not offenders, (
+        "Layers above 'workflow' must not read the layer-private "
+        "CompiledWorkflow.graph; use the public codec/introspection surface.\n  "
+        + "\n  ".join(offenders)
+    )

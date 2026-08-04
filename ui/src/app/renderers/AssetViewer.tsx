@@ -2,9 +2,7 @@ import {
   Archive,
   Download,
   FileJson,
-  FileText,
   GitCommitHorizontal,
-  Image as ImageIcon,
   Layers,
   Package,
   ScrollText,
@@ -14,8 +12,6 @@ import { useEffect, useMemo, useState } from "react";
 import type { AssetLineageNode } from "@/api/generated/models/AssetLineageNode";
 import type { AssetLineageResponse } from "@/api/generated/models/AssetLineageResponse";
 import {
-  EMPTY_COPY,
-  EmptyState,
   EntityMetric,
   EntityPage,
   KeyValueGrid,
@@ -24,42 +20,43 @@ import {
   OverviewPage,
   OverviewSection,
 } from "@/app/components/entity";
+import { canonicalStatusFor } from "@/app/components/entity/status";
 import { workspaceApi } from "@/app/state/api";
 import { useNavigationState } from "@/app/state/useNavigationState";
 import type { ApiAssetResponse, AssetKind, RendererProps } from "@/app/types";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Code as InlineCode } from "@/components/ui/code";
+import {
+  WorkbenchAction,
+  WorkbenchIconAction,
+  WorkbenchOperationState,
+  WorkbenchRetryAction,
+  WorkbenchTag,
+} from "@/components/workbench";
+import { formatDateTime } from "@/lib/datetime";
+import { formatBytes } from "@/lib/format-bytes";
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
-const formatBytes = (bytes: number | null | undefined): string => {
-  if (bytes == null) return "—";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
-};
-
-const KIND_META: Record<string, { label: string; icon: typeof Archive; accent: string }> = {
-  data: { label: "Data", icon: Package, accent: "text-amber-500" },
-  artifact: { label: "Artifact", icon: Archive, accent: "text-sky-500" },
-  log: { label: "Log", icon: ScrollText, accent: "text-emerald-500" },
+const KIND_META: Record<string, { label: string; icon: typeof Archive; iconClassName: string }> = {
+  data: { label: "Data", icon: Package, iconClassName: "text-muted-foreground" },
+  artifact: { label: "Artifact", icon: Archive, iconClassName: "text-muted-foreground" },
+  log: { label: "Log", icon: ScrollText, iconClassName: "text-muted-foreground" },
   checkpoint: {
     label: "Checkpoint",
     icon: GitCommitHorizontal,
-    accent: "text-purple-500",
+    iconClassName: "text-muted-foreground",
   },
-  error_trace: { label: "Error Trace", icon: ShieldAlert, accent: "text-red-500" },
+  error_trace: { label: "Error Trace", icon: ShieldAlert, iconClassName: "text-muted-foreground" },
   execution_state: {
     label: "Execution State",
     icon: Layers,
-    accent: "text-indigo-500",
+    iconClassName: "text-muted-foreground",
   },
-  output: { label: "Output", icon: FileJson, accent: "text-teal-500" },
+  output: { label: "Output", icon: FileJson, iconClassName: "text-muted-foreground" },
 };
 
 const kindMeta = (kind: string) =>
-  KIND_META[kind] ?? { label: kind, icon: Archive, accent: "text-muted-foreground" };
+  KIND_META[kind] ?? { label: kind, icon: Archive, iconClassName: "text-muted-foreground" };
 
 const extraValue = <T,>(asset: ApiAssetResponse, key: string): T | undefined =>
   (asset.extra as Record<string, unknown> | undefined)?.[key] as T | undefined;
@@ -80,20 +77,30 @@ const isImage = (mime: string | undefined, path: string | undefined): boolean =>
 // ── Per-kind content panels ───────────────────────────────────────────────
 
 const BinaryPreview = ({ asset }: { asset: ApiAssetResponse }): JSX.Element => {
-  const [textContent, setTextContent] = useState<string | null>(null);
-  const [imageUrl, setImageUrl] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
   const mime = extraValue<string>(asset, "mime");
   const size = extraValue<number>(asset, "size") ?? null;
   const textual = isTextual(mime, asset.path);
   const image = isImage(mime, asset.path);
+  const [textContent, setTextContent] = useState<string | null>(null);
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [loading, setLoading] = useState(textual || image);
+  const [error, setError] = useState<string | null>(null);
+  const [requestVersion, setRequestVersion] = useState(0);
 
   useEffect(() => {
-    if (!textual && !image) return;
+    void requestVersion;
+    if (!textual && !image) {
+      setLoading(false);
+      setError(null);
+      return;
+    }
 
     let cancelled = false;
     let objectUrl: string | null = null;
+    setLoading(true);
+    setError(null);
+    setTextContent(null);
+    setImageUrl(null);
 
     fetch(`/api/assets/${encodeURIComponent(asset.id)}/content`)
       .then((response) => {
@@ -117,41 +124,67 @@ const BinaryPreview = ({ asset }: { asset: ApiAssetResponse }): JSX.Element => {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : "Failed to load asset content");
         }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
       });
 
     return () => {
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [asset.id, textual, image]);
+  }, [asset.id, textual, image, requestVersion]);
 
   const downloadUrl = `/api/assets/${encodeURIComponent(asset.id)}/content`;
 
   if (error) {
     return (
-      <div className="p-6">
-        <EmptyState title="Failed to load content." description={error} />
-      </div>
+      <WorkbenchOperationState
+        kind="error"
+        title="Could not load asset content"
+        detail={error}
+        action={
+          <WorkbenchRetryAction onClick={() => setRequestVersion((version) => version + 1)} />
+        }
+      />
     );
   }
 
   if (image) {
     return (
       <div className="flex h-full items-center justify-center bg-muted/20 p-6">
-        {imageUrl ? (
+        {loading ? (
+          <WorkbenchOperationState kind="loading" title="Loading image…" />
+        ) : imageUrl ? (
           <img
             src={imageUrl}
             alt={asset.name}
-            className="max-h-full max-w-full rounded-md border border-border/60"
+            className="max-h-full max-w-full rounded-control border border-border/60"
           />
         ) : (
-          <EmptyState title="Loading…" icon={<ImageIcon className="h-8 w-8" />} />
+          <WorkbenchOperationState
+            kind="empty"
+            title="Image content is empty"
+            detail="The asset loaded successfully but did not return a preview."
+          />
         )}
       </div>
     );
   }
 
   if (textual) {
+    if (loading) {
+      return <WorkbenchOperationState kind="loading" title="Loading asset content…" />;
+    }
+    if (textContent === "") {
+      return (
+        <WorkbenchOperationState
+          kind="empty"
+          title="Asset content is empty"
+          detail="The asset loaded successfully but contains no text."
+        />
+      );
+    }
     const ext = asset.path?.split(".").pop()?.toLowerCase() ?? "";
     let displayed = textContent ?? "";
     if (textContent && ext === "json") {
@@ -163,8 +196,8 @@ const BinaryPreview = ({ asset }: { asset: ApiAssetResponse }): JSX.Element => {
     }
     return (
       <div className="h-full overflow-auto">
-        <pre className="whitespace-pre-wrap break-words px-6 py-4 font-mono text-xs text-foreground">
-          {textContent === null ? "Loading…" : displayed}
+        <pre className="whitespace-pre-wrap break-words px-6 py-4 font-mono text-label text-foreground">
+          {displayed}
         </pre>
       </div>
     );
@@ -172,17 +205,16 @@ const BinaryPreview = ({ asset }: { asset: ApiAssetResponse }): JSX.Element => {
 
   return (
     <div className="flex h-full items-center justify-center">
-      <EmptyState
-        title="Binary content"
-        description={`${formatBytes(size)} · ${mime ?? "unknown"}`}
-        icon={<Package className="h-8 w-8" />}
+      <WorkbenchOperationState
+        kind="empty"
+        title="Binary preview unavailable"
+        detail={`${formatBytes(size)} · ${mime ?? "unknown"}`}
         action={
-          <a href={downloadUrl} download={asset.name}>
-            <Button size="sm" variant="outline">
-              <Download className="mr-2 h-4 w-4" />
-              Download
-            </Button>
-          </a>
+          <WorkbenchIconAction label={`Download ${asset.name}`} asChild>
+            <a href={downloadUrl} download={asset.name}>
+              <Download className="h-4 w-4" />
+            </a>
+          </WorkbenchIconAction>
         }
       />
     </div>
@@ -190,11 +222,17 @@ const BinaryPreview = ({ asset }: { asset: ApiAssetResponse }): JSX.Element => {
 };
 
 const LogTail = ({ asset }: { asset: ApiAssetResponse }): JSX.Element => {
-  const [lines, setLines] = useState<string>("Loading…");
+  const [lines, setLines] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [requestVersion, setRequestVersion] = useState(0);
 
   useEffect(() => {
+    void requestVersion;
     let cancelled = false;
+    setLines(null);
+    setLoading(true);
+    setError(null);
     fetch(`/api/assets/${encodeURIComponent(asset.id)}/tail?n=500`)
       .then((response) => {
         if (!response.ok) throw new Error(response.statusText);
@@ -207,22 +245,44 @@ const LogTail = ({ asset }: { asset: ApiAssetResponse }): JSX.Element => {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : "Failed to load log tail");
         }
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [asset.id]);
+  }, [asset.id, requestVersion]);
 
   if (error) {
     return (
-      <div className="p-6">
-        <EmptyState title="Failed to load log" description={error} />
-      </div>
+      <WorkbenchOperationState
+        kind="error"
+        title="Could not load log"
+        detail={error}
+        action={
+          <WorkbenchRetryAction onClick={() => setRequestVersion((version) => version + 1)} />
+        }
+      />
+    );
+  }
+
+  if (loading) {
+    return <WorkbenchOperationState kind="loading" title="Loading log…" skeletonRows={5} />;
+  }
+
+  if (!lines) {
+    return (
+      <WorkbenchOperationState
+        kind="empty"
+        title="No log output"
+        detail="The log loaded successfully but contains no lines."
+      />
     );
   }
 
   return (
-    <div className="h-full overflow-auto bg-black/90 px-4 py-3 font-mono text-xs text-emerald-100">
+    <div className="h-full overflow-auto bg-canvas px-4 py-3 font-mono text-label text-foreground">
       <pre className="whitespace-pre-wrap break-words">{lines}</pre>
     </div>
   );
@@ -230,10 +290,16 @@ const LogTail = ({ asset }: { asset: ApiAssetResponse }): JSX.Element => {
 
 const JsonPreview = ({ asset }: { asset: ApiAssetResponse }): JSX.Element => {
   const [text, setText] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [requestVersion, setRequestVersion] = useState(0);
 
   useEffect(() => {
+    void requestVersion;
     let cancelled = false;
+    setText(null);
+    setLoading(true);
+    setError(null);
     fetch(`/api/assets/${encodeURIComponent(asset.id)}/content`)
       .then((r) => (r.ok ? r.text() : Promise.reject(new Error(r.statusText))))
       .then((t) => {
@@ -246,24 +312,46 @@ const JsonPreview = ({ asset }: { asset: ApiAssetResponse }): JSX.Element => {
       })
       .catch((err) => {
         if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [asset.id]);
+  }, [asset.id, requestVersion]);
 
   if (error) {
     return (
-      <div className="p-6">
-        <EmptyState title="Failed to load content" description={error} />
-      </div>
+      <WorkbenchOperationState
+        kind="error"
+        title="Could not load structured content"
+        detail={error}
+        action={
+          <WorkbenchRetryAction onClick={() => setRequestVersion((version) => version + 1)} />
+        }
+      />
+    );
+  }
+
+  if (loading) {
+    return <WorkbenchOperationState kind="loading" title="Loading structured content…" />;
+  }
+
+  if (text === "") {
+    return (
+      <WorkbenchOperationState
+        kind="empty"
+        title="Structured content is empty"
+        detail="The asset loaded successfully but contains no content."
+      />
     );
   }
 
   return (
     <div className="h-full overflow-auto">
-      <pre className="whitespace-pre-wrap break-words px-6 py-4 font-mono text-xs text-foreground">
-        {text ?? "Loading…"}
+      <pre className="whitespace-pre-wrap break-words px-6 py-4 font-mono text-label text-foreground">
+        {text}
       </pre>
     </div>
   );
@@ -276,13 +364,13 @@ const ErrorTraceView = ({ asset }: { asset: ApiAssetResponse }): JSX.Element => 
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      <div className="border-b border-red-500/20 bg-red-500/5 px-6 py-4">
-        <div className="text-xs font-semibold uppercase text-red-500">
+      <div className="border-b border-status-failed/20 bg-status-failed-soft px-6 py-4">
+        <div className="text-label font-semibold uppercase text-status-failed-foreground">
           {exceptionType ?? "Unknown exception"}
         </div>
-        <div className="mt-1 text-sm text-foreground">{message ?? "(no message)"}</div>
+        <div className="mt-1 text-body-lg text-foreground">{message ?? "(no message)"}</div>
         {executionId && (
-          <div className="mt-1 font-mono text-xs text-muted-foreground">
+          <div className="mt-1 font-mono text-label text-muted-foreground">
             execution_id = {executionId}
           </div>
         )}
@@ -321,34 +409,36 @@ const LineageColumn = ({
 }): JSX.Element => {
   if (nodes.length === 0) {
     return (
-      <div className="rounded border border-border/70 bg-muted/10 p-3 text-xs text-muted-foreground">
+      <div className="space-y-2 text-label text-muted-foreground">
         <div className="mb-1 font-semibold text-foreground">{title}</div>
-        <div>—</div>
+        <div className="border-y border-border/60 py-2">—</div>
       </div>
     );
   }
   return (
-    <div className="rounded border border-border/70 bg-muted/10 p-3">
-      <div className="mb-2 text-xs font-semibold text-foreground">
+    <div className="space-y-2">
+      <div className="mb-2 text-label font-semibold text-foreground">
         {title} <span className="text-muted-foreground">({nodes.length})</span>
       </div>
-      <ul className="space-y-1.5">
+      <ul className="divide-y divide-border/60 border-y border-border/60">
         {nodes.map((node) => {
           const meta = kindMeta(node.kind);
           const Icon = meta.icon;
           return (
             <li key={node.id}>
-              <button
+              <WorkbenchAction
+                kind="ghost"
+                size="content"
                 type="button"
                 onClick={() => onSelect(node.id)}
-                className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-accent"
+                className="flex w-full items-center gap-2 px-2 py-2 text-left text-label hover:bg-interactive"
               >
-                <Icon className={`h-3.5 w-3.5 shrink-0 ${meta.accent}`} />
+                <Icon className={`h-3.5 w-3.5 shrink-0 ${meta.iconClassName}`} />
                 <span className="flex-1 truncate font-mono">{node.name}</span>
-                <Badge variant="outline" className="text-[10px]">
+                <WorkbenchTag meaning="metadata" className="text-micro">
                   {meta.label}
-                </Badge>
-              </button>
+                </WorkbenchTag>
+              </WorkbenchAction>
             </li>
           );
         })}
@@ -361,14 +451,26 @@ const LineageColumn = ({
 
 export const AssetViewer = ({ selection, snapshot }: RendererProps): JSX.Element => {
   const [asset, setAsset] = useState<ApiAssetResponse | null>(null);
+  const [assetLoading, setAssetLoading] = useState(true);
+  const [assetError, setAssetError] = useState<string | null>(null);
+  const [settledAssetId, setSettledAssetId] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
+  const [assetRequestVersion, setAssetRequestVersion] = useState(0);
   const [lineage, setLineage] = useState<AssetLineageResponse | null>(null);
-  const { setSelection, breadcrumbs, canNavigateUp, navigateUp } = useNavigationState(snapshot);
+  const [lineageLoading, setLineageLoading] = useState(true);
+  const [lineageError, setLineageError] = useState<string | null>(null);
+  const [lineageRequestVersion, setLineageRequestVersion] = useState(0);
+  const { setSelection } = useNavigationState(snapshot);
 
   const assetId = selection.objectId;
 
   useEffect(() => {
+    void assetRequestVersion;
     let cancelled = false;
+    setAsset(null);
+    setAssetLoading(true);
+    setAssetError(null);
+    setNotFound(false);
     workspaceApi
       .getAssets()
       .then((all) => {
@@ -382,18 +484,30 @@ export const AssetViewer = ({ selection, snapshot }: RendererProps): JSX.Element
         }
       })
       .catch((err) => {
-        if (typeof console !== "undefined") console.error("Failed to load asset", err);
-        setNotFound(true);
+        if (cancelled) return;
+        setAssetError(err instanceof Error ? err.message : "Failed to load asset");
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setAssetLoading(false);
+          setSettledAssetId(assetId);
+        }
       });
     return () => {
       cancelled = true;
     };
-  }, [assetId]);
+  }, [assetId, assetRequestVersion]);
 
   useEffect(() => {
+    void lineageRequestVersion;
     let cancelled = false;
     setLineage(null);
-    if (!assetId) return;
+    setLineageError(null);
+    if (!assetId) {
+      setLineageLoading(false);
+      return;
+    }
+    setLineageLoading(true);
     workspaceApi
       .getAssetLineage(assetId)
       .then((res) => {
@@ -401,24 +515,59 @@ export const AssetViewer = ({ selection, snapshot }: RendererProps): JSX.Element
         setLineage(res);
       })
       .catch((err) => {
-        if (typeof console !== "undefined") console.error("Failed to load lineage", err);
+        if (cancelled) return;
+        setLineageError(err instanceof Error ? err.message : "Failed to load asset lineage");
+      })
+      .finally(() => {
+        if (!cancelled) setLineageLoading(false);
       });
     return () => {
       cancelled = true;
     };
-  }, [assetId]);
+  }, [assetId, lineageRequestVersion]);
 
   const assetSummary = useMemo(
     () => snapshot.assets.find((a) => a.id === assetId),
     [snapshot.assets, assetId],
   );
 
-  if (notFound) {
-    return <div className="p-8 text-muted-foreground">Asset not found.</div>;
+  if (assetLoading || settledAssetId !== assetId) {
+    return (
+      <WorkbenchOperationState
+        kind="loading"
+        title="Loading asset…"
+        skeletonRows={6}
+        className="h-full"
+      />
+    );
   }
 
-  if (!asset) {
-    return <div className="p-8 text-muted-foreground">Loading asset…</div>;
+  if (assetError) {
+    return (
+      <WorkbenchOperationState
+        kind="error"
+        title="Could not load asset"
+        detail={assetError}
+        action={
+          <WorkbenchRetryAction
+            onClick={() => {
+              setAssetLoading(true);
+              setAssetRequestVersion((version) => version + 1);
+            }}
+          />
+        }
+      />
+    );
+  }
+
+  if (notFound || !asset) {
+    return (
+      <WorkbenchOperationState
+        kind="empty"
+        title="Asset not found"
+        detail="The asset list loaded successfully, but this asset is no longer present."
+      />
+    );
   }
 
   const meta = kindMeta(asset.kind);
@@ -440,20 +589,16 @@ export const AssetViewer = ({ selection, snapshot }: RendererProps): JSX.Element
 
   return (
     <EntityPage
-      breadcrumbs={breadcrumbs}
-      canNavigateUp={canNavigateUp}
-      onNavigateUp={navigateUp}
       icon={meta.icon}
       title={asset.name}
       status={assetSummary?.status}
       subtitle={`${meta.label} · ${scopeLabel}`}
       actions={
-        <a href={downloadUrl} download={asset.name}>
-          <Button variant="outline" size="sm">
-            <Download className="mr-2 h-4 w-4" />
-            Download
-          </Button>
-        </a>
+        <WorkbenchIconAction label={`Download ${asset.name}`} asChild>
+          <a href={downloadUrl} download={asset.name}>
+            <Download className="h-4 w-4" />
+          </a>
+        </WorkbenchIconAction>
       }
       metrics={
         <>
@@ -479,18 +624,21 @@ export const AssetViewer = ({ selection, snapshot }: RendererProps): JSX.Element
                         value={asset.scope_kind}
                         detail={scopeLabel}
                       />
-                      <OverviewHighlight label="Status" value={assetSummary?.status ?? "unknown"} />
+                      <OverviewHighlight
+                        label="Status"
+                        value={canonicalStatusFor(assetSummary?.status) ?? "unknown"}
+                      />
                     </OverviewHighlightGrid>
                   </OverviewSection>
 
                   {(assetSummary?.projectId || producerRun) && (
                     <OverviewSection title="Relationships">
-                      <div className="flex flex-wrap gap-1.5">
+                      <div className="flex flex-wrap gap-2">
                         {assetSummary?.projectId && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-7 px-2 text-xs"
+                          <WorkbenchAction
+                            kind="secondary"
+                            size="compact"
+                            className="h-control-compact px-2 text-label"
                             onClick={() => {
                               if (assetSummary.projectId) {
                                 setSelection({
@@ -501,19 +649,19 @@ export const AssetViewer = ({ selection, snapshot }: RendererProps): JSX.Element
                             }}
                           >
                             Project: {assetSummary.projectId}
-                          </Button>
+                          </WorkbenchAction>
                         )}
                         {producerRun && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-7 px-2 text-xs"
+                          <WorkbenchAction
+                            kind="secondary"
+                            size="compact"
+                            className="h-control-compact px-2 text-label"
                             onClick={() =>
                               setSelection({ objectType: "run", objectId: producerRun.id })
                             }
                           >
                             Producer Run: {producerRun.name || producerRun.id}
-                          </Button>
+                          </WorkbenchAction>
                         )}
                       </div>
                     </OverviewSection>
@@ -532,11 +680,11 @@ export const AssetViewer = ({ selection, snapshot }: RendererProps): JSX.Element
 
                   {tagEntries.length > 0 && (
                     <OverviewSection title="Tags">
-                      <div className="flex flex-wrap gap-1.5">
+                      <div className="flex flex-wrap gap-2">
                         {tagEntries.map(([key, value]) => (
-                          <Badge key={key} variant="secondary" className="text-xs">
+                          <WorkbenchTag key={key} className="text-label">
                             {key}: {value}
-                          </Badge>
+                          </WorkbenchTag>
                         ))}
                       </div>
                     </OverviewSection>
@@ -549,25 +697,29 @@ export const AssetViewer = ({ selection, snapshot }: RendererProps): JSX.Element
                   items={[
                     {
                       label: "Asset ID",
-                      value: <span className="font-mono text-xs">{asset.id}</span>,
+                      value: <span className="font-mono text-label">{asset.id}</span>,
                     },
                     { label: "Name", value: asset.name },
                     { label: "Kind", value: meta.label },
                     {
                       label: "Scope",
-                      value: <span className="font-mono text-xs">{scopeLabel}</span>,
+                      value: <span className="font-mono text-label">{scopeLabel}</span>,
                     },
                     {
                       label: "Path",
-                      value: <span className="break-all font-mono text-xs">{asset.path}</span>,
+                      value: <span className="break-all font-mono text-label">{asset.path}</span>,
                     },
                     {
                       label: "Created",
-                      value: new Date(asset.created_at).toLocaleString(),
+                      value: (
+                        <span title={asset.created_at}>{formatDateTime(asset.created_at)}</span>
+                      ),
                     },
                     {
                       label: "Updated",
-                      value: new Date(asset.updated_at).toLocaleString(),
+                      value: (
+                        <span title={asset.updated_at}>{formatDateTime(asset.updated_at)}</span>
+                      ),
                     },
                   ]}
                 />
@@ -579,15 +731,19 @@ export const AssetViewer = ({ selection, snapshot }: RendererProps): JSX.Element
                     items={[
                       {
                         label: "Run",
-                        value: <span className="font-mono text-xs">{producerRunId ?? "—"}</span>,
+                        value: <span className="font-mono text-label">{producerRunId ?? "—"}</span>,
                       },
                       {
                         label: "Execution",
-                        value: <span className="font-mono text-xs">{producerExecId ?? "—"}</span>,
+                        value: (
+                          <span className="font-mono text-label">{producerExecId ?? "—"}</span>
+                        ),
                       },
                       {
                         label: "Task",
-                        value: <span className="font-mono text-xs">{producerTaskId ?? "—"}</span>,
+                        value: (
+                          <span className="font-mono text-label">{producerTaskId ?? "—"}</span>
+                        ),
                       },
                     ]}
                   />
@@ -596,14 +752,33 @@ export const AssetViewer = ({ selection, snapshot }: RendererProps): JSX.Element
 
               {asset.content_hash && (
                 <OverviewSection title="Content hash">
-                  <div className="break-all rounded border border-border/70 bg-muted/20 p-2 font-mono text-xs">
+                  <InlineCode className="block break-all border-y border-border/60 py-2 font-mono text-label">
                     {asset.content_hash}
-                  </div>
+                  </InlineCode>
                 </OverviewSection>
               )}
 
-              {lineage && (lineage.ancestors?.length || lineage.descendants?.length) ? (
-                <OverviewSection title="Lineage">
+              <OverviewSection title="Lineage">
+                {lineageLoading ? (
+                  <WorkbenchOperationState
+                    kind="loading"
+                    density="compact"
+                    title="Loading lineage…"
+                    skeletonRows={2}
+                  />
+                ) : lineageError ? (
+                  <WorkbenchOperationState
+                    kind="error"
+                    density="compact"
+                    title="Could not load lineage"
+                    detail={lineageError}
+                    action={
+                      <WorkbenchRetryAction
+                        onClick={() => setLineageRequestVersion((version) => version + 1)}
+                      />
+                    }
+                  />
+                ) : lineage && (lineage.ancestors?.length || lineage.descendants?.length) ? (
                   <div className="grid gap-3 sm:grid-cols-2">
                     <LineageColumn
                       title="Upstream (ancestors)"
@@ -616,12 +791,19 @@ export const AssetViewer = ({ selection, snapshot }: RendererProps): JSX.Element
                       onSelect={(id) => setSelection({ objectType: "asset", objectId: id })}
                     />
                   </div>
-                </OverviewSection>
-              ) : null}
+                ) : (
+                  <WorkbenchOperationState
+                    kind="empty"
+                    density="compact"
+                    title="No lineage recorded"
+                    detail="This asset has no known upstream or downstream assets."
+                  />
+                )}
+              </OverviewSection>
 
               {asset.extra && Object.keys(asset.extra).length > 0 && (
                 <OverviewSection title="Kind-specific details">
-                  <pre className="overflow-auto border-y border-border/70 bg-muted/20 p-3 font-mono text-xs">
+                  <pre className="overflow-auto border-y border-border/70 bg-muted/20 p-3 font-mono text-label">
                     {JSON.stringify(asset.extra, null, 2)}
                   </pre>
                 </OverviewSection>
@@ -632,15 +814,11 @@ export const AssetViewer = ({ selection, snapshot }: RendererProps): JSX.Element
         {
           value: "content",
           label: "Content",
-          content: <ContentPanel asset={asset} />,
+          content: <ContentPanel key={asset.id} asset={asset} />,
         },
       ]}
     />
   );
 };
-
-// Suppress unused-import warning (kept for future virtualised log tail)
-void FileText;
-void EMPTY_COPY;
 
 export type { AssetKind };

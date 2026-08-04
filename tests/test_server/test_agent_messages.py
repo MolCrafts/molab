@@ -17,7 +17,7 @@ from typing import Any
 import pytest
 from fastapi import HTTPException
 
-import molexp.server.dependencies as deps
+import molexp.server.deps.agent_runtime as agent_runtime_deps
 from molexp.agent.loops.interactive import InteractiveLoop, InteractiveLoopConfig
 from molexp.agent.router import (
     AgenticChunk,
@@ -44,6 +44,7 @@ class _ScriptedRouter:
         prompt: str,
         system: str = "",
         tools: tuple[Any, ...] = (),
+        toolsets: tuple[Any, ...] = (),
         tier: ModelTier = ModelTier.DEFAULT,
         message_history: tuple[Any, ...] = (),
     ) -> AsyncIterator[AgenticChunk]:
@@ -85,7 +86,7 @@ def _runner(tmp: Path, router: object | None = None) -> AgentRunner:
 @pytest.fixture
 def registry(monkeypatch: pytest.MonkeyPatch) -> AgentSessionRegistry:
     reg = AgentSessionRegistry()
-    monkeypatch.setattr(deps, "_agent_runtime_registry", reg)
+    monkeypatch.setattr(agent_runtime_deps, "_agent_runtime_registry", reg)
     return reg
 
 
@@ -97,48 +98,77 @@ def _new_session(session_id: str) -> Session:
     return Session(storage=InMemorySessionStorage(), session_id=session_id)
 
 
-async def test_message_starts_followup_turn(tmp_path: Path, registry: AgentSessionRegistry) -> None:
-    rt = registry.create(
-        workspace_root=str(tmp_path),
-        runner=_runner(tmp_path),
-        session=_new_session("s1"),
-        goal="hi",
-        user_input="hi",
-    )
-    await rt.await_finished()
-    assert rt.status() == "completed"
+class TestPostUserMessage:
+    """``routes.agent.post_user_message`` — follow-up turns + status domains."""
 
-    resp = await agent_routes.post_user_message(
-        "s1", UserMessageCreateRequest(content="and now this"), workspace=_ws(tmp_path)
-    )
-    assert resp.message  # a MessageResponse
-    # a fresh turn was spawned on the same session
-    assert rt.status() in ("running", "completed")
-    await rt.await_finished()
-    await registry.aclose()
-
-
-async def test_message_unknown_session_404(tmp_path: Path, registry: AgentSessionRegistry) -> None:
-    with pytest.raises(HTTPException) as exc:
-        await agent_routes.post_user_message(
-            "nope", UserMessageCreateRequest(content="hi"), workspace=_ws(tmp_path)
+    async def test_starts_followup_turn_on_completed_session(
+        self, tmp_path: Path, registry: AgentSessionRegistry
+    ) -> None:
+        rt = registry.create(
+            workspace_root=str(tmp_path),
+            runner=_runner(tmp_path),
+            session=_new_session("s1"),
+            goal="hi",
+            user_input="hi",
         )
-    assert exc.value.status_code == 404
+        await rt.await_finished()
+        assert rt.status() == "completed"
 
-
-async def test_message_mid_turn_409(tmp_path: Path, registry: AgentSessionRegistry) -> None:
-    rt = registry.create(
-        workspace_root=str(tmp_path),
-        runner=_runner(tmp_path, router=_BlockingRouter()),
-        session=_new_session("s1"),
-        goal="work",
-        user_input="work",
-    )
-    await asyncio.sleep(0.01)
-    assert rt.status() == "running"
-    with pytest.raises(HTTPException) as exc:
-        await agent_routes.post_user_message(
-            "s1", UserMessageCreateRequest(content="interrupt"), workspace=_ws(tmp_path)
+        resp = await agent_routes.post_user_message(
+            "s1", UserMessageCreateRequest(content="and now this"), workspace=_ws(tmp_path)
         )
-    assert exc.value.status_code == 409
-    await registry.aclose()
+        assert resp.message  # a MessageResponse
+        # a fresh turn was spawned on the same session
+        assert rt.status() in ("running", "completed")
+        await rt.await_finished()
+        await registry.aclose()
+
+    async def test_unknown_session_returns_404(
+        self, tmp_path: Path, registry: AgentSessionRegistry
+    ) -> None:
+        with pytest.raises(HTTPException) as exc:
+            await agent_routes.post_user_message(
+                "nope", UserMessageCreateRequest(content="hi"), workspace=_ws(tmp_path)
+            )
+        assert exc.value.status_code == 404
+
+    async def test_mid_turn_returns_409(
+        self, tmp_path: Path, registry: AgentSessionRegistry
+    ) -> None:
+        rt = registry.create(
+            workspace_root=str(tmp_path),
+            runner=_runner(tmp_path, router=_BlockingRouter()),
+            session=_new_session("s1"),
+            goal="work",
+            user_input="work",
+        )
+        await asyncio.sleep(0.01)
+        assert rt.status() == "running"
+        with pytest.raises(HTTPException) as exc:
+            await agent_routes.post_user_message(
+                "s1", UserMessageCreateRequest(content="interrupt"), workspace=_ws(tmp_path)
+            )
+        assert exc.value.status_code == 409
+        await registry.aclose()
+
+
+class TestCancelSession:
+    """``routes.agent.cancel_session`` — stops the live turn, returns the wire ack."""
+
+    async def test_cancels_running_turn(
+        self, tmp_path: Path, registry: AgentSessionRegistry
+    ) -> None:
+        rt = registry.create(
+            workspace_root=str(tmp_path),
+            runner=_runner(tmp_path, router=_BlockingRouter()),
+            session=_new_session("s1"),
+            goal="work",
+            user_input="work",
+        )
+        await asyncio.sleep(0.01)
+        assert rt.status() == "running"
+
+        resp = await agent_routes.cancel_session("s1", workspace=_ws(tmp_path))
+        assert resp.message == "cancelled"
+        assert rt.status() == "cancelled"
+        await registry.aclose()

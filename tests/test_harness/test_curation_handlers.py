@@ -1,0 +1,218 @@
+"""Guarded-execution slice 02 — ``resolve_object_ref`` + the curation handlers.
+
+Exercises ``molexp.harness.actions.resolve.resolve_object_ref`` over a real
+on-disk Workspace and the two curation handlers
+(``molexp.harness.actions.handlers.curation`` — in-process over
+``molexp.workspace.curation``), driven through the slice-01 ``ProposalExecutor``.
+
+The generic dispatch spine (executed/failed recording, the
+``assert_within_affected_scope`` guard, unknown-op errors) is owned by
+``test_proposal_executor.py``; this file owns only the resolver and the concrete
+curation mutations.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+from pathlib import Path
+
+import pytest
+
+from molexp.harness.schemas.change_proposal import (
+    ChangeProposal,
+    ChangeSpec,
+    ObjectRef,
+    StateSnapshot,
+)
+from molexp.workspace import Workspace
+from molexp.workspace.folder import Folder
+
+
+def _ctx(tmp_path: Path):
+    from molexp.harness.core.run_context import HarnessRunContext
+    from molexp.harness.store.file_artifact_store import FileArtifactStore
+    from molexp.harness.store.sqlite_event_log import SQLiteEventLog
+    from molexp.harness.store.sqlite_lineage_store import SQLiteArtifactLineageStore
+
+    db = tmp_path / "harness.sqlite"
+    artifacts = FileArtifactStore(root=tmp_path / "artifacts")
+    events = SQLiteEventLog(path=db)
+    lineage = SQLiteArtifactLineageStore(path=db, artifact_store=artifacts)
+    return HarnessRunContext(
+        run_id="run-ge2",
+        workspace_root=tmp_path,
+        artifact_store=artifacts,
+        event_log=events,
+        lineage_store=lineage,
+    )
+
+
+def _workspace(tmp_path: Path) -> Workspace:
+    """A workspace with project p / experiments e1,e2 / run r1 / a root folder."""
+    ws = Workspace(root=tmp_path, name="Lab")
+    project = ws.add_project("p")
+    project.add_experiment("e1", workflow_source="t.py")
+    project.add_experiment("e2", workflow_source="t.py")
+    project.get_experiment("e1").add_run(id="r1")
+    ws.add_folder(Folder(parent=ws, name="scratch", kind="curation.test"))
+    return ws
+
+
+def _proposal(op: str, *, affected: list[ObjectRef], payload: dict) -> ChangeProposal:
+    return ChangeProposal(
+        id="cp-ge2",
+        intent=f"{op} action",
+        current_state=StateSnapshot(objects=list(affected)),
+        proposed_change=ChangeSpec(op=op, summary=op, payload=payload),
+        affected_objects=list(affected),
+        expected_benefit="tidier tree",
+        risks=[],
+        reversibility="reversible",
+        approval_level="user",
+        evidence=[],
+        knowledge=[],
+    )
+
+
+def _curation_executor():
+    from molexp.harness.actions import ChangeActionRegistry, ProposalExecutor
+    from molexp.harness.actions.handlers import register_curation_handlers
+
+    registry = ChangeActionRegistry()
+    register_curation_handlers(registry)
+    return ProposalExecutor(registry)
+
+
+def _result_obj(ctx, outcome):
+    ref_id = outcome.result_artifact_ids[0]
+    return json.loads(ctx.artifact_store.get(ref_id))
+
+
+class TestResolveObjectRef:
+    def test_resolves_each_kind_to_live_entity(self, tmp_path: Path) -> None:
+        from molexp.harness.actions import resolve_object_ref
+
+        ws = _workspace(tmp_path)
+        payload = tmp_path / "src.txt"
+        payload.write_text("hello")
+        asset = ws.get_project("p").get_experiment("e1").data_assets.import_asset("d", payload)
+
+        run = resolve_object_ref(tmp_path, ObjectRef(kind="run", id="r1"))
+        assert run.id == "r1"
+        exp = resolve_object_ref(tmp_path, ObjectRef(kind="experiment", id="e2"))
+        assert exp.id == "e2"
+        folder = resolve_object_ref(tmp_path, ObjectRef(kind="folder", id="scratch"))
+        assert folder.name == "scratch"
+        da = resolve_object_ref(tmp_path, ObjectRef(kind="data_asset", id=asset.asset_id))
+        assert da.asset_id == asset.asset_id
+
+    def test_raises_on_missing_id_or_unknown_kind(self, tmp_path: Path) -> None:
+        """No silent None — an unresolvable id / unknown kind is loud (no-fallback rule)."""
+        from molexp.harness.actions import resolve_object_ref
+        from molexp.harness.errors import ObjectRefResolutionError
+
+        _workspace(tmp_path)
+        with pytest.raises(ObjectRefResolutionError):
+            resolve_object_ref(tmp_path, ObjectRef(kind="run", id="ghost"))
+        with pytest.raises(ObjectRefResolutionError):
+            resolve_object_ref(tmp_path, ObjectRef(kind="galaxy", id="x"))
+
+
+class TestAssetMoveHandler:
+    def test_move_run_relocates_run_and_records_executed(self, tmp_path: Path) -> None:
+        _workspace(tmp_path)
+        ctx = _ctx(tmp_path)
+        affected = [ObjectRef(kind="run", id="r1"), ObjectRef(kind="experiment", id="e2")]
+        proposal = _proposal(
+            "asset_move",
+            affected=affected,
+            payload={
+                "curation_op": "move_run",
+                "target_experiment": {"kind": "experiment", "id": "e2"},
+            },
+        )
+        outcome = asyncio.run(_curation_executor().dispatch(ctx, proposal))
+        assert outcome.status == "executed"
+        ws = Workspace(root=tmp_path, name="Lab")
+        assert not ws.get_project("p").get_experiment("e1").has_run("r1")
+        assert ws.get_project("p").get_experiment("e2").has_run("r1")
+        assert _result_obj(ctx, outcome)["proposal_id"] == "cp-ge2"
+
+    def test_rehome_asset_reimports_under_target(self, tmp_path: Path) -> None:
+        from molexp.workspace.assets.scan import scan_assets
+
+        ws = _workspace(tmp_path)
+        payload = tmp_path / "src.txt"
+        payload.write_text("payload-bytes")
+        asset = ws.get_project("p").get_experiment("e1").data_assets.import_asset("d", payload)
+
+        ctx = _ctx(tmp_path)
+        affected = [
+            ObjectRef(kind="data_asset", id=asset.asset_id),
+            ObjectRef(kind="experiment", id="e1"),
+            ObjectRef(kind="experiment", id="e2"),
+        ]
+        proposal = _proposal(
+            "asset_move",
+            affected=affected,
+            payload={
+                "curation_op": "rehome_asset",
+                "source": {"kind": "experiment", "id": "e1"},
+                "target": {"kind": "experiment", "id": "e2"},
+            },
+        )
+        outcome = asyncio.run(_curation_executor().dispatch(ctx, proposal))
+        assert outcome.status == "executed"
+        e2_dir = ws.get_project("p").get_experiment("e2").experiment_dir
+        assert scan_assets(e2_dir), "the re-homed asset should be present under e2"
+
+    def test_target_outside_affected_scope_records_failed_without_mutation(
+        self, tmp_path: Path
+    ) -> None:
+        """A payload target absent from affected_objects → failed, no filesystem change."""
+        _workspace(tmp_path)
+        ctx = _ctx(tmp_path)
+        # affected omits the target experiment e2, but the payload names it
+        proposal = _proposal(
+            "asset_move",
+            affected=[ObjectRef(kind="run", id="r1")],
+            payload={
+                "curation_op": "move_run",
+                "target_experiment": {"kind": "experiment", "id": "e2"},
+            },
+        )
+        outcome = asyncio.run(_curation_executor().dispatch(ctx, proposal))
+        assert outcome.status == "failed"
+        ws = Workspace(root=tmp_path, name="Lab")
+        assert ws.get_project("p").get_experiment("e1").has_run("r1")  # run not moved
+
+
+class TestArtifactDeleteHandler:
+    def test_removes_folder_and_records_executed(self, tmp_path: Path) -> None:
+        _workspace(tmp_path)
+        ctx = _ctx(tmp_path)
+        proposal = _proposal(
+            "artifact_delete",
+            affected=[ObjectRef(kind="folder", id="scratch")],
+            payload={},
+        )
+        outcome = asyncio.run(_curation_executor().dispatch(ctx, proposal))
+        assert outcome.status == "executed"
+        ws = Workspace(root=tmp_path, name="Lab")
+        assert not ws.has_folder("scratch", cls=Folder)
+        assert _result_obj(ctx, outcome)["proposal_id"] == "cp-ge2"
+
+    def test_removes_run_kind_object(self, tmp_path: Path) -> None:
+        """curate-unify-01 — artifact_delete deletes a run-kind affected object, not only folders."""
+        _workspace(tmp_path)
+        ctx = _ctx(tmp_path)
+        proposal = _proposal(
+            "artifact_delete",
+            affected=[ObjectRef(kind="run", id="r1")],
+            payload={},
+        )
+        outcome = asyncio.run(_curation_executor().dispatch(ctx, proposal))
+        assert outcome.status == "executed"
+        ws = Workspace(root=tmp_path, name="Lab")
+        assert not ws.get_project("p").get_experiment("e1").has_run("r1")

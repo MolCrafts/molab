@@ -377,10 +377,12 @@ class McpStore:
             if not isinstance(raw, dict):
                 continue
             values: Iterable[JSONValue] = []
-            if isinstance(raw.get("env"), dict):
-                values = list(values) + list(raw["env"].values())
-            if isinstance(raw.get("headers"), dict):
-                values = list(values) + list(raw["headers"].values())
+            env = raw.get("env")
+            if isinstance(env, dict):
+                values = list(values) + list(env.values())
+            headers = raw.get("headers")
+            if isinstance(headers, dict):
+                values = list(values) + list(headers.values())
             for key in _collect_refs(values):
                 out.setdefault(key, set()).add(name)
         return {k: sorted(v) for k, v in out.items()}
@@ -434,6 +436,28 @@ class McpStore:
 
     # ── Secret substitution (runtime only) ─────────────────────────────────
 
+    def public_env(self, scope: McpScope, name: str) -> dict[str, str]:
+        """Return non-secret env literals for the settings UI (never secret values).
+
+        Values that use ``${SECRET:…}`` placeholders are omitted — only
+        plain env pins like ``MOLMCP_SOURCES=molpy,molvis`` are returned so
+        the editor can round-trip them without leaking keyring material.
+        """
+        raw = _read_servers(self.config_path(scope)).get(name)
+        if not isinstance(raw, dict):
+            return {}
+        env = raw.get("env")
+        if not isinstance(env, dict):
+            return {}
+        out: dict[str, str] = {}
+        for key, value in env.items():
+            if not isinstance(key, str) or not isinstance(value, str):
+                continue
+            if SECRET_REF_PATTERN.search(value):
+                continue
+            out[key] = value
+        return out
+
     def resolve(self, entry: McpServerEntry) -> ResolvedSpec:
         """Substitute ``${SECRET:K}`` in the entry's env/headers.
 
@@ -452,21 +476,23 @@ class McpStore:
             raise KeyError(f"Server '{entry.name}' missing at scope {entry.scope.value}")
 
         if entry.transport == "stdio":
-            env_resolved = {
-                k: self._substitute(entry.name, v) for k, v in (raw.get("env") or {}).items()
-            }
+            raw_env = raw.get("env")
+            env_items = raw_env.items() if isinstance(raw_env, dict) else ()
+            env_resolved = {k: self._substitute(entry.name, v) for k, v in env_items}
+            raw_args = raw.get("args")
+            args_iter = raw_args if isinstance(raw_args, list) else ()
             return ResolvedSpec(
                 transport="stdio",
                 command=str(raw.get("command") or ""),
-                args=tuple(str(a) for a in (raw.get("args") or [])),
+                args=tuple(str(a) for a in args_iter),
                 url=None,
                 env=env_resolved,
                 headers={},
             )
 
-        header_resolved = {
-            k: self._substitute(entry.name, v) for k, v in (raw.get("headers") or {}).items()
-        }
+        raw_headers = raw.get("headers")
+        header_items = raw_headers.items() if isinstance(raw_headers, dict) else ()
+        header_resolved = {k: self._substitute(entry.name, v) for k, v in header_items}
         return ResolvedSpec(
             transport=entry.transport,
             command=None,

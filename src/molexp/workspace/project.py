@@ -13,15 +13,18 @@ from __future__ import annotations
 from pathlib import Path as _LocalPath
 from typing import TYPE_CHECKING, Any, cast
 
+from molexp._typing import JSONValue
 from molexp.path import Path
 
 if TYPE_CHECKING:
+    from .fs import FileSystem
     from .workspace import Workspace
+
+from molexp.knowledge.types import concept_type
 
 from .assets import AssetScope, AssetsView, DataAssetLibrary, ImportAction
 from .base import (
     _load_metadata,
-    _rebuild_container_index,
     _reconstruct,
     _save_metadata,
 )
@@ -34,12 +37,14 @@ from .folder import (
     WORKSPACE_EXPERIMENT_KIND,
     WORKSPACE_PROJECT_KIND,
     Folder,
+    _validate_target_registered,
 )
 from .fs import PathArg
 from .models import FolderMetadata, ProjectMetadata
 from .utils import slugify
 
 
+@concept_type(WORKSPACE_PROJECT_KIND)
 class Project(Folder):
     """Research project container.
 
@@ -61,7 +66,7 @@ class Project(Folder):
         kind: str = WORKSPACE_PROJECT_KIND,
         id: str | None = None,
         workspace: Workspace | None = None,
-        fs: FileSystem | None = None,  # noqa: F821
+        fs: FileSystem | None = None,
         _entity_metadata: ProjectMetadata | None = None,
     ) -> None:
         from .fs_local import LocalFileSystem
@@ -95,7 +100,6 @@ class Project(Folder):
 
         self._entity_metadata: ProjectMetadata = meta
         self._data_assets: DataAssetLibrary | None = None
-        self._experiments_cache: dict[str, Experiment] = {}
 
     # ── Folder hooks ─────────────────────────────────────────────────────
 
@@ -104,8 +108,12 @@ class Project(Folder):
 
     @classmethod
     def child_dir(cls, parent: Folder, derived_id: str) -> Path:
-        """Folder hook — projects live under ``projects/<id>/``."""
-        return Path(parent._fs.join(parent.path(), "projects", derived_id))
+        """Folder hook — projects live under ``projects/<id>/``.
+
+        Uses :meth:`~Folder.resolve` (not :meth:`~Folder.path`) so listing a
+        project never issues a remote ``mkdir`` on the workspace root.
+        """
+        return Path(parent._fs.join(parent.resolve(), "projects", derived_id))
 
     @classmethod
     def from_disk(cls, child_dir: PathArg, parent: Folder) -> Project:
@@ -123,7 +131,6 @@ class Project(Folder):
         attrs = cls.base_from_disk_attrs(parent, folder_meta) | {
             "_entity_metadata": meta,
             "_data_assets": None,
-            "_experiments_cache": {},
         }
         return _reconstruct(cls, attrs)
 
@@ -184,14 +191,14 @@ class Project(Folder):
 
     @property
     def assets(self) -> AssetsView:
-        """Scope-filtered catalog view (read-only queries)."""
-        return AssetsView(self.workspace.catalog, self.scope)
+        """Scope-filtered asset view (read-only queries)."""
+        return AssetsView(self.workspace.root, self.scope)
 
     @property
     def data_assets(self) -> DataAssetLibrary:
         if self._data_assets is None:
             self._data_assets = DataAssetLibrary(
-                self.project_dir, self.scope, self.workspace.catalog
+                self.project_dir, self.scope, event_root=_LocalPath(str(self.workspace.root))
             )
         return self._data_assets
 
@@ -203,29 +210,11 @@ class Project(Folder):
         self._fs.mkdir(d, parents=True, exist_ok=True)
         meta_path = self._fs.join(d, "project.json")
         _save_metadata(self._entity_metadata, meta_path, fs=self._fs)
-        self._catalog_upsert()
 
     def save(self) -> None:
         """Persist current metadata to disk."""
         meta_path = self._fs.join(self.project_dir, "project.json")
         _save_metadata(self._entity_metadata, meta_path, fs=self._fs)
-        self._catalog_upsert()
-
-    def _catalog_upsert(self) -> None:
-        meta = self._entity_metadata
-        self.workspace.catalog.upsert_project(
-            {
-                "project_id": meta.id,
-                "workspace_id": self.workspace.id,
-                "name": meta.name,
-                "description": meta.description,
-                "owner": meta.owner,
-                "tags": list(meta.tags),
-                "path": "projects/" + self.id,
-                "created_at": meta.created_at.isoformat(),
-                "updated_at": meta.created_at.isoformat(),
-            }
-        )
 
     def import_asset(  # noqa: ANN201
         self,
@@ -239,48 +228,65 @@ class Project(Folder):
 
     # ── Experiment CRUD: typed semantic sugar over generic Folder CRUD ─────
 
-    def add_experiment(self, name: str, **kwargs: Any) -> Experiment:  # noqa: ANN401
+    def add_experiment(
+        self,
+        name: str,
+        *,
+        id: str | None = None,
+        params: dict[str, JSONValue] | None = None,
+        n_replicas: int = 1,
+        seeds: list[int] | None = None,
+        workflow_source: str | None = None,
+        workflow_type: str | None = None,
+        git_commit: str | None = None,
+        description: str = "",
+        tags: list[str] | None = None,
+        default_target: str | None = None,
+    ) -> Experiment:
         """Mount an experiment under this project (idempotent on slug).
 
         One-line wrapper over generic ``add_folder``. The slugified
         ``name`` doubles as the experiment id when no explicit ``id=``
-        kwarg is given — matching the legacy ``Project.Experiment``
+        is given — matching the legacy ``Project.Experiment``
         factory semantics so ``add_experiment("counter")`` twice returns
         the same instance.
+
+        The signature is spelled out explicitly (mirroring the
+        :class:`~molexp.workspace.models.ExperimentMetadata` fields the
+        :class:`Experiment` constructor accepts) so a typo such as
+        ``prams=`` raises ``TypeError`` instead of flowing silently.
+        ``params`` is the canonical spelling for the parameter dict.
         """
-        slug = slugify(name)
-        explicit_id = kwargs.pop("id", None)
-        resolved_id = explicit_id if explicit_id is not None else slug
-        cached = self._experiments_cache.get(resolved_id)
-        if cached is not None:
-            return cached
-        child_dir = Experiment.child_dir(self, resolved_id)
-        if self._fs.is_dir(child_dir):
-            existing = Experiment.from_disk(child_dir, self)
-            self._experiments_cache[existing.id] = existing
-            self._children_cache[existing.id] = existing
-            return existing
-        exp = Experiment(parent=self, name=name, id=resolved_id, **kwargs)
-        exp.materialize()
-        self._experiments_cache[exp.id] = exp
-        self._children_cache[exp.id] = exp
-        self._upsert_index_row(exp)
-        return exp
+        resolved_id = id if id is not None else slugify(name)
+        _validate_target_registered(self.workspace, default_target)
+        child = self._construct_child(
+            Experiment,
+            name,
+            id=resolved_id,
+            params=params,
+            n_replicas=n_replicas,
+            seeds=seeds,
+            workflow_source=workflow_source,
+            workflow_type=workflow_type,
+            git_commit=git_commit,
+            description=description,
+            tags=tags,
+            default_target=default_target,
+        )
+        return self.add_folder(child)
+
+    def experiment(self, name: str, **kwargs: Any) -> Experiment:  # noqa: ANN401
+        """Fluent create-or-get alias for :meth:`add_experiment` (idempotent)."""
+        return self.add_experiment(name, **kwargs)
 
     def get_experiment(self, name: str) -> Experiment:
-        exp = self.get_folder(name, cls=Experiment)
-        self._experiments_cache[exp.id] = exp
-        return exp
+        return self.get_folder(name, cls=Experiment)
 
     def has_experiment(self, name: str) -> bool:
         return self.has_folder(name, cls=Experiment)
 
     def remove_experiment(self, name: str) -> None:
-        slug = slugify(name)
-        self._experiments_cache.pop(slug, None)
         self.remove_folder(name, cls=Experiment)
-        self.workspace.catalog.remove_experiment(slug)
-        self._refresh_experiments_index()
 
     def list_experiments(self) -> list[Experiment]:
         """List all experiments in this project via the typed CRUD view."""
@@ -291,11 +297,3 @@ class Project(Folder):
         if kind is not None and kind != WORKSPACE_EXPERIMENT_KIND:
             return []
         return list(self.list_experiments())
-
-    def _refresh_experiments_index(self) -> None:
-        _rebuild_container_index(
-            container_dir=self._fs.join(self.project_dir, "experiments"),
-            index_filename="experiments.json",
-            metadata_filename="experiment.json",
-            fields=["id", "name", "description", "tags", "n_replicas", "created_at"],
-        )

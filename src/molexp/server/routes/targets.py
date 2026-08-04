@@ -16,8 +16,8 @@ from molexp.workspace import (
     ComputeTarget,
     Workspace,
     add_target,
+    effective_targets,
     get_target,
-    list_targets,
     remove_target,
     to_transport,
 )
@@ -38,8 +38,8 @@ router = APIRouter(prefix="/targets", tags=["targets"])
 def list_targets_endpoint(
     workspace: Workspace = Depends(get_workspace),
 ) -> TargetListResponse:
-    """List every compute target registered on the workspace."""
-    targets = list_targets(workspace)
+    """List compute targets — the registered ones plus the built-in ``local``."""
+    targets = effective_targets(workspace)
     rows = [TargetResponse.from_model(t) for t in targets]
     return TargetListResponse(targets=rows, total=len(rows))
 

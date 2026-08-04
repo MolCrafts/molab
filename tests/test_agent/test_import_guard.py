@@ -1,24 +1,20 @@
 """Agent boundary firewall (rectification spec — Phase 0 / P0-06).
 
-Agent is the top of the three-layer DAG. It may import from both
-``molexp.workspace.*`` and ``molexp.workflow.*`` (those are downstream).
-It MUST NOT import from sibling application layers:
+Agent sits above the bottom storage layers. Its sanctioned downstream edges
+are ``molexp.workspace.*`` and ``molexp.knowledge.*`` (Agent/AgentSession are
+Concepts after the OKF rehome). It MUST NOT import ``molexp.workflow`` /
+``molexp.harness`` (sibling/upstream) nor the application layers
+(``plugins`` / ``server`` / ``cli`` / ``services`` / ``sweep``). Two SDK
+invariants live here too:
 
-- ``molexp.plugins`` (the agent stays a library, never reaches the
-  application's plugin shell)
-- ``molexp.server``, ``molexp.cli``, ``molexp.sweep``
+1. ``pydantic_ai`` may only be imported from ``src/molexp/agent/_pydanticai/``.
+2. Importing the agent surface stays SDK-lazy — ``import molexp.agent`` (and
+   ``molexp.agent.loops``) loads neither ``pydantic_ai`` nor the ``mcp`` SDK
+   until a router is actually built.
 
-Two pydantic-SDK invariants also live here:
-
-1. ``pydantic_ai`` may only be imported from
-   ``src/molexp/agent/_pydanticai/``.
-2. ``pydantic_graph`` must NOT be imported anywhere under
-   ``src/molexp/agent/`` — pg lives exclusively under
-   ``src/molexp/workflow/_pydantic_graph/``. PlanMode drives multi-step
-   workflows through the public ``molexp.workflow`` API.
-3. Plain ``import molexp.agent`` does not eagerly load ``pydantic_ai``
-   — the SDK is loaded lazily when ``PydanticAIRouter`` is
-   constructed (on first ``AgentRunner.run``).
+(``pydantic_graph`` is banned across all of ``src/`` — owned by the full-src
+AST scan in ``tests/test_workflow/test_engine_boundary.py`` — so it is not
+re-scanned here.)
 """
 
 from __future__ import annotations
@@ -34,6 +30,7 @@ FORBIDDEN_PREFIXES: tuple[str, ...] = (
     "molexp.plugins",
     "molexp.server",
     "molexp.cli",
+    "molexp.services",  # application-service layer sits above agent
     "molexp.sweep",
     "molexp.workflow",  # spec 03b: agent stopped being the orchestrator
     "molexp.harness",  # spec 03b: agent sits below harness in the DAG
@@ -59,18 +56,14 @@ def _runtime_imports(tree: ast.AST) -> list[ast.Import | ast.ImportFrom]:
     """Walk ``tree`` collecting only the imports executed at runtime.
 
     Imports inside ``if TYPE_CHECKING:`` (or ``if typing.TYPE_CHECKING:``)
-    are skipped — they exist only for type checkers and are never
-    loaded, so they do not violate the runtime-firewall invariant.
+    are skipped — they exist only for type checkers and are never loaded,
+    so they do not violate the runtime-firewall invariant.
     """
     collected: list[ast.Import | ast.ImportFrom] = []
 
     def _walk(node: ast.AST) -> None:
         for child in ast.iter_child_nodes(node):
             if _is_type_checking_block(child):
-                # Skip the whole if/elif/else cascade: the body is
-                # never executed and any orelse clause that mirrors a
-                # ``if not TYPE_CHECKING:`` shape would be unusual and
-                # worth flagging by hand.
                 continue
             if isinstance(child, (ast.Import, ast.ImportFrom)):
                 collected.append(child)
@@ -107,7 +100,7 @@ def _format(hits: list[tuple[Path, int, str]]) -> list[str]:
 
 
 def test_agent_forbids_application_layers() -> None:
-    """No imports of plugins / server / cli / sweep anywhere in agent/."""
+    """No imports of plugins / server / cli / services / sweep / workflow / harness."""
     offenders: dict[str, list[str]] = {}
     for prefix in FORBIDDEN_PREFIXES:
         hits = _files_importing(prefix, AGENT_ROOT)
@@ -132,69 +125,12 @@ def test_pydantic_ai_imports_confined_to_pydanticai_subtree() -> None:
     assert not bad, "pydantic_ai imports outside agent/_pydanticai/:\n  " + "\n  ".join(bad)
 
 
-def test_pydantic_graph_never_imported_in_agent() -> None:
-    """``pydantic_graph`` is a workflow-layer concern; ``agent/`` never imports it.
-
-    Post spec 03b, the agent layer is a pydantic-ai facade with only LLM-only
-    loops (Chat + Interactive); pipeline orchestration moved to the harness
-    layer, so any ``pydantic_graph`` reference under ``agent/`` is a defect.
-    """
-    hits = _files_importing("pydantic_graph", AGENT_ROOT)
-    bad = _format(hits)
-    assert not bad, (
-        "pydantic_graph imported inside agent/. The workflow layer is "
-        "the only sanctioned pg site:\n  " + "\n  ".join(bad)
-    )
-
-
-def test_importing_molexp_agent_does_not_load_pydantic_ai() -> None:
-    """``import molexp.agent`` must not eagerly import pydantic_ai.
-
-    The router is heavy and the SDK takes time to load; agent's
-    runner constructs it lazily on first ``.run()``. We only assert
-    pydantic_ai laziness here — pydantic_graph may legitimately load
-    transitively through ``molexp.workflow`` (PlanMode wiring), and
-    its confinement to ``workflow/_pydantic_graph/`` is enforced
-    separately by ``tests/test_workflow/test_import_guard.py``.
-    """
-    code = (
-        "import sys\n"
-        "import molexp.agent  # noqa: F401\n"
-        "assert 'pydantic_ai' not in sys.modules, (\n"
-        "    f'pydantic_ai was eagerly loaded; '\n"
-        "    f'check that no module under agent/ imports it at top level '\n"
-        "    f'outside agent/_pydanticai/.'\n"
-        ")\n"
-    )
-    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
-    assert result.returncode == 0, result.stderr or result.stdout
-
-
-def test_importing_molexp_agent_router_does_not_load_pydantic_ai() -> None:
-    """``import molexp.agent.router`` (the protocol module) must also stay lazy.
-
-    The protocol file deliberately defers all SDK imports to the concrete
-    :class:`~molexp.agent._pydanticai.router.PydanticAIRouter` so test
-    fakes can implement the protocol without paying the SDK load cost.
-    """
-    code = (
-        "import sys\n"
-        "import molexp.agent.router  # noqa: F401\n"
-        "assert 'pydantic_ai' not in sys.modules, (\n"
-        "    f'pydantic_ai was eagerly loaded by molexp.agent.router; '\n"
-        "    f'the protocol module must not import the SDK.'\n"
-        ")\n"
-    )
-    result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
-    assert result.returncode == 0, result.stderr or result.stdout
-
-
 def test_importing_loops_does_not_load_mcp_clients() -> None:
     """Sentinel — importing the public loop surface stays MCP-client free.
 
-    Plain ``import molexp.agent.loops`` (ChatLoop + future pipeline
-    loops) must not pull ``pydantic_ai.mcp`` / the ``mcp`` SDK into
-    ``sys.modules``; MCP wiring stays lazy until a router is built.
+    Plain ``import molexp.agent.loops`` must not pull ``pydantic_ai.mcp`` /
+    the ``mcp`` SDK into ``sys.modules``; MCP wiring stays lazy until a
+    router is built.
     """
     code = (
         "import sys\n"
@@ -209,36 +145,25 @@ def test_importing_loops_does_not_load_mcp_clients() -> None:
     assert result.returncode == 0, result.stderr or result.stdout
 
 
-def test_importing_mcp_defaults_stays_lazy() -> None:
-    """ac-014 — ``import molexp.agent.mcp.defaults`` stays SDK-free.
+def test_pydanticai_router_public_reexport_is_lazy() -> None:
+    """``from molexp.agent import PydanticAIRouter`` works and stays lazy.
 
-    The defaults module declares the platform's seeded MCP servers and
-    the seeding helper; nothing in it should pull in ``pydantic_ai`` or
-    ``pydantic_graph``. The seeding fires under
-    :class:`~molexp.agent.mcp.store.McpStore` construction, but neither
-    side path should require the SDKs.
+    The public spelling resolves through a module-level ``__getattr__``:
+    ``import molexp.agent`` alone must not load ``pydantic_ai``; touching the
+    ``PydanticAIRouter`` attribute loads the SDK and returns the same class
+    that lives under the ``_pydanticai/`` firewall.
     """
     code = (
         "import sys\n"
-        "import molexp.agent.mcp.defaults  # noqa: F401\n"
+        "import molexp.agent\n"
         "assert 'pydantic_ai' not in sys.modules, (\n"
-        "    f'pydantic_ai was eagerly loaded by molexp.agent.mcp.defaults'\n"
+        "    'import molexp.agent must stay pydantic_ai-free even with the '\n"
+        "    'PydanticAIRouter re-export declared'\n"
         ")\n"
-        "assert 'pydantic_graph' not in sys.modules, (\n"
-        "    f'pydantic_graph was eagerly loaded by molexp.agent.mcp.defaults'\n"
-        ")\n"
+        "from molexp.agent import PydanticAIRouter\n"
+        "from molexp.agent._pydanticai.router import PydanticAIRouter as Private\n"
+        "assert PydanticAIRouter is Private, 'public re-export must be the same class'\n"
+        "assert 'pydantic_ai' in sys.modules, 'attribute access should have loaded the SDK'\n"
     )
     result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr or result.stdout
-
-
-def test_agent_workspace_only_is_allowed() -> None:
-    """Sanity guard: workspace is the ONLY downstream layer agent may reach.
-
-    Post spec 03b the charter is reversed — agent sits *below* harness in the
-    DAG and no longer drives the workflow engine, so both ``molexp.workflow``
-    and ``molexp.harness`` are forbidden alongside the application shell.
-    """
-    assert "molexp.workspace" not in FORBIDDEN_PREFIXES
-    assert "molexp.workflow" in FORBIDDEN_PREFIXES
-    assert "molexp.harness" in FORBIDDEN_PREFIXES

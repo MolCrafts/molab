@@ -7,6 +7,7 @@ The server, CLI, and Python API all derive from these models.
 from __future__ import annotations
 
 from datetime import datetime
+from enum import StrEnum
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
@@ -14,6 +15,22 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from molexp._typing import JSONValue
 
 # ── Shared value objects ────────────────────────────────────────────────────
+
+
+class RunStatus(StrEnum):
+    """Lifecycle state of a run.
+
+    Lives here (the workspace schema source of truth) rather than in
+    ``run.py`` so the run-lifecycle collaborators can import it without a
+    circular ``run.py`` dependency. Re-exported from ``run.py`` for
+    backward compatibility (``from molexp.workspace.run import RunStatus``).
+    """
+
+    PENDING = "pending"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 class ErrorInfo(BaseModel, frozen=True):
@@ -179,6 +196,10 @@ class ExperimentMetadata(BaseModel, frozen=True):
     # grouping; workspace never interprets it.
     workflow_source: str | None = None
     workflow_type: str | None = None
+    # Provenance: the plan run that generated this experiment's workflow
+    # (a plan IS a run, so one string suffices — no new entity, and runs
+    # inherit by association; a second run-identity field is forbidden).
+    plan_run_id: str | None = None
     parameter_space: dict[str, JSONValue] = Field(default_factory=dict)
     git_commit: str | None = None
 
@@ -206,7 +227,7 @@ class ExecutionRecord(BaseModel, frozen=True):
     scheduler_job_id: str | None = None
 
 
-class ExecutionMetadata(BaseModel):
+class ExecutionMetadata(BaseModel, frozen=True):
     """Per-attempt metadata persisted to ``executions/<exec_id>/execution.json``.
 
     Mirrors the matching :class:`ExecutionRecord` entry in
@@ -226,20 +247,32 @@ class ExecutionMetadata(BaseModel):
     error: ErrorInfo | None = None
 
 
-class RunMetadata(BaseModel):
-    """Single execution instance metadata.
+class RunMetadata(BaseModel, frozen=True):
+    """Single execution instance — identity / provenance only.
 
-    ``profile`` is the activated molcfg profile name (normalized,
-    ``-`` → ``_``) or ``None`` when no profile was selected.  ``config``
-    is the frozen merged configuration dict that the run executed
-    against; ``config_hash`` is its sha256 digest, duplicated for fast
-    queryability.  The framework treats profile contents as opaque
-    user data — it persists them for reproducibility but never
-    interprets them.
+    ``RunMetadata`` (persisted to ``run.json``) carries the settled,
+    human-meaningful identity of a run: its parameters, frozen config +
+    hash, activated profile, workflow snapshot/version, source snapshot,
+    intended compute target, executor info, and the terminal ``error``
+    diagnostic. The framework treats profile/config contents as opaque
+    user data — it persists them for reproducibility but never interprets
+    them.
 
-    ``execution_history`` indexes every attempt to execute this run,
-    newest last.  Each entry points to the corresponding sub-directory
-    under ``run_dir/executions/``.
+    Hot machine state — ``status`` / ``finished_at`` / execution history /
+    ownership (pid/host/heartbeat) — does **not** live here. It is owned
+    by the OKF ``_ops/run.json`` sidecar (:class:`RunOpsState`), the sole
+    source of truth (the OKF identity-vs-runtime split; wsokf-07/wsokf-10).
+    Read it through the ops-backed :class:`~molexp.workspace.run.Run`
+    accessors (``run.status`` / ``run.finished_at`` / ``run.execution_history``)
+    or :meth:`~molexp.workspace.run.Run.read_ops`.
+
+    ``model_config`` uses ``extra="ignore"`` so a ``run.json`` written by
+    an older molexp version (which still carried ``status`` / ``finished_at`` /
+    ``execution_history`` / ``labels``) loads cleanly — the relocated keys
+    are dropped on read (greenfield; no backfill migration).
+
+    ``error`` remains here as a terminal failure diagnostic — it is not
+    modelled by :class:`RunOpsState`.
 
     ``submit_cwd`` is the absolute working directory at the moment
     ``molexp run`` submitted this run.  The cluster worker chdirs here
@@ -249,24 +282,29 @@ class RunMetadata(BaseModel):
     workspaces under ``run_dir/``.
     """
 
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
     id: str
-    status: str = "pending"
     parameters: dict[str, JSONValue] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=datetime.now)
-    finished_at: datetime | None = None
     error: ErrorInfo | None = None
     # Opaque workflow-snapshot payload — the canonical type lives in
     # ``molexp.workflow.snapshot_ref.WorkflowSnapshotRef``; workspace
     # stores it as a plain dict to avoid an upward dependency.
     workflow_snapshot: dict[str, JSONValue] | None = None
     script: str | None = None
+    # Source snapshot — the entrypoint script's bytes + its first-party
+    # local-import closure, copied under ``run_dir/source/`` at dispatch (see
+    # ``molexp.workspace.source_snapshot.snapshot_sources``). ``script`` records
+    # the *path* and ``workflow_snapshot.code_hash`` an AST hash; this carries the
+    # actual source manifest so a run is reproducible from its own directory even
+    # if the live tree changes. ``None`` for runs dispatched before this existed.
+    source_snapshot: dict[str, JSONValue] | None = None
     submit_cwd: str | None = None
     profile: str | None = None
     config: dict[str, JSONValue] = Field(default_factory=dict)
     config_hash: str | None = None
-    labels: dict[str, str] = Field(default_factory=dict)
     executor_info: dict[str, JSONValue] = Field(default_factory=dict)
-    execution_history: list[ExecutionRecord] = Field(default_factory=list)
 
     # Intended compute target name (matches a ComputeTarget in the workspace
     # registry).  Captured at run-creation time so the UI can filter and the
@@ -280,9 +318,3 @@ class RunMetadata(BaseModel):
     # without a bound Workflow (legacy / ad-hoc runs).
     workflow_id: str | None = None
     workflow_version: str | None = None
-
-    # Walltime chunking — last completed step recorded by
-    # ``RunContext.checkpoint_step``.  ``None`` for runs that don't use
-    # step-based chunking.  ``RunContext.resumed_step`` reads this to
-    # decide where the next chunk picks up.
-    last_step: int | None = None

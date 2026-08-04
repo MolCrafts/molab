@@ -17,14 +17,25 @@ function ResizablePanelGroup({
   className,
   direction,
   autoSaveId,
+  autoSavePanelIds,
   ...props
 }: Omit<React.ComponentProps<typeof ResizablePrimitive.Group>, "orientation"> & {
   direction?: ResizablePrimitive.Orientation;
   autoSaveId?: string;
+  /**
+   * Stable panel ids for persisted groups. Conditional groups use the id
+   * combination as a separate layout key, so hiding a panel does not overwrite
+   * the last multi-panel layout.
+   */
+  autoSavePanelIds?: string[];
 }) {
   const persisted = ResizablePrimitive.useDefaultLayout(
     autoSaveId
-      ? { id: autoSaveId, storage: globalThis.localStorage }
+      ? {
+          id: autoSaveId,
+          panelIds: autoSavePanelIds,
+          storage: globalThis.localStorage,
+        }
       : // No persistence requested: a stable unused id keeps hook order stable.
         { id: "resizable-ephemeral" },
   );
@@ -42,8 +53,30 @@ function ResizablePanelGroup({
   );
 }
 
-function ResizablePanel({ ...props }: React.ComponentProps<typeof ResizablePrimitive.Panel>) {
-  return <ResizablePrimitive.Panel data-slot="resizable-panel" {...props} />;
+// react-resizable-panels v4 reinterpreted bare numeric sizes as *pixels*; v3
+// (and every call site in this app) treats them as *percentages*. Without this
+// shim, `defaultSize={22}` becomes 22px instead of 22% — collapsing panels to a
+// sliver and capping their drag range at a few pixels. Coerce bare numbers back
+// to percentage strings so the call sites keep their v3 meaning; strings (which
+// already carry an explicit unit like "%", "px", "rem") pass through untouched.
+const asPercent = (size: number | string | undefined): number | string | undefined =>
+  typeof size === "number" ? `${size}%` : size;
+
+function ResizablePanel({
+  defaultSize,
+  minSize,
+  maxSize,
+  ...props
+}: React.ComponentProps<typeof ResizablePrimitive.Panel>) {
+  return (
+    <ResizablePrimitive.Panel
+      data-slot="resizable-panel"
+      defaultSize={asPercent(defaultSize)}
+      minSize={asPercent(minSize)}
+      maxSize={asPercent(maxSize)}
+      {...props}
+    />
+  );
 }
 
 function ResizableHandle({

@@ -144,6 +144,14 @@ export const renderPlanByObjectType: Record<SemanticObjectType, RenderPlan> = {
     center: [{ panelKind: "viewer", contentType: "metadata", fileKind: "json" }],
     right: [{ panelKind: "inspector", contentType: "metadata", fileKind: "json" }],
   },
+  task: {
+    center: [{ panelKind: "viewer", contentType: "metadata", fileKind: "json" }],
+    right: [{ panelKind: "inspector", contentType: "metadata", fileKind: "json" }],
+  },
+  knowledge: {
+    center: [{ panelKind: "viewer", contentType: "metadata", fileKind: "json" }],
+    right: [{ panelKind: "inspector", contentType: "metadata", fileKind: "json" }],
+  },
 };
 
 export const buildRendererKeyFromSelection = (

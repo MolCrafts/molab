@@ -52,7 +52,9 @@ from .exceptions import (
 )
 
 if TYPE_CHECKING:
-    import molpy
+    # molpy is a declared dependency. ``Frame`` is re-exported by molpy and
+    # reached ONLY through it — molexp never imports molrs directly.
+    from molpy import Frame
     from molpy.io import BaseTrajectoryReader
 
 # Private module name for sidecar import — never ``"__main__"``, so the
@@ -146,10 +148,10 @@ def _reader_subclasses_in(module) -> list[type]:  # noqa: ANN001
     """Collect concrete ``BaseTrajectoryReader`` subclasses defined in ``module``.
 
     Filters to classes whose ``__module__`` is the sidecar itself (so imported
-    base classes are ignored), excluding the abstract ``BaseTrajectoryReader`` /
-    ``MmapTrajectoryReader`` bases.
+    base classes are ignored), excluding the abstract ``BaseTrajectoryReader``
+    base.
     """
-    from molpy.io import BaseTrajectoryReader, MmapTrajectoryReader
+    from molpy.io import BaseTrajectoryReader
 
     found: list[type] = []
     for obj in vars(module).values():
@@ -157,7 +159,7 @@ def _reader_subclasses_in(module) -> list[type]:  # noqa: ANN001
             continue
         if not issubclass(obj, BaseTrajectoryReader):
             continue
-        if obj in (BaseTrajectoryReader, MmapTrajectoryReader):
+        if obj is BaseTrajectoryReader:
             continue
         if getattr(obj, "__module__", None) != module.__name__:
             continue
@@ -203,7 +205,7 @@ def load_sidecar_reader(dataset_path: str | os.PathLike[str]) -> BaseTrajectoryR
 
 def preview_frames(
     dataset_path: str | os.PathLike[str], *, limit: int = DEFAULT_PREVIEW_LIMIT
-) -> list[molpy.Frame]:
+) -> list[Frame]:
     """Return at most ``limit`` frames from the sidecar reader.
 
     The cap is applied **host-side** via :func:`itertools.islice` on the
@@ -229,7 +231,7 @@ def preview_frames(
         raise PreviewReaderError(str(dataset_path), f"iteration failed: {exc}") from exc
 
 
-def frames_to_extxyz(frames: Iterable[molpy.Frame]) -> bytes:
+def frames_to_extxyz(frames: Iterable[Frame]) -> bytes:
     """Serialize frames to extended-XYZ trajectory bytes via molpy.
 
     Args:

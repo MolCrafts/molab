@@ -17,7 +17,7 @@ export const RunsKpiStrip = ({
   avgWaitSeconds,
   sparklines,
 }: RunsKpiStripProps): JSX.Element => (
-  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+  <div className="grid grid-cols-2 gap-x-3 gap-y-4 border-y border-border/60 py-2 sm:grid-cols-3 lg:grid-cols-5">
     <RunsKpiCard
       label="Running"
       value={stats.running}
@@ -25,6 +25,7 @@ export const RunsKpiStrip = ({
       sparkline={sparklines?.running.series}
       delta={sparklines?.running.delta ?? null}
       deltaSuffix="in last hour"
+      muted={stats.running === 0}
     />
     <RunsKpiCard
       label="Pending"
@@ -33,6 +34,7 @@ export const RunsKpiStrip = ({
       sparkline={sparklines?.pending.series}
       delta={sparklines?.pending.delta ?? null}
       deltaSuffix="in last hour"
+      muted={stats.pending === 0}
     />
     <RunsKpiCard
       label="Failed"
@@ -42,6 +44,7 @@ export const RunsKpiStrip = ({
       sparkline={sparklines?.failed.series}
       delta={sparklines?.failed.delta ?? null}
       deltaSuffix="in last hour"
+      muted={stats.failed === 0}
     />
     <RunsKpiCard
       label="Succeeded"
@@ -50,12 +53,14 @@ export const RunsKpiStrip = ({
       sparkline={sparklines?.succeeded.series}
       delta={sparklines?.succeeded.delta ?? null}
       deltaSuffix="in last hour"
+      muted={stats.succeeded === 0}
     />
     <RunsKpiCard
       label="Avg wait (24h)"
       value={formatDuration(avgWaitSeconds)}
       tone="neutral"
       detail="submit → start"
+      muted={avgWaitSeconds == null}
     />
   </div>
 );

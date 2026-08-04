@@ -1,83 +1,74 @@
-"""Tests for the slimmed TaskContext.
+"""Tests for the dataflow-by-name :class:`molexp.workflow.context.TaskContext`.
 
-After the rectification, TaskContext exposes exactly five attributes:
-``state``, ``deps``, ``inputs``, ``config``, ``run_context``. Workspace
-plumbing (``artifact``, ``log``, ``find_asset``, ``checkpoint``,
-``set_result``, ``get_result``) is gone. ``config`` is a plain
-``Mapping[str, Any]``, not a ``ProfileConfig``.
+After the dataflow-by-name refactor, ``ctx.inputs`` / ``ctx.config`` and the old
+workspace-plumbing surface are GONE: a task body receives its inputs as typed
+parameters bound by name, and the only data surface left on ``ctx`` is
+``workdir``. ``ctx.state`` is in staged removal — it emits a
+``DeprecationWarning`` and returns a READ-ONLY :class:`ReadOnlyStateView`.
 """
 
 from __future__ import annotations
 
-from molexp.workflow.context import ActorContext, TaskContext
+import pytest
+
+from molexp.workflow.context import TaskContext
 
 
-class TestSlimmedTaskContext:
-    def test_five_public_attributes(self):
-        ctx = TaskContext(state={"x": 1}, deps="d", inputs=42)
-        assert ctx.state == {"x": 1}
-        assert ctx.deps == "d"
-        assert ctx.inputs == 42
-        assert ctx.config == {}
-        assert ctx.run_context is None
-
-    def test_workspace_plumbing_removed(self):
-        ctx = TaskContext(state=None, deps=None, inputs=None)
-        for name in ("artifact", "log", "find_asset", "checkpoint", "set_result", "get_result"):
+class TestTaskContext:
+    def test_workspace_plumbing_surface_is_absent(self):
+        """The pre-refactor data/capability surface is gone from ``ctx``."""
+        ctx = TaskContext(inputs=None)
+        for name in (
+            "inputs",
+            "config",
+            "artifact",
+            "log",
+            "find_asset",
+            "checkpoint",
+            "set_result",
+            "get_result",
+        ):
             assert not hasattr(ctx, name), (
-                f"TaskContext.{name} must be removed; workspace plumbing now "
-                f"flows through opaque ``run_context`` instead."
+                f"TaskContext.{name} must be absent; inputs bind to parameters and "
+                f"capabilities flow via the engine's materialization layer."
             )
 
-    def test_config_is_plain_mapping_not_profile_config(self):
-        from collections.abc import Mapping
-
-        ctx = TaskContext(
-            state=None, deps=None, inputs=None, config={"epochs": 5, "dataset": "md17"}
-        )
-        assert isinstance(ctx.config, Mapping)
-        assert ctx.config["epochs"] == 5
-        assert ctx.config["dataset"] == "md17"
-
-        # Crucially: it must accept a plain dict (no ProfileConfig adapter).
-        assert isinstance(ctx.config, (dict, Mapping))
-
-    def test_default_config_is_empty_mapping(self):
-        ctx = TaskContext(state=None, deps=None, inputs=None)
-        assert ctx.config == {}
-
-    def test_run_context_is_opaque_passthrough(self):
-        sentinel = object()
-        ctx = TaskContext(state=None, deps=None, inputs=None, run_context=sentinel)
-        assert ctx.run_context is sentinel
-
-    def test_run_context_is_arbitrary_duck_typed_object(self):
-        class Anything:
-            work_dir = "/tmp/anywhere"
-            config = {}  # noqa: RUF012
-            run = None
-
-        obj = Anything()
-        ctx = TaskContext(state=None, deps=None, inputs=None, run_context=obj)
-        assert ctx.run_context is obj
+    def test_state_access_emits_deprecation_warning_with_migration_message(self):
+        ctx = TaskContext(inputs=None, state={"x": 1})
+        with pytest.warns(DeprecationWarning) as record:
+            _ = ctx.state
+        msg = str(record[0].message)
+        assert "values now bind to named task parameters" in msg
+        assert "ctx.state will be removed" in msg
 
 
-class TestNoProfileConfigInContextModule:
-    def test_context_module_does_not_import_profile_config(self):
-        import inspect
+class TestReadOnlyStateView:
+    """``ctx.state`` returns a frozen, read-only snapshot of engine state:
+    legacy reads still resolve, mutation is impossible, and the underlying
+    engine state is never touched."""
 
-        from molexp.workflow import context as context_mod
+    def test_reads_legacy_values_and_blocks_mutation(self):
+        from molexp.workflow._engine.state import WorkflowState
 
-        src = inspect.getsource(context_mod)
-        assert "from molexp.profile import ProfileConfig" not in src
-        assert "ProfileConfig" not in src or "# " in src.split("ProfileConfig")[0][-2:]
-
-
-class TestActorContext:
-    def test_actor_context_inherits_slim_task_context(self):
-        ctx = ActorContext(state={"x": 1}, deps=None, inputs=None)
-        assert ctx.state == {"x": 1}
-        assert ctx.config == {}
-        # Same five-attribute contract.
-        for name in ("artifact", "log", "find_asset", "checkpoint", "set_result", "get_result"):
-            assert not hasattr(ctx, name)
+        state = WorkflowState()
+        state.record("tick", 41)
+        ctx = TaskContext(inputs=None, state=state)
+        with pytest.warns(DeprecationWarning):
+            view = ctx.state
+        # Legacy read patterns still return correct values.
+        assert view.results.get("tick") == 41
+        assert view.results["tick"] == 41
+        assert view.results.get("missing") is None
+        assert "tick" in view.completed
+        assert view.failed is False
+        assert view.error is None
+        # Mutation through the view is impossible.
+        with pytest.raises(TypeError):
+            view.results["tick"] = 99  # type: ignore[index]
+        with pytest.raises(AttributeError):
+            view.results = {}  # type: ignore[misc]
+        with pytest.raises(AttributeError):
+            view.failed = True  # type: ignore[misc]
+        # Engine state was untouched.
+        assert state.results["tick"] == 41
+        assert state.failed is False

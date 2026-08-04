@@ -11,11 +11,17 @@ Cross-layer payloads are stored as opaque JSON dicts here; the
 upstream layers own the typed shape and own the typed parsing on
 read-back.
 
+Notes + literature are owned by the OKF Concepts (``Note`` /
+``ReferenceConcept`` + its typed ``ReferenceMeta``), reached via the
+``Bundle`` façade / ``concept_from_dir`` — directories whose path is
+their identity. ``ZoteroItem`` / ``read_zotero_items`` are the
+read-only Zotero importer that produces ``ReferenceConcept`` records
+(PDFs pointed at, never copied).
+
 Each scope exposes:
 
-- ``{scope}.assets``       — read-only catalog view (typed Asset queries)
+- ``{scope}.assets``       — read-only asset view (typed Asset queries over the manifests)
 - ``{scope}.data_assets``  — ``DataAssetLibrary`` for importing user inputs
-- ``workspace.catalog``    — full workspace-level ``AssetCatalog`` (singleton property)
 - ``workspace.cache``      — ``CacheFolder`` (singleton property; exposes ``as_cache_store()``)
 
 Upstream layers extend the workspace tree by importing the public
@@ -27,7 +33,6 @@ generic five-verb CRUD — see ``molexp.agent.folders`` for the
 from .assets import (
     ArtifactAsset,
     Asset,
-    AssetCatalog,
     AssetManifest,
     AssetScope,
     AssetsView,
@@ -35,16 +40,19 @@ from .assets import (
     DataAsset,
     DataAssetLibrary,
     ErrorTraceAsset,
-    ExecutionStateAsset,
     LogAsset,
-    OutputAsset,
     Producer,
 )
 from .base import atomic_write_json, atomic_write_text
+from .bundle import Backlink, Bundle
+from .bundle_index import BundleIndex, ConceptIndexEntry, SearchHit, SearchResult
 from .cache import WORKSPACE_CACHE_KIND, CacheFolder
-from .catalog import WORKSPACE_CATALOG_KIND
+from .concepts import Note, ReferenceConcept
 from .context import Context
+from .doc_embed import EntitySummary, summarize_entity
+from .edges import DEFAULT_EDGE_ROLE, Edge, EdgeRole
 from .errors import (
+    ConceptNotFoundError,
     ExperimentExistsError,
     ExperimentNotFoundError,
     FolderMoveCollisionError,
@@ -52,6 +60,14 @@ from .errors import (
     ProjectNotFoundError,
     RunExistsError,
     RunNotFoundError,
+)
+from .events import (
+    WORKSPACE_EVENTS_DB,
+    WorkspaceEvent,
+    WorkspaceEventLog,
+    WorkspaceEventType,
+    emit_workspace_event,
+    read_workspace_events,
 )
 from .experiment import Experiment
 from .folder import (
@@ -61,6 +77,19 @@ from .folder import (
     WORKSPACE_RUN_KIND,
     Folder,
 )
+from .harvest import harvest_run
+from .knowledge_item import (
+    KNOWLEDGE_ITEM_KIND,
+    KNOWLEDGE_KINDS,
+    KnowledgeItem,
+    KnowledgeKind,
+    KnowledgeMeta,
+    SourceKind,
+    SourceRef,
+    parse_knowledge_kind,
+)
+from .knowledge_write import write_knowledge_item
+from .lifecycle_ops import cancel_run
 from .models import (
     ComputeTarget,
     ErrorInfo,
@@ -71,14 +100,25 @@ from .models import (
     RunMetadata,
     WorkspaceMetadata,
 )
+from .note_meta import NoteMeta
 from .param import GridSpace, Params, ParamSpace, UniformSpace
 from .project import Project
-from .run import Run, RunContext, RunStatus
+from .prune import (
+    ExecutionPruneEntry,
+    ExecutionPrunePlan,
+    LivePruneRefusedError,
+    apply_execution_prune,
+    plan_execution_prune,
+)
+from .reference_meta import ReferenceMeta
+from .run import RETRYABLE_STATUSES, Run, RunContext, RunStatus
+from .run_reaper import pid_alive, reap_zombie_run
+from .runset import RunRecord, RunSet, RunSetResult
 from .target import (
     LocalTarget,
     RemoteTarget,
-    Session,
     SessionManager,
+    SSHSession,
     Target,
     TargetNotFound,
     parse_target,
@@ -86,58 +126,91 @@ from .target import (
     target_to_transport,
 )
 from .targets import (
+    LOCAL_TARGET_NAME,
     add_target,
+    builtin_local_target,
+    effective_targets,
     get_target,
     has_target,
     list_targets,
     remove_target,
+    resolve_compute_target,
     target_run_dir,
     to_transport,
 )
 from .workspace import Workspace
+from .workspace_context import (
+    ArtifactRef,
+    ContextFocus,
+    ExperimentRef,
+    HealthFlag,
+    KnowledgeRef,
+    ProjectRef,
+    RunRef,
+    WorkflowRef,
+    WorkspaceContext,
+    WorkspaceRef,
+    assemble_workspace_context,
+)
+from .zotero_concepts import ZoteroItem, read_zotero_items
 
 __all__ = [
-    # Folder kind taxonomy (unify-folder-abstraction-02)
+    "DEFAULT_EDGE_ROLE",
+    "KNOWLEDGE_ITEM_KIND",
+    "KNOWLEDGE_KINDS",
+    "LOCAL_TARGET_NAME",
+    "RETRYABLE_STATUSES",
     "WORKSPACE_CACHE_KIND",
-    "WORKSPACE_CATALOG_KIND",
+    "WORKSPACE_EVENTS_DB",
     "WORKSPACE_EXPERIMENT_KIND",
     "WORKSPACE_PROJECT_KIND",
     "WORKSPACE_ROOT_KIND",
     "WORKSPACE_RUN_KIND",
     "ArtifactAsset",
-    # Assets
+    "ArtifactRef",
     "Asset",
-    "AssetCatalog",
     "AssetManifest",
     "AssetScope",
     "AssetsView",
-    # System folders (unify-folder-abstraction-03)
+    "Backlink",
+    "Bundle",
+    "BundleIndex",
     "CacheFolder",
     "CheckpointAsset",
     "ComputeTarget",
-    # Context
+    "ConceptIndexEntry",
+    "ConceptNotFoundError",
     "Context",
+    "ContextFocus",
     "DataAsset",
     "DataAssetLibrary",
+    "Edge",
+    "EdgeRole",
+    "EntitySummary",
     "ErrorInfo",
     "ErrorTraceAsset",
+    "ExecutionPruneEntry",
+    "ExecutionPrunePlan",
     "ExecutionRecord",
-    "ExecutionStateAsset",
     "Experiment",
-    # Workspace error hierarchy
     "ExperimentExistsError",
     "ExperimentMetadata",
     "ExperimentNotFoundError",
-    # Folder abstraction (unify-folder-abstraction-01)
+    "ExperimentRef",
     "Folder",
     "FolderMetadata",
     "FolderMoveCollisionError",
     "GridSpace",
-    # Target types + session management (unified workspace CLI)
+    "HealthFlag",
+    "KnowledgeItem",
+    "KnowledgeKind",
+    "KnowledgeMeta",
+    "KnowledgeRef",
+    "LivePruneRefusedError",
     "LocalTarget",
     "LogAsset",
-    "OutputAsset",
-    # Parameters
+    "Note",
+    "NoteMeta",
     "ParamSpace",
     "Params",
     "Producer",
@@ -145,37 +218,92 @@ __all__ = [
     "ProjectExistsError",
     "ProjectMetadata",
     "ProjectNotFoundError",
+    "ProjectRef",
+    "ReferenceConcept",
+    "ReferenceMeta",
     "RemoteTarget",
     "Run",
     "RunContext",
     "RunExistsError",
     "RunMetadata",
     "RunNotFoundError",
+    "RunRecord",
+    "RunRef",
+    "RunSet",
+    "RunSetResult",
     "RunStatus",
-    "Session",
+    "SSHSession",
+    "SearchHit",
+    "SearchResult",
     "SessionManager",
+    "SourceKind",
+    "SourceRef",
     "Target",
     "TargetNotFound",
     "UniformSpace",
-    # Entities
+    "WorkflowRef",
     "Workspace",
-    # Metadata models
+    "WorkspaceContext",
+    "WorkspaceEvent",
+    "WorkspaceEventLog",
+    "WorkspaceEventType",
     "WorkspaceMetadata",
-    # Compute target helpers
+    "WorkspaceRef",
+    "ZoteroItem",
+    "# Assets",
+    "# Atomic JSON I/O — used by workflow layer's persistence + agent",
+    "# Atomic plain-text I/O — companion to atomic_write_json for",
+    "# Built-in ``local`` compute target (targets-merge)",
+    "# Compute target helpers",
+    "# Context",
+    "# Entities",
+    "# Folder abstraction (unify-folder-abstraction-01)",
+    "# Folder kind taxonomy (unify-folder-abstraction-02)",
+    "# Metadata models",
+    "# OKF KnowledgeItem Concept (integration P0.4) — typed, source-linked",
+    "# OKF Note Concept (wsokf-05) — a directory whose path is its identity",
+    "# OKF Note backlink (knowledge-docs-01) — a derived reverse-edge row",
+    "# OKF Note document meta.yaml payload (knowledge-docs-05) — tags + status",
+    "# OKF Reference Concept (wsokf-05) — a directory whose path is its",
+    "# OKF bundle façade (wsokf-04) — distinct from the per-scope Library",
+    "# OKF document-embed entity summary (knowledge-docs-05) — read-only UI card",
+    "# OKF read-only Zotero importer (wsokf-05) — produces ReferenceConcepts",
+    "# OKF typed knowledge-graph edge role (typed-provenance-edge P0.1)",
+    "# Parameters",
+    "# Retryable-status domain (resume / rerun verb selection)",
+    "# System folders (unify-folder-abstraction-03)",
+    "# Target types + session management (unified workspace CLI)",
+    "# WorkspaceContext read-model + assembler (integration P0.2)",
+    "# Workspace error hierarchy",
+    "# Workspace event spine (integration P0.3) — append-only cross-object timeline",
+    "# identity. Its typed meta.yaml payload is ReferenceMeta.",
+    "# layer's session storage.",
+    "# markdown reports / generated source previews / log snapshots.",
     "add_target",
-    # Atomic JSON I/O — used by workflow layer's persistence + agent
-    # layer's session storage.
+    "apply_execution_prune",
+    "assemble_workspace_context",
     "atomic_write_json",
-    # Atomic plain-text I/O — companion to atomic_write_json for
-    # markdown reports / generated source previews / log snapshots.
     "atomic_write_text",
+    "builtin_local_target",
+    "cancel_run",
+    "effective_targets",
+    "emit_workspace_event",
     "get_target",
+    "harvest_run",
     "has_target",
     "list_targets",
     "parse_target",
+    "pid_alive",
+    "plan_execution_prune",
+    "read_workspace_events",
+    "read_zotero_items",
+    "reap_zombie_run",
     "remove_target",
+    "resolve_compute_target",
     "resolve_target",
+    "summarize_entity",
     "target_run_dir",
     "target_to_transport",
     "to_transport",
+    "write_knowledge_item",
 ]

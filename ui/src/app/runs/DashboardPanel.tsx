@@ -2,8 +2,7 @@ import { GripVertical, X } from "lucide-react";
 import type { DragEvent, JSX, ReactNode } from "react";
 import { useState } from "react";
 
-import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { WorkbenchIconAction } from "@/components/workbench";
 import { cn } from "@/lib/utils";
 
 import type { DropPosition } from "./useDashboardLayout";
@@ -11,9 +10,12 @@ import type { DropPosition } from "./useDashboardLayout";
 interface DashboardPanelProps {
   id: string;
   title?: string;
+  description?: string;
   children: ReactNode;
   onReorder: (activeId: string, overId: string, position: DropPosition) => void;
   onRemove: (id: string) => void;
+  /** Skip the chrome when the child is already a full surface (e.g. KPI strip). */
+  bare?: boolean;
 }
 
 const DRAG_MIME = "application/x-molexp-panel-id";
@@ -33,9 +35,11 @@ const computeDropPosition = (event: DragEvent<HTMLDivElement>): DropPosition => 
 export const DashboardPanel = ({
   id,
   title,
+  description,
   children,
   onReorder,
   onRemove,
+  bare = false,
 }: DashboardPanelProps): JSX.Element => {
   const [draggable, setDraggable] = useState(false);
   const [isDragging, setIsDragging] = useState(false);
@@ -74,8 +78,38 @@ export const DashboardPanel = ({
     if (activeId && activeId !== id) onReorder(activeId, id, position);
   };
 
+  const controls = (
+    <div
+      className={cn(
+        "flex items-center gap-1 opacity-0 transition-opacity",
+        "group-hover/panel:opacity-100 group-focus-within/panel:opacity-100",
+        bare && "absolute right-2 top-2 z-10",
+      )}
+    >
+      <WorkbenchIconAction
+        label={title ? `Drag ${title} panel` : "Drag panel"}
+        onMouseDown={() => setDraggable(true)}
+        onMouseUp={() => setDraggable(false)}
+        onTouchStart={() => setDraggable(true)}
+        onTouchEnd={() => setDraggable(false)}
+        className="cursor-grab text-muted-foreground active:cursor-grabbing"
+      >
+        <GripVertical className="h-3.5 w-3.5" />
+      </WorkbenchIconAction>
+      <WorkbenchIconAction
+        label={title ? `Remove ${title} panel` : "Remove panel"}
+        kind="danger"
+        onClick={() => onRemove(id)}
+        className="text-muted-foreground hover:bg-status-failed-soft hover:text-status-failed-foreground"
+      >
+        <X className="h-3.5 w-3.5" />
+      </WorkbenchIconAction>
+    </div>
+  );
+
   return (
-    <Card
+    <section
+      aria-label={title ? `${title} dashboard panel` : "Dashboard panel"}
       data-panel-id={id}
       draggable={draggable}
       onDragStart={handleDragStart}
@@ -84,40 +118,27 @@ export const DashboardPanel = ({
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
       className={cn(
-        "group/panel relative flex h-full min-h-0 flex-col gap-0 overflow-hidden py-0 transition-all",
+        "group/panel relative flex h-full min-h-0 flex-col overflow-hidden rounded-panel border border-border bg-surface",
+        bare && "border-transparent bg-transparent",
         isDragging && "opacity-50",
       )}
     >
       {dropPosition && !isDragging && <DropIndicator position={dropPosition} />}
-      <div className="absolute right-2 top-2 z-10 flex items-center gap-0.5 opacity-0 transition-opacity group-hover/panel:opacity-100 focus-within:opacity-100">
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          aria-label={title ? `Drag ${title} panel` : "Drag panel"}
-          title="Drag — drop on left/right to split, top/bottom for new row"
-          onMouseDown={() => setDraggable(true)}
-          onMouseUp={() => setDraggable(false)}
-          onTouchStart={() => setDraggable(true)}
-          onTouchEnd={() => setDraggable(false)}
-          className="h-6 w-6 cursor-grab text-muted-foreground active:cursor-grabbing"
-        >
-          <GripVertical className="h-3.5 w-3.5" />
-        </Button>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          aria-label={title ? `Remove ${title} panel` : "Remove panel"}
-          title="Remove panel"
-          onClick={() => onRemove(id)}
-          className="h-6 w-6 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-        >
-          <X className="h-3.5 w-3.5" />
-        </Button>
-      </div>
-      <CardContent className="flex-1 min-h-0 p-4">{children}</CardContent>
-    </Card>
+      {!bare && (title || description) ? (
+        <header className="flex flex-row items-start justify-between gap-3 border-b border-border px-3 py-2">
+          <div className="min-w-0 space-y-1">
+            {title && (
+              <h3 className="text-body font-medium leading-none text-foreground">{title}</h3>
+            )}
+            {description && <p className="text-label text-muted-foreground">{description}</p>}
+          </div>
+          {controls}
+        </header>
+      ) : (
+        controls
+      )}
+      <div className={cn("min-h-0 flex-1", bare ? "p-0" : "p-3")}>{children}</div>
+    </section>
   );
 };
 
@@ -128,11 +149,11 @@ interface DropIndicatorProps {
 const DropIndicator = ({ position }: DropIndicatorProps): JSX.Element => (
   <div
     className={cn(
-      "pointer-events-none absolute z-20 bg-primary/70 transition-all",
+      "mol-motion-enter-fade pointer-events-none absolute z-20 bg-accent/70",
       position === "left" && "left-0 top-0 h-full w-1",
       position === "right" && "right-0 top-0 h-full w-1",
       position === "top" && "left-0 top-0 h-1 w-full",
-      position === "bottom" && "left-0 bottom-0 h-1 w-full",
+      position === "bottom" && "bottom-0 left-0 h-1 w-full",
     )}
   />
 );

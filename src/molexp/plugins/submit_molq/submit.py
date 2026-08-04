@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import shlex
 import sys
+from collections.abc import Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, TypedDict
 
 from molexp._typing import JSONValue
 
@@ -16,7 +18,18 @@ from .metadata import build_executor_info
 type MolqEventPayload = "object"
 
 if TYPE_CHECKING:
-    from molq import Duration, JobExecution, Memory, Submitor
+    from molq import Duration, JobExecution, Memory, Script, Submitor
+
+    class _CmdKwargs(TypedDict, total=False):
+        """The mutually-exclusive command channel passed to ``submit_job``.
+
+        Matches molq's ``argv: list[str] | None`` / ``script: Script | None``
+        parameter types so the ``**`` spread type-checks against the exact
+        keyword each branch fills (a plain ``dict`` would widen every keyword).
+        """
+
+        argv: list[str]
+        script: Script
 
     from molexp.workspace import ComputeTarget
     from molexp.workspace.experiment import Experiment
@@ -89,6 +102,14 @@ class SubmitHandler:
             out on terminal events.  When ``None`` the handler dispatches
             via molq's default ``LocalTransport`` against the workspace's
             local filesystem (the ``--scheduler X`` CLI path with no target).
+        env: Environment variables exported into the batch script before the
+            worker runs (e.g. ``LD_LIBRARY_PATH``). ``None`` values stripped.
+        preamble: Shell lines run *before* the worker, for environments that
+            need setup the scheduler cannot express as resources — ``module
+            load``, ``source venv/bin/activate``, etc. A ``str`` is treated as
+            one line; a sequence is joined with newlines. When set, the job is
+            submitted as an inline script (preamble + ``exec <worker>``) instead
+            of a bare ``argv``.
     """
 
     def __init__(
@@ -100,6 +121,8 @@ class SubmitHandler:
         scheduling: dict[str, JSONValue],
         block: bool = False,
         target: ComputeTarget | None = None,
+        env: dict[str, str] | None = None,
+        preamble: str | Sequence[str] | None = None,
     ) -> None:
         self._scheduler = scheduler
         self._cluster = cluster or "default"
@@ -107,6 +130,11 @@ class SubmitHandler:
         self._sched = _strip_none(scheduling)
         self._block = block
         self._target = target
+        self._env = {k: v for k, v in (env or {}).items() if v is not None}
+        if isinstance(preamble, str):
+            self._preamble: list[str] = [preamble]
+        else:
+            self._preamble = list(preamble or [])
         # ``_handles`` stores molq ``JobExecution`` handles; ``_submitor`` is the
         # active molq ``Submitor`` context. Typed via TYPE_CHECKING string refs
         # so import order stays clean.
@@ -123,12 +151,15 @@ class SubmitHandler:
         mol_run: Run,
         experiment: Experiment,  # noqa: ARG002
         project: Project,
+        *,
+        execution_id: str | None = None,
     ) -> None:
         from molq import (
             Cluster,
             JobExecution,
             JobResources,
             JobScheduling,
+            Script,
             Submitor,
         )
 
@@ -141,13 +172,13 @@ class SubmitHandler:
         job_name = f"{project.name[:20]}-{mol_run.id[:8]}"
         run_dir = Path(mol_run.run_dir)
 
-        # Pre-allocate the execution_id the worker will use.  When running
-        # locally the per-attempt directory is created here so molq's
-        # stdout/stderr/jobs paths land alongside the workflow.json the
-        # worker will write.  When running on a remote target the staging
-        # step takes care of mirror-creating the equivalent directory on
-        # the transport's filesystem.
-        execution_id = make_execution_id(mol_run.id, run_dir)
+        # The execution_id the worker will use. ``resume`` passes the existing
+        # one to reopen (the worker seeds from its persisted node outputs);
+        # ``rerun`` and first-submit derive a fresh ``exec-{run_id}-N``. When
+        # running locally the per-attempt directory is created here so molq's
+        # stdout/stderr/jobs paths land alongside the workflow.json the worker
+        # writes; a remote target mirror-creates it during staging.
+        execution_id = execution_id or make_execution_id(mol_run.id, run_dir)
         local_exec_dir = run_dir / "executions" / execution_id
         local_exec_dir.mkdir(parents=True, exist_ok=True)
 
@@ -200,16 +231,30 @@ class SubmitHandler:
                 ):
                     submitor._event_bus.on(evt, stage_out_cb)
 
+            worker_argv = [
+                sys.executable,
+                "-m",
+                "molexp.cli",
+                "execute",
+                target_run_dir_,
+                "--execution-id",
+                execution_id,
+            ]
+            # With a preamble (module load / source venv / …) the worker can't
+            # be a bare argv: wrap it in an inline script so the setup lines run
+            # first, then ``exec`` the worker so it inherits the job's PID.
+            # A TypedDict (not a plain dict) so the ``**cmd_kwargs`` spread maps
+            # each key to molq's exact parameter type (``argv`` / ``script``).
+            cmd_kwargs: _CmdKwargs
+            if self._preamble:
+                worker_cmd = " ".join(shlex.quote(a) for a in worker_argv)
+                script_text = "\n".join([*self._preamble, f"exec {worker_cmd}"])
+                cmd_kwargs = {"script": Script.inline(script_text)}
+            else:
+                cmd_kwargs = {"argv": worker_argv}
+
             job = submitor.submit_job(
-                argv=[
-                    sys.executable,
-                    "-m",
-                    "molexp.cli",
-                    "execute",
-                    target_run_dir_,
-                    "--execution-id",
-                    execution_id,
-                ],
+                **cmd_kwargs,
                 resources=JobResources(
                     cpu_count=_as_int(res.get("cpus")),
                     memory=_parse_memory(res.get("mem")),
@@ -227,6 +272,7 @@ class SubmitHandler:
                     cwd=target_exec_dir,
                     output_file=f"{target_exec_dir}/stdout.log",
                     error_file=f"{target_exec_dir}/stderr.log",
+                    env=self._env or None,
                 ),
                 metadata={
                     "run_id": mol_run.id,

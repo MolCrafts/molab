@@ -1,639 +1,235 @@
-import type { Edge, Node, NodeProps, NodeTypes } from "@xyflow/react";
-import { Background, Controls, Handle, MarkerType, Position, ReactFlow } from "@xyflow/react";
-import { useEffect, useMemo, useState } from "react";
-// xyflow's stylesheet is imported once at the app entry (see index.tsx).
-import type {
-  RendererProps,
-  SemanticStatus,
-  WorkflowGraph,
-  WorkflowNodeMetadata,
-} from "@/app/types";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
+/**
+ * WorkflowGraphViewer — the workflow "Graph" tab. Renders the workflow entity's
+ * task-graph IR (from the snapshot, or the just-saved draft) on the editable
+ * flowgram free-layout canvas, and saves edits back via {@link workflowApi}.
+ * Clicking a node opens the right-panel TaskViewer via `inspectedTask`.
+ *
+ * Editing safety: a failed save surfaces a dismissible error and keeps the draft
+ * so the user can retry; ⌘S/Ctrl+S saves; navigating away (in-app or full
+ * unload) with unsaved edits prompts to confirm; Discard reverts to the last
+ * saved graph.
+ *
+ * Raw workspace-file `workflow.json` previews are a different source + format
+ * and are handled by {@link WorkflowFileViewer}; this viewer only ever receives
+ * ``workflow`` entity selections (it is mounted solely by WorkflowViewer).
+ */
 
-interface WorkflowNodeData extends Record<string, unknown> {
-  label: string;
-  nodeType: "task" | "input" | "output";
-  status: SemanticStatus;
-  description: string;
-}
-
-interface WorkflowEdgeWithStatus {
-  id: string;
-  source: string;
-  target: string;
-  label: string;
-  status: SemanticStatus;
-  animated?: boolean;
-}
-
-interface DisplayWorkflowGraph {
-  nodes: WorkflowNodeMetadata[];
-  edges: WorkflowEdgeWithStatus[];
-}
-
-interface FileWorkflowData {
-  id: string;
-  name?: string;
-  graph: DisplayWorkflowGraph | null;
-}
-
-type WorkflowFlowNode = Node<WorkflowNodeData, "workflowNode">;
-
-const STATUS_VALUES: readonly SemanticStatus[] = [
-  "active",
-  "archived",
-  "draft",
-  "pending",
-  "running",
-  "succeeded",
-  "failed",
-  "cancelled",
-  "skipped",
-];
-
-const getSemanticStatus = (value: unknown): SemanticStatus => {
-  if (typeof value === "string" && STATUS_VALUES.includes(value as SemanticStatus)) {
-    return value as SemanticStatus;
-  }
-  return "pending";
-};
-
-const asRecord = (value: unknown): Record<string, unknown> | null => {
-  if (typeof value === "object" && value !== null && !Array.isArray(value)) {
-    return value as Record<string, unknown>;
-  }
-  return null;
-};
-
-const getStatusColor = (status: SemanticStatus): string => {
-  switch (status) {
-    case "succeeded":
-      return "border-blue-500 text-blue-700";
-    case "failed":
-      return "border-red-500 text-red-700";
-    case "running":
-      return "border-green-500 text-green-700";
-    case "skipped":
-    case "cancelled":
-      return "border-yellow-500 text-yellow-700";
-    default:
-      return "border-border text-foreground";
-  }
-};
-
-const getEdgeColor = (status: SemanticStatus): string => {
-  switch (status) {
-    case "succeeded":
-      return "#3b82f6";
-    case "failed":
-      return "#ef4444";
-    case "running":
-      return "#22c55e";
-    case "skipped":
-    case "cancelled":
-      return "#eab308";
-    default:
-      return "#94a3b8";
-  }
-};
-
-const WorkflowNode = ({ data }: NodeProps<WorkflowFlowNode>): JSX.Element => {
-  const colorClass = getStatusColor(data.status);
-
-  return (
-    <div
-      className={`rounded-md border-2 bg-background px-3 py-2 shadow-sm min-w-[150px] ${colorClass}`}
-    >
-      <Handle type="target" position={Position.Top} className="h-3 w-3 bg-muted-foreground" />
-      <p className="text-xs font-semibold uppercase tracking-wide opacity-70">{data.nodeType}</p>
-      <p className="text-sm font-bold">{data.label}</p>
-      <p className="text-xs opacity-70 capitalize">{data.status}</p>
-      <Handle type="source" position={Position.Bottom} className="h-3 w-3 bg-muted-foreground" />
-    </div>
-  );
-};
-
-const normalizeGraph = (graph: WorkflowGraph): DisplayWorkflowGraph => {
-  return {
-    nodes: graph.nodes.map((node) => ({
-      nodeId: node.nodeId,
-      label: node.label,
-      nodeType: node.nodeType,
-      status: node.status,
-      description: node.description,
-      position: node.position,
-    })),
-    edges: graph.edges.map((edge) => ({
-      id: edge.id,
-      source: edge.source,
-      target: edge.target,
-      label: edge.label,
-      status: "pending",
-    })),
-  };
-};
-
-const normalizeGraphFromUnknown = (value: unknown): DisplayWorkflowGraph | null => {
-  const graph = asRecord(value);
-  if (!graph) {
-    return null;
-  }
-
-  const rawNodes = Array.isArray(graph.nodes) ? graph.nodes : null;
-  if (!rawNodes) {
-    return null;
-  }
-
-  const nodes: WorkflowNodeMetadata[] = rawNodes
-    .map((item) => {
-      const node = asRecord(item);
-      if (!node) {
-        return null;
-      }
-      const nodeId = typeof node.nodeId === "string" ? node.nodeId : null;
-      if (!nodeId) {
-        return null;
-      }
-
-      const nodeType =
-        node.nodeType === "task" || node.nodeType === "input" || node.nodeType === "output"
-          ? node.nodeType
-          : "task";
-      const positionRecord = asRecord(node.position);
-      const x = typeof positionRecord?.x === "number" ? positionRecord.x : 0;
-      const y = typeof positionRecord?.y === "number" ? positionRecord.y : 0;
-
-      return {
-        nodeId,
-        label: typeof node.label === "string" ? node.label : nodeId,
-        nodeType,
-        status: getSemanticStatus(node.status),
-        description: typeof node.description === "string" ? node.description : "",
-        position: { x, y },
-      };
-    })
-    .filter((node): node is WorkflowNodeMetadata => node !== null);
-
-  const rawEdges = Array.isArray(graph.edges) ? graph.edges : [];
-  const edges: WorkflowEdgeWithStatus[] = rawEdges.reduce<WorkflowEdgeWithStatus[]>(
-    (acc, item, index) => {
-      const edge = asRecord(item);
-      if (!edge || typeof edge.source !== "string" || typeof edge.target !== "string") {
-        return acc;
-      }
-      acc.push({
-        id: typeof edge.id === "string" ? edge.id : `edge-${index}`,
-        source: edge.source,
-        target: edge.target,
-        label: typeof edge.label === "string" ? edge.label : "",
-        status: getSemanticStatus(edge.status),
-        animated: edge.animated === true,
-      });
-      return acc;
-    },
-    [],
-  );
-
-  return { nodes, edges };
-};
-
-const graphFromTaskConfigPayload = (
-  value: Record<string, unknown>,
-): DisplayWorkflowGraph | null => {
-  const tasks = Array.isArray(value.task_configs) ? value.task_configs : null;
-  const links = Array.isArray(value.links) ? value.links : null;
-  if (!tasks || !links) {
-    return null;
-  }
-
-  const nodes: WorkflowNodeMetadata[] = tasks
-    .map((item, index) => {
-      const task = asRecord(item);
-      if (!task || typeof task.task_id !== "string") {
-        return null;
-      }
-
-      return {
-        nodeId: task.task_id,
-        label: typeof task.task_type === "string" ? task.task_type : task.task_id,
-        nodeType: "task",
-        status: getSemanticStatus(task.status),
-        description: task.task_id,
-        position: { x: (index % 4) * 220, y: Math.floor(index / 4) * 140 },
-      };
-    })
-    .filter((node): node is WorkflowNodeMetadata => node !== null);
-
-  const edges: WorkflowEdgeWithStatus[] = links.reduce<WorkflowEdgeWithStatus[]>(
-    (acc, item, index) => {
-      const link = asRecord(item);
-      if (!link || typeof link.source !== "string" || typeof link.target !== "string") {
-        return acc;
-      }
-      acc.push({
-        id: typeof link.id === "string" ? link.id : `${link.source}:${link.target}:${index}`,
-        source: link.source,
-        target: link.target,
-        label: typeof link.label === "string" ? link.label : "",
-        status: getSemanticStatus(link.status),
-        animated: link.animated === true,
-      });
-      return acc;
-    },
-    [],
-  );
-
-  return { nodes, edges };
-};
-
-const extractWorkflowFromFile = async (filePath: string): Promise<FileWorkflowData | null> => {
-  try {
-    const response = await fetch(`/api/workspace/files?path=${encodeURIComponent(filePath)}`);
-    if (!response.ok) {
-      return null;
-    }
-
-    const data = (await response.json()) as unknown;
-    const root = asRecord(data);
-    if (!root) {
-      return null;
-    }
-
-    const context = asRecord(root.context);
-    const contextWorkflow = asRecord(context?.workflow);
-    if (contextWorkflow) {
-      return {
-        id:
-          typeof contextWorkflow.workflow_id === "string"
-            ? contextWorkflow.workflow_id
-            : typeof contextWorkflow.id === "string"
-              ? contextWorkflow.id
-              : filePath,
-        name: typeof contextWorkflow.name === "string" ? contextWorkflow.name : undefined,
-        graph:
-          normalizeGraphFromUnknown(contextWorkflow.graph) ??
-          graphFromTaskConfigPayload(contextWorkflow),
-      };
-    }
-
-    return {
-      id: typeof root.workflow_id === "string" ? root.workflow_id : filePath,
-      name: typeof root.name === "string" ? root.name : undefined,
-      graph: normalizeGraphFromUnknown(root.graph) ?? graphFromTaskConfigPayload(root),
-    };
-  } catch (error) {
-    console.error("Failed to extract workflow:", error);
-    return null;
-  }
-};
-
-const parallelGraph: DisplayWorkflowGraph = {
-  nodes: [
-    {
-      nodeId: "start",
-      label: "Input Data",
-      nodeType: "input",
-      status: "succeeded",
-      position: { x: 250, y: 0 },
-      description: "Raw sequence",
-    },
-    {
-      nodeId: "preprocess",
-      label: "MSA Search",
-      nodeType: "task",
-      status: "succeeded",
-      position: { x: 250, y: 100 },
-      description: "Multiple Sequence Alignment",
-    },
-    {
-      nodeId: "model_1",
-      label: "Model 1",
-      nodeType: "task",
-      status: "succeeded",
-      position: { x: 50, y: 250 },
-      description: "Prediction Model 1",
-    },
-    {
-      nodeId: "model_2",
-      label: "Model 2",
-      nodeType: "task",
-      status: "failed",
-      position: { x: 250, y: 250 },
-      description: "Prediction Model 2 (Failed)",
-    },
-    {
-      nodeId: "model_3",
-      label: "Model 3",
-      nodeType: "task",
-      status: "skipped",
-      position: { x: 450, y: 250 },
-      description: "Prediction Model 3 (Skipped)",
-    },
-    {
-      nodeId: "consensus",
-      label: "Consensus",
-      nodeType: "task",
-      status: "running",
-      position: { x: 250, y: 400 },
-      description: "Ensemble voting",
-    },
-    {
-      nodeId: "output",
-      label: "PDB Structure",
-      nodeType: "output",
-      status: "pending",
-      position: { x: 250, y: 500 },
-      description: "Final structure",
-    },
-  ],
-  edges: [
-    { id: "e1", source: "start", target: "preprocess", label: "seq", status: "succeeded" },
-    { id: "e2", source: "preprocess", target: "model_1", label: "msa", status: "succeeded" },
-    { id: "e3", source: "preprocess", target: "model_2", label: "msa", status: "failed" },
-    { id: "e4", source: "preprocess", target: "model_3", label: "msa", status: "skipped" },
-    { id: "e5", source: "model_1", target: "consensus", label: "pdb", status: "running" },
-    { id: "e6", source: "model_2", target: "consensus", label: "pdb", status: "skipped" },
-    { id: "e7", source: "model_3", target: "consensus", label: "pdb", status: "skipped" },
-    { id: "e8", source: "consensus", target: "output", label: "best", status: "pending" },
-  ],
-};
-
-const loopGraph: DisplayWorkflowGraph = {
-  nodes: [
-    {
-      nodeId: "init",
-      label: "Init Params",
-      nodeType: "input",
-      status: "succeeded",
-      position: { x: 200, y: 0 },
-      description: "Initial configuration",
-    },
-    {
-      nodeId: "sim",
-      label: "Simulation",
-      nodeType: "task",
-      status: "succeeded",
-      position: { x: 200, y: 150 },
-      description: "Run dynamics",
-    },
-    {
-      nodeId: "eval",
-      label: "Evaluate Energy",
-      nodeType: "task",
-      status: "succeeded",
-      position: { x: 200, y: 300 },
-      description: "Check stability",
-    },
-    {
-      nodeId: "check",
-      label: "Converged?",
-      nodeType: "task",
-      status: "running",
-      position: { x: 200, y: 450 },
-      description: "Decision gate",
-    },
-    {
-      nodeId: "refine",
-      label: "Refine",
-      nodeType: "task",
-      status: "pending",
-      position: { x: 450, y: 225 },
-      description: "Adjust parameters",
-    },
-    {
-      nodeId: "final",
-      label: "Report",
-      nodeType: "output",
-      status: "pending",
-      position: { x: 200, y: 600 },
-      description: "Analysis report",
-    },
-  ],
-  edges: [
-    { id: "e1", source: "init", target: "sim", label: "start", status: "succeeded" },
-    { id: "e2", source: "sim", target: "eval", label: "traj", status: "succeeded" },
-    { id: "e3", source: "eval", target: "check", label: "score", status: "succeeded" },
-    { id: "e4", source: "check", target: "final", label: "yes", status: "pending" },
-    { id: "e5", source: "check", target: "refine", label: "no", status: "running", animated: true },
-    {
-      id: "e6",
-      source: "refine",
-      target: "sim",
-      label: "retry",
-      status: "pending",
-      animated: true,
-    },
-  ],
-};
-
-const asyncGraph: DisplayWorkflowGraph = {
-  nodes: [
-    {
-      nodeId: "trigger",
-      label: "Job Submission",
-      nodeType: "input",
-      status: "succeeded",
-      position: { x: 100, y: 100 },
-      description: "Submit to cluster",
-    },
-    {
-      nodeId: "remote",
-      label: "Remote Cluster",
-      nodeType: "task",
-      status: "running",
-      position: { x: 350, y: 100 },
-      description: "External computation",
-    },
-    {
-      nodeId: "monitor",
-      label: "Status Poller",
-      nodeType: "task",
-      status: "running",
-      position: { x: 350, y: 250 },
-      description: "Check status",
-    },
-    {
-      nodeId: "notify",
-      label: "Notification",
-      nodeType: "task",
-      status: "skipped",
-      position: { x: 100, y: 250 },
-      description: "Slack alert (Skipped)",
-    },
-    {
-      nodeId: "download",
-      label: "Fetch Results",
-      nodeType: "task",
-      status: "pending",
-      position: { x: 600, y: 100 },
-      description: "Download artifacts",
-    },
-  ],
-  edges: [
-    { id: "e1", source: "trigger", target: "remote", label: "submit", status: "succeeded" },
-    { id: "e2", source: "trigger", target: "notify", label: "started", status: "skipped" },
-    {
-      id: "e3",
-      source: "remote",
-      target: "monitor",
-      label: "heartbeat",
-      status: "running",
-      animated: true,
-    },
-    { id: "e4", source: "remote", target: "download", label: "done", status: "pending" },
-  ],
-};
-
-const getDemoGraph = (workflowId: string): DisplayWorkflowGraph => {
-  if (workflowId.includes("exp-002")) {
-    return loopGraph;
-  }
-  if (workflowId.includes("exp-101")) {
-    return asyncGraph;
-  }
-  return parallelGraph;
-};
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useBlocker } from "react-router-dom";
+import { workflowApi } from "@/app/state/api";
+import { useInspectedTask } from "@/app/state/inspectedTask";
+import type { RendererProps } from "@/app/types";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { WorkbenchDismissAction, WorkbenchTag } from "@/components/workbench";
+import { FlowgramCanvas } from "@/components/workflow/flowgram-canvas";
+import { FlowgramCanvasToolbar } from "@/components/workflow/flowgram-canvas-toolbar";
+import {
+  buildFlowgramDocument,
+  type FlowgramDocument,
+  flowgramDocToTaskGraphJson,
+  normalizeTaskGraph,
+  taskGraphToWireDocument,
+} from "@/components/workflow/flowgram-document";
+import type { TaskGraphJson } from "@/components/workflow/task-graph-ir";
 
 export const WorkflowGraphViewer = ({ selection, snapshot }: RendererProps): JSX.Element => {
-  const snapshotWorkflow =
-    snapshot.workflows.find((item) => item.id === selection.objectId) ?? null;
-  const [fileWorkflow, setFileWorkflow] = useState<FileWorkflowData | null>(null);
-  const [isLoadingFile, setIsLoadingFile] = useState(false);
+  const { inspectTask } = useInspectedTask();
+  const workflow = snapshot.workflows.find((item) => item.id === selection.objectId) ?? null;
 
+  const [savedGraph, setSavedGraph] = useState<TaskGraphJson | null>(null);
+  const [draft, setDraft] = useState<FlowgramDocument | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // Bumped on save/discard to force the canvas to re-initialize from the
+  // authoritative document (flowgram only reads `initialData` on mount).
+  const [revision, setRevision] = useState(0);
+
+  const dirty = draft !== null;
+
+  // Reset edit state whenever the selected workflow changes. objectId is a
+  // trigger, not a read — biome's exhaustive-deps can't see that and would
+  // strip it, which would leave stale edits when switching workflows.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: objectId is a reset trigger
   useEffect(() => {
-    let cancelled = false;
+    setSavedGraph(null);
+    setDraft(null);
+    setError(null);
+  }, [selection.objectId]);
 
-    if (selection.objectType !== "workspace-file") {
-      setFileWorkflow(null);
-      setIsLoadingFile(false);
-      return;
+  // Prefer the freshly-saved graph, else the snapshot's IR.
+  const graph = savedGraph ?? workflow?.graph ?? null;
+  const document = useMemo<FlowgramDocument | null>(
+    () => (graph ? buildFlowgramDocument(graph) : null),
+    [graph],
+  );
+
+  const handleSave = useCallback(async (): Promise<void> => {
+    if (!workflow || !draft) return;
+    setSaving(true);
+    setError(null);
+    try {
+      const wire = taskGraphToWireDocument(
+        flowgramDocToTaskGraphJson(draft, workflow.name ?? "Workflow"),
+      );
+      const persisted = await workflowApi.save(workflow.projectId, workflow.experimentId, wire);
+      // Reload from the server-normalized document so the canvas reflects
+      // exactly what was persisted, and remount it to drop the stale draft.
+      setSavedGraph(normalizeTaskGraph(persisted));
+      setDraft(null);
+      setRevision((r) => r + 1);
+    } catch (err) {
+      // Keep `draft` so the user can fix and retry — never silently lose edits.
+      setError(
+        err instanceof Error
+          ? `Couldn't save workflow: ${err.message}`
+          : "Couldn't save workflow. Check your connection and try again.",
+      );
+    } finally {
+      setSaving(false);
     }
+  }, [workflow, draft]);
 
-    setIsLoadingFile(true);
-    extractWorkflowFromFile(selection.objectId)
-      .then((extracted) => {
-        if (!cancelled) {
-          setFileWorkflow(extracted);
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setIsLoadingFile(false);
-        }
-      });
+  const handleDiscard = useCallback((): void => {
+    setDraft(null);
+    setError(null);
+    setRevision((r) => r + 1);
+  }, []);
 
-    return () => {
-      cancelled = true;
+  // ⌘S / Ctrl+S saves when there are unsaved edits.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "s") {
+        if (!dirty || saving) return;
+        event.preventDefault();
+        void handleSave();
+      }
     };
-  }, [selection.objectId, selection.objectType]);
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [dirty, saving, handleSave]);
 
-  const workflowId = snapshotWorkflow?.id ?? fileWorkflow?.id ?? selection.objectId;
-  const workflowName = snapshotWorkflow?.name ?? fileWorkflow?.name;
+  // Warn before a full-page unload (refresh / close / external nav) while dirty.
+  useEffect(() => {
+    if (!dirty) return;
+    const onBeforeUnload = (event: BeforeUnloadEvent): void => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [dirty]);
 
-  const graph = useMemo<DisplayWorkflowGraph | null>(() => {
-    if (snapshotWorkflow?.graph) {
-      return normalizeGraph(snapshotWorkflow.graph);
+  // Intercept in-app navigation (e.g. selecting another workflow) while dirty so
+  // edits aren't silently dropped. Requires the data router (see index.tsx).
+  const blocker = useBlocker(
+    ({ currentLocation, nextLocation }) =>
+      dirty && currentLocation.pathname !== nextLocation.pathname,
+  );
+
+  // If the edits get saved/discarded while a block is pending, let nav through.
+  useEffect(() => {
+    if (blocker.state === "blocked" && !dirty) {
+      blocker.reset?.();
     }
-    if (fileWorkflow?.graph) {
-      return fileWorkflow.graph;
-    }
-    if (snapshotWorkflow || fileWorkflow) {
-      return getDemoGraph(workflowId);
-    }
-    return null;
-  }, [fileWorkflow, snapshotWorkflow, workflowId]);
+  }, [blocker, dirty]);
 
-  const nodes = useMemo<WorkflowFlowNode[]>(() => {
-    if (!graph) {
-      return [];
-    }
-    return graph.nodes.map((node) => ({
-      id: node.nodeId,
-      type: "workflowNode",
-      position: node.position,
-      data: {
-        label: node.label,
-        nodeType: node.nodeType,
-        status: node.status,
-        description: node.description,
-      },
-    }));
-  }, [graph]);
-
-  const edges = useMemo<Edge[]>(() => {
-    if (!graph) {
-      return [];
-    }
-    return graph.edges.map((edge) => ({
-      id: edge.id,
-      source: edge.source,
-      target: edge.target,
-      type: "smoothstep",
-      animated: edge.animated || edge.status === "running",
-      style: {
-        stroke: getEdgeColor(edge.status),
-        strokeWidth: 2,
-      },
-      label: edge.label,
-      markerEnd: {
-        type: MarkerType.ArrowClosed,
-        color: getEdgeColor(edge.status),
-      },
-    }));
-  }, [graph]);
-
-  const nodeTypes = useMemo<NodeTypes>(() => ({ workflowNode: WorkflowNode }), []);
-
-  if (isLoadingFile) {
+  if (!workflow) {
     return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Workflow Graph</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <Skeleton className="h-[400px] w-full" />
-        </CardContent>
-      </Card>
+      <div className="flex h-full items-center justify-center px-4 text-label text-muted-foreground">
+        No workflow data found.
+      </div>
     );
   }
 
-  if (!snapshotWorkflow && !fileWorkflow) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Workflow Graph</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <p className="text-sm text-muted-foreground">No workflow data found in this file.</p>
-        </CardContent>
-      </Card>
-    );
-  }
+  const isEmpty = !document || document.nodes.length === 0;
+  const taskCount = graph?.task_configs.length ?? 0;
+  const linkCount = graph?.links.length ?? 0;
+  const parallelCount = graph?.links.filter((link) => link.kind === "parallel").length ?? 0;
 
   return (
-    <Card className="h-full flex flex-col">
-      <CardHeader className="pb-3">
-        <div className="flex items-center justify-between">
-          <CardTitle className="text-lg">Workflow Graph</CardTitle>
-          {workflowName && <Badge variant="outline">{workflowName}</Badge>}
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
+      <div className="relative min-h-0 w-full flex-1">
+        <div className="pointer-events-none absolute inset-x-0 top-0 z-50 flex flex-col gap-2 px-3 py-3">
+          <div className="flex items-start justify-between gap-2">
+            <div className="pointer-events-auto flex flex-wrap items-center gap-2 rounded-control border border-border bg-background/90 px-2 py-1 text-micro text-muted-foreground">
+              <WorkbenchTag meaning="metadata">{taskCount} tasks</WorkbenchTag>
+              <WorkbenchTag meaning="metadata">{linkCount} links</WorkbenchTag>
+              <WorkbenchTag meaning="metadata">{parallelCount} parallel</WorkbenchTag>
+            </div>
+            <div className="pointer-events-auto flex items-center rounded-control border border-border bg-background/90 px-1 py-1">
+              <FlowgramCanvasToolbar
+                onSave={handleSave}
+                onDiscard={handleDiscard}
+                saving={saving}
+                dirty={dirty}
+              />
+            </div>
+          </div>
+
+          {error && (
+            <div
+              role="alert"
+              className="pointer-events-auto flex items-start justify-between gap-3 rounded-control border border-status-failed/30 bg-status-failed-soft px-3 py-2 text-body text-status-failed-foreground"
+            >
+              <span>{error}</span>
+              <WorkbenchDismissAction
+                label="Dismiss error"
+                onClick={() => setError(null)}
+                className="-mr-1 size-6 shrink-0 text-status-failed-foreground/80 hover:text-status-failed-foreground"
+              />
+            </div>
+          )}
         </div>
-      </CardHeader>
-      <CardContent className="flex-1 p-0">
-        <div className="h-full w-full">
-          <ReactFlow
-            nodes={nodes}
-            edges={edges}
-            nodeTypes={nodeTypes}
-            fitView
-            attributionPosition="bottom-right"
-          >
-            <Background />
-            <Controls />
-          </ReactFlow>
-        </div>
-      </CardContent>
-    </Card>
+
+        {isEmpty ? (
+          <div className="flex h-full flex-col items-center justify-center gap-1 px-6 text-center">
+            <p className="text-body font-medium text-foreground">No tasks in this workflow yet</p>
+            <p className="max-w-sm text-label text-muted-foreground">
+              Its graph is empty or hasn&apos;t been compiled. Open the Source tab to view or edit
+              the workflow definition.
+            </p>
+          </div>
+        ) : (
+          <FlowgramCanvas
+            key={`${workflow.id}:${revision}`}
+            document={document}
+            editable
+            onChange={setDraft}
+            onNodeClick={(taskId) => inspectTask(taskId, "")}
+          />
+        )}
+      </div>
+
+      <AlertDialog
+        open={blocker.state === "blocked"}
+        onOpenChange={(open) => {
+          if (!open) blocker.reset?.();
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Leave with unsaved changes?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Your edits to this workflow graph haven&apos;t been saved. Leaving now discards them.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => blocker.reset?.()}>Stay</AlertDialogCancel>
+            <AlertDialogAction intent="danger" onClick={() => blocker.proceed?.()}>
+              Leave
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
   );
 };

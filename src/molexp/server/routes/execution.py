@@ -9,7 +9,8 @@ from fastapi.responses import JSONResponse
 
 from molexp.workflow import (
     Caching,
-    Workflow,
+    default_binding_registry,
+    default_codec,
 )
 from molexp.workspace import (
     ExperimentNotFoundError as WorkspaceExperimentNotFoundError,
@@ -46,15 +47,18 @@ def create_execution(
     except WorkspaceExperimentNotFoundError:
         raise ExperimentNotFoundError(request.project_id, request.experiment_id) from None
 
-    if request.workflow_json is not None and Workflow.for_experiment(experiment) is None:
+    if (
+        request.workflow_json is not None
+        and default_binding_registry.for_experiment(experiment) is None
+    ):
         # The IR is the durable artifact — compile it here so the bound
-        # spec lives in the workflow-layer registry, and re-emit it as
-        # opaque JSON so the worker can pick it up without re-running
+        # spec lives in the workflow-layer binding registry, and re-emit it
+        # as opaque JSON so the worker can pick it up without re-running
         # the user script.
-        spec = Workflow.from_dict(request.workflow_json)
-        spec.bind_to(experiment)
+        spec = default_codec.ir_to_spec(request.workflow_json)
+        default_binding_registry.bind(experiment, spec)
 
-    new_run = experiment.add_run(parameters=request.parameters)
+    new_run = experiment.add_run(params=request.parameters)
     return RunResponse.from_model(new_run)
 
 
@@ -72,25 +76,31 @@ def get_execution_plan() -> JSONResponse:
 # ============================================================================
 
 # Process-local cache — NOT shared across workers.  Use --workers 1.
-_cache_instance = None
+_cache_instance: Caching | None = None
 
 
-def _get_cache():  # noqa: ANN202
+def _get_cache() -> Caching:
     global _cache_instance
     if _cache_instance is None:
+        # Process-local FileCacheStore under ~/.molexp/cache (not workspace-rooted).
+        # Caching no longer exposes initialize() / _store_dir — storage is the
+        # pluggable CacheStore and stats() is the public entry-count path.
         store_dir = Path.home() / ".molexp" / "cache"
+        store_dir.mkdir(parents=True, exist_ok=True)
         _cache_instance = Caching(store_dir=store_dir)
-        _cache_instance.initialize()
     return _cache_instance
 
 
 @router.get("/cache/stats", response_model=CacheStatsResponse)
 def get_cache_stats() -> CacheStatsResponse:
     cache = _get_cache()
-    entry_count = 0
-    if cache._store_dir.exists():
-        entry_count = len(list(cache._store_dir.glob("*.json")))
-    return CacheStatsResponse(storeDir=str(cache._store_dir), entryCount=entry_count)
+    stats = cache.stats
+    store = cache.store
+    store_dir = getattr(store, "store_dir", None)
+    return CacheStatsResponse(
+        storeDir=str(store_dir) if store_dir is not None else "",
+        entryCount=entry_count if isinstance(entry_count := stats["entry_count"], int) else 0,
+    )
 
 
 @router.delete("/cache", response_model=CacheClearResponse)

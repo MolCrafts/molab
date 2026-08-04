@@ -1,9 +1,8 @@
 """Typed accessors used by ``RunContext``.
 
 Three accessors are exposed as ``ctx.artifact``, ``ctx.log``, and
-``ctx.checkpoint``.  Each writes the physical file, registers the
-asset in the run-scope manifest, and upserts the catalog row — all
-in one call.
+``ctx.checkpoint``.  Each writes the physical file and registers the
+asset in the run-scope ``assets.json`` manifest — all in one call.
 
 Producer fields are auto-populated from a caller-provided callable so
 that task-scoped producer info can be set when running inside a task.
@@ -11,14 +10,14 @@ that task-scoped producer info can be set when running inside a task.
 
 from __future__ import annotations
 
+import contextlib
 import json
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import datetime
 from pathlib import Path
 
 from molexp._typing import TaskOutput
 
-from ..catalog.index import AssetCatalog
 from ..utils import compute_content_hash, generate_asset_id
 from .artifact import ArtifactAsset
 from .base import Asset, AssetScope, Producer
@@ -33,19 +32,20 @@ class _AccessorBase:
         scope_dir: Path,
         scope: AssetScope,
         manifest: AssetManifest,
-        catalog: AssetCatalog | None,
         producer_provider: Callable[[], Producer],
+        *,
+        event_root: Path | None = None,
     ) -> None:
         self._scope_dir = scope_dir
         self._scope = scope
         self._manifest = manifest
-        self._catalog = catalog
         self._producer_provider = producer_provider
+        # Workspace root for the event spine; None (the default) keeps the
+        # accessor emit-free (vision-loop-12 — only RunAssets passes it).
+        self._event_root = event_root
 
     def _register(self, asset) -> None:  # noqa: ANN001
         self._manifest.register(asset)
-        if self._catalog is not None:
-            self._catalog.register(asset)
 
 
 class ArtifactAccessor(_AccessorBase):
@@ -58,7 +58,7 @@ class ArtifactAccessor(_AccessorBase):
         *,
         tags: dict[str, str] | None = None,
         mime: str | None = None,
-        consumed: list[Asset] | tuple[Asset, ...] | None = None,
+        consumed: Sequence[Asset | str] | None = None,
     ) -> ArtifactAsset:
         """Persist ``data`` as ``<run_dir>/artifacts/<name>``.
 
@@ -68,9 +68,10 @@ class ArtifactAccessor(_AccessorBase):
                 ``dict``/``list``, or any other value (str-cast).
             tags: Free-form metadata attached to the asset.
             mime: Optional MIME type hint.
-            consumed: Optional upstream assets whose ``asset_id``s
-                will be recorded in :attr:`Producer.inputs` to form a
-                lineage edge.
+            consumed: Optional upstream assets (or raw asset-id strings)
+                whose ids are recorded in :attr:`Producer.inputs` to form
+                lineage edges — one kwarg, two item shapes, no second
+                spelling.
         """
         target = self._scope_dir / "artifacts" / name
         target.parent.mkdir(parents=True, exist_ok=True)
@@ -80,7 +81,16 @@ class ArtifactAccessor(_AccessorBase):
         elif isinstance(data, Path):
             import shutil
 
-            shutil.copy2(data, target)
+            # Chat / land often write products straight into run/artifacts/
+            # then pass the same path to save — copy2 would raise SameFileError.
+            src = Path(data)
+            try:
+                already = target.exists() and src.resolve().samefile(target.resolve())
+            except OSError:
+                already = False
+            if not already:
+                with contextlib.suppress(shutil.SameFileError):
+                    shutil.copy2(src, target)
         elif isinstance(data, (dict, list)):
             with open(target, "w") as f:  # noqa: PTH123
                 json.dump(data, f, indent=2, default=str)
@@ -90,7 +100,8 @@ class ArtifactAccessor(_AccessorBase):
         now = datetime.now()
         producer = self._producer_provider()
         if consumed:
-            producer = producer.model_copy(update={"inputs": tuple(a.asset_id for a in consumed)})
+            ids = tuple(item if isinstance(item, str) else item.asset_id for item in consumed)
+            producer = producer.model_copy(update={"inputs": ids})
         asset = ArtifactAsset(
             asset_id=generate_asset_id(),
             name=name,
@@ -105,6 +116,15 @@ class ArtifactAccessor(_AccessorBase):
             content_hash=compute_content_hash(target),
         )
         self._register(asset)
+        if self._event_root is not None:
+            from ._events import emit_asset_added
+
+            emit_asset_added(
+                self._event_root,
+                asset,
+                name=name,
+                extra_refs=[producer.run_id] if producer.run_id else (),
+            )
         return asset
 
 
@@ -117,30 +137,37 @@ class _BoundLog:
         asset: LogAsset,
         scope_dir: Path,
         manifest: AssetManifest,
-        catalog: AssetCatalog | None,
     ) -> None:
         self._asset = asset
         self._scope_dir = scope_dir
         self._manifest = manifest
-        self._catalog = catalog
+        self._dirty = False
 
     @property
     def asset(self) -> LogAsset:
         return self._asset
 
     def append(self, line: str) -> None:
+        # The line bytes go straight to the .log file (O(1) append). The
+        # ``line_count`` / ``updated_at`` metadata is bumped in memory only and
+        # marked dirty; rewriting the whole manifest on *every* line is
+        # O(lines x assets) churn, so the flush is deferred to :meth:`flush`
+        # (called once when the run context exits).
         self._asset.append(self._scope_dir, line)
-        # Lazy refresh of line_count + updated_at
-        updated = self._asset.model_copy(
+        self._asset = self._asset.model_copy(
             update={
                 "line_count": self._asset.line_count + 1,
                 "updated_at": datetime.now(),
             }
         )
-        self._asset = updated
-        self._manifest.update(updated)
-        if self._catalog is not None:
-            self._catalog.update(updated)
+        self._dirty = True
+
+    def flush(self) -> None:
+        """Persist the accumulated ``line_count`` / ``updated_at`` once."""
+        if not self._dirty:
+            return
+        self._manifest.update(self._asset)
+        self._dirty = False
 
     def tail(self, n: int = 100) -> list[str]:
         return self._asset.tail(self._scope_dir, n)
@@ -161,11 +188,10 @@ class LogAccessor(_AccessorBase):
         scope_dir: Path,
         scope: AssetScope,
         manifest: AssetManifest,
-        catalog: AssetCatalog | None,
         producer_provider: Callable[[], Producer],
         execution_id_provider: Callable[[], str | None],
     ) -> None:
-        super().__init__(scope_dir, scope, manifest, catalog, producer_provider)
+        super().__init__(scope_dir, scope, manifest, producer_provider)
         self._execution_id_provider = execution_id_provider
         self._cache: dict[str, _BoundLog] = {}
 
@@ -205,9 +231,14 @@ class LogAccessor(_AccessorBase):
             )
             self._register(existing)
 
-        bound = _BoundLog(existing, self._scope_dir, self._manifest, self._catalog)
+        bound = _BoundLog(existing, self._scope_dir, self._manifest)
         self._cache[name] = bound
         return bound
+
+    def flush_all(self) -> None:
+        """Flush deferred metadata for every bound log (called on context exit)."""
+        for bound in self._cache.values():
+            bound.flush()
 
 
 class CheckpointAccessor(_AccessorBase):
@@ -218,10 +249,9 @@ class CheckpointAccessor(_AccessorBase):
         scope_dir: Path,
         scope: AssetScope,
         manifest: AssetManifest,
-        catalog: AssetCatalog | None,
         producer_provider: Callable[[], Producer],
     ) -> None:
-        super().__init__(scope_dir, scope, manifest, catalog, producer_provider)
+        super().__init__(scope_dir, scope, manifest, producer_provider)
         self._last_ckpt_id: str | None = None
 
     def __call__(

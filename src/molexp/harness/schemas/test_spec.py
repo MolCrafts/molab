@@ -24,10 +24,10 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from molexp.harness.schemas.artifact import ArtifactRef
+from molexp.harness.schemas.artifact import PlanArtifactRef
 from molexp.harness.schemas.parameter import ParameterValue
 
-__all__ = ["TestKind", "TestResult", "TestSpec", "TestStatus"]
+__all__ = ["TestKind", "TestResult", "TestSpec", "TestSpecBundle", "TestStatus"]
 
 
 TestKind = Literal[
@@ -65,6 +65,41 @@ class TestSpec(BaseModel):
     required: bool = True
 
 
+class TestSpecBundle(BaseModel):
+    """One ``test_spec`` artifact carrying a per-task list of :class:`TestSpec`.
+
+    The ``GenerateTestSpec`` stage fans test generation out to **one
+    :class:`TestSpec` per ``BoundTask``** of the bound workflow; rather than
+    persist N separate ``test_spec`` artifacts (which would break the
+    single-latest-artifact contract both ``ValidateTestSpec`` and
+    ``GenerateTestCode`` rely on) the specs ride inside this bundle. The
+    artifact *kind* stays ``"test_spec"``; only its JSON shape widens from a
+    bare ``TestSpec`` to this wrapper. Each member's ``target_task_id`` names
+    the ``BoundTask`` it covers.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    id: str
+    bound_workflow_id: str
+    specs: list[TestSpec] = Field(default_factory=list)
+
+    @classmethod
+    def from_artifact(cls, raw: bytes | str) -> TestSpecBundle:
+        """Parse a ``test_spec`` artifact body as a bundle.
+
+        Accepts the current bundle shape; falls back to a bare
+        :class:`TestSpec` (wrapped as a one-element bundle) so single-spec
+        artifacts written before the per-task fan-out still load. Raises if
+        the bytes are neither a bundle nor a TestSpec.
+        """
+        try:
+            return cls.model_validate_json(raw)
+        except ValueError:
+            spec = TestSpec.model_validate_json(raw)
+            return cls(id=spec.id, bound_workflow_id=spec.target_workflow_id or "", specs=[spec])
+
+
 class TestResult(BaseModel):
     """Outcome of running one :class:`TestSpec`."""
 
@@ -74,7 +109,7 @@ class TestResult(BaseModel):
     test_spec_id: str
     status: TestStatus
     metrics: dict[str, float] = Field(default_factory=dict)
-    produced_artifacts: list[ArtifactRef] = Field(default_factory=list)
-    stdout: ArtifactRef | None = None
-    stderr: ArtifactRef | None = None
+    produced_artifacts: list[PlanArtifactRef] = Field(default_factory=list)
+    stdout: PlanArtifactRef | None = None
+    stderr: PlanArtifactRef | None = None
     reason: str | None = None

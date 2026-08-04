@@ -50,6 +50,8 @@ export interface RunsKpiCardProps {
   invertDelta?: boolean;
   sparkline?: number[];
   tone?: KpiTone;
+  /** Soften the value when the metric is zero / empty. */
+  muted?: boolean;
 }
 
 const formatDelta = (delta: number): string => {
@@ -75,27 +77,31 @@ export const RunsKpiCard = ({
   invertDelta = false,
   sparkline,
   tone = "neutral",
+  muted = false,
 }: RunsKpiCardProps): JSX.Element => {
   const hasSpark = sparkline && sparkline.length > 0 && sparkline.some((v) => v > 0);
   const showDelta = typeof delta === "number" && Number.isFinite(delta);
 
   return (
-    <div className="flex h-full flex-col gap-2 rounded-md border border-border/60 bg-card p-3">
-      <div className="flex items-center gap-1.5">
+    <div className="flex h-full flex-col gap-2 border-l border-border/60 px-3 py-2">
+      <div className="flex items-center gap-2">
         <span
           aria-hidden="true"
-          className={cn("inline-block h-1.5 w-1.5 rounded-full", DOT_CLASS[tone])}
+          className={cn("inline-block h-1.5 w-1.5 shrink-0 rounded-full", DOT_CLASS[tone])}
         />
-        <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-          {label}
-        </span>
+        <span className="text-label text-muted-foreground">{label}</span>
       </div>
       <div className="flex items-baseline justify-between gap-2">
-        <span className="min-w-0 break-words text-2xl font-semibold leading-none tabular-nums text-foreground">
+        <span
+          className={cn(
+            "min-w-0 break-words text-display font-semibold leading-none tracking-tight tabular-nums",
+            muted ? "text-muted-foreground/45" : "text-foreground",
+          )}
+        >
           {value}
         </span>
         {hasSpark && (
-          <div className="h-7 w-20 shrink-0 opacity-90">
+          <div className="h-control-compact w-20 shrink-0 opacity-90">
             <Sparkline
               data={sparkline}
               trend={SPARK_TREND[tone]}
@@ -107,11 +113,11 @@ export const RunsKpiCard = ({
         )}
       </div>
       {(showDelta || detail) && (
-        <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+        <div className="flex items-center justify-between text-micro text-muted-foreground">
           {showDelta ? (
             <span
               className={cn(
-                "inline-flex items-center gap-0.5 font-medium tabular-nums",
+                "inline-flex items-center gap-1 font-medium tabular-nums",
                 deltaToneClass(delta as number, invertDelta),
               )}
             >

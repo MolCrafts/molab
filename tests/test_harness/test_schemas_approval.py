@@ -1,183 +1,105 @@
-"""Tests for ApprovalIntent / ApprovalRequest / ApprovalDecision (Phase 6 §7.5).
+"""Scope-generalized ``ApprovalRequest`` schema (spec plan-emergent-07).
 
-Locks:
-- frozen pydantic round-trip
-- ApprovalIntent carries exactly six values
-- ApprovalRequest defaults (metadata={}, etc.)
-- ApprovalDecision defaults (reason=None)
+plan-emergent-07 adds a *resume-routing discriminator* to the approval schema:
+``ApprovalRequest`` gains an explicit frozen ``scope`` (``approval_gate`` vs
+``intervention_request``) plus a ``target_agent_id`` naming the phase-2 codegen
+subagent, and ``ApprovalIntent`` gains ``"task_intervention"``. These are
+typed fields — not ``metadata`` — because they drive deterministic resume
+dispatch and must round-trip through the store's typed columns.
+
+RED before GREEN: these pin the schema the production change must satisfy.
 """
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from typing import get_args, get_origin
 
 import pytest
 from pydantic import ValidationError
 
-# ---------------------------------------------------------- ApprovalIntent
+from molexp.harness.schemas import ApprovalRequest, ApprovalScope
 
 
-def test_approval_intent_carries_six_values() -> None:
-    from typing import Literal
-
-    from molexp.harness.schemas.approval import ApprovalIntent
-
-    assert get_origin(ApprovalIntent) is Literal
-    expected = {
-        "agent_inferred_scientific_parameters",
-        "full_execution",
-        "hpc_submission",
-        "large_resource_request",
-        "overwrite",
-        "final_report",
-    }
-    assert set(get_args(ApprovalIntent)) == expected
+def _created_at() -> datetime:
+    return datetime(2026, 7, 22, 12, 0, 0, tzinfo=UTC)
 
 
-# ---------------------------------------------------------- ApprovalRequest
-
-
-def _make_request():
-    from molexp.harness.schemas.approval import ApprovalRequest
-
+def _gate_request() -> ApprovalRequest:
     return ApprovalRequest(
-        id="req-001",
-        intent="hpc_submission",
-        reason="Workflow targets slurm backend",
-        triggered_by_policy="require_for_hpc_submission",
-        created_at=datetime(2026, 5, 26, tzinfo=UTC),
+        id="req-1",
+        intent="experiment_spec",
+        reason="approve the concrete experiment spec",
+        triggered_by_policy="PlanMode",
+        created_at=_created_at(),
     )
 
 
-def test_approval_request_round_trip() -> None:
-    from molexp.harness.schemas.approval import ApprovalRequest
+class TestApprovalRequestScope:
+    def test_default_scope_is_approval_gate(self) -> None:
+        # Backward-compat default: a phase-1 gate omits scope entirely.
+        assert _gate_request().scope == "approval_gate"
 
-    req = _make_request()
-    dumped = req.model_dump_json()
-    rehydrated = ApprovalRequest.model_validate_json(dumped)
-    assert rehydrated == req
+    def test_default_target_agent_id_is_none(self) -> None:
+        assert _gate_request().target_agent_id is None
 
-
-def test_approval_request_with_metadata_round_trip() -> None:
-    from molexp.harness.schemas.approval import ApprovalRequest
-
-    req = ApprovalRequest(
-        id="req-002",
-        intent="agent_inferred_scientific_parameters",
-        reason="Task t1 has 2 agent-inferred parameters",
-        triggered_by_policy="require_for_agent_inferred_scientific_parameters",
-        metadata={"bound_task_id": "b1", "inferred_keys": ["n_chains", "rho"]},
-        created_at=datetime(2026, 5, 26, tzinfo=UTC),
-    )
-    dumped = req.model_dump_json()
-    rehydrated = ApprovalRequest.model_validate_json(dumped)
-    assert rehydrated == req
-
-
-def test_approval_request_defaults() -> None:
-    req = _make_request()
-    assert req.metadata == {}
-
-
-def test_approval_request_is_frozen() -> None:
-    req = _make_request()
-    with pytest.raises(ValidationError):
-        req.intent = "full_execution"  # type: ignore[misc]
-
-
-def test_approval_request_rejects_unknown_intent() -> None:
-    from molexp.harness.schemas.approval import ApprovalRequest
-
-    with pytest.raises(ValidationError):
-        ApprovalRequest(
-            id="x",
-            intent="not_a_real_intent",  # type: ignore[arg-type]
-            reason="x",
-            triggered_by_policy="x",
-            created_at=datetime(2026, 5, 26, tzinfo=UTC),
+    def test_construct_intervention_request(self) -> None:
+        request = ApprovalRequest(
+            id="req-int",
+            intent="task_intervention",
+            reason="loop stuck — need human guidance",
+            triggered_by_policy="StepAuditLoop",
+            created_at=_created_at(),
+            scope="intervention_request",
+            target_agent_id="codegen-task-T",
         )
+        assert request.scope == "intervention_request"
+        assert request.target_agent_id == "codegen-task-T"
+        assert request.intent == "task_intervention"
+
+    def test_scope_field_is_frozen(self) -> None:
+        request = _gate_request()
+        with pytest.raises(ValidationError):
+            request.scope = "intervention_request"  # type: ignore[misc]
+
+    def test_target_agent_id_field_is_frozen(self) -> None:
+        request = ApprovalRequest(
+            id="req-int",
+            intent="task_intervention",
+            reason="r",
+            triggered_by_policy="p",
+            created_at=_created_at(),
+            scope="intervention_request",
+            target_agent_id="codegen-task-T",
+        )
+        with pytest.raises(ValidationError):
+            request.target_agent_id = "codegen-task-U"  # type: ignore[misc]
+
+    def test_illegal_scope_value_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            ApprovalRequest(
+                id="req-bad",
+                intent="experiment_spec",
+                reason="r",
+                triggered_by_policy="p",
+                created_at=_created_at(),
+                scope="not-a-scope",  # type: ignore[arg-type]
+            )
+
+    def test_task_intervention_is_a_valid_intent(self) -> None:
+        request = ApprovalRequest(
+            id="req-int",
+            intent="task_intervention",
+            reason="r",
+            triggered_by_policy="p",
+            created_at=_created_at(),
+        )
+        assert request.intent == "task_intervention"
 
 
-def test_approval_request_default_factory_independent() -> None:
-    a = _make_request()
-    b = _make_request()
-    assert a.metadata is not b.metadata
+class TestApprovalScopeExport:
+    def test_approval_scope_importable_from_schemas(self) -> None:
+        # ApprovalScope is a first-class exported Literal alias.
+        from molexp.harness import schemas
 
-
-# ---------------------------------------------------------- ApprovalDecision
-
-
-def _make_decision(*, granted: bool = True):
-    from molexp.harness.schemas.approval import ApprovalDecision
-
-    return ApprovalDecision(
-        request_id="req-001",
-        granted=granted,
-        decided_by="user:roy",
-        decided_at=datetime(2026, 5, 26, tzinfo=UTC),
-        reason="Looks safe",
-    )
-
-
-def test_approval_decision_round_trip() -> None:
-    from molexp.harness.schemas.approval import ApprovalDecision
-
-    dec = _make_decision()
-    dumped = dec.model_dump_json()
-    rehydrated = ApprovalDecision.model_validate_json(dumped)
-    assert rehydrated == dec
-
-
-def test_approval_decision_defaults() -> None:
-    from molexp.harness.schemas.approval import ApprovalDecision
-
-    dec = ApprovalDecision(
-        request_id="req-001",
-        granted=False,
-        decided_by="harness:auto",
-        decided_at=datetime(2026, 5, 26, tzinfo=UTC),
-    )
-    assert dec.reason is None
-
-
-def test_approval_decision_is_frozen() -> None:
-    dec = _make_decision()
-    with pytest.raises(ValidationError):
-        dec.granted = False  # type: ignore[misc]
-
-
-# -------------------------------------------- re-exports
-
-
-def test_three_approval_types_re_exported_from_schemas_package() -> None:
-    from molexp.harness.schemas import (
-        ApprovalDecision as via_pkg_dec,
-    )
-    from molexp.harness.schemas import (
-        ApprovalIntent as via_pkg_intent,
-    )
-    from molexp.harness.schemas import (
-        ApprovalRequest as via_pkg_req,
-    )
-    from molexp.harness.schemas.approval import (
-        ApprovalDecision as via_mod_dec,
-    )
-    from molexp.harness.schemas.approval import (
-        ApprovalIntent as via_mod_intent,
-    )
-    from molexp.harness.schemas.approval import (
-        ApprovalRequest as via_mod_req,
-    )
-
-    assert via_pkg_intent is via_mod_intent
-    assert via_pkg_req is via_mod_req
-    assert via_pkg_dec is via_mod_dec
-
-
-def test_three_approval_types_re_exported_from_top_level() -> None:
-    from molexp.harness import (  # noqa: F401
-        ApprovalDecision,
-        ApprovalIntent,
-        ApprovalRequest,
-    )
+        assert "ApprovalScope" in schemas.__all__
+        assert ApprovalScope is schemas.ApprovalScope

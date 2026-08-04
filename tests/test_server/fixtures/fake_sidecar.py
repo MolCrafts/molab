@@ -13,6 +13,8 @@ private module name. It exercises the two halves of the trust gate:
 The reader itself is a tiny in-memory :class:`molpy.io.BaseTrajectoryReader`
 subclass yielding ``element/x/y/z`` frames, so the happy-path tests need no
 real dataset on disk.
+
+``Frame`` is reached through molpy (``molpy.Frame``), never by importing molrs.
 """
 
 from __future__ import annotations
@@ -20,8 +22,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-import molpy
 import numpy as np
+from molpy import Frame
 from molpy.io import BaseTrajectoryReader
 
 # ── module-import sentinel ────────────────────────────────────────────────
@@ -42,15 +44,15 @@ class FakeReader(BaseTrajectoryReader):
         super().__init__(fpath, must_exist=False)
         self._n = n_frames
 
-    def read_frame(self, i: int) -> molpy.Frame:
-        frame = molpy.Frame()
+    def read_frame(self, i: int) -> Frame:
+        frame = Frame()
         frame["atoms"] = {
             "element": np.array(["C", "O"]),
             "x": np.array([0.0, float(i)]),
             "y": np.array([0.0, 0.0]),
             "z": np.array([0.0, 0.0]),
         }
-        frame.metadata["frame_index"] = i
+        frame.meta["frame_index"] = i
         return frame
 
     @property

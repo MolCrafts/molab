@@ -6,9 +6,11 @@ structured output. Both methods share one configuration surface
 (:class:`AgentRunner` ``model=`` / ``models=`` kwargs) and one cache.
 
 This module is the *protocol*, not the *implementation*. The concrete
-class :class:`~molexp.agent._pydanticai.router.PydanticAIRouter` lives
-under the ``_pydanticai/`` firewall — this file imports nothing from
-pydantic-ai. Stub routers used by tests implement the same protocol.
+class lives under the ``_pydanticai/`` firewall and is re-exported
+**lazily** from the package surface — spell it
+``from molexp.agent import PydanticAIRouter`` (never import from
+``_pydanticai`` directly). This file imports nothing from pydantic-ai.
+Stub routers used by tests implement the same protocol.
 
 ``RouterTextResult`` is a frozen :class:`dataclasses.dataclass` rather
 than a pydantic model: it carries an opaque pydantic-ai
@@ -22,15 +24,28 @@ from __future__ import annotations
 from collections.abc import AsyncIterator, Mapping
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import Any, Literal, Protocol, TypeVar, runtime_checkable
+from typing import TYPE_CHECKING, Any, Literal, Protocol, TypeVar, runtime_checkable
 
 from pydantic import BaseModel, ConfigDict
 
 from molexp.agent.types import UsageBreakdown
 
+if TYPE_CHECKING:
+    # Hook types live in ``molexp.agent.loops.hooks`` (SDK-free). Importing
+    # them only under TYPE_CHECKING keeps this protocol module free of a
+    # runtime import cycle with ``agent.loops`` — ``from __future__ import
+    # annotations`` (above) defers every annotation to a string, so the
+    # signatures below never trigger a runtime import.
+    from molexp.agent.loops.hooks import (
+        AfterToolHook,
+        BeforeToolHook,
+        ShouldStopGuard,
+    )
+
 __all__ = [
     "AgenticChunk",
     "FinalChunk",
+    "McpToolSpec",
     "ModelTier",
     "Router",
     "RouterTextResult",
@@ -89,6 +104,30 @@ class RouterTextResult:
     raw: Any = field(default=None)
 
 
+@dataclass(frozen=True)
+class McpToolSpec:
+    """SDK-free descriptor for a stdio MCP server to attach as an agent tool.
+
+    The harness/services layers pass these to :meth:`Router.complete_structured`
+    to make a codegen agent consult a live MCP server (e.g. molmcp's
+    ``molcrafts_search`` / ``molcrafts_describe``) mid-generation instead of
+    guessing an API from a static catalog. The concrete router turns each spec
+    into a pydantic-ai MCP toolset — none of the callers touch pydantic-ai.
+
+    Attributes:
+        name: Toolset id; also the ``{name}_{tool}`` prefix on every tool.
+        command: Executable launched over stdio (e.g. ``"molmcp"``).
+        args: Command arguments.
+        env: Extra environment as name/value pairs (tuple so the spec stays
+            hashable/frozen); empty means inherit the parent environment.
+    """
+
+    name: str
+    command: str
+    args: tuple[str, ...] = ()
+    env: tuple[tuple[str, str], ...] = ()
+
+
 # ── Agentic-loop streaming chunks ──────────────────────────────────────────
 
 
@@ -137,6 +176,8 @@ class ToolResultChunk(BaseModel):
     """The return of a dispatched tool call.
 
     ``ok`` is ``False`` when the tool raised / produced a retry prompt.
+    ``artifacts`` carries full inline conversation embeds (molplot/molvis)
+    peeled from embed-tool JSON — never truncated like ``result_summary``.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -145,15 +186,23 @@ class ToolResultChunk(BaseModel):
     tool_name: str
     result_summary: str = ""
     ok: bool = True
+    artifacts: tuple[dict[str, object], ...] = ()
 
 
 class FinalChunk(BaseModel):
-    """The terminal chunk — carries the agentic loop's final assistant text."""
+    """The terminal chunk — final assistant text + optional lossless history.
+
+    ``model_messages_json`` is the pydantic-ai ``ModelMessage`` list as
+    canonical JSON bytes (produced only inside ``_pydanticai``). Stubs omit
+    it; production routers set it so :class:`~molexp.agent.loops.InteractiveLoop`
+    can persist multiturn context without importing pydantic-ai.
+    """
 
     model_config = ConfigDict(frozen=True)
 
     kind: Literal["final"] = "final"
     text: str
+    model_messages_json: bytes | None = None
 
 
 AgenticChunk = TextDeltaChunk | ThinkingDeltaChunk | ToolCallChunk | ToolResultChunk | FinalChunk
@@ -226,6 +275,7 @@ class Router(Protocol):
         user: str,
         schema: type[SchemaT],
         node_id: str = "",
+        mcp_tools: tuple[McpToolSpec, ...] = (),
     ) -> SchemaT:
         """Drive one schema-typed round trip with retry + event hooks.
 
@@ -239,15 +289,20 @@ class Router(Protocol):
             node_id: Caller-supplied identifier propagated into
                 :class:`~molexp.agent._pydanticai.errors.ProviderError`
                 and event records for traceability.
+            mcp_tools: Stdio MCP servers to attach as agent tools for this
+                call. When non-empty the agent may call those tools (e.g.
+                molmcp code intelligence) before emitting its structured
+                answer, so codegen consults the real API instead of guessing.
 
         Returns:
             One instance of ``schema``.
 
         Raises:
             ProviderError: On retry exhaustion or non-retryable
-                failure. (The internal name remains
-                ``ProviderError`` to minimize churn — catch via
-                ``from molexp.agent._pydanticai.errors import ProviderError``.)
+                failure (the
+                :class:`~molexp.agent._pydanticai.errors.ProviderError`
+                raised by the concrete router; the internal name
+                remains ``ProviderError`` to minimize churn).
         """
         ...
 
@@ -257,8 +312,12 @@ class Router(Protocol):
         prompt: str,
         system: str = "",
         tools: tuple[Any, ...] = (),
+        toolsets: tuple[Any, ...] = (),
         tier: ModelTier = ModelTier.DEFAULT,
         message_history: tuple[Any, ...] = (),
+        before_tool: BeforeToolHook | None = None,
+        after_tool: AfterToolHook | None = None,
+        should_stop: ShouldStopGuard | None = None,
     ) -> AsyncIterator[AgenticChunk]:
         """Drive an emergent tool-using loop, streamed as :data:`AgenticChunk`\\ s.
 
@@ -278,13 +337,38 @@ class Router(Protocol):
             tools: Tools the model may call — opaque pydantic-ai
                 ``Tool`` instances or bare callables, forwarded
                 verbatim. The protocol stays SDK-free, hence ``Any``.
+            toolsets: Opaque pydantic-ai toolset objects (typically from
+                :func:`molexp.agent._pydanticai.mcp.build_mcp_server`).
+                Empty means no MCP/toolset attachment. May be combined
+                with ``tools``.
             tier: Which tier's model to use. Defaults to ``DEFAULT``.
             message_history: Opaque prior-turn history (or empty),
                 forwarded verbatim to the underlying agent.
+            before_tool: Optional :class:`~molexp.agent.loops.hooks.BeforeToolHook`
+                consulted as each tool call is dispatched. ``None`` (the
+                default) opts out — omitting it is byte-identical to today.
+            after_tool: Optional :class:`~molexp.agent.loops.hooks.AfterToolHook`
+                consulted as each tool result is observed. ``None`` (the
+                default) opts out.
+            should_stop: Optional
+                :class:`~molexp.agent.loops.hooks.ShouldStopGuard` consulted
+                before the terminal :class:`FinalChunk`. ``None`` (the default)
+                opts out.
 
         Yields:
             :data:`AgenticChunk`\\ s in emission order; the last is a
             :class:`FinalChunk`.
+
+        Note:
+            Phase 01 honors only the after-tool boundary that passive
+            ``Agent.iter()`` iteration permits — an ``after_tool`` returning
+            :meth:`~molexp.agent.loops.hooks.HookOutcome.deny` flips the
+            emitted :class:`ToolResultChunk` ``ok`` to ``False`` and folds the
+            deny message into ``result_summary``. Before-tool veto,
+            suspend-resume, and should-stop re-injection are *triggered and
+            recorded* in phase 01 but their enforcement is realized in phase
+            02. When all three hooks are ``None`` the chunk stream is
+            byte-identical to omitting them entirely.
         """
         ...
 

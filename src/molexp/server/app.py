@@ -8,6 +8,7 @@ It strictly adheres to the standard pattern:
 
 from __future__ import annotations
 
+import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -29,16 +30,36 @@ logger = get_logger(__name__)
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:  # noqa: ARG001
     """Application lifespan: startup and shutdown events.
 
-    On shutdown the agent session registry is closed, which cancels and awaits
-    every in-flight background turn so no orphan task survives teardown.
+    On shutdown the agent session registry and the plan-task + curate-task
+    registries are closed, cancelling and awaiting every in-flight background
+    turn / plan task / curate task so no orphan task survives teardown.
+    SSE long-pollers are woken first so uvicorn's connection drain can finish.
     """
-    from .dependencies import reset_agent_runtime
+    from molexp.services.approval_notify import (
+        close_approval_subscribers,
+        reset_approval_subscribers,
+    )
 
+    from .dependencies import reset_agent_runtime
+    from .deps.curate_runtime import reset_curate_runtime
+    from .deps.plan_runtime import reset_plan_runtime
+    from .shutdown import mark_shutting_down, reset_shutdown_flag
+
+    reset_shutdown_flag()
+    reset_approval_subscribers()
     logger.info("MolExp server starting up")
     try:
         yield
     finally:
+        # 1) Cooperative stop for SSE / long-poll generators still open in the
+        # browser (approvals inbox, agent tails). Without this, uvicorn hangs on
+        # "Waiting for connections to close" until every tab disconnects.
+        mark_shutting_down()
+        close_approval_subscribers()
+        # 2) Cancel in-flight background work owned by this process.
         await reset_agent_runtime()
+        await reset_plan_runtime()
+        await reset_curate_runtime()
         logger.info("MolExp server shutting down")
 
 
@@ -96,10 +117,17 @@ def _mount_webapp(app: FastAPI, webapp_dir: Path) -> None:
     # SPA fallback — serves index.html for every non-API, non-static path.
     # ``index.html`` is the only un-hashed asset, so it MUST never be cached
     # by the browser; otherwise a fresh build's new JS hashes won't be loaded.
+    # Unmatched ``/api/*`` must NOT fall through to index.html (200 HTML) —
+    # the SPA client then tries ``response.json()`` and floods the console
+    # with "Unexpected token '<'" parse errors.
+    from fastapi import HTTPException
+
     no_cache_headers = {"Cache-Control": "no-store, must-revalidate"}
 
     @app.get("/{full_path:path}", include_in_schema=False)
     async def _spa_fallback(full_path: str) -> FileResponse:
+        if full_path == "api" or full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not found")
         candidate = webapp_dir / full_path
         if full_path and candidate.is_file():
             return FileResponse(str(candidate))
@@ -148,6 +176,14 @@ def create_app(
             is auto-detected via ``importlib.resources``.
         serve_static: Set to ``False`` to run in API-only mode.
     """
+    # 0. Bridge operator config (~/.molexp/config.json) into the in-code
+    #    ``molexp.config`` — e.g. ``agent.model`` set via ``molexp config`` —
+    #    so server routes see the same configuration the CLI documents.
+    #    In-code registrations keep precedence.
+    from molexp.services.operator_config import bridge_operator_config
+
+    bridge_operator_config()
+
     app = FastAPI(
         title="MolExp API",
         version="0.1.0",
@@ -194,6 +230,14 @@ def create_app(
             capabilities={cap.value: registry.is_available(cap) for cap in Capability},
         )
 
+    is_dev = os.environ.get("RUN_MODE", None) == "development"
+
+    if is_dev:
+        from tidewave.fastapi import Tidewave
+
+        tidewave = Tidewave()
+        tidewave.install(app)
+
     # 5. Static file serving (production) or root fallback (dev / no build)
     webapp_path: Path | None = None
     if serve_static:
@@ -215,8 +259,3 @@ def create_app(
             }
 
     return app
-
-
-# Default app instance for Development Mode (uvicorn --reload).
-# API-only — the frontend dev server (localhost:5173) runs separately.
-app = create_app(serve_static=False)

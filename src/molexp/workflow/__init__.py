@@ -1,21 +1,22 @@
 """Molexp workflow layer — public OOP API.
 
-Define a workflow by instantiating :class:`WorkflowBuilder`, registering
-tasks via its methods, then calling :meth:`WorkflowBuilder.build` to
-produce the frozen, content-addressed :class:`Workflow`. Three equivalent
-styles share the builder class:
+Define a workflow by instantiating :class:`WorkflowCompiler`, registering
+tasks via its methods, then calling :meth:`WorkflowCompiler.compile` to
+produce the frozen, content-addressed :class:`CompiledWorkflow` (graph +
+per-task snapshots + version + optional experiment binding). Three
+equivalent styles share the compiler class:
 
 1. **Decorator** (functions as tasks)::
 
-       wf_builder = WorkflowBuilder(name="pipeline")
+       wf = WorkflowCompiler(name="pipeline")
 
 
-       @wf_builder.task
+       @wf.task
        async def fetch(ctx: TaskContext) -> FetchResult: ...
 
 
-       wf = wf_builder.build()
-       result = await wf.execute()
+       compiled = wf.compile()
+       result = await WorkflowRuntime().execute(compiled)
 
 2. **OOP** (subclass ``Task`` and ``.add()``)::
 
@@ -23,7 +24,7 @@ styles share the builder class:
            async def execute(self, ctx: TaskContext) -> FetchResult: ...
 
 
-       wf = WorkflowBuilder(name="pipeline").add(FetchTask()).build()
+       compiled = WorkflowCompiler(name="pipeline").add(FetchTask()).compile()
 
 3. **Protocol** (any object with ``async execute(ctx)``)::
 
@@ -31,20 +32,40 @@ styles share the builder class:
            async def execute(self, ctx) -> dict: ...
 
 
-       wf = WorkflowBuilder(name="pipeline").add(ExternalProcessor()).build()
+       compiled = WorkflowCompiler(name="pipeline").add(ExternalProcessor()).compile()
 
-Bind a built :class:`Workflow` to an experiment via
-``wf.bind_to(experiment)`` so that downstream code (CLI / server /
-cluster workers) can recover it via
-:meth:`Workflow.for_experiment(experiment) <Workflow.for_experiment>`.
+Control flow beyond the DAG shape is declared on the compiler:
+``wf.parallel`` (runtime-sized fan-out), ``wf.branch`` (label-routed
+edges) and ``wf.loop`` (repeat-until). A branch or loop-``until`` task
+returns ``(value, Next("label"))``; the routed target receives ``value``
+bound to its named parameters (values-on-edges delivery — see
+``docs/guide/control-flow.md``).
+
+Execution lives on :class:`WorkflowRuntime`
+(``runtime.execute(compiled)`` / ``.start`` / ``.run_on``), not on the
+artifact. Bind a compiled workflow to an experiment via
+``wf.compile(experiment=exp)`` or
+:data:`default_binding_registry`.bind(exp, compiled)`` so that downstream
+code (CLI / server / cluster workers) can recover it via
+``default_binding_registry.for_experiment(experiment)``.
 """
 
+from ._engine.persistence import read_node_outputs, seed_from_execution
+from ._engine.runtime import (
+    WorkflowRuntime,
+    fresh_requested,
+    make_execution_id,
+    request_fresh_execution,
+)
 from ._names import generate_name
-from ._pydantic_graph.runtime import make_execution_id
-from .builder import WorkflowBuilder
+from .binding import WorkflowBinding, WorkflowBindingRegistry, default_binding_registry
 from .cache import Caching
 from .cache_store import CacheStore, FileCacheStore
-from .context import ActorContext, TaskContext
+from .codec import WorkflowCodec, default_codec
+from .command_task import CommandTask
+from .compiled import CompiledWorkflow
+from .compiler import WorkflowCompiler
+from .context import TaskContext
 from .contract import (
     ArtifactDecl,
     Severity,
@@ -59,22 +80,45 @@ from .contract import (
     default_validation_checks,
     validate_workflow_contract,
 )
+
+# NOTE: importing ``.execute`` also registers the workspace-side
+# ``set_run_executor`` seam that backs ``Run.execute`` / ``RunSet.execute``.
+from .execute import (
+    RunFailedError,
+    RunNotExecutableError,
+    aexecute_run,
+    execute_run,
+)
+from .ir import (
+    EdgeKind,
+    GraphEdgeIR,
+    GraphLoopIR,
+    GraphNodePosition,
+    GraphParallelIR,
+    GraphTaskIR,
+    WorkflowGraphIR,
+    build_workflow_graph_ir,
+)
+from .mermaid import render_workflow_mermaid
+from .outputs import RegisterArtifact, RegisterMetric
 from .promote import promote_callable, resolve_callable_entrypoint, resolve_spec_entrypoint
 from .protocols import Runnable, Streamable
 from .registry import TaskTypeRegistry, default_registry
-from .serializer import WorkflowCompiler, default_compiler
 from .snapshot import TaskSnapshot
 from .snapshot_ref import WorkflowSnapshotRef
-from .spec import Workflow
+from .subworkflow import SubWorkflow
 from .task import Actor, Task
 from .types import (
     BranchEdges,
+    CommandError,
     CycleError,
     EdgeShapeError,
     End,
     EntryAmbiguousError,
     LoopMaxItersExceeded,
     MissingRouteError,
+    MissingUpstreamResultError,
+    Next,
     OutEdges,
     ParallelExecutionError,
     UnconditionalEdges,
@@ -94,23 +138,38 @@ from .version import (
 
 __all__ = [
     "Actor",
-    "ActorContext",
     "ArtifactDecl",
     "BranchEdges",
     "CacheStore",
     "Caching",
+    "CommandError",
+    "CommandTask",
+    "CompiledWorkflow",
     "CycleError",
+    "EdgeKind",
     "EdgeShapeError",
     "End",
     "EntryAmbiguousError",
     "FileCacheStore",
+    "GraphEdgeIR",
+    "GraphLoopIR",
+    "GraphNodePosition",
+    "GraphParallelIR",
+    "GraphTaskIR",
     "LoopMaxItersExceeded",
     "MissingRouteError",
+    "MissingUpstreamResultError",
+    "Next",
     "OutEdges",
     "ParallelExecutionError",
+    "RegisterArtifact",
+    "RegisterMetric",
+    "RunFailedError",
+    "RunNotExecutableError",
     "Runnable",
     "Severity",
     "Streamable",
+    "SubWorkflow",
     "Task",
     "TaskContext",
     "TaskIO",
@@ -127,24 +186,36 @@ __all__ = [
     "ValidationCheckId",
     "ValidationIssue",
     "ValidationReport",
-    "Workflow",
-    "WorkflowBuilder",
+    "WorkflowBinding",
+    "WorkflowBindingRegistry",
+    "WorkflowCodec",
     "WorkflowCompiler",
     "WorkflowContract",
     "WorkflowDeadlockError",
     "WorkflowError",
     "WorkflowExecution",
+    "WorkflowGraphIR",
     "WorkflowResult",
+    "WorkflowRuntime",
     "WorkflowSnapshotRef",
     "WorkflowVersion",
     "WorkflowVersionConflictError",
-    "default_compiler",
+    "aexecute_run",
+    "build_workflow_graph_ir",
+    "default_binding_registry",
+    "default_codec",
     "default_registry",
     "default_validation_checks",
+    "execute_run",
+    "fresh_requested",
     "generate_name",
     "make_execution_id",
     "promote_callable",
+    "read_node_outputs",
+    "render_workflow_mermaid",
+    "request_fresh_execution",
     "resolve_callable_entrypoint",
     "resolve_spec_entrypoint",
+    "seed_from_execution",
     "validate_workflow_contract",
 ]

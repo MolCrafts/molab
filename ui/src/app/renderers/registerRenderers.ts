@@ -1,13 +1,15 @@
+import { KnowledgeDocPanel } from "@/app/knowledge/KnowledgeDocPanel";
 import { registerRenderer } from "@/app/registry";
 import { AgentSessionInspector } from "@/app/renderers/AgentSessionInspector";
 import { AgentViewer } from "@/app/renderers/AgentViewer";
 import { AssetViewer } from "@/app/renderers/AssetViewer";
 import { ExperimentViewer } from "@/app/renderers/ExperimentViewer";
 import { ImageViewer } from "@/app/renderers/ImageViewer";
+import { KnowledgeViewer } from "@/app/renderers/KnowledgeViewer";
 import { MetadataInspector } from "@/app/renderers/MetadataInspector";
 import { ProjectViewer } from "@/app/renderers/ProjectViewer";
 import { RunViewer } from "@/app/renderers/RunViewer";
-import { TextEditor } from "@/app/renderers/TextEditor";
+import { TaskViewer } from "@/app/renderers/TaskViewer";
 import { WorkflowFileViewer } from "@/app/renderers/WorkflowFileViewer";
 import { WorkflowInspector } from "@/app/renderers/WorkflowInspector";
 import { WorkflowViewer } from "@/app/renderers/WorkflowViewer";
@@ -73,6 +75,8 @@ export const registerDefaultRenderers = (): void => {
     Component: WorkflowViewer,
   });
 
+  // The `panelKind:"editor"` renderer is owned by the internal `editor`
+  // plugin (`@/plugins/editor`), registered eagerly in `bootPlugins()`.
   const workspaceFileKinds = [
     "yaml",
     "json",
@@ -82,20 +86,6 @@ export const registerDefaultRenderers = (): void => {
     "unknown",
     "image",
   ] as const;
-  const editorFileKinds = ["yaml", "json", "python", "markdown", "text", "unknown"] as const;
-  editorFileKinds.forEach((fileKind) => {
-    registerRenderer({
-      key: {
-        objectType: "workspace-file",
-        fileKind,
-        contentType: "text",
-        panelKind: "editor",
-      },
-      title: "Text Editor",
-      panelSlot: "center",
-      Component: TextEditor,
-    });
-  });
 
   registerRenderer({
     key: {
@@ -217,5 +207,53 @@ export const registerDefaultRenderers = (): void => {
     title: "Agent Task Inspector",
     panelSlot: "right",
     Component: AgentSessionInspector,
+  });
+
+  registerRenderer({
+    key: {
+      objectType: "task",
+      fileKind: "json",
+      contentType: "metadata",
+      panelKind: "viewer",
+    },
+    title: "Task Overview",
+    panelSlot: "center",
+    Component: TaskViewer,
+  });
+
+  registerRenderer({
+    key: {
+      objectType: "task",
+      fileKind: "json",
+      contentType: "metadata",
+      panelKind: "inspector",
+    },
+    title: "Task Inspector",
+    panelSlot: "right",
+    Component: TaskViewer,
+  });
+
+  registerRenderer({
+    key: {
+      objectType: "knowledge",
+      fileKind: "json",
+      contentType: "metadata",
+      panelKind: "viewer",
+    },
+    title: "Knowledge",
+    panelSlot: "center",
+    Component: KnowledgeViewer,
+  });
+
+  registerRenderer({
+    key: {
+      objectType: "knowledge",
+      fileKind: "json",
+      contentType: "metadata",
+      panelKind: "inspector",
+    },
+    title: "Document",
+    panelSlot: "right",
+    Component: KnowledgeDocPanel,
   });
 };

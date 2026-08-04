@@ -61,16 +61,57 @@ class _BoundaryStubTask:
         )
 
 
+class WorkflowTopology:
+    """Decoupled topology carrier handed to the CFG lowering pass.
+
+    Holds exactly the declaration state the lowering reads — task
+    registrations plus the control/branch/loop/parallel/entry decls — so
+    ``_engine`` no longer needs to import the public
+    ``WorkflowCompiler`` / ``CompiledWorkflow``. The private attribute
+    names mirror the old ``Workflow`` spec so the lowering bodies are
+    unchanged.
+    """
+
+    __slots__ = (
+        "_branch_edges",
+        "_control_edges",
+        "_entries",
+        "_loops",
+        "_parallels",
+        "_tasks",
+        "name",
+    )
+
+    def __init__(
+        self,
+        *,
+        name: str,
+        tasks: list[TaskRegistration],
+        entries: tuple[str, ...] = (),
+        control_edges: tuple[tuple[str, str], ...] = (),
+        branch_edges: tuple[tuple[str, str, str], ...] = (),
+        loops: tuple[LoopDecl, ...] = (),
+        parallels: tuple[ParallelDecl, ...] = (),
+    ) -> None:
+        self.name = name
+        self._tasks = tasks
+        self._entries = entries
+        self._control_edges = control_edges
+        self._branch_edges = branch_edges
+        self._loops = loops
+        self._parallels = parallels
+
+
 class TaskRegistration:
     """Internal record of one registered task or actor."""
 
     __slots__ = (
-        "config",
         "dependent_params",
         "depends_on",
         "fn_or_class",
         "is_actor",
         "name",
+        "position",
         "remote",
         "task_type",
     )
@@ -83,8 +124,8 @@ class TaskRegistration:
         is_actor: bool = False,
         remote: UserDeps = None,
         task_type: str | None = None,
-        config: JSONMapping | None = None,
         dependent_params: DependentParamsFn | None = None,
+        position: tuple[float, float] | None = None,
     ) -> None:
         self.name = name
         self.fn_or_class = fn_or_class
@@ -92,5 +133,10 @@ class TaskRegistration:
         self.is_actor = is_actor
         self.remote = remote
         self.task_type = task_type
-        self.config = dict(config) if config else None
         self.dependent_params = dependent_params
+        # Editor-canvas coordinate metadata (free-layout graph). Pure UI
+        # metadata: it round-trips through the IR but never enters the
+        # ``TaskSnapshot`` content hash (the snapshot reads the task instance's
+        # code + captured ``__init__`` config), so moving a node never
+        # invalidates the cache.
+        self.position = position

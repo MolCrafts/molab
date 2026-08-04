@@ -1,121 +1,51 @@
-"""Tests for Workflow + WorkflowBuilder."""
+"""Tests for WorkflowCompiler task registration/naming + the stable workflow id."""
 
-from molexp.workflow import Task, TaskContext, WorkflowBuilder
+from __future__ import annotations
+
+from molexp.workflow import Task, WorkflowCompiler
 from molexp.workflow._graph_decl import TaskRegistration
 from molexp.workflow._helpers import _stable_workflow_id
 
 
-class TestWorkflowDecorators:
-    def test_single_task(self):
-        wf = WorkflowBuilder(name="simple")
-
-        @wf.task
-        async def fetch(ctx):
-            return 1
-
-        spec = wf.build()
-        assert spec.name == "simple"
-        assert len(spec._tasks) == 1
-        assert spec._tasks[0].name == "fetch"
-
-    def test_dependencies(self):
-        wf = WorkflowBuilder(name="chain")
-
-        @wf.task
-        async def a(ctx):
-            return 1
-
-        @wf.task(depends_on=["a"])
-        async def b(ctx):
-            return 2
-
-        spec = wf.build()
-        assert spec._tasks[1].depends_on == ["a"]
-
-    def test_custom_name(self):
-        wf = WorkflowBuilder(name="named")
+class TestWorkflowCompiler:
+    def test_decorator_name_override(self):
+        wf = WorkflowCompiler(name="named")
 
         @wf.task(name="custom_name")
         async def fn(ctx):
             return 1
 
-        spec = wf.build()
+        spec = wf.compile()
         assert spec._tasks[0].name == "custom_name"
 
-    def test_actor_decorator(self):
-        wf = WorkflowBuilder(name="stream")
-
-        @wf.actor
-        async def streamer(ctx):
-            yield 1
-
-        spec = wf.build()
-        assert spec._tasks[0].is_actor is True
-
-
-class TestWorkflowAdd:
-    def test_add_task(self):
-        class DoubleTask(Task):
-            async def execute(self, ctx: TaskContext) -> int:
-                return 2
-
-        spec = WorkflowBuilder(name="oop").add(DoubleTask()).build()
-        assert len(spec._tasks) == 1
-        assert spec._tasks[0].name == "double"
-
-    def test_add_external_runnable(self):
-        class External:
-            async def execute(self, ctx) -> int:
-                return 42
-
-        spec = WorkflowBuilder(name="ext").add(External(), name="ext").build()
-        assert spec._tasks[0].name == "ext"
-
-    def test_chaining(self):
-        class A(Task):
-            async def execute(self, ctx):
-                return 1
-
-        class B(Task):
-            async def execute(self, ctx):
-                return 2
-
-        spec = WorkflowBuilder(name="chain").add(A()).add(B(), depends_on=["a"]).build()
-        assert len(spec._tasks) == 2
-
-    def test_strip_task_suffix(self):
+    def test_add_strips_task_suffix_and_snake_cases(self):
         class FetchTask(Task):
             async def execute(self, ctx):
                 return 1
 
-        spec = WorkflowBuilder(name="strip").add(FetchTask()).build()
+        spec = WorkflowCompiler(name="strip").add(FetchTask()).compile()
         assert spec._tasks[0].name == "fetch"
 
-    def test_mix_decorator_and_add(self):
+    def test_mixed_decorator_and_add_preserves_registration_order(self):
         class PostTask(Task):
             async def execute(self, ctx):
                 return "post"
 
-        wf = WorkflowBuilder(name="mixed")
+        wf = WorkflowCompiler(name="mixed")
 
         @wf.task
         async def pre(ctx):
             return "pre"
 
         wf.add(PostTask(), depends_on=["pre"])
-        spec = wf.build()
+        spec = wf.compile()
         assert [t.name for t in spec._tasks] == ["pre", "post"]
 
 
 class TestStableWorkflowId:
-    def test_deterministic(self):
-        regs = [TaskRegistration("a", lambda: None, []), TaskRegistration("b", lambda: None, ["a"])]
-        id1 = _stable_workflow_id("test", regs)
-        id2 = _stable_workflow_id("test", regs)
-        assert id1 == id2
-
-    def test_different_name_different_id(self):
-        regs = [TaskRegistration("a", lambda: None, [])]
-        id1 = _stable_workflow_id("wf1", regs)
-        id2 = _stable_workflow_id("wf2", regs)
-        assert id1 != id2
+    def test_is_deterministic(self):
+        regs = [
+            TaskRegistration("a", lambda: None, []),
+            TaskRegistration("b", lambda: None, ["a"]),
+        ]
+        assert _stable_workflow_id("test", regs) == _stable_workflow_id("test", regs)

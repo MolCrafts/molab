@@ -2,14 +2,12 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
-import type { WorkflowStepInfo } from './WorkflowStepInfo';
 /**
- * Workflow execution state read from workflow.json.
+ * Runtime workflow graph state read from ``workflow.json``.
  */
 export type RunExecutionResponse = {
     execution_id?: (string | null);
     status?: string;
-    steps?: Array<WorkflowStepInfo>;
-    end?: (Record<string, any> | null);
+    workflow?: (Record<string, any> | null);
 };
 

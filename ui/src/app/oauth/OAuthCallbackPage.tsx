@@ -92,7 +92,7 @@ export const OAuthCallbackPage = (): JSX.Element => {
         <Body>
           This window was not opened from molexp's settings UI. Copy the code below and paste it
           into the Connect dialog manually.
-          <pre className="mt-3 max-w-full overflow-auto rounded border bg-muted/40 p-2 text-xs">
+          <pre className="mt-3 max-w-full overflow-auto rounded-control border bg-muted/40 p-2 text-label">
             {params.code}
           </pre>
         </Body>
@@ -114,14 +114,14 @@ export const OAuthCallbackPage = (): JSX.Element => {
 
 const Center = ({ children }: { children: React.ReactNode }): JSX.Element => (
   <div className="flex min-h-screen items-center justify-center bg-background p-6">
-    <div className="max-w-md space-y-3 rounded-lg border bg-card p-6 shadow-sm">{children}</div>
+    <main className="max-w-md space-y-3 border-y border-border/60 py-6">{children}</main>
   </div>
 );
 
 const Title = ({ children }: { children: React.ReactNode }): JSX.Element => (
-  <h1 className="text-lg font-semibold">{children}</h1>
+  <h1 className="text-heading font-semibold">{children}</h1>
 );
 
 const Body = ({ children }: { children: React.ReactNode }): JSX.Element => (
-  <div className="text-sm text-muted-foreground">{children}</div>
+  <div className="text-body-lg text-muted-foreground">{children}</div>
 );

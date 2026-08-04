@@ -1,209 +1,76 @@
-"""molexp.harness — provenance-first scientific workflow harness.
+"""molexp.harness — lineage-first scientific workflow harness.
 
 Top-level package, sibling of :mod:`molexp.workspace`, :mod:`molexp.workflow`,
-and :mod:`molexp.agent`. Owns state, provenance, validation, approval,
+and :mod:`molexp.agent`. Owns state, artifact lineage, validation, approval,
 execution, and audit for harness-driven runs; agents are demoted to
 proposal generators behind hard boundaries defined in
 ``.claude/notes/harness-goal.md``.
 
-Phase 1 (this module's current content) ships only the **state substrate**:
-typed artifact references, an append-only event log, a provenance edge
-store, and a Stage / StageRunner wrapper that brackets each execution unit
-with events + lineage. Later Phases add WorkflowIR, BoundWorkflow,
-CapabilityRegistry, TestSpec, executors, approval gates, replay, and CLI.
+Provenance split (one owner per concern): the harness records
+**pipeline-artifact lineage only** — which stage of which run produced which
+artifact, derived from which prior artifact (``ArtifactLineageStore``)
+— plus the audit event timeline. **Run-level provenance** (params, merged
+config + ``config_hash``, profile, workflow identity, execution history,
+environment) is owned by :mod:`molexp.workspace` (``RunMetadata`` /
+per-scope ``AssetManifest``); code-version and environment capture belong
+there, never here.
+
+Public surface (deliberately small): the Stage execution machinery, the two
+shipped modes (:class:`ChatMode` + :class:`PlanOrchestrator`), the stores
+their artifacts and audit trail live in, the executor seam, the approval
+gate, and the agent gateway. Everything else — stage classes, schemas,
+validators, policies, curation actions — is imported via its full submodule
+path (``molexp.harness.stages`` / ``.schemas`` / ``.validators`` / …).
 
 Dependency direction: ``molexp.harness → molexp.workspace`` plus a single
 sanctioned edge ``molexp.harness → molexp.agent.router`` (the SDK-free
 Protocol module — see spec ``harness-as-mode-substrate-03a``).
 Imports from ``molexp.workflow``, ``molexp.plugins``, ``molexp.server``,
-``molexp.cli``, or ``molexp.sweep`` are forbidden, and ``pydantic_ai`` /
+``molexp.cli``, or ``molexp.services`` are forbidden, and ``pydantic_ai`` /
 ``pydantic_graph`` must not be transitively pulled in — see
 ``tests/test_harness/test_import_guard.py``.
 """
 
 from __future__ import annotations
 
-from molexp.harness.audit import (
-    find_last_successful_stage,
-    generate_audit_report,
-    replay_metadata,
-)
-from molexp.harness.core import HarnessRunContext, Stage, StageRunner, StageTask
-from molexp.harness.errors import (
-    AgentResponseNotRegisteredError,
-    ArtifactNotFoundError,
-    CapabilityAlreadyRegisteredError,
-    CapabilityCallValidationError,
-    CapabilityNotFoundError,
-    EventSeqConflictError,
-    HarnessError,
-    StageExecutionError,
-    StagePersistedFailureError,
-)
+from molexp.harness.audit import replay_metadata
+from molexp.harness.core import HarnessRunContext, Stage, StageRunner
+from molexp.harness.errors import ApprovalPendingError, StageExecutionError
 from molexp.harness.executors import DryRunExecutor, Executor, LocalExecutor
 from molexp.harness.gateways import AgentGateway, RouterBackedAgentGateway
-from molexp.harness.mode import Mode
-from molexp.harness.modes import PlanMode
-from molexp.harness.policy import (
-    evaluate_approval_policy,
-    make_final_report_approval_request,
-    record_approval_decision,
-    record_approval_request,
-)
-from molexp.harness.registry import CapabilityRegistry, InMemoryCapabilityRegistry
-from molexp.harness.schemas import (
-    WELL_KNOWN_ARTIFACT_KINDS,
-    AgentCallResult,
-    AgentCallSpec,
-    ApprovalDecision,
-    ApprovalIntent,
-    ApprovalPolicy,
-    ApprovalRequest,
-    ArtifactKind,
-    ArtifactRef,
-    AuditReport,
-    BoundTask,
-    BoundWorkflow,
-    CommandResult,
-    CommandSpec,
-    DependencyEdge,
-    EventType,
-    ExecutionEnvironment,
-    ExpectedOutput,
-    ExperimentReport,
-    HarnessEvent,
-    ModeResult,
-    ParameterSource,
-    ParameterValue,
-    PathPolicy,
-    ResourcePolicy,
-    TaskIR,
-    TestKind,
-    TestResult,
-    TestSpec,
-    TestStatus,
-    ToolCapability,
-    ToolPolicy,
-    UserPlan,
-    ValidationReport,
-    ValidationViolation,
-    WorkflowIR,
-    WorkflowSource,
-)
-from molexp.harness.stages import (
-    ApprovalGate,
-    BindMolcraftsTasks,
-    ExtractWorkflowIR,
-    GenerateExperimentReport,
-    GenerateTestSpec,
-    GenerateWorkflowSource,
-    SaveUserPlan,
-    ValidateBoundWorkflow,
-    ValidateWorkflowIR,
-    ValidateWorkflowSource,
-)
+from molexp.harness.modes import ChatMode, PlanOrchestrator, chat_loop_config
+from molexp.harness.registry import CapabilityRegistry
+from molexp.harness.schemas import ModeResult
+from molexp.harness.stages import ApprovalGate
 from molexp.harness.store import (
     ArtifactStore,
-    EventLog,
     FileArtifactStore,
-    ProvenanceStore,
+    SQLiteApprovalStore,
+    SQLiteArtifactLineageStore,
     SQLiteEventLog,
-    SQLiteProvenanceStore,
-)
-from molexp.harness.validators import (
-    validate_bound_workflow,
-    validate_provenance,
-    validate_test_spec,
-    validate_workflow_ir,
-    validate_workflow_source,
 )
 
 __all__ = [
-    "WELL_KNOWN_ARTIFACT_KINDS",
-    "AgentCallResult",
-    "AgentCallSpec",
     "AgentGateway",
-    "AgentResponseNotRegisteredError",
-    "ApprovalDecision",
     "ApprovalGate",
-    "ApprovalIntent",
-    "ApprovalPolicy",
-    "ApprovalRequest",
-    "ArtifactKind",
-    "ArtifactNotFoundError",
-    "ArtifactRef",
+    "ApprovalPendingError",
     "ArtifactStore",
-    "AuditReport",
-    "BindMolcraftsTasks",
-    "BoundTask",
-    "BoundWorkflow",
-    "CapabilityAlreadyRegisteredError",
-    "CapabilityCallValidationError",
-    "CapabilityNotFoundError",
     "CapabilityRegistry",
-    "CommandResult",
-    "CommandSpec",
-    "DependencyEdge",
+    "ChatMode",
     "DryRunExecutor",
-    "EventLog",
-    "EventSeqConflictError",
-    "EventType",
-    "ExecutionEnvironment",
     "Executor",
-    "ExpectedOutput",
-    "ExperimentReport",
-    "ExtractWorkflowIR",
     "FileArtifactStore",
-    "GenerateExperimentReport",
-    "GenerateTestSpec",
-    "GenerateWorkflowSource",
-    "HarnessError",
-    "HarnessEvent",
     "HarnessRunContext",
-    "InMemoryCapabilityRegistry",
     "LocalExecutor",
-    "Mode",
     "ModeResult",
-    "ParameterSource",
-    "ParameterValue",
-    "PathPolicy",
-    "PlanMode",
-    "ProvenanceStore",
-    "ResourcePolicy",
+    "PlanOrchestrator",
     "RouterBackedAgentGateway",
+    "SQLiteApprovalStore",
+    "SQLiteArtifactLineageStore",
     "SQLiteEventLog",
-    "SQLiteProvenanceStore",
-    "SaveUserPlan",
     "Stage",
     "StageExecutionError",
-    "StagePersistedFailureError",
     "StageRunner",
-    "StageTask",
-    "TaskIR",
-    "TestKind",
-    "TestResult",
-    "TestSpec",
-    "TestStatus",
-    "ToolCapability",
-    "ToolPolicy",
-    "UserPlan",
-    "ValidateBoundWorkflow",
-    "ValidateWorkflowIR",
-    "ValidateWorkflowSource",
-    "ValidationReport",
-    "ValidationViolation",
-    "WorkflowIR",
-    "WorkflowSource",
-    "evaluate_approval_policy",
-    "find_last_successful_stage",
-    "generate_audit_report",
-    "make_final_report_approval_request",
-    "record_approval_decision",
-    "record_approval_request",
+    "chat_loop_config",
     "replay_metadata",
-    "validate_bound_workflow",
-    "validate_provenance",
-    "validate_test_spec",
-    "validate_workflow_ir",
-    "validate_workflow_source",
 ]

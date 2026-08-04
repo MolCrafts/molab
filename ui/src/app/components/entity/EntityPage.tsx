@@ -1,7 +1,5 @@
-import { ChevronLeft, ChevronRight } from "lucide-react";
 import type { ComponentType, JSX, ReactNode } from "react";
-import { Link } from "react-router-dom";
-import type { BreadcrumbItem, SemanticStatus } from "@/app/types";
+import type { SemanticStatus } from "@/app/types";
 import { EntityTabBar, EntityTabContent, EntityTabs } from "./EntityTabs";
 import { StatusBadge } from "./StatusBadge";
 
@@ -20,72 +18,18 @@ interface EntityMetricProps {
 
 export const EntityMetric = ({ label, value }: EntityMetricProps): JSX.Element => {
   return (
-    <span className="flex items-baseline gap-1 text-xs">
+    <span className="flex items-baseline gap-1 text-label">
       <span className="font-semibold tabular-nums text-foreground">{value}</span>
       <span className="text-muted-foreground">{label}</span>
     </span>
   );
 };
 
-interface HeaderBreadcrumbProps {
-  items: BreadcrumbItem[];
-  canNavigateUp?: boolean;
-  onNavigateUp?: () => void;
-}
-
-const HeaderBreadcrumb = ({
-  items,
-  canNavigateUp,
-  onNavigateUp,
-}: HeaderBreadcrumbProps): JSX.Element => {
-  return (
-    <div className="flex items-center gap-1 text-xs text-muted-foreground">
-      {onNavigateUp && (
-        <button
-          type="button"
-          onClick={onNavigateUp}
-          disabled={!canNavigateUp}
-          aria-label="Back"
-          className="flex h-6 w-6 items-center justify-center rounded-sm transition-colors hover:bg-muted/60 hover:text-foreground disabled:opacity-40"
-        >
-          <ChevronLeft className="h-3.5 w-3.5" />
-        </button>
-      )}
-      <nav className="flex min-w-0 flex-wrap items-center gap-1">
-        {items.map((item, index) => {
-          const isLast = index === items.length - 1;
-          return (
-            <span
-              key={`${item.label}-${item.to ?? index}`}
-              className="flex min-w-0 items-center gap-1"
-            >
-              {item.to && !isLast ? (
-                <Link
-                  to={item.to}
-                  className="truncate rounded-sm px-1 py-0.5 transition-colors hover:bg-muted/60 hover:text-foreground"
-                >
-                  {item.label}
-                </Link>
-              ) : (
-                <span className={isLast ? "truncate text-foreground" : "truncate"}>
-                  {item.label}
-                </span>
-              )}
-              {!isLast && <ChevronRight className="h-3 w-3 flex-none opacity-50" />}
-            </span>
-          );
-        })}
-      </nav>
-    </div>
-  );
-};
-
 interface EntityHeaderProps {
-  breadcrumbs?: BreadcrumbItem[];
-  canNavigateUp?: boolean;
-  onNavigateUp?: () => void;
   icon: ComponentType<{ className?: string }>;
   title: string;
+  /** Hover tooltip on the title, e.g. the untruncated source text. */
+  titleTooltip?: string;
   subtitle?: string;
   status?: string;
   /** Inline element rendered after the status badge (e.g. "Live" indicator). */
@@ -95,11 +39,9 @@ interface EntityHeaderProps {
 }
 
 export const EntityHeader = ({
-  breadcrumbs,
-  canNavigateUp,
-  onNavigateUp,
   icon: Icon,
   title,
+  titleTooltip,
   subtitle,
   status,
   titleAccessory,
@@ -107,50 +49,41 @@ export const EntityHeader = ({
   metrics,
 }: EntityHeaderProps): JSX.Element => {
   return (
-    <section className="border-b border-border/70 bg-background">
-      <div className="px-4 pt-2">
-        {breadcrumbs && breadcrumbs.length > 0 && (
-          <HeaderBreadcrumb
-            items={breadcrumbs}
-            canNavigateUp={canNavigateUp}
-            onNavigateUp={onNavigateUp}
-          />
-        )}
-
-        {/* min-h locks the header height regardless of whether actions/metrics
-            slots are populated, so different viewers (some with buttons, some
-            without) line up vertically in the same way. */}
-        <div className="mt-1.5 flex min-h-9 items-center justify-between gap-4 pb-2.5">
-          <div className="flex min-w-0 flex-1 items-center gap-2.5">
-            <div className="flex h-7 w-7 flex-none items-center justify-center rounded-md bg-muted">
-              <Icon className="h-4 w-4 text-foreground" />
-            </div>
-            <div className="flex min-w-0 flex-1 items-center gap-2">
-              <h2 className="truncate text-base font-semibold text-foreground">{title}</h2>
-              {status && <StatusBadge status={status} />}
-              {titleAccessory}
-              {subtitle && (
-                <span
-                  className="hidden min-w-0 truncate text-xs text-muted-foreground md:inline"
-                  title={subtitle}
-                >
-                  · {subtitle}
-                </span>
-              )}
-            </div>
-          </div>
-
-          {(actions || metrics) && (
-            <div className="flex flex-none items-center gap-4">
-              {metrics && (
-                <div className="flex flex-wrap items-baseline justify-end gap-x-3 gap-y-0.5">
-                  {metrics}
-                </div>
-              )}
-              {actions && <div className="flex items-center gap-1">{actions}</div>}
+    <section className="bg-surface">
+      <div className="flex h-toolbar min-w-0 items-center gap-2 px-2">
+        <div className="hidden size-7 flex-none items-center justify-center text-accent sm:flex">
+          <Icon className="size-4" aria-hidden />
+        </div>
+        <div className="flex min-w-0 flex-1 items-center gap-2">
+          <h2
+            className="truncate text-title font-semibold tracking-tight text-foreground"
+            title={titleTooltip}
+          >
+            {title}
+          </h2>
+          {status && (
+            <div className="flex-none">
+              <StatusBadge status={status} size="sm" dot />
             </div>
           )}
+          {titleAccessory}
+          {subtitle && (
+            <>
+              <span className="hidden h-4 w-px flex-none bg-border lg:block" aria-hidden />
+              <p
+                className="hidden min-w-0 truncate text-label text-muted-foreground lg:block"
+                title={subtitle}
+              >
+                {subtitle}
+              </p>
+            </>
+          )}
         </div>
+
+        {metrics && (
+          <div className="hidden flex-none items-baseline justify-end gap-3 xl:flex">{metrics}</div>
+        )}
+        {actions && <div className="flex flex-none items-center gap-1">{actions}</div>}
       </div>
     </section>
   );
@@ -167,13 +100,11 @@ interface KeyValueGridProps {
 
 export const KeyValueGrid = ({ items }: KeyValueGridProps): JSX.Element => {
   return (
-    <dl className="grid gap-x-6 gap-y-2 md:grid-cols-2">
+    <dl className="grid gap-x-6 gap-y-3 md:grid-cols-2">
       {items.map((item) => (
         <div key={item.label} className="flex min-w-0 flex-col">
-          <dt className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-            {item.label}
-          </dt>
-          <dd className="mt-0.5 min-w-0 truncate text-sm text-foreground">{item.value}</dd>
+          <dt className="text-label text-muted-foreground">{item.label}</dt>
+          <dd className="mt-1 min-w-0 truncate text-body-lg text-foreground">{item.value}</dd>
         </div>
       ))}
     </dl>
@@ -199,9 +130,6 @@ export interface EntityPageTab {
 
 interface EntityPageProps {
   // Header — forwarded verbatim to :class:`EntityHeader`.
-  breadcrumbs?: BreadcrumbItem[];
-  canNavigateUp?: boolean;
-  onNavigateUp?: () => void;
   icon: ComponentType<{ className?: string }>;
   title: string;
   subtitle?: string;
@@ -222,9 +150,6 @@ interface EntityPageProps {
 }
 
 export const EntityPage = ({
-  breadcrumbs,
-  canNavigateUp,
-  onNavigateUp,
   icon,
   title,
   subtitle,
@@ -240,9 +165,6 @@ export const EntityPage = ({
   return (
     <div className="flex h-full flex-col bg-background">
       <EntityHeader
-        breadcrumbs={breadcrumbs}
-        canNavigateUp={canNavigateUp}
-        onNavigateUp={onNavigateUp}
         icon={icon}
         title={title}
         subtitle={subtitle}

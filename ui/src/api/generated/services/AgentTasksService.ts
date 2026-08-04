@@ -2,10 +2,29 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
+import type { AgentSystemPromptResponse } from '../models/AgentSystemPromptResponse';
 import type { AgentTaskListResponse } from '../models/AgentTaskListResponse';
 import type { AgentTaskResponse } from '../models/AgentTaskResponse';
+import type { ApprovalDecidedEvent } from '../models/ApprovalDecidedEvent';
+import type { ApprovalRequestedEvent } from '../models/ApprovalRequestedEvent';
+import type { ArtifactWrittenEvent } from '../models/ArtifactWrittenEvent';
+import type { ClarificationRequiredEvent } from '../models/ClarificationRequiredEvent';
+import type { CompactionPerformedEvent } from '../models/CompactionPerformedEvent';
+import type { ErrorEvent } from '../models/ErrorEvent';
 import type { GoalCreateRequest } from '../models/GoalCreateRequest';
+import type { LoopCompletedEvent } from '../models/LoopCompletedEvent';
+import type { LoopStartedEvent } from '../models/LoopStartedEvent';
+import type { LoopSuspendedEvent } from '../models/LoopSuspendedEvent';
 import type { MessageResponse } from '../models/MessageResponse';
+import type { PlanEmittedEvent } from '../models/PlanEmittedEvent';
+import type { PreflightFailedEvent } from '../models/PreflightFailedEvent';
+import type { RepairProposedEvent } from '../models/RepairProposedEvent';
+import type { StageCompletedEvent } from '../models/StageCompletedEvent';
+import type { StageStartedEvent } from '../models/StageStartedEvent';
+import type { ThinkingDeltaEvent } from '../models/ThinkingDeltaEvent';
+import type { TokenDeltaEvent } from '../models/TokenDeltaEvent';
+import type { ToolCallCompletedEvent } from '../models/ToolCallCompletedEvent';
+import type { ToolCallStartedEvent } from '../models/ToolCallStartedEvent';
 import type { UserMessageCreateRequest } from '../models/UserMessageCreateRequest';
 import type { CancelablePromise } from '../core/CancelablePromise';
 import { OpenAPI } from '../core/OpenAPI';
@@ -27,8 +46,8 @@ export class AgentTasksService {
      * Create Agent Task
      * Create a user-facing agent task.
      *
-     * Today this starts exactly one runtime session, but task identity is already
-     * separate from the runtime session id.
+     * The task is the stable conversation container. Each turn is dispatched to
+     * either the interactive agent or the nine-stage Planning Agent.
      * @param requestBody
      * @returns AgentTaskResponse Successful Response
      * @throws ApiError
@@ -41,6 +60,27 @@ export class AgentTasksService {
             url: '/api/agent-tasks',
             body: requestBody,
             mediaType: 'application/json',
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * Delete Agent Task Route
+     * Cancel any live turn, drop the runtime, and remove task metadata.
+     * @param taskId
+     * @returns MessageResponse Successful Response
+     * @throws ApiError
+     */
+    public static deleteAgentTaskRouteApiAgentTasksTaskIdDelete(
+        taskId: string,
+    ): CancelablePromise<MessageResponse> {
+        return __request(OpenAPI, {
+            method: 'DELETE',
+            url: '/api/agent-tasks/{task_id}',
+            path: {
+                'task_id': taskId,
+            },
             errors: {
                 422: `Validation Error`,
             },
@@ -68,18 +108,39 @@ export class AgentTasksService {
         });
     }
     /**
+     * Cancel Agent Task
+     * Stop the in-flight turn for this task (idempotent when already idle).
+     * @param taskId
+     * @returns MessageResponse Successful Response
+     * @throws ApiError
+     */
+    public static cancelAgentTaskApiAgentTasksTaskIdCancelPost(
+        taskId: string,
+    ): CancelablePromise<MessageResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/agent-tasks/{task_id}/cancel',
+            path: {
+                'task_id': taskId,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
      * Stream Agent Task Events
      * Stream task activity events.
      *
      * Delegates to the existing session event stream until task events are
      * persisted independently.
      * @param taskId
-     * @returns any Successful Response
+     * @returns any Server-Sent Events stream; each `data:` frame is one AgentEvent (discriminated on `kind`), terminated by a `done` control frame.
      * @throws ApiError
      */
     public static streamAgentTaskEventsApiAgentTasksTaskIdEventsGet(
         taskId: string,
-    ): CancelablePromise<any> {
+    ): CancelablePromise<(LoopStartedEvent | StageStartedEvent | StageCompletedEvent | ArtifactWrittenEvent | ApprovalRequestedEvent | ApprovalDecidedEvent | PlanEmittedEvent | PreflightFailedEvent | RepairProposedEvent | ClarificationRequiredEvent | CompactionPerformedEvent | LoopCompletedEvent | LoopSuspendedEvent | ErrorEvent | ThinkingDeltaEvent | TokenDeltaEvent | ToolCallStartedEvent | ToolCallCompletedEvent)> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/agent-tasks/{task_id}/events',
@@ -93,7 +154,10 @@ export class AgentTasksService {
     }
     /**
      * Post Agent Task Message
-     * Send a user message to a running agent task.
+     * Send a follow-up user message on an existing agent task.
+     *
+     * Continues the *same* runtime session (does not create a new task). A turn
+     * already in flight is rejected with 409 by the session layer.
      * @param taskId
      * @param requestBody
      * @returns MessageResponse Successful Response
@@ -111,6 +175,31 @@ export class AgentTasksService {
             },
             body: requestBody,
             mediaType: 'application/json',
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * Get Agent Task System Prompt
+     * Return the composed system prompt for an agent task (inspector).
+     *
+     * Accepts either a task id or a runtime session id. Live surface replacement
+     * for the retired ``GET /api/agent/sessions/{id}/system-prompt`` (which
+     * 503s via the legacy agent catch-all).
+     * @param taskId
+     * @returns AgentSystemPromptResponse Successful Response
+     * @throws ApiError
+     */
+    public static getAgentTaskSystemPromptApiAgentTasksTaskIdSystemPromptGet(
+        taskId: string,
+    ): CancelablePromise<AgentSystemPromptResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/agent-tasks/{task_id}/system-prompt',
+            path: {
+                'task_id': taskId,
+            },
             errors: {
                 422: `Validation Error`,
             },

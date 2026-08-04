@@ -1,10 +1,12 @@
+import { refFromSelection } from "@/app/entities/interop";
+import { RelatedPanel } from "@/app/entities/RelatedPanel";
 import {
   buildRendererKeyFromSelection,
   renderPlanByObjectType,
   resolveRenderer,
 } from "@/app/registry";
 import type { InspectorTarget, Selection, WorkspaceSnapshot } from "@/app/types";
-import { Card } from "@/components/ui/card";
+import { NodeInspector } from "@/components/workbench";
 
 interface RightPanelProps {
   selection: Selection | null;
@@ -22,11 +24,7 @@ export const RightPanel = ({
   onRefresh,
 }: RightPanelProps): JSX.Element => {
   if (!selection) {
-    return (
-      <Card className="flex h-full items-center justify-center border-dashed border-border/60 bg-muted/10">
-        <p className="text-sm text-muted-foreground">Inspector is idle.</p>
-      </Card>
-    );
+    return <NodeInspector title="Inspector" empty emptyHint="Inspector is idle." />;
   }
 
   const plan = renderPlanByObjectType[selection.objectType];
@@ -47,6 +45,7 @@ export const RightPanel = ({
           onRefresh={onRefresh}
         />
       ))}
+      <RelatedPanel entity={refFromSelection(selection)} snapshot={snapshot} />
     </div>
   );
 };

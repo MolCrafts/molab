@@ -14,16 +14,15 @@ from __future__ import annotations
 
 from pathlib import Path as _LocalPath
 
+from molexp.knowledge.types import concept_type
 from molexp.path import Path
 
 from .assets import AssetScope, AssetsView, DataAssetLibrary
 from .base import (
     _load_metadata,
-    _rebuild_container_index,
     _save_metadata,
 )
 from .cache import CacheFolder
-from .catalog import AssetCatalog
 from .errors import ProjectExistsError, ProjectNotFoundError
 from .folder import (
     WORKSPACE_PROJECT_KIND,
@@ -36,25 +35,36 @@ from .models import FolderMetadata, WorkspaceMetadata
 from .project import Project
 from .utils import slugify
 
-# CLI-level root override: set by ``molexp run -w PATH`` before executing the
-# user script, so every ``me.Workspace(...)`` in that script resolves to the
-# overridden path instead of its hardcoded argument. ``None`` means no
-# override — ``Workspace(root)`` uses the caller-supplied root as-is.
-_cli_root_override: _LocalPath | None = None
+# CLI-level root override: set by ``molexp run`` before executing the user
+# script so a script's ``me.Workspace(...)`` resolves against the CLI instead
+# of (or, when rootless, in place of) its hardcoded argument. Stored as
+# ``(path, explicit)`` or ``None``:
+#   * ``explicit=True``  — an explicit ``-ws/--workspace`` flag: STRONG, wins
+#     even over a root the script passed (the original CLI-flag behavior).
+#   * ``explicit=False`` — an inferred root (the entry-script directory, set
+#     when no flag is given): WEAK, only fills in when the script omits its
+#     root, so a script that passes an explicit root keeps it.
+# ``None`` means no override — ``Workspace(root)`` uses the caller's root as-is.
+_cli_root_override: tuple[_LocalPath, bool] | None = None
 
 
-def set_cli_root_override(path: _LocalPath | str | None) -> None:
+def set_cli_root_override(path: _LocalPath | str | None, *, explicit: bool = True) -> None:
     """Set (or clear) the CLI-level workspace root override.
 
-    When set, :class:`Workspace` constructors use this path instead of the
-    ``root`` argument they were called with. Intended solely for ``molexp
-    run -w PATH`` to make the CLI flag authoritative over script-hardcoded
-    workspace roots.
+    Args:
+        path: The override root, or ``None`` to clear it.
+        explicit: ``True`` (default) for an explicit ``-ws`` flag — wins over a
+            root the script hardcodes. ``False`` for an inferred root (entry
+            script directory) — used only when the script omits its root.
+
+    Intended solely for ``molexp run`` to make the CLI flag authoritative, or
+    to fill in a rootless ``Workspace(name=...)`` with the script's directory.
     """
     global _cli_root_override
-    _cli_root_override = _LocalPath(path).resolve() if path is not None else None
+    _cli_root_override = (_LocalPath(path).resolve(), explicit) if path is not None else None
 
 
+@concept_type(WORKSPACE_ROOT_KIND)
 class Workspace(Folder):
     """Top-level workspace with project management and global asset library.
 
@@ -75,14 +85,24 @@ class Workspace(Folder):
     _not_found_error_cls = ProjectNotFoundError
 
     def __init__(
-        self, root: PathArg, name: str | None = None, *, fs: FileSystem | None = None
+        self, root: PathArg | None = None, name: str | None = None, *, fs: FileSystem | None = None
     ) -> None:
         self._fs = fs or LocalFileSystem()
 
-        # CLI --workspace wins over script-hardcoded roots (local only).
-        if _cli_root_override is not None and isinstance(self._fs, LocalFileSystem):
-            resolved_raw = str(_cli_root_override)
-        elif isinstance(self._fs, LocalFileSystem):
+        # Root precedence (local only). An explicit ``-ws`` override is STRONG
+        # and wins over a script-passed root; an inferred override is WEAK and
+        # only fills in when ``root`` is omitted. With no override, the passed
+        # root is used as-is; with neither root nor override we fail fast.
+        local = isinstance(self._fs, LocalFileSystem)
+        override = _cli_root_override if local else None
+        if override is not None and (root is None or override[1]):
+            resolved_raw = str(override[0])
+        elif root is None:
+            raise ValueError(
+                "Workspace root not given and no CLI override set — "
+                "pass a root or run the script via `molexp run`"
+            )
+        elif local:
             resolved_raw = self._fs.resolve(str(root))
         else:
             resolved_raw = str(root)  # Remote: use path as-is (tilde handled by remote shell)
@@ -117,8 +137,6 @@ class Workspace(Folder):
         self.root: Path = self._root_path
         self._entity_metadata: WorkspaceMetadata = entity_meta
         self._data_assets: DataAssetLibrary | None = None
-        self._catalog: AssetCatalog | None = None
-        self._projects_cache: dict[str, Project] = {}
         self._cache_folder: CacheFolder | None = None
 
     # ── Folder hooks ─────────────────────────────────────────────────────
@@ -126,6 +144,19 @@ class Workspace(Folder):
     def resolve(self) -> Path:
         """Workspace IS its own on-disk dir; no parent nesting."""
         return self._root_path
+
+    @classmethod
+    def from_disk(cls, child_dir: PathArg, parent: Folder) -> Workspace:
+        """Reconstruct a Workspace rooted at *child_dir* (OKF concept rebuild).
+
+        A Workspace is its own root and persists ``workspace.json`` (not the
+        base ``metadata.json``), so the generic :meth:`Folder.from_disk` cannot
+        rebuild it. ``concept_from_dir`` reaches here when a ``meta.yaml`` typed
+        ``workspace.root`` is found; the constructor reloads ``workspace.json``
+        from *child_dir* and ignores the synthetic *parent* (a Workspace has
+        none). See the Folder.from_disk hook docs.
+        """
+        return cls(root=child_dir, fs=parent._fs)
 
     def _ensure_materialized(self) -> None:
         meta_path = self._fs.join(self.resolve(), "workspace.json")
@@ -165,25 +196,17 @@ class Workspace(Folder):
 
     @property
     def assets(self) -> AssetsView:
-        """Scope-filtered catalog view (read-only queries)."""
-        return AssetsView(self.catalog, self.scope)
+        """Scope-filtered asset view (read-only queries)."""
+        return AssetsView(self.root, self.scope)
 
     @property
     def data_assets(self) -> DataAssetLibrary:
         """Library for importing ``DataAsset`` inputs."""
         if self._data_assets is None:
-            self._data_assets = DataAssetLibrary(self.root, self.scope, self.catalog)
+            self._data_assets = DataAssetLibrary(
+                self.root, self.scope, event_root=_LocalPath(str(self.root))
+            )
         return self._data_assets
-
-    @property
-    def catalog(self) -> AssetCatalog:
-        """Workspace-wide JSON asset + entity catalog.
-
-        Lazily constructed.  The catalog directory is created on first write.
-        """
-        if self._catalog is None:
-            self._catalog = AssetCatalog(self.root)
-        return self._catalog
 
     # ── System folder accessors (singletons via lowercase property) ──────
 
@@ -211,25 +234,12 @@ class Workspace(Folder):
         self._fs.mkdir(root_str, parents=True, exist_ok=True)
         meta_path = self._fs.join(root_str, "workspace.json")
         _save_metadata(self._entity_metadata, meta_path, fs=self._fs)
-        self._catalog_upsert()
+        self.write_meta()  # OKF marker for the root, additive
 
     def save(self) -> None:
         """Persist current metadata to disk."""
         meta_path = self._fs.join(self.resolve(), "workspace.json")
         _save_metadata(self._entity_metadata, meta_path, fs=self._fs)
-        self._catalog_upsert()
-
-    def _catalog_upsert(self) -> None:
-        meta = self._entity_metadata
-        self.catalog.upsert_workspace(
-            {
-                "workspace_id": meta.id,
-                "root_path": self.resolve(),
-                "name": meta.name,
-                "created_at": meta.created_at.isoformat(),
-                "updated_at": meta.created_at.isoformat(),
-            }
-        )
 
     # ── Alternative constructors ─────────────────────────────────────────
 
@@ -255,28 +265,16 @@ class Workspace(Folder):
     def add_project(self, name: str) -> Project:
         """Mount a project under this workspace (idempotent on slug)."""
         self._ensure_materialized()
-        slug = slugify(name)
-        cached = self._children_cache.get(slug)
-        if isinstance(cached, Project):
-            return cached
-        child_dir = Project.child_dir(self, slug)
-        if self._fs.is_dir(child_dir):
-            existing = Project.from_disk(child_dir, self)
-            self._children_cache[slug] = existing
-            self._projects_cache[existing.id] = existing
-            return existing
-        proj = Project(parent=self, name=name, fs=self._fs)
-        proj.materialize()
-        self._children_cache[slug] = proj
-        self._projects_cache[proj.id] = proj
-        self._upsert_index_row(proj)
-        return proj
+        child = self._construct_child(Project, name, fs=self._fs)
+        return self.add_folder(child)
+
+    def project(self, name: str) -> Project:
+        """Fluent create-or-get alias for :meth:`add_project` (idempotent)."""
+        return self.add_project(name)
 
     def get_project(self, name: str) -> Project:
         """Strict getter — raise :class:`ProjectNotFoundError` if absent."""
-        proj = self.get_folder(name, cls=Project)
-        self._projects_cache[proj.id] = proj
-        return proj
+        return self.get_folder(name, cls=Project)
 
     def has_project(self, name: str) -> bool:
         return self.has_folder(name, cls=Project)
@@ -286,13 +284,8 @@ class Workspace(Folder):
     # the legacy implementation for now to avoid behavioral drift.
 
     def remove_project(self, name: str) -> None:
-        """Delete project directory + cascade-drop catalog rows + drop indices."""
-        slug = slugify(name)
-        if slug in self._projects_cache:
-            self._projects_cache.pop(slug, None)
+        """Delete the project directory + drop child indices."""
         self.remove_folder(name, cls=Project)
-        self.catalog.remove_project(slug)
-        self._refresh_projects_index()
 
     def list_projects(self) -> list[Project]:
         """List all projects in this workspace via the typed CRUD view."""
@@ -303,12 +296,3 @@ class Workspace(Folder):
         if kind is not None and kind != WORKSPACE_PROJECT_KIND:
             return []
         return list(self.list_projects())
-
-    def _refresh_projects_index(self) -> None:
-        root_str = self.resolve()
-        _rebuild_container_index(
-            container_dir=self._fs.join(root_str, "projects"),
-            index_filename="projects.json",
-            metadata_filename="project.json",
-            fields=["id", "name", "description", "created_at"],
-        )

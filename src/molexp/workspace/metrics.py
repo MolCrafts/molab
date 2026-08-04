@@ -1,15 +1,22 @@
-"""Compact run-local metrics storage.
+"""MolRec metrics JSONL stream under a run / record root.
 
-The on-disk format is append-only JSONL under ``run_dir/metrics``. Metrics
-are run-local data — they intentionally do not flow through the workspace
-asset manifest or catalog.
+On-disk layout (shared with molrec + molnex provisional writer)::
 
-Originally lived under ``molexp.plugins.metrics``; moved here so the
-workspace layer's only dependencies are :mod:`molexp.workflow` and the
-molexp root-level singletons (mollog / molcfg). Metrics is not a
-plugin — it has no capability registry, no entry-point hook, and no
-alternative implementation. Run-scoped JSONL persistence is workspace
-infrastructure, sibling to the artifact / log / checkpoint accessors.
+    <root>/metrics/metrics.jsonl   # authoritative append-only stream
+    <root>/metrics/index.json      # optional, derived on flush
+
+Compact keys ``t`` / ``k`` / ``s`` / ``w`` / ``v`` / ``tags`` follow the
+molrec metrics JSONL reference binding (see molrec ``docs/spec/metrics.md``).
+When *root* is a molexp run directory, this is the run-local stream used by
+``GET …/runs/{id}/metrics`` and the UI :class:`RunMetricsView`. When *root*
+is a landed MolRec package, the same paths apply.
+
+Metrics intentionally do not flow through the workspace asset manifest —
+they are section data of the run/record, not catalogued products.
+
+Originally lived under ``molexp.plugins.metrics``; this module is workspace
+infrastructure (not a plugin). A future molpy reference implementation may
+own the writer; molexp keeps a copy so the host does not depend on molnex.
 """
 
 from __future__ import annotations
@@ -20,6 +27,7 @@ import threading
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
+from typing import cast
 
 from molexp._typing import JSONValue
 
@@ -291,6 +299,7 @@ class MetricsWriter:
     def __init__(self, run_dir: Path) -> None:
         self._run_dir = Path(run_dir)
         self._lock = threading.Lock()
+        self._index_dirty = False
 
     def scalar(
         self,
@@ -317,13 +326,16 @@ class MetricsWriter:
         tags: dict[str, JSONValue] | None = None,
     ) -> MetricRecord:
         return self.log(
-            {
-                "t": "histogram",
-                "k": key,
-                "s": step,
-                "w": _format_wall_time(wall_time),
-                "v": {"bins": bins, "counts": counts},
-            },
+            cast(
+                "MetricRecord",
+                {
+                    "t": "histogram",
+                    "k": key,
+                    "s": step,
+                    "w": _format_wall_time(wall_time),
+                    "v": {"bins": bins, "counts": counts},
+                },
+            ),
             tags=tags,
         )
 
@@ -393,26 +405,20 @@ class MetricsWriter:
             with _metrics_path(self._run_dir).open("a", encoding="utf-8") as fh:
                 fh.write(line)
                 fh.write("\n")
-            self._update_index(payload)
+            # The derived ``index.json`` is rebuilt once on :meth:`flush`
+            # (run-context exit), not rewritten per record — ``metrics.jsonl``
+            # is the source of truth and ``read_run_metrics`` reads it directly.
+            self._index_dirty = True
 
         return payload
 
-    def _update_index(self, record: MetricRecord) -> None:
-        path = _index_path(self._run_dir)
-        if path.exists():
-            try:
-                with path.open(encoding="utf-8") as fh:
-                    index = json.load(fh)
-            except (json.JSONDecodeError, OSError):
-                rebuild_metrics_index(self._run_dir)
+    def flush(self) -> None:
+        """Rebuild the derived ``metrics/index.json`` from the JSONL once."""
+        with self._lock:
+            if not self._index_dirty:
                 return
-        else:
             rebuild_metrics_index(self._run_dir)
-            return
-
-        _update_index_with_record(index, record)
-        index["series_count"] = len(index.get("series", {}))
-        _atomic_write_json(path, index)
+            self._index_dirty = False
 
 
 def _format_wall_time(wall_time: str | datetime | None) -> str:

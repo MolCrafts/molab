@@ -2,14 +2,15 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
-// Manually re-shaped: tsc rejects a self-referential type alias (TS2456).
-// The interface indirection makes the recursion legal while staying
-// structurally identical to the generated form. Reapply this patch after
-// each ``npm run generate:api`` until openapi-typescript-codegen emits
-// recursive types correctly.
+/**
+ * OpenAPI ``JSONValue`` — broken into interface forms so TypeScript does not
+ * reject the recursive alias (``Record<string, JSONValue>`` self-reference).
+ * ``scripts/patch-generated-api.mjs`` re-applies this after ``generate:api``.
+ */
+export type JSONValue = string | number | boolean | null | JSONArray | JSONObject;
+
 export interface JSONObject {
     [key: string]: JSONValue;
 }
-export type JSONArray = Array<JSONValue>;
-export type JSONValue = string | number | boolean | JSONArray | JSONObject | null;
 
+export interface JSONArray extends Array<JSONValue> {}

@@ -1,12 +1,12 @@
-"""``ValidationReport`` + ``ValidationViolation`` — the validator return contract.
+"""``PlanValidationReport`` + ``ValidationViolation`` — the validator return contract.
 
 Every harness validator (:func:`molexp.harness.validators.workflow_ir.validate_workflow_ir`,
 :func:`molexp.harness.validators.bound_workflow.validate_bound_workflow`)
-returns a :class:`ValidationReport`. Validators never raise; failures
+returns a :class:`PlanValidationReport`. Validators never raise; failures
 surface as :class:`ValidationViolation` entries with machine-readable
 ``code`` strings.
 
-``ValidationReport.passed`` is derived: ``True`` iff zero ``severity =
+``PlanValidationReport.passed`` is derived: ``True`` iff zero ``severity =
 "error"`` violations exist. Warning-only reports still pass. This gives
 the Phase-4 stage wrappers a clean tri-state mental model (clean /
 pass-with-warnings / fail) without needing to recompute the flag.
@@ -18,11 +18,22 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-__all__ = ["ValidationReport", "ValidationViolation"]
+__all__ = ["PlanValidationReport", "ValidationViolation"]
 
 
 _TARGET_KINDS = Literal[
-    "workflow_ir", "bound_workflow", "workflow_source", "test_spec", "provenance"
+    "experiment_spec",
+    "workflow_ir",
+    "bound_workflow",
+    "workflow_source",
+    "test_spec",
+    "test_source",
+    "input_set",
+    "provenance",
+    #: Emergent-plan guard target: an :class:`~molexp.harness.plan.ExperimentPlan`
+    #: (opaque spec + task board) graded by
+    #: :class:`~molexp.harness.validators.plan_form.PlanFormValidator`.
+    "experiment_plan",
 ]
 _SEVERITIES = Literal["error", "warning"]
 
@@ -38,7 +49,7 @@ class ValidationViolation(BaseModel):
     severity: _SEVERITIES = "error"
 
 
-class ValidationReport(BaseModel):
+class PlanValidationReport(BaseModel):
     """Result of one validator pass."""
 
     model_config = ConfigDict(frozen=True)
@@ -54,7 +65,7 @@ class ValidationReport(BaseModel):
         target_kind: _TARGET_KINDS,
         target_id: str,
         violations: list[ValidationViolation],
-    ) -> ValidationReport:
+    ) -> PlanValidationReport:
         """Build a report with ``passed`` derived from the violations list."""
         passed = not any(v.severity == "error" for v in violations)
         return cls(

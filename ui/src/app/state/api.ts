@@ -1,9 +1,27 @@
+import type { BacklinksResponse } from "@/api/generated/models/BacklinksResponse";
+import { EmbedRequest } from "@/api/generated/models/EmbedRequest";
+import type { EmbedResponse } from "@/api/generated/models/EmbedResponse";
+import type { EntityCard } from "@/api/generated/models/EntityCard";
+import type { KnowledgeListResponse } from "@/api/generated/models/KnowledgeListResponse";
+import type { KnowledgeSearchResponse } from "@/api/generated/models/KnowledgeSearchResponse";
+import type { NoteDetailResponse } from "@/api/generated/models/NoteDetailResponse";
+import type { NoteSummary } from "@/api/generated/models/NoteSummary";
+import type { PlanDetailResponse } from "@/api/generated/models/PlanDetailResponse";
+import type { PlanListResponse } from "@/api/generated/models/PlanListResponse";
+import type { PlanTaskCreateRequest } from "@/api/generated/models/PlanTaskCreateRequest";
+import type { PlanTaskResponse } from "@/api/generated/models/PlanTaskResponse";
+import type { WorkspacePlanListResponse } from "@/api/generated/models/WorkspacePlanListResponse";
 import { AssetsService } from "@/api/generated/services/AssetsService";
 import { ExecutionService } from "@/api/generated/services/ExecutionService";
 import { ExperimentsService } from "@/api/generated/services/ExperimentsService";
+import { KnowledgeService } from "@/api/generated/services/KnowledgeService";
+import { PlansService } from "@/api/generated/services/PlansService";
+import { PlanTasksService } from "@/api/generated/services/PlanTasksService";
 import { ProjectsService } from "@/api/generated/services/ProjectsService";
 import { RunsService } from "@/api/generated/services/RunsService";
+import { WorkflowService } from "@/api/generated/services/WorkflowService";
 import { WorkspaceService } from "@/api/generated/services/WorkspaceService";
+import { AgentUnavailableError, probeOnce, resetAgentProbes } from "@/app/state/agentProbe";
 import type {
   AgentSessionSummary,
   ApiAgentSession,
@@ -14,17 +32,23 @@ import type {
   ApiProjectResponse,
   ApiRunResponse,
   AssetSummary,
-  ConsoleEntry,
   ExperimentCreateRequest,
   ExperimentSummary,
   ProjectCreateRequest,
   ProjectSummary,
   RunCreateRequest,
   RunSummary,
+  ServedWorkspaceSummary,
   WorkflowSummary,
   WorkspaceSnapshot,
   WorkspaceTreeNode,
 } from "@/app/types";
+import {
+  buildFlowgramDocument,
+  type FlowgramDocument,
+  parseTaskGraphIr,
+} from "@/components/workflow/flowgram-document";
+import type { TaskGraphJson } from "@/components/workflow/task-graph-ir";
 
 // Local types not yet in OpenAPI. The lineage fields (`assetId`,
 // `assetKind`, `producerRunId`, `producerTaskId`) are populated when
@@ -115,19 +139,100 @@ export class TensorboardScalarsError extends Error {
   }
 }
 
+export type { EntityCard } from "@/api/generated/models/EntityCard";
 export type { LammpsLogResponse } from "@/api/generated/models/LammpsLogResponse";
 export type { LammpsThermoStage } from "@/api/generated/models/LammpsThermoStage";
 export type { RunFileTextResponse } from "@/api/generated/models/RunFileTextResponse";
 
+/** The entity kinds a knowledge document can embed (mirrors ``EmbedRequest.target_kind``). */
+export type EmbedTargetKind = "run" | "experiment" | "asset" | "reference";
+
+/** The typed provenance-edge role an embed writes (mirrors ``EmbedRequest.role``). */
+export type EmbedRole = "derived_from" | "cites" | "supersedes" | "records" | "references";
+
+const EMBED_TARGET_KIND: Record<EmbedTargetKind, EmbedRequest.target_kind> = {
+  run: EmbedRequest.target_kind.RUN,
+  experiment: EmbedRequest.target_kind.EXPERIMENT,
+  asset: EmbedRequest.target_kind.ASSET,
+  reference: EmbedRequest.target_kind.REFERENCE,
+};
+
 export const workspaceApi = {
+  /** Active workspace root (+ optional remote readiness flags from newer servers). */
+  getWorkspaceInfo: async (): Promise<{
+    root: string;
+    projectCount: number;
+    assetCount: number;
+    connected?: boolean | null;
+    indexed?: boolean | null;
+    ready?: boolean | null;
+  }> => {
+    // Generated type may lag openapi dump; cast keeps extra fields when present.
+    return WorkspaceService.getWorkspaceInfoApiWorkspaceInfoGet() as Promise<{
+      root: string;
+      projectCount: number;
+      assetCount: number;
+      connected?: boolean | null;
+      indexed?: boolean | null;
+      ready?: boolean | null;
+    }>;
+  },
   getProjects: async (): Promise<ApiProjectResponse[]> => {
     return ProjectsService.listProjectsApiProjectsGet();
+  },
+  // The served-workspace set (GET /api/workspaces) is outside the generated
+  // client; a plain fetch keeps it decoupled from the per-workspace routes.
+  getServedWorkspaces: async (): Promise<ServedWorkspaceSummary[]> => {
+    const response = await fetch("/api/workspaces");
+    if (!response.ok) return [];
+    const rows = (await response.json()) as Array<{
+      key: string;
+      label: string;
+      isRemote: boolean;
+      path: string | null;
+      active?: boolean;
+      unreachable?: boolean;
+    }>;
+    return rows.map((row) => ({
+      key: row.key,
+      label: row.label,
+      isRemote: row.isRemote,
+      path: row.path ?? null,
+      active: row.active ?? false,
+      unreachable: row.unreachable ?? false,
+    }));
+  },
+  // Switch the active workspace (used when a user opens a non-active workspace
+  // in the multi-workspace nav). Local switches by path; remote by target name
+  // (which equals the served key).
+  activateServedWorkspace: async (workspace: ServedWorkspaceSummary): Promise<void> => {
+    const body = workspace.isRemote
+      ? { kind: "remote", name: workspace.key }
+      : { kind: "local", path: workspace.path };
+    const response = await fetch("/api/workspace/open", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!response.ok) {
+      throw new Error(`Failed to activate workspace ${workspace.key}: ${response.status}`);
+    }
+  },
+  // Projects of one named workspace via the aggregate route
+  // (GET /api/workspaces/{ws}/projects). Used when several workspaces are
+  // served so each group lists its own projects without a collision.
+  getProjectsForWorkspace: async (workspaceKey: string): Promise<ApiProjectResponse[]> => {
+    const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceKey)}/projects`);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch projects for workspace ${workspaceKey}: ${response.status}`);
+    }
+    return (await response.json()) as ApiProjectResponse[];
   },
   createProject: async (data: ProjectCreateRequest): Promise<ApiProjectResponse> => {
     return ProjectsService.createProjectApiProjectsPost(data);
   },
   deleteProject: async (projectId: string): Promise<void> => {
-    await ProjectsService.deleteProjectApiProjectsIdDelete(projectId);
+    await ProjectsService.deleteProjectApiProjectsProjectIdDelete(projectId);
   },
   getExperiments: async (projectId: string): Promise<ApiExperimentResponse[]> => {
     return ExperimentsService.listExperimentsApiProjectsProjectIdExperimentsGet(projectId);
@@ -181,11 +286,17 @@ export const workspaceApi = {
       executionId,
     );
   },
-  getRunExecution: async (projectId: string, experimentId: string, runId: string) => {
+  getRunExecution: async (
+    projectId: string,
+    experimentId: string,
+    runId: string,
+    executionId?: string | null,
+  ) => {
     return RunsService.getRunExecutionApiProjectsProjectIdExperimentsExperimentIdRunsRunIdExecutionGet(
       projectId,
       experimentId,
       runId,
+      executionId,
     );
   },
   getRunLammpsLog: async (projectId: string, experimentId: string, runId: string, path: string) => {
@@ -273,6 +384,167 @@ export const workspaceApi = {
       data,
     );
   },
+  createPlanTask: async (
+    projectId: string,
+    experimentId: string,
+    data: PlanTaskCreateRequest,
+  ): Promise<PlanTaskResponse> => {
+    return PlanTasksService.createPlanTaskApiProjectsProjectIdExperimentsExperimentIdPlanTasksPost(
+      projectId,
+      experimentId,
+      data,
+    );
+  },
+  getPlanTask: async (
+    projectId: string,
+    experimentId: string,
+    taskId: string,
+  ): Promise<PlanTaskResponse> => {
+    return PlanTasksService.getPlanTaskApiProjectsProjectIdExperimentsExperimentIdPlanTasksTaskIdGet(
+      projectId,
+      experimentId,
+      taskId,
+    );
+  },
+  // Generated (durable) plans: the persisted PlanMode result for an experiment.
+  listPlans: async (projectId: string, experimentId: string): Promise<PlanListResponse> => {
+    return PlansService.listPlansApiProjectsProjectIdExperimentsExperimentIdPlansGet(
+      projectId,
+      experimentId,
+    );
+  },
+  // Every generated plan in the active workspace (the Agents hub's unified list).
+  listAllPlans: async (): Promise<WorkspacePlanListResponse> => {
+    return PlansService.listAllPlansApiPlansGet();
+  },
+  getPlan: async (
+    projectId: string,
+    experimentId: string,
+    runId: string,
+  ): Promise<PlanDetailResponse> => {
+    return PlansService.getPlanApiProjectsProjectIdExperimentsExperimentIdPlansRunIdGet(
+      projectId,
+      experimentId,
+      runId,
+    );
+  },
+  // OKF knowledge concepts (Notes + References) for the active workspace.
+  // Optional `tag` / `status` AND-narrow the note list (06 added the query
+  // support); existing callers pass nothing and get the full list.
+  listKnowledge: async (
+    options: { tag?: string | null; status?: string | null } = {},
+  ): Promise<KnowledgeListResponse> => {
+    return KnowledgeService.listKnowledgeApiKnowledgeGet(
+      options.tag ?? undefined,
+      options.status ?? undefined,
+    );
+  },
+  getNote: async (path: string): Promise<NoteDetailResponse> => {
+    return KnowledgeService.getNoteApiKnowledgeNoteGet(path);
+  },
+  // Body-aware knowledge search — pure exposure of the ONE Bundle.search verb
+  // (vision-loop-08); all matching semantics live server-side in the workspace.
+  searchKnowledge: async (
+    q: string,
+    options: { type?: string | null; tag?: string | null } = {},
+  ): Promise<KnowledgeSearchResponse> => {
+    return KnowledgeService.searchKnowledgeApiKnowledgeSearchGet(
+      q,
+      options.type ?? undefined,
+      options.tag ?? undefined,
+    );
+  },
+  /**
+   * The resolved summary cards for a note's embedded entities (06's card
+   * resolver, ridden through ``getNote``). A thin read wrapper so the entity-card
+   * UI never re-derives the request shape at the call site.
+   */
+  getNoteCards: async (path: string): Promise<EntityCard[]> => {
+    const detail = await KnowledgeService.getNoteApiKnowledgeNoteGet(path);
+    return detail.cards ?? [];
+  },
+  /**
+   * Embed a live workspace entity into a note as one typed provenance edge
+   * (06's ``POST /knowledge/doc/embed``). Maps the friendly kind onto the
+   * generated ``EmbedRequest.target_kind`` enum so callers pass a plain string.
+   */
+  embedEntity: async (
+    path: string,
+    request: {
+      targetKind: EmbedTargetKind;
+      target: string;
+      role?: EmbedRole | null;
+      text?: string | null;
+    },
+  ): Promise<EmbedResponse> => {
+    return KnowledgeService.embedDocApiKnowledgeDocEmbedPost(path, {
+      target_kind: EMBED_TARGET_KIND[request.targetKind],
+      target: request.target,
+      role: request.role ?? null,
+      text: request.text ?? null,
+    });
+  },
+  /**
+   * Rewrite a note's body (its `index.md`) through the generated
+   * KnowledgeService (never a hand-rolled fetch — mirrors `workflowApi.save`).
+   * Returns the server-normalized NoteDetailResponse so the caller can realign
+   * its in-memory body with what was persisted.
+   */
+  updateNoteDoc: async (path: string, body: string): Promise<NoteDetailResponse> => {
+    return KnowledgeService.editDocApiKnowledgeDocPut(path, { body });
+  },
+  /**
+   * Update a note's tags/status (PATCH /knowledge/doc/meta) through the
+   * generated KnowledgeService — never a hand-rolled fetch. Each field is
+   * optional; omit one to leave it untouched (the server preserves the sibling
+   * via `Note.set_tags` / `Note.set_status`). Returns the server-normalized
+   * NoteSummary so the caller can realign its in-memory tags/status.
+   */
+  updateNoteMeta: async (
+    path: string,
+    patch: { tags?: string[]; status?: string },
+  ): Promise<NoteSummary> => {
+    return KnowledgeService.updateDocMetaApiKnowledgeDocMetaPatch(path, patch);
+  },
+  /**
+   * Create a Note document via the generated KnowledgeService. `parentPath`
+   * nests the new doc beneath an existing Note (its bundle-relative path);
+   * omit it to create a root-bundle knowledge-base doc.
+   */
+  createKnowledgeDoc: async (
+    name: string,
+    options: { parentPath?: string | null; body?: string } = {},
+  ): Promise<NoteSummary> => {
+    return KnowledgeService.createDocApiKnowledgeDocPost({
+      name,
+      parentPath: options.parentPath ?? null,
+      body: options.body ?? "",
+    });
+  },
+  /** Rename a Note (PATCH /knowledge/doc with a new `name`). */
+  renameKnowledgeDoc: async (path: string, name: string): Promise<NoteSummary> => {
+    return KnowledgeService.moveDocApiKnowledgeDocPatch(path, { name });
+  },
+  /** Reparent a Note under `parentPath` (PATCH /knowledge/doc). */
+  moveKnowledgeDoc: async (path: string, parentPath: string): Promise<NoteSummary> => {
+    return KnowledgeService.moveDocApiKnowledgeDocPatch(path, { parentPath });
+  },
+  /** Delete a Note (its directory subtree) via the generated KnowledgeService. */
+  deleteKnowledgeDoc: async (path: string): Promise<void> => {
+    await KnowledgeService.deleteDocApiKnowledgeDocDelete(path);
+  },
+  /** Every Concept linking at `path` (GET /knowledge/backlinks). */
+  getKnowledgeBacklinks: async (path: string): Promise<BacklinksResponse> => {
+    return KnowledgeService.getBacklinksApiKnowledgeBacklinksGet(path);
+  },
+  /**
+   * Plain URL for a browser download of a Note's portable Markdown
+   * (GET /knowledge/doc/export). Used directly via `<a href>` — never fetched —
+   * so the `Content-Disposition` attachment header drives the download.
+   */
+  knowledgeDocExportUrl: (path: string): string => {
+    return `/api/knowledge/doc/export?path=${encodeURIComponent(path)}`;
+  },
   updateRunStatus: async (
     projectId: string,
     experimentId: string,
@@ -347,20 +619,34 @@ export const workspaceApi = {
    * lineage metadata (`assetId`, `assetKind`, `producerRunId`,
    * `producerTaskId`) for nodes that match a registered asset.
    */
+  /**
+   * List workspace directory via WorkspaceFs (Path + Fs model).
+   * Prefer this over raw fetch so local/remote stay transparent.
+   */
   getWorkspaceTree: async (
     options: { path?: string; maxDepth?: number; includeCatalog?: boolean } = {},
-  ): Promise<WorkspaceTreeNodeRaw> => {
-    const params = new URLSearchParams();
-    params.set("path", options.path ?? "");
-    params.set("max_depth", String(options.maxDepth ?? 8));
-    if (options.includeCatalog) {
-      params.set("include", "catalog");
-    }
-    const response = await fetch(`/api/workspace/files?${params.toString()}`);
-    if (!response.ok) {
-      throw new Error(`Request failed: ${response.status} ${response.statusText}`);
-    }
-    return response.json();
+  ): Promise<WorkspaceFilesResponse> => {
+    const { getWorkspaceFs } = await import("@/lib/workspace-fs");
+    const fs = getWorkspaceFs();
+    const dirents = await fs.listdir(options.path ?? "", {
+      maxDepth: options.maxDepth ?? 2,
+      includeCatalog: options.includeCatalog,
+    });
+    // Adapt domain dirents back to the legacy raw wire shape for mapWorkspaceTree.
+    const toRaw = (d: (typeof dirents)[number]): WorkspaceFileNode => ({
+      name: d.name,
+      path: d.path,
+      type: d.kind === "file" ? "file" : "folder",
+      size: d.sizeBytes,
+      modified: d.mtime ?? undefined,
+      children: d.children.map(toRaw),
+      assetId: d.assetId,
+      hasPreviewSidecar: d.hasPreviewSidecar,
+    });
+    return {
+      path: options.path || fs.root || "/",
+      children: dirents.map(toRaw),
+    };
   },
 
   /**
@@ -398,30 +684,64 @@ export const workspaceApi = {
     ) as unknown as Promise<ExperimentComparisonResponse>;
   },
 
-  /** Best-effort kill: marks the run as cancelled. */
+  /** Canonical cancel verb: POST …/cancel (same as CLI `molexp runs cancel`). */
   killRun: async (
     projectId: string,
     experimentId: string,
     runId: string,
   ): Promise<RunActionResponse> => {
-    return RunsService.killRunApiProjectsProjectIdExperimentsExperimentIdRunsRunIdKillPost(
+    return RunsService.cancelRunApiProjectsProjectIdExperimentsExperimentIdRunsRunIdCancelPost(
       projectId,
       experimentId,
       runId,
     ) as unknown as Promise<RunActionResponse>;
   },
 
-  /** Clone an existing run's parameters into a fresh run. */
+  /** Resume a run in place: reopen its last non-succeeded execution, seeding completed nodes. */
+  resumeRun: async (
+    projectId: string,
+    experimentId: string,
+    runId: string,
+  ): Promise<RunContinueResponse> => {
+    return RunsService.resumeRunApiProjectsProjectIdExperimentsExperimentIdRunsRunIdResumePost(
+      projectId,
+      experimentId,
+      runId,
+    ) as unknown as Promise<RunContinueResponse>;
+  },
+
+  /** Rerun a run from scratch in a new execution on the same run (no clone). */
   rerunRun: async (
     projectId: string,
     experimentId: string,
     runId: string,
-  ): Promise<RunRerunResponse> => {
+    fresh: boolean = false,
+  ): Promise<RunContinueResponse> => {
     return RunsService.rerunRunApiProjectsProjectIdExperimentsExperimentIdRunsRunIdRerunPost(
       projectId,
       experimentId,
       runId,
-    ) as unknown as Promise<RunRerunResponse>;
+      fresh,
+    ) as unknown as Promise<RunContinueResponse>;
+  },
+
+  /**
+   * Start a pending run by dispatching it to a compute target (the `run` verb).
+   * Target-less runs 422 — those execute via `molexp run` on the host.
+   */
+  startRun: async (
+    projectId: string,
+    experimentId: string,
+    runId: string,
+    target: string,
+    parameters?: Record<string, unknown>,
+  ): Promise<RunContinueResponse> => {
+    return RunsService.startRunApiProjectsProjectIdExperimentsExperimentIdRunsRunIdRunPost(
+      projectId,
+      experimentId,
+      runId,
+      { target, parameters: parameters ?? null },
+    ) as unknown as Promise<RunContinueResponse>;
   },
 
   /** Stream URL for a run export zip — used directly via <a href>. */
@@ -504,9 +824,9 @@ export interface RunActionResponse {
   message: string | null;
 }
 
-export interface RunRerunResponse {
-  sourceRunId: string;
-  newRunId: string;
+export interface RunContinueResponse {
+  runId: string;
+  executionId: string;
   projectId: string;
   experimentId: string;
   status: string;
@@ -514,6 +834,7 @@ export interface RunRerunResponse {
 
 export const buildEmptySnapshot = (): WorkspaceSnapshot => {
   return {
+    workspaces: [],
     projects: [],
     experiments: [],
     runs: [],
@@ -525,13 +846,18 @@ export const buildEmptySnapshot = (): WorkspaceSnapshot => {
   };
 };
 
-export const mapProjects = (projects: ApiProjectResponse[]): ProjectSummary[] => {
+export const mapProjects = (
+  projects: ApiProjectResponse[],
+  workspaceKey?: string,
+): ProjectSummary[] => {
   return projects.map((project) => ({
     id: project.id,
     name: project.name,
     status: "active",
     summary: project.description || "No description",
     updatedAt: project.created,
+    experimentCount: project.experimentCount ?? null,
+    ...(workspaceKey ? { workspaceKey } : {}),
   }));
 };
 
@@ -543,12 +869,14 @@ export const mapExperiments = (
     id: experiment.id,
     name: experiment.name,
     status: "active",
-    summary: experiment.description || experiment.workflow || "No workflow",
+    summary: experiment.description || "",
     workflowFile: experiment.workflow ?? "",
     updatedAt: experiment.created,
     projectId,
     parameterSpace: (experiment.parameterSpace ?? {}) as Record<string, unknown>,
     workflowSource: experiment.workflow ?? null,
+    planRunId: experiment.planRunId ?? null,
+    runCount: experiment.runCount ?? null,
   }));
 };
 
@@ -614,16 +942,40 @@ const assetSummary = (asset: ApiAssetResponse): string => {
 };
 
 export const mapAssets = (assets: ApiAssetResponse[], projectId?: string): AssetSummary[] => {
-  return assets.map((asset) => ({
-    id: asset.id,
-    name: asset.name,
-    kind: asset.kind,
-    status: "active",
-    summary: assetSummary(asset),
-    updatedAt: asset.updated_at,
-    sizeBytes: assetSize(asset),
-    projectId,
-  }));
+  return assets.map((asset) => {
+    // ``scope_ids`` is the parent chain ending at the leaf scope: a run-scoped
+    // asset is ``[projectId, experimentId, runId]``, an experiment-scoped one
+    // ``[projectId, experimentId]``, etc. This drives the Assets nav grouping.
+    const ids = asset.scope_ids ?? [];
+    return {
+      id: asset.id,
+      name: asset.name,
+      kind: asset.kind,
+      status: "active",
+      summary: assetSummary(asset),
+      updatedAt: asset.updated_at,
+      sizeBytes: assetSize(asset),
+      scopeKind: asset.scope_kind,
+      projectId: ids[0] ?? projectId,
+      experimentId: ids[1],
+      runId: ids[2],
+    };
+  });
+};
+
+/**
+ * Build a flowgram free-layout document from an experiment's `workflow_source`
+ * when it is a serialized IR (`{task_configs, links}` — see `Workflow.to_dict()`
+ * / `schema/workflow.json`). Returns `undefined` when the source is absent or is
+ * a Python script / path rather than a serialized IR, so callers fall back to
+ * the raw string.
+ */
+export const buildWorkflowDocument = (
+  source: string | null | undefined,
+): FlowgramDocument | undefined => {
+  const ir = parseTaskGraphIr(source);
+  if (!ir) return undefined;
+  return buildFlowgramDocument(ir);
 };
 
 export const mapWorkflows = (
@@ -633,20 +985,22 @@ export const mapWorkflows = (
   const experimentById = new Map(rawExperiments.map((experiment) => [experiment.id, experiment]));
   return experiments.map((experiment) => {
     const raw = experimentById.get(experiment.id);
-    const workflowPath = raw?.workflow ?? "workflow";
+    const source = raw?.workflow ?? null;
+    const graph: TaskGraphJson | undefined = parseTaskGraphIr(source) ?? undefined;
     return {
       id: `workflow:${experiment.id}`,
       name: `${experiment.name} workflow`,
       status: "active",
-      summary: workflowPath,
+      summary: graph
+        ? `${graph.task_configs.length} tasks · ${graph.links.length} dependencies`
+        : (source ?? "workflow"),
       updatedAt: experiment.updatedAt,
       projectId: experiment.projectId,
       experimentId: experiment.id,
+      graph,
     };
   });
 };
-
-export const emptyConsoleEntries = (): ConsoleEntry[] => [];
 
 const mapWorkspaceNode = (node: WorkspaceFileNode): WorkspaceTreeNode => {
   const isFile = node.type === "file";
@@ -686,6 +1040,7 @@ export const mapAgentSessions = (sessions: ApiAgentSession[]): AgentSessionSumma
   return sessions.map((s) => ({
     id: s.taskId ?? s.sessionId,
     sessionId: s.sessionId,
+    title: s.title ?? "",
     goal: s.goal,
     status: s.status as AgentSessionSummary["status"],
     createdAt: s.createdAt,
@@ -727,9 +1082,14 @@ export class AgentNotConfiguredError extends Error {
  * with :class:`molexp.server.schemas.requests.GoalCreateRequest`.
  */
 export interface SessionLaunchOptions {
-  planMode?: boolean;
+  /** Canonical agent for the first turn — only ``mode``, never plan_mode. */
+  mode?: "chat" | "plan";
   instructionsOverride?: string;
   skillId?: string;
+  /** Mount scope (vision-loop-11): the entity whose state seeds the session. */
+  projectId?: string;
+  experimentId?: string;
+  runId?: string;
 }
 
 interface ApiAgentTask {
@@ -743,7 +1103,13 @@ interface ApiAgentTask {
   events?: ApiAgentSession["events"];
   stats?: ApiAgentSession["stats"];
   planMode?: boolean;
+  activeMode?: "chat" | "plan";
+  activeTurnId?: string | null;
+  activePlanTaskId?: string | null;
   skillId?: string | null;
+  projectId?: string | null;
+  experimentId?: string | null;
+  runId?: string | null;
 }
 
 const normalizeAgentTask = (task: ApiAgentTask): ApiAgentSession => ({
@@ -757,7 +1123,14 @@ const normalizeAgentTask = (task: ApiAgentTask): ApiAgentSession => ({
   events: task.events ?? [],
   stats: task.stats,
   planMode: task.planMode ?? false,
+  activeMode: (task.activeMode ??
+    (task.planMode ? "plan" : "chat")) as ApiAgentSession["activeMode"],
+  activeTurnId: task.activeTurnId ?? null,
+  activePlanTaskId: task.activePlanTaskId ?? null,
   skillId: task.skillId ?? null,
+  projectId: task.projectId ?? null,
+  experimentId: task.experimentId ?? null,
+  runId: task.runId ?? null,
 });
 
 export const agentApi = {
@@ -768,11 +1141,15 @@ export const agentApi = {
     return (data.tasks ?? []).map(normalizeAgentTask);
   },
 
-  getHealth: async (): Promise<ApiAgentHealth> => {
-    const response = await fetch("/api/agent/health");
-    if (!response.ok) throw new Error(`Failed to fetch agent health: ${response.statusText}`);
-    return response.json();
-  },
+  // Probe endpoint: routed through probeOnce so an unconfigured agent stack
+  // (503) is detected once and never re-requested (see agentProbe.ts).
+  getHealth: (): Promise<ApiAgentHealth> =>
+    probeOnce("agent-health", async () => {
+      const response = await fetch("/api/agent/health");
+      if (response.status === 503) throw new AgentUnavailableError("/api/agent/health");
+      if (!response.ok) throw new Error(`Failed to fetch agent health: ${response.statusText}`);
+      return response.json();
+    }),
 
   createSession: async (
     description: string,
@@ -783,10 +1160,14 @@ export const agentApi = {
       description,
       success_criteria: successCriteria,
     };
-    if (options.planMode !== undefined) body.plan_mode = options.planMode;
+    // Canonical field only — never dual-write plan_mode.
+    if (options.mode !== undefined) body.mode = options.mode;
     if (options.instructionsOverride !== undefined)
       body.instructions_override = options.instructionsOverride;
     if (options.skillId !== undefined) body.skill_id = options.skillId;
+    if (options.projectId !== undefined) body.projectId = options.projectId;
+    if (options.experimentId !== undefined) body.experimentId = options.experimentId;
+    if (options.runId !== undefined) body.runId = options.runId;
     const response = await fetch("/api/agent-tasks", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -823,13 +1204,47 @@ export const agentApi = {
     sessionId: string,
     content: string,
     requestId: string | null = null,
+    mode: "chat" | "plan" = "chat",
   ): Promise<void> => {
     const response = await fetch(`/api/agent-tasks/${sessionId}/messages`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ content, request_id: requestId }),
+      body: JSON.stringify({ content, request_id: requestId, mode }),
     });
-    if (!response.ok) throw new Error(`Failed to post message: ${response.statusText}`);
+    if (!response.ok) {
+      // Surface FastAPI `detail` (e.g. missing model) — statusText alone is useless.
+      let detail = "";
+      try {
+        const body = (await response.json()) as { detail?: unknown };
+        if (typeof body.detail === "string") detail = body.detail;
+        else if (Array.isArray(body.detail))
+          detail = body.detail
+            .map((d) => (typeof d === "object" && d && "msg" in d ? String(d.msg) : String(d)))
+            .join("; ");
+        else if (body.detail != null) detail = JSON.stringify(body.detail);
+      } catch {
+        /* ignore non-JSON error bodies */
+      }
+      throw new Error(
+        detail || `Failed to post message: ${response.status} ${response.statusText}`,
+      );
+    }
+  },
+
+  /** Stop the in-flight turn for a task (idempotent when already idle). */
+  cancelSession: async (sessionId: string): Promise<void> => {
+    const response = await fetch(`/api/agent-tasks/${encodeURIComponent(sessionId)}/cancel`, {
+      method: "POST",
+    });
+    if (!response.ok) throw new Error(`Failed to cancel agent task: ${response.statusText}`);
+  },
+
+  /** Drop a task (cancels live turn + removes on-disk metadata). */
+  deleteSession: async (sessionId: string): Promise<void> => {
+    const response = await fetch(`/api/agent-tasks/${encodeURIComponent(sessionId)}`, {
+      method: "DELETE",
+    });
+    if (!response.ok) throw new Error(`Failed to delete agent task: ${response.statusText}`);
   },
 };
 
@@ -853,6 +1268,8 @@ export interface ApiMcpServer {
   args: string[];
   url: string | null;
   envKeys: string[];
+  /** Non-secret env literals (e.g. MOLMCP_SOURCES) for the editor. */
+  env?: Record<string, string>;
   headerKeys: string[];
   secretRefs: string[];
   unresolvedSecrets: string[];
@@ -860,6 +1277,8 @@ export interface ApiMcpServer {
   valid: boolean;
   invalidReason: string;
   auth: ApiMcpAuthSummary | null;
+  /** Parsed MOLMCP_SOURCES when this is a molmcp server. */
+  knowledgeSources?: string[];
 }
 
 export interface ApiMcpOAuthStatus {
@@ -951,14 +1370,9 @@ export interface ApiAgentToolList {
   mcpGroups: ApiMcpToolGroup[];
 }
 
-// Tool ``source`` is either ``"native"`` for built-in tools or
-// ``"mcp:<server-name>"`` for tools discovered through an MCP server.
-// Helpers below keep the prefix in one place.
-export const NATIVE_SOURCE = "native";
-
+// Every tool belongs to an MCP server. Keep its wire-format source prefix
+// centralized so the MCP list can attach tools to their owning server.
 export const mcpSource = (server: string): string => `mcp:${server}`;
-
-export const isMcpSource = (source: string): boolean => source.startsWith("mcp:");
 
 export interface ApiSkill {
   id: string;
@@ -1041,6 +1455,9 @@ export const SLASH_NAME_PATTERN = /^[a-z0-9][a-z0-9-]{0,31}$/;
 // Provider config — read/write the workspace's LLM provider settings.
 export type ApiProviderName = "anthropic" | "openai" | "google" | "deepseek" | "openai-compatible";
 
+export type ApiModelTier = "cheap" | "default" | "heavy";
+export type ApiTierModels = Record<ApiModelTier, string>;
+
 export interface ApiAgentProvider {
   provider: ApiProviderName;
   model: string;
@@ -1049,11 +1466,24 @@ export interface ApiAgentProvider {
   apiKeySet: boolean;
   instructions: string;
   supportedProviders: ApiProviderName[];
+  /** Global cheap/default/heavy table — full ``provider:model`` ids; may cross providers. */
+  models: ApiTierModels;
+  configurations: ApiProviderConfiguration[];
+}
+
+export interface ApiProviderConfiguration {
+  provider: ApiProviderName;
+  /** Legacy per-provider tier map; prefer top-level ``models``. */
+  models: ApiTierModels;
+  baseUrl: string;
+  apiKeyPreview: string;
+  apiKeySet: boolean;
 }
 
 export interface ProviderUpdateInput {
   provider?: ApiProviderName;
   model?: string;
+  models?: ApiTierModels;
   apiKey?: string;
   baseUrl?: string;
   instructions?: string;
@@ -1072,16 +1502,56 @@ const _toProviderBody = (input: ProviderUpdateInput): Record<string, unknown> =>
   const body: Record<string, unknown> = {};
   if (input.provider !== undefined) body.provider = input.provider;
   if (input.model !== undefined) body.model = input.model;
+  if (input.models !== undefined) body.models = input.models;
   if (input.apiKey !== undefined) body.api_key = input.apiKey;
   if (input.baseUrl !== undefined) body.base_url = input.baseUrl;
   if (input.instructions !== undefined) body.instructions = input.instructions;
   return body;
 };
 
+export type ApiKnowledgeSources = {
+  sources: string[];
+  knownPackages: string[];
+  unrestricted: boolean;
+  serverName: string;
+  scope: string;
+  configured: boolean;
+};
+
 export const agentAdminApi = {
-  getProvider: async (): Promise<ApiAgentProvider> => {
-    const response = await fetch("/api/agent/provider");
-    if (!response.ok) throw new Error(`Failed to fetch provider: ${response.statusText}`);
+  // Probe endpoint: routed through probeOnce so an unconfigured agent stack
+  // (503) is detected once and never re-requested (see agentProbe.ts).
+  getProvider: (): Promise<ApiAgentProvider> =>
+    probeOnce("agent-provider", async () => {
+      const response = await fetch("/api/agent/provider");
+      if (response.status === 503) throw new AgentUnavailableError("/api/agent/provider");
+      if (!response.ok) throw new Error(`Failed to fetch provider: ${response.statusText}`);
+      return response.json();
+    }),
+
+  getKnowledgeSources: (): Promise<ApiKnowledgeSources> =>
+    probeOnce("agent-knowledge-sources", async () => {
+      const response = await fetch("/api/agent/knowledge-sources");
+      if (response.status === 503) {
+        throw new AgentUnavailableError("/api/agent/knowledge-sources");
+      }
+      if (!response.ok) {
+        throw new Error(`Failed to fetch knowledge sources: ${response.statusText}`);
+      }
+      return response.json();
+    }),
+
+  updateKnowledgeSources: async (sources: string[]): Promise<ApiKnowledgeSources> => {
+    const response = await fetch("/api/agent/knowledge-sources", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sources }),
+    });
+    if (!response.ok) {
+      const detail = await response.text().catch(() => "");
+      throw new Error(`Failed to update knowledge sources: ${response.statusText} ${detail}`);
+    }
+    resetAgentProbes();
     return response.json();
   },
 
@@ -1095,6 +1565,9 @@ export const agentAdminApi = {
       const detail = await response.text().catch(() => "");
       throw new Error(`Failed to update provider: ${response.statusText} ${detail}`);
     }
+    // A saved provider can turn an unconfigured stack into a live one —
+    // drop any cached "unavailable" probe outcomes so the UI re-probes.
+    resetAgentProbes();
     return response.json();
   },
 
@@ -1111,11 +1584,13 @@ export const agentAdminApi = {
     return response.json();
   },
 
-  listMcpServers: async (): Promise<ApiMcpServerList> => {
-    const response = await fetch("/api/agent/mcp/servers");
-    if (!response.ok) throw new Error(`Failed to fetch MCP servers: ${response.statusText}`);
-    return response.json();
-  },
+  listMcpServers: (): Promise<ApiMcpServerList> =>
+    probeOnce("agent-mcp-servers", async () => {
+      const response = await fetch("/api/agent/mcp/servers");
+      if (response.status === 503) throw new AgentUnavailableError("/api/agent/mcp/servers");
+      if (!response.ok) throw new Error(`Failed to fetch MCP servers: ${response.statusText}`);
+      return response.json();
+    }),
 
   createMcpServer: async (input: McpServerUpsertInput): Promise<ApiMcpServer> => {
     const response = await fetch("/api/agent/mcp/servers", {
@@ -1240,26 +1715,41 @@ export const agentAdminApi = {
     }
   },
 
-  listTools: async (): Promise<ApiAgentTool[]> => {
-    const response = await fetch("/api/agent/tools");
-    if (!response.ok) throw new Error(`Failed to fetch tools: ${response.statusText}`);
-    const data = await response.json();
-    return data.tools ?? [];
-  },
+  listTools: (): Promise<ApiAgentTool[]> =>
+    probeOnce("agent-tools-list", async () => {
+      const response = await fetch("/api/agent/tools");
+      if (response.status === 503) throw new AgentUnavailableError("/api/agent/tools");
+      if (!response.ok) throw new Error(`Failed to fetch tools: ${response.statusText}`);
+      const data = await response.json();
+      return data.tools ?? [];
+    }).catch((error: unknown) => {
+      if (error instanceof AgentUnavailableError) return [];
+      throw error;
+    }),
 
-  listToolsAndGroups: async (): Promise<ApiAgentToolList> => {
-    const response = await fetch("/api/agent/tools");
-    if (!response.ok) throw new Error(`Failed to fetch tools: ${response.statusText}`);
-    const data = await response.json();
-    return { tools: data.tools ?? [], mcpGroups: data.mcpGroups ?? [] };
-  },
+  listToolsAndGroups: (): Promise<ApiAgentToolList> =>
+    probeOnce("agent-tools-groups", async () => {
+      const response = await fetch("/api/agent/tools");
+      if (response.status === 503) throw new AgentUnavailableError("/api/agent/tools");
+      if (!response.ok) throw new Error(`Failed to fetch tools: ${response.statusText}`);
+      const data = await response.json();
+      return { tools: data.tools ?? [], mcpGroups: data.mcpGroups ?? [] };
+    }).catch((error: unknown) => {
+      if (error instanceof AgentUnavailableError) return { tools: [], mcpGroups: [] };
+      throw error;
+    }),
 
-  listSkills: async (): Promise<ApiSkill[]> => {
-    const response = await fetch("/api/agent/skills");
-    if (!response.ok) throw new Error(`Failed to fetch skills: ${response.statusText}`);
-    const data = await response.json();
-    return data.skills ?? [];
-  },
+  listSkills: (): Promise<ApiSkill[]> =>
+    probeOnce("agent-skills", async () => {
+      const response = await fetch("/api/agent/skills");
+      if (response.status === 503) throw new AgentUnavailableError("/api/agent/skills");
+      if (!response.ok) throw new Error(`Failed to fetch skills: ${response.statusText}`);
+      const data = await response.json();
+      return data.skills ?? [];
+    }).catch((error: unknown) => {
+      if (error instanceof AgentUnavailableError) return [];
+      throw error;
+    }),
 
   createSkill: async (input: SkillUpsertInput): Promise<ApiSkill> => {
     const response = await fetch("/api/agent/skills", {
@@ -1305,10 +1795,10 @@ export const agentAdminApi = {
   launchSkill: async (
     skillId: string,
     parameters: Record<string, unknown> = {},
-    options: { planMode?: boolean } = {},
+    options: { mode?: "chat" | "plan" } = {},
   ): Promise<ApiAgentSession> => {
     const body: Record<string, unknown> = { parameters };
-    if (options.planMode !== undefined) body.plan_mode = options.planMode;
+    if (options.mode !== undefined) body.mode = options.mode;
     const response = await fetch(`/api/agent/skills/${skillId}/launch`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -1322,12 +1812,16 @@ export const agentAdminApi = {
 // ── Slash commands ────────────────────────────────────────────────────────
 
 export const commandsApi = {
-  list: async (): Promise<ApiCommand[]> => {
-    const response = await fetch("/api/agent/commands");
-    if (!response.ok) throw new Error(`Failed to fetch commands: ${response.statusText}`);
-    const data = await response.json();
-    return data.commands ?? [];
-  },
+  // Probe endpoint: routed through probeOnce so an unconfigured agent stack
+  // (503) is detected once and never re-requested (see agentProbe.ts).
+  list: (): Promise<ApiCommand[]> =>
+    probeOnce("agent-commands", async () => {
+      const response = await fetch("/api/agent/commands");
+      if (response.status === 503) throw new AgentUnavailableError("/api/agent/commands");
+      if (!response.ok) throw new Error(`Failed to fetch commands: ${response.statusText}`);
+      const data = await response.json();
+      return data.commands ?? [];
+    }),
 
   parse: async (raw: string): Promise<ApiCommandParse> => {
     const response = await fetch("/api/agent/commands/parse", {
@@ -1343,9 +1837,43 @@ export const commandsApi = {
 // ── Per-session prompt inspection ─────────────────────────────────────────
 
 export const planApi = {
-  getSystemPrompt: async (sessionId: string): Promise<ApiAgentSystemPrompt> => {
-    const response = await fetch(`/api/agent/sessions/${sessionId}/system-prompt`);
-    if (!response.ok) throw new Error(`Failed to fetch system prompt: ${response.statusText}`);
+  /**
+   * System-prompt breakdown for the task inspector.
+   *
+   * Live surface is `/api/agent-tasks/{id}/system-prompt` (accepts task id or
+   * runtime session id). The legacy `/api/agent/sessions/.../system-prompt`
+   * path is retired and always 503s.
+   */
+  getSystemPrompt: async (taskOrSessionId: string): Promise<ApiAgentSystemPrompt> => {
+    const response = await fetch(`/api/agent-tasks/${taskOrSessionId}/system-prompt`);
+    if (!response.ok) {
+      const detail = await response.text().catch(() => "");
+      const suffix = detail ? ` — ${detail.slice(0, 200)}` : "";
+      throw new Error(`Failed to fetch system prompt: ${response.statusText}${suffix}`);
+    }
     return response.json();
+  },
+};
+
+// ── Workflow document write-back (flowgram canvas) ─────────────────────────
+
+export const workflowApi = {
+  /**
+   * Persist an edited workflow document through the generated WorkflowService
+   * (never a hand-rolled fetch). `document` is the backend wire IR
+   * ({task_configs, links, ...}); returns the server-normalized wire IR.
+   */
+  save: async (
+    projectId: string,
+    experimentId: string,
+    document: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> => {
+    const response =
+      await WorkflowService.putWorkflowDocumentApiProjectsProjectIdExperimentsExperimentIdWorkflowPut(
+        projectId,
+        experimentId,
+        { document },
+      );
+    return response.document as Record<string, unknown>;
   },
 };

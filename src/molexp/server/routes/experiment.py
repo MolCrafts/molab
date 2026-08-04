@@ -56,6 +56,7 @@ def create_experiment(
         )
     exp = project.add_experiment(
         name=req.name,
+        description=req.description,
         workflow_source=req.workflow_source,
         params=req.parameter_space,
         default_target=req.default_target,
@@ -97,8 +98,9 @@ def get_experiment_comparison(
             pass
 
         duration: float | None = None
-        if run.metadata.finished_at and run.metadata.created_at:
-            duration = (run.metadata.finished_at - run.metadata.created_at).total_seconds()
+        finished_at = run.finished_at
+        if finished_at and run.metadata.created_at:
+            duration = (finished_at - run.metadata.created_at).total_seconds()
 
         error_dict: dict[str, str] | None = None
         if run.metadata.error:
@@ -115,7 +117,7 @@ def get_experiment_comparison(
                 metrics=metrics_summary,
                 durationSec=duration,
                 created=run.metadata.created_at.isoformat(),
-                finished=run.metadata.finished_at.isoformat() if run.metadata.finished_at else None,
+                finished=finished_at.isoformat() if finished_at else None,
                 error=error_dict,
             )
         )

@@ -33,8 +33,8 @@ export const MolvisDatasetPreview = ({ assetId }: FilePreviewContentProps): JSX.
     const run = async (): Promise<void> => {
       try {
         const [{ mountMolvis }, { loadFileContent }] = await Promise.all([
-          import("@molcrafts/molvis-core"),
-          import("@molcrafts/molvis-core/io"),
+          import("@molcrafts/molvis-stage"),
+          import("@molcrafts/molvis-stage/io"),
         ]);
         if (cancelled) return;
 
@@ -86,22 +86,22 @@ export const MolvisDatasetPreview = ({ assetId }: FilePreviewContentProps): JSX.
 
   if (!assetId) {
     return (
-      <div className="flex h-[420px] w-full items-center justify-center px-4 text-center text-xs text-muted-foreground">
+      <div className="flex h-chart-lg w-full items-center justify-center px-4 text-center text-label text-muted-foreground">
         Register this file as a dataset asset to preview it.
       </div>
     );
   }
 
   return (
-    <div className="relative h-[420px] w-full overflow-hidden rounded-md border border-border bg-black/5">
+    <div className="relative h-chart-lg w-full overflow-hidden rounded-control border border-border bg-canvas">
       <div ref={containerRef} className="absolute inset-0" />
       {state.kind === "loading" && (
-        <div className="absolute inset-0 flex items-center justify-center text-xs text-muted-foreground">
+        <div className="absolute inset-0 flex items-center justify-center text-label text-muted-foreground">
           Loading preview…
         </div>
       )}
       {state.kind === "error" && (
-        <div className="absolute inset-0 flex items-center justify-center px-4 text-center text-xs text-destructive">
+        <div className="absolute inset-0 flex items-center justify-center px-4 text-center text-label text-destructive">
           Failed to render preview: {state.message}
         </div>
       )}

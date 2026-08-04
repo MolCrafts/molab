@@ -14,6 +14,7 @@ explicit ``workspace``. They reach the process-singleton
 
 from __future__ import annotations
 
+import asyncio
 import secrets
 from collections.abc import AsyncGenerator, Callable
 from pathlib import Path
@@ -41,7 +42,10 @@ if TYPE_CHECKING:
         UserMessageCreateRequest,
     )
 
-router = APIRouter(prefix="/api/agent", tags=["agent"])
+# NOTE: no ``/api`` here — the router is mounted under the global ``/api``
+# prefix by ``create_app`` (a hardcoded ``/api/agent`` used to produce live
+# ``/api/api/agent/*`` paths).
+router = APIRouter(prefix="/agent", tags=["agent"])
 
 # Copied from routes/molq.py:27 (the canonical SSE idiom) — not imported, so the
 # agent stream stays decoupled from the molq job dashboard.
@@ -49,9 +53,9 @@ _SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
 
 
 _GONE_DETAIL = (
-    "Agent HTTP routes are temporarily disabled while the layer is rebuilt "
-    "around AgentRunner; restoration is tracked by the server-routes-agent-"
-    "rectification spec."
+    "This legacy agent HTTP route is retired. Live agent surfaces: "
+    "/api/agent-tasks (sessions), /api/agent/provider and /api/agent/mcp/servers "
+    "(settings), /api/approvals (approvals inbox)."
 )
 
 
@@ -74,10 +78,12 @@ async def agent_disabled(path: str) -> None:  # noqa: ARG001
 # ── Runner construction (a test seam) ───────────────────────────────────────
 #
 # ``create_session`` builds one :class:`AgentRunner` per session. Production
-# resolves the model from in-code ``molexp.config`` (``agent_model``); tests
-# install a factory that injects a fake/scripted ``Router`` so no real LLM is
-# constructed. Server must not import ``molexp.cli`` (layer inversion), so the
-# model is read from ``molexp.config`` directly rather than the CLI config.
+# resolves the model from in-code ``molexp.config`` (``agent.model``, bridged
+# from ``~/.molexp/config.json`` at server startup); tests install a factory
+# that injects a fake/scripted ``Router`` so no real LLM is constructed.
+# Server must not import ``molexp.cli`` (layer inversion), so the model is
+# read from ``molexp.config`` / the shared operator-config loader rather than
+# the CLI module.
 
 RunnerFactory = Callable[["Workspace"], "AgentRunner"]
 
@@ -97,11 +103,33 @@ def reset_runner_factory() -> None:
 
 
 def _configured_model() -> str | None:
-    """Return the ``agent_model`` registered in in-code ``molexp.config``."""
-    import molexp
+    """Return the agent model registered in in-code ``molexp.config``.
 
-    model = molexp.config.get("agent_model")
+    The canonical key is ``"agent.model"`` (same spelling as the CLI's
+    ``molexp config set agent.model <id>``; the server startup bridge —
+    :func:`molexp.services.operator_config.bridge_operator_config` — populates
+    it from ``~/.molexp/config.json``). The legacy flat ``"agent_model"``
+    key is still honoured for in-code users.
+    """
+    import molexp
+    from molexp.services.operator_config import AGENT_MODEL_KEY, LEGACY_AGENT_MODEL_KEY
+
+    model = molexp.config.get(AGENT_MODEL_KEY) or molexp.config.get(LEGACY_AGENT_MODEL_KEY)
     return model if isinstance(model, str) and model else None
+
+
+def _configured_models() -> dict[str, str] | None:
+    """Return a complete cheap/default/heavy map when one is configured."""
+    import molexp
+    from molexp.services.operator_config import AGENT_MODELS_KEY
+
+    value = molexp.config.get(AGENT_MODELS_KEY)
+    if value is None or not callable(getattr(value, "get", None)):
+        return None
+    models = {tier: value.get(tier) for tier in ("cheap", "default", "heavy")}
+    if not all(isinstance(model, str) and model for model in models.values()):
+        return None
+    return {tier: str(model) for tier, model in models.items()}
 
 
 def _workspace_root(workspace: Workspace) -> str:
@@ -109,33 +137,83 @@ def _workspace_root(workspace: Workspace) -> str:
     return str(root) if root is not None else ""
 
 
-def _build_runner(workspace: Workspace) -> AgentRunner:
+def _mount_context(
+    workspace: Workspace,
+    *,
+    project_id: str | None,
+    experiment_id: str | None,
+    run_id: str | None,
+) -> tuple[str, Path | None]:
+    """Build the mount-context block + session anchor dir; bad scope → 404.
+
+    Returns ``("", None)`` for an unscoped session. The anchor is the mounted
+    entity's directory — the session's on-disk folder mounts there so storage
+    location and context agree (vision-loop-11 Design §3).
+    """
+    from molexp.services.agent_context import mount_session_scope
+
+    try:
+        # ValueError: deeper id without its parents; LookupError: the whole
+        # workspace *NotFoundError hierarchy (they subclass LookupError).
+        # No silent downgrade: an experiment/run id without its parents is
+        # rejected, never treated as "unscoped".
+        return mount_session_scope(
+            workspace,
+            project_id=project_id,
+            experiment_id=experiment_id,
+            run_id=run_id,
+        )
+    except (ValueError, LookupError) as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+
+def _build_runner(
+    workspace: Workspace, context_block: str = "", session_anchor: Path | None = None
+) -> AgentRunner:
     """Construct the :class:`AgentRunner` for a new session.
 
     Uses the installed test factory when present; otherwise resolves the model
     from ``molexp.config`` and raises a 503 pre-flight when none is configured
     (rather than constructing an empty, never-answering session).
+    ``context_block`` is the vision-loop-11 mount snapshot the loop composes
+    after its base system prompt.
     """
     if _runner_factory is not None:
         return _runner_factory(workspace)
 
+    models = _configured_models()
     model = _configured_model()
-    if not model:
+    if models is None and not model:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=(
-                "No agent model is configured. Register one in molexp.config "
-                "(agent_model) before creating an agent session."
+                "No agent model is configured. Run `molexp config set "
+                "agent.model <id>` or register molexp.config['agent.model'] "
+                "in code before creating an agent session."
             ),
         )
 
     from molexp.agent import AgentRunner
-    from molexp.agent.loops import InteractiveLoop, InteractiveLoopConfig
+    from molexp.agent.loops import InteractiveLoop
+    from molexp.harness.modes.chat import chat_loop_config
 
     root = getattr(workspace, "root", None)
     workspace_root = Path(str(root)) if root is not None else None
-    loop = InteractiveLoop(config=InteractiveLoopConfig(workspace_root=workspace_root))
-    return AgentRunner(loop=loop, model=model, workspace=workspace_root)
+    # Default agent sessions are Chat Mode (scratch-only, no default land).
+    # Plan turns use PlanOrchestrator separately; lifecycle tools stay optional.
+    loop = InteractiveLoop(
+        config=chat_loop_config(
+            workspace_root=workspace_root,
+            context_block=context_block,
+        )
+    )
+    if models is not None:
+        return AgentRunner(
+            loop=loop, models=models, workspace=workspace_root, session_anchor=session_anchor
+        )
+    return AgentRunner(
+        loop=loop, model=model, workspace=workspace_root, session_anchor=session_anchor
+    )
 
 
 # ── Wire translation (runtime objects never cross response_model) ────────────
@@ -176,7 +254,13 @@ async def create_session(
     workspace: Workspace,
 ) -> AgentSessionResponse:
     """Create a session, kick its first background turn, return the wire shape."""
-    runner = _build_runner(workspace)
+    context_block, session_anchor = _mount_context(
+        workspace,
+        project_id=request.project_id,
+        experiment_id=request.experiment_id,
+        run_id=request.run_id,
+    )
+    runner = _build_runner(workspace, context_block, session_anchor)
     session_id = secrets.token_hex(6)
     session = runner.session(session_id)
     runtime = get_agent_runtime().create(
@@ -186,7 +270,9 @@ async def create_session(
         goal=request.description,
         user_input=request.description,
     )
-    return _to_session_response(runtime, plan_mode=request.plan_mode, skill_id=request.skill_id)
+    return _to_session_response(
+        runtime, plan_mode=request.mode == "plan", skill_id=request.skill_id
+    )
 
 
 def list_sessions(*, workspace: Workspace) -> AgentSessionListResponse:
@@ -216,7 +302,7 @@ async def stream_events(session_id: str, *, workspace: Workspace) -> StreamingRe
     Fails fast with 404 (before any stream byte) when the session is not
     registered. Otherwise frames each event as ``data: {json}\\n\\n`` in
     replay-then-tail order, closes with a terminal ``done`` frame after the
-    turn's ``mode_completed``, and emits exactly one ``error`` frame (then a
+    turn's ``loop_completed``, and emits exactly one ``error`` frame (then a
     clean close) when the turn ended in failure.
     """
     runtime = get_agent_runtime().get(_workspace_root(workspace), session_id)
@@ -226,18 +312,28 @@ async def stream_events(session_id: str, *, workspace: Workspace) -> StreamingRe
             detail=f"agent session {session_id!r} not found",
         )
 
-    async def _generate() -> AsyncGenerator[str, None]:
+    async def _generate() -> AsyncGenerator[str]:
         from molexp.server.agent_runtime.serialize import (
             done_frame,
             error_frame,
             event_to_sse_frame,
         )
+        from molexp.server.shutdown import is_shutting_down
 
         try:
             async for event in runtime.subscribe_events():
+                if is_shutting_down():
+                    yield done_frame()
+                    return
                 yield event_to_sse_frame(event)
+        except asyncio.CancelledError:
+            # Client disconnect or uvicorn drain — exit without re-raise noise.
+            return
         except Exception as exc:  # streaming failure → one error frame, clean close
             yield error_frame(str(exc))
+            return
+        if is_shutting_down():
+            yield done_frame()
             return
         if runtime.status() == "failed":
             yield error_frame(str(runtime.error) if runtime.error else "turn failed")
@@ -275,8 +371,40 @@ async def post_user_message(
     return MessageResponse(message="accepted")
 
 
+async def cancel_session(session_id: str, *, workspace: Workspace) -> MessageResponse:
+    """Cancel the in-flight turn for ``session_id`` (idempotent).
+
+    404 when the session is not registered. When no turn is running the call
+    is a no-op success so the UI can always offer Stop without racing the
+    terminal frame.
+    """
+    runtime = get_agent_runtime().get(_workspace_root(workspace), session_id)
+    if runtime is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"agent session {session_id!r} not found",
+        )
+    runtime.cancel()
+    await runtime.await_finished()
+    return MessageResponse(message="cancelled")
+
+
+async def delete_session(session_id: str, *, workspace: Workspace) -> MessageResponse:
+    """Cancel any in-flight turn and drop the runtime from the registry."""
+    registry = get_agent_runtime()
+    root = _workspace_root(workspace)
+    runtime = registry.get(root, session_id)
+    if runtime is not None:
+        runtime.cancel()
+        await runtime.await_finished()
+        registry.remove(root, session_id)
+    return MessageResponse(message="deleted")
+
+
 __all__ = [
+    "cancel_session",
     "create_session",
+    "delete_session",
     "get_session",
     "list_sessions",
     "post_user_message",

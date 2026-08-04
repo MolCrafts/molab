@@ -19,8 +19,15 @@ interface ApiAgentTask {
     events: ApiAgentSession["events"];
     stats: ApiAgentSession["stats"];
     planMode: boolean;
+    activeMode?: "chat" | "plan";
     skillId: string | null;
 }
+
+/** Canonical: only ``mode: "plan"`` selects Plan Mode. */
+const isPlanRequest = (body: { mode?: string }): boolean => body.mode === "plan";
+
+const asActiveMode = (plan: boolean): ApiAgentSession["activeMode"] =>
+    (plan ? "plan" : "chat") as ApiAgentSession["activeMode"];
 
 const taskFromSession = (session: ApiAgentSession): ApiAgentTask => ({
     taskId: session.taskId ?? session.sessionId,
@@ -33,23 +40,24 @@ const taskFromSession = (session: ApiAgentSession): ApiAgentTask => ({
     events: session.events ?? [],
     stats: session.stats,
     planMode: Boolean(session.planMode),
+    activeMode: session.activeMode ?? asActiveMode(Boolean(session.planMode)),
     skillId: session.skillId ?? null,
 });
 
 const createMockTaskSession = (body: {
     description: string;
-    plan_mode?: boolean;
+    mode?: string;
     skill_id?: string | null;
 }): ApiAgentSession => {
     const sessionId = `sess-${Date.now()}`;
     const taskId = `task-${Date.now()}`;
     const startedAt = new Date().toISOString();
-    const planMode = Boolean(body.plan_mode);
+    const planMode = isPlanRequest(body);
     const session: ApiAgentSession = {
         sessionId,
         taskId,
         title: body.description.slice(0, 60),
-        status: "running",
+        status: planMode ? "awaiting_user" : "running",
         goal: body.description,
         createdAt: startedAt,
         events: [],
@@ -67,8 +75,39 @@ const createMockTaskSession = (body: {
             durationSeconds: null,
         },
         planMode,
+        activeMode: asActiveMode(planMode),
         skillId: body.skill_id ?? null,
     };
+    // Plan without scope stays awaiting_user (real server asks for project/experiment).
+    if (planMode) {
+        const ts = new Date().toISOString();
+        const planSession: ApiAgentSession = {
+            ...session,
+            status: "awaiting_user",
+            events: [
+                {
+                    type: "loop_started",
+                    ts,
+                    payload: { user_input: body.description, mode: "plan" },
+                },
+                {
+                    type: "clarification_required",
+                    ts,
+                    payload: {
+                        request_id: `context-${taskId}`,
+                        questions:
+                            "Choose where this plan should live. Pick an existing scope or create new names.",
+                        context_kind: "experiment",
+                        allow_create: true,
+                        catalog: [],
+                        mode: "plan",
+                    },
+                },
+            ],
+        };
+        setAgentSession(planSession);
+        return planSession;
+    }
     setAgentSession(session);
     setTimeout(() => {
         const current = getAgentSession(sessionId);
@@ -76,51 +115,23 @@ const createMockTaskSession = (body: {
         const ts = new Date().toISOString();
         setAgentSession({
             ...current,
-            status: planMode ? "running" : "completed",
+            status: "completed",
             events: [
                 ...(current.events ?? []),
-                planMode
-                    ? {
-                          type: "plan_emitted",
-                          ts,
-                          payload: {
-                              plan_id: `plan-${sessionId}`,
-                              step_count: 1,
-                              plan_markdown: "1. Inspect workspace\n2. Draft workflow\n3. Validate outputs",
-                              workflow_preview: {
-                                  workflow_ir: {
-                                      name: "agent-task-plan",
-                                      task_configs: [
-                                          {
-                                              task_id: "inspect",
-                                              task_type: "inspect_workspace",
-                                              config: {},
-                                          },
-                                      ],
-                                      links: [],
-                                      metadata: {},
-                                  },
-                                  python_script: "",
-                                  mermaid: "",
-                                  intervention_points: [],
-                              },
-                          },
-                      }
-                    : {
-                          type: "mode_completed",
-                          ts,
-                          payload: { text: `Goal completed: "${body.description}"` },
-                      },
+                {
+                    type: "mode_completed",
+                    ts,
+                    payload: { text: `Goal completed: "${body.description}"` },
+                },
             ],
             stats: {
                 ...(current.stats ?? {}),
-                completedAt: planMode ? null : ts,
-                durationSeconds: planMode
-                    ? null
-                    : (new Date(ts).getTime() - new Date(startedAt).getTime()) / 1000,
+                completedAt: ts,
+                durationSeconds:
+                    (new Date(ts).getTime() - new Date(startedAt).getTime()) / 1000,
             },
         });
-    }, planMode ? 1500 : 3000);
+    }, 3000);
     return session;
 };
 
@@ -135,7 +146,7 @@ export const agentHandlers = [
     http.post(`${API_BASE}/agent-tasks`, async ({ request }) => {
         const body = (await request.json()) as {
             description: string;
-            plan_mode?: boolean;
+            mode?: string;
             skill_id?: string | null;
         };
         const session = createMockTaskSession(body);
@@ -179,17 +190,25 @@ export const agentHandlers = [
                     return;
                 }
                 const goal = session.goal ?? "demo";
+                const answerChunks = [
+                    "Based on the latest run, **val_loss converged to 0.032**.\n\n",
+                    "| epoch | train | val |\n|---|---|---|\n",
+                    "| 10 | 0.041 | 0.038 |\n| 15 | 0.034 | 0.032 |\n\n",
+                    "Next I suggest a finite-size check at `2x` box length.",
+                ];
                 const seq: Record<string, unknown>[] = [
-                    { kind: "mode_started", timestamp: now(), mode_name: "interactive", user_input: goal },
+                    { kind: "loop_started", timestamp: now(), loop_name: "interactive", user_input: goal },
                     { kind: "thinking_delta", timestamp: now(), text: "Let me reason about " },
                     { kind: "thinking_delta", timestamp: now(), text: "the request before answering." },
                     { kind: "tool_call_started", timestamp: now(), tool_name: "read_file", args_summary: "path=README.md" },
                     { kind: "tool_call_completed", timestamp: now(), tool_name: "read_file", result_summary: "42 lines", ok: true },
-                    { kind: "token_delta", timestamp: now(), text: "Here " },
-                    { kind: "token_delta", timestamp: now(), text: "is " },
-                    { kind: "token_delta", timestamp: now(), text: "the " },
-                    { kind: "token_delta", timestamp: now(), text: "answer." },
-                    { kind: "mode_completed", timestamp: now(), text: "Here is the answer." },
+                    ...answerChunks.map((text) => ({ kind: "token_delta", timestamp: now(), text })),
+                    {
+                        kind: "loop_completed",
+                        timestamp: now(),
+                        text: answerChunks.join(""),
+                        result: { usage: { input_tokens: 18234, output_tokens: 1456 } },
+                    },
                 ];
                 for (const ev of seq) {
                     controller.enqueue(frame(ev));
@@ -207,7 +226,7 @@ export const agentHandlers = [
         });
     }),
 
-    // POST /api/agent-tasks/:taskId/messages — chat message from user
+    // POST /api/agent-tasks/:taskId/messages — follow-up turn (honors `mode`)
     http.post(`${API_BASE}/agent-tasks/:taskId/messages`, async ({ params, request }) => {
         const session = getAgentSession(params.taskId as string);
         if (!session) {
@@ -216,20 +235,66 @@ export const agentHandlers = [
                 { status: 404 },
             );
         }
-        const body = (await request.json()) as { content: string; request_id?: string | null };
+        const body = (await request.json()) as {
+            content: string;
+            request_id?: string | null;
+            mode?: string;
+        };
         const ts = new Date().toISOString();
+        const planMode = isPlanRequest(body);
+        if (planMode) {
+            setAgentSession({
+                ...session,
+                status: "awaiting_user",
+                planMode: true,
+                activeMode: asActiveMode(true),
+                events: [
+                    ...(session.events ?? []),
+                    {
+                        type: "loop_started",
+                        ts,
+                        payload: {
+                            user_input: body.content,
+                            mode: "plan",
+                            request_id: body.request_id ?? null,
+                        },
+                    },
+                    {
+                        type: "clarification_required",
+                        ts,
+                        payload: {
+                            request_id: body.request_id ?? `context-${session.sessionId}`,
+                            questions:
+                                "Choose where this plan should live. Pick an existing scope or create new names.",
+                            context_kind: "experiment",
+                            allow_create: true,
+                            catalog: [],
+                            mode: "plan",
+                        },
+                    },
+                ],
+            });
+            return HttpResponse.json({ message: "experiment context required" });
+        }
         setAgentSession({
             ...session,
+            status: "running",
+            planMode: false,
+            activeMode: asActiveMode(false),
             events: [
                 ...(session.events ?? []),
                 {
-                    type: "UserMessageReceived",
+                    type: "loop_started",
                     ts,
-                    payload: { content: body.content, request_id: body.request_id ?? null },
+                    payload: {
+                        user_input: body.content,
+                        mode: "chat",
+                        request_id: body.request_id ?? null,
+                    },
                 },
             ],
         });
-        return HttpResponse.json({ message: "queued" });
+        return HttpResponse.json({ message: "accepted" });
     }),
 
     // GET /api/agent/sessions — list all sessions
@@ -244,14 +309,14 @@ export const agentHandlers = [
             description: string;
             constraints?: Record<string, unknown>;
             success_criteria?: string[];
-            plan_mode?: boolean;
+            mode?: string;
             instructions_override?: string | null;
             skill_id?: string | null;
         };
 
         const sessionId = `sess-${Date.now()}`;
         const startedAt = new Date().toISOString();
-        const planMode = Boolean(body.plan_mode);
+        const planMode = isPlanRequest(body);
 
         const newSession: ApiAgentSession = {
             sessionId,
@@ -275,6 +340,7 @@ export const agentHandlers = [
                 durationSeconds: null,
             },
             planMode,
+            activeMode: asActiveMode(planMode),
             skillId: body.skill_id ?? null,
         };
 
@@ -473,26 +539,23 @@ export const agentHandlers = [
         });
     }),
 
-    // GET /api/agent/sessions/:sessionId/system-prompt
-    http.get(`${API_BASE}/agent/sessions/:sessionId/system-prompt`, ({ params }) => {
-        const session = getAgentSession(params.sessionId as string);
-        if (!session) {
-            return HttpResponse.json(
-                { detail: `Session ${params.sessionId} not found` },
-                { status: 404 },
-            );
-        }
+    // GET /api/agent-tasks/:taskId/system-prompt (live surface; legacy /agent/sessions/... is retired)
+    http.get(`${API_BASE}/agent-tasks/:taskId/system-prompt`, ({ params }) => {
+        const taskId = params.taskId as string;
+        const session = getAgentSession(taskId);
         const base =
-            "You are a research experiment assistant integrated with the molexp workspace.";
-        const planAddendum =
-            "\n\nYou are in PLAN MODE.\nTools that mutate workspace state are unavailable in this turn.";
+            "You are molexp's interactive research agent.";
+        const planMode = Boolean(session?.planMode);
+        const planAddendum = planMode
+            ? "You are in PLAN MODE.\nPrefer the plan tool surface (task board) over ad-hoc mutation."
+            : "";
         return HttpResponse.json({
             base,
             workspaceInstructions: "",
             skillInstructions: "",
             sessionOverride: null,
-            planMode: Boolean(session.planMode),
-            effective: session.planMode ? base + planAddendum : base,
+            planMode,
+            effective: planAddendum ? `${base}\n\n${planAddendum}` : base,
         });
     }),
 

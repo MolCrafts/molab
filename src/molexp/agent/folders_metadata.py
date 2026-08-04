@@ -1,15 +1,13 @@
-"""Frozen pydantic metadata models for agent-layer ``Folder`` subclasses.
+"""Agent-layer ``meta.yaml`` models — agent-owned, OKF-shaped.
 
-The agent layer defines its own on-disk entities (``Agent`` /
-``AgentSession`` in :mod:`molexp.agent.folders`) as subclasses of
-:class:`molexp.workspace.Folder`. Each carries an
-*entity-shaped* metadata model that extends :class:`FolderMetadata`
-with the agent-specific fields workspace does **not** know about
-(workspace stores their JSON as opaque dicts).
-
-Sub-spec ``unify-folder-abstraction-03`` § Design § 4 introduces these
-models so the agent layer can persist Agent personas + conversation
-state without re-implementing the storage primitive.
+After the OKF rehome onto ``molexp.workspace.Folder`` (wsokf-06), ``Agent`` /
+``AgentSession`` are workspace Concepts whose settled, human-meaningful identity
+*is* their ``meta.yaml`` payload. These models are agent-owned frozen pydantic
+models in the OKF Concept-meta shape — a required ``type`` discriminator (the
+string the shared concept-type registry resolves on) plus ``extra="allow"`` so
+forward fields survive a round-trip. The pydantic-ai ``ModelMessage`` history
+stays in a sibling ``messages.jsonl`` (binary, via the lazy codec) — never
+inlined here.
 """
 
 from __future__ import annotations
@@ -17,57 +15,60 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from molexp._typing import JSONValue
-from molexp.workspace import FolderMetadata
-
-
-def _utc_now() -> datetime:
-    return datetime.now()
-
 
 SessionStatusStr = Literal["pending", "running", "paused", "succeeded", "failed", "cancelled"]
 
 
-class AgentMetadata(FolderMetadata):
-    """Persisted ``agent.json`` payload for an :class:`Agent` folder.
+class AgentMeta(BaseModel):
+    """``meta.yaml`` payload for an :class:`~molexp.agent.folders.Agent` Concept.
 
-    Extends :class:`FolderMetadata` with the agent persona fields the
-    agent layer owns (workspace stores the JSON as opaque dicts).
+    Attributes:
+        type: The concept-type discriminator (``"agent.agent"``) the shared
+            registry resolves back to :class:`~molexp.agent.folders.Agent`.
+        id: The agent's slug (its directory name).
+        system_prompt: The agent persona's system prompt.
+        model: The model id this agent runs on (empty when unset).
+        tier: The model tier label (empty when unset).
+        description: A human-readable description.
     """
 
     model_config = ConfigDict(frozen=True, extra="allow")
 
+    type: str = "agent.agent"
+    id: str = ""
     system_prompt: str = ""
     model: str = ""
     tier: str = ""
     description: str = ""
 
 
-class AgentSessionMetadata(FolderMetadata):
-    """Persisted ``agent_session.json`` payload for an :class:`AgentSession`.
+class AgentSessionMeta(BaseModel):
+    """``meta.yaml`` payload for an :class:`~molexp.agent.folders.AgentSession`.
 
-    Extends :class:`FolderMetadata` with conversation-shaped fields.
-    Pydantic-ai ``ModelMessage`` history is kept in a sibling
-    ``messages.jsonl`` (encoded via the lazy
-    :mod:`molexp.agent._pydanticai.messages_codec`), NOT inlined here —
-    metadata stays small.
+    Attributes:
+        type: The concept-type discriminator (``"agent.session"``) the shared
+            registry resolves back to
+            :class:`~molexp.agent.folders.AgentSession`.
+        id: The session's slug (its directory name).
+        goal_summary: A one-line summary of the conversation's goal.
+        status: The session lifecycle state.
+        started_at: When the session first ran (``None`` until it does).
+        finished_at: When the session reached a terminal state.
+        extras: Free-form forward-compatible metadata.
     """
 
     model_config = ConfigDict(frozen=True, extra="allow")
 
+    type: str = "agent.session"
+    id: str = ""
     goal_summary: str = ""
     status: SessionStatusStr = "pending"
-    started_at: datetime = Field(default_factory=_utc_now)
+    started_at: datetime | None = None
     finished_at: datetime | None = None
-    # Opaque agent-layer custom state — additional projection columns the
-    # session catalog may carry without forking the schema.
     extras: dict[str, JSONValue] = Field(default_factory=dict)
 
 
-__all__ = [
-    "AgentMetadata",
-    "AgentSessionMetadata",
-    "SessionStatusStr",
-]
+__all__ = ["AgentMeta", "AgentSessionMeta", "SessionStatusStr"]

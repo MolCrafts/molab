@@ -5,7 +5,7 @@ Renamed from the harness-goal's ``RunContext`` to disambiguate from
 metadata). The full dotted path stays unambiguous; the short class name
 matches the package.
 
-Phase 1 carried three stores (artifact / event / provenance). Phase 7
+Phase 1 carried three stores (artifact / event / artifact-lineage). Phase 7
 adds three optional service fields (``capability_registry``,
 ``agent_gateway``, ``approval_policy``) — all default to ``None`` so
 Phase-1..6 callers stay byte-identical. Stages introduced in Phase 7+
@@ -25,9 +25,10 @@ from pathlib import Path
 from molexp.harness.gateways.gateway import AgentGateway
 from molexp.harness.registry.capability_registry import CapabilityRegistry
 from molexp.harness.schemas.policy import ApprovalPolicy
+from molexp.harness.store.approval_store import ApprovalStore
 from molexp.harness.store.artifact_store import ArtifactStore
 from molexp.harness.store.event_log import EventLog
-from molexp.harness.store.provenance_store import ProvenanceStore
+from molexp.harness.store.lineage_store import ArtifactLineageStore
 
 __all__ = ["HarnessRunContext"]
 
@@ -40,19 +41,21 @@ class HarnessRunContext:
     workspace_root: Path
     artifact_store: ArtifactStore
     event_log: EventLog
-    provenance_store: ProvenanceStore
+    lineage_store: ArtifactLineageStore
     capability_registry: CapabilityRegistry | None
     agent_gateway: AgentGateway | None
     approval_policy: ApprovalPolicy | None
+    approval_store: ApprovalStore | None
 
     __slots__ = (
         "_frozen",
         "agent_gateway",
         "approval_policy",
+        "approval_store",
         "artifact_store",
         "capability_registry",
         "event_log",
-        "provenance_store",
+        "lineage_store",
         "run_id",
         "workspace_root",
     )
@@ -64,20 +67,22 @@ class HarnessRunContext:
         workspace_root: Path,
         artifact_store: ArtifactStore,
         event_log: EventLog,
-        provenance_store: ProvenanceStore,
+        lineage_store: ArtifactLineageStore,
         capability_registry: CapabilityRegistry | None = None,
         agent_gateway: AgentGateway | None = None,
         approval_policy: ApprovalPolicy | None = None,
+        approval_store: ApprovalStore | None = None,
     ) -> None:
         # Bypass our own __setattr__ guard while constructing.
         object.__setattr__(self, "run_id", run_id)
         object.__setattr__(self, "workspace_root", Path(workspace_root))
         object.__setattr__(self, "artifact_store", artifact_store)
         object.__setattr__(self, "event_log", event_log)
-        object.__setattr__(self, "provenance_store", provenance_store)
+        object.__setattr__(self, "lineage_store", lineage_store)
         object.__setattr__(self, "capability_registry", capability_registry)
         object.__setattr__(self, "agent_gateway", agent_gateway)
         object.__setattr__(self, "approval_policy", approval_policy)
+        object.__setattr__(self, "approval_store", approval_store)
         object.__setattr__(self, "_frozen", True)
 
     def __setattr__(self, name: str, value: object) -> None:

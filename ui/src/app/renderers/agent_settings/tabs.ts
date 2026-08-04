@@ -1,24 +1,16 @@
 /**
  * Top-level tabs for AgentSettingsViewer.
  *
- * Per the agent-harness UI lockstep spec (§8) the legacy 5-tab layout
- * collapses to three semantic groups:
+ * Capability surfaces: model (with a short Chat/Plan overview on top),
+ * persistent instructions, reusable skills, and MCP servers. Chat vs Plan
+ * is a **composer mode** (Shift+Tab), not a separate settings section —
+ * tools live under their owning MCP server row.
  *
- *   - "agent"        — agent-core configuration: instructions, slash
- *                       commands, native tools.
- *   - "providers"    — model provider settings (registry-driven).
- *   - "tool-sources" — pluggable tool sources (today: MCP servers).
- *
- * The descriptor array is pure data so it can be unit-tested from
- * the node test environment without pulling in JSX, lucide, or the
- * api-client singleton chain.
- *
- * The renderer (`AgentSettingsViewer`) maps each `contentKey` to a
- * concrete React component and constructs the full tab descriptors
- * for `EntityPage`.
+ * Pure data so it can be unit-tested without JSX / lucide / api clients.
+ * The renderer maps each `contentKey` to a React component.
  */
 
-export type AgentSettingsTabKey = "agent" | "providers" | "tool-sources";
+export type AgentSettingsTabKey = "model" | "instructions" | "skills" | "mcp";
 
 export interface AgentSettingsTabDef {
   /** URL-safe slug used by EntityPage for tab routing. */
@@ -26,11 +18,12 @@ export interface AgentSettingsTabDef {
   /** Human-visible label rendered in the tab strip. */
   readonly label: string;
   /** Which content component the renderer mounts for this tab. */
-  readonly contentKey: "agent-core" | "providers-form" | "mcp-servers";
+  readonly contentKey: "providers-form" | "instructions-form" | "skills-list" | "mcp-servers";
 }
 
 export const AGENT_SETTINGS_TABS: readonly AgentSettingsTabDef[] = [
-  { value: "agent", label: "Agent", contentKey: "agent-core" },
-  { value: "providers", label: "Model providers", contentKey: "providers-form" },
-  { value: "tool-sources", label: "Tool sources", contentKey: "mcp-servers" },
+  { value: "model", label: "Model", contentKey: "providers-form" },
+  { value: "instructions", label: "Instructions", contentKey: "instructions-form" },
+  { value: "skills", label: "Skills", contentKey: "skills-list" },
+  { value: "mcp", label: "MCP", contentKey: "mcp-servers" },
 ];

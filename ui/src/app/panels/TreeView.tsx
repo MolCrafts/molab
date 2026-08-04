@@ -9,6 +9,7 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from "@/components/ui/context-menu";
+import { WorkbenchAction, WorkbenchIconAction } from "@/components/workbench";
 
 export interface TreeNodeAction {
   id: string;
@@ -24,8 +25,12 @@ export interface TreeNodeAction {
 export interface TreeNode {
   id: string;
   label: string;
+  /** Hover tooltip; defaults to `label` (e.g. an agent task's full goal). */
+  hoverTitle?: string;
+  labelClassName?: string;
   icon?: ComponentType<{ className?: string }>;
   iconClassName?: string;
+  leadingAccessory?: ReactNode;
   right?: ReactNode;
   meta?: ReactNode;
   children?: TreeNode[];
@@ -41,6 +46,8 @@ interface TreeViewProps {
   emptyTitle?: string;
   emptyDescription?: string;
   emptyIcon?: ReactNode;
+  /** Fired when a node is expanded (not collapsed). Used for lazy WorkspaceFs.listdir. */
+  onExpand?: (nodeId: string) => void;
 }
 
 const INDENT = 14;
@@ -71,10 +78,13 @@ const TreeRow = ({
   const childrenReserveChevron = node.children?.some((c) => c.children !== undefined) ?? false;
 
   const rowButton = (
-    <button
+    <WorkbenchAction
+      kind="ghost"
+      size="content"
       type="button"
-      className={`group flex h-7 min-w-0 flex-1 items-center gap-2 overflow-hidden rounded-md px-2 text-left text-sm transition-colors ${
-        isActive ? "bg-accent text-accent-foreground" : "hover:bg-muted/40"
+      className={`group flex h-control-compact min-w-0 flex-1 items-center gap-2 overflow-hidden rounded-control px-2 text-left text-body-lg transition-colors ${
+        // Soft lavender wash — solid bg-accent is for buttons, too dark on day mode rows.
+        isActive ? "bg-accent-muted text-accent-muted-foreground" : "hover:bg-muted/40"
       }`}
       onClick={() => {
         if (node.onSelect) {
@@ -86,19 +96,20 @@ const TreeRow = ({
       onContextMenu={() => {
         node.onSelect?.();
       }}
-      title={node.label}
+      title={node.hoverTitle ?? node.label}
     >
       {Icon && (
         <Icon
           className={`h-3.5 w-3.5 flex-none ${node.iconClassName ?? "text-muted-foreground"}`}
         />
       )}
-      <span className="min-w-0 flex-1 truncate">{node.label}</span>
+      {node.leadingAccessory && <span className="flex-none">{node.leadingAccessory}</span>}
+      <span className={`min-w-0 flex-1 truncate ${node.labelClassName ?? ""}`}>{node.label}</span>
       {node.right && <span className="flex-none">{node.right}</span>}
       {node.meta !== undefined && node.meta !== null && (
-        <span className="flex-none font-mono text-[10px] text-muted-foreground">{node.meta}</span>
+        <span className="flex-none font-mono text-micro text-muted-foreground">{node.meta}</span>
       )}
-    </button>
+    </WorkbenchAction>
   );
 
   const wrappedRow =
@@ -137,12 +148,11 @@ const TreeRow = ({
 
   return (
     <div>
-      <div className="flex items-center gap-0.5" style={{ paddingLeft: `${depth * INDENT}px` }}>
+      <div className="flex items-center gap-1" style={{ paddingLeft: `${depth * INDENT}px` }}>
         {hasChildren ? (
-          <button
-            type="button"
-            aria-label={isExpanded ? "Collapse" : "Expand"}
-            className="flex h-6 w-6 flex-none items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-muted/40 hover:text-foreground"
+          <WorkbenchIconAction
+            label={isExpanded ? "Collapse" : "Expand"}
+            className="size-6 flex-none text-muted-foreground"
             onClick={(event) => {
               event.stopPropagation();
               onToggle(node.id);
@@ -151,7 +161,7 @@ const TreeRow = ({
             <ChevronRight
               className={`h-3.5 w-3.5 transition-transform ${isExpanded ? "rotate-90" : ""}`}
             />
-          </button>
+          </WorkbenchIconAction>
         ) : reserveChevron ? (
           <span className="h-6 w-6 flex-none" />
         ) : null}
@@ -161,7 +171,7 @@ const TreeRow = ({
         <div>
           {node.children.length === 0 && node.emptyChildLabel ? (
             <p
-              className="text-xs text-muted-foreground"
+              className="text-label text-muted-foreground"
               style={{ paddingLeft: `${(depth + 1) * INDENT + 8}px` }}
             >
               {node.emptyChildLabel}
@@ -192,6 +202,7 @@ export const TreeView = ({
   emptyTitle,
   emptyDescription,
   emptyIcon,
+  onExpand,
 }: TreeViewProps): JSX.Element => {
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(expandPath ?? []));
 
@@ -207,8 +218,12 @@ export const TreeView = ({
   const toggle = (id: string): void => {
     setExpanded((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
+        onExpand?.(id);
+      }
       return next;
     });
   };
@@ -227,7 +242,7 @@ export const TreeView = ({
   const reserveChevron = nodes.some((n) => n.children !== undefined);
 
   return (
-    <div className="space-y-0.5">
+    <div className="space-y-1">
       {nodes.map((node) => (
         <TreeRow
           key={node.id}

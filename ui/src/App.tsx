@@ -21,15 +21,22 @@ const buildDefaultInspectorTarget = (selection: Selection | null): InspectorTarg
   };
 };
 
-const App = (): JSX.Element => {
-  const location = useLocation();
-  // OAuth popup target — bypass workspace boot so the page can postMessage
-  // its code/state back to the opener without spinning up the whole app.
-  if (location.pathname === "/oauth-callback") {
-    return <OAuthCallbackPage />;
-  }
-  const activeView = getLeftPanelViewFromPath(location.pathname);
-  const { snapshot, status, error, refresh } = useWorkspaceState(activeView);
+// Workspace-backed app tree. Kept as a separate component so its hooks only
+// mount on non-OAuth routes — App's early return for /oauth-callback must not
+// skip hooks within the same component (Rules of Hooks).
+const WorkspaceApp = ({ pathname }: { pathname: string }): JSX.Element => {
+  const activeView = getLeftPanelViewFromPath(pathname);
+  const {
+    snapshot,
+    status,
+    error,
+    refresh,
+    expandDirectory,
+    expandProject,
+    expandExperiment,
+    isProjectExpanded,
+    isExperimentExpanded,
+  } = useWorkspaceState(activeView);
   // Subscribe to the runs poller only when the user is on the runs view; the
   // hook still gives us a refresh handle even when disabled so manual refresh
   // works regardless of polling state.
@@ -51,8 +58,11 @@ const App = (): JSX.Element => {
     setSelection(nextSelection);
   };
 
-  const handleOpenWorkspace = async (path: string): Promise<void> => {
-    await workspaceApi.openWorkspace(path);
+  const handleOpenWorkspace = async (
+    path: string,
+    options?: { createIfMissing?: boolean },
+  ): Promise<void> => {
+    await workspaceApi.openWorkspace(path, options?.createIfMissing ?? false);
     refresh();
   };
 
@@ -79,6 +89,8 @@ const App = (): JSX.Element => {
 
   const isRefreshing = activeView === "runs" ? runs.loading : status === "loading";
 
+  // Sync / mutation tips land only in the bottom status strip (heartbeat +
+  // activity region). No floating "Syncing…" cards — aligned with MolVis.
   return (
     <ErrorBoundary>
       <AppShell
@@ -93,18 +105,32 @@ const App = (): JSX.Element => {
         onOpenWorkspace={handleOpenWorkspace}
         onCreateDirectory={handleCreateDirectory}
         onCreateFile={handleCreateFile}
+        onExpandDirectory={(path) => {
+          void expandDirectory(path);
+        }}
+        onExpandProject={(projectId) => {
+          void expandProject(projectId);
+        }}
+        onExpandExperiment={(projectId, experimentId) => {
+          void expandExperiment(projectId, experimentId);
+        }}
+        isProjectExpanded={isProjectExpanded}
+        isExperimentExpanded={isExperimentExpanded}
         onWorkspaceRefresh={refresh}
         onActiveRefresh={handleActiveRefresh}
       />
-      {status === "loading" && (
-        <div className="pointer-events-none fixed inset-0 z-50 flex items-center justify-center bg-background/50">
-          <div className="rounded-md border border-border bg-background px-4 py-2 text-sm text-muted-foreground">
-            Syncing workspace state...
-          </div>
-        </div>
-      )}
     </ErrorBoundary>
   );
+};
+
+const App = (): JSX.Element => {
+  const location = useLocation();
+  // OAuth popup target — bypass workspace boot so the page can postMessage
+  // its code/state back to the opener without spinning up the whole app.
+  if (location.pathname === "/oauth-callback") {
+    return <OAuthCallbackPage />;
+  }
+  return <WorkspaceApp pathname={location.pathname} />;
 };
 
 export default App;

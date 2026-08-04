@@ -1,27 +1,41 @@
-"""``molexp workspace {project,experiment,runs,target,asset,mcp}`` — resource CRUD."""
+"""``molexp workspace {project,experiment,runs,target,asset}`` — resource CRUD.
+
+The ``mcp`` config group lives in the sibling :mod:`.mcp_config` module.
+"""
 
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
-from typing import Annotated, Any, NoReturn
+from typing import Annotated, Any
 
 import typer
-from molcfg import Config, ConfigError
 from rich.console import Console
 from rich.table import Table
 
 from molexp.cli._common import (
     _TERMINAL_STATUSES,
-    get_workspace,
     rprint,
     run_executor_info,
     status_color,
 )
-from molexp.cli._target import TargetOption, resolve_workspace_target
-from molexp.workspace.target import LocalTarget
+from molexp.cli._target import TargetOption, open_workspace
+from molexp.workspace.run import RETRYABLE_STATUSES
 
 _console = Console()
+
+
+def _open_ws(target_spec: str):
+    """Open a local or remote workspace; exit 1 if missing."""
+    try:
+        _target, _transport, _fs, ws = open_workspace(target_spec)
+    except FileNotFoundError as exc:
+        rprint(f"[red]Error:[/red] {exc}")
+        rprint("  Run [bold]molexp init[/bold] to create one.")
+        raise typer.Exit(1) from exc
+    return ws
+
 
 # ---------------------------------------------------------------------------
 # project
@@ -36,10 +50,7 @@ def project_create(
     target_spec: TargetOption = ".",
 ) -> None:
     """Create a new project."""
-    target, _transport, _fs = resolve_workspace_target(target_spec)
-    if not isinstance(target, LocalTarget):
-        _remote_only("project create")
-    ws = get_workspace(target.path if target.path != Path.cwd() else None)
+    ws = _open_ws(target_spec)
     try:
         project = ws.add_project(name)
         rprint(f"[green]OK[/green] Created project: {project.id}")
@@ -52,10 +63,7 @@ def project_create(
 @project_app.command("list")
 def project_list(target_spec: TargetOption = ".") -> None:
     """List all projects."""
-    target, _transport, _fs = resolve_workspace_target(target_spec)
-    if not isinstance(target, LocalTarget):
-        _remote_only("project list")
-    ws = get_workspace(target.path if target.path != Path.cwd() else None)
+    ws = _open_ws(target_spec)
     projects = ws.list_projects()
     if not projects:
         rprint("[yellow]No projects found[/yellow]")
@@ -85,10 +93,7 @@ def project_info(
     """Show project information."""
     from molexp.workspace import ProjectNotFoundError
 
-    target, _transport, _fs = resolve_workspace_target(target_spec)
-    if not isinstance(target, LocalTarget):
-        _remote_only("project info")
-    ws = get_workspace(target.path if target.path != Path.cwd() else None)
+    ws = _open_ws(target_spec)
     try:
         project = ws.get_project(project_id)
     except ProjectNotFoundError:
@@ -120,10 +125,7 @@ def experiment_create(
     """Create a new experiment."""
     from molexp.workspace import ProjectNotFoundError
 
-    target, _transport, _fs = resolve_workspace_target(target_spec)
-    if not isinstance(target, LocalTarget):
-        _remote_only("experiment create")
-    ws = get_workspace(target.path if target.path != Path.cwd() else None)
+    ws = _open_ws(target_spec)
     try:
         try:
             project = ws.get_project(project_id)
@@ -149,10 +151,7 @@ def experiment_list(
     """List all experiments in a project."""
     from molexp.workspace import ProjectNotFoundError
 
-    target, _transport, _fs = resolve_workspace_target(target_spec)
-    if not isinstance(target, LocalTarget):
-        _remote_only("experiment list")
-    ws = get_workspace(target.path if target.path != Path.cwd() else None)
+    ws = _open_ws(target_spec)
     try:
         project = ws.get_project(project_id)
     except ProjectNotFoundError:
@@ -178,6 +177,37 @@ def experiment_list(
 run_app = typer.Typer(help="Run management commands", no_args_is_help=True)
 
 
+def _stdin_is_interactive() -> bool:
+    """Whether stdin is a real terminal (a seam so tests can fake a TTY)."""
+    return sys.stdin.isatty()
+
+
+def _classify_container_id(ws, candidate: str) -> str | None:  # noqa: ANN001
+    """Return ``"project"`` / ``"experiment"`` when *candidate* names one.
+
+    Used by ``runs cancel`` to catch the classic mix-up: ``runs list`` takes
+    ``PROJECT EXPERIMENT`` positionals while ``runs cancel`` takes bare
+    ``RUN_IDS`` — a container name passed as a run id must error with the
+    correct usage instead of a silent warn-and-skip.
+    """
+    from molexp.workspace import ExperimentNotFoundError, ProjectNotFoundError
+
+    try:
+        ws.get_project(candidate)
+    except ProjectNotFoundError:
+        pass
+    else:
+        return "project"
+    for proj in ws.list_projects():
+        try:
+            proj.get_experiment(candidate)
+        except ExperimentNotFoundError:
+            continue
+        else:
+            return "experiment"
+    return None
+
+
 @run_app.command("create")
 def run_create(
     project_id: Annotated[str, typer.Argument(help="Project ID")],
@@ -188,10 +218,7 @@ def run_create(
     target_spec: TargetOption = ".",
 ) -> None:
     """Create a new run."""
-    target, _transport, _fs = resolve_workspace_target(target_spec)
-    if not isinstance(target, LocalTarget):
-        _remote_only("runs create")
-    ws = get_workspace(target.path if target.path != Path.cwd() else None)
+    ws = _open_ws(target_spec)
     parameters: dict = {}
     if params:
         params_path = Path(params)
@@ -218,7 +245,7 @@ def run_create(
         except _ExpNotFound:
             rprint(f"[red]Error:[/red] Experiment not found: {experiment_id}")
             raise typer.Exit(1) from None
-        r = experiment.add_run(parameters=parameters)
+        r = experiment.add_run(params=parameters)
         rprint(f"[green]OK[/green] Created run: {r.id}")
         rprint(f"  Project: {project_id}")
         rprint(f"  Experiment: {experiment_id}")
@@ -239,10 +266,7 @@ def run_list(
     target_spec: TargetOption = ".",
 ) -> None:
     """List all runs in an experiment."""
-    target, _transport, _fs = resolve_workspace_target(target_spec)
-    if not isinstance(target, LocalTarget):
-        _remote_only("runs list")
-    ws = get_workspace(target.path if target.path != Path.cwd() else None)
+    ws = _open_ws(target_spec)
     from molexp.workspace import ExperimentNotFoundError as _ExpNotFound
     from molexp.workspace import ProjectNotFoundError as _ProjNotFound
 
@@ -260,20 +284,26 @@ def run_list(
     if not runs:
         rprint(f"[yellow]No runs found in {project_id}/{experiment_id}[/yellow]")
         return
+    from molexp._run_display import elapsed
+
     table = Table(title=f"Runs in {project_id}/{experiment_id}")
     table.add_column("Run ID", style="cyan")
     table.add_column("Status", style="green")
     table.add_column("Profile", style="cyan")
     table.add_column("Created")
+    table.add_column("Duration")
     for r in runs:
         status = str(r.status).lower()
         color = status_color(status)
         profile_display = r.metadata.profile or "—"
+        finished = r.finished_at.isoformat() if r.finished_at else None
+        duration = elapsed(r.metadata.created_at.isoformat(), finished)
         table.add_row(
             r.id,
             f"[{color}]{status}[/{color}]",
             profile_display,
             r.metadata.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+            duration or "—",
         )
     _console.print(table)
 
@@ -315,10 +345,7 @@ def run_cancel(
     target_spec: TargetOption = ".",
 ) -> None:
     """Cancel one or more scheduled runs."""
-    target, _transport, _fs = resolve_workspace_target(target_spec)
-    if not isinstance(target, LocalTarget):
-        _remote_only("runs cancel")
-    ws = get_workspace(target.path if target.path != Path.cwd() else None)
+    ws = _open_ws(target_spec)
     target_runs: list[Any] = []
 
     from molexp.workspace import ExperimentNotFoundError as _ExpNotFound
@@ -326,6 +353,7 @@ def run_cancel(
     from molexp.workspace import RunNotFoundError as _RunNotFound
 
     if run_ids:
+        misclassified: list[tuple[str, str]] = []
         for rid in run_ids:
             found = None
             for proj in ws.list_projects():
@@ -337,10 +365,26 @@ def run_cancel(
                     break
                 if found:
                     break
-            if found is None:
-                rprint(f"[yellow]Warning:[/yellow] Run {rid!r} not found — skipping.")
-            else:
+            if found is not None:
                 target_runs.append(found)
+                continue
+            kind = _classify_container_id(ws, rid)
+            if kind is not None:
+                misclassified.append((rid, kind))
+            else:
+                rprint(f"[yellow]Warning:[/yellow] Run {rid!r} not found — skipping.")
+        if misclassified:
+            for rid, kind in misclassified:
+                article = "an" if kind == "experiment" else "a"
+                rprint(
+                    f"[red]Error:[/red] {rid!r} looks like {article} {kind} id — "
+                    "`molexp runs cancel` takes RUN_IDS."
+                )
+            proj_hint = next((rid for rid, kind in misclassified if kind == "project"), None)
+            exp_hint = next((rid for rid, kind in misclassified if kind == "experiment"), None)
+            list_cmd = f"molexp runs list {proj_hint or '<project>'} {exp_hint or '<experiment>'}"
+            rprint(f"To target a run, use its id from: [bold]{list_cmd}[/bold]")
+            raise typer.Exit(1)
     else:
         if not project_id or not experiment_id:
             rprint("[red]Error:[/red] Provide run IDs, or both --project and --experiment.")
@@ -397,6 +441,13 @@ def run_cancel(
     _console.print(table)
 
     if not yes:
+        if not _stdin_is_interactive():
+            # Never block a pipe/CI invocation on the y/N prompt.
+            rprint(
+                "[red]Error:[/red] non-interactive session: pass --yes to confirm "
+                f"cancelling {len(target_runs)} run(s)."
+            )
+            raise typer.Exit(1)
         confirm = typer.prompt(f"\nCancel {len(target_runs)} job(s)? [y/N]", default="N")
         if confirm.strip().lower() not in ("y", "yes"):
             rprint("[dim]Aborted.[/dim]")
@@ -457,6 +508,43 @@ def run_cancel(
         rprint(".")
 
 
+@run_app.command("harvest")
+def run_harvest(
+    project_id: Annotated[str, typer.Argument(help="Project ID")],
+    experiment_id: Annotated[str, typer.Argument(help="Experiment ID")],
+    run_id: Annotated[str, typer.Argument(help="Run ID")],
+    narrative: Annotated[str, typer.Argument(help="Interpretation of the run outcome")],
+    kind: Annotated[str, typer.Option("--kind", help="Knowledge kind")] = "Finding",
+    created_by: Annotated[str, typer.Option("--created-by")] = "cli",
+    target_spec: TargetOption = ".",
+) -> None:
+    """Harvest a terminal run into a KnowledgeItem (workspace.harvest_run)."""
+    ws = _open_ws(target_spec)
+    from molexp.workspace import ExperimentNotFoundError as _ExpNotFound
+    from molexp.workspace import ProjectNotFoundError as _ProjNotFound
+    from molexp.workspace import RunNotFoundError as _RunNotFound
+    from molexp.workspace import harvest_run, parse_knowledge_kind
+
+    try:
+        project = ws.get_project(project_id)
+        experiment = project.get_experiment(experiment_id)
+        run = experiment.get_run(run_id)
+    except (_ProjNotFound, _ExpNotFound, _RunNotFound) as exc:
+        rprint(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(1) from None
+    try:
+        item = harvest_run(
+            run,
+            kind=parse_knowledge_kind(kind),
+            narrative=narrative,
+            created_by=created_by,
+        )
+    except ValueError as exc:
+        rprint(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(1) from None
+    rprint(f"[green]OK[/green] Harvested KnowledgeItem: {item.name}")
+
+
 @run_app.command("info")
 def run_info(
     project_id: Annotated[str, typer.Argument(help="Project ID")],
@@ -465,10 +553,7 @@ def run_info(
     target_spec: TargetOption = ".",
 ) -> None:
     """Show run information."""
-    target, _transport, _fs = resolve_workspace_target(target_spec)
-    if not isinstance(target, LocalTarget):
-        _remote_only("runs info")
-    ws = get_workspace(target.path if target.path != Path.cwd() else None)
+    ws = _open_ws(target_spec)
     from molexp.workspace import ExperimentNotFoundError as _ExpNotFound
     from molexp.workspace import ProjectNotFoundError as _ProjNotFound
     from molexp.workspace import RunNotFoundError as _RunNotFound
@@ -491,9 +576,21 @@ def run_info(
 
     rprint(f"[bold]Run:[/bold] {r.id}")
     rprint(f"  Status: {r.status}")
+    # A failed run must say WHY, right under the status, with the one command to
+    # retry — the reason is captured in the canonical record (run.json). The
+    # error block is status-gated (run-recovery bug 2): a run that has since
+    # succeeded must not keep advertising a stale error + retry hint (the
+    # lifecycle also clears metadata.error on success; this is the display-side
+    # defense for records written before that fix).
+    err = r.metadata.error
+    if err is not None and r.status in RETRYABLE_STATUSES:
+        rprint(f"  [red]Error:[/red] {err.type}: {err.message}")
+        script = r.metadata.script if hasattr(r.metadata, "script") else None
+        hint = f"molexp run {script} --resume" if script else "molexp run <script> --resume"
+        rprint(f"  [dim]Retry with:[/dim] {hint}")
     rprint(f"  Created: {r.metadata.created_at}")
-    if r.metadata.finished_at:
-        rprint(f"  Finished: {r.metadata.finished_at}")
+    if r.finished_at:
+        rprint(f"  Finished: {r.finished_at}")
     if r.metadata.profile:
         rprint(f"  Profile: [cyan]{r.metadata.profile}[/cyan]")
         if r.metadata.config_hash:
@@ -501,6 +598,21 @@ def run_info(
         if r.metadata.config:
             rprint(f"  Config: {json.dumps(r.metadata.config, indent=2, default=str)}")
     rprint(f"  Parameters: {json.dumps(r.parameters, indent=2, default=str)}")
+    # Recent workspace-timeline events for this run (default-on event spine;
+    # the same read path the server's /events endpoint uses). Silent only when
+    # the workspace has no timeline yet (nothing has emitted).
+    from molexp.workspace.events import read_workspace_events
+    from molexp.workspace.fs_local import LocalFileSystem
+
+    # Event log is a local SQLite file; remote workspaces skip the timeline
+    # rather than probing a non-existent local path under the remote root.
+    if isinstance(ws._fs, LocalFileSystem):
+        events = read_workspace_events(ws.root, ref=r.id, limit=5)
+        if events:
+            rprint("  Recent events:")
+            for ev in events:
+                ts = ev.created_at.strftime("%Y-%m-%d %H:%M:%S")
+                rprint(f"    {ts}  {ev.type}  [dim]({ev.actor})[/dim]")
 
 
 # Attach prune subcommand from the prune module.
@@ -516,358 +628,147 @@ _prune.register(run_app)
 asset_app = typer.Typer(help="Asset management commands", no_args_is_help=True)
 
 
+_ASSET_SCOPE_KINDS = ("workspace", "project", "experiment", "run")
+
+
+def _format_asset_scope(scope) -> str:  # noqa: ANN001
+    """Render an ``AssetScope`` as ``kind:id/id/…`` (bare kind at workspace)."""
+    if not scope.ids:
+        return scope.kind
+    return f"{scope.kind}:{'/'.join(scope.ids)}"
+
+
 @asset_app.command("list")
 def asset_list(
+    scope: Annotated[
+        str | None,
+        typer.Option(
+            "--scope",
+            help="Filter by scope kind: workspace | project | experiment | run.",
+        ),
+    ] = None,
     limit: Annotated[int, typer.Option("--limit", "-l", help="Limit results")] = 50,
     target_spec: TargetOption = ".",
 ) -> None:
-    """List workspace-level assets."""
-    target, _transport, _fs = resolve_workspace_target(target_spec)
-    if not isinstance(target, LocalTarget):
-        _remote_only("asset list")
-    ws = get_workspace(target.path if target.path != Path.cwd() else None)
-    assets = ws.assets.list_assets()[:limit]
-    if not assets:
-        rprint("[yellow]No assets found[/yellow]")
+    """List assets across ALL scopes (workspace, project, experiment, run).
+
+    The default view scans every scope's authoritative ``assets.json`` manifest
+    — the same count ``molexp context`` reports — with a Scope column locating
+    each asset. Use ``--scope`` to restrict to one scope kind.
+    """
+    ws = _open_ws(target_spec)
+
+    if scope is not None and scope not in _ASSET_SCOPE_KINDS:
+        rprint(
+            f"[red]Error:[/red] unknown scope {scope!r} — "
+            f"choose one of: {', '.join(_ASSET_SCOPE_KINDS)}."
+        )
+        raise typer.Exit(1)
+
+    from molexp.workspace.assets import scan
+
+    assets = scan.scan_assets(ws.root, fs=ws._fs)
+    total = len(assets)
+    if scope is not None:
+        assets = [a for a in assets if a.scope.kind == scope]
+    shown = assets[:limit]
+
+    if not shown:
+        if scope is not None and total:
+            rprint(
+                f"[yellow]No {scope}-scope assets found[/yellow] "
+                f"— {total} asset(s) exist in other scopes (drop --scope to see them)."
+            )
+        else:
+            rprint("[yellow]No assets found[/yellow]")
         return
-    table = Table(title="Workspace Assets")
+    title = "Assets (all scopes)" if scope is None else f"Assets ({scope} scope)"
+    table = Table(title=title)
     table.add_column("Asset ID", style="cyan")
     table.add_column("Name", style="green")
+    table.add_column("Kind")
+    table.add_column("Scope", style="magenta")
     table.add_column("Created")
-    for a in assets:
-        table.add_row(a.asset_id[:12] + "...", a.name, a.created_at.strftime("%Y-%m-%d %H:%M"))
+    for a in shown:
+        table.add_row(
+            a.asset_id[:12] + "...",
+            a.name,
+            a.kind if hasattr(a, "kind") else "-",
+            _format_asset_scope(a.scope),
+            a.created_at.strftime("%Y-%m-%d %H:%M"),
+        )
     _console.print(table)
+    if len(assets) > len(shown):
+        rprint(f"[dim]Showing {len(shown)} of {len(assets)} — raise --limit to see more.[/dim]")
 
 
-# ---------------------------------------------------------------------------
-# mcp
-# ---------------------------------------------------------------------------
-
-mcp_app = typer.Typer(
-    name="mcp", help="Configure MCP servers (mirrors `claude mcp`).", no_args_is_help=True
-)
-
-_USER_SCOPE_PATH = Path.home() / ".claude.json"
-_PROJECT_SCOPE_FILENAME = ".mcp.json"
-_VALID_TRANSPORTS = ("stdio", "http", "sse")
-_VALID_SCOPES = ("user", "project")
-
-_ScopeOpt = Annotated[str, typer.Option("--scope", "-s", help="user or project")]
-_ConfigOpt = Annotated[Path | None, typer.Option("--config", help="Override path from --scope")]
-
-
-def _resolve_mcp_path(scope: str, override: Path | None) -> Path:
-    if override is not None:
-        return override.expanduser().resolve()
-    if scope == "user":
-        return _USER_SCOPE_PATH
-    if scope == "project":
-        return Path.cwd() / _PROJECT_SCOPE_FILENAME
-    raise typer.BadParameter(f"Unknown scope {scope!r}. Valid: {', '.join(_VALID_SCOPES)}.")
-
-
-def _load_mcp_cfg(path: Path) -> Config:
-    if not path.exists():
-        return Config({"mcpServers": {}})
-    try:
-        cfg = Config.load_json(path)
-    except (json.JSONDecodeError, ConfigError) as exc:
-        raise typer.BadParameter(
-            f"Config file at {path} is not a valid JSON object: {exc}"
-        ) from exc
-    if "mcpServers" not in cfg:
-        cfg["mcpServers"] = {}
-    elif not isinstance(cfg["mcpServers"], Config):
-        raise typer.BadParameter(f"Config file at {path} has a non-object 'mcpServers' field.")
-    return cfg
-
-
-def _save_mcp_cfg(cfg: Config, path: Path) -> None:
-    import os as _os
-
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    cfg.save_json(tmp, indent=2)
-    _os.chmod(tmp, 0o600)  # noqa: PTH101
-    tmp.replace(path)
-
-
-def _server_entry(cfg: Config, name: str) -> Config | None:
-    return cfg.get(f"mcpServers.{name}")
-
-
-def _server_names(cfg: Config) -> list[str]:
-    servers = cfg["mcpServers"]
-    return list(servers.keys()) if isinstance(servers, Config) else []
-
-
-def _parse_kv_pair(raw: str, *, sep: str, kind: str) -> tuple[str, str]:
-    if sep not in raw:
-        raise typer.BadParameter(f"Bad {kind} {raw!r}: expected '<key>{sep}<value>'.")
-    key, value = raw.split(sep, 1)
-    key = key.strip()
-    if kind == "--header":
-        value = value.strip()
-    if not key:
-        raise typer.BadParameter(f"Bad {kind} {raw!r}: empty key.")
-    return key, value
-
-
-def _build_server_entry(
-    transport: str,
-    command_or_url: str,
-    args: list[str],
-    env_pairs: list[str],
-    header_pairs: list[str],
-) -> dict[str, Any]:
-    if transport not in _VALID_TRANSPORTS:
-        raise typer.BadParameter(
-            f"Unknown transport {transport!r}. Valid: {', '.join(_VALID_TRANSPORTS)}."
-        )
-    if transport == "stdio":
-        if header_pairs:
-            raise typer.BadParameter("--header is only valid for http/sse transports.")
-        env_dict = dict(_parse_kv_pair(e, sep="=", kind="--env") for e in env_pairs)
-        return {"type": "stdio", "command": command_or_url, "args": list(args), "env": env_dict}
-    if env_pairs:
-        raise typer.BadParameter("--env is only valid for stdio transports.")
-    if args:
-        raise typer.BadParameter("Positional args are only valid for stdio transports.")
-    headers = dict(_parse_kv_pair(h, sep=":", kind="--header") for h in header_pairs)
-    return {"type": transport, "url": command_or_url, "headers": headers}
-
-
-def _copy_servers(
-    src_cfg: Config, dst_cfg: Config, *, force: bool
-) -> tuple[list[str], list[str], list[str]]:
-    added, overwritten, skipped = [], [], []
-    for name in _server_names(src_cfg):
-        entry = src_cfg[f"mcpServers.{name}"]
-        if isinstance(entry, Config):
-            entry = entry.to_dict()
-        target_exists = _server_entry(dst_cfg, name) is not None
-        if target_exists and not force:
-            skipped.append(name)
-            continue
-        dst_cfg[f"mcpServers.{name}"] = entry
-        (overwritten if target_exists else added).append(name)
-    return added, overwritten, skipped
-
-
-@mcp_app.command("add")
-def mcp_add(
-    name: Annotated[str, typer.Argument(help="Server name")],
-    command_or_url: Annotated[
-        str, typer.Argument(help="Command (stdio) or URL (http/sse)", metavar="COMMAND_OR_URL")
-    ],
-    args: Annotated[
-        list[str] | None, typer.Argument(help="Trailing args (after -- separator)")
-    ] = None,
-    transport: Annotated[
-        str, typer.Option("--transport", "-t", help="stdio | http | sse")
-    ] = "stdio",
-    env: Annotated[
-        list[str] | None,
-        typer.Option("--env", "-e", help="Env var (stdio only, repeatable, KEY=VALUE)"),
-    ] = None,
-    header: Annotated[
-        list[str] | None,
-        typer.Option("--header", "-H", help="HTTP header (http/sse only, repeatable, NAME:VALUE)"),
-    ] = None,
-    scope: _ScopeOpt = "user",
-    config: _ConfigOpt = None,
-    force: Annotated[bool, typer.Option("--force", "-f", help="Overwrite if entry exists")] = False,
+@asset_app.command("info")
+def asset_info(
+    asset_id: Annotated[str, typer.Argument(help="The asset id to inspect.")],
+    target_spec: TargetOption = ".",
 ) -> None:
-    """Add an MCP server to the registry."""
-    cfg_path = _resolve_mcp_path(scope, config)
-    cfg = _load_mcp_cfg(cfg_path)
-    if _server_entry(cfg, name) is not None and not force:
+    """Show one asset's full record — wraps ``assets.scan.get_asset``."""
+    from molexp.workspace.assets import scan as asset_scan
+
+    ws = _open_ws(target_spec)
+
+    asset = asset_scan.get_asset(ws.root, asset_id, fs=ws._fs)
+    if asset is None:
+        rprint(f"[red]Error:[/red] no asset with id {asset_id!r} in this workspace.")
+        raise typer.Exit(1)
+    rprint(f"[bold]{asset.name}[/bold]  ({asset.asset_id})")
+    # ``kind`` is the subclass-declared discriminator (base Asset omits it).
+    rprint(f"  kind         : {asset.kind if hasattr(asset, 'kind') else type(asset).__name__}")
+    rprint(f"  scope        : {_format_asset_scope(asset.scope)}")
+    rprint(f"  content_hash : {asset.content_hash or '(none)'}")
+    producer = asset.producer
+    if producer is not None:
+        rprint(f"  producer     : run={producer.run_id or '-'} task={producer.task_id or '-'}")
+        if producer.inputs:
+            rprint(f"  inputs       : {', '.join(producer.inputs)}")
+    rprint(f"  path         : {asset.path}")
+    rprint(f"  created      : {asset.created_at.isoformat()}")
+
+
+@asset_app.command("lineage")
+def asset_lineage(
+    asset_id: Annotated[str, typer.Argument(help="The asset id to trace.")],
+    direction: Annotated[
+        str,
+        typer.Option("--direction", help="ancestors | descendants | both."),
+    ] = "both",
+    target_spec: TargetOption = ".",
+) -> None:
+    """Trace an asset's provenance — wraps ``assets.lineage.ancestors/descendants``."""
+    from molexp.workspace.assets import lineage as asset_lineage_mod
+    from molexp.workspace.assets import scan as asset_scan
+
+    if direction not in ("ancestors", "descendants", "both"):
         rprint(
-            f"[red]Error:[/red] Server [bold]{name}[/bold] already exists in {cfg_path}. Pass --force to overwrite."
+            f"[red]Error:[/red] --direction must be ancestors|descendants|both, got {direction!r}."
         )
         raise typer.Exit(1)
-    entry = _build_server_entry(
-        transport=transport,
-        command_or_url=command_or_url,
-        args=list(args or []),
-        env_pairs=list(env or []),
-        header_pairs=list(header or []),
-    )
-    cfg[f"mcpServers.{name}"] = entry
-    _save_mcp_cfg(cfg, cfg_path)
-    rprint(f"[green]OK[/green] Added [bold]{name}[/bold] ({transport}) to {cfg_path}")
+    ws = _open_ws(target_spec)
 
-
-@mcp_app.command("add-json")
-def mcp_add_json(
-    name: Annotated[str, typer.Argument(help="Server name")],
-    json_str: Annotated[
-        str, typer.Argument(help="JSON object describing the server entry", metavar="JSON")
-    ],
-    scope: _ScopeOpt = "user",
-    config: _ConfigOpt = None,
-    force: Annotated[bool, typer.Option("--force", "-f", help="Overwrite if entry exists")] = False,
-) -> None:
-    """Add an MCP server from a raw JSON string."""
-    try:
-        entry = json.loads(json_str)
-    except json.JSONDecodeError as exc:
-        rprint(f"[red]Error:[/red] Invalid JSON: {exc}")
-        raise typer.Exit(1) from None
-    if not isinstance(entry, dict):
-        rprint(f"[red]Error:[/red] JSON must be an object, got {type(entry).__name__}.")
+    if asset_scan.get_asset(ws.root, asset_id, fs=ws._fs) is None:
+        rprint(f"[red]Error:[/red] no asset with id {asset_id!r} in this workspace.")
         raise typer.Exit(1)
-    cfg_path = _resolve_mcp_path(scope, config)
-    cfg = _load_mcp_cfg(cfg_path)
-    if _server_entry(cfg, name) is not None and not force:
-        rprint(
-            f"[red]Error:[/red] Server [bold]{name}[/bold] already exists in {cfg_path}. Pass --force to overwrite."
-        )
-        raise typer.Exit(1)
-    cfg[f"mcpServers.{name}"] = entry
-    _save_mcp_cfg(cfg, cfg_path)
-    rprint(f"[green]OK[/green] Added [bold]{name}[/bold] from JSON to {cfg_path}")
 
+    def _render(label: str, arrow: str, ids: set[str]) -> None:
+        rprint(f"[bold]{label}[/bold] ({len(ids)}):")
+        if not ids:
+            rprint("  (none)")
+            return
+        for related_id in sorted(ids):
+            related = asset_scan.get_asset(ws.root, related_id, fs=ws._fs)
+            suffix = (
+                f"  {related.name} ({related.kind if hasattr(related, 'kind') else '?'})"
+                if related is not None
+                else ""
+            )
+            rprint(f"  {arrow} {related_id}{suffix}")
 
-@mcp_app.command("get")
-def mcp_get(
-    name: Annotated[str, typer.Argument(help="Server name")],
-    scope: _ScopeOpt = "user",
-    config: _ConfigOpt = None,
-) -> None:
-    """Print the JSON entry for a single server."""
-    cfg_path = _resolve_mcp_path(scope, config)
-    cfg = _load_mcp_cfg(cfg_path)
-    entry = _server_entry(cfg, name)
-    if entry is None:
-        rprint(f"[red]Error:[/red] Server [bold]{name}[/bold] not found in {cfg_path}.")
-        raise typer.Exit(1)
-    rprint(f"[bold]{name}[/bold]  ([dim]{cfg_path}[/dim])")
-    payload = entry.to_dict() if isinstance(entry, Config) else entry
-    _console.print_json(json.dumps(payload))
-
-
-@mcp_app.command("list")
-def mcp_list(
-    scope: _ScopeOpt = "user",
-    config: _ConfigOpt = None,
-) -> None:
-    """List configured MCP servers."""
-    cfg_path = _resolve_mcp_path(scope, config)
-    cfg = _load_mcp_cfg(cfg_path)
-    names = sorted(_server_names(cfg))
-    if not names:
-        rprint(f"[yellow]No MCP servers configured[/yellow] ({cfg_path})")
-        return
-    table = Table(title=f"MCP servers ({cfg_path})")
-    table.add_column("Name", style="cyan")
-    table.add_column("Transport", style="green")
-    table.add_column("Command / URL")
-    table.add_column("Args / Headers", overflow="fold")
-    for name in names:
-        entry = _server_entry(cfg, name)
-        if isinstance(entry, Config):
-            entry = entry.to_dict()
-        if not isinstance(entry, dict):
-            entry = {}
-        transport = entry.get("type") or ("http" if "url" in entry else "stdio")
-        if "url" in entry:
-            target = entry["url"]
-            extra = ", ".join(f"{k}={v!r}" for k, v in (entry.get("headers") or {}).items())
-        else:
-            target = entry.get("command", "")
-            extra = " ".join(entry.get("args") or [])
-        table.add_row(name, transport, target, extra)
-    _console.print(table)
-
-
-@mcp_app.command("remove")
-def mcp_remove(
-    name: Annotated[str, typer.Argument(help="Server name")],
-    scope: _ScopeOpt = "user",
-    config: _ConfigOpt = None,
-) -> None:
-    """Remove an MCP server from the registry."""
-    cfg_path = _resolve_mcp_path(scope, config)
-    cfg = _load_mcp_cfg(cfg_path)
-    if _server_entry(cfg, name) is None:
-        rprint(f"[red]Error:[/red] Server [bold]{name}[/bold] not found in {cfg_path}.")
-        raise typer.Exit(1)
-    del cfg[f"mcpServers.{name}"]
-    _save_mcp_cfg(cfg, cfg_path)
-    rprint(f"[green]OK[/green] Removed [bold]{name}[/bold] from {cfg_path}")
-
-
-@mcp_app.command("import")
-def mcp_import(
-    from_path: Annotated[Path, typer.Argument(help="Source JSON file with `mcpServers` envelope")],
-    scope: _ScopeOpt = "user",
-    config: _ConfigOpt = None,
-    force: Annotated[
-        bool, typer.Option("--force", "-f", help="Overwrite entries that already exist")
-    ] = False,
-) -> None:
-    """Copy `mcpServers` from FROM_PATH into the active registry."""
-    src_path = from_path.expanduser().resolve()
-    if not src_path.exists():
-        rprint(f"[red]Error:[/red] Source file not found: {src_path}")
-        raise typer.Exit(1)
-    src_cfg = _load_mcp_cfg(src_path)
-    if not _server_names(src_cfg):
-        rprint(f"[yellow]Source has no `mcpServers` to import:[/yellow] {src_path}")
-        return
-    dst_path = _resolve_mcp_path(scope, config)
-    dst_cfg = _load_mcp_cfg(dst_path)
-    added, overwritten, skipped = _copy_servers(src_cfg, dst_cfg, force=force)
-    _save_mcp_cfg(dst_cfg, dst_path)
-    rprint(
-        f"[green]OK[/green] Imported {len(added)} new, {len(overwritten)} overwritten, {len(skipped)} skipped ({src_path} → {dst_path})"
-    )
-    if added:
-        rprint(f"  added:       {', '.join(added)}")
-    if overwritten:
-        rprint(f"  overwritten: {', '.join(overwritten)}")
-    if skipped:
-        rprint(f"  skipped:     {', '.join(skipped)}  [dim](pass --force to overwrite)[/dim]")
-
-
-@mcp_app.command("export")
-def mcp_export(
-    to_path: Annotated[Path, typer.Argument(help="Destination JSON file")],
-    scope: _ScopeOpt = "user",
-    config: _ConfigOpt = None,
-    force: Annotated[
-        bool, typer.Option("--force", "-f", help="Overwrite entries that already exist")
-    ] = False,
-) -> None:
-    """Copy the active `mcpServers` registry into TO_PATH."""
-    src_path = _resolve_mcp_path(scope, config)
-    src_cfg = _load_mcp_cfg(src_path)
-    if not _server_names(src_cfg):
-        rprint(f"[yellow]Active registry is empty:[/yellow] {src_path}")
-        return
-    dst_path = to_path.expanduser().resolve()
-    dst_cfg = _load_mcp_cfg(dst_path)
-    added, overwritten, skipped = _copy_servers(src_cfg, dst_cfg, force=force)
-    _save_mcp_cfg(dst_cfg, dst_path)
-    rprint(
-        f"[green]OK[/green] Exported {len(added)} new, {len(overwritten)} overwritten, {len(skipped)} skipped ({src_path} → {dst_path})"
-    )
-    if added:
-        rprint(f"  added:       {', '.join(added)}")
-    if overwritten:
-        rprint(f"  overwritten: {', '.join(overwritten)}")
-    if skipped:
-        rprint(f"  skipped:     {', '.join(skipped)}  [dim](pass --force to overwrite)[/dim]")
-
-
-# ---------------------------------------------------------------------------
-# helpers
-# ---------------------------------------------------------------------------
-
-
-def _remote_only(cmd_name: str) -> NoReturn:  # noqa: ARG001
-    """Raise an error for commands not yet supported on remote targets."""
-    from molexp.cli.workspace import RemoteWorkspaceError
-
-    raise RemoteWorkspaceError(None)
+    if direction in ("ancestors", "both"):
+        _render("ancestors", "<-", asset_lineage_mod.ancestors(ws, asset_id))
+    if direction in ("descendants", "both"):
+        _render("descendants", "->", asset_lineage_mod.descendants(ws, asset_id))

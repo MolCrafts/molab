@@ -33,6 +33,14 @@ def _str_or_none(value: object) -> str | None:
     return str(value)
 
 
+class WorkflowDocumentResponse(BaseModel):
+    """The persisted (normalized) workflow IR document for an experiment."""
+
+    project_id: str = Field(..., description="Owning project id")
+    experiment_id: str = Field(..., description="Owning experiment id")
+    document: dict[str, Any] = Field(..., description="Normalized workflow IR document")
+
+
 def _read_context_results(run: Run) -> dict[str, Any]:
     """Read the ``context.results`` block from run.json on disk.
 
@@ -97,6 +105,7 @@ class ExperimentResponse(BaseModel):
     description: str = ""
     workflow: str | None = None
     workflowType: str | None = None
+    planRunId: str | None = None
     gitCommit: str | None = None
     parameterSpace: dict[str, Any] = Field(default_factory=dict)
     defaultTarget: str | None = None
@@ -115,9 +124,7 @@ class ExperimentResponse(BaseModel):
                     id=r.id,
                     status=r.status,
                     created=r.metadata.created_at.isoformat(),
-                    finished=(
-                        r.metadata.finished_at.isoformat() if r.metadata.finished_at else None
-                    ),
+                    finished=(r.finished_at.isoformat() if r.finished_at else None),
                     parameters=r.parameters,
                     results=_read_context_results(r),
                 )
@@ -130,6 +137,7 @@ class ExperimentResponse(BaseModel):
             description=experiment.description,
             workflow=experiment.metadata.workflow_source,
             workflowType=experiment.metadata.workflow_type,
+            planRunId=experiment.metadata.plan_run_id,
             gitCommit=experiment.metadata.git_commit,
             parameterSpace=experiment.metadata.parameter_space,
             defaultTarget=experiment.metadata.default_target,
@@ -234,7 +242,9 @@ class RunResponse(BaseModel):
                 status=rec.status,
                 schedulerJobId=rec.scheduler_job_id,
             )
-            for rec in run.metadata.execution_history
+            # Execution history + status come from the OKF ``_ops`` sidecar
+            # (wsokf-07), read once via ``run.read_ops()``.
+            for rec in run.read_ops().executions
         ]
         return cls(
             id=run.id,
@@ -242,7 +252,7 @@ class RunResponse(BaseModel):
             experimentId=run.experiment.id,
             status=run.status,
             created=run.metadata.created_at.isoformat(),
-            finished=run.metadata.finished_at.isoformat() if run.metadata.finished_at else None,
+            finished=run.finished_at.isoformat() if run.finished_at else None,
             parameters=run.parameters,
             results=_read_context_results(run),
             workflow=wf_snap,
@@ -335,6 +345,12 @@ class WorkspaceInfoResponse(BaseModel):
     projectCount: int
     assetCount: int
     warnings: list[str] = []
+    # Remote-cache lifecycle (null for local workspaces).
+    # ``ready`` = connected AND navigation index built; missing ``_index.json``
+    # on first open is normal — the server creates it.
+    connected: bool | None = None
+    indexed: bool | None = None
+    ready: bool | None = None
 
 
 class FolderEntryResponse(BaseModel):
@@ -433,7 +449,14 @@ class AgentTaskResponse(BaseModel):
     events: list[SessionEventResponse] = Field(default_factory=list)
     stats: SessionStatsResponse = Field(default_factory=SessionStatsResponse)
     planMode: bool = False
+    activeMode: Literal["chat", "plan"] = "chat"
+    activeTurnId: str | None = None
+    activePlanTaskId: str | None = None
     skillId: str | None = None
+    #: Plan / mount scope — the same ids used by plan_emitted and Deliverables.
+    projectId: str | None = None
+    experimentId: str | None = None
+    runId: str | None = None
 
 
 class AgentTaskListResponse(BaseModel):
@@ -628,21 +651,12 @@ class TensorboardScalarsResponse(BaseModel):
     series: list[TensorboardScalarSeries] = Field(default_factory=list)
 
 
-class WorkflowStepInfo(BaseModel):
-    """Human-readable summary of one workflow execution step."""
-
-    index: int
-    status: str  # pending | running | success | error
-    outputs: dict[str, Any] = Field(default_factory=dict)
-
-
 class RunExecutionResponse(BaseModel):
-    """Workflow execution state read from workflow.json."""
+    """Runtime workflow graph state read from ``workflow.json``."""
 
     execution_id: str | None = None
     status: str = "not_started"  # running | completed | failed | not_started
-    steps: list[WorkflowStepInfo] = Field(default_factory=list)
-    end: dict[str, Any] | None = None
+    workflow: dict[str, Any] | None = None
 
 
 # ── Asset lineage (Producer.inputs DAG) ─────────────────────────────────────
@@ -777,11 +791,16 @@ class RunActionResponse(BaseModel):
     message: str | None = None
 
 
-class RunRerunResponse(BaseModel):
-    """A new run cloned from an existing one."""
+class RunContinueResponse(BaseModel):
+    """Result of continuing a run in place — ``resume`` or ``rerun``.
 
-    sourceRunId: str
-    newRunId: str
+    Both verbs act on the same ``runId`` (no clone, no new run). ``executionId``
+    is the execution the action targeted: the reopened one for ``resume``, the
+    freshly-derived ``exec-{run_id}-N`` for ``rerun``.
+    """
+
+    runId: str
+    executionId: str
     projectId: str
     experimentId: str
     status: str
@@ -823,21 +842,25 @@ class ToolParameterResponse(BaseModel):
 
 
 class AgentToolResponse(BaseModel):
-    """One tool exposed to the agent — native or MCP-discovered.
+    """One agent tool — molexp **builtin** or MCP-discovered.
 
-    For MCP tools, ``source`` is ``"mcp:<server-name>"`` so the UI can
-    group by server. Native tools keep ``source = "native"``.
+    ``source`` is:
+
+    * ``"builtin"`` — always-on molexp tools (``workspace_ensure``,
+      ``run_land``, ``code_write``, …)
+    * ``"mcp:<server-name>"`` — tool from an MCP server, so the UI can
+      attach it to that server's expanded row
     """
 
     name: str
     description: str = ""
     parameters: list[ToolParameterResponse] = Field(default_factory=list)
     requiresApproval: bool = False
-    source: str = "native"
+    source: str
 
 
 class McpToolGroupResponse(BaseModel):
-    """Per-server status surface for the Tools panel.
+    """Per-server discovery status for the MCP server list.
 
     Even when a server is offline / misconfigured / unauthorized we want
     the UI to render *something* under that server's heading — a row with
@@ -845,7 +868,7 @@ class McpToolGroupResponse(BaseModel):
     """
 
     server: str
-    scope: Literal["native", "user", "workspace"]
+    scope: Literal["user", "workspace"]
     ok: bool
     toolCount: int = 0
     error: str | None = None

@@ -2,6 +2,15 @@
 
 **Status**: target architecture. Today's `architecture.md` describes current state; this file describes what we are building toward. Reconcile incrementally as each Phase (§16) lands.
 
+> **Companion:** this file owns the harness *internals* (artifacts, events,
+> WorkflowIR/BoundWorkflow split, executors, validators, audit). The **cross-layer
+> coordination** — how Workspace / Workflow / Experiment / Run / Artifact /
+> Knowledge / Agent cooperate, plus the `WorkspaceContext → Intent → Plan →
+> ChangeProposal → Action → Run/Artifact → KnowledgeDelta` operation loop and the
+> AI-assisted features — is specified in **`integration.md`**, which consumes the
+> models below. New coordination types (`WorkspaceContext`, `WorkspaceEvent`,
+> typed `KnowledgeItem`, `ChangeProposal`) live there; see §4.9.
+
 ## 0. 目标
 
 本系统的目标不是做一个"会写实验流程的 agent"，而是做一个 **provenance-first scientific workflow harness**。
@@ -196,6 +205,16 @@ regression behavior
 ---
 
 ## 3. 端到端流程
+
+> **Shipped (reconciled):** the implemented pipeline is the **single 9-step
+> `PlanMode`** — idea → (1) draft proposal → (2) concrete spec → (3) resolve
+> capabilities → (4) workflow IR → (5) tasks + per-task tests → (6) input set →
+> (7) compile/dry-run → (8) review → (9) execution report. The nine steps end
+> at a descriptive execution report (never submits); real scientific execution
+> is the **opt-in `--execute` tail** (`ExecuteWorkflow → GenerateFinalReport →
+> ApprovalGate → GenerateAuditReport`). The earlier separate `RunMode` is
+> retired/folded into that tail. The conceptual pipeline below still holds; the
+> shipped stage names + the spec/capabilities/input-set steps refine it.
 
 完整 pipeline：
 
@@ -639,6 +658,31 @@ class TestResult(BaseModel):
 每个最终结果必须有 provenance_test
 ```
 
+### 4.9 Coordination-layer extensions (see `integration.md`)
+
+The models above are the harness *internals* (single-run, provenance-first). The
+**cross-layer coordination** models extend — never duplicate — them, and are
+specified in full in `integration.md`:
+
+```text
+WorkspaceContext   read-model assembled from authoritative workspace+knowledge
+                   state; the structured input agents/planners observe.        (integration §1)
+WorkspaceEvent     append-only cross-object coordination spine (mirrors
+                   SQLiteEventLog at workspace scope); HarnessEvent stays the
+                   intra-run deep audit, linked by run_id/content_hash.         (integration §2)
+KnowledgeItem      typed, source-linked OKF concept (Observation / Decision /
+                   Finding / FailureAnalysis / ParameterRationale / …) — every
+                   item carries ≥1 SourceRef into a run/artifact/decision.      (integration §5)
+ChangeProposal     first-class reviewable change; both a `change_proposal`
+                   artifact kind AND a durable record; decided by the existing
+                   ApprovalGate. Every high-risk mutation goes through one.     (integration §8)
+```
+
+Relationship: `integration.md` defers to this file for the *intra-run* mechanism
+(ArtifactRef, HarnessEvent, ApprovalRequest/Decision, executors) and layers the
+*inter-object* loop on top. The §16 phases below remain the harness-internal
+roadmap; the coordination roadmap is `integration.md` §9 (P0–P2).
+
 ---
 
 ## 5. Capability Registry
@@ -929,9 +973,19 @@ class StageRunner:
 
 ### 8.4 标准 Stage 列表
 
+> **Code-synced 2026-07-10.** The *shipped* pipeline is
+> `PlanMode.step_groups()` (9 visible steps + opt-in `--execute` tail) —
+> including `AssembleKnowledgeContext` after `SaveUserPlan`, RepairLoops on
+> every generate→validate pair, and three named `ApprovalGate`s
+> (`approve_experiment_spec` / `approve_plan` / `approve_execution`). Live
+> public surface is **21 symbols** (`tests/test_harness/test_public_surface.py`).
+> This list remains a **north-star inventory**, not a 1:1 dump of the current
+> stage table — see `.claude/notes/architecture.md` Layer 4 for the blueprint.
+
 ```text
 CreateRun
 SaveUserPlan
+AssembleKnowledgeContext
 GenerateExperimentReport
 ReviewExperimentReport
 ExtractWorkflowIR
@@ -1698,6 +1752,7 @@ bound = bind_tasks(ir)
 
 ```python
 await runner.run_stage(SaveUserPlan())
+await runner.run_stage(AssembleKnowledgeContext())
 await runner.run_stage(GenerateExperimentReport())
 await runner.run_stage(ExtractWorkflowIR())
 await runner.run_stage(BindMolcraftsTasks())

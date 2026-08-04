@@ -1,3 +1,5 @@
+import type { TaskGraphJson } from "@/components/workflow/task-graph-ir";
+
 export type LeftPanelView =
   | "workspace"
   | "projects"
@@ -5,6 +7,7 @@ export type LeftPanelView =
   | "asset"
   | "workflow"
   | "agent"
+  | "knowledge"
   | "settings";
 
 export type SemanticObjectType =
@@ -14,7 +17,9 @@ export type SemanticObjectType =
   | "asset"
   | "workflow"
   | "workspace-file"
-  | "agent";
+  | "agent"
+  | "task"
+  | "knowledge";
 
 export type BaseObjectType = "project" | "experiment" | "run" | "asset";
 
@@ -102,6 +107,14 @@ export interface ProjectSummary {
   status: SemanticStatus;
   summary: string;
   updatedAt: string;
+  /**
+   * Stable key of the served workspace this project belongs to. Undefined in
+   * the single-workspace case (the flat `/api/projects` path), set when the
+   * project list is aggregated across several served workspaces.
+   */
+  workspaceKey?: string;
+  /** Server-reported count when list is shallow (experiments not loaded yet). */
+  experimentCount?: number | null;
 }
 
 export interface ExperimentSummary {
@@ -114,6 +127,10 @@ export interface ExperimentSummary {
   projectId: string;
   parameterSpace: Record<string, unknown>;
   workflowSource: string | null;
+  /** The plan run that generated this experiment's workflow (vision-loop-10). */
+  planRunId: string | null;
+  /** Server-reported count when list is shallow (runs not loaded yet). */
+  runCount?: number | null;
 }
 
 export interface ExecutionRecordSummary {
@@ -153,7 +170,13 @@ export interface AssetSummary {
   summary: string;
   updatedAt: string;
   sizeBytes: number | null;
+  /** Scope owner chain, derived from the asset's `scope_ids`. Drives the
+   *  Project → Experiment → Run grouping in the Assets nav. */
   projectId?: string;
+  experimentId?: string;
+  runId?: string;
+  /** Scope leaf kind: `workspace` / `project` / `experiment` / `run`. */
+  scopeKind?: string;
 }
 
 export interface WorkflowSummary {
@@ -164,42 +187,19 @@ export interface WorkflowSummary {
   updatedAt: string;
   projectId: string;
   experimentId: string;
-  graph?: WorkflowGraph;
+  /** The workflow's task-graph IR (the sole client IR type), when available. */
+  graph?: TaskGraphJson;
 }
 
 export interface AgentSessionSummary {
   id: string;
   sessionId: string;
+  /** Server-side task title (curated for plan tasks, goal-derived otherwise). */
+  title: string;
   goal: string;
   status: SemanticStatus;
   createdAt: string;
   eventCount: number;
-}
-
-export interface WorkflowNodeMetadata {
-  nodeId: string;
-  label: string;
-  nodeType: "task" | "input" | "output";
-  status: SemanticStatus;
-  description: string;
-  position: WorkflowNodePosition;
-}
-
-export interface WorkflowGraph {
-  nodes: WorkflowNodeMetadata[];
-  edges: WorkflowGraphEdge[];
-}
-
-export interface WorkflowNodePosition {
-  x: number;
-  y: number;
-}
-
-export interface WorkflowGraphEdge {
-  id: string;
-  source: string;
-  target: string;
-  label: string;
 }
 
 export interface WorkspaceTreeNode {
@@ -214,6 +214,12 @@ export interface WorkspaceTreeNode {
   // registered asset id and the server's existence-only sidecar flag.
   assetId?: string;
   hasPreviewSidecar?: boolean;
+  /**
+   * Directory children were fetched via WorkspaceFs.listdir.
+   * ``false`` ⇒ UI should re-listdir on expand (shallow / remote trees).
+   * Files are always treated as loaded.
+   */
+  childrenLoaded?: boolean;
 }
 
 export interface ConsoleEntry {
@@ -223,7 +229,24 @@ export interface ConsoleEntry {
   timestamp: string;
 }
 
+/** One workspace `molexp serve` is hosting (mirrors GET /api/workspaces). */
+export interface ServedWorkspaceSummary {
+  key: string;
+  label: string;
+  isRemote: boolean;
+  path: string | null;
+  /** True for the workspace whose deep tree (experiments/runs) is loaded. */
+  active: boolean;
+  unreachable: boolean;
+}
+
 export interface WorkspaceSnapshot {
+  /**
+   * The set of served workspaces (empty or single in the unchanged
+   * single-workspace case). When length > 1 the left nav groups projects under
+   * a per-workspace header.
+   */
+  workspaces: ServedWorkspaceSummary[];
   projects: ProjectSummary[];
   experiments: ExperimentSummary[];
   runs: RunSummary[];
@@ -234,7 +257,7 @@ export interface WorkspaceSnapshot {
   consoleEntries: ConsoleEntry[];
 }
 
-export type ObjectView = "overview" | "logs" | "metrics" | "scheduler" | "snapshot";
+export type ObjectView = "overview" | "executions" | "logs" | "metrics" | "scheduler";
 
 export interface ObjectSelection {
   objectType: BaseObjectType;
@@ -257,16 +280,40 @@ export interface WorkspaceFileSelection {
   hasPreviewSidecar?: boolean;
 }
 
+/** Mount scope for a new agent chat (vision-loop-11): the entity whose state
+ * is injected as the session's context block. Project is the shallowest legal
+ * scope; deeper ids require their parents. */
+export interface AgentMountScope {
+  projectId: string;
+  experimentId?: string;
+  runId?: string;
+}
+
 export interface AgentSelection {
   objectType: "agent";
   objectId: string; // task_id, or "new" for the goal-input state
+  scope?: AgentMountScope; // only meaningful when objectId === "new"
+}
+
+export interface TaskSelection {
+  objectType: "task";
+  taskId: string; // workflow-graph node id
+  runId: string; // owning run — used to resolve the task's produced assets
+  objectId: string; // === taskId, for RendererProps compatibility
+}
+
+export interface KnowledgeSelection {
+  objectType: "knowledge";
+  objectId: string; // the concept's bundle-relative path, or "" for the browse overview
 }
 
 export type Selection =
   | ObjectSelection
   | WorkflowSelection
   | WorkspaceFileSelection
-  | AgentSelection;
+  | AgentSelection
+  | TaskSelection
+  | KnowledgeSelection;
 
 export type InspectorTarget =
   | {

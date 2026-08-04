@@ -3,8 +3,9 @@
 Loads a :class:`WorkflowSource` artifact, runs the pure
 :func:`validate_workflow_source` pre-checks (syntax + public-surface imports),
 and only if those pass **lazily imports** ``molexp.workflow`` to compile the
-source into a real ``Workflow`` (calling the program's ``build_workflow()`` and
-``.build()``). A :class:`ValidationReport` is **always persisted**; on failure
+source into a real ``CompiledWorkflow`` (calling the program's
+``build_workflow()`` and ``.compile()``). A :class:`PlanValidationReport` is
+**always persisted**; on failure
 the stage raises :class:`StagePersistedFailureError` (mirroring
 :class:`ValidateWorkflowIR`).
 
@@ -26,6 +27,7 @@ concern (harness executors).
 
 from __future__ import annotations
 
+import ast
 import json
 from typing import Any, ClassVar
 
@@ -33,13 +35,14 @@ from molexp.harness.core.run_context import HarnessRunContext
 from molexp.harness.core.stage import Stage
 from molexp.harness.errors import StagePersistedFailureError
 from molexp.harness.schemas import (
-    ArtifactRef,
-    ValidationReport,
+    PlanArtifactRef,
+    PlanValidationReport,
     ValidationViolation,
     WorkflowSource,
 )
 from molexp.harness.stages._resolve import require_latest
-from molexp.harness.validators.workflow_source import validate_workflow_source
+from molexp.harness.validators.render import render_violations
+from molexp.harness.validators.workflow_source import WorkflowSourceValidator
 
 __all__ = ["ValidateWorkflowSource"]
 
@@ -67,6 +70,18 @@ _SAFE_BUILTINS: dict[str, Any] = {
 }
 
 
+def _defines_build_workflow(source: str) -> bool:
+    """True if ``source`` defines a top-level ``build_workflow`` function."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return False
+    return any(
+        isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == "build_workflow"
+        for node in tree.body
+    )
+
+
 class ValidateWorkflowSource(Stage):
     """Compile a WorkflowSource artifact through molexp.workflow; persist a report."""
 
@@ -75,7 +90,7 @@ class ValidateWorkflowSource(Stage):
     def __init__(self, *, raise_on_failure: bool = True) -> None:
         self._raise_on_failure = raise_on_failure
 
-    async def run(self, ctx: HarnessRunContext) -> ArtifactRef:
+    async def run(self, ctx: HarnessRunContext) -> PlanArtifactRef:
         target = require_latest(ctx, "workflow_source", stage=self.name).id
         raw = ctx.artifact_store.get(target)
 
@@ -95,9 +110,52 @@ class ValidateWorkflowSource(Stage):
                 target=target,
             )
 
-        # Pure pre-checks first — reject syntax errors + private imports BEFORE
-        # any compile/exec of the untrusted source.
-        report = validate_workflow_source(ws.source, target_id=target)
+        # Multi-file (per-task modules + assembly): static per-file pre-checks
+        # only — syntax + public-surface imports on EACH file, and the assembly
+        # must define build_workflow(). The real build/compile of the assembled
+        # package runs in CompileWorkflow (a subprocess), so the harness never
+        # execs the multi-module program in-process.
+        if ws.files:
+            violations: list[ValidationViolation] = []
+            # Assembly must be present: either as workflow/__init__.py in files
+            # or as the top-level ``source`` field (materialize writes it).
+            has_init_file = any(
+                f.path.endswith("__init__.py") and "build_workflow" in (f.source or "")
+                for f in ws.files
+            )
+            if not has_init_file and not _defines_build_workflow(ws.source or ""):
+                violations.append(
+                    ValidationViolation(
+                        code="missing_build_workflow",
+                        message=(
+                            "multi-file WorkflowSource must define build_workflow() in "
+                            "source (package assembly) or in a files[] __init__.py"
+                        ),
+                        severity="error",
+                    )
+                )
+            for f in ws.files:
+                violations.extend(
+                    WorkflowSourceValidator.validate(f.source, target_id=target).violations
+                )
+            if not _defines_build_workflow(ws.source):
+                violations.append(
+                    ValidationViolation(
+                        code="missing_build_workflow",
+                        message="the workflow assembly defines no callable build_workflow()",
+                        severity="error",
+                    )
+                )
+            return self._persist_and_maybe_raise(
+                ctx,
+                violations,
+                f"generated workflow files did not validate:\n{render_violations(violations)}",
+                target=target,
+            )
+
+        # Single-file: pure pre-checks first — reject syntax errors + private
+        # imports BEFORE any compile/exec of the untrusted source.
+        report = WorkflowSourceValidator.validate(ws.source, target_id=target)
         if not report.passed:
             return self._persist_report_and_maybe_raise(ctx, report, target=target)
 
@@ -106,7 +164,7 @@ class ValidateWorkflowSource(Stage):
         return self._persist_and_maybe_raise(
             ctx,
             violations,
-            f"generated workflow source did not build: {[v.code for v in violations]}",
+            f"generated workflow source did not build:\n{render_violations(violations)}",
             target=target,
         )
 
@@ -139,21 +197,24 @@ class ValidateWorkflowSource(Stage):
 
         try:
             builder = builder_factory()
-            result = builder.build()
+            result = builder.compile()
         except Exception as exc:
             return [
                 ValidationViolation(
                     code="build_error",
-                    message=f"build_workflow().build() failed: {exc!r}",
+                    message=f"build_workflow().compile() failed: {exc!r}",
                     severity="error",
                 )
             ]
 
-        if not isinstance(result, workflow.Workflow):
+        if not isinstance(result, workflow.CompiledWorkflow):
             return [
                 ValidationViolation(
                     code="not_a_workflow",
-                    message=f"build_workflow().build() returned {type(result).__name__}, not a Workflow",
+                    message=(
+                        f"build_workflow().compile() returned {type(result).__name__}, "
+                        "not a CompiledWorkflow"
+                    ),
                     severity="error",
                 )
             ]
@@ -166,8 +227,8 @@ class ValidateWorkflowSource(Stage):
         error_message: str,
         *,
         target: str,
-    ) -> ArtifactRef:
-        report = ValidationReport.from_violations(
+    ) -> PlanArtifactRef:
+        report = PlanValidationReport.from_violations(
             target_kind="workflow_source",
             target_id=target,
             violations=violations,
@@ -177,11 +238,11 @@ class ValidateWorkflowSource(Stage):
     def _persist_report_and_maybe_raise(
         self,
         ctx: HarnessRunContext,
-        report: ValidationReport,
+        report: PlanValidationReport,
         error_message: str | None = None,
         *,
         target: str,
-    ) -> ArtifactRef:
+    ) -> PlanArtifactRef:
         report_ref = ctx.artifact_store.put_json(
             kind="validation_report",
             obj=json.loads(report.model_dump_json()),
@@ -189,9 +250,9 @@ class ValidateWorkflowSource(Stage):
             parent_ids=[target],
         )
         if not report.passed and self._raise_on_failure:
-            codes = [v.code for v in report.violations if v.severity == "error"]
             raise StagePersistedFailureError(
                 report_ref,
-                error_message or f"workflow source validation failed: {codes}",
+                error_message
+                or (f"workflow source validation failed:\n{render_violations(report.violations)}"),
             )
         return report_ref

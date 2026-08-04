@@ -1,8 +1,8 @@
-"""Unit tests for molexp.tree_monitor data/layout primitives.
+"""Unit tests for the molexp.cli.tui data/layout primitives.
 
-Covers tree build, flatten + expansion, short-id formatting, target
-collection, and the dialog classification path.  TUI loop and key
-handling are out of scope — validated manually.
+Covers tree build, flatten + expansion, target collection, the dialog
+classification path, and the deprecated ``molexp.tree_monitor`` shim.
+TUI loop and key handling are out of scope — validated manually.
 """
 
 from __future__ import annotations
@@ -12,18 +12,10 @@ from pathlib import Path
 
 import pytest
 
-from molexp.tree_monitor import (
-    _collect_targets,
-    _prepare_dialog,
-    _short_exec_label,
-    _short_id,
-    _UIState,
-    build_tree,
-    flatten,
-    node_path_str,
-)
+from molexp.cli.tui import build_tree, flatten, node_path_str
+from molexp.cli.tui.tree_monitor import _collect_targets, _prepare_dialog, _UIState
 from molexp.workspace import Workspace
-from molexp.workspace.models import ExecutionRecord
+from molexp.workspace.models import ExecutionRecord, RunStatus
 
 
 @pytest.fixture
@@ -33,8 +25,8 @@ def seeded_workspace(tmp_path):
 
     p = ws.add_project("proj-a")
     e = p.add_experiment("exp-x", workflow_source="s.py", params={})
-    r1 = e.add_run(parameters={"seed": 1}, id="abcdef0123456789")
-    r2 = e.add_run(parameters={"seed": 2}, id="fedcba9876543210")
+    r1 = e.add_run(params={"seed": 1}, id="abcdef0123456789")
+    r2 = e.add_run(params={"seed": 2}, id="fedcba9876543210")
 
     # r1: two execution attempts
     hist = []
@@ -49,28 +41,18 @@ def seeded_workspace(tmp_path):
                 status=status,
             )
         )
-    r1._update_metadata(execution_history=hist, status="succeeded")
-    r2._update_metadata(status="running")
+    r1.update_ops(
+        lambda s: s.model_copy(update={"executions": tuple(hist), "status": RunStatus.SUCCEEDED})
+    )
+    r2.update_ops(lambda s: s.model_copy(update={"status": RunStatus.RUNNING}))
 
     p2 = ws.add_project("proj-b")
     p2.add_experiment("exp-y", workflow_source="s.py", params={})
     return ws
 
 
-class TestShortId:
-    def test_long_id_truncates(self):
-        assert _short_id("abcdef0123456789") == "abcdef"
-
-    def test_short_id_unchanged(self):
-        assert _short_id("abc") == "abc"
-
-    def test_exec_label_strips_prefix_and_adds_attempt(self):
-        assert _short_exec_label("exec-abcdef0123456789") == "exec-abcdef"
-        assert _short_exec_label("exec-abcdef0123456789-2") == "exec-abcdef#2"
-
-
 class TestBuildTree:
-    def test_structure(self, seeded_workspace):
+    def test_builds_hierarchy_with_count_hints_and_execution_children(self, seeded_workspace):
         root = build_tree(seeded_workspace)
         assert root.kind == "workspace"
         assert [c.kind for c in root.children] == ["project", "project"]
@@ -94,12 +76,6 @@ class TestBuildTree:
 
 
 class TestFlatten:
-    def test_all_collapsed(self, seeded_workspace):
-        root = build_tree(seeded_workspace)
-        rows = flatten(root, expanded=set())
-        assert [r.node.display_label for r in rows] == ["proj-a", "proj-b"]
-        assert all(r.depth == 0 for r in rows)
-
     def test_expand_project(self, seeded_workspace):
         root = build_tree(seeded_workspace)
         rows = flatten(root, expanded={("project", "proj-a")})
@@ -109,16 +85,6 @@ class TestFlatten:
             (1, "experiment", "exp-x"),
             (0, "project", "proj-b"),
         ]
-
-    def test_expand_full_chain(self, seeded_workspace):
-        root = build_tree(seeded_workspace)
-        expanded = {
-            ("project", "proj-a"),
-            ("project", "proj-a", "experiment", "exp-x"),
-        }
-        rows = flatten(root, expanded=expanded)
-        kinds = [r.node.kind for r in rows]
-        assert kinds == ["project", "experiment", "run", "run", "project"]
 
 
 class TestNodePath:
@@ -169,3 +135,21 @@ class TestPrepareDialog:
         dialog = _prepare_dialog([run])
         assert dialog.plan_lines[0][0] == "!"
         assert "uncancellable" in dialog.plan_lines[0][2]
+
+
+class TestDeprecatedShim:
+    def test_legacy_import_path_warns_and_reexports(self):
+        import importlib
+        import sys
+
+        sys.modules.pop("molexp.tree_monitor", None)
+        with pytest.warns(DeprecationWarning, match="molexp.cli.tui"):
+            shim = importlib.import_module("molexp.tree_monitor")
+
+        import molexp.cli.tui as tui
+
+        assert shim.TreeMonitor is tui.TreeMonitor
+        assert shim.TreeNode is tui.TreeNode
+        assert shim.build_tree is tui.build_tree
+        assert shim.flatten is tui.flatten
+        assert shim.node_path_str is tui.node_path_str

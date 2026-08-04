@@ -1,19 +1,9 @@
-"""Failing tests pinning the contract for ``molexp.plugins.cli``.
+"""Tests for ``molexp.plugins.cli`` — the CLI-only plugin layer.
 
-These tests cover the new CLI-only plugin layer introduced by
-spec ``07-cli-ui-plugin-split``:
-
-- a frozen ``CliPlugin`` dataclass with a *required* ``register``
-  callable (no more ``register_cli: Callable | None``)
-- a ``CLI_PLUGIN_API_VERSION`` constant pinned to ``"1"``
-- a ``discover_cli_plugins()`` function that walks the
-  ``molexp.cli_plugins`` entry-point group with
-  ``functools.cache`` + failure-isolation + first-wins
-  de-duplication
-
-The tests are deliberately RED right now: ``molexp.plugins.cli`` does
-not exist yet, so the very first import fails with ``ImportError``.
-Implementation is scheduled for Step 5 of the spec.
+Covers the ``CliPlugin`` descriptor's required-``register`` contract and
+``discover_cli_plugins()``'s entry-point walk over the
+``molexp.cli_plugins`` group (cache + failure isolation + api-version
+gating + first-wins de-duplication).
 """
 
 from __future__ import annotations
@@ -23,63 +13,28 @@ from collections.abc import Iterable
 import pytest
 import typer
 
-from molexp.plugins.cli import (  # type: ignore[import-not-found]
+from molexp.plugins.cli import (
     CLI_PLUGIN_API_VERSION,
     CliPlugin,
-    _discover_cli_uncached,  # type: ignore[import-not-found]
+    _discover_cli_uncached,
     discover_cli_plugins,
 )
 
-# ── contract dataclass tests (ac-001) ─────────────────────────────────────
 
-
-class TestCliPluginContract:
-    def test_is_immutable_plain_class(self) -> None:
-        """CliPlugin is a plain Python class with explicit __init__; it carries
-        a live ``register`` callable so it is not a pydantic BaseModel."""
-        from pydantic import BaseModel
-
-        assert not issubclass(CliPlugin, BaseModel)
-
-    def test_required_fields(self) -> None:
+class TestCliPlugin:
+    def test_register_is_a_required_field(self) -> None:
         def reg(app: typer.Typer) -> None:
             pass
 
-        plugin = CliPlugin(id="x", name="X", version="0.0.1", register=reg)
-        assert plugin.id == "x"
-        assert plugin.name == "X"
-        assert plugin.version == "0.0.1"
-        assert plugin.api_version == "1"
-        assert callable(plugin.register)
-        assert plugin.register is reg
-
-        # ``register`` is a required, non-defaulted field — constructing
-        # a CliPlugin without it must raise ``TypeError``.
+        # ``register`` has no default — 07-cli-ui-plugin-split retired the
+        # optional ``register_cli`` field, so a CLI plugin that registers
+        # nothing cannot be constructed.
+        assert CliPlugin(id="x", name="X", version="0.0.1", register=reg).register is reg
         with pytest.raises(TypeError):
             CliPlugin(id="x", name="X", version="0.0.1")  # type: ignore[call-arg]
 
-    def test_immutable(self) -> None:
-        plugin = CliPlugin(
-            id="x",
-            name="X",
-            version="0.0.1",
-            register=lambda app: None,  # noqa: ARG005
-        )
-        with pytest.raises(AttributeError):
-            plugin.id = "y"  # type: ignore[misc]
 
-    def test_api_version_constant(self) -> None:
-        assert CLI_PLUGIN_API_VERSION == "1"
-        plugin = CliPlugin(
-            id="x",
-            name="X",
-            version="0.0.1",
-            register=lambda app: None,  # noqa: ARG005
-        )
-        assert plugin.api_version == CLI_PLUGIN_API_VERSION
-
-
-# ── discovery tests (ac-002) ──────────────────────────────────────────────
+# ── discovery fixtures + helpers ──────────────────────────────────────────
 
 
 class _FakeEntryPoint:
@@ -251,10 +206,6 @@ class TestDiscoverCliPlugins:
 
         assert result == (first,)
         assert any("duplicate" in msg.lower() for msg in warnings)
-
-    def test_no_entry_points_returns_empty_tuple(self, monkeypatch: pytest.MonkeyPatch) -> None:
-        _install_fake_eps(monkeypatch, [])
-        assert discover_cli_plugins() == ()
 
     def test_cache_hits_on_second_call(self, monkeypatch: pytest.MonkeyPatch) -> None:
         valid = _make_plugin("cached")

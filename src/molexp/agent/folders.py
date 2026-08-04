@@ -1,300 +1,258 @@
-"""Agent-layer :class:`Folder` subclasses — ``Agent`` + ``AgentSession``.
+"""Agent-layer Concept types — ``Agent`` + ``AgentSession``.
 
-Per sub-spec ``unify-folder-abstraction-03`` § Design § 4, the agent
-layer owns its on-disk entity tree by subclassing the public
-:class:`molexp.workspace.Folder`. workspace remains unaware of these
-classes; the kinds ``agent.agent`` / ``agent.session`` and the
-metadata shapes are agent-layer-internal.
+Rehomed onto :class:`molexp.workspace.Folder` (the OKF rewrite, wsokf-06): an
+``Agent`` is a workspace Concept (``kind = "agent.agent"``) whose
+``AgentSession`` children (``kind = "agent.session"``) are **flat** child
+Concepts — one dir per session, ``meta.yaml`` for structured identity,
+``messages.jsonl`` for the pydantic-ai history. Both register with the shared
+concept-type registry (``molexp.knowledge.types.concept_type`` — the *only*
+knowledge edge), so ``workspace.folder.concept_from_dir`` / ``list_folders`` /
+``get_folder`` rebuild the right subclass. All I/O routes through the Folder's
+injectable filesystem (``self._fs``), so a session works against any backend.
 
-Mount points are the caller's choice — any workspace ``Folder`` accepts
-``Agent`` (or any sibling) via the generic ``add_folder(...)`` API::
+Unlike the base workspace ``Folder`` (whose ``meta.yaml`` is an additive
+``{type, id}`` marker alongside an authoritative ``metadata.json``), the agent
+Concepts have **no** separate entity json — their settled identity
+(system_prompt/model/tier for Agent; goal_summary/status/timestamps for
+AgentSession) *is* the OKF structured identity, so ``meta.yaml`` is the full,
+rich authority. ``Agent`` / ``AgentSession`` therefore override
+``write_meta`` / ``materialize`` / ``from_disk`` to make the typed
+:class:`~molexp.agent.folders_metadata.AgentMeta` /
+:class:`~molexp.agent.folders_metadata.AgentSessionMeta` the meta.yaml payload.
 
-    ws = Workspace("./lab")
-    proj = ws.add_project("qm9")
-
-    # Pattern A — workspace-level agent (shared across projects)
-    review_bot = ws.add_folder(Agent(name="review-bot"))
-    sess = review_bot.add_session("chat-1")
-
-    # Pattern B — project-scoped agent
-    helper = proj.add_folder(Agent(name="qm9-helper"))
-
-``AgentSession.read_messages`` / ``write_messages`` lazy-load the
-pydantic-ai message codec so ``import molexp.agent.folders`` does **not**
-pull ``pydantic_ai`` into ``sys.modules``; the codec is invoked only
-when a caller actually reads/writes the conversation history.
-
-Naming note: the *runtime* ``AgentSession`` (in
-:mod:`molexp.agent.session`) is a transient in-memory object passed to
-``AgentRunner.run``; this :class:`AgentSession` is its on-disk
-persistent counterpart (subclasses :class:`Folder`). They are distinct
-classes living in distinct modules — ``from molexp.agent.folders import
-AgentSession`` for the storage class, ``from molexp.agent.session
-import AgentSession`` (or ``from molexp.agent import AgentSession``)
-for the runtime class.
+The *runtime* ``AgentSession`` (in :mod:`molexp.agent.session`) is a distinct
+in-memory class; this one is its on-disk persistent counterpart.
 """
 
 from __future__ import annotations
 
-from typing import Any, cast
+import yaml
 
 from molexp._typing import JSONValue
-from molexp.agent.folders_metadata import (
-    AgentMetadata,
-    AgentSessionMetadata,
-    SessionStatusStr,
-)
+from molexp.agent.folders_metadata import AgentMeta, AgentSessionMeta, SessionStatusStr
+from molexp.knowledge.types import concept_type
 from molexp.path import Path
-from molexp.workspace import Folder, FolderMetadata
-from molexp.workspace.base import (
-    _load_metadata,
-    _reconstruct,
-    _save_metadata,
-)
-from molexp.workspace.fs import PathArg
+from molexp.workspace import Folder
+from molexp.workspace.fs import FileSystem, PathArg
+from molexp.workspace.models import FolderMetadata
 
 AGENT_KIND = "agent.agent"
 AGENT_SESSION_KIND = "agent.session"
-
-AGENT_METADATA_FILENAME = "agent.json"
-AGENT_SESSION_METADATA_FILENAME = "agent_session.json"
 MESSAGES_FILENAME = "messages.jsonl"
+# Leaf-stamp sidecar beside ``messages.jsonl``: records the session entry id
+# the lossless model-messages blob was produced against, so the emergent loop
+# can tell a linear continuation (reuse the blob) from a branch/resume
+# (discard it and reseed from the entry tree).
+MESSAGES_LEAF_FILENAME = "messages.leaf"
+META_YAML_FILENAME = "meta.yaml"
 
 
-# ── AgentSession (Folder subclass) ─────────────────────────────────────────
+def _folder_metadata(slug: str, kind: str) -> FolderMetadata:
+    """Build the base :class:`FolderMetadata` an agent Concept carries."""
+    return FolderMetadata(id=slug, name=slug, kind=kind)
 
 
+@concept_type(AGENT_SESSION_KIND)
 class AgentSession(Folder):
     """One conversation under an :class:`Agent` — ``kind = "agent.session"``.
 
-    Per-session dir holds:
-
-    - ``agent_session.json`` — :class:`AgentSessionMetadata` payload
-      (goal_summary / status / timestamps).
-    - ``messages.jsonl`` — pydantic-ai ``ModelMessage`` history,
-      written via :meth:`write_messages` (lazy codec).
+    Holds ``meta.yaml`` (:class:`AgentSessionMeta`, the rich identity authority)
+    + ``messages.jsonl`` (the pydantic-ai history, written via
+    :meth:`write_messages` through ``self._fs``).
     """
 
     def __init__(
         self,
         *,
-        parent: Folder | None = None,
         name: str,
+        parent: Folder | None = None,
+        root_path: PathArg | None = None,
         kind: str = AGENT_SESSION_KIND,
+        fs: FileSystem | None = None,
         goal_summary: str = "",
         status: SessionStatusStr = "pending",
-        _entity_metadata: AgentSessionMetadata | None = None,
+        _meta: AgentSessionMeta | None = None,
     ) -> None:
-        super().__init__(parent=parent, name=name, kind=kind)
-        meta = (
-            _entity_metadata
-            if _entity_metadata is not None
-            else AgentSessionMetadata(
-                id=self._name,
-                name=name,
-                kind=kind,
-                goal_summary=goal_summary,
-                status=status,
-            )
+        super().__init__(name=name, parent=parent, kind=kind, root_path=root_path, fs=fs)
+        self._session_meta = _meta or AgentSessionMeta(
+            id=self._name, goal_summary=goal_summary, status=status
         )
-        self._entity_metadata: AgentSessionMetadata = meta
 
-    def resolve(self) -> Path:
-        """Compute the session's on-disk path (parent-relative, no I/O).
+    # ── meta.yaml authority (rich AgentSessionMeta, not the additive marker) ─
 
-        Returns :class:`molexp.Path` so a session under a
-        :class:`RemoteFileSystem`-backed workspace can be addressed the
-        same way as a local one.  All session I/O routes through
-        ``self._fs`` (``read_messages`` / ``write_messages`` /
-        ``materialize`` / ``save``)."""
-        if self._parent is None:
-            raise RuntimeError(
-                f"AgentSession {self._name!r} is unmounted — mount via parent.add_folder()"
-            )
-        return type(self).child_dir(self._parent, self._name)
+    def write_meta(self) -> str:
+        """Write the rich :class:`AgentSessionMeta` as this session's meta.yaml."""
+        fpath = self._fs.join(self.path(), META_YAML_FILENAME)
+        self._fs.atomic_write_text(
+            fpath, yaml.safe_dump(self._session_meta.model_dump(mode="json"), sort_keys=False)
+        )
+        return fpath
 
-    @classmethod
-    def child_dir(cls, parent: Folder, derived_id: str) -> Path:
-        """Sessions live under ``<parent>/agent_sessions/<id>/``."""
-        return Path(parent._fs.join(parent.path(), "agent_sessions", derived_id))
+    def read_meta(self) -> dict[str, JSONValue]:
+        """Read the raw meta.yaml dict, or ``{}`` if absent."""
+        fpath = self._fs.join(self.resolve(), META_YAML_FILENAME)
+        if not self._fs.exists(fpath):
+            return {}
+        loaded = yaml.safe_load(self._fs.read_text(fpath)) or {}
+        return loaded if isinstance(loaded, dict) else {}
+
+    def read_session_meta(self) -> AgentSessionMeta:
+        """Load this session's typed ``meta.yaml`` from disk (disk is truth)."""
+        return AgentSessionMeta.model_validate(self.read_meta())
+
+    def write_session_meta(self, meta: AgentSessionMeta) -> None:
+        """Persist this session's typed ``meta.yaml`` (disk is the source)."""
+        self._session_meta = meta
+        self.write_meta()
+
+    def materialize(self) -> None:
+        """Write the session's ``meta.yaml`` (creating the dir lazily)."""
+        self.write_meta()
 
     @classmethod
     def from_disk(cls, child_dir: PathArg, parent: Folder) -> AgentSession:
-        meta_path = parent._fs.join(child_dir, AGENT_SESSION_METADATA_FILENAME)
-        meta = _load_metadata(AgentSessionMetadata, meta_path, fs=parent._fs)
-        folder_meta = FolderMetadata(
-            id=meta.id,
-            name=meta.name,
-            kind=AGENT_SESSION_KIND,
-            created_at=meta.created_at,
-            updated_at=meta.updated_at,
+        """Reconstruct an :class:`AgentSession` from its ``meta.yaml`` (disk is truth)."""
+        fs = parent._fs
+        meta_path = fs.join(child_dir, META_YAML_FILENAME)
+        slug = fs.basename(child_dir)
+        meta = (
+            AgentSessionMeta.model_validate(yaml.safe_load(fs.read_text(meta_path)) or {})
+            if fs.exists(meta_path)
+            else AgentSessionMeta(id=slug)
         )
-        attrs = cls.base_from_disk_attrs(parent, folder_meta) | {
-            "_entity_metadata": meta,
-        }
-        return _reconstruct(cls, attrs)
-
-    @property
-    def metadata(self) -> AgentSessionMetadata:  # type: ignore[override]
-        return self._entity_metadata
+        session = cls(name=slug, parent=parent, _meta=meta)
+        session._metadata = _folder_metadata(slug, AGENT_SESSION_KIND)
+        return session
 
     @property
     def goal_summary(self) -> str:
-        return self._entity_metadata.goal_summary
+        return self.read_session_meta().goal_summary
 
     @property
     def status(self) -> SessionStatusStr:
-        return self._entity_metadata.status
+        return self.read_session_meta().status
 
-    def materialize(self) -> None:
-        self._fs.mkdir(self.path(), parents=True, exist_ok=True)
-        meta_path = self._fs.join(self.path(), AGENT_SESSION_METADATA_FILENAME)
-        _save_metadata(self._entity_metadata, meta_path, fs=self._fs)
-
-    def save(self) -> None:
-        meta_path = self._fs.join(self.path(), AGENT_SESSION_METADATA_FILENAME)
-        _save_metadata(self._entity_metadata, meta_path, fs=self._fs)
-
-    def _to_index_row(self) -> dict[str, JSONValue]:
-        return cast("dict[str, JSONValue]", self._entity_metadata.model_dump(mode="json"))
-
-    # ── pydantic-ai ModelMessage history (lazy codec) ──────────────────────
+    # ── pydantic-ai ModelMessage history (lazy codec, fs-routed) ───────────
 
     @property
     def messages_path(self) -> Path:
-        return Path(self._fs.join(self.path(), MESSAGES_FILENAME))
+        return Path(self._fs.join(self.resolve(), MESSAGES_FILENAME))
 
-    def read_messages(self) -> tuple[Any, ...]:
-        """Load the persisted pydantic-ai ``ModelMessage`` tuple.
-
-        Routes I/O through ``self._fs`` so a session under a
-        :class:`RemoteFileSystem`-backed workspace reads ``messages.jsonl``
-        over the configured transport.  The codec lives behind the
-        ``_pydanticai/`` import-boundary firewall, so importing
-        :mod:`molexp.agent.folders` does NOT pull ``pydantic_ai`` in —
-        only the first call to ``read_messages`` / ``write_messages`` does.
-        """
+    def read_messages(self) -> tuple[object, ...]:
+        """Load the persisted ``ModelMessage`` tuple (``()`` if none), via fs."""
         path = self.messages_path
         if not self._fs.exists(path):
             return ()
-        # function-local import — pydantic-ai stays lazy
         from molexp.agent._pydanticai.messages_codec import load_model_messages
 
         return load_model_messages(self._fs.read_bytes(path))
 
-    def write_messages(self, messages: tuple[Any, ...]) -> None:
-        """Atomically persist the pydantic-ai ``ModelMessage`` tuple."""
+    def write_messages(self, messages: tuple[object, ...]) -> None:
+        """Persist the ``ModelMessage`` tuple via fs (empty ⇒ remove)."""
         path = self.messages_path
         if not messages:
-            if self._fs.exists(path):
-                self._fs.remove(path)
+            self._fs.remove(path)
             return
         from molexp.agent._pydanticai.messages_codec import dump_model_messages
 
-        self._fs.mkdir(self.path(), parents=True, exist_ok=True)
-        payload = dump_model_messages(messages)
-        self._fs.write_bytes(path, payload)
+        self._fs.write_bytes(path, dump_model_messages(messages))
 
 
-# ── Agent (Folder subclass) ────────────────────────────────────────────────
-
-
+@concept_type(AGENT_KIND)
 class Agent(Folder):
-    """Configured agent persona — ``kind = "agent.agent"``.
-
-    Owns multiple :class:`AgentSession` children via typed semantic-sugar
-    CRUD (``add_session / get_session / has_session / list_sessions /
-    remove_session``), all one-line wrappers over the generic
-    :class:`Folder` CRUD.
-    """
+    """Configured agent persona — ``kind = "agent.agent"``; owns sessions."""
 
     def __init__(
         self,
         *,
-        parent: Folder | None = None,
         name: str,
+        parent: Folder | None = None,
+        root_path: PathArg | None = None,
         kind: str = AGENT_KIND,
+        fs: FileSystem | None = None,
         system_prompt: str = "",
         model: str = "",
         tier: str = "",
         description: str = "",
-        _entity_metadata: AgentMetadata | None = None,
+        _meta: AgentMeta | None = None,
     ) -> None:
-        super().__init__(parent=parent, name=name, kind=kind)
-        meta = (
-            _entity_metadata
-            if _entity_metadata is not None
-            else AgentMetadata(
-                id=self._name,
-                name=name,
-                kind=kind,
-                system_prompt=system_prompt,
-                model=model,
-                tier=tier,
-                description=description,
-            )
+        super().__init__(name=name, parent=parent, kind=kind, root_path=root_path, fs=fs)
+        self._agent_meta = _meta or AgentMeta(
+            id=self._name,
+            system_prompt=system_prompt,
+            model=model,
+            tier=tier,
+            description=description,
         )
-        self._entity_metadata: AgentMetadata = meta
 
-    def resolve(self) -> Path:
-        """Compute the agent's on-disk path (parent-relative, no I/O)."""
-        if self._parent is None:
-            raise RuntimeError(f"Agent {self._name!r} is unmounted — mount via parent.add_folder()")
-        return type(self).child_dir(self._parent, self._name)
+    # ── meta.yaml authority (rich AgentMeta, not the additive marker) ──────
 
-    @classmethod
-    def child_dir(cls, parent: Folder, derived_id: str) -> Path:
-        """Agents live under ``<parent>/agents/<id>/``."""
-        return Path(parent._fs.join(parent.path(), "agents", derived_id))
+    def write_meta(self) -> str:
+        """Write the rich :class:`AgentMeta` as this agent's meta.yaml."""
+        fpath = self._fs.join(self.path(), META_YAML_FILENAME)
+        self._fs.atomic_write_text(
+            fpath, yaml.safe_dump(self._agent_meta.model_dump(mode="json"), sort_keys=False)
+        )
+        return fpath
+
+    def read_meta(self) -> dict[str, JSONValue]:
+        """Read the raw meta.yaml dict, or ``{}`` if absent."""
+        fpath = self._fs.join(self.resolve(), META_YAML_FILENAME)
+        if not self._fs.exists(fpath):
+            return {}
+        loaded = yaml.safe_load(self._fs.read_text(fpath)) or {}
+        return loaded if isinstance(loaded, dict) else {}
+
+    def read_agent_meta(self) -> AgentMeta:
+        """Load this agent's typed ``meta.yaml`` from disk (disk is truth)."""
+        return AgentMeta.model_validate(self.read_meta())
+
+    def write_agent_meta(self, meta: AgentMeta) -> None:
+        """Persist this agent's typed ``meta.yaml`` (disk is the source)."""
+        self._agent_meta = meta
+        self.write_meta()
+
+    def materialize(self) -> None:
+        """Write the agent's ``meta.yaml`` (creating the dir lazily)."""
+        self.write_meta()
 
     @classmethod
     def from_disk(cls, child_dir: PathArg, parent: Folder) -> Agent:
-        meta_path = parent._fs.join(child_dir, AGENT_METADATA_FILENAME)
-        meta = _load_metadata(AgentMetadata, meta_path, fs=parent._fs)
-        folder_meta = FolderMetadata(
-            id=meta.id,
-            name=meta.name,
-            kind=AGENT_KIND,
-            created_at=meta.created_at,
-            updated_at=meta.updated_at,
+        """Reconstruct an :class:`Agent` from its ``meta.yaml`` (disk is truth)."""
+        fs = parent._fs
+        meta_path = fs.join(child_dir, META_YAML_FILENAME)
+        slug = fs.basename(child_dir)
+        meta = (
+            AgentMeta.model_validate(yaml.safe_load(fs.read_text(meta_path)) or {})
+            if fs.exists(meta_path)
+            else AgentMeta(id=slug)
         )
-        attrs = cls.base_from_disk_attrs(parent, folder_meta) | {
-            "_entity_metadata": meta,
-        }
-        return _reconstruct(cls, attrs)
-
-    @property
-    def metadata(self) -> AgentMetadata:  # type: ignore[override]
-        return self._entity_metadata
+        agent = cls(name=slug, parent=parent, _meta=meta)
+        agent._metadata = _folder_metadata(slug, AGENT_KIND)
+        return agent
 
     @property
     def system_prompt(self) -> str:
-        return self._entity_metadata.system_prompt
+        return self.read_agent_meta().system_prompt
 
     @property
     def model(self) -> str:
-        return self._entity_metadata.model
+        return self.read_agent_meta().model
 
     @property
     def tier(self) -> str:
-        return self._entity_metadata.tier
+        return self.read_agent_meta().tier
 
-    def materialize(self) -> None:
-        self._fs.mkdir(self.path(), parents=True, exist_ok=True)
-        meta_path = self._fs.join(self.path(), AGENT_METADATA_FILENAME)
-        _save_metadata(self._entity_metadata, meta_path, fs=self._fs)
+    # ── typed sugar for AgentSession children (flat concept dirs) ──────────
 
-    def save(self) -> None:
-        meta_path = self._fs.join(self.path(), AGENT_METADATA_FILENAME)
-        _save_metadata(self._entity_metadata, meta_path, fs=self._fs)
-
-    def _to_index_row(self) -> dict[str, JSONValue]:
-        return cast("dict[str, JSONValue]", self._entity_metadata.model_dump(mode="json"))
-
-    # ── Typed semantic-sugar CRUD for AgentSession children ────────────────
-
-    def add_session(self, name: str, **kwargs: Any) -> AgentSession:  # noqa: ANN401
-        return cast(AgentSession, self.add_folder(AgentSession(name=name, **kwargs)))
+    def add_session(
+        self, name: str, *, goal_summary: str = "", status: SessionStatusStr = "pending"
+    ) -> AgentSession:
+        """Create (or return) a child session Concept; idempotent on slug."""
+        child = AgentSession(parent=self, name=name, goal_summary=goal_summary, status=status)
+        session = self.add_folder(child)
+        assert isinstance(session, AgentSession)
+        return session
 
     def get_session(self, name: str) -> AgentSession:
         return self.get_folder(name, cls=AgentSession)
@@ -311,10 +269,9 @@ class Agent(Folder):
 
 __all__ = [
     "AGENT_KIND",
-    "AGENT_METADATA_FILENAME",
     "AGENT_SESSION_KIND",
-    "AGENT_SESSION_METADATA_FILENAME",
     "MESSAGES_FILENAME",
+    "MESSAGES_LEAF_FILENAME",
     "Agent",
     "AgentSession",
 ]

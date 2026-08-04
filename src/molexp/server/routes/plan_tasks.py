@@ -1,0 +1,289 @@
+"""Plan-task routes — run the harness ``PlanMode`` pipeline as a background task.
+
+``POST /projects/{p}/experiments/{e}/plan-tasks`` files a content-addressed Run
+under the experiment and starts PlanMode on it in the background (no LLM
+blocking the request). Approval gates suspend the task (``waiting_approval``)
+until a decision lands via the ``/api/approvals`` inbox — never auto-granted.
+``GET .../{task_id}`` polls status; on completion the generated workflow is
+persisted onto the experiment, so the existing workflow-graph renderer
+(``GET .../workflow``) shows it.
+
+The route is the UI counterpart to the ``molexp plan`` CLI: same content-
+addressed Run, same harness pipeline, reached over HTTP instead of a TTY.
+"""
+
+from __future__ import annotations
+
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, ConfigDict, Field
+
+from molexp.server.dependencies import get_workspace
+
+if TYPE_CHECKING:
+    from molexp.services.plan_runtime.task import PlanTask
+    from molexp.workspace import Workspace
+
+__all__ = ["router"]
+
+router = APIRouter(
+    prefix="/projects/{project_id}/experiments/{experiment_id}/plan-tasks",
+    tags=["plan-tasks"],
+)
+
+_DRAFT_PREVIEW_CHARS = 80
+
+
+class PlanTaskCreateRequest(BaseModel):
+    """Body for starting a PlanMode background task."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    draft: str = Field(..., description="Natural-language experiment draft for PlanMode.")
+    model: str | None = Field(None, description="Model id; defaults to the configured agent.model.")
+    ground: bool = Field(
+        True,
+        description=(
+            "Ground task binding against the molcrafts toolchain via the configured "
+            "molmcp MCP server. Skips with a notice when molmcp is unavailable."
+        ),
+    )
+    execute: bool = Field(
+        False,
+        description=(
+            "Append the real-execution tail (ExecuteWorkflow -> GenerateFinalReport -> "
+            "ApprovalGate(approve_execution) -> GenerateAuditReport). Runs the "
+            "materialized driver as an executor subprocess OF THE SERVER HOST — "
+            "exactly what the CLI does on its host; it never schedules to molq. "
+            "Every gate suspends into the approvals inbox."
+        ),
+    )
+    compute_target: str | None = Field(
+        None,
+        description=(
+            "Named workspace compute target for the step-9 DESCRIPTIVE execution "
+            "report. Unknown names are rejected (422) listing the known targets."
+        ),
+    )
+    knowledge_sources: list[str] | None = Field(
+        None,
+        description=(
+            "Optional molmcp package allowlist (e.g. molpy, molvis, molplot). "
+            "When null, uses agent.knowledge_sources from operator config; empty "
+            "list means unrestricted."
+        ),
+        alias="knowledgeSources",
+    )
+
+
+class PlanTaskResponse(BaseModel):
+    """One background plan task's current state (UI polls this)."""
+
+    taskId: str
+    runId: str
+    projectId: str
+    experimentId: str
+    status: str
+    createdAt: str
+    model: str
+    draftPreview: str
+    workflowPersisted: bool = False
+    execute: bool = False
+    error: str | None = None
+    recordErrors: list[str] = Field(default_factory=list)
+
+
+class PlanTaskListResponse(BaseModel):
+    tasks: list[PlanTaskResponse]
+    total: int
+
+
+def _configured_model() -> str | None:
+    """Return the ``agent.model`` value from in-code ``molexp.config``, if any."""
+    import molexp
+    from molexp.services.operator_config import AGENT_MODEL_KEY
+
+    model = molexp.config.get(AGENT_MODEL_KEY)
+    return model if isinstance(model, str) and model else None
+
+
+def _configured_models() -> dict[str, str] | None:
+    """Return the configured tier map through the shared agent resolver."""
+    from molexp.server.routes.agent import _configured_models as configured_models
+
+    return configured_models()
+
+
+def _to_response(task: PlanTask, *, project_id: str, experiment_id: str) -> PlanTaskResponse:
+    preview = ""
+    stripped = task.draft.strip()
+    if stripped:
+        preview = stripped.splitlines()[0][:_DRAFT_PREVIEW_CHARS]
+    return PlanTaskResponse(
+        taskId=task.task_id,
+        runId=task.run_id,
+        projectId=project_id,
+        experimentId=experiment_id,
+        status=task.status,
+        createdAt=task.created_at,
+        model=task.model,
+        draftPreview=preview,
+        workflowPersisted=task.workflow_persisted,
+        execute=task.execute,
+        error=repr(task.error) if task.error is not None else None,
+        recordErrors=[
+            f"{e.record}: {e.error}"
+            for e in (task.record_outcome.errors if task.record_outcome is not None else ())
+        ],
+    )
+
+
+@router.post("", response_model=PlanTaskResponse, status_code=status.HTTP_201_CREATED)
+async def create_plan_task(
+    project_id: str,
+    experiment_id: str,
+    request: PlanTaskCreateRequest,
+    workspace: Workspace = Depends(get_workspace),
+) -> PlanTaskResponse:
+    """Start a PlanMode pipeline on a content-addressed run under the experiment.
+
+    Async so the spawned background ``asyncio.Task`` (the PlanMode run) attaches
+    to the app event loop; the handler itself does no awaiting and returns the
+    initial ``running`` status immediately.
+    """
+    return start_plan_task(
+        project_id=project_id,
+        experiment_id=experiment_id,
+        request=request,
+        workspace=workspace,
+    )
+
+
+def start_plan_task(
+    *,
+    project_id: str,
+    experiment_id: str,
+    request: PlanTaskCreateRequest,
+    workspace: Workspace,
+    record_task_id: str | None = None,
+    turn_id: str | None = None,
+    supersedes_run_id: str | None = None,
+) -> PlanTaskResponse:
+    """Shared starter used by the legacy route and AgentTask plan turns."""
+    from molexp._typing import JSONValue
+    from molexp.server.deps.plan_runtime import get_plan_runtime
+    from molexp.services.plan_runtime import resolve_plan_compute_target
+    from molexp.services.plan_runtime.gateway import build_plan_gateway
+    from molexp.workspace.errors import RunNotFoundError
+    from molexp.workspace.utils import derive_run_id
+
+    draft = request.draft.strip()
+    if not draft:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "draft is empty")
+
+    models = None if request.model else _configured_models()
+    model = request.model or (models.get("default") if models is not None else _configured_model())
+    if not model:
+        raise HTTPException(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "No model configured. Set it with `molexp config set agent.model <id>`.",
+        )
+
+    # Workspace NotFound errors map to HTTP envelopes via the registered handlers.
+    experiment = workspace.get_project(project_id).get_experiment(experiment_id)
+
+    params: dict[str, JSONValue] = {"mode": "plan", "draft": draft}
+    if supersedes_run_id:
+        params["supersedes"] = supersedes_run_id
+    run_id = derive_run_id(params)
+    try:
+        run = experiment.get_run(run_id)
+    except RunNotFoundError:
+        run = experiment.add_run(params, id=run_id)
+
+    # One shared resolution path with the CLI (Python = UI law). An unknown
+    # explicit name fails the REQUEST (422 + candidates), never falls back.
+    try:
+        compute_target = resolve_plan_compute_target(run, workspace, name=request.compute_target)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
+
+    # ONE public id for plan + agent UI: agent-task id when nested under the
+    # Agents hub, else plan-<run_id>. Registry key, events.json, approvals
+    # taskId, and metadata.active_plan_task_id all share this string — never a
+    # second plan-{generate_id} handle that the UI cannot resolve.
+    session_task_id = record_task_id or f"plan-{run.id}"
+    # Knowledge package pin: request override → molmcp server MOLMCP_SOURCES → open.
+    sources: list[str] | None
+    if request.knowledge_sources is not None:
+        sources = [s.strip() for s in request.knowledge_sources if str(s).strip()] or None
+    else:
+        from molexp.server.routes.agent_admin import _knowledge_sources_response
+
+        cfg = _knowledge_sources_response(workspace)
+        sources = list(cfg.sources) if cfg.sources else None
+    gateway = build_plan_gateway(
+        model=model,
+        models=models,
+        run=run,
+        workspace_root=str(workspace.root),
+        task_id=session_task_id,
+        draft=draft,
+        turn_id=turn_id,
+        knowledge_sources=sources,
+    )
+    runtime = get_plan_runtime()
+    # Sequential revise on the same agent task reuses the id; cancel any prior
+    # in-memory handle so resume/approve cannot hit a stale PlanTask.
+    prior = runtime.get(str(workspace.root), session_task_id)
+    if prior is not None and prior.status in {"running", "waiting_approval"}:
+        prior.cancel()
+    task = runtime.create(
+        workspace_root=str(workspace.root),
+        task_id=session_task_id,
+        run=run,
+        experiment=experiment,
+        draft=draft,
+        model=model,
+        created_at=datetime.now(tz=UTC).isoformat(),
+        gateway=gateway,
+        ground=request.ground,
+        execute=request.execute,
+        compute_target=compute_target,
+        record_task_id=session_task_id,
+        turn_id=turn_id,
+        knowledge_sources=tuple(sources) if sources else None,
+    )
+    return _to_response(task, project_id=project_id, experiment_id=experiment_id)
+
+
+@router.get("", response_model=PlanTaskListResponse)
+def list_plan_tasks(
+    project_id: str,
+    experiment_id: str,
+    workspace: Workspace = Depends(get_workspace),
+) -> PlanTaskListResponse:
+    """List the live plan tasks in this workspace (in-memory; MVP)."""
+    from molexp.server.deps.plan_runtime import get_plan_runtime
+
+    tasks = get_plan_runtime().list_tasks(str(workspace.root))
+    items = [_to_response(t, project_id=project_id, experiment_id=experiment_id) for t in tasks]
+    return PlanTaskListResponse(tasks=items, total=len(items))
+
+
+@router.get("/{task_id}", response_model=PlanTaskResponse)
+def get_plan_task(
+    project_id: str,
+    experiment_id: str,
+    task_id: str,
+    workspace: Workspace = Depends(get_workspace),
+) -> PlanTaskResponse:
+    """Return one plan task's current status."""
+    from molexp.server.deps.plan_runtime import get_plan_runtime
+
+    task = get_plan_runtime().get(str(workspace.root), task_id)
+    if task is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"plan task {task_id!r} not found")
+    return _to_response(task, project_id=project_id, experiment_id=experiment_id)

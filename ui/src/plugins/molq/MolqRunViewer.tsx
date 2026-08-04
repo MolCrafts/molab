@@ -1,28 +1,29 @@
-import { Ban, Boxes, Copy, FileQuestion, ServerCog, Terminal } from "lucide-react";
+import { Boxes, FileQuestion, ServerCog } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import {
+  DashboardCard,
+  DashboardGrid,
   EmptyState,
   EntityHeader,
   EntityMetric,
   EntityTabBar,
   EntityTabContent,
   EntityTabs,
-  KeyValueGrid,
-  OverviewHighlight,
-  OverviewHighlightGrid,
-  OverviewPage,
-  OverviewSection,
+  StatCard,
+  StatGrid,
 } from "@/app/components/entity";
-import { listEntityTabs } from "@/app/registry";
+import { formatScalar, statusTone } from "@/app/renderers/dashboardData";
+import { RunExecutionsPanel } from "@/app/renderers/RunExecutionsPanel";
+import { RunLogsPanel } from "@/app/renderers/RunLogsPanel";
 import { RunViewer } from "@/app/renderers/RunViewer";
-import { RunSnapshotPanel } from "@/app/renderers/SnapshotViewer";
+import { RunOutputsPanel } from "@/app/renderers/run/RunOutputsPanel";
+import { useRunViewer } from "@/app/renderers/useRunViewer";
+import { POST_DISPATCH_TAB, RunToolbar } from "@/app/runs/RunToolbar";
 import { workspaceApi } from "@/app/state/api";
-import { useNavigationState } from "@/app/state/useNavigationState";
-import type { RendererProps } from "@/app/types";
-import { useAlert, useConfirm } from "@/components/ConfirmDialog";
-import { Button } from "@/components/ui/button";
-
-const terminalRunStatuses = new Set(["succeeded", "failed", "cancelled", "skipped"]);
+import { useDiscoveredFileTypesForRun } from "@/app/state/useDiscoveredFileTypes";
+import type { ApiAssetResponse, RendererProps } from "@/app/types";
+import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
+import { WorkbenchAction } from "@/components/workbench";
 
 const getExecutorEntry = (
   executorInfo: Record<string, string>,
@@ -42,64 +43,61 @@ const formatExecutorLabel = (key: string): string => {
 };
 
 export const MolqRunViewer = (props: RendererProps): JSX.Element => {
-  const { selection, snapshot, onRefresh } = props;
-  const { setSelection, breadcrumbs, canNavigateUp, navigateUp } = useNavigationState(snapshot);
-  const [logs, setLogs] = useState<{ stdout?: string | null; stderr?: string | null } | null>(null);
-  const [logsError, setLogsError] = useState<string | null>(null);
-  const runTabContributions = listEntityTabs("run");
-  const { confirm, dialog: confirmDialog } = useConfirm();
-  const { alert, dialog: alertDialog } = useAlert();
+  const {
+    run,
+    project,
+    experiment,
+    workflow,
+    selectedRunId,
+    activeTab,
+    setActiveTab,
+    logs,
+    logsError,
+    selectedExecutionId,
+    setSelectedExecutionId,
+    duration,
+    attemptCount,
+    parameterEntries,
+    resultEntries,
+    runTabContributions,
+    inspectTask,
+    setSelection,
+    handleCancelRun,
+    confirmDialog,
+    alertDialog,
+  } = useRunViewer(props);
 
-  const run = useMemo(() => {
-    return snapshot.runs.find((item) => item.id === selection.objectId) ?? null;
-  }, [selection.objectId, snapshot.runs]);
-
-  const requestedTab =
-    selection.objectType === "run" ? (selection.objectView ?? "overview") : "overview";
-  const selectedRunId = selection.objectId;
-  const [activeTab, setActiveTab] = useState<string>(requestedTab);
-
-  useEffect(() => {
-    if (selectedRunId) {
-      setActiveTab(requestedTab);
-    }
-  }, [requestedTab, selectedRunId]);
+  const [runAssets, setRunAssets] = useState<ApiAssetResponse[]>([]);
+  const runCoords = useMemo(
+    () =>
+      run ? { projectId: run.projectId, experimentId: run.experimentId, runId: run.id } : null,
+    [run],
+  );
+  const { discovered: discoveredPlugins } = useDiscoveredFileTypesForRun(runCoords, "run");
 
   useEffect(() => {
     let cancelled = false;
-    setLogsError(null);
-
-    if (!run || activeTab !== "logs") {
+    if (!run) {
+      setRunAssets([]);
       return;
     }
-
-    setLogs(null);
     workspaceApi
-      .getRunLogs(run.projectId, run.experimentId, run.id)
-      .then((nextLogs) => {
-        if (!cancelled) {
-          setLogs(nextLogs);
-        }
+      .getRunAssets(run.id)
+      .then((assets) => {
+        if (!cancelled) setRunAssets(assets);
       })
-      .catch((error) => {
-        if (!cancelled) {
-          setLogsError(error instanceof Error ? error.message : "Failed to load logs");
-        }
+      .catch(() => {
+        if (!cancelled) setRunAssets([]);
       });
-
     return () => {
       cancelled = true;
     };
-  }, [activeTab, run]);
+  }, [run]);
 
   if (!run) {
     return (
       <div className="flex h-full items-center justify-center bg-background">
-        <EmptyState
-          icon={<FileQuestion className="h-6 w-6" />}
-          title="Run not found"
-          description="It may have been deleted or not yet synced."
-        />
+        <EmptyState icon={<FileQuestion className="h-6 w-6" />} title="Not found" />
       </div>
     );
   }
@@ -108,65 +106,37 @@ export const MolqRunViewer = (props: RendererProps): JSX.Element => {
     return <RunViewer {...props} />;
   }
 
-  const project = snapshot.projects.find((item) => item.id === run.projectId);
-  const experiment = snapshot.experiments.find((item) => item.id === run.experimentId);
   const scheduler = getExecutorEntry(run.executorInfo, "scheduler") ?? "unknown";
   const cluster = getExecutorEntry(run.executorInfo, "cluster_name", "cluster") ?? "default";
   const jobId = getExecutorEntry(run.executorInfo, "job_id") ?? "pending";
   const schedulerJobId = getExecutorEntry(run.executorInfo, "scheduler_job_id") ?? "not assigned";
   const details = Object.entries(run.executorInfo);
-  const executorFields = [
-    { label: "Backend", value: <span className="font-mono text-xs">molq</span> },
-    { label: "Scheduler", value: <span className="font-mono text-xs">{scheduler}</span> },
-    { label: "Cluster", value: <span className="font-mono text-xs">{cluster}</span> },
-    { label: "Job ID", value: <span className="font-mono text-xs">{jobId}</span> },
-    {
-      label: "Scheduler Job ID",
-      value: <span className="font-mono text-xs">{schedulerJobId}</span>,
-    },
-  ];
+  const outputResults = resultEntries.map(([key, value]) => ({ key, value }));
 
-  const handleCopyRunId = (): void => {
-    void navigator.clipboard.writeText(run.id);
-  };
-
-  const handleTabChange = (value: string): void => {
-    setActiveTab(value);
-  };
-
-  const handleCancelRun = async (): Promise<void> => {
-    if (terminalRunStatuses.has(run.status)) return;
-    const confirmed = await confirm({
-      title: "Mark run as cancelled?",
-      description: (
-        <>
-          Run <code className="rounded bg-muted px-1 py-0.5 text-xs">{run.id}</code> will be marked
-          cancelled in the workspace. This does not stop any underlying scheduler job.
-        </>
-      ),
-      confirmLabel: "Mark cancelled",
-      destructive: true,
-    });
-    if (!confirmed) return;
-
-    try {
-      await workspaceApi.updateRunStatus(run.projectId, run.experimentId, run.id, "cancelled");
-      onRefresh();
-    } catch (error) {
-      console.error("Failed to mark run cancelled:", error);
-      void alert({
-        title: "Failed to mark run cancelled",
-        description: error instanceof Error ? error.message : String(error),
-      });
-    }
-  };
+  const fieldGrid = (entries: [string, unknown][], emptyLabel: string): JSX.Element =>
+    entries.length === 0 ? (
+      <p className="text-label italic text-muted-foreground">{emptyLabel}</p>
+    ) : (
+      <dl className="grid gap-x-4 gap-y-2 sm:grid-cols-2">
+        {entries.map(([key, value]) => (
+          <div key={key} className="min-w-0">
+            <dt className="truncate text-micro uppercase tracking-wide text-muted-foreground">
+              {key}
+            </dt>
+            <dd
+              className="truncate font-mono text-label text-foreground"
+              title={formatScalar(value)}
+            >
+              {formatScalar(value)}
+            </dd>
+          </div>
+        ))}
+      </dl>
+    );
 
   return (
     <div className="flex h-full flex-col bg-background">
       <EntityHeader
-        breadcrumbs={breadcrumbs}
-        canNavigateUp={canNavigateUp}
-        onNavigateUp={navigateUp}
         icon={ServerCog}
         title={run.name}
         status={run.status}
@@ -178,133 +148,202 @@ export const MolqRunViewer = (props: RendererProps): JSX.Element => {
           </>
         }
         actions={
-          <>
-            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={handleCopyRunId}>
-              <Copy className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className="h-7 w-7 text-muted-foreground hover:text-destructive"
-              disabled={terminalRunStatuses.has(run.status)}
-              title="Updates workspace status only; it does not cancel a scheduler job."
-              onClick={() => {
-                void handleCancelRun();
-              }}
-            >
-              <Ban className="h-4 w-4" />
-            </Button>
-          </>
+          <RunToolbar
+            projectId={run.projectId}
+            experimentId={run.experimentId}
+            runId={run.id}
+            status={run.status}
+            params={run.parameters ?? {}}
+            onRefresh={props.onRefresh}
+            onCancel={handleCancelRun}
+            onDispatched={() => setActiveTab(POST_DISPATCH_TAB)}
+            onOpenAgent={() =>
+              setSelection({
+                objectType: "agent",
+                objectId: "new",
+                scope: {
+                  projectId: run.projectId,
+                  experimentId: run.experimentId,
+                  runId: run.id,
+                },
+              })
+            }
+            onHarvested={(path) => {
+              props.onRefresh();
+              if (path) {
+                setSelection({ objectType: "knowledge", objectId: path });
+              }
+            }}
+          />
         }
       />
 
       <div className="flex flex-1 flex-col overflow-hidden">
-        <EntityTabs value={activeTab} onValueChange={handleTabChange}>
+        <EntityTabs value={activeTab} onValueChange={setActiveTab}>
           <EntityTabBar
             tabs={[
               { value: "overview", label: "Overview" },
+              {
+                value: "outputs",
+                label:
+                  runAssets.length + resultEntries.length > 0
+                    ? `Outputs (${runAssets.length + resultEntries.length})`
+                    : "Outputs",
+              },
+              {
+                value: "executions",
+                label: `Executions${attemptCount ? ` (${attemptCount})` : ""}`,
+              },
               { value: "logs", label: "Logs" },
               ...runTabContributions.map((tab) => ({ value: tab.value, label: tab.label })),
+              ...discoveredPlugins.map(({ contribution, files }) => ({
+                value: contribution.value,
+                label: `${contribution.label} (${files.length})`,
+              })),
               { value: "scheduler", label: "Scheduler" },
-              { value: "snapshot", label: "Snapshot" },
             ]}
           />
 
           <EntityTabContent value="overview">
-            <OverviewPage
-              aside={
-                <>
-                  <OverviewSection title="Highlights">
-                    <OverviewHighlightGrid>
-                      <OverviewHighlight label="Scheduler" value={scheduler} />
-                      <OverviewHighlight label="Cluster" value={cluster} />
-                      <OverviewHighlight label="Status" value={run.status} />
-                      <OverviewHighlight label="Job ID" value={jobId} />
-                    </OverviewHighlightGrid>
-                  </OverviewSection>
+            <DashboardGrid>
+              <div className="lg:col-span-12">
+                <StatGrid>
+                  <StatCard label="Status" value={run.status} tone={statusTone(run.status)} />
+                  <StatCard label="Duration" value={duration ?? "—"} muted={!duration} />
+                  <StatCard
+                    label="Attempts"
+                    value={attemptCount || 1}
+                    hint={attemptCount > 1 ? `${attemptCount} executions` : "single attempt"}
+                  />
+                  <StatCard label="Scheduler" value={scheduler} />
+                  <StatCard label="Cluster" value={cluster} />
+                </StatGrid>
+              </div>
 
-                  <OverviewSection title="Relationships">
-                    <div className="flex flex-wrap gap-1.5">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-7 px-2 text-xs"
-                        onClick={() =>
-                          setSelection({ objectType: "project", objectId: run.projectId })
-                        }
-                      >
-                        Project: {project?.name || run.projectId}
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-7 px-2 text-xs"
-                        onClick={() =>
-                          setSelection({ objectType: "experiment", objectId: run.experimentId })
-                        }
-                      >
-                        Experiment: {experiment?.name || run.experimentId}
-                      </Button>
-                    </div>
-                  </OverviewSection>
-                </>
-              }
-            >
-              <OverviewSection title="Summary">
-                <p className="max-w-3xl text-sm leading-6 text-foreground">
-                  {run.summary || (
-                    <span className="text-muted-foreground">
-                      No summary provided for this molq-backed run.
-                    </span>
+              <DashboardCard title="Scheduler" className="lg:col-span-5">
+                <dl className="grid grid-cols-2 gap-x-4 gap-y-2">
+                  <div className="min-w-0">
+                    <dt className="text-micro uppercase tracking-wide text-muted-foreground">
+                      Job ID
+                    </dt>
+                    <dd className="truncate font-mono text-label text-foreground">{jobId}</dd>
+                  </div>
+                  <div className="min-w-0">
+                    <dt className="text-micro uppercase tracking-wide text-muted-foreground">
+                      Scheduler Job ID
+                    </dt>
+                    <dd className="truncate font-mono text-label text-foreground">
+                      {schedulerJobId}
+                    </dd>
+                  </div>
+                  <div className="min-w-0">
+                    <dt className="text-micro uppercase tracking-wide text-muted-foreground">
+                      Backend
+                    </dt>
+                    <dd className="truncate font-mono text-label text-foreground">molq</dd>
+                  </div>
+                  <div className="min-w-0">
+                    <dt className="text-micro uppercase tracking-wide text-muted-foreground">
+                      Cluster
+                    </dt>
+                    <dd className="truncate font-mono text-label text-foreground">{cluster}</dd>
+                  </div>
+                </dl>
+              </DashboardCard>
+
+              <DashboardCard title="Lineage" className="lg:col-span-7">
+                <div className="flex flex-wrap gap-2">
+                  <WorkbenchAction
+                    kind="secondary"
+                    size="compact"
+                    className="h-control-compact px-2 text-label"
+                    onClick={() => setSelection({ objectType: "project", objectId: run.projectId })}
+                  >
+                    Project · {project?.name || run.projectId}
+                  </WorkbenchAction>
+                  <WorkbenchAction
+                    kind="secondary"
+                    size="compact"
+                    className="h-control-compact px-2 text-label"
+                    onClick={() =>
+                      setSelection({ objectType: "experiment", objectId: run.experimentId })
+                    }
+                  >
+                    Experiment · {experiment?.name || run.experimentId}
+                  </WorkbenchAction>
+                  {workflow && (
+                    <WorkbenchAction
+                      kind="secondary"
+                      size="compact"
+                      className="h-control-compact px-2 text-label"
+                      onClick={() =>
+                        setSelection({
+                          objectType: "workflow",
+                          objectId: workflow.id,
+                          workflowId: workflow.id,
+                        })
+                      }
+                    >
+                      Workflow · {workflow.name}
+                    </WorkbenchAction>
                   )}
-                </p>
-              </OverviewSection>
+                </div>
+              </DashboardCard>
 
-              <OverviewSection title="Execution">
-                <KeyValueGrid items={executorFields} />
-              </OverviewSection>
+              {run.errorMessage && (
+                <DashboardCard title="Error" className="border-destructive/30 lg:col-span-12">
+                  <pre className="whitespace-pre-wrap break-words font-mono text-label text-destructive">
+                    {run.errorMessage}
+                  </pre>
+                </DashboardCard>
+              )}
 
-              <OverviewSection title="Scheduler Metadata">
-                <KeyValueGrid
-                  items={details.map(([key, value]) => ({
-                    label: formatExecutorLabel(key),
-                    value: <span className="font-mono text-xs">{value}</span>,
-                  }))}
-                />
-              </OverviewSection>
-            </OverviewPage>
+              <DashboardCard title="Parameters" className="lg:col-span-6">
+                {fieldGrid(parameterEntries, "—")}
+              </DashboardCard>
+
+              <DashboardCard title="Results" className="lg:col-span-6">
+                {fieldGrid(resultEntries, "—")}
+              </DashboardCard>
+            </DashboardGrid>
+          </EntityTabContent>
+
+          <EntityTabContent value="outputs">
+            <RunOutputsPanel assets={runAssets} results={outputResults} />
+          </EntityTabContent>
+
+          <EntityTabContent value="executions">
+            <RunExecutionsPanel
+              run={run}
+              workflow={workflow}
+              selectedExecutionId={selectedExecutionId}
+              onSelectExecution={setSelectedExecutionId}
+              onInspectTask={inspectTask}
+              onViewLogs={() => setActiveTab("logs")}
+              onOpenWorkflow={
+                workflow
+                  ? () =>
+                      setSelection({
+                        objectType: "workflow",
+                        objectId: workflow.id,
+                        workflowId: workflow.id,
+                      })
+                  : undefined
+              }
+            />
           </EntityTabContent>
 
           <EntityTabContent
             value="logs"
-            className="m-0 flex flex-1 flex-col overflow-hidden bg-zinc-950 p-0 text-zinc-50 dark:bg-black"
+            className="m-0 flex flex-1 flex-col overflow-hidden bg-canvas p-0 text-foreground"
           >
-            <div className="flex items-center gap-2 border-b border-zinc-800 bg-zinc-900 px-3 py-1 font-mono text-[11px] text-zinc-400">
-              <Terminal className="h-3 w-3" />
-              stdout/stderr
-            </div>
-            <div className="flex-1 overflow-auto p-3 font-mono text-xs">
-              {logsError ? (
-                <div className="text-rose-300">{logsError}</div>
-              ) : logs ? (
-                <div className="space-y-4">
-                  <section>
-                    <div className="mb-1 text-[11px] uppercase text-zinc-500">stdout</div>
-                    <pre className="whitespace-pre-wrap text-zinc-100">
-                      {logs.stdout || "No stdout captured."}
-                    </pre>
-                  </section>
-                  <section>
-                    <div className="mb-1 text-[11px] uppercase text-zinc-500">stderr</div>
-                    <pre className="whitespace-pre-wrap text-rose-100">
-                      {logs.stderr || "No stderr captured."}
-                    </pre>
-                  </section>
-                </div>
-              ) : (
-                <div className="italic opacity-60">Loading logs...</div>
-              )}
-            </div>
+            <RunLogsPanel
+              logs={logs}
+              logsError={logsError}
+              selectedExecutionId={selectedExecutionId}
+              attemptLabel={selectedExecutionId ? selectedExecutionId : "latest attempt"}
+              onViewLatest={() => setSelectedExecutionId(null)}
+            />
           </EntityTabContent>
 
           {runTabContributions.map((tab) => {
@@ -316,35 +355,42 @@ export const MolqRunViewer = (props: RendererProps): JSX.Element => {
             );
           })}
 
+          {discoveredPlugins.map(({ contribution, files }) => {
+            const PluginComponent = contribution.Component;
+            return (
+              <EntityTabContent key={contribution.id} value={contribution.value}>
+                {activeTab === contribution.value && (
+                  <PluginComponent key={selectedRunId} {...props} discoveredFiles={files} />
+                )}
+              </EntityTabContent>
+            );
+          })}
+
           <EntityTabContent value="scheduler">
             <div className="flex-1 overflow-auto p-4">
               <section>
-                <h3 className="flex items-center gap-1.5 text-[11px] font-medium uppercase text-muted-foreground">
+                <h3 className="flex items-center gap-2 text-micro font-medium uppercase text-muted-foreground">
                   <Boxes className="h-3.5 w-3.5" />
                   Normalized Executor Info
                 </h3>
                 <div className="mt-2 overflow-hidden border-y border-border/70">
-                  <table className="w-full text-left text-sm">
-                    <tbody className="divide-y divide-border/50">
+                  <Table className="w-full text-left text-body-lg">
+                    <TableBody className="divide-y divide-border/50">
                       {details.map(([key, value]) => (
-                        <tr key={key}>
-                          <td className="w-[220px] py-2 pr-4 text-xs font-medium text-muted-foreground">
+                        <TableRow key={key}>
+                          <TableCell className="w-56 py-2 pr-4 text-label font-medium text-muted-foreground">
                             {formatExecutorLabel(key)}
-                          </td>
-                          <td className="break-all py-2 font-mono text-xs text-foreground">
+                          </TableCell>
+                          <TableCell className="break-all py-2 font-mono text-label text-foreground">
                             {value}
-                          </td>
-                        </tr>
+                          </TableCell>
+                        </TableRow>
                       ))}
-                    </tbody>
-                  </table>
+                    </TableBody>
+                  </Table>
                 </div>
               </section>
             </div>
-          </EntityTabContent>
-
-          <EntityTabContent value="snapshot">
-            <RunSnapshotPanel run={run} />
           </EntityTabContent>
         </EntityTabs>
       </div>
