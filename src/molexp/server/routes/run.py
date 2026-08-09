@@ -47,6 +47,7 @@ from ..schemas import (
     LammpsThermoStage,
     MetricSeriesResponse,
     RunActionResponse,
+    RunAnalyzeFailureRequest,
     RunContinueResponse,
     RunCreateRequest,
     RunExecutionResponse,
@@ -879,6 +880,114 @@ def harvest_run_route(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     # Bundle-relative path so the UI can open Knowledge without stripping roots.
+    try:
+        rel = item.resolve().relative_to(workspace.resolve()).as_posix()
+    except Exception:
+        rel = item.name
+    return {"name": item.name, "path": rel}
+
+
+@router.get("/{run_id}/metrics/detect")
+def detect_run_metrics_sources(
+    project_id: str,
+    experiment_id: str,
+    run_id: str,
+    workspace=Depends(get_workspace),  # noqa: ANN001
+) -> dict[str, object]:
+    """Classify foreign log formats under the run directory (read-only).
+
+    Does not write the metrics buffer. Host ≠ MolRec: detection never invents
+    meta/status sections.
+    """
+    from molexp.plugins.metrics_ingest import detect_log_formats
+
+    experiment = _get_experiment(workspace, project_id, experiment_id)
+    if not experiment:
+        raise RunNotFoundError(project_id, experiment_id, run_id)
+    run = _get_run_or_none(experiment, run_id)
+    if not run:
+        raise RunNotFoundError(project_id, experiment_id, run_id)
+    hits = detect_log_formats(run.run_dir)
+    return {
+        "runId": run.id,
+        "hits": [
+            {
+                "format": hit.format.value,
+                "path": hit.path.name,
+            }
+            for hit in hits
+        ],
+    }
+
+
+@router.post("/{run_id}/metrics/ingest")
+def ingest_run_metrics(
+    project_id: str,
+    experiment_id: str,
+    run_id: str,
+    workspace=Depends(get_workspace),  # noqa: ANN001
+) -> dict[str, object]:
+    """Ingest foreign logs into the run host metrics JSONL buffer (additive).
+
+    Shares :func:`molexp.plugins.metrics_ingest.ingest_run` with the CLI.
+    Skips are returned; the route does not fail the whole call when one
+    converter cannot run.
+    """
+    from molexp.plugins.metrics_ingest import ingest_run
+
+    experiment = _get_experiment(workspace, project_id, experiment_id)
+    if not experiment:
+        raise RunNotFoundError(project_id, experiment_id, run_id)
+    run = _get_run_or_none(experiment, run_id)
+    if not run:
+        raise RunNotFoundError(project_id, experiment_id, run_id)
+    result = ingest_run(run.run_dir)
+    return {
+        "runId": run.id,
+        "records": result.records,
+        "ingested": {fmt.value: n for fmt, n in result.ingested.items()},
+        "skipped": [
+            {
+                "format": s.format.value,
+                "path": s.path.name,
+                "reason": s.reason,
+            }
+            for s in result.skipped
+        ],
+    }
+
+
+@router.post("/{run_id}/analyze-failure")
+def analyze_run_failure_route(
+    project_id: str,
+    experiment_id: str,
+    run_id: str,
+    body: RunAnalyzeFailureRequest,
+    workspace=Depends(get_workspace),  # noqa: ANN001
+) -> dict[str, str]:
+    """Analyze a failed run into a sourced FailureAnalysis KnowledgeItem.
+
+    Shares :func:`molexp.services.run_failure.analyze_run_failure` with the CLI
+    (close-loop-02). Deterministic narrative when ``narrative`` is omitted.
+    """
+    from molexp.services.run_failure import analyze_run_failure
+
+    experiment = _get_experiment(workspace, project_id, experiment_id)
+    if not experiment:
+        raise RunNotFoundError(project_id, experiment_id, run_id)
+    run = _get_run_or_none(experiment, run_id)
+    if not run:
+        raise RunNotFoundError(project_id, experiment_id, run_id)
+    try:
+        item = analyze_run_failure(
+            run,
+            created_by=body.created_by,
+            narrative=body.narrative,
+            force=body.force,
+            name=body.name,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
         rel = item.resolve().relative_to(workspace.resolve()).as_posix()
     except Exception:
