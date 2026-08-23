@@ -3,8 +3,8 @@ typed asset accessors (``ArtifactAccessor`` / ``LogAccessor`` /
 ``CheckpointAccessor``) exposed on the facade.
 
 Scope is the RunContext surface only: lifecycle status resolution, in-context
-result/artifact/log/checkpoint I/O, working-dir guards, and the sync/async
-context-manager protocols. Manifest *scanning* (``scan_assets``) is owned by
+result/artifact/log/checkpoint I/O, ``register_product``, working-dir guards,
+and the sync/async context-manager protocols. Manifest *scanning* (``scan_assets``) is owned by
 ``test_asset_scan`` / ``test_assets``; failure-recovery / no-op resolution by
 ``test_run_lifecycle_recovery``.
 """
@@ -59,6 +59,45 @@ class TestRunContextResults:
         with run.start() as ctx:
             ctx.set_result("acc", 0.95)
             assert ctx.get_result("acc") == 0.95
+
+
+class TestRegisterProduct:
+    def test_registers_file_under_artifacts_and_returns_path(self, run, tmp_path):
+        src = tmp_path / "nve.pt"
+        src.write_bytes(b"traj")
+        with run.start() as ctx:
+            dest = ctx.register_product(src, name="nve.pt")
+            assert dest == ctx.work_dir / "artifacts" / "nve.pt"
+            assert dest.read_bytes() == b"traj"
+            names = [a.name for a in run.assets.query(kind="artifact")]
+            assert "nve.pt" in names
+
+    def test_name_only_returns_dest_without_registering(self, run):
+        with run.start() as ctx:
+            dest = ctx.register_product(name="nve.pt")
+            assert dest == ctx.work_dir / "artifacts" / "nve.pt"
+            assert dest.parent.is_dir()
+            assert not dest.exists()
+            assert run.assets.query(kind="artifact") == []
+
+    def test_same_path_is_idempotent(self, run):
+        with run.start() as ctx:
+            dest = ctx.register_product(name="nve.pt")
+            dest.write_bytes(b"traj")
+            registered = ctx.register_product(dest)
+            assert registered == dest
+            assert dest.read_bytes() == b"traj"
+            names = [a.name for a in run.assets.query(kind="artifact")]
+            assert "nve.pt" in names
+
+    def test_requires_src_or_name(self, run):
+        with run.start() as ctx, pytest.raises(ValueError, match="src or name"):
+            ctx.register_product()
+
+    def test_missing_src_raises(self, run, tmp_path):
+        missing = tmp_path / "gone.pt"
+        with run.start() as ctx, pytest.raises(FileNotFoundError, match="not a file"):
+            ctx.register_product(missing)
 
 
 class TestArtifactAccessor:

@@ -304,7 +304,7 @@ def _promote_outputs(output: TaskOutput, run_context: object) -> TaskOutput:
     A task stays pure (writes only under ``ctx.workdir``); to surface a file or
     metric as a run-scoped product it returns the marker as an output value.
     Here — where the engine still holds ``run_context`` — we perform the side
-    effect (copy+register the artifact under ``<run_dir>/artifacts/``; append the
+    effect (``register_product`` under ``<run_dir>/artifacts/``; append the
     scalar to the run's metrics) and replace the marker with a plain value (the
     artifact's run path / the metric number) so downstream tasks bind cleanly.
     Without a workspace ``run_context`` the markers degrade to their bare value.
@@ -321,7 +321,12 @@ def _promote_outputs(output: TaskOutput, run_context: object) -> TaskOutput:
     for key, value in output.items():
         if isinstance(value, RegisterArtifact):
             path = Path(value.path)
-            if artifact is not None:
+            register = getattr(run_context, "register_product", None)
+            if callable(register):
+                promoted[key] = str(
+                    register(path, name=value.name, tags=value.tags, mime=value.mime)
+                )
+            elif artifact is not None:
                 asset = artifact.save(
                     value.name or path.name, path, tags=value.tags, mime=value.mime
                 )

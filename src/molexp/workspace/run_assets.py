@@ -150,6 +150,37 @@ class RunAssets:
 
     # ── Asset access ────────────────────────────────────────────────────
 
+    def register_product(
+        self,
+        src: Path | str | None = None,
+        *,
+        name: str | None = None,
+        tags: dict[str, str] | None = None,
+        mime: str | None = None,
+    ) -> Path:
+        """Register a file this run produced as a run artifact.
+
+        ``register_product(name="nve.pt")`` returns
+        ``<run>/artifacts/nve.pt`` (parent created) so the task can write
+        there. ``register_product(src)`` copies *src* into that directory
+        if needed and records it on the run manifest.
+
+        This is the counterpart of :meth:`register_asset` (import a
+        ``DataAsset`` input).
+        """
+        path = Path(src) if src is not None else None
+        dest_name = name or (path.name if path is not None else None)
+        if dest_name is None:
+            raise ValueError("register_product requires src or name")
+        dest = self._work_dir / "artifacts" / dest_name
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        if path is None:
+            return dest
+        if not path.is_file():
+            raise FileNotFoundError(f"register_product: {path} is not a file")
+        asset = self.artifact.save(dest_name, path, tags=tags, mime=mime)
+        return self._work_dir / asset.path
+
     def register_asset(  # noqa: ANN201
         self,
         name: str,
