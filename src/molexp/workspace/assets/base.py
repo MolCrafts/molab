@@ -104,6 +104,13 @@ class Asset(BaseModel):
     ``execution_state``) leave it ``None`` — content addressing of an
     open-ended stream is ambiguous.
     """
+    external_uri: str | None = None
+    """Absolute filesystem path this index entry points at.
+
+    When set, the bytes live *outside* the scope directory: no copy,
+    symlink, or hardlink is created. :meth:`absolute_path` returns this
+    path. ``path`` remains a scope-relative label for the index record.
+    """
 
     @property
     def uri(self) -> str:
@@ -111,5 +118,7 @@ class Asset(BaseModel):
         return f"asset://{self.scope.urn}/{self.asset_id}"
 
     def absolute_path(self, scope_dir: Path) -> Path:
-        """Resolve ``path`` against the scope's on-disk directory."""
+        """Resolve the payload: external pointer if set, else ``scope_dir / path``."""
+        if self.external_uri:
+            return Path(self.external_uri)
         return scope_dir / self.path

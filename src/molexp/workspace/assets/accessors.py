@@ -127,6 +127,55 @@ class ArtifactAccessor(_AccessorBase):
             )
         return asset
 
+    def point(
+        self,
+        name: str,
+        src: str | Path,
+        *,
+        tags: dict[str, str] | None = None,
+        mime: str | None = None,
+        consumed: Sequence[Asset | str] | None = None,
+    ) -> ArtifactAsset:
+        """Index an existing file that lives *outside* the run directory.
+
+        Writes no copy, symlink, or hardlink. The manifest records
+        ``external_uri``; :meth:`ArtifactAsset.absolute_path` resolves there.
+        """
+        source = Path(src).resolve()
+        if not source.exists():
+            raise FileNotFoundError(f"Source path does not exist: {src}")
+        now = datetime.now()
+        producer = self._producer_provider()
+        if consumed:
+            ids = tuple(item if isinstance(item, str) else item.asset_id for item in consumed)
+            producer = producer.model_copy(update={"inputs": ids})
+        size = source.stat().st_size if source.is_file() else 0
+        asset = ArtifactAsset(
+            asset_id=generate_asset_id(),
+            name=name,
+            scope=self._scope,
+            path=Path("artifacts") / name,
+            created_at=now,
+            updated_at=now,
+            producer=producer,
+            tags=tags or {},
+            mime=mime,
+            size=size,
+            content_hash=compute_content_hash(source),
+            external_uri=str(source),
+        )
+        self._register(asset)
+        if self._event_root is not None:
+            from ._events import emit_asset_added
+
+            emit_asset_added(
+                self._event_root,
+                asset,
+                name=name,
+                extra_refs=[producer.run_id] if producer.run_id else (),
+            )
+        return asset
+
 
 class _BoundLog:
     """Thin wrapper returned by ``LogAccessor.__call__`` so callers can
@@ -287,6 +336,40 @@ class CheckpointAccessor(_AccessorBase):
             tags=tags or {},
             ckpt_id=ckpt_id,
             parent_ckpt_id=self._last_ckpt_id,
+        )
+        self._register(asset)
+        self._last_ckpt_id = ckpt_id
+        return asset
+
+    def point(
+        self,
+        name: str,
+        src: str | Path,
+        *,
+        tags: dict[str, str] | None = None,
+    ) -> CheckpointAsset:
+        """Index an existing checkpoint file that lives outside the run directory.
+
+        No copy or filesystem link. ``external_uri`` is the pointer;
+        :meth:`CheckpointAsset.load` only works if that file is JSON.
+        """
+        source = Path(src).resolve()
+        if not source.exists():
+            raise FileNotFoundError(f"Source path does not exist: {src}")
+        ckpt_id = f"ckpt_{generate_asset_id()[:12]}"
+        now = datetime.now()
+        asset = CheckpointAsset(
+            asset_id=generate_asset_id(),
+            name=name,
+            scope=self._scope,
+            path=Path(".ckpt") / f"{ckpt_id}.json",
+            created_at=now,
+            updated_at=now,
+            producer=self._producer_provider(),
+            tags=tags or {},
+            ckpt_id=ckpt_id,
+            parent_ckpt_id=self._last_ckpt_id,
+            external_uri=str(source),
         )
         self._register(asset)
         self._last_ckpt_id = ckpt_id

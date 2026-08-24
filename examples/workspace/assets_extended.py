@@ -56,6 +56,7 @@ async def main() -> None:
     external.write_text("x,y\n1,2\n3,4\n")
     ws.data_assets.import_asset("dataset-copy", external)  # default: copy
     ws.data_assets.import_asset("dataset-link", external, action="symlink")
+    ws.data_assets.import_asset("dataset-ref", external, action="reference")  # index only
 
     print(f"workspace root: {root}")
 
