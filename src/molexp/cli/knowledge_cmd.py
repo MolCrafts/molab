@@ -113,7 +113,7 @@ def import_zotero(
 
     rprint(f"[green]OK[/green] Imported {len(refs)} reference(s) into {bundle.root}")
     for ref in refs:
-        meta = ref.read_ref_meta()
+        meta = ref.read_reference_meta()
         title = meta.title or "(untitled)"
         year = f" ({meta.year})" if meta.year else ""
         rprint(f"  {bundle.rel_path(ref)}  [dim]{title}{year}[/dim]")

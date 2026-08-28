@@ -109,7 +109,7 @@ LIFECYCLE_CAPABILITIES: tuple[ToolCapability, ...] = (
         ),
         input_schema=_input_schema(["run"], ["run"]),
         output_schema={"type": "object"},
-        callable_path="molexp.workspace.lifecycle_ops.cancel_run",
+        callable_path="molexp.harness.actions.handlers.lifecycle.cancel_run_capability",
         side_effects=["cancel:run"],
         tags=["lifecycle", "reclaim"],
     ),

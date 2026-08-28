@@ -1,6 +1,6 @@
 # MolExp Examples
 
-Each guide in `docs/guide/` (and each onboarding page in `docs/getting-started/`)
+Each guide in `docs/en/guide/` (and each onboarding page in `docs/en/getting-started/`)
 has a runnable example here. Read the guide for prose, run the example to see
 the same idea working.
 
@@ -12,54 +12,54 @@ You can delete these freely; none of them touch `~/` or any system path.
 
 | Guide | Example | What it shows |
 |---|---|---|
-| [quick-start](../docs/getting-started/quick-start.md) | `getting_started/01_quick_start.py` | End-to-end: workspace + experiment + run + result |
-| [first-workflow](../docs/getting-started/first-workflow.md) | `getting_started/02_first_workflow.py` | A `Workflow` with no workspace attached |
-| [tracked-runs](../docs/getting-started/tracked-runs.md) | `getting_started/03_tracked_run.py` | What appears on disk when a run is tracked |
-| [cli-and-profiles](../docs/getting-started/cli-and-profiles.md) | `getting_started/04_cli_and_profiles/` | `molexp run` + `molcfg.yaml` + `--profile` |
+| [quick-start](../docs/en/getting-started/quick-start.md) | `getting_started/01_quick_start.py` | End-to-end: workspace + experiment + run + result |
+| [first-workflow](../docs/en/getting-started/first-workflow.md) | `getting_started/02_first_workflow.py` | A `Workflow` with no workspace attached |
+| [tracked-runs](../docs/en/getting-started/tracked-runs.md) | `getting_started/03_tracked_run.py` | What appears on disk when a run is tracked |
+| [cli-and-profiles](../docs/en/getting-started/cli-and-profiles.md) | `getting_started/04_cli_and_profiles/` | `molexp run` + `molcfg.yaml` + `--profile` |
 
 ## Workflow Authoring
 
 | Guide | Example | What it shows |
 |---|---|---|
-| [task-and-actor](../docs/guide/task-and-actor.md) | `workflow/task_and_actor.py` | Decorator, OOP, and Protocol-form tasks, plus a streaming actor |
-| [task-context](../docs/guide/task-context.md) | `workflow/task_context.py` | Named-parameter binding (upstream output / run param / build-time config) and `ctx.workdir` — the pure task context |
-| [workflow-runtime](../docs/guide/workflow-runtime.md) | `workflow/workflow_runtime.py` | `WorkflowRuntime.execute()` vs `.start()` |
-| [control-flow](../docs/guide/control-flow.md) | `workflow/control_flow.py` | Diamond fan-out, conditionals, build-time and `wf.parallel` fan-out |
-| [control-flow](../docs/guide/control-flow.md) | `workflow/branch_and_loop.py` | `wf.branch` routing and `wf.loop` repeat-until — `(value, Next(label))` values bind to the target's named parameters |
-| [subworkflows](../docs/guide/subworkflows.md) | `workflow/subworkflows.py` | Calling a sub-spec from inside a task |
-| [ir-export](../docs/guide/ir-export.md) | `workflow/ir_export.py` | Mermaid diagrams, JSON IR round-trip, full-graph IR for UIs |
+| [task-and-actor](../docs/en/guide/task-and-actor.md) | `workflow/task_and_actor.py` | Decorator, OOP, and Protocol-form tasks, plus a streaming actor |
+| [task-context](../docs/en/guide/task-context.md) | `workflow/task_context.py` | Named-parameter binding (upstream output / run param / build-time config) and `ctx.workdir` — the pure task context |
+| [workflow-runtime](../docs/en/guide/workflow-runtime.md) | `workflow/workflow_runtime.py` | `WorkflowRuntime.execute()` vs `.start()` |
+| [control-flow](../docs/en/guide/control-flow.md) | `workflow/control_flow.py` | Diamond fan-out, conditionals, build-time and `wf.parallel` fan-out |
+| [control-flow](../docs/en/guide/control-flow.md) | `workflow/branch_and_loop.py` | `wf.branch` routing and `wf.loop` repeat-until — `(value, Next(label))` values bind to the target's named parameters |
+| [subworkflows](../docs/en/guide/subworkflows.md) | `workflow/subworkflows.py` | Calling a sub-spec from inside a task |
+| [ir-export](../docs/en/guide/ir-export.md) | `workflow/ir_export.py` | Mermaid diagrams, JSON IR round-trip, full-graph IR for UIs |
 
 ## Records and Assets
 
 | Guide | Example | What it shows |
 |---|---|---|
-| [workspace-api](../docs/guide/workspace-api.md) | `workspace/workspace_api.py` | `Workspace → Project → Experiment → Run` walk |
-| [workspace-architecture](../docs/guide/workspace-architecture.md) | `workspace/workspace_architecture.py` | What files actually land on disk |
-| [workflow-persistence](../docs/guide/workflow-persistence.md) | `workspace/workflow_persistence.py` | `run.json`, `execution_history`, `config_hash` |
-| [assets](../docs/guide/assets.md) | `workspace/assets.py` | Artifact, log, checkpoint, `find_asset` |
-| [assets](../docs/guide/assets.md) | `workspace/assets_extended.py` | Error traces, checkpoint chaining, content-hash lookup, import actions |
+| [workspace-api](../docs/en/guide/workspace-api.md) | `workspace/workspace_api.py` | `Workspace → Project → Experiment → Run` walk |
+| [workspace-architecture](../docs/en/guide/workspace-architecture.md) | `workspace/workspace_architecture.py` | What files actually land on disk |
+| [workflow-persistence](../docs/en/guide/workflow-persistence.md) | `workspace/workflow_persistence.py` | `run.json`, `execution_history`, `config_hash` |
+| [assets](../docs/en/guide/assets.md) | `workspace/assets.py` | Artifact, log, checkpoint, `find_asset` |
+| [assets](../docs/en/guide/assets.md) | `workspace/assets_extended.py` | Error traces, checkpoint chaining, content-hash lookup, import actions |
 
 ## Sweeps
 
 | Guide | Example | What it shows |
 |---|---|---|
-| [sweeps](../docs/guide/sweeps.md) | `sweeps/grid_and_space.py` | GridSpace, UniformSpace, RunSet.execute, to_records, min_by, idempotent re-declaration |
+| [sweeps](../docs/en/guide/sweeps.md) | `sweeps/grid_and_space.py` | GridSpace, UniformSpace, RunSet.execute, to_records, min_by, idempotent re-declaration |
 
 ## Knowledge
 
 | Guide | Example | What it shows |
 |---|---|---|
-| [knowledge](../docs/guide/knowledge.md) | `knowledge/notes_and_references.py` | Bundle, Note, ReferenceConcept, cite, backlinks, search |
+| [knowledge](../docs/en/guide/knowledge.md) | `knowledge/notes_and_references.py` | Bundle, Note, ReferenceConcept, cite, backlinks, search |
 
 ## Operations
 
 | Guide | Example | What it shows |
 |---|---|---|
-| [run-profiles](../docs/guide/run-profiles.md) | `operations/run_profiles/` | `molcfg.yaml`, `--profile`, `--override` |
-| [server-lifecycle](../docs/guide/server-lifecycle.md) | `operations/server_lifecycle.py` | Programmatic `ServerManager.start()` / `stop()` |
-| [molq](../docs/guide/molq.md) | `operations/scheduler_molq.py` | How `--scheduler slurm` composes a `SubmitHandler` |
-| [run-profiles](../docs/guide/run-profiles.md) | `operations/run_profiles_advanced/` | Profile inheritance (`extends`), `--override` dot notation |
-| [workspace-architecture](../docs/guide/workspace-architecture.md) | `operations/remote_targets.py` | LocalTarget, RemoteTarget, ComputeTarget resolution |
+| [run-profiles](../docs/en/guide/run-profiles.md) | `operations/run_profiles/` | `molcfg.yaml`, `--profile`, `--override` |
+| [server-lifecycle](../docs/en/guide/server-lifecycle.md) | `operations/server_lifecycle.py` | Programmatic `ServerManager.start()` / `stop()` |
+| [molq](../docs/en/guide/molq.md) | `operations/scheduler_molq.py` | How `--scheduler slurm` composes a `SubmitHandler` |
+| [run-profiles](../docs/en/guide/run-profiles.md) | `operations/run_profiles_advanced/` | Profile inheritance (`extends`), `--override` dot notation |
+| [workspace-architecture](../docs/en/guide/workspace-architecture.md) | `operations/remote_targets.py` | LocalTarget, RemoteTarget, ComputeTarget resolution |
 
 ## Agent Layer
 
@@ -76,36 +76,38 @@ key into the `API_KEY` constant to flip the *same* loop to the real model.
 | `agent/interactive_loop.py` | The emergent tool loop — `InteractiveLoop` driving `Router.stream_agentic`. The scripted stream yields a thinking delta, one full tool round, then the streamed answer; the demo asserts the chunk→`AgentEvent` translation (`ToolCallStartedEvent` / `ToolCallCompletedEvent`). The loop behind the `molexp agent` CLI REPL. |
 | `agent/mcp_integration.py` | Agent with MCP toolsets — offline ScriptedRouter simulates tool calls, MCPServerStdio construction pattern (commented), InteractiveLoop tool events. |
 
-> Note: "**Loop**" is the agent-layer LLM-conversation concept (`AgentLoop` → `ChatLoop` / `InteractiveLoop`). "**Mode**" is reserved for the harness orchestration concept below (`harness.Mode` → `PlanMode` / `RunMode`).
+> Note: "**Loop**" is the agent-layer LLM-conversation concept (`AgentLoop` → `ChatLoop` / `InteractiveLoop`). "**Mode**" is reserved for the harness orchestration concept below (`PlanOrchestrator` / `ChatMode`).
 >
 > **API keys** — live mode registers the LLM key *in code* via `molexp.config["deepseek_api_key"] = ...` (paste into the `API_KEY` constant at the top of each file). `molexp.config` is a live `molcfg.Config`; molexp reads the key from it, **never from environment variables**.
 
 ## Harness Layer
 
-`PlanMode` is the harness `Mode` that turns a short natural-language experiment
-draft into generated, validated, runnable `molexp.workflow` source — running its
-stage pipeline (ExperimentReport → WorkflowIR → BoundWorkflow → workflow source)
-on a `workspace.Run` with full provenance + audit. Its back half, `RunMode`
-(chained on the same Run via `molexp plan --execute`), generates unit tests,
-really runs them with pytest, executes the workflow through an executor
-subprocess on the real engine, and writes the final report + audit trail.
+`PlanOrchestrator` is the harness pipeline that turns a short natural-language
+experiment draft into a frozen, human-approved plan and then realizes it. It
+runs in **two phases** on one `workspace.Run` with full provenance + audit:
+**Phase 1 — interactive planning** (an agent loop places tasks with acceptance
+criteria on a task board; a form guard blocks a malformed board; a hard review
+gate freezes the approved plan and renders the plan report) and **Phase 2 —
+deterministic realization** (the frozen board is bound, each task goes through
+codegen + its own pytest run, and the assembled workflow is compiled in an
+executor subprocess — no real science, `--compile-only`).
 
 | Example | What it shows |
 |---|---|
-| `harness/experiment_pipeline.py` | **The flagship**: a natural-language experiment goal → `PlanMode` (plan + validated workflow source) → `RunMode` (generated unit tests REALLY run under pytest, the workflow REALLY executes on the `molexp.workflow` engine in an executor subprocess) → extracted `FinalReport` + audit trail. Offline by default via an in-file `CannedGateway` implementing the public `AgentGateway` Protocol — only the LLM is canned; every validator, pytest, and the engine run for real (a seeded 1D random walk whose D = MSD/(2·d·t) ≈ 0.5). Paste a key into `API_KEY` to run the same pipeline against the real DeepSeek API through `RouterBackedAgentGateway`. |
+| `harness/experiment_pipeline.py` | **The flagship**: a natural-language experiment goal → `PlanOrchestrator` phase 1 (task board → review gate → frozen plan + plan report) → phase 2 realization (per-task codegen + per-task pytest, then compile). Offline by default via an in-file `CannedGateway` implementing the public `AgentGateway` Protocol — only the LLM is canned. Paste a key into `API_KEY` to run the same pipeline against the real DeepSeek API through `RouterBackedAgentGateway`. |
 | `harness/stages_standalone.py` | Harness building blocks in isolation — ToolCapability, InMemoryCapabilityRegistry, CannedGateway pattern for offline stage testing. |
 
 ## Plugins
 
 | Guide | Example | What it shows |
 |---|---|---|
-| [plugins](../docs/concept/plugins.md) | `plugins/custom_submit_handler.py` | CliPlugin construction, SubmitHandler Protocol, entry-point registration pattern |
+| [plugins](../docs/en/concept/plugins.md) | `plugins/custom_submit_handler.py` | CliPlugin construction, SubmitHandler Protocol, entry-point registration pattern |
 
 ## CLI Commands
 
 | Guide | Example | What it shows |
 |---|---|---|
-| [workspace-architecture](../docs/guide/workspace-architecture.md) | `cli/commands.sh` | `molexp init`, `info`, `project`, `experiment`, `runs`, `asset` — full CLI tour |
+| [workspace-architecture](../docs/en/guide/workspace-architecture.md) | `cli/commands.sh` | `molexp init`, `info`, `project`, `experiment`, `runs`, `asset` — full CLI tour |
 
 ## Driving a Run
 
@@ -119,7 +121,7 @@ from molexp.workflow import WorkflowCompiler, WorkflowRuntime
 
 compiled = WorkflowCompiler(name="train").add(Train()).compile()
 
-exp = ws.project("demo").experiment("train").run(compiled, params={"lr": [1e-3]})
+exp = ws.add_project("demo").add_experiment("train").define(compiled, params={"lr": [1e-3]})
 
 run = exp.list_runs()[0]
 with run.start(profile_config=cfg) as ctx:
@@ -127,7 +129,7 @@ with run.start(profile_config=cfg) as ctx:
     ctx.set_result("final_loss", result.outputs["train"])
 ```
 
-`Experiment.run(workflow, params=...)` binds the compiled workflow to the
+`Experiment.define(workflow, params=...)` binds the compiled workflow to the
 experiment in `molexp.workflow.default_binding_registry` (an explicit,
 injectable `{experiment_id → CompiledWorkflow}` store — the old class-level
 `bind_to` registry was replaced) and registers the workspace for CLI

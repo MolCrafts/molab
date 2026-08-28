@@ -70,7 +70,7 @@ Assets produced during a run carry a `Producer` record: `run_id`, `execution_id`
 import molexp as me
 
 ws = me.Workspace("./lab", name="lab")
-run = ws.project("demo").experiment("baseline").add_run({"lr": 1e-3})
+run = ws.add_project("demo").add_experiment("baseline").add_run({"lr": 1e-3})
 
 with run.start() as ctx:
     ctx.set_active_task("train")

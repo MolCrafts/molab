@@ -1,4 +1,4 @@
-"""``PlanTaskRegistry`` — in-process registry of live PlanMode tasks.
+"""``PlanTaskRegistry`` — in-process registry of live PlanOrchestrator tasks.
 
 Mirrors :class:`~molexp.server.agent_runtime.registry.AgentSessionRegistry`:
 a process-singleton keyed ``(workspace_root, task_id)``, reached via the

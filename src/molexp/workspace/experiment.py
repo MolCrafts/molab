@@ -417,7 +417,7 @@ class Experiment(Folder):
             Run,
             resolved_id,
             id=resolved_id,
-            parameters=params,
+            params=params,
             workflow_snapshot=workflow_snapshot,
             target=resolved_target,
         )
@@ -570,16 +570,27 @@ class Experiment(Folder):
         _workflow_executor(self, workflow)
         return RunSet(runs, workflow=workflow)
 
-    def runs(self) -> RunSet:
+    def runset(self) -> RunSet:
         """All existing runs as a :class:`~molexp.workspace.runset.RunSet`.
 
         The batch view over :meth:`list_runs` — read back a finished sweep
-        (``exp.runs().collect().to_records()``) or execute still-pending runs
+        (``exp.runset().collect().to_records()``) or execute still-pending runs
         (the workflow resolves from the experiment's binding at execute time).
         """
         from .runset import RunSet
 
         return RunSet(self.list_runs())
+
+    def runs(self) -> RunSet:
+        """Deprecated alias of :meth:`runset`."""
+        import warnings
+
+        warnings.warn(
+            "Experiment.runs() is deprecated; use runset()",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.runset()
 
     def get_run(self, run_id: str) -> Run:
         """Get an existing run by id (must exist)."""

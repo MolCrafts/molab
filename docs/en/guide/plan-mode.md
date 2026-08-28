@@ -1,55 +1,60 @@
-# 用 Agent Harness 做规划
+# Planning with the Agent Harness
 
-`molexp plan` 把自然语言实验草案变成：
+`molexp plan` turns a natural-language experiment draft into:
 
-1. **任务板**（有序步骤 + 验收标准），
-2. **人工审查**（审批收件箱 / TTY / `--yes`），
-3. **冻结计划** + 可读 **计划报告**，
-4. 默认再 **实现** 工作流（codegen + 仅编译 dry-run）。
+1. a **task board** (ordered steps + acceptance criteria),
+2. a **human review** (approvals inbox / TTY / `--yes`),
+3. a **frozen plan** plus a readable **plan report**.
 
-生产入口是 `molexp.harness.PlanOrchestrator`。内部细节见
-[Plan Mode 架构](../architecture/plan-mode.md)。
+Phase 2 — **deterministic realization** (per-task codegen + a compile-only
+dry run) — is a separate phase of the pipeline that this command does not
+drive yet: `molexp plan` stops at the frozen plan + report, and passing
+`--execute` only prints a notice.
 
-## 前置条件
+The production entry point is `molexp.harness.PlanOrchestrator`. For the
+internals, see the [Plan Mode architecture](../architecture/plan-mode.md).
+
+## Prerequisites
 
 ```bash
 pip install "molexp[agent]"
 molexp config set agent.model anthropic:claude-sonnet-4-5
 ```
 
-模型来自 `~/.molexp/config.json` 的 `agent.model`（CLI 与服务端同一加载器）。
-可用 `--model` 覆盖。
+The model comes from `agent.model` in `~/.molexp/config.json` (CLI and server
+share one loader). Override it per invocation with `--model`.
 
-## 规划（并实现）
+## Planning
 
 ```bash
-molexp plan "筛选三种溶剂比例并报告电导率"
+molexp plan "Screen three solvent ratios and report conductivity"
 molexp plan --file draft.md
 ```
 
-| 阶段 | 你会看到 |
-|------|----------|
-| 规划 | Agent 用工具往任务板上放任务；表单不完整则不能结束 |
-| 审查 | 硬门禁 — 批准 / 拒绝 / 修订（keep_tasks、备注、优先级） |
-| 实现 | 按任务生成代码与单测，再 compile-only |
+| Stage | What you see |
+|-------|--------------|
+| Planning | The agent places tasks on the board through tools; it cannot finish while the form is incomplete |
+| Review | Hard gate — approve / reject / revise (keep_tasks, notes, priority) |
+| Freeze + report | The content-addressed frozen plan and a readable report land on disk |
 
-无 TTY 授权且未 `--yes` 时，审查门禁会 **挂起** 到审批收件箱；授权后同一 run
-store-first 恢复。默认项目/实验为 `plans` / `plan`。
+Without a TTY grant and without `--yes`, the review gate **suspends** into the
+approvals inbox; once granted, the same run resumes store-first. The default
+project/experiment is `plans` / `plan`.
 
 ```bash
-molexp plan --file draft.md --yes   # 自动过审查门禁，仍会跑实现阶段
+molexp plan --file draft.md --yes   # auto-approves the review gate; stops at the frozen plan + report
 ```
 
 ## UI
 
-Agent 作曲器切到 **Plan**（模式胶囊或 `Shift+Tab`）。同一 `POST /plan-tasks`
-驱动 `PlanOrchestrator`。
+Switch the agent composer to **Plan** (mode pill or `Shift+Tab`). The same
+`POST /plan-tasks` drives `PlanOrchestrator`.
 
-- **左轨** — 新阶段列表（任务板 → 审查 → 冻结 → 报告 → 绑定 → 源码 → 编译…）
-- **右栏** — 当前阶段交付物
-- **审批** — 结构化表单；**批准与修订都会提交 fieldValues**
+- **Left rail** — the new stage list (task board → review → freeze → report → bind → source → compile…)
+- **Right pane** — the current stage's deliverables
+- **Approvals** — a structured form; **both approve and revise submit fieldValues**
 
-## 产物
+## Artifacts
 
 ```text
 runs/run-<id>/
@@ -58,17 +63,18 @@ runs/run-<id>/
 └── harness.sqlite
 ```
 
-实现全绿时，工作流 IR 会投影到 experiment，供图查看器打开。
+When realization goes all-green, the workflow IR is projected onto the
+experiment so the graph viewer can open it.
 
-## 审批动作
+## Approval actions
 
-| 动作 | 效果 |
-|------|------|
-| **批准** | 写入授权 + 可选 field_values；恢复后冻结并实现 |
-| **修订** | 把 field_values 应用到任务板，重新进门禁 |
-| **拒绝** | 计划任务标记失败 |
+| Action | Effect |
+|--------|--------|
+| **Approve** | Writes the grant + optional field_values; on resume the plan is frozen and the report rendered |
+| **Revise** | Applies field_values to the task board and re-enters the gate |
+| **Reject** | The plan task is marked failed |
 
-## 相关
+## Related
 
-- 架构：[Plan Mode 架构](../architecture/plan-mode.md)
-- 跟踪运行：[Tracked runs](../getting-started/tracked-runs.md)
+- Architecture: [Plan Mode architecture](../architecture/plan-mode.md)
+- Tracked runs: [Tracked runs](../getting-started/tracked-runs.md)

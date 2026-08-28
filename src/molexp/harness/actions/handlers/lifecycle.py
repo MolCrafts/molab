@@ -81,6 +81,7 @@ def _execute_family(
     verb: str,
     allowed: tuple[str, ...],
     domain_hint: str,
+    resume: bool = False,
     rerun: bool = False,
     fresh: bool = False,
 ) -> dict[str, JSONValue]:
@@ -96,7 +97,7 @@ def _execute_family(
         )
     from molexp.harness.workflow_recovery import compiled_workflow_for_run
 
-    execute_run(compiled_workflow_for_run(run), run, rerun=rerun, fresh=fresh)
+    execute_run(compiled_workflow_for_run(run), run, resume=resume, rerun=rerun, fresh=fresh)
     return _summary(run)
 
 
@@ -117,6 +118,7 @@ def resume_run_capability(run: Run) -> dict[str, JSONValue]:
         verb="run_resume",
         allowed=("failed", "cancelled"),
         domain_hint="pending wants run_execute, running wants run_cancel.",
+        resume=True,
     )
 
 
@@ -130,6 +132,20 @@ def rerun_run_capability(run: Run, fresh: bool = False) -> dict[str, JSONValue]:
         rerun=True,
         fresh=fresh,
     )
+
+
+def cancel_run_capability(run: Run) -> dict[str, JSONValue]:
+    """Cancel a RUNNING run — strict intervene domain, capability signature.
+
+    Thin wrapper over :func:`molexp.workspace.lifecycle_ops.cancel_run` so the
+    capability catalog's input schema (``run`` only) tracks a live signature:
+    the core's operator-side seams (``signal_executor`` / ``allow_pending``)
+    are shell concerns, never capability inputs.
+    """
+    from molexp.workspace.lifecycle_ops import cancel_run
+
+    cancel_run(run)
+    return _summary(run)
 
 
 def prune_runs_capability(
@@ -201,10 +217,7 @@ class RunLifecycleHandler:
         elif verb == "rerun":
             detail = rerun_run_capability(run, fresh=bool(payload.get("fresh", False)))
         elif verb == "cancel":
-            from molexp.workspace.lifecycle_ops import cancel_run
-
-            cancel_run(run)
-            detail = _summary(run)
+            detail = cancel_run_capability(run)
         elif verb == "prune":
             detail = prune_runs_capability(
                 run,

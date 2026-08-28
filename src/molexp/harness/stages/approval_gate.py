@@ -94,12 +94,12 @@ class ApprovalGate(Stage):
         self._approve = approve
         self._subject_artifact_ids = list(subject_artifact_ids or [])
         # The kind of the summary artifact this gate persists on grant. Defaults
-        # to ``analysis_result``; an EARLY gate (e.g. PlanMode's spec-approval
+        # to ``analysis_result``; an EARLY gate (e.g. PlanOrchestrator's spec-approval
         # checkpoint) overrides it so it does not collide with the terminal
         # gate's ``analysis_result`` (which keys the UI's "Review" rail step).
         self._result_kind = result_kind
         # A Mode keys its completion ledger on ``stage.name``; when a single
-        # mode wires more than one gate (e.g. PlanMode's experiment-spec
+        # mode wires more than one gate (e.g. PlanOrchestrator's experiment-spec
         # checkpoint plus the terminal final-report gate) each needs a
         # distinct name. We shadow the ``name`` ClassVar on this instance only
         # (class-level ``ApprovalGate.name`` stays "approval_gate"); the

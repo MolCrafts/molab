@@ -61,9 +61,24 @@ __all__ = [
     "CurationArgumentError",
     "CurationInvocation",
     "CurationResult",
+    "resolve_curate_run",
     "resolve_curation_arguments",
     "run_curation_flow",
 ]
+
+
+def resolve_curate_run(experiment: Experiment, request_text: str) -> Run:
+    """Content-addressed curate Run bootstrap — same request ⇒ same Run.
+
+    The ONE bootstrap shared by ``molexp curate ask`` and ``POST
+    /curate-tasks`` ("Python 操作 = UI 操作"); twin of
+    :func:`molexp.services.plan_runtime.resolve_plan_run`.
+    """
+    from molexp._typing import JSONValue
+    from molexp.workspace.utils import derive_run_id
+
+    params: dict[str, JSONValue] = {"mode": "curate", "request": request_text}
+    return experiment.add_run(params, id=derive_run_id(params))
 
 
 class CurationArgumentError(ValueError):

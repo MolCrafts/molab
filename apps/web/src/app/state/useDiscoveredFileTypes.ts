@@ -4,7 +4,7 @@ import { workspaceApi } from "@/app/state/api";
 import type { SemanticObjectType } from "@/app/types";
 import type { DiscoveredPlugin } from "@/lib/file-type-discovery";
 import { discoverPluginsForObject, flattenFileNodes } from "@/lib/file-type-discovery";
-import { usePluginPreferencesGeneration } from "@/plugins/preferences";
+import { usePluginPreferencesGeneration } from "@/lib/plugin-preferences";
 
 interface RunCoords {
   projectId: string;

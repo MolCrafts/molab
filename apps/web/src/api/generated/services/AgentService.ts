@@ -13,7 +13,7 @@ export class AgentService {
      * @returns any Successful Response
      * @throws ApiError
      */
-    public static agentDisabledApiAgentPathDelete(
+    public static agentDisabled(
         path: string,
         molexpSession?: (string | null),
     ): CancelablePromise<any> {
@@ -38,7 +38,7 @@ export class AgentService {
      * @returns any Successful Response
      * @throws ApiError
      */
-    public static agentDisabledApiAgentPathDelete1(
+    public static agentDisabled1(
         path: string,
         molexpSession?: (string | null),
     ): CancelablePromise<any> {
@@ -63,7 +63,7 @@ export class AgentService {
      * @returns any Successful Response
      * @throws ApiError
      */
-    public static agentDisabledApiAgentPathDelete2(
+    public static agentDisabled2(
         path: string,
         molexpSession?: (string | null),
     ): CancelablePromise<any> {
@@ -88,7 +88,7 @@ export class AgentService {
      * @returns any Successful Response
      * @throws ApiError
      */
-    public static agentDisabledApiAgentPathDelete3(
+    public static agentDisabled3(
         path: string,
         molexpSession?: (string | null),
     ): CancelablePromise<any> {
@@ -113,7 +113,7 @@ export class AgentService {
      * @returns any Successful Response
      * @throws ApiError
      */
-    public static agentDisabledApiAgentPathDelete4(
+    public static agentDisabled4(
         path: string,
         molexpSession?: (string | null),
     ): CancelablePromise<any> {

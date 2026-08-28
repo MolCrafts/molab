@@ -9,7 +9,7 @@ export type RunAnalyzeFailureRequest = {
     /**
      * Author string
      */
-    created_by?: string;
+    createdBy?: string;
     /**
      * When true, also accept cancelled runs (default: failed only)
      */

@@ -12,7 +12,7 @@
  * file is absent — e.g. local executions skip stdout capture).
  */
 export type RunLogsResponse = {
-    execution_id?: (string | null);
+    executionId?: (string | null);
     stderr?: (string | null);
     stdout?: (string | null);
 };

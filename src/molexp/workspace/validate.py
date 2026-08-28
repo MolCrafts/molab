@@ -43,7 +43,7 @@ _SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 META_JSON = "meta.json"
 _LEGACY_META_YAML = "meta.yaml"
 META_YAML = META_JSON  # back-compat alias
-RUN_DIR_PREFIX = "run-"
+from .utils import RUN_DIR_PREFIX  # noqa: E402 — one definition (layout law)
 
 #: Structural container subdirs per level — directories that hold children or
 #: payload rather than being Concepts themselves, so they carry no meta.json.

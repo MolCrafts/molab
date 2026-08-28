@@ -1,6 +1,6 @@
 import type { LineChartConfig, SeriesPoint } from "@molcrafts/molplot";
 import type { JSX } from "react";
-import { useEffect, useImperativeHandle, useRef } from "react";
+import { useEffect, useImperativeHandle, useMemo, useRef } from "react";
 
 export interface MolplotLineChartHandle {
   /** Push a single point onto an existing series (cheap extendTraces). */
@@ -27,19 +27,87 @@ interface MolplotLineChartProps {
   style?: React.CSSProperties;
 }
 
+type LineChartInstance = {
+  dispose: () => void;
+  ready: () => Promise<void>;
+  appendPoint: (id: string, p: SeriesPoint) => Promise<void>;
+  appendPoints: (id: string, p: SeriesPoint[]) => Promise<void>;
+  setSeries: (id: string, p: SeriesPoint[]) => Promise<void>;
+  setWindow: (n: number | null) => Promise<void>;
+  setAxisRange: (axis: "x" | "y", range: [number, number] | "auto") => Promise<void>;
+  clear: (id?: string) => Promise<void>;
+};
+
+export interface SeriesCursor {
+  length: number;
+  lastX: number;
+  lastY: number;
+}
+
+export const cursorFromPoints = (points: ReadonlyArray<SeriesPoint>): SeriesCursor => {
+  if (points.length === 0) return { length: 0, lastX: Number.NaN, lastY: Number.NaN };
+  const last = points[points.length - 1];
+  return { length: points.length, lastX: last.x, lastY: last.y };
+};
+
+export type SeriesUpdatePlan =
+  | { op: "noop" }
+  | { op: "append"; points: SeriesPoint[] }
+  | { op: "replace" };
+
 /**
- * Thin React wrapper around molplot's imperative ``LineChart`` —
- * mounts / disposes the underlying chart instance against a div ref
- * and re-renders when the ``config`` reference changes.
+ * Decide whether incoming points are a tail append (streaming poll) or a
+ * full replace (reset / smoothing / x-axis change).
+ */
+export const planSeriesUpdate = (
+  cursor: SeriesCursor | undefined,
+  points: ReadonlyArray<SeriesPoint>,
+): SeriesUpdatePlan => {
+  if (!cursor) return points.length === 0 ? { op: "noop" } : { op: "replace" };
+  if (points.length === cursor.length) {
+    if (points.length === 0) return { op: "noop" };
+    const last = points[points.length - 1];
+    if (last.x === cursor.lastX && last.y === cursor.lastY) return { op: "noop" };
+    return { op: "replace" };
+  }
+  if (points.length > cursor.length) {
+    if (cursor.length === 0) return { op: "append", points: points.slice() };
+    const hinge = points[cursor.length - 1];
+    if (hinge && hinge.x === cursor.lastX && hinge.y === cursor.lastY) {
+      return { op: "append", points: points.slice(cursor.length) };
+    }
+  }
+  return { op: "replace" };
+};
+
+/**
+ * Identity of the Vega spec (not the data). Polling new points must not
+ * remount the chart — that wipes pan/zoom on the container.
+ */
+export const lineChartStructureKey = (config: LineChartConfig): string =>
+  JSON.stringify({
+    series: config.series.map((s) => ({
+      id: s.id,
+      label: s.label,
+      color: s.color,
+      width: s.width,
+      opacity: s.opacity,
+      mode: s.mode,
+    })),
+    xAxis: config.xAxis,
+    yAxis: config.yAxis,
+    theme: config.theme,
+    preset: config.preset,
+    hovermode: config.hovermode,
+    showLegend: config.showLegend,
+    windowSize: config.windowSize,
+  });
+
+/**
+ * Thin React wrapper around molplot's imperative ``LineChart``.
  *
- * Callers passing dynamic configs must memoise them; otherwise every
- * parent render tears down the chart. This intentional sharpness lets
- * the wrapper stay free of deep-equality logic.
- *
- * For streaming use cases reach the imperative API through the ref:
- * a 1Hz metric source should call ``handle.appendPoint(id, point)``
- * rather than re-passing a growing ``config.series[].initialPoints``
- * each tick.
+ * Mounts once per spec structure. New points are ``appendPoints`` only;
+ * ``setSeries`` is reserved for a reset (cursor mismatch).
  */
 export const MolplotLineChart = ({
   config,
@@ -48,15 +116,11 @@ export const MolplotLineChart = ({
   style,
 }: MolplotLineChartProps): JSX.Element => {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const chartRef = useRef<{
-    dispose: () => void;
-    appendPoint: (id: string, p: SeriesPoint) => Promise<void>;
-    appendPoints: (id: string, p: SeriesPoint[]) => Promise<void>;
-    setSeries: (id: string, p: SeriesPoint[]) => Promise<void>;
-    setWindow: (n: number | null) => Promise<void>;
-    setAxisRange: (axis: "x" | "y", range: [number, number] | "auto") => Promise<void>;
-    clear: (id?: string) => Promise<void>;
-  } | null>(null);
+  const chartRef = useRef<LineChartInstance | null>(null);
+  const configRef = useRef(config);
+  const cursorRef = useRef<Map<string, SeriesCursor>>(new Map());
+  configRef.current = config;
+  const structureKey = useMemo(() => lineChartStructureKey(config), [config]);
 
   useImperativeHandle(
     ref,
@@ -72,22 +136,59 @@ export const MolplotLineChart = ({
   );
 
   useEffect(() => {
+    void structureKey;
     const container = containerRef.current;
-    if (!container) {
-      return;
-    }
+    if (!container) return;
     let cancelled = false;
     void (async () => {
       const { LineChart } = await import("@molcrafts/molplot");
       if (cancelled) return;
-      chartRef.current = new LineChart(container, config);
+      const initial = configRef.current;
+      const chart = new LineChart(container, initial);
+      const cursors = new Map<string, SeriesCursor>();
+      for (const series of initial.series) {
+        cursors.set(series.id, cursorFromPoints(series.initialPoints ?? []));
+      }
+      cursorRef.current = cursors;
+      chartRef.current = chart;
+      await chart.ready();
     })();
     return () => {
       cancelled = true;
       chartRef.current?.dispose();
       chartRef.current = null;
     };
+  }, [structureKey]);
+
+  useEffect(() => {
+    const chart = chartRef.current;
+    if (!chart) return;
+    for (const series of config.series) {
+      const points = series.initialPoints ?? [];
+      const plan = planSeriesUpdate(cursorRef.current.get(series.id), points);
+      cursorRef.current.set(series.id, cursorFromPoints(points));
+      if (plan.op === "append" && plan.points.length > 0) {
+        void chart.appendPoints(series.id, plan.points).catch(() => {
+          void chart.setSeries(series.id, points);
+        });
+      } else if (plan.op === "replace") {
+        void chart.setSeries(series.id, points);
+      }
+    }
   }, [config]);
 
-  return <div ref={containerRef} className={className} style={style} />;
+  // Vega container owns the wheel: prevent the parent overflow scroller from
+  // eating it. Do not stopPropagation — molplot's capture listener must stamp
+  // axis flags on the same event.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const onWheel = (event: WheelEvent): void => {
+      event.preventDefault();
+    };
+    el.addEventListener("wheel", onWheel, { capture: true, passive: false });
+    return () => el.removeEventListener("wheel", onWheel, { capture: true });
+  }, []);
+
+  return <div ref={containerRef} className={className} style={{ touchAction: "none", ...style }} />;
 };

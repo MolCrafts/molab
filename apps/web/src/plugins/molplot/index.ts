@@ -1,7 +1,9 @@
 import { registerFileTypeContribution } from "@/app/registry";
 import { RunMetricsTab } from "@/plugins/molplot/RunMetricsTab";
+import { resolveMolplotMetricsTabBadgeCount } from "@/plugins/molplot/tab-badge-count";
 import type { UiPluginModule } from "@/plugins/types";
 import { MolplotObservablesTab } from "./MolplotObservablesTab";
+import { isMlpMetricsSurface } from "./mlp-surface";
 
 export type { LineChartConfig, LineSeriesConfig, VegaLiteSpec } from "@molcrafts/molplot";
 export { MolplotBarChart } from "./MolplotBarChart";
@@ -11,27 +13,18 @@ export { MolplotRawChart } from "./MolplotRawChart";
 export { MultiRunMetricsView } from "./MultiRunMetricsView";
 export { RunMetricsTab } from "./RunMetricsTab";
 export { RunMetricsView } from "./RunMetricsView";
-export { smoothEma } from "./smoothing";
+export { filterSpikes, smoothEma } from "./smoothing";
 
 /**
  * molplot UI plugin — activates purely by filename suffixes (no heuristics).
  *
  * Contract (see molexp.workspace.mlp_names):
  * - ``*.mlp.jsonl`` — live metrics WAL → Metrics tab
- * - ``*.mlp.zarr`` / ``…/*.mlp.zarr/zarr.json`` — dense Zarr SoT → Metrics tab
+ * - ``*.mlp.zarr`` / ``<stem>.mlp.zarr/zarr.json`` — dense Zarr SoT → Metrics tab
+ *   (nested arrays inside the store are not surfaces)
  * - ``*.mlp.vl.json`` — Vega-Lite plot artifact → MolPlot tab
  * - ``*.mlp.index.json`` is a host cache only — never matched
  */
-const isMlpMetricsSurface = (file: { name: string; relPath: string }): boolean => {
-  const path = `${file.relPath}`.toLowerCase().replace(/\\/g, "/");
-  const name = file.name.toLowerCase();
-  if (name.endsWith(".mlp.jsonl") || path.endsWith(".mlp.jsonl")) return true;
-  if (name.endsWith(".mlp.zarr") || path.endsWith(".mlp.zarr")) return true;
-  if (path.includes(".mlp.zarr/") || (name === "zarr.json" && path.includes(".mlp.zarr"))) {
-    return true;
-  }
-  return false;
-};
 
 const isMlpPlotSurface = (file: { name: string; relPath: string }): boolean => {
   const path = `${file.relPath}`.toLowerCase().replace(/\\/g, "/");
@@ -55,6 +48,7 @@ const molplotPlugin: UiPluginModule = {
         patterns: ["**/*.mlp.jsonl", "**/*.mlp.zarr", "**/*.mlp.zarr/zarr.json"],
         matches: isMlpMetricsSurface,
       },
+      resolveTabBadgeCount: resolveMolplotMetricsTabBadgeCount,
       Component: RunMetricsTab,
     });
     registerFileTypeContribution({

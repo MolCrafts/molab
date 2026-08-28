@@ -4,7 +4,7 @@ Once your script can create a workspace and bind experiments, replace `asyncio.r
 
 ## Register for CLI Discovery
 
-`molexp run` discovers workspaces through the fluent declaration chain. The key line is `Experiment.run(workflow, params=...)` — it seeds the runs, binds the workflow, and registers the workspace:
+`molexp run` discovers workspaces through the declaration chain. The key line is `Experiment.define(workflow, params=...)` — it seeds the runs, binds the workflow, and registers the workspace:
 
 ```python
 import molexp as me
@@ -18,9 +18,9 @@ def fetch(scale: float) -> list[float]:
 
 (
     me.Workspace("./lab", name="lab")
-    .project("demo")
-    .experiment("sum")
-    .run(wf.compile(), params={"scale": [1.0, 2.0]})
+    .add_project("demo")
+    .add_experiment("sum")
+    .define(wf.compile(), params={"scale": [1.0, 2.0]})
 )
 ```
 
@@ -40,7 +40,7 @@ The experiment script is **science + declaration only**. These are platform resp
 |---|---|
 | `argparse` / Typer for `--workspace` / `--seed` / … | `molexp run`, task params, `molcfg.yaml` profiles, `--override KEY=VAL` |
 | `sys.path.insert` to a package tree | Install the package (`pip install -e …`); sibling modules work because `molexp run` adds the script directory |
-| `exp.add_run(..., id=f"…{time.time()}")` + `execute_run` | `exp.run(wf.compile(), params=…)` then `molexp run`; re-execute with `--rerun [--fresh]` |
+| `exp.add_run(..., id=f"…{time.time()}")` + `execute_run` | `exp.define(wf.compile(), params=…)` then `molexp run`; re-execute with `--rerun [--fresh]` |
 | Second `run.start()` after execute to `artifact.save` / `metrics.scalar` | Return `RegisterArtifact` / `RegisterMetric` from the task (write files under `ctx.workdir`) |
 | Nested CLIs for optional trajectory / cutoff | Typed task parameters (or a second task), set via profile / `--override` |
 

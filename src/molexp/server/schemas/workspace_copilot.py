@@ -9,8 +9,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel
-
+from ._wire import ApiModel
 from .workspace_context import (
     HealthFlagResponse,
     KnowledgeRefResponse,
@@ -22,7 +21,7 @@ if TYPE_CHECKING:
     from molexp.harness.copilot import NextAction, WorkspaceSummary
 
 
-class NextActionResponse(BaseModel):
+class NextActionResponse(ApiModel):
     kind: str
     target: str
     rationale: str
@@ -40,7 +39,7 @@ class NextActionResponse(BaseModel):
         )
 
 
-class WorkspaceSummaryResponse(BaseModel):
+class WorkspaceSummaryResponse(ApiModel):
     """Camel-cased HTTP view of the read-only ``WorkspaceSummary``."""
 
     workspace: WorkspaceRefResponse

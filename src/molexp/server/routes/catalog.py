@@ -142,8 +142,9 @@ def _derive_scope_from_path(rel_path: str) -> CatalogScopeInfo | None:
     if len(parts) >= 4 and parts[2] == "experiments":
         experiment_id = parts[3]
     if len(parts) >= 6 and parts[4] == "runs":
-        run_dir_name = parts[5]
-        run_id = run_dir_name[4:] if run_dir_name.startswith("run-") else run_dir_name
+        from molexp.workspace.utils import run_id_from_dir_name
+
+        run_id = run_id_from_dir_name(parts[5])
 
     kind = "workspace"
     if run_id:

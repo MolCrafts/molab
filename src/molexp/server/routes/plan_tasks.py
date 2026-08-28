@@ -1,7 +1,7 @@
-"""Plan-task routes — run the harness ``PlanMode`` pipeline as a background task.
+"""Plan-task routes — run the harness ``PlanOrchestrator`` pipeline as a background task.
 
 ``POST /projects/{p}/experiments/{e}/plan-tasks`` files a content-addressed Run
-under the experiment and starts PlanMode on it in the background (no LLM
+under the experiment and starts PlanOrchestrator on it in the background (no LLM
 blocking the request). Approval gates suspend the task (``waiting_approval``)
 until a decision lands via the ``/api/approvals`` inbox — never auto-granted.
 ``GET .../{task_id}`` polls status; on completion the generated workflow is
@@ -37,11 +37,11 @@ _DRAFT_PREVIEW_CHARS = 80
 
 
 class PlanTaskCreateRequest(BaseModel):
-    """Body for starting a PlanMode background task."""
+    """Body for starting a PlanOrchestrator background task."""
 
     model_config = ConfigDict(populate_by_name=True)
 
-    draft: str = Field(..., description="Natural-language experiment draft for PlanMode.")
+    draft: str = Field(..., description="Natural-language experiment draft for PlanOrchestrator.")
     model: str | None = Field(None, description="Model id; defaults to the configured agent.model.")
     ground: bool = Field(
         True,
@@ -101,19 +101,17 @@ class PlanTaskListResponse(BaseModel):
 
 
 def _configured_model() -> str | None:
-    """Return the ``agent.model`` value from in-code ``molexp.config``, if any."""
-    import molexp
-    from molexp.services.operator_config import AGENT_MODEL_KEY
+    """Effective ``agent.model`` — the shared services resolver."""
+    from molexp.services.operator_config import resolve_configured_model
 
-    model = molexp.config.get(AGENT_MODEL_KEY)
-    return model if isinstance(model, str) and model else None
+    return resolve_configured_model()
 
 
 def _configured_models() -> dict[str, str] | None:
-    """Return the configured tier map through the shared agent resolver."""
-    from molexp.server.routes.agent import _configured_models as configured_models
+    """Complete cheap/default/heavy tier map — the shared services resolver."""
+    from molexp.services.operator_config import resolve_configured_models
 
-    return configured_models()
+    return resolve_configured_models()
 
 
 def _to_response(task: PlanTask, *, project_id: str, experiment_id: str) -> PlanTaskResponse:
@@ -147,9 +145,9 @@ async def create_plan_task(
     request: PlanTaskCreateRequest,
     workspace: Workspace = Depends(get_workspace),
 ) -> PlanTaskResponse:
-    """Start a PlanMode pipeline on a content-addressed run under the experiment.
+    """Start a PlanOrchestrator pipeline on a content-addressed run under the experiment.
 
-    Async so the spawned background ``asyncio.Task`` (the PlanMode run) attaches
+    Async so the spawned background ``asyncio.Task`` (the PlanOrchestrator run) attaches
     to the app event loop; the handler itself does no awaiting and returns the
     initial ``running`` status immediately.
     """
@@ -172,12 +170,9 @@ def start_plan_task(
     supersedes_run_id: str | None = None,
 ) -> PlanTaskResponse:
     """Shared starter used by the legacy route and AgentTask plan turns."""
-    from molexp._typing import JSONValue
     from molexp.server.deps.plan_runtime import get_plan_runtime
-    from molexp.services.plan_runtime import resolve_plan_compute_target
+    from molexp.services.plan_runtime import resolve_plan_compute_target, resolve_plan_run
     from molexp.services.plan_runtime.gateway import build_plan_gateway
-    from molexp.workspace.errors import RunNotFoundError
-    from molexp.workspace.utils import derive_run_id
 
     draft = request.draft.strip()
     if not draft:
@@ -194,14 +189,8 @@ def start_plan_task(
     # Workspace NotFound errors map to HTTP envelopes via the registered handlers.
     experiment = workspace.get_project(project_id).get_experiment(experiment_id)
 
-    params: dict[str, JSONValue] = {"mode": "plan", "draft": draft}
-    if supersedes_run_id:
-        params["supersedes"] = supersedes_run_id
-    run_id = derive_run_id(params)
-    try:
-        run = experiment.get_run(run_id)
-    except RunNotFoundError:
-        run = experiment.add_run(params, id=run_id)
+    # One bootstrap shared with `molexp plan` (services.plan_runtime).
+    run = resolve_plan_run(experiment, draft, supersedes=supersedes_run_id)
 
     # One shared resolution path with the CLI (Python = UI law). An unknown
     # explicit name fails the REQUEST (422 + candidates), never falls back.

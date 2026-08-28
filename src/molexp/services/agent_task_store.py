@@ -252,7 +252,7 @@ def write_agent_task_events(
 ) -> None:
     """Persist a task's session events (``{type, ts, payload}`` records).
 
-    Used to record a synthesized transcript (e.g. a PlanMode run) so the session
+    Used to record a synthesized transcript (e.g. a PlanOrchestrator run) so the session
     view shows the whole flow even though no live runtime session exists.
     """
     target_dir = _task_dir(workspace_root, task_id, create=True)

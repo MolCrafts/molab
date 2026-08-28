@@ -13,9 +13,9 @@
  */
 export type RunStartRequest = {
     /**
-     * Run inputs to apply before starting (the workflow's root inputs). None keeps the run's existing parameters; a pending run has not been hashed yet, so editing inputs here is safe.
+     * Run inputs to apply before starting (the workflow's root inputs). None keeps the run's existing params; a pending run has not been hashed yet, so editing inputs here is safe. 'parameters' is a deprecated alias.
      */
-    parameters?: (Record<string, any> | null);
+    params?: (Record<string, any> | null);
     /**
      * Compute target name to start the run on (must exist in the workspace registry)
      */

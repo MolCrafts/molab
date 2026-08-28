@@ -1,4 +1,4 @@
-"""``drive_plan_mode`` — the ONE way CLI and server run a PlanMode pipeline.
+"""``drive_plan_mode`` — the ONE way CLI and server run a PlanOrchestrator pipeline.
 
 Wraps ``mode.run(...)`` in the run's own lifecycle (``run.start()``), so a
 plan Run's workspace status is honest: ``running`` while the pipeline
@@ -23,7 +23,26 @@ if TYPE_CHECKING:
     from molexp.harness.gateways.gateway import AgentGateway
     from molexp.workspace.run import Run
 
-__all__ = ["drive_plan_mode"]
+__all__ = ["drive_plan_mode", "resolve_plan_run"]
+
+
+def resolve_plan_run(experiment: Any, draft: str, *, supersedes: str | None = None) -> Run:  # noqa: ANN401
+    """Content-addressed plan Run bootstrap — same draft ⇒ same Run.
+
+    The ONE bootstrap shared by ``molexp plan`` and ``POST /plan-tasks``
+    ("Python 操作 = UI 操作"): the run id is derived from the canonical
+    params (``mode``/``draft`` and, when a plan supersedes an earlier one,
+    ``supersedes`` — a superseding plan is a *different* logical run), and
+    ``add_run`` is idempotent on that id, so re-driving the same draft
+    replays store-first on the same Run instead of minting a new one.
+    """
+    from molexp._typing import JSONValue
+    from molexp.workspace.utils import derive_run_id
+
+    params: dict[str, JSONValue] = {"mode": "plan", "draft": draft}
+    if supersedes:
+        params["supersedes"] = supersedes
+    return experiment.add_run(params, id=derive_run_id(params))
 
 
 class _ModeLike(Protocol):

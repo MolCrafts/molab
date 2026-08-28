@@ -6,15 +6,18 @@ export type ExecutionCreateRequest = {
     /**
      * Target experiment ID
      */
-    experiment_id: string;
-    parameters?: Record<string, any>;
+    experimentId: string;
+    /**
+     * Run params ('parameters' accepted as a deprecated alias)
+     */
+    params?: Record<string, any>;
     /**
      * Target project ID
      */
-    project_id: string;
+    projectId: string;
     /**
      * Optional workflow IR (matches schema/workflow.json). When provided and the experiment has no workflow bound yet, the server binds it and persists the IR to disk. Subsequent calls reuse the on-disk binding.
      */
-    workflow_json?: (Record<string, any> | null);
+    workflowJson?: (Record<string, any> | null);
 };
 

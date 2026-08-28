@@ -18,7 +18,7 @@ export class CurateTasksService {
      * @returns CurateTaskListResponse Successful Response
      * @throws ApiError
      */
-    public static listCurateTasksApiProjectsProjectIdExperimentsExperimentIdCurateTasksGet(
+    public static listCurateTasks(
         projectId: string,
         experimentId: string,
         molexpSession?: (string | null),
@@ -52,7 +52,7 @@ export class CurateTasksService {
      * @returns CurateTaskResponse Successful Response
      * @throws ApiError
      */
-    public static createCurateTaskApiProjectsProjectIdExperimentsExperimentIdCurateTasksPost(
+    public static createCurateTask(
         projectId: string,
         experimentId: string,
         requestBody: CurateTaskCreateRequest,
@@ -85,7 +85,7 @@ export class CurateTasksService {
      * @returns CurateTaskResponse Successful Response
      * @throws ApiError
      */
-    public static getCurateTaskApiProjectsProjectIdExperimentsExperimentIdCurateTasksTaskIdGet(
+    public static getCurateTask(
         projectId: string,
         experimentId: string,
         taskId: string,

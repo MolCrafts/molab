@@ -8,20 +8,23 @@ hot-state sidecar and the ownership heartbeat; the workflow engine owns
 scheduling, caching and node-level persistence. Nothing here is a second
 path — it is the CLI's in-process handler, made importable.
 
-Verb selection follows the canonical run-status law (see CLAUDE.md); the two
-keywords mirror the CLI exactly — ``rerun`` is ``--rerun`` (fresh attempt, no
-seeding) and ``fresh`` is ``--fresh`` (bypass the content-addressed cache
-read; only meaningful with ``rerun=True``):
+Verb selection follows the canonical run-status law (see CLAUDE.md); the
+three keywords mirror the CLI exactly — ``resume`` is ``--resume`` (reopen
+the last execution, seed completed nodes), ``rerun`` is ``--rerun`` (fresh
+attempt, no seeding) and ``fresh`` is ``--fresh`` (bypass the
+content-addressed cache read; only meaningful with ``rerun=True``). Retrying
+is always explicit — with neither flag, a retryable run refuses instead of
+silently resuming:
 
-======================  ====================  =================================
-run status              ``rerun=False``       ``rerun=True``
-======================  ====================  =================================
-``pending``             run (first attempt)   run (first attempt)
-``failed``/``cancelled``  resume (reopen +      rerun (new ``exec-<id>-N``,
-                        seed completed nodes)  no seeding)
+======================  ====================  ==================  ==================
+run status              no flag               ``resume=True``     ``rerun=True``
+======================  ====================  ==================  ==================
+``pending``             run (first attempt)   *error* — run's job  *error* — run's job
+``failed``/``cancelled``  :class:`RunNotExecutableError`  resume (reopen +    rerun (new
+                        — retrying is explicit  seed completed)     ``exec-<id>-N``)
 ``succeeded``           :class:`RunNotExecutableError` — done is done
 ``running``             :class:`RunNotExecutableError` — cancel it first
-======================  ====================  =================================
+======================  ====================  ==================  ==================
 
 A task failure raises :class:`RunFailedError` (carrying the partial
 ``WorkflowResult``) *after* the failed state has been persisted — loud like
@@ -87,8 +90,8 @@ def _ensure_compiled(workflow: object) -> CompiledWorkflow:
     )
 
 
-def _select_verb(run: Run, *, rerun: bool) -> tuple[str | None, dict | None]:
-    """Map the run's status (+ ``rerun``) to ``(execution_id, seed_outputs)``.
+def _select_verb(run: Run, *, resume: bool, rerun: bool) -> tuple[str | None, dict | None]:
+    """Map the run's status (+ ``resume``/``rerun``) to ``(execution_id, seed_outputs)``.
 
     ``(None, None)`` means a fresh attempt (first run / explicit rerun); a
     non-``None`` execution id reopens that attempt with its completed nodes
@@ -107,10 +110,28 @@ def _select_verb(run: Run, *, rerun: bool) -> tuple[str | None, dict | None]:
             f"or result.outputs. Re-executing a succeeded run is not a molexp "
             f"operation; declare a run with different params instead."
         )
-    if not rerun and status in RETRYABLE_STATUSES:
-        # resume: reopen the last execution, seed its completed nodes. The
-        # no-fallback semantics live in ``seed_from_execution``.
-        return seed_from_execution(run)
+    if status in RETRYABLE_STATUSES:
+        if resume:
+            # resume: reopen the last execution, seed its completed nodes. The
+            # no-fallback semantics live in ``seed_from_execution``.
+            return seed_from_execution(run)
+        if rerun:
+            return None, None
+        raise RunNotExecutableError(
+            f"run {run.id} is {status!r} — retrying is an explicit verb: pass "
+            f"resume=True to reopen the last execution (completed nodes are "
+            f"seeded) or rerun=True for a fresh attempt from the top "
+            f"(add fresh=True to also bypass cache reads). CLI twins: "
+            f"`molexp run --resume` / `molexp run --rerun [--fresh]`."
+        )
+    if resume or rerun:
+        # pending — plain run's job; resume/rerun never start a first attempt.
+        verb = "resume" if resume else "rerun"
+        raise RunNotExecutableError(
+            f"run {run.id} is {status!r} — {verb} applies to failed/cancelled "
+            f"runs only; a pending run is started by a plain execute "
+            f"(no resume/rerun flag)."
+        )
     return None, None
 
 
@@ -119,10 +140,16 @@ def _raise_if_failed(run: Run, result: WorkflowResult) -> WorkflowResult:
         return result
     error = getattr(run.metadata, "error", None)
     detail = f"{error.type}: {error.message}" if error is not None else "see the run's error logs"
+    exec_id = getattr(result, "execution_id", None)
+    error_txt = (
+        f"{run.run_dir}/executions/{exec_id}/error.txt"
+        if exec_id
+        else f"{run.run_dir}/executions/<exec_id>/error.txt"
+    )
     raise RunFailedError(
         f"run {run.id} failed — {detail} "
-        f"(run dir: {run.run_dir}; retry with execute_run(...) to resume, "
-        f"or rerun=True to re-execute from the top)",
+        f"(details: {error_txt}; retry with resume=True to continue from the "
+        f"failed node, or rerun=True to re-execute from the top)",
         result=result,
     )
 
@@ -131,18 +158,24 @@ async def aexecute_run(
     workflow: object,
     run: Run,
     *,
+    resume: bool = False,
     rerun: bool = False,
     fresh: bool = False,
     profile_config: ProfileConfig | None = None,
 ) -> WorkflowResult:
     """Async one-step tracked execution. See :func:`execute_run`."""
+    if resume and rerun:
+        raise ValueError(
+            "resume=True and rerun=True are mutually exclusive verbs — resume "
+            "reopens the last execution, rerun opens a fresh attempt."
+        )
     if fresh and not rerun:
         raise ValueError(
             "fresh=True bypasses the cache for an explicit re-execution and "
             "requires rerun=True (mirroring `molexp run --rerun --fresh`)."
         )
     compiled = _ensure_compiled(workflow)
-    execution_id, seed_outputs = _select_verb(run, rerun=rerun)
+    execution_id, seed_outputs = _select_verb(run, resume=resume, rerun=rerun)
     with run.start(profile_config, execution_id=execution_id) as ctx:
         result = await WorkflowRuntime().execute(
             compiled,
@@ -158,6 +191,7 @@ def execute_run(
     workflow: object,
     run: Run,
     *,
+    resume: bool = False,
     rerun: bool = False,
     fresh: bool = False,
     profile_config: ProfileConfig | None = None,
@@ -172,9 +206,13 @@ def execute_run(
         run: The workspace :class:`~molexp.workspace.run.Run` to execute
             against (status machine / ``_ops`` sidecar / heartbeat are driven
             by its ``RunContext`` lifecycle, exactly as under ``molexp run``).
-        rerun: ``True`` forces a fresh attempt (new ``exec-<run_id>-N``, no
-            seeding) instead of the default resume-on-retryable behaviour —
-            the CLI's ``--rerun``.
+        resume: ``True`` reopens a failed/cancelled run's last execution and
+            seeds its completed nodes (recompute only the rest) — the CLI's
+            ``--resume``. Mutually exclusive with ``rerun``.
+        rerun: ``True`` opens a fresh attempt (new ``exec-<run_id>-N``, no
+            seeding) for a failed/cancelled run — the CLI's ``--rerun``.
+            With neither flag, a retryable run refuses loudly (retrying is
+            an explicit verb, never implicit).
         fresh: ``True`` additionally bypasses the content-addressed cache
             *read* for that attempt (results are still written back). Requires
             ``rerun=True`` — the CLI's ``--rerun --fresh``.
@@ -199,7 +237,9 @@ def execute_run(
             "await aexecute_run(...) (or run.aexecute(...)) instead."
         )
     return asyncio.run(
-        aexecute_run(workflow, run, rerun=rerun, fresh=fresh, profile_config=profile_config)
+        aexecute_run(
+            workflow, run, resume=resume, rerun=rerun, fresh=fresh, profile_config=profile_config
+        )
     )
 
 
@@ -231,14 +271,30 @@ class _WorkspaceRunExecutor:
         return bound
 
     def execute(
-        self, run: Run, workflow: object | None, *, rerun: bool = False, fresh: bool = False
+        self,
+        run: Run,
+        workflow: object | None,
+        *,
+        resume: bool = False,
+        rerun: bool = False,
+        fresh: bool = False,
     ) -> object:
-        return execute_run(self._resolve(run, workflow), run, rerun=rerun, fresh=fresh)
+        return execute_run(
+            self._resolve(run, workflow), run, resume=resume, rerun=rerun, fresh=fresh
+        )
 
     async def aexecute(
-        self, run: Run, workflow: object | None, *, rerun: bool = False, fresh: bool = False
+        self,
+        run: Run,
+        workflow: object | None,
+        *,
+        resume: bool = False,
+        rerun: bool = False,
+        fresh: bool = False,
     ) -> object:
-        return await aexecute_run(self._resolve(run, workflow), run, rerun=rerun, fresh=fresh)
+        return await aexecute_run(
+            self._resolve(run, workflow), run, resume=resume, rerun=rerun, fresh=fresh
+        )
 
 
 # Wire the seam at import time so ``run.execute(workflow)`` works as soon as

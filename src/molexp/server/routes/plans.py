@@ -1,6 +1,6 @@
-"""Plan-document routes — read the persisted PlanMode artifacts for an experiment.
+"""Plan-document routes — read the persisted PlanOrchestrator artifacts for an experiment.
 
-A "plan" is a content-addressed Run under the experiment that PlanMode populated
+A "plan" is a content-addressed Run under the experiment that PlanOrchestrator populated
 with an ``experiment_report`` artifact (the readable experiment plan) plus a
 ``user_plan`` artifact (the natural-language draft). The ephemeral plan-*task*
 runtime (``plan_tasks.py``) tracks in-flight generation; these routes serve the

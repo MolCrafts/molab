@@ -31,7 +31,7 @@ export class KnowledgeService {
      * @returns KnowledgeListResponse Successful Response
      * @throws ApiError
      */
-    public static listKnowledgeApiKnowledgeGet(
+    public static listKnowledge(
         tag?: (string | null),
         status?: (string | null),
         molexpSession?: (string | null),
@@ -59,7 +59,7 @@ export class KnowledgeService {
      * @returns BacklinksResponse Successful Response
      * @throws ApiError
      */
-    public static getBacklinksApiKnowledgeBacklinksGet(
+    public static getBacklinks(
         path: string,
         molexpSession?: (string | null),
     ): CancelablePromise<BacklinksResponse> {
@@ -85,7 +85,7 @@ export class KnowledgeService {
      * @returns MessageResponse Successful Response
      * @throws ApiError
      */
-    public static deleteDocApiKnowledgeDocDelete(
+    public static deleteDoc(
         path: string,
         molexpSession?: (string | null),
     ): CancelablePromise<MessageResponse> {
@@ -112,7 +112,7 @@ export class KnowledgeService {
      * @returns NoteSummary Successful Response
      * @throws ApiError
      */
-    public static moveDocApiKnowledgeDocPatch(
+    public static moveDoc(
         path: string,
         requestBody: DocMoveRequest,
         molexpSession?: (string | null),
@@ -141,7 +141,7 @@ export class KnowledgeService {
      * @returns NoteSummary Successful Response
      * @throws ApiError
      */
-    public static createDocApiKnowledgeDocPost(
+    public static createDoc(
         requestBody: DocCreateRequest,
         molexpSession?: (string | null),
     ): CancelablePromise<NoteSummary> {
@@ -167,7 +167,7 @@ export class KnowledgeService {
      * @returns NoteDetailResponse Successful Response
      * @throws ApiError
      */
-    public static editDocApiKnowledgeDocPut(
+    public static editDoc(
         path: string,
         requestBody: DocBodyUpdate,
         molexpSession?: (string | null),
@@ -202,7 +202,7 @@ export class KnowledgeService {
      * @returns EmbedResponse Successful Response
      * @throws ApiError
      */
-    public static embedDocApiKnowledgeDocEmbedPost(
+    public static embedDoc(
         path: string,
         requestBody: EmbedRequest,
         molexpSession?: (string | null),
@@ -231,7 +231,7 @@ export class KnowledgeService {
      * @returns any Successful Response
      * @throws ApiError
      */
-    public static exportDocApiKnowledgeDocExportGet(
+    public static exportDoc(
         path: string,
         molexpSession?: (string | null),
     ): CancelablePromise<any> {
@@ -262,7 +262,7 @@ export class KnowledgeService {
      * @returns NoteSummary Successful Response
      * @throws ApiError
      */
-    public static updateDocMetaApiKnowledgeDocMetaPatch(
+    public static updateDocMeta(
         path: string,
         requestBody: DocMetaUpdate,
         molexpSession?: (string | null),
@@ -299,7 +299,7 @@ export class KnowledgeService {
      * @returns EntityBacklinksResponse Successful Response
      * @throws ApiError
      */
-    public static entityBacklinksApiKnowledgeEntityBacklinksGet(
+    public static entityBacklinks(
         kind: 'run' | 'experiment',
         projectId: string,
         experimentId: string,
@@ -331,7 +331,7 @@ export class KnowledgeService {
      * @returns NoteDetailResponse Successful Response
      * @throws ApiError
      */
-    public static getNoteApiKnowledgeNoteGet(
+    public static getNote(
         path: string,
         molexpSession?: (string | null),
     ): CancelablePromise<NoteDetailResponse> {
@@ -363,7 +363,7 @@ export class KnowledgeService {
      * @returns KnowledgeSearchResponse Successful Response
      * @throws ApiError
      */
-    public static searchKnowledgeApiKnowledgeSearchGet(
+    public static searchKnowledge(
         q: string,
         type?: (string | null),
         tag?: (string | null),

@@ -1,6 +1,6 @@
 """Persist a plan-generated workflow onto its Experiment for UI display.
 
-PlanMode's ``workflow_source`` artifact is generated Python (a ``build_workflow()``
+PlanOrchestrator's ``workflow_source`` artifact is generated Python (a ``build_workflow()``
 program); the UI workflow-graph renderer reads ``experiment.workflow_source`` as
 a ``molexp.workflow`` IR document (the shape the ``workflow`` route round-trips
 through ``default_codec``). This compiles the already-pipeline-validated source

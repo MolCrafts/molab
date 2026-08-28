@@ -24,7 +24,7 @@ def score(simulate: float) -> float:
 
 
 ws = me.Workspace("./lab", name="lab")
-exp = ws.project("demo").experiment("lr-scan")
+exp = ws.add_project("demo").add_experiment("lr-scan")
 runset = exp.sweep(wf, {"lr": [0.1, 0.2], "batch": [16, 32]})
 print(len(runset), "runs seeded")
 ```
@@ -41,7 +41,7 @@ for row in summary.to_records():
     print(row["lr"], row["batch"], row["status"], row["score"])
 ```
 
-Runs outside the pending domain are left alone — a succeeded run is never silently recomputed, and retrying a failure stays an explicit per-run verb (`run.execute(wf)` to resume, `fresh=True` to rerun). They still appear in the summary with their current status and persisted outputs.
+Runs outside the pending domain are left alone — a succeeded run is never silently recomputed, and retrying a failure stays an explicit verb (`run.execute(wf, resume=True)` to resume, `run.execute(wf, rerun=True)` to rerun; add `fresh=True` to also bypass the cache read — or retry the whole batch with `runset.execute(resume=True)` / `execute(rerun=True)`). They still appear in the summary with their current status and persisted outputs.
 
 ## Reading the Summary
 
@@ -67,13 +67,13 @@ def invert(x: float) -> float:
     return 1.0 / x
 
 
-outcome = ws.project("demo").experiment("edge-cases").sweep(risky, {"x": [0.0, 2.0]}).execute()
+outcome = ws.add_project("demo").add_experiment("edge-cases").sweep(risky, {"x": [0.0, 2.0]}).execute()
 for row in outcome.to_records():
     print(row["x"], row["status"], row["error"])
 print(len(outcome.failed), "run(s) failed")
 ```
 
-The `x=0.0` row comes back `failed` with `error="ZeroDivisionError: float division by zero"`; the `x=2.0` row succeeds. Retry the failed cells individually (`run.execute(wf)` resumes them) or fix the workflow and rerun with `fresh=True`.
+The `x=0.0` row comes back `failed` with `error="ZeroDivisionError: division by zero"`; the `x=2.0` row succeeds. Retry the failed cells individually (`run.execute(wf, resume=True)` resumes them) or fix the workflow and rerun with `run.execute(wf, rerun=True)` — pass `fresh=True` as well to also bypass the cache read.
 
 ## Re-running and Reading Back
 

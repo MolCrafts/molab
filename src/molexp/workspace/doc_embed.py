@@ -35,6 +35,7 @@ from .bundle_index import extract_title
 from .concepts import REFERENCE_KIND
 from .edges import DEFAULT_EDGE_ROLE, EdgeRole
 from .folder import Folder
+from .utils import RUN_DIR_PREFIX, run_dir_name
 
 # Per-kind default edge roles, all members of the frozen ``EdgeRole`` vocabulary
 # (edges.py). A kind absent here defaults to ``DEFAULT_EDGE_ROLE`` ("references").
@@ -87,7 +88,7 @@ def _scope_dir(root: Path, scope: AssetScope) -> Path:
     directory = directory / "experiments" / ids[1]
     if scope.kind == "experiment":
         return directory
-    run_seg = ids[2] if ids[2].startswith("run-") else f"run-{ids[2]}"
+    run_seg = ids[2] if ids[2].startswith(RUN_DIR_PREFIX) else run_dir_name(ids[2])
     return directory / "runs" / run_seg
 
 

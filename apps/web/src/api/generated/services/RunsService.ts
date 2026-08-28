@@ -2,6 +2,7 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
+import type { ExecutionCreateRequest } from '../models/ExecutionCreateRequest';
 import type { LammpsLogResponse } from '../models/LammpsLogResponse';
 import type { RunActionResponse } from '../models/RunActionResponse';
 import type { RunAnalyzeFailureRequest } from '../models/RunAnalyzeFailureRequest';
@@ -16,6 +17,7 @@ import type { RunMetricsResponse } from '../models/RunMetricsResponse';
 import type { RunResponse } from '../models/RunResponse';
 import type { RunStartRequest } from '../models/RunStartRequest';
 import type { RunStatusResponse } from '../models/RunStatusResponse';
+import type { RunStatusUpdateRequest } from '../models/RunStatusUpdateRequest';
 import type { WorkspaceEventResponse } from '../models/WorkspaceEventResponse';
 import type { CancelablePromise } from '../core/CancelablePromise';
 import { OpenAPI } from '../core/OpenAPI';
@@ -29,7 +31,7 @@ export class RunsService {
      * @returns RunResponse Successful Response
      * @throws ApiError
      */
-    public static listRunsApiProjectsProjectIdExperimentsExperimentIdRunsGet(
+    public static listRuns(
         projectId: string,
         experimentId: string,
         molexpSession?: (string | null),
@@ -58,7 +60,7 @@ export class RunsService {
      * @returns RunResponse Successful Response
      * @throws ApiError
      */
-    public static createRunApiProjectsProjectIdExperimentsExperimentIdRunsPost(
+    public static createRun(
         projectId: string,
         experimentId: string,
         requestBody: RunCreateRequest,
@@ -90,7 +92,7 @@ export class RunsService {
      * @returns RunResponse Successful Response
      * @throws ApiError
      */
-    public static getRunApiProjectsProjectIdExperimentsExperimentIdRunsRunIdGet(
+    public static getRun(
         projectId: string,
         experimentId: string,
         runId: string,
@@ -126,7 +128,7 @@ export class RunsService {
      * @returns string Successful Response
      * @throws ApiError
      */
-    public static analyzeRunFailureRouteApiProjectsProjectIdExperimentsExperimentIdRunsRunIdAnalyzeFailurePost(
+    public static analyzeRunFailureRoute(
         projectId: string,
         experimentId: string,
         runId: string,
@@ -159,12 +161,13 @@ export class RunsService {
      * and the resulting ``cancelled`` status); ``/kill`` remains as a
      * deprecated alias route bound to this same handler.
      *
-     * Routes through :func:`molexp.plugins.submit_molq.cancel.try_cancel`, which signals
-     * molq via :class:`molq.Submitor` for cluster-submitted runs and
-     * sends ``SIGTERM`` for runs still owned by a local pid.  When neither
-     * path applies (run never submitted, terminal, or executor info
-     * missing) we fall back to flipping the metadata status so the UI
-     * still reflects user intent.
+     * One shared body with the CLI and the harness capability:
+     * :func:`molexp.workspace.lifecycle_ops.cancel_run` (reap → domain check →
+     * signal → flip), with :func:`molexp.plugins.submit_molq.cancel.try_cancel`
+     * injected as the executor-signal hook (molq :class:`molq.Submitor` for
+     * cluster-submitted runs, ``SIGTERM`` for a local pid). A run outside the
+     * cancellable domain (pending / succeeded / already stopped) is a 409 with
+     * the verb that owns it — never a silent status flip.
      * @param projectId
      * @param experimentId
      * @param runId
@@ -172,7 +175,7 @@ export class RunsService {
      * @returns RunActionResponse Successful Response
      * @throws ApiError
      */
-    public static cancelRunApiProjectsProjectIdExperimentsExperimentIdRunsRunIdCancelPost(
+    public static cancelRun(
         projectId: string,
         experimentId: string,
         runId: string,
@@ -210,7 +213,7 @@ export class RunsService {
      * @returns WorkspaceEventResponse Successful Response
      * @throws ApiError
      */
-    public static getRunEventsApiProjectsProjectIdExperimentsExperimentIdRunsRunIdEventsGet(
+    public static getRunEvents(
         projectId: string,
         experimentId: string,
         runId: string,
@@ -247,7 +250,7 @@ export class RunsService {
      * @returns RunExecutionResponse Successful Response
      * @throws ApiError
      */
-    public static getRunExecutionApiProjectsProjectIdExperimentsExperimentIdRunsRunIdExecutionGet(
+    public static getRunExecution(
         projectId: string,
         experimentId: string,
         runId: string,
@@ -284,7 +287,7 @@ export class RunsService {
      * @returns RunLogsResponse Successful Response
      * @throws ApiError
      */
-    public static getRunExecutionLogsApiProjectsProjectIdExperimentsExperimentIdRunsRunIdExecutionsExecutionIdLogsGet(
+    public static getRunExecutionLogs(
         projectId: string,
         experimentId: string,
         runId: string,
@@ -318,7 +321,7 @@ export class RunsService {
      * @returns any Successful Response
      * @throws ApiError
      */
-    public static exportRunApiProjectsProjectIdExperimentsExperimentIdRunsRunIdExportGet(
+    public static exportRun(
         projectId: string,
         experimentId: string,
         runId: string,
@@ -343,6 +346,9 @@ export class RunsService {
     /**
      * Get Run File Text
      * Return the raw text content of a file under the run directory.
+     *
+     * Routes through ``workspace._fs`` — same path as workspace file reads —
+     * so remote workspaces resolve correctly.
      * @param projectId
      * @param experimentId
      * @param runId
@@ -351,7 +357,7 @@ export class RunsService {
      * @returns RunFileTextResponse Successful Response
      * @throws ApiError
      */
-    public static getRunFileTextApiProjectsProjectIdExperimentsExperimentIdRunsRunIdFileTextGet(
+    public static getRunFileText(
         projectId: string,
         experimentId: string,
         runId: string,
@@ -381,9 +387,10 @@ export class RunsService {
      * Get Run Files
      * Return the on-disk file tree for a run, enriched with catalog metadata.
      *
-     * Files registered in the asset catalog (artifacts, logs, checkpoints,
-     * error traces) carry ``assetId``, ``assetKind``, and ``taskId`` so the
-     * UI can render lineage chips inline.
+     * Uses the **same** :func:`~molexp.workspace.fs_tree.list_tree_children` walk
+     * as workspace file listing (via ``workspace._fs``) so remote workspaces
+     * activate plugins the same way as local ones. Catalog enrichment is
+     * best-effort for local asset scans only.
      * @param projectId
      * @param experimentId
      * @param runId
@@ -391,7 +398,7 @@ export class RunsService {
      * @returns RunFilesResponse Successful Response
      * @throws ApiError
      */
-    public static getRunFilesApiProjectsProjectIdExperimentsExperimentIdRunsRunIdFilesGet(
+    public static getRunFiles(
         projectId: string,
         experimentId: string,
         runId: string,
@@ -424,7 +431,7 @@ export class RunsService {
      * @returns string Successful Response
      * @throws ApiError
      */
-    public static harvestRunRouteApiProjectsProjectIdExperimentsExperimentIdRunsRunIdHarvestPost(
+    public static harvestRunRoute(
         projectId: string,
         experimentId: string,
         runId: string,
@@ -460,7 +467,7 @@ export class RunsService {
      * @returns RunActionResponse Successful Response
      * @throws ApiError
      */
-    public static cancelRunApiProjectsProjectIdExperimentsExperimentIdRunsRunIdKillPost(
+    public static cancelRun1(
         projectId: string,
         experimentId: string,
         runId: string,
@@ -497,7 +504,7 @@ export class RunsService {
      * @returns LammpsLogResponse Successful Response
      * @throws ApiError
      */
-    public static getRunLammpsLogApiProjectsProjectIdExperimentsExperimentIdRunsRunIdLammpsLogGet(
+    public static getRunLammpsLog(
         projectId: string,
         experimentId: string,
         runId: string,
@@ -533,7 +540,7 @@ export class RunsService {
      * @returns RunLogsResponse Successful Response
      * @throws ApiError
      */
-    public static getRunLogsApiProjectsProjectIdExperimentsExperimentIdRunsRunIdLogsGet(
+    public static getRunLogs(
         projectId: string,
         experimentId: string,
         runId: string,
@@ -557,7 +564,7 @@ export class RunsService {
     }
     /**
      * Get Run Metrics
-     * Return run-local metrics from ``metrics/metrics.jsonl``.
+     * Return run-local metrics (dense Zarr SoT, else JSONL WAL).
      * @param projectId
      * @param experimentId
      * @param runId
@@ -569,7 +576,7 @@ export class RunsService {
      * @returns RunMetricsResponse Successful Response
      * @throws ApiError
      */
-    public static getRunMetricsApiProjectsProjectIdExperimentsExperimentIdRunsRunIdMetricsGet(
+    public static getRunMetrics(
         projectId: string,
         experimentId: string,
         runId: string,
@@ -614,7 +621,7 @@ export class RunsService {
      * @returns any Successful Response
      * @throws ApiError
      */
-    public static detectRunMetricsSourcesApiProjectsProjectIdExperimentsExperimentIdRunsRunIdMetricsDetectGet(
+    public static detectRunMetricsSources(
         projectId: string,
         experimentId: string,
         runId: string,
@@ -638,7 +645,7 @@ export class RunsService {
     }
     /**
      * Ingest Run Metrics
-     * Ingest foreign logs into the run host metrics JSONL buffer (additive).
+     * Ingest foreign logs into the run host metrics surface (additive).
      *
      * Shares :func:`molexp.plugins.metrics_ingest.ingest_run` with the CLI.
      * Skips are returned; the route does not fail the whole call when one
@@ -650,7 +657,7 @@ export class RunsService {
      * @returns any Successful Response
      * @throws ApiError
      */
-    public static ingestRunMetricsApiProjectsProjectIdExperimentsExperimentIdRunsRunIdMetricsIngestPost(
+    public static ingestRunMetrics(
         projectId: string,
         experimentId: string,
         runId: string,
@@ -692,7 +699,7 @@ export class RunsService {
      * @returns RunContinueResponse Successful Response
      * @throws ApiError
      */
-    public static rerunRunApiProjectsProjectIdExperimentsExperimentIdRunsRunIdRerunPost(
+    public static rerunRun(
         projectId: string,
         experimentId: string,
         runId: string,
@@ -735,7 +742,7 @@ export class RunsService {
      * @returns RunContinueResponse Successful Response
      * @throws ApiError
      */
-    public static resumeRunApiProjectsProjectIdExperimentsExperimentIdRunsRunIdResumePost(
+    public static resumeRun(
         projectId: string,
         experimentId: string,
         runId: string,
@@ -776,7 +783,7 @@ export class RunsService {
      * @returns RunContinueResponse Successful Response
      * @throws ApiError
      */
-    public static startRunApiProjectsProjectIdExperimentsExperimentIdRunsRunIdRunPost(
+    public static startRun(
         projectId: string,
         experimentId: string,
         runId: string,
@@ -803,6 +810,14 @@ export class RunsService {
     }
     /**
      * Update Run Status
+     * Mark a run ``cancelled`` — the one status a client may write directly.
+     *
+     * Every other status is owned by the run lifecycle (the three-verb law):
+     * ``running``/``succeeded``/``failed`` are stamped by the executing
+     * process, never by a client, and retrying goes through the explicit
+     * ``resume``/``rerun`` routes. Requests for any status but ``cancelled``
+     * are refused with 409; prefer ``POST .../{run_id}/cancel`` (which also
+     * signals the live executor) over this raw mark.
      * @param projectId
      * @param experimentId
      * @param runId
@@ -811,11 +826,11 @@ export class RunsService {
      * @returns RunStatusResponse Successful Response
      * @throws ApiError
      */
-    public static updateRunStatusApiProjectsProjectIdExperimentsExperimentIdRunsRunIdStatusPatch(
+    public static updateRunStatus(
         projectId: string,
         experimentId: string,
         runId: string,
-        requestBody: Record<string, string>,
+        requestBody: RunStatusUpdateRequest,
         molexpSession?: (string | null),
     ): CancelablePromise<RunStatusResponse> {
         return __request(OpenAPI, {
@@ -837,6 +852,35 @@ export class RunsService {
         });
     }
     /**
+     * Create Run
+     * Create a run in a specific project/experiment (body carries scope ids).
+     *
+     * If ``request.workflow_json`` is supplied and the experiment has no
+     * workflow bound, compile and persist the IR before the run is
+     * materialized so worker processes can pick it up off disk.
+     * @param requestBody
+     * @param molexpSession
+     * @returns RunResponse Successful Response
+     * @throws ApiError
+     */
+    public static createRun1(
+        requestBody: ExecutionCreateRequest,
+        molexpSession?: (string | null),
+    ): CancelablePromise<RunResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/runs',
+            cookies: {
+                'molexp_session': molexpSession,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
      * List Runs
      * @param projectId
      * @param experimentId
@@ -845,7 +889,7 @@ export class RunsService {
      * @returns RunResponse Successful Response
      * @throws ApiError
      */
-    public static listRunsApiWorkspacesWsProjectsProjectIdExperimentsExperimentIdRunsGet(
+    public static listRuns1(
         projectId: string,
         experimentId: string,
         ws: string,
@@ -877,7 +921,7 @@ export class RunsService {
      * @returns RunResponse Successful Response
      * @throws ApiError
      */
-    public static createRunApiWorkspacesWsProjectsProjectIdExperimentsExperimentIdRunsPost(
+    public static createRun2(
         projectId: string,
         experimentId: string,
         ws: string,
@@ -912,7 +956,7 @@ export class RunsService {
      * @returns RunResponse Successful Response
      * @throws ApiError
      */
-    public static getRunApiWorkspacesWsProjectsProjectIdExperimentsExperimentIdRunsRunIdGet(
+    public static getRun1(
         projectId: string,
         experimentId: string,
         runId: string,
@@ -951,7 +995,7 @@ export class RunsService {
      * @returns string Successful Response
      * @throws ApiError
      */
-    public static analyzeRunFailureRouteApiWorkspacesWsProjectsProjectIdExperimentsExperimentIdRunsRunIdAnalyzeFailurePost(
+    public static analyzeRunFailureRoute1(
         projectId: string,
         experimentId: string,
         runId: string,
@@ -986,12 +1030,13 @@ export class RunsService {
      * and the resulting ``cancelled`` status); ``/kill`` remains as a
      * deprecated alias route bound to this same handler.
      *
-     * Routes through :func:`molexp.plugins.submit_molq.cancel.try_cancel`, which signals
-     * molq via :class:`molq.Submitor` for cluster-submitted runs and
-     * sends ``SIGTERM`` for runs still owned by a local pid.  When neither
-     * path applies (run never submitted, terminal, or executor info
-     * missing) we fall back to flipping the metadata status so the UI
-     * still reflects user intent.
+     * One shared body with the CLI and the harness capability:
+     * :func:`molexp.workspace.lifecycle_ops.cancel_run` (reap → domain check →
+     * signal → flip), with :func:`molexp.plugins.submit_molq.cancel.try_cancel`
+     * injected as the executor-signal hook (molq :class:`molq.Submitor` for
+     * cluster-submitted runs, ``SIGTERM`` for a local pid). A run outside the
+     * cancellable domain (pending / succeeded / already stopped) is a 409 with
+     * the verb that owns it — never a silent status flip.
      * @param projectId
      * @param experimentId
      * @param runId
@@ -1000,7 +1045,7 @@ export class RunsService {
      * @returns RunActionResponse Successful Response
      * @throws ApiError
      */
-    public static cancelRunApiWorkspacesWsProjectsProjectIdExperimentsExperimentIdRunsRunIdCancelPost(
+    public static cancelRun2(
         projectId: string,
         experimentId: string,
         runId: string,
@@ -1041,7 +1086,7 @@ export class RunsService {
      * @returns WorkspaceEventResponse Successful Response
      * @throws ApiError
      */
-    public static getRunEventsApiWorkspacesWsProjectsProjectIdExperimentsExperimentIdRunsRunIdEventsGet(
+    public static getRunEvents1(
         projectId: string,
         experimentId: string,
         runId: string,
@@ -1081,7 +1126,7 @@ export class RunsService {
      * @returns RunExecutionResponse Successful Response
      * @throws ApiError
      */
-    public static getRunExecutionApiWorkspacesWsProjectsProjectIdExperimentsExperimentIdRunsRunIdExecutionGet(
+    public static getRunExecution1(
         projectId: string,
         experimentId: string,
         runId: string,
@@ -1121,7 +1166,7 @@ export class RunsService {
      * @returns RunLogsResponse Successful Response
      * @throws ApiError
      */
-    public static getRunExecutionLogsApiWorkspacesWsProjectsProjectIdExperimentsExperimentIdRunsRunIdExecutionsExecutionIdLogsGet(
+    public static getRunExecutionLogs1(
         projectId: string,
         experimentId: string,
         runId: string,
@@ -1158,7 +1203,7 @@ export class RunsService {
      * @returns any Successful Response
      * @throws ApiError
      */
-    public static exportRunApiWorkspacesWsProjectsProjectIdExperimentsExperimentIdRunsRunIdExportGet(
+    public static exportRun1(
         projectId: string,
         experimentId: string,
         runId: string,
@@ -1185,6 +1230,9 @@ export class RunsService {
     /**
      * Get Run File Text
      * Return the raw text content of a file under the run directory.
+     *
+     * Routes through ``workspace._fs`` — same path as workspace file reads —
+     * so remote workspaces resolve correctly.
      * @param projectId
      * @param experimentId
      * @param runId
@@ -1194,7 +1242,7 @@ export class RunsService {
      * @returns RunFileTextResponse Successful Response
      * @throws ApiError
      */
-    public static getRunFileTextApiWorkspacesWsProjectsProjectIdExperimentsExperimentIdRunsRunIdFileTextGet(
+    public static getRunFileText1(
         projectId: string,
         experimentId: string,
         runId: string,
@@ -1226,9 +1274,10 @@ export class RunsService {
      * Get Run Files
      * Return the on-disk file tree for a run, enriched with catalog metadata.
      *
-     * Files registered in the asset catalog (artifacts, logs, checkpoints,
-     * error traces) carry ``assetId``, ``assetKind``, and ``taskId`` so the
-     * UI can render lineage chips inline.
+     * Uses the **same** :func:`~molexp.workspace.fs_tree.list_tree_children` walk
+     * as workspace file listing (via ``workspace._fs``) so remote workspaces
+     * activate plugins the same way as local ones. Catalog enrichment is
+     * best-effort for local asset scans only.
      * @param projectId
      * @param experimentId
      * @param runId
@@ -1237,7 +1286,7 @@ export class RunsService {
      * @returns RunFilesResponse Successful Response
      * @throws ApiError
      */
-    public static getRunFilesApiWorkspacesWsProjectsProjectIdExperimentsExperimentIdRunsRunIdFilesGet(
+    public static getRunFiles1(
         projectId: string,
         experimentId: string,
         runId: string,
@@ -1273,7 +1322,7 @@ export class RunsService {
      * @returns string Successful Response
      * @throws ApiError
      */
-    public static harvestRunRouteApiWorkspacesWsProjectsProjectIdExperimentsExperimentIdRunsRunIdHarvestPost(
+    public static harvestRunRoute1(
         projectId: string,
         experimentId: string,
         runId: string,
@@ -1312,7 +1361,7 @@ export class RunsService {
      * @returns RunActionResponse Successful Response
      * @throws ApiError
      */
-    public static cancelRunApiWorkspacesWsProjectsProjectIdExperimentsExperimentIdRunsRunIdKillPost(
+    public static cancelRun3(
         projectId: string,
         experimentId: string,
         runId: string,
@@ -1352,7 +1401,7 @@ export class RunsService {
      * @returns LammpsLogResponse Successful Response
      * @throws ApiError
      */
-    public static getRunLammpsLogApiWorkspacesWsProjectsProjectIdExperimentsExperimentIdRunsRunIdLammpsLogGet(
+    public static getRunLammpsLog1(
         projectId: string,
         experimentId: string,
         runId: string,
@@ -1391,7 +1440,7 @@ export class RunsService {
      * @returns RunLogsResponse Successful Response
      * @throws ApiError
      */
-    public static getRunLogsApiWorkspacesWsProjectsProjectIdExperimentsExperimentIdRunsRunIdLogsGet(
+    public static getRunLogs1(
         projectId: string,
         experimentId: string,
         runId: string,
@@ -1417,7 +1466,7 @@ export class RunsService {
     }
     /**
      * Get Run Metrics
-     * Return run-local metrics from ``metrics/metrics.jsonl``.
+     * Return run-local metrics (dense Zarr SoT, else JSONL WAL).
      * @param projectId
      * @param experimentId
      * @param runId
@@ -1430,7 +1479,7 @@ export class RunsService {
      * @returns RunMetricsResponse Successful Response
      * @throws ApiError
      */
-    public static getRunMetricsApiWorkspacesWsProjectsProjectIdExperimentsExperimentIdRunsRunIdMetricsGet(
+    public static getRunMetrics1(
         projectId: string,
         experimentId: string,
         runId: string,
@@ -1478,7 +1527,7 @@ export class RunsService {
      * @returns any Successful Response
      * @throws ApiError
      */
-    public static detectRunMetricsSourcesApiWorkspacesWsProjectsProjectIdExperimentsExperimentIdRunsRunIdMetricsDetectGet(
+    public static detectRunMetricsSources1(
         projectId: string,
         experimentId: string,
         runId: string,
@@ -1504,7 +1553,7 @@ export class RunsService {
     }
     /**
      * Ingest Run Metrics
-     * Ingest foreign logs into the run host metrics JSONL buffer (additive).
+     * Ingest foreign logs into the run host metrics surface (additive).
      *
      * Shares :func:`molexp.plugins.metrics_ingest.ingest_run` with the CLI.
      * Skips are returned; the route does not fail the whole call when one
@@ -1517,7 +1566,7 @@ export class RunsService {
      * @returns any Successful Response
      * @throws ApiError
      */
-    public static ingestRunMetricsApiWorkspacesWsProjectsProjectIdExperimentsExperimentIdRunsRunIdMetricsIngestPost(
+    public static ingestRunMetrics1(
         projectId: string,
         experimentId: string,
         runId: string,
@@ -1562,7 +1611,7 @@ export class RunsService {
      * @returns RunContinueResponse Successful Response
      * @throws ApiError
      */
-    public static rerunRunApiWorkspacesWsProjectsProjectIdExperimentsExperimentIdRunsRunIdRerunPost(
+    public static rerunRun1(
         projectId: string,
         experimentId: string,
         runId: string,
@@ -1608,7 +1657,7 @@ export class RunsService {
      * @returns RunContinueResponse Successful Response
      * @throws ApiError
      */
-    public static resumeRunApiWorkspacesWsProjectsProjectIdExperimentsExperimentIdRunsRunIdResumePost(
+    public static resumeRun1(
         projectId: string,
         experimentId: string,
         runId: string,
@@ -1652,7 +1701,7 @@ export class RunsService {
      * @returns RunContinueResponse Successful Response
      * @throws ApiError
      */
-    public static startRunApiWorkspacesWsProjectsProjectIdExperimentsExperimentIdRunsRunIdRunPost(
+    public static startRun1(
         projectId: string,
         experimentId: string,
         runId: string,
@@ -1681,6 +1730,14 @@ export class RunsService {
     }
     /**
      * Update Run Status
+     * Mark a run ``cancelled`` — the one status a client may write directly.
+     *
+     * Every other status is owned by the run lifecycle (the three-verb law):
+     * ``running``/``succeeded``/``failed`` are stamped by the executing
+     * process, never by a client, and retrying goes through the explicit
+     * ``resume``/``rerun`` routes. Requests for any status but ``cancelled``
+     * are refused with 409; prefer ``POST .../{run_id}/cancel`` (which also
+     * signals the live executor) over this raw mark.
      * @param projectId
      * @param experimentId
      * @param runId
@@ -1690,12 +1747,12 @@ export class RunsService {
      * @returns RunStatusResponse Successful Response
      * @throws ApiError
      */
-    public static updateRunStatusApiWorkspacesWsProjectsProjectIdExperimentsExperimentIdRunsRunIdStatusPatch(
+    public static updateRunStatus1(
         projectId: string,
         experimentId: string,
         runId: string,
         ws: string,
-        requestBody: Record<string, string>,
+        requestBody: RunStatusUpdateRequest,
         molexpSession?: (string | null),
     ): CancelablePromise<RunStatusResponse> {
         return __request(OpenAPI, {
@@ -1705,6 +1762,40 @@ export class RunsService {
                 'project_id': projectId,
                 'experiment_id': experimentId,
                 'run_id': runId,
+                'ws': ws,
+            },
+            cookies: {
+                'molexp_session': molexpSession,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * Create Run
+     * Create a run in a specific project/experiment (body carries scope ids).
+     *
+     * If ``request.workflow_json`` is supplied and the experiment has no
+     * workflow bound, compile and persist the IR before the run is
+     * materialized so worker processes can pick it up off disk.
+     * @param ws
+     * @param requestBody
+     * @param molexpSession
+     * @returns RunResponse Successful Response
+     * @throws ApiError
+     */
+    public static createRun3(
+        ws: string,
+        requestBody: ExecutionCreateRequest,
+        molexpSession?: (string | null),
+    ): CancelablePromise<RunResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/workspaces/{ws}/runs',
+            path: {
                 'ws': ws,
             },
             cookies: {

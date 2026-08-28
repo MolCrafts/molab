@@ -17,7 +17,7 @@ export class TargetsService {
      * @returns TargetListResponse Successful Response
      * @throws ApiError
      */
-    public static listTargetsEndpointApiTargetsGet(
+    public static listTargetsEndpoint(
         molexpSession?: (string | null),
     ): CancelablePromise<TargetListResponse> {
         return __request(OpenAPI, {
@@ -41,7 +41,7 @@ export class TargetsService {
      * @returns TargetResponse Successful Response
      * @throws ApiError
      */
-    public static createTargetEndpointApiTargetsPost(
+    public static createTargetEndpoint(
         requestBody: TargetCreateRequest,
         molexpSession?: (string | null),
     ): CancelablePromise<TargetResponse> {
@@ -66,7 +66,7 @@ export class TargetsService {
      * @returns void
      * @throws ApiError
      */
-    public static deleteTargetEndpointApiTargetsNameDelete(
+    public static deleteTargetEndpoint(
         name: string,
         molexpSession?: (string | null),
     ): CancelablePromise<void> {
@@ -96,7 +96,7 @@ export class TargetsService {
      * @returns TargetTestResponse Successful Response
      * @throws ApiError
      */
-    public static testTargetEndpointApiTargetsNameTestPost(
+    public static testTargetEndpoint(
         name: string,
         molexpSession?: (string | null),
     ): CancelablePromise<TargetTestResponse> {

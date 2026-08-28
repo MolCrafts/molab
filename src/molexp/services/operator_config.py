@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import os
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -204,6 +205,40 @@ def set_operator_values(
     return config
 
 
+def resolve_configured_model() -> str | None:
+    """Bridge the operator config, then return the effective ``agent.model``.
+
+    The ONE model-resolution helper for every shell entry (CLI commands and
+    server routes). Bridging is idempotent and in-code registration wins, so
+    reading the bridged ``molexp.config`` afterwards sees whichever source
+    is authoritative (in-code > ``~/.molexp/config.json``). The legacy flat
+    ``agent_model`` key is honoured (with a DeprecationWarning at bridge time).
+    """
+    import molexp
+
+    bridge_operator_config()
+    model = molexp.config.get(AGENT_MODEL_KEY) or molexp.config.get(LEGACY_AGENT_MODEL_KEY)
+    return model if isinstance(model, str) and model else None
+
+
+def resolve_configured_models() -> dict[str, str] | None:
+    """Bridge the operator config, then return a complete tier map (or None).
+
+    Companion of :func:`resolve_configured_model` for the cheap/default/heavy
+    ``agent.models`` mapping consumed by the plan router.
+    """
+    import molexp
+
+    bridge_operator_config()
+    value = molexp.config.get(AGENT_MODELS_KEY)
+    if value is None or not callable(getattr(value, "get", None)):
+        return None
+    models = {tier: value.get(tier) for tier in ("cheap", "default", "heavy")}
+    if not all(isinstance(model, str) and model for model in models.values()):
+        return None
+    return {tier: str(model) for tier, model in models.items()}
+
+
 def bridge_operator_config(path: Path | None = None) -> None:
     """Bridge operator-config values into the in-code ``molexp.config``.
 
@@ -217,7 +252,17 @@ def bridge_operator_config(path: Path | None = None) -> None:
 
     config = load_operator_config(path)
 
-    already = molexp.config.get(AGENT_MODEL_KEY) or molexp.config.get(LEGACY_AGENT_MODEL_KEY)
+    canonical = molexp.config.get(AGENT_MODEL_KEY)
+    legacy = molexp.config.get(LEGACY_AGENT_MODEL_KEY)
+    if not canonical and isinstance(legacy, str) and legacy:
+        warnings.warn(
+            "molexp.config['agent_model'] (flat legacy key) is deprecated; "
+            "register the model under 'agent.model' instead "
+            "(CLI: `molexp config set agent.model <id>`).",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+    already = canonical or legacy
     if not (isinstance(already, str) and already):
         model = configured_agent_model(config)
         if model is not None:

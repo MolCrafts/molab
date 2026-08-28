@@ -23,7 +23,7 @@ export class TensorboardService {
      * @returns TensorboardScalarsResponse Successful Response
      * @throws ApiError
      */
-    public static getRunTensorboardScalarsApiProjectsProjectIdExperimentsExperimentIdRunsRunIdTensorboardScalarsGet(
+    public static getRunTensorboardScalars(
         projectId: string,
         experimentId: string,
         runId: string,
@@ -68,7 +68,7 @@ export class TensorboardService {
      * @returns TensorboardScalarsResponse Successful Response
      * @throws ApiError
      */
-    public static getRunTensorboardScalarsApiWorkspacesWsProjectsProjectIdExperimentsExperimentIdRunsRunIdTensorboardScalarsGet(
+    public static getRunTensorboardScalars1(
         projectId: string,
         experimentId: string,
         runId: string,

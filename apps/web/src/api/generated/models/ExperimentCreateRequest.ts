@@ -18,10 +18,10 @@ export type ExperimentCreateRequest = {
     /**
      * Parameter space definition
      */
-    parameter_space?: Record<string, any>;
+    parameterSpace?: Record<string, any>;
     /**
      * Path to workflow file
      */
-    workflow_source?: (string | null);
+    workflowSource?: (string | null);
 };
 

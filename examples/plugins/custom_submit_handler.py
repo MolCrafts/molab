@@ -1,6 +1,6 @@
 """Plugin authoring — ``CliPlugin`` construction and ``SubmitHandler`` composition.
 
-Matches ``docs/concept/plugins.md``.
+Matches ``docs/en/concept/plugins.md``.
 
 Demonstrates:
 

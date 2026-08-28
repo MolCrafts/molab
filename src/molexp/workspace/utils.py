@@ -28,13 +28,31 @@ if TYPE_CHECKING:
     from .._typing import JSONValue
 
 __all__ = [
+    "RUN_DIR_PREFIX",
     "compute_content_hash",
     "derive_execution_id",
     "derive_run_id",
     "generate_asset_id",
     "generate_id",
+    "run_dir_name",
+    "run_id_from_dir_name",
     "slugify",
 ]
+
+#: The mandatory Run-directory prefix (layout naming law: ``runs/run-<id>/``).
+#: Part of the on-disk contract, not cosmetic — the ONE definition every
+#: strip/build site cites instead of restating ``"run-"`` per call site.
+RUN_DIR_PREFIX = "run-"
+
+
+def run_dir_name(run_id: str) -> str:
+    """Directory basename for a run id — ``run-<id>`` (layout naming law)."""
+    return f"{RUN_DIR_PREFIX}{run_id}"
+
+
+def run_id_from_dir_name(name: str) -> str:
+    """Inverse of :func:`run_dir_name`; a name with no prefix passes through."""
+    return name.removeprefix(RUN_DIR_PREFIX)
 
 
 def derive_run_id(params: Mapping[str, JSONValue], *, length: int = 16) -> str:

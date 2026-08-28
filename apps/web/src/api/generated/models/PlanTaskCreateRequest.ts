@@ -3,7 +3,7 @@
 /* tslint:disable */
 /* eslint-disable */
 /**
- * Body for starting a PlanMode background task.
+ * Body for starting a PlanOrchestrator background task.
  */
 export type PlanTaskCreateRequest = {
     /**
@@ -11,7 +11,7 @@ export type PlanTaskCreateRequest = {
      */
     compute_target?: (string | null);
     /**
-     * Natural-language experiment draft for PlanMode.
+     * Natural-language experiment draft for PlanOrchestrator.
      */
     draft: string;
     /**

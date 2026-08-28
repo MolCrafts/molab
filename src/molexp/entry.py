@@ -80,10 +80,15 @@ def _execute_experiment(experiment: Experiment, workflow: object) -> None:
     """
     from molexp.workflow import CompiledWorkflow, default_binding_registry
 
+    # Auto-compile an uncompiled WorkflowCompiler — same convenience as
+    # ``Experiment.sweep`` (duck-typed: compiled workflows have no ``compile``).
+    compile_hook = getattr(workflow, "compile", None)
+    if not isinstance(workflow, CompiledWorkflow) and callable(compile_hook):
+        workflow = compile_hook()
     if not isinstance(workflow, CompiledWorkflow):
         raise TypeError(
-            f"Experiment.run expects a compiled workflow "
-            f"(WorkflowCompiler(...).compile()), got {type(workflow).__name__}."
+            f"Experiment.define expects a workflow (WorkflowCompiler or "
+            f"WorkflowCompiler(...).compile()), got {type(workflow).__name__}."
         )
     default_binding_registry.bind(experiment, workflow)
     # Record the IR so the server/UI can render the graph; refresh on every

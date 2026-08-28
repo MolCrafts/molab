@@ -58,8 +58,13 @@ def config_set(
     Examples::
 
         molexp config set agent.model anthropic:claude-sonnet-4-5
+        molexp config set agent.anthropic_api_key sk-ant-...
+        molexp config set agent.deepseek_api_key sk-...
         molexp config set tunnel.via zrok
         molexp config set tunnel.token <token>
+
+    LLM provider keys use ``agent.<provider>_api_key`` — they are bridged
+    into the process config at startup (keys never come from env vars).
     """
     # Coerce value
     coerced: str | int | float | bool = value

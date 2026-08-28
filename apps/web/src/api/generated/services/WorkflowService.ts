@@ -17,7 +17,7 @@ export class WorkflowService {
      * @returns WorkflowDocumentResponse Successful Response
      * @throws ApiError
      */
-    public static getWorkflowDocumentApiProjectsProjectIdExperimentsExperimentIdWorkflowGet(
+    public static getWorkflowDocument(
         projectId: string,
         experimentId: string,
         molexpSession?: (string | null),
@@ -47,7 +47,7 @@ export class WorkflowService {
      * @returns WorkflowDocumentResponse Successful Response
      * @throws ApiError
      */
-    public static putWorkflowDocumentApiProjectsProjectIdExperimentsExperimentIdWorkflowPut(
+    public static putWorkflowDocument(
         projectId: string,
         experimentId: string,
         requestBody: WorkflowDocumentRequest,
@@ -80,7 +80,7 @@ export class WorkflowService {
      * @returns WorkflowDocumentResponse Successful Response
      * @throws ApiError
      */
-    public static getWorkflowDocumentApiWorkspacesWsProjectsProjectIdExperimentsExperimentIdWorkflowGet(
+    public static getWorkflowDocument1(
         projectId: string,
         experimentId: string,
         ws: string,
@@ -113,7 +113,7 @@ export class WorkflowService {
      * @returns WorkflowDocumentResponse Successful Response
      * @throws ApiError
      */
-    public static putWorkflowDocumentApiWorkspacesWsProjectsProjectIdExperimentsExperimentIdWorkflowPut(
+    public static putWorkflowDocument1(
         projectId: string,
         experimentId: string,
         ws: string,

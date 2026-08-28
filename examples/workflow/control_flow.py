@@ -1,6 +1,6 @@
 """Fan-out, conditionals, and diamond shapes — all via the DAG.
 
-Matches ``docs/guide/control-flow.md``.
+Matches ``docs/en/guide/control-flow.md``.
 
 MolExp has no ``IfTask`` / ``ForTask``; control flow is expressed by the
 shape of ``depends_on``, by Python inside tasks, and by ``wf.parallel`` for

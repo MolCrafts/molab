@@ -152,8 +152,12 @@ class TestMaterializeBoundFromBoard:
             spec={"title": "t", "objective": "o"},
             board=_valid_board(),
         )
-        spec_ref, bound_ref = materialize_plan_for_realization(plan, store, created_by="test")
+        spec_ref, ir_ref, bound_ref = materialize_plan_for_realization(
+            plan, store, created_by="test"
+        )
         assert isinstance(spec_ref, PlanArtifactRef)
+        assert isinstance(ir_ref, PlanArtifactRef)
         assert isinstance(bound_ref, PlanArtifactRef)
         assert store.latest_by_kind("experiment_spec") is not None
+        assert store.latest_by_kind("workflow_ir") is not None
         assert store.latest_by_kind("bound_workflow") is not None

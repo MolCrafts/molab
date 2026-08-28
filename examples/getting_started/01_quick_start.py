@@ -1,6 +1,6 @@
 """Quick start — workspace + experiment + tracked run, end to end.
 
-Matches ``docs/getting-started/quick-start.md``.
+Matches ``docs/en/getting-started/quick-start.md``.
 
 Run directly::
 
@@ -41,7 +41,9 @@ async def main() -> None:
 
     # Declare: one experiment running `compiled` over a one-cell sweep.
     ws = me.Workspace(workspace_root, name="quickstart")
-    experiment = ws.project("demo").experiment("train").run(compiled, params={"lr": [1e-3]})
+    experiment = (
+        ws.add_project("demo").add_experiment("train").define(compiled, params={"lr": [1e-3]})
+    )
 
     # Drive the seeded run in-process (`molexp run` does this for you).
     run = experiment.list_runs()[0]

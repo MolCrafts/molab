@@ -178,8 +178,7 @@ def curate_ask(
     ] = False,
 ) -> None:
     """Plan + run one curation capability from a natural-language request (LLM)."""
-    from molexp._typing import JSONValue
-    from molexp.cli._common import deterministic_run_id, rprint
+    from molexp.cli._common import rprint
     from molexp.harness import ApprovalPendingError
     from molexp.services.curate_runtime.flow import CurationArgumentError, run_curation_flow
     from molexp.workspace import Workspace
@@ -197,9 +196,11 @@ def curate_ask(
     workspace_root = (workspace or Path.cwd()).resolve()
     ws = Workspace(workspace_root)
     ws.materialize()
-    params: dict[str, JSONValue] = {"mode": "curate", "request": request_text}
+    # One bootstrap shared with POST /curate-tasks (services.curate_runtime).
+    from molexp.services.curate_runtime.flow import resolve_curate_run
+
     exp = ws.add_project(project).add_experiment(experiment)
-    run = exp.add_run(params, id=deterministic_run_id(params))
+    run = resolve_curate_run(exp, request_text)
 
     preview = request_text.strip().splitlines()[0][:_REQUEST_PREVIEW_CHARS]
     rprint(f"[bold]molexp curate ask[/bold] — run [bold]{run.id}[/bold]")

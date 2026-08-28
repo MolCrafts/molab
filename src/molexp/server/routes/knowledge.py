@@ -458,7 +458,7 @@ def list_knowledge(
 
     references: list[ReferenceSummary] = []
     for ref in bundle.references():
-        meta = ref.read_ref_meta()
+        meta = ref.read_reference_meta()
         references.append(
             ReferenceSummary(
                 name=ref.name,

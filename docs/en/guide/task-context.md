@@ -59,7 +59,7 @@ from molexp.workflow import WorkflowCompiler, WorkflowRuntime
 compiled = WorkflowCompiler(name="train").add(Train()).compile()
 
 ws = me.Workspace("./lab", name="lab")
-exp = ws.project("demo").experiment("baseline").run(compiled, params={"lr": [1e-3]})
+exp = ws.add_project("demo").add_experiment("baseline").define(compiled, params={"lr": [1e-3]})
 run = exp.list_runs()[0]
 
 with run.start() as ctx:                  # run.start(profile_config=cfg) to attach a profile

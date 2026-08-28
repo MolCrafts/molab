@@ -21,7 +21,7 @@ export class AuthService {
      * @returns AuthUserPublic Successful Response
      * @throws ApiError
      */
-    public static authLoginApiAuthLoginPost(
+    public static authLogin(
         requestBody: LoginRequest,
     ): CancelablePromise<AuthUserPublic> {
         return __request(OpenAPI, {
@@ -40,7 +40,7 @@ export class AuthService {
      * @returns void
      * @throws ApiError
      */
-    public static authLogoutApiAuthLogoutPost(
+    public static authLogout(
         molexpSession?: (string | null),
     ): CancelablePromise<void> {
         return __request(OpenAPI, {
@@ -60,7 +60,7 @@ export class AuthService {
      * @returns AuthUserPublic Successful Response
      * @throws ApiError
      */
-    public static authMeApiAuthMeGet(
+    public static authMe(
         molexpSession?: (string | null),
     ): CancelablePromise<AuthUserPublic> {
         return __request(OpenAPI, {
@@ -80,7 +80,7 @@ export class AuthService {
      * @returns AuthUserPublic Successful Response
      * @throws ApiError
      */
-    public static authRefreshApiAuthRefreshPost(
+    public static authRefresh(
         molexpSession?: (string | null),
     ): CancelablePromise<AuthUserPublic> {
         return __request(OpenAPI, {
@@ -100,7 +100,7 @@ export class AuthService {
      * @returns AuthStatusResponse Successful Response
      * @throws ApiError
      */
-    public static authStatusApiAuthStatusGet(
+    public static authStatus(
         molexpSession?: (string | null),
     ): CancelablePromise<AuthStatusResponse> {
         return __request(OpenAPI, {
@@ -121,7 +121,7 @@ export class AuthService {
      * @returns AuthUserPublic Successful Response
      * @throws ApiError
      */
-    public static authSwitchApiAuthSwitchPost(
+    public static authSwitch(
         requestBody: SwitchRequest,
         molexpSession?: (string | null),
     ): CancelablePromise<AuthUserPublic> {
@@ -144,7 +144,7 @@ export class AuthService {
      * @returns AuthTokenResponse Successful Response
      * @throws ApiError
      */
-    public static authTokenApiAuthTokenGet(
+    public static authToken(
         molexpSession?: (string | null),
     ): CancelablePromise<AuthTokenResponse> {
         return __request(OpenAPI, {
@@ -164,7 +164,7 @@ export class AuthService {
      * @returns AuthUserListResponse Successful Response
      * @throws ApiError
      */
-    public static listUsersApiAuthUsersGet(
+    public static listUsers(
         molexpSession?: (string | null),
     ): CancelablePromise<AuthUserListResponse> {
         return __request(OpenAPI, {
@@ -185,7 +185,7 @@ export class AuthService {
      * @returns AuthUserPublic Successful Response
      * @throws ApiError
      */
-    public static createUserApiAuthUsersPost(
+    public static createUser(
         requestBody: CreateUserRequest,
         molexpSession?: (string | null),
     ): CancelablePromise<AuthUserPublic> {
@@ -209,7 +209,7 @@ export class AuthService {
      * @returns void
      * @throws ApiError
      */
-    public static deleteUserApiAuthUsersUsernameDelete(
+    public static deleteUser(
         username: string,
         molexpSession?: (string | null),
     ): CancelablePromise<void> {
@@ -235,7 +235,7 @@ export class AuthService {
      * @returns AuthUserPublic Successful Response
      * @throws ApiError
      */
-    public static patchUserApiAuthUsersUsernamePatch(
+    public static patchUser(
         username: string,
         requestBody: PatchUserRequest,
         molexpSession?: (string | null),
@@ -264,7 +264,7 @@ export class AuthService {
      * @returns AuthUserPublic Successful Response
      * @throws ApiError
      */
-    public static setUserPasswordApiAuthUsersUsernamePasswordPost(
+    public static setUserPassword(
         username: string,
         requestBody: PasswordRequest,
         molexpSession?: (string | null),

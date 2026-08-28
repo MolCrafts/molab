@@ -41,30 +41,61 @@ DEFAULT_LOCK_TIMEOUT_SECONDS = 10.0
 _POLL_INTERVAL_SECONDS = 0.02
 
 
+def _stringify_with_warning(value: object) -> str:
+    """``json.dumps`` fallback: stringify non-JSON values LOUDLY, never silently.
+
+    Callers should hand this function JSON-safe data (pydantic
+    ``model_dump(mode="json")``, sanitized outputs); when they don't, the
+    value is still persisted as its ``str()`` so a write never corrupts a
+    run mid-flight — but the offender is named in the log instead of being
+    silently masked.
+    """
+    logger.warning(
+        f"atomic_write_json: non-JSON value of type {type(value).__name__} "
+        f"stringified on write — pass JSON-safe data (e.g. model_dump(mode='json'))."
+    )
+    return str(value)
+
+
+def dump_canonical_json(data: object) -> str:
+    """Serialize *data* in molexp's ONE canonical JSON form.
+
+    ``indent=2, sort_keys=True, ensure_ascii=False`` + trailing newline —
+    the single byte format shared by every atomic JSON writer (entity files,
+    workflow-state checkpoints, harness artifacts), so derived views such as
+    the git checkpoint projection re-derive byte-identical content.
+    """
+    return (
+        json.dumps(
+            data, indent=2, ensure_ascii=False, sort_keys=True, default=_stringify_with_warning
+        )
+        + "\n"
+    )
+
+
 def atomic_write_json(path: Path, data: object) -> None:
     """Write JSON data to a file atomically via write-to-temp + rename.
 
     On POSIX systems, os.replace is atomic — if the process crashes
     mid-write, the original file remains intact. This prevents data
     corruption for critical files like run.json, metadata files, and
-    workflow-state checkpoints.
-
-    The ``data`` parameter is the structural top-type ``object`` rather
-    than ``JSONValue`` because :func:`json.dumps` is invoked with
-    ``default=str``, which accepts anything that has a string repr.
-    Callers are responsible for ensuring the value is meaningful as
-    JSON; ``json.dumps`` raises at write time if not.
+    workflow-state checkpoints. Serialization goes through
+    :func:`dump_canonical_json` (the one canonical byte form); the temp file
+    is chmod'd ``0o600`` before the rename, matching the workspace entity
+    writer.
 
     Args:
         path: Destination file path.
-        data: JSON-serializable value (or anything ``str()``-coercible).
+        data: JSON-serializable value (non-JSON leaves are stringified with
+            a loud warning — see :func:`dump_canonical_json`).
     """
     path.parent.mkdir(parents=True, exist_ok=True)
     # Write to a temp file in the same directory (same filesystem for atomic rename)
     fd, tmp_path = tempfile.mkstemp(dir=path.parent, suffix=".tmp", prefix=f".{path.stem}_")
     try:
-        with os.fdopen(fd, "w") as f:
-            json.dump(data, f, indent=2, default=str)
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            f.write(dump_canonical_json(data))
+        os.chmod(tmp_path, 0o600)  # noqa: PTH101
         os.replace(tmp_path, path)  # noqa: PTH105
     except BaseException:
         # Clean up temp file on any failure (including KeyboardInterrupt)

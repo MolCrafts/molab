@@ -2,8 +2,10 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
+import type { CacheClearResponse } from '../models/CacheClearResponse';
 import type { CacheControlRequest } from '../models/CacheControlRequest';
 import type { CacheControlResponse } from '../models/CacheControlResponse';
+import type { CacheStatsResponse } from '../models/CacheStatsResponse';
 import type { CacheStatusResponse } from '../models/CacheStatusResponse';
 import type { CurateRequest } from '../models/CurateRequest';
 import type { CurateResponse } from '../models/CurateResponse';
@@ -40,7 +42,7 @@ export class WorkspaceService {
      * @returns WorkspaceEventResponse Successful Response
      * @throws ApiError
      */
-    public static getWorkspaceEventsApiEventsGet(
+    public static getWorkspaceEvents(
         type?: ('run.created' | 'run.started' | 'run.failed' | 'run.completed' | 'asset.added' | 'knowledge.created' | 'workflow.created' | 'experiment.created' | null),
         ref?: (string | null),
         limit: number = 50,
@@ -63,6 +65,27 @@ export class WorkspaceService {
         });
     }
     /**
+     * Clear Cache
+     * Clear the workspace content-addressed task cache.
+     * @param molexpSession
+     * @returns CacheClearResponse Successful Response
+     * @throws ApiError
+     */
+    public static clearCache(
+        molexpSession?: (string | null),
+    ): CancelablePromise<CacheClearResponse> {
+        return __request(OpenAPI, {
+            method: 'DELETE',
+            url: '/api/workspace/cache',
+            cookies: {
+                'molexp_session': molexpSession,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
      * Invalidate Workspace Cache
      * Drop cached entries from the active workspace's mirror.
      *
@@ -74,7 +97,7 @@ export class WorkspaceService {
      * @returns CacheControlResponse Successful Response
      * @throws ApiError
      */
-    public static invalidateWorkspaceCacheApiWorkspaceCacheInvalidatePost(
+    public static invalidateWorkspaceCache(
         requestBody: CacheControlRequest,
         molexpSession?: (string | null),
     ): CancelablePromise<CacheControlResponse> {
@@ -104,7 +127,7 @@ export class WorkspaceService {
      * @returns CacheControlResponse Successful Response
      * @throws ApiError
      */
-    public static refreshWorkspaceCacheApiWorkspaceCacheRefreshPost(
+    public static refreshWorkspaceCache(
         requestBody: CacheControlRequest,
         molexpSession?: (string | null),
     ): CancelablePromise<CacheControlResponse> {
@@ -122,6 +145,27 @@ export class WorkspaceService {
         });
     }
     /**
+     * Get Cache Stats
+     * Workspace content-addressed task cache statistics.
+     * @param molexpSession
+     * @returns CacheStatsResponse Successful Response
+     * @throws ApiError
+     */
+    public static getCacheStats(
+        molexpSession?: (string | null),
+    ): CancelablePromise<CacheStatsResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/workspace/cache/stats',
+            cookies: {
+                'molexp_session': molexpSession,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
      * Workspace Cache Status
      * Poll remote-index progress (file-count total → fetch done).
      *
@@ -131,7 +175,7 @@ export class WorkspaceService {
      * @returns CacheStatusResponse Successful Response
      * @throws ApiError
      */
-    public static workspaceCacheStatusApiWorkspaceCacheStatusGet(
+    public static workspaceCacheStatus(
         molexpSession?: (string | null),
     ): CancelablePromise<CacheStatusResponse> {
         return __request(OpenAPI, {
@@ -161,7 +205,7 @@ export class WorkspaceService {
      * @returns WorkspaceContextResponse Successful Response
      * @throws ApiError
      */
-    public static getWorkspaceContextApiWorkspaceContextGet(
+    public static getWorkspaceContext(
         projectId?: (string | null),
         experimentId?: (string | null),
         runId?: (string | null),
@@ -194,7 +238,7 @@ export class WorkspaceService {
      * @returns WorkspaceSummaryResponse Successful Response
      * @throws ApiError
      */
-    public static getWorkspaceCopilotApiWorkspaceCopilotGet(
+    public static getWorkspaceCopilot(
         molexpSession?: (string | null),
     ): CancelablePromise<WorkspaceSummaryResponse> {
         return __request(OpenAPI, {
@@ -220,7 +264,7 @@ export class WorkspaceService {
      * @returns CurateResponse Successful Response
      * @throws ApiError
      */
-    public static curateWorkspaceApiWorkspaceCuratePost(
+    public static curateWorkspace(
         requestBody: CurateRequest,
         molexpSession?: (string | null),
     ): CancelablePromise<CurateResponse> {
@@ -245,7 +289,7 @@ export class WorkspaceService {
      * @returns any Successful Response
      * @throws ApiError
      */
-    public static createDirectoryApiWorkspaceDirectoriesPost(
+    public static createDirectory(
         requestBody: DirectoryCreateRequest,
         molexpSession?: (string | null),
     ): CancelablePromise<Record<string, any>> {
@@ -273,7 +317,7 @@ export class WorkspaceService {
      * @returns FileContentResponse Successful Response
      * @throws ApiError
      */
-    public static readWorkspaceFileApiWorkspaceFileGet(
+    public static readWorkspaceFile(
         path: string = '',
         molexpSession?: (string | null),
     ): CancelablePromise<FileContentResponse> {
@@ -302,7 +346,7 @@ export class WorkspaceService {
      * @returns any Successful Response
      * @throws ApiError
      */
-    public static readWorkspaceFileBlobApiWorkspaceFileBlobGet(
+    public static readWorkspaceFileBlob(
         path: string = '',
         molexpSession?: (string | null),
     ): CancelablePromise<any> {
@@ -341,7 +385,7 @@ export class WorkspaceService {
      * @returns any Successful Response
      * @throws ApiError
      */
-    public static listWorkspaceFilesApiWorkspaceFilesGet(
+    public static listWorkspaceFiles(
         path: string = '',
         maxDepth: number = 4,
         include?: (string | null),
@@ -371,7 +415,7 @@ export class WorkspaceService {
      * @returns any Successful Response
      * @throws ApiError
      */
-    public static writeFileApiWorkspaceFilesPut(
+    public static writeFile(
         requestBody: FileContentUpdateRequest,
         molexpSession?: (string | null),
     ): CancelablePromise<Record<string, any>> {
@@ -395,7 +439,7 @@ export class WorkspaceService {
      * @returns WorkspaceInfoResponse Successful Response
      * @throws ApiError
      */
-    public static getWorkspaceInfoApiWorkspaceInfoGet(
+    public static getWorkspaceInfo(
         molexpSession?: (string | null),
     ): CancelablePromise<WorkspaceInfoResponse> {
         return __request(OpenAPI, {
@@ -423,7 +467,7 @@ export class WorkspaceService {
      * @returns WorkspaceInfoResponse Successful Response
      * @throws ApiError
      */
-    public static openWorkspaceApiWorkspaceOpenPost(
+    public static openWorkspace(
         requestBody: (WorkspaceOpenLocalRequest | WorkspaceOpenRemoteRequest),
         molexpSession?: (string | null),
     ): CancelablePromise<WorkspaceInfoResponse> {
@@ -456,7 +500,7 @@ export class WorkspaceService {
      * @returns WorkspaceRunsResponse Successful Response
      * @throws ApiError
      */
-    public static listWorkspaceRunsApiWorkspaceRunsGet(
+    public static listWorkspaceRuns(
         projectId?: (string | null),
         experimentId?: (string | null),
         backend?: (string | null),
@@ -488,7 +532,7 @@ export class WorkspaceService {
      * @returns WorkspaceTargetListResponse Successful Response
      * @throws ApiError
      */
-    public static listWorkspaceTargetsApiWorkspaceTargetsGet(
+    public static listWorkspaceTargets(
         molexpSession?: (string | null),
     ): CancelablePromise<WorkspaceTargetListResponse> {
         return __request(OpenAPI, {
@@ -509,7 +553,7 @@ export class WorkspaceService {
      * @returns WorkspaceTargetResponse Successful Response
      * @throws ApiError
      */
-    public static createWorkspaceTargetApiWorkspaceTargetsPost(
+    public static createWorkspaceTarget(
         requestBody: WorkspaceTargetCreateRequest,
         molexpSession?: (string | null),
     ): CancelablePromise<WorkspaceTargetResponse> {
@@ -533,7 +577,7 @@ export class WorkspaceService {
      * @returns void
      * @throws ApiError
      */
-    public static deleteWorkspaceTargetApiWorkspaceTargetsNameDelete(
+    public static deleteWorkspaceTarget(
         name: string,
         molexpSession?: (string | null),
     ): CancelablePromise<void> {
@@ -563,7 +607,7 @@ export class WorkspaceService {
      * @returns TargetTestResponse Successful Response
      * @throws ApiError
      */
-    public static testWorkspaceTargetApiWorkspaceTargetsNameTestPost(
+    public static testWorkspaceTarget(
         name: string,
         molexpSession?: (string | null),
     ): CancelablePromise<TargetTestResponse> {

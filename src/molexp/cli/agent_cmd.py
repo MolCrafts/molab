@@ -49,21 +49,14 @@ class _ReplContext:
 
 
 def _configured_model() -> str | None:
-    """Return the ``agent.model`` value from ``molexp config``, if any.
+    """Effective ``agent.model`` — the shared services resolver.
 
-    Delegates to the shared operator-config loader so the CLI and the
-    server resolve the model from the same file and key; bridging also
-    lands any persisted ``agent.<provider>_api_key`` into ``molexp.config``
-    so provider construction finds it.
+    Bridging also lands any persisted ``agent.<provider>_api_key`` into
+    ``molexp.config`` so provider construction finds it.
     """
-    from molexp.services.operator_config import (
-        bridge_operator_config,
-        configured_agent_model,
-        load_operator_config,
-    )
+    from molexp.services.operator_config import resolve_configured_model
 
-    bridge_operator_config()
-    return configured_agent_model(load_operator_config())
+    return resolve_configured_model()
 
 
 def _make_runner(
@@ -196,6 +189,19 @@ def _run_repl(
             "[bold]molexp config set agent.model <id>[/bold]."
         )
         raise typer.Exit(1)
+
+    # Preflight the agent stack + credentials BEFORE the banner, so a missing
+    # `molexp[agent]` extra or API key is one clear line, not a failed first
+    # turn (same check `molexp plan` runs).
+    from molexp.services.plan_runtime.gateway import PlanPreflightError, preflight_plan_router
+
+    try:
+        preflight_plan_router(model=resolved_model)
+    except PlanPreflightError as exc:
+        from rich.markup import escape
+
+        rprint(f"[red]Error:[/red] {escape(str(exc))}")
+        raise typer.Exit(1) from exc
 
     with contextlib.suppress(ImportError):
         import readline  # noqa: F401

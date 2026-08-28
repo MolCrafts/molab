@@ -1,4 +1,4 @@
-"""Production gateway builder + agent-stack preflight for PlanMode pipelines.
+"""Production gateway builder + agent-stack preflight for PlanOrchestrator pipelines.
 
 The ONE gateway construction path both entry points share: ``molexp plan``
 (:mod:`molexp.cli.plan_cmd`) and the server's ``plan-tasks`` background task.
@@ -179,7 +179,7 @@ def preflight_plan_router(*, model: str, models: dict[str, str] | None = None) -
 def _missing_agent_stack_message(exc: ModuleNotFoundError) -> str:
     """One-line preflight message naming the install command for the extra."""
     return (
-        f"PlanMode needs the LLM agent stack, but {exc.name!r} is not installed — "
+        f"the LLM agent stack is required, but {exc.name!r} is not installed — "
         'install it with: pip install "molexp[agent]"'
     )
 

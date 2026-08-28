@@ -4,10 +4,9 @@ from __future__ import annotations
 
 import io
 import json
-from datetime import datetime
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 
 from molexp.plugins.submit_molq.cancel import try_cancel
@@ -39,6 +38,7 @@ from molexp.workspace import resolve_compute_target as resolve_target
 from molexp.workspace.events import read_workspace_events
 from molexp.workspace.fs_cached import CachedRemoteFileSystem
 from molexp.workspace.fs_tree import list_tree_children, tree_to_run_file_dicts
+from molexp.workspace.lifecycle_ops import cancel_run as lifecycle_cancel_run
 from molexp.workspace.metrics import read_run_metrics
 from molexp.workspace.targets import get_target
 
@@ -62,6 +62,7 @@ from ..schemas import (
     RunResponse,
     RunStartRequest,
     RunStatusResponse,
+    RunStatusUpdateRequest,
 )
 from .workspace import WorkspaceEventResponse
 
@@ -127,7 +128,7 @@ def _synthesize_snapshot(experiment: Experiment) -> dict | None:
 
 def _run_has_workflow_source(run) -> bool:  # noqa: ANN001
     """True if the run carries a generated ``workflow_source`` harness artifact
-    the worker can compile + execute in place (the PlanMode flow)."""
+    the worker can compile + execute in place (the PlanOrchestrator flow)."""
     from molexp.harness.store.file_artifact_store import FileArtifactStore
 
     try:
@@ -149,7 +150,7 @@ def _dispatch_to_molq(target, run, execution_id: str | None = None) -> None:  # 
     entrypoint = snapshot.get("entrypoint") if isinstance(snapshot, dict) else None
     # A run is executable either via an importable entrypoint (``molexp run``
     # script flow) OR a generated ``build_workflow()`` source the worker compiles
-    # in place (the PlanMode flow — the experiment has no importable module).
+    # in place (the PlanOrchestrator flow — the experiment has no importable module).
     if not entrypoint and not _run_has_workflow_source(run):
         raise HTTPException(
             status_code=422,
@@ -163,7 +164,7 @@ def _dispatch_to_molq(target, run, execution_id: str | None = None) -> None:  # 
     # Worker chdirs to submit_cwd before importing user code so cwd-relative
     # paths resolve the same as at submit time.
     if not run.metadata.submit_cwd:
-        run._update_metadata(submit_cwd=str(Path.cwd().resolve()))
+        run.update_provenance(submit_cwd=str(Path.cwd().resolve()))
 
     handler = SubmitHandler(
         scheduler=target.scheduler,
@@ -218,7 +219,7 @@ def get_run(
 
 
 @router.post("", response_model=RunResponse, status_code=201)
-def create_run(
+def create_scoped_run(
     project_id: str,
     experiment_id: str,
     run_req: RunCreateRequest,
@@ -239,7 +240,7 @@ def create_run(
             ) from exc
 
     run = experiment.add_run(
-        params=run_req.parameters,
+        params=run_req.params,
         target=run_req.target,
         workflow_snapshot=_synthesize_snapshot(experiment),
     )
@@ -585,11 +586,16 @@ def _require_retryable(run, run_id: str) -> None:  # noqa: ANN001
     :data:`molexp.workspace.RETRYABLE_STATUSES`.
     """
     if run.status not in RETRYABLE_STATUSES:
+        next_step = {
+            "running": "cancel it first (POST .../cancel or `molexp runs cancel`)",
+            "succeeded": "it finished — read its results instead",
+            "pending": "start it with the run verb (POST .../run or `molexp run`)",
+        }.get(str(run.status), "check the run's status")
         raise HTTPException(
             status_code=409,
             detail=(
                 f"run {run_id!r} is {run.status!r}; resume/rerun apply only to "
-                "failed or cancelled runs"
+                f"failed or cancelled runs — {next_step}"
             ),
         )
 
@@ -616,7 +622,7 @@ def _dispatch_continuation(workspace, run, execution_id: str) -> None:  # noqa: 
     if not (isinstance(snapshot, dict) and snapshot.get("entrypoint")):
         synthesized = _synthesize_snapshot(run.experiment)
         if synthesized is not None:
-            run._update_metadata(workflow_snapshot=synthesized)
+            run.update_provenance(workflow_snapshot=synthesized)
     _dispatch_to_molq(target, run, execution_id=execution_id)
 
 
@@ -668,17 +674,17 @@ def start_run(
         ) from exc
     # Apply edited inputs before dispatch — a pending run is not yet hashed, so
     # its config_hash (computed at execution start) picks up the new parameters.
-    if start_req.parameters is not None:
-        run._update_metadata(parameters=dict(start_req.parameters))
+    if start_req.params is not None:
+        run.update_provenance(parameters=dict(start_req.params))
     # Record a newly-chosen target so any later resume/rerun inherits it.
     if start_req.target and start_req.target != run.metadata.target:
-        run._update_metadata(target=start_req.target)
+        run.update_provenance(target=start_req.target)
     # Ensure the run carries a re-importable workflow entrypoint (mirrors continuation).
     snapshot = run.metadata.workflow_snapshot
     if not (isinstance(snapshot, dict) and snapshot.get("entrypoint")):
         synthesized = _synthesize_snapshot(run.experiment)
         if synthesized is not None:
-            run._update_metadata(workflow_snapshot=synthesized)
+            run.update_provenance(workflow_snapshot=synthesized)
     execution_id = make_execution_id(run.id, Path(run.run_dir))
     _dispatch_to_molq(target, run, execution_id=execution_id)
     return RunContinueResponse(
@@ -785,6 +791,8 @@ def cancel_run(
     project_id: str,
     experiment_id: str,
     run_id: str,
+    request: Request,
+    response: Response,
     workspace=Depends(get_workspace),  # noqa: ANN001
 ) -> RunActionResponse:
     """Cancel a run.
@@ -793,13 +801,21 @@ def cancel_run(
     and the resulting ``cancelled`` status); ``/kill`` remains as a
     deprecated alias route bound to this same handler.
 
-    Routes through :func:`molexp.plugins.submit_molq.cancel.try_cancel`, which signals
-    molq via :class:`molq.Submitor` for cluster-submitted runs and
-    sends ``SIGTERM`` for runs still owned by a local pid.  When neither
-    path applies (run never submitted, terminal, or executor info
-    missing) we fall back to flipping the metadata status so the UI
-    still reflects user intent.
+    One shared body with the CLI and the harness capability:
+    :func:`molexp.workspace.lifecycle_ops.cancel_run` (reap → domain check →
+    signal → flip), with :func:`molexp.plugins.submit_molq.cancel.try_cancel`
+    injected as the executor-signal hook (molq :class:`molq.Submitor` for
+    cluster-submitted runs, ``SIGTERM`` for a local pid). A run outside the
+    cancellable domain (pending / succeeded / already stopped) is a 409 with
+    the verb that owns it — never a silent status flip.
     """
+    if request.url.path.endswith("/kill"):
+        # Machine-readable deprecation signal for non-OpenAPI clients.
+        response.headers["Deprecation"] = "true"
+        response.headers["Link"] = (
+            f"</api/projects/{project_id}/experiments/{experiment_id}"
+            f'/runs/{run_id}/cancel>; rel="successor-version"'
+        )
     experiment = _get_experiment(workspace, project_id, experiment_id)
     if not experiment:
         raise RunNotFoundError(project_id, experiment_id, run_id)
@@ -807,18 +823,14 @@ def cancel_run(
     if not run:
         raise RunNotFoundError(project_id, experiment_id, run_id)
 
-    warning = try_cancel(run)
-    if warning is None:
-        return RunActionResponse(
-            runId=run.id,
-            status=run.status,
-            message="Run cancelled",
-        )
-    run.cancel()
+    try:
+        warning = lifecycle_cancel_run(run, signal_executor=try_cancel)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     return RunActionResponse(
         runId=run.id,
         status=run.status,
-        message=warning,
+        message=warning if warning is not None else "Run cancelled",
     )
 
 
@@ -1032,9 +1044,18 @@ def update_run_status(
     project_id: str,
     experiment_id: str,
     run_id: str,
-    status: dict[str, str],
+    body: RunStatusUpdateRequest,
     workspace=Depends(get_workspace),  # noqa: ANN001
 ) -> RunStatusResponse:
+    """Mark a run ``cancelled`` — the one status a client may write directly.
+
+    Every other status is owned by the run lifecycle (the three-verb law):
+    ``running``/``succeeded``/``failed`` are stamped by the executing
+    process, never by a client, and retrying goes through the explicit
+    ``resume``/``rerun`` routes. Requests for any status but ``cancelled``
+    are refused with 409; prefer ``POST .../{run_id}/cancel`` (which also
+    signals the live executor) over this raw mark.
+    """
     experiment = _get_experiment(workspace, project_id, experiment_id)
     if not experiment:
         raise RunNotFoundError(project_id, experiment_id, run_id)
@@ -1042,23 +1063,26 @@ def update_run_status(
     if not run:
         raise RunNotFoundError(project_id, experiment_id, run_id)
 
-    new_status_str = status.get("status", run.status)
+    new_status_str = body.status
     try:
-        new_status = RunStatus(new_status_str)
+        RunStatus(new_status_str)
     except ValueError:
         raise InvalidStatusError(run.status, new_status_str)  # noqa: B904
 
-    # Status / finished_at are hot state → the OKF ``_ops`` sidecar (wsokf-10).
-    finished = datetime.now() if new_status_str in ("succeeded", "failed", "cancelled") else None
-    run.update_ops(
-        lambda s: s.model_copy(
-            update=(
-                {"status": new_status, "finished_at": finished}
-                if finished is not None
-                else {"status": new_status}
-            )
+    if new_status_str != RunStatus.CANCELLED.value:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"status {new_status_str!r} is owned by the run lifecycle — "
+                f"use the run/resume/rerun verbs (POST .../run|resume|rerun) "
+                f"instead of writing status directly; only 'cancelled' may be "
+                f"marked by a client."
+            ),
         )
-    )
+    try:
+        lifecycle_cancel_run(run, allow_pending=True)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
 
     return RunStatusResponse(
         id=run.id,

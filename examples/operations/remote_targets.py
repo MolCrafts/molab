@@ -1,6 +1,6 @@
 """Compute targets — LocalTarget, RemoteTarget, and target resolution.
 
-Matches ``docs/guide/workspace-architecture.md``.
+Matches ``docs/en/guide/workspace-architecture.md``.
 
 Demonstrates:
 

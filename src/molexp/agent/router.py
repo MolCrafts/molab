@@ -1,7 +1,7 @@
 """``Router`` — unified LLM dispatch protocol for ``molexp.agent``.
 
 Every :class:`AgentLoop` reaches the LLM through a :class:`Router`.
-ChatLoop wants a single text completion; PlanMode wants tier-routed
+ChatLoop wants a single text completion; PlanOrchestrator wants tier-routed
 structured output. Both methods share one configuration surface
 (:class:`AgentRunner` ``model=`` / ``models=`` kwargs) and one cache.
 
@@ -231,7 +231,7 @@ class Router(Protocol):
     * :meth:`complete_text` — one free-form text round trip
       (``ChatLoop`` and any future single-shot mode).
     * :meth:`complete_structured` — schema-typed dispatch with retry
-      and event hooks (``PlanMode`` per-task LLM calls).
+      and event hooks (``PlanOrchestrator`` per-task LLM calls).
     * :meth:`stream_agentic` — the emergent tool-using loop
       (``InteractiveLoop``): the model autonomously decides → calls a
       tool → observes → loops, streamed as an :data:`AgenticChunk` flow.

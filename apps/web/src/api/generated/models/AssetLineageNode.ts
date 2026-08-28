@@ -12,6 +12,6 @@ export type AssetLineageNode = {
     id: string;
     kind: string;
     name: string;
-    scope_kind: string;
+    scopeKind: string;
 };
 

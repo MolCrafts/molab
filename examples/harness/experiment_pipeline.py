@@ -1,33 +1,36 @@
-"""NL experiment goal → plan → generated tests → REAL execution → final report.
+"""NL experiment goal → task board → review gate → frozen plan → realization.
 
 The flagship harness demo: one natural-language goal flows through the
-single canonical ``PlanMode`` pipeline on one ``workspace.Run`` (the
-earlier two-class PlanMode/RunMode split is retired):
+two-phase ``PlanOrchestrator`` pipeline on one ``workspace.Run`` (the
+earlier nine-step PlanMode/RunMode ledger is retired):
 
-- The default nine visible steps — draft proposal → draft spec → resolve
-  capabilities → workflow IR → tasks + per-task tests → input set →
-  compile/dry-run → review gate → execution report — expand the goal into
-  an experiment plan, validated runnable ``molexp.workflow`` source,
-  generated unit tests, and a compile-only dry run.
-- ``PlanMode(execute=True)`` (used here) appends the opt-in real-execution
-  tail — ``ExecuteWorkflow → GenerateFinalReport →
-  ApprovalGate(approve_execution) → GenerateAuditReport`` — which REALLY
-  runs the generated tests with pytest, executes the workflow on the real
-  ``molexp.workflow`` engine in an executor subprocess, and writes the
-  final experiment report from the actual results.
+- **Phase 1 — interactive planning**: an agent loop places tasks with
+  acceptance criteria on a task board; a form guard blocks a malformed
+  board; the hard review gate freezes the approved plan and the
+  ``plan_report_renderer`` agent emits the plan report. Offline, the loop
+  is replaced by an in-file ``CannedBoardRunner`` (the ``PlanLoopRunner``
+  seam) that writes the same board the production ``InteractiveLoop``
+  would build.
+- **Phase 2 — deterministic realization** (``RealizeBoard``): every board
+  task gets its module generated (canned here) and its unit test REALLY
+  run under pytest in an isolated tree, the greens are reduced into one
+  ``workflow_source``, and the assembled workflow is compiled by the real
+  ``molexp.workflow`` engine in an executor subprocess
+  (``run_workflow.py --compile-only`` — no real science).
 
 OFFLINE BY DEFAULT — zero network, zero API keys, deterministic: the
 in-file :class:`CannedGateway` implements the public ``AgentGateway``
 Protocol (the same seam the production ``RouterBackedAgentGateway`` plugs
-into) and serves pre-authored responses for all seven LLM agents. Only the
-LLM is canned: every validator runs for real, pytest runs for real, and the
-workflow really executes — the canned experiment is a 1D random walk whose
-diffusion coefficient is estimated via Einstein's relation D = MSD/(2·d·t).
+into) and serves pre-authored responses for the plan agents. Only the LLM
+is canned: the form guard, the review gate, per-task pytest, and the
+compile subprocess all run for real — the canned experiment is a 1D random
+walk whose diffusion coefficient follows Einstein's relation
+D = MSD/(2·d·t) ≈ 0.5.
 
 LIVE MODE — paste a DeepSeek key into ``API_KEY`` below (molexp reads LLM
 keys from ``molexp.config``, registered in code, never from the
 environment) and the same pipeline runs against the real model through
-``RouterBackedAgentGateway``.
+``RouterBackedAgentGateway`` with the production planning loop.
 
 Run directly::
 
@@ -38,39 +41,36 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import sys
 import tempfile
 from pathlib import Path
+from typing import Any
 
 import molexp
-from molexp.harness import AgentGateway, PlanMode
+from molexp.harness import (
+    AgentGateway,
+    FileArtifactStore,
+    LocalExecutor,
+    PlanOrchestrator,
+)
 from molexp.harness.errors import AgentResponseNotRegisteredError
+from molexp.harness.plan import (
+    BoardTask,
+    Difficulty,
+    FeasibilityAnnotation,
+    TaskBoard,
+    board_path,
+    read_board,
+    write_board,
+)
 from molexp.harness.schemas import (
     AgentCallResult,
     AgentCallSpec,
-    BoundTask,
-    BoundWorkflow,
-    DependencyEdge,
     ExecutionResult,
-    ExpectedOutput,
-    ExperimentReport,
-    ExperimentSpec,
-    FinalReport,
-    InputSet,
-    ParameterValue,
-    PlanArtifactRef,
-    PlanTaskIR,
-    PlanWorkflowIR,
-    ResourcePolicy,
-    SpecVariable,
-    SweepAxis,
-    TestSource,
-    TestSpec,
-    TestSpecBundle,
     WorkflowSource,
 )
-from molexp.harness.stages.approval_gate import auto_grant_approver
-from molexp.harness.store.file_artifact_store import FileArtifactStore
+from molexp.harness.stages import auto_grant_approver
 from molexp.workspace import Workspace
 
 MODEL = "deepseek:deepseek-v4-flash"
@@ -82,287 +82,153 @@ GOAL = (
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
-# The canned "LLM outputs". The workflow + test sources are REAL programs:
-# ValidateWorkflowSource compiles the workflow, pytest really runs the tests,
-# and the materialized driver really executes the workflow engine.
+# Phase 1, canned: the board the planning loop would build. Every task carries
+# acceptance criteria (the form guard refuses a board without them).
 # ─────────────────────────────────────────────────────────────────────────────
 
-WORKFLOW_SOURCE = '''\
-"""Random-walk diffusion workflow (generated for the molexp harness demo)."""
+
+def _canned_board() -> TaskBoard:
+    def _task(tid: str, name: str, acceptance: tuple[str, ...]) -> BoardTask:
+        return BoardTask(
+            id=tid,
+            name=name,
+            acceptance=acceptance,
+            feasibility=FeasibilityAnnotation(
+                reachable=True, difficulty=Difficulty.TRIVIAL, rationale="pure-python stdlib"
+            ),
+        )
+
+    return TaskBoard(
+        version=1,
+        tasks=(
+            _task(
+                "generate_walks",
+                "Generate seeded random walks",
+                ("same seed reproduces the same displacements", "ensemble has 200 walkers"),
+            ),
+            _task(
+                "compute_msd",
+                "Compute the ensemble MSD",
+                ("MSD is positive", "MSD matches the hand-computed mean of squares"),
+            ),
+            _task(
+                "estimate_d",
+                "Estimate D via Einstein's relation",
+                ("D = MSD/(2 d t)", "unit-time ±1 walk gives D ≈ 0.5"),
+            ),
+        ),
+    )
+
+
+class CannedBoardRunner:
+    """In-file ``PlanLoopRunner`` — writes the canned board, no LLM.
+
+    Production uses ``InteractiveLoopPlanRunner`` (the agent-layer
+    ``InteractiveLoop`` driving the board tools); this stub exercises the
+    same seam offline by writing the board the loop would have built.
+    """
+
+    def __init__(self, board: TaskBoard) -> None:
+        self._board = board
+
+    async def run_planning(
+        self, *, ctx: Any, board: Any, tools: Any, hooks: Any, user_input: str
+    ) -> None:
+        del board, tools, hooks, user_input
+        write_board(board_path(ctx.workspace_root), self._board)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Phase 2, canned codegen: REAL per-task modules + REAL pytest files. The
+# realizer renames each module's top-level function to the task slug, runs its
+# test under pytest in an isolated tree, then compiles the assembly for real.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_TASK_MODULES = {
+    "generate_walks": '''\
+"""Seeded ±1-step random-walk ensemble (generated for the harness demo)."""
 
 import random
-
-from molexp.workflow import TaskContext, WorkflowCompiler
 
 SEED = 20260610
 N_WALKERS = 200
 N_STEPS = 400
 
 
-def random_walk_displacements(n_walkers, n_steps, seed):
-    """Final displacements of ``n_walkers`` independent ±1-step walks."""
-    rng = random.Random(seed)
+async def generate_walks(ctx=None) -> dict:
+    rng = random.Random(SEED)
     finals = []
-    for _ in range(n_walkers):
+    for _ in range(N_WALKERS):
         x = 0
-        for _ in range(n_steps):
+        for _ in range(N_STEPS):
             x += 1 if rng.random() < 0.5 else -1
         finals.append(x)
-    return finals
+    return {"displacements": finals, "n_steps": N_STEPS}
+''',
+    "compute_msd": '''\
+"""Ensemble mean squared displacement (generated for the harness demo)."""
 
 
-def mean_squared_displacement(displacements):
-    return sum(d * d for d in displacements) / len(displacements)
+async def compute_msd(displacements, n_steps) -> dict:
+    msd = sum(d * d for d in displacements) / len(displacements)
+    return {"msd": msd, "n_steps": n_steps}
+''',
+    "estimate_d": '''\
+"""Einstein relation D = MSD/(2 d t) in one dimension (generated)."""
 
 
-def estimate_diffusion_coefficient(msd, total_time, dimensions=1):
-    """Einstein relation: D = MSD / (2 * d * t)."""
-    return msd / (2 * dimensions * total_time)
+async def estimate_d(msd, n_steps) -> dict:
+    return {"diffusion_coefficient": msd / (2 * 1 * n_steps), "msd": msd}
+''',
+}
+
+_TASK_TESTS = {
+    "generate_walks": """\
+import asyncio
+
+from workflow.generate_walks import N_WALKERS, generate_walks
 
 
-def build_workflow() -> WorkflowCompiler:
-    wf = WorkflowCompiler(name="random_walk_diffusion")
-
-    @wf.task
-    async def generate_walks(ctx: TaskContext) -> dict:
-        finals = random_walk_displacements(N_WALKERS, N_STEPS, SEED)
-        return {"displacements": finals, "n_steps": N_STEPS}
-
-    @wf.task(depends_on=["generate_walks"])
-    async def compute_msd(displacements, n_steps) -> dict:
-        # Dataflow-by-name: generate_walks' returned keys arrive as parameters.
-        msd = mean_squared_displacement(displacements)
-        return {"msd": msd, "n_steps": n_steps}
-
-    @wf.task(depends_on=["compute_msd"])
-    async def estimate_d(msd, n_steps) -> dict:
-        d = estimate_diffusion_coefficient(msd, n_steps)
-        return {"diffusion_coefficient": d, "msd": msd}
-
-    return wf
-'''
-
-TEST_SOURCE = '''\
-"""Generated unit tests for the random-walk diffusion workflow."""
-
-from generated_workflow import (
-    N_STEPS,
-    N_WALKERS,
-    SEED,
-    build_workflow,
-    estimate_diffusion_coefficient,
-    mean_squared_displacement,
-    random_walk_displacements,
-)
+def test_same_seed_reproduces_the_same_displacements():
+    a = asyncio.run(generate_walks())
+    b = asyncio.run(generate_walks())
+    assert a["displacements"] == b["displacements"]
 
 
-def test_generate_walks_are_deterministic_with_seed():
-    a = random_walk_displacements(N_WALKERS, N_STEPS, SEED)
-    b = random_walk_displacements(N_WALKERS, N_STEPS, SEED)
-    assert a == b
-    assert len(a) == N_WALKERS
+def test_ensemble_has_200_walkers():
+    out = asyncio.run(generate_walks())
+    assert len(out["displacements"]) == N_WALKERS == 200
+""",
+    "compute_msd": """\
+import asyncio
+
+from workflow.compute_msd import compute_msd
 
 
-def test_compute_msd_is_positive_and_near_n_steps():
-    walks = random_walk_displacements(N_WALKERS, N_STEPS, SEED)
-    msd = mean_squared_displacement(walks)
-    assert msd > 0
-    # Var of an n-step ±1 walk is exactly n; generous statistical bounds.
-    assert 0.5 * N_STEPS < msd < 2.0 * N_STEPS
+def test_msd_is_positive_and_matches_hand_computation():
+    out = asyncio.run(compute_msd([2, -2, 4], 400))
+    assert out["msd"] == (4 + 4 + 16) / 3
+    assert out["msd"] > 0
+""",
+    "estimate_d": """\
+import asyncio
+
+from workflow.estimate_d import estimate_d
 
 
-def test_estimate_d_is_positive_and_near_half():
-    walks = random_walk_displacements(N_WALKERS, N_STEPS, SEED)
-    msd = mean_squared_displacement(walks)
-    d = estimate_diffusion_coefficient(msd, N_STEPS)
-    assert d > 0
-    assert 0.25 < d < 1.0  # unit-time ±1 walk → D ≈ 0.5
+def test_unit_time_walk_gives_d_half():
+    out = asyncio.run(estimate_d(400.0, 400))
+    assert abs(out["diffusion_coefficient"] - 0.5) < 1e-12
+""",
+}
 
 
-def test_workflow_compiles_with_three_tasks():
-    assert build_workflow().compile() is not None
-'''
-
-
-def _canned_responses() -> dict[str, tuple[str, dict]]:
-    """Build {agent_name: (output_kind, payload)} from REAL schema instances.
-
-    Constructing through the schemas (then ``model_dump``) means any schema
-    drift in molexp.harness turns this example red in the smoke gate —
-    exactly the anti-drift job the example tier exists for.
-
-    The numeric literals below (200 walkers / 400 steps / seed 20260610)
-    must stay in sync with the SEED / N_WALKERS / N_STEPS constants inside
-    WORKFLOW_SOURCE — they describe the same "generated" program.
-    """
-    report = ExperimentReport(
-        title="Random-walk diffusion",
-        objective=GOAL,
-        system_description="An ensemble of 200 independent 1D ±1-step random walkers.",
-        experimental_design=(
-            "Generate seeded walks, compute the ensemble MSD at t = 400 steps, "
-            "and estimate D via Einstein's relation D = MSD/(2 d t)."
-        ),
-        expected_outputs=["diffusion_coefficient"],
-    )
-    spec = ExperimentSpec(
-        id="spec-random-walk",
-        experiment_report_id="rep-random-walk",
-        title=report.title,
-        objective=GOAL,
-        variables=[
-            SpecVariable(
-                name="n_walkers",
-                value=ParameterValue(value=200, source="agent_inferred"),
-                description="ensemble size",
-            ),
-            SpecVariable(
-                name="n_steps",
-                value=ParameterValue(value=400, source="agent_inferred"),
-                unit="steps",
-            ),
-        ],
-    )
-    ir = PlanWorkflowIR(
-        id="wf-random-walk",
-        name="random_walk_diffusion",
-        objective="Estimate D from the MSD of seeded 1D random walks",
-        inputs={
-            "n_walkers": ParameterValue(value=200, source="agent_inferred", approved=True),
-            "n_steps": ParameterValue(value=400, source="agent_inferred", approved=True),
-            "seed": ParameterValue(value=20260610, source="agent_inferred", approved=True),
-        },
-        tasks=[
-            PlanTaskIR(
-                id="generate_walks",
-                name="Generate walks",
-                purpose="Simulate the seeded walker ensemble",
-                task_type="simulation",
-                inputs={},
-                outputs={"displacements": "final displacements"},
-            ),
-            PlanTaskIR(
-                id="compute_msd",
-                name="Compute MSD",
-                purpose="Ensemble mean squared displacement",
-                task_type="analysis",
-                inputs={},
-                outputs={"msd": "mean squared displacement"},
-            ),
-            PlanTaskIR(
-                id="estimate_d",
-                name="Estimate D",
-                purpose="Einstein relation D = MSD/(2 d t)",
-                task_type="analysis",
-                inputs={},
-                outputs={"diffusion_coefficient": "estimated D"},
-            ),
-        ],
-        edges=[
-            DependencyEdge(source_task_id="generate_walks", target_task_id="compute_msd"),
-            DependencyEdge(source_task_id="compute_msd", target_task_id="estimate_d"),
-        ],
-        expected_outputs=[
-            ExpectedOutput(
-                name="diffusion_coefficient",
-                kind="analysis_result",
-                description="Estimated D from the Einstein relation",
-            )
-        ],
-    )
-    bound = BoundWorkflow(
-        id="bw-random-walk",
-        workflow_ir_id=ir.id,
-        tasks=[
-            BoundTask(
-                id=f"b-{task.id}",
-                ir_task_id=task.id,
-                capability_id=f"stdlib.random_walk.{task.id}",
-                package="python-stdlib",
-                callable=f"generated_workflow.{task.id}",
-                parameters={},
-                inputs={},
-                outputs=dict.fromkeys(task.outputs, "json"),
-            )
-            for task in ir.tasks
-        ],
-        edges=[
-            DependencyEdge(source_task_id="b-generate_walks", target_task_id="b-compute_msd"),
-            DependencyEdge(source_task_id="b-compute_msd", target_task_id="b-estimate_d"),
-        ],
-        execution_backend="local",
-        environment={},
-        resource_policy=ResourcePolicy(
-            backend="local", max_runtime_s=600, denied_paths=["/", "~/.ssh"]
-        ),
-    )
-    workflow_source = WorkflowSource(
-        source=WORKFLOW_SOURCE,
-        module_name="generated_workflow",
-        bound_workflow_id=bound.id,
-        symbols=("WorkflowCompiler", "TaskContext"),
-    )
-    input_set = InputSet(
-        id="is-random-walk",
-        experiment_spec_id=spec.id,
-        title="seed sweep (single cell)",
-        sweep_axes=[SweepAxis(name="seed", values=[20260610], source="agent_inferred")],
-        strategy="grid",
-        total_runs=1,
-    )
-    # One TestSpec per IR task (the per-task fan-out); the generated
-    # TEST_SOURCE carries a ``test_*`` covering each task id.
-    test_spec = TestSpecBundle(
-        id="tsb-random-walk",
-        bound_workflow_id=bound.id,
-        specs=[
-            TestSpec(
-                id=f"ts-{tid}",
-                name=f"{tid} unit test",
-                kind="unit_test",
-                target_task_id=tid,
-                description="Determinism, MSD sanity, and D = MSD/(2 d t) bounds.",
-            )
-            for tid in ("generate_walks", "compute_msd", "estimate_d")
-        ],
-    )
-    test_source = TestSource(
-        source=TEST_SOURCE,
-        module_name="test_generated_workflow",
-        test_spec_id=test_spec.id,
-        bound_workflow_id=bound.id,
-        symbols=("build_workflow",),
-    )
-    final_report = FinalReport(
-        title="Random-walk diffusion — final report",
-        objective=GOAL,
-        methods_summary="Three-task molexp.workflow executed via the harness driver.",
-        test_summary="4 generated pytest cases passed (determinism, MSD, D bounds).",
-        execution_summary="Workflow executed to completion in an executor subprocess.",
-        results="Estimated D ≈ 0.5 in lattice units (MSD/(2t) of the seeded ensemble).",
-        conclusions="The seeded ensemble reproduces Einstein diffusion: D = MSD/(2 d t).",
-        limitations=["toy lattice walk", "single ensemble size"],
-        next_steps=["sweep n_steps", "compare against an analytic ±1-walk variance"],
-    )
-    return {
-        "experiment_report_writer": ("experiment_report", report.model_dump(mode="json")),
-        "experiment_spec_generator": ("experiment_spec", spec.model_dump(mode="json")),
-        "workflow_ir_extractor": ("workflow_ir", ir.model_dump(mode="json")),
-        "bound_workflow_binder": ("bound_workflow", bound.model_dump(mode="json")),
-        "workflow_source_writer": ("workflow_source", workflow_source.model_dump(mode="json")),
-        "plan_reviewer": (
-            "plan_review",
-            {
-                "passed": True,
-                "findings": [],
-                "summary": "Workflow faithfully implements the report.",
-            },
-        ),
-        "input_set_generator": ("input_set", input_set.model_dump(mode="json")),
-        "test_spec_writer": ("test_spec", test_spec.model_dump(mode="json")),
-        "test_code_writer": ("test_source", test_source.model_dump(mode="json")),
-        "final_report_writer": ("final_report", final_report.model_dump(mode="json")),
-    }
+def _slug_from_prompt(prompt_text: str) -> str:
+    """The task slug the codegen prompt names (``slug: <identifier>``)."""
+    match = re.search(r"^\s*slug:\s*([A-Za-z_][A-Za-z0-9_]*)\s*$", prompt_text, re.MULTILINE)
+    if match is None:
+        raise AgentResponseNotRegisteredError("codegen prompt carries no task slug")
+    return match.group(1)
 
 
 class CannedGateway:
@@ -376,17 +242,52 @@ class CannedGateway:
     ``input_artifact_ids``, so lineage stays intact offline.
     """
 
-    def __init__(self, store: FileArtifactStore, responses: dict[str, tuple[str, dict]]) -> None:
+    def __init__(self, store: FileArtifactStore) -> None:
         self._store = store
-        self._responses = responses
         self.calls: list[tuple[AgentCallSpec, AgentCallResult]] = []
 
-    async def call(self, spec: AgentCallSpec) -> AgentCallResult:
-        if spec.agent_name not in self._responses:
-            raise AgentResponseNotRegisteredError(
-                f"no canned response registered for agent {spec.agent_name!r}"
+    def _payload(self, spec: AgentCallSpec) -> tuple[str, dict]:
+        """(output_kind, payload) for one agent call — the 'LLM output'."""
+        if spec.agent_name == "plan_report_renderer":
+            return (
+                "plan_report",
+                {
+                    "title": "Random-walk diffusion — plan report",
+                    "summary_md": (
+                        "# Plan\n\nGenerate seeded walks, compute the ensemble MSD, "
+                        "estimate D via Einstein's relation D = MSD/(2 d t)."
+                    ),
+                },
             )
-        kind, payload = self._responses[spec.agent_name]
+        prompt = self._store.get(spec.input_artifact_ids[0]).decode("utf-8")
+        slug = _slug_from_prompt(prompt)
+        if spec.agent_name == "workflow_source_file_writer":
+            return (
+                "workflow_source_file",
+                {
+                    "source": _TASK_MODULES[slug],
+                    "module_name": slug,
+                    "bound_workflow_id": "bw-random-walk",
+                    "symbols": [slug],
+                },
+            )
+        if spec.agent_name == "test_code_file_writer":
+            return (
+                "test_source_file",
+                {
+                    "source": _TASK_TESTS[slug],
+                    "module_name": f"test_{slug}",
+                    "test_spec_id": f"ts-{slug}",
+                    "bound_workflow_id": "bw-random-walk",
+                    "symbols": [slug],
+                },
+            )
+        raise AgentResponseNotRegisteredError(
+            f"no canned response registered for agent {spec.agent_name!r}"
+        )
+
+    async def call(self, spec: AgentCallSpec) -> AgentCallResult:
+        kind, payload = self._payload(spec)
         created_by = f"agent:{spec.agent_name}"
         raw_ref = self._store.put_text(
             kind="log",
@@ -432,12 +333,6 @@ def _live_gateway(store: FileArtifactStore) -> AgentGateway:
     )
 
 
-def _print_stage_table(label: str, names: list[str], refs: tuple[PlanArtifactRef, ...]) -> None:
-    print(f"\n{label}")
-    for name, ref in zip(names, refs, strict=True):
-        print(f"  {name:<26} {ref.kind:<20} {ref.id}")
-
-
 def _assert_gateway_contract(gateway: CannedGateway) -> None:
     """Self-check: the in-file gateway really honors the persistence law."""
     assert isinstance(gateway, AgentGateway), "CannedGateway must satisfy the Protocol"
@@ -456,53 +351,63 @@ def main() -> int:
         store = FileArtifactStore(root=run.run_dir / "artifacts")
 
         offline = not API_KEY
-        gateway: AgentGateway = (
-            CannedGateway(store, _canned_responses()) if offline else _live_gateway(store)
-        )
+        gateway: AgentGateway
+        if offline:
+            gateway = CannedGateway(store)
+            # Phase 1's planning loop is the CannedBoardRunner seam offline;
+            # live mode uses the default InteractiveLoopPlanRunner.
+            orch = PlanOrchestrator(
+                loop_runner=CannedBoardRunner(_canned_board()),
+                approve=auto_grant_approver,  # unattended demo opts in EXPLICITLY
+                realize=True,
+                executor=LocalExecutor(),  # real per-task pytest + real compile
+            )
+        else:
+            gateway = _live_gateway(store)
+            orch = PlanOrchestrator(approve=auto_grant_approver, realize=True)
+
         print(f"goal    : {GOAL}")
-        print(f"mode    : {'offline (canned LLM, real engine)' if offline else f'live ({MODEL})'}")
+        print(
+            f"mode    : {'offline (canned LLM, real gates + pytest + compile)' if offline else f'live ({MODEL})'}"
+        )
         print(f"run     : {run.id}")
 
-        # One end-to-end mode: the 9-step plan + the opt-in real-execution tail.
-        # Default LocalExecutor → real pytest + real engine for steps 7 and the tail.
-        # Approvals never auto-grant by default — an unattended demo run opts in
-        # EXPLICITLY with auto_grant_approver (interactive flows use a TTY prompt
-        # or the server's approvals inbox instead).
-        mode = PlanMode(approver=auto_grant_approver, execute=True)
-        names = [s.name for s in mode.stages(GOAL)]
-        result = asyncio.run(mode.run(run=run, user_input=GOAL, gateway=gateway))
-        _print_stage_table(
-            "PlanMode stage artifacts (execute=True):", names, result.stage_artifacts
-        )
+        result = asyncio.run(orch.run(run=run, user_input=GOAL, gateway=gateway))
         if isinstance(gateway, CannedGateway):
             _assert_gateway_contract(gateway)
 
-        # The generated tests really ran — show pytest's own summary.
-        test_ref = next(a for a in result.stage_artifacts if a.kind == "test_result")
-        test_payload = json.loads(store.get(test_ref.id))
-        pytest_stdout = store.get(test_payload["stdout"]["id"]).decode("utf-8")
-        print(f"\npytest  : {pytest_stdout.strip().splitlines()[-1]}")
+        # Phase 1 left a reviewed, frozen plan + report on the store. (The
+        # reachability probe grounds against molmcp; offline it annotates
+        # every task unreachable — the review gate is what admits the plan.)
+        board = read_board(board_path(run.run_dir))
+        print("\ntask board (frozen after the review gate):")
+        for task in board.tasks:
+            probed = "annotated" if task.feasibility is not None else "unprobed"
+            print(f"  {task.id:<16} feasibility={probed} acceptance={len(task.acceptance)}")
+        for kind in ("frozen_experiment_plan", "plan_report"):
+            ref = store.latest_by_kind(kind)
+            assert ref is not None, f"missing {kind} artifact"
+            print(f"  {kind:<22} {ref.id}")
 
-        # Step 7 produced a compile dry run (metadata.mode == "compile"); the
-        # tail produced the REAL run — the last execution_result is the real one.
-        exec_refs = [a for a in result.stage_artifacts if a.kind == "execution_result"]
-        execution = ExecutionResult.model_validate_json(store.get(exec_refs[-1].id))
+        # Phase 2 reduced the greens into one workflow_source (assembly +
+        # one file per task) and compiled it for real (--compile-only).
+        wf_ref = store.latest_by_kind("workflow_source")
+        assert wf_ref is not None
+        wf = WorkflowSource.model_validate_json(store.get(wf_ref.id))
+        print("\nrealized workflow_source files:")
+        for file in wf.files:
+            print(f"  {file.path}")
+        assert "def build_workflow" in wf.source
+
+        exec_ref = store.latest_by_kind("execution_result")
+        assert exec_ref is not None
+        execution = ExecutionResult.model_validate_json(store.get(exec_ref.id))
         assert execution.status == "succeeded"
-        d_value = float(execution.outputs["estimate_d"]["diffusion_coefficient"])
-        assert d_value > 0, "Einstein relation must give a positive D"
-        print(f"engine  : status={execution.status} exit={execution.exit_code}")
-        print(f"D       : {d_value:.4f} (lattice units; expectation ≈ 0.5)")
-
-        # The final report is a real artifact written from those results.
-        report_ref = next(a for a in result.stage_artifacts if a.kind == "final_report")
-        report = FinalReport.model_validate_json(store.get(report_ref.id))
-        print(f"\nFinal report — {report.title}")
-        print(f"  objective   : {report.objective}")
-        print(f"  tests       : {report.test_summary}")
-        print(f"  execution   : {report.execution_summary}")
-        print(f"  results     : {report.results}")
-        print(f"  conclusions : {report.conclusions}")
-        print(f"  next steps  : {'; '.join(report.next_steps)}")
+        assert result.final_artifact is not None
+        print(f"\ncompile : status={execution.status} mode={execution.metadata.get('mode')}")
+        print(f"final   : {result.final_artifact.kind} ({result.final_artifact.id})")
+        print(f"\nartifacts : {run.run_dir / 'artifacts'}")
+        print(f"audit db  : {run.run_dir / 'harness.sqlite'}  (events + artifact lineage)")
     return 0
 
 

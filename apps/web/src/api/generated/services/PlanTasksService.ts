@@ -18,7 +18,7 @@ export class PlanTasksService {
      * @returns PlanTaskListResponse Successful Response
      * @throws ApiError
      */
-    public static listPlanTasksApiProjectsProjectIdExperimentsExperimentIdPlanTasksGet(
+    public static listPlanTasks(
         projectId: string,
         experimentId: string,
         molexpSession?: (string | null),
@@ -40,9 +40,9 @@ export class PlanTasksService {
     }
     /**
      * Create Plan Task
-     * Start a PlanMode pipeline on a content-addressed run under the experiment.
+     * Start a PlanOrchestrator pipeline on a content-addressed run under the experiment.
      *
-     * Async so the spawned background ``asyncio.Task`` (the PlanMode run) attaches
+     * Async so the spawned background ``asyncio.Task`` (the PlanOrchestrator run) attaches
      * to the app event loop; the handler itself does no awaiting and returns the
      * initial ``running`` status immediately.
      * @param projectId
@@ -52,7 +52,7 @@ export class PlanTasksService {
      * @returns PlanTaskResponse Successful Response
      * @throws ApiError
      */
-    public static createPlanTaskApiProjectsProjectIdExperimentsExperimentIdPlanTasksPost(
+    public static createPlanTask(
         projectId: string,
         experimentId: string,
         requestBody: PlanTaskCreateRequest,
@@ -85,7 +85,7 @@ export class PlanTasksService {
      * @returns PlanTaskResponse Successful Response
      * @throws ApiError
      */
-    public static getPlanTaskApiProjectsProjectIdExperimentsExperimentIdPlanTasksTaskIdGet(
+    public static getPlanTask(
         projectId: string,
         experimentId: string,
         taskId: string,

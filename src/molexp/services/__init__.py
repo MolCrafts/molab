@@ -7,7 +7,7 @@ duplicating logic or importing each other.
 
 Contents:
 
-- :mod:`molexp.services.plan_runtime` — PlanMode gateway builder + preflight,
+- :mod:`molexp.services.plan_runtime` — PlanOrchestrator gateway builder + preflight,
   background-task registry, and the post-run record/persist/materialize steps.
 - :mod:`molexp.services.curate_runtime` — the shared curation flow
   (discover → plan → gate → invoke) + proposal backend.
@@ -17,6 +17,11 @@ Contents:
 - :mod:`molexp.services.agent_task_store` — on-disk metadata/events for
   user-facing agent tasks (consumed by the Agents-hub routes and the plan
   recorder).
+- :mod:`molexp.services.agent_context` — the one mount-context builder for
+  ``molexp agent`` and server session create (``build_mount_context`` /
+  ``resolve_scope_dir`` / ``mount_session_scope``).
+- :mod:`molexp.services.approval_notify` — in-process approval-change
+  pub/sub (payload-free SSE pings for ``GET /api/approvals/events``).
 - :mod:`molexp.services.auth` — filesystem users + sessions for
   ``molexp serve`` HTTP auth (CLI ``molexp auth`` and the server share it).
 
@@ -37,9 +42,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from molexp.services.agent_context import build_mount_context, resolve_scope_dir
+    from molexp.services.agent_context import (
+        build_mount_context,
+        mount_session_scope,
+        resolve_scope_dir,
+    )
 
-__all__ = ["build_mount_context", "resolve_scope_dir"]
+__all__ = ["build_mount_context", "mount_session_scope", "resolve_scope_dir"]
 
 
 def __getattr__(name: str) -> object:

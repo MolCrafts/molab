@@ -13,10 +13,10 @@ export type WorkflowDocumentResponse = {
     /**
      * Owning experiment id
      */
-    experiment_id: string;
+    experimentId: string;
     /**
      * Owning project id
      */
-    project_id: string;
+    projectId: string;
 };
 

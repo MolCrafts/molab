@@ -103,33 +103,17 @@ def reset_runner_factory() -> None:
 
 
 def _configured_model() -> str | None:
-    """Return the agent model registered in in-code ``molexp.config``.
+    """Effective ``agent.model`` — the shared services resolver."""
+    from molexp.services.operator_config import resolve_configured_model
 
-    The canonical key is ``"agent.model"`` (same spelling as the CLI's
-    ``molexp config set agent.model <id>``; the server startup bridge —
-    :func:`molexp.services.operator_config.bridge_operator_config` — populates
-    it from ``~/.molexp/config.json``). The legacy flat ``"agent_model"``
-    key is still honoured for in-code users.
-    """
-    import molexp
-    from molexp.services.operator_config import AGENT_MODEL_KEY, LEGACY_AGENT_MODEL_KEY
-
-    model = molexp.config.get(AGENT_MODEL_KEY) or molexp.config.get(LEGACY_AGENT_MODEL_KEY)
-    return model if isinstance(model, str) and model else None
+    return resolve_configured_model()
 
 
 def _configured_models() -> dict[str, str] | None:
-    """Return a complete cheap/default/heavy map when one is configured."""
-    import molexp
-    from molexp.services.operator_config import AGENT_MODELS_KEY
+    """Complete cheap/default/heavy map — the shared services resolver."""
+    from molexp.services.operator_config import resolve_configured_models
 
-    value = molexp.config.get(AGENT_MODELS_KEY)
-    if value is None or not callable(getattr(value, "get", None)):
-        return None
-    models = {tier: value.get(tier) for tier in ("cheap", "default", "heavy")}
-    if not all(isinstance(model, str) and model for model in models.values()):
-        return None
-    return {tier: str(model) for tier, model in models.items()}
+    return resolve_configured_models()
 
 
 def _workspace_root(workspace: Workspace) -> str:

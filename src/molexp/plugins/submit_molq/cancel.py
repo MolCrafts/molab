@@ -15,6 +15,7 @@ Three outcomes:
 
 from __future__ import annotations
 
+import contextlib
 import os
 import platform
 import signal
@@ -27,7 +28,7 @@ if TYPE_CHECKING:
     from molexp.workspace.run import Run
 
 
-_TERMINAL_STATUSES = frozenset({"succeeded", "failed", "cancelled"})
+from molexp.workspace.run_ops import TERMINAL_STATUSES as _TERMINAL_STATUSES
 
 
 @dataclass(frozen=True)
@@ -35,8 +36,11 @@ class CancelPlan:
     """Classification of how to cancel a run."""
 
     kind: Literal["molq", "local", "none"]
-    detail: str  # cluster_name / pid-as-str / reason
+    detail: str  # pid-as-str / reason / cluster label
     job_id: str | None = None  # molq internal job_id (only for kind=="molq")
+    scheduler: str | None = None  # molq scheduler backend (kind=="molq")
+    cluster: str | None = None  # molq cluster name (kind=="molq")
+    scheduler_job_id: str | None = None  # native scheduler id fallback
 
 
 def classify(run: Run) -> CancelPlan:
@@ -52,11 +56,14 @@ def classify(run: Run) -> CancelPlan:
     # Ownership (pid/host) lives in the OKF ``_ops`` sidecar (wsokf-10);
     # executor_info (scheduler/job ids) stays on run.json metadata.
     info = normalize_executor_info(run.metadata.executor_info, {})
-    if info.get("backend") == "molq" and info.get("job_id"):
+    if info.get("backend") == "molq" and (info.get("job_id") or info.get("scheduler_job_id")):
         return CancelPlan(
             kind="molq",
             detail=info.get("cluster_name", ""),
-            job_id=info["job_id"],
+            job_id=info.get("job_id"),
+            scheduler=info.get("scheduler"),
+            cluster=info.get("cluster_name"),
+            scheduler_job_id=info.get("scheduler_job_id"),
         )
 
     ops = run.read_ops()
@@ -73,9 +80,18 @@ def classify(run: Run) -> CancelPlan:
     return CancelPlan(kind="none", detail=reason)
 
 
-def try_cancel(run: Run) -> str | None:
+def try_cancel(
+    run: Run,
+    *,
+    fallback_scheduler: str = "local",
+    fallback_cluster: str = "default",
+) -> str | None:
     """Attempt to cancel *run*.  Return ``None`` on success, a warning
     message otherwise.  Never raises for caller-actionable reasons.
+
+    ``fallback_scheduler`` / ``fallback_cluster`` fill in when the run's
+    recorded executor_info lacks them (the CLI forwards its ``--scheduler`` /
+    ``--cluster`` flags here).
     """
     plan = classify(run)
     if plan.kind == "none":
@@ -97,10 +113,20 @@ def try_cancel(run: Run) -> str | None:
     # plan.kind == "molq"
     from molq import Cluster, Submitor
 
-    assert plan.job_id is not None
+    scheduler = plan.scheduler or fallback_scheduler
+    cluster = plan.cluster or fallback_cluster
+    submitor = Submitor(Cluster(name=cluster, scheduler=scheduler))
     try:
-        Submitor(Cluster(name="default", scheduler=plan.detail or "local")).cancel_job(plan.job_id)
+        if plan.job_id is not None:
+            submitor.cancel_job(plan.job_id)
+        elif plan.scheduler_job_id is not None:
+            submitor._scheduler_impl.cancel(plan.scheduler_job_id)
+        else:  # pragma: no cover — classify() guarantees one of the two ids
+            return f"cannot cancel {run.id[:6]}: no molq job metadata"
     except Exception as exc:  # molq raises a hierarchy, but surface all
         return f"molq cancel failed for {run.id[:6]}: {exc}"
+    finally:
+        with contextlib.suppress(Exception):
+            submitor.close()
     run.cancel()
     return None

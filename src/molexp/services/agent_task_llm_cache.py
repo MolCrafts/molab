@@ -14,8 +14,6 @@ is built. Defaults: 7-day age, 100 calls per task, 64 MiB per workspace.
 
 from __future__ import annotations
 
-import json
-import os
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -144,11 +142,11 @@ def record_llm_call(
         "turn_id": turn_id,
     }
     cache_dir = _cache_dir(workspace_root, task_id)
-    cache_dir.mkdir(parents=True, exist_ok=True)
     path = cache_dir / f"{cache_id}.json"
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(body, ensure_ascii=False), encoding="utf-8")
-    os.replace(tmp, path)  # noqa: PTH105
+    # One atomic-write path (temp file + rename) — the Layer-0 primitive.
+    from molexp.atomicio import atomic_write_json
+
+    atomic_write_json(path, body)
 
     append_agent_task_events(
         workspace_root,

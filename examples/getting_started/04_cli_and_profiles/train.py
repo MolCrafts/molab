@@ -1,9 +1,9 @@
 """Script that is meant to be driven by ``molexp run`` — not by ``python``.
 
-Matches ``docs/getting-started/cli-and-profiles.md``.
+Matches ``docs/en/getting-started/cli-and-profiles.md``.
 
 The script declares a workspace, an experiment, and the workflow it runs via
-the fluent chain ``ws.project(...).experiment(...).run(wf, params=...)`` —
+the declaration chain ``ws.add_project(...).add_experiment(...).define(wf, params=...)`` —
 that declaration is what the CLI discovers. Execute it with::
 
     molexp run examples/getting_started/04_cli_and_profiles/train.py --profile smoke
@@ -42,7 +42,7 @@ async def train(lr: float = 1e-3, epochs: int = 10) -> dict:
 
 (
     me.Workspace(WORKSPACE_ROOT, name="cli-demo")
-    .project("demo")
-    .experiment("train")
-    .run(wf.compile(), params={"seed": [0]})
+    .add_project("demo")
+    .add_experiment("train")
+    .define(wf.compile(), params={"seed": [0]})
 )

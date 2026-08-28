@@ -1,4 +1,4 @@
-"""RED tests for ``RealizeBoard`` + ``input_set_to_param_space`` (plan-emergent-06).
+"""Tests for ``RealizeBoard`` (plan-emergent-06).
 
 ``RealizeBoard`` (``molexp.harness.stages.realize_board``) is the deterministic
 map -> reduce -> compile realizer of a *frozen* task board:
@@ -15,9 +15,6 @@ map -> reduce -> compile realizer of a *frozen* task board:
 - **Compile** — all-green only: ``MaterializeExecution().run(ctx)`` then
   ``CompileWorkflow(executor).run(ctx)`` (``--compile-only``), returning the
   compile ``execution_result`` ref.
-
-``input_set_to_param_space`` bridges an ``InputSet`` to the workspace
-``ParamSpace`` family (grid -> ``GridSpace``; uniform -> ``UniformSpace``).
 
 Stub-driven + offline: ``StubAgentGateway`` codegen responders + ``DryRunExecutor``
 (happy) / a slug-keyed canned ``Executor`` (block). NO real LLM, NO real pytest
@@ -38,7 +35,6 @@ from molexp.harness.schemas import (
     InterventionRequest,
     WorkflowSource,
 )
-from molexp.harness.stages.input_space import input_set_to_param_space
 from molexp.harness.stages.realize_board import RealizeBoard
 
 pytestmark = pytest.mark.asyncio
@@ -306,75 +302,6 @@ class TestRealizeBoardBlock:
         # Compile NEVER ran: no execution_result, and no --compile-only command.
         assert ctx.artifact_store.list_by_kind("execution_result") == []
         assert not any("--compile-only" in " ".join(s.cmd) for s in executor.specs)
-
-
-class TestInputSetToParamSpace:
-    def test_grid_yields_gridspace_with_cartesian_cell_count(self) -> None:
-        from molexp.harness.schemas import InputSet
-        from molexp.workspace.param import GridSpace
-
-        iset = InputSet(
-            id="is-grid",
-            experiment_spec_id="spec-3",
-            title="grid",
-            sweep_axes=[
-                {"name": "temp", "values": [300, 350]},
-                {"name": "sigma", "values": [0.8, 0.9, 1.0]},
-            ],
-            strategy="grid",
-            total_runs=6,
-        )
-        space = input_set_to_param_space(iset)
-        assert isinstance(space, GridSpace)
-        assert len(space) == 6
-
-    def test_uniform_yields_uniformspace_with_total_runs_and_seed(self) -> None:
-        from molexp.harness.schemas import InputSet
-        from molexp.workspace.param import UniformSpace
-
-        iset = InputSet(
-            id="is-uni",
-            experiment_spec_id="spec-3",
-            title="uniform",
-            sweep_axes=[{"name": "temp", "values": [300, 350, 400]}],
-            strategy="uniform",
-            total_runs=5,
-            random_seed=42,
-        )
-        space = input_set_to_param_space(iset)
-        assert isinstance(space, UniformSpace)
-        assert space.n_samples == 5
-        assert space.seed == 42
-        assert len(space) == 5
-
-    def test_single_value_axis_is_one_cell(self) -> None:
-        from molexp.harness.schemas import InputSet
-
-        iset = InputSet(
-            id="is-single",
-            experiment_spec_id="spec-3",
-            title="single",
-            sweep_axes=[{"name": "temp", "values": [300]}],
-            strategy="grid",
-            total_runs=1,
-        )
-        space = input_set_to_param_space(iset)
-        assert len(space) == 1
-
-    def test_no_axes_is_a_single_degenerate_cell(self) -> None:
-        from molexp.harness.schemas import InputSet
-
-        iset = InputSet(
-            id="is-none",
-            experiment_spec_id="spec-3",
-            title="fixed-only",
-            sweep_axes=[],
-            fixed_params={"n_steps": 1000},
-            strategy="grid",
-            total_runs=1,
-        )
-        space = input_set_to_param_space(iset)
-        assert len(space) == 1
 
 
 class TestRealizeBoardExport:

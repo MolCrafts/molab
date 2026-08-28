@@ -16,7 +16,7 @@ export class PlansService {
      * @returns WorkspacePlanListResponse Successful Response
      * @throws ApiError
      */
-    public static listAllPlansApiPlansGet(
+    public static listAllPlans(
         molexpSession?: (string | null),
     ): CancelablePromise<WorkspacePlanListResponse> {
         return __request(OpenAPI, {
@@ -39,7 +39,7 @@ export class PlansService {
      * @returns PlanListResponse Successful Response
      * @throws ApiError
      */
-    public static listPlansApiProjectsProjectIdExperimentsExperimentIdPlansGet(
+    public static listPlans(
         projectId: string,
         experimentId: string,
         molexpSession?: (string | null),
@@ -69,7 +69,7 @@ export class PlansService {
      * @returns PlanDetailResponse Successful Response
      * @throws ApiError
      */
-    public static getPlanApiProjectsProjectIdExperimentsExperimentIdPlansRunIdGet(
+    public static getPlan(
         projectId: string,
         experimentId: string,
         runId: string,

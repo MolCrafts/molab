@@ -475,6 +475,11 @@
   --motion-offset-x: 8px;
 }
 
+.mol-motion-enter-from-left {
+  animation: molexp-enter-x var(--motion-base) var(--motion-ease) both;
+  --motion-offset-x: -8px;
+}
+
 .mol-motion-enter-fade {
   animation: molexp-enter-fade var(--motion-base) var(--motion-ease) both;
 }
@@ -756,6 +761,7 @@
   .mol-motion-panel,
   .mol-motion-enter-from-bottom,
   .mol-motion-enter-from-right,
+  .mol-motion-enter-from-left,
   .mol-motion-enter-fade,
   .mol-motion-overlay,
   .mol-motion-dialog,

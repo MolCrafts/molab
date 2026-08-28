@@ -1,4 +1,4 @@
-"""Deterministic :class:`ReviewPack` builders for PlanMode step audits.
+"""Deterministic :class:`ReviewPack` builders for PlanOrchestrator step audits.
 
 No LLM: packs are assembled from the latest subject artifacts so the audit
 trail always has a structured form even when the gateway is offline.

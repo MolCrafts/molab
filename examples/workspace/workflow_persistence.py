@@ -1,6 +1,6 @@
 """What survives re-opening a run: ``run.json`` + ``execution_history``.
 
-Matches ``docs/guide/workflow-persistence.md``.
+Matches ``docs/en/guide/workflow-persistence.md``.
 
 Executes the same run twice (first failing, then succeeding) and prints
 the public run fields that let you trace the attempt history, profile
@@ -47,7 +47,7 @@ async def main() -> None:
     _FAIL_ONCE_MARKER = root / "fail-once"
 
     ws = me.Workspace(root, name="persist-demo")
-    exp = ws.project("demo").experiment("train").run(compiled, params={"seed": [0]})
+    exp = ws.add_project("demo").add_experiment("train").define(compiled, params={"seed": [0]})
 
     cfg = ProfileConfig({"epochs": 5}, name="smoke")
     run = exp.list_runs()[0]

@@ -25,6 +25,7 @@ from molexp.ids import slugify
 
 from .knowledge_item import KnowledgeItem, KnowledgeKind, SourceRef
 from .knowledge_write import write_knowledge_item
+from .run_ops import TERMINAL_STATUSES as _TERMINAL_STATUSES
 
 if TYPE_CHECKING:
     from molexp._typing import JSONValue
@@ -32,8 +33,6 @@ if TYPE_CHECKING:
     from .run import Run
 
 __all__ = ["harvest_run"]
-
-_TERMINAL_STATUSES = frozenset({"succeeded", "failed", "cancelled"})
 
 _MAX_VALUE_CHARS = 400
 """Per-value cap in the rendered results table (repr-truncated)."""

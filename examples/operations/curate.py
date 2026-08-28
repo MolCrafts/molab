@@ -43,16 +43,16 @@ async def main() -> None:
 
     # 1. A workspace with two experiments; the run 'expt-042' lives under 'run-a'.
     ws = me.Workspace(root, name="curate-demo")
-    lab = ws.project("lab")
-    lab.experiment("run-a").add_run(id="expt-042")
-    lab.experiment("run-b")
+    lab = ws.add_project("lab")
+    lab.add_experiment("run-a").add_run(id="expt-042")
+    lab.add_experiment("run-b")
     print("before:  run-a has", [r.id for r in lab.experiment("run-a").list_runs()])
 
     # 2. Propose moving the run to 'run-b' and drive it through the approval gate.
     #    build_curation_proposal turns the structured request into a §8 ChangeProposal;
     #    run_curation_proposal is the ONE backend the CLI + route also call.
     proposal = build_curation_proposal("move_run", run="expt-042", target_experiment="run-b")
-    audit_run = ws.project("curations").experiment("curate").add_run(id="audit-1")
+    audit_run = ws.add_project("curations").add_experiment("curate").add_run(id="audit-1")
     result = await run_curation_proposal(
         proposal,
         workspace=ws,

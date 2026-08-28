@@ -46,7 +46,7 @@ def test_atomic_write_json_failure_leaves_original_and_no_temp(
     def boom(*_a: object, **_k: object) -> None:
         raise RuntimeError("disk full")
 
-    monkeypatch.setattr(atomicio.json, "dump", boom)
+    monkeypatch.setattr(atomicio, "dump_canonical_json", boom)
     with pytest.raises(RuntimeError):
         atomic_write_json(target, {"ok": False})
 

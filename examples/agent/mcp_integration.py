@@ -1,6 +1,6 @@
 """Agent with MCP toolsets — ``MCPServerStdio`` pattern + ``InteractiveLoop`` tool events.
 
-Matches ``docs/concept/agent.md``.
+Matches ``docs/en/concept/agent.md``.
 
 Demonstrates:
 

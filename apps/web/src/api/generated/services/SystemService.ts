@@ -8,11 +8,22 @@ import { OpenAPI } from '../core/OpenAPI';
 import { request as __request } from '../core/request';
 export class SystemService {
     /**
+     * Root
+     * @returns any Successful Response
+     * @throws ApiError
+     */
+    public static root(): CancelablePromise<any> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/',
+        });
+    }
+    /**
      * Health Check
      * @returns HealthResponse Successful Response
      * @throws ApiError
      */
-    public static healthCheckApiHealthGet(): CancelablePromise<HealthResponse> {
+    public static healthCheck(): CancelablePromise<HealthResponse> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/health',

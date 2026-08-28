@@ -14,7 +14,7 @@ export class GitService {
      * @returns GitCheckpointResponse Successful Response
      * @throws ApiError
      */
-    public static gitCheckpointRouteApiGitCheckpointPost(
+    public static gitCheckpointRoute(
         molexpSession?: (string | null),
     ): CancelablePromise<GitCheckpointResponse> {
         return __request(OpenAPI, {
@@ -35,7 +35,7 @@ export class GitService {
      * @returns string Successful Response
      * @throws ApiError
      */
-    public static gitPushRouteApiGitPushPost(
+    public static gitPushRoute(
         requestBody: GitPushRequest,
         molexpSession?: (string | null),
     ): CancelablePromise<Record<string, string>> {
@@ -58,7 +58,7 @@ export class GitService {
      * @returns GitCheckpointResponse Successful Response
      * @throws ApiError
      */
-    public static gitRebuildRouteApiGitRebuildPost(
+    public static gitRebuildRoute(
         molexpSession?: (string | null),
     ): CancelablePromise<GitCheckpointResponse> {
         return __request(OpenAPI, {
@@ -79,7 +79,7 @@ export class GitService {
      * @returns GitCheckpointResponse Successful Response
      * @throws ApiError
      */
-    public static gitCheckpointRouteApiWorkspacesWsGitCheckpointPost(
+    public static gitCheckpointRoute1(
         ws: string,
         molexpSession?: (string | null),
     ): CancelablePromise<GitCheckpointResponse> {
@@ -105,7 +105,7 @@ export class GitService {
      * @returns string Successful Response
      * @throws ApiError
      */
-    public static gitPushRouteApiWorkspacesWsGitPushPost(
+    public static gitPushRoute1(
         ws: string,
         requestBody: GitPushRequest,
         molexpSession?: (string | null),
@@ -133,7 +133,7 @@ export class GitService {
      * @returns GitCheckpointResponse Successful Response
      * @throws ApiError
      */
-    public static gitRebuildRouteApiWorkspacesWsGitRebuildPost(
+    public static gitRebuildRoute1(
         ws: string,
         molexpSession?: (string | null),
     ): CancelablePromise<GitCheckpointResponse> {

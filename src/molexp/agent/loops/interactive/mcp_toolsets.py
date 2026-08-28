@@ -63,7 +63,9 @@ def open_mcp_toolsets(workspace_root: Path) -> tuple[object, ...]:
                 url=resolved.url or "",
                 headers=resolved.headers or None,
             )
-        except (OSError, ValueError, KeyError, TypeError, RuntimeError) as exc:
+        except (OSError, ValueError, KeyError, TypeError, RuntimeError, ImportError) as exc:
+            # ImportError: the agent extra (pydantic_ai) may be absent — an
+            # unbuildable server entry is skipped, never fatal to the loop.
             _LOG.warning(
                 f"[interactive.mcp] skip server {entry.name!r} (scope={entry.scope.value}): {exc!r}"
             )

@@ -29,9 +29,9 @@ def train(lr: float) -> dict:
 def report(loss: float) -> float:
     return loss
 
-# Create the hierarchy
+# Create the hierarchy (add_* is idempotent create-or-get)
 ws = me.Workspace("./lab", name="lab")
-exp = ws.project("qm9").experiment("baseline")
+exp = ws.add_project("qm9").add_experiment("baseline")
 ```
 
 ## Execute One Tracked Run
@@ -58,7 +58,8 @@ A failing task raises `RunFailedError` and the run is persisted as `failed`. Mol
 | Run status | `run.execute(wf)` behavior |
 |---|---|
 | `pending` | Execute from the top |
-| `failed` / `cancelled` | **Resume** — seed completed tasks, recompute the rest |
+| `failed` / `cancelled` | Refuses — retrying is explicit: pass `resume=True` or `rerun=True` |
+| `failed` / `cancelled` + `resume=True` | **Resume** — seed completed tasks, recompute the rest |
 | `failed` / `cancelled` + `rerun=True` | **Rerun** — fresh attempt from the top |
 | `succeeded` | Refuses — read results instead |
 | `running` | Refuses — cancel first (`run.cancel()`) |
@@ -66,7 +67,7 @@ A failing task raises `RunFailedError` and the run is persisted as `failed`. Mol
 ```python
 # docs: skip — resume/rerun only applies to failed/cancelled runs; the run above succeeded
 # Resume a failed run (reuse completed task outputs)
-run.execute(wf)
+run.execute(wf, resume=True)
 
 # Rerun from scratch in a new attempt
 run.execute(wf, rerun=True)
@@ -80,7 +81,7 @@ run.execute(wf, rerun=True, fresh=True)
 One workflow on many parameter cells. `exp.sweep()` materializes one run per cell; `RunSet.execute()` drives every pending run:
 
 ```python
-scan = ws.project("qm9").experiment("lr-scan").sweep(wf, {"lr": [1e-3, 1e-4, 1e-5]})
+scan = ws.add_project("qm9").add_experiment("lr-scan").sweep(wf, {"lr": [1e-3, 1e-4, 1e-5]})
 summary = scan.execute()
 
 # Each row: params + status + per-task outputs
@@ -99,7 +100,7 @@ print(best["lr"], best["run_id"])
 Bind the compiled workflow to the experiment so `molexp run` can discover it:
 
 ```python
-exp.run(wf.compile(), params={"lr": [1e-3, 5e-4]})
+exp.define(wf.compile(), params={"lr": [1e-3, 5e-4]})
 ```
 
 Now `molexp run` owns run selection, profiles, resume flags, and scheduler-backed execution over the exact same runs. See [CLI and Profiles](cli-and-profiles.md).

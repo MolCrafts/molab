@@ -23,6 +23,10 @@ export type ServedWorkspaceResponse = {
      */
     label: string;
     /**
+     * True when the remote is unreachable and likely needs an interactive verification code (2FA/OTP). The UI should show a connect dialog.
+     */
+    needsAuth?: boolean;
+    /**
      * Absolute local root, null when remote
      */
     path?: (string | null);

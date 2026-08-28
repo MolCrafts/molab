@@ -8,6 +8,7 @@ checkpoints, and asset access during execution.
 from __future__ import annotations
 
 import contextlib
+import warnings
 from collections.abc import Callable, Iterator
 from datetime import datetime
 from pathlib import Path  # local-FS path for RunContext (LLM/worker-local I/O)
@@ -38,8 +39,8 @@ from .models import (
     RunMetadata,
     RunStatus,
 )
-from .run_ops import RUN_OPS_NAME, RunOpsState
-from .utils import generate_id
+from .run_ops import RETRYABLE_STATUSES, RUN_OPS_NAME, RunOpsState
+from .utils import generate_id, run_dir_name
 
 if TYPE_CHECKING:
     from .experiment import Experiment
@@ -60,12 +61,12 @@ __all__ = [
     "set_run_executor",
 ]
 
-#: The run statuses ``resume`` / ``rerun`` apply to — the single source of
-#: truth for the retryable domain (consumed by both the CLI and the server
-#: routes). The three verbs stay orthogonal: ``pending`` is plain run's job,
-#: ``succeeded`` is done, and a live ``running`` run must never get a second
-#: concurrent execution.
-RETRYABLE_STATUSES: frozenset[str] = frozenset({RunStatus.FAILED.value, RunStatus.CANCELLED.value})
+# ``RETRYABLE_STATUSES`` (the resume/rerun verb domain) is defined once in
+# ``run_ops`` (next to ``RunOpsState.is_retryable``) and re-exported here —
+# ``workspace.run.RETRYABLE_STATUSES`` stays the public citation path for the
+# CLI and the server routes. The three verbs stay orthogonal: ``pending`` is
+# plain run's job, ``succeeded`` is done, and a live ``running`` run must
+# never get a second concurrent execution.
 
 
 # ── Cross-layer run-execution seam ──────────────────────────────────────────
@@ -89,11 +90,23 @@ class RunWorkflowExecutor(Protocol):
     """
 
     def execute(
-        self, run: Run, workflow: object | None, *, rerun: bool = False, fresh: bool = False
+        self,
+        run: Run,
+        workflow: object | None,
+        *,
+        resume: bool = False,
+        rerun: bool = False,
+        fresh: bool = False,
     ) -> object: ...
 
     async def aexecute(
-        self, run: Run, workflow: object | None, *, rerun: bool = False, fresh: bool = False
+        self,
+        run: Run,
+        workflow: object | None,
+        *,
+        resume: bool = False,
+        rerun: bool = False,
+        fresh: bool = False,
     ) -> object: ...
 
 
@@ -153,12 +166,25 @@ class Run(Folder):
         name: str | None = None,
         kind: str = WORKSPACE_RUN_KIND,
         experiment: Experiment | None = None,
+        params: dict[str, JSONValue] | None = None,
         parameters: dict[str, JSONValue] | None = None,
         id: str | None = None,
         workflow_snapshot: dict[str, JSONValue] | None = None,
         target: str | None = None,
         _entity_metadata: RunMetadata | None = None,
     ) -> None:
+        if parameters is not None:
+            if params is not None:
+                raise TypeError(
+                    "Run() got both 'params' and its deprecated alias "
+                    "'parameters'; pass only 'params'"
+                )
+            warnings.warn(
+                "Run(parameters=...) is deprecated; use params=...",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+            params = parameters
         resolved_parent = parent if parent is not None else experiment
         if resolved_parent is None:
             raise ValueError("Run: parent (or experiment) is required")
@@ -169,7 +195,7 @@ class Run(Folder):
             if _entity_metadata is not None
             else RunMetadata(
                 id=id or name or generate_id(),
-                parameters=parameters or {},
+                parameters=params or {},
                 workflow_snapshot=workflow_snapshot,
                 target=target,
             )
@@ -203,7 +229,7 @@ class Run(Folder):
     def child_dir(cls, parent: Folder, derived_id: str) -> MolexpPath:
         """Folder hook — runs live under ``runs/run-<id>/``."""
         # resolve() not path() — pure layout math must not mkdir on remote.
-        return MolexpPath(parent._fs.join(parent.resolve(), "runs", f"run-{derived_id}"))
+        return MolexpPath(parent._fs.join(parent.resolve(), "runs", run_dir_name(derived_id)))
 
     @classmethod
     def from_disk(cls, child_dir: PathArg, parent: Folder) -> Run:
@@ -249,7 +275,13 @@ class Run(Folder):
         return self._entity_metadata.id
 
     @property
+    def params(self) -> dict[str, JSONValue]:
+        """The run's parameter mapping (canonical spelling)."""
+        return self._entity_metadata.parameters
+
+    @property
     def parameters(self) -> dict[str, JSONValue]:
+        """Alias of :attr:`params` (kept for the persisted field spelling)."""
         return self._entity_metadata.parameters
 
     @property
@@ -487,7 +519,15 @@ class Run(Folder):
         """
         return RunContext(self, profile_config=profile_config, execution_id=execution_id)
 
-    def execute(self, workflow: object, /, *, rerun: bool = False, fresh: bool = False) -> object:
+    def execute(
+        self,
+        workflow: object,
+        /,
+        *,
+        resume: bool = False,
+        rerun: bool = False,
+        fresh: bool = False,
+    ) -> object:
         """Execute *workflow* against this run in one step and return the result.
 
         Folds the driver dance — ``run.start()`` context, workflow-runtime
@@ -498,12 +538,14 @@ class Run(Folder):
         (auto-compiled). Returns a ``molexp.workflow.WorkflowResult`` whose
         ``.outputs`` maps task name → output.
 
-        Verbs mirror the CLI: a ``pending`` run executes (first attempt); a
-        ``failed`` / ``cancelled`` run *resumes* its last execution, or opens
-        a fresh attempt with ``rerun=True`` (``--rerun``); ``fresh=True``
-        additionally bypasses the cache read and requires ``rerun=True``
-        (``--rerun --fresh``); a ``succeeded`` run and a live ``running`` run
-        always refuse (done is done; cancel first). A task failure raises
+        Verbs mirror the CLI and retrying is always explicit: a ``pending``
+        run executes (first attempt); a ``failed`` / ``cancelled`` run
+        *resumes* its last execution with ``resume=True`` (``--resume``) or
+        opens a fresh attempt with ``rerun=True`` (``--rerun``) — with
+        neither flag it refuses loudly; ``fresh=True`` additionally bypasses
+        the cache read and requires ``rerun=True`` (``--rerun --fresh``); a
+        ``succeeded`` run and a live ``running`` run always refuse (done is
+        done; cancel first). A task failure raises
         ``molexp.workflow.RunFailedError`` (the failed state is persisted;
         never silent).
 
@@ -511,13 +553,23 @@ class Run(Folder):
         :meth:`aexecute`. Delegates through the :func:`set_run_executor`
         seam so workspace never imports the workflow layer.
         """
-        return require_run_executor().execute(self, workflow, rerun=rerun, fresh=fresh)
+        return require_run_executor().execute(
+            self, workflow, resume=resume, rerun=rerun, fresh=fresh
+        )
 
     async def aexecute(
-        self, workflow: object, /, *, rerun: bool = False, fresh: bool = False
+        self,
+        workflow: object,
+        /,
+        *,
+        resume: bool = False,
+        rerun: bool = False,
+        fresh: bool = False,
     ) -> object:
         """Async variant of :meth:`execute` — same semantics, awaitable."""
-        return await require_run_executor().aexecute(self, workflow, rerun=rerun, fresh=fresh)
+        return await require_run_executor().aexecute(
+            self, workflow, resume=resume, rerun=rerun, fresh=fresh
+        )
 
     # ── Sugar: ``with run as ctx:`` / ``async with run as ctx:`` ────────
     #
@@ -633,6 +685,22 @@ class Run(Folder):
     _OPS_ONLY_KEYS: frozenset[str] = frozenset(
         {"status", "finished_at", "execution_history", "labels"}
     )
+
+    def update_provenance(self, **updates: object) -> None:
+        """Update identity/provenance fields on ``run.json`` — the public verb.
+
+        The sanctioned entry for application shells (CLI / server / plugins)
+        to record provenance on a run: ``target=`` / ``params`` (pre-hash) /
+        ``workflow_snapshot=`` / ``script=`` / ``submit_cwd=`` /
+        ``executor_info=`` / …. Values flow through pydantic's per-field
+        validators; hot machine state (``status`` / ``finished_at`` /
+        ``execution_history`` / ``labels``) is refused — that lives in the
+        ``_ops`` sidecar and is written via :meth:`update_ops`.
+
+        Raises:
+            ValueError: If an ops-only hot-state key is passed.
+        """
+        self._update_metadata(**updates)
 
     def _update_metadata(self, **updates: object) -> None:
         """Forward identity/provenance updates into ``RunMetadata.model_copy``.

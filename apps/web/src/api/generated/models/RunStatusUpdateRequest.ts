@@ -2,7 +2,10 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
-export type Body_import_data_asset_api_assets_data_import_post = {
-    file: string;
+export type RunStatusUpdateRequest = {
+    /**
+     * New status value
+     */
+    status: string;
 };
 

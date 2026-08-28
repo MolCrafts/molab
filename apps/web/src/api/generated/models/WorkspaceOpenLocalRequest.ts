@@ -9,7 +9,7 @@ export type WorkspaceOpenLocalRequest = {
     /**
      * Create if missing
      */
-    create_if_missing?: boolean;
+    createIfMissing?: boolean;
     /**
      * Discriminator
      */

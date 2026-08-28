@@ -1,6 +1,6 @@
 """Notes, references, and the OKF knowledge graph — Bundle, Note, ReferenceConcept, cite, backlinks.
 
-Matches ``docs/guide/knowledge.md``.
+Matches ``docs/en/guide/knowledge.md``.
 
 Demonstrates:
 
@@ -38,7 +38,7 @@ async def main() -> None:
     bundle = Bundle(ws.root)
 
     # ── 2. Create a note under an experiment ────────────────────────────
-    exp = ws.project("polymer-cg").experiment("solvation-sweep")
+    exp = ws.add_project("polymer-cg").add_experiment("solvation-sweep")
     note = bundle.create_note(
         "Analysis Notes",
         parent=exp,

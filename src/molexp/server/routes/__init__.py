@@ -16,7 +16,6 @@ from . import (
     auth,
     catalog,
     curate_tasks,
-    execution,
     experiment,
     git,
     knowledge,
@@ -27,6 +26,7 @@ from . import (
     project,
     registry,
     run,
+    runs_flat,
     targets,
     tensorboard,
     workflow,
@@ -45,7 +45,7 @@ def _workspace_scoped_modules() -> tuple:
         project,
         experiment,
         run,
-        execution,
+        runs_flat,
         asset,
         preview,
         catalog,
@@ -124,6 +124,7 @@ def create_api_router() -> APIRouter:
     gated.include_router(project.router)
     gated.include_router(experiment.router)
     gated.include_router(run.router)
+    gated.include_router(runs_flat.flat_router)
     gated.include_router(asset.router)
     gated.include_router(preview.router)
     gated.include_router(catalog.router)
@@ -131,7 +132,6 @@ def create_api_router() -> APIRouter:
     gated.include_router(workspace.events_router)
     gated.include_router(workspaces.router)
     gated.include_router(registry.router)
-    gated.include_router(execution.router)
     gated.include_router(molq.router)
     gated.include_router(targets.router)
     gated.include_router(tensorboard.router)
@@ -154,7 +154,6 @@ __all__ = [
     "catalog",
     "create_api_router",
     "curate_tasks",
-    "execution",
     "experiment",
     "git",
     "knowledge",
@@ -165,6 +164,7 @@ __all__ = [
     "project",
     "registry",
     "run",
+    "runs_flat",
     "targets",
     "tensorboard",
     "workflow",

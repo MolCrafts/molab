@@ -9,11 +9,11 @@ export type WorkspaceTargetCreateRequest = {
     /**
      * Override local mirror root (defaults to ~/.molexp/remote_cache/<name>)
      */
-    cache_dir?: (string | null);
+    cacheDir?: (string | null);
     /**
      * Mirror pin policy: >0 pin until user refresh; 0 = re-stat remote on every read
      */
-    cache_ttl_seconds?: number;
+    cacheTtlSeconds?: number;
     /**
      * ``user@host`` or bare hostname for SSH
      */
@@ -21,7 +21,7 @@ export type WorkspaceTargetCreateRequest = {
     /**
      * Absolute path to an SSH identity file
      */
-    identity_file?: (string | null);
+    identityFile?: (string | null);
     /**
      * Unique slug-shaped identifier
      */
@@ -33,10 +33,10 @@ export type WorkspaceTargetCreateRequest = {
     /**
      * Absolute POSIX path on the remote host
      */
-    root_path: string;
+    rootPath: string;
     /**
      * Extra ``ssh`` argv tokens
      */
-    ssh_opts?: Array<string>;
+    sshOpts?: Array<string>;
 };
 

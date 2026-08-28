@@ -17,7 +17,7 @@ export type UserMessageCreateRequest = {
     /**
      * Pending UserMessageRequestEvent id this message replies to (omit for an unsolicited follow-up).
      */
-    request_id?: (string | null);
+    requestId?: (string | null);
 };
 export namespace UserMessageCreateRequest {
     /**

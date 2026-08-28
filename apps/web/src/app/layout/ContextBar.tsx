@@ -1,11 +1,9 @@
-import { CloudOff, HardDrive, Loader2, Menu, RefreshCw, Search, Server } from "lucide-react";
+import { Loader2, Menu, RefreshCw, Search } from "lucide-react";
 import { UserMenu } from "@/app/auth";
 import { ApprovalsBell } from "@/app/components/ApprovalsBell";
-import type { ServedWorkspaceSummary } from "@/app/types";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { WorkbenchIconAction } from "@/components/workbench";
-import { shortWorkspaceLabel } from "@/lib/workspace-path";
 
 interface ContextBarProps {
   searchQuery: string;
@@ -14,8 +12,6 @@ interface ContextBarProps {
   isRefreshing?: boolean;
   /** When set, a hamburger button (mobile only) opens the navigation drawer. */
   onMenuClick?: () => void;
-  /** Active served workspace — shown next to the product mark so the mount is never anonymous. */
-  activeWorkspace?: ServedWorkspaceSummary | null;
 }
 
 export const ContextBar = ({
@@ -24,7 +20,6 @@ export const ContextBar = ({
   onRefresh,
   isRefreshing = false,
   onMenuClick,
-  activeWorkspace = null,
 }: ContextBarProps): JSX.Element => {
   return (
     <header className="flex h-11 flex-none items-center border-b border-border bg-background">
@@ -41,44 +36,10 @@ export const ContextBar = ({
             </WorkbenchIconAction>
           )}
           {/* Product identity once, top-left — constitution §7 */}
-          <span className="text-title font-semibold tracking-tight text-foreground">MolExp</span>
-          {activeWorkspace && (
-            <TooltipProvider>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span
-                    className="hidden min-w-0 max-w-[14rem] items-center gap-1.5 truncate rounded-control border border-border/70 bg-muted/40 px-2 py-0.5 text-micro text-muted-foreground sm:inline-flex lg:max-w-[22rem]"
-                    title={activeWorkspace.label}
-                  >
-                    {activeWorkspace.unreachable ? (
-                      <CloudOff
-                        className="h-3 w-3 flex-none text-status-failed-foreground"
-                        aria-hidden
-                      />
-                    ) : activeWorkspace.isRemote ? (
-                      <Server
-                        className="h-3 w-3 flex-none text-status-warning-foreground"
-                        aria-hidden
-                      />
-                    ) : (
-                      <HardDrive className="h-3 w-3 flex-none text-muted-foreground" aria-hidden />
-                    )}
-                    <span className="min-w-0 truncate font-mono text-foreground/80">
-                      {shortWorkspaceLabel(activeWorkspace.label)}
-                    </span>
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent side="bottom" className="max-w-sm font-mono text-micro">
-                  {activeWorkspace.unreachable
-                    ? "Unreachable · "
-                    : activeWorkspace.isRemote
-                      ? "Remote · "
-                      : "Local · "}
-                  {activeWorkspace.label}
-                </TooltipContent>
-              </Tooltip>
-            </TooltipProvider>
-          )}
+          <span className="flex min-w-0 items-center gap-2">
+            <img src="/favicon.png" alt="" className="h-6 w-6 flex-none" width={24} height={24} />
+            <span className="text-title font-semibold tracking-tight text-foreground">molexp</span>
+          </span>
         </div>
 
         <div className="flex flex-1 items-center justify-end gap-2">

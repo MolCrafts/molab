@@ -1,5 +1,5 @@
-import { listFileTypeContributions } from "@/plugins/contribution-runtime";
-import type { DiscoveredFile, FileMatchContext, FileTypeContribution } from "@/plugins/types";
+import { listFileTypeContributions } from "@/lib/contribution-runtime";
+import type { DiscoveredFile, FileMatchContext, FileTypeContribution } from "@/lib/contribution-types";
 
 const escapeRegExp = (input: string): string => {
   return input.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

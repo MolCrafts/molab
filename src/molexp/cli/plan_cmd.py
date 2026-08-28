@@ -34,7 +34,6 @@ from typing import TYPE_CHECKING, Annotated
 import typer
 
 if TYPE_CHECKING:
-    from molexp._typing import JSONValue
     from molexp.agent.router import Router
     from molexp.harness.gateways.gateway import AgentGateway
     from molexp.harness.registry.capability_registry import CapabilityRegistry
@@ -356,7 +355,7 @@ def plan(
     ] = False,
 ) -> None:
     """Turn an experiment draft into a frozen experiment plan (emergent planning)."""
-    from molexp.cli._common import deterministic_run_id, rprint
+    from molexp.cli._common import rprint
     from molexp.harness import ApprovalPendingError, PlanOrchestrator, StageExecutionError
     from molexp.services.plan_runtime import PlanPreflightError
     from molexp.workspace import Workspace
@@ -387,10 +386,12 @@ def plan(
     ws = Workspace(workspace_root)
     ws.materialize()
     # Content-addressed run id: the same draft maps to the same Run, so a
-    # re-run replays store-first through the review gate on that Run.
-    params: dict[str, JSONValue] = {"mode": "plan", "draft": draft_text}
+    # re-run replays store-first through the review gate on that Run. One
+    # bootstrap shared with POST /plan-tasks (services.plan_runtime).
+    from molexp.services.plan_runtime import resolve_plan_run
+
     exp = ws.add_project(project).add_experiment(experiment)
-    run = exp.add_run(params, id=deterministic_run_id(params))
+    run = resolve_plan_run(exp, draft_text)
 
     # Explicit or suspended, never implicit: an interactive approver exists
     # only on a TTY or with --yes; otherwise approve=None means the review gate

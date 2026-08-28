@@ -1,6 +1,6 @@
 """The three equivalent ways to define a workflow task, plus a streaming actor.
 
-Matches ``docs/guide/task-and-actor.md``.
+Matches ``docs/en/guide/task-and-actor.md``.
 
 Demonstrates:
 

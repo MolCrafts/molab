@@ -12,7 +12,6 @@ import type { PlanTaskCreateRequest } from "@/api/generated/models/PlanTaskCreat
 import type { PlanTaskResponse } from "@/api/generated/models/PlanTaskResponse";
 import type { WorkspacePlanListResponse } from "@/api/generated/models/WorkspacePlanListResponse";
 import { AssetsService } from "@/api/generated/services/AssetsService";
-import { ExecutionService } from "@/api/generated/services/ExecutionService";
 import { ExperimentsService } from "@/api/generated/services/ExperimentsService";
 import { KnowledgeService } from "@/api/generated/services/KnowledgeService";
 import { PlansService } from "@/api/generated/services/PlansService";
@@ -684,10 +683,10 @@ export const workspaceApi = {
     return response.content;
   },
   getCacheStats: async (): Promise<ApiCacheStats> => {
-    return ExecutionService.getCacheStatsApiCacheStatsGet();
+    return WorkspaceService.getCacheStats();
   },
   clearCache: async (): Promise<ApiCacheClear> => {
-    return ExecutionService.clearCacheApiCacheDelete();
+    return WorkspaceService.clearCache();
   },
   getWorkspaceFileBlob: async (path: string): Promise<Blob> => {
     // The generated client currently returns 'any' (JSON) for blob endpoint if not configured for binary.

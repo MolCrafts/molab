@@ -19,7 +19,7 @@ their **names** are never compiled into molexp (auto-discovery law).
 Optional lifecycle tools append when ``operation_mode == "lifecycle"``.
 ``operation_mode`` is behavior only — never a capability mask.
 
-The harness's planning pipeline lives in ``molexp.harness.PlanMode`` (a
+The harness's planning pipeline lives in ``molexp.harness.PlanOrchestrator`` (a
 harness ``Mode``), reached through the ``AgentGateway`` Protocol — not from
 this agent loop. See ``examples/harness/experiment_pipeline.py`` for the
 end-to-end flow.

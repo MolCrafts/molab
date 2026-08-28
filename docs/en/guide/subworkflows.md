@@ -103,6 +103,9 @@ class can appear in multiple workflows — the lightest form of reuse when you d
 not need a whole sub-pipeline as one node:
 
 ```python
+from molexp.workflow import Task, TaskContext, WorkflowCompiler
+
+
 class Fetch(Task):
     async def execute(self, ctx: TaskContext) -> list[float]:
         return [3.0, 1.0, 4.0]

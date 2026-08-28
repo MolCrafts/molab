@@ -166,13 +166,23 @@ class ReferenceConcept(Folder):
     ) -> None:
         super().__init__(parent=parent, name=name, kind=kind, root_path=root_path, fs=fs)
 
-    def read_ref_meta(self) -> ReferenceMeta:
+    def read_reference_meta(self) -> ReferenceMeta:
         """Load this reference's typed bib ``meta.json`` as a :class:`ReferenceMeta`."""
         fpath = self._fs.join(self.resolve(), META_JSON_FILENAME)
         if not self._fs.exists(fpath):
             legacy = self._fs.join(self.resolve(), "meta.json")
             return cast("ReferenceMeta", ReferenceMeta.from_yaml(self._fs.read_text(legacy)))
         return cast("ReferenceMeta", ReferenceMeta.from_json(self._fs.read_text(fpath)))
+
+    def read_ref_meta(self) -> ReferenceMeta:
+        """Deprecated alias for :meth:`read_reference_meta` (full-word spelling)."""
+        warnings.warn(
+            "ReferenceConcept.read_ref_meta is deprecated; "
+            "use ReferenceConcept.read_reference_meta instead",
+            DeprecationWarning,
+            stacklevel=2,
+        )
+        return self.read_reference_meta()
 
     def write_reference_meta(self, meta: ReferenceMeta) -> None:
         """Atomically write this reference's typed bib ``meta.json``.

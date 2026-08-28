@@ -12,9 +12,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel
-
 from molexp._typing import JSONValue
+
+from ._wire import ApiModel
 
 if TYPE_CHECKING:
     from molexp.workspace.workspace_context import (
@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     )
 
 
-class WorkspaceRefResponse(BaseModel):
+class WorkspaceRefResponse(ApiModel):
     id: str
     name: str
     root: str
@@ -42,7 +42,7 @@ class WorkspaceRefResponse(BaseModel):
         return cls(id=ref.id, name=ref.name, root=ref.root, targets=list(ref.targets))
 
 
-class ProjectRefResponse(BaseModel):
+class ProjectRefResponse(ApiModel):
     id: str
     name: str
 
@@ -51,7 +51,7 @@ class ProjectRefResponse(BaseModel):
         return cls(id=ref.id, name=ref.name)
 
 
-class ExperimentRefResponse(BaseModel):
+class ExperimentRefResponse(ApiModel):
     id: str
     name: str
     projectId: str
@@ -67,7 +67,7 @@ class ExperimentRefResponse(BaseModel):
         )
 
 
-class WorkflowRefResponse(BaseModel):
+class WorkflowRefResponse(ApiModel):
     experimentId: str
     name: str
     irHash: str | None = None
@@ -77,7 +77,7 @@ class WorkflowRefResponse(BaseModel):
         return cls(experimentId=ref.experiment_id, name=ref.name, irHash=ref.ir_hash)
 
 
-class RunRefResponse(BaseModel):
+class RunRefResponse(ApiModel):
     runId: str
     experimentId: str
     projectId: str
@@ -101,7 +101,7 @@ class RunRefResponse(BaseModel):
         )
 
 
-class ArtifactRefResponse(BaseModel):
+class ArtifactRefResponse(ApiModel):
     assetId: str
     scope: str
     kind: str
@@ -125,7 +125,7 @@ class ArtifactRefResponse(BaseModel):
         )
 
 
-class KnowledgeRefResponse(BaseModel):
+class KnowledgeRefResponse(ApiModel):
     path: str
     type: str
     title: str
@@ -136,7 +136,7 @@ class KnowledgeRefResponse(BaseModel):
         return cls(path=ref.path, type=ref.type, title=ref.title, id=ref.id)
 
 
-class HealthFlagResponse(BaseModel):
+class HealthFlagResponse(ApiModel):
     kind: str
     ref: str
     detail: str
@@ -146,7 +146,7 @@ class HealthFlagResponse(BaseModel):
         return cls(kind=flag.kind, ref=flag.ref, detail=flag.detail)
 
 
-class ContextFocusResponse(BaseModel):
+class ContextFocusResponse(ApiModel):
     projectId: str | None = None
     experimentId: str | None = None
     runId: str | None = None
@@ -162,7 +162,7 @@ class ContextFocusResponse(BaseModel):
         )
 
 
-class WorkspaceContextResponse(BaseModel):
+class WorkspaceContextResponse(ApiModel):
     """Camel-cased HTTP view of the canonical ``WorkspaceContext`` read-model."""
 
     workspace: WorkspaceRefResponse

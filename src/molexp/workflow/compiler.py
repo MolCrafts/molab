@@ -12,6 +12,7 @@ binding, and returns the single frozen artifact.
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Callable, Mapping
 from typing import TYPE_CHECKING
 
@@ -172,6 +173,20 @@ class WorkflowCompiler:
 
     # ── Decorator: function-as-task ───────────────────────────────────────
 
+    def _append_registration(self, registration: TaskRegistration) -> None:
+        """Append a registration, refusing a duplicate task name loudly.
+
+        A silent overwrite (copy-pasted decorator, forgotten ``name=``) would
+        drop a task from the graph with no signal; the graph is declared once.
+        """
+        if any(existing.name == registration.name for existing in self._tasks):
+            raise ValueError(
+                f"workflow {self._name!r} already has a task named "
+                f"{registration.name!r} — task names are unique; pass "
+                f"name='…' to register a second task from the same callable."
+            )
+        self._tasks.append(registration)
+
     def task(
         self,
         fn: Callable | None = None,
@@ -185,16 +200,51 @@ class WorkflowCompiler:
     ) -> Callable:
         """Register a function as a batch workflow task.
 
-        ``routes={label: target}`` declares branch outgoing control edges;
-        ``next_=target`` declares a single unconditional control edge.
-        The two are mutually exclusive.
+        The task's inputs are its function parameters, **bound by name**: a
+        parameter named after an upstream task receives that task's output,
+        and any other parameter is filled from the run's ``params`` (sweep
+        cell / ``add_run(params=…)``). Task bodies may be plain ``def`` or
+        ``async def`` (sync bodies run via ``asyncio.to_thread``).
+
+        Args:
+            fn: The function (when used as a bare ``@wf.task``).
+            depends_on: Upstream task names this task waits for. Optional
+                when the name-binding rule already implies the edge — a
+                parameter named exactly after an upstream task creates the
+                dependency; declare ``depends_on`` for ordering-only edges.
+            name: Task name (defaults to the function name). Must be unique
+                within the workflow.
+            remote: Optional execution deps forwarded to the runtime
+                (e.g. a molq scheduler spec) — execution location is not
+                task identity.
+            routes: ``{label: target}`` branch routing — the task returns
+                ``(value, Next(label))`` and control (with ``value``) flows
+                to that target. Mutually exclusive with ``next_``.
+            next_: Single unconditional control edge to ``target``.
+                Mutually exclusive with ``routes``.
+            dependent_params: Optional callable deriving extra params from
+                upstream outputs before the body runs.
+
+        Example::
+
+            wf = WorkflowCompiler(name="pipeline")
+
+
+            @wf.task
+            def prepare(x: int) -> int:  # x ← run params
+                return x + 1
+
+
+            @wf.task(depends_on=["prepare"])
+            def analyze(prepare: int) -> int:  # prepare ← upstream output
+                return prepare * 10
         """
         if routes is not None and next_ is not None:
             raise TypeError("WorkflowCompiler.task: routes= and next_= are mutually exclusive")
 
         def decorator(f: Callable) -> Callable:
             task_name = name or _callable_name(f)
-            self._tasks.append(
+            self._append_registration(
                 TaskRegistration(
                     name=task_name,
                     fn_or_class=f,
@@ -229,7 +279,7 @@ class WorkflowCompiler:
 
         def decorator(f: Callable) -> Callable:
             actor_name = name or _callable_name(f)
-            self._tasks.append(
+            self._append_registration(
                 TaskRegistration(
                     name=actor_name,
                     fn_or_class=f,
@@ -277,7 +327,7 @@ class WorkflowCompiler:
                 task_name = task_name[: -len(suffix)]
                 break
 
-        self._tasks.append(
+        self._append_registration(
             TaskRegistration(
                 name=task_name,
                 fn_or_class=task,
@@ -426,6 +476,13 @@ class WorkflowCompiler:
         :data:`~molexp.workflow.binding.default_binding_registry`) so
         ``registry.for_experiment(experiment) is compiled``.
         """
+        if not self._tasks:
+            warnings.warn(
+                f"workflow {self._name!r} compiles with zero tasks — it will "
+                f"execute and report succeeded without doing anything. "
+                f"Register tasks with @wf.task / wf.add(...) first.",
+                stacklevel=2,
+            )
         return compile_registrations(
             name=self._name,
             version_label=self._version,

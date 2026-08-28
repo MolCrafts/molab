@@ -1,6 +1,6 @@
 """Error traces, checkpoint chaining, content-hash lookup, multi-scope asset queries.
 
-Matches ``docs/guide/assets.md``.
+Matches ``docs/en/guide/assets.md``.
 
 Demonstrates:
 
@@ -61,7 +61,7 @@ async def main() -> None:
     print(f"workspace root: {root}")
 
     # ── 2. Execute workflow — success path ───────────────────────────────
-    exp = ws.project("demo").experiment("train").run(compiled, params={"seed": [42]})
+    exp = ws.add_project("demo").add_experiment("train").define(compiled, params={"seed": [42]})
     run = exp.list_runs()[0]
     with run.start() as ctx:
         result = await WorkflowRuntime().execute(compiled, run_context=ctx)

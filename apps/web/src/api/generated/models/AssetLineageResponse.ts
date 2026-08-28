@@ -12,7 +12,7 @@ import type { AssetLineageNode } from './AssetLineageNode';
  */
 export type AssetLineageResponse = {
     ancestors?: Array<AssetLineageNode>;
-    asset_id: string;
+    assetId: string;
     descendants?: Array<AssetLineageNode>;
 };
 
