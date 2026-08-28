@@ -6,13 +6,13 @@
  * Wire form for a :class:`WorkspaceTarget`.
  */
 export type WorkspaceTargetResponse = {
-    cache_dir?: (string | null);
-    cache_ttl_seconds?: number;
+    cacheDir?: (string | null);
+    cacheTtlSeconds?: number;
     host: string;
-    identity_file?: (string | null);
+    identityFile?: (string | null);
     name: string;
     port?: (number | null);
-    root_path: string;
-    ssh_opts?: Array<string>;
+    rootPath: string;
+    sshOpts?: Array<string>;
 };
 

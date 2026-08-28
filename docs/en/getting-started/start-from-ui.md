@@ -26,7 +26,7 @@ The UI presents the same hierarchy the workspace stores on disk:
 ## 1. Start the server
 
 ```bash
-pip install molexp
+pip install git+https://github.com/MolCrafts/molexp   # PyPI release pending
 molexp serve -ws ./lab --port 8000
 ```
 

@@ -3,8 +3,7 @@
 /* tslint:disable */
 /* eslint-disable */
 import type { AssetResponse } from '../models/AssetResponse';
-import type { Body_upload_project_asset_api_projects__project_id__assets_upload_post } from '../models/Body_upload_project_asset_api_projects__project_id__assets_upload_post';
-import type { Body_upload_project_asset_api_workspaces__ws__projects__project_id__assets_upload_post } from '../models/Body_upload_project_asset_api_workspaces__ws__projects__project_id__assets_upload_post';
+import type { Body_uploadProjectAsset } from '../models/Body_uploadProjectAsset';
 import type { MessageResponse } from '../models/MessageResponse';
 import type { ProjectCreateRequest } from '../models/ProjectCreateRequest';
 import type { ProjectResponse } from '../models/ProjectResponse';
@@ -18,7 +17,7 @@ export class ProjectsService {
      * @returns ProjectResponse Successful Response
      * @throws ApiError
      */
-    public static listProjectsApiProjectsGet(
+    public static listProjects(
         molexpSession?: (string | null),
     ): CancelablePromise<Array<ProjectResponse>> {
         return __request(OpenAPI, {
@@ -39,7 +38,7 @@ export class ProjectsService {
      * @returns ProjectResponse Successful Response
      * @throws ApiError
      */
-    public static createProjectApiProjectsPost(
+    public static createProject(
         requestBody: ProjectCreateRequest,
         molexpSession?: (string | null),
     ): CancelablePromise<ProjectResponse> {
@@ -63,7 +62,7 @@ export class ProjectsService {
      * @returns MessageResponse Successful Response
      * @throws ApiError
      */
-    public static deleteProjectApiProjectsProjectIdDelete(
+    public static deleteProject(
         projectId: string,
         molexpSession?: (string | null),
     ): CancelablePromise<MessageResponse> {
@@ -88,7 +87,7 @@ export class ProjectsService {
      * @returns ProjectResponse Successful Response
      * @throws ApiError
      */
-    public static getProjectApiProjectsProjectIdGet(
+    public static getProject(
         projectId: string,
         molexpSession?: (string | null),
     ): CancelablePromise<ProjectResponse> {
@@ -115,7 +114,7 @@ export class ProjectsService {
      * @returns AssetResponse Successful Response
      * @throws ApiError
      */
-    public static listProjectAssetsApiProjectsProjectIdAssetsGet(
+    public static listProjectAssets(
         projectId: string,
         limit: number = 100,
         molexpSession?: (string | null),
@@ -146,9 +145,9 @@ export class ProjectsService {
      * @returns AssetResponse Successful Response
      * @throws ApiError
      */
-    public static uploadProjectAssetApiProjectsProjectIdAssetsUploadPost(
+    public static uploadProjectAsset(
         projectId: string,
-        formData: Body_upload_project_asset_api_projects__project_id__assets_upload_post,
+        formData: Body_uploadProjectAsset,
         molexpSession?: (string | null),
     ): CancelablePromise<AssetResponse> {
         return __request(OpenAPI, {
@@ -175,7 +174,7 @@ export class ProjectsService {
      * @returns AssetResponse Successful Response
      * @throws ApiError
      */
-    public static getProjectAssetApiProjectsProjectIdAssetsAssetIdGet(
+    public static getProjectAsset(
         projectId: string,
         assetId: string,
         molexpSession?: (string | null),
@@ -203,7 +202,7 @@ export class ProjectsService {
      * @returns any Successful Response
      * @throws ApiError
      */
-    public static downloadProjectAssetApiProjectsProjectIdAssetsAssetIdDownloadGet(
+    public static downloadProjectAsset(
         projectId: string,
         assetId: string,
         molexpSession?: (string | null),
@@ -230,7 +229,7 @@ export class ProjectsService {
      * @returns ProjectResponse Successful Response
      * @throws ApiError
      */
-    public static listProjectsApiWorkspacesWsProjectsGet(
+    public static listProjects1(
         ws: string,
         molexpSession?: (string | null),
     ): CancelablePromise<Array<ProjectResponse>> {
@@ -256,7 +255,7 @@ export class ProjectsService {
      * @returns ProjectResponse Successful Response
      * @throws ApiError
      */
-    public static createProjectApiWorkspacesWsProjectsPost(
+    public static createProject1(
         ws: string,
         requestBody: ProjectCreateRequest,
         molexpSession?: (string | null),
@@ -285,7 +284,7 @@ export class ProjectsService {
      * @returns MessageResponse Successful Response
      * @throws ApiError
      */
-    public static deleteProjectApiWorkspacesWsProjectsProjectIdDelete(
+    public static deleteProject1(
         projectId: string,
         ws: string,
         molexpSession?: (string | null),
@@ -313,7 +312,7 @@ export class ProjectsService {
      * @returns ProjectResponse Successful Response
      * @throws ApiError
      */
-    public static getProjectApiWorkspacesWsProjectsProjectIdGet(
+    public static getProject1(
         projectId: string,
         ws: string,
         molexpSession?: (string | null),
@@ -343,7 +342,7 @@ export class ProjectsService {
      * @returns AssetResponse Successful Response
      * @throws ApiError
      */
-    public static listProjectAssetsApiWorkspacesWsProjectsProjectIdAssetsGet(
+    public static listProjectAssets1(
         projectId: string,
         ws: string,
         limit: number = 100,
@@ -377,10 +376,10 @@ export class ProjectsService {
      * @returns AssetResponse Successful Response
      * @throws ApiError
      */
-    public static uploadProjectAssetApiWorkspacesWsProjectsProjectIdAssetsUploadPost(
+    public static uploadProjectAsset1(
         projectId: string,
         ws: string,
-        formData: Body_upload_project_asset_api_workspaces__ws__projects__project_id__assets_upload_post,
+        formData: Body_uploadProjectAsset,
         molexpSession?: (string | null),
     ): CancelablePromise<AssetResponse> {
         return __request(OpenAPI, {
@@ -409,7 +408,7 @@ export class ProjectsService {
      * @returns AssetResponse Successful Response
      * @throws ApiError
      */
-    public static getProjectAssetApiWorkspacesWsProjectsProjectIdAssetsAssetIdGet(
+    public static getProjectAsset1(
         projectId: string,
         assetId: string,
         ws: string,
@@ -440,7 +439,7 @@ export class ProjectsService {
      * @returns any Successful Response
      * @throws ApiError
      */
-    public static downloadProjectAssetApiWorkspacesWsProjectsProjectIdAssetsAssetIdDownloadGet(
+    public static downloadProjectAsset1(
         projectId: string,
         assetId: string,
         ws: string,

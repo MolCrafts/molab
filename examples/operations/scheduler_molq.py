@@ -1,6 +1,6 @@
 """How ``--scheduler slurm`` composes a ``SubmitHandler`` under the hood.
 
-Matches ``docs/guide/molq.md``.
+Matches ``docs/en/guide/molq.md``.
 
 This example is explanatory rather than executable on its own: actual
 submission requires a live scheduler. The code here builds the same
@@ -40,7 +40,7 @@ def main() -> None:
     ws = me.Workspace(root, name="molq-demo")
     project = ws.add_project("demo")
     exp = project.add_experiment("train")
-    run = exp.add_run(parameters={"seed": 0})
+    run = exp.add_run(params={"seed": 0})
 
     # The CLI composes this same object from --scheduler/--cpus/--gpus/… .
     # Demonstration only; the CLI builds and uses this handler at submit time.

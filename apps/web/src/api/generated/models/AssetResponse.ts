@@ -12,18 +12,18 @@
  * when the asset is content-addressable; ``None`` for streaming kinds.
  */
 export type AssetResponse = {
-    content_hash?: (string | null);
-    created_at: string;
+    contentHash?: (string | null);
+    createdAt: string;
     extra?: Record<string, any>;
-    has_preview_sidecar?: boolean;
+    hasPreviewSidecar?: boolean;
     id: string;
     kind: string;
     name: string;
     path: string;
     producer?: (Record<string, any> | null);
-    scope_ids: Array<string>;
-    scope_kind: string;
+    scopeIds: Array<string>;
+    scopeKind: string;
     tags?: Record<string, string>;
-    updated_at: string;
+    updatedAt: string;
 };
 

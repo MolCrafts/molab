@@ -1,6 +1,6 @@
 """A workflow executed with no workspace attached.
 
-Matches ``docs/getting-started/first-workflow.md``.
+Matches ``docs/en/getting-started/first-workflow.md``.
 
 The point of this example is that a workflow is independent of the workspace
 model: you can compile and execute one entirely in memory. Persistent runs,

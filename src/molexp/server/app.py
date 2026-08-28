@@ -200,6 +200,8 @@ def create_app(
     #    In-code registrations keep precedence.
     from molexp.services.operator_config import bridge_operator_config
 
+    from .openapi_ids import molexp_operation_id
+
     bridge_operator_config()
 
     app = FastAPI(
@@ -209,6 +211,7 @@ def create_app(
         docs_url="/api/docs",
         openapi_url="/api/openapi.json",
         lifespan=lifespan,
+        generate_unique_id_function=molexp_operation_id,
     )
 
     # 1. CORS Configuration (Dev Mode Support)

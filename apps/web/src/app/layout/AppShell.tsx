@@ -364,7 +364,6 @@ export const AppShell = ({
           onRefresh={onActiveRefresh}
           isRefreshing={isRefreshing}
           onMenuClick={isMobile ? () => setMobileNavOpen(true) : undefined}
-          activeWorkspace={activeWorkspace}
         />
         {/* Work surface above a full-width MolVis-style status bar. */}
         <main className="flex min-h-0 flex-1 flex-col overflow-hidden">

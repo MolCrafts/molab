@@ -1,4 +1,4 @@
-"""Step-audit form/review schemas — expert review packs for PlanMode gates.
+"""Step-audit form/review schemas — expert review packs for PlanOrchestrator gates.
 
 Pure data (``frozen=True``). Used by :class:`~molexp.harness.stages.step_audit_loop.StepAuditLoop`
 and services/CLI/UI consumers. Binary :class:`~molexp.harness.schemas.approval.ApprovalDecision`

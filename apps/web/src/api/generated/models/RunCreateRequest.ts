@@ -4,9 +4,9 @@
 /* eslint-disable */
 export type RunCreateRequest = {
     /**
-     * Run parameters
+     * Run params ('parameters' accepted as a deprecated alias)
      */
-    parameters?: Record<string, any>;
+    params?: Record<string, any>;
     /**
      * Compute target name (must exist in workspace registry)
      */

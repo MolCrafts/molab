@@ -2,10 +2,10 @@ import {
   listFilePreviewContributions,
   registerFilePreviewContribution,
   unregisterFilePreviewContribution,
-} from "@/plugins/contribution-runtime";
-import type { FilePreviewPlugin } from "@/plugins/types";
+} from "@/lib/contribution-runtime";
+import type { FilePreviewPlugin } from "@/lib/contribution-types";
 
-export type { FilePreviewContentProps, FilePreviewPlugin } from "@/plugins/types";
+export type { FilePreviewContentProps, FilePreviewPlugin } from "@/lib/contribution-types";
 
 class FilePreviewPluginRegistry {
   register(plugin: FilePreviewPlugin): void {

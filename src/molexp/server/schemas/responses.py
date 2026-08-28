@@ -10,7 +10,7 @@ import json
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 # The typed AgentEvent discriminated union is the wire shape the live SSE event
 # stream frames carry (spec 01). Re-exported here so the OpenAPI surface owns a
@@ -25,6 +25,8 @@ from molexp.workspace import (
     Run,
 )
 
+from ._wire import ApiModel
+
 
 def _str_or_none(value: object) -> str | None:
     """Coerce a JSON-shaped opaque value into ``str | None`` for response fields."""
@@ -33,7 +35,7 @@ def _str_or_none(value: object) -> str | None:
     return str(value)
 
 
-class WorkflowDocumentResponse(BaseModel):
+class WorkflowDocumentResponse(ApiModel):
     """The persisted (normalized) workflow IR document for an experiment."""
 
     project_id: str = Field(..., description="Owning project id")
@@ -66,7 +68,7 @@ def _read_context_results(run: Run) -> dict[str, Any]:
 # ── Project ─────────────────────────────────────────────────────────────────
 
 
-class ProjectResponse(BaseModel):
+class ProjectResponse(ApiModel):
     id: str
     name: str
     description: str = ""
@@ -90,7 +92,7 @@ class ProjectResponse(BaseModel):
         )
 
 
-class ProjectListResponse(BaseModel):
+class ProjectListResponse(ApiModel):
     projects: list[ProjectResponse]
     total: int
 
@@ -98,7 +100,7 @@ class ProjectListResponse(BaseModel):
 # ── Experiment ──────────────────────────────────────────────────────────────
 
 
-class ExperimentResponse(BaseModel):
+class ExperimentResponse(ApiModel):
     id: str
     projectId: str
     name: str
@@ -156,7 +158,7 @@ class ExperimentResponse(BaseModel):
 # ── Run ─────────────────────────────────────────────────────────────────────
 
 
-class RunSummary(BaseModel):
+class RunSummary(ApiModel):
     id: str
     status: str
     created: str
@@ -165,14 +167,14 @@ class RunSummary(BaseModel):
     results: dict[str, Any] = Field(default_factory=dict)
 
 
-class WorkflowSnapshotResponse(BaseModel):
+class WorkflowSnapshotResponse(ApiModel):
     source: str
     gitCommit: str | None = None
     codeHash: str | None = None
     configHash: str | None = None
 
 
-class ExecutionRecordResponse(BaseModel):
+class ExecutionRecordResponse(ApiModel):
     """One execution attempt of a Run.
 
     Mirrors :class:`molexp.workspace.models.ExecutionRecord` with
@@ -187,7 +189,7 @@ class ExecutionRecordResponse(BaseModel):
     schedulerJobId: str | None = None
 
 
-class RunResponse(BaseModel):
+class RunResponse(ApiModel):
     id: str
     projectId: str
     experimentId: str
@@ -273,7 +275,7 @@ class RunResponse(BaseModel):
         )
 
 
-class RunStatusResponse(BaseModel):
+class RunStatusResponse(ApiModel):
     id: str
     status: str
     finished: str | None = None
@@ -282,7 +284,7 @@ class RunStatusResponse(BaseModel):
 # ── Asset ───────────────────────────────────────────────────────────────────
 
 
-class AssetResponse(BaseModel):
+class AssetResponse(ApiModel):
     """Serialized typed ``Asset``.
 
     ``kind`` is the discriminator (``data`` / ``artifact`` / ``log`` / …).
@@ -346,7 +348,7 @@ class AssetResponse(BaseModel):
 # ── Workspace ───────────────────────────────────────────────────────────────
 
 
-class WorkspaceInfoResponse(BaseModel):
+class WorkspaceInfoResponse(ApiModel):
     root: str
     projectCount: int
     assetCount: int
@@ -359,56 +361,56 @@ class WorkspaceInfoResponse(BaseModel):
     ready: bool | None = None
 
 
-class FolderEntryResponse(BaseModel):
+class FolderEntryResponse(ApiModel):
     name: str
     path: str
     type: str
     size: int | None = None
 
 
-class FolderBrowseResponse(BaseModel):
+class FolderBrowseResponse(ApiModel):
     path: str
     entries: list[FolderEntryResponse]
 
 
-class WorkspaceFolderResponse(BaseModel):
+class WorkspaceFolderResponse(ApiModel):
     id: str
     path: str
     name: str
     added_at: str
 
 
-class FileContentResponse(BaseModel):
+class FileContentResponse(ApiModel):
     content: str
 
 
 # ── Execution ───────────────────────────────────────────────────────────────
 
 
-class ExecutionPlanResponse(BaseModel):
+class ExecutionPlanResponse(ApiModel):
     plan: list[str]
     nodeCount: int
 
 
-class CacheStatsResponse(BaseModel):
+class CacheStatsResponse(ApiModel):
     storeDir: str
     entryCount: int
 
 
-class CacheClearResponse(BaseModel):
+class CacheClearResponse(ApiModel):
     removedCount: int
 
 
 # ── Agent ───────────────────────────────────────────────────────────────────
 
 
-class SessionEventResponse(BaseModel):
+class SessionEventResponse(ApiModel):
     type: str
     ts: str
     payload: dict[str, Any] = Field(default_factory=dict)
 
 
-class SessionStatsResponse(BaseModel):
+class SessionStatsResponse(ApiModel):
     inputTokens: int = 0
     outputTokens: int = 0
     cacheReadTokens: int = 0
@@ -422,7 +424,7 @@ class SessionStatsResponse(BaseModel):
     durationSeconds: float | None = None
 
 
-class AgentSessionResponse(BaseModel):
+class AgentSessionResponse(ApiModel):
     sessionId: str
     status: str
     goalDescription: str
@@ -433,12 +435,12 @@ class AgentSessionResponse(BaseModel):
     skillId: str | None = None
 
 
-class AgentSessionListResponse(BaseModel):
+class AgentSessionListResponse(ApiModel):
     sessions: list[AgentSessionResponse]
     total: int
 
 
-class AgentTaskResponse(BaseModel):
+class AgentTaskResponse(ApiModel):
     """User-facing task wrapper around one current runtime session.
 
     ``taskId`` is the product identifier the UI should route on; ``sessionId``
@@ -465,19 +467,19 @@ class AgentTaskResponse(BaseModel):
     runId: str | None = None
 
 
-class AgentTaskListResponse(BaseModel):
+class AgentTaskListResponse(ApiModel):
     tasks: list[AgentTaskResponse]
     total: int
 
 
-class CommandParameterSpec(BaseModel):
+class CommandParameterSpec(ApiModel):
     """One ``{{param}}`` slot in a slash command's goal_template."""
 
     name: str
     required: bool = True
 
 
-class CommandSpec(BaseModel):
+class CommandSpec(ApiModel):
     """A single slash command — skill-backed or builtin."""
 
     slashName: str
@@ -489,11 +491,11 @@ class CommandSpec(BaseModel):
     skillId: str | None = None
 
 
-class CommandListResponse(BaseModel):
+class CommandListResponse(ApiModel):
     commands: list[CommandSpec] = Field(default_factory=list)
 
 
-class CommandParseResponse(BaseModel):
+class CommandParseResponse(ApiModel):
     """Parsed slash-command shape returned by the server.
 
     The agent-side slash-command parser (formerly ``molexp.agent.skills.commands``)
@@ -509,7 +511,7 @@ class CommandParseResponse(BaseModel):
     error: str = ""
 
 
-class AgentSystemPromptResponse(BaseModel):
+class AgentSystemPromptResponse(ApiModel):
     """Per-session system prompt breakdown for the inspector."""
 
     base: str
@@ -523,7 +525,7 @@ class AgentSystemPromptResponse(BaseModel):
 # ── Plugin Registry ─────────────────────────────────────────────────────────
 
 
-class UiPluginResponse(BaseModel):
+class UiPluginResponse(ApiModel):
     """Per-bundle entry returned by ``GET /api/plugins``.
 
     Carries no UI semantics — those live in each bundle's own
@@ -537,7 +539,7 @@ class UiPluginResponse(BaseModel):
     entryUrl: str
 
 
-class UiPluginListResponse(BaseModel):
+class UiPluginListResponse(ApiModel):
     plugins: list[UiPluginResponse]
     total: int
 
@@ -545,14 +547,14 @@ class UiPluginListResponse(BaseModel):
 # ── Task-type registry ──────────────────────────────────────────────────────
 
 
-class TaskTypeResponse(BaseModel):
+class TaskTypeResponse(ApiModel):
     """Single registered task type the agent / UI can compose into IR."""
 
     slug: str = Field(..., description="Registry slug, e.g. 'core.add'")
     description: str = Field("", description="Human-readable summary")
 
 
-class TaskTypeListResponse(BaseModel):
+class TaskTypeListResponse(ApiModel):
     task_types: list[TaskTypeResponse]
     total: int
 
@@ -560,11 +562,11 @@ class TaskTypeListResponse(BaseModel):
 # ── Generic ─────────────────────────────────────────────────────────────────
 
 
-class MessageResponse(BaseModel):
+class MessageResponse(ApiModel):
     message: str
 
 
-class HealthResponse(BaseModel):
+class HealthResponse(ApiModel):
     status: str
     workspace_available: bool
     capabilities: dict[str, bool] = Field(default_factory=dict)
@@ -577,7 +579,7 @@ class HealthResponse(BaseModel):
 # ── Run logs / execution ─────────────────────────────────────────────────────
 
 
-class RunLogsResponse(BaseModel):
+class RunLogsResponse(ApiModel):
     """Per-execution stdout/stderr for a run.
 
     ``execution_id`` is the attempt these logs belong to; the server
@@ -592,7 +594,7 @@ class RunLogsResponse(BaseModel):
     stderr: str | None = None
 
 
-class MetricSeriesResponse(BaseModel):
+class MetricSeriesResponse(ApiModel):
     """Summary for one metric series in a run-local metrics query."""
 
     key: str
@@ -603,7 +605,7 @@ class MetricSeriesResponse(BaseModel):
     latestValue: Any | None = None
 
 
-class RunMetricsResponse(BaseModel):
+class RunMetricsResponse(ApiModel):
     """Run-local metrics query response."""
 
     nextLine: int = 0
@@ -612,7 +614,7 @@ class RunMetricsResponse(BaseModel):
     parseErrors: int = 0
 
 
-class RunFileTextResponse(BaseModel):
+class RunFileTextResponse(ApiModel):
     """Raw UTF-8 text content of a file under a run directory."""
 
     path: str
@@ -620,14 +622,14 @@ class RunFileTextResponse(BaseModel):
     size: int
 
 
-class LammpsThermoStage(BaseModel):
+class LammpsThermoStage(ApiModel):
     """One ``Per MPI rank ... Loop time`` block as columns + numeric rows."""
 
     columns: list[str] = Field(default_factory=list)
     rows: list[list[float]] = Field(default_factory=list)
 
 
-class LammpsLogResponse(BaseModel):
+class LammpsLogResponse(ApiModel):
     """Parsed LAMMPS log thermo stages, produced by ``molpy.io.LAMMPSLog``."""
 
     path: str
@@ -636,7 +638,7 @@ class LammpsLogResponse(BaseModel):
     stages: list[LammpsThermoStage] = Field(default_factory=list)
 
 
-class TensorboardScalarPoint(BaseModel):
+class TensorboardScalarPoint(ApiModel):
     """One scalar sample read from a tfevents file."""
 
     step: int
@@ -644,7 +646,7 @@ class TensorboardScalarPoint(BaseModel):
     value: float
 
 
-class TensorboardScalarSeries(BaseModel):
+class TensorboardScalarSeries(ApiModel):
     """All scalar samples for a single tag inside one logdir."""
 
     tag: str
@@ -652,7 +654,7 @@ class TensorboardScalarSeries(BaseModel):
     points: list[TensorboardScalarPoint] = Field(default_factory=list)
 
 
-class TensorboardScalarsResponse(BaseModel):
+class TensorboardScalarsResponse(ApiModel):
     """Parsed scalars across every tfevents logdir found under a run."""
 
     runId: str
@@ -661,7 +663,7 @@ class TensorboardScalarsResponse(BaseModel):
     series: list[TensorboardScalarSeries] = Field(default_factory=list)
 
 
-class RunExecutionResponse(BaseModel):
+class RunExecutionResponse(ApiModel):
     """Runtime workflow graph state read from ``workflow.json``."""
 
     execution_id: str | None = None
@@ -672,7 +674,7 @@ class RunExecutionResponse(BaseModel):
 # ── Asset lineage (Producer.inputs DAG) ─────────────────────────────────────
 
 
-class AssetLineageNode(BaseModel):
+class AssetLineageNode(ApiModel):
     """One node in an asset's lineage neighborhood.
 
     Carries just enough to render a clickable card in the UI; full
@@ -685,7 +687,7 @@ class AssetLineageNode(BaseModel):
     scope_kind: str
 
 
-class AssetLineageResponse(BaseModel):
+class AssetLineageResponse(ApiModel):
     """Upstream + downstream neighbours of an asset in the lineage DAG.
 
     ``ancestors`` is the transitive set of upstream asset_ids reached
@@ -701,7 +703,7 @@ class AssetLineageResponse(BaseModel):
 # ── Catalog / file lineage ──────────────────────────────────────────────────
 
 
-class CatalogProducerInfo(BaseModel):
+class CatalogProducerInfo(ApiModel):
     """Producer metadata for a catalog entry."""
 
     runId: str | None = None
@@ -709,7 +711,7 @@ class CatalogProducerInfo(BaseModel):
     executionId: str | None = None
 
 
-class CatalogScopeInfo(BaseModel):
+class CatalogScopeInfo(ApiModel):
     """Scope chain that owns this asset (project/experiment/run ids)."""
 
     kind: str
@@ -718,7 +720,7 @@ class CatalogScopeInfo(BaseModel):
     runId: str | None = None
 
 
-class CatalogSibling(BaseModel):
+class CatalogSibling(ApiModel):
     """Other outputs from the same producer.task_id."""
 
     assetId: str
@@ -727,7 +729,7 @@ class CatalogSibling(BaseModel):
     relPath: str
 
 
-class CatalogByPathResponse(BaseModel):
+class CatalogByPathResponse(ApiModel):
     """Reverse-lookup: which run/experiment/project produced a file?"""
 
     matched: bool
@@ -739,7 +741,7 @@ class CatalogByPathResponse(BaseModel):
     siblings: list[CatalogSibling] = Field(default_factory=list)
 
 
-class RunFileNode(BaseModel):
+class RunFileNode(ApiModel):
     """One node in a run's output file tree."""
 
     name: str
@@ -756,7 +758,7 @@ class RunFileNode(BaseModel):
 RunFileNode.model_rebuild()
 
 
-class RunFilesResponse(BaseModel):
+class RunFilesResponse(ApiModel):
     """Per-run output file tree, enriched with catalog producer metadata."""
 
     runId: str
@@ -767,7 +769,7 @@ class RunFilesResponse(BaseModel):
 # ── Experiment comparison ───────────────────────────────────────────────────
 
 
-class ComparisonRunRow(BaseModel):
+class ComparisonRunRow(ApiModel):
     """One run row in the experiment comparison matrix."""
 
     runId: str
@@ -780,7 +782,7 @@ class ComparisonRunRow(BaseModel):
     error: dict[str, str] | None = None
 
 
-class ExperimentComparisonResponse(BaseModel):
+class ExperimentComparisonResponse(ApiModel):
     """Comparison matrix: parameter columns x run rows + metric columns."""
 
     experimentId: str
@@ -793,7 +795,7 @@ class ExperimentComparisonResponse(BaseModel):
 # ── Run actions ─────────────────────────────────────────────────────────────
 
 
-class RunActionResponse(BaseModel):
+class RunActionResponse(ApiModel):
     """Result of an actionable mutation on a run."""
 
     runId: str
@@ -801,7 +803,7 @@ class RunActionResponse(BaseModel):
     message: str | None = None
 
 
-class RunContinueResponse(BaseModel):
+class RunContinueResponse(ApiModel):
     """Result of continuing a run in place — ``resume`` or ``rerun``.
 
     Both verbs act on the same ``runId`` (no clone, no new run). ``executionId``
@@ -819,7 +821,7 @@ class RunContinueResponse(BaseModel):
 # ── Skills / MCP / Tool admin ───────────────────────────────────────────────
 
 
-class SkillResponse(BaseModel):
+class SkillResponse(ApiModel):
     """A saved skill (goal template + tool scope + system addendum)."""
 
     id: str
@@ -841,17 +843,17 @@ class SkillResponse(BaseModel):
     updatedAt: str = ""
 
 
-class SkillListResponse(BaseModel):
+class SkillListResponse(ApiModel):
     skills: list[SkillResponse] = Field(default_factory=list)
 
 
-class ToolParameterResponse(BaseModel):
+class ToolParameterResponse(ApiModel):
     name: str
     annotation: str = "Any"
     required: bool = False
 
 
-class AgentToolResponse(BaseModel):
+class AgentToolResponse(ApiModel):
     """One agent tool — molexp **builtin** or MCP-discovered.
 
     ``source`` is:
@@ -869,7 +871,7 @@ class AgentToolResponse(BaseModel):
     source: str
 
 
-class McpToolGroupResponse(BaseModel):
+class McpToolGroupResponse(ApiModel):
     """Per-server discovery status for the MCP server list.
 
     Even when a server is offline / misconfigured / unauthorized we want
@@ -884,12 +886,12 @@ class McpToolGroupResponse(BaseModel):
     error: str | None = None
 
 
-class AgentToolListResponse(BaseModel):
+class AgentToolListResponse(ApiModel):
     tools: list[AgentToolResponse] = Field(default_factory=list)
     mcpGroups: list[McpToolGroupResponse] = Field(default_factory=list)
 
 
-class CustomToolHttpInvokerResponse(BaseModel):
+class CustomToolHttpInvokerResponse(ApiModel):
     """Read-only view of a user/workspace HTTP-webhook tool's wiring.
 
     Header values are returned **with secret references intact**
@@ -904,14 +906,14 @@ class CustomToolHttpInvokerResponse(BaseModel):
     bodyTemplate: str = ""
 
 
-class CustomToolPythonInvokerResponse(BaseModel):
+class CustomToolPythonInvokerResponse(ApiModel):
     """Read-only view of a Python-implementation tool reference."""
 
     kind: Literal["python"] = "python"
     target: str
 
 
-class CustomToolResponse(BaseModel):
+class CustomToolResponse(ApiModel):
     """Single user/workspace/registration-tier tool record.
 
     Mirrors the `AgentToolResponse` shape but adds the persistence
@@ -938,11 +940,11 @@ class CustomToolResponse(BaseModel):
     updatedAt: str = ""
 
 
-class CustomToolListResponse(BaseModel):
+class CustomToolListResponse(ApiModel):
     tools: list[CustomToolResponse] = Field(default_factory=list)
 
 
-class McpAuthSummary(BaseModel):
+class McpAuthSummary(ApiModel):
     """Public-safe view of a server's structured auth settings.
 
     Token values, refresh tokens, and client secrets are never exposed —
@@ -957,7 +959,7 @@ class McpAuthSummary(BaseModel):
     connected: bool = False
 
 
-class McpServerResponse(BaseModel):
+class McpServerResponse(ApiModel):
     """One MCP server entry, possibly merged across scopes.
 
     ``shadowed`` is True when this entry exists at User scope but is
@@ -982,7 +984,7 @@ class McpServerResponse(BaseModel):
     auth: McpAuthSummary | None = None
 
 
-class McpServerListResponse(BaseModel):
+class McpServerListResponse(ApiModel):
     """Merged view of both scopes plus the resolved file paths.
 
     ``workspacePath`` and ``userPath`` are the absolute paths the store
@@ -995,7 +997,7 @@ class McpServerListResponse(BaseModel):
     servers: list[McpServerResponse] = Field(default_factory=list)
 
 
-class McpServerTestResponse(BaseModel):
+class McpServerTestResponse(ApiModel):
     """Outcome of probing an MCP server (subprocess spawn or HTTP handshake)."""
 
     ok: bool
@@ -1007,7 +1009,7 @@ class McpServerTestResponse(BaseModel):
     error: str | None = None
 
 
-class McpOAuthStartResponse(BaseModel):
+class McpOAuthStartResponse(ApiModel):
     """Result of POST /mcp/servers/{name}/oauth/start.
 
     The UI opens ``authorizeUrl`` in a popup; once the IdP bounces back to
@@ -1020,7 +1022,7 @@ class McpOAuthStartResponse(BaseModel):
     authorizeUrl: str
 
 
-class McpOAuthStatusResponse(BaseModel):
+class McpOAuthStatusResponse(ApiModel):
     """Whether the named server currently has a usable OAuth token on disk.
 
     ``hasTokens`` is True after a successful Connect; False if the user has
@@ -1033,7 +1035,7 @@ class McpOAuthStatusResponse(BaseModel):
     scopes: list[str] = Field(default_factory=list)
 
 
-class McpSecretRefRow(BaseModel):
+class McpSecretRefRow(ApiModel):
     """One row in the secrets list — key + which servers reference it."""
 
     key: str
@@ -1041,7 +1043,7 @@ class McpSecretRefRow(BaseModel):
     referencedBy: list[str] = Field(default_factory=list)
 
 
-class McpSecretListResponse(BaseModel):
+class McpSecretListResponse(ApiModel):
     """Secrets at the requested scope. Plaintext values are never returned."""
 
     scope: Literal["native", "user", "workspace"]
@@ -1052,7 +1054,7 @@ class McpSecretListResponse(BaseModel):
 # ── Agent provider config ───────────────────────────────────────────────────
 
 
-class AgentProviderResponse(BaseModel):
+class AgentProviderResponse(ApiModel):
     """Public view of the workspace's LLM provider config — never the raw key.
 
     ``apiKeyPreview`` is a masked rendering ("sk-...1234"); ``apiKeySet``
@@ -1068,7 +1070,7 @@ class AgentProviderResponse(BaseModel):
     supportedProviders: list[str] = Field(default_factory=list)
 
 
-class AgentProviderTestResponse(BaseModel):
+class AgentProviderTestResponse(ApiModel):
     """Result of probing the configured provider with a minimal request.
 
     ``ok=True`` means we got a model response back. ``latencyMs`` is the
@@ -1084,7 +1086,7 @@ class AgentProviderTestResponse(BaseModel):
     error: str | None = None
 
 
-class AgentHealthResponse(BaseModel):
+class AgentHealthResponse(ApiModel):
     """Whether the agent runtime is ready to start a new session.
 
     ``ready=False`` indicates a configuration problem the user can

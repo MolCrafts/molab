@@ -9,7 +9,7 @@ export type RunHarvestRequest = {
     /**
      * Author string
      */
-    created_by?: string;
+    createdBy?: string;
     /**
      * Knowledge kind
      */

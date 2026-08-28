@@ -15,13 +15,13 @@ from rich.console import Console
 from rich.table import Table
 
 from molexp.cli._common import (
-    _TERMINAL_STATUSES,
     rprint,
     run_executor_info,
     status_color,
 )
 from molexp.cli._target import TargetOption, open_workspace
-from molexp.workspace.run import RETRYABLE_STATUSES
+from molexp.workspace.run import RETRYABLE_STATUSES, Run
+from molexp.workspace.run_ops import TERMINAL_STATUSES as _TERMINAL_STATUSES
 
 _console = Console()
 
@@ -453,59 +453,127 @@ def run_cancel(
             rprint("[dim]Aborted.[/dim]")
             raise typer.Exit(0)
 
-    from molq import Cluster, Submitor
+    # One shared cancel body with the server route and the harness capability
+    # (reap → domain check → executor signal → status flip): the workspace
+    # core with the molq signal hook injected.
+    from molexp.plugins.submit_molq.cancel import try_cancel
+    from molexp.workspace.lifecycle_ops import cancel_run as cancel_core
 
-    submitor_cache: dict[tuple[str, str], Any] = {}
+    def _signal(run: Run) -> str | None:
+        return try_cancel(run, fallback_scheduler=scheduler, fallback_cluster=cluster or "default")
+
     cancelled = 0
     errors = 0
-    try:
-        for r in target_runs:
-            executor_info = run_executor_info(r)
-            molq_id = executor_info.get("job_id")
-            scheduler_job_id = executor_info.get("scheduler_job_id")
-            run_scheduler = executor_info.get("scheduler") or scheduler
-            run_cluster = executor_info.get("cluster_name") or cluster or "default"
-            if run_scheduler != "local":
-                if molq_id and run_scheduler:
-                    cache_key = (run_scheduler, run_cluster)
-                    submitor = submitor_cache.get(cache_key)
-                    if submitor is None:
-                        submitor = Submitor(Cluster(name=run_cluster, scheduler=run_scheduler))
-                        submitor_cache[cache_key] = submitor
-                    try:
-                        submitor.cancel_job(molq_id)
-                    except Exception as exc:
-                        rprint(
-                            f"  [yellow]Warning:[/yellow] scheduler cancel failed for {r.id}: {exc}"
-                        )
-                        errors += 1
-                elif scheduler_job_id and run_scheduler:
-                    cache_key = (run_scheduler, run_cluster)
-                    submitor = submitor_cache.get(cache_key)
-                    if submitor is None:
-                        submitor = Submitor(Cluster(name=run_cluster, scheduler=run_scheduler))
-                        submitor_cache[cache_key] = submitor
-                    try:
-                        submitor._scheduler_impl.cancel(scheduler_job_id)
-                    except Exception as exc:
-                        rprint(
-                            f"  [yellow]Warning:[/yellow] scheduler cancel failed for {r.id}: {exc}"
-                        )
-                        errors += 1
-                else:
-                    rprint(f"  [yellow]Warning:[/yellow] {r.id} has no molq job metadata.")
-            r.cancel()
-            rprint(f"  [green]OK[/green] Cancelled {r.id}")
-            cancelled += 1
-    finally:
-        for submitor in submitor_cache.values():
-            submitor.close()
+    for r in target_runs:
+        try:
+            warning = cancel_core(r, signal_executor=_signal, allow_pending=True)
+        except ValueError as exc:
+            rprint(f"  [yellow]Skipping[/yellow] {r.id} — {exc}")
+            continue
+        if warning is not None:
+            rprint(f"  [yellow]Warning:[/yellow] {warning} (workspace state updated)")
+            errors += 1
+        rprint(f"  [green]OK[/green] Cancelled {r.id}")
+        cancelled += 1
 
     rprint(f"\n[green]Done.[/green] {cancelled} run(s) cancelled", end="")
     if errors:
         rprint(f", [yellow]{errors} scheduler error(s)[/yellow] (workspace state updated).")
     else:
         rprint(".")
+
+
+def _retry_run(
+    project_id: str,
+    experiment_id: str,
+    run_id: str,
+    target_spec: str,
+    *,
+    resume: bool = False,
+    rerun: bool = False,
+    fresh: bool = False,
+) -> None:
+    """Shared body of ``runs resume`` / ``runs rerun`` — the CLI twins of
+    ``POST .../{run_id}/resume|rerun``, executing in-process on this host
+    (same path as ``molexp run --resume/--rerun``)."""
+    ws = _open_ws(target_spec)
+    from molexp.workspace import ExperimentNotFoundError as _ExpNotFound
+    from molexp.workspace import ProjectNotFoundError as _ProjNotFound
+    from molexp.workspace import RunNotFoundError as _RunNotFound
+    from molexp.workspace.run_reaper import reap_zombie_run
+    from molexp.workspace.targets import LOCAL_TARGET_NAME
+
+    try:
+        project = ws.get_project(project_id)
+        experiment = project.get_experiment(experiment_id)
+        run = experiment.get_run(run_id)
+    except (_ProjNotFound, _ExpNotFound, _RunNotFound) as exc:
+        rprint(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(1) from None
+
+    target = getattr(run.metadata, "target", None)
+    if target and target != LOCAL_TARGET_NAME:
+        rprint(
+            f"[red]Error:[/red] run {run.id} targets {target!r} — this command "
+            "executes in-process on this host only. Use the server's "
+            "POST /runs/{id}/resume|rerun (or `molexp run` on that host)."
+        )
+        raise typer.Exit(1)
+
+    reap_zombie_run(run)
+    from molexp.harness.workflow_recovery import compiled_workflow_for_run
+    from molexp.workflow import RunFailedError, RunNotExecutableError, execute_run
+
+    try:
+        workflow = compiled_workflow_for_run(run)
+    except Exception as exc:
+        rprint(f"[red]Error:[/red] cannot reconstruct the run's workflow: {exc}")
+        raise typer.Exit(1) from None
+    verb = "Resumed" if resume else "Reran"
+    try:
+        execute_run(workflow, run, resume=resume, rerun=rerun, fresh=fresh)
+    except RunNotExecutableError as exc:
+        rprint(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(1) from None
+    except RunFailedError as exc:
+        rprint(f"[red]FAILED[/red] {exc}")
+        raise typer.Exit(1) from None
+    rprint(f"[green]OK[/green] {verb} run {run.id} — status: {run.status}")
+
+
+@run_app.command("resume")
+def run_resume(
+    project_id: Annotated[str, typer.Argument(help="Project ID")],
+    experiment_id: Annotated[str, typer.Argument(help="Experiment ID")],
+    run_id: Annotated[str, typer.Argument(help="Run ID")],
+    target_spec: TargetOption = ".",
+) -> None:
+    """Resume a failed/cancelled run (reopen last execution, seed completed nodes).
+
+    CLI twin of ``POST .../{run_id}/resume`` and ``molexp run --resume``.
+    """
+    _retry_run(project_id, experiment_id, run_id, target_spec, resume=True)
+
+
+@run_app.command("rerun")
+def run_rerun(
+    project_id: Annotated[str, typer.Argument(help="Project ID")],
+    experiment_id: Annotated[str, typer.Argument(help="Experiment ID")],
+    run_id: Annotated[str, typer.Argument(help="Run ID")],
+    fresh: Annotated[
+        bool,
+        typer.Option(
+            "--fresh",
+            help="Also bypass content-addressed cache reads (results are still written back).",
+        ),
+    ] = False,
+    target_spec: TargetOption = ".",
+) -> None:
+    """Rerun a failed/cancelled run from the top in a fresh execution.
+
+    CLI twin of ``POST .../{run_id}/rerun`` and ``molexp run --rerun``.
+    """
+    _retry_run(project_id, experiment_id, run_id, target_spec, rerun=True, fresh=fresh)
 
 
 @run_app.command("harvest")

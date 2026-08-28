@@ -17,16 +17,13 @@ hero:
     - label: Guides
       href: "guide/"
   install:
-    label: Install
+    label: Install (PyPI release pending)
     methods:
-      - { label: pip, command: pip install molexp }
-      - { label: uv, command: uv add molexp }
+      - { label: pip, command: pip install git+https://github.com/MolCrafts/molexp }
+      - { label: uv, command: uv pip install git+https://github.com/MolCrafts/molexp }
   badges:
-    - img: https://img.shields.io/pypi/v/molexp
-      href: https://pypi.org/project/molexp/
-      alt: PyPI version
     - img: https://img.shields.io/badge/python-3.12%2B-blue
-      href: https://pypi.org/project/molexp/
+      href: https://github.com/MolCrafts/molexp
       alt: Python 3.12+
 ---
 
@@ -138,7 +135,7 @@ parameters, status, and outputs — nothing lives only in memory.
 import molexp as me
 
 ws = me.Workspace("./lab", name="lab")
-exp = ws.project("demo").experiment("sum")
+exp = ws.add_project("demo").add_experiment("sum")
 run = exp.add_run(params={"scale": 2.0})
 
 result = run.execute(wf)
@@ -162,8 +159,8 @@ Collapse the results to plain records and pick the best.
 
 ```python
 scan = (
-    ws.project("demo")
-    .experiment("lr-scan")
+    ws.add_project("demo")
+    .add_experiment("lr-scan")
     .sweep(wf, {"scale": [1.0, 2.0, 4.0]})
 )
 summary = scan.execute()
@@ -187,7 +184,7 @@ rerun, and scheduler-backed execution.
 
 ```python
 # train.py — register the experiment once
-ws.project("demo").experiment("sum").run(
+ws.add_project("demo").add_experiment("sum").define(
     wf.compile(), params={"scale": [1.0, 2.0]}
 )
 ```
@@ -227,7 +224,7 @@ Four layers, each with a single job. They compose without coupling.
   </div>
   <div>
     <dt>Harness</dt>
-    <dd>Experiment orchestrator. Draft specs → resolve capabilities → generate workflow code → compile → test → review. Nine auditable steps.</dd>
+    <dd>Experiment orchestrator. Two phases: interactive planning onto a task board behind a hard review gate, then deterministic realization — per-task codegen, tests, compile — with full artifact lineage.</dd>
   </div>
   <div>
     <dt>Assets</dt>
@@ -383,7 +380,7 @@ Common entry points you will reach for most often.
   </a>
   <a href="guide/plan-mode/">
     <strong>PlanOrchestrator</strong>
-    <em>Nine-step agent-driven experiment pipeline: draft → spec → code → test → review.</em>
+    <em>Two-phase plan pipeline: interactive planning behind a review gate, then deterministic realization.</em>
   </a>
 </div>
 

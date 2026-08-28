@@ -59,7 +59,7 @@ await runtime.execute(compiled)
 await runtime.execute(compiled, config={"scale": 2.0})
 
 ws = me.Workspace("./lab", name="lab")
-exp = ws.project("demo").experiment("baseline").run(compiled, params={"scale": [2.0]})
+exp = ws.add_project("demo").add_experiment("baseline").define(compiled, params={"scale": [2.0]})
 run = exp.list_runs()[0]
 
 with run.start() as ctx:      # run.start(profile_config=cfg) to attach a resolved profile

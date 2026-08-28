@@ -86,8 +86,10 @@ class DataAssetLibrary:
         Args:
             name: Asset display name.
             src: Path to import.
-            action: How to materialize (``copy`` / ``move`` / ``symlink``
-                / ``hardlink``).
+            action: How to materialize. ``copy`` / ``move`` / ``symlink``
+                / ``hardlink`` place bytes under ``assets/<id>/payload/``.
+                ``reference`` writes only the index record (``asset.json``)
+                pointing at *src* — no copy and no filesystem link.
             meta: Free-form tags persisted with the asset.
             consumed: Optional upstream assets used to build this one.
                 Their ``asset_id``s are recorded in
@@ -100,19 +102,41 @@ class DataAssetLibrary:
 
         asset_id = generate_asset_id()
         asset_dir = self.root / asset_id
-        payload_dir = asset_dir / "payload"
+        now = datetime.now()
+        producer: Producer | None = None
+        if consumed:
+            producer = Producer(inputs=tuple(a.asset_id for a in consumed))
 
+        if action == "reference":
+            # Index-only: the payload stays at source_path. No payload/
+            # directory, no symlink, no hardlink.
+            asset = DataAsset(
+                asset_id=asset_id,
+                name=name,
+                scope=self.scope,
+                path=Path("assets") / asset_id,
+                created_at=now,
+                updated_at=now,
+                producer=producer,
+                tags=meta or {},
+                source_path=str(source_path),
+                import_action=action,
+                content_hash=compute_content_hash(source_path),
+                external_uri=str(source_path),
+            )
+            asset_dir.mkdir(parents=True, exist_ok=True)
+            with open(asset_dir / "asset.json", "w") as f:  # noqa: PTH123
+                json.dump(asset.model_dump(mode="json"), f, indent=2)
+            self._emit_added(asset)
+            return asset
+
+        payload_dir = asset_dir / "payload"
         self._materialize(source_path, payload_dir, action)
 
-        now = datetime.now()
         rel_path = Path("assets") / asset_id / "payload"
         content_hash = None
         if action in ("copy", "move") and payload_dir.exists():
             content_hash = compute_content_hash(payload_dir)
-
-        producer: Producer | None = None
-        if consumed:
-            producer = Producer(inputs=tuple(a.asset_id for a in consumed))
 
         asset = DataAsset(
             asset_id=asset_id,

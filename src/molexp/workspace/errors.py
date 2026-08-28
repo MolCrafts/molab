@@ -8,9 +8,9 @@ The two families:
   raised when the entity already exists and the caller asked for
   a brand-new one.
 
-The idempotent PascalCase factories (``Workspace.Project`` /
-``Project.Experiment`` / ``Experiment.Run``) raise neither — they
-return the existing entity if found.
+The idempotent ``add_*`` factories (``Workspace.add_project`` /
+``Project.add_experiment`` / ``Experiment.add_run``) raise neither —
+they return the existing entity if found.
 
 These classes carry the entity identifier in the message so that
 upstream layers (``server/exceptions.py``) can format HTTP

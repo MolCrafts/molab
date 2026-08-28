@@ -43,7 +43,6 @@ __all__ = [
     "GridSpace",
     "Logger",
     "ParamSpace",
-    "Path",
     "Project",
     "Run",
     "RunContext",

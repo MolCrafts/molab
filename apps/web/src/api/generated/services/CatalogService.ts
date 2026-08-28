@@ -19,7 +19,7 @@ export class CatalogService {
      * @returns CatalogByPathResponse Successful Response
      * @throws ApiError
      */
-    public static catalogByPathApiCatalogByPathGet(
+    public static catalogByPath(
         path: string,
         molexpSession?: (string | null),
     ): CancelablePromise<CatalogByPathResponse> {
@@ -50,7 +50,7 @@ export class CatalogService {
      * @returns CatalogByPathResponse Successful Response
      * @throws ApiError
      */
-    public static catalogByPathApiWorkspacesWsCatalogByPathGet(
+    public static catalogByPath1(
         ws: string,
         path: string,
         molexpSession?: (string | null),

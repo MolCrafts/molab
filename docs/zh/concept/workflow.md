@@ -49,7 +49,7 @@ result = asyncio.run(WorkflowRuntime().execute(compiled))
 import molexp as me
 
 ws = me.Workspace("./lab", name="lab")
-run = ws.project("demo").experiment("baseline").add_run(params={})
+run = ws.add_project("demo").add_experiment("baseline").add_run(params={})
 result = run.execute(wf)
 ```
 

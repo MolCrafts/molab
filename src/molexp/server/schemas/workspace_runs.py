@@ -6,16 +6,17 @@ table where each run row expands to show its execution attempts.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 from molexp._typing import JSONValue
 from molexp.workspace import Run
 from molexp.workspace.models import ExecutionRecord
 
+from ._wire import ApiModel
 from .molq import MolqJobSummary  # noqa: F401  (preserve import surface)
 
 
-class WorkspaceExecutionRow(BaseModel):
+class WorkspaceExecutionRow(ApiModel):
     """One execution attempt of a run, surfaced for the workspace runs table."""
 
     executionId: str
@@ -29,7 +30,7 @@ class WorkspaceExecutionRow(BaseModel):
     backendMetadata: dict[str, str] = Field(default_factory=dict)
 
 
-class WorkspaceRunRow(BaseModel):
+class WorkspaceRunRow(ApiModel):
     """One run, with its execution history nested for tree expansion."""
 
     id: str
@@ -134,7 +135,7 @@ def _build_execution_row(
     )
 
 
-class WorkspaceRunsStats(BaseModel):
+class WorkspaceRunsStats(ApiModel):
     total: int = 0
     running: int = 0
     pending: int = 0
@@ -142,7 +143,7 @@ class WorkspaceRunsStats(BaseModel):
     succeeded: int = 0
 
 
-class WorkspaceRunsResponse(BaseModel):
+class WorkspaceRunsResponse(ApiModel):
     runs: list[WorkspaceRunRow]
     stats: WorkspaceRunsStats
     total: int

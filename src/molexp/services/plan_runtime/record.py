@@ -1,4 +1,4 @@
-"""Surface a PlanMode run on the Agents + Knowledge tabs.
+"""Surface a PlanOrchestrator run on the Agents + Knowledge tabs.
 
 Five raising writers make the AI activity visible in the UI — the agent-task
 entry + session transcript (Agents tab), and three typed ``KnowledgeItem``
@@ -254,7 +254,7 @@ def _write_session_events(
 ) -> None:
     """Write a synthesized session transcript for the Agents *session view*.
 
-    The transcript is deliberately lean: one step per PlanMode stage plus a short
+    The transcript is deliberately lean: one step per PlanOrchestrator stage plus a short
     final summary. The full deliverables — spec, every task, and the runnable
     source — are NOT crammed into the chat answer; the session view's Deliverables
     panel fetches them structurally from ``GET /plans/{run_id}``. The terminal
@@ -408,7 +408,7 @@ def _summary(title: str, tasks: list[str], source: str | None) -> str:
         did.append("generated the runnable workflow source")
     return (
         f"**{title}** — experiment plan ready.\n\n"
-        f"PlanMode {', '.join(did)}.\n\n"
+        f"The plan pipeline {', '.join(did)}.\n\n"
         "Open the **Deliverables** panel to review the spec, plan, and workflow script."
     )
 
@@ -606,7 +606,7 @@ def write_experiment_record(
         name=item_name,
         kind="Decision",
         sources=sources,
-        created_by=f"PlanMode/{model}",
+        created_by=f"PlanOrchestrator/{model}",
         body=body,
         cite=[(run, "derived_from")],
         title=title,
@@ -664,7 +664,7 @@ def write_finding_record(
         name=item_name,
         kind="Finding",
         sources=sources,
-        created_by=f"PlanMode/{model}",
+        created_by=f"PlanOrchestrator/{model}",
         body="\n".join(lines).rstrip() + "\n",
         cite=cites,
         title=title,
@@ -717,7 +717,7 @@ def write_failure_analysis_record(
             SourceRef(kind="run", ref=run.id),
             SourceRef(kind="experiment", ref=experiment.id),
         ],
-        created_by=f"PlanMode/{model}",
+        created_by=f"PlanOrchestrator/{model}",
         body="\n".join(lines).rstrip() + "\n",
         cite=[(run, "derived_from")],
         title=title,
@@ -807,7 +807,7 @@ def _render_markdown(
         f"# {title}",
         "",
         (
-            f"> Experiment record from PlanMode · experiment `{experiment_id}` · "
+            f"> Experiment record from the plan pipeline · experiment `{experiment_id}` · "
             f"run `{run.id}` · model `{model}` · {_created_at(run)}"
         ),
         "",

@@ -39,7 +39,7 @@ def init(
     spec = path if path is not None else "."
     rprint(f"[bold]Initializing workspace at:[/bold] {spec}")
     try:
-        target, _transport, _fs, ws = open_workspace(spec, require_existing=False)
+        _target, _transport, _fs, ws = open_workspace(spec, require_existing=False)
         if name is not None and ws.metadata.name != name:
             ws.metadata = ws.metadata.model_copy(update={"name": name})
         ws.materialize()
@@ -47,4 +47,8 @@ def init(
         rprint(f"[red]Failed to initialize workspace:[/red] {exc}")
         raise typer.Exit(1) from exc
 
-    rprint(f"[green]OK[/green] Workspace ready: {target} → {ws.root}")
+    rprint(f"[green]OK[/green] Workspace ready: {ws.root}")
+    rprint("\n[bold]Next steps:[/bold]")
+    rprint("  • Write a script ending in ws.add_project(...).add_experiment(...)")
+    rprint("    .define(workflow, params=...), then: [bold]molexp run script.py[/bold]")
+    rprint("  • Or open the web UI: [bold]molexp serve[/bold]")

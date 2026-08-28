@@ -64,7 +64,7 @@ workflow.json
 
 The IR's canonical wire format is **JSON** — used by the FastAPI server and
 by the auto-generated TypeScript client. A YAML alternative is also
-available and is the format PlanMode-materialized experiment workspaces
+available and is the format PlanOrchestrator-materialized experiment workspaces
 write to `ir/workflow.yaml`. Round-trip is provided by
 `molexp.workflow.WorkflowCodec`:
 

@@ -27,7 +27,7 @@ from molexp._typing import JSONValue, TaskOutput
 
 from .execution_results import read_completed_node_outputs
 from .models import RunStatus
-from .run import Run, RunWorkflowExecutor, require_run_executor
+from .run import RETRYABLE_STATUSES, Run, RunWorkflowExecutor, require_run_executor
 
 __all__ = ["RunRecord", "RunSet", "RunSetResult"]
 
@@ -133,28 +133,57 @@ class RunSet(Sequence[Run]):
 
     # ── Execution ────────────────────────────────────────────────────────
 
-    def execute(self, *, parallel: int = 1) -> RunSetResult:
-        """Execute every ``pending`` run; return the honest batch summary.
+    def execute(
+        self,
+        *,
+        parallel: int = 1,
+        resume: bool = False,
+        rerun: bool = False,
+        fresh: bool = False,
+    ) -> RunSetResult:
+        """Execute the runs in this set's verb domain; return the honest summary.
 
         Reuses the single sanctioned execution path (``molexp run``'s):
         each run goes through its RunContext lifecycle + the workflow
-        engine, via the workflow layer's registered run executor. Runs
-        outside the ``pending`` domain (succeeded / failed / cancelled /
-        running) are left alone — retrying a failure stays an explicit
-        per-run verb — and appear in the summary with their current status
-        and persisted outputs. A failing run is recorded (``status`` +
+        engine, via the workflow layer's registered run executor. The three
+        verbs mirror the CLI exactly and each acts on a **disjoint** domain:
+
+        * no flag — execute every ``pending`` run (first attempt);
+        * ``resume=True`` — reopen each ``failed``/``cancelled`` run's last
+          execution, seeding its completed nodes (``--resume``);
+        * ``rerun=True`` — open a fresh attempt for each
+          ``failed``/``cancelled`` run (``--rerun``); ``fresh=True``
+          additionally bypasses cache reads (requires ``rerun=True``).
+
+        Runs outside the selected domain are left alone — retrying a failure
+        stays an explicit verb — and appear in the summary with their current
+        status and persisted outputs. A failing run is recorded (``status`` +
         ``error``) and never interrupts its siblings.
 
         Args:
             parallel: Maximum number of runs executing concurrently (≥ 1).
+            resume: Act on failed/cancelled runs by resuming them.
+            rerun: Act on failed/cancelled runs with a fresh attempt.
+            fresh: With ``rerun=True``, bypass content-addressed cache reads.
 
         Raises:
-            ValueError: ``parallel`` < 1.
+            ValueError: ``parallel`` < 1, ``resume`` and ``rerun`` together,
+                or ``fresh`` without ``rerun``.
             RuntimeError: Called with the workflow layer not imported, or
                 from inside a running event loop.
         """
         if parallel < 1:
             raise ValueError(f"parallel must be >= 1, got {parallel}")
+        if resume and rerun:
+            raise ValueError(
+                "resume=True and rerun=True are mutually exclusive verbs — "
+                "resume reopens the last execution, rerun opens a fresh attempt."
+            )
+        if fresh and not rerun:
+            raise ValueError(
+                "fresh=True bypasses the cache for an explicit re-execution and "
+                "requires rerun=True (mirroring `molexp run --rerun --fresh`)."
+            )
         executor = require_run_executor()  # fail fast before opening a loop
         try:
             asyncio.get_running_loop()
@@ -165,17 +194,31 @@ class RunSet(Sequence[Run]):
                 "RunSet.execute() was called from inside a running event "
                 "loop; drive the runs with run.aexecute(...) there instead."
             )
-        return asyncio.run(self._execute(executor, parallel=parallel))
+        return asyncio.run(
+            self._execute(executor, parallel=parallel, resume=resume, rerun=rerun, fresh=fresh)
+        )
 
-    async def _execute(self, executor: RunWorkflowExecutor, parallel: int) -> RunSetResult:
+    async def _execute(
+        self,
+        executor: RunWorkflowExecutor,
+        parallel: int,
+        *,
+        resume: bool = False,
+        rerun: bool = False,
+        fresh: bool = False,
+    ) -> RunSetResult:
         semaphore = asyncio.Semaphore(parallel)
+        retryable = resume or rerun
+        domain = RETRYABLE_STATUSES if retryable else frozenset({RunStatus.PENDING.value})
 
         async def _one(run: Run) -> RunRecord:
-            if run.status != RunStatus.PENDING.value:
+            if run.status not in domain:
                 return self._record_for(run)
             async with semaphore:
                 try:
-                    result = await executor.aexecute(run, self._workflow)
+                    result = await executor.aexecute(
+                        run, self._workflow, resume=resume, rerun=rerun, fresh=fresh
+                    )
                 except Exception as exc:
                     return self._record_for(run, exc=exc)
             return self._record_for(run, outputs=dict(getattr(result, "outputs", {}) or {}))

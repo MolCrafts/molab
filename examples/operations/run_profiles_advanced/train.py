@@ -1,6 +1,6 @@
 """Profile inheritance and ``--override`` dot-notation — ``molcfg.yaml`` advanced patterns.
 
-Matches ``docs/guide/run-profiles.md``.
+Matches ``docs/en/guide/run-profiles.md``.
 
 Demonstrates:
 
@@ -45,7 +45,7 @@ def train(
 
 (
     me.Workspace(WORKSPACE_ROOT, name="profiles-advanced")
-    .project("demo")
-    .experiment("train")
-    .run(wf.compile(), params={"epochs": [3, 10]})
+    .add_project("demo")
+    .add_experiment("train")
+    .define(wf.compile(), params={"epochs": [3, 10]})
 )

@@ -90,12 +90,12 @@ export const TreeMenuItems = ({ actions }: { actions: TreeNodeAction[] }): JSX.E
 );
 
 const INDENT = 14;
+/** Always-reserved gutter so sibling expandability never shifts indent. */
+const CHEVRON_COL = 24;
 
 interface RowProps {
   node: TreeNode;
   depth: number;
-  /** True if any sibling at this level has children. Drives the chevron-column reservation. */
-  reserveChevron: boolean;
   activeId?: string;
   expanded: Set<string>;
   onToggle: (id: string) => void;
@@ -107,7 +107,6 @@ interface RowProps {
 const TreeRow = ({
   node,
   depth,
-  reserveChevron,
   activeId,
   expanded,
   onToggle,
@@ -119,7 +118,6 @@ const TreeRow = ({
   const isActive = activeId === node.id;
   const Icon = node.icon;
   const actions = node.actions ?? [];
-  const childrenReserveChevron = node.children?.some((c) => c.children !== undefined) ?? false;
   const childCount = node.children?.length ?? 0;
   // Parent often passes an inline onExpand; keep a live ref so the empty-heal
   // effect only re-runs when the *node state* changes, not every render.
@@ -212,9 +210,9 @@ const TreeRow = ({
               className={`h-3.5 w-3.5 transition-transform ${isExpanded ? "rotate-90" : ""}`}
             />
           </WorkbenchIconAction>
-        ) : reserveChevron ? (
-          <span className="h-6 w-6 flex-none" />
-        ) : null}
+        ) : (
+          <span className="h-6 w-6 flex-none" aria-hidden />
+        )}
         {wrappedRow}
       </div>
       {node.children !== undefined && isExpanded && (
@@ -222,7 +220,7 @@ const TreeRow = ({
           {node.children.length === 0 && node.emptyChildLabel ? (
             <p
               className="text-label text-muted-foreground"
-              style={{ paddingLeft: `${(depth + 1) * INDENT + 8}px` }}
+              style={{ paddingLeft: `${(depth + 1) * INDENT + CHEVRON_COL}px` }}
             >
               {node.emptyChildLabel}
             </p>
@@ -232,7 +230,6 @@ const TreeRow = ({
                 key={child.id}
                 node={child}
                 depth={depth + 1}
-                reserveChevron={childrenReserveChevron}
                 activeId={activeId}
                 expanded={expanded}
                 onToggle={onToggle}
@@ -301,8 +298,6 @@ export const TreeView = ({
     );
   }
 
-  const reserveChevron = nodes.some((n) => n.children !== undefined);
-
   return (
     <div className="space-y-0.5">
       {nodes.map((node) => (
@@ -310,7 +305,6 @@ export const TreeView = ({
           key={node.id}
           node={node}
           depth={0}
-          reserveChevron={reserveChevron}
           activeId={activeId}
           expanded={expanded}
           onToggle={toggle}

@@ -11,6 +11,27 @@ import typer
 
 app = typer.Typer(
     name="molexp",
-    help="Molecular experiment workflow management",
+    help="Agent-assisted scientific-workflow platform for FAIR research",
     no_args_is_help=True,
 )
+
+
+def _version_callback(value: bool) -> None:
+    if value:
+        import molexp
+
+        typer.echo(f"molexp {molexp.__version__}")
+        raise typer.Exit()
+
+
+@app.callback()
+def _main(
+    version: bool = typer.Option(
+        False,
+        "--version",
+        callback=_version_callback,
+        is_eager=True,
+        help="Show the molexp version and exit.",
+    ),
+) -> None:
+    """Agent-assisted scientific-workflow platform for FAIR research."""

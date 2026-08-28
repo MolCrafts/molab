@@ -22,7 +22,7 @@ export class RegistryService {
      * @returns UiPluginListResponse Successful Response
      * @throws ApiError
      */
-    public static listPluginsApiPluginsGet(
+    public static listPlugins(
         molexpSession?: (string | null),
     ): CancelablePromise<UiPluginListResponse> {
         return __request(OpenAPI, {
@@ -43,7 +43,7 @@ export class RegistryService {
      * @returns TaskTypeListResponse Successful Response
      * @throws ApiError
      */
-    public static listTaskTypesApiTasksGet(
+    public static listTaskTypes(
         molexpSession?: (string | null),
     ): CancelablePromise<TaskTypeListResponse> {
         return __request(OpenAPI, {
@@ -65,7 +65,7 @@ export class RegistryService {
      * @returns TaskTypeResponse Successful Response
      * @throws ApiError
      */
-    public static getTaskTypeApiTasksSlugGet(
+    public static getTaskType(
         slug: string,
         molexpSession?: (string | null),
     ): CancelablePromise<TaskTypeResponse> {

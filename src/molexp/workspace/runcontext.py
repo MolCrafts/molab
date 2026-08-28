@@ -150,6 +150,36 @@ class RunContext:
         """Scratch directory for one workflow task under this execution."""
         return self._assets.task_workdir(task_name)
 
+    def register_product(
+        self,
+        src: Path | str | None = None,
+        *,
+        name: str | None = None,
+        tags: dict[str, str] | None = None,
+        mime: str | None = None,
+    ) -> Path:
+        """Register a file this run produced as a run artifact.
+
+        A task's durable products — ``nve.pt``, a plot, a report — go
+        through this API. Opposite of :meth:`register_asset` (importing
+        an external ``DataAsset``).
+
+        Call with only ``name`` to get ``<run_dir>/artifacts/<name>``
+        (parent created) and write the product there. Call again with
+        the file to copy it if needed and record it on the run
+        manifest. Passing an existing file in one shot also works.
+
+        Args:
+            src: File the task wrote. Omit to only reserve the dest path.
+            name: Filename under ``artifacts/``. Defaults to ``src.name``.
+            tags: Free-form metadata on the registered asset.
+            mime: Optional MIME hint.
+
+        Returns:
+            Absolute path of the product under ``artifacts/``.
+        """
+        return self._assets.register_product(src, name=name, tags=tags, mime=mime)
+
     # ── Lifecycle ───────────────────────────────────────────────────────
 
     def __enter__(self) -> RunContext:

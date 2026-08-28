@@ -1,6 +1,6 @@
 """IR export: Mermaid diagrams, JSON IR round-trip, and graph IR for UIs.
 
-Matches ``docs/guide/ir-export.md``.
+Matches ``docs/en/guide/ir-export.md``.
 
 Demonstrates:
 

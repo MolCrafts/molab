@@ -65,12 +65,10 @@ class CurateTaskListResponse(BaseModel):
 
 
 def _configured_model() -> str | None:
-    """Return the ``agent.model`` value from in-code ``molexp.config``, if any."""
-    import molexp
-    from molexp.services.operator_config import AGENT_MODEL_KEY
+    """Effective ``agent.model`` — the shared services resolver."""
+    from molexp.services.operator_config import resolve_configured_model
 
-    model = molexp.config.get(AGENT_MODEL_KEY)
-    return model if isinstance(model, str) and model else None
+    return resolve_configured_model()
 
 
 def _to_response(task: CurateTask, *, project_id: str, experiment_id: str) -> CurateTaskResponse:
@@ -108,12 +106,9 @@ async def create_curate_task(
     to the app event loop; the handler itself does no awaiting and returns the
     initial ``running`` status immediately.
     """
-    from molexp._typing import JSONValue
     from molexp.ids import generate_id
     from molexp.server.deps.curate_runtime import get_curate_runtime
     from molexp.services.curate_runtime.gateway import build_curate_gateway
-    from molexp.workspace.errors import RunNotFoundError
-    from molexp.workspace.utils import derive_run_id
 
     text = request.request.strip()
     if not text:
@@ -129,12 +124,10 @@ async def create_curate_task(
     # Workspace NotFound errors map to HTTP envelopes via the registered handlers.
     experiment = workspace.get_project(project_id).get_experiment(experiment_id)
 
-    params: dict[str, JSONValue] = {"mode": "curate", "request": text}
-    run_id = derive_run_id(params)
-    try:
-        run = experiment.get_run(run_id)
-    except RunNotFoundError:
-        run = experiment.add_run(params, id=run_id)
+    # One bootstrap shared with `molexp curate ask` (services.curate_runtime).
+    from molexp.services.curate_runtime.flow import resolve_curate_run
+
+    run = resolve_curate_run(experiment, text)
 
     gateway = build_curate_gateway(model=model, run=run)
     task = get_curate_runtime().create(

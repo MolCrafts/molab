@@ -24,6 +24,7 @@ from molexp.workflow import default_binding_registry
 from molexp.workspace.run import RETRYABLE_STATUSES, RunStatus
 from molexp.workspace.source_snapshot import snapshot_sources
 from molexp.workspace.target import LocalTarget, RemoteTarget
+from molexp.workspace.utils import run_id_from_dir_name
 
 if TYPE_CHECKING:
     from molexp.workflow.protocols import RunContextLike
@@ -366,7 +367,7 @@ def _dispatch_runs(
                         source_snapshot = snapshot_sources(
                             script.resolve(), Path(str(mol_run.run_dir))
                         )
-                        mol_run._update_metadata(
+                        mol_run.update_provenance(
                             script=str(script.resolve()),
                             source_snapshot=source_snapshot,
                             submit_cwd=submit_cwd_str,
@@ -458,7 +459,7 @@ def _make_local_inprocess_handler(
     return _handler
 
 
-@app.command(name="execute")
+@app.command(name="execute", hidden=True)
 def execute(
     run_dir: Annotated[
         Path,
@@ -522,7 +523,7 @@ def execute(
     run_id = (
         cast("str | None", meta.get("id"))
         or ctx_meta.get("run_id")
-        or run_dir.name.removeprefix("run-")
+        or run_id_from_dir_name(run_dir.name)
     )
     # project/experiment ids are not stored in run.json; derive them from the
     # canonical layout …/projects/<P>/experiments/<E>/runs/run-<id>. The run
@@ -768,6 +769,24 @@ def _run_dry_run(
         rprint("[dim]No runnable bound experiments found.[/dim]")
 
 
+def _latest_error_txt(run: Run) -> str | None:
+    """Path of the newest execution's ``error.txt``, if one was written."""
+    try:
+        exec_id = run.read_ops().current_execution_id
+        candidates = []
+        if exec_id:
+            candidates.append(Path(str(run.run_dir)) / "executions" / exec_id / "error.txt")
+        executions_dir = Path(str(run.run_dir)) / "executions"
+        if executions_dir.is_dir():
+            candidates.extend(sorted(executions_dir.glob("*/error.txt"), reverse=True))
+        for candidate in candidates:
+            if candidate.is_file():
+                return str(candidate)
+    except Exception:  # a missing sidecar must never mask the failure report
+        return None
+    return None
+
+
 def _report_local_results(dispatched_runs: list[Run], continue_verb: str | None) -> None:
     """Print an honest terminal-status summary and set the process exit code.
 
@@ -787,7 +806,13 @@ def _report_local_results(dispatched_runs: list[Run], continue_verb: str | None)
         rprint("")
         for mol_run in failed:
             rprint(f"  [red]x[/red] run={mol_run.id}  status={mol_run.status}")
+            error_txt = _latest_error_txt(mol_run)
+            if error_txt is not None:
+                rprint(f"    [dim]error: {error_txt}[/dim]")
         rprint(f"\n[red]FAILED[/red] {len(failed)} of {len(dispatched_runs)} runs did not succeed.")
+        rprint(
+            "[dim]Retry: molexp run <script> --resume (continue) or --rerun (from the top).[/dim]"
+        )
         raise typer.Exit(1)
     rprint(f"\n[green]OK[/green] {len(dispatched_runs)} runs {verb}.")
 

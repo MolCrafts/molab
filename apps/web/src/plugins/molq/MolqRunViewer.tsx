@@ -18,6 +18,7 @@ import { useRunViewer } from "@/app/renderers/useRunViewer";
 import { POST_DISPATCH_TAB, RunToolbar } from "@/app/runs/RunToolbar";
 import { workspaceApi } from "@/app/state/api";
 import { useDiscoveredFileTypesForRun } from "@/app/state/useDiscoveredFileTypes";
+import { usePluginTabBadgeCounts } from "@/lib/use-plugin-tab-badge-counts";
 import type { ApiAssetResponse, RendererProps } from "@/app/types";
 import {
   Table,
@@ -28,6 +29,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { formatDateTime } from "@/lib/datetime";
+import { pluginTabLabel } from "@/lib/plugin-tab-label";
 
 const getExecutorEntry = (
   executorInfo: Record<string, string>,
@@ -72,6 +74,7 @@ export const MolqRunViewer = (props: RendererProps): JSX.Element => {
     [run],
   );
   const { discovered: discoveredPlugins } = useDiscoveredFileTypesForRun(runCoords, "run");
+  const tabBadgeCounts = usePluginTabBadgeCounts(discoveredPlugins, runCoords);
 
   useEffect(() => {
     let cancelled = false;
@@ -201,7 +204,12 @@ export const MolqRunViewer = (props: RendererProps): JSX.Element => {
               ...runTabContributions.map((tab) => ({ value: tab.value, label: tab.label })),
               ...discoveredPlugins.map(({ contribution, files }) => ({
                 value: contribution.value,
-                label: `${contribution.label} (${files.length})`,
+                label: pluginTabLabel(
+                  contribution.label,
+                  files.length,
+                  Boolean(contribution.resolveTabBadgeCount),
+                  tabBadgeCounts[contribution.value],
+                ),
               })),
             ]}
           />

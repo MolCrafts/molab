@@ -1,6 +1,6 @@
 """Artifacts, logs, checkpoints, data imports, and asset queries.
 
-Matches ``docs/guide/assets.md``.
+Matches ``docs/en/guide/assets.md``.
 
 Walks through:
 
@@ -51,7 +51,7 @@ async def main() -> None:
     external.write_text("x,y\n1,2\n3,4\n")
     ws.data_assets.import_asset("toy-dataset", external)
 
-    exp = ws.project("demo").experiment("train").run(compiled, params=None)
+    exp = ws.add_project("demo").add_experiment("train").define(compiled, params=None)
     run = exp.list_runs()[0]
     with run.start() as ctx:
         result = await WorkflowRuntime().execute(compiled, run_context=ctx)

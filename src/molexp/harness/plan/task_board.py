@@ -1,7 +1,7 @@
 """Task-board state model + pure transitions for the emergent plan loop.
 
 The :class:`TaskBoard` is the current-state-only record of an experiment's
-tasks during the emergent PlanMode loop: a monotone ``version`` counter plus a
+tasks during the emergent PlanOrchestrator loop: a monotone ``version`` counter plus a
 tuple of :class:`BoardTask` entries. It carries **no** timestamps and **no**
 history — the audit trail lives in the harness event log / artifact lineage,
 not in the board itself.

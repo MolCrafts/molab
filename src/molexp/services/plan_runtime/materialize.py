@@ -1,8 +1,8 @@
-"""The single shared step that makes a PlanMode run UI-visible — honestly.
+"""The single shared step that makes a PlanOrchestrator run UI-visible — honestly.
 
 Both entry points that run a plan — the server's ``POST /plan-tasks`` background
 task and the CLI's ``molexp plan`` — call :func:`materialize_plan_records` after
-``PlanMode`` finishes (success **or** terminal failure), so a plan produced from
+``PlanOrchestrator`` finishes (success **or** terminal failure), so a plan produced from
 Python and one produced from the UI converge on the *exact same* on-disk
 workspace state. Keeping this in one function is the invariant that makes
 "Python operation ≡ UI operation" hold: neither path can drift from the other.

@@ -1,6 +1,6 @@
 """A tour of ``TaskContext`` — inputs bind by name, ``ctx`` carries the workdir.
 
-Matches ``docs/guide/task-context.md``.
+Matches ``docs/en/guide/task-context.md``.
 
 A task body declares the runtime values it consumes as **named parameters**; the
 engine binds them from the merged map {build-time config} | {upstream outputs |
@@ -61,7 +61,7 @@ compiled = WorkflowCompiler(name="counter").add(Seed()).add(Record(), depends_on
 async def main() -> None:
     root = Path(tempfile.mkdtemp(prefix="molexp-ctx-"))
     ws = me.Workspace(root, name="ctx-demo")
-    exp = ws.project("demo").experiment("counter").run(compiled, params={"base": [1]})
+    exp = ws.add_project("demo").add_experiment("counter").define(compiled, params={"base": [1]})
 
     run = exp.list_runs()[0]
     cfg = ProfileConfig({"scale": 10}, name="smoke")

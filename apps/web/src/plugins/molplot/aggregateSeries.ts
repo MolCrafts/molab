@@ -102,15 +102,7 @@ const sampleStd = (xs: number[]): number => {
   return Math.sqrt(variance);
 };
 
-const MODEBAR_REMOVE = [
-  "lasso2d",
-  "select2d",
-  "toggleSpikelines",
-  "hoverClosestCartesian",
-  "hoverCompareCartesian",
-];
-
-/** Shared axis / modebar / theme block, mirroring RunMetricsView's chart config. */
+/** Shared axis / theme block, mirroring RunMetricsView's chart config. */
 const baseConfig = (
   series: LineSeriesConfig[],
   options: Pick<AggregateOptions, "xMode" | "yScale" | "metricKey">,
@@ -124,8 +116,6 @@ const baseConfig = (
   hovertemplate: "%{y:.6g}<extra></extra>",
   hovermode: "x unified",
   showLegend: true,
-  modebar: false,
-  modebarRemove: MODEBAR_REMOVE,
   theme: "auto",
 });
 

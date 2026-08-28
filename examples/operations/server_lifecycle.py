@@ -1,6 +1,6 @@
 """Server lifecycle — creating the FastAPI app and inspecting `ServerManager`.
 
-Matches ``docs/guide/server-lifecycle.md``.
+Matches ``docs/en/guide/server-lifecycle.md``.
 
 Running a real server inside a documentation example is fragile: it needs a
 free port, a live event loop, and somewhere to park the subprocess. So this

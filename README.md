@@ -9,14 +9,13 @@
 
 <p>
   <a href="https://img.shields.io/github/actions/workflow/status/MolCrafts/molexp/ci.yml?style=flat-square&logo=githubactions&logoColor=white&label=CI"><img src="https://img.shields.io/github/actions/workflow/status/MolCrafts/molexp/ci.yml?style=flat-square&logo=githubactions&logoColor=white&label=CI" alt="CI"></a>
-  <a href="https://pypi.org/project/molexp/"><img src="https://img.shields.io/pypi/v/molexp?style=flat-square&logo=pypi&logoColor=white&label=PyPI" alt="PyPI"></a>
-  <a href="https://pypi.org/project/molexp/"><img src="https://img.shields.io/pypi/pyversions/molexp?style=flat-square&logo=python&logoColor=white" alt="Python"></a>
+  <img src="https://img.shields.io/badge/python-3.12%2B-blue?style=flat-square&logo=python&logoColor=white" alt="Python 3.12+">
   <img src="https://img.shields.io/badge/license-BSD--3--Clause-18432B?style=flat-square" alt="License">
   <a href="https://github.com/astral-sh/ruff"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json&style=flat-square" alt="Ruff"></a>
 </p>
 
 <p>
-  <a href="https://molcrafts.github.io/molexp/"><b>Documentation</b></a> &nbsp;&middot;&nbsp;
+  <a href="docs/en/index.md"><b>Documentation</b></a> &nbsp;&middot;&nbsp;
   <a href="#quick-start"><b>Quick start</b></a> &nbsp;&middot;&nbsp;
   <a href="#molcrafts-ecosystem"><b>Ecosystem</b></a>
 </p>
@@ -56,11 +55,15 @@ What that unlocks is a research workflow you can trust and revisit: experiments 
 
 ## Install
 
+molexp is not yet published on PyPI (a release is pending) — install straight from GitHub:
+
 ```bash
-pip install molexp
+pip install git+https://github.com/MolCrafts/molexp
+# or, with uv
+uv pip install git+https://github.com/MolCrafts/molexp
 ```
 
-Requires Python >= 3.12. Core depends on `pydantic`, `typer`, `rich`, `fastapi`, `uvicorn`, and the MolCrafts libraries `mollog`, `molcfg`, `molq`, and `molpy` (the workflow engine is self-owned — `pydantic-graph` is no longer a dependency). Optional extras: `molexp[agent]` adds the PydanticAI LLM layer; `molexp[tensorboard]` adds the TensorBoard scalar reader; `molexp[all]` bundles both, and `molexp[dev]` pulls everything for development.
+Requires Python >= 3.12. Core depends on `pydantic`, `pyyaml`, `typer`, `rich`, `fastapi`, `uvicorn`, `zarr`, and the MolCrafts libraries `mollog`, `molcfg`, `molq`, and `molpy` (the workflow engine is self-owned — `pydantic-graph` is no longer a dependency). Optional extras: `molexp[agent]` adds the PydanticAI LLM layer; `molexp[tensorboard]` adds the TensorBoard scalar reader; `molexp[all]` bundles both, and `molexp[dev]` pulls everything for development.
 
 ## Quick start
 
@@ -89,15 +92,15 @@ result = asyncio.run(WorkflowRuntime().execute(wf.compile()))
 print(result.outputs)  # {'fetch': [1.0, 4.0, 9.0], 'reduce': 14.0}
 ```
 
-Attaching a workflow to a tracked `Workspace` experiment (`ws.project(...).experiment(...).run(wf.compile(), params=...)`), running it with `molcfg` profiles via `molexp run`, and submitting to a cluster are covered in the docs.
+Attaching a workflow to a tracked `Workspace` experiment (`ws.add_project(...).add_experiment(...).define(wf.compile(), params=...)`), running it with `molcfg` profiles via `molexp run`, and submitting to a cluster are covered in the docs.
 
 ## Documentation
 
-- [Getting Started](https://molcrafts.github.io/molexp/getting-started/) — runnable first workflow, tracked runs, CLI and profiles
-- [Concepts](https://molcrafts.github.io/molexp/concept/) — the workflow / workspace / plugin mental model
-- [Guide](https://molcrafts.github.io/molexp/guide/) — task & actor authoring, runtime, assets, server, molq
-- [Architecture](https://molcrafts.github.io/molexp/architecture/) — layer boundaries the code preserves
-- [Development](https://molcrafts.github.io/molexp/development/) — compiler internals, task protocols, active specs
+- [Getting Started](docs/en/getting-started/index.md) — runnable first workflow, tracked runs, CLI and profiles
+- [Concepts](docs/en/concept/index.md) — the workflow / workspace / plugin mental model
+- [Guide](docs/en/guide/index.md) — task & actor authoring, runtime, assets, server, molq
+- [Architecture](docs/en/architecture/index.md) — layer boundaries the code preserves
+- [Development](docs/en/development/index.md) — compiler internals, task protocols, active specs
 
 ## MolCrafts ecosystem
 
@@ -118,7 +121,7 @@ Attaching a workflow to a tracked `Workspace` experiment (`ws.project(...).exper
 
 ## Contributing
 
-Contributions are welcome — see the [development docs](https://molcrafts.github.io/molexp/development/) to get started.
+Contributions are welcome — see the [development docs](docs/en/development/index.md) to get started.
 
 ## License
 

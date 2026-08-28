@@ -1,6 +1,6 @@
 """Grid and random parameter sweeps — RunSet, RunSetResult, and idempotent re-declaration.
 
-Matches ``docs/guide/sweeps.md``.
+Matches ``docs/en/guide/sweeps.md``.
 
 Demonstrates:
 
@@ -50,7 +50,7 @@ def main() -> None:
 
     # ── 1. GridSpace — exhaustive Cartesian product ─────────────────────
     print("── GridSpace sweep ──────────────────────────────────────")
-    exp = ws.project("demo").experiment("lr-scan")
+    exp = ws.add_project("demo").add_experiment("lr-scan")
     space = GridSpace({"lr": [1e-3, 5e-4, 1e-4], "seed": [42]})
     scan = exp.sweep(wf, params=space)
     summary = scan.execute(parallel=2)
@@ -64,7 +64,7 @@ def main() -> None:
     # ── 2. Dict shorthand — same as GridSpace ──────────────────────────
     print()
     print("── Dict shorthand ───────────────────────────────────────")
-    quick = ws.project("demo").experiment("quick-sweep").sweep(wf, {"lr": [1e-2]})
+    quick = ws.add_project("demo").add_experiment("quick-sweep").sweep(wf, {"lr": [1e-2]})
     quick_result = quick.execute()
     print(f"  runs: {len(quick_result)}")
 
@@ -88,7 +88,7 @@ def main() -> None:
     print()
     print("── UniformSpace random sampling ─────────────────────────")
     uniform = UniformSpace({"lr": [1e-3, 5e-4, 1e-4, 5e-5]}, n_samples=3, seed=1)
-    rand_exp = ws.project("demo").experiment("random-scan")
+    rand_exp = ws.add_project("demo").add_experiment("random-scan")
     rand_scan = rand_exp.sweep(wf, params=uniform)
     rand_summary = rand_scan.execute()
     for row in rand_summary.to_records():

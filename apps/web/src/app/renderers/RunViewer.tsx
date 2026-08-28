@@ -9,7 +9,9 @@ import { useRunViewer } from "@/app/renderers/useRunViewer";
 import { POST_DISPATCH_TAB, RunToolbar } from "@/app/runs/RunToolbar";
 import { workspaceApi } from "@/app/state/api";
 import { useDiscoveredFileTypesForRun } from "@/app/state/useDiscoveredFileTypes";
+import { usePluginTabBadgeCounts } from "@/lib/use-plugin-tab-badge-counts";
 import type { ApiAssetResponse, RendererProps } from "@/app/types";
+import { pluginTabLabel } from "@/lib/plugin-tab-label";
 
 const openKnowledgePath = (
   path: string,
@@ -54,6 +56,7 @@ export const RunViewer = (props: RendererProps): JSX.Element => {
     [run],
   );
   const { discovered: discoveredPlugins } = useDiscoveredFileTypesForRun(runCoords, "run");
+  const tabBadgeCounts = usePluginTabBadgeCounts(discoveredPlugins, runCoords);
 
   useEffect(() => {
     let cancelled = false;
@@ -175,7 +178,12 @@ export const RunViewer = (props: RendererProps): JSX.Element => {
       const PluginComponent = contribution.Component;
       return {
         value: contribution.value,
-        label: `${contribution.label} (${files.length})`,
+        label: pluginTabLabel(
+          contribution.label,
+          files.length,
+          Boolean(contribution.resolveTabBadgeCount),
+          tabBadgeCounts[contribution.value],
+        ),
         content:
           activeTab === contribution.value ? (
             <PluginComponent key={selectedRunId} {...props} discoveredFiles={files} />

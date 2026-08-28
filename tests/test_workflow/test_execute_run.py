@@ -111,9 +111,10 @@ class TestExecuteRun:
         with pytest.raises(ValueError, match="rerun=True"):
             execute_run(_build_wf(), run, fresh=True)
 
-    def test_failed_then_default_resumes_same_execution(self, tmp_path: Path) -> None:
-        """Default retry of a failed run is *resume*: reopen the same
-        execution, seed completed nodes, recompute only the rest."""
+    def test_failed_then_explicit_resume_reopens_same_execution(self, tmp_path: Path) -> None:
+        """Retrying is explicit: a failed run refuses a plain call and
+        ``resume=True`` reopens the same execution, seeds completed nodes,
+        and recomputes only the rest."""
         flag = tmp_path / "healed"
         first_calls: list[int] = []
 
@@ -140,7 +141,10 @@ class TestExecuteRun:
         exec_ids_before = [r.execution_id for r in run.execution_history]
 
         flag.write_text("ok")
-        result = execute_run(build(), run)
+        # A plain call on a retryable run refuses — retrying is an explicit verb.
+        with pytest.raises(RunNotExecutableError, match="resume=True"):
+            execute_run(build(), run)
+        result = execute_run(build(), run, resume=True)
         assert result.status == "succeeded"
         assert result.outputs["stage_b"] == 200
         # Same execution reopened — no new attempt appended.

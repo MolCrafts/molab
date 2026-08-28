@@ -3,7 +3,7 @@
 /* tslint:disable */
 /* eslint-disable */
 /**
- * Partial update of a note's ``meta.yaml`` tags/status.
+ * Partial update of a note's ``meta.json`` tags/status.
  *
  * Each field is independently optional; ``None`` means "leave untouched", which
  * maps onto ``Note.set_tags`` / ``Note.set_status`` each preserving the sibling

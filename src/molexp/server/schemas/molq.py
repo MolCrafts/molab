@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 from molexp.plugins.submit_molq.dashboard import (
     JobDetail,
@@ -14,8 +14,10 @@ from molexp.plugins.submit_molq.dashboard import (
     TargetSummary,
 )
 
+from ._wire import ApiModel
 
-class MolqTargetSummary(BaseModel):
+
+class MolqTargetSummary(ApiModel):
     name: str
     scheduler: str
     clusterName: str | None = None
@@ -37,12 +39,12 @@ class MolqTargetSummary(BaseModel):
         )
 
 
-class MolqTargetListResponse(BaseModel):
+class MolqTargetListResponse(ApiModel):
     targets: list[MolqTargetSummary]
     total: int
 
 
-class MolqJobSummary(BaseModel):
+class MolqJobSummary(ApiModel):
     target: str
     jobId: str
     schedulerJobId: str | None = None
@@ -76,7 +78,7 @@ class MolqJobSummary(BaseModel):
         )
 
 
-class MolqQueueStats(BaseModel):
+class MolqQueueStats(ApiModel):
     running: int = 0
     pending: int = 0
     failed: int = 0
@@ -94,7 +96,7 @@ class MolqQueueStats(BaseModel):
         )
 
 
-class MolqJobsResponse(BaseModel):
+class MolqJobsResponse(ApiModel):
     jobs: list[MolqJobSummary]
     stats: MolqQueueStats
     total: int
@@ -109,7 +111,7 @@ class MolqJobsResponse(BaseModel):
         )
 
 
-class MolqJobTransition(BaseModel):
+class MolqJobTransition(ApiModel):
     timestamp: datetime
     fromState: str | None = None
     toState: str

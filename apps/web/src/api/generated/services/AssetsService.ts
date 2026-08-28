@@ -4,8 +4,7 @@
 /* eslint-disable */
 import type { AssetLineageResponse } from '../models/AssetLineageResponse';
 import type { AssetResponse } from '../models/AssetResponse';
-import type { Body_import_data_asset_api_assets_data_import_post } from '../models/Body_import_data_asset_api_assets_data_import_post';
-import type { Body_import_data_asset_api_workspaces__ws__assets_data_import_post } from '../models/Body_import_data_asset_api_workspaces__ws__assets_data_import_post';
+import type { Body_importDataAsset } from '../models/Body_importDataAsset';
 import type { DataAssetRegisterRequest } from '../models/DataAssetRegisterRequest';
 import type { CancelablePromise } from '../core/CancelablePromise';
 import { OpenAPI } from '../core/OpenAPI';
@@ -28,7 +27,7 @@ export class AssetsService {
      * @returns AssetResponse Successful Response
      * @throws ApiError
      */
-    public static listAssetsApiAssetsGet(
+    public static listAssets(
         kind?: (string | null),
         scopeKind?: (string | null),
         runId?: (string | null),
@@ -64,8 +63,8 @@ export class AssetsService {
      * @returns AssetResponse Successful Response
      * @throws ApiError
      */
-    public static importDataAssetApiAssetsDataImportPost(
-        formData: Body_import_data_asset_api_assets_data_import_post,
+    public static importDataAsset(
+        formData: Body_importDataAsset,
         molexpSession?: (string | null),
     ): CancelablePromise<AssetResponse> {
         return __request(OpenAPI, {
@@ -92,7 +91,7 @@ export class AssetsService {
      * @returns AssetResponse Successful Response
      * @throws ApiError
      */
-    public static registerDataAssetApiAssetsDataRegisterPost(
+    public static registerDataAsset(
         requestBody: DataAssetRegisterRequest,
         molexpSession?: (string | null),
     ): CancelablePromise<AssetResponse> {
@@ -116,7 +115,7 @@ export class AssetsService {
      * @returns AssetResponse Successful Response
      * @throws ApiError
      */
-    public static getAssetApiAssetsAssetIdGet(
+    public static getAsset(
         assetId: string,
         molexpSession?: (string | null),
     ): CancelablePromise<AssetResponse> {
@@ -142,7 +141,7 @@ export class AssetsService {
      * @returns any Successful Response
      * @throws ApiError
      */
-    public static assetContentApiAssetsAssetIdContentGet(
+    public static assetContent(
         assetId: string,
         molexpSession?: (string | null),
     ): CancelablePromise<any> {
@@ -172,7 +171,7 @@ export class AssetsService {
      * @returns AssetLineageResponse Successful Response
      * @throws ApiError
      */
-    public static getAssetLineageApiAssetsAssetIdLineageGet(
+    public static getAssetLineage(
         assetId: string,
         molexpSession?: (string | null),
     ): CancelablePromise<AssetLineageResponse> {
@@ -216,7 +215,7 @@ export class AssetsService {
      * @returns any Successful Response
      * @throws ApiError
      */
-    public static previewAssetApiAssetsAssetIdPreviewGet(
+    public static previewAsset(
         assetId: string,
         format: 'frames' | 'png' = 'frames',
         limit: number = 200,
@@ -249,7 +248,7 @@ export class AssetsService {
      * @returns string Successful Response
      * @throws ApiError
      */
-    public static assetTailApiAssetsAssetIdTailGet(
+    public static assetTail(
         assetId: string,
         n: number = 100,
         molexpSession?: (string | null),
@@ -289,7 +288,7 @@ export class AssetsService {
      * @returns AssetResponse Successful Response
      * @throws ApiError
      */
-    public static listAssetsApiWorkspacesWsAssetsGet(
+    public static listAssets1(
         ws: string,
         kind?: (string | null),
         scopeKind?: (string | null),
@@ -330,9 +329,9 @@ export class AssetsService {
      * @returns AssetResponse Successful Response
      * @throws ApiError
      */
-    public static importDataAssetApiWorkspacesWsAssetsDataImportPost(
+    public static importDataAsset1(
         ws: string,
-        formData: Body_import_data_asset_api_workspaces__ws__assets_data_import_post,
+        formData: Body_importDataAsset,
         molexpSession?: (string | null),
     ): CancelablePromise<AssetResponse> {
         return __request(OpenAPI, {
@@ -363,7 +362,7 @@ export class AssetsService {
      * @returns AssetResponse Successful Response
      * @throws ApiError
      */
-    public static registerDataAssetApiWorkspacesWsAssetsDataRegisterPost(
+    public static registerDataAsset1(
         ws: string,
         requestBody: DataAssetRegisterRequest,
         molexpSession?: (string | null),
@@ -392,7 +391,7 @@ export class AssetsService {
      * @returns AssetResponse Successful Response
      * @throws ApiError
      */
-    public static getAssetApiWorkspacesWsAssetsAssetIdGet(
+    public static getAsset1(
         assetId: string,
         ws: string,
         molexpSession?: (string | null),
@@ -421,7 +420,7 @@ export class AssetsService {
      * @returns any Successful Response
      * @throws ApiError
      */
-    public static assetContentApiWorkspacesWsAssetsAssetIdContentGet(
+    public static assetContent1(
         assetId: string,
         ws: string,
         molexpSession?: (string | null),
@@ -454,7 +453,7 @@ export class AssetsService {
      * @returns AssetLineageResponse Successful Response
      * @throws ApiError
      */
-    public static getAssetLineageApiWorkspacesWsAssetsAssetIdLineageGet(
+    public static getAssetLineage1(
         assetId: string,
         ws: string,
         molexpSession?: (string | null),
@@ -501,7 +500,7 @@ export class AssetsService {
      * @returns any Successful Response
      * @throws ApiError
      */
-    public static previewAssetApiWorkspacesWsAssetsAssetIdPreviewGet(
+    public static previewAsset1(
         assetId: string,
         ws: string,
         format: 'frames' | 'png' = 'frames',
@@ -537,7 +536,7 @@ export class AssetsService {
      * @returns string Successful Response
      * @throws ApiError
      */
-    public static assetTailApiWorkspacesWsAssetsAssetIdTailGet(
+    public static assetTail1(
         assetId: string,
         ws: string,
         n: number = 100,

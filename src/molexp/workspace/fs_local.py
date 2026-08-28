@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import contextlib
-import json
 import os
 import shutil
 import tempfile
@@ -179,19 +178,11 @@ class LocalFileSystem:
 
     @staticmethod
     def atomic_write_json(path: PathArg, data: object) -> None:
-        p = Path(path)
-        p.parent.mkdir(parents=True, exist_ok=True)
-        fd, tmp = tempfile.mkstemp(dir=str(p.parent), prefix=f".{p.name}.", suffix=".tmp")
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as fh:
-                json.dump(data, fh, indent=2, ensure_ascii=False, sort_keys=True)
-                fh.write("\n")
-            os.chmod(tmp, 0o600)  # noqa: PTH101
-            os.replace(tmp, p)  # noqa: PTH105
-        except BaseException:
-            with contextlib.suppress(OSError):
-                os.unlink(tmp)  # noqa: PTH108
-            raise
+        # ONE canonical byte form + write mechanics for all JSON writers —
+        # delegate to the Layer-0 primitive (temp file, chmod 0600, rename).
+        from molexp.atomicio import atomic_write_json as _atomic_write_json
+
+        _atomic_write_json(Path(path), data)
 
     @staticmethod
     def atomic_write_text(path: PathArg, content: str, *, encoding: str = "utf-8") -> None:

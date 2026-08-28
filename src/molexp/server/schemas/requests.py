@@ -7,12 +7,14 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Discriminator, Field, Tag
+from pydantic import AliasChoices, ConfigDict, Discriminator, Field, Tag
+
+from ._wire import ApiModel
 
 # ── Workspace ───────────────────────────────────────────────────────────────
 
 
-class WorkspaceOpenLocalRequest(BaseModel):
+class WorkspaceOpenLocalRequest(ApiModel):
     """Local-workspace branch of ``POST /api/workspace/open``."""
 
     kind: Literal["local"] = Field(default="local", description="Discriminator")
@@ -20,7 +22,7 @@ class WorkspaceOpenLocalRequest(BaseModel):
     create_if_missing: bool = Field(False, description="Create if missing")
 
 
-class WorkspaceOpenRemoteRequest(BaseModel):
+class WorkspaceOpenRemoteRequest(ApiModel):
     """Remote-workspace branch of ``POST /api/workspace/open``.
 
     The descriptor must already be registered via
@@ -56,14 +58,14 @@ WorkspaceOpenRequest = Annotated[
 # ── Project ─────────────────────────────────────────────────────────────────
 
 
-class ProjectCreateRequest(BaseModel):
+class ProjectCreateRequest(ApiModel):
     name: str = Field(..., description="Human-readable project name")
     description: str = Field("", description="Project description")
     owner: str = Field("", description="Project owner")
     tags: list[str] = Field(default_factory=list, description="Project tags")
 
 
-class ProjectUpdateRequest(BaseModel):
+class ProjectUpdateRequest(ApiModel):
     name: str | None = None
     description: str | None = None
     owner: str | None = None
@@ -74,7 +76,7 @@ class ProjectUpdateRequest(BaseModel):
 # ── Experiment ──────────────────────────────────────────────────────────────
 
 
-class ExperimentCreateRequest(BaseModel):
+class ExperimentCreateRequest(ApiModel):
     name: str = Field(..., description="Human-readable experiment name")
     workflow_source: str | None = Field(None, description="Path to workflow file")
     description: str = Field("", description="Experiment description")
@@ -93,15 +95,21 @@ class ExperimentCreateRequest(BaseModel):
 # ── Run ─────────────────────────────────────────────────────────────────────
 
 
-class RunCreateRequest(BaseModel):
-    parameters: dict[str, Any] = Field(default_factory=dict, description="Run parameters")
+class RunCreateRequest(ApiModel):
+    params: dict[str, Any] = Field(
+        default_factory=dict,
+        validation_alias=AliasChoices("params", "parameters"),
+        description="Run params ('parameters' accepted as a deprecated alias)",
+    )
     target: str | None = Field(
         default=None,
         description="Compute target name (must exist in workspace registry)",
     )
 
+    model_config = {"populate_by_name": True}
 
-class RunHarvestRequest(BaseModel):
+
+class RunHarvestRequest(ApiModel):
     """Harvest a terminal run into a sourced KnowledgeItem under its experiment."""
 
     kind: Literal[
@@ -123,7 +131,7 @@ class RunHarvestRequest(BaseModel):
     )
 
 
-class RunAnalyzeFailureRequest(BaseModel):
+class RunAnalyzeFailureRequest(ApiModel):
     """Analyze a failed run into a sourced FailureAnalysis KnowledgeItem."""
 
     narrative: str | None = Field(
@@ -138,7 +146,7 @@ class RunAnalyzeFailureRequest(BaseModel):
     name: str | None = Field(default=None, description="Optional KnowledgeItem name")
 
 
-class RunStartRequest(BaseModel):
+class RunStartRequest(ApiModel):
     """Body for the ``run`` (start) verb on a pending run.
 
     A pending run is target-less (the create+dispatch contract dispatches a
@@ -152,21 +160,25 @@ class RunStartRequest(BaseModel):
         default=None,
         description="Compute target name to start the run on (must exist in the workspace registry)",
     )
-    parameters: dict[str, Any] | None = Field(
+    params: dict[str, Any] | None = Field(
         default=None,
+        validation_alias=AliasChoices("params", "parameters"),
         description=(
             "Run inputs to apply before starting (the workflow's root inputs). "
-            "None keeps the run's existing parameters; a pending run has not been "
-            "hashed yet, so editing inputs here is safe."
+            "None keeps the run's existing params; a pending run has not been "
+            "hashed yet, so editing inputs here is safe. 'parameters' is a "
+            "deprecated alias."
         ),
     )
 
+    model_config = {"populate_by_name": True}
 
-class RunStatusUpdateRequest(BaseModel):
+
+class RunStatusUpdateRequest(ApiModel):
     status: str = Field(..., description="New status value")
 
 
-class WorkflowDocumentRequest(BaseModel):
+class WorkflowDocumentRequest(ApiModel):
     """Edited workflow IR document posted by the free-layout canvas.
 
     ``document`` is the wire IR (``{task_configs, links, entries, loops,
@@ -180,10 +192,14 @@ class WorkflowDocumentRequest(BaseModel):
 # ── Execution ───────────────────────────────────────────────────────────────
 
 
-class ExecutionCreateRequest(BaseModel):
+class ExecutionCreateRequest(ApiModel):
     project_id: str = Field(..., description="Target project ID")
     experiment_id: str = Field(..., description="Target experiment ID")
-    parameters: dict[str, Any] = Field(default_factory=dict)
+    params: dict[str, Any] = Field(
+        default_factory=dict,
+        validation_alias=AliasChoices("params", "parameters"),
+        description="Run params ('parameters' accepted as a deprecated alias)",
+    )
     workflow_json: dict[str, Any] | None = Field(
         default=None,
         description=(
@@ -198,12 +214,12 @@ class ExecutionCreateRequest(BaseModel):
 # ── Asset ───────────────────────────────────────────────────────────────────
 
 
-class AssetUpdateRequest(BaseModel):
+class AssetUpdateRequest(ApiModel):
     tags: list[str] | None = None
     metadata: dict[str, Any] | None = None
 
 
-class DataAssetRegisterRequest(BaseModel):
+class DataAssetRegisterRequest(ApiModel):
     """Register an existing workspace file in place as a ``DataAsset``."""
 
     path: str = Field(..., description="Workspace-relative path to the existing file")
@@ -214,7 +230,7 @@ class DataAssetRegisterRequest(BaseModel):
 # ── Agent ───────────────────────────────────────────────────────────────────
 
 
-class GoalCreateRequest(BaseModel):
+class GoalCreateRequest(ApiModel):
     model_config = ConfigDict(populate_by_name=True)
 
     description: str = Field(..., description="Natural language goal description")
@@ -252,7 +268,7 @@ class GoalCreateRequest(BaseModel):
     )
 
 
-class UserMessageCreateRequest(BaseModel):
+class UserMessageCreateRequest(ApiModel):
     """Mid-session chat message from the user to the agent."""
 
     content: str = Field(..., description="User's message")
@@ -272,7 +288,7 @@ class UserMessageCreateRequest(BaseModel):
 # ── Skills (saved goal templates) ───────────────────────────────────────────
 
 
-class SkillCreateRequest(BaseModel):
+class SkillCreateRequest(ApiModel):
     name: str = Field(..., description="Display name")
     goal_template: str = Field(
         ...,
@@ -329,7 +345,7 @@ class SkillCreateRequest(BaseModel):
     )
 
 
-class SkillUpdateRequest(BaseModel):
+class SkillUpdateRequest(ApiModel):
     name: str | None = None
     goal_template: str | None = None
     description: str | None = None
@@ -344,7 +360,7 @@ class SkillUpdateRequest(BaseModel):
     requires_exit_tool: str | None = None
 
 
-class SkillLaunchRequest(BaseModel):
+class SkillLaunchRequest(ApiModel):
     """Materialize a skill into a Goal and start a session."""
 
     parameters: dict[str, Any] = Field(default_factory=dict)
@@ -357,7 +373,7 @@ class SkillLaunchRequest(BaseModel):
     )
 
 
-class CommandParseRequest(BaseModel):
+class CommandParseRequest(ApiModel):
     """Parse a raw chat input that the user typed starting with '/'."""
 
     raw: str = Field(..., description="The raw chat text, including the leading '/'.")
@@ -366,7 +382,7 @@ class CommandParseRequest(BaseModel):
 # ── Custom tools (user/workspace-tier tool declarations) ────────────────────
 
 
-class CustomToolHttpInvokerRequest(BaseModel):
+class CustomToolHttpInvokerRequest(ApiModel):
     """HTTP-webhook invoker spec for a user-declared tool."""
 
     kind: Literal["http"] = "http"
@@ -388,7 +404,7 @@ class CustomToolHttpInvokerRequest(BaseModel):
     )
 
 
-class CustomToolCreateRequest(BaseModel):
+class CustomToolCreateRequest(ApiModel):
     """Create a user/workspace-tier tool declaration."""
 
     name: str = Field(..., description="Tool name as the LLM will see it")
@@ -417,7 +433,7 @@ class CustomToolCreateRequest(BaseModel):
     )
 
 
-class CustomToolUpdateRequest(BaseModel):
+class CustomToolUpdateRequest(ApiModel):
     """Patch a user/workspace-tier tool declaration. Omitted fields stay."""
 
     name: str | None = None
@@ -432,7 +448,7 @@ class CustomToolUpdateRequest(BaseModel):
 # ── Agent provider config ───────────────────────────────────────────────────
 
 
-class AgentProviderUpdateRequest(BaseModel):
+class AgentProviderUpdateRequest(ApiModel):
     """Patch the workspace's LLM provider config.
 
     Any field left as ``None`` is preserved. Pass ``api_key=""`` to clear
@@ -460,7 +476,7 @@ class AgentProviderUpdateRequest(BaseModel):
 # ── MCP servers ─────────────────────────────────────────────────────────────
 
 
-class McpStdioSpecRequest(BaseModel):
+class McpStdioSpecRequest(ApiModel):
     """Local subprocess MCP server spec."""
 
     type: Literal["stdio"] = "stdio"
@@ -472,7 +488,7 @@ class McpStdioSpecRequest(BaseModel):
     )
 
 
-class McpOAuth2AuthRequest(BaseModel):
+class McpOAuth2AuthRequest(ApiModel):
     """OAuth 2.0 (Authorization Code + PKCE) auth for an HTTP MCP server.
 
     The actual token exchange happens via the dedicated /oauth/* endpoints;
@@ -490,7 +506,7 @@ class McpOAuth2AuthRequest(BaseModel):
     )
 
 
-class McpHttpSpecRequest(BaseModel):
+class McpHttpSpecRequest(ApiModel):
     """Remote HTTP MCP server spec.
 
     Two transports: ``http`` (streamable HTTP, Claude Code convention)
@@ -512,7 +528,7 @@ class McpHttpSpecRequest(BaseModel):
     )
 
 
-class McpOAuthCallbackRequest(BaseModel):
+class McpOAuthCallbackRequest(ApiModel):
     """OAuth callback payload posted by the SPA after the IdP bounces back.
 
     The SPA owns the redirect-URI route (``/oauth-callback``); it pulls
@@ -529,7 +545,7 @@ McpSpecRequest = Annotated[
 ]
 
 
-class McpServerUpsertRequest(BaseModel):
+class McpServerUpsertRequest(ApiModel):
     """Create or replace an MCP server entry at the chosen scope."""
 
     name: str = Field(
@@ -548,7 +564,7 @@ class McpServerUpsertRequest(BaseModel):
     spec: McpSpecRequest = Field(..., discriminator="type")
 
 
-class McpSecretSetRequest(BaseModel):
+class McpSecretSetRequest(ApiModel):
     """Set or clear an MCP secret value at the chosen scope.
 
     The plaintext ``value`` is sent up only; the secret store never returns

@@ -26,9 +26,6 @@ from molexp.workspace.run_reaper import pid_alive, reap_zombie_run
 
 console = Console()
 
-# Terminal run statuses — not cancellable / considered "done".
-_TERMINAL_STATUSES = frozenset({"succeeded", "failed", "cancelled"})
-
 # Rich color mapping used by list / info / monitor displays.
 _STATUS_COLORS: dict[str, str] = {
     "succeeded": "green",
@@ -88,8 +85,6 @@ def run_executor_info(run: Run) -> dict[str, str]:
 
 
 __all__ = [
-    "_STATUS_COLORS",
-    "_TERMINAL_STATUSES",
     "console",
     "deterministic_run_id",
     "get_workspace",

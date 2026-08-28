@@ -34,10 +34,6 @@ class ParamSpace(ABC):
         """Return the total number of parameter combinations."""
         ...
 
-    def count(self) -> int:
-        """Alias for len()."""
-        return len(self)
-
 
 class GridSpace(ParamSpace):
     """Exhaustive Cartesian product over all parameter values.
@@ -49,6 +45,14 @@ class GridSpace(ParamSpace):
     """
 
     def __init__(self, param_grid: dict[str, list[Any]]) -> None:
+        scalars = [name for name, values in param_grid.items() if not isinstance(values, list)]
+        if scalars:
+            first = scalars[0]
+            raise ValueError(
+                f"GridSpace maps every axis to a *list* of values; got a scalar "
+                f"for {', '.join(repr(n) for n in scalars)} — wrap it in a list "
+                f"(e.g. {first!r}: [{param_grid[first]!r}])."
+            )
         self.param_grid = param_grid
         self._param_names = list(param_grid.keys())
         self._param_values = list(param_grid.values())

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from molexp.harness.plan.bind_board import (
     board_plan_to_bound_workflow,
+    board_plan_to_workflow_ir,
     materialize_plan_for_realization,
 )
 from molexp.harness.plan.board_store import (
@@ -64,6 +65,7 @@ __all__ = [
     "annotate_feasibility",
     "board_path",
     "board_plan_to_bound_workflow",
+    "board_plan_to_workflow_ir",
     "experiment_report_to_document",
     "freeze_experiment_plan",
     "freeze_spec",

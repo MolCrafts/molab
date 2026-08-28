@@ -4,7 +4,7 @@
 /* eslint-disable */
 import type { TaskTypeResponse } from './TaskTypeResponse';
 export type TaskTypeListResponse = {
-    task_types: Array<TaskTypeResponse>;
+    taskTypes: Array<TaskTypeResponse>;
     total: number;
 };
 

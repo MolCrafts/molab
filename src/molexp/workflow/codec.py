@@ -24,7 +24,7 @@ Every conversion is **AST-based / template-based** — we never ``exec``
 user-supplied Python. The Python surface is a structured carrier for
 the IR, not a free-form script.
 
-PlanMode-specific report digestion, code generation, and handoff
+PlanOrchestrator-specific report digestion, code generation, and handoff
 assembly are not part of this module. They belong to the agent layer;
 the workflow layer only owns generic workflow representations and
 contract validation.
@@ -353,7 +353,7 @@ class WorkflowCodec:
     # ── IR ↔ YAML ───────────────────────────────────────────────────────
     #
     # YAML is offered for the experiment-workspace ``ir/workflow.yaml``
-    # use case PlanMode produces. JSON remains the canonical wire format
+    # use case PlanOrchestrator produces. JSON remains the canonical wire format
     # for the server. ``safe_load`` / ``safe_dump`` only — untrusted YAML
     # is never executed.
 

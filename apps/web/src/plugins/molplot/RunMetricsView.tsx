@@ -1,14 +1,30 @@
-import { Activity, AlertTriangle, BarChart3, Maximize2, Wrench } from "lucide-react";
+import { Activity, AlertTriangle, Maximize2, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { EmptyState, OverviewSection } from "@/app/components/entity";
 import type { MetricRecord } from "@/app/state/api";
 import { workspaceApi } from "@/app/state/api";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Slider } from "@/components/ui/slider";
+import { Switch } from "@/components/ui/switch";
 import { WorkbenchAction, WorkbenchIconAction } from "@/components/workbench";
 import { CHART_SERIES_PALETTE } from "@/lib/chart-tokens";
+import { cn } from "@/lib/utils";
 import { MolplotLineChart } from "@/plugins/molplot";
-import { smoothEma } from "@/plugins/molplot/smoothing";
+import {
+  DEFAULT_SCALAR_FORMAT,
+  formatScalar,
+  type ScalarFormat,
+  type ScalarNotation,
+} from "@/plugins/molplot/scalar-format";
+import { filterSpikes, smoothEma } from "@/plugins/molplot/smoothing";
 
 /**
  * Coord-driven run-metrics view: polls `getRunMetrics` for the run named by
@@ -47,13 +63,6 @@ export interface RunMetricsViewProps {
 
 const isFiniteNumber = (value: unknown): value is number => {
   return typeof value === "number" && Number.isFinite(value);
-};
-
-const formatValue = (value: number): string => {
-  if (Math.abs(value) >= 1000 || (Math.abs(value) > 0 && Math.abs(value) < 0.001)) {
-    return value.toExponential(3);
-  }
-  return value.toPrecision(4);
 };
 
 const parseWall = (raw?: string): number => {
@@ -114,8 +123,10 @@ interface ChartConfigOptions {
   yScale: YScale;
   smoothing: number;
   color: string;
-  /** Show the per-chart plotly modebar. Default false (hidden until toggled). */
-  showToolbar?: boolean;
+  /** Drop isolated outliers (Hampel/MAD) before EMA. */
+  spikeFilter?: boolean;
+  /** Modified-Z threshold in σ units. Lower = more aggressive. */
+  spikeSigma?: number;
 }
 
 // Opacity applied to the raw signal trace when a smoothed overlay is drawn on
@@ -124,14 +135,16 @@ interface ChartConfigOptions {
 const RAW_TRACE_OPACITY = 0.3;
 
 export const buildLineChartConfig = (series: ScalarSeries, options: ChartConfigOptions) => {
-  const { xMode, yScale, smoothing, color, showToolbar = false } = options;
+  const { xMode, yScale, smoothing, color, spikeFilter = false, spikeSigma = 4 } = options;
   const xs = series.points.map((p) => (xMode === "step" ? p.step : p.wall));
   const ys = series.points.map((p) => p.y);
-  const smoothed = smoothing > 0 ? smoothEma(ys, smoothing) : null;
-  // Restore the two-trace overlay (faded raw behind the smoothed curve) — the
-  // migration to a single series hid noise that the smoothing slider is meant
-  // to reveal vs. the raw signal.
-  const seriesList = smoothed
+  const cleaned = spikeFilter ? filterSpikes(ys, { nSigma: spikeSigma }) : ys;
+  const processed = smoothing > 0 ? smoothEma(cleaned, smoothing) : cleaned;
+  const overlay = spikeFilter || smoothing > 0;
+  // Restore the two-trace overlay (faded raw behind the processed curve) — the
+  // migration to a single series hid noise that smoothing / spike-filter is
+  // meant to reveal vs. the raw signal. Filter always runs before EMA.
+  const seriesList = overlay
     ? [
         {
           id: `${series.key}::raw`,
@@ -146,7 +159,7 @@ export const buildLineChartConfig = (series: ScalarSeries, options: ChartConfigO
           label: series.key,
           color,
           width: 2,
-          initialPoints: smoothed.map((y, i) => ({ x: xs[i], y })),
+          initialPoints: processed.map((y, i) => ({ x: xs[i], y })),
         },
       ]
     : [
@@ -167,14 +180,6 @@ export const buildLineChartConfig = (series: ScalarSeries, options: ChartConfigO
     yAxis: { type: yScale, label: series.key },
     hovertemplate: "%{y:.6g}<extra></extra>",
     hovermode: "x unified" as const,
-    modebar: showToolbar,
-    modebarRemove: [
-      "lasso2d",
-      "select2d",
-      "toggleSpikelines",
-      "hoverClosestCartesian",
-      "hoverCompareCartesian",
-    ],
     theme: "auto" as const,
   };
 };
@@ -184,8 +189,9 @@ interface ChartProps {
   xMode: XMode;
   yScale: YScale;
   smoothing: number;
+  spikeFilter: boolean;
+  spikeSigma: number;
   color: string;
-  showToolbar: boolean;
   height: string;
 }
 
@@ -194,77 +200,114 @@ const MetricChart = ({
   xMode,
   yScale,
   smoothing,
+  spikeFilter,
+  spikeSigma,
   color,
-  showToolbar,
   height,
 }: ChartProps): JSX.Element => {
   const config = useMemo(
-    () => buildLineChartConfig(series, { xMode, yScale, smoothing, color, showToolbar }),
-    [series, xMode, yScale, smoothing, color, showToolbar],
+    () =>
+      buildLineChartConfig(series, {
+        xMode,
+        yScale,
+        smoothing,
+        spikeFilter,
+        spikeSigma,
+        color,
+      }),
+    [series, xMode, yScale, smoothing, spikeFilter, spikeSigma, color],
   );
 
   return <MolplotLineChart config={config} style={{ width: "100%", height }} />;
 };
 
-interface MetricPanelProps {
-  series: ScalarSeries;
+interface CardSettings {
+  notation: ScalarNotation;
+  significantDigits: number;
+  smoothing: number;
+  spikeFilter: boolean;
+  spikeSigma: number;
   xMode: XMode;
   yScale: YScale;
-  smoothing: number;
+}
+
+const DEFAULT_CARD_SETTINGS: CardSettings = {
+  notation: DEFAULT_SCALAR_FORMAT.notation,
+  significantDigits: DEFAULT_SCALAR_FORMAT.significantDigits,
+  smoothing: 0.6,
+  spikeFilter: false,
+  spikeSigma: 4,
+  xMode: "step",
+  yScale: "linear",
+};
+
+const settingsOf = (map: Record<string, CardSettings>, key: string): CardSettings => ({
+  ...DEFAULT_CARD_SETTINGS,
+  ...map[key],
+});
+
+const scalarFormatOf = (settings: CardSettings): ScalarFormat => ({
+  notation: settings.notation,
+  significantDigits: settings.significantDigits,
+});
+
+const isPlotSeries = (series: ScalarSeries): boolean => series.points.length > 1;
+
+interface MetricPanelProps {
+  series: ScalarSeries;
+  settings: CardSettings;
   color: string;
+  selected: boolean;
+  onSelect: () => void;
 }
 
 /**
- * One scalar series tile. Owns two pieces of local view state that are
- * deliberately per-panel rather than global: whether the plotly modebar is
- * revealed (hidden by default to keep the grid calm) and whether the panel is
- * blown up into a focus dialog. The enlarge dialog renders a second, taller
- * chart instance with the toolbar always on.
+ * One scalar series tile. The header selects it for Display; the Vega
+ * container owns pan/zoom and must not sit under a click-capture layer.
  */
 const MetricPanel = ({
   series,
-  xMode,
-  yScale,
-  smoothing,
+  settings,
   color,
+  selected,
+  onSelect,
 }: MetricPanelProps): JSX.Element => {
-  const [showToolbar, setShowToolbar] = useState(false);
   const [enlarged, setEnlarged] = useState(false);
+  const formatted = formatScalar(series.latest, scalarFormatOf(settings));
+  const frameClass = cn(
+    "relative min-w-0 bg-transparent p-3 text-left outline-none",
+    "text-muted-foreground hover:text-foreground",
+    "after:absolute after:inset-x-3 after:bottom-0 after:h-px after:bg-accent after:opacity-0 after:transition-opacity",
+    selected && "text-accent after:opacity-100",
+  );
 
-  // A one-shot scalar (a single recorded point, no step progression) is a VALUE,
-  // not a time series — show the number, not an empty one-point chart.
-  if (series.points.length <= 1) {
+  if (!isPlotSeries(series)) {
     return (
-      <section className="min-w-0 border-l border-border/60 py-1 pl-3">
-        <div className="truncate text-micro font-medium uppercase tracking-wide text-muted-foreground">
-          {series.key}
-        </div>
-        <div className="mt-1 font-mono text-display font-semibold tabular-nums text-foreground">
-          {formatValue(series.latest)}
-        </div>
-      </section>
+      <button
+        type="button"
+        className={cn(frameClass, "block w-full")}
+        aria-pressed={selected}
+        onClick={onSelect}
+      >
+        <div className="truncate text-micro font-medium">{series.key}</div>
+        <div className="mt-1 font-mono text-display font-semibold tabular-nums">{formatted}</div>
+      </button>
     );
   }
 
   return (
-    <section className="min-w-0 rounded-control border border-border bg-background p-3">
-      <div className="flex items-baseline justify-between gap-3">
-        <div className="min-w-0 truncate text-body-lg font-medium text-foreground">
+    <article className={frameClass} data-selected={selected || undefined}>
+      <div className="flex cursor-pointer items-baseline justify-between gap-3">
+        <button
+          type="button"
+          className="min-w-0 flex-1 truncate bg-transparent px-0 text-left text-body-lg font-medium"
+          aria-pressed={selected}
+          onClick={onSelect}
+        >
           {series.key}
-        </div>
+        </button>
         <div className="flex shrink-0 items-center gap-2">
-          <span className="font-mono text-label text-muted-foreground">
-            {formatValue(series.latest)}
-          </span>
-          <WorkbenchIconAction
-            onClick={() => setShowToolbar((value) => !value)}
-            aria-pressed={showToolbar}
-            label={showToolbar ? "Hide chart toolbar" : "Show chart toolbar"}
-            kind={showToolbar ? "primary" : "ghost"}
-            className="size-6"
-          >
-            <Wrench className="h-3.5 w-3.5" />
-          </WorkbenchIconAction>
+          <span className="font-mono text-label">{formatted}</span>
           <WorkbenchIconAction
             onClick={() => setEnlarged(true)}
             label="Enlarge chart"
@@ -274,32 +317,49 @@ const MetricPanel = ({
           </WorkbenchIconAction>
         </div>
       </div>
-      <MetricChart
-        series={series}
-        xMode={xMode}
-        yScale={yScale}
-        smoothing={smoothing}
-        color={color}
-        showToolbar={showToolbar}
-        height="220px"
-      />
+      <div className="relative mt-1 min-h-0" onPointerDown={(event) => event.stopPropagation()}>
+        <MetricChart
+          series={series}
+          xMode={settings.xMode}
+          yScale={settings.yScale}
+          smoothing={settings.smoothing}
+          spikeFilter={settings.spikeFilter}
+          spikeSigma={settings.spikeSigma}
+          color={color}
+          height="220px"
+        />
+      </div>
       <Dialog open={enlarged} onOpenChange={setEnlarged}>
-        <DialogContent className="max-w-5xl">
-          <DialogHeader>
+        <DialogContent
+          className={cn(
+            "flex h-auto min-h-60 min-w-80 flex-col overflow-hidden p-4",
+            "aspect-[4/3] w-[min(80vw,calc(90vh*4/3))] max-h-[90vh]",
+            "max-w-[min(95vw,calc(90vh*4/3))] sm:max-w-[min(95vw,calc(90vh*4/3))]",
+            "resize-x",
+          )}
+        >
+          <DialogHeader className="shrink-0 pr-8">
             <DialogTitle className="truncate font-mono text-body-lg">{series.key}</DialogTitle>
           </DialogHeader>
-          <MetricChart
-            series={series}
-            xMode={xMode}
-            yScale={yScale}
-            smoothing={smoothing}
-            color={color}
-            showToolbar
-            height="70vh"
-          />
+          <div className="relative min-h-0 flex-1">
+            <MetricChart
+              series={series}
+              xMode={settings.xMode}
+              yScale={settings.yScale}
+              smoothing={settings.smoothing}
+              spikeFilter={settings.spikeFilter}
+              spikeSigma={settings.spikeSigma}
+              color={color}
+              height="100%"
+            />
+            <div
+              className="pointer-events-none absolute right-1 bottom-1 h-2.5 w-2.5 border-r-2 border-b-2 border-muted-foreground/50"
+              aria-hidden
+            />
+          </div>
         </DialogContent>
       </Dialog>
-    </section>
+    </article>
   );
 };
 
@@ -330,26 +390,55 @@ const OtherRecords = ({ records }: { records: MetricRecord[] }): JSX.Element | n
   );
 };
 
-interface ControlsProps {
-  smoothing: number;
-  xMode: XMode;
-  yScale: YScale;
-  onSmoothingChange: (value: number) => void;
-  onXModeChange: (value: XMode) => void;
-  onYScaleChange: (value: YScale) => void;
+interface DisplayPatch {
+  onChange: (patch: Partial<CardSettings>) => void;
 }
 
-// Vertical control stack for the left sidebar. Each control is a labelled block
-// laid out top-to-bottom (rather than the old horizontal toolbar) so it reads
-// naturally in a narrow rail.
-const ChartControls = ({
-  smoothing,
-  xMode,
-  yScale,
-  onSmoothingChange,
-  onXModeChange,
-  onYScaleChange,
-}: ControlsProps): JSX.Element => (
+const ScalarDisplayControls = ({
+  settings,
+  onChange,
+}: DisplayPatch & { settings: CardSettings }): JSX.Element => (
+  <div className="flex flex-col gap-4 text-label">
+    <div className="flex flex-col gap-2">
+      <Label htmlFor="metric-notation">Notation</Label>
+      <Select
+        value={settings.notation}
+        onValueChange={(value) => onChange({ notation: value as ScalarNotation })}
+      >
+        <SelectTrigger id="metric-notation" className="w-full">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="auto">Auto</SelectItem>
+          <SelectItem value="scientific">Scientific</SelectItem>
+          <SelectItem value="decimal">Decimal</SelectItem>
+        </SelectContent>
+      </Select>
+    </div>
+    <div className="flex flex-col gap-2">
+      <span className="font-medium text-foreground">Significant digits</span>
+      <div className="flex items-center gap-2">
+        <Slider
+          min={1}
+          max={8}
+          step={1}
+          value={[settings.significantDigits]}
+          onValueChange={([value]) => onChange({ significantDigits: value })}
+          className="flex-1"
+          aria-label="Significant digits"
+        />
+        <span className="w-control text-right font-mono tabular-nums text-muted-foreground">
+          {settings.significantDigits}
+        </span>
+      </div>
+    </div>
+  </div>
+);
+
+const PlotDisplayControls = ({
+  settings,
+  onChange,
+}: DisplayPatch & { settings: CardSettings }): JSX.Element => (
   <div className="flex flex-col gap-4 text-label">
     <div className="flex flex-col gap-2">
       <span className="font-medium text-foreground">Smoothing</span>
@@ -358,15 +447,54 @@ const ChartControls = ({
           min={0}
           max={0.99}
           step={0.01}
-          value={[smoothing]}
-          onValueChange={([value]) => onSmoothingChange(value)}
+          value={[settings.smoothing]}
+          onValueChange={([value]) => onChange({ smoothing: value })}
           className="flex-1"
-          aria-label="EMA smoothing weight"
+          aria-label="TensorBoard EMA smoothing"
         />
         <span className="w-control text-right font-mono tabular-nums text-muted-foreground">
-          {smoothing.toFixed(2)}
+          {settings.smoothing.toFixed(2)}
         </span>
       </div>
+      <p className="text-micro text-muted-foreground">
+        TensorBoard-style EMA. 0 is raw; 0.6 is the usual default.
+      </p>
+    </div>
+    <div className="flex flex-col gap-2">
+      <div className="flex items-center justify-between gap-2">
+        <Label htmlFor="metric-spike-filter" className="font-medium text-foreground">
+          Filter spikes
+        </Label>
+        <Switch
+          id="metric-spike-filter"
+          checked={settings.spikeFilter}
+          onCheckedChange={(checked) => onChange({ spikeFilter: checked })}
+          aria-label="Filter outlier spikes before smoothing"
+        />
+      </div>
+      <p className="text-micro text-muted-foreground">
+        Drop isolated outliers, then smooth. A glitch cannot yank the EMA.
+      </p>
+      {settings.spikeFilter ? (
+        <div className="flex flex-col gap-2">
+          <span className="font-medium text-foreground">Threshold (σ)</span>
+          <div className="flex items-center gap-2">
+            <Slider
+              min={2}
+              max={8}
+              step={0.5}
+              value={[settings.spikeSigma]}
+              onValueChange={([value]) => onChange({ spikeSigma: value })}
+              className="flex-1"
+              aria-label="Spike filter threshold in sigma"
+            />
+            <span className="w-control text-right font-mono tabular-nums text-muted-foreground">
+              {settings.spikeSigma.toFixed(1)}
+            </span>
+          </div>
+          <p className="text-micro text-muted-foreground">Lower catches more spikes.</p>
+        </div>
+      ) : null}
     </div>
     <div className="flex flex-col gap-2">
       <span className="font-medium text-foreground">X axis</span>
@@ -374,9 +502,9 @@ const ChartControls = ({
         {(["step", "wall"] as const).map((mode) => (
           <WorkbenchAction
             key={mode}
-            kind={xMode === mode ? "primary" : "secondary"}
+            kind={settings.xMode === mode ? "primary" : "secondary"}
             size="compact"
-            onClick={() => onXModeChange(mode)}
+            onClick={() => onChange({ xMode: mode })}
             className="w-full"
           >
             {mode === "step" ? "Step" : "Wall"}
@@ -390,9 +518,9 @@ const ChartControls = ({
         {(["linear", "log"] as const).map((scale) => (
           <WorkbenchAction
             key={scale}
-            kind={yScale === scale ? "primary" : "secondary"}
+            kind={settings.yScale === scale ? "primary" : "secondary"}
             size="compact"
-            onClick={() => onYScaleChange(scale)}
+            onClick={() => onChange({ yScale: scale })}
             className="w-full"
           >
             {scale === "linear" ? "Linear" : "Log"}
@@ -413,12 +541,13 @@ export const RunMetricsView = ({
   const [parseErrors, setParseErrors] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [smoothing, setSmoothing] = useState(0.6);
-  const [xMode, setXMode] = useState<XMode>("step");
-  const [yScale, setYScale] = useState<YScale>("linear");
+  const [panelOpen, setPanelOpen] = useState(false);
+  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const [cardSettings, setCardSettings] = useState<Record<string, CardSettings>>({});
 
   const scalarSeries = useMemo(() => buildScalarSeries(records), [records]);
   const grouped = useMemo(() => groupSeries(scalarSeries), [scalarSeries]);
+  const selectedSeries = scalarSeries.find((item) => item.key === selectedKey) ?? null;
 
   // Track the latest tail position in a ref so the polling effect doesn't list
   // it as a dependency — otherwise every successful fetch (which advances
@@ -504,33 +633,67 @@ export const RunMetricsView = ({
     );
   }
 
+  const selectCard = (key: string): void => {
+    setSelectedKey(key);
+    setPanelOpen(true);
+  };
+
+  const patchSelected = (patch: Partial<CardSettings>): void => {
+    if (!selectedKey) return;
+    setCardSettings((current) => ({
+      ...current,
+      [selectedKey]: { ...settingsOf(current, selectedKey), ...patch },
+    }));
+  };
+
+  const displayPanel = panelOpen ? (
+    <aside className="mol-motion-enter-from-left flex w-60 shrink-0 flex-col gap-4 overflow-y-auto border-r border-border bg-muted/20 px-4 py-4">
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0 truncate text-body-lg font-medium text-foreground">Display</div>
+        <WorkbenchIconAction label="Hide display settings" onClick={() => setPanelOpen(false)}>
+          <PanelLeftClose className="h-4 w-4" />
+        </WorkbenchIconAction>
+      </div>
+
+      {selectedSeries ? (
+        <>
+          <p className="truncate font-mono text-label text-muted-foreground">
+            {selectedSeries.key}
+          </p>
+          {isPlotSeries(selectedSeries) ? (
+            <PlotDisplayControls
+              settings={settingsOf(cardSettings, selectedSeries.key)}
+              onChange={patchSelected}
+            />
+          ) : (
+            <ScalarDisplayControls
+              settings={settingsOf(cardSettings, selectedSeries.key)}
+              onChange={patchSelected}
+            />
+          )}
+        </>
+      ) : (
+        <p className="text-label text-muted-foreground">Select a metric to format it.</p>
+      )}
+
+      <div className="mt-auto flex flex-col gap-1 border-t border-border pt-3 text-label text-muted-foreground">
+        <span>{records.length} records</span>
+        <span>{scalarSeries.length} scalars</span>
+        {parseErrors > 0 && <span>{parseErrors} parse errors</span>}
+      </div>
+    </aside>
+  ) : (
+    <div className="flex w-10 shrink-0 flex-col items-center border-r border-border bg-muted/20 pt-3">
+      <WorkbenchIconAction label="Show display settings" onClick={() => setPanelOpen(true)}>
+        <PanelLeftOpen className="h-4 w-4" />
+      </WorkbenchIconAction>
+    </div>
+  );
+
   return (
     <div className="flex flex-1 overflow-hidden bg-background">
-      <aside className="flex w-56 shrink-0 flex-col gap-4 overflow-y-auto border-r border-border bg-muted/20 px-4 py-4">
-        <div className="flex items-center gap-2">
-          <BarChart3 className="h-4 w-4 text-muted-foreground" />
-          <div className="text-body-lg font-medium text-foreground">Run Metrics</div>
-        </div>
-
-        {scalarSeries.length > 0 && (
-          <ChartControls
-            smoothing={smoothing}
-            xMode={xMode}
-            yScale={yScale}
-            onSmoothingChange={setSmoothing}
-            onXModeChange={setXMode}
-            onYScaleChange={setYScale}
-          />
-        )}
-
-        <div className="mt-auto flex flex-col gap-1 border-t border-border pt-3 text-label text-muted-foreground">
-          <span>{records.length} records</span>
-          <span>{scalarSeries.length} scalar series</span>
-          {parseErrors > 0 && <span>{parseErrors} parse errors</span>}
-        </div>
-      </aside>
-
-      <div className="flex-1 overflow-auto">
+      {displayPanel}
+      <div className="min-w-0 flex-1 overflow-auto">
         <div className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-4 md:px-6">
           {grouped.length > 0 ? (
             grouped.map(([groupName, items]) => (
@@ -540,10 +703,10 @@ export const RunMetricsView = ({
                     <MetricPanel
                       key={series.key}
                       series={series}
-                      xMode={xMode}
-                      yScale={yScale}
-                      smoothing={smoothing}
+                      settings={settingsOf(cardSettings, series.key)}
                       color={PALETTE[index % PALETTE.length]}
+                      selected={selectedKey === series.key}
+                      onSelect={() => selectCard(series.key)}
                     />
                   ))}
                 </div>

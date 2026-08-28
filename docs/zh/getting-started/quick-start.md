@@ -23,7 +23,7 @@ def summarize(values: list[float], scale: float = 1.0) -> float:
 
 # 2. 创建工作区层级
 ws = me.Workspace("./lab", name="lab")
-run = ws.project("demo").experiment("sum").add_run(params={"scale": 2.0})
+run = ws.add_project("demo").add_experiment("sum").add_run(params={"scale": 2.0})
 
 # 3. 执行并读取结果
 result = run.execute(wf)
@@ -42,7 +42,7 @@ python demo.py
 
 **步骤 1 — 定义。** `WorkflowCompiler` 持有任务定义。`@wf.task` 将普通函数变为工作流节点。`depends_on=["fetch"]` 告诉引擎 `summarize` 在 `fetch` 之后运行并接收其输出。
 
-**步骤 2 — 创建。** `Workspace("./lab")` 在磁盘上创建目录。流畅链式调用 `.project("demo").experiment("sum").add_run(params={"scale": 2.0})` 构建持久化层级：项目分组相关工作，实验命名一个可重复定义，运行记录一次具体执行及其参数。
+**步骤 2 — 创建。** `Workspace("./lab")` 在磁盘上创建目录。链式调用 `.add_project("demo").add_experiment("sum").add_run(params={"scale": 2.0})` 构建持久化层级：项目分组相关工作，实验命名一个可重复定义，运行记录一次具体执行及其参数。`add_*` 是幂等的「创建或获取」；裸名词拼写（`ws.project(...)` / `project.experiment(...)`）是严格的 getter，节点不存在时会抛错。
 
 **步骤 3 — 执行。** `run.execute(wf)` 包办一切：编译工作流，打开运行的追踪生命周期，将运行参数绑定到根任务后执行图，将每个任务的输出持久化到运行目录，并返回结果。
 

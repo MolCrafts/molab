@@ -77,7 +77,7 @@ class WorkflowState:
     def from_seed(cls, seed: Mapping[str, TaskOutput]) -> WorkflowState:
         """Construct an initial state seeded with already-known task outputs.
 
-        Used by the PlanMode review→repair loop (``Workflow.execute(
+        Used by the PlanOrchestrator review→repair loop (``Workflow.execute(
         seed_outputs=...)``): each seeded entry is treated as a task that
         already finished successfully, so its name lands in both
         ``completed`` and ``seeded``. Downstream tasks find the values in

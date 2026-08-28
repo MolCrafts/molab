@@ -6,7 +6,7 @@
  * Runtime workflow graph state read from ``workflow.json``.
  */
 export type RunExecutionResponse = {
-    execution_id?: (string | null);
+    executionId?: (string | null);
     status?: string;
     workflow?: (Record<string, any> | null);
 };

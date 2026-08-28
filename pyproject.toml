@@ -5,7 +5,8 @@ backend-path = ["."]
 
 [project]
 name = "molexp"
-version = "0.0.2"
+# Keep in sync with src/molexp/__init__.py::__version__ (one bump, two sites).
+version = "0.3.0"
 description = "Agent-assisted scientific-workflow platform for FAIR research"
 authors = [{name = "molcrafts"}]
 license = {text = "BSD-3-Clause"}

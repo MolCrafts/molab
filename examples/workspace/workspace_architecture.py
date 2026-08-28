@@ -1,6 +1,6 @@
 """Inspect what files actually land on disk for one tracked run.
 
-Matches ``docs/guide/workspace-architecture.md``.
+Matches ``docs/en/guide/workspace-architecture.md``.
 
 MolExp persists every entity as a small JSON file alongside the payloads
 it produces. This example seeds a realistic workspace and then prints
@@ -35,7 +35,7 @@ compiled = wf.compile()
 async def main() -> None:
     root = Path(tempfile.mkdtemp(prefix="molexp-arch-"))
     ws = me.Workspace(root, name="arch-demo")
-    exp = ws.project("demo").experiment("baseline").run(compiled, params=None)
+    exp = ws.add_project("demo").add_experiment("baseline").define(compiled, params=None)
     run = exp.list_runs()[0]
     with run.start() as ctx:
         result = await WorkflowRuntime().execute(compiled, run_context=ctx)

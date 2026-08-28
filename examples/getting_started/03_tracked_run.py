@@ -1,6 +1,6 @@
 """What actually appears on disk when a ``Run`` is tracked.
 
-Matches ``docs/getting-started/tracked-runs.md``.
+Matches ``docs/en/getting-started/tracked-runs.md``.
 
 Run directly::
 
@@ -33,7 +33,7 @@ async def main() -> None:
     print(f"workspace root: {root}\n")
 
     ws = me.Workspace(root, name="tracked-demo")
-    exp = ws.project("demo").experiment("baseline").run(compiled, params={"seed": [42]})
+    exp = ws.add_project("demo").add_experiment("baseline").define(compiled, params={"seed": [42]})
 
     run = exp.list_runs()[0]
     with run.start() as ctx:

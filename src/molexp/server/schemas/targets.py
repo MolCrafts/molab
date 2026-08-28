@@ -9,12 +9,14 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 from molexp.workspace.models import ComputeTarget
 
+from ._wire import ApiModel
 
-class TargetCreateRequest(BaseModel):
+
+class TargetCreateRequest(ApiModel):
     """Payload for ``POST /api/targets``."""
 
     name: str = Field(..., description="Unique target name within the workspace")
@@ -42,7 +44,7 @@ class TargetCreateRequest(BaseModel):
     model_config = {"populate_by_name": True}
 
 
-class TargetResponse(BaseModel):
+class TargetResponse(ApiModel):
     """Wire form for a :class:`ComputeTarget`."""
 
     name: str
@@ -74,14 +76,14 @@ class TargetResponse(BaseModel):
         )
 
 
-class TargetListResponse(BaseModel):
+class TargetListResponse(ApiModel):
     """Response for ``GET /api/targets``."""
 
     targets: list[TargetResponse]
     total: int
 
 
-class TargetTestResponse(BaseModel):
+class TargetTestResponse(ApiModel):
     """Response for ``POST /api/targets/{name}/test``."""
 
     name: str
@@ -90,7 +92,7 @@ class TargetTestResponse(BaseModel):
     error: str | None = None
 
 
-class TargetTestCheck(BaseModel):
+class TargetTestCheck(ApiModel):
     """One step of the target connectivity probe."""
 
     label: str = Field(..., description="Human-readable check name")

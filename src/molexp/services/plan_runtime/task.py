@@ -1,6 +1,6 @@
-"""``PlanTask`` — one background PlanMode pipeline run for the server.
+"""``PlanTask`` — one background PlanOrchestrator pipeline run for the server.
 
-A plan task is one-shot (run PlanMode once on a content-addressed Run), so —
+A plan task is one-shot (run PlanOrchestrator once on a content-addressed Run), so —
 unlike the agent-session runtime — it needs no session/turn split: the task IS
 the background ``asyncio.Task`` plus its coarse status. On success it persists
 the generated workflow onto the experiment so the UI graph renderer shows it.
@@ -38,7 +38,7 @@ PlanTaskStatus = Literal["running", "completed", "failed", "cancelled", "waiting
 
 
 class PlanTask:
-    """A single background PlanMode run, its status, and its result."""
+    """A single background PlanOrchestrator run, its status, and its result."""
 
     def __init__(
         self,
@@ -98,7 +98,7 @@ class PlanTask:
         turn_id: str | None = None,
         knowledge_sources: tuple[str, ...] | None = None,
     ) -> PlanTask:
-        """Build a task and spawn its background PlanMode run.
+        """Build a task and spawn its background PlanOrchestrator run.
 
         ``execute=True`` appends the real-execution tail — the driver runs as
         an executor subprocess **of the serving host** (exactly what the CLI
@@ -326,7 +326,7 @@ class PlanTask:
                     },
                 ],
             )
-            # Advance the PlanMode progress rail: experiment_plan / plan_report
+            # Advance the PlanOrchestrator progress rail: experiment_plan / plan_report
             # already on disk at the gate, but the rail only tracks
             # tool_call_completed{result.artifact}.
             try:

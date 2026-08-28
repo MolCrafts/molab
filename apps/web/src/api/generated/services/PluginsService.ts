@@ -20,7 +20,7 @@ export class PluginsService {
      * @returns UiPluginListResponse Successful Response
      * @throws ApiError
      */
-    public static listPluginsApiPluginsGet(
+    public static listPlugins(
         molexpSession?: (string | null),
     ): CancelablePromise<UiPluginListResponse> {
         return __request(OpenAPI, {

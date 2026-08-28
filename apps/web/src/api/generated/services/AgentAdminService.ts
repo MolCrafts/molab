@@ -30,7 +30,7 @@ export class AgentAdminService {
      * @returns any Successful Response
      * @throws ApiError
      */
-    public static listAdminProvidersApiAgentAdminProvidersGet(
+    public static listAdminProviders(
         molexpSession?: (string | null),
     ): CancelablePromise<Record<string, any>> {
         return __request(OpenAPI, {
@@ -54,7 +54,7 @@ export class AgentAdminService {
      * @returns CommandListResponse Successful Response
      * @throws ApiError
      */
-    public static listCommandsApiAgentCommandsGet(
+    public static listCommands(
         molexpSession?: (string | null),
     ): CancelablePromise<CommandListResponse> {
         return __request(OpenAPI, {
@@ -76,7 +76,7 @@ export class AgentAdminService {
      * @returns CommandParseResponse Successful Response
      * @throws ApiError
      */
-    public static parseCommandApiAgentCommandsParsePost(
+    public static parseCommand(
         requestBody: _CommandParseRequest,
         molexpSession?: (string | null),
     ): CancelablePromise<CommandParseResponse> {
@@ -106,7 +106,7 @@ export class AgentAdminService {
      * @returns AgentHealthResponse Successful Response
      * @throws ApiError
      */
-    public static agentHealthApiAgentHealthGet(
+    public static agentHealth(
         molexpSession?: (string | null),
     ): CancelablePromise<AgentHealthResponse> {
         return __request(OpenAPI, {
@@ -127,7 +127,7 @@ export class AgentAdminService {
      * @returns KnowledgeSourcesResponse Successful Response
      * @throws ApiError
      */
-    public static getKnowledgeSourcesApiAgentKnowledgeSourcesGet(
+    public static getKnowledgeSources(
         molexpSession?: (string | null),
     ): CancelablePromise<KnowledgeSourcesResponse> {
         return __request(OpenAPI, {
@@ -149,7 +149,7 @@ export class AgentAdminService {
      * @returns KnowledgeSourcesResponse Successful Response
      * @throws ApiError
      */
-    public static updateKnowledgeSourcesApiAgentKnowledgeSourcesPut(
+    public static updateKnowledgeSources(
         requestBody: KnowledgeSourcesUpdateRequest,
         molexpSession?: (string | null),
     ): CancelablePromise<KnowledgeSourcesResponse> {
@@ -174,7 +174,7 @@ export class AgentAdminService {
      * @returns McpSecretListResponse Successful Response
      * @throws ApiError
      */
-    public static listMcpSecretsApiAgentMcpSecretsGet(
+    public static listMcpSecrets(
         scope: string = 'user',
         molexpSession?: (string | null),
     ): CancelablePromise<McpSecretListResponse> {
@@ -201,7 +201,7 @@ export class AgentAdminService {
      * @returns any Successful Response
      * @throws ApiError
      */
-    public static putMcpSecretApiAgentMcpSecretsKeyPut(
+    public static putMcpSecret(
         key: string,
         requestBody: McpSecretPutRequest,
         molexpSession?: (string | null),
@@ -229,7 +229,7 @@ export class AgentAdminService {
      * @returns McpServerListResponse Successful Response
      * @throws ApiError
      */
-    public static listMcpServersApiAgentMcpServersGet(
+    public static listMcpServers(
         molexpSession?: (string | null),
     ): CancelablePromise<McpServerListResponse> {
         return __request(OpenAPI, {
@@ -251,7 +251,7 @@ export class AgentAdminService {
      * @returns McpServerResponse Successful Response
      * @throws ApiError
      */
-    public static createMcpServerApiAgentMcpServersPost(
+    public static createMcpServer(
         requestBody: McpServerUpsertRequest,
         molexpSession?: (string | null),
     ): CancelablePromise<McpServerResponse> {
@@ -277,7 +277,7 @@ export class AgentAdminService {
      * @returns void
      * @throws ApiError
      */
-    public static deleteMcpServerApiAgentMcpServersNameDelete(
+    public static deleteMcpServer(
         name: string,
         scope: string = 'user',
         molexpSession?: (string | null),
@@ -308,7 +308,7 @@ export class AgentAdminService {
      * @returns McpServerResponse Successful Response
      * @throws ApiError
      */
-    public static replaceMcpServerApiAgentMcpServersNamePut(
+    public static replaceMcpServer(
         name: string,
         requestBody: McpServerUpsertRequest,
         molexpSession?: (string | null),
@@ -338,7 +338,7 @@ export class AgentAdminService {
      * @returns McpServerTestResponse Successful Response
      * @throws ApiError
      */
-    public static testMcpServerApiAgentMcpServersNameTestPost(
+    public static testMcpServer(
         name: string,
         scope: string = 'user',
         molexpSession?: (string | null),
@@ -367,7 +367,7 @@ export class AgentAdminService {
      * @returns ProviderResponse Successful Response
      * @throws ApiError
      */
-    public static getProviderApiAgentProviderGet(
+    public static getProvider(
         molexpSession?: (string | null),
     ): CancelablePromise<ProviderResponse> {
         return __request(OpenAPI, {
@@ -394,7 +394,7 @@ export class AgentAdminService {
      * @returns ProviderResponse Successful Response
      * @throws ApiError
      */
-    public static updateProviderApiAgentProviderPut(
+    public static updateProvider(
         requestBody: ProviderUpdateRequest,
         molexpSession?: (string | null),
     ): CancelablePromise<ProviderResponse> {
@@ -423,7 +423,7 @@ export class AgentAdminService {
      * @returns ProviderTestResponse Successful Response
      * @throws ApiError
      */
-    public static testProviderApiAgentProviderTestPost(
+    public static testProvider(
         requestBody: ProviderUpdateRequest,
         molexpSession?: (string | null),
     ): CancelablePromise<ProviderTestResponse> {
@@ -451,7 +451,7 @@ export class AgentAdminService {
      * @returns SkillListResponse Successful Response
      * @throws ApiError
      */
-    public static listSkillsApiAgentSkillsGet(
+    public static listSkills(
         molexpSession?: (string | null),
     ): CancelablePromise<SkillListResponse> {
         return __request(OpenAPI, {
@@ -477,7 +477,7 @@ export class AgentAdminService {
      * @returns AgentToolListResponse Successful Response
      * @throws ApiError
      */
-    public static listToolsApiAgentToolsGet(
+    public static listTools(
         molexpSession?: (string | null),
     ): CancelablePromise<AgentToolListResponse> {
         return __request(OpenAPI, {

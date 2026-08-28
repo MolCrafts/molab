@@ -5,9 +5,11 @@ never touches the run. To promote one of those files (or a metric) to a
 **run-scoped** product the body returns a marker as one of its output values;
 the engine — which still holds the ``run_context`` — does the promotion:
 
-* :class:`RegisterArtifact` copies the file into ``<run_dir>/artifacts/<name>``
-  and registers it in the asset catalog, so the UI (file tree, molvis preview,
-  lineage) discovers it.
+* :class:`RegisterArtifact` is promoted by the engine via
+  ``RunContext.register_product`` into ``<run_dir>/artifacts/<name>``
+  and recorded in the asset catalog, so the UI (file tree, molvis preview,
+  lineage) discovers it. Driver / worker code that already holds a
+  ``RunContext`` should call ``register_product`` directly.
 * :class:`RegisterMetric` appends a scalar to the run's metrics WAL (densified
   to Zarr on flush), so the Metrics view plots it.
 

@@ -37,7 +37,7 @@ export class AgentTasksService {
      * @returns AgentTaskListResponse Successful Response
      * @throws ApiError
      */
-    public static listAgentTasksApiAgentTasksGet(
+    public static listAgentTasks(
         molexpSession?: (string | null),
     ): CancelablePromise<AgentTaskListResponse> {
         return __request(OpenAPI, {
@@ -62,7 +62,7 @@ export class AgentTasksService {
      * @returns AgentTaskResponse Successful Response
      * @throws ApiError
      */
-    public static createAgentTaskApiAgentTasksPost(
+    public static createAgentTask(
         requestBody: GoalCreateRequest,
         molexpSession?: (string | null),
     ): CancelablePromise<AgentTaskResponse> {
@@ -87,7 +87,7 @@ export class AgentTasksService {
      * @returns MessageResponse Successful Response
      * @throws ApiError
      */
-    public static deleteAgentTaskRouteApiAgentTasksTaskIdDelete(
+    public static deleteAgentTaskRoute(
         taskId: string,
         molexpSession?: (string | null),
     ): CancelablePromise<MessageResponse> {
@@ -113,7 +113,7 @@ export class AgentTasksService {
      * @returns AgentTaskResponse Successful Response
      * @throws ApiError
      */
-    public static getAgentTaskApiAgentTasksTaskIdGet(
+    public static getAgentTask(
         taskId: string,
         molexpSession?: (string | null),
     ): CancelablePromise<AgentTaskResponse> {
@@ -144,7 +144,7 @@ export class AgentTasksService {
      * @returns MessageResponse Successful Response
      * @throws ApiError
      */
-    public static cancelAgentTaskApiAgentTasksTaskIdCancelPost(
+    public static cancelAgentTask(
         taskId: string,
         molexpSession?: (string | null),
     ): CancelablePromise<MessageResponse> {
@@ -173,7 +173,7 @@ export class AgentTasksService {
      * @returns any Server-Sent Events stream; each `data:` frame is one AgentEvent (discriminated on `kind`), terminated by a `done` control frame.
      * @throws ApiError
      */
-    public static streamAgentTaskEventsApiAgentTasksTaskIdEventsGet(
+    public static streamAgentTaskEvents(
         taskId: string,
         molexpSession?: (string | null),
     ): CancelablePromise<(LoopStartedEvent | StageStartedEvent | StageCompletedEvent | ArtifactWrittenEvent | ApprovalRequestedEvent | ApprovalDecidedEvent | PlanEmittedEvent | PreflightFailedEvent | RepairProposedEvent | ClarificationRequiredEvent | CompactionPerformedEvent | LoopCompletedEvent | LoopSuspendedEvent | ErrorEvent | ThinkingDeltaEvent | TokenDeltaEvent | ToolCallStartedEvent | ToolCallCompletedEvent)> {
@@ -205,7 +205,7 @@ export class AgentTasksService {
      * @returns MessageResponse Successful Response
      * @throws ApiError
      */
-    public static postAgentTaskMessageApiAgentTasksTaskIdMessagesPost(
+    public static postAgentTaskMessage(
         taskId: string,
         requestBody: UserMessageCreateRequest,
         molexpSession?: (string | null),
@@ -238,7 +238,7 @@ export class AgentTasksService {
      * @returns AgentSystemPromptResponse Successful Response
      * @throws ApiError
      */
-    public static getAgentTaskSystemPromptApiAgentTasksTaskIdSystemPromptGet(
+    public static getAgentTaskSystemPrompt(
         taskId: string,
         molexpSession?: (string | null),
     ): CancelablePromise<AgentSystemPromptResponse> {

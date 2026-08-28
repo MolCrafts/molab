@@ -21,7 +21,7 @@ Create a note under an experiment by passing the experiment as the note's `paren
 from molexp.workspace import Bundle, Workspace
 
 ws = Workspace("./lab", name="Lab")
-exp = ws.project("polymer-cg").experiment("solvation-sweep")
+exp = ws.add_project("polymer-cg").add_experiment("solvation-sweep")
 
 bundle = Bundle(ws.root)
 note = bundle.create_note(

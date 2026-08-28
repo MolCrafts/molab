@@ -1,7 +1,7 @@
 """``resolve_plan_compute_target`` — the ONE plan compute-target resolution path.
 
 CLI (`molexp plan`) and server (plan-tasks route) resolve the descriptive
-compute target for PlanMode's step-9 execution report through this single
+compute target for PlanOrchestrator's step-9 execution report through this single
 function (Python = UI law). The target is *descriptive*: it feeds
 ``GenerateExecutionReport`` and never schedules anything — server-side
 ``execute=true`` still runs the driver as an executor subprocess of the

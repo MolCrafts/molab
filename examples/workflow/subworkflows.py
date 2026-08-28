@@ -1,6 +1,6 @@
 """Compose an outer workflow out of a reusable inner workflow via ``SubWorkflow``.
 
-Matches ``docs/guide/subworkflows.md``.
+Matches ``docs/en/guide/subworkflows.md``.
 
 ``SubWorkflow`` is the sanctioned composition node: it wraps an inner
 ``CompiledWorkflow`` (or a ``WorkflowCompiler``, compiled on construction) and,

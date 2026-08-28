@@ -10,14 +10,15 @@ are re-imported from ``.targets`` rather than duplicated.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import Field
 
 from molexp.server.workspace_targets import WorkspaceTarget
 
+from ._wire import ApiModel
 from .targets import TargetTestCheck, TargetTestResponse
 
 
-class WorkspaceTargetCreateRequest(BaseModel):
+class WorkspaceTargetCreateRequest(ApiModel):
     """Payload for ``POST /api/workspace/targets``."""
 
     name: str = Field(..., description="Unique slug-shaped identifier")
@@ -45,7 +46,7 @@ class WorkspaceTargetCreateRequest(BaseModel):
     )
 
 
-class WorkspaceTargetResponse(BaseModel):
+class WorkspaceTargetResponse(ApiModel):
     """Wire form for a :class:`WorkspaceTarget`."""
 
     name: str
@@ -71,7 +72,7 @@ class WorkspaceTargetResponse(BaseModel):
         )
 
 
-class WorkspaceTargetListResponse(BaseModel):
+class WorkspaceTargetListResponse(ApiModel):
     """Response for ``GET /api/workspace/targets``."""
 
     targets: list[WorkspaceTargetResponse]

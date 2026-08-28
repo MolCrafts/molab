@@ -346,8 +346,8 @@ export const featureShowcaseHandlers = [
       }),
   ),
 
-  http.get("/api/cache/stats", () =>
+  http.get("/api/workspace/cache/stats", () =>
     HttpResponse.json({ entryCount: 42, storeDir: "/mock-workspace/.molexp/cache" }),
   ),
-  http.delete("/api/cache", () => HttpResponse.json({ removedCount: 42 })),
+  http.delete("/api/workspace/cache", () => HttpResponse.json({ removedCount: 42 })),
 ];

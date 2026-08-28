@@ -281,7 +281,7 @@ class SubmitHandler:
                 },
             )
 
-        mol_run._update_metadata(
+        mol_run.update_provenance(
             executor_info=build_executor_info(
                 scheduler=scheduler_name,
                 cluster_name=self._cluster,

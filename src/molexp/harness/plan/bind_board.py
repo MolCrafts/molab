@@ -18,14 +18,57 @@ from molexp.harness.schemas.bound_workflow import (
     ExecutionEnvironment,
     ResourcePolicy,
 )
-from molexp.harness.schemas.workflow_ir import DependencyEdge
+from molexp.harness.schemas.workflow_ir import DependencyEdge, PlanTaskIR, PlanWorkflowIR
 from molexp.workspace.utils import generate_id
 
 if TYPE_CHECKING:
     from molexp.harness.schemas import PlanArtifactRef
     from molexp.harness.store.artifact_store import ArtifactStore
 
-__all__ = ["board_plan_to_bound_workflow", "materialize_plan_for_realization"]
+__all__ = [
+    "board_plan_to_bound_workflow",
+    "board_plan_to_workflow_ir",
+    "materialize_plan_for_realization",
+]
+
+
+def board_plan_to_workflow_ir(plan: ExperimentPlan, *, ir_id: str | None = None) -> PlanWorkflowIR:
+    """Project a frozen experiment plan into a minimal :class:`PlanWorkflowIR`.
+
+    The board realization path needs a ``workflow_ir`` artifact —
+    :class:`~molexp.harness.stages.materialize_execution.MaterializeExecution`
+    reads its ``inputs`` for the driver params — but the emergent planning
+    loop produces only spec + board. This deterministic projection mirrors
+    :func:`board_plan_to_bound_workflow` (same task ids, same sequential
+    edges) with empty inputs: the board carries no sweep axes yet, and the
+    projection invents no science.
+    """
+    tasks = [
+        PlanTaskIR(
+            id=task.id,
+            name=task.name,
+            purpose=task.name,
+            task_type="capability",
+            inputs={},
+            outputs={"result": f"{task.id}.result"},
+            acceptance_criteria=list(task.acceptance),
+        )
+        for task in plan.board.tasks
+    ]
+    edges = [
+        DependencyEdge(source_task_id=left.id, target_task_id=right.id)
+        for left, right in pairwise(tasks)
+    ]
+    spec = dict(plan.spec)
+    return PlanWorkflowIR(
+        id=ir_id or f"wir-{generate_id()}",
+        name=str(spec.get("title") or spec.get("id") or "experiment"),
+        objective=str(spec.get("objective") or spec.get("title") or ""),
+        inputs={},
+        tasks=tasks,
+        edges=edges,
+        expected_outputs=[],
+    )
 
 
 def board_plan_to_bound_workflow(
@@ -99,11 +142,15 @@ def materialize_plan_for_realization(
     *,
     created_by: str,
     parent_ids: tuple[str, ...] = (),
-) -> tuple[PlanArtifactRef, PlanArtifactRef]:
-    """Persist ``experiment_spec`` + ``bound_workflow`` for :class:`RealizeBoard`.
+) -> tuple[PlanArtifactRef, PlanArtifactRef, PlanArtifactRef]:
+    """Persist ``experiment_spec`` + ``workflow_ir`` + ``bound_workflow``.
+
+    Everything :class:`RealizeBoard` and its compile tail
+    (``MaterializeExecution`` requires an upstream ``workflow_ir``) need,
+    from the one conversion seam.
 
     Returns:
-        ``(experiment_spec_ref, bound_workflow_ref)``.
+        ``(experiment_spec_ref, workflow_ir_ref, bound_workflow_ref)``.
     """
     parents = list(parent_ids)
     spec_obj = dict(plan.spec)
@@ -115,11 +162,18 @@ def materialize_plan_for_realization(
         created_by=created_by,
         parent_ids=parents,
     )
-    bound = board_plan_to_bound_workflow(plan)
+    ir = board_plan_to_workflow_ir(plan)
+    ir_ref = store.put_json(
+        kind="workflow_ir",
+        obj=ir.model_dump(mode="json"),
+        created_by=created_by,
+        parent_ids=[spec_ref.id, *parents],
+    )
+    bound = board_plan_to_bound_workflow(plan, workflow_ir_id=ir.id)
     bound_ref = store.put_json(
         kind="bound_workflow",
         obj=bound.model_dump(mode="json"),
         created_by=created_by,
-        parent_ids=[spec_ref.id, *parents],
+        parent_ids=[spec_ref.id, ir_ref.id, *parents],
     )
-    return spec_ref, bound_ref
+    return spec_ref, ir_ref, bound_ref

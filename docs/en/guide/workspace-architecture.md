@@ -35,14 +35,14 @@ Each `Run` captures reproducibility metadata: an opaque `workflow_snapshot` payl
 
 ## Creating a Hierarchy
 
-The hierarchy is created from the top down, but not every step has identical identity rules. `ws.project(...)` and `project.experiment(...)` are get-or-create operations keyed by slug or explicit id, so repeated calls can load existing objects from disk. `exp.add_run(...)` is different: it creates a fresh run unless you provide an explicit `id`, in which case it becomes a get-or-load operation for that concrete run directory. Runs seeded by `exp.run(workflow, params=...)` derive their ids from their parameters, so the sweep declaration is idempotent.
+The hierarchy is created from the top down, but not every step has identical identity rules. `ws.add_project(...)` and `project.add_experiment(...)` are create-or-get operations keyed by slug or explicit id, so repeated calls can load existing objects from disk (the bare-noun spellings `ws.project(...)` / `project.experiment(...)` are strict getters that raise when the node is absent). `exp.add_run(...)` is different: it creates a fresh run unless you provide an explicit `id`, in which case it becomes a get-or-load operation for that concrete run directory. Runs seeded by `exp.define(workflow, params=...)` derive their ids from their parameters, so the sweep declaration is idempotent.
 
 ```python
 import molexp as me
 
 ws = me.Workspace("./lab", name="lab")                    # lightweight object; no files yet
-project = ws.project("MD Simulations")                    # materializes workspace.json and project.json
-exp = project.experiment(
+project = ws.add_project("MD Simulations")                # materializes workspace.json and project.json
+exp = project.add_experiment(
     "temperature-300K",
     params={"T": 300, "pressure": 1.0},
     n_replicas=3,
@@ -54,11 +54,11 @@ run = exp.add_run(
 )                                                         # materializes run.json
 ```
 
-Re-calling the project or experiment factory with the same name or id returns the same in-memory object within the current process and loads from disk when needed. Runs only behave that way when the run id is stable.
+Re-calling `add_project` / `add_experiment` with the same name or id returns the same in-memory object within the current process and loads from disk when needed. Runs only behave that way when the run id is stable.
 
 ## Pairing an Experiment with a Workflow
 
-Workspace itself stores no workflow-shaped types. The association is declared through `Experiment.run(workflow, params=...)`, which records the workflow's graph IR on the experiment and binds the live `CompiledWorkflow` in the workflow layer's `default_binding_registry`:
+Workspace itself stores no workflow-shaped types. The association is declared through `Experiment.define(workflow, params=...)`, which records the workflow's graph IR on the experiment and binds the live `CompiledWorkflow` in the workflow layer's `default_binding_registry`:
 
 ```python
 from molexp.workflow import Task, TaskContext, WorkflowCompiler, WorkflowRuntime
@@ -70,7 +70,7 @@ class TrainTask(Task):
 
 
 compiled = WorkflowCompiler(name="train").add(TrainTask()).compile()   # task auto-named "train"
-exp = project.experiment("baseline").run(compiled, params={"lr": [1e-3]})
+exp = project.add_experiment("baseline").define(compiled, params={"lr": [1e-3]})
 
 # Workspace just provides the Run the workflow executes within.
 run = exp.list_runs()[0]
@@ -78,18 +78,18 @@ with run.start() as ctx:
     result = await WorkflowRuntime().execute(compiled, run_context=ctx)
 ```
 
-This decoupling came out of the 2026-05-09 rectification: workspace stays a storage primitive, workflow stays a graph engine, and the cross-layer seam (`molexp.entry`) wires `Experiment.run` to the binding registry without workspace ever importing the workflow layer.
+This decoupling came out of the 2026-05-09 rectification: workspace stays a storage primitive, workflow stays a graph engine, and the cross-layer seam (`molexp.entry`) wires `Experiment.define` to the binding registry without workspace ever importing the workflow layer.
 
 ## Parameter Combinations
 
-`GridSpace` and `UniformSpace` generate parameter combinations. `Experiment.run(workflow, params=...)` accepts a space (or a plain `{axis: [values]}` grid mapping) directly and materializes one content-addressed `Run` per cell:
+`GridSpace` and `UniformSpace` generate parameter combinations. `Experiment.define(workflow, params=...)` accepts a space (or a plain `{axis: [values]}` grid mapping) directly and materializes one content-addressed `Run` per cell:
 
 ```python
 from molexp import GridSpace
 
 grid = GridSpace({"T": [300, 310, 320], "force_field": ["amber", "charmm"]})
 
-sweep = project.experiment("md-sweep").run(compiled, params=grid)
+sweep = project.add_experiment("md-sweep").define(compiled, params=grid)
 print(len(sweep.list_runs()))  # 6 — one per grid cell
 ```
 

@@ -19,7 +19,7 @@ export class ApprovalsService {
      * @returns PendingApprovalsResponse Successful Response
      * @throws ApiError
      */
-    public static listPendingApprovalsApiApprovalsGet(
+    public static listPendingApprovals(
         molexpSession?: (string | null),
     ): CancelablePromise<PendingApprovalsResponse> {
         return __request(OpenAPI, {
@@ -40,7 +40,7 @@ export class ApprovalsService {
      * @returns any Successful Response
      * @throws ApiError
      */
-    public static streamApprovalEventsApiApprovalsEventsGet(
+    public static streamApprovalEvents(
         molexpSession?: (string | null),
     ): CancelablePromise<any> {
         return __request(OpenAPI, {
@@ -67,7 +67,7 @@ export class ApprovalsService {
      * @returns ApprovalDecisionResponse Successful Response
      * @throws ApiError
      */
-    public static decideApprovalApiApprovalsTaskKindTaskIdDecisionsPost(
+    public static decideApproval(
         taskKind: 'plan' | 'curate',
         taskId: string,
         requestBody: ApprovalDecisionRequest,

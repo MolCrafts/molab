@@ -39,7 +39,7 @@ Control flow beyond the DAG shape is declared on the compiler:
 edges) and ``wf.loop`` (repeat-until). A branch or loop-``until`` task
 returns ``(value, Next("label"))``; the routed target receives ``value``
 bound to its named parameters (values-on-edges delivery — see
-``docs/guide/control-flow.md``).
+``docs/en/guide/control-flow.md``).
 
 Execution lives on :class:`WorkflowRuntime`
 (``runtime.execute(compiled)`` / ``.start`` / ``.run_on``), not on the

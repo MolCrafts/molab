@@ -19,7 +19,7 @@ export class MolqService {
      * @returns MolqJobsResponse Successful Response
      * @throws ApiError
      */
-    public static listJobsApiPluginsMolqJobsGet(
+    public static listJobs(
         target?: (string | null),
         includeTerminal: boolean = true,
         limit: number = 200,
@@ -50,7 +50,7 @@ export class MolqService {
      * @returns MolqJobDetailResponse Successful Response
      * @throws ApiError
      */
-    public static getJobApiPluginsMolqJobsJobIdGet(
+    public static getJob(
         jobId: string,
         target: string,
         molexpSession?: (string | null),
@@ -85,7 +85,7 @@ export class MolqService {
      * @returns any Successful Response
      * @throws ApiError
      */
-    public static streamLogsApiPluginsMolqJobsJobIdLogsGet(
+    public static streamLogs(
         jobId: string,
         target: string,
         stream: string = 'stdout',
@@ -116,7 +116,7 @@ export class MolqService {
      * @returns MolqTargetListResponse Successful Response
      * @throws ApiError
      */
-    public static listTargetsApiPluginsMolqTargetsGet(
+    public static listTargets(
         molexpSession?: (string | null),
     ): CancelablePromise<MolqTargetListResponse> {
         return __request(OpenAPI, {

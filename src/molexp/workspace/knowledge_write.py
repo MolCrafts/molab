@@ -75,7 +75,7 @@ def write_knowledge_item(
         name: Concept directory name (slug).
         kind: Knowledge category.
         sources: Non-empty source list (enforced by :class:`KnowledgeMeta`).
-        created_by: Author string (person or ``agent:…`` / ``PlanMode/…``).
+        created_by: Author string (person or ``agent:…`` / ``PlanOrchestrator/…``).
         body: Markdown body for ``index.md``.
         cite: Optional ``(Folder, EdgeRole)`` pairs for typed out-edges.
         title: Optional title for the event payload (defaults to *name*).

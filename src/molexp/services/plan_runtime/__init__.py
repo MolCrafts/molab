@@ -1,6 +1,6 @@
-"""PlanMode application-service runtime, shared by the CLI and the server.
+"""PlanOrchestrator application-service runtime, shared by the CLI and the server.
 
-Runs the harness ``PlanMode`` pipeline as a background ``asyncio.Task`` driven
+Runs the harness ``PlanOrchestrator`` pipeline as a background ``asyncio.Task`` driven
 by the server's ``plan-tasks`` routes, and provides the gateway builder +
 agent-stack preflight ``molexp plan`` drives directly. On completion the
 generated workflow is persisted onto the experiment so the existing UI
@@ -10,7 +10,7 @@ workflow-graph renderer shows it.
 from __future__ import annotations
 
 from molexp.services.plan_runtime.decide import decide_plan_review, map_review_action_to_approval
-from molexp.services.plan_runtime.drive import drive_plan_mode
+from molexp.services.plan_runtime.drive import drive_plan_mode, resolve_plan_run
 from molexp.services.plan_runtime.gateway import (
     PlanPreflightError,
     build_plan_gateway,
@@ -66,6 +66,7 @@ __all__ = [
     "reset_plan_gateway_factory",
     "reset_resume_driver_factory",
     "resolve_plan_compute_target",
+    "resolve_plan_run",
     "resolve_resume_scope",
     "set_plan_gateway_factory",
     "set_resume_driver_factory",

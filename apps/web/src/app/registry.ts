@@ -11,7 +11,7 @@ import {
   listFileTypeContributions,
   resolveRendererContribution,
   unregisterFileTypeContribution,
-} from "@/plugins/contribution-runtime";
+} from "@/lib/contribution-runtime";
 import type {
   EntityTabContribution,
   ExecutionColumnContribution,
@@ -22,8 +22,8 @@ import type {
   RendererEntry,
   RendererResolutionContext,
   RenderTarget,
-} from "@/plugins/types";
-import { buildRendererRegistryKey } from "@/plugins/types";
+} from "@/lib/contribution-types";
+import { buildRendererRegistryKey } from "@/lib/contribution-types";
 
 export type {
   DiscoveredFile,
@@ -40,7 +40,7 @@ export type {
   RendererContribution,
   RendererEntry,
   RenderTarget,
-} from "@/plugins/types";
+} from "@/lib/contribution-types";
 
 export interface RenderPlan {
   center: RenderTarget[];

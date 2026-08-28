@@ -1055,7 +1055,7 @@ export const LeftPanel = ({
 }: LeftPanelProps): JSX.Element => {
   const listHeader = listHeaderByView[view];
   const hasWorkspace = Boolean(snapshot.workspaceRoot);
-  // Active workspace identity is shown once in ContextBar (short label).
+  // Active workspace is the tree root with the open-folder icon; identity lives there.
   const [createProjectOpen, setCreateProjectOpen] = useState(false);
   const [addWorkspaceOpen, setAddWorkspaceOpen] = useState(false);
   const [createExperimentProjectId, setCreateExperimentProjectId] = useState<string | null>(null);

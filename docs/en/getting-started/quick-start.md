@@ -23,7 +23,7 @@ def summarize(values: list[float], scale: float = 1.0) -> float:
 
 # 2. Create the workspace hierarchy
 ws = me.Workspace("./lab", name="lab")
-run = ws.project("demo").experiment("sum").add_run(params={"scale": 2.0})
+run = ws.add_project("demo").add_experiment("sum").add_run(params={"scale": 2.0})
 
 # 3. Execute and read the result
 result = run.execute(wf)
@@ -42,7 +42,7 @@ The output is `succeeded 28.0`.
 
 **Step 1 — Define.** `WorkflowCompiler` holds task definitions. `@wf.task` turns a plain function into a workflow node. `depends_on=["fetch"]` tells the engine that `summarize` runs after `fetch` and receives its output.
 
-**Step 2 — Create.** `Workspace("./lab")` creates a directory on disk. The fluent chain `.project("demo").experiment("sum").add_run(params={"scale": 2.0})` builds the persistent hierarchy: a project groups related work, an experiment names one repeatable definition, and a run records one concrete execution with its parameters.
+**Step 2 — Create.** `Workspace("./lab")` creates a directory on disk. The chain `.add_project("demo").add_experiment("sum").add_run(params={"scale": 2.0})` builds the persistent hierarchy: a project groups related work, an experiment names one repeatable definition, and a run records one concrete execution with its parameters. The `add_*` calls are idempotent create-or-get operations; the bare-noun spellings (`ws.project(...)` / `project.experiment(...)`) are strict getters that raise when the node does not exist yet.
 
 **Step 3 — Execute.** `run.execute(wf)` does everything: compiles the workflow, opens the run's tracked lifecycle, executes the graph with the run's params bound to the root task, persists every task's output under the run directory, and returns the result.
 
@@ -76,7 +76,7 @@ print(same_run.status)                     # succeeded
 print(same_run.get_result("summarize"))    # 28.0
 ```
 
-`get_run(params=...)` rediscovers the run by its content-addressed identity — the same params always resolve to the same run.
+`get_run(run_id)` looks a run up by its id. You do not need to remember ids to rediscover runs, though: runs seeded by `exp.define(wf, params=...)` or `exp.sweep(...)` get content-addressed ids derived from their parameters, so re-declaring the same sweep resolves to the same runs.
 
 ## Next Steps
 

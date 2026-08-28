@@ -1,6 +1,6 @@
 """Harness building blocks — ToolCapability, capability registration, and the AgentGateway pattern.
 
-Matches ``docs/architecture/plan-mode.md``.
+Matches ``docs/en/architecture/plan-mode.md``.
 
 Demonstrates:
 

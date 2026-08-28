@@ -17,16 +17,13 @@ hero:
     - label: 完整指南
       href: "guide/"
   install:
-    label: 安装
+    label: 安装（PyPI 发布筹备中）
     methods:
-      - { label: pip, command: pip install molexp }
-      - { label: uv, command: uv add molexp }
+      - { label: pip, command: pip install git+https://github.com/MolCrafts/molexp }
+      - { label: uv, command: uv pip install git+https://github.com/MolCrafts/molexp }
   badges:
-    - img: https://img.shields.io/pypi/v/molexp
-      href: https://pypi.org/project/molexp/
-      alt: PyPI version
     - img: https://img.shields.io/badge/python-3.12%2B-blue
-      href: https://pypi.org/project/molexp/
+      href: https://github.com/MolCrafts/molexp
       alt: Python 3.12+
 ---
 
@@ -113,7 +110,7 @@ def summarize(values: list[float], scale: float = 1.0) -> float:
     return sum(values) * scale
 
 ws = me.Workspace("./lab", name="lab")
-run = ws.project("demo").experiment("sum").add_run(params={"scale": 2.0})
+run = ws.add_project("demo").add_experiment("sum").add_run(params={"scale": 2.0})
 result = run.execute(wf)
 print(run.status, result.outputs["summarize"])  # succeeded 28.0
 ```
@@ -130,8 +127,8 @@ print(run.status, result.outputs["summarize"])  # succeeded 28.0
 
 ```python
 scan = (
-    ws.project("demo")
-    .experiment("lr-scan")
+    ws.add_project("demo")
+    .add_experiment("lr-scan")
     .sweep(wf, {"scale": [1.0, 2.0, 4.0]})
 )
 summary = scan.execute()
@@ -153,9 +150,9 @@ best = summary.min_by("summarize")
 ```python
 (
     me.Workspace("./lab", name="lab")
-    .project("demo")
-    .experiment("sum")
-    .run(wf.compile(), params={"scale": [1.0, 2.0]})
+    .add_project("demo")
+    .add_experiment("sum")
+    .define(wf.compile(), params={"scale": [1.0, 2.0]})
 )
 ```
 
@@ -199,7 +196,7 @@ molexp run train.py --rerun --fresh     # 从头重新执行
   </div>
   <div>
     <dt>流水线 Harness</dt>
-    <dd>实验编排器。起草规格 → 解析能力 → 生成工作流代码 → 编译 → 测试 → 审查。九个可审计步骤。</dd>
+    <dd>实验编排器。两个阶段：交互式规划把任务放上任务板并经过硬审查门禁，随后确定性实现——按任务代码生成、测试、编译——全程留有产物溯源。</dd>
   </div>
   <div>
     <dt>资产 Assets</dt>

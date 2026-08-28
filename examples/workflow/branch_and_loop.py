@@ -1,6 +1,6 @@
 """Routed branches and workflow-level loops — values ride the edges.
 
-Matches ``docs/guide/control-flow.md``.
+Matches ``docs/en/guide/control-flow.md``.
 
 ``wf.branch`` declares label-routed edges: the deciding task returns
 ``(value, Next("label"))`` and the routed target receives ``value`` bound to its

@@ -1,6 +1,6 @@
 """Run profiles in anger — same script, three execution shapes.
 
-Matches ``docs/guide/run-profiles.md``.
+Matches ``docs/en/guide/run-profiles.md``.
 
 Execute with the CLI, picking one of the profiles defined in
 ``molcfg.yaml``::
@@ -59,7 +59,7 @@ async def train(
 
 (
     me.Workspace(WORKSPACE_ROOT, name="run-profiles-demo")
-    .project("demo")
-    .experiment("train")
-    .run(wf.compile(), params={"seed": [0]})
+    .add_project("demo")
+    .add_experiment("train")
+    .define(wf.compile(), params={"seed": [0]})
 )

@@ -1,4 +1,4 @@
-"""Scope-routed durable resume for suspended PlanMode runs (spec plan-emergent-07).
+"""Scope-routed durable resume for suspended PlanOrchestrator runs (spec plan-emergent-07).
 
 plan-emergent-07 splits plan suspension into two scopes and routes resume by the
 answered :class:`~molexp.harness.schemas.ApprovalRequest`'s ``scope``:
@@ -14,7 +14,7 @@ answered :class:`~molexp.harness.schemas.ApprovalRequest`'s ``scope``:
 The :class:`ResumeDriver` seam mirrors ``set_plan_gateway_factory``: a
 module-level factory (:func:`set_resume_driver_factory`) lets tests inject an
 offline double so routing is exercised with no real router / LLM / subprocess.
-The production :class:`RouterBackedResumeDriver` re-drives real PlanMode work.
+The production :class:`RouterBackedResumeDriver` re-drives real PlanOrchestrator work.
 """
 
 from __future__ import annotations
@@ -57,7 +57,7 @@ def resolve_resume_scope(request: ApprovalRequest) -> ApprovalScope:
 
 @runtime_checkable
 class ResumeDriver(Protocol):
-    """The seam PlanMode resume drives through (main session vs one subagent).
+    """The seam PlanOrchestrator resume drives through (main session vs one subagent).
 
     Two async entry points, both offline-injectable via
     :func:`set_resume_driver_factory` so tests exercise routing with no real
@@ -82,7 +82,7 @@ def _fold_guidance(payload: dict[str, object]) -> str:
 
 
 class RouterBackedResumeDriver:
-    """Production :class:`ResumeDriver` — re-drives real PlanMode work.
+    """Production :class:`ResumeDriver` — re-drives real PlanOrchestrator work.
 
     ``resume_main`` folds the operator payload into a guidance ``user_input`` and
     re-drives :class:`~molexp.harness.Plan` via
