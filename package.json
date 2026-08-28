@@ -7,6 +7,7 @@
     "apps/*"
   ],
   "scripts": {
+    "prepare": "node -e \"process.exit(process.env.CI ? 0 : 1)\" || pre-commit install --hook-type pre-commit --hook-type pre-push",
     "dev:web": "npm run dev -w molexp-web --",
     "dev:api": "npm run dev:api -w molexp-web --",
     "dev:vsc-ext": "npm run dev -w molexp-workflow-preview --",

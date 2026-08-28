@@ -2,6 +2,7 @@
 # CI parity with .github/workflows/ci.yml (UV_NO_SOURCES=1 for path-free installs).
 
 default_install_hook_types: [pre-commit, pre-push]
+default_stages: [pre-commit, pre-push]
 exclude: '^apps/web/src/api/generated/'
 
 repos:
@@ -50,10 +51,11 @@ repos:
         stages: [pre-push]
 
       # Mirrors the ci.yml `web` job (`npm run lint && typecheck && test:web`).
+      # always_run: CI always runs the web job, even on Python-only commits.
       - id: web-checks
         name: "CI web (biome lint + tsc + rstest)"
         entry: bash -c 'npm run lint && npm run typecheck && npm run test:web'
         language: system
         pass_filenames: false
-        files: '^apps/(web|vsc-ext)/'
+        always_run: true
         stages: [pre-push]

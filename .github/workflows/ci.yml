@@ -56,7 +56,10 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
-          cache: npm
+          # No cache: npm — package-lock.json is gitignored (latest-range
+          # policy). `cache: npm` requires a lockfile and failed the web job
+          # at setup-node, before install. Local pre-commit never hit this
+          # because node_modules already existed.
       - name: npm install
         # package-lock.json is gitignored (latest-range policy); install
         # resolves caret ranges from apps/web/package.json on every run.
