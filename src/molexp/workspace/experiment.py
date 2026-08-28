@@ -398,7 +398,7 @@ class Experiment(Folder):
             Run,
             resolved_id,
             id=resolved_id,
-            params=params,
+            parameters=params,
             workflow_snapshot=workflow_snapshot,
             target=resolved_target,
         )
