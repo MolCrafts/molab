@@ -11,21 +11,31 @@ run or written beside it. Do not treat ``ops`` / ``run.json`` as MolRec
 Latest molrec L4 (see molrec ``docs/spec/storage.md``):
 
 ```text
-molrec (spec)  — scientific package record (Zarr root; not host metrics)
+molrec (protocol)  — never imported; products follow the spec by convention
                       ↓
-              molexp Run (host storage only)
+              molexp / molvis / molplot  (the layers that obey and evolve it)
                       ↓
-   host metrics / plot filenames (plugin activation by suffix only):
+              molexp Run (host: run.json / ops/run.json — not a Record)
+                      ↓
+   host metrics / plots (molrec L4 host layout; plugin activation by suffix):
      *.mlp.jsonl       live WAL
      *.mlp.zarr/       dense series SoT (Zarr V3)
      *.mlp.index.json  host series cache only (never activates plugins)
      *.mlp.vl.json     Vega-Lite plot artifact
                       ↓
-              UI plugins (filename match only):
+              UI plugins (filename match only — no protocol reimplementation):
                 molplot ← *.mlp.jsonl / *.mlp.zarr / *.mlp.vl.json
-                molvis  ← classic trajectories (MolRec Zarr reader: future)
+                molvis  ← classic trajectories; *.mrec/
+                          (plugin hands a directory source; molvis opens the store)
                 molq    ← scheduler chrome only
 ```
+
+**Record** 是 Zarr V3 根（文档段写在 group attributes；live metrics 是
+``metrics/metrics.jsonl``，密化 series 在 ``metrics/`` 下）。科学包落到
+``artifacts/`` 时遵循这套布局。**host** Run 不是 Record：``ctx.metrics``
+写文件名门控的 ``*.mlp.*``，molplot 靠后缀激活、不必打开 Zarr。打开 Zarr
+结构库是 **molvis**（molrs ``RecordReader``）的事，不是 molexp UI 插件。
+生产代码不要 ``import molrec``。
 
 - **Core** Run UI lists products under **Outputs** and routes previews.
 - **Plugins** activate only when filenames match — never hard-wired as core tabs.
@@ -35,9 +45,9 @@ molrec (spec)  — scientific package record (Zarr root; not host metrics)
 - Live append uses the **JSONL WAL** (``*.mlp.jsonl``); closed curves densify
   into **Zarr arrays** under ``*.mlp.zarr/`` (never per-step Zarr chunk append).
 - ``*.mlp.index.json`` is a **host-derived series cache** (rebuildable listing
-  aid). It is **not** molrec L4 and does **not** activate plugins.
+  aid). It is not a Record section and does **not** activate plugins.
 - Builtin agent ``run_land`` tags MolRec roots via Zarr ``meta`` attributes
-  (``record_schema_version`` / ``format_name=molrec``) when present; training
+  (``record_schema_version`` / ``format_name=mrec``) when present; training
   writers own the WAL → densify path.
 
 ### Ingest foreign logs into the host metrics surface

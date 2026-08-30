@@ -2,6 +2,9 @@
 
 One line per **live** spec. `/mol:spec` adds entries; `/mol:impl` ticks the spec's tasks and prunes the entry (with the spec file) on completion.
 
+## Open
+
+
 ## host-reflect (chain)
 
 _Closed 01 on `dev` (2026-08-19) — `Reflection` plugin on `agent/post-step` waterfall._
