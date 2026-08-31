@@ -58,13 +58,25 @@ def lammps_run(tmp_path: Path) -> Path:
     return tmp_path
 
 
+def _wal(run_dir: Path) -> Path:
+    return run_dir / "artifacts" / "metrics.mlp.jsonl"
+
+
 def _read_lines(run_dir: Path) -> list[dict[str, Any]]:
-    stream = run_dir / "metrics.mlp.jsonl"
+    stream = _wal(run_dir)
     return [json.loads(line) for line in stream.read_text().splitlines() if line.strip()]
 
 
+def _assert_no_zarr_or_index(run_dir: Path) -> None:
+    assert not (run_dir / "metrics.mlp.jsonl").exists()
+    assert not (run_dir / "metrics.mlp.index.json").exists()
+    assert not (run_dir / "metrics.mlp.zarr").exists()
+    assert not (run_dir / "artifacts" / "metrics.mlp.index.json").exists()
+    assert not (run_dir / "artifacts" / "metrics.mlp.zarr").exists()
+
+
 class TestIngestRunWritesOnlyTheBuffer:
-    def test_writes_metrics_and_the_host_series_cache(
+    def test_writes_jsonl_in_artifacts(
         self, lammps_run: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         thermo = FakeThermo(("Step", "Temp"), np.array([[0.0, 300.0], [100.0, 298.0]]))
@@ -75,9 +87,8 @@ class TestIngestRunWritesOnlyTheBuffer:
         result = ingest_run(lammps_run)
 
         assert result.ingested == {LogFormat.LAMMPS_LOG: 2}
-        assert (lammps_run / "metrics.mlp.jsonl").is_file()
-        assert (lammps_run / "metrics.mlp.index.json").is_file()
-        assert (lammps_run / "metrics.mlp.zarr" / "zarr.json").is_file()
+        assert _wal(lammps_run).is_file()
+        _assert_no_zarr_or_index(lammps_run)
 
     def test_never_writes_molrec_sections(
         self, lammps_run: Path, monkeypatch: pytest.MonkeyPatch
@@ -125,6 +136,7 @@ class TestIngestRunSkips:
         assert result.did_ingest is False
         assert len(result.skipped) == 1
         assert "no molpy here" in result.skipped[0].reason
+        assert not _wal(lammps_run).exists()
         assert not (lammps_run / "metrics.mlp.jsonl").exists()
 
     def test_skips_csv_without_a_mapping(self, tmp_path: Path) -> None:
@@ -158,7 +170,10 @@ class TestIngestRunSkips:
 
         assert result.did_ingest is False
         assert result.skipped == []
+        assert not _wal(tmp_path).exists()
         assert not (tmp_path / "metrics.mlp.jsonl").exists()
+        assert not (tmp_path / "metrics.mlp.zarr").exists()
+        assert not (tmp_path / "metrics.mlp.index.json").exists()
 
 
 class TestLammpsMapping:

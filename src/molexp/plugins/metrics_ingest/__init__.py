@@ -5,9 +5,8 @@ A molexp **Run is a host**, not a MolRec record. Nothing here writes molrec
 molrec spec; molexp does not ship a molrec module.
 
 What these tools produce is the run-local metrics surface: a JSONL **WAL**
-(``metrics.mlp.jsonl``), densified on flush into a Zarr V3 **SoT**
-(``metrics.mlp.zarr/``), plus the host series cache ``metrics.mlp.index.json``.
-That is what ``GET …/runs/{id}/metrics`` and the UI read.
+at ``artifacts/metrics.mlp.jsonl``. That is what ``GET …/runs/{id}/metrics``
+and the UI read. Leftover zarr / index files are ignored.
 
 Public surface::
 

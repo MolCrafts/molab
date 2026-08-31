@@ -57,30 +57,63 @@ class RunAssets:
         self._scope = scope
         self._producer = producer
         self._get_execution_id = get_execution_id
-        self._manifest = AssetManifest(work_dir)
         self.files = FileStore(work_dir, fs=run._disk())
+        self._manifest: AssetManifest | None = None
+        self._log: LogAccessor | None = None
+        self._checkpoint: CheckpointAccessor | None = None
+        self._metrics: MetricsWriter | None = None
 
-        # Only artifact registration emits on the event spine (frequency
-        # budget: log lines / checkpoints stay silent). The workspace root is
-        # resolved through the run's ownership chain — the same path the run
-        # lifecycle uses; a detached run (unit-test fixture) simply emits
-        # nothing, per the spine's derived/non-fatal contract.
-        try:
-            self._event_root = Path(str(run.experiment.project.workspace.root))
-        except (RuntimeError, AttributeError):
-            self._event_root = None
-        self.log = LogAccessor(
-            work_dir,
-            scope,
+    def _exec_rel(self) -> Path:
+        execution_id = self._get_execution_id()
+        if execution_id is None:
+            raise RuntimeError(
+                "RunAssets requires an active execution; call it inside `with run.start() as ctx:`."
+            )
+        return Path("executions") / execution_id
+
+    def _execution_dir(self) -> Path:
+        return self._run_dir / self._exec_rel()
+
+    def _bind(self) -> None:
+        if self._manifest is not None:
+            return
+        exec_dir = self._execution_dir()
+        exec_dir.mkdir(parents=True, exist_ok=True)
+        rel = self._exec_rel()
+        self._manifest = AssetManifest(exec_dir)
+        self._log = LogAccessor(
+            self._run_dir,
+            self._scope,
             self._manifest,
-            producer,
-            get_execution_id,
+            self._producer,
+            self._get_execution_id,
             files=self.files,
         )
-        self.checkpoint = CheckpointAccessor(
-            work_dir, scope, self._manifest, producer, files=self.files
+        self._checkpoint = CheckpointAccessor(
+            self._run_dir, self._scope, self._manifest, self._producer, files=self.files
         )
-        self.metrics = MetricsWriter(work_dir, append=self.files.append)
+        self._metrics = MetricsWriter(
+            exec_dir,
+            append=lambda name, line: self.files.append(rel / "artifacts" / name, line),
+        )
+
+    @property
+    def log(self) -> LogAccessor:
+        self._bind()
+        assert self._log is not None
+        return self._log
+
+    @property
+    def checkpoint(self) -> CheckpointAccessor:
+        self._bind()
+        assert self._checkpoint is not None
+        return self._checkpoint
+
+    @property
+    def metrics(self) -> MetricsWriter:
+        self._bind()
+        assert self._metrics is not None
+        return self._metrics
 
     # ── Working directories ─────────────────────────────────────────────
 
@@ -163,7 +196,7 @@ class RunAssets:
         dest_name = name or (path.name if path is not None else None)
         if dest_name is None:
             raise ValueError("register_product requires src or name")
-        dest = self._run_dir / "artifacts" / dest_name
+        dest = self._run_dir / self._exec_rel() / "artifacts" / dest_name
         dest.parent.mkdir(parents=True, exist_ok=True)
         if path is None:
             return dest
@@ -257,15 +290,6 @@ class RunAssets:
         else:
             raise ValueError(f"register: unknown kind {kind!r}")
         self._manifest.register(asset)
-        if kind == "artifact" and self._event_root is not None:
-            from .assets._events import emit_asset_added
-
-            emit_asset_added(
-                self._event_root,
-                asset,
-                name=label,
-                extra_refs=[producer.run_id] if producer.run_id else (),
-            )
         return asset
 
     def register_artifact(
@@ -289,7 +313,7 @@ class RunAssets:
             payload = bytes(data)
         else:
             payload = str(data)
-        dest = self.files.put(Path("artifacts") / name, payload)
+        dest = self.files.put(self._exec_rel() / "artifacts" / name, payload)
         asset = self.register(
             dest, kind="artifact", name=name, mime=mime, tags=tags, consumed=consumed
         )

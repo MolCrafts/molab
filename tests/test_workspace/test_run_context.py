@@ -67,7 +67,7 @@ class TestRegisterProduct:
         src.write_bytes(b"traj")
         with run.start() as ctx:
             dest = ctx.register_product(src, name="nve.pt")
-            assert dest == ctx.run_dir / "artifacts" / "nve.pt"
+            assert dest == ctx.run_dir / "executions" / ctx._execution_id / "artifacts" / "nve.pt"
             assert dest.read_bytes() == b"traj"
             names = [a.name for a in run.assets.query(kind="artifact")]
             assert "nve.pt" in names
@@ -75,7 +75,7 @@ class TestRegisterProduct:
     def test_name_only_returns_dest_without_registering(self, run):
         with run.start() as ctx:
             dest = ctx.register_product(name="nve.pt")
-            assert dest == ctx.run_dir / "artifacts" / "nve.pt"
+            assert dest == ctx.run_dir / "executions" / ctx._execution_id / "artifacts" / "nve.pt"
             assert dest.parent.is_dir()
             assert not dest.exists()
             assert run.assets.query(kind="artifact") == []
@@ -114,7 +114,9 @@ class TestRegisterArtifact:
             src.write_text("ok")
             asset = ctx.register_artifact(src)
             assert asset.name == "report.txt"
-            assert (ctx.run_dir / "artifacts" / "report.txt").read_text() == "ok"
+            assert (
+                ctx.run_dir / "executions" / ctx._execution_id / "artifacts" / "report.txt"
+            ).read_text() == "ok"
 
     def test_register_artifact_memory_payload_requires_name(self, run):
         with run.start() as ctx, pytest.raises(ValueError, match="name is required"):
@@ -130,7 +132,8 @@ class TestRegisterArtifact:
     def test_register_metric_writes_wal(self, run):
         with run.start() as ctx:
             ctx.register_metric("score", 0.87, step=1)
-        wal = run.run_dir / "metrics.mlp.jsonl"
+        eid = run.read_ops().current_execution_id
+        wal = run.run_dir / "executions" / eid / "artifacts" / "metrics.mlp.jsonl"
         assert wal.exists()
         assert "score" in wal.read_text()
 

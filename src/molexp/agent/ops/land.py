@@ -6,10 +6,11 @@ the UI shows empty pending runs.
 
 Landing is **workspace storage only**: open a RunContext, copy sources +
 product files into the run as assets, optionally set small JSON headlines
-via ``set_result``, and settle the lifecycle. Scientific series live in
-**MolRec** records (observables / metrics JSONL / status) written by
-molnex/molpy — the shared metrics WAL + dense Zarr binding, not a
-molexp-private format.
+via ``set_result``, and settle the lifecycle. Scientific packages follow
+the external molrec spec (Zarr root with ``meta`` / ``frame`` /
+``trajectory`` / ``observables`` / run-surface sections). Host metrics
+stay on the filename-gated ``*.mlp.*`` surface — a molexp Run is not a
+MolRec record.
 """
 
 from __future__ import annotations
@@ -135,15 +136,12 @@ def _record_section_tags(src: Path) -> dict[str, str]:
     for name in _RECORD_SECTIONS:
         section = src / name
         if name == "metrics":
-            # Host metrics surfaces are filename-gated (*.mlp.jsonl / *.mlp.zarr).
+            # Host metrics surfaces are filename-gated (*.mlp.jsonl only).
             try:
                 entries = list(src.iterdir())
             except OSError:
                 entries = []
-            has_mlp = any(p.is_file() and p.name.endswith(".mlp.jsonl") for p in entries) or any(
-                p.is_dir() and p.name.endswith(".mlp.zarr") and (p / "zarr.json").is_file()
-                for p in entries
-            )
+            has_mlp = any(p.is_file() and p.name.endswith(".mlp.jsonl") for p in entries)
             if section.is_dir() or has_mlp:
                 sections.append(name)
             continue

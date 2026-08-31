@@ -1,16 +1,20 @@
 """Molplot / host-metrics filename contract (single source of truth).
 
+This is the molrec L4 **host** layout (see molrec ``docs/spec/storage.md``),
+implemented here — not in a UI plugin and not by importing molrec.
+
 Plugin activation and metrics I/O decide solely by **filename suffixes** —
 no nested ``metrics/`` directory, no free-form heuristics.
 
 Layout under a run (or any host root)::
 
-    <stem>.mlp.jsonl       # live JSONL WAL
-    <stem>.mlp.zarr/       # dense Zarr V3 SoT (dir; contains zarr.json)
-    <stem>.mlp.index.json  # host series cache only (never activates plugins)
-    <name>.mlp.vl.json     # Vega-Lite plot artifact → MolPlot tab
+    artifacts/<stem>.mlp.jsonl   # live JSONL WAL — the metrics persist surface
+    <stem>.mlp.zarr/             # leftover dense store (ignored; never a surface)
+    <stem>.mlp.index.json        # leftover host cache (never activates plugins)
+    <name>.mlp.vl.json           # Vega-Lite plot artifact → MolPlot tab
 
-Default writer stem is ``metrics`` → ``metrics.mlp.jsonl`` / ``metrics.mlp.zarr``.
+Default writer stem is ``metrics`` → ``artifacts/metrics.mlp.jsonl``.
+``is_mlp_zarr`` / ``is_mlp_index`` remain so leftover files can be ignored.
 There is no backward-compat path for the former ``metrics/metrics.jsonl`` layout.
 """
 
@@ -50,16 +54,12 @@ def is_mlp_vl(name: str) -> bool:
 def is_mlp_metrics_surface(name: str, *, rel_path: str = "") -> bool:
     """True when a file should activate the Metrics tab.
 
-    Matches ``*.mlp.jsonl``, a ``*.mlp.zarr`` directory entry, or
-    ``zarr.json`` nested under a ``*.mlp.zarr`` path.
+    Matches ``*.mlp.jsonl`` only. Leftover ``*.mlp.zarr`` / ``zarr.json``
+    nested under a zarr store do not activate the tab.
     """
     n = name.lower()
     p = rel_path.lower().replace("\\", "/")
-    if is_mlp_jsonl(n) or is_mlp_jsonl(p):
-        return True
-    if is_mlp_zarr(n) or p.endswith(MLP_ZARR_SUFFIX) or f"{MLP_ZARR_SUFFIX}/" in p:
-        return True
-    return bool(n == "zarr.json" and MLP_ZARR_SUFFIX in p)
+    return is_mlp_jsonl(n) or is_mlp_jsonl(p)
 
 
 def is_mlp_plot_surface(name: str, *, rel_path: str = "") -> bool:

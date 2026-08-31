@@ -14,6 +14,7 @@ import pytest
 from molexp.workflow import (
     RegisterArtifact,
     TaskContext,
+    Workflow,
     WorkflowCompiler,
     WorkflowRuntime,
 )
@@ -30,7 +31,7 @@ class TestPromoteRegisterArtifact:
     @pytest.mark.asyncio
     async def test_returned_marker_copies_into_run_artifacts(self, tmp_path: Path) -> None:
         captured: dict[str, object] = {}
-        wf = WorkflowCompiler(name="reg")
+        wf = Workflow(name="reg")
 
         @wf.task
         async def export(ctx: TaskContext) -> dict:
@@ -41,11 +42,14 @@ class TestPromoteRegisterArtifact:
 
         run = _new_run(tmp_path)
         with run.start() as ctx:
-            result = await WorkflowRuntime().execute(wf.compile(), run_context=ctx)
+            result = await WorkflowRuntime().execute(
+                WorkflowCompiler().compile(wf), run_context=ctx
+            )
 
         assert result.status == "succeeded"
         promoted = Path(result.outputs["export"]["data"])
-        assert promoted == Path(run.run_dir) / "artifacts" / "system.data"
+        eid = run.read_ops().current_execution_id
+        assert promoted == Path(run.run_dir) / "executions" / eid / "artifacts" / "system.data"
         scratch = Path(captured["scratch"])
         assert scratch.parent.name == "export"
         assert "work" in scratch.parts
@@ -57,7 +61,7 @@ class TestPromoteRegisterArtifact:
 
     @pytest.mark.asyncio
     async def test_scalar_marker_return_is_promoted(self, tmp_path: Path) -> None:
-        wf = WorkflowCompiler(name="scalar")
+        wf = Workflow(name="scalar")
 
         @wf.task
         async def export(ctx: TaskContext) -> RegisterArtifact:
@@ -67,13 +71,19 @@ class TestPromoteRegisterArtifact:
 
         run = _new_run(tmp_path)
         with run.start() as ctx:
-            result = await WorkflowRuntime().execute(wf.compile(), run_context=ctx)
+            result = await WorkflowRuntime().execute(
+                WorkflowCompiler().compile(wf), run_context=ctx
+            )
 
-        assert Path(result.outputs["export"]) == Path(run.run_dir) / "artifacts" / "a.txt"
+        eid = run.read_ops().current_execution_id
+        assert (
+            Path(result.outputs["export"])
+            == Path(run.run_dir) / "executions" / eid / "artifacts" / "a.txt"
+        )
 
     @pytest.mark.asyncio
     async def test_ctx_register_artifact_in_return_dict(self, tmp_path: Path) -> None:
-        wf = WorkflowCompiler(name="verb")
+        wf = Workflow(name="verb")
 
         @wf.task
         async def export(ctx: TaskContext) -> dict:
@@ -83,16 +93,19 @@ class TestPromoteRegisterArtifact:
 
         run = _new_run(tmp_path)
         with run.start() as ctx:
-            result = await WorkflowRuntime().execute(wf.compile(), run_context=ctx)
+            result = await WorkflowRuntime().execute(
+                WorkflowCompiler().compile(wf), run_context=ctx
+            )
 
+        eid = run.read_ops().current_execution_id
         assert (
             Path(result.outputs["export"]["report"])
-            == Path(run.run_dir) / "artifacts" / "report.txt"
+            == Path(run.run_dir) / "executions" / eid / "artifacts" / "report.txt"
         )
 
     @pytest.mark.asyncio
     async def test_pending_only_still_registers(self, tmp_path: Path) -> None:
-        wf = WorkflowCompiler(name="pending")
+        wf = Workflow(name="pending")
 
         @wf.task
         async def export(ctx: TaskContext) -> int:
@@ -103,14 +116,19 @@ class TestPromoteRegisterArtifact:
 
         run = _new_run(tmp_path)
         with run.start() as ctx:
-            result = await WorkflowRuntime().execute(wf.compile(), run_context=ctx)
+            result = await WorkflowRuntime().execute(
+                WorkflowCompiler().compile(wf), run_context=ctx
+            )
 
         assert result.outputs["export"] == 1
-        assert (Path(run.run_dir) / "artifacts" / "side.txt").read_text() == "side"
+        eid = run.read_ops().current_execution_id
+        assert (
+            Path(run.run_dir) / "executions" / eid / "artifacts" / "side.txt"
+        ).read_text() == "side"
 
     @pytest.mark.asyncio
     async def test_register_metric_appends_wal(self, tmp_path: Path) -> None:
-        wf = WorkflowCompiler(name="metric")
+        wf = Workflow(name="metric")
 
         @wf.task
         async def measure(ctx: TaskContext) -> dict:
@@ -118,17 +136,20 @@ class TestPromoteRegisterArtifact:
 
         run = _new_run(tmp_path)
         with run.start() as ctx:
-            result = await WorkflowRuntime().execute(wf.compile(), run_context=ctx)
+            result = await WorkflowRuntime().execute(
+                WorkflowCompiler().compile(wf), run_context=ctx
+            )
 
         assert result.outputs["measure"]["n"] == 42.0
-        wal = Path(run.run_dir) / "metrics.mlp.jsonl"
+        eid = run.read_ops().current_execution_id
+        wal = Path(run.run_dir) / "executions" / eid / "artifacts" / "metrics.mlp.jsonl"
         assert wal.exists()
         assert "n_atoms" in wal.read_text()
 
     @pytest.mark.asyncio
     async def test_pending_only_reregisters_on_cache_hit(self, tmp_path: Path) -> None:
         counters = {"export": 0}
-        wf = WorkflowCompiler(name="cached-reg")
+        wf = Workflow(name="cached-reg")
 
         @wf.task
         async def export(ctx: TaskContext) -> int:
@@ -138,7 +159,7 @@ class TestPromoteRegisterArtifact:
             ctx.register_artifact(out)
             return 7
 
-        compiled = wf.compile()
+        compiled = WorkflowCompiler().compile(wf)
         cache = Caching(store_dir=tmp_path / "shared-cache")
 
         # Same workspace so content-hash re-registration can see the first run's
