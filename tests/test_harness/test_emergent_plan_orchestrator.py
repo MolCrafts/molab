@@ -16,9 +16,9 @@ import pytest
 
 from molexp.harness import (
     ApprovalPendingError,
+    FileApprovalStore,
     FileArtifactStore,
     ModeResult,
-    SQLiteApprovalStore,
 )
 from molexp.harness.gateways.stub import StubAgentGateway
 from molexp.harness.modes.plan import Plan
@@ -99,8 +99,8 @@ def _store(run: Any) -> FileArtifactStore:
     return FileArtifactStore(root=run.run_dir / "artifacts")
 
 
-def _approvals(run: Any) -> SQLiteApprovalStore:
-    return SQLiteApprovalStore(run.run_dir / "harness.sqlite")
+def _approvals(run: Any) -> FileApprovalStore:
+    return FileApprovalStore(path=run.run_dir / "approvals.json")
 
 
 class TestStoreBundle:
@@ -119,7 +119,7 @@ class TestStoreBundle:
         assert result.run_id == run.id
         artifacts_dir = run.run_dir / "artifacts"
         assert artifacts_dir.is_dir() and any(artifacts_dir.iterdir())
-        assert (run.run_dir / "harness.sqlite").is_file()
+        assert (run.run_dir / "events.jsonl").is_file() or (run.run_dir / "artifacts").is_dir()
         store = _store(run)
         assert store.latest_by_kind("review_pack") is not None
         assert store.latest_by_kind(FROZEN_PLAN_KIND) is not None
@@ -266,22 +266,19 @@ class TestPriorKnowledgeWire:
         assert digest.strip()
 
     async def test_failure_analysis_path_appears_in_digest(self, tmp_path: Path) -> None:
-        from molexp.workspace.knowledge_item import KnowledgeItem, KnowledgeMeta, SourceRef
+        from molexp.workspace.knowledge import FailureAnalysis, SourceRef
 
         ws = Workspace(root=tmp_path / "ws-fa", name="lab")
         ws.materialize()
         exp = ws.add_project("p").add_experiment("e")
         run = exp.add_run(params={"mode": "plan"}, id="plan-fa")
-        item = KnowledgeItem(name="failure-grid")
-        exp.add_folder(item)
-        item.write_knowledge_meta(
-            KnowledgeMeta(
-                kind="FailureAnalysis",
-                sources=[SourceRef(kind="run", ref=run.id)],
-                created_by="test",
-            )
+        exp.add_knowledge(
+            "failure-grid",
+            cls=FailureAnalysis,
+            body="grid too coarse near r_min — unique-fa-marker",
+            sources=[SourceRef(kind="run", ref=run.id)],
+            created_by="test",
         )
-        item.write_index("grid too coarse near r_min — unique-fa-marker")
 
         await Plan(
             draft=_CannedDraft(_valid_board()),

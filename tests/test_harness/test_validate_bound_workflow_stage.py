@@ -67,13 +67,13 @@ def _bw_with_bad_capability_dict() -> dict:
 def ctx(tmp_path: Path):
     from molexp.harness.core.run_context import HarnessRunContext
     from molexp.harness.store.file_artifact_store import FileArtifactStore
-    from molexp.harness.store.sqlite_event_log import SQLiteEventLog
-    from molexp.harness.store.sqlite_lineage_store import SQLiteArtifactLineageStore
+    from molexp.harness.store.file_lineage_store import FileLineageStore
+    from molexp.harness.store.jsonl_event_log import JsonlEventLog
 
-    db = tmp_path / "events.sqlite"
+    db = tmp_path / "events.jsonl"
     a = FileArtifactStore(root=tmp_path / "artifacts")
-    e = SQLiteEventLog(path=db)
-    p = SQLiteArtifactLineageStore(path=db, artifact_store=a)
+    e = JsonlEventLog(path=db)
+    p = FileLineageStore(artifact_store=a)
     return HarnessRunContext(
         run_id="run-vbw",
         workspace_root=tmp_path,
@@ -150,13 +150,13 @@ class TestValidateBoundWorkflowStage:
         from molexp.harness.registry.in_memory import InMemoryCapabilityRegistry
         from molexp.harness.stages.validate_bound_workflow import ValidateBoundWorkflow
         from molexp.harness.store.file_artifact_store import FileArtifactStore
-        from molexp.harness.store.sqlite_event_log import SQLiteEventLog
-        from molexp.harness.store.sqlite_lineage_store import SQLiteArtifactLineageStore
+        from molexp.harness.store.file_lineage_store import FileLineageStore
+        from molexp.harness.store.jsonl_event_log import JsonlEventLog
 
-        db = tmp_path / "events.sqlite"
+        db = tmp_path / "events.jsonl"
         a = FileArtifactStore(root=tmp_path / "artifacts")
-        e = SQLiteEventLog(path=db)
-        p = SQLiteArtifactLineageStore(path=db, artifact_store=a)
+        e = JsonlEventLog(path=db)
+        p = FileLineageStore(artifact_store=a)
         # Empty registry → cap.x is unknown
         registry = InMemoryCapabilityRegistry()
         ctx = HarnessRunContext(

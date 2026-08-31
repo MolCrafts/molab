@@ -8,6 +8,8 @@ References:
 
 from __future__ import annotations
 
+import os
+import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -15,7 +17,6 @@ from molexp.workspace import Workspace
 from molexp.workspace.assets import ArtifactAsset, AssetManifest, AssetScope, Producer
 from molexp.workspace.concepts import Note
 from molexp.workspace.models import RunStatus
-from molexp.workspace.run_ops import RunOpsState
 from molexp.workspace.workspace_context import (
     ContextFocus,
     assemble_workspace_context,
@@ -85,11 +86,18 @@ class TestAssembleWorkspaceContext:
         exp = ws.add_project("p").add_experiment("e")
 
         rf = exp.add_run(params={"k": 1})
-        rf.write_ops(RunOpsState(status=RunStatus.FAILED))
+        rf._update_metadata(status=RunStatus.FAILED)
 
         beat = datetime(2020, 1, 1, tzinfo=UTC)
         rr = exp.add_run(params={"k": 2})
-        rr.write_ops(RunOpsState(status=RunStatus.RUNNING, started_at=beat, heartbeat_at=beat))
+        rr._update_metadata(
+            status=RunStatus.RUNNING, started_at=beat, owner_pid=1, owner_host="hpc"
+        )
+        alive = Path(str(rr.run_dir)) / "alive"
+        alive.write_text("")
+        # HEARTBEAT_STALE_SECONDS == 600.0
+        old = time.time() - 601.0
+        os.utime(alive, (old, old))
         now = beat + timedelta(minutes=20)
 
         # a dangling-producer artifact registered into rf's run-scope manifest

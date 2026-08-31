@@ -44,8 +44,8 @@ from molexp.harness.registry import InMemoryCapabilityRegistry
 from molexp.harness.schemas import CapabilityInvocationResult, ToolCapability
 from molexp.harness.stages import InvokeCapability
 from molexp.harness.store.file_artifact_store import FileArtifactStore
-from molexp.harness.store.sqlite_event_log import SQLiteEventLog
-from molexp.harness.store.sqlite_lineage_store import SQLiteArtifactLineageStore
+from molexp.harness.store.file_lineage_store import FileLineageStore
+from molexp.harness.store.jsonl_event_log import JsonlEventLog
 from tests.test_harness._capability_fixtures import echo
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -86,10 +86,10 @@ def _make_ctx(
     run_id: str = "run-cap",
 ) -> HarnessRunContext:
     """Build a fresh ``HarnessRunContext`` backed by isolated on-disk stores."""
-    db_path = root / "events.sqlite"
+    db_path = root / "events.jsonl"
     artifacts = FileArtifactStore(root=root / "artifacts")
-    events = SQLiteEventLog(path=db_path)
-    lineage = SQLiteArtifactLineageStore(path=db_path, artifact_store=artifacts)
+    events = JsonlEventLog(path=db_path)
+    lineage = FileLineageStore(artifact_store=artifacts)
     return HarnessRunContext(
         run_id=run_id,
         workspace_root=root,
@@ -206,8 +206,6 @@ class TestInvokeCapability:
             "parent_id": params_ref.id,
             "child_id": result_ref.id,
             "relation": "derived_from",
-            "stage": "invoke_capability",
-            "run_id": "run-lineage",
         } in edges
 
     def test_dry_run_executor_is_a_no_op(self, tmp_path: Path) -> None:

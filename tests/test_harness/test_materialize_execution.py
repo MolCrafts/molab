@@ -24,13 +24,13 @@ TEST_SOURCE_TEXT = "def test_ok():\n    assert True\n"
 def ctx(tmp_path: Path):
     from molexp.harness.core.run_context import HarnessRunContext
     from molexp.harness.store.file_artifact_store import FileArtifactStore
-    from molexp.harness.store.sqlite_event_log import SQLiteEventLog
-    from molexp.harness.store.sqlite_lineage_store import SQLiteArtifactLineageStore
+    from molexp.harness.store.file_lineage_store import FileLineageStore
+    from molexp.harness.store.jsonl_event_log import JsonlEventLog
 
-    db = tmp_path / "events.sqlite"
+    db = tmp_path / "events.jsonl"
     a = FileArtifactStore(root=tmp_path / "artifacts")
-    e = SQLiteEventLog(path=db)
-    p = SQLiteArtifactLineageStore(path=db, artifact_store=a)
+    e = JsonlEventLog(path=db)
+    p = FileLineageStore(artifact_store=a)
     return HarnessRunContext(
         run_id="run-mat",
         workspace_root=tmp_path,
@@ -154,10 +154,10 @@ class TestMaterializeExecution:
         from molexp.harness.schemas import WorkflowSource
 
         assembly = (
-            "from molexp.workflow import WorkflowCompiler\n"
+            "from molexp.workflow import Workflow\n"
             "from workflow.task_a import task_a\n\n"
-            "def build_workflow() -> WorkflowCompiler:\n"
-            '    wf = WorkflowCompiler(name="demo")\n'
+            "def build_workflow() -> Workflow:\n"
+            '    wf = Workflow(name="demo")\n'
             "    wf.task(task_a)\n"
             "    return wf\n"
         )
@@ -179,7 +179,7 @@ class TestMaterializeExecution:
             created_by="seed",
             parent_ids=[],
         )
-        test_body = "from workflow import build_workflow\n\n\ndef test_a():\n    assert build_workflow().compile() is not None\n"
+        test_body = "from workflow import build_workflow\n\n\ndef test_a():\n    assert WorkflowCompiler().compile(build_workflow()) is not None\n"
         ctx.artifact_store.put_json(
             kind="test_source",
             obj={

@@ -1,42 +1,103 @@
-"""Heartbeat refresh on running runs (``RunLifecycle.refresh_heartbeat``).
+"""Alive-file heartbeat (``molexp.workspace.run_heartbeat``).
 
-The ownership stamp (``owner_pid`` / ``owner_host`` / ``heartbeat_at`` on the
-OKF ``ops/run.json`` sidecar) is written once at claim time; a background
-daemon thread keeps ``heartbeat_at`` fresh while the run executes so cross-host
-reapers can tell a live remote run from a zombie.
+Ownership heartbeat is the mtime of an empty run-root ``alive`` file, not a
+JSON field. ``touch_alive`` / ``is_alive_stale`` / ``unlink_alive`` go through
+``Folder._disk()``. A missing ``alive`` is not stale. ``refresh_heartbeat``
+touches ``alive`` and must not rewrite ``run.json``.
 """
 
 from __future__ import annotations
 
-import json
+import os
+import time
 from pathlib import Path
 
+from molexp.workspace.run_heartbeat import (
+    ALIVE_NAME,
+    HEARTBEAT_INTERVAL_SECONDS,
+    HEARTBEAT_STALE_SECONDS,
+    is_alive_stale,
+    touch_alive,
+    unlink_alive,
+)
 
-def _read_ops(run) -> dict:
-    return json.loads(Path(str(run.run_dir / "ops" / "run.json")).read_text())
+
+def _alive_path(run) -> Path:
+    return Path(str(run.run_dir)) / ALIVE_NAME
+
+
+class TestTouchAlive:
+    def test_touch_creates_empty_file_and_updates_mtime(self, run) -> None:
+        assert ALIVE_NAME == "alive"
+        run.materialize()
+        alive = _alive_path(run)
+        assert not alive.exists()
+
+        touch_alive(run)
+        assert alive.is_file()
+        assert alive.stat().st_size == 0
+
+        os.utime(alive, (alive.stat().st_mtime - 10.0, alive.stat().st_mtime - 10.0))
+        before = alive.stat().st_mtime
+        touch_alive(run)
+        assert alive.stat().st_size == 0
+        assert alive.stat().st_mtime > before
+
+
+class TestIsAliveStale:
+    def test_missing_file_is_not_stale(self, run) -> None:
+        run.materialize()
+        assert not _alive_path(run).exists()
+        assert is_alive_stale(run) is False
+
+    def test_fresh_mtime_is_not_stale(self, run) -> None:
+        run.materialize()
+        touch_alive(run)
+        assert is_alive_stale(run) is False
+
+    def test_old_mtime_is_stale(self, run) -> None:
+        assert HEARTBEAT_STALE_SECONDS == 600.0
+        run.materialize()
+        touch_alive(run)
+        alive = _alive_path(run)
+        old = time.time() - 601.0
+        os.utime(alive, (old, old))
+        assert is_alive_stale(run) is True
+
+
+class TestUnlinkAlive:
+    def test_unlink_removes_alive_and_is_idempotent(self, run) -> None:
+        run.materialize()
+        touch_alive(run)
+        alive = _alive_path(run)
+        assert alive.is_file()
+        unlink_alive(run)
+        assert not alive.exists()
+        unlink_alive(run)
+        assert not alive.exists()
 
 
 class TestRefreshHeartbeat:
-    def test_refresh_updates_only_the_heartbeat(self, run) -> None:
+    def test_refresh_touches_alive_without_rewriting_run_json(self, run) -> None:
+        assert HEARTBEAT_INTERVAL_SECONDS == 30.0
         ctx = run.start()
         with ctx:
-            before = _read_ops(run)
+            alive = _alive_path(run)
+            run_json = Path(str(run.run_dir)) / "run.json"
+            assert alive.is_file()
+            assert alive.stat().st_size == 0
+            os.utime(alive, (alive.stat().st_mtime - 10.0, alive.stat().st_mtime - 10.0))
+            before_mtime = alive.stat().st_mtime
+            before_bytes = run_json.read_bytes()
+
             ctx._lifecycle.refresh_heartbeat()
-            after = _read_ops(run)
 
-            assert after["heartbeat_at"] >= before["heartbeat_at"]
-            # Ownership + status preserved verbatim.
-            assert after["owner_pid"] == before["owner_pid"]
-            assert after["owner_host"] == before["owner_host"]
-            assert after["status"] == before["status"]
+            assert alive.stat().st_mtime > before_mtime
+            assert alive.stat().st_size == 0
+            assert run_json.read_bytes() == before_bytes
 
-    def test_refresh_is_noop_before_first_ops_write(self, run, experiment) -> None:
-        # A run whose ops/run.json does not exist yet (no ownership claim)
-        # must not be resurrected by a stray heartbeat tick.
+    def test_refresh_is_noop_before_claim(self, experiment) -> None:
         fresh = experiment.add_run(params={"lr": 9e-9})
         ctx = fresh.start()
-        ops_json = Path(str(fresh.run_dir / "ops" / "run.json"))
-        if ops_json.exists():
-            ops_json.unlink()
         ctx._lifecycle.refresh_heartbeat()
-        assert not ops_json.exists()
+        assert not _alive_path(fresh).exists()

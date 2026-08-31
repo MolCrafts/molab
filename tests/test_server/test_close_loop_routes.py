@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from molexp.server.app import create_app
 from molexp.server.dependencies import get_workspace
 from molexp.workspace import Workspace
-from molexp.workspace.run_ops import RunStatus
+from molexp.workspace.models import RunStatus
 
 
 @pytest.fixture()
@@ -30,7 +30,7 @@ def client(ws: Workspace) -> TestClient:
 def _failed_run(ws: Workspace):
     exp = ws.add_project("p").add_experiment("e")
     run = exp.add_run(params={"x": 1}, id="aabbcc01")
-    run.update_ops(lambda s: s.model_copy(update={"status": RunStatus.FAILED}))
+    run._update_metadata(status=RunStatus.FAILED)
     err = run.run_dir / "executions" / "exec-aabbcc01" / "error.txt"
     err.parent.mkdir(parents=True, exist_ok=True)
     err.write_text("unit-test-oom\n", encoding="utf-8")
@@ -58,7 +58,7 @@ class TestAnalyzeFailureRoute:
 
     def test_succeeded_run_refused(self, client: TestClient, ws: Workspace) -> None:
         run = _failed_run(ws)
-        run.update_ops(lambda s: s.model_copy(update={"status": RunStatus.SUCCEEDED}))
+        run._update_metadata(status=RunStatus.SUCCEEDED)
         res = client.post(
             f"/api/projects/p/experiments/e/runs/{run.id}/analyze-failure",
             json={},

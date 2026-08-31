@@ -77,10 +77,9 @@ class ExecutionStore:
     ) -> list[ExecutionRecord]:
         """Return execution history with *execution_id*'s record closed.
 
-        Sourced from the OKF ``ops`` sidecar (wsokf-10) — the sole home of a
-        run's execution history.
+        Sourced from ``run.json`` — the sole home of a run's execution history.
         """
-        history = list(self._run.read_ops().executions)
+        history = list(self._run.execution_history)
         for i, entry in enumerate(history):
             if entry.execution_id == execution_id:
                 history[i] = entry.model_copy(update={"finished_at": finished_at, "status": status})

@@ -306,12 +306,12 @@ class TestRealizeOneTaskBlocked:
 def _make_ctx_with_store(tmp_path: Path, store, gateway):
     """Build a ``HarnessRunContext`` around an already-constructed artifact store."""
     from molexp.harness.core.run_context import HarnessRunContext
-    from molexp.harness.store.sqlite_event_log import SQLiteEventLog
-    from molexp.harness.store.sqlite_lineage_store import SQLiteArtifactLineageStore
+    from molexp.harness.store.file_lineage_store import FileLineageStore
+    from molexp.harness.store.jsonl_event_log import JsonlEventLog
 
-    db = tmp_path / "events.sqlite"
-    e = SQLiteEventLog(path=db)
-    p = SQLiteArtifactLineageStore(path=db, artifact_store=store)
+    db = tmp_path / "events.jsonl"
+    e = JsonlEventLog(path=db)
+    p = FileLineageStore(artifact_store=store)
     return HarnessRunContext(
         run_id="run-realize-task",
         workspace_root=tmp_path,

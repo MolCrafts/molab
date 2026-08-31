@@ -155,11 +155,7 @@ def _build_experiment_node(exp: Experiment, project_id: str) -> TreeNode:
 
 def _build_run_node(run: Run, project_id: str, exp_id: str) -> TreeNode:
     data = read_run_json(run.run_dir)
-    # Hot state (status / finished_at / execution history) lives solely in the
-    # OKF ``ops`` sidecar (wsokf-10) — read it through the ops-backed Run
-    # accessors. Identity (created_at, executor_info, error) stays in run.json.
-    ops = run.read_ops()
-    status = ops.status.value
+    status = run.status
     info = normalize_executor_info(_as_dict(data.get("executor_info")), {})
     note: str | None = None
     err = data.get("error")
@@ -167,7 +163,7 @@ def _build_run_node(run: Run, project_id: str, exp_id: str) -> TreeNode:
         note_raw = err.get("message")
         note = note_raw if isinstance(note_raw, str) else None
 
-    finished = ops.finished_at.isoformat() if ops.finished_at else None
+    finished = run.finished_at.isoformat() if run.finished_at else None
     node = TreeNode(
         kind="run",
         node_id=("project", project_id, "experiment", exp_id, "run", run.id),
@@ -178,7 +174,7 @@ def _build_run_node(run: Run, project_id: str, exp_id: str) -> TreeNode:
         ref=run,
     )
 
-    history = ops.executions
+    history = run.execution_history
     node.count_hint = f"{len(history)} attempts" if history else None
     for rec in history:
         node.children.append(_build_execution_node(rec, project_id, exp_id, run, info))

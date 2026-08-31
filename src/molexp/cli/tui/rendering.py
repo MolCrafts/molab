@@ -240,12 +240,9 @@ def _detail_run(node: TreeNode) -> list[RenderableType]:
     assert isinstance(node.ref, Run), "run-kind node must hold a Run"
     run = node.ref
     data = read_run_json(run.run_dir)
-    # Hot state (status / finished_at / executions) lives solely in the OKF
-    # ops sidecar (wsokf-10); identity (profile/config/script/error) in run.json.
-    ops = run.read_ops()
     kv = _kv_table()
     kv.add_row("id", str(run.id))
-    status_str = ops.status.value or node.status or ""
+    status_str = run.status or node.status or ""
     kv.add_row("status", status_str.upper())
     if profile := _as_str(data.get("profile")):
         kv.add_row("profile", profile)
@@ -256,8 +253,8 @@ def _detail_run(node: TreeNode) -> list[RenderableType]:
     created_at = data.get("created_at")
     if created_at:
         kv.add_row("created_at", _fmt_iso(created_at))
-    if ops.finished_at:
-        kv.add_row("finished_at", _fmt_iso(ops.finished_at.isoformat()))
+    if run.finished_at:
+        kv.add_row("finished_at", _fmt_iso(run.finished_at.isoformat()))
     if node.elapsed:
         kv.add_row("elapsed", node.elapsed)
     err = data.get("error")
@@ -271,8 +268,8 @@ def _detail_run(node: TreeNode) -> list[RenderableType]:
         for key in ("backend", "scheduler", "cluster", "job_id", "scheduler_job_id"):
             if norm.get(key):
                 kv.add_row(key, str(norm[key]))
-    if ops.executions:
-        kv.add_row("attempts", str(len(ops.executions)))
+    if run.execution_history:
+        kv.add_row("attempts", str(len(run.execution_history)))
     kv.add_row("run_dir", str(run.run_dir))
 
     cfg = _as_dict(data.get("config"))
@@ -292,8 +289,7 @@ def _detail_execution(node: TreeNode) -> list[RenderableType]:
     ), "execution-kind node must hold a (Run, exec_id) tuple"
     run = node.ref[0]
     exec_id = node.ref[1]
-    # Execution history lives solely in the OKF ops sidecar (wsokf-10).
-    rec = next((r for r in run.read_ops().executions if r.execution_id == exec_id), None)
+    rec = next((r for r in run.execution_history if r.execution_id == exec_id), None)
     kv = _kv_table()
     kv.add_row("execution_id", str(exec_id))
     kv.add_row("run_id", str(run.id))

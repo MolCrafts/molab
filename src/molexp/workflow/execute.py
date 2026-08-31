@@ -3,8 +3,8 @@
 ``execute_run(workflow, run)`` folds the driver dance (``run.start()`` context
 + ``WorkflowRuntime().execute(..., run_context=ctx)`` + asyncio plumbing) into
 a single call on the **same execution path as** ``molexp run``: the
-``RunContext`` lifecycle owns the status machine, the ``ops/run.json``
-hot-state sidecar and the ownership heartbeat; the workflow engine owns
+``RunContext`` lifecycle owns the status machine, ``run.json`` hot state
+and the ``alive``-file ownership heartbeat; the workflow engine owns
 scheduling, caching and node-level persistence. Nothing here is a second
 path — it is the CLI's in-process handler, made importable.
 
@@ -45,7 +45,7 @@ from molexp.workspace.run import RETRYABLE_STATUSES, RunStatus, set_run_executor
 from ._engine.persistence import seed_from_execution
 from ._engine.runtime import WorkflowRuntime
 from .compiled import CompiledWorkflow
-from .compiler import WorkflowCompiler
+from .compiler import Workflow, WorkflowCompiler
 
 if TYPE_CHECKING:
     from molexp.profile import ProfileConfig
@@ -82,11 +82,10 @@ def _ensure_compiled(workflow: object) -> CompiledWorkflow:
     """Normalize *workflow* to a :class:`CompiledWorkflow` (auto-compile)."""
     if isinstance(workflow, CompiledWorkflow):
         return workflow
-    if isinstance(workflow, WorkflowCompiler):
-        return workflow.compile()
+    if isinstance(workflow, Workflow):
+        return WorkflowCompiler().compile(workflow)
     raise TypeError(
-        f"execute_run expects a CompiledWorkflow or a WorkflowCompiler, "
-        f"got {type(workflow).__name__}"
+        f"execute_run expects a CompiledWorkflow or a Workflow, got {type(workflow).__name__}"
     )
 
 
@@ -202,7 +201,7 @@ def execute_run(
     ``asyncio.run``. Args:
 
         workflow: A ``CompiledWorkflow``, or an uncompiled
-            ``WorkflowCompiler`` (compiled automatically).
+            ``Workflow`` (compiled automatically).
         run: The workspace :class:`~molexp.workspace.run.Run` to execute
             against (status machine / ``ops`` sidecar / heartbeat are driven
             by its ``RunContext`` lifecycle, exactly as under ``molexp run``).

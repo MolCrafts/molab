@@ -42,10 +42,10 @@ from molexp.harness.schemas import ModeResult
 from molexp.harness.stages import ApprovalGate
 from molexp.harness.store import (
     ArtifactStore,
+    FileApprovalStore,
     FileArtifactStore,
-    SQLiteApprovalStore,
-    SQLiteArtifactLineageStore,
-    SQLiteEventLog,
+    FileLineageStore,
+    JsonlEventLog,
 )
 
 __all__ = [
@@ -57,15 +57,15 @@ __all__ = [
     "Chat",
     "DryRunExecutor",
     "Executor",
+    "FileApprovalStore",
     "FileArtifactStore",
+    "FileLineageStore",
     "HarnessRunContext",
+    "JsonlEventLog",
     "LocalExecutor",
     "ModeResult",
     "Plan",
     "RouterBackedAgentGateway",
-    "SQLiteApprovalStore",
-    "SQLiteArtifactLineageStore",
-    "SQLiteEventLog",
     "Stage",
     "StageExecutionError",
     "StageRunner",

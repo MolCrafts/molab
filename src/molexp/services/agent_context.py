@@ -87,8 +87,7 @@ def resolve_scope_dir(
         workspace, project_id=project_id, experiment_id=experiment_id, run_id=run_id
     )
     deepest = run or experiment or project
-    # Folder.path() returns molexp.path.Path, not a pathlib.Path subclass.
-    return Path(str(deepest.path())) if deepest is not None else None
+    return Path(deepest.path) if deepest is not None else None
 
 
 def mount_session_scope(
@@ -143,7 +142,7 @@ def _resolve_and_render(
     else:
         sections = _workspace_sections(context)
     deepest = run or experiment or project
-    anchor = Path(str(deepest.path())) if deepest is not None else None
+    anchor = Path(deepest.path) if deepest is not None else None
     return _fit(sections, max_chars), anchor
 
 
@@ -193,7 +192,7 @@ def _run_sections(run: Run, experiment_id: str, project_id: str) -> list[str]:
     ]
     if meta.config_hash:
         header.append(f"- config_hash: {meta.config_hash}")
-    current = run.read_ops().current_execution_id
+    current = run.current_execution_id
     if current:
         header.append(f"- execution: {current}")
     error = meta.error

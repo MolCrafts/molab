@@ -19,18 +19,18 @@ def _ctx(tmp_path: Path, *, with_stub=False, registry=None):
     from molexp.harness.core.run_context import HarnessRunContext
     from molexp.harness.gateways.stub import StubAgentGateway
     from molexp.harness.store.file_artifact_store import FileArtifactStore
-    from molexp.harness.store.sqlite_event_log import SQLiteEventLog
-    from molexp.harness.store.sqlite_lineage_store import SQLiteArtifactLineageStore
+    from molexp.harness.store.file_lineage_store import FileLineageStore
+    from molexp.harness.store.jsonl_event_log import JsonlEventLog
 
-    db = tmp_path / "events.sqlite"
+    db = tmp_path / "events.jsonl"
     a = FileArtifactStore(root=tmp_path / "artifacts")
     gateway = StubAgentGateway(artifact_store=a) if with_stub else None
     return HarnessRunContext(
         run_id="run-x",
         workspace_root=tmp_path,
         artifact_store=a,
-        event_log=SQLiteEventLog(path=db),
-        lineage_store=SQLiteArtifactLineageStore(path=db, artifact_store=a),
+        event_log=JsonlEventLog(path=db),
+        lineage_store=FileLineageStore(artifact_store=a),
         agent_gateway=gateway,
         capability_registry=registry,
     )

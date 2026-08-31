@@ -637,3 +637,34 @@ class TestDomainPlugins:
         src = inspect.getsource(compose_mod)
         assert "from molexp.workspace.workspace import Workspace" not in src
         assert "WorkspacePlugin" in src
+
+
+class TestRunStoresPlugin:
+    def test_apply_does_not_create_harness_sqlite(self, tmp_path: Path) -> None:
+        from molexp.harness.host.plugins.stores import RunStoresPlugin
+
+        host = Host()
+        host.mount(RunStoresPlugin(run_id="run-1", run_dir=tmp_path))
+        assert not (tmp_path / "harness.sqlite").exists()
+
+    def test_append_writes_events_jsonl_at_run_dir(self, tmp_path: Path) -> None:
+        from molexp.harness.host.plugins.stores import RunStoresPlugin
+
+        host = Host()
+        host.mount(RunStoresPlugin(run_id="run-1", run_dir=tmp_path))
+        events = host.ctx.require(Keys.EVENTS)
+        events.append(run_id="run-1", type="run_created", actor="harness")
+        assert (tmp_path / "events.jsonl").is_file()
+        assert not (tmp_path / "artifacts" / "events.jsonl").exists()
+        assert not (tmp_path / "ops" / "events.jsonl").exists()
+        assert not (tmp_path / "harness.sqlite").exists()
+
+    def test_record_pending_writes_approvals_json_at_run_dir(self, tmp_path: Path) -> None:
+        from molexp.harness.host.plugins.stores import RunStoresPlugin
+
+        host = Host()
+        host.mount(RunStoresPlugin(run_id="run-1", run_dir=tmp_path))
+        store = host.ctx.require(Keys.APPROVAL)
+        store.record_pending("run-1", _approval_request())
+        assert (tmp_path / "approvals.json").is_file()
+        assert not (tmp_path / "harness.sqlite").exists()

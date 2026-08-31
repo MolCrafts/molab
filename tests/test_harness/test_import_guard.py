@@ -201,6 +201,14 @@ class TestImportGuard:
             )
         )
 
+    def test_harness_does_not_import_sqlitelog(self) -> None:
+        """persist-one-03: harness sources must not import ``molexp.sqlitelog``."""
+        hits = _imports_with_prefix("molexp.sqlitelog", HARNESS_ROOT)
+        assert not hits, (
+            "molexp.harness must not import molexp.sqlitelog "
+            "(persist-one-03-harness-files).\nOffenders:\n  " + "\n  ".join(_format_hits(hits))
+        )
+
     def test_static_scan_detects_planted_violations(self, tmp_path: Path) -> None:
         """Negative test: the AST scan must catch freshly-planted bad imports."""
         fake = tmp_path / "tainted.py"

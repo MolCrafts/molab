@@ -20,6 +20,7 @@ import molexp as me
 from molexp.workflow import (
     RunFailedError,
     RunNotExecutableError,
+    Workflow,
     WorkflowCompiler,
     aexecute_run,
     execute_run,
@@ -33,8 +34,8 @@ def _make_run(tmp_path: Path, params: dict | None = None):
     return exp.add_run(params=params if params is not None else {"x": 3})
 
 
-def _build_wf() -> WorkflowCompiler:
-    wf = WorkflowCompiler(name="pipeline")
+def _build_wf() -> Workflow:
+    wf = Workflow(name="pipeline")
 
     @wf.task
     def double(x: int) -> int:
@@ -50,7 +51,7 @@ def _build_wf() -> WorkflowCompiler:
 class TestExecuteRun:
     def test_one_step_execute_returns_per_task_outputs(self, tmp_path: Path) -> None:
         run = _make_run(tmp_path)
-        result = execute_run(_build_wf().compile(), run)
+        result = execute_run(WorkflowCompiler().compile(_build_wf()), run)
         assert result.status == "succeeded"
         assert result.outputs["double"] == 6
         assert result.outputs["summarize"] == "got 6"
@@ -58,7 +59,7 @@ class TestExecuteRun:
         assert len(run.execution_history) == 1
 
     def test_task_failure_raises_and_persists_failed_run(self, tmp_path: Path) -> None:
-        wf = WorkflowCompiler(name="boom")
+        wf = Workflow(name="boom")
 
         @wf.task
         def explode(x: int) -> int:
@@ -76,7 +77,7 @@ class TestExecuteRun:
         """The engine swallows the task exception, but its live traceback must
         still reach ``executions/<exec_id>/error.txt`` — the documented "with
         traceback" trace file, not a placeholder note."""
-        wf = WorkflowCompiler(name="boom")
+        wf = Workflow(name="boom")
 
         @wf.task
         def explode(x: int) -> int:
@@ -118,8 +119,8 @@ class TestExecuteRun:
         flag = tmp_path / "healed"
         first_calls: list[int] = []
 
-        def build() -> WorkflowCompiler:
-            wf = WorkflowCompiler(name="healing")
+        def build() -> Workflow:
+            wf = Workflow(name="healing")
 
             @wf.task
             def stage_a(x: int) -> int:
@@ -153,7 +154,7 @@ class TestExecuteRun:
         assert first_calls == [1]
 
     def test_failed_then_rerun_opens_new_execution(self, tmp_path: Path) -> None:
-        wf_fail = WorkflowCompiler(name="always-fails")
+        wf_fail = Workflow(name="always-fails")
 
         @wf_fail.task
         def explode(x: int) -> int:
@@ -169,7 +170,7 @@ class TestExecuteRun:
     def test_running_run_raises(self, tmp_path: Path) -> None:
         run = _make_run(tmp_path)
         run.materialize()
-        run.update_ops(lambda state: state.model_copy(update={"status": RunStatus.RUNNING}))
+        run._update_metadata(status=RunStatus.RUNNING)
         with pytest.raises(RunNotExecutableError, match="cancel"):
             execute_run(_build_wf(), run)
 
@@ -192,7 +193,7 @@ class TestExecuteRun:
 class TestRunExecuteMethod:
     def test_run_execute_delegates_through_seam(self, tmp_path: Path) -> None:
         run = _make_run(tmp_path, params={"x": 4})
-        result = run.execute(_build_wf().compile())
+        result = run.execute(WorkflowCompiler().compile(_build_wf()))
         assert result.status == "succeeded"
         assert result.outputs["summarize"] == "got 8"
         assert run.status == RunStatus.SUCCEEDED.value

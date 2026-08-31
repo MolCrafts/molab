@@ -23,51 +23,46 @@ from molexp.harness.stages.assemble_knowledge_context import (
     AssembleKnowledgeContext,
 )
 from molexp.workspace import Workspace
-from molexp.workspace.knowledge_item import (
-    KnowledgeItem,
-    KnowledgeKind,
-    KnowledgeMeta,
-    SourceRef,
-)
+from molexp.workspace.knowledge import Knowledge, SourceRef, parse_knowledge_class
 
 
 def _ctx(workspace_root: Path, run_dir: Path):
     from molexp.harness.core.run_context import HarnessRunContext
     from molexp.harness.store.file_artifact_store import FileArtifactStore
-    from molexp.harness.store.sqlite_event_log import SQLiteEventLog
-    from molexp.harness.store.sqlite_lineage_store import SQLiteArtifactLineageStore
+    from molexp.harness.store.file_lineage_store import FileLineageStore
+    from molexp.harness.store.jsonl_event_log import JsonlEventLog
 
     run_dir.mkdir(parents=True, exist_ok=True)
-    db_path = run_dir / "harness.sqlite"
+    db_path = run_dir / "events.jsonl"
     artifacts = FileArtifactStore(root=run_dir / "artifacts")
     return HarnessRunContext(
         run_id="run-akc",
         workspace_root=workspace_root,
         artifact_store=artifacts,
-        event_log=SQLiteEventLog(path=db_path),
-        lineage_store=SQLiteArtifactLineageStore(path=db_path, artifact_store=artifacts),
+        event_log=JsonlEventLog(path=db_path),
+        lineage_store=FileLineageStore(artifact_store=artifacts),
     )
 
 
 def _item(
     exp,
     name: str,
-    kind: KnowledgeKind,
+    class_name: str,
     body: str,
     *,
     status: Literal["active", "stale", "superseded", "conflicting"] = "active",
-) -> KnowledgeItem:
+) -> Knowledge:
     run = exp.list_runs()[0]
-    item = KnowledgeItem(name=name)
-    exp.add_folder(item)
-    meta = KnowledgeMeta(
-        kind=kind,
+    item = exp.add_knowledge(
+        name,
+        cls=parse_knowledge_class(class_name),
+        body=body,
         sources=[SourceRef(kind="run", ref=run.id)],
         created_by="test",
-        status=status,
     )
-    item.write_knowledge_meta(meta)
-    item.write_index(body)
+    if status != "active":
+        item._entity_metadata = item.metadata.model_copy(update={"status": status})
+        item.save()
     return item
 
 

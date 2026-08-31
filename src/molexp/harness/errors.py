@@ -22,7 +22,6 @@ __all__ = [
     "CapabilityGapError",
     "CapabilityNotFoundError",
     "CapabilityResolutionError",
-    "EventSeqConflictError",
     "HarnessError",
     "ObjectRefResolutionError",
     "OutOfAffectedScopeError",
@@ -62,14 +61,6 @@ class PluginInjectError(HarnessError):
 
 class ArtifactNotFoundError(HarnessError):
     """Raised when a lookup by ``artifact_id`` finds nothing."""
-
-
-class EventSeqConflictError(HarnessError):
-    """Raised when an attempted ``HarnessEvent.append`` violates the per-run
-    ``(run_id, seq)`` uniqueness constraint.
-
-    Wraps the underlying ``sqlite3.IntegrityError`` as ``__cause__``.
-    """
 
 
 class StageExecutionError(HarnessError):

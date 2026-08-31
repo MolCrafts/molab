@@ -24,18 +24,18 @@ from molexp.harness.core.stage_runner import StageRunner, run_stage_bracketed
 from molexp.harness.errors import StageExecutionError, StagePersistedFailureError
 from molexp.harness.schemas import PlanArtifactRef
 from molexp.harness.store.file_artifact_store import FileArtifactStore
-from molexp.harness.store.sqlite_event_log import SQLiteEventLog
-from molexp.harness.store.sqlite_lineage_store import SQLiteArtifactLineageStore
+from molexp.harness.store.file_lineage_store import FileLineageStore
+from molexp.harness.store.jsonl_event_log import JsonlEventLog
 
 # ───────────────────────────────────────────────────────── fixtures / helpers
 
 
 def _make_ctx(root: Path, *, run_id: str = "run-test") -> HarnessRunContext:
     """Build a fresh HarnessRunContext backed by isolated on-disk stores."""
-    db_path = root / "events.sqlite"
+    db_path = root / "events.jsonl"
     artifacts = FileArtifactStore(root=root / "artifacts")
-    events = SQLiteEventLog(path=db_path)
-    provenance = SQLiteArtifactLineageStore(path=db_path, artifact_store=artifacts)
+    events = JsonlEventLog(path=db_path)
+    provenance = FileLineageStore(artifact_store=artifacts)
     return HarnessRunContext(
         run_id=run_id,
         workspace_root=root,
@@ -148,8 +148,6 @@ class TestRunStageBracketed:
                 "parent_id": parent.id,
                 "child_id": child.id,
                 "relation": "derived_from",
-                "stage": "ChildStage",
-                "run_id": "run-lineage",
             }
         ]
 

@@ -4,9 +4,10 @@ Spec: workspace-git-projection-03-map. The projection is a derived,
 rebuildable view of the authoritative workspace: entities map onto the real
 git objects from spec 02, refs land under ``refs/molexp/*``, and a
 ``rebuild`` from the authoritative files reproduces byte-identical OIDs
-(proving git is a projection target, never a second truth). Hot state
-(``ops/``), ``cache/`` and derived indexes are excluded; ``molexp.ids`` and
-the content-addressed cache keys are never perturbed.
+(proving git is a projection target, never a second truth). The run-root
+``alive`` heartbeat file, ``cache/`` and derived indexes are excluded;
+``run.json`` is projected. ``molexp.ids`` and the content-addressed cache
+keys are never perturbed.
 """
 
 from __future__ import annotations
@@ -49,17 +50,14 @@ def _seed_two_runs(ws_root: Path) -> tuple[Workspace, object, object]:
 
 def _append_execution(run, execution_id: str, started: datetime, finished: datetime) -> None:
     """Seed an extra settled ExecutionRecord with fixed (deterministic) dates."""
-
-    def _add(ops):
-        rec = ExecutionRecord(
-            execution_id=execution_id,
-            started_at=started,
-            finished_at=finished,
-            status="succeeded",
-        )
-        return ops.model_copy(update={"executions": (*ops.executions, rec)})
-
-    run.update_ops(_add)
+    rec = ExecutionRecord(
+        execution_id=execution_id,
+        started_at=started,
+        finished_at=finished,
+        status="succeeded",
+    )
+    history = (*tuple(run.execution_history), rec)
+    run._update_metadata(execution_history=history)
 
 
 class TestGitProjection:
@@ -117,16 +115,17 @@ class TestGitProjection:
     # ── exclusion of hot state + derived indexes ─────────────────────────
 
     async def test_hot_state_and_indexes_never_projected(self, tmp_path):
-        ws, _a, _b = _seed_two_runs(tmp_path / "lab")
+        ws, run_a, _b = _seed_two_runs(tmp_path / "lab")
+        alive = Path(str(run_a.run_dir)) / "alive"
+        alive.write_text("")
         db = await ensure_object_db(tmp_path / "odb")
         res = await GitProjection(ws, db).project()
         paths = _git(db.path, "ls-tree", "-r", "--name-only", res.workspace_tree.hex).split("\n")
         parts = {part for path in paths if path for part in path.split("/")}
-        assert "ops" not in parts
-        assert "_ops" not in parts
+        assert "alive" not in parts
         assert "cache" not in parts
         assert "executions" not in parts
-        # The run ENTITY file is projected (identity), the index files are not.
+        # The run ENTITY file is projected (identity + hot state); alive is not.
         assert any(p.endswith("run.json") for p in paths)
         # No plural children-index at a parent level (projects/experiments/runs.json).
         assert not any(

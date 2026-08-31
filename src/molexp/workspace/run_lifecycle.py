@@ -28,24 +28,18 @@ from __future__ import annotations
 import os
 import platform
 import threading
-from datetime import UTC, datetime
+from datetime import datetime
 from typing import TYPE_CHECKING
 
 from mollog import get_logger
 
 from .models import ErrorInfo, ExecutionMetadata, ExecutionRecord, RunStatus
-from .run_ops import RUN_OPS_NAME
+from .run_heartbeat import ALIVE_NAME, HEARTBEAT_INTERVAL_SECONDS, touch_alive, unlink_alive
 
 if TYPE_CHECKING:
     from .runcontext import RunContext
 
 logger = get_logger(__name__)
-
-#: Cadence of the ownership-heartbeat refresh while a run is executing.
-#: Cross-host zombie reapers (see ``molexp.cli._common.reap_zombie_run``)
-#: only reap a remote ``running`` run when this stamp is stale well beyond
-#: the refresh cadence, so the two constants must stay far apart.
-HEARTBEAT_INTERVAL_SECONDS = 30.0
 
 
 def _split_error_text(raw: str) -> tuple[str, str]:
@@ -113,11 +107,11 @@ class RunLifecycle:
         ctx._ctx_store.load_existing_results()
         ctx._ctx_store.reset_write_tracking()
         self._apply_profile_metadata()
+        # Remember the status this attempt started from *before* claim writes
+        # RUNNING: a signal-less no-op attempt must restore it instead of
+        # defaulting to SUCCEEDED (bug 1).
+        self._status_on_enter = ctx.run.metadata.status
         self._claim_ownership()
-        # Remember the status this attempt started from: a signal-less no-op
-        # attempt must restore it instead of defaulting to SUCCEEDED (bug 1).
-        self._status_on_enter = ctx.run.read_ops().status
-        ctx.run._set_status(RunStatus.RUNNING)
         ctx._start_time = datetime.now()
         ctx._entered = True
 
@@ -128,7 +122,7 @@ class RunLifecycle:
         # (no id, or an id matching no record) appends a fresh record (rerun /
         # first attempt).
         explicit = ctx._explicit_execution_id
-        history = ctx.run.read_ops().executions
+        history = ctx.run.metadata.execution_history
         reopened = (
             next((r for r in history if r.execution_id == explicit), None)
             if explicit is not None
@@ -149,16 +143,10 @@ class RunLifecycle:
                 started_at=ctx._start_time,
             )
             new_executions = (*history, new_record)
-        # Record the active execution id + history in the OKF ``ops`` hot-state
-        # sidecar (wsokf-10). ``run.json`` (identity) carries no hot-state field.
         active_execution_id = ctx._execution_id
-        ctx.run.update_ops(
-            lambda state: state.model_copy(
-                update={
-                    "current_execution_id": active_execution_id,
-                    "executions": new_executions,
-                }
-            )
+        ctx.run._update_metadata(
+            current_execution_id=active_execution_id,
+            execution_history=new_executions,
         )
         ctx._executions.write_metadata(
             ExecutionMetadata(
@@ -171,14 +159,13 @@ class RunLifecycle:
         ctx._assets.append_run_log(f"execution started  exec_id={ctx._execution_id}")
         ctx._ctx_store.save()
         self._start_heartbeat()
-        # Default-on, non-fatal workspace-timeline milestone (integration P0.3).
-        self._emit_run_event("run.started", payload={"execution_id": ctx._execution_id})
 
     def exit(self, exc_type, exc_val, exc_tb) -> bool:  # noqa: ANN001
         # Stop the heartbeat first so it cannot race the terminal-status
         # writes below (the reaper must never see a fresh heartbeat on a
         # run whose status is already terminal-in-progress).
         self._stop_heartbeat()
+        unlink_alive(self._ctx.run)
         ctx = self._ctx
         # ``enter()`` always runs first and assigns a non-None execution id.
         execution_id = ctx._execution_id
@@ -245,20 +232,13 @@ class RunLifecycle:
         # A no-op attempt closes its record as "aborted" — it neither
         # succeeded nor failed; the run-level status stays what it was.
         record_status = "aborted" if noop else final.value
-        # Terminal hot-state — status / finished_at / closed executions / cleared
-        # ownership — is written solely to the OKF ``ops`` sidecar (wsokf-10).
         closed_executions = tuple(ctx._executions.close_record(execution_id, record_status, now))
-        ctx.run.update_ops(
-            lambda state: state.model_copy(
-                update={
-                    "status": final,
-                    "finished_at": now,
-                    "executions": closed_executions,
-                    "owner_pid": None,
-                    "owner_host": None,
-                    "heartbeat_at": None,
-                }
-            )
+        ctx.run._update_metadata(
+            status=final,
+            finished_at=now,
+            execution_history=closed_executions,
+            owner_pid=None,
+            owner_host=None,
         )
         ctx._executions.update_metadata(
             execution_id,
@@ -274,13 +254,6 @@ class RunLifecycle:
         # commit per settled execution, and only when the projection DB already
         # exists (opt-in by existence). Best-effort — never breaks the run.
         self._checkpoint_git_on_settle()
-        # Default-on, non-fatal workspace-timeline milestone (integration P0.3).
-        # A no-op attempt changed nothing — it emits no completion/failure event.
-        if not noop:
-            settled = "run.completed" if final is RunStatus.SUCCEEDED else "run.failed"
-            self._emit_run_event(
-                settled, payload={"status": final.value, "execution_id": execution_id}
-            )
         ctx._entered = False
         return False
 
@@ -289,25 +262,6 @@ class RunLifecycle:
         from molexp.workspace.git_projection import checkpoint_run_on_settle
 
         checkpoint_run_on_settle(self._ctx.run)
-
-    def _emit_run_event(self, event_type, *, payload) -> None:  # noqa: ANN001
-        """Append a default-on, non-fatal run milestone to the workspace event spine.
-
-        Resolves the workspace root from the run (the same
-        ``run.experiment.project.workspace`` path :meth:`_checkpoint_git_on_settle`
-        uses) and delegates to :func:`molexp.workspace.events.emit_workspace_event`,
-        which swallows any failure (the timeline never breaks a run).
-        """
-        from molexp.workspace.events import emit_workspace_event
-
-        run = self._ctx.run
-        emit_workspace_event(
-            run.experiment.project.workspace.resolve(),
-            event_type,
-            "run-lifecycle",
-            payload=payload,
-            refs=[run.id],
-        )
 
     def _apply_profile_metadata(self) -> None:
         """Persist the active profile name / data / hash into RunMetadata."""
@@ -320,37 +274,33 @@ class RunLifecycle:
         )
 
     def _claim_ownership(self) -> None:
-        """Stamp the run with the current process identity in the ``ops`` sidecar.
+        """Stamp ``run.json`` with this process's identity and touch ``alive``.
 
-        Stored as ``owner_pid`` / ``owner_host`` / ``heartbeat_at`` (aware-UTC)
-        on :class:`RunOpsState` (wsokf-10).  A later ``molexp run`` invocation
-        can consult these to tell a live run from a zombie left behind by a
+        Writes ``owner_pid`` / ``owner_host`` / ``status=running`` /
+        ``started_at`` and creates the run-root ``alive`` file whose mtime
+        is the cross-host heartbeat. A later ``molexp run`` invocation can
+        consult these to tell a live run from a zombie left behind by a
         crashed process.
         """
         ctx = self._ctx
-        now = datetime.now(UTC)
-        pid = os.getpid()
-        host = platform.node()
-        ctx.run.update_ops(
-            lambda state: state.model_copy(
-                update={
-                    "owner_pid": pid,
-                    "owner_host": host,
-                    "heartbeat_at": now,
-                }
-            )
+        now = datetime.now()
+        ctx.run._update_metadata(
+            owner_pid=os.getpid(),
+            owner_host=platform.node(),
+            status=RunStatus.RUNNING,
+            started_at=ctx.run.metadata.started_at or now,
         )
+        touch_alive(ctx.run)
 
     # ── Heartbeat ────────────────────────────────────────────────────────
     #
-    # The ownership stamp written by ``_claim_ownership`` includes a
-    # ``heartbeat_at`` timestamp. Same-host reapers can check the pid directly,
-    # but cross-host observers (molq / SLURM submissions are the core
-    # scenario) have only this timestamp to tell a live remote run from a
-    # zombie — so it must be refreshed while the run executes.
+    # Cross-host observers (molq / SLURM submissions are the core scenario)
+    # have only the ``alive`` file mtime to tell a live remote run from a
+    # zombie — so it must be refreshed while the run executes. Same-host
+    # reapers probe the pid directly.
 
     def _start_heartbeat(self) -> None:
-        """Spawn the daemon thread that re-stamps ``heartbeat_at``."""
+        """Spawn the daemon thread that re-touches the ``alive`` file."""
         stop = threading.Event()
         thread = threading.Thread(
             target=self._heartbeat_loop,
@@ -381,18 +331,13 @@ class RunLifecycle:
                 logger.debug(f"heartbeat refresh failed for run {self._ctx.run.id}", exc_info=True)
 
     def refresh_heartbeat(self) -> None:
-        """Re-stamp the run's heartbeat in the OKF ``ops`` sidecar (aware-UTC).
+        """Touch the run-root ``alive`` file; never rewrite ``run.json``.
 
-        The live-run heartbeat lives on :attr:`RunOpsState.heartbeat_at` (an
-        aware-UTC timestamp) so cross-host staleness comparisons are tz-correct
-        (wsokf-07/wsokf-10) — a single ``update_ops`` read-modify-write of
-        ``ops/run.json``. ``run.json`` (identity) is never touched.
-
-        A run whose ``ops/run.json`` has not been written yet (first beat
+        A run whose ``alive`` file has not been created yet (first beat
         before the lifecycle claimed ownership) is left untouched.
         """
         run = self._ctx.run
-        if run.read_ops_json(RUN_OPS_NAME) is None:
+        fs = run._disk()
+        if not fs.exists(fs.join(run.run_dir, ALIVE_NAME)):
             return
-        now = datetime.now(UTC)
-        run.update_ops(lambda state: state.model_copy(update={"heartbeat_at": now}))
+        touch_alive(run)

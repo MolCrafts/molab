@@ -143,19 +143,27 @@ class ComputeTarget(BaseModel, frozen=True):
 
 
 class WorkspaceMetadata(BaseModel, frozen=True):
-    """Top-level workspace."""
+    """Top-level workspace.
+
+    ``type`` is the OKF concept kind. It lives on ``workspace.json``.
+    """
 
     id: str
     name: str
+    type: str = "workspace.root"
     created_at: datetime = Field(default_factory=datetime.now)
     targets: list[ComputeTarget] = Field(default_factory=list)
 
 
 class ProjectMetadata(BaseModel, frozen=True):
-    """Research project container."""
+    """Research project container.
+
+    ``type`` lives on ``project.json``.
+    """
 
     id: str
     name: str
+    type: str = "workspace.project"
     description: str = ""
     owner: str = ""
     tags: list[str] = Field(default_factory=list)
@@ -188,6 +196,7 @@ class ExperimentMetadata(BaseModel, frozen=True):
 
     id: str
     name: str
+    type: str = "workspace.experiment"
     description: str = ""
     tags: list[str] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=datetime.now)
@@ -248,31 +257,25 @@ class ExecutionMetadata(BaseModel, frozen=True):
 
 
 class RunMetadata(BaseModel, frozen=True):
-    """Single execution instance — identity / provenance only.
+    """Single execution instance — identity, provenance, and hot state.
 
-    ``RunMetadata`` (persisted to ``run.json``) carries the settled,
-    human-meaningful identity of a run: its parameters, frozen config +
+    ``RunMetadata`` (persisted to ``run.json``) is the sole source of a
+    run's identity *and* hot machine state: parameters, frozen config +
     hash, activated profile, workflow snapshot/version, source snapshot,
-    intended compute target, executor info, and the terminal ``error``
-    diagnostic. The framework treats profile/config contents as opaque
-    user data — it persists them for reproducibility but never interprets
-    them.
+    intended compute target, executor info, the terminal ``error``
+    diagnostic, plus ``status`` / ownership / ``started_at`` /
+    ``finished_at`` / ``current_execution_id`` / ``execution_history``.
+    The framework treats profile/config contents as opaque user data —
+    it persists them for reproducibility but never interprets them.
 
-    Hot machine state — ``status`` / ``finished_at`` / execution history /
-    ownership (pid/host/heartbeat) — does **not** live here. It is owned
-    by the OKF ``ops/run.json`` sidecar (:class:`RunOpsState`), the sole
-    source of truth (the OKF identity-vs-runtime split; wsokf-07/wsokf-10).
-    Read it through the ops-backed :class:`~molexp.workspace.run.Run`
-    accessors (``run.status`` / ``run.finished_at`` / ``run.execution_history``)
-    or :meth:`~molexp.workspace.run.Run.read_ops`.
+    Heartbeat is **not** a JSON field: the owner process touches an empty
+    run-root ``alive`` file (see :mod:`molexp.workspace.run_heartbeat`).
+    ``heartbeat_at`` and ownership ``labels`` are not modelled.
 
     ``model_config`` uses ``extra="ignore"`` so a ``run.json`` written by
-    an older molexp version (which still carried ``status`` / ``finished_at`` /
-    ``execution_history`` / ``labels``) loads cleanly — the relocated keys
-    are dropped on read (greenfield; no backfill migration).
-
-    ``error`` remains here as a terminal failure diagnostic — it is not
-    modelled by :class:`RunOpsState`.
+    an older molexp version (which still carried ``heartbeat_at`` /
+    ``labels``) loads cleanly — unknown keys are dropped on read
+    (greenfield; no backfill migration).
 
     ``submit_cwd`` is the absolute working directory at the moment
     ``molexp run`` submitted this run.  The cluster worker chdirs here
@@ -285,8 +288,16 @@ class RunMetadata(BaseModel, frozen=True):
     model_config = ConfigDict(extra="ignore", frozen=True)
 
     id: str
+    type: str = "workspace.run"
     parameters: dict[str, JSONValue] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=datetime.now)
+    status: RunStatus = RunStatus.PENDING
+    owner_pid: int | None = None
+    owner_host: str | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    current_execution_id: str | None = None
+    execution_history: tuple[ExecutionRecord, ...] = ()
     error: ErrorInfo | None = None
     # Opaque workflow-snapshot payload — the canonical type lives in
     # ``molexp.workflow.snapshot_ref.WorkflowSnapshotRef``; workspace

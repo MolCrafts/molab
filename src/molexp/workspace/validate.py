@@ -13,8 +13,7 @@ filter, and a severity so a caller can distinguish a broken tree from a
 merely incomplete one:
 
 * ``error``   — the layout law is violated; readers may mis-resolve the tree.
-* ``warning`` — legal but lazily-created state is absent (a Run that has
-  never executed has no ``ops/run.json`` yet, which is normal).
+* ``warning`` — legal but lazily-created state is absent.
 
 Derived indexes are checked *against* the authoritative entity dirs, never
 the other way round: the One-source-of-truth law makes the plural
@@ -47,9 +46,9 @@ RUN_DIR_PREFIX = "run-"
 #: Structural container subdirs per level — directories that hold children or
 #: payload rather than being Concepts themselves, so they carry no meta.json.
 _CONTAINERS: dict[str, frozenset[str]] = {
-    "workspace": frozenset({"projects", "assets", "cache"}),
-    "project": frozenset({"experiments", "assets", "cache"}),
-    "experiment": frozenset({"runs", "assets", "cache"}),
+    "workspace": frozenset({"projects", "assets", "cache", "knowledges"}),
+    "project": frozenset({"experiments", "assets", "cache", "knowledges"}),
+    "experiment": frozenset({"runs", "assets", "cache", "knowledges"}),
     "run": frozenset(
         {
             "artifacts",
@@ -59,8 +58,6 @@ _CONTAINERS: dict[str, frozenset[str]] = {
             "metrics",
             "logs",
             "jobs",
-            "ops",
-            "_ops",  # pre-rename sidecar; still legal so old trees are not strays
         }
     ),
 }
@@ -97,7 +94,8 @@ _CHILD_OF: dict[str, str] = {
 _RULE_HINTS: dict[str, str] = {
     "workspace.missing": (
         "Create the directory, then call materialize_workspace / "
-        "Workspace(...).materialize() so workspace.json + meta.json exist."
+        "Workspace(...).materialize() so workspace.json exists "
+        "(OKF type lives on that file)."
     ),
     "workspace.entity": (
         "Not a workspace root. materialize_workspace(path=…) or "
@@ -142,13 +140,9 @@ _RULE_HINTS: dict[str, str] = {
         "Rename the directory so it is always under runs/run-<run_id> "
         "(the run- prefix is mandatory)."
     ),
-    "run.ops": (
-        "No ops/run.json yet — normal for a run that never executed. "
-        "Ignore, or execute the run so the hot-state sidecar is created."
-    ),
     "concept.marker": (
-        "Write meta.json with a registered concept type "
-        "(e.g. type: workspace.project | workspace.experiment | workspace.run)."
+        "Stamp type on workspace.json / project.json / experiment.json / "
+        "run.json. Notes and other Folders use meta.json."
     ),
     "layout.stray": (
         "Move with ws.wp.mv(src, dst) / me.wp.mv(ws, src, dst) under the "
@@ -201,7 +195,7 @@ class ValidationReport(BaseModel):
 
     Serializes cleanly for MCP / agent tools via :meth:`model_dump` /
     :meth:`to_dict`. ``ok`` is True when there are no ``error`` severity
-    findings; warnings (e.g. missing ``ops``) never fail the tree.
+    findings; warnings never fail the tree.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -330,13 +324,23 @@ class _Checker:
     def _has_concept_marker(self, path: str) -> bool:
         return self._fs.is_file(self._fs.join(path, META_JSON))
 
+    def _entity_has_type(self, path: str, entity: str) -> bool:
+        fpath = self._fs.join(path, entity)
+        if not self._fs.is_file(fpath):
+            return False
+        try:
+            payload = json.loads(self._fs.read_text(fpath))
+        except (OSError, ValueError):
+            return False
+        return isinstance(payload, dict) and bool(payload.get("type"))
+
     def _check_concept(self, path: str, level: str) -> None:
         """Entity file + OKF marker for one concept directory."""
         entity = _ENTITY_FILE[level]
         if not self._fs.is_file(self._fs.join(path, entity)):
             self._add(path, f"{level}.entity", f"missing {entity}")
-        if not self._has_concept_marker(path):
-            self._add(path, "concept.marker", f"missing {META_JSON} concept marker")
+        if not self._entity_has_type(path, entity):
+            self._add(path, "concept.marker", f"missing type on {entity}")
 
     def _check_strays(self, path: str, level: str) -> None:
         """Every child dir is a known container or a Concept (has meta.json)."""
@@ -351,6 +355,25 @@ class _Checker:
                 child,
                 "layout.stray",
                 f"{name!r} is neither a container {sorted(allowed)} nor a Concept (no {META_JSON})",
+            )
+
+    def _check_knowledge_container(self, path: str) -> None:
+        """Every child of ``knowledges/`` must have a class-named entity JSON."""
+        from . import knowledge as _knowledge  # noqa: F401
+        from .folder import _ENTITY_FILE_TO_CLS
+
+        knowledges = self._fs.join(path, "knowledges")
+        if not self._fs.is_dir(knowledges):
+            return
+        entity_names = set(_ENTITY_FILE_TO_CLS) | {"knowledge.json"}
+        for name in self._subdirs(knowledges):
+            child = self._fs.join(knowledges, name)
+            if any(self._fs.is_file(self._fs.join(child, ent)) for ent in entity_names):
+                continue
+            self._add(
+                child,
+                "layout.stray",
+                f"{name!r} under knowledges/ has no knowledge entity JSON",
             )
 
     def _check_index(self, path: str, level: str, child_dirs: list[str]) -> None:
@@ -399,15 +422,6 @@ class _Checker:
     def _check_run(self, path: str) -> None:
         self._check_concept(path, "run")
         self._check_strays(path, "run")
-        has_ops = self._fs.is_file(self._fs.join(path, "ops", "run.json"))
-        has_legacy = self._fs.is_file(self._fs.join(path, "_ops", "run.json"))
-        if not has_ops and not has_legacy:
-            self._add(
-                path,
-                "run.ops",
-                "no ops/run.json hot-state sidecar (normal for a run that never executed)",
-                severity="warning",
-            )
 
     # -- entry point -----------------------------------------------------
 
@@ -422,6 +436,7 @@ class _Checker:
 
         self._check_concept(root, "workspace")
         self._check_strays(root, "workspace")
+        self._check_knowledge_container(root)
 
         projects_dir = self._fs.join(root, "projects")
         project_dirs = self._subdirs(projects_dir)
@@ -433,6 +448,7 @@ class _Checker:
                 self._add(pdir, "project.slug", f"{pname!r} is not a kebab-case slug")
             self._check_concept(pdir, "project")
             self._check_strays(pdir, "project")
+            self._check_knowledge_container(pdir)
 
             experiments_dir = self._fs.join(pdir, "experiments")
             experiment_dirs = self._subdirs(experiments_dir)
@@ -444,6 +460,7 @@ class _Checker:
                     self._add(edir, "experiment.slug", f"{ename!r} is not a kebab-case slug")
                 self._check_concept(edir, "experiment")
                 self._check_strays(edir, "experiment")
+                self._check_knowledge_container(edir)
 
                 runs_dir = self._fs.join(edir, "runs")
                 run_dirs = self._subdirs(runs_dir)

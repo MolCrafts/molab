@@ -55,7 +55,7 @@ def _append_execution(run: Run, execution_id: str) -> None:
         finished_at=now,
         status="succeeded",
     )
-    run.update_ops(lambda s: s.model_copy(update={"executions": (*s.executions, record)}))
+    run._update_metadata(execution_history=(*run.execution_history, record))
 
 
 def _last_execution_id(run: Run) -> str:

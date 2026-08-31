@@ -11,7 +11,7 @@ or decision; the UI refetches the list).
 
 The inbox is read-through: pending state lives on the suspended tasks (which
 carry the requests their gate raised) and decisions live in each run's
-``harness.sqlite`` approval store — this module owns no state of its own.
+``approvals.json`` store — this module owns no state of its own.
 """
 
 from __future__ import annotations
@@ -276,7 +276,7 @@ async def decide_approval(
         return ApprovalDecisionResponse(taskKind=task_kind, taskId=task_id, status=task.status)
 
     # Curate: binary grant/reject only (revise maps to reject for now).
-    from molexp.harness import SQLiteApprovalStore, SQLiteEventLog
+    from molexp.harness import FileApprovalStore, JsonlEventLog
     from molexp.harness.policy.event_log import ApprovalEventRecorder
 
     granted = request.action == "approve"
@@ -288,12 +288,11 @@ async def decide_approval(
         reason=request.reason,
     )
     run_dir = task.run.run_dir
-    db_path = run_dir / "harness.sqlite"
-    store = SQLiteApprovalStore(path=db_path)
+    store = FileApprovalStore(path=run_dir / "approvals.json")
     store.record_pending(task.run_id, pending)
     store.record_decision(decision)
     ApprovalEventRecorder.record_decision(
-        SQLiteEventLog(path=db_path), task.run_id, pending, decision
+        JsonlEventLog(path=run_dir / "events.jsonl"), task.run_id, pending, decision
     )
     if granted:
         task.resume()

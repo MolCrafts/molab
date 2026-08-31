@@ -119,7 +119,7 @@ class FileArtifactStore:
         sha = _hash_path(path)
         existing = self._find_existing(kind, sha)
         if existing is not None:
-            return self._merge_parent_ids(existing, parent_ids)
+            return self.merge_parent_ids(existing.id, parent_ids)
 
         artifact_id = _derive_id(kind, sha)
         dest_dir = self._root / kind
@@ -165,7 +165,7 @@ class FileArtifactStore:
             existing = self._find_existing(kind, sha)
             if existing is not None:
                 staged.unlink(missing_ok=True)
-                return self._merge_parent_ids(existing, parent_ids)
+                return self.merge_parent_ids(existing.id, parent_ids)
 
             artifact_id = _derive_id(kind, sha)
             final = kind_dir / f"{artifact_id}{suffix}"
@@ -210,6 +210,32 @@ class FileArtifactStore:
             return None
         return self.get_ref(index[-1])
 
+    def list_refs(self) -> list[PlanArtifactRef]:
+        if not self._refs_dir.exists():
+            return []
+        return [
+            PlanArtifactRef.model_validate_json(path.read_text(encoding="utf-8"))
+            for path in sorted(self._refs_dir.glob("*.json"))
+        ]
+
+    def merge_parent_ids(self, artifact_id: str, parent_ids: list[str]) -> PlanArtifactRef:
+        """Union *parent_ids* into the stored ref; preserve created_at / created_by."""
+        existing = self.get_ref(artifact_id)
+        merged: list[str] = list(existing.parent_ids)
+        added = False
+        for pid in parent_ids:
+            if pid not in merged:
+                merged.append(pid)
+                added = True
+        if not added:
+            return existing
+        updated = existing.model_copy(update={"parent_ids": merged})
+        atomic_write_json(
+            self._refs_dir / f"{existing.id}.json",
+            json.loads(updated.model_dump_json()),
+        )
+        return updated
+
     # ----------------------------------------------------------- internals
 
     def _find_existing(self, kind: ArtifactKind, sha: str) -> PlanArtifactRef | None:
@@ -223,32 +249,6 @@ class FileArtifactStore:
             # ever happens, fall through and treat as a new artifact.
             return None
         return ref
-
-    def _merge_parent_ids(
-        self, existing: PlanArtifactRef, new_parent_ids: list[str]
-    ) -> PlanArtifactRef:
-        """On idempotent hit, union the new parent_ids with the stored ones.
-
-        Without this, ``put_X`` returning an existing ref on a second
-        derivation path would drop the lineage edge for that second
-        derivation — provenance would be incomplete. We preserve the
-        original ``created_at`` / ``created_by`` so the audit trail
-        still points to the first producer.
-        """
-        merged: list[str] = list(existing.parent_ids)
-        added = False
-        for pid in new_parent_ids:
-            if pid not in merged:
-                merged.append(pid)
-                added = True
-        if not added:
-            return existing
-        updated = existing.model_copy(update={"parent_ids": merged})
-        atomic_write_json(
-            self._refs_dir / f"{existing.id}.json",
-            json.loads(updated.model_dump_json()),
-        )
-        return updated
 
     def _finalize(
         self,

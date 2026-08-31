@@ -25,10 +25,10 @@ from molexp.harness.core.run_context import HarnessRunContext
 from molexp.harness.errors import ApprovalPendingError, StageExecutionError
 from molexp.harness.schemas import ApprovalDecision, ApprovalRequest
 from molexp.harness.stages import ApprovalGate
-from molexp.harness.store.approval_store import SQLiteApprovalStore
+from molexp.harness.store.file_approval_store import FileApprovalStore
 from molexp.harness.store.file_artifact_store import FileArtifactStore
-from molexp.harness.store.sqlite_event_log import SQLiteEventLog
-from molexp.harness.store.sqlite_lineage_store import SQLiteArtifactLineageStore
+from molexp.harness.store.file_lineage_store import FileLineageStore
+from molexp.harness.store.jsonl_event_log import JsonlEventLog
 
 _RUN_ID = "run-gate"
 
@@ -60,19 +60,18 @@ def _decision(
 
 
 class _Env:
-    """One run's stores + ctx, all sharing ``harness.sqlite`` like Mode._build_ctx."""
+    """One run's stores + ctx, file-backed like Mode._build_ctx."""
 
     def __init__(self, tmp_path: Path) -> None:
-        db = tmp_path / "harness.sqlite"
         self.artifacts = FileArtifactStore(root=tmp_path / "artifacts")
-        self.event_log = SQLiteEventLog(path=db)
-        self.approval_store = SQLiteApprovalStore(db)
+        self.event_log = JsonlEventLog(path=tmp_path / "events.jsonl")
+        self.approval_store = FileApprovalStore(path=tmp_path / "approvals.json")
         self.ctx = HarnessRunContext(
             run_id=_RUN_ID,
             workspace_root=tmp_path,
             artifact_store=self.artifacts,
             event_log=self.event_log,
-            lineage_store=SQLiteArtifactLineageStore(path=db, artifact_store=self.artifacts),
+            lineage_store=FileLineageStore(artifact_store=self.artifacts),
             approval_store=self.approval_store,
         )
 

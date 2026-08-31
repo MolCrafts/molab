@@ -96,8 +96,11 @@ class TestAssetManifest:
         assert len(results) == n
         scanned = scan.scan_assets(ws.root, kind="artifact", producer_run=run.id)
         assert len(scanned) == n
+        eid = run.current_execution_id
         manifest_artifacts = [
-            a for a in AssetManifest(Path(run.run_dir)).list() if a.kind == "artifact"
+            a
+            for a in AssetManifest(Path(run.run_dir) / "executions" / eid).list()
+            if a.kind == "artifact"
         ]
         assert len(manifest_artifacts) == n
 

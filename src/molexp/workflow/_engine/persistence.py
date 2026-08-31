@@ -204,11 +204,11 @@ def last_resumable_execution_id(run: Run) -> str | None:
     persisted there. Returns ``None`` when the run has no execution to reopen —
     the caller errors (no fallback to a fresh execution).
 
-    Execution history is read from the OKF ``ops`` hot-state sidecar
-    (``run.read_ops().executions``) per wsokf-07 — the same ``ExecutionRecord``
-    shape, the same "most-recent non-succeeded" rule.
+    Execution history is read from ``run.json``
+    (``run.execution_history``) — the same ``ExecutionRecord`` shape, the
+    same "most-recent non-succeeded" rule.
     """
-    for record in reversed(run.read_ops().executions):
+    for record in reversed(run.execution_history):
         if record.status != "succeeded":
             return record.execution_id
     return None

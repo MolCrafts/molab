@@ -33,13 +33,13 @@ _NOW = datetime(2026, 7, 1, tzinfo=UTC)
 def _ctx(tmp_path: Path):
     from molexp.harness.core.run_context import HarnessRunContext
     from molexp.harness.store.file_artifact_store import FileArtifactStore
-    from molexp.harness.store.sqlite_event_log import SQLiteEventLog
-    from molexp.harness.store.sqlite_lineage_store import SQLiteArtifactLineageStore
+    from molexp.harness.store.file_lineage_store import FileLineageStore
+    from molexp.harness.store.jsonl_event_log import JsonlEventLog
 
-    db = tmp_path / "harness.sqlite"
+    db = tmp_path / "events.jsonl"
     artifacts = FileArtifactStore(root=tmp_path / "artifacts")
-    events = SQLiteEventLog(path=db)
-    lineage = SQLiteArtifactLineageStore(path=db, artifact_store=artifacts)
+    events = JsonlEventLog(path=db)
+    lineage = FileLineageStore(artifact_store=artifacts)
     return HarnessRunContext(
         run_id="run-ge3",
         workspace_root=tmp_path,

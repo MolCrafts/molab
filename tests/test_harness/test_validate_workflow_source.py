@@ -13,7 +13,7 @@ Two units under test, one TestClass each:
   valid source under a restricted ``__builtins__`` (ac-009).
 
 ``VALID_SOURCE`` was verified against the real public ``molexp.workflow``
-surface (``WorkflowCompiler`` + decorator ``@wf.task`` + ``.compile()``) — it
+surface (``WorkflowCompiler`` + decorator ``@wf.task`` + ``WorkflowCompiler().compile()``) — it
 compiles to a ``Workflow``.
 """
 
@@ -28,13 +28,13 @@ import pytest
 # --------------------------------------------------------------- fixtures
 
 # ac-007 happy-path source: defines a builder via the decorator surface and
-# returns it; ``.compile()`` accepts it. Verified against real molexp.workflow.
+# returns it; ``WorkflowCompiler().compile()`` accepts it. Verified against real molexp.workflow.
 VALID_SOURCE = """\
-from molexp.workflow import Task, TaskContext, WorkflowCompiler
+from molexp.workflow import Task, TaskContext, Workflow, WorkflowCompiler
 
 
-def build_workflow() -> WorkflowCompiler:
-    wf = WorkflowCompiler(name="demo")
+def build_workflow() -> Workflow:
+    wf = Workflow(name="demo")
 
     @wf.task
     async def load(ctx: TaskContext) -> list[int]:
@@ -53,21 +53,21 @@ SYNTAX_ERROR_SOURCE = "def (:\n    pass\n"
 # (b) imports a private subpackage of molexp.workflow.
 PRIVATE_IMPORT_SOURCE = """\
 from molexp.workflow._engine import something
-from molexp.workflow import WorkflowCompiler
+from molexp.workflow import Workflow, WorkflowCompiler
 
 
-def build_workflow() -> WorkflowCompiler:
-    return WorkflowCompiler(name="sneaky")
+def build_workflow() -> Workflow:
+    return Workflow(name="sneaky")
 """
 
-# (c) parses + imports cleanly but ``.compile()`` fails — a task depends on a
+# (c) parses + imports cleanly but ``WorkflowCompiler().compile()`` fails — a task depends on a
 # task that is never registered → UnknownTaskError at build time.
 BUILD_FAILS_SOURCE = """\
-from molexp.workflow import TaskContext, WorkflowCompiler
+from molexp.workflow import TaskContext, Workflow, WorkflowCompiler
 
 
-def build_workflow() -> WorkflowCompiler:
-    wf = WorkflowCompiler(name="baddep")
+def build_workflow() -> Workflow:
+    wf = Workflow(name="baddep")
 
     @wf.task(depends_on=["does_not_exist"])
     async def square(ctx: TaskContext) -> list[int]:
@@ -90,13 +90,13 @@ def _workflow_source_dict(source: str = VALID_SOURCE) -> dict:
 def ctx(tmp_path: Path):
     from molexp.harness.core.run_context import HarnessRunContext
     from molexp.harness.store.file_artifact_store import FileArtifactStore
-    from molexp.harness.store.sqlite_event_log import SQLiteEventLog
-    from molexp.harness.store.sqlite_lineage_store import SQLiteArtifactLineageStore
+    from molexp.harness.store.file_lineage_store import FileLineageStore
+    from molexp.harness.store.jsonl_event_log import JsonlEventLog
 
-    db = tmp_path / "events.sqlite"
+    db = tmp_path / "events.jsonl"
     a = FileArtifactStore(root=tmp_path / "artifacts")
-    e = SQLiteEventLog(path=db)
-    p = SQLiteArtifactLineageStore(path=db, artifact_store=a)
+    e = JsonlEventLog(path=db)
+    p = FileLineageStore(artifact_store=a)
     return HarnessRunContext(
         run_id="run-vws",
         workspace_root=tmp_path,
@@ -154,9 +154,9 @@ class TestWorkflowSourceValidator:
 
         source = (
             "import argparse\n"
-            "from molexp.workflow import WorkflowCompiler\n\n"
-            "def build_workflow() -> WorkflowCompiler:\n"
-            "    return WorkflowCompiler(name='x')\n"
+            "from molexp.workflow import Workflow\n\n"
+            "def build_workflow() -> Workflow:\n"
+            "    return Workflow(name='x')\n"
         )
         report = WorkflowSourceValidator.validate(source)
         assert report.passed is False
@@ -169,9 +169,9 @@ class TestWorkflowSourceValidator:
             "import sys\n"
             "from pathlib import Path\n"
             "sys.path.insert(0, str(Path('/tmp/pkg/src')))\n"
-            "from molexp.workflow import WorkflowCompiler\n\n"
-            "def build_workflow() -> WorkflowCompiler:\n"
-            "    return WorkflowCompiler(name='x')\n"
+            "from molexp.workflow import Workflow\n\n"
+            "def build_workflow() -> Workflow:\n"
+            "    return Workflow(name='x')\n"
         )
         report = WorkflowSourceValidator.validate(source)
         assert report.passed is False
@@ -181,11 +181,11 @@ class TestWorkflowSourceValidator:
         from molexp.harness.validators.workflow_source import WorkflowSourceValidator
 
         source = (
-            "from molexp.workflow import WorkflowCompiler, execute_run\n\n"
-            "def build_workflow() -> WorkflowCompiler:\n"
-            "    return WorkflowCompiler(name='x')\n\n"
+            "from molexp.workflow import Workflow, WorkflowCompiler, execute_run\n\n"
+            "def build_workflow() -> Workflow:\n"
+            "    return Workflow(name='x')\n\n"
             "def main():\n"
-            "    execute_run(build_workflow().compile(), None)  # noqa: intentional\n"
+            "    execute_run(WorkflowCompiler().compile(build_workflow()), None)  # noqa: intentional\n"
         )
         report = WorkflowSourceValidator.validate(source)
         assert report.passed is False

@@ -2,7 +2,7 @@
 
 The explicit execution→knowledge verb for plain runs (vision-loop-06): a
 researcher (or, later, an agent capability) harvests a terminal run into a
-source-attributed :class:`KnowledgeItem` mounted under the run's experiment.
+source-attributed :class:`Knowledge` mounted under the run's experiment.
 
 Harvesting is **interpretation, not archival**: the run's raw record already
 lives in ``run.json``/artifacts, so a harvest without a narrative is refused —
@@ -12,7 +12,7 @@ knowledge is what the numbers *mean*. Preconditions error, never fall back:
   live run has no outcome to interpret yet;
 * ``narrative`` must be non-empty.
 
-Placement rationale: workspace-only imports (Run / KnowledgeItem / Folder), so
+Placement rationale: workspace-only imports (Run / Knowledge / Folder), so
 the P1 lifecycle-capability slice can expose this as a harness
 ``ToolCapability`` (harness→workspace is legal; harness→services is not).
 """
@@ -23,9 +23,9 @@ from typing import TYPE_CHECKING
 
 from molexp.ids import slugify
 
-from .knowledge_item import KnowledgeItem, KnowledgeKind, SourceRef
-from .knowledge_write import write_knowledge_item
-from .run_ops import TERMINAL_STATUSES as _TERMINAL_STATUSES
+from .knowledge import Knowledge, SourceRef
+from .knowledge_write import write_knowledge
+from .run import TERMINAL_STATUSES as _TERMINAL_STATUSES
 
 if TYPE_CHECKING:
     from molexp._typing import JSONValue
@@ -41,31 +41,13 @@ _MAX_VALUE_CHARS = 400
 def harvest_run(
     run: Run,
     *,
-    kind: KnowledgeKind,
+    cls: type[Knowledge],
     narrative: str,
     created_by: str,
     results: dict[str, JSONValue] | None = None,
     name: str | None = None,
-) -> KnowledgeItem:
-    """Harvest a terminal *run* into a typed, source-attributed KnowledgeItem.
-
-    Args:
-        run: The finished run whose outcome is being interpreted.
-        kind: The knowledge category (``"Finding"``, ``"FailureAnalysis"``, …).
-        narrative: The human/agent interpretation — required, non-empty.
-        created_by: Who harvested (a person, or ``"agent:<name>"``).
-        results: Optional key→value table of the outcome's headline numbers;
-            values are repr-truncated at ``_MAX_VALUE_CHARS``.
-        name: Explicit Concept name for multiple harvests of one run; the
-            default ``f"{slug(kind)}-{run.id}"`` makes re-harvesting
-            idempotent (same name → update in place).
-
-    Returns:
-        The written :class:`KnowledgeItem`, mounted under the run's experiment.
-
-    Raises:
-        ValueError: The run is not terminal, or *narrative* is empty.
-    """
+) -> Knowledge:
+    """Harvest a terminal *run* into sourced Knowledge under its experiment."""
     if run.status not in _TERMINAL_STATUSES:
         raise ValueError(
             f"run {run.id} is {run.status!r} — only a terminal run "
@@ -78,17 +60,17 @@ def harvest_run(
         )
 
     experiment = run.experiment
-    item_name = name or f"{slugify(kind)}-{run.id}"
-    return write_knowledge_item(
+    item_name = name or f"{slugify(cls.__name__)}-{run.id}"
+    return write_knowledge(
         experiment,
         name=item_name,
-        kind=kind,
+        cls=cls,
         sources=[
             SourceRef(kind="run", ref=run.id),
             SourceRef(kind="experiment", ref=experiment.id),
         ],
         created_by=created_by,
-        body=_render_body(run, kind=kind, narrative=narrative, results=results),
+        body=_render_body(run, cls=cls, narrative=narrative, results=results),
         cite=[(run, "derived_from")],
     )
 
@@ -96,12 +78,12 @@ def harvest_run(
 def _render_body(
     run: Run,
     *,
-    kind: KnowledgeKind,
+    cls: type[Knowledge],
     narrative: str,
     results: dict[str, JSONValue] | None,
 ) -> str:
     lines = [
-        f"# [{kind}] run {run.id}",
+        f"# [{cls.__name__}] run {run.id}",
         "",
         narrative.strip(),
         "",

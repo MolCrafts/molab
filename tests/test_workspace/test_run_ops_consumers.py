@@ -1,50 +1,38 @@
-"""Run hot-state read accessors resolve from the OKF ``ops/run.json`` sidecar (wsokf-07).
+"""Run hot-state read accessors resolve from ``RunMetadata`` on ``run.json``.
 
-After wsokf-07/10 a Run's hot machine state — status, retryable domain, and
-execution history — is sourced from :class:`molexp.workspace.run_ops.RunOpsState`
-in ``ops/run.json`` through :meth:`Run.read_ops`, not from ``RunMetadata`` in
-``run.json``. This file owns the **read** side: ``Run.status`` /
-``Run.is_retryable`` / ``Run.execution_history`` consume the sidecar. (The
-lifecycle *write* side + the run.json/ops split live in
-``test_runmetadata_single_source``; ownership + heartbeat in ``test_run_heartbeat``.)
+``Run.status`` / ``Run.is_retryable`` / ``Run.execution_history`` read
+``self.metadata``. There is no ``ops/run.json`` sidecar.
 """
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from molexp.workspace.models import RunStatus
-from molexp.workspace.run_ops import RunOpsState
+from molexp.workspace.models import ExecutionRecord, RunStatus
 
 
-class TestStatusReadsFromOps:
-    def test_status_reads_from_ops_sidecar(self, run) -> None:
+class TestStatusReadsFromMetadata:
+    def test_status_reads_from_run_json(self, run) -> None:
         run.materialize()
-        run.update_ops(lambda s: s.model_copy(update={"status": RunStatus.FAILED}))
+        run._update_metadata(status=RunStatus.FAILED)
         assert run.status == "failed"
-        assert run.read_ops().status is RunStatus.FAILED
+        assert run.metadata.status is RunStatus.FAILED
 
-    def test_is_retryable_reads_from_ops_sidecar(self, run) -> None:
+    def test_is_retryable_reads_from_run_json(self, run) -> None:
         run.materialize()
         assert run.is_retryable is False
-        run.update_ops(lambda s: s.model_copy(update={"status": RunStatus.CANCELLED}))
+        run._update_metadata(status=RunStatus.CANCELLED)
         assert run.is_retryable is True
-        run.update_ops(lambda s: s.model_copy(update={"status": RunStatus.SUCCEEDED}))
+        run._update_metadata(status=RunStatus.SUCCEEDED)
         assert run.is_retryable is False
 
-    def test_execution_history_reads_from_ops_sidecar(self, run) -> None:
+    def test_execution_history_reads_from_run_json(self, run) -> None:
         run.materialize()
-        state = RunOpsState.model_validate(
-            {
-                "status": "failed",
-                "executions": [
-                    {
-                        "execution_id": "exec-a",
-                        "started_at": datetime(2026, 1, 1, tzinfo=UTC).isoformat(),
-                        "status": "failed",
-                    }
-                ],
-            }
+        rec = ExecutionRecord(
+            execution_id="exec-a",
+            started_at=datetime(2026, 1, 1, tzinfo=UTC),
+            status="failed",
         )
-        run.write_ops(state)
+        run._update_metadata(status=RunStatus.FAILED, execution_history=(rec,))
         assert [r.execution_id for r in run.execution_history] == ["exec-a"]
+        assert [r.execution_id for r in run.metadata.execution_history] == ["exec-a"]

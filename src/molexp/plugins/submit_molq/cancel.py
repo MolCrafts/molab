@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from molexp.workspace.run import Run
 
 
-from molexp.workspace.run_ops import TERMINAL_STATUSES as _TERMINAL_STATUSES
+from molexp.workspace.run import TERMINAL_STATUSES as _TERMINAL_STATUSES
 
 
 @dataclass(frozen=True)
@@ -53,8 +53,6 @@ def classify(run: Run) -> CancelPlan:
     if status in _TERMINAL_STATUSES:
         return CancelPlan(kind="none", detail="already terminal")
 
-    # Ownership (pid/host) lives in the OKF ``ops`` sidecar (wsokf-10);
-    # executor_info (scheduler/job ids) stays on run.json metadata.
     info = normalize_executor_info(run.metadata.executor_info, {})
     if info.get("backend") == "molq" and (info.get("job_id") or info.get("scheduler_job_id")):
         return CancelPlan(
@@ -66,9 +64,8 @@ def classify(run: Run) -> CancelPlan:
             scheduler_job_id=info.get("scheduler_job_id"),
         )
 
-    ops = run.read_ops()
-    pid = ops.owner_pid
-    host = ops.owner_host
+    pid = run.metadata.owner_pid
+    host = run.metadata.owner_host
     if pid is not None and host == platform.node():
         return CancelPlan(kind="local", detail=str(pid))
 

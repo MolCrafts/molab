@@ -250,9 +250,7 @@ class RunResponse(ApiModel):
                 status=rec.status,
                 schedulerJobId=rec.scheduler_job_id,
             )
-            # Execution history + status come from the OKF ``ops`` sidecar
-            # (wsokf-07), read once via ``run.read_ops()``.
-            for rec in run.read_ops().executions
+            for rec in run.execution_history
         ]
         return cls(
             id=run.id,
@@ -352,7 +350,7 @@ class WorkspaceInfoResponse(ApiModel):
     root: str
     projectCount: int
     assetCount: int
-    warnings: list[str] = []
+    warnings: list[str] = Field(default_factory=list)
     # Remote-cache lifecycle (null for local workspaces).
     # ``ready`` = connected AND navigation index built; missing ``_index.json``
     # on first open is normal — the server creates it.

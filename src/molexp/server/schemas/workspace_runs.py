@@ -71,10 +71,7 @@ class WorkspaceRunRow(ApiModel):
         cluster = executor.get("cluster_name")
         scheduler = executor.get("scheduler")
 
-        # Execution history + finished_at are hot state → the OKF ``ops``
-        # sidecar (wsokf-10); read once via ``run.read_ops()``.
-        ops = run.read_ops()
-        executions = [_build_execution_row(run.id, rec, executor) for rec in ops.executions]
+        executions = [_build_execution_row(run.id, rec, executor) for rec in run.execution_history]
         latest_sched_id: str | None = None
         for rec in reversed(executions):
             if rec.schedulerJobId:
@@ -96,7 +93,7 @@ class WorkspaceRunRow(ApiModel):
             profile=run.metadata.profile,
             parameters=dict(run.parameters),
             createdAt=run.metadata.created_at.isoformat(),
-            finishedAt=(ops.finished_at.isoformat() if ops.finished_at else None),
+            finishedAt=(run.finished_at.isoformat() if run.finished_at else None),
             executionCount=len(executions),
             latestSchedulerJobId=latest_sched_id,
             executions=executions,

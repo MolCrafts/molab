@@ -48,7 +48,7 @@ class TestPromoteRegisterArtifact:
 
         assert result.status == "succeeded"
         promoted = Path(result.outputs["export"]["data"])
-        eid = run.read_ops().current_execution_id
+        eid = run.current_execution_id
         assert promoted == Path(run.run_dir) / "executions" / eid / "artifacts" / "system.data"
         scratch = Path(captured["scratch"])
         assert scratch.parent.name == "export"
@@ -75,7 +75,7 @@ class TestPromoteRegisterArtifact:
                 WorkflowCompiler().compile(wf), run_context=ctx
             )
 
-        eid = run.read_ops().current_execution_id
+        eid = run.current_execution_id
         assert (
             Path(result.outputs["export"])
             == Path(run.run_dir) / "executions" / eid / "artifacts" / "a.txt"
@@ -97,7 +97,7 @@ class TestPromoteRegisterArtifact:
                 WorkflowCompiler().compile(wf), run_context=ctx
             )
 
-        eid = run.read_ops().current_execution_id
+        eid = run.current_execution_id
         assert (
             Path(result.outputs["export"]["report"])
             == Path(run.run_dir) / "executions" / eid / "artifacts" / "report.txt"
@@ -121,7 +121,7 @@ class TestPromoteRegisterArtifact:
             )
 
         assert result.outputs["export"] == 1
-        eid = run.read_ops().current_execution_id
+        eid = run.current_execution_id
         assert (
             Path(run.run_dir) / "executions" / eid / "artifacts" / "side.txt"
         ).read_text() == "side"
@@ -141,7 +141,7 @@ class TestPromoteRegisterArtifact:
             )
 
         assert result.outputs["measure"]["n"] == 42.0
-        eid = run.read_ops().current_execution_id
+        eid = run.current_execution_id
         wal = Path(run.run_dir) / "executions" / eid / "artifacts" / "metrics.mlp.jsonl"
         assert wal.exists()
         assert "n_atoms" in wal.read_text()

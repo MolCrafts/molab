@@ -24,7 +24,7 @@ Each scope exposes:
 - ``{folder}.files``       — ``FileStore`` rooted at that folder (user byte-exit)
 - ``{scope}.assets``       — read-only asset view (typed Asset queries over the manifests)
 - ``{scope}.data_assets``  — ``DataAssetLibrary`` for importing user inputs
-- ``workspace.cache``      — ``CacheFolder`` (singleton property; exposes ``as_cache_store()``)
+- ``workspace.cache``      — opt-in ``CacheFolder`` (``as_cache_store()``); execute writes ``run_dir/cache`` instead
 
 Upstream layers extend the workspace tree by importing the public
 ``Folder`` base class and mounting their own subclasses via the
@@ -58,18 +58,12 @@ from .errors import (
     ExperimentExistsError,
     ExperimentNotFoundError,
     FolderMoveCollisionError,
+    KnowledgeExistsError,
+    KnowledgeNotFoundError,
     ProjectExistsError,
     ProjectNotFoundError,
     RunExistsError,
     RunNotFoundError,
-)
-from .events import (
-    WORKSPACE_EVENTS_DB,
-    WorkspaceEvent,
-    WorkspaceEventLog,
-    WorkspaceEventType,
-    emit_workspace_event,
-    read_workspace_events,
 )
 from .experiment import Experiment
 from .file_store import FileStore
@@ -81,17 +75,25 @@ from .folder import (
     Folder,
 )
 from .harvest import harvest_run
-from .knowledge_item import (
-    KNOWLEDGE_ITEM_KIND,
-    KNOWLEDGE_KINDS,
-    KnowledgeItem,
-    KnowledgeKind,
-    KnowledgeMeta,
+from .knowledge import (
+    PLAN_BOOK_NAME,
+    Assumption,
+    Constraint,
+    Decision,
+    FailureAnalysis,
+    Finding,
+    Knowledge,
+    KnowledgeMetadata,
+    Observation,
+    OpenQuestion,
+    ParameterRationale,
+    Plan,
+    ProtocolNote,
     SourceKind,
     SourceRef,
-    parse_knowledge_kind,
+    parse_knowledge_class,
 )
-from .knowledge_write import write_knowledge_item
+from .knowledge_write import write_knowledge
 from .lifecycle_ops import cancel_run
 from .models import (
     ComputeTarget,
@@ -104,7 +106,7 @@ from .models import (
     WorkspaceMetadata,
 )
 from .note_meta import NoteMeta
-from .param import GridSpace, Params, ParamSpace, UniformSpace
+from .param import GridSpace, Params, ParamSpace, UniformSpace  # Params is the sweep-cell model
 from .project import Project
 from .prune import (
     ExecutionPruneEntry,
@@ -114,8 +116,7 @@ from .prune import (
     plan_execution_prune,
 )
 from .reference_meta import ReferenceMeta
-from .run import RETRYABLE_STATUSES, Run, RunContext, RunStatus
-from .run_ops import TERMINAL_STATUSES
+from .run import RETRYABLE_STATUSES, TERMINAL_STATUSES, Run, RunContext, RunStatus
 from .run_reaper import pid_alive, reap_zombie_run
 from .runset import RunRecord, RunSet, RunSetResult
 from .target import (
@@ -162,13 +163,11 @@ from .zotero_concepts import ZoteroItem, read_zotero_items
 
 __all__ = [
     "DEFAULT_EDGE_ROLE",
-    "KNOWLEDGE_ITEM_KIND",
-    "KNOWLEDGE_KINDS",
     "LOCAL_TARGET_NAME",
+    "PLAN_BOOK_NAME",
     "RETRYABLE_STATUSES",
     "TERMINAL_STATUSES",
     "WORKSPACE_CACHE_KIND",
-    "WORKSPACE_EVENTS_DB",
     "WORKSPACE_EXPERIMENT_KIND",
     "WORKSPACE_PROJECT_KIND",
     "WORKSPACE_ROOT_KIND",
@@ -179,6 +178,7 @@ __all__ = [
     "AssetManifest",
     "AssetScope",
     "AssetsView",
+    "Assumption",
     "Backlink",
     "Bundle",
     "BundleIndex",
@@ -187,10 +187,12 @@ __all__ = [
     "ComputeTarget",
     "ConceptIndexEntry",
     "ConceptNotFoundError",
+    "Constraint",
     "Context",
     "ContextFocus",
     "DataAsset",
     "DataAssetLibrary",
+    "Decision",
     "Edge",
     "EdgeRole",
     "EntitySummary",
@@ -204,29 +206,37 @@ __all__ = [
     "ExperimentMetadata",
     "ExperimentNotFoundError",
     "ExperimentRef",
+    "FailureAnalysis",
     "FileStore",
+    "Finding",
     "Folder",
     "FolderMetadata",
     "FolderMoveCollisionError",
     "GridSpace",
     "HealthFlag",
-    "KnowledgeItem",
-    "KnowledgeKind",
-    "KnowledgeMeta",
+    "Knowledge",
+    "KnowledgeExistsError",
+    "KnowledgeMetadata",
+    "KnowledgeNotFoundError",
     "KnowledgeRef",
     "LivePruneRefusedError",
     "LocalTarget",
     "LogAsset",
     "Note",
     "NoteMeta",
+    "Observation",
+    "OpenQuestion",
     "ParamSpace",
+    "ParameterRationale",
     "Params",
+    "Plan",
     "Producer",
     "Project",
     "ProjectExistsError",
     "ProjectMetadata",
     "ProjectNotFoundError",
     "ProjectRef",
+    "ProtocolNote",
     "ReferenceConcept",
     "ReferenceMeta",
     "RemoteTarget",
@@ -254,9 +264,6 @@ __all__ = [
     "WorkflowRef",
     "Workspace",
     "WorkspaceContext",
-    "WorkspaceEvent",
-    "WorkspaceEventLog",
-    "WorkspaceEventType",
     "WorkspaceMetadata",
     "WorkspacePaths",
     "WorkspaceRef",
@@ -270,7 +277,6 @@ __all__ = [
     "cancel_run",
     "cp",
     "effective_targets",
-    "emit_workspace_event",
     "get_target",
     "harvest_run",
     "has_target",
@@ -278,10 +284,10 @@ __all__ = [
     "ls",
     "mkdir",
     "mv",
+    "parse_knowledge_class",
     "parse_target",
     "pid_alive",
     "plan_execution_prune",
-    "read_workspace_events",
     "read_zotero_items",
     "reap_zombie_run",
     "remove_target",
@@ -293,5 +299,5 @@ __all__ = [
     "target_to_transport",
     "to_transport",
     "validate_workspace",
-    "write_knowledge_item",
+    "write_knowledge",
 ]

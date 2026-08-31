@@ -22,12 +22,10 @@ import pytest
 @pytest.fixture()
 def stores(tmp_path: Path):
     from molexp.harness.store.file_artifact_store import FileArtifactStore
-    from molexp.harness.store.sqlite_lineage_store import SQLiteArtifactLineageStore
+    from molexp.harness.store.file_lineage_store import FileLineageStore
 
     artifacts = FileArtifactStore(root=tmp_path / "artifacts")
-    provenance = SQLiteArtifactLineageStore(
-        path=tmp_path / "events.sqlite", artifact_store=artifacts
-    )
+    provenance = FileLineageStore(artifact_store=artifacts)
     return artifacts, provenance
 
 

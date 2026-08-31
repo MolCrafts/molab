@@ -36,8 +36,8 @@ from molexp.harness.schemas.approval import ApprovalDecision, ApprovalRequest
 from molexp.harness.stages import Approver, InvokeCapability, auto_grant_approver
 from molexp.harness.stages.invoke_capability import dispatch_capability
 from molexp.harness.store.file_artifact_store import FileArtifactStore
-from molexp.harness.store.sqlite_event_log import SQLiteEventLog
-from molexp.harness.store.sqlite_lineage_store import SQLiteArtifactLineageStore
+from molexp.harness.store.file_lineage_store import FileLineageStore
+from molexp.harness.store.jsonl_event_log import JsonlEventLog
 
 _ECHO_PATH = "tests.test_harness._capability_fixtures:echo"
 
@@ -73,10 +73,10 @@ def _make_ctx(
     registry: CapabilityRegistry | None = None,
 ) -> HarnessRunContext:
     """Build a ``HarnessRunContext`` backed by isolated on-disk stores."""
-    db_path = root / "events.sqlite"
+    db_path = root / "events.jsonl"
     artifacts = FileArtifactStore(root=root / "artifacts")
-    events = SQLiteEventLog(path=db_path)
-    lineage = SQLiteArtifactLineageStore(path=db_path, artifact_store=artifacts)
+    events = JsonlEventLog(path=db_path)
+    lineage = FileLineageStore(artifact_store=artifacts)
     return HarnessRunContext(
         run_id="run-plan-tools-cap",
         workspace_root=root,

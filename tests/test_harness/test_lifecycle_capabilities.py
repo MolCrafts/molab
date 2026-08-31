@@ -134,10 +134,9 @@ class TestLifecycleHandlers:
                     status=status,
                 )
             )
-        run.update_ops(
-            lambda s: s.model_copy(
-                update={"executions": tuple(history), "status": RunStatus.SUCCEEDED}
-            )
+        run._update_metadata(
+            execution_history=tuple(history),
+            status=RunStatus.SUCCEEDED,
         )
         return run
 

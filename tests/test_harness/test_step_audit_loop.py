@@ -23,10 +23,10 @@ from molexp.harness.stages.review_pack_builders import (
     build_experiment_spec_review_pack,
     build_plan_review_pack,
 )
-from molexp.harness.store.approval_store import SQLiteApprovalStore
+from molexp.harness.store.file_approval_store import FileApprovalStore
 from molexp.harness.store.file_artifact_store import FileArtifactStore
-from molexp.harness.store.sqlite_event_log import SQLiteEventLog
-from molexp.harness.store.sqlite_lineage_store import SQLiteArtifactLineageStore
+from molexp.harness.store.file_lineage_store import FileLineageStore
+from molexp.harness.store.jsonl_event_log import JsonlEventLog
 
 _RUN_ID = "run-audit"
 
@@ -55,16 +55,15 @@ def _pack(_ctx: HarnessRunContext) -> ReviewPack:
 
 class _Env:
     def __init__(self, tmp_path: Path) -> None:
-        db = tmp_path / "harness.sqlite"
         self.artifacts = FileArtifactStore(root=tmp_path / "artifacts")
-        self.event_log = SQLiteEventLog(path=db)
-        self.approval_store = SQLiteApprovalStore(db)
+        self.event_log = JsonlEventLog(path=tmp_path / "events.jsonl")
+        self.approval_store = FileApprovalStore(path=tmp_path / "approvals.json")
         self.ctx = HarnessRunContext(
             run_id=_RUN_ID,
             workspace_root=tmp_path,
             artifact_store=self.artifacts,
             event_log=self.event_log,
-            lineage_store=SQLiteArtifactLineageStore(path=db, artifact_store=self.artifacts),
+            lineage_store=FileLineageStore(artifact_store=self.artifacts),
             approval_store=self.approval_store,
         )
         self.subject = self.artifacts.put_json(

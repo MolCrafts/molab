@@ -42,8 +42,8 @@ from molexp.harness.schemas.approval import ApprovalDecision, ApprovalRequest
 from molexp.harness.schemas.bound_workflow import BoundTask
 from molexp.harness.stages import Approver, InvokeCapability, auto_grant_approver
 from molexp.harness.store.file_artifact_store import FileArtifactStore
-from molexp.harness.store.sqlite_event_log import SQLiteEventLog
-from molexp.harness.store.sqlite_lineage_store import SQLiteArtifactLineageStore
+from molexp.harness.store.file_lineage_store import FileLineageStore
+from molexp.harness.store.jsonl_event_log import JsonlEventLog
 
 # ─────────────────────────────────────────────────────────── constants / paths
 
@@ -104,10 +104,10 @@ def _make_ctx(
     run_id: str = "run-side-effect",
 ) -> HarnessRunContext:
     """Build a fresh ``HarnessRunContext`` backed by isolated on-disk stores."""
-    db_path = root / "events.sqlite"
+    db_path = root / "events.jsonl"
     artifacts = FileArtifactStore(root=root / "artifacts")
-    events = SQLiteEventLog(path=db_path)
-    lineage = SQLiteArtifactLineageStore(path=db_path, artifact_store=artifacts)
+    events = JsonlEventLog(path=db_path)
+    lineage = FileLineageStore(artifact_store=artifacts)
     return HarnessRunContext(
         run_id=run_id,
         workspace_root=root,

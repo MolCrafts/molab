@@ -132,7 +132,7 @@ class TestRegisterArtifact:
     def test_register_metric_writes_wal(self, run):
         with run.start() as ctx:
             ctx.register_metric("score", 0.87, step=1)
-        eid = run.read_ops().current_execution_id
+        eid = run.current_execution_id
         wal = run.run_dir / "executions" / eid / "artifacts" / "metrics.mlp.jsonl"
         assert wal.exists()
         assert "score" in wal.read_text()
@@ -230,7 +230,7 @@ class TestRunContextWorkdir:
         with run.start():
             pass
         assert "run.json" in seen
-        assert "ops/run.json" in seen
+        assert "ops/run.json" not in seen
 
     def test_register_catalogs_without_rewriting(self, run):
         with run.start() as ctx:

@@ -63,20 +63,16 @@ def _seed_failed_execution(run: Run) -> str:
     run.materialize()
     exec_id = f"exec-{run.id}"
     (Path(str(run.run_dir)) / "executions" / exec_id).mkdir(parents=True)
-    run.update_ops(
-        lambda s: s.model_copy(
-            update={
-                "status": RunStatus.FAILED,
-                "executions": (
-                    ExecutionRecord(
-                        execution_id=exec_id,
-                        started_at=datetime(2026, 7, 1, 10, 0),
-                        finished_at=datetime(2026, 7, 1, 10, 5),
-                        status="failed",
-                    ),
-                ),
-            }
-        )
+    run._update_metadata(
+        status=RunStatus.FAILED,
+        execution_history=(
+            ExecutionRecord(
+                execution_id=exec_id,
+                started_at=datetime(2026, 7, 1, 10, 0),
+                finished_at=datetime(2026, 7, 1, 10, 5),
+                status="failed",
+            ),
+        ),
     )
     return exec_id
 

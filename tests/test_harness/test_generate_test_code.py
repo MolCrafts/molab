@@ -35,11 +35,11 @@ _TEST_SOURCE = (
 )
 
 _WORKFLOW_SOURCE = """\
-from molexp.workflow import Task, TaskContext, WorkflowCompiler
+from molexp.workflow import Task, TaskContext, Workflow, WorkflowCompiler
 
 
-def build_workflow() -> WorkflowCompiler:
-    wf = WorkflowCompiler(name="demo")
+def build_workflow() -> Workflow:
+    wf = Workflow(name="demo")
 
     @wf.task
     async def load(ctx: TaskContext) -> list[int]:
@@ -129,13 +129,13 @@ def _seed_two_task_bundle(artifact_store: ArtifactStore) -> PlanArtifactRef:
 def ctx_no_gw(tmp_path: Path) -> HarnessRunContext:
     from molexp.harness.core.run_context import HarnessRunContext
     from molexp.harness.store.file_artifact_store import FileArtifactStore
-    from molexp.harness.store.sqlite_event_log import SQLiteEventLog
-    from molexp.harness.store.sqlite_lineage_store import SQLiteArtifactLineageStore
+    from molexp.harness.store.file_lineage_store import FileLineageStore
+    from molexp.harness.store.jsonl_event_log import JsonlEventLog
 
-    db = tmp_path / "events.sqlite"
+    db = tmp_path / "events.jsonl"
     a = FileArtifactStore(root=tmp_path / "artifacts")
-    e = SQLiteEventLog(path=db)
-    p = SQLiteArtifactLineageStore(path=db, artifact_store=a)
+    e = JsonlEventLog(path=db)
+    p = FileLineageStore(artifact_store=a)
     return HarnessRunContext(
         run_id="run-gtc",
         workspace_root=tmp_path,
@@ -150,13 +150,13 @@ def ctx_with_gw(tmp_path: Path) -> HarnessRunContext:
     from molexp.harness.core.run_context import HarnessRunContext
     from molexp.harness.gateways.stub import StubAgentGateway
     from molexp.harness.store.file_artifact_store import FileArtifactStore
-    from molexp.harness.store.sqlite_event_log import SQLiteEventLog
-    from molexp.harness.store.sqlite_lineage_store import SQLiteArtifactLineageStore
+    from molexp.harness.store.file_lineage_store import FileLineageStore
+    from molexp.harness.store.jsonl_event_log import JsonlEventLog
 
-    db = tmp_path / "events.sqlite"
+    db = tmp_path / "events.jsonl"
     a = FileArtifactStore(root=tmp_path / "artifacts")
-    e = SQLiteEventLog(path=db)
-    p = SQLiteArtifactLineageStore(path=db, artifact_store=a)
+    e = JsonlEventLog(path=db)
+    p = FileLineageStore(artifact_store=a)
     stub = StubAgentGateway(artifact_store=a)
     return HarnessRunContext(
         run_id="run-gtc",

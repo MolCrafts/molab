@@ -20,8 +20,13 @@ from molexp.cli._common import (
     status_color,
 )
 from molexp.cli._target import TargetOption, open_workspace
-from molexp.workspace.run import RETRYABLE_STATUSES, Run
-from molexp.workspace.run_ops import TERMINAL_STATUSES as _TERMINAL_STATUSES
+from molexp.workspace.run import (
+    RETRYABLE_STATUSES,
+    Run,
+)
+from molexp.workspace.run import (
+    TERMINAL_STATUSES as _TERMINAL_STATUSES,
+)
 
 _console = Console()
 
@@ -591,7 +596,7 @@ def run_harvest(
     from molexp.workspace import ExperimentNotFoundError as _ExpNotFound
     from molexp.workspace import ProjectNotFoundError as _ProjNotFound
     from molexp.workspace import RunNotFoundError as _RunNotFound
-    from molexp.workspace import harvest_run, parse_knowledge_kind
+    from molexp.workspace import harvest_run, parse_knowledge_class
 
     try:
         project = ws.get_project(project_id)
@@ -603,7 +608,7 @@ def run_harvest(
     try:
         item = harvest_run(
             run,
-            kind=parse_knowledge_kind(kind),
+            cls=parse_knowledge_class(kind),
             narrative=narrative,
             created_by=created_by,
         )
@@ -746,21 +751,11 @@ def run_info(
         if r.metadata.config:
             rprint(f"  Config: {json.dumps(r.metadata.config, indent=2, default=str)}")
     rprint(f"  Parameters: {json.dumps(r.parameters, indent=2, default=str)}")
-    # Recent workspace-timeline events for this run (default-on event spine;
-    # the same read path the server's /events endpoint uses). Silent only when
-    # the workspace has no timeline yet (nothing has emitted).
-    from molexp.workspace.events import read_workspace_events
-    from molexp.workspace.fs_local import LocalFileSystem
-
-    # Event log is a local SQLite file; remote workspaces skip the timeline
-    # rather than probing a non-existent local path under the remote root.
-    if isinstance(ws.fs, LocalFileSystem):
-        events = read_workspace_events(ws.root, ref=r.id, limit=5)
-        if events:
-            rprint("  Recent events:")
-            for ev in events:
-                ts = ev.created_at.strftime("%Y-%m-%d %H:%M:%S")
-                rprint(f"    {ts}  {ev.type}  [dim]({ev.actor})[/dim]")
+    history = r.execution_history
+    if history:
+        rprint("  Executions:")
+        for rec in history[-5:]:
+            rprint(f"    {rec.started_at}  {rec.status}  {rec.execution_id}")
 
 
 # Attach prune subcommand from the prune module.

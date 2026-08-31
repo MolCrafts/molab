@@ -11,7 +11,6 @@ into the live, molexp-managed workspace.
 from __future__ import annotations
 
 import subprocess
-from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
@@ -59,7 +58,9 @@ class TestCheckpointRunOnSettle:
 
         # N high-frequency workspace writes that are NOT execution settles.
         for _ in range(5):
-            run.update_ops(lambda s: s.model_copy(update={"heartbeat_at": datetime.now(UTC)}))
+            from molexp.workspace.run_heartbeat import touch_alive
+
+            touch_alive(run)
         ws.add_project("noise")  # an add_folder write
         run.experiment.add_run(params={"seed": 99})  # another entity write
         assert _commits(ws, run.id) == 1  # unchanged — no settle, no commit
@@ -96,7 +97,7 @@ class TestMaterializeRun:
 
         # The historical run state is materialized into the scratch dir …
         assert (scratch / "run.json").exists()
-        assert (scratch / "artifacts" / "metrics.json").exists()
+        assert any(scratch.rglob("metrics.json"))
         # … and the scratch dir is OUTSIDE the live workspace tree.
         ws_root = Path(str(ws.root))
         assert ws_root not in scratch.parents

@@ -35,11 +35,11 @@ from molexp.workspace.run import Run
 # A generated program that compiles to a real workflow through the public API
 # (same canned shape as tests/test_cli/test_plan_cmd.py).
 _VALID_SOURCE = """\
-from molexp.workflow import TaskContext, WorkflowCompiler
+from molexp.workflow import TaskContext, Workflow, WorkflowCompiler
 
 
-def build_workflow() -> WorkflowCompiler:
-    wf = WorkflowCompiler(name="plan-demo")
+def build_workflow() -> Workflow:
+    wf = Workflow(name="plan-demo")
 
     @wf.task
     async def build_system(ctx: TaskContext) -> dict:
@@ -60,9 +60,9 @@ _SOURCE_WITHOUT_BUILDER = "ANSWER = 42\n"
 # shape ``Workflow.bind_to(experiment)`` records), so the module compiles at
 # module level.
 _SCRIPT_MODULE = """\
-from molexp.workflow import TaskContext, WorkflowCompiler
+from molexp.workflow import TaskContext, Workflow, WorkflowCompiler
 
-wf = WorkflowCompiler(name="script-demo")
+wf = Workflow(name="script-demo")
 
 
 @wf.task
@@ -70,7 +70,7 @@ async def only_task(ctx: TaskContext) -> dict:
     return {"ok": True}
 
 
-workflow = wf.compile()
+workflow = WorkflowCompiler().compile(wf)
 """
 
 # ── fixtures ─────────────────────────────────────────────────────────────────

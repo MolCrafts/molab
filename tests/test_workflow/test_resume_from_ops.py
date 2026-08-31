@@ -1,9 +1,8 @@
-"""Workflow resume seeding sources execution history from ``ops`` (wsokf-07).
+"""Workflow resume seeding sources ``run.execution_history`` (persist-one-02).
 
-``workflow/_engine/persistence.py``'s ``last_resumable_execution_id`` /
-``seed_from_execution`` pick the most-recent non-succeeded execution from
-``run.read_ops().executions`` (the OKF hot-state sidecar) instead of
-``run.metadata.execution_history``.
+``last_resumable_execution_id`` / ``seed_from_execution`` pick the most-recent
+non-succeeded execution from ``run.execution_history`` (``RunMetadata`` on
+``run.json``).
 """
 
 from __future__ import annotations
@@ -17,7 +16,7 @@ from molexp.workflow._engine.persistence import (
     last_resumable_execution_id,
     seed_from_execution,
 )
-from molexp.workspace.run_ops import RunOpsState
+from molexp.workspace.models import ExecutionRecord, RunStatus
 
 
 def _make_run(tmp_path: Path):
@@ -25,15 +24,15 @@ def _make_run(tmp_path: Path):
     return ws.add_project("demo").add_experiment("train").add_run(params={"seed": 0})
 
 
-def _write_ops_history(run, records: list[dict]) -> None:
-    state = RunOpsState.model_validate({"status": "failed", "executions": records})
-    run.write_ops(state)
+def _write_execution_history(run, records: list[dict]) -> None:
+    history = tuple(ExecutionRecord.model_validate(item) for item in records)
+    run._update_metadata(status=RunStatus.FAILED, execution_history=history)
 
 
-class TestLastResumableFromOps:
+class TestLastResumableExecutionId:
     def test_picks_last_non_succeeded(self, tmp_path: Path) -> None:
         run = _make_run(tmp_path)
-        _write_ops_history(
+        _write_execution_history(
             run,
             [
                 {
@@ -54,6 +53,7 @@ class TestLastResumableFromOps:
             ],
         )
         assert last_resumable_execution_id(run) == "exec-3"
+        assert [r.execution_id for r in run.execution_history] == ["exec-1", "exec-2", "exec-3"]
 
     def test_empty_history_returns_none(self, tmp_path: Path) -> None:
         run = _make_run(tmp_path)
@@ -61,11 +61,11 @@ class TestLastResumableFromOps:
         assert last_resumable_execution_id(run) is None
 
 
-class TestSeedFromOps:
-    def test_seeds_completed_outputs_from_ops_execution(self, tmp_path: Path) -> None:
+class TestSeedFromExecutionHistory:
+    def test_seeds_completed_outputs_from_execution_history(self, tmp_path: Path) -> None:
         run = _make_run(tmp_path)
         exec_id = "exec-seed"
-        _write_ops_history(
+        _write_execution_history(
             run,
             [
                 {

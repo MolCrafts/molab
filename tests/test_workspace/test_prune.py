@@ -55,9 +55,7 @@ def _seed_executions(run: Run, statuses: tuple[str, ...]) -> list[str]:
             )
         )
         exec_ids.append(exec_id)
-    run.update_ops(
-        lambda s: s.model_copy(update={"executions": tuple(history), "status": RunStatus.SUCCEEDED})
-    )
+    run._update_metadata(execution_history=tuple(history), status=RunStatus.SUCCEEDED)
     return exec_ids
 
 
@@ -122,7 +120,7 @@ class TestPlanSelection:
                 status="failed",
             ),
         ]
-        run.update_ops(lambda s: s.model_copy(update={"executions": tuple(history)}))
+        run._update_metadata(execution_history=tuple(history))
         plan = plan_execution_prune(run, execution_ids=[ghost])
         assert [entry.dir_exists for entry in plan.entries] == [False]
         del exec_ids  # selection is history-driven, not disk-driven
@@ -149,19 +147,15 @@ class TestLiveRecordRefusal:
         run.materialize()
         exec_id = f"exec-{run.id}"
         (Path(str(run.run_dir)) / "executions" / exec_id).mkdir(parents=True)
-        run.update_ops(
-            lambda s: s.model_copy(
-                update={
-                    "status": RunStatus.RUNNING,
-                    "executions": (
-                        ExecutionRecord(
-                            execution_id=exec_id,
-                            started_at=datetime(2026, 7, 1, 10, 0),
-                            status="running",
-                        ),
-                    ),
-                }
-            )
+        run._update_metadata(
+            status=RunStatus.RUNNING,
+            execution_history=(
+                ExecutionRecord(
+                    execution_id=exec_id,
+                    started_at=datetime(2026, 7, 1, 10, 0),
+                    status="running",
+                ),
+            ),
         )
         return run
 
@@ -175,7 +169,7 @@ class TestLiveRecordRefusal:
     def test_running_record_on_terminal_run_prunes_normally(self, tmp_path: Path) -> None:
         """A zombie leftover (running record, terminal run) is prunable history."""
         run = self._live_run(tmp_path)
-        run.update_ops(lambda s: s.model_copy(update={"status": RunStatus.FAILED}))
+        run._update_metadata(status=RunStatus.FAILED)
         plan = plan_execution_prune(run, statuses=["running"])
         assert [entry.execution_id for entry in plan.entries] == [f"exec-{run.id}"]
         apply_execution_prune(run, plan)
@@ -220,7 +214,7 @@ class TestApply:
                 status="failed",
             ),
         ]
-        run.update_ops(lambda s: s.model_copy(update={"executions": tuple(history)}))
+        run._update_metadata(execution_history=tuple(history))
         plan = plan_execution_prune(run, execution_ids=[ghost])
         removed = apply_execution_prune(run, plan)
         assert removed == 0

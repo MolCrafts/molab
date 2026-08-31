@@ -130,7 +130,7 @@ def decide_plan_review(
         ValueError: pack_id mismatch when both sides carry one, or task not waiting.
         RuntimeError: From PlanTask when status is wrong.
     """
-    from molexp.harness import SQLiteApprovalStore, SQLiteEventLog
+    from molexp.harness import FileApprovalStore, JsonlEventLog
     from molexp.harness.policy.event_log import ApprovalEventRecorder
     from molexp.harness.store.file_artifact_store import FileArtifactStore
     from molexp.services.approval_notify import notify_approvals_changed
@@ -194,15 +194,13 @@ def decide_plan_review(
             _apply_plan_field_values(run, review.field_values)
 
     run_dir = Path(str(run.run_dir))
-    db_path = run_dir / "harness.sqlite"
-    store = SQLiteApprovalStore(path=db_path)
+    store = FileApprovalStore(path=run_dir / "approvals.json")
     store.record_pending(run.id, request)
+    events = JsonlEventLog(path=run_dir / "events.jsonl")
 
     if review.action == "approve":
         store.record_decision(approval)
-        ApprovalEventRecorder.record_decision(
-            SQLiteEventLog(path=db_path), run.id, request, approval
-        )
+        ApprovalEventRecorder.record_decision(events, run.id, request, approval)
         if task is not None:
             task.resume()
         notify_approvals_changed()
@@ -210,9 +208,7 @@ def decide_plan_review(
 
     if review.action == "reject":
         store.record_decision(approval)
-        ApprovalEventRecorder.record_decision(
-            SQLiteEventLog(path=db_path), run.id, request, approval
-        )
+        ApprovalEventRecorder.record_decision(events, run.id, request, approval)
         if task is not None:
             task.mark_rejected(review.reason or "rejected")
         notify_approvals_changed()

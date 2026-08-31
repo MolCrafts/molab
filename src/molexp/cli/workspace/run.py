@@ -772,7 +772,7 @@ def _run_dry_run(
 def _latest_error_txt(run: Run) -> str | None:
     """Path of the newest execution's ``error.txt``, if one was written."""
     try:
-        exec_id = run.read_ops().current_execution_id
+        exec_id = run.current_execution_id
         candidates = []
         if exec_id:
             candidates.append(Path(str(run.run_dir)) / "executions" / exec_id / "error.txt")

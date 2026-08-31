@@ -33,11 +33,11 @@ class TestValidateWorkspace:
         assert report.ok, report.violations
         assert report.errors == ()
 
-    def test_never_executed_run_warns_but_still_conforms(self, tmp_path: Path) -> None:
-        # ops/run.json is created lazily at execution; its absence is legal.
+    def test_never_executed_run_conforms_without_ops_warning(self, tmp_path: Path) -> None:
         ws = _workspace(tmp_path)
         report = ws.validate()
-        assert [v.rule for v in report.warnings] == ["run.ops"]
+        assert "run.ops" not in {v.rule for v in report.warnings}
+        assert not any("ops/run.json" in v.detail for v in report.violations)
         assert report.ok
 
     def test_missing_workspace_json_is_not_a_workspace(self, tmp_path: Path) -> None:
@@ -69,11 +69,19 @@ class TestValidateWorkspace:
 
     def test_missing_concept_marker_is_an_error(self, tmp_path: Path) -> None:
         ws = _workspace(tmp_path)
-        (Path(ws.get_project("alpha").resolve()) / "meta.json").unlink()
+        entity = Path(ws.get_project("alpha").resolve()) / "project.json"
+        payload = json.loads(entity.read_text())
+        payload.pop("type", None)
+        entity.write_text(json.dumps(payload))
 
         report = ws.validate()
         marker = [v for v in report.errors if v.rule == "concept.marker"]
         assert marker and marker[0].path == "projects/alpha"
+
+    def test_workspace_type_on_entity_is_the_concept_marker(self, tmp_path: Path) -> None:
+        ws = _workspace(tmp_path)
+        report = ws.validate()
+        assert "concept.marker" not in {v.rule for v in report.errors}
 
     def test_stray_directory_is_flagged(self, tmp_path: Path) -> None:
         # A results dir dropped at the root is neither a container nor a Concept.
@@ -141,16 +149,6 @@ class TestValidateWorkspace:
         report = ws2.validate()
         assert "index.legacy_name" in {v.rule for v in report.errors}
 
-    def test_meta_yaml_is_not_a_concept_marker(self, tmp_path: Path) -> None:
-        """Concept identity is meta.json only — a yaml leftover is not a marker."""
-        ws = _workspace(tmp_path)
-        proj = Path(ws.get_project("alpha").resolve())
-        (proj / "meta.json").unlink()
-        (proj / "meta.yaml").write_text("type: workspace.project\n")
-
-        report = ws.validate()
-        assert "concept.marker" in {v.rule for v in report.errors}
-
     def test_project_dir_that_is_not_a_slug_is_flagged(self, tmp_path: Path) -> None:
         ws = _workspace(tmp_path)
         projects = Path(ws.resolve()) / "projects"
@@ -171,9 +169,10 @@ class TestValidateWorkspace:
         payload = report.to_dict()
         assert payload["ok"] is True
         assert payload["error_count"] == 0
-        assert payload["warning_count"] >= 1  # never-executed run → run.ops
+        assert payload["warning_count"] == 0
         assert "summary" in payload
-        assert payload.get("next_actions")
+        assert "next_actions" in payload
+        assert payload["next_actions"] == []
         assert all(
             set(v) >= {"path", "rule", "detail", "severity", "hint"} for v in payload["violations"]
         )

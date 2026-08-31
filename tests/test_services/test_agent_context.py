@@ -26,10 +26,9 @@ from molexp.workspace.concepts import Note
 from molexp.workspace.experiment import Experiment
 from molexp.workspace.models import ErrorInfo, RunStatus
 from molexp.workspace.run import Run
-from molexp.workspace.run_ops import RunOpsState
 
 # Naive timestamp on purpose — the run lifecycle writes naive datetimes into
-# the ops sidecar, and mixing naive/aware breaks the assembler's run sort.
+# run.json, and mixing naive/aware breaks the assembler's run sort.
 _TS = datetime(2026, 1, 1)
 
 _CONFIG_HASH = "sha256:feedc0defeedc0de"
@@ -58,7 +57,7 @@ def _seed(tmp_path: Path) -> tuple[Workspace, Experiment, Run, Run]:
     ok.save()
 
     failed = exp.add_run(params={"sigma": 0.5, "seed": 7})
-    failed.write_ops(RunOpsState(status=RunStatus.FAILED, started_at=_TS, finished_at=_TS))
+    failed._update_metadata(status=RunStatus.FAILED, started_at=_TS, finished_at=_TS)
     failed.metadata = failed.metadata.model_copy(
         update={"error": ErrorInfo(type="ValueError", message="lattice exploded", timestamp=_TS)}
     )
@@ -99,7 +98,7 @@ class TestBuildMountContext:
         ws, exp, _, _ = _seed(tmp_path)
         # Second failed run → the failed count (2) differs from succeeded (1).
         extra = exp.add_run(params={"sigma": 0.75, "seed": 7})
-        extra.write_ops(RunOpsState(status=RunStatus.FAILED, started_at=_TS, finished_at=_TS))
+        extra._update_metadata(status=RunStatus.FAILED, started_at=_TS, finished_at=_TS)
 
         out = build_mount_context(ws, project_id="proton-transport", experiment_id="sigma-scan")
         assert "succeeded" in out

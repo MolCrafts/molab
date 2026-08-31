@@ -11,7 +11,7 @@ from molexp.workspace import (
     RunNotFoundError,
     Workspace,
 )
-from molexp.workspace.models import ExecutionRecord
+from molexp.workspace.models import ExecutionRecord, RunStatus
 
 
 def _build(tmp_path):
@@ -34,7 +34,7 @@ def _build(tmp_path):
                 status=status,
             )
         )
-    r.update_ops(lambda s: s.model_copy(update={"executions": tuple(hist)}))
+    r._update_metadata(execution_history=tuple(hist))
     return ws, p, e, r
 
 
@@ -64,6 +64,28 @@ class TestDeleteRun:
         _ws, _p, e, _r = _build(tmp_path)
         with pytest.raises(RunNotFoundError):
             e.remove_run("nope")
+
+
+class TestRemoveFailedRuns:
+    def test_deletes_only_failed(self, tmp_path):
+        _ws, _p, e, seeded = _build(tmp_path)
+        ok = e.add_run(params={"seed": 2})
+        fail = e.add_run(params={"seed": 3})
+        ok._update_metadata(status=RunStatus.SUCCEEDED)
+        fail._update_metadata(status=RunStatus.FAILED)
+        deleted = e.remove_failed_runs()
+        assert fail.id in deleted
+        assert ok.id not in deleted
+        assert seeded.id not in deleted
+        assert e.has_run(ok.id)
+        assert e.has_run(seeded.id)
+        assert not e.has_run(fail.id)
+
+    def test_noop_when_nothing_failed(self, tmp_path):
+        _ws, _p, e, r = _build(tmp_path)
+        r._update_metadata(status=RunStatus.SUCCEEDED)
+        assert e.remove_failed_runs() == []
+        assert e.has_run(r.id)
 
 
 class TestDeleteProject:

@@ -13,7 +13,6 @@ from pathlib import Path
 from unittest.mock import MagicMock
 
 from molexp.harness.schemas import ApprovalRequest, ReviewDecision
-from molexp.harness.store.approval_store import SQLiteApprovalStore
 from molexp.harness.store.file_artifact_store import FileArtifactStore
 from molexp.services.plan_runtime.decide import decide_plan_review
 from molexp.workspace import Workspace
@@ -55,8 +54,13 @@ class TestDecidePlanReview:
             run=run, request=_request(), decision=_decision("approve"), task=task
         )
         assert approval.granted is True
-        store = SQLiteApprovalStore(path=Path(str(run.run_dir)) / "harness.sqlite")
+        from molexp.harness.store.file_approval_store import FileApprovalStore
+
+        run_dir = Path(str(run.run_dir))
+        store = FileApprovalStore(path=run_dir / "approvals.json")
         assert store.granted_decision_for("req-1") is not None
+        assert (run_dir / "events.jsonl").is_file()
+        assert not (run_dir / "harness.sqlite").exists()
         task.resume.assert_called_once()
         task.mark_rejected.assert_not_called()
 
@@ -68,6 +72,9 @@ class TestDecidePlanReview:
             run=run, request=_request(), decision=_decision("reject"), task=task
         )
         assert approval.granted is False
+        run_dir = Path(str(run.run_dir))
+        assert (run_dir / "events.jsonl").is_file()
+        assert not (run_dir / "harness.sqlite").exists()
         task.mark_rejected.assert_called_once()
         task.resume.assert_not_called()
 
@@ -83,8 +90,10 @@ class TestDecidePlanReview:
         assert approval.granted is False
         task.resume.assert_called_once()
         task.mark_rejected.assert_not_called()
+        run_dir = Path(str(run.run_dir))
+        assert not (run_dir / "harness.sqlite").exists()
 
-        store = FileArtifactStore(root=Path(str(run.run_dir)) / "artifacts")
+        store = FileArtifactStore(root=run_dir / "artifacts")
         ref = store.latest_by_kind("review_decision")
         assert ref is not None
         body = ReviewDecision.model_validate_json(store.get(ref.id))

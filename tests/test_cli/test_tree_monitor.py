@@ -41,10 +41,8 @@ def seeded_workspace(tmp_path):
                 status=status,
             )
         )
-    r1.update_ops(
-        lambda s: s.model_copy(update={"executions": tuple(hist), "status": RunStatus.SUCCEEDED})
-    )
-    r2.update_ops(lambda s: s.model_copy(update={"status": RunStatus.RUNNING}))
+    r1._update_metadata(execution_history=tuple(hist), status=RunStatus.SUCCEEDED)
+    r2._update_metadata(status=RunStatus.RUNNING)
 
     p2 = ws.add_project("proj-b")
     p2.add_experiment("exp-y", workflow_source="s.py", params={})

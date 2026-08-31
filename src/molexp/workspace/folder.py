@@ -14,14 +14,12 @@ import json
 import os
 import re
 import shutil
-from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path as _StdPath
 from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, ClassVar, NamedTuple, TypeVar, cast
 
 from molexp._typing import JSONValue
-from molexp.atomicio import file_lock
 from molexp.knowledge.types import resolve_concept_type
 from molexp.path import Path
 
@@ -55,8 +53,6 @@ _CAMEL_TO_SNAKE = re.compile(r"(?<!^)(?=[A-Z])")
 # stays in ``index.md`` (Markdown is not a data format for structured fields).
 INDEX_FILENAME = "index.md"
 META_JSON_FILENAME = "meta.json"  # sole concept identity file (type → registry)
-OPS_DIR = "ops"  # operational sidecar — hot machine state, not knowledge
-LEGACY_OPS_DIR = "_ops"  # read fallback for workspaces written before the rename
 _MD_LINK = re.compile(r"\[([^\]]*)\]\(([^)]+)\)")  # [label](target) — both captured
 
 
@@ -98,14 +94,59 @@ def _folder_metadata_from_marker(
     )
 
 
+_CORE_ENTITY_JSON = ("workspace.json", "project.json", "experiment.json", "run.json")
+#: Entity filename → Folder subclass, filled by :func:`register_entity_class`.
+#: Knowledge reconstructs from the filename (no ``type`` field on disk).
+_ENTITY_FILE_TO_CLS: dict[str, type[Folder]] = {}
+
+
+def _snake_name(cls: type) -> str:
+    """``FailureAnalysis`` → ``failure_analysis``."""
+    return _CAMEL_TO_SNAKE.sub("_", cls.__name__).lower()
+
+
+def entity_filename(cls: type) -> str:
+    """Singular class-named entity JSON (``experiment.json``, ``plan.json``)."""
+    return f"{_snake_name(cls)}.json"
+
+
+def register_entity_class(cls: type[Folder]) -> type[Folder]:
+    """Register *cls* for reconstruction from its entity filename."""
+    _ENTITY_FILE_TO_CLS[entity_filename(cls)] = cls
+    return cls
+
+
+def class_for_entity_file(name: str) -> type[Folder] | None:
+    """Return the Folder subclass registered for entity file *name*, if any."""
+    return _ENTITY_FILE_TO_CLS.get(name)
+
+
+def _entity_json_names() -> tuple[str, ...]:
+    extra = tuple(name for name in sorted(_ENTITY_FILE_TO_CLS) if name not in _CORE_ENTITY_JSON)
+    return _CORE_ENTITY_JSON + extra
+
+
 def _load_concept_marker_dict(fs: FileSystem, concept_dir: PathArg) -> dict[str, object] | None:
-    """Load concept identity dict from ``meta.json``."""
+    """Load concept identity: entity JSON first (``type`` optional), else Note ``meta.json``."""
+    for name in _entity_json_names():
+        entity = fs.join(concept_dir, name)
+        if not fs.exists(entity):
+            continue
+        with fs.open(entity) as fh:
+            raw_entity: object = json.load(fh)
+        if not isinstance(raw_entity, dict):
+            continue
+        return {
+            key: raw_entity[key]
+            for key in ("type", "created_at", "updated_at", "extra")
+            if key in raw_entity
+        }
     primary = fs.join(concept_dir, META_JSON_FILENAME)
-    if not fs.exists(primary):
-        return None
-    with fs.open(primary) as fh:
-        raw: object = json.load(fh)
-    return cast("dict[str, object]", raw) if isinstance(raw, dict) else None
+    if fs.exists(primary):
+        with fs.open(primary) as fh:
+            raw: object = json.load(fh)
+        return cast("dict[str, object]", raw) if isinstance(raw, dict) else None
+    return None
 
 
 class LinkScan(NamedTuple):
@@ -263,29 +304,25 @@ class Folder:
         """Byte-exit rooted at this folder. Does not own the disk."""
         from .file_store import FileStore
 
-        return FileStore(self.path(), fs=self._disk())
+        return FileStore(self.path, fs=self._disk())
 
     # ── Path resolution ──────────────────────────────────────────────────
     #
-    # ``resolve`` and ``path`` return :class:`molexp.Path` — a subclass of
-    # :class:`pathlib.PurePosixPath`.  It is a *pure* path: no ``.exists``,
-    # ``.read_text`` or other I/O methods, so it cannot accidentally
-    # short-circuit to the local filesystem on a remote-backed folder.
-    # All I/O flows through :meth:`_disk` (the workspace FileSystem).
+    # ``resolve`` returns :class:`molexp.Path` (pure POSIX math; I/O goes
+    # through :meth:`_disk`). ``path`` is a :class:`pathlib.Path` for local
+    # joins like ``run.path / "run.json"``.
 
-    def path(self) -> Path:
-        """Return the on-disk path; create only if missing (lazy, idempotent).
+    @property
+    def path(self) -> _StdPath:
+        """On-disk directory as :class:`pathlib.Path`.
 
-        Pure path math is :meth:`resolve`.  This twin only ``mkdir`` when
-        the directory is not already present — so remote-backed folders that
-        already exist never issue a write (remote ``mkdir`` can fail on
-        permission even when the path is already a directory).
+        Creates the directory if missing (lazy, idempotent). Pure path math
+        without mkdir is :meth:`resolve`.
         """
         target = self.resolve()
-        if self._disk().is_dir(target):
-            return target
-        self._disk().mkdir(target, parents=True, exist_ok=True)
-        return target
+        if not self._disk().is_dir(target):
+            self._disk().mkdir(target, parents=True, exist_ok=True)
+        return _StdPath(str(target))
 
     def resolve(self) -> Path:
         """Walk the parent chain without triggering lazy mkdir."""
@@ -320,7 +357,7 @@ class Folder:
 
     def read_json(self, name: str) -> dict[str, JSONValue]:
         _validate_file_name(name)
-        fpath = self._disk().join(self.path(), name)
+        fpath = self._disk().join(self.path, name)
         with self._disk().open(fpath) as fh:
             raw: object = json.load(fh)
         if not isinstance(raw, dict):
@@ -329,7 +366,7 @@ class Folder:
 
     def write_json(self, name: str, data: object) -> str:
         _validate_file_name(name)
-        fpath = self._disk().join(self.path(), name)
+        fpath = self._disk().join(self.path, name)
         self._disk().atomic_write_json(fpath, data)
         return fpath
 
@@ -355,7 +392,7 @@ class Folder:
         }
         if self._metadata.extra:
             data["extra"] = self._metadata.extra
-        fpath = self._disk().join(self.path(), META_JSON_FILENAME)
+        fpath = self._disk().join(self.path, META_JSON_FILENAME)
         self._disk().atomic_write_json(fpath, data)
         return fpath
 
@@ -373,7 +410,7 @@ class Folder:
 
     def write_index(self, text: str) -> str:
         """Atomically write the OKF ``index.md`` narrative + markdown links."""
-        fpath = self._disk().join(self.path(), INDEX_FILENAME)
+        fpath = self._disk().join(self.path, INDEX_FILENAME)
         self._disk().atomic_write_text(fpath, text)
         return fpath
 
@@ -421,58 +458,6 @@ class Folder:
         :data:`~molexp.workspace.edges.DEFAULT_EDGE_ROLE`, never dropped).
         """
         return self.links().typed_concepts
-
-    # ── ops/ operational sidecar (hot machine state, never in meta.json) ─
-
-    def _ops_json_path(self, name: str) -> str:
-        """Return the existing ops JSON path (``ops/`` first, then ``_ops/``).
-
-        Writes always go to :data:`OPS_DIR`. Reads fall back to the pre-rename
-        ``_ops/`` location so existing workspaces still load.
-        """
-        canonical = self._disk().join(self.resolve(), OPS_DIR, f"{name}.json")
-        if self._disk().exists(canonical):
-            return canonical
-        legacy = self._disk().join(self.resolve(), LEGACY_OPS_DIR, f"{name}.json")
-        if self._disk().exists(legacy):
-            return legacy
-        return canonical
-
-    def ops_dir(self) -> str:
-        """Return the per-Folder ``ops/`` sidecar dir, creating it if absent."""
-        d = self._disk().join(self.path(), OPS_DIR)
-        self._disk().mkdir(d, parents=True, exist_ok=True)
-        return d
-
-    def read_ops_json(self, name: str) -> dict[str, JSONValue] | None:
-        """Read ``ops/<name>.json`` (or legacy ``_ops/<name>.json``)."""
-        fpath = self._ops_json_path(name)
-        if not self._disk().exists(fpath):
-            return None
-        with self._disk().open(fpath) as fh:
-            return cast("dict[str, JSONValue]", json.load(fh))
-
-    def write_ops_json(self, name: str, data: object) -> None:
-        """Atomically write ``ops/<name>.json`` (operational state)."""
-        if isinstance(data, (dict, list, str, bytes)):
-            self.files.put(f"{OPS_DIR}/{name}.json", data)
-        else:
-            self._disk().atomic_write_json(self._disk().join(self.ops_dir(), f"{name}.json"), data)
-
-    def update_ops_json(
-        self, name: str, fn: Callable[[dict[str, JSONValue]], dict[str, JSONValue]]
-    ) -> dict[str, JSONValue]:
-        """Read-modify-write ``ops/<name>.json`` under an advisory file lock.
-
-        The lock is a local file lock (``molexp.atomicio.file_lock``); concurrent
-        same-host RMW is safe. (Remote-backend locking is a future refinement.)
-        """
-        ops = self.ops_dir()
-        with file_lock(_StdPath(self._disk().join(ops, f"{name}.json.lock"))):
-            current = self.read_ops_json(name) or {}
-            updated = fn(current)
-            self.files.put(f"{OPS_DIR}/{name}.json", updated)
-        return updated
 
     # ── Lifecycle ────────────────────────────────────────────────────────
 
@@ -830,6 +815,16 @@ class Folder:
         if self._parent is not None:
             self._parent._children_cache.pop(self._name, None)
 
+    def _sync_entity_identity(self) -> None:
+        """Hook — subclasses with entity metadata mirror the folder identity.
+
+        Called by :meth:`move_to` after the folder identity is updated and
+        before any :meth:`resolve`-dependent write: entity subclasses resolve
+        their directory from the entity id, so a stale entity id would land
+        :meth:`write_meta` in a freshly created old-id dir and key the rebuilt
+        children index by the old id. Default: no entity metadata, no-op.
+        """
+
     def move_to(
         self,
         new_parent: Folder,
@@ -876,6 +871,9 @@ class Folder:
                 "updated_at": datetime.now(),
             }
         )
+        # Before any resolve()-dependent write — entity subclasses derive their
+        # directory from the entity id, so this must land ahead of write_meta().
+        self._sync_entity_identity()
         new_parent._children_cache[target_id] = self
         self.write_meta()
         # Children indexes are derived; rebuild both endpoints from on-disk truth
@@ -928,13 +926,22 @@ def append_link(
 
 
 def concept_from_dir(child_dir: PathArg, parent: Folder) -> Folder:
-    """Reconstruct *child_dir* as its registered concept subclass via meta.json.
+    """Reconstruct *child_dir* as its Folder subclass.
 
-    Reads the OKF ``meta.json`` ``type`` and resolves it through the knowledge
-    concept-type registry (unknown/absent → base :class:`Folder`), then
-    delegates to that class's ``from_disk``.
+    Knowledge family (and any :func:`register_entity_class` type) is recovered
+    from the entity filename via reflection — no ``type`` field. Notes / Agent
+    still resolve ``meta.json`` ``type`` through the concept-type registry.
+    WPER entity JSON with a ``type`` key uses the registry as well.
     """
     fs = parent._disk()
+    try:
+        names = fs.listdir(child_dir)
+    except OSError:
+        names = []
+    for name in names:
+        mapped = class_for_entity_file(name)
+        if mapped is not None:
+            return mapped.from_disk(child_dir, parent)
     marker = _load_concept_marker_dict(fs, child_dir) or {}
     type_str = str(marker.get("type", ""))
     cls = resolve_concept_type(type_str, Folder)
@@ -943,9 +950,7 @@ def concept_from_dir(child_dir: PathArg, parent: Folder) -> Folder:
 
 __all__ = [
     "INDEX_FILENAME",
-    "LEGACY_OPS_DIR",
     "META_JSON_FILENAME",
-    "OPS_DIR",
     "WORKSPACE_EXPERIMENT_KIND",
     "WORKSPACE_PROJECT_KIND",
     "WORKSPACE_ROOT_KIND",
@@ -953,5 +958,8 @@ __all__ = [
     "Folder",
     "LinkScan",
     "append_link",
+    "class_for_entity_file",
     "concept_from_dir",
+    "entity_filename",
+    "register_entity_class",
 ]

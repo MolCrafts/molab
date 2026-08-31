@@ -39,8 +39,8 @@ from molexp.harness.plan_tools import (
     update_task,
 )
 from molexp.harness.store.file_artifact_store import FileArtifactStore
-from molexp.harness.store.sqlite_event_log import SQLiteEventLog
-from molexp.harness.store.sqlite_lineage_store import SQLiteArtifactLineageStore
+from molexp.harness.store.file_lineage_store import FileLineageStore
+from molexp.harness.store.jsonl_event_log import JsonlEventLog
 
 # ──────────────────────────────────────────────────────────── fixtures / helpers
 
@@ -118,10 +118,10 @@ def _snapshot(board: _FakeBoard) -> list[tuple[str, str]]:
 
 def _make_ctx(root: Path) -> HarnessRunContext:
     """Build a ``HarnessRunContext`` backed by isolated on-disk stores."""
-    db_path = root / "events.sqlite"
+    db_path = root / "events.jsonl"
     artifacts = FileArtifactStore(root=root / "artifacts")
-    events = SQLiteEventLog(path=db_path)
-    lineage = SQLiteArtifactLineageStore(path=db_path, artifact_store=artifacts)
+    events = JsonlEventLog(path=db_path)
+    lineage = FileLineageStore(artifact_store=artifacts)
     return HarnessRunContext(
         run_id="run-plan-tools-board",
         workspace_root=root,

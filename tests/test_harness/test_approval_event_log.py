@@ -18,9 +18,9 @@ from molexp.harness.schemas.approval import ApprovalDecision, ApprovalRequest
 
 @pytest.fixture()
 def event_log(tmp_path: Path):
-    from molexp.harness.store.sqlite_event_log import SQLiteEventLog
+    from molexp.harness.store.jsonl_event_log import JsonlEventLog
 
-    return SQLiteEventLog(path=tmp_path / "events.sqlite")
+    return JsonlEventLog(path=tmp_path / "events.jsonl")
 
 
 def _request() -> ApprovalRequest:

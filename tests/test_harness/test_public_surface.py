@@ -6,7 +6,7 @@ the executor seam, the approval gate, and the agent gateway — plus the symbols
 the public
 docs (``docs/guide/plan-mode.md`` / ``docs/architecture/plan-mode.md``) cite
 as harness API (``RouterBackedAgentGateway``, ``CapabilityRegistry``,
-``StageExecutionError``, ``SQLiteEventLog``, ``SQLiteArtifactLineageStore``,
+``StageExecutionError``, ``JsonlEventLog``, ``FileLineageStore``,
 ``replay_metadata``).
 
 Stages, schemas, and validators are NOT re-exported at the top level; their
@@ -43,16 +43,18 @@ EXPECTED_ALL = {
     "RouterBackedAgentGateway",
     "CapabilityRegistry",
     "StageExecutionError",
-    "SQLiteEventLog",
-    "SQLiteArtifactLineageStore",
+    "JsonlEventLog",
+    "FileLineageStore",
     "replay_metadata",
     # approval inbox (vision-loop-01)
     "ApprovalPendingError",
-    "SQLiteApprovalStore",
+    "FileApprovalStore",
 }
 
 
 def test_all_is_exactly_the_frozen_ledger() -> None:
+    assert len(EXPECTED_ALL) == 22
+    assert len(harness.__all__) == 22
     assert set(harness.__all__) == EXPECTED_ALL
 
 

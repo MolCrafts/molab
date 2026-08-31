@@ -10,8 +10,7 @@ Around every call to ``stage.run(ctx)`` it:
 5. On exception: appends ``stage_failed`` with the ``repr(exc)`` payload
    and re-raises wrapped in :class:`StageExecutionError`.
 6. For every ``parent_id`` listed in the returned ref's ``parent_ids``,
-   calls ``lineage_store.add_edge(parent_id, ref.id,
-   relation="derived_from", stage=stage.name, run_id=ctx.run_id)``.
+   calls ``lineage_store.add_edge(parent_id, ref.id, relation="derived_from")``.
 
 If a Stage raises :class:`StagePersistedFailureError`, the bracket treats it
 as a persisted-then-aborted failure: it still emits ``artifact_created`` +
@@ -27,11 +26,10 @@ pipeline; :class:`StageRunner` is the thin single-stage wrapper for direct
 callers and tests.
 
 Every store write (``event_log.append`` / ``lineage_store.add_edge``) is
-blocking SQLite I/O, so the bracket dispatches each through
+blocking I/O, so the bracket dispatches each through
 :func:`asyncio.to_thread`. That keeps the event loop responsive when the
 pipeline runs behind a server route or alongside agent token-streaming; the
-stores serialize concurrent worker-thread access behind their shared per-file
-lock (see :mod:`molexp.harness.store._sqlite`).
+stores serialize concurrent worker-thread access behind per-file locks.
 """
 
 from __future__ import annotations
@@ -58,10 +56,7 @@ _LOG = get_logger("molexp.harness.stage")
 async def _record_artifact(ctx: HarnessRunContext, stage: Stage, ref: PlanArtifactRef) -> None:
     """Emit ``artifact_created`` + the ref's ``derived_from`` lineage edges.
 
-    Each edge is stamped with the producing stage's name and the pipeline's
-    ``run_id`` — what the pipeline legitimately knows at write time — so the
-    lineage chain stays traversable end-to-end and links back to the
-    ``workspace.Run`` the pipeline executed under.
+    Stage / run stamps live on the event-log payload; lineage is parent_ids.
     """
     await asyncio.to_thread(
         ctx.event_log.append,
@@ -77,8 +72,6 @@ async def _record_artifact(ctx: HarnessRunContext, stage: Stage, ref: PlanArtifa
             parent_id=parent_id,
             child_id=ref.id,
             relation="derived_from",
-            stage=stage.name,
-            run_id=ctx.run_id,
         )
 
 

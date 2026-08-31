@@ -8,7 +8,7 @@ checkpoints, and asset access during execution.
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from datetime import datetime
 from pathlib import Path  # local-FS path for RunContext (LLM/worker-local I/O)
 from typing import TYPE_CHECKING, Protocol, cast
@@ -20,7 +20,7 @@ from molexp._typing import (
     TaskOutput,
 )
 from molexp.knowledge.types import concept_type
-from molexp.path import Path as MolexpPath  # workspace-abstraction path (Folder.path() return)
+from molexp.path import Path as MolexpPath
 from molexp.profile import ProfileConfig
 
 from .assets import AssetScope
@@ -38,7 +38,7 @@ from .models import (
     RunMetadata,
     RunStatus,
 )
-from .run_ops import RUN_OPS_NAME, RunOpsState
+from .run_heartbeat import unlink_alive
 from .utils import generate_id
 
 if TYPE_CHECKING:
@@ -53,6 +53,7 @@ _logger = get_logger(__name__)
 
 __all__ = [
     "RETRYABLE_STATUSES",
+    "TERMINAL_STATUSES",
     "Run",
     "RunContext",
     "RunStatus",
@@ -66,6 +67,11 @@ __all__ = [
 #: ``succeeded`` is done, and a live ``running`` run must never get a second
 #: concurrent execution.
 RETRYABLE_STATUSES: frozenset[str] = frozenset({RunStatus.FAILED.value, RunStatus.CANCELLED.value})
+
+#: Terminal statuses — a finished run carries a ``finished_at``.
+TERMINAL_STATUSES: frozenset[str] = frozenset(
+    {RunStatus.SUCCEEDED.value, RunStatus.FAILED.value, RunStatus.CANCELLED.value}
+)
 
 
 # ── Cross-layer run-execution seam ──────────────────────────────────────────
@@ -83,7 +89,7 @@ class RunWorkflowExecutor(Protocol):
 
     Implemented by ``molexp.workflow.execute`` and registered via
     :func:`set_run_executor`. ``workflow`` is opaque to workspace (a
-    ``CompiledWorkflow`` / ``WorkflowCompiler``, or ``None`` to resolve the
+    ``CompiledWorkflow`` / ``Workflow``, or ``None`` to resolve the
     experiment's bound workflow); the return value is an opaque
     ``molexp.workflow.WorkflowResult``.
     """
@@ -116,7 +122,7 @@ def require_run_executor() -> RunWorkflowExecutor:
     if _run_executor is None:
         raise RuntimeError(
             "Run.execute needs the workflow layer; `import molexp.workflow` "
-            "(e.g. `from molexp.workflow import WorkflowCompiler`) registers "
+            "(e.g. `from molexp.workflow import Workflow`) registers "
             "the executor."
         )
     return _run_executor
@@ -195,7 +201,9 @@ class Run(Folder):
     # ── Folder hooks ─────────────────────────────────────────────────────
 
     def resolve(self) -> MolexpPath:
-        return self.run_dir
+        return MolexpPath(
+            self._disk().join(self.experiment.experiment_dir, "runs", f"run-{self.id}")
+        )
 
     @classmethod
     def child_dir(cls, parent: Folder, derived_id: str) -> MolexpPath:
@@ -254,57 +262,33 @@ class Run(Folder):
 
     @property
     def status(self) -> str:
-        """Current run status, sourced from the ``ops/run.json`` hot sidecar.
-
-        Hot machine state (status / ownership / heartbeat / executions) lives
-        solely in the OKF ``ops/`` sidecar per the identity-vs-runtime split
-        (wsokf-07/wsokf-10); ``run.json`` carries no status field.
-        """
-        return self.read_ops().status.value
+        """Current run status, sourced from ``run.json`` (:class:`RunMetadata`)."""
+        return self.metadata.status.value
 
     @property
     def is_retryable(self) -> bool:
         """Whether ``resume`` / ``rerun`` apply (status in :data:`RETRYABLE_STATUSES`)."""
-        return self.read_ops().is_retryable
+        return self.status in RETRYABLE_STATUSES
 
     @property
     def execution_history(self) -> list[ExecutionRecord]:
-        """Run-level execution history, read from the ``ops`` sidecar (wsokf-07)."""
-        return list(self.read_ops().executions)
+        """Run-level execution history, read from ``run.json``."""
+        return list(self.metadata.execution_history)
 
     @property
     def finished_at(self) -> datetime | None:
-        """Terminal timestamp, read from the ``ops`` sidecar (wsokf-07)."""
-        return self.read_ops().finished_at
+        """Terminal timestamp, read from ``run.json``."""
+        return self.metadata.finished_at
 
     @property
     def current_execution_id(self) -> str | None:
-        """Active/last execution id, read from the ``ops`` sidecar (wsokf-07)."""
-        return self.read_ops().current_execution_id
-
-    # ── OKF ops/run.json hot-state sidecar (typed; isolated from run.json) ─
-
-    def read_ops(self) -> RunOpsState:
-        """Load the typed Run ops state from ``ops/run.json`` (default if none)."""
-        return RunOpsState.model_validate(self.read_ops_json(RUN_OPS_NAME) or {})
-
-    def write_ops(self, state: RunOpsState) -> None:
-        """Persist the typed Run ops state to ``ops/run.json`` (atomic)."""
-        self.write_ops_json(RUN_OPS_NAME, state.model_dump(mode="json"))
-
-    def update_ops(self, fn: Callable[[RunOpsState], RunOpsState]) -> RunOpsState:
-        """Read-modify-write the typed Run ops state under an advisory lock."""
-
-        def apply(raw: dict[str, JSONValue]) -> dict[str, JSONValue]:
-            return fn(RunOpsState.model_validate(raw or {})).model_dump(mode="json")
-
-        return RunOpsState.model_validate(self.update_ops_json(RUN_OPS_NAME, apply))
+        """Active/last execution id, read from ``run.json``."""
+        return self.metadata.current_execution_id
 
     @property
-    def run_dir(self) -> MolexpPath:
-        return MolexpPath(
-            self._disk().join(self.experiment.experiment_dir, "runs", f"run-{self.id}")
-        )
+    def run_dir(self) -> Path:
+        """Alias of :attr:`Folder.path` — the run directory as ``pathlib.Path``."""
+        return self.path
 
     @property
     def scope(self):  # noqa: ANN201
@@ -359,11 +343,11 @@ class Run(Folder):
     def _latest_execution_node_output(self, key: str) -> TaskOutput:
         """Fallback for :meth:`get_result` — read *key* from the latest execution.
 
-        The execution history (newest last) is sourced from the OKF ``ops``
-        sidecar (wsokf-10); its last entry names the most recent attempt.
-        Read-only: nothing is written back to disk.
+        The execution history (newest last) is sourced from ``run.json``;
+        its last entry names the most recent attempt. Read-only: nothing
+        is written back to disk.
         """
-        history = self.read_ops().executions
+        history = self.metadata.execution_history
         if not history:
             return None
         execution_id = history[-1].execution_id
@@ -391,8 +375,17 @@ class Run(Folder):
     def materialize(self) -> None:
         d = self.run_dir
         self._disk().mkdir(d, parents=True, exist_ok=True)
-        _save_metadata(self.metadata, self._disk().join(self.run_dir, "run.json"), fs=self._disk())
-        self.write_meta()
+        self.save()
+
+    def write_meta(self) -> str:
+        """Stamp concept ``type`` on ``run.json``."""
+        self.save()
+        return self._disk().join(self.run_dir, "run.json")
+
+    def _sync_entity_identity(self) -> None:
+        """Mirror the folder identity into ``run.json`` (``move_to`` hook)."""
+        self._entity_metadata = self._entity_metadata.model_copy(update={"id": self._name})
+        self.save()
 
     def save(self) -> None:
         _save_metadata(self.metadata, self._disk().join(self.run_dir, "run.json"), fs=self._disk())
@@ -467,8 +460,8 @@ class Run(Folder):
         Folds the driver dance — ``run.start()`` context, workflow-runtime
         dispatch, asyncio plumbing — into a single synchronous call on the
         same execution path ``molexp run`` uses (RunContext lifecycle: status
-        machine, ``ops`` sidecar, heartbeat). *workflow* is a
-        ``CompiledWorkflow`` or an uncompiled ``WorkflowCompiler``
+        machine, ``alive`` heartbeat). *workflow* is a
+        ``CompiledWorkflow`` or an uncompiled ``Workflow``
         (auto-compiled). Returns a ``molexp.workflow.WorkflowResult`` whose
         ``.outputs`` maps task name → output.
 
@@ -520,23 +513,19 @@ class Run(Folder):
         return await ctx.__aexit__(exc_type, exc_val, exc_tb)
 
     def cancel(self) -> None:
-        """Mark the run as cancelled in the OKF ``ops`` hot-state sidecar.
+        """Mark the run as cancelled and persist the terminal state.
 
-        Sets ``status=cancelled`` + ``finished_at`` and clears the ownership
-        stamp (pid/host/heartbeat) in one read-modify-write of ``ops/run.json``;
-        ``run.json`` (identity/provenance) is untouched (wsokf-10).
+        Sets ``status=cancelled`` + ``finished_at``, clears the ownership
+        stamp, and unlinks the ``alive`` heartbeat file. All JSON writes
+        go through ``run.json``.
         """
         now = datetime.now()
-        self.update_ops(
-            lambda state: state.model_copy(
-                update={
-                    "status": RunStatus.CANCELLED,
-                    "finished_at": now,
-                    "owner_pid": None,
-                    "owner_host": None,
-                    "heartbeat_at": None,
-                }
-            )
+        unlink_alive(self)
+        self._update_metadata(
+            status=RunStatus.CANCELLED,
+            finished_at=now,
+            owner_pid=None,
+            owner_host=None,
         )
 
     def delete_execution(self, execution_id: str) -> None:
@@ -551,7 +540,7 @@ class Run(Folder):
         import shutil
 
         exec_dir = Path(self.run_dir / "executions" / execution_id)
-        history = list(self.read_ops().executions)
+        history = list(self.metadata.execution_history)
         matched_idx = next(
             (i for i, rec in enumerate(history) if rec.execution_id == execution_id),
             None,
@@ -562,12 +551,12 @@ class Run(Folder):
             shutil.rmtree(exec_dir)
         if matched_idx is not None:
             history.pop(matched_idx)
-            self.update_ops(lambda state: state.model_copy(update={"executions": tuple(history)}))
+            self._update_metadata(execution_history=tuple(history))
 
     # ── Internal (frozen-metadata mutation helpers) ──────────────────────
 
     def _set_status(self, status: RunStatus) -> None:
-        self.update_ops(lambda state: state.model_copy(update={"status": status}))
+        self._update_metadata(status=status)
 
     @contextlib.contextmanager
     def _metadata_lock(self) -> Iterator[None]:
@@ -600,16 +589,8 @@ class Run(Folder):
         except Exception:
             _logger.debug(f"run {self.id}: could not reload run.json; keeping in-memory copy")
 
-    #: Hot machine-state fields that left ``RunMetadata`` in wsokf-10 — they
-    #: now live solely in the OKF ``ops/run.json`` sidecar
-    #: (:class:`RunOpsState`). Writers must route them through
-    #: :meth:`update_ops`, never :meth:`_update_metadata`.
-    _OPS_ONLY_KEYS: frozenset[str] = frozenset(
-        {"status", "finished_at", "execution_history", "labels"}
-    )
-
     def _update_metadata(self, **updates: object) -> None:
-        """Forward identity/provenance updates into ``RunMetadata.model_copy``.
+        """Forward field updates into ``RunMetadata.model_copy`` and persist.
 
         Values flow through pydantic's per-field validators; the parameter
         type is the true Python top-type ``object`` (not ``Any`` — the
@@ -619,24 +600,19 @@ class Run(Folder):
         The read-modify-write cycle (reload from disk → apply updates →
         atomic save) runs under :meth:`_metadata_lock` so concurrent
         processes updating different fields cannot drop each other's
-        writes (lost-update protection).
-
-        ``run.json`` holds identity / provenance only (wsokf-10). Hot
-        machine state — ``status`` / ``finished_at`` / ``execution_history`` /
-        ownership ``labels`` — lives in the ``ops`` sidecar and must be
-        written through :meth:`update_ops`; passing one of those keys here is
-        a programming error and raises :class:`ValueError`.
-
-        Raises:
-            ValueError: If an ops-only hot-state key is passed.
+        writes (lost-update protection). Status, ownership, and
+        execution history are first-class ``RunMetadata`` fields and
+        may be written here.
         """
-        offending = self._OPS_ONLY_KEYS & updates.keys()
-        if offending:
-            raise ValueError(
-                f"_update_metadata received hot-state key(s) {sorted(offending)!r}; "
-                "these live in the ops/run.json sidecar — write them via update_ops()"
-            )
         with self._metadata_lock():
             self._reload_metadata_from_disk()
             self.metadata = self.metadata.model_copy(update=updates)
             self.save()
+
+    def update_provenance(self, **updates: object) -> None:
+        """Patch ``RunMetadata`` fields on ``run.json`` and persist.
+
+        Public spelling used by ``molexp run``, the molq submit plugin, and
+        the server start route. Same contract as :meth:`_update_metadata`.
+        """
+        self._update_metadata(**updates)

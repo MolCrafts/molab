@@ -1,7 +1,8 @@
 """``Bundle`` — the OKF bundle façade over the ``workspace.Folder`` tree.
 
-A *bundle* is a directory subtree whose Concept dirs (dirs that directly hold
-``meta.json``) form a knowledge graph via ``index.md`` markdown links. A
+A *bundle* is a directory subtree whose Concept dirs (WPER entity JSON
+with ``type``, or a Note ``meta.json``) form a knowledge graph via
+``index.md`` markdown links. A
 :class:`Bundle` wraps a *bundle root* and exposes the whole subtree — at any
 depth — as one management entry point: :meth:`walk` (depth-first Concept
 enumeration), :meth:`get` (path-as-identity resolution), :meth:`put`
@@ -46,10 +47,8 @@ from .edges import DEFAULT_EDGE_ROLE, EdgeRole
 from .errors import ConceptNotFoundError
 from .folder import (
     INDEX_FILENAME,
-    LEGACY_OPS_DIR,
-    META_JSON_FILENAME,
-    OPS_DIR,
     Folder,
+    _load_concept_marker_dict,
     append_link,
     concept_from_dir,
 )
@@ -99,11 +98,11 @@ def _utcnow() -> datetime:
 
 
 def _is_concept_dir(path: PathArg, fs: FileSystem) -> bool:
-    """Return ``True`` iff *path* is a dir that holds a concept marker."""
+    """Return ``True`` iff *path* is a Concept directory."""
     try:
         if not fs.is_dir(path):
             return False
-        return fs.exists(fs.join(path, META_JSON_FILENAME))
+        return _load_concept_marker_dict(fs, path) is not None
     except OSError:
         # Broken / cycle symlinks or path-too-long entries are not concepts.
         return False
@@ -134,24 +133,6 @@ class Bundle:
     def rel_path(self, concept: Folder) -> str:
         """Return *concept*'s identity: its POSIX path relative to the root."""
         return _StdPath(str(concept.resolve())).relative_to(self._root).as_posix()
-
-    def _emit_created(self, concept: Folder, *, title: str) -> None:
-        """Best-effort ``knowledge.created`` on the event spine (vision-loop-12).
-
-        Emitted only for NEWLY materialized Concepts (the create verbs are
-        idempotent — a repeat call is not a creation). Non-fatal by
-        ``emit_workspace_event``'s contract: the Concept write is already
-        durable when this runs.
-        """
-        from .events import emit_workspace_event
-
-        emit_workspace_event(
-            self._root,
-            "knowledge.created",
-            "bundle",
-            payload={"type": concept.kind, "title": title},
-            refs=[self.rel_path(concept)],
-        )
 
     def _folder_for(self, path: PathArg) -> Folder:
         """Build the typed Concept whose identity is the Concept dir *path*.
@@ -274,9 +255,8 @@ class Bundle:
     def walk(self) -> Iterator[Folder]:
         """Yield every Concept under the root, depth-first (preorder).
 
-        A dir is yielded iff it holds ``meta.json``. The ``ops/`` sidecar
-        (and the pre-rename ``_ops/`` location) is skipped; paths matching the workspace
-        ``.gitignore`` cascade (plus a safety-floor denylist for
+        A dir is yielded iff it holds ``meta.json``. Paths matching the
+        workspace ``.gitignore`` cascade (plus a safety-floor denylist for
         ``node_modules`` / ``.git`` / venvs) are skipped entirely; symlink
         cycles are cut by tracking resolved paths. Non-Concept organizational
         dirs are descended into but not yielded; loose files are inherently
@@ -305,8 +285,6 @@ class Bundle:
         root_resolved = self.fs.resolve(str(self._root))
 
         for name in sorted(names):
-            if name in {OPS_DIR, LEGACY_OPS_DIR}:
-                continue
             entry = self.fs.join(directory, name)
             try:
                 if not self.fs.is_dir(entry):
@@ -418,12 +396,9 @@ class Bundle:
 
         host = parent if parent is not None else self._pinned_parent(self._root)
         slug = slugify(name) or name
-        created = not host.has_folder(slug, cls=Note)
         note = host.add_folder(Note(parent=host, name=slug))
         if body:
             note.set_body(body)
-        if created:
-            self._emit_created(note, title=name)
         return note
 
     def rename_note(self, concept: Folder, new_name: str) -> None:
@@ -629,7 +604,6 @@ class Bundle:
         refs: list[ReferenceConcept] = []
         for item in items:
             slug = slugify(item.key) or item.key
-            created = not host.has_folder(slug, cls=ReferenceConcept)
             ref = host.add_folder(ReferenceConcept(parent=host, name=slug))
             ref.write_reference_meta(
                 ReferenceMeta(
@@ -643,10 +617,6 @@ class Bundle:
                     source_key=item.key,
                 )
             )
-            if created:
-                # After write_reference_meta — the Concept is bib-complete
-                # when the event lands.
-                self._emit_created(ref, title=item.title or slug)
             refs.append(ref)
         self._record_source("zotero", str(path), len(items), now=now)
         return refs

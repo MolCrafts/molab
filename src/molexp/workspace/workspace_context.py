@@ -9,7 +9,7 @@ Design invariants:
 
 - **Pure projection.** :func:`assemble_workspace_context` is a read — it stores nothing
   new and the model is never itself canonical (authoritative state stays in the entity
-  ``*.json`` / ``ops/run.json`` / ``assets.json`` / OKF ``meta.json``).
+  ``*.json`` / ``assets.json`` / OKF ``meta.json``).
 - **Layer-legal.** This module imports only ``workspace`` + stdlib/pydantic — never
   ``workflow`` / ``agent`` / ``harness`` (enforced by the workspace import-guard). Workflow
   *availability* is read workspace-only from the externalized ``workflow.json``.
@@ -34,8 +34,9 @@ from molexp._typing import JSONValue
 from .assets.scan import scan_assets
 from .bundle_index import extract_title
 from .concepts import Note, ReferenceConcept
-from .knowledge_item import KnowledgeItem
+from .knowledge import Knowledge
 from .models import RunStatus
+from .run_heartbeat import is_alive_stale
 
 if TYPE_CHECKING:
     from .workspace import Workspace
@@ -84,7 +85,7 @@ class WorkflowRef(BaseModel, frozen=True):
 
 
 class RunRef(BaseModel, frozen=True):
-    """A run's identity + hot-state summary (from ``ops/run.json``)."""
+    """A run's identity + hot-state summary (from ``run.json``)."""
 
     run_id: str
     experiment_id: str
@@ -163,24 +164,23 @@ def assemble_workspace_context(
     workspace: Workspace,
     *,
     focus: ContextFocus | None = None,
-    now: datetime | None = None,
+    now: datetime | None = None,  # noqa: ARG001
 ) -> WorkspaceContext:
     """Assemble the canonical :class:`WorkspaceContext` — a pure read.
 
-    Walks the authoritative folder tree + ``read_ops`` + ``scan_assets`` + ``Bundle`` and
+    Walks the authoritative folder tree + ``run.json`` + ``scan_assets`` + ``Bundle`` and
     composes them into one read-model. Writes nothing.
 
     Args:
         workspace: The workspace to project.
         focus: Caller-supplied ephemeral focus (default: empty); echoed, never stored.
-        now: Reference time for heartbeat-staleness (default: aware-UTC now); injected for
-            deterministic tests.
+        now: Accepted for call-site compatibility; alive-mtime staleness uses
+            wall clock, not this stamp.
 
     Returns:
         The assembled :class:`WorkspaceContext`.
     """
     focus = focus if focus is not None else ContextFocus()
-    now = now if now is not None else datetime.now(UTC)
     root = str(workspace.resolve())
 
     projects: list[ProjectRef] = []
@@ -208,18 +208,18 @@ def assemble_workspace_context(
             if experiment.workflow_source is not None:
                 workflows.append(WorkflowRef(experiment_id=experiment.id, name=experiment.name))
             for run in experiment.list_runs():
-                ops = run.read_ops()
-                err = run.metadata.error
+                meta = run.metadata
+                err = meta.error
                 err_text = f"{err.type}: {err.message}" if err is not None else None
                 ref = RunRef(
                     run_id=run.id,
                     experiment_id=experiment.id,
                     project_id=project.id,
-                    status=str(ops.status),
-                    config_hash=run.metadata.config_hash,
-                    started_at=ops.started_at,
-                    finished_at=ops.finished_at,
-                    current_execution_id=ops.current_execution_id,
+                    status=str(meta.status),
+                    config_hash=meta.config_hash,
+                    started_at=meta.started_at,
+                    finished_at=meta.finished_at,
+                    current_execution_id=meta.current_execution_id,
                 )
                 run_refs.append(ref)
                 run_ids.add(run.id)
@@ -233,12 +233,12 @@ def assemble_workspace_context(
                         HealthFlag(
                             kind="failed_run",
                             ref=run.id,
-                            detail=f"run {run.id} is {ops.status} (retryable){reason}",
+                            detail=f"run {run.id} is {meta.status} (retryable){reason}",
                         )
                     )
-                if ops.status == RunStatus.RUNNING:
+                if meta.status == RunStatus.RUNNING:
                     running_runs.append(ref)
-                    if ops.is_heartbeat_stale(now):
+                    if is_alive_stale(run):
                         flags.append(
                             HealthFlag(
                                 kind="stale_running",
@@ -283,13 +283,18 @@ def assemble_workspace_context(
         # Knowledge is the free-form Note, the literature ReferenceConcept, and the
         # typed source-attributed KnowledgeItem (P0.4) — the canonical home for
         # auto-derived knowledge. Entity folders (Project/Experiment/Run) are excluded.
-        if isinstance(concept, Note | ReferenceConcept | KnowledgeItem):
-            meta = concept.read_meta()
-            raw_id = meta.get("id")
+        if isinstance(concept, Note | ReferenceConcept | Knowledge):
+            if isinstance(concept, Knowledge):
+                type_name = type(concept).__name__
+                raw_id = concept.metadata.id
+            else:
+                meta = concept.read_meta()
+                type_name = str(meta.get("type", ""))
+                raw_id = meta.get("id")
             knowledge.append(
                 KnowledgeRef(
                     path=bundle.rel_path(concept),
-                    type=str(meta.get("type", "")),
+                    type=type_name,
                     title=extract_title(concept.read_index()) or concept.name,
                     id=str(raw_id) if raw_id is not None else None,
                 )

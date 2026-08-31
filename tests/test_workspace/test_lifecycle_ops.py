@@ -30,7 +30,6 @@ from molexp.workspace import Workspace
 from molexp.workspace.lifecycle_ops import cancel_run
 from molexp.workspace.models import RunStatus
 from molexp.workspace.run import Run
-from molexp.workspace.run_ops import RunOpsState
 
 # ── fixtures ─────────────────────────────────────────────────────────────────
 
@@ -45,14 +44,15 @@ def run(tmp_path: Path) -> Run:
 
 
 def _mark_running(run: Run, *, pid: int, host: str, heartbeat_at: datetime | None) -> None:
-    run.write_ops(
-        RunOpsState(
-            status="running",
-            owner_pid=pid,
-            owner_host=host,
-            heartbeat_at=heartbeat_at,
-        )
+    from molexp.workspace.run_heartbeat import touch_alive
+
+    run._update_metadata(
+        status=RunStatus.RUNNING,
+        owner_pid=pid,
+        owner_host=host,
     )
+    if heartbeat_at is not None:
+        touch_alive(run)
 
 
 def _dead_pid() -> int:
@@ -72,10 +72,8 @@ class TestCancelRunning:
     def test_cancel_clears_the_ownership_stamp(self, run: Run) -> None:
         _mark_running(run, pid=os.getpid(), host=platform.node(), heartbeat_at=datetime.now(UTC))
         cancel_run(run)
-        state = run.read_ops()
-        assert state.owner_pid is None
-        assert state.owner_host is None
-        assert state.heartbeat_at is None
+        assert run.metadata.owner_pid is None
+        assert run.metadata.owner_host is None
 
 
 class TestRefusesNonRunning:
@@ -87,7 +85,7 @@ class TestRefusesNonRunning:
     def test_non_running_status_refuses_and_preserves_status(
         self, run: Run, status: RunStatus
     ) -> None:
-        run.update_ops(lambda s: s.model_copy(update={"status": status}))
+        run._update_metadata(status=status)
         with pytest.raises(ValueError, match="running"):
             cancel_run(run)
         assert run.status == status.value
