@@ -54,9 +54,9 @@ When execution happens under a persistent run, the workspace helpers live on the
 
 ```python
 import molexp as me
-from molexp.workflow import WorkflowCompiler, WorkflowRuntime
+from molexp.workflow import Workflow, WorkflowCompiler, WorkflowRuntime
 
-compiled = WorkflowCompiler(name="train").add(Train()).compile()
+compiled = WorkflowCompiler().compile(Workflow(name="train").add(Train()))
 
 ws = me.Workspace("./lab", name="lab")
 exp = ws.project("demo").experiment("baseline").run(compiled, params={"lr": [1e-3]})

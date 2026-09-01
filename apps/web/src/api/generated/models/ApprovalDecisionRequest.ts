@@ -5,16 +5,20 @@
 /**
  * Operator decision — ReviewDecision-shaped wire body.
  *
- * Preferred field is ``action`` (approve|reject|revise). ``granted`` remains
- * as a **deprecated** boolean alias for approve/reject only (migration for
- * older UI clients that only knew grant/deny).
+ * ``action`` is required (approve|reject|revise).
  */
 export type ApprovalDecisionRequest = {
-    action?: ('approve' | 'reject' | 'revise' | null);
+    action: ApprovalDecisionRequest.action;
     edits?: (Record<string, any> | null);
     fieldValues?: Record<string, any>;
-    granted?: (boolean | null);
     reason?: (string | null);
     requestId: string;
 };
+export namespace ApprovalDecisionRequest {
+    export enum action {
+        APPROVE = 'approve',
+        REJECT = 'reject',
+        REVISE = 'revise',
+    }
+}
 

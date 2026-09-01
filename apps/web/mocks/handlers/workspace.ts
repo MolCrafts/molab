@@ -237,6 +237,8 @@ export const workspaceHandlers = [
         const experimentFilter = url.searchParams.get("experimentId");
         const backendFilter = url.searchParams.get("backend");
         const statusFilter = url.searchParams.get("status");
+        const offset = Math.max(0, Number(url.searchParams.get("offset") ?? 0));
+        const limit = Math.max(1, Number(url.searchParams.get("limit") ?? 500));
 
         const allRuns = buildMockWorkspaceRuns();
         const filtered = allRuns.filter((row) => {
@@ -247,11 +249,12 @@ export const workspaceHandlers = [
             return true;
         });
 
+        const page = filtered.slice(offset, offset + limit);
         return HttpResponse.json({
-            runs: filtered,
+            runs: page,
             stats: computeMockStats(filtered),
             total: filtered.length,
-            truncated: false,
+            truncated: offset + page.length < filtered.length,
         });
     }),
 
@@ -355,7 +358,7 @@ export const workspaceHandlers = [
             // For dev:mock, a remote workspace exposes its own empty
             // project/asset set — distinguishable from the local mock store.
             return HttpResponse.json({
-                root: target.root_path,
+                root: target.rootPath,
                 projectCount: 0,
                 assetCount: 0,
                 warnings: [],

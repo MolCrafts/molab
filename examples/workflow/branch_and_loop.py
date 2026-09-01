@@ -22,12 +22,12 @@ from __future__ import annotations
 
 import asyncio
 
-from molexp.workflow import Next, WorkflowCompiler, WorkflowRuntime
+from molexp.workflow import Next, Workflow, WorkflowCompiler, WorkflowRuntime
 
 
 # ── 1. Branch — route a value to one downstream task ───────────────────────
 async def branch_demo(score: float) -> None:
-    wf = WorkflowCompiler(name="triage", entry="classify")
+    wf = Workflow(name="triage", entry="classify")
 
     @wf.task
     async def classify() -> tuple[dict, Next]:
@@ -44,14 +44,14 @@ async def branch_demo(score: float) -> None:
 
     wf.branch("classify", routes={"accept": "accepted", "reject": "rejected"})
 
-    result = await WorkflowRuntime().execute(wf.compile())
+    result = await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
     taken = "accepted" if "accepted" in result.outputs else "rejected"
     print(f"branch: {result.outputs[taken]}")
 
 
 # ── 2. Loop — repeat the body until the until-task exits ───────────────────
 async def loop_demo() -> None:
-    wf = WorkflowCompiler(name="refine", entry="step")
+    wf = Workflow(name="refine", entry="step")
 
     @wf.task
     async def step(value: int | None = None) -> int:
@@ -70,7 +70,7 @@ async def loop_demo() -> None:
 
     wf.loop(body=["step"], until="check", max_iters=10, on_exit="report")
 
-    result = await WorkflowRuntime().execute(wf.compile())
+    result = await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
     print(f"loop:   {result.outputs['report']} (step ran {result.outputs['step']} times)")
 
 

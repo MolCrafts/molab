@@ -28,13 +28,11 @@ the same slug already exists, it is loaded and returned).
 from __future__ import annotations
 
 import json
-from pathlib import Path as _LocalPath
 from typing import TYPE_CHECKING, Protocol, cast
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from .knowledge_item import KnowledgeItem, KnowledgeKind, SourceRef
     from .param import ParamSpace
     from .project import Project
     from .runset import RunSet
@@ -58,7 +56,8 @@ from .folder import (
     _validate_target_registered,
 )
 from .fs import PathArg
-from .models import ExperimentMetadata, FolderMetadata
+from .knowledge import HasKnowledge
+from .models import ExperimentMetadata, FolderMetadata, RunStatus
 from .run import Run
 from .utils import generate_id
 
@@ -97,7 +96,7 @@ def set_workflow_executor(executor: WorkflowExecutor) -> None:
 # ``experiment.json``. Kept separate (and free of the ``schema_version``
 # envelope) so external tooling — notably the molexp VSCode preview — can read
 # and diff the raw IR directly without parsing it out of the metadata file.
-WORKFLOW_DOC_FILENAME = "workflow.json"
+WORKFLOW_DOC_FILENAME = "workflow.ir.json"
 
 
 def _parse_ir_document(source: str | None) -> dict | None:
@@ -105,7 +104,7 @@ def _parse_ir_document(source: str | None) -> dict | None:
 
     ``workflow_source`` is free-form: it may carry a compiled workflow IR (a
     JSON object), a path / Python-source string (e.g. ``"train.py"``), or be
-    empty. Only the JSON-object form is externalized to ``workflow.json``;
+    empty. Only the JSON-object form is externalized to ``workflow.ir.json``;
     everything else stays embedded in ``experiment.json``.
     """
     if not source:
@@ -118,8 +117,11 @@ def _parse_ir_document(source: str | None) -> dict | None:
 
 
 @concept_type(WORKSPACE_EXPERIMENT_KIND)
-class Experiment(Folder):
+class Experiment(Folder, HasKnowledge):
     """Repeatable experiment — a parameter-space container.
+
+    Knowledge (including the plan book) lives at ``knowledges/<id>/``.
+    Harness Plan Mode is a separate plugin at ``run_dir/plan/task_board.json``.
 
     Example::
 
@@ -210,7 +212,7 @@ class Experiment(Folder):
     def from_disk(cls, child_dir: PathArg, parent: Folder) -> Experiment:
         """Load ``experiment.json`` and rebuild entity state. See Folder.from_disk hook docs.
 
-        When a standalone ``workflow.json`` is present it is the canonical home
+        When a standalone ``workflow.ir.json`` is present it is the canonical home
         for the compiled IR; its contents are rehydrated into the in-memory
         ``workflow_source`` field so every downstream reader is unaffected by the
         externalized on-disk layout.
@@ -219,6 +221,8 @@ class Experiment(Folder):
             ExperimentMetadata, parent._disk().join(child_dir, "experiment.json"), fs=parent._disk()
         )
         doc_path = parent._disk().join(child_dir, WORKFLOW_DOC_FILENAME)
+        if not parent._disk().is_file(doc_path):
+            doc_path = parent._disk().join(child_dir, "workflow.json")
         if parent._disk().is_file(doc_path):
             with parent._disk().open(doc_path) as fh:
                 ir = json.load(fh)
@@ -314,9 +318,7 @@ class Experiment(Folder):
     @property
     def data_assets(self) -> DataAssetLibrary:
         if self._data_assets is None:
-            self._data_assets = DataAssetLibrary(
-                self.experiment_dir, self.scope, event_root=_LocalPath(str(self.workspace.root))
-            )
+            self._data_assets = DataAssetLibrary(self.experiment_dir, self.scope)
         return self._data_assets
 
     def get_seeds(self) -> list[int]:
@@ -335,9 +337,19 @@ class Experiment(Folder):
         """Create filesystem structure and persist metadata (non-recursive)."""
         d = self.experiment_dir
         self._disk().mkdir(d, parents=True, exist_ok=True)
-        disk_meta = self._persist_workflow_doc()
-        _save_metadata(disk_meta, self._disk().join(d, "experiment.json"), fs=self._disk())
-        self.write_meta()
+        self.save()
+
+    def write_meta(self) -> str:
+        """Stamp concept ``type`` on ``experiment.json``."""
+        self.save()
+        return self._disk().join(self.experiment_dir, "experiment.json")
+
+    def _sync_entity_identity(self) -> None:
+        """Mirror the folder identity into ``experiment.json`` (``move_to`` hook)."""
+        self._entity_metadata = self._entity_metadata.model_copy(
+            update={"id": self._name, "name": self._metadata.name}
+        )
+        self.save()
 
     def save(self) -> None:
         """Persist current metadata to disk."""
@@ -357,10 +369,10 @@ class Experiment(Folder):
         """Externalize an IR ``workflow_source`` and return the metadata for disk.
 
         When the source is a compiled workflow IR, it is written to a standalone
-        ``workflow.json`` (clean, pretty-printed — the molexp VSCode preview
+        ``workflow.ir.json`` (clean, pretty-printed — the molexp VSCode preview
         reads it directly) and stripped from the returned metadata so the IR has
         a single on-disk home. Non-IR sources (a Python path / source) stay
-        embedded and any stale ``workflow.json`` is removed.
+        embedded and any stale ``workflow.ir.json`` is removed.
 
         The in-memory ``self._entity_metadata`` is left untouched so live readers
         (server responses, run snapshots) keep seeing the full source until the
@@ -368,11 +380,16 @@ class Experiment(Folder):
         """
         ir = _parse_ir_document(self._entity_metadata.workflow_source)
         doc_path = self._workflow_doc_path
+        legacy = self._disk().join(self.experiment_dir, "workflow.json")
         if ir is not None:
             self._disk().atomic_write_json(doc_path, ir)
+            if self._disk().is_file(legacy):
+                self._disk().remove(legacy)
             return self._entity_metadata.model_copy(update={"workflow_source": None})
         if self._disk().is_file(doc_path):
             self._disk().remove(doc_path)
+        if self._disk().is_file(legacy):
+            self._disk().remove(legacy)
         return self._entity_metadata
 
     # ── Run CRUD: typed semantic sugar over generic Folder CRUD ────────────
@@ -402,18 +419,7 @@ class Experiment(Folder):
             workflow_snapshot=workflow_snapshot,
             target=resolved_target,
         )
-        run = self.add_folder(child)
-        # Default-on, non-fatal workspace-timeline milestone (integration P0.3).
-        from .events import emit_workspace_event
-
-        emit_workspace_event(
-            self.workspace.resolve(),
-            "run.created",
-            "run-lifecycle",
-            payload={"experiment_id": self.id, "project_id": self.project.id},
-            refs=[run.id],
-        )
-        return run
+        return self.add_folder(child)
 
     def add_runs(
         self,
@@ -508,7 +514,7 @@ class Experiment(Folder):
         *list* of values — a scalar axis fails fast) or any
         :class:`~molexp.workspace.ParamSpace`. ``None`` seeds a single
         parameter-free run. *workflow* may be an uncompiled
-        ``WorkflowCompiler``; it is compiled automatically.
+        ``Workflow``; the workflow-layer executor compiles it.
         """
         from .param import GridSpace, ParamSpace
         from .runset import RunSet
@@ -529,11 +535,6 @@ class Experiment(Folder):
             space = GridSpace(
                 {axis: values for axis, values in grid.items() if isinstance(values, list)}
             )
-        # Auto-compile an uncompiled WorkflowCompiler (duck-typed: a compiled
-        # workflow has no ``compile`` method; workspace never imports workflow).
-        compile_hook = getattr(workflow, "compile", None)
-        if callable(compile_hook):
-            workflow = compile_hook()
         runs = self.add_runs(space)
         if _workflow_executor is None:
             raise RuntimeError(
@@ -606,81 +607,27 @@ class Experiment(Folder):
         """Alias of :meth:`del_run`."""
         self.del_run(run_id)
 
-    def add_knowledge(
-        self,
-        name: str,
-        *,
-        kind: KnowledgeKind = "Finding",
-        body: str = "",
-        sources: list[SourceRef | Folder | str] | None = None,
-        created_by: str = "user",
-        title: str = "",
-    ) -> KnowledgeItem:
-        """Add a sourced knowledge item under this experiment."""
-        from .knowledge_write import write_knowledge_item
-        from .project import _normalize_sources
+    def remove_failed_runs(self) -> list[str]:
+        """Delete every run whose hot status is ``failed``.
 
-        refs = _normalize_sources(sources, default_host=self)
-        return write_knowledge_item(
-            self,
-            name=name,
-            kind=kind,
-            sources=refs,
-            created_by=created_by,
-            body=body,
-            title=title or name,
-            cite=[(self, "derived_from")],
-        )
+        Reaps zombie ``running`` owners first so a dead scheduler job is
+        treated as failed and removed with the rest. Succeeded, pending,
+        live-running, and cancelled runs stay.
 
-    def knowledge(self, name: str) -> KnowledgeItem:
-        """Get a knowledge item under this experiment."""
-        from .knowledge_item import KnowledgeItem
+        Returns:
+            Removed run ids, in listing order.
+        """
+        from .run_reaper import reap_zombie_run
 
-        return self.get_folder(name, cls=KnowledgeItem)
-
-    def set_knowledge(
-        self,
-        name: str,
-        *,
-        kind: KnowledgeKind | None = None,
-        body: str | None = None,
-        sources: list[SourceRef | Folder | str] | None = None,
-        created_by: str | None = None,
-        title: str = "",
-    ) -> KnowledgeItem:
-        """Update knowledge under this experiment."""
-        from .knowledge_write import write_knowledge_item
-        from .project import _normalize_sources
-
-        item = self.knowledge(name)
-        meta = item.read_knowledge_meta()
-        new_kind = kind if kind is not None else meta.kind
-        refs = (
-            _normalize_sources(sources, default_host=self)
-            if sources is not None
-            else list(meta.sources)
-        )
-        new_body = body if body is not None else item.body()
-        new_by = created_by if created_by is not None else meta.created_by
-        return write_knowledge_item(
-            self,
-            name=name,
-            kind=new_kind,
-            sources=refs,
-            created_by=new_by,
-            body=new_body,
-            title=title or name,
-        )
-
-    def del_knowledge(self, name: str) -> None:
-        from .knowledge_item import KnowledgeItem
-
-        self.remove_folder(name, cls=KnowledgeItem)
-
-    def knowledges(self) -> list[KnowledgeItem]:
-        from .knowledge_item import KnowledgeItem
-
-        return self.list_folders(cls=KnowledgeItem)
+        removed: list[str] = []
+        for run in list(self.list_runs()):
+            reap_zombie_run(run)
+            if run.status != RunStatus.FAILED.value:
+                continue
+            rid = run.id
+            self.remove_run(rid)
+            removed.append(rid)
+        return removed
 
     # ── Internal helpers ────────────────────────────────────────────────
 

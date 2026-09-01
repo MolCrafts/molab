@@ -20,7 +20,6 @@ CLI's former private copy of shape (1) delegates here (one code path).
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from molexp.harness.errors import HarnessError
@@ -28,7 +27,7 @@ from molexp.harness.errors import HarnessError
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from molexp.workflow import CompiledWorkflow, WorkflowCompiler
+    from molexp.workflow import CompiledWorkflow, Workflow
     from molexp.workspace.run import Run
 
 __all__ = ["WorkflowRecoveryError", "compiled_workflow_for_run"]
@@ -89,8 +88,9 @@ def _from_workflow_source(run: Run) -> CompiledWorkflow | None:
     """Compile the plan-generated ``build_workflow()`` program, if present."""
     from molexp.harness.schemas import WorkflowSource
     from molexp.harness.store.file_artifact_store import FileArtifactStore
+    from molexp.harness.store.paths import harness_artifact_root
 
-    store = FileArtifactStore(root=Path(run.run_dir) / "artifacts")
+    store = FileArtifactStore(root=harness_artifact_root(run.run_dir))
     ref = store.latest_by_kind("workflow_source")
     if ref is None:
         return None
@@ -103,5 +103,7 @@ def _from_workflow_source(run: Run) -> CompiledWorkflow | None:
             f"run {run.id}: its workflow_source artifact defines no callable "
             "build_workflow() — the generated program is malformed"
         )
-    builder = cast("Callable[[], WorkflowCompiler]", raw_builder)
-    return builder().compile()
+    from molexp.workflow import WorkflowCompiler
+
+    builder = cast("Callable[[], Workflow]", raw_builder)
+    return WorkflowCompiler().compile(builder())

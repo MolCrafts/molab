@@ -6,7 +6,8 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import type { EntityRef } from "@/app/entities/kinds";
-import type { LeftPanelView, WorkspaceSnapshot } from "@/app/types";
+import { getNavigationContribution, leftPanelViewFromPath } from "@/app/navigation/sections";
+import type { ExperimentView, ObjectView, ProjectView, WorkspaceSnapshot } from "@/app/types";
 
 const enc = encodeURIComponent;
 
@@ -14,20 +15,43 @@ const enc = encodeURIComponent;
  *  place the run route shape is defined — both ``entityPath`` (snapshot lookup)
  *  and callers that already have the parent ids (e.g. the runs dashboard, whose
  *  poller rows may include runs not in the view snapshot) route through it. */
-export const runPath = (projectId: string, experimentId: string, runId: string): string =>
-  `/projects/${enc(projectId)}/experiments/${enc(experimentId)}/runs/${enc(runId)}`;
+export const runPath = (
+  projectId: string,
+  experimentId: string,
+  runId: string,
+  view?: ObjectView,
+): string => {
+  const base = `/projects/${enc(projectId)}/experiments/${enc(experimentId)}/runs/${enc(runId)}`;
+  return view && view !== "overview" ? `${base}?${new URLSearchParams({ tab: view })}` : base;
+};
+
+/** Canonical experiment URL. Secondary views are nested beneath the experiment
+ * instead of competing as top-level product areas. */
+export const experimentPath = (
+  projectId: string,
+  experimentId: string,
+  view: ExperimentView = "overview",
+): string => {
+  const base = `/projects/${enc(projectId)}/experiments/${enc(experimentId)}`;
+  return view === "overview" ? base : `${base}/${view}`;
+};
+
+export const projectPath = (projectId: string, view: ProjectView = "overview"): string => {
+  const base = `/projects/${enc(projectId)}`;
+  return view === "overview" ? base : `${base}/${view}`;
+};
 
 /** Build the canonical URL for an entity ref, or ``null`` if it cannot be
  *  located in the current snapshot (e.g. a stale ref to a deleted run). */
 export const entityPath = (ref: EntityRef, snapshot: WorkspaceSnapshot): string | null => {
   switch (ref.kind) {
     case "project":
-      return `/projects/${enc(ref.id)}`;
+      return projectPath(ref.id);
 
     case "experiment": {
       const experiment = snapshot.experiments.find((e) => e.id === ref.id);
       if (!experiment) return null;
-      return `/projects/${enc(experiment.projectId)}/experiments/${enc(experiment.id)}`;
+      return experimentPath(experiment.projectId, experiment.id);
     }
 
     case "run": {
@@ -44,8 +68,15 @@ export const entityPath = (ref: EntityRef, snapshot: WorkspaceSnapshot): string 
       return `${runPath(run.projectId, run.experimentId, run.id)}/tasks/${enc(ref.id)}`;
     }
 
-    case "workflow":
-      return `/workflows/${enc(ref.id)}`;
+    case "workflow": {
+      const workflow = snapshot.workflows.find((item) => item.id === ref.id);
+      const experiment = workflow
+        ? snapshot.experiments.find((item) => item.id === workflow.experimentId)
+        : undefined;
+      return experiment
+        ? experimentPath(experiment.projectId, experiment.id, "workflow")
+        : `/workflows/${enc(ref.id)}`;
+    }
 
     case "asset":
       return `/assets/${enc(ref.id)}`;
@@ -67,26 +98,16 @@ export const entityPath = (ref: EntityRef, snapshot: WorkspaceSnapshot): string 
 /** Section landing routes — the collection pages reached from a breadcrumb
  *  root or the nav rail. */
 export const SECTION_PATH = {
-  projects: "/projects",
-  workspace: "/workspace",
-  runs: "/runs",
-  activity: "/activity",
-  workflows: "/workflows",
-  assets: "/assets",
-  agents: "/agent-tasks",
-  knowledge: "/knowledge",
-  settings: "/settings",
+  dashboard: getNavigationContribution("dashboard").route,
+  projects: getNavigationContribution("projects").route,
+  workspace: getNavigationContribution("workspace").route,
+  runs: getNavigationContribution("runs").route,
+  activity: getNavigationContribution("activity").route,
+  workflows: getNavigationContribution("workflow").route,
+  assets: getNavigationContribution("asset").route,
+  agents: getNavigationContribution("agent").route,
+  knowledge: getNavigationContribution("knowledge").route,
+  settings: getNavigationContribution("settings").route,
 } as const;
 
-/** Pure pathname → left-rail section (no router). Used by navigation state. */
-export const leftPanelViewFromPath = (pathname: string): LeftPanelView => {
-  if (pathname.startsWith("/workspace")) return "workspace";
-  if (pathname.startsWith("/runs")) return "runs";
-  if (pathname.startsWith("/activity")) return "activity";
-  if (pathname.startsWith("/workflows")) return "workflow";
-  if (pathname.startsWith("/assets")) return "asset";
-  if (pathname.startsWith("/agent-tasks")) return "agent";
-  if (pathname.startsWith("/knowledge")) return "knowledge";
-  if (pathname.startsWith("/settings")) return "settings";
-  return "projects";
-};
+export { leftPanelViewFromPath };

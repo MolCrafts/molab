@@ -1286,10 +1286,14 @@ _KNOWLEDGE_SKIP_DEFAULT = frozenset(
         "runs",
         "assets",
         "cache",
-        "ops",
-        "_ops",
         "executions",
         "artifacts",
+        "plan",
+        "source",
+        "jobs",
+        "work",
+        "harness",
+        "alive",
     }
 )
 

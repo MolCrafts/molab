@@ -18,7 +18,7 @@ import { useEffect, useId, useMemo, useState } from "react";
 import type { RunExecutionResponse } from "@/api/generated/models/RunExecutionResponse";
 import type { WorkflowSnapshotResponse } from "@/api/generated/models/WorkflowSnapshotResponse";
 import { KeyValueGrid } from "@/app/components/entity";
-import { workspaceApi } from "@/app/state/api";
+
 import type { RunSummary } from "@/app/types";
 import { WorkbenchTag } from "@/components/workbench";
 import { normalizeTaskGraph } from "@/components/workflow/flowgram-document";
@@ -41,6 +41,7 @@ interface TaskSnapshotResponse {
   [key: string]: unknown;
 }
 
+import { runsApi } from "@/api";
 import {
   Select,
   SelectContent,
@@ -741,7 +742,7 @@ export const RunSnapshotPanel = ({ run }: RunSnapshotPanelProps): JSX.Element =>
     setLoading(true);
     setError(null);
     const load = (): void => {
-      workspaceApi
+      runsApi
         .getRunExecution(run.projectId, run.experimentId, run.id)
         .then((data) => {
           if (cancelled) return;
@@ -782,12 +783,12 @@ export const RunSnapshotPanel = ({ run }: RunSnapshotPanelProps): JSX.Element =>
             </span>
           </span>
         </div>
-        {execution?.execution_id && (
+        {execution?.executionId && (
           <span
             className="font-mono text-label text-muted-foreground"
-            title={execution.execution_id}
+            title={execution.executionId}
           >
-            {execution.execution_id}
+            {execution.executionId}
           </span>
         )}
       </div>

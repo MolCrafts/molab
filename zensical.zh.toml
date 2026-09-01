@@ -55,6 +55,7 @@ nav = [
     ]},
     { "开发" = [
         { "索引" = "development/index.md" },
+        { "启动与重编 UI" = "development/ui-serve.md" },
         { "编译器" = "development/compiler.md" },
         { "任务协议" = "development/task-protocols.md" },
         { "编写插件" = "plugins.md" }

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from molexp.workflow import TaskContext, WorkflowCompiler
+from molexp.workflow import TaskContext, Workflow
 from molexp.workspace import Workspace
 from molexp.workspace.assets import lineage, scan
 
@@ -28,8 +28,8 @@ def _artifact_for(ws: Workspace, run_id: str, task: str):
     return found[0]
 
 
-def _chain_workflow() -> WorkflowCompiler:
-    wf = WorkflowCompiler(name="chain")
+def _chain_workflow() -> Workflow:
+    wf = Workflow(name="chain")
 
     @wf.task
     async def upstream(ctx: TaskContext) -> dict:
@@ -70,7 +70,7 @@ class TestEngineAutomaticLineage:
         assert up.producer.inputs == ()
 
     def test_diamond_fan_in_records_both_upstreams_deduped(self, tmp_path: Path) -> None:
-        wf = WorkflowCompiler(name="diamond")
+        wf = Workflow(name="diamond")
 
         @wf.task
         async def left(ctx: TaskContext) -> dict:

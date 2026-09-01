@@ -80,7 +80,7 @@ export class WorkflowService {
      * @returns WorkflowDocumentResponse Successful Response
      * @throws ApiError
      */
-    public static getWorkflowDocument1(
+    public static getWorkflowDocumentWs(
         projectId: string,
         experimentId: string,
         ws: string,
@@ -113,7 +113,7 @@ export class WorkflowService {
      * @returns WorkflowDocumentResponse Successful Response
      * @throws ApiError
      */
-    public static putWorkflowDocument1(
+    public static putWorkflowDocumentWs(
         projectId: string,
         experimentId: string,
         ws: string,

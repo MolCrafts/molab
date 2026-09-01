@@ -12,14 +12,8 @@ from pathlib import Path
 
 import pytest
 
-from molexp.workspace import (
-    LOCAL_TARGET_NAME,
-    ComputeTarget,
-    Workspace,
-    add_target,
-    builtin_local_target,
-    effective_targets,
-)
+from molexp.workspace import LOCAL_TARGET_NAME, ComputeTarget, Workspace
+from molexp.workspace.targets import builtin_local_target, effective_targets
 
 
 @pytest.fixture
@@ -38,7 +32,7 @@ class TestTargetDefaults:
         assert target.is_remote is False
 
     def test_effective_targets_registered_local_overrides_builtin(self, ws: Workspace) -> None:
-        add_target(ws, ComputeTarget(name=LOCAL_TARGET_NAME, scratch_root="/custom/scratch"))
+        ws.add_target(ComputeTarget(name=LOCAL_TARGET_NAME, scratch_root="/custom/scratch"))
         targets = effective_targets(ws)
         assert [t.name for t in targets] == [LOCAL_TARGET_NAME]
         assert targets[0].scratch_root == "/custom/scratch"

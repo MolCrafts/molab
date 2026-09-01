@@ -1,5 +1,6 @@
 import { AlertTriangle } from "lucide-react";
 import { type JSX, useEffect, useMemo, useState } from "react";
+import { runsApi } from "@/api";
 import {
   CopyButton,
   EmptyState,
@@ -9,7 +10,6 @@ import {
   statusKey,
 } from "@/app/components/entity";
 import { formatDuration } from "@/app/renderers/dashboardData";
-import { workspaceApi } from "@/app/state/api";
 import type { RunSummary, WorkflowSummary } from "@/app/types";
 import {
   Table,
@@ -80,7 +80,7 @@ export const RunExecutionsPanel = ({
         setExecutionGraphError(null);
         return;
       }
-      workspaceApi
+      runsApi
         .getRunExecution(run.projectId, run.experimentId, run.id, effectiveExecutionId)
         .then((response) => {
           if (cancelled) return;

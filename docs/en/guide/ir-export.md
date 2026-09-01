@@ -25,6 +25,7 @@ from molexp.workflow import (
     CompiledWorkflow,
     Task,
     TaskContext,
+    Workflow,
     WorkflowCompiler,
     default_registry,
 )
@@ -37,7 +38,7 @@ class Fetch(Task):
         return {"n": 42}
 
 
-compiled = WorkflowCompiler(name="demo").add(Fetch()).compile()
+compiled = WorkflowCompiler().compile(Workflow(name="demo").add(Fetch()))
 
 graph = compiled.to_graph_ir()          # full graph (UI / observability)
 parallel_edges = [e for e in graph.edges if e.kind == "parallel"]

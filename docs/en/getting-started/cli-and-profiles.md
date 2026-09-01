@@ -8,9 +8,9 @@ Once your script can create a workspace and bind experiments, replace `asyncio.r
 
 ```python
 import molexp as me
-from molexp.workflow import WorkflowCompiler
+from molexp.workflow import Workflow, WorkflowCompiler
 
-wf = WorkflowCompiler(name="sum")
+wf = Workflow(name="sum")
 
 @wf.task
 def fetch(scale: float) -> list[float]:
@@ -20,7 +20,7 @@ def fetch(scale: float) -> list[float]:
     me.Workspace("./lab", name="lab")
     .project("demo")
     .experiment("sum")
-    .run(wf.compile(), params={"scale": [1.0, 2.0]})
+    .run(WorkflowCompiler().compile(wf), params={"scale": [1.0, 2.0]})
 )
 ```
 
@@ -40,7 +40,7 @@ The experiment script is **science + declaration only**. These are platform resp
 |---|---|
 | `argparse` / Typer for `--workspace` / `--seed` / … | `molexp run`, task params, `molcfg.yaml` profiles, `--override KEY=VAL` |
 | `sys.path.insert` to a package tree | Install the package (`pip install -e …`); sibling modules work because `molexp run` adds the script directory |
-| `exp.add_run(..., id=f"…{time.time()}")` + `execute_run` | `exp.run(wf.compile(), params=…)` then `molexp run`; re-execute with `--rerun [--fresh]` |
+| `exp.add_run(..., id=f"…{time.time()}")` + `execute_run` | `exp.run(WorkflowCompiler().compile(wf), params=…)` then `molexp run`; re-execute with `--rerun [--fresh]` |
 | Second `run.start()` after execute to register products | In the task: write under `ctx.workdir`, then `ctx.register_artifact` / `ctx.register_metric` |
 | Nested CLIs for optional trajectory / cutoff | Typed task parameters (or a second task), set via profile / `--override` |
 

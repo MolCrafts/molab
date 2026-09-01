@@ -8,7 +8,7 @@ __all__ = ["SYSTEM_PROMPT"]
 
 SYSTEM_PROMPT = (
     "You generate runnable molexp.workflow Python source from a BoundWorkflow. "
-    "Use ONLY the public molexp.workflow surface — WorkflowCompiler, Task, Actor, "
+    "Use ONLY the public molexp.workflow surface — Workflow, WorkflowCompiler, Task, Actor, "
     "TaskContext, register_artifact / register_metric — never private submodules "
     "(nothing starting with an underscore, e.g. molexp.workflow._engine).\n\n"
     f"{MOLEXP_CODEGEN_CONTRACT}\n"
@@ -16,18 +16,18 @@ SYSTEM_PROMPT = (
     "module per bound task at `workflow/<task_id>.py` (containing exactly that "
     "task's async function + its own in-function imports), PLUS the assembly "
     "`workflow/__init__.py` that imports each task function and registers it on a "
-    'WorkflowCompiler. Set `module_name` to "workflow" and `source` to the '
+    'Workflow. Set `module_name` to "workflow" and `source` to the '
     "assembly (the `workflow/__init__.py` content). In the assembly, register an "
     "IMPORTED function with `wf.task(fn)` (no deps) or "
     "`wf.task(depends_on=[...])(fn)` (with deps) — NOT the bare `@wf.task` "
     "decorator, because each task body lives in its own module. The first task "
     "has no deps. Example assembly:\n"
     "    # workflow/__init__.py\n"
-    "    from molexp.workflow import WorkflowCompiler\n"
+    "    from molexp.workflow import Workflow\n"
     "    from workflow.define_forcefield import define_forcefield\n"
     "    from workflow.build_monomer import build_monomer\n\n"
-    "    def build_workflow() -> WorkflowCompiler:\n"
-    '        wf = WorkflowCompiler(name="cg_build")\n'
+    "    def build_workflow() -> Workflow:\n"
+    '        wf = Workflow(name="cg_build")\n'
     "        wf.task(define_forcefield)\n"
     '        wf.task(depends_on=["define_forcefield"])(build_monomer)\n'
     "        return wf\n"
@@ -166,9 +166,9 @@ SYSTEM_PROMPT = (
     "Follow this exact shape (the real molexp.workflow surface):\n\n"
     "```python\n"
     "from typing import Literal\n\n"
-    "from molexp.workflow import WorkflowCompiler\n\n\n"
-    "def build_workflow() -> WorkflowCompiler:\n"
-    '    wf = WorkflowCompiler(name="cg_build")\n\n'
+    "from molexp.workflow import Workflow\n\n\n"
+    "def build_workflow() -> Workflow:\n"
+    '    wf = Workflow(name="cg_build")\n\n'
     "    @wf.task\n"
     "    async def define_forcefield(sigma: float = 1.0, epsilon: float = 1.0,\n"
     "                                bead_mass: float = 1.0, cation_charge: float = 1.0,\n"

@@ -1,8 +1,7 @@
 import { useEffect, useState } from "react";
-import { workspaceApi } from "@/app/state/api";
+import { workspaceApi } from "@/api";
 import type { RendererProps } from "@/app/types";
 import { WorkbenchOperationState, WorkbenchRetryAction } from "@/components/workbench";
-
 export const ImageViewer = ({ selection }: RendererProps): JSX.Element => {
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);

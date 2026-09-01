@@ -1,5 +1,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  assetsApi,
+  experimentsApi,
+  projectsApi,
+  projectsWsApi,
+  runsApi,
+  workspaceApi,
+  workspacesApi,
+} from "@/api";
+import {
   agentApi,
   buildEmptySnapshot,
   mapAgentSessions,
@@ -8,7 +17,6 @@ import {
   mapProjects,
   mapRuns,
   mapWorkflows,
-  workspaceApi,
 } from "@/app/state/api";
 import { pulseSync } from "@/app/state/syncPulse";
 import type {
@@ -25,7 +33,6 @@ import {
   treeRootFromListing,
 } from "@/lib/workspace-fs";
 import type { WorkspacePath } from "@/lib/workspace-path";
-
 export type WorkspaceStatus = "idle" | "loading" | "ready" | "error";
 
 export interface WorkspaceState {
@@ -53,7 +60,12 @@ export interface WorkspaceState {
 
 // Slice = an independently fetchable chunk of the snapshot.
 // Entity hierarchy (experiments / runs) is **not** a slice — it loads on expand.
-type SnapshotSlice = "workspaces" | "workspaceTree" | "projectsList" | "assets" | "agentSessions";
+export type SnapshotSlice =
+  | "workspaces"
+  | "workspaceTree"
+  | "projectsList"
+  | "assets"
+  | "agentSessions";
 
 // Bootstrap: shallow only. No fan-out over experiments×runs (that was 20+ HTTP
 // calls on every poll and freezes remote workspaces).
@@ -68,22 +80,6 @@ const BOOTSTRAP_SLICES: readonly SnapshotSlice[] = [
 // folders that were already expanded (stale-while-revalidate — UI keeps
 // showing the previous children until the new payload lands).
 const REFRESH_SLICES: readonly SnapshotSlice[] = BOOTSTRAP_SLICES;
-
-// Polling: only cheap / view-local slices. Never re-walk the whole entity tree.
-// projects view: no interval — list is static until user expands or hits refresh.
-// workspace: optional soft tree refresh is still heavy on remote → off.
-// assets: load once when entering the view (see effect), not every 3s.
-const VIEW_POLL_SLICES: Record<LeftPanelView, readonly SnapshotSlice[]> = {
-  workspace: [],
-  projects: [],
-  workflow: [],
-  asset: [],
-  runs: [],
-  activity: [],
-  agent: [],
-  knowledge: [],
-  settings: [],
-};
 
 const WORKSPACE_TREE_BOOTSTRAP_DEPTH = 2;
 
@@ -125,7 +121,7 @@ const findTreeNode = (root: WorkspaceTreeNode, path: string): WorkspaceTreeNode 
 
 const fetchWorkspaces = async (): Promise<WorkspaceSnapshot["workspaces"]> => {
   try {
-    return await workspaceApi.getServedWorkspaces();
+    return await workspacesApi.listWorkspaces();
   } catch {
     // Soft: list endpoint failed (backend down). Empty set; no console spam.
     return [];
@@ -138,14 +134,14 @@ const fetchProjectsList = async (
   // Always stamp workspaceKey so the multi-workspace nav filter
   // (`project.workspaceKey === ws.key`) never drops a single-ws project.
   if (workspaces.length === 0) {
-    return mapProjects(await workspaceApi.getProjects());
+    return mapProjects(await projectsApi.listProjects());
   }
   if (workspaces.length === 1) {
     const ws = workspaces[0];
     if (ws.unreachable) return [];
     try {
       // Prefer flat /api/projects (active workspace) — same data, one RTT.
-      return mapProjects(await workspaceApi.getProjects(), ws.key);
+      return mapProjects(await projectsApi.listProjects(), ws.key);
     } catch {
       return [];
     }
@@ -154,7 +150,7 @@ const fetchProjectsList = async (
     workspaces.map(async (ws) => {
       if (ws.unreachable) return [];
       try {
-        return mapProjects(await workspaceApi.getProjectsForWorkspace(ws.key), ws.key);
+        return mapProjects(await projectsWsApi.listProjects(ws.key), ws.key);
       } catch {
         return [];
       }
@@ -173,7 +169,7 @@ const fetchAllAssets = async (projects: ProjectSummary[]): Promise<WorkspaceSnap
   const projectAssets = await Promise.all(
     projects.map(async (project) => {
       try {
-        return mapAssets(await workspaceApi.getProjectAssets(project.id), project.id);
+        return mapAssets(await projectsApi.listProjectAssets(project.id), project.id);
       } catch (err) {
         console.warn(`Failed to fetch assets for project ${project.id}:`, err);
         return [];
@@ -181,7 +177,7 @@ const fetchAllAssets = async (projects: ProjectSummary[]): Promise<WorkspaceSnap
     }),
   );
   try {
-    const allAssets = [...mapAssets(await workspaceApi.getAssets()), ...projectAssets.flat()];
+    const allAssets = [...mapAssets(await assetsApi.listAssets()), ...projectAssets.flat()];
     return Array.from(new Map(allAssets.map((item) => [item.id, item])).values());
   } catch (err) {
     console.warn("Workspace assets unavailable:", err);
@@ -216,21 +212,62 @@ const applySlicePatch = async (
   }
 };
 
-const fetchSlices = async (
+type SliceLoader = (
+  current: WorkspaceSnapshot,
+  slice: SnapshotSlice,
+) => Promise<Partial<WorkspaceSnapshot>>;
+
+const INDEPENDENT_SLICES: readonly SnapshotSlice[] = [
+  "workspaces",
+  "workspaceTree",
+  "agentSessions",
+];
+
+/**
+ * Run snapshot slices by dependency level. Workspaces, file tree, and agent
+ * sessions start together; projects wait for the workspace list; assets wait
+ * for the resulting project list. Patches are merged in descriptor order so
+ * network completion order cannot make the snapshot nondeterministic.
+ */
+export const fetchSlices = async (
   current: WorkspaceSnapshot,
   slices: readonly SnapshotSlice[],
   onProgress?: (next: WorkspaceSnapshot) => void,
+  loadSlice: SliceLoader = applySlicePatch,
 ): Promise<WorkspaceSnapshot> => {
   let next = current;
-  for (const slice of slices) {
+
+  const loadSafe = async (
+    snapshot: WorkspaceSnapshot,
+    slice: SnapshotSlice,
+  ): Promise<Partial<WorkspaceSnapshot>> => {
     try {
-      const patch = await applySlicePatch(next, slice);
-      next = { ...next, ...patch };
-      onProgress?.(next);
+      return await loadSlice(snapshot, slice);
     } catch (err) {
       console.warn(`Snapshot slice "${slice}" failed:`, err);
+      return {};
     }
+  };
+
+  const independent = INDEPENDENT_SLICES.filter((slice) => slices.includes(slice));
+  if (independent.length > 0) {
+    const patches = await Promise.all(independent.map((slice) => loadSafe(next, slice)));
+    const merged = { ...next };
+    for (const patch of patches) Object.assign(merged, patch);
+    next = merged;
+    onProgress?.(next);
   }
+
+  if (slices.includes("projectsList")) {
+    next = { ...next, ...(await loadSafe(next, "projectsList")) };
+    onProgress?.(next);
+  }
+
+  if (slices.includes("assets")) {
+    next = { ...next, ...(await loadSafe(next, "assets")) };
+    onProgress?.(next);
+  }
+
   return next;
 };
 
@@ -319,7 +356,7 @@ export const useWorkspaceState = (activeView?: LeftPanelView): WorkspaceState =>
       if (projectsLoadingRef.current.has(projectId)) return;
       projectsLoadingRef.current.add(projectId);
       try {
-        const raw = await workspaceApi.getExperiments(projectId);
+        const raw = await experimentsApi.listExperiments(projectId);
         const mapped = mapExperiments(projectId, raw);
         // Workflows for just these experiments (IR if present on the wire).
         const workflows = mapWorkflows(mapped, raw);
@@ -364,7 +401,7 @@ export const useWorkspaceState = (activeView?: LeftPanelView): WorkspaceState =>
       if (experimentsLoadingRef.current.has(key)) return;
       experimentsLoadingRef.current.add(key);
       try {
-        const raw = await workspaceApi.getRuns(projectId, experimentId);
+        const raw = await runsApi.listRuns(projectId, experimentId);
         const mapped = mapRuns(projectId, experimentId, raw);
         // Mark loaded only after success — so emptyChildLabel stays "Loading…"
         // rather than "No runs" while the remote fetch is in flight (first open).
@@ -458,14 +495,6 @@ export const useWorkspaceState = (activeView?: LeftPanelView): WorkspaceState =>
     assetsLoadedForViewRef.current = true;
     runFetch(["assets"], true);
   }, [activeView, runFetch]);
-
-  // Optional view-scoped polling (currently all empty — on-demand only).
-  useEffect(() => {
-    if (activeView === undefined) return;
-    const slices = VIEW_POLL_SLICES[activeView];
-    if (slices.length === 0) return;
-    // Reserved for future light polls; intentionally no default interval.
-  }, [activeView]);
 
   return {
     snapshot,

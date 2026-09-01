@@ -7,9 +7,9 @@ Before MolExp becomes a workspace or a CLI tool, it is a workflow system. A work
 A task is an ordinary function. It declares the data it needs as named parameters. The engine binds values by name from upstream outputs.
 
 ```python
-from molexp.workflow import WorkflowCompiler
+from molexp.workflow import Workflow, WorkflowCompiler
 
-wf = WorkflowCompiler(name="pipeline")
+wf = Workflow(name="pipeline")
 
 @wf.task
 def fetch() -> dict:
@@ -36,13 +36,13 @@ The two styles mix freely in one graph.
 
 ## Compile and Run (No Workspace)
 
-`wf.compile()` freezes the definition into a `CompiledWorkflow`. You can run it purely in memory — no projects, experiments, or directories:
+`WorkflowCompiler().compile(wf)` freezes the definition into a `CompiledWorkflow`. You can run it purely in memory — no projects, experiments, or directories:
 
 ```python
 import asyncio
 from molexp.workflow import WorkflowRuntime
 
-compiled = wf.compile()
+compiled = WorkflowCompiler().compile(wf)
 result = asyncio.run(WorkflowRuntime().execute(compiled))
 print(result.status, result.outputs)  # succeeded {'fetch': ..., 'scale': 84, 'publish': 'published 84'}
 ```
@@ -64,11 +64,10 @@ class Scale(Task):
     def execute(self, ctx: TaskContext, value: int, factor: int = 2) -> int:
         return value * factor
 
-compiled = (
-    WorkflowCompiler(name="pipeline-oop")
+compiled = WorkflowCompiler().compile(
+    Workflow(name="pipeline-oop")
     .add(Fetch())
     .add(Scale(), depends_on=["fetch"])
-    .compile()
 )
 ```
 

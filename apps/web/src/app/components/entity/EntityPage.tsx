@@ -1,5 +1,6 @@
 import type { ComponentType, JSX, ReactNode } from "react";
 import type { SemanticStatus } from "@/app/types";
+import { PageHeader } from "@/components/layout/PageHeader";
 import { EntityTabBar, EntityTabContent, EntityTabs } from "./EntityTabs";
 import { StatusBadge } from "./StatusBadge";
 
@@ -40,24 +41,7 @@ export const EntityHeader = ({
   titleTooltip,
   actions,
 }: EntityHeaderProps): JSX.Element => {
-  return (
-    <section className="bg-surface">
-      <div className="flex h-toolbar min-w-0 items-center gap-2 px-2">
-        <div className="hidden size-7 flex-none items-center justify-center text-accent sm:flex">
-          <Icon className="size-4" aria-hidden />
-        </div>
-        <div className="flex min-w-0 flex-1 items-center gap-2">
-          <h2
-            className="truncate text-title font-semibold tracking-tight text-foreground"
-            title={titleTooltip ?? title}
-          >
-            {title}
-          </h2>
-        </div>
-        {actions && <div className="flex flex-none items-center gap-0.5">{actions}</div>}
-      </div>
-    </section>
-  );
+  return <PageHeader icon={Icon} title={title} titleTooltip={titleTooltip} actions={actions} />;
 };
 
 interface KeyValueItem {

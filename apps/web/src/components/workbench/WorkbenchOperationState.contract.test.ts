@@ -15,8 +15,8 @@ const ASYNC_SURFACES = [
   "plugins/knowledge/DocTree.tsx",
   "plugins/knowledge/KnowledgeDocPanel.tsx",
   // KnowledgeBacklinksCard only mounts when rows exist (no loading/error chrome).
-  "app/components/ApprovalsBell.tsx",
-  "app/renderers/agent/ApprovalsInbox.tsx",
+  "app/approvals/ApprovalsBell.tsx",
+  "app/approvals/ApprovalsInbox.tsx",
   "app/entities/GlobalCommandPalette.tsx",
   "app/renderers/agent/ModelPicker.tsx",
 ] as const;

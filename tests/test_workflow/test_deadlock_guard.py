@@ -16,7 +16,7 @@ import asyncio
 
 import pytest
 
-from molexp.workflow import WorkflowCompiler, WorkflowRuntime
+from molexp.workflow import Workflow, WorkflowCompiler, WorkflowRuntime
 from molexp.workflow.types import Next, WorkflowDeadlockError
 
 
@@ -26,7 +26,7 @@ class TestStructuralDeadlockDetection:
         """A join depending on a branch-skipped task raises
         ``WorkflowDeadlockError`` (naming the dep) in bounded time rather than
         busy-polling forever."""
-        wf = WorkflowCompiler(name="deadlock", entry="route")
+        wf = Workflow(name="deadlock", entry="route")
 
         @wf.task(routes={"ok": "good", "fail": "bad"})
         async def route(ctx) -> Next:
@@ -47,7 +47,9 @@ class TestStructuralDeadlockDetection:
         with pytest.raises(WorkflowDeadlockError) as excinfo:
             # wait_for bounds the regression: if detection ever stopped being
             # structural this would hang and surface as TimeoutError instead.
-            await asyncio.wait_for(WorkflowRuntime().execute(wf.compile()), timeout=10)
+            await asyncio.wait_for(
+                WorkflowRuntime().execute(WorkflowCompiler().compile(wf)), timeout=10
+            )
 
         assert "bad" in str(excinfo.value), "the error must name the unsatisfied dependency"
 
@@ -56,7 +58,7 @@ class TestStructuralDeadlockDetection:
         """A genuinely slow but live upstream must NOT trip the guard —
         detection is structural, never a timeout. ``slow`` sleeps past any
         quiescence window; the join must still complete normally."""
-        wf = WorkflowCompiler(name="slow-ok")
+        wf = Workflow(name="slow-ok")
 
         @wf.task
         async def fast(ctx) -> str:
@@ -71,7 +73,9 @@ class TestStructuralDeadlockDetection:
         async def join(ctx) -> str:
             return "joined"
 
-        result = await asyncio.wait_for(WorkflowRuntime().execute(wf.compile()), timeout=10)
+        result = await asyncio.wait_for(
+            WorkflowRuntime().execute(WorkflowCompiler().compile(wf)), timeout=10
+        )
         assert result.status == "succeeded"
         assert result.outputs["join"] == "joined"
         assert result.outputs["slow"] == "slow-out"

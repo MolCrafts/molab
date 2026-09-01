@@ -18,6 +18,7 @@ import {
   registerRendererContribution,
   renderPlanByObjectType,
   resolveRenderer,
+  resolveRenderersForSelection,
 } from "@/app/registry";
 import type { RendererKey, WorkspaceSnapshot } from "@/app/types";
 import { resetContributionRuntimeForTests } from "@/plugins/contribution-runtime";
@@ -34,6 +35,18 @@ function makeEntry(key: RendererKey, title = "Test"): RendererEntry {
     Component: (() => null) as unknown as RendererEntry["Component"],
   };
 }
+
+const emptySnapshot = {
+  projects: [],
+  experiments: [],
+  runs: [],
+  assets: [],
+  workflows: [],
+  agentSessions: [],
+  workspaceRoot: null,
+  consoleEntries: [],
+  workspaces: [],
+} satisfies WorkspaceSnapshot;
 
 // ---------------------------------------------------------------------------
 
@@ -180,7 +193,17 @@ describe("entity tab contributions", () => {
 });
 
 describe("renderPlanByObjectType", () => {
-  const types = ["project", "experiment", "run", "asset", "workflow", "workspace-file"] as const;
+  const types = [
+    "project",
+    "experiment",
+    "run",
+    "asset",
+    "workflow",
+    "workspace-file",
+    "agent",
+    "task",
+    "knowledge",
+  ] as const;
 
   it("has an entry for every SemanticObjectType", () => {
     for (const t of types) {
@@ -203,6 +226,39 @@ describe("renderPlanByObjectType", () => {
   it("workspace-file center uses editor panelKind", () => {
     const [centerTarget] = renderPlanByObjectType["workspace-file"].center;
     expect(centerTarget.panelKind).toBe("editor");
+  });
+});
+
+describe("resolveRenderersForSelection", () => {
+  it("resolves only contributions planned for the requested host slot", () => {
+    const centerKey: RendererKey = {
+      objectType: "project",
+      fileKind: "json",
+      contentType: "metadata",
+      panelKind: "viewer",
+    };
+    const rightKey: RendererKey = { ...centerKey, panelKind: "inspector" };
+
+    registerRenderer(makeEntry(centerKey, "Project center"));
+    registerRenderer({
+      ...makeEntry(rightKey, "Project inspector"),
+      panelSlot: "right",
+    });
+
+    const selection = { objectType: "project" as const, objectId: "project-1" };
+    expect(resolveRenderersForSelection(selection, emptySnapshot, "center")).toHaveLength(1);
+    expect(resolveRenderersForSelection(selection, emptySnapshot, "center")[0].title).toBe(
+      "Project center",
+    );
+    expect(resolveRenderersForSelection(selection, emptySnapshot, "right")).toHaveLength(1);
+    expect(resolveRenderersForSelection(selection, emptySnapshot, "right")[0].title).toBe(
+      "Project inspector",
+    );
+  });
+
+  it("softly omits a missing contribution", () => {
+    const selection = { objectType: "knowledge" as const, objectId: "notes/readme.md" };
+    expect(resolveRenderersForSelection(selection, emptySnapshot, "right")).toEqual([]);
   });
 });
 

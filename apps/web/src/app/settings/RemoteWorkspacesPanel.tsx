@@ -42,7 +42,7 @@ export function RemoteWorkspacesPanel(): JSX.Element {
   const listQuery = useQuery({
     queryKey: settingsKeys.remoteWorkspaces(),
     queryFn: async () => {
-      const res = await WorkspaceService.listWorkspaceTargetsApiWorkspaceTargetsGet();
+      const res = await WorkspaceService.listWorkspaceTargets();
       return res.targets;
     },
   });
@@ -53,8 +53,7 @@ export function RemoteWorkspacesPanel(): JSX.Element {
   };
 
   const deleteMutation = useMutation({
-    mutationFn: (name: string) =>
-      WorkspaceService.deleteWorkspaceTargetApiWorkspaceTargetsNameDelete(name),
+    mutationFn: (name: string) => WorkspaceService.deleteWorkspaceTarget(name),
     onSuccess: async (_data, name) => {
       if (activeName === name) setActiveName(null);
       await invalidate();
@@ -79,7 +78,7 @@ export function RemoteWorkspacesPanel(): JSX.Element {
     setActionError(null);
     setTestResult(null);
     try {
-      const res = await WorkspaceService.testWorkspaceTargetApiWorkspaceTargetsNameTestPost(name);
+      const res = await WorkspaceService.testWorkspaceTarget(name);
       setTestResult(res);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Failed to test remote workspace");
@@ -95,7 +94,7 @@ export function RemoteWorkspacesPanel(): JSX.Element {
     setOpenWarnings([]);
     setCacheStatus(null);
     try {
-      const info = await WorkspaceService.openWorkspaceApiWorkspaceOpenPost({
+      const info = await WorkspaceService.openWorkspace({
         kind: "remote",
         name,
       });
@@ -114,7 +113,7 @@ export function RemoteWorkspacesPanel(): JSX.Element {
     setActionError(null);
     setTestResult(null);
     try {
-      const res = await WorkspaceService.refreshWorkspaceCacheApiWorkspaceCacheRefreshPost({
+      const res = await WorkspaceService.refreshWorkspaceCache({
         scope: "indices",
       });
       setCacheStatus({ dropped: res.dropped, fetchedAt: Date.now() });
@@ -182,7 +181,7 @@ export function RemoteWorkspacesPanel(): JSX.Element {
                     </WorkbenchTag>
                   </div>
                   <div className="mt-1 truncate font-mono text-micro text-muted-foreground">
-                    {t.host} → {t.root_path}
+                    {t.host} → {t.rootPath}
                   </div>
                 </div>
                 <div className="flex flex-none flex-wrap items-center justify-end gap-1">

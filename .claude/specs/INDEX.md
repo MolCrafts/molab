@@ -4,6 +4,16 @@ One line per **live** spec. `/mol:spec` adds entries; `/mol:impl` ticks the spec
 
 ## Open
 
+## persist-one (chain)
+
+_One persist format: JSONL metrics in artifacts/, no ops/ sidecar, no harness.sqlite._
+
+| # | Spec | Commit theme |
+|---|---|---|
+| 01 | [persist-one-01-metrics](persist-one-01-metrics.md) | JSONL-only host metrics under artifacts/ [approved] |
+| 02 | [persist-one-02-run-state](persist-one-02-run-state.md) | fold ops into run.json; alive mtime heartbeat [approved] |
+| 03 | [persist-one-03-harness-files](persist-one-03-harness-files.md) | file stores replace harness.sqlite [approved] |
+| 04 | [persist-one-04-cutover](persist-one-04-cutover.md) | callers, docs, delete sqlitelog [approved] |
 
 ## host-reflect (chain)
 

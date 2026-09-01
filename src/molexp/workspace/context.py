@@ -12,7 +12,7 @@ from molexp._typing import JSONValue, TaskOutput
 class Context(BaseModel):
     """Pure data model for execution state.
 
-    Asset directories (``artifacts/``, ``logs/``, ``.ckpt/``) are managed
+    Asset directories (``artifacts/``, ``logs/``, ``checkpoints/``) are managed
     through ``RunContext`` typed accessors now; only the run-scope
     ``work_dir`` is stored here.
     """

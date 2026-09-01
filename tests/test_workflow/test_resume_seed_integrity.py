@@ -19,11 +19,11 @@ import pytest
 
 from molexp.workflow import (
     TaskContext,
+    Workflow,
     WorkflowCompiler,
     WorkflowRuntime,
-    read_node_outputs,
 )
-from molexp.workflow._engine.persistence import filter_resume_seeds
+from molexp.workflow._engine.persistence import filter_resume_seeds, read_node_outputs
 
 # ── module-level per-task execution counters ─────────────────────────────────
 _COUNTERS: dict[str, int] = {}
@@ -46,7 +46,7 @@ def _compiled_returning(value: object):
     produce two different ``code_hash``es (⇒ different snapshot keys for the
     same task name) — the "task code changed between attempts" shape.
     """
-    wf = WorkflowCompiler(name="resume-seed")
+    wf = Workflow(name="resume-seed")
 
     if value == "old":
 
@@ -62,7 +62,7 @@ def _compiled_returning(value: object):
             _bump("step")
             return "new"
 
-    return wf.compile()
+    return WorkflowCompiler().compile(wf)
 
 
 def _wf_json_path(run_dir: Path, execution_id: str) -> Path:
@@ -127,14 +127,14 @@ class TestResumeSeedIntegrity:
     async def test_lossy_output_flagged_and_never_seeded(self, tmp_path: Path) -> None:
         """A lossy output is flagged, refused by ``read_node_outputs``, dropped
         by the engine gate even when force-fed, and recomputed on resume."""
-        wf = WorkflowCompiler(name="lossy")
+        wf = Workflow(name="lossy")
 
         @wf.task
         async def step(ctx: TaskContext) -> object:
             _bump("step")
             return _Opaque()
 
-        compiled = wf.compile()
+        compiled = WorkflowCompiler().compile(wf)
         r1 = await WorkflowRuntime().execute(compiled, run_dir=tmp_path)
         assert r1.status == "succeeded"
         assert _COUNTERS["step"] == 1

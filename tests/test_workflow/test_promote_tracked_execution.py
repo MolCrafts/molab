@@ -20,7 +20,8 @@ import asyncio
 
 import pytest
 
-from molexp.workflow import WorkflowRuntime, promote_callable
+from molexp.workflow import WorkflowRuntime
+from molexp.workflow.promote import promote_callable
 
 
 # Module-level promoted body — importable via ``module:qualname``.

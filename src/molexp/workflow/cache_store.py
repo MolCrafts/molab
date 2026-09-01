@@ -4,9 +4,11 @@
 versioning, and LRU eviction policy. The actual *storage* — read / write /
 list / remove / atime — is delegated through the :class:`CacheStore`
 Protocol so the cache can sit on top of either a plain filesystem
-directory (``FileCacheStore``) or the workspace's singleton ``CacheFolder``
-via ``ws.cache.as_cache_store()`` (returns a ``CacheStore``-conforming
-adapter — see ``molexp.workspace.cache.folder``).
+directory (``FileCacheStore``, the execution default at ``<run_dir>/cache``)
+or the workspace's optional ``CacheFolder`` via ``ws.cache.as_cache_store()``
+(returns a ``CacheStore``-conforming adapter — see
+``molexp.workspace.cache.folder``). Execution auto-cache never uses the
+workspace-root folder.
 
 Sub-spec ``unify-folder-abstraction-03-system-folder-migration``
 retired the standalone ``WorkspaceCacheStore`` class + the
@@ -72,12 +74,9 @@ class FileCacheStore:
     writes use a temp-file + rename (mirrors workspace's
     :func:`atomic_write_json` semantics for non-JSON-decoded strings).
 
-    This is the right backing when a caller wants a cache that lives
-    outside any workspace — e.g. the FastAPI server's process-local
-    cache; library users running ad-hoc workflows; etc. Workspace-
-    aware callers should reach for ``ws.cache.as_cache_store()``
-    instead (returns a ``CacheStore`` adapter rooted at
-    ``<workspace_root>/cache/``).
+    Execution auto-cache uses this rooted at ``<run_dir>/cache``.
+    ``ws.cache.as_cache_store()`` remains an explicit workspace-wide
+    alternative; it is not created by execute.
     """
 
     def __init__(self, store_dir: Path | str) -> None:

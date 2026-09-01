@@ -66,7 +66,7 @@ class TestWorkflowCodecYamlRoundTrip:
 
     def test_spec_survives_yaml_round_trip_through_ir(self) -> None:
         """``spec_to_yaml`` ⇄ ``yaml_to_spec`` is IR-stable (slugged tasks only)."""
-        from molexp.workflow.compiler import WorkflowCompiler
+        from molexp.workflow.compiler import Workflow, WorkflowCompiler
         from molexp.workflow.registry import default_registry
         from molexp.workflow.task import Task
 
@@ -77,11 +77,8 @@ class TestWorkflowCodecYamlRoundTrip:
         if not default_registry.has("test.inert_yaml_rt"):
             default_registry.register("test.inert_yaml_rt", Inert)
 
-        spec = (
-            WorkflowCompiler(name="rt")
-            .add(Inert(), name="A")
-            .add(Inert(), name="B", depends_on=["A"])
-            .compile()
+        spec = WorkflowCompiler().compile(
+            Workflow(name="rt").add(Inert(), name="A").add(Inert(), name="B", depends_on=["A"])
         )
         text = default_codec.spec_to_yaml(spec)
         spec2 = default_codec.yaml_to_spec(text)

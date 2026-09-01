@@ -157,7 +157,7 @@ export class ExperimentsService {
      * @returns ExperimentResponse Successful Response
      * @throws ApiError
      */
-    public static listExperiments1(
+    public static listExperimentsWs(
         projectId: string,
         ws: string,
         molexpSession?: (string | null),
@@ -186,7 +186,7 @@ export class ExperimentsService {
      * @returns ExperimentResponse Successful Response
      * @throws ApiError
      */
-    public static createExperiment1(
+    public static createExperimentWs(
         projectId: string,
         ws: string,
         requestBody: ExperimentCreateRequest,
@@ -218,7 +218,7 @@ export class ExperimentsService {
      * @returns MessageResponse Successful Response
      * @throws ApiError
      */
-    public static deleteExperiment1(
+    public static deleteExperimentWs(
         projectId: string,
         experimentId: string,
         ws: string,
@@ -249,7 +249,7 @@ export class ExperimentsService {
      * @returns ExperimentResponse Successful Response
      * @throws ApiError
      */
-    public static getExperiment1(
+    public static getExperimentWs(
         projectId: string,
         experimentId: string,
         ws: string,
@@ -281,7 +281,7 @@ export class ExperimentsService {
      * @returns ExperimentComparisonResponse Successful Response
      * @throws ApiError
      */
-    public static getExperimentComparison1(
+    public static getExperimentComparisonWs(
         projectId: string,
         experimentId: string,
         ws: string,

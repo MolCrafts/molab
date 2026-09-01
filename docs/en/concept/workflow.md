@@ -8,16 +8,16 @@ MolExp separates a workflow's lifecycle into three stages:
 
 | Stage | Tool | What happens |
 |---|---|---|
-| **Author** | `WorkflowCompiler` | Declare tasks and dependencies |
-| **Compile** | `.compile()` | Freeze into a validated `CompiledWorkflow` |
+| **Author** | `Workflow` | Declare tasks and dependencies |
+| **Compile** | `WorkflowCompiler().compile(workflow)` | Freeze into a validated `CompiledWorkflow` |
 | **Execute** | `WorkflowRuntime` or `Run.execute()` | Drive the graph |
 
 You can author with decorators:
 
 ```python
-from molexp.workflow import WorkflowCompiler
+from molexp.workflow import Workflow, WorkflowCompiler
 
-wf = WorkflowCompiler(name="demo")
+wf = Workflow(name="demo")
 
 @wf.task
 def fetch() -> list[float]:
@@ -27,7 +27,7 @@ def fetch() -> list[float]:
 def summarize(data: list[float]) -> float:
     return sum(data)
 
-compiled = wf.compile()
+compiled = WorkflowCompiler().compile(wf)
 ```
 
 Or with reusable task classes — both produce the same kind of `CompiledWorkflow`.

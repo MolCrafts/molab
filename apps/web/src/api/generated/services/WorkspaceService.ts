@@ -14,7 +14,6 @@ import type { FileContentResponse } from '../models/FileContentResponse';
 import type { FileContentUpdateRequest } from '../models/FileContentUpdateRequest';
 import type { TargetTestResponse } from '../models/TargetTestResponse';
 import type { WorkspaceContextResponse } from '../models/WorkspaceContextResponse';
-import type { WorkspaceEventResponse } from '../models/WorkspaceEventResponse';
 import type { WorkspaceInfoResponse } from '../models/WorkspaceInfoResponse';
 import type { WorkspaceOpenLocalRequest } from '../models/WorkspaceOpenLocalRequest';
 import type { WorkspaceOpenRemoteRequest } from '../models/WorkspaceOpenRemoteRequest';
@@ -27,43 +26,6 @@ import type { CancelablePromise } from '../core/CancelablePromise';
 import { OpenAPI } from '../core/OpenAPI';
 import { request as __request } from '../core/request';
 export class WorkspaceService {
-    /**
-     * Get Workspace Events
-     * The workspace-wide activity stream, newest first.
-     *
-     * The global read over the event spine — the same shared
-     * :func:`molexp.workspace.events.read_workspace_events` code path the
-     * per-run route and ``molexp runs info`` use. A workspace with no timeline
-     * yet answers ``[]`` without creating the DB (reading is side-effect free).
-     * @param type Keep only this event type
-     * @param ref Keep only events referencing this id
-     * @param limit
-     * @param molexpSession
-     * @returns WorkspaceEventResponse Successful Response
-     * @throws ApiError
-     */
-    public static getWorkspaceEvents(
-        type?: ('run.created' | 'run.started' | 'run.failed' | 'run.completed' | 'asset.added' | 'knowledge.created' | 'workflow.created' | 'experiment.created' | null),
-        ref?: (string | null),
-        limit: number = 50,
-        molexpSession?: (string | null),
-    ): CancelablePromise<Array<WorkspaceEventResponse>> {
-        return __request(OpenAPI, {
-            method: 'GET',
-            url: '/api/events',
-            cookies: {
-                'molexp_session': molexpSession,
-            },
-            query: {
-                'type': type,
-                'ref': ref,
-                'limit': limit,
-            },
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
     /**
      * Clear Cache
      * Clear the workspace content-addressed task cache.
@@ -495,6 +457,7 @@ export class WorkspaceService {
      * @param experimentId
      * @param backend Filter by executor backend
      * @param status Filter by run status
+     * @param offset
      * @param limit
      * @param molexpSession
      * @returns WorkspaceRunsResponse Successful Response
@@ -505,6 +468,7 @@ export class WorkspaceService {
         experimentId?: (string | null),
         backend?: (string | null),
         status?: (string | null),
+        offset?: number,
         limit: number = 500,
         molexpSession?: (string | null),
     ): CancelablePromise<WorkspaceRunsResponse> {
@@ -519,6 +483,7 @@ export class WorkspaceService {
                 'experimentId': experimentId,
                 'backend': backend,
                 'status': status,
+                'offset': offset,
                 'limit': limit,
             },
             errors: {

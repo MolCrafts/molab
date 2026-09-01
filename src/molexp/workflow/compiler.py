@@ -1,13 +1,12 @@
-"""WorkflowCompiler — build + compile in one pass, emitting a CompiledWorkflow.
+"""Workflow authoring and compilation — two types, never mixed.
 
-Merges the old ``WorkflowBuilder`` (fluent authoring) and the internal CFG
-``WorkflowGraphCompiler`` (lowering) into a single object. The fluent API is
-unchanged in spirit — ``add`` / ``task`` / ``actor`` / ``entry`` / ``control``
-/ ``branch`` / ``loop`` / ``parallel`` / ``reduce`` — but instead of
-``.build() -> Workflow`` it exposes ``.compile(*, experiment=None,
-registry=None) -> CompiledWorkflow``, which lowers the registrations exactly
-once, computes per-task snapshots + the workflow version, performs experiment
-binding, and returns the single frozen artifact.
+:class:`Workflow` is the mutable authored graph (decorator + OOP).
+:class:`WorkflowCompiler` lowers a :class:`Workflow` to a frozen
+:class:`CompiledWorkflow`. There is no builder constructor on the compiler
+and no ``compile`` method on the graph::
+
+    wf = Workflow(name="pipeline")
+    compiled = WorkflowCompiler().compile(wf)
 """
 
 from __future__ import annotations
@@ -125,18 +124,18 @@ def compile_registrations(
     return compiled
 
 
-class WorkflowCompiler:
-    """Fluent workflow authoring + one-pass compile (decorator and OOP styles).
+class Workflow:
+    """Mutable authored graph (decorator + OOP).
 
-    Instantiate once, register tasks via the decorators (:meth:`task`,
-    :meth:`actor`) or :meth:`add`, wire control flow with :meth:`control` /
-    :meth:`branch` / :meth:`loop` / :meth:`parallel`, then call
-    :meth:`compile` to produce a :class:`CompiledWorkflow`.
+    Compile with :class:`WorkflowCompiler`::
+
+        wf = Workflow(name="pipeline")
+        compiled = WorkflowCompiler().compile(wf)
     """
 
     def __init__(
         self,
-        name: str,
+        name: str = "",
         mode: str = "batch",
         version: str = "0",
         *,
@@ -227,7 +226,7 @@ class WorkflowCompiler:
 
         Example::
 
-            wf = WorkflowCompiler(name="pipeline")
+            wf = Workflow(name="pipeline")
 
 
             @wf.task
@@ -240,7 +239,7 @@ class WorkflowCompiler:
                 return prepare * 10
         """
         if routes is not None and next_ is not None:
-            raise TypeError("WorkflowCompiler.task: routes= and next_= are mutually exclusive")
+            raise TypeError("Workflow.task: routes= and next_= are mutually exclusive")
 
         def decorator(f: Callable) -> Callable:
             task_name = name or _callable_name(f)
@@ -275,7 +274,7 @@ class WorkflowCompiler:
         Same ``routes=`` / ``next_=`` semantics as :meth:`task`.
         """
         if routes is not None and next_ is not None:
-            raise TypeError("WorkflowCompiler.actor: routes= and next_= are mutually exclusive.")
+            raise TypeError("Workflow.actor: routes= and next_= are mutually exclusive.")
 
         def decorator(f: Callable) -> Callable:
             actor_name = name or _callable_name(f)
@@ -306,20 +305,20 @@ class WorkflowCompiler:
         routes: Mapping[str, str] | None = None,
         next_: str | None = None,
         dependent_params: DependentParamsFn | None = None,
-    ) -> WorkflowCompiler:
+    ) -> Workflow:
         """Register a Task / Actor instance (or any Runnable/Streamable).
 
         The serialization slug is **not** an argument here: it is a property of
         the task *type*, declared once via
         :meth:`TaskTypeRegistry.register` / ``@default_registry.register("slug")``
-        and resolved automatically at :meth:`compile` time. A task's build-time
+        and resolved automatically at compile time. A task's build-time
         config is **not** declared here either — it is the task instance's own
         ``__init__`` arguments (captured automatically; see
         :func:`~molexp.workflow.snapshot.task_config_of`), which the cache and IR
         both key on. Returns ``self`` to support chaining.
         """
         if routes is not None and next_ is not None:
-            raise TypeError("WorkflowCompiler.add: routes= and next_= are mutually exclusive.")
+            raise TypeError("Workflow.add: routes= and next_= are mutually exclusive.")
 
         task_name = name or _to_snake_case(type(task).__name__)
         for suffix in ("_task", "_actor"):
@@ -342,16 +341,14 @@ class WorkflowCompiler:
 
     # ── Control-flow declarations ─────────────────────────────────────────
 
-    def entry(self, name: str) -> WorkflowCompiler:
+    def entry(self, name: str) -> Workflow:
         """Declare *name* as a workflow entry point. Multiple calls = multi-entry."""
         if name in self._entries:
-            raise ValueError(
-                f"WorkflowCompiler {self._name!r}: entry {name!r} declared multiple times"
-            )
+            raise ValueError(f"Workflow {self._name!r}: entry {name!r} declared multiple times")
         self._entries.append(name)
         return self
 
-    def control(self, src: str, to: str) -> WorkflowCompiler:
+    def control(self, src: str, to: str) -> Workflow:
         """Declare an unconditional control edge ``src -> to``."""
         self._control_edges.append((src, to))
         return self
@@ -363,7 +360,7 @@ class WorkflowCompiler:
         to: str | None = None,
         *,
         routes: Mapping[str, str] | None = None,
-    ) -> WorkflowCompiler:
+    ) -> Workflow:
         """Declare branch (label-routed) control edges on *src*.
 
         Two forms: ``wf.branch("src", "label", "target")`` or
@@ -372,7 +369,7 @@ class WorkflowCompiler:
         if routes is not None:
             if label is not None or to is not None:
                 raise TypeError(
-                    "WorkflowCompiler.branch: pass either positional (src, label, to) "
+                    "Workflow.branch: pass either positional (src, label, to) "
                     "or keyword routes={...}, not both."
                 )
             for lbl, target in routes.items():
@@ -380,7 +377,7 @@ class WorkflowCompiler:
             return self
         if label is None or to is None:
             raise TypeError(
-                "WorkflowCompiler.branch: pass (src, label, to) or routes={...}; "
+                "Workflow.branch: pass (src, label, to) or routes={...}; "
                 "received a partial single-edge form."
             )
         self._branch_edges.append((src, label, to))
@@ -393,7 +390,7 @@ class WorkflowCompiler:
         until: str,
         max_iters: int,
         on_exit: str = "_end",
-    ) -> WorkflowCompiler:
+    ) -> Workflow:
         """Declare a loop: ``body`` runs repeatedly until ``until`` exits.
 
         ``until`` returns ``Next("continue")`` to loop or ``Next("exit")`` to
@@ -401,10 +398,10 @@ class WorkflowCompiler:
         """
         if not body:
             raise ValueError(
-                f"WorkflowCompiler.loop: body must contain at least one task name; got {body!r}"
+                f"Workflow.loop: body must contain at least one task name; got {body!r}"
             )
         if max_iters < 1:
-            raise ValueError(f"WorkflowCompiler.loop: max_iters must be >= 1; got {max_iters!r}")
+            raise ValueError(f"Workflow.loop: max_iters must be >= 1; got {max_iters!r}")
         self._loops.append(
             LoopDecl(body=tuple(body), until=until, max_iters=max_iters, on_exit=on_exit)
         )
@@ -417,11 +414,11 @@ class WorkflowCompiler:
         body: str,
         join: str,
         max_concurrency: int = 1,
-    ) -> WorkflowCompiler:
+    ) -> Workflow:
         """Declare parallel fan-out: run *body* once per element of *map_over* output."""
         if max_concurrency < 1:
             raise ValueError(
-                f"WorkflowCompiler.parallel: max_concurrency must be >= 1; got {max_concurrency!r}"
+                f"Workflow.parallel: max_concurrency must be >= 1; got {max_concurrency!r}"
             )
         self._parallels.append(
             ParallelDecl(map_over=map_over, body=body, join=join, max_concurrency=max_concurrency)
@@ -440,7 +437,7 @@ class WorkflowCompiler:
         def decorator(fn: Callable[..., TaskOutput]) -> Callable[..., TaskOutput]:
             if self._reducer is not None:
                 raise ValueError(
-                    f"WorkflowCompiler {self._name!r}: reducer already registered "
+                    f"Workflow {self._name!r}: reducer already registered "
                     f"({_callable_name(self._reducer[1])!r})"
                 )
             self._reducer = (over, fn)
@@ -461,42 +458,53 @@ class WorkflowCompiler:
             for lbl, target in routes.items():
                 self._branch_edges.append((task_name, lbl, target))
 
-    # ── Compile ───────────────────────────────────────────────────────────
+
+class WorkflowCompiler:
+    """Lowers a :class:`Workflow` to a :class:`CompiledWorkflow`.
+
+    The compiler is not a graph and is not a builder. Author tasks on
+    :class:`Workflow`, then::
+
+        compiled = WorkflowCompiler().compile(workflow)
+    """
 
     def compile(
         self,
+        workflow: Workflow,
         *,
         experiment: _ExperimentLike | None = None,
         registry: WorkflowBindingRegistry | None = None,
     ) -> CompiledWorkflow:
-        """Lower the registrations and emit the :class:`CompiledWorkflow`.
+        """Lower *workflow* to a :class:`CompiledWorkflow`.
 
-        Validation (cycles, edge shape, reachability) surfaces here. When
-        ``experiment`` is given, the artifact is bound into ``registry`` (or
-        :data:`~molexp.workflow.binding.default_binding_registry`) so
-        ``registry.for_experiment(experiment) is compiled``.
+        When ``experiment`` is given, the artifact is bound into ``registry``
+        (or :data:`~molexp.workflow.binding.default_binding_registry`).
         """
-        if not self._tasks:
+        if not isinstance(workflow, Workflow):
+            raise TypeError(
+                f"WorkflowCompiler.compile requires a Workflow, got {type(workflow).__name__}"
+            )
+        if not workflow._tasks:
             warnings.warn(
-                f"workflow {self._name!r} compiles with zero tasks — it will "
+                f"workflow {workflow._name!r} compiles with zero tasks — it will "
                 f"execute and report succeeded without doing anything. "
                 f"Register tasks with @wf.task / wf.add(...) first.",
                 stacklevel=2,
             )
         return compile_registrations(
-            name=self._name,
-            version_label=self._version,
-            tasks=list(self._tasks),
-            mode=self._mode,
-            entries=tuple(self._entries),
-            control_edges=tuple(self._control_edges),
-            branch_edges=tuple(self._branch_edges),
-            loops=tuple(self._loops),
-            parallels=tuple(self._parallels),
-            reducer=self._reducer,
+            name=workflow._name,
+            version_label=workflow._version,
+            tasks=list(workflow._tasks),
+            mode=workflow._mode,
+            entries=tuple(workflow._entries),
+            control_edges=tuple(workflow._control_edges),
+            branch_edges=tuple(workflow._branch_edges),
+            loops=tuple(workflow._loops),
+            parallels=tuple(workflow._parallels),
+            reducer=workflow._reducer,
             experiment=experiment,
             registry=registry,
         )
 
 
-__all__ = ["WorkflowCompiler", "compile_registrations"]
+__all__ = ["Workflow", "WorkflowCompiler", "compile_registrations"]

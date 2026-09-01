@@ -9,6 +9,7 @@ import {
   ShieldAlert,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { assetsApi } from "@/api";
 import type { AssetLineageNode } from "@/api/generated/models/AssetLineageNode";
 import type { AssetLineageResponse } from "@/api/generated/models/AssetLineageResponse";
 import {
@@ -20,9 +21,8 @@ import {
   OverviewSection,
 } from "@/app/components/entity";
 import { canonicalStatusFor } from "@/app/components/entity/status";
-import { workspaceApi } from "@/app/state/api";
 import { useNavigationState } from "@/app/state/useNavigationState";
-import type { ApiAssetResponse, AssetKind, RendererProps } from "@/app/types";
+import type { ApiAssetResponse, AssetKind, ScopedRendererProps } from "@/app/types";
 import { Code as InlineCode } from "@/components/ui/code";
 import {
   WorkbenchAction,
@@ -359,7 +359,7 @@ const JsonPreview = ({ asset }: { asset: ApiAssetResponse }): JSX.Element => {
 const ErrorTraceView = ({ asset }: { asset: ApiAssetResponse }): JSX.Element => {
   const exceptionType = extraValue<string>(asset, "exception_type");
   const message = extraValue<string>(asset, "message");
-  const executionId = extraValue<string>(asset, "execution_id");
+  const executionId = extraValue<string>(asset, "executionId");
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -370,7 +370,7 @@ const ErrorTraceView = ({ asset }: { asset: ApiAssetResponse }): JSX.Element => 
         <div className="mt-1 text-body-lg text-foreground">{message ?? "(no message)"}</div>
         {executionId && (
           <div className="mt-1 font-mono text-label text-muted-foreground">
-            execution_id = {executionId}
+            executionId = {executionId}
           </div>
         )}
       </div>
@@ -448,7 +448,10 @@ const LineageColumn = ({
 
 // ── Main viewer ────────────────────────────────────────────────────────────
 
-export const AssetViewer = ({ selection, snapshot }: RendererProps): JSX.Element => {
+export const AssetViewer = ({
+  selection,
+  snapshot,
+}: ScopedRendererProps<"assets" | "runs" | "experiments" | "workflows">): JSX.Element => {
   const [asset, setAsset] = useState<ApiAssetResponse | null>(null);
   const [assetLoading, setAssetLoading] = useState(true);
   const [assetError, setAssetError] = useState<string | null>(null);
@@ -470,8 +473,8 @@ export const AssetViewer = ({ selection, snapshot }: RendererProps): JSX.Element
     setAssetLoading(true);
     setAssetError(null);
     setNotFound(false);
-    workspaceApi
-      .getAssets()
+    assetsApi
+      .listAssets()
       .then((all) => {
         if (cancelled) return;
         const match = all.find((a) => a.id === assetId);
@@ -507,7 +510,7 @@ export const AssetViewer = ({ selection, snapshot }: RendererProps): JSX.Element
       return;
     }
     setLineageLoading(true);
-    workspaceApi
+    assetsApi
       .getAssetLineage(assetId)
       .then((res) => {
         if (cancelled) return;
@@ -576,13 +579,13 @@ export const AssetViewer = ({ selection, snapshot }: RendererProps): JSX.Element
 
   const producerRunId = asset.producer?.run_id as string | undefined;
   const producerTaskId = asset.producer?.task_id as string | undefined;
-  const producerExecId = asset.producer?.execution_id as string | undefined;
+  const producerExecId = asset.producer?.executionId as string | undefined;
   const producerRun = producerRunId ? snapshot.runs.find((r) => r.id === producerRunId) : null;
 
   const scopeLabel =
-    asset.scope_kind === "workspace"
+    asset.scopeKind === "workspace"
       ? "workspace"
-      : `${asset.scope_kind}: ${asset.scope_ids.join(" / ")}`;
+      : `${asset.scopeKind}: ${asset.scopeIds.join(" / ")}`;
 
   const tagEntries = Object.entries(asset.tags ?? {});
 
@@ -611,7 +614,7 @@ export const AssetViewer = ({ selection, snapshot }: RendererProps): JSX.Element
                       <OverviewHighlight label="Size" value={formatBytes(size)} />
                       <OverviewHighlight
                         label="Scope"
-                        value={asset.scope_kind}
+                        value={asset.scopeKind}
                         detail={scopeLabel}
                       />
                       <OverviewHighlight
@@ -701,15 +704,11 @@ export const AssetViewer = ({ selection, snapshot }: RendererProps): JSX.Element
                     },
                     {
                       label: "Created",
-                      value: (
-                        <span title={asset.created_at}>{formatDateTime(asset.created_at)}</span>
-                      ),
+                      value: <span title={asset.createdAt}>{formatDateTime(asset.createdAt)}</span>,
                     },
                     {
                       label: "Updated",
-                      value: (
-                        <span title={asset.updated_at}>{formatDateTime(asset.updated_at)}</span>
-                      ),
+                      value: <span title={asset.updatedAt}>{formatDateTime(asset.updatedAt)}</span>,
                     },
                   ]}
                 />
@@ -740,10 +739,10 @@ export const AssetViewer = ({ selection, snapshot }: RendererProps): JSX.Element
                 </OverviewSection>
               )}
 
-              {asset.content_hash && (
+              {asset.contentHash && (
                 <OverviewSection title="Content hash">
                   <InlineCode className="block break-all border-y border-border/60 py-2 font-mono text-label">
-                    {asset.content_hash}
+                    {asset.contentHash}
                   </InlineCode>
                 </OverviewSection>
               )}

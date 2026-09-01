@@ -20,9 +20,9 @@ import tempfile
 from pathlib import Path
 
 import molexp as me
-from molexp.workflow import WorkflowCompiler, WorkflowRuntime
+from molexp.workflow import Workflow, WorkflowCompiler, WorkflowRuntime
 
-wf = WorkflowCompiler(name="step")
+wf = Workflow(name="step")
 
 
 @wf.task
@@ -31,7 +31,7 @@ async def step(seed: int | None = None) -> dict:
     return {"noted": True, "seed": seed}
 
 
-compiled = wf.compile()
+compiled = WorkflowCompiler().compile(wf)
 
 
 async def main() -> None:

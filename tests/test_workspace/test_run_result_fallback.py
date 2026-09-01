@@ -24,7 +24,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from molexp.workspace.models import ExecutionRecord
-from molexp.workspace.run import Run
+from molexp.workspace.run import Run, RunStatus
 
 if TYPE_CHECKING:
     from molexp._typing import JSONValue
@@ -75,6 +75,13 @@ class TestDriverResultPrecedence:
             [{"task_id": "train", "status": "completed", "outputs": "node-value"}],
         )
         assert run.get_result("train") == "driver-value"
+
+    def test_cancel_preserves_driver_results(self, run):
+        with run.start() as ctx:
+            ctx.set_result("train", "driver-value")
+        run.cancel()
+        assert run.get_result("train") == "driver-value"
+        assert run.status == RunStatus.CANCELLED.value
 
     def test_driver_side_none_result_does_not_fall_back(self, run):
         with run.start() as ctx:

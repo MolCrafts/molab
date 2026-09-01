@@ -2,15 +2,15 @@
 
 This page is for contributors who need to understand — or modify — how a `WorkflowCompiler` produces a `CompiledWorkflow` and how that artifact becomes an executable graph. End-users should read the [Quick Start](../getting-started/quick-start.md) first.
 
-There is **no intermediate JSON representation on the execution path**. Compilation happens in memory, in one pass, when `wf.compile()` is called. The lowering lives in `molexp.workflow._engine.*`, which is private to the workflow package. The plan and engine are molexp-owned plain Python — the former `pydantic_graph` dependency is gone entirely (no import anywhere in the repo; the `End` sentinel is molexp's own, in `molexp.workflow.types`).
+There is **no intermediate JSON representation on the execution path**. Compilation happens in memory, in one pass, when `WorkflowCompiler().compile(wf)` is called. The lowering lives in `molexp.workflow._engine.*`, which is private to the workflow package. The plan and engine are molexp-owned plain Python — the former `pydantic_graph` dependency is gone entirely (no import anywhere in the repo; the `End` sentinel is molexp's own, in `molexp.workflow.types`).
 
 ## Compilation Flow
 
 ```
-@wf.task / wf.actor / WorkflowCompiler.add(...)   →  TaskRegistration[]
+@wf.task / wf.actor / Workflow.add(...)           →  TaskRegistration[]
 wf.control / wf.branch / wf.loop / wf.parallel    →  control-flow declarations
                               │
-                              ▼   wf.compile()
+                              ▼   WorkflowCompiler().compile(wf)
                   compile_registrations(...)
                   (validation + snapshotting + structural lowering)
                               │
@@ -22,13 +22,13 @@ wf.control / wf.branch / wf.loop / wf.parallel    →  control-flow declarations
         WorkflowRuntime().execute(compiled, ...)   →  WorkflowResult
 ```
 
-One compilation boundary: `wf.compile()` validates the declarations, computes the `workflow_id`, snapshots every task, and lowers the whole thing to a frozen, molexp-owned `ExecutionPlan` stored on the artifact as `.graph`. The runtime never recompiles — it builds fresh per-execution state/deps and drives the prebuilt plan through the structural engine (`engine.run_plan`).
+One compilation boundary: `WorkflowCompiler().compile(wf)` validates the declarations, computes the `workflow_id`, snapshots every task, and lowers the whole thing to a frozen, molexp-owned `ExecutionPlan` stored on the artifact as `.graph`. The runtime never recompiles — it builds fresh per-execution state/deps and drives the prebuilt plan through the structural engine (`engine.run_plan`).
 
 ## Source Layout
 
 ```
 src/molexp/workflow/
-├── compiler.py            # WorkflowCompiler (decorator + OOP registration) + compile_registrations
+├── compiler.py            # Workflow (decorator + OOP registration) + WorkflowCompiler.compile + compile_registrations
 ├── compiled.py            # CompiledWorkflow — frozen artifact (graph + snapshots + IR exports)
 ├── binding.py             # WorkflowBindingRegistry / default_binding_registry
 ├── task.py                # Task / Actor convenience base classes
@@ -60,9 +60,9 @@ The outer API (`molexp.workflow.__init__`) is the public boundary. Anything unde
 `workflow_id` is a 16-hex-character `sha256` over the workflow `name` plus, for each task, `name + type(fn_or_class).__qualname__ + sorted(depends_on)` (see `_helpers._stable_workflow_id`):
 
 ```python
-from molexp.workflow import WorkflowCompiler
+from molexp.workflow import Workflow, WorkflowCompiler
 
-wf = WorkflowCompiler(name="demo")
+wf = Workflow(name="demo")
 
 
 @wf.task
@@ -70,7 +70,7 @@ async def fetch() -> int:
     return 42
 
 
-compiled = wf.compile()
+compiled = WorkflowCompiler().compile(wf)
 print(compiled.workflow_id)   # e.g. "c3f9e2b8a7d4e1f0"
 ```
 
@@ -84,7 +84,7 @@ Pair `workflow_id` with `config_hash` on `RunMetadata` and the experiment's pers
 
 ## Validation and Lowering
 
-`compile_registrations` hands the declaration set to `WorkflowGraphCompiler` (`_engine/compiler.py`), which runs five stages — all synchronous from `wf.compile()`, before any user task code runs:
+`compile_registrations` hands the declaration set to `WorkflowGraphCompiler` (`_engine/compiler.py`), which runs five stages — all synchronous from `WorkflowCompiler().compile(wf)`, before any user task code runs:
 
 1. **Data-DAG validation** — the `depends_on` graph must be acyclic (`CycleError`) and reference only registered tasks (`UnknownTaskError`).
 2. **Edge-set construction** — explicit `wf.control` / `wf.branch` declarations bucket into per-source `UnconditionalEdges` / `BranchEdges`; `wf.parallel` expands into `map_over → body → join` control edges; `wf.loop` expands into a `{"continue", "exit"}` branch on its `until` task; tasks with no explicit edges get a fan-out synthesised from their reverse data edges. Mixing branch + unconditional edges on one source raises `EdgeShapeError`.
@@ -147,14 +147,14 @@ from molexp.workflow import Caching, FileCacheStore, WorkflowRuntime
 
 ws = me.Workspace("./lab", name="lab")
 
-# Workspace-rooted cache (preferred for tracked runs): built automatically
-# from ``run_context`` via ``ws.cache.as_cache_store()``; or pass explicitly:
-cache = Caching(store=ws.cache.as_cache_store(), max_entries=1000)
+# Run-local cache is built automatically from ``run_context`` at
+# ``<run_dir>/cache``. Pass an explicit store only to override:
+cache = Caching(store=FileCacheStore("./cache"), max_entries=1000)
 
 result = await WorkflowRuntime().execute(compiled, cache=cache)
 ```
 
-For workspace-less callers (e.g. ad-hoc scripts), use `FileCacheStore(path)` or a plain `store_dir=...` argument. The user-home `~/.molexp/cache/` shortcut from earlier MolExp versions is gone — caching is always either workspace-rooted or explicitly directed to a path the caller chose.
+For callers with no run, use `FileCacheStore(path)` or a plain `store_dir=...` argument. The user-home `~/.molexp/cache/` shortcut from earlier MolExp versions is gone — execute writes `run_dir/cache`, never a workspace-root `cache/`.
 
 ## What the Compiler Does Not Do
 

@@ -170,9 +170,10 @@ def start_plan_task(
     supersedes_run_id: str | None = None,
 ) -> PlanTaskResponse:
     """Shared starter used by the legacy route and AgentTask plan turns."""
+    from molexp.harness import Plan
     from molexp.server.deps.plan_runtime import get_plan_runtime
-    from molexp.services.plan_runtime import resolve_plan_compute_target, resolve_plan_run
     from molexp.services.plan_runtime.gateway import build_plan_gateway
+    from molexp.services.plan_runtime.targets import resolve_plan_compute_target
 
     draft = request.draft.strip()
     if not draft:
@@ -189,8 +190,8 @@ def start_plan_task(
     # Workspace NotFound errors map to HTTP envelopes via the registered handlers.
     experiment = workspace.get_project(project_id).get_experiment(experiment_id)
 
-    # One bootstrap shared with `molexp plan` (services.plan_runtime).
-    run = resolve_plan_run(experiment, draft, supersedes=supersedes_run_id)
+    # One bootstrap shared with `molexp plan` (Plan.open).
+    run = Plan.open(experiment, draft, supersedes=supersedes_run_id).bound_run
 
     # One shared resolution path with the CLI (Python = UI law). An unknown
     # explicit name fails the REQUEST (422 + candidates), never falls back.

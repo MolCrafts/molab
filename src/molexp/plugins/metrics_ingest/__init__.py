@@ -28,7 +28,7 @@ CSV           stdlib :mod:`csv`, operator-supplied column mapping
 ============  ==================================================
 
 All three write through
-:meth:`molexp.workspace.metrics.MetricsWriter.log_many`, the single-open bulk
+:meth:`molexp.plugins.metrics.MetricsWriter.log_many`, the single-open bulk
 path — roughly an order of magnitude faster than per-record appends on a large
 thermo table, at flat memory.
 """

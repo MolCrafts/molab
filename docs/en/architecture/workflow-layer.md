@@ -27,9 +27,10 @@ agent           ───────► workflow ───────► works
 
 Concretely the workflow layer reaches downward for:
 
-- `ws.cache.as_cache_store()` — the workspace's singleton cache
-  folder, backing the content-addressed result cache. The user-home
-  `~/.molexp/cache/` shortcut is gone.
+- `FileCacheStore(run_dir / "cache")` — the run-local content-addressed
+  result cache (auto-derived from `run_context`). The user-home
+  `~/.molexp/cache/` shortcut is gone; execute does not create a
+  workspace-root `cache/`.
 - `workspace.atomic_write_json` — used by the execution-document
   writer (`_engine/persistence.py`) to write `workflow.json`
   under each run's `executions/<exec_id>/` directory. Atomicity is
@@ -58,8 +59,8 @@ opaque.
   `WorkflowVersion`)
 - **caching**: `Caching` orchestrates the cache policy (key
   derivation, format version, LRU eviction) on top of a pluggable
-  `CacheStore` (`FileCacheStore` for plain directories,
-  `ws.cache.as_cache_store()` for workspace-rooted caches)
+  `CacheStore` (`FileCacheStore(run_dir / "cache")` for execute;
+  `ws.cache.as_cache_store()` remains opt-in)
 - **persistence**: the coalescing execution-document writer
   (`_engine/persistence.py` — `open_execution_document` /
   bounded-staleness flush / mandatory synchronous flush on failures

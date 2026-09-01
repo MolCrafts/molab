@@ -20,12 +20,12 @@ const DEFAULT_CACHE_TTL_SECONDS = 300;
 const emptyForm = (): WorkspaceTargetCreateRequest => ({
   name: "",
   host: "",
-  root_path: "",
+  rootPath: "",
   port: null,
-  identity_file: null,
-  ssh_opts: [],
-  cache_dir: null,
-  cache_ttl_seconds: DEFAULT_CACHE_TTL_SECONDS,
+  identityFile: null,
+  sshOpts: [],
+  cacheDir: null,
+  cacheTtlSeconds: DEFAULT_CACHE_TTL_SECONDS,
 });
 
 interface AddRemoteWorkspaceFormProps {
@@ -53,20 +53,18 @@ export function AddRemoteWorkspaceForm({
         ...form,
         name: form.name.trim(),
         host: form.host.trim(),
-        root_path: form.root_path.trim(),
+        rootPath: form.rootPath.trim(),
         port: form.port == null ? null : Number(form.port),
-        identity_file: form.identity_file?.trim() ? form.identity_file.trim() : null,
-        ssh_opts: sshOptsRaw
+        identityFile: form.identityFile?.trim() ? form.identityFile.trim() : null,
+        sshOpts: sshOptsRaw
           .split(",")
           .map((s) => s.trim())
           .filter(Boolean),
-        cache_dir: form.cache_dir?.trim() ? form.cache_dir.trim() : null,
-        cache_ttl_seconds:
-          form.cache_ttl_seconds == null
-            ? DEFAULT_CACHE_TTL_SECONDS
-            : Number(form.cache_ttl_seconds),
+        cacheDir: form.cacheDir?.trim() ? form.cacheDir.trim() : null,
+        cacheTtlSeconds:
+          form.cacheTtlSeconds == null ? DEFAULT_CACHE_TTL_SECONDS : Number(form.cacheTtlSeconds),
       };
-      const created = await WorkspaceService.createWorkspaceTargetApiWorkspaceTargetsPost(payload);
+      const created = await WorkspaceService.createWorkspaceTarget(payload);
       setForm(emptyForm());
       setSshOptsRaw("");
       onCreated?.(created);
@@ -107,8 +105,8 @@ export function AddRemoteWorkspaceForm({
           <Label htmlFor="add-remote-ws-root">Root path</Label>
           <Input
             id="add-remote-ws-root"
-            value={form.root_path}
-            onChange={(e) => setForm({ ...form, root_path: e.target.value })}
+            value={form.rootPath}
+            onChange={(e) => setForm({ ...form, rootPath: e.target.value })}
             placeholder="/scratch/me/molexp-lab"
             required
           />
@@ -132,8 +130,8 @@ export function AddRemoteWorkspaceForm({
           <Label htmlFor="add-remote-ws-identity">Identity file</Label>
           <Input
             id="add-remote-ws-identity"
-            value={form.identity_file ?? ""}
-            onChange={(e) => setForm({ ...form, identity_file: e.target.value })}
+            value={form.identityFile ?? ""}
+            onChange={(e) => setForm({ ...form, identityFile: e.target.value })}
             placeholder="~/.ssh/id_ed25519"
           />
         </div>
@@ -157,11 +155,11 @@ export function AddRemoteWorkspaceForm({
                 id="add-remote-ws-cache-ttl"
                 type="number"
                 min={0}
-                value={form.cache_ttl_seconds ?? DEFAULT_CACHE_TTL_SECONDS}
+                value={form.cacheTtlSeconds ?? DEFAULT_CACHE_TTL_SECONDS}
                 onChange={(e) =>
                   setForm({
                     ...form,
-                    cache_ttl_seconds:
+                    cacheTtlSeconds:
                       e.target.value === "" ? DEFAULT_CACHE_TTL_SECONDS : Number(e.target.value),
                   })
                 }
@@ -176,9 +174,9 @@ export function AddRemoteWorkspaceForm({
               <Label htmlFor="add-remote-ws-cache-dir">Cache directory (optional)</Label>
               <Input
                 id="add-remote-ws-cache-dir"
-                value={form.cache_dir ?? ""}
+                value={form.cacheDir ?? ""}
                 onChange={(e) =>
-                  setForm({ ...form, cache_dir: e.target.value === "" ? null : e.target.value })
+                  setForm({ ...form, cacheDir: e.target.value === "" ? null : e.target.value })
                 }
                 placeholder="~/.molexp/remote_cache/<name>"
               />

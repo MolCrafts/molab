@@ -1,5 +1,6 @@
+import { Eye } from "lucide-react";
 import type { JSX, ReactNode } from "react";
-import { RunStatusBadge, WorkbenchAction } from "@/components/workbench";
+import { RunStatusBadge, WorkbenchIconAction } from "@/components/workbench";
 import { formatDuration, formatRelative, formatTimestamp } from "@/lib/format-time";
 
 import { RunsRecentEvents } from "../RunsRecentEvents";
@@ -123,25 +124,29 @@ interface ExecutionRowProps {
 }
 
 const ExecutionRow = ({ execution, selected, onSelect }: ExecutionRowProps): JSX.Element => (
-  <li>
-    <WorkbenchAction
-      kind="ghost"
-      size="content"
-      type="button"
-      onClick={onSelect}
-      className={
-        selected
-          ? "flex w-full items-center justify-between gap-2 rounded-control border border-accent/30 bg-accent/5 px-3 py-2 text-left text-label"
-          : "flex w-full items-center justify-between gap-2 rounded-control border border-border/70 bg-background px-3 py-2 text-left text-label transition-colors hover:bg-muted/40"
-      }
-    >
+  <li
+    className={
+      selected
+        ? "flex items-center gap-2 border-l-2 border-accent bg-accent-muted px-2 py-1.5 text-label"
+        : "flex items-center gap-2 border-l-2 border-transparent px-2 py-1.5 text-label"
+    }
+  >
+    <div className="min-w-0 flex-1">
       <span className="truncate font-mono text-muted-foreground" title={execution.executionId}>
         {execution.executionId.slice(0, 14)}
       </span>
-      <div className="flex items-center gap-2">
+      <div className="mt-1 flex items-center gap-2">
         <RunStatusBadge status={execution.status} size="sm" />
         <span className="text-muted-foreground">{formatRelative(execution.startedAt)}</span>
       </div>
-    </WorkbenchAction>
+    </div>
+    <WorkbenchIconAction
+      label={selected ? "Clear selected attempt" : `Inspect attempt ${execution.executionId}`}
+      onClick={onSelect}
+      aria-pressed={selected}
+      className={selected ? "bg-interactive" : undefined}
+    >
+      <Eye className="size-3.5" />
+    </WorkbenchIconAction>
   </li>
 );

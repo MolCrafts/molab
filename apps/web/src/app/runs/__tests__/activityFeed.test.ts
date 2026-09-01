@@ -1,99 +1,30 @@
-/**
- * Pure-core tests for the workspace activity feed (vision-loop-12): event
- * type → icon/label mapping, ref → entity-link resolution, empty-state copy.
- */
-
 import { describe, expect, it } from "@rstest/core";
 
-import {
-  eventTypeFilterLabel,
-  eventVisualFor,
-  FEED_EMPTY_TEXT,
-  resolveEventRef,
-  WORKSPACE_EVENT_TYPES,
-} from "@/app/runs/activityFeed";
+import { eventsFromRuns, eventVisualFor, WORKSPACE_EVENT_TYPES } from "@/app/runs/activityFeed";
 
 describe("eventVisualFor", () => {
-  it("maps every spine event type to a distinct label", () => {
-    // Mirrors the WorkspaceEventType Literal (workspace/events.py) exactly.
-    const types = [
+  it("maps run lifecycle types", () => {
+    expect(WORKSPACE_EVENT_TYPES).toEqual([
       "run.created",
       "run.started",
       "run.failed",
       "run.completed",
-      "asset.added",
-      "knowledge.created",
-      "workflow.created",
-      "experiment.created",
-    ];
-    const labels = types.map((t) => eventVisualFor(t).label);
-    expect(new Set(labels).size).toBe(types.length);
-    expect(labels.every((label) => label.length > 0)).toBe(true);
-  });
-
-  it("gives each mapped type an icon and a dot class", () => {
-    const visual = eventVisualFor("asset.added");
-    expect(visual.icon).toBeDefined();
-    expect(visual.dotClass).toContain("bg-");
-  });
-
-  it("renders an unknown type by its raw name instead of hiding it", () => {
-    expect(eventVisualFor("mystery.event").label).toBe("mystery.event");
+    ]);
+    expect(eventVisualFor("run.failed").label).toBe("Run failed");
   });
 });
 
-describe("WORKSPACE_EVENT_TYPES filter chips", () => {
-  it("lists every known spine type with a human filter label", () => {
-    expect(WORKSPACE_EVENT_TYPES).toContain("run.failed");
-    expect(WORKSPACE_EVENT_TYPES).toContain("knowledge.created");
-    expect(WORKSPACE_EVENT_TYPES.length).toBeGreaterThanOrEqual(8);
-    for (const type of WORKSPACE_EVENT_TYPES) {
-      expect(eventTypeFilterLabel(type).length).toBeGreaterThan(0);
-    }
-  });
-});
-
-describe("resolveEventRef", () => {
-  const known = new Set(["run-abc123"]);
-
-  it("resolves a known run id to a run link", () => {
-    expect(resolveEventRef("run-abc123", "asset.added", known)).toEqual({
-      kind: "run",
-      runId: "run-abc123",
-      text: "run-abc123",
-    });
-  });
-
-  it("resolves knowledge.created refs to knowledge paths", () => {
-    expect(resolveEventRef("protocols/gel-prep", "knowledge.created", known)).toEqual({
-      kind: "knowledge",
-      path: "protocols/gel-prep",
-      text: "protocols/gel-prep",
-    });
-  });
-
-  it("leaves unresolvable refs as plain text — never a dead link", () => {
-    expect(resolveEventRef("sha256:deadbeef", "asset.added", known)).toEqual({
-      kind: "plain",
-      text: "sha256:deadbeef",
-    });
-  });
-
-  it("shows the asset's human name for asset.added ids when the payload has one", () => {
-    const resolved = resolveEventRef("3a189b4b-7754-463e-bf63", "asset.added", known, {
-      kind: "artifact",
-      name: "result.json",
-    });
-    expect(resolved).toEqual({ kind: "plain", text: "result.json" });
-  });
-
-  it("prefers the run link when a knowledge event also references a run", () => {
-    expect(resolveEventRef("run-abc123", "knowledge.created", known).kind).toBe("run");
-  });
-});
-
-describe("empty state", () => {
-  it("states when events will appear, not just that none exist", () => {
-    expect(FEED_EMPTY_TEXT).toBe("No events yet.");
+describe("eventsFromRuns", () => {
+  it("builds created/started/completed from a succeeded run", () => {
+    const rows = eventsFromRuns([
+      {
+        id: "r1",
+        status: "succeeded",
+        createdAt: "2026-01-01T00:00:00Z",
+        startedAt: "2026-01-01T00:01:00Z",
+        finishedAt: "2026-01-01T00:02:00Z",
+      },
+    ]);
+    expect(rows.map((r) => r.type)).toEqual(["run.completed", "run.started", "run.created"]);
   });
 });

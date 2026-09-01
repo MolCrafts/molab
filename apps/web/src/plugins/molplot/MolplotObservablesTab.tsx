@@ -9,14 +9,13 @@ import type { VegaLiteSpec } from "@molcrafts/molplot";
 import { BarChart3, FileText } from "lucide-react";
 import type { JSX } from "react";
 import { useEffect, useMemo, useState } from "react";
+import { runsApi } from "@/api";
 import { EmptyState } from "@/app/components/entity";
-import { workspaceApi } from "@/app/state/api";
 import type { RendererProps } from "@/app/types";
 import { WorkbenchAction } from "@/components/workbench";
 import type { DiscoveredFile } from "@/plugins/types";
 import { molplotDisplayName } from "./display-name";
 import { MolplotRawChart } from "./MolplotRawChart";
-
 export const MolplotObservablesTab = ({
   selection,
   snapshot,
@@ -47,13 +46,13 @@ export const MolplotObservablesTab = ({
 
     if (!file.name.toLowerCase().endsWith(".mlp.vl.json")) {
       setError(
-        "Not a molplot Vega-Lite artifact (expected *.mlp.vl.json). Host metrics curves use *.mlp.jsonl / *.mlp.zarr via the Metrics tab.",
+        "Not a molplot Vega-Lite artifact (expected *.mlp.vl.json). Host metrics curves use *.mlp.jsonl via the Metrics tab.",
       );
       return;
     }
 
     setLoading(true);
-    workspaceApi
+    runsApi
       .getRunFileText(run.projectId, run.experimentId, run.id, file.relPath)
       .then((response) => {
         if (cancelled) return;
@@ -79,15 +78,15 @@ export const MolplotObservablesTab = ({
 
   return (
     <div className="flex min-h-0 flex-1">
-      <aside className="flex w-56 flex-none flex-col bg-surface/45">
-        <div className="flex h-control-comfortable items-center gap-2 px-3">
+      <aside className="flex w-56 flex-none flex-col border-r border-border bg-surface-subtle">
+        <div className="flex h-[35px] items-center gap-2 border-b border-border px-3">
           <BarChart3 className="size-4 text-accent" aria-hidden />
           <span className="text-label font-medium text-foreground">MolPlot</span>
           <span className="ml-auto font-mono text-micro text-muted-foreground">
             {discoveredFiles.length}
           </span>
         </div>
-        <div className="min-h-0 flex-1 space-y-1 overflow-auto p-2">
+        <div className="min-h-0 flex-1 overflow-auto p-1">
           {discoveredFiles.map((candidate) => (
             <WorkbenchAction
               kind="ghost"
@@ -95,7 +94,7 @@ export const MolplotObservablesTab = ({
               key={candidate.relPath}
               type="button"
               onClick={() => setSelected(candidate.relPath)}
-              className={`flex w-full items-center gap-2 px-2 py-2 text-left font-mono text-micro transition-colors ${
+              className={`flex w-full items-center gap-2 rounded-none px-2 py-1.5 text-left font-mono text-micro transition-colors ${
                 file?.relPath === candidate.relPath
                   ? "bg-accent-muted text-accent-muted-foreground"
                   : "text-muted-foreground hover:bg-interactive hover:text-foreground"
@@ -128,7 +127,7 @@ export const MolplotObservablesTab = ({
           />
         )}
         {spec && (
-          <div className="min-h-96 bg-surface/65 p-3">
+          <div className="min-h-96">
             <MolplotRawChart
               spec={{ spec }}
               style={{ width: "100%", height: "var(--spacing-chart-lg)" }}

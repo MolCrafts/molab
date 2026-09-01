@@ -14,7 +14,8 @@ import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
-from molexp.workspace import Bundle, ReferenceConcept, ZoteroItem, read_zotero_items
+from molexp.workspace import Bundle, ReferenceConcept, ZoteroItem
+from molexp.workspace.zotero_concepts import read_zotero_items
 
 FIXED = datetime(2026, 6, 21, 12, 0, 0, tzinfo=UTC)
 

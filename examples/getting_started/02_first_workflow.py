@@ -15,11 +15,11 @@ from __future__ import annotations
 
 import asyncio
 
-from molexp.workflow import WorkflowCompiler, WorkflowRuntime
+from molexp.workflow import Workflow, WorkflowCompiler, WorkflowRuntime
 
 
 async def main() -> None:
-    wf = WorkflowCompiler(name="first-workflow")
+    wf = Workflow(name="first-workflow")
 
     @wf.task
     async def load() -> list[int]:
@@ -35,7 +35,7 @@ async def main() -> None:
     async def total(square: list[int]) -> int:
         return sum(square)
 
-    compiled = wf.compile()
+    compiled = WorkflowCompiler().compile(wf)
     result = await WorkflowRuntime().execute(compiled)
 
     print(f"workflow_id: {compiled.workflow_id}")

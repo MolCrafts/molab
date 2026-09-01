@@ -8,16 +8,16 @@ MolExp 将工作流的生命周期分为三个阶段：
 
 | 阶段 | 工具 | 做什么 |
 |---|---|---|
-| **编写** | `WorkflowCompiler` | 声明任务和依赖 |
-| **编译** | `.compile()` | 冻结为已验证的 `CompiledWorkflow` |
+| **编写** | `Workflow` | 声明任务和依赖 |
+| **编译** | `WorkflowCompiler().compile(workflow)` | 冻结为已验证的 `CompiledWorkflow` |
 | **执行** | `WorkflowRuntime` 或 `Run.execute()` | 驱动图 |
 
 可以用装饰器编写：
 
 ```python
-from molexp.workflow import WorkflowCompiler
+from molexp.workflow import Workflow, WorkflowCompiler
 
-wf = WorkflowCompiler(name="demo")
+wf = Workflow(name="demo")
 
 @wf.task
 def fetch() -> list[float]:
@@ -27,7 +27,7 @@ def fetch() -> list[float]:
 def summarize(data: list[float]) -> float:
     return sum(data)
 
-compiled = wf.compile()
+compiled = WorkflowCompiler().compile(wf)
 ```
 
 也可以用可复用的任务类——两者产生同一种 `CompiledWorkflow`。

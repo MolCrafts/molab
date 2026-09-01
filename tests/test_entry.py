@@ -123,13 +123,13 @@ class TestFluentExperimentChain:
 
     @staticmethod
     def _workflow() -> object:
-        from molexp.workflow import Task, TaskContext, WorkflowCompiler
+        from molexp.workflow import Task, TaskContext, Workflow, WorkflowCompiler
 
         class Step(Task):
             async def execute(self, ctx: TaskContext) -> int:
                 return 1
 
-        return WorkflowCompiler(name="wf").add(Step(), name="step").compile()
+        return WorkflowCompiler().compile(Workflow(name="wf").add(Step(), name="step"))
 
     def test_chain_seeds_one_run_per_grid_cell(self, tmp_path):
         exp = (

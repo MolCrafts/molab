@@ -32,8 +32,8 @@ class ExternalProcessor:
         # runtime values arrive as the body's own named parameters, not off ctx
         return {"processed": records}
 
-from molexp.workflow import WorkflowCompiler
-compiled = WorkflowCompiler(name="pipeline").add(ExternalProcessor()).compile()
+from molexp.workflow import Workflow, WorkflowCompiler
+compiled = WorkflowCompiler().compile(Workflow(name="pipeline").add(ExternalProcessor()))
 ```
 
 ## Relationship to `Task` / `Actor`

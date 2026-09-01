@@ -40,7 +40,7 @@ function rethrow(err: unknown): never {
 
 export async function fetchAuthStatus(): Promise<AuthStatus> {
   try {
-    const res = await AuthService.authStatusApiAuthStatusGet();
+    const res = await AuthService.authStatus();
     return {
       enabled: res.enabled,
       authenticated: res.authenticated,
@@ -53,7 +53,7 @@ export async function fetchAuthStatus(): Promise<AuthStatus> {
 
 export async function login(username: string, password: string): Promise<AuthUser> {
   try {
-    const res = await AuthService.authLoginApiAuthLoginPost({ username, password });
+    const res = await AuthService.authLogin({ username, password });
     return mapUser(res);
   } catch (err) {
     rethrow(err);
@@ -62,7 +62,7 @@ export async function login(username: string, password: string): Promise<AuthUse
 
 export async function logout(): Promise<void> {
   try {
-    await AuthService.authLogoutApiAuthLogoutPost();
+    await AuthService.authLogout();
   } catch (err) {
     rethrow(err);
   }
@@ -70,7 +70,7 @@ export async function logout(): Promise<void> {
 
 export async function fetchUsers(): Promise<AuthUser[]> {
   try {
-    const res = await AuthService.listUsersApiAuthUsersGet();
+    const res = await AuthService.listUsers();
     return res.users.map(mapUser);
   } catch (err) {
     rethrow(err);
@@ -84,7 +84,7 @@ export async function createUser(input: {
   workspaces: string[];
 }): Promise<AuthUser> {
   try {
-    const res = await AuthService.createUserApiAuthUsersPost({
+    const res = await AuthService.createUser({
       username: input.username,
       password: input.password,
       role: asApiRole(input.role),
@@ -107,7 +107,7 @@ export async function patchUser(
       workspaces: patch.workspaces,
       disabled: patch.disabled,
     };
-    const res = await AuthService.patchUserApiAuthUsersUsernamePatch(username, body);
+    const res = await AuthService.patchUser(username, body);
     return mapUser(res);
   } catch (err) {
     rethrow(err);
@@ -116,7 +116,7 @@ export async function patchUser(
 
 export async function setUserPassword(username: string, password: string): Promise<AuthUser> {
   try {
-    const res = await AuthService.setUserPasswordApiAuthUsersUsernamePasswordPost(username, {
+    const res = await AuthService.setUserPassword(username, {
       password,
     });
     return mapUser(res);
@@ -127,7 +127,7 @@ export async function setUserPassword(username: string, password: string): Promi
 
 export async function deleteUser(username: string): Promise<void> {
   try {
-    await AuthService.deleteUserApiAuthUsersUsernameDelete(username);
+    await AuthService.deleteUser(username);
   } catch (err) {
     rethrow(err);
   }

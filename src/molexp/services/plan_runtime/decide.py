@@ -133,6 +133,7 @@ def decide_plan_review(
     from molexp.harness import FileApprovalStore, JsonlEventLog
     from molexp.harness.policy.event_log import ApprovalEventRecorder
     from molexp.harness.store.file_artifact_store import FileArtifactStore
+    from molexp.harness.store.paths import harness_artifact_root
     from molexp.services.approval_notify import notify_approvals_changed
 
     if isinstance(decision, ReviewDecision):
@@ -144,7 +145,7 @@ def decide_plan_review(
         review = review.model_copy(update={"decided_by": decided_by})
 
     # Persist structured decision for StepAuditLoop re-entry (esp. revise).
-    artifacts = FileArtifactStore(root=Path(str(run.run_dir)) / "artifacts")
+    artifacts = FileArtifactStore(root=harness_artifact_root(run.run_dir))
     artifacts.put_json(
         kind="review_decision",
         obj=review.model_dump(mode="json"),

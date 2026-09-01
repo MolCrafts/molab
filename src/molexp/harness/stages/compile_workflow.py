@@ -2,7 +2,7 @@
 
 Runs the materialized ``run_workflow.py --compile-only`` through the
 **injected** :class:`Executor` in the run's ``generated/`` directory. The
-compile-only driver branch does ``build_workflow().compile()`` (proving the
+compile-only driver branch does ``WorkflowCompiler().compile(build_workflow())`` (proving the
 generated source compiles and the DAG builds) and confirms the embedded
 params satisfy the root inputs — but executes **no** task bodies, so no real
 compute runs. The real ``molexp.workflow`` engine loads only inside that

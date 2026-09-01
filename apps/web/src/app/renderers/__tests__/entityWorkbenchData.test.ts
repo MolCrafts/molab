@@ -2,6 +2,8 @@ import { describe, expect, it } from "@rstest/core";
 import {
   buildExperimentWorkbenchData,
   buildProjectWorkbenchData,
+  experimentRunCompleteness,
+  projectSnapshotCompleteness,
 } from "@/app/renderers/entityWorkbenchData";
 import type {
   ExperimentSummary,
@@ -124,6 +126,47 @@ describe("buildProjectWorkbenchData", () => {
     expect(reasons).toContainEqual(["series", "running"]);
     expect(reasons).toContainEqual(["empty", "missing-workflow"]);
     expect(reasons).toContainEqual(["empty", "empty"]);
+  });
+});
+
+describe("lazy snapshot completeness", () => {
+  it("keeps authoritative totals separate from partially loaded run statuses", () => {
+    const experiments = [
+      { ...snapshot.experiments[0], runCount: 3 },
+      { ...snapshot.experiments[1], runCount: 0 },
+    ];
+    const partial = projectSnapshotCompleteness(
+      { ...project, experimentCount: 2 },
+      experiments,
+      snapshot.runs.slice(0, 1),
+    );
+
+    expect(partial).toEqual({
+      experimentCount: 2,
+      runCount: 3,
+      experimentsComplete: true,
+      runsComplete: false,
+    });
+  });
+
+  it("treats missing server totals as unknown instead of zero", () => {
+    expect(projectSnapshotCompleteness(project, snapshot.experiments, snapshot.runs)).toEqual({
+      experimentCount: null,
+      runCount: null,
+      experimentsComplete: false,
+      runsComplete: false,
+    });
+    expect(experimentRunCompleteness(snapshot.experiments[1], 0)).toEqual({
+      runCount: null,
+      runsComplete: false,
+    });
+  });
+
+  it("marks an experiment complete only after all reported runs are loaded", () => {
+    const summary = { ...snapshot.experiments[0], runCount: 3 };
+    expect(experimentRunCompleteness(summary, 2).runsComplete).toBe(false);
+    expect(experimentRunCompleteness(summary, 3).runsComplete).toBe(true);
+    expect(experimentRunCompleteness(summary, 4).runsComplete).toBe(false);
   });
 });
 

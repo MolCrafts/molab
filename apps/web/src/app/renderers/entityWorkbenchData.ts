@@ -2,9 +2,10 @@ import { STATUS_GROUPS } from "@/app/runs/statusGroups";
 import type {
   AssetSummary,
   ExperimentSummary,
+  ProjectSummary,
+  RendererSnapshot,
   RunSummary,
   WorkflowSummary,
-  WorkspaceSnapshot,
 } from "@/app/types";
 import type { TaskGraphJson } from "@/components/workflow/task-graph-ir";
 import { countRunStatuses, type RunStatusCounts } from "./dashboardData";
@@ -37,6 +38,20 @@ export interface ProjectWorkbenchData {
   attention: AttentionItem[];
   recentRuns: RunSummary[];
   assetCount: number;
+}
+
+export interface ProjectSnapshotCompleteness {
+  /** Authoritative server total, or null when the shallow summary did not report it. */
+  experimentCount: number | null;
+  /** Sum of authoritative per-experiment totals, or null when any child total is unknown. */
+  runCount: number | null;
+  experimentsComplete: boolean;
+  runsComplete: boolean;
+}
+
+export interface ExperimentRunCompleteness {
+  runCount: number | null;
+  runsComplete: boolean;
 }
 
 export interface ParameterAxisSummary {
@@ -77,6 +92,43 @@ export const partitionParameterAxes = (
 const latestRunTime = (run: RunSummary): number =>
   Date.parse(run.finishedAt ?? run.startedAt ?? run.updatedAt ?? "") || 0;
 
+const reportedCount = (value: number | null | undefined): number | null =>
+  typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
+
+/** Distinguish authoritative totals from the lazy client snapshot. Consumers
+ * must gate status distributions and rates on the corresponding complete flag. */
+export const projectSnapshotCompleteness = (
+  project: Pick<ProjectSummary, "experimentCount">,
+  experiments: Pick<ExperimentSummary, "runCount">[],
+  runs: Pick<RunSummary, "id">[],
+): ProjectSnapshotCompleteness => {
+  const experimentCount = reportedCount(project.experimentCount);
+  const experimentsComplete = experimentCount !== null && experiments.length === experimentCount;
+  const childRunCounts = experiments.map((experiment) => reportedCount(experiment.runCount));
+  const runCount =
+    experimentsComplete && childRunCounts.every((count) => count !== null)
+      ? childRunCounts.reduce<number>((total, count) => total + (count ?? 0), 0)
+      : null;
+
+  return {
+    experimentCount,
+    runCount,
+    experimentsComplete,
+    runsComplete: runCount !== null && runs.length === runCount,
+  };
+};
+
+export const experimentRunCompleteness = (
+  experiment: Pick<ExperimentSummary, "runCount">,
+  loadedRunCount: number,
+): ExperimentRunCompleteness => {
+  const runCount = reportedCount(experiment.runCount);
+  return {
+    runCount,
+    runsComplete: runCount !== null && loadedRunCount === runCount,
+  };
+};
+
 const stringifyAxisValue = (value: unknown): string => {
   if (Array.isArray(value)) return value.map(stringifyAxisValue).join(", ");
   if (value === null || value === undefined) return "-";
@@ -105,7 +157,7 @@ export const summarizeWorkflowGraph = (
 
 export const buildProjectWorkbenchData = (
   projectId: string,
-  snapshot: WorkspaceSnapshot,
+  snapshot: Pick<RendererSnapshot, "experiments" | "runs" | "workflows" | "assets">,
   projectAssets: Pick<AssetSummary, "id">[] = snapshot.assets.filter(
     (asset) => asset.projectId === projectId,
   ),

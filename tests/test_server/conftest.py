@@ -8,6 +8,7 @@ from molexp.server.dependencies import get_workspace
 from molexp.workflow import (
     Task,
     TaskContext,
+    Workflow,
     WorkflowCompiler,
     default_binding_registry,
 )
@@ -59,7 +60,7 @@ class _NoopTask(Task):
 
 # Module-level Workflow — explicitly named at module scope so
 # ``resolve_spec_entrypoint`` returns ``<this-file>:_NOOP_SPEC``.
-_NOOP_SPEC = WorkflowCompiler(name="noop").add(_NoopTask(), name="step").compile()
+_NOOP_SPEC = WorkflowCompiler().compile(Workflow(name="noop").add(_NoopTask(), name="step"))
 
 
 @pytest.fixture

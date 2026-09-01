@@ -33,7 +33,7 @@ export function ComputeTargetsPanel(): JSX.Element {
   const listQuery = useQuery({
     queryKey: settingsKeys.computeTargets(),
     queryFn: async () => {
-      const res = await TargetsService.listTargetsEndpointApiTargetsGet();
+      const res = await TargetsService.listTargetsEndpoint();
       return res.targets;
     },
   });
@@ -44,7 +44,7 @@ export function ComputeTargetsPanel(): JSX.Element {
   };
 
   const deleteMutation = useMutation({
-    mutationFn: (name: string) => TargetsService.deleteTargetEndpointApiTargetsNameDelete(name),
+    mutationFn: (name: string) => TargetsService.deleteTargetEndpoint(name),
     onSuccess: invalidate,
   });
 
@@ -66,7 +66,7 @@ export function ComputeTargetsPanel(): JSX.Element {
     setActionError(null);
     setTestResult(null);
     try {
-      const res = await TargetsService.testTargetEndpointApiTargetsNameTestPost(name);
+      const res = await TargetsService.testTargetEndpoint(name);
       setTestResult(res);
     } catch (err) {
       setActionError(err instanceof Error ? err.message : "Failed to test target");

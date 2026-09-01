@@ -18,11 +18,11 @@ import pytest
 from molexp.workflow import (
     Caching,
     TaskContext,
+    Workflow,
     WorkflowCompiler,
     WorkflowRuntime,
-    fresh_requested,
-    request_fresh_execution,
 )
+from molexp.workflow._engine.runtime import fresh_requested, request_fresh_execution
 from molexp.workspace import Workspace
 
 _COUNTERS: dict[str, int] = {}
@@ -52,14 +52,14 @@ def _new_run(workspace: Workspace, name: str):
 
 
 def _counted_workflow():
-    wf = WorkflowCompiler(name="counted-fresh")
+    wf = Workflow(name="counted-fresh")
 
     @wf.task
     async def step(ctx: TaskContext) -> int:
         _bump("step")
         return 42
 
-    return wf.compile()
+    return WorkflowCompiler().compile(wf)
 
 
 class TestBypassCache:

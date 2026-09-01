@@ -412,11 +412,11 @@ export function seed(): void {
             id: "asset-001",
             name: "qm9",
             kind: "data",
-            scope_kind: "workspace",
-            scope_ids: [],
+            scopeKind: "workspace",
+            scopeIds: [],
             path: "data_assets/asset-001/payload",
-            created_at: isoAt(-2000),
-            updated_at: isoAt(-2000),
+            createdAt: isoAt(-2000),
+            updatedAt: isoAt(-2000),
             producer: null,
             tags: { source: "s3://datasets/qm9", stage: "training" },
             extra: {
@@ -425,18 +425,18 @@ export function seed(): void {
                 source_path: "s3://datasets/qm9",
                 import_action: "copy",
             },
-            content_hash:
+            contentHash:
                 "sha256:9c1185a5c5e9fc54612808977ee8f548b2258d31ddadef7c5e9fc54612808977",
         },
         {
             id: "asset-002",
             name: "ligands",
             kind: "data",
-            scope_kind: "project",
-            scope_ids: ["catalyst-search"],
+            scopeKind: "project",
+            scopeIds: ["catalyst-search"],
             path: "data_assets/asset-002/payload",
-            created_at: isoAt(-1600),
-            updated_at: isoAt(-1600),
+            createdAt: isoAt(-1600),
+            updatedAt: isoAt(-1600),
             producer: null,
             tags: { source: "internal", stage: "screening" },
             extra: {
@@ -450,14 +450,14 @@ export function seed(): void {
             id: "asset-003",
             name: "alphafold.pt",
             kind: "artifact",
-            scope_kind: "run",
-            scope_ids: ["protein-folding", "exp-001", "run-001"],
+            scopeKind: "run",
+            scopeIds: ["protein-folding", "exp-001", "run-001"],
             path: "artifacts/alphafold.pt",
-            created_at: isoAt(-100),
-            updated_at: isoAt(-100),
+            createdAt: isoAt(-100),
+            updatedAt: isoAt(-100),
             producer: {
                 run_id: "run-001",
-                execution_id: "exec-001",
+                executionId: "exec-001",
                 task_id: "train",
                 inputs: ["asset-001"],
             },
@@ -466,21 +466,21 @@ export function seed(): void {
                 mime: "application/octet-stream",
                 size: 20971520,
             },
-            content_hash:
+            contentHash:
                 "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
         },
         {
             id: "asset-004",
             name: "run",
             kind: "log",
-            scope_kind: "run",
-            scope_ids: ["protein-folding", "exp-001", "run-001"],
+            scopeKind: "run",
+            scopeIds: ["protein-folding", "exp-001", "run-001"],
             path: "logs/run.log",
-            created_at: isoAt(-120),
-            updated_at: isoAt(-60),
+            createdAt: isoAt(-120),
+            updatedAt: isoAt(-60),
             producer: {
                 run_id: "run-001",
-                execution_id: "exec-001",
+                executionId: "exec-001",
                 task_id: null,
             },
             tags: {},
@@ -493,14 +493,14 @@ export function seed(): void {
             id: "asset-005",
             name: "epoch1",
             kind: "checkpoint",
-            scope_kind: "run",
-            scope_ids: ["protein-folding", "exp-001", "run-001"],
+            scopeKind: "run",
+            scopeIds: ["protein-folding", "exp-001", "run-001"],
             path: ".ckpt/ckpt_abc.json",
-            created_at: isoAt(-80),
-            updated_at: isoAt(-80),
+            createdAt: isoAt(-80),
+            updatedAt: isoAt(-80),
             producer: {
                 run_id: "run-001",
-                execution_id: "exec-001",
+                executionId: "exec-001",
                 task_id: "train",
                 inputs: ["asset-001", "asset-003"],
             },
@@ -1155,12 +1155,12 @@ export function getAllAssets(): ApiAssetResponse[] {
  */
 export function getAssetsByProject(projectId: string): ApiAssetResponse[] {
     return Array.from(db.assets.values()).filter((asset) => {
-        if (asset.scope_kind === "project" && asset.scope_ids[0] === projectId) {
+        if (asset.scopeKind === "project" && asset.scopeIds[0] === projectId) {
             return true;
         }
         if (
-            (asset.scope_kind === "experiment" || asset.scope_kind === "run") &&
-            asset.scope_ids[0] === projectId
+            (asset.scopeKind === "experiment" || asset.scopeKind === "run") &&
+            asset.scopeIds[0] === projectId
         ) {
             return true;
         }

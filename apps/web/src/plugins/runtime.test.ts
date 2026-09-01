@@ -3,7 +3,7 @@
  *
  * The loader must:
  *
- *   - call `PluginsService.listPluginsApiPluginsGet()` to discover
+ *   - call `PluginsService.listPlugins()` to discover
  *     descriptors of shape `{id, manifestUrl, entryUrl}`;
  *   - for each descriptor, fetch its `manifestUrl` via
  *     `state.fetchManifest`, validate the body against
@@ -14,9 +14,8 @@
  *   - isolate per-plugin failures (fetch, schema, version, import,
  *     malformed module) so other plugins keep loading.
  *
- * The built-in lazy compat table is gone — internal plugins
- * (`core`, `metrics`, `molplot`, `molq`, `molvis`, `tensorboard`) are
- * statically imported by `App.tsx`, not routed through `discoverAndLoad`.
+ * Built-in plugins use a separate descriptor + dynamic-loader path; these
+ * cases cover only server-discovered third-party bundles.
  */
 
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
@@ -69,7 +68,7 @@ describe("plugin loader (manifest-based)", () => {
     dynamicImportSpy.mockResolvedValueOnce({
       default: { id: "alpha", register: registerSpy },
     });
-    rs.spyOn(PluginsService, "listPluginsApiPluginsGet").mockResolvedValueOnce({
+    rs.spyOn(PluginsService, "listPlugins").mockResolvedValueOnce({
       plugins: [makeDescriptor("alpha")],
       total: 1,
     } as never);
@@ -89,7 +88,7 @@ describe("plugin loader (manifest-based)", () => {
     dynamicImportSpy.mockResolvedValueOnce({
       default: { id: "alpha", register: registerSpy },
     });
-    rs.spyOn(PluginsService, "listPluginsApiPluginsGet").mockResolvedValueOnce({
+    rs.spyOn(PluginsService, "listPlugins").mockResolvedValueOnce({
       plugins: [makeDescriptor("alpha")],
       total: 1,
     } as never);
@@ -109,7 +108,7 @@ describe("plugin loader (manifest-based)", () => {
       ...makeManifest("alpha"),
       api_version: "999" as never,
     });
-    rs.spyOn(PluginsService, "listPluginsApiPluginsGet").mockResolvedValueOnce({
+    rs.spyOn(PluginsService, "listPlugins").mockResolvedValueOnce({
       plugins: [makeDescriptor("alpha")],
       total: 1,
     } as never);
@@ -132,7 +131,7 @@ describe("plugin loader (manifest-based)", () => {
     dynamicImportSpy.mockResolvedValueOnce({
       default: { id: "good", register: registerSpy },
     });
-    rs.spyOn(PluginsService, "listPluginsApiPluginsGet").mockResolvedValueOnce({
+    rs.spyOn(PluginsService, "listPlugins").mockResolvedValueOnce({
       plugins: [makeDescriptor("broken"), makeDescriptor("good")],
       total: 2,
     } as never);
@@ -147,7 +146,7 @@ describe("plugin loader (manifest-based)", () => {
   it("survives a failing dynamic import", async () => {
     fetchManifestSpy.mockResolvedValueOnce(makeManifest("broken"));
     dynamicImportSpy.mockRejectedValueOnce(new Error("module gone"));
-    rs.spyOn(PluginsService, "listPluginsApiPluginsGet").mockResolvedValueOnce({
+    rs.spyOn(PluginsService, "listPlugins").mockResolvedValueOnce({
       plugins: [makeDescriptor("broken")],
       total: 1,
     } as never);
@@ -158,9 +157,7 @@ describe("plugin loader (manifest-based)", () => {
   });
 
   it("survives a failing /api/plugins fetch", async () => {
-    rs.spyOn(PluginsService, "listPluginsApiPluginsGet").mockRejectedValueOnce(
-      new Error("server down"),
-    );
+    rs.spyOn(PluginsService, "listPlugins").mockRejectedValueOnce(new Error("server down"));
 
     await expect(discoverAndLoad(state)).resolves.not.toThrow();
     expect(fetchManifestSpy).not.toHaveBeenCalled();
@@ -170,7 +167,7 @@ describe("plugin loader (manifest-based)", () => {
   it("ignores remote modules whose default export is malformed", async () => {
     fetchManifestSpy.mockResolvedValueOnce(makeManifest("malformed"));
     dynamicImportSpy.mockResolvedValueOnce({ default: { foo: "bar" } });
-    rs.spyOn(PluginsService, "listPluginsApiPluginsGet").mockResolvedValueOnce({
+    rs.spyOn(PluginsService, "listPlugins").mockResolvedValueOnce({
       plugins: [makeDescriptor("malformed")],
       total: 1,
     } as never);
@@ -188,7 +185,7 @@ describe("plugin loader (manifest-based)", () => {
       name: "Broken",
       api_version: "1",
     } as never);
-    rs.spyOn(PluginsService, "listPluginsApiPluginsGet").mockResolvedValueOnce({
+    rs.spyOn(PluginsService, "listPlugins").mockResolvedValueOnce({
       plugins: [makeDescriptor("broken")],
       total: 1,
     } as never);

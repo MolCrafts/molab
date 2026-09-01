@@ -12,10 +12,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from molexp.workspace import harvest_run
+from molexp.workspace.knowledge import FailureAnalysis
 
 if TYPE_CHECKING:
-    from molexp.workspace.knowledge_item import KnowledgeItem
+    from molexp.workspace.knowledge import Knowledge
     from molexp.workspace.run import Run
 
 __all__ = ["analyze_run_failure", "build_failure_narrative"]
@@ -76,8 +76,8 @@ def analyze_run_failure(
     narrative: str | None = None,
     force: bool = False,
     name: str | None = None,
-) -> KnowledgeItem:
-    """Write/update a FailureAnalysis KnowledgeItem for a failed *run*.
+) -> Knowledge:
+    """Write/update a FailureAnalysis for a failed *run*.
 
     Args:
         run: Workspace Run to interpret.
@@ -87,7 +87,7 @@ def analyze_run_failure(
         name: Explicit KnowledgeItem name; default ``failure-analysis-{run.id}``.
 
     Returns:
-        The written :class:`~molexp.workspace.knowledge_item.KnowledgeItem`.
+        The written :class:`~molexp.workspace.knowledge.Knowledge`.
 
     Raises:
         ValueError: Status domain refusal or empty effective narrative.
@@ -103,9 +103,8 @@ def analyze_run_failure(
 
     text = (narrative or "").strip() or build_failure_narrative(run)
     item_name = name or f"{_DEFAULT_NAME_PREFIX}-{run.id}"
-    return harvest_run(
-        run,
-        kind="FailureAnalysis",
+    return run.harvest(
+        cls=FailureAnalysis,
         narrative=text,
         created_by=created_by,
         name=item_name,

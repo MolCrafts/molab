@@ -2,6 +2,10 @@
 
 Contributor-facing docs for working on `molexp` internals.
 
+## UI
+
+- [Serve and rebuild the UI](ui-serve.md) — daily `molexp serve --dev`; bundled preview with `npm run build:web`; wheel only with `-C build-web=true`
+
 ## Internals
 
 - [Compiler](compiler.md) — DSL → `CompiledWorkflow` → `ExecutionPlan` lowering + structural engine, identity, caching

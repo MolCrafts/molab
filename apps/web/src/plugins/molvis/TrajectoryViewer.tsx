@@ -1,8 +1,15 @@
 import { useEffect, useRef, useState } from "react";
-import { workspaceApi } from "@/app/state/api";
+import { runsApi } from "@/api";
 import { cn } from "@/lib/utils";
 import type { DiscoveredFile } from "@/plugins/types";
+import {
+  collectZarrStore,
+  runWorkspaceRelPath,
+  scopedZarrSource,
+  workspaceZarrSource,
+} from "./host-zarr";
 import { loadMolvisCore } from "./loadMolvisCore";
+import { isMolvisZarr, zarrStoreRoot } from "./openable";
 
 interface TrajectoryViewerProps {
   projectId: string;
@@ -46,9 +53,13 @@ export const TrajectoryViewer = ({
     let cancelled = false;
     setState({ kind: "loading" });
 
+    const fileName = file.name;
+    const fileRelPath = file.relPath;
+    const zarrFile = { name: fileName, relPath: fileRelPath };
+
     const run = async (): Promise<void> => {
       try {
-        const { mountMolvis, loadFileContent } = await loadMolvisCore();
+        const { mountMolvis, loadFileContent, loadZarrSource } = await loadMolvisCore();
         if (cancelled) return;
 
         const app = mountMolvis(container) as unknown as MolvisHandle;
@@ -61,19 +72,34 @@ export const TrajectoryViewer = ({
         }
         if (cancelled) return;
 
-        const response = await workspaceApi.getRunFileText(
-          projectId,
-          experimentId,
-          runId,
-          file.relPath,
-        );
-        if (cancelled) return;
-
-        await loadFileContent(
-          app as unknown as Parameters<typeof loadFileContent>[0],
-          response.content,
-          file.name,
-        );
+        const molvisApp = app as unknown as Parameters<typeof loadFileContent>[0];
+        if (isMolvisZarr(zarrFile)) {
+          const storeRoot = zarrStoreRoot(fileRelPath);
+          const source = scopedZarrSource(
+            workspaceZarrSource(runWorkspaceRelPath(projectId, experimentId, runId)),
+            storeRoot,
+          );
+          const storeName = storeRoot.split("/").pop() || fileName;
+          if (loadZarrSource) {
+            await loadZarrSource(molvisApp, source, storeName);
+          } else {
+            const files = await collectZarrStore(source);
+            await loadFileContent(molvisApp, files, storeName);
+          }
+        } else {
+          const response = await runsApi.getRunFileText(
+            projectId,
+            experimentId,
+            runId,
+            fileRelPath,
+          );
+          if (cancelled) return;
+          const content = response.content;
+          if (typeof content !== "string" || content.length === 0) {
+            throw new Error(`Empty file: ${fileRelPath}`);
+          }
+          await loadFileContent(molvisApp, content, fileName);
+        }
         if (cancelled) return;
 
         setState({ kind: "ready" });

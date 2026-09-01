@@ -16,7 +16,8 @@ import sys
 
 import pytest
 
-from molexp.services.plan_runtime import PlanPreflightError, preflight_plan_router
+from molexp.services.plan_runtime import PlanPreflightError
+from molexp.services.plan_runtime.gateway import preflight_plan_router
 
 
 class _BlockPydanticAI(importlib.abc.MetaPathFinder):

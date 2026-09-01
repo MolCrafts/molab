@@ -34,7 +34,7 @@ from .assets import (
 )
 from .assets.base import AssetKind
 from .file_store import FileStore
-from .metrics import MetricsWriter
+from .metrics_seam import MetricsSink, create_metrics_writer
 from .utils import compute_content_hash, generate_asset_id
 
 if TYPE_CHECKING:
@@ -61,7 +61,7 @@ class RunAssets:
         self._manifest: AssetManifest | None = None
         self._log: LogAccessor | None = None
         self._checkpoint: CheckpointAccessor | None = None
-        self._metrics: MetricsWriter | None = None
+        self._metrics: MetricsSink | None = None
 
     def _exec_rel(self) -> Path:
         execution_id = self._get_execution_id()
@@ -80,7 +80,7 @@ class RunAssets:
         exec_dir = self._execution_dir()
         exec_dir.mkdir(parents=True, exist_ok=True)
         rel = self._exec_rel()
-        self._manifest = AssetManifest(exec_dir)
+        self._manifest = AssetManifest(exec_dir, fs=self._run._disk())
         self._log = LogAccessor(
             self._run_dir,
             self._scope,
@@ -90,11 +90,16 @@ class RunAssets:
             files=self.files,
         )
         self._checkpoint = CheckpointAccessor(
-            self._run_dir, self._scope, self._manifest, self._producer, files=self.files
+            self._run_dir,
+            self._scope,
+            self._manifest,
+            self._producer,
+            files=self.files,
+            execution_id_provider=self._get_execution_id,
         )
-        self._metrics = MetricsWriter(
+        self._metrics = create_metrics_writer(
             exec_dir,
-            append=lambda name, line: self.files.append(rel / "artifacts" / name, line),
+            lambda name, line: self.files.append(rel / "artifacts" / name, line),
         )
 
     @property
@@ -110,7 +115,7 @@ class RunAssets:
         return self._checkpoint
 
     @property
-    def metrics(self) -> MetricsWriter:
+    def metrics(self) -> MetricsSink:
         self._bind()
         assert self._metrics is not None
         return self._metrics

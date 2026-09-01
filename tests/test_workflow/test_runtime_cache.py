@@ -17,6 +17,7 @@ from molexp.workflow import (
     Caching,
     Task,
     TaskContext,
+    Workflow,
     WorkflowCompiler,
     WorkflowRuntime,
 )
@@ -82,14 +83,14 @@ class TestRuntimeCaching:
     async def test_second_run_hits_cache_and_serves_output_without_recompute(
         self, workspace: Workspace
     ) -> None:
-        wf = WorkflowCompiler(name="counted")
+        wf = Workflow(name="counted")
 
         @wf.task
         async def step(ctx: TaskContext) -> int:
             _bump("step")
             return 42
 
-        compiled = wf.compile()
+        compiled = WorkflowCompiler().compile(wf)
         cache = Caching(store=workspace.cache.as_cache_store())
 
         run1 = _new_run(workspace, "run1")
@@ -105,10 +106,30 @@ class TestRuntimeCaching:
         assert r2.outputs["step"] == 42
         assert _COUNTERS["step"] == 1
 
+    async def test_auto_cache_from_run_context_writes_under_run_cache(
+        self, workspace: Workspace
+    ) -> None:
+        wf = Workflow(name="auto-cache")
+
+        @wf.task
+        async def step(ctx: TaskContext) -> int:
+            _bump("auto")
+            return 7
+
+        compiled = WorkflowCompiler().compile(wf)
+        run = _new_run(workspace, "auto")
+        with run.start() as ctx:
+            result = await WorkflowRuntime().execute(compiled, run_context=ctx)
+        assert result.outputs["step"] == 7
+        run_cache = Path(run.run_dir) / "cache"
+        assert run_cache.is_dir()
+        assert list(run_cache.glob("*.json"))
+        assert not (Path(workspace.root) / "cache").exists()
+
     async def test_artifact_reregistered_on_hit_without_recompute(
         self, workspace: Workspace
     ) -> None:
-        wf = WorkflowCompiler(name="artifact-producer")
+        wf = Workflow(name="artifact-producer")
 
         @wf.task
         async def produce(ctx: TaskContext) -> str:
@@ -116,7 +137,7 @@ class TestRuntimeCaching:
             ctx.register_artifact("produced", name="produce.txt")
             return "produced"
 
-        compiled = wf.compile()
+        compiled = WorkflowCompiler().compile(wf)
         cache = Caching(store=workspace.cache.as_cache_store())
 
         run1 = _new_run(workspace, "art1")
@@ -154,7 +175,9 @@ class TestRuntimeCaching:
         cache = Caching(store=workspace.cache.as_cache_store())
 
         def _compiled(factor: int):
-            return WorkflowCompiler(name="cfg").add(Compute(factor), name="compute").compile()
+            return WorkflowCompiler().compile(
+                Workflow(name="cfg").add(Compute(factor), name="compute")
+            )
 
         run1 = _new_run(workspace, "cfg1")
         with run1.start() as ctx1:
@@ -176,28 +199,28 @@ class TestRuntimeCaching:
     async def test_cache_none_disables_caching(self, tmp_path: Path) -> None:
         # No workspace run_context → nothing to auto-derive a cache from, and
         # cache=None (default) → caching off, identical to pre-spec behaviour.
-        wf = WorkflowCompiler(name="no-cache")
+        wf = Workflow(name="no-cache")
 
         @wf.task
         async def step(ctx: TaskContext) -> int:
             _bump("step")
             return 1
 
-        compiled = wf.compile()
+        compiled = WorkflowCompiler().compile(wf)
 
         await WorkflowRuntime().execute(compiled, run_dir=tmp_path / "nc1")
         await WorkflowRuntime().execute(compiled, run_dir=tmp_path / "nc2")
         assert _COUNTERS["step"] == 2
 
     async def test_actor_is_never_cached(self, workspace: Workspace) -> None:
-        wf = WorkflowCompiler(name="actor-wf")
+        wf = Workflow(name="actor-wf")
 
         @wf.actor
         async def streamer(ctx: TaskContext):
             _bump("streamer")
             yield "chunk"
 
-        compiled = wf.compile()
+        compiled = WorkflowCompiler().compile(wf)
         cache = Caching(store=workspace.cache.as_cache_store())
 
         run1 = _new_run(workspace, "act1")
@@ -220,7 +243,7 @@ class TestRuntimeCaching:
         warned: list[str] = []
         monkeypatch.setattr(node_cache.logger, "warning", lambda msg: warned.append(str(msg)))
 
-        wf = WorkflowCompiler(name="degraded-cache")
+        wf = Workflow(name="degraded-cache")
 
         @wf.task
         async def first(ctx: TaskContext) -> int:
@@ -232,7 +255,7 @@ class TestRuntimeCaching:
             _bump("second")
             return first + 1
 
-        compiled = wf.compile()
+        compiled = WorkflowCompiler().compile(wf)
         cache = Caching(store=_FailingPutStore())
 
         result = await WorkflowRuntime().execute(compiled, cache=cache)

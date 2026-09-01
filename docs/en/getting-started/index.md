@@ -12,4 +12,4 @@ This section is the practical path. It is organized around the order most people
 
 ## When you're ready to go deeper
 
-Once you can read a script that calls `wf.compile()` and `run.execute(wf)`, the [Concepts](../concept/index.md) section will firm up the mental model, and the [Guide](../guide/index.md) section covers detailed topics.
+Once you can read a script that calls `WorkflowCompiler().compile(wf)` and `run.execute(wf)`, the [Concepts](../concept/index.md) section will firm up the mental model, and the [Guide](../guide/index.md) section covers detailed topics.

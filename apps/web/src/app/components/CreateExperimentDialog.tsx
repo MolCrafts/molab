@@ -1,10 +1,10 @@
 import { Plus } from "lucide-react";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useState } from "react";
+import { experimentsApi } from "@/api";
 import type { TargetResponse } from "@/api/generated/models/TargetResponse";
 import { TargetsService } from "@/api/generated/services/TargetsService";
 import { AddTargetDialog } from "@/app/settings/AddTargetDialog";
-import { workspaceApi } from "@/app/state/api";
 import {
   Dialog,
   DialogContent,
@@ -58,7 +58,7 @@ export function CreateExperimentDialog({
 
   const refreshTargets = useCallback(async () => {
     try {
-      const res = await TargetsService.listTargetsEndpointApiTargetsGet();
+      const res = await TargetsService.listTargetsEndpoint();
       setTargets(res.targets);
     } catch {
       setTargets([]);
@@ -76,11 +76,11 @@ export function CreateExperimentDialog({
     setError(null);
 
     try {
-      await workspaceApi.createExperiment(projectId, {
+      await experimentsApi.createExperiment(projectId, {
         name,
-        workflow_source: workflow.trim() ? workflow : undefined,
+        workflowSource: workflow.trim() ? workflow : undefined,
         description,
-        parameter_space: JSON.parse(parameterSpace),
+        parameterSpace: JSON.parse(parameterSpace),
         defaultTarget: defaultTarget === NO_TARGET_VALUE ? null : defaultTarget,
       });
 

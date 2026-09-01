@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     from molexp.workspace.edges import EdgeRole
     from molexp.workspace.experiment import Experiment
     from molexp.workspace.folder import Folder
-    from molexp.workspace.knowledge_item import KnowledgeItem
+    from molexp.workspace.knowledge import Knowledge
     from molexp.workspace.run import Run
 
 __all__ = [
@@ -39,6 +39,7 @@ __all__ = [
     "write_experiment_record",
     "write_failure_analysis_record",
     "write_finding_record",
+    "write_plan_book",
     "write_plan_task_status",
     "write_session_events_record",
 ]
@@ -456,8 +457,9 @@ def _failure_detail(run: Run, _error: str) -> str | None:
 
 def _read_artifact_text(run: Run, kind: str) -> str | None:
     from molexp.harness.store.file_artifact_store import FileArtifactStore
+    from molexp.harness.store.paths import harness_artifact_root
 
-    root = Path(run.run_dir) / "artifacts"
+    root = harness_artifact_root(run.run_dir)
     store = FileArtifactStore(root=root)
     ref = store.latest_by_kind(kind)
     if ref is None:
@@ -486,7 +488,9 @@ def _infer_failure_stage(kinds: set[str]) -> str | None:
 
 
 def _artifact_kinds(run: Run) -> list[str]:
-    index_dir = Path(run.run_dir) / "artifacts" / "_index"
+    from molexp.harness.store.paths import harness_artifact_root
+
+    index_dir = harness_artifact_root(run.run_dir) / "_index"
     if not index_dir.is_dir():
         return []
     return sorted(p.stem for p in index_dir.glob("*.json"))
@@ -556,7 +560,7 @@ def emit_artifact_stage_events(
 
 # ── knowledge experiment-record note ─────────────────────────────────────────
 # Disk write + knowledge.created + guarded cite all go through
-# ``molexp.workspace.write_knowledge_item`` (agent-record-export-02). Plan-only
+# ``molexp.workspace.write_knowledge`` (agent-record-export-02). Plan-only
 # rendering stays here.
 
 
@@ -566,15 +570,15 @@ def write_experiment_record(
     experiment: Experiment,
     draft: str,
     model: str,
-) -> KnowledgeItem:
-    """Write the Decision-kind experiment record via ``write_knowledge_item``.
+) -> Knowledge:
+    """Write the Decision experiment record via ``write_knowledge``.
 
     Raises when no ``experiment_report`` artifact exists — the record renders
     from it, and a missing report is the caller's signal to skip this writer
     (checked via :func:`has_artifact`), never a silent no-op.
     """
-    from molexp.workspace.knowledge_item import SourceRef
-    from molexp.workspace.knowledge_write import write_knowledge_item
+    from molexp.workspace.knowledge import Decision, SourceRef
+    from molexp.workspace.knowledge_write import write_knowledge
 
     report = _read_artifact_json(run, "experiment_report")
     if report is None:
@@ -601,16 +605,15 @@ def write_experiment_record(
     report_ref = _artifact_ref_id(run, "experiment_report")
     if report_ref is not None:
         sources.append(SourceRef(kind="artifact", ref=report_ref))
-    return write_knowledge_item(
+    return write_knowledge(
         experiment,
         name=item_name,
-        kind="Decision",
+        cls=Decision,
         sources=sources,
         created_by=f"PlanOrchestrator/{model}",
         body=body,
         cite=[(run, "derived_from")],
         title=title,
-        actor="plan-record",
     )
 
 
@@ -620,7 +623,7 @@ def write_finding_record(
     experiment: Experiment,
     draft: str,
     model: str,
-) -> KnowledgeItem:
+) -> Knowledge:
     """Write the Finding from the execute tail's ``final_report``.
 
     Raises when no ``final_report`` exists (caller gates via
@@ -629,8 +632,8 @@ def write_finding_record(
     ``references`` edge connects the Finding to the Decision record when
     that record exists — plan → outcome stays traversable.
     """
-    from molexp.workspace.knowledge_item import KnowledgeItem, SourceRef
-    from molexp.workspace.knowledge_write import write_knowledge_item
+    from molexp.workspace.knowledge import Finding, Knowledge, SourceRef
+    from molexp.workspace.knowledge_write import write_knowledge
 
     final_report = _read_artifact_json(run, "final_report")
     if final_report is None:
@@ -653,22 +656,21 @@ def write_finding_record(
     cites: list[tuple[Folder, EdgeRole]] = [(run, "derived_from")]
     try:
         decision = experiment.get_folder(
-            f"experiment-record-{experiment.id}-{run.id}", cls=KnowledgeItem
+            f"experiment-record-{experiment.id}-{run.id}", cls=Knowledge
         )
     except Exception:
         decision = None  # no Decision record (its write raced/failed) — Finding stands alone
     if decision is not None:
         cites.append((decision, "references"))
-    return write_knowledge_item(
+    return write_knowledge(
         experiment,
         name=item_name,
-        kind="Finding",
+        cls=Finding,
         sources=sources,
         created_by=f"PlanOrchestrator/{model}",
         body="\n".join(lines).rstrip() + "\n",
         cite=cites,
         title=title,
-        actor="plan-record",
     )
 
 
@@ -679,14 +681,14 @@ def write_failure_analysis_record(
     model: str,
     failure_stage: str | None,
     failure_error: str,
-) -> KnowledgeItem:
+) -> Knowledge:
     """Write the FailureAnalysis for a plan that terminally failed.
 
     Never called for an approval suspension — a suspension is not a failure
     (the callers carve ``ApprovalPendingError`` out before reaching this).
     """
-    from molexp.workspace.knowledge_item import SourceRef
-    from molexp.workspace.knowledge_write import write_knowledge_item
+    from molexp.workspace.knowledge import FailureAnalysis, SourceRef
+    from molexp.workspace.knowledge_write import write_knowledge
 
     item_name = f"failure-{experiment.id}-{run.id}"
     completed = _artifact_kinds(run)
@@ -709,10 +711,10 @@ def write_failure_analysis_record(
         "a validator rejected are regenerated, not reused.",
     ]
     title = f"Failure analysis: plan run {run.id}"
-    return write_knowledge_item(
+    return write_knowledge(
         experiment,
         name=item_name,
-        kind="FailureAnalysis",
+        cls=FailureAnalysis,
         sources=[
             SourceRef(kind="run", ref=run.id),
             SourceRef(kind="experiment", ref=experiment.id),
@@ -721,8 +723,70 @@ def write_failure_analysis_record(
         body="\n".join(lines).rstrip() + "\n",
         cite=[(run, "derived_from")],
         title=title,
-        actor="plan-record",
     )
+
+
+def write_plan_book(
+    *,
+    run: Run,
+    experiment: Experiment,
+    model: str,
+) -> Knowledge:
+    """Land the 12-section plan book as ``experiment.knowledge("plan-book")``.
+
+    Body prefers the ``plan_report`` artifact; falls back to rendering
+    ``experiment_plan``. Never writes under ``run_dir/plan/``.
+    """
+    from molexp.workspace.knowledge import PLAN_BOOK_NAME, Plan, SourceRef
+    from molexp.workspace.knowledge_write import write_knowledge
+
+    body = _plan_book_body(run)
+    if not body.strip():
+        raise ValueError(f"run {run.id} has no plan_report/experiment_plan to land as a plan book")
+    sources = [
+        SourceRef(kind="run", ref=run.id),
+        SourceRef(kind="experiment", ref=experiment.id),
+    ]
+    for kind in ("plan_report", "experiment_plan"):
+        ref_id = _artifact_ref_id(run, kind)
+        if ref_id is not None:
+            sources.append(SourceRef(kind="artifact", ref=ref_id))
+    return write_knowledge(
+        experiment,
+        name=PLAN_BOOK_NAME,
+        cls=Plan,
+        sources=sources,
+        created_by=f"PlanOrchestrator/{model}",
+        body=body,
+        cite=[(run, "derived_from")],
+        title=PLAN_BOOK_NAME,
+    )
+
+
+def _plan_book_body(run: Run) -> str:
+    text = _read_artifact_text(run, "plan_report")
+    if text and text.strip():
+        try:
+            data = json.loads(text)
+        except json.JSONDecodeError:
+            return text
+        if isinstance(data, dict):
+            for key in ("body_md", "markdown", "body", "text"):
+                value = data.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value
+        return text
+    plan = _read_artifact_json(run, "experiment_plan")
+    if plan is None:
+        return ""
+    try:
+        from molexp.harness.plan.document import render_experiment_plan_document
+        from molexp.harness.plan.experiment_plan import ExperimentPlan
+
+        obj = ExperimentPlan.model_validate(plan)
+        return render_experiment_plan_document(obj)
+    except Exception:
+        return json.dumps(plan, indent=2) + "\n"
 
 
 _FINAL_REPORT_FIELDS: list[tuple[str, str]] = [
@@ -763,8 +827,9 @@ def _read_workflow_tasks(experiment: Experiment) -> list[str]:
 def _artifact_ref_id(run: Run, kind: str) -> str | None:
     """The content-addressed id of the run's latest *kind* artifact (or None)."""
     from molexp.harness.store.file_artifact_store import FileArtifactStore
+    from molexp.harness.store.paths import harness_artifact_root
 
-    store = FileArtifactStore(root=Path(run.run_dir) / "artifacts")
+    store = FileArtifactStore(root=harness_artifact_root(run.run_dir))
     ref = store.latest_by_kind(kind)
     return ref.id if ref is not None else None
 
@@ -877,8 +942,9 @@ def _created_at(run: Run) -> str:
 def _read_artifact_json(run: Run, kind: str) -> dict[str, Any] | None:
     """The run's latest *kind* artifact parsed as a JSON object (or None)."""
     from molexp.harness.store.file_artifact_store import FileArtifactStore
+    from molexp.harness.store.paths import harness_artifact_root
 
-    root = Path(run.run_dir) / "artifacts"
+    root = harness_artifact_root(run.run_dir)
     store = FileArtifactStore(root=root)
     ref = store.latest_by_kind(kind)
     if ref is None:

@@ -51,7 +51,7 @@ from .bundle_index import BundleIndex, ConceptIndexEntry, SearchHit, SearchResul
 from .cache import WORKSPACE_CACHE_KIND, CacheFolder
 from .concepts import Note, ReferenceConcept
 from .context import Context
-from .doc_embed import EntitySummary, summarize_entity
+from .doc_embed import EntitySummary
 from .edges import DEFAULT_EDGE_ROLE, Edge, EdgeRole
 from .errors import (
     ConceptNotFoundError,
@@ -74,7 +74,6 @@ from .folder import (
     WORKSPACE_RUN_KIND,
     Folder,
 )
-from .harvest import harvest_run
 from .knowledge import (
     PLAN_BOOK_NAME,
     Assumption,
@@ -91,10 +90,7 @@ from .knowledge import (
     ProtocolNote,
     SourceKind,
     SourceRef,
-    parse_knowledge_class,
 )
-from .knowledge_write import write_knowledge
-from .lifecycle_ops import cancel_run
 from .models import (
     ComputeTarget,
     ErrorInfo,
@@ -108,42 +104,13 @@ from .models import (
 from .note_meta import NoteMeta
 from .param import GridSpace, Params, ParamSpace, UniformSpace  # Params is the sweep-cell model
 from .project import Project
-from .prune import (
-    ExecutionPruneEntry,
-    ExecutionPrunePlan,
-    LivePruneRefusedError,
-    apply_execution_prune,
-    plan_execution_prune,
-)
+from .prune import ExecutionPruneEntry, ExecutionPrunePlan, LivePruneRefusedError
 from .reference_meta import ReferenceMeta
 from .run import RETRYABLE_STATUSES, TERMINAL_STATUSES, Run, RunContext, RunStatus
-from .run_reaper import pid_alive, reap_zombie_run
 from .runset import RunRecord, RunSet, RunSetResult
-from .target import (
-    LocalTarget,
-    RemoteTarget,
-    SessionManager,
-    SSHSession,
-    Target,
-    TargetNotFound,
-    parse_target,
-    resolve_target,
-    target_to_transport,
-)
-from .targets import (
-    LOCAL_TARGET_NAME,
-    add_target,
-    builtin_local_target,
-    effective_targets,
-    get_target,
-    has_target,
-    list_targets,
-    remove_target,
-    resolve_compute_target,
-    target_run_dir,
-    to_transport,
-)
-from .validate import ValidationReport, Violation, validate_workspace
+from .target import LocalTarget, RemoteTarget, SessionManager, SSHSession, Target, TargetNotFound
+from .targets import LOCAL_TARGET_NAME
+from .validate import ValidationReport, Violation
 from .workspace import Workspace
 from .workspace_context import (
     ArtifactRef,
@@ -156,10 +123,9 @@ from .workspace_context import (
     WorkflowRef,
     WorkspaceContext,
     WorkspaceRef,
-    assemble_workspace_context,
 )
-from .wp import WorkspacePaths, cp, ls, mkdir, mv, rm
-from .zotero_concepts import ZoteroItem, read_zotero_items
+from .wp import WorkspacePaths
+from .zotero_concepts import ZoteroItem
 
 __all__ = [
     "DEFAULT_EDGE_ROLE",
@@ -268,36 +234,6 @@ __all__ = [
     "WorkspacePaths",
     "WorkspaceRef",
     "ZoteroItem",
-    "add_target",
-    "apply_execution_prune",
-    "assemble_workspace_context",
     "atomic_write_json",
     "atomic_write_text",
-    "builtin_local_target",
-    "cancel_run",
-    "cp",
-    "effective_targets",
-    "get_target",
-    "harvest_run",
-    "has_target",
-    "list_targets",
-    "ls",
-    "mkdir",
-    "mv",
-    "parse_knowledge_class",
-    "parse_target",
-    "pid_alive",
-    "plan_execution_prune",
-    "read_zotero_items",
-    "reap_zombie_run",
-    "remove_target",
-    "resolve_compute_target",
-    "resolve_target",
-    "rm",
-    "summarize_entity",
-    "target_run_dir",
-    "target_to_transport",
-    "to_transport",
-    "validate_workspace",
-    "write_knowledge",
 ]

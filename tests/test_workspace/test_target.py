@@ -14,13 +14,7 @@ from pathlib import Path
 import pytest
 from molq.transport import LocalTransport, SshTransport
 
-from molexp.workspace import (
-    ComputeTarget,
-    SSHSession,
-    Workspace,
-    add_target,
-    resolve_compute_target,
-)
+from molexp.workspace import ComputeTarget, SSHSession, Workspace
 from molexp.workspace.fs_local import LocalFileSystem
 from molexp.workspace.target import (
     LocalTarget,
@@ -32,6 +26,7 @@ from molexp.workspace.target import (
     resolve_target,
     target_to_filesystem,
 )
+from molexp.workspace.targets import resolve_compute_target
 
 
 @pytest.fixture
@@ -101,15 +96,14 @@ class TestResolveTarget:
 
     def test_at_name_resolves_local_registry_target(self, ws: Workspace, tmp_path: Path) -> None:
         scratch = tmp_path / "scratch"
-        add_target(ws, ComputeTarget(name="box", scratch_root=str(scratch)))
+        ws.add_target(ComputeTarget(name="box", scratch_root=str(scratch)))
         target, transport = resolve_target("@box", ws)
         assert isinstance(target, LocalTarget)
         assert target.path == Path(str(scratch))
         assert isinstance(transport, LocalTransport)
 
     def test_at_name_resolves_remote_registry_target_with_all_fields(self, ws: Workspace) -> None:
-        add_target(
-            ws,
+        ws.add_target(
             ComputeTarget(
                 name="hpc",
                 host="me@cluster.example",
@@ -142,7 +136,7 @@ class TestResolveComputeTarget:
     def test_named_lookup_local_fallback_and_missing_raises(self, ws: Workspace) -> None:
         """The single named-target resolution path: named lookup, the built-in
         ``local`` fallback, and a raw ``KeyError`` on an unknown name."""
-        add_target(ws, ComputeTarget(name="laptop", scratch_root="/tmp/molexp"))
+        ws.add_target(ComputeTarget(name="laptop", scratch_root="/tmp/molexp"))
         assert resolve_compute_target(ws, "laptop").scratch_root == "/tmp/molexp"
         assert resolve_compute_target(ws, "local").scratch_root == str(ws.root)
         with pytest.raises(KeyError):

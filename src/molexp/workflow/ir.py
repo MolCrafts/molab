@@ -32,7 +32,7 @@ from .._typing import JSONValue
 from .snapshot import task_config_of
 
 if TYPE_CHECKING:
-    from .compiled import CompiledWorkflow as Workflow
+    from .compiled import CompiledWorkflow
 
 __all__ = [
     "EdgeKind",
@@ -154,8 +154,8 @@ class WorkflowGraphIR(BaseModel):
         return render_workflow_mermaid(self)
 
 
-def build_workflow_graph_ir(spec: Workflow) -> WorkflowGraphIR:
-    """Build the full :class:`WorkflowGraphIR` from a compiled :class:`Workflow`.
+def build_workflow_graph_ir(spec: CompiledWorkflow) -> WorkflowGraphIR:
+    """Build the full :class:`WorkflowGraphIR` from a :class:`CompiledWorkflow`.
 
     Reads the spec's frozen topology directly; every task is included
     regardless of whether it carries a registry ``task_type`` slug.
@@ -241,7 +241,7 @@ def _position_of(task: object) -> GraphNodePosition | None:
     return GraphNodePosition(x=x, y=y)
 
 
-def _build_edges(spec: Workflow) -> tuple[GraphEdgeIR, ...]:
+def _build_edges(spec: CompiledWorkflow) -> tuple[GraphEdgeIR, ...]:
     """Project the spec's split edge collections into one ``kind``-tagged set.
 
     ``depends_on`` → ``data``; ``_control_edges`` → ``control``;

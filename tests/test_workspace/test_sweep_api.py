@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 import molexp as me
-from molexp.workflow import WorkflowCompiler, default_binding_registry
+from molexp.workflow import Workflow, WorkflowCompiler, default_binding_registry
 from molexp.workspace import GridSpace
 from molexp.workspace.runset import RunSet
 
@@ -24,8 +24,8 @@ def experiment(tmp_path: Path):
     return ws.add_project("demo").add_experiment("scan")
 
 
-def _build_wf() -> WorkflowCompiler:
-    wf = WorkflowCompiler(name="scan")
+def _build_wf() -> Workflow:
+    wf = Workflow(name="scan")
 
     @wf.task
     def cell(lr: float, batch: int) -> float:
@@ -36,14 +36,16 @@ def _build_wf() -> WorkflowCompiler:
 
 class TestSweep:
     def test_dict_upgrades_to_grid_and_returns_runset(self, experiment) -> None:
-        rs = experiment.sweep(_build_wf().compile(), {"lr": [0.1, 0.2], "batch": [16, 32]})
+        rs = experiment.sweep(
+            WorkflowCompiler().compile(_build_wf()), {"lr": [0.1, 0.2], "batch": [16, 32]}
+        )
         assert isinstance(rs, RunSet)
         assert len(rs) == 4
         cells = {(r.parameters["lr"], r.parameters["batch"]) for r in rs}
         assert cells == {(0.1, 16), (0.1, 32), (0.2, 16), (0.2, 32)}
 
     def test_sweep_is_idempotent(self, experiment) -> None:
-        compiled = _build_wf().compile()
+        compiled = WorkflowCompiler().compile(_build_wf())
         first = experiment.sweep(compiled, {"lr": [0.1, 0.2]})
         second = experiment.sweep(compiled, {"lr": [0.1, 0.2]})
         assert sorted(r.id for r in first) == sorted(r.id for r in second)
@@ -51,7 +53,7 @@ class TestSweep:
 
     def test_sweep_scalar_axis_fails_fast(self, experiment) -> None:
         with pytest.raises(ValueError, match="batch"):
-            experiment.sweep(_build_wf().compile(), {"lr": [0.1], "batch": 16})
+            experiment.sweep(WorkflowCompiler().compile(_build_wf()), {"lr": [0.1], "batch": 16})
 
     def test_sweep_auto_compiles_compiler(self, experiment) -> None:
         rs = experiment.sweep(_build_wf(), {"lr": [0.1]})
@@ -60,7 +62,7 @@ class TestSweep:
         assert bound is not None, "sweep must bind the (auto-)compiled workflow"
 
     def test_sweep_binds_workflow_for_cli_discovery(self, experiment) -> None:
-        compiled = _build_wf().compile()
+        compiled = WorkflowCompiler().compile(_build_wf())
         experiment.sweep(compiled, {"lr": [0.1]})
         assert default_binding_registry.for_experiment(experiment) is compiled
 

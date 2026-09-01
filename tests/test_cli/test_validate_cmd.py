@@ -24,9 +24,8 @@ def _workspace(tmp_path: Path) -> Workspace:
 def test_validate_reports_conforming_tree(tmp_path: Path) -> None:
     _workspace(tmp_path)
     result = CliRunner().invoke(app, ["validate", "-ws", str(tmp_path)])
-    # A never-executed run warns (no ops sidecar) but the tree still conforms.
     assert result.exit_code == 0, result.output
-    assert "0 error(s)" in result.output
+    assert "conforms" in result.output
 
 
 def test_validate_exits_nonzero_on_a_violation(tmp_path: Path) -> None:
@@ -39,11 +38,12 @@ def test_validate_exits_nonzero_on_a_violation(tmp_path: Path) -> None:
     assert "leftover-output" in result.output
 
 
-def test_strict_promotes_warnings_to_failure(tmp_path: Path) -> None:
+def test_strict_on_a_conforming_tree_still_exits_zero(tmp_path: Path) -> None:
+    """``--strict`` fails warnings; a molexp-written tree has none after ops/ went away."""
     _workspace(tmp_path)
     result = CliRunner().invoke(app, ["validate", "-ws", str(tmp_path), "--strict"])
-    assert result.exit_code == 1, result.output
-    assert "run.ops" in result.output
+    assert result.exit_code == 0, result.output
+    assert "conforms" in result.output
 
 
 def test_validate_json_emits_full_report(tmp_path: Path) -> None:

@@ -10,6 +10,7 @@ from molexp.harness.store.file_approval_store import FileApprovalStore
 from molexp.harness.store.file_artifact_store import FileArtifactStore
 from molexp.harness.store.file_lineage_store import FileLineageStore
 from molexp.harness.store.jsonl_event_log import JsonlEventLog
+from molexp.harness.store.paths import harness_artifact_root
 
 __all__ = ["RunStoresPlugin"]
 
@@ -38,8 +39,8 @@ class RunStoresPlugin:
         self._workspace_root = Path(workspace_root) if workspace_root is not None else self._run_dir
 
     def apply(self, ctx: Context) -> None:
-        """Open stores under ``run_dir/artifacts``, ``events.jsonl``, ``approvals.json``."""
-        artifact_store = FileArtifactStore(root=self._run_dir / "artifacts")
+        """Open stores under ``harness/artifacts``, ``events.jsonl``, ``approvals.json``."""
+        artifact_store = FileArtifactStore(root=harness_artifact_root(self._run_dir))
         ctx.provide(Keys.RUN_ID, self._run_id)
         ctx.provide(Keys.WORKSPACE_ROOT, self._workspace_root)
         ctx.provide(Keys.ARTIFACTS, artifact_store)

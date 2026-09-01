@@ -55,7 +55,7 @@ Agent 作曲器切到 **Plan**（模式胶囊或 `Shift+Tab`）。同一 `POST /
 runs/run-<id>/
 ├── plan/task_board.json
 ├── artifacts/
-└── harness.sqlite
+└── events.jsonl + approvals.json
 ```
 
 实现全绿时，工作流 IR 会投影到 experiment，供图查看器打开。

@@ -10,17 +10,24 @@ import { cn } from "@/lib/utils";
 
 interface BreadcrumbProps {
   items: BreadcrumbItem[];
+  /** Entity pages own the current title; show only navigable ancestors. */
+  omitCurrent?: boolean;
 }
 
-export const Breadcrumb = ({ items }: BreadcrumbProps): JSX.Element => {
+export const Breadcrumb = ({ items, omitCurrent = false }: BreadcrumbProps): JSX.Element => {
+  const visibleItems = omitCurrent ? items.slice(0, -1) : items;
   return (
-    <nav className="flex min-w-0 items-center gap-1 overflow-hidden text-label text-muted-foreground">
-      {items.map((item, index) => {
-        const isLast = index === items.length - 1;
+    <nav
+      aria-label="Breadcrumb"
+      className="flex min-w-0 items-center gap-1 overflow-hidden text-label text-muted-foreground"
+    >
+      {visibleItems.map((item, index) => {
+        const isLast = index === visibleItems.length - 1;
+        const isCurrent = isLast && !omitCurrent;
         return (
           <Fragment key={`${item.label}-${item.to ?? index}`}>
             {index > 0 && <ChevronRight className="h-3 w-3 flex-none opacity-50" />}
-            {item.to && !isLast ? (
+            {item.to && !isCurrent ? (
               <Link
                 to={item.to}
                 className="min-w-0 truncate rounded-control px-1 py-1 transition-colors hover:bg-muted/60 hover:text-foreground"
@@ -30,7 +37,8 @@ export const Breadcrumb = ({ items }: BreadcrumbProps): JSX.Element => {
             ) : (
               <span
                 title={item.label}
-                className={cn("min-w-0 truncate", isLast && "font-medium text-foreground")}
+                className={cn("min-w-0 truncate", isCurrent && "font-medium text-foreground")}
+                aria-current={isCurrent ? "page" : undefined}
               >
                 {item.label}
               </span>

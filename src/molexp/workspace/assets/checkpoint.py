@@ -12,7 +12,7 @@ from .base import Asset
 class CheckpointAsset(Asset):
     """Checkpoint blob saved via ``ctx.checkpoint(name, data=...)``.
 
-    Lives at ``run_dir/.ckpt/<ckpt_id>.json``.  ``parent_ckpt_id``
+    Lives at ``executions/<id>/checkpoints/<ckpt_id>.json``.  ``parent_ckpt_id``
     forms a linear version chain within a run (schema reserves the
     field for future branching).
     """

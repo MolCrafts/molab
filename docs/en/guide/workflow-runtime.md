@@ -3,9 +3,9 @@
 Execution lives on `WorkflowRuntime`, not on the compiled artifact. You instantiate the runtime (it is cheap and stateless apart from an optional cache) and hand it a `CompiledWorkflow`:
 
 ```python
-from molexp.workflow import WorkflowCompiler, WorkflowRuntime
+from molexp.workflow import Workflow, WorkflowCompiler, WorkflowRuntime
 
-wf = WorkflowCompiler(name="demo")
+wf = Workflow(name="demo")
 
 
 @wf.task
@@ -13,7 +13,7 @@ async def compute(scale: float = 1.0) -> float:
     return 42.0 * scale
 
 
-compiled = wf.compile()
+compiled = WorkflowCompiler().compile(wf)
 
 runtime = WorkflowRuntime()
 result = await runtime.execute(compiled)      # block until done
@@ -39,10 +39,11 @@ Workflow execution state — the `workflow.json` snapshot under `<run_dir>/execu
 
 Cache persistence is pluggable. `Caching` orchestrates the cache policy (key derivation, format version, LRU eviction); the storage primitive is a `CacheStore` implementation supplied at construction time:
 
-- `ws.cache.as_cache_store()` — the workspace's singleton cache folder, the preferred form for runs that already have a workspace. When you pass a `run_context`, the runtime builds this workspace-backed cache automatically.
-- `FileCacheStore(path)` — a plain filesystem directory. Useful when the caller has no workspace (e.g. ad-hoc scripts; the FastAPI server's process-local cache).
+- `FileCacheStore(run_dir / "cache")` — the default when you pass a `run_context`; the runtime builds this automatically. Task-result cache lives **under the run**, not at the workspace root.
+- `ws.cache.as_cache_store()` — an explicit workspace-wide cache folder. Execution does not auto-create it.
+- `FileCacheStore(path)` — any other directory. Useful when the caller has no run (e.g. ad-hoc scripts; the FastAPI server's process-local cache).
 
-The user-home `~/.molexp/cache/` shortcut from earlier MolExp versions is gone — caching is always either workspace-rooted or explicitly opted into via `FileCacheStore`.
+The user-home `~/.molexp/cache/` shortcut from earlier MolExp versions is gone — caching is always either run-local or explicitly opted into via `FileCacheStore` / `ws.cache`.
 
 ## Blocking Execution and Background Execution
 

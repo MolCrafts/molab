@@ -33,7 +33,7 @@ from molexp.harness.plan import (
 )
 from molexp.harness.schemas import ApprovalDecision
 from molexp.harness.stages import auto_grant_approver
-from molexp.services.plan_runtime import drive_plan_mode
+from molexp.harness.store.paths import harness_artifact_root
 from molexp.workspace import Workspace
 
 pytestmark = pytest.mark.asyncio
@@ -85,7 +85,7 @@ def run(tmp_path: Path):
 
 
 def _gateway(run: Any) -> StubAgentGateway:
-    gw = StubAgentGateway(FileArtifactStore(root=run.run_dir / "artifacts"))
+    gw = StubAgentGateway(FileArtifactStore(root=harness_artifact_root(run.run_dir)))
     gw.register(
         "plan_report_renderer",
         output={"title": "Plan report", "summary_md": "# Plan\n\nlooks good"},
@@ -96,7 +96,7 @@ def _gateway(run: Any) -> StubAgentGateway:
 
 
 def _store(run: Any) -> FileArtifactStore:
-    return FileArtifactStore(root=run.run_dir / "artifacts")
+    return FileArtifactStore(root=harness_artifact_root(run.run_dir))
 
 
 def _approvals(run: Any) -> FileApprovalStore:
@@ -117,9 +117,9 @@ class TestStoreBundle:
 
         assert isinstance(result, ModeResult)
         assert result.run_id == run.id
-        artifacts_dir = run.run_dir / "artifacts"
+        artifacts_dir = harness_artifact_root(run.run_dir)
         assert artifacts_dir.is_dir() and any(artifacts_dir.iterdir())
-        assert (run.run_dir / "events.jsonl").is_file() or (run.run_dir / "artifacts").is_dir()
+        assert (run.run_dir / "events.jsonl").is_file() or artifacts_dir.is_dir()
         store = _store(run)
         assert store.latest_by_kind("review_pack") is not None
         assert store.latest_by_kind(FROZEN_PLAN_KIND) is not None
@@ -225,13 +225,12 @@ class TestStoredGrantReplay:
 
 
 class TestModeLikeShape:
-    async def test_drive_plan_mode_returns_a_mode_result(self, run: Any) -> None:
-        result = await drive_plan_mode(
-            Plan(
-                draft=_CannedDraft(_valid_board()),
-                approve=auto_grant_approver,
-                realize=False,
-            ),
+    async def test_execute_returns_a_mode_result(self, run: Any) -> None:
+        result = await Plan(
+            draft=_CannedDraft(_valid_board()),
+            approve=auto_grant_approver,
+            realize=False,
+        ).execute(
             run=run,
             user_input=_USER_INPUT,
             gateway=_gateway(run),
@@ -290,7 +289,7 @@ class TestPriorKnowledgeWire:
             gateway=_gateway(run),
         )
 
-        store = FileArtifactStore(root=run.run_dir / "artifacts")
+        store = FileArtifactStore(root=harness_artifact_root(run.run_dir))
         knowledge = store.latest_by_kind("knowledge_context")
         assert knowledge is not None
         digest = store.get(knowledge.id).decode("utf-8")
@@ -300,7 +299,7 @@ class TestPriorKnowledgeWire:
 
 class TestPlanLoopSystemPrompt:
     def test_appends_digest_when_present(self) -> None:
-        from molexp.harness.modes.plan import plan_loop_system_prompt
+        from molexp.harness.modes.plan_workflow import plan_loop_system_prompt
 
         bare = plan_loop_system_prompt(None)
         with_digest = plan_loop_system_prompt("# Prior\n\npath: failure-x")

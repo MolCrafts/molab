@@ -205,7 +205,7 @@ audit/replay  事件与血缘的只读消费
 ### 2.2 宿主不应该负责什么
 
 ```text
-拥有 Run 身份或 ops/run.json（workspace 插件）
+拥有 Run 身份或 run.json (hot state) + alive（workspace 插件）
 实现 DAG 调度或 cache key（workflow 插件）
 直接 import pydantic_ai（agent 插件）
 把 molpy/molvis/molq 符号编成宿主工具
@@ -678,7 +678,7 @@ specified in full in `integration.md`:
 WorkspaceContext   read-model assembled from authoritative workspace+knowledge
                    state; the structured input agents/planners observe.        (integration §1)
 WorkspaceEvent     append-only cross-object coordination spine (mirrors
-                   SQLiteEventLog at workspace scope); HarnessEvent stays the
+                   JsonlEventLog at workspace scope); HarnessEvent stays the
                    intra-run deep audit, linked by run_id/content_hash.         (integration §2)
 KnowledgeItem      typed, source-linked OKF concept (Observation / Decision /
                    Finding / FailureAnalysis / ParameterRationale / …) — every
@@ -1740,7 +1740,7 @@ run state 从 event log 推导
 ArtifactRef
 FileArtifactStore
 HarnessEvent
-SQLiteEventLog
+JsonlEventLog
 ProvenanceStore
 RunContext
 StageRunner
@@ -2010,7 +2010,7 @@ Agent 可以建议工具，但不能直接拼接和执行最终命令。
 ```text
 1. 定义 schemas
 2. 实现 FileArtifactStore
-3. 实现 SQLiteEventLog
+3. 实现 JsonlEventLog
 4. 实现 StageRunner
 5. 把现有 pipeline 包成 stages
 6. 加 WorkflowIR validator

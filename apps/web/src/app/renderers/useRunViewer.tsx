@@ -13,19 +13,23 @@
  */
 
 import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { runsApi } from "@/api";
 import { listEntityTabs } from "@/app/registry";
 import { formatDuration } from "@/app/renderers/dashboardData";
 import { canCancel, canHarvest, isTerminalStatus } from "@/app/runs/runLifecycle";
-import { workspaceApi } from "@/app/state/api";
 import { useInspectedTask } from "@/app/state/inspectedTask";
 import { useNavigationState } from "@/app/state/useNavigationState";
-import type { RendererProps, WorkspaceSnapshot } from "@/app/types";
+import type { RendererSnapshot, ScopedRendererProps, WorkspaceSnapshot } from "@/app/types";
 import { useAlert, useConfirm } from "@/components/ConfirmDialog";
 import { Code as InlineCode } from "@/components/ui/code";
+import { useContributionGeneration } from "@/lib/contribution-runtime";
 import { usePluginPreferencesGeneration } from "@/plugins/preferences";
 
 type RunRow = WorkspaceSnapshot["runs"][number];
 type RunLogs = { stdout?: string | null; stderr?: string | null } | null;
+export type RunRendererProps = ScopedRendererProps<
+  "projects" | "experiments" | "runs" | "workflows"
+>;
 
 export interface UseRunViewer {
   run: RunRow | null;
@@ -56,7 +60,7 @@ export interface UseRunViewer {
   alertDialog: ReactNode;
 }
 
-export const useRunViewer = (props: RendererProps): UseRunViewer => {
+export const useRunViewer = (props: RunRendererProps): UseRunViewer => {
   const { selection, snapshot, onRefresh } = props;
   const { setSelection } = useNavigationState(snapshot);
   const { inspectTask } = useInspectedTask();
@@ -65,14 +69,16 @@ export const useRunViewer = (props: RendererProps): UseRunViewer => {
   const [selectedExecutionId, setSelectedExecutionId] = useState<string | null>(null);
   // User-disabled plugins drop their entity tabs without a page reload.
   const pluginPrefsGeneration = usePluginPreferencesGeneration();
+  const contributionGeneration = useContributionGeneration();
   // Filter plugin tabs (e.g. molq) by contribution.matches when present.
   const runTabContributions = useMemo(() => {
     void pluginPrefsGeneration;
+    void contributionGeneration;
     return listEntityTabs("run", {
       selection: props.selection,
-      snapshot: props.snapshot,
+      snapshot: props.snapshot as RendererSnapshot,
     });
-  }, [props.selection, props.snapshot, pluginPrefsGeneration]);
+  }, [props.selection, props.snapshot, pluginPrefsGeneration, contributionGeneration]);
   const { confirm, dialog: confirmDialog } = useConfirm();
   const { alert, dialog: alertDialog } = useAlert();
 
@@ -108,8 +114,8 @@ export const useRunViewer = (props: RendererProps): UseRunViewer => {
 
     setLogs(null);
     const fetcher = selectedExecutionId
-      ? workspaceApi.getRunExecutionLogs(runProjectId, runExperimentId, runId, selectedExecutionId)
-      : workspaceApi.getRunLogs(runProjectId, runExperimentId, runId);
+      ? runsApi.getRunExecutionLogs(runProjectId, runExperimentId, runId, selectedExecutionId)
+      : runsApi.getRunLogs(runProjectId, runExperimentId, runId);
 
     fetcher
       .then((nextLogs) => {
@@ -171,7 +177,7 @@ export const useRunViewer = (props: RendererProps): UseRunViewer => {
     });
     if (!confirmed) return;
     try {
-      await workspaceApi.killRun(run.projectId, run.experimentId, run.id);
+      await runsApi.cancelRun(run.projectId, run.experimentId, run.id);
       onRefresh();
     } catch (error) {
       console.error("Failed to cancel run:", error);

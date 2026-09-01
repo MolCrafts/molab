@@ -33,10 +33,11 @@ class WorkflowSource(BaseModel):
     Attributes:
         source: The entry module's source — the ``build_workflow()`` assembly.
             By convention it defines a module-level ``build_workflow()``
-            returning a ``WorkflowCompiler``. In multi-file mode this is the
+            returning a ``Workflow``. In multi-file mode this is the
             ``workflow/__init__.py`` content (it imports the per-task modules);
             in single-file mode it is the whole program. ``ValidateWorkflowSource``
-            checks it and ``CompileWorkflow`` ``.compile()``s the assembled package.
+            checks it and ``CompileWorkflow`` compiles it with
+            ``WorkflowCompiler().compile(build_workflow())``.
         module_name: The importable entrypoint exposing ``build_workflow`` —
             the package name (e.g. ``"workflow"``) in multi-file mode, or a
             module name (e.g. ``"generated_workflow"``) in single-file mode.
@@ -46,7 +47,7 @@ class WorkflowSource(BaseModel):
             ``{module_name}.py``.
         bound_workflow_id: The ``BoundWorkflow`` artifact id this derives from.
         symbols: The public ``molexp.workflow`` symbols the program uses
-            (e.g. ``("WorkflowCompiler", "Task", "TaskContext")``).
+            (e.g. ``("Workflow", "Task", "TaskContext")``).
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")

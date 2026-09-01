@@ -181,7 +181,7 @@ class TestPut:
         b = Bundle(bundle)
         # Unmounted concept: dir may exist without meta until put/materialize.
         epsilon = Folder(name="epsilon", kind=CONCEPT_KIND, root_path=str(bundle))
-        Path(epsilon.path()).mkdir(parents=True, exist_ok=True)
+        Path(epsilon.path).mkdir(parents=True, exist_ok=True)
         assert not (Path(epsilon.resolve()) / "meta.json").is_file()
         b.put(epsilon)
         assert (Path(epsilon.resolve()) / "meta.json").is_file()
@@ -254,7 +254,7 @@ class TestTypedReconstruction:
 # that reanchor — get/link (resolution) and walk (enumeration) — are covered.
 
 KI_BODY_NEEDLE = "zwitterion-retrieval-needle"
-KI_REL = "projects/p/experiments/e/ki"
+KI_REL = "projects/p/experiments/e/knowledges/ki"
 _DOUBLED_SEGMENTS = ("projects/projects", "experiments/experiments", "runs/runs")
 
 
@@ -286,24 +286,21 @@ class TestNestedMounts:
 
     def test_knowledge_item_under_experiment_walks_once_undoubled(self, tmp_path: Path) -> None:
         import os
-        from typing import cast
 
         from molexp.workspace import Workspace
-        from molexp.workspace.knowledge_item import KnowledgeItem, KnowledgeMeta, SourceRef
+        from molexp.workspace.knowledge import Finding, SourceRef
 
         ws = Workspace(root=tmp_path / "lab")
         ws.materialize()
         exp = ws.add_project("p").add_experiment("e")
         exp.add_run(id="r")
-        item = cast("KnowledgeItem", exp.add_folder(KnowledgeItem(parent=exp, name="ki")))
-        item.write_knowledge_meta(
-            KnowledgeMeta(
-                kind="Finding",
-                sources=[SourceRef(kind="run", ref="r")],
-                created_by="tests",
-            )
+        item = exp.add_knowledge(
+            "ki",
+            cls=Finding,
+            body=f"# Zwitterion finding\n\nthe {KI_BODY_NEEDLE} appears only in this body\n",
+            sources=[SourceRef(kind="run", ref="r")],
+            created_by="tests",
         )
-        item.set_body(f"# Zwitterion finding\n\nthe {KI_BODY_NEEDLE} appears only in this body\n")
 
         b = Bundle(ws.resolve())
         rels = [b.rel_path(f) for f in b.walk()]

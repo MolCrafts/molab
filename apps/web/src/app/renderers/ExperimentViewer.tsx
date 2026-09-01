@@ -6,12 +6,12 @@ import {
   FileQuestion,
   FlaskConical,
   Grid3x3,
-  Maximize2,
   MoreHorizontal,
   Play,
   Trash2,
 } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useMemo, useState } from "react";
+import { experimentsApi, runsApi } from "@/api";
 import { CreateRunDialog } from "@/app/components/CreateRunDialog";
 import { CreateSweepDialog } from "@/app/components/CreateSweepDialog";
 import type { DataTableColumn, DataTableRowAction } from "@/app/components/entity";
@@ -45,12 +45,10 @@ import {
   type RunListHandlers,
 } from "@/app/runs/runListActions";
 import { useRunMultiSelect } from "@/app/runs/useRunMultiSelect";
-import { workspaceApi } from "@/app/state/api";
 import { useNavigationState } from "@/app/state/useNavigationState";
-import type { ObjectView, RendererProps, RunSummary } from "@/app/types";
+import type { ExperimentView, ObjectView, RunSummary, ScopedRendererProps } from "@/app/types";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { Code as InlineCode } from "@/components/ui/code";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -70,11 +68,17 @@ import {
 import { toast } from "@/components/ui/toast";
 import { WorkbenchAction, WorkbenchIconAction } from "@/components/workbench";
 import { parseWorkflowIr } from "@/components/workflow/workflow-graph";
+import { useContributionGeneration } from "@/lib/contribution-runtime";
 import { formatDateTime } from "@/lib/datetime";
 import { getWorkspaceFs } from "@/lib/workspace-fs";
 import { formatQualifiedPath, runWorkspaceRelativePath } from "@/lib/workspace-path";
 import { isPluginEnabled, usePluginPreferencesGeneration } from "@/plugins/preferences";
-import { WorkflowGraphViewer } from "@/plugins/workflow/WorkflowGraphViewer";
+
+const WorkflowGraphViewer = lazy(() =>
+  import("@/plugins/workflow/WorkflowGraphViewer").then((module) => ({
+    default: module.WorkflowGraphViewer,
+  })),
+);
 
 const formatResultPreview = (results: Record<string, unknown>): string => {
   const entries = Object.entries(results);
@@ -140,24 +144,30 @@ export const ExperimentViewer = ({
   inspectorTarget,
   onInspectorTargetChange,
   onRefresh,
-}: RendererProps): JSX.Element => {
+}: ScopedRendererProps<"experiments" | "runs" | "workflows" | "workspaces">): JSX.Element => {
   const [isDeleting, setIsDeleting] = useState(false);
   const [sweepOpen, setSweepOpen] = useState(false);
-  // Workflow is overview-only (expand modal); never a tab value.
-  const [activeTab, setActiveTab] = useState("overview");
-  const [workflowExpanded, setWorkflowExpanded] = useState(false);
   // Re-render when the user toggles the Workflow plugin in Settings.
   usePluginPreferencesGeneration();
+  useContributionGeneration();
 
-  const setEntityTab = useCallback((value: string) => {
-    setActiveTab(value === "workflow" ? "overview" : value);
-  }, []);
   const { setSelection } = useNavigationState(snapshot);
   const { confirm, dialog: confirmDialog } = useConfirm();
 
   const experimentId = selection.objectId;
   const experiment = snapshot.experiments.find((e) => e.id === experimentId);
   const projectId = experiment?.projectId || "";
+  const activeTab: ExperimentView =
+    selection.objectType === "experiment" ? (selection.experimentView ?? "overview") : "overview";
+
+  const setEntityTab = useCallback(
+    (value: string) => {
+      const experimentView: ExperimentView =
+        value === "workflow" || value === "runs" || value === "compare" ? value : "overview";
+      setSelection({ objectType: "experiment", objectId: experimentId, experimentView });
+    },
+    [experimentId, setSelection],
+  );
 
   const runs = useMemo(
     () => snapshot.runs.filter((r) => r.experimentId === experimentId),
@@ -198,7 +208,7 @@ export const ExperimentViewer = ({
     }
     setIsDeleting(true);
     try {
-      await workspaceApi.deleteExperiment(projectId, experimentId);
+      await experimentsApi.deleteExperiment(projectId, experimentId);
       onRefresh();
     } catch (error) {
       console.error("Failed to delete experiment:", error);
@@ -237,7 +247,7 @@ export const ExperimentViewer = ({
       });
       if (!ok) return;
       try {
-        await workspaceApi.killRun(run.projectId, run.experimentId, run.id);
+        await runsApi.cancelRun(run.projectId, run.experimentId, run.id);
         toast.success("Cancelled");
         onRefresh();
       } catch (error) {
@@ -250,7 +260,7 @@ export const ExperimentViewer = ({
   const handleResumeRun = useCallback(
     async (run: RunSummary) => {
       try {
-        await workspaceApi.resumeRun(run.projectId, run.experimentId, run.id);
+        await runsApi.resumeRun(run.projectId, run.experimentId, run.id);
         toast.success("Resumed");
         onRefresh();
         navigateToRunView(run, "executions");
@@ -480,23 +490,30 @@ export const ExperimentViewer = ({
     return formatDuration(new Date(0).toISOString(), new Date(ms).toISOString());
   })();
 
-  // No graph / no workflow entity / plugin disabled → omit the surface.
-  // Never mount an empty viewer shell for "attach a workflow" copy.
+  const workflowPluginEnabled = isPluginEnabled("workflow");
   const hasWorkflowData = Boolean(
-    isPluginEnabled("workflow") && workflow && workbench.workflowSummary.exists,
+    workflowPluginEnabled && workflow && workbench.workflowSummary.exists,
   );
   const workflowSelection =
     hasWorkflowData && workflow
       ? { objectType: "workflow" as const, objectId: workflow.id, workflowId: workflow.id }
       : null;
   const workflowViewer = workflowSelection ? (
-    <WorkflowGraphViewer
-      selection={workflowSelection}
-      snapshot={snapshot}
-      inspectorTarget={inspectorTarget}
-      onInspectorTargetChange={onInspectorTargetChange}
-      onRefresh={onRefresh}
-    />
+    <Suspense
+      fallback={
+        <div className="flex h-full items-center justify-center p-6">
+          <EmptyState title="Loading workflow" description="Preparing the graph viewer…" />
+        </div>
+      }
+    >
+      <WorkflowGraphViewer
+        selection={workflowSelection}
+        snapshot={snapshot}
+        inspectorTarget={inspectorTarget}
+        onInspectorTargetChange={onInspectorTargetChange}
+        onRefresh={onRefresh}
+      />
+    </Suspense>
   ) : null;
 
   const workflowLabel =
@@ -505,15 +522,6 @@ export const ExperimentViewer = ({
       ? experiment.workflowFile
       : null) ||
     "Workflow";
-
-  // Single graph instance: overview embed when collapsed, modal when expanded.
-  // Moving it (not cloning) avoids dual canvases and keeps edit state.
-  const workflowCanvas =
-    hasWorkflowData && workflowViewer && !workflowExpanded ? (
-      <div className="h-[min(28rem,52vh)] min-h-80 overflow-hidden rounded-panel border border-border bg-canvas">
-        {workflowViewer}
-      </div>
-    ) : null;
 
   // Always pass full tab bodies (EntityTabContent hides inactive with CSS).
   // Conditional `activeTab === … ? content : null` remounted Flowgram on every switch.
@@ -608,32 +616,24 @@ export const ExperimentViewer = ({
         )}
 
         {hasWorkflowData && (
-          <section className="space-y-3">
-            <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="flex min-w-0 flex-wrap items-baseline gap-2">
-                <h3 className="text-body-lg font-medium text-foreground">Workflow</h3>
-                <p className="truncate font-mono text-micro text-muted-foreground">
-                  {/* Never dump workflow IR JSON — name/path only. */}
-                  {workflowLabel}
-                </p>
-              </div>
-              <WorkbenchIconAction
-                label="Expand workflow"
-                kind="ghost"
-                className="h-control-compact w-control-compact"
-                aria-label="Expand workflow"
-                title="Expand workflow"
-                onClick={() => setWorkflowExpanded(true)}
-              >
-                <Maximize2 className="h-4 w-4" />
-              </WorkbenchIconAction>
+          <section className="flex flex-wrap items-center justify-between gap-4 border-t border-border pt-6">
+            <div className="min-w-0">
+              <h3 className="text-body-lg font-medium text-foreground">Workflow</h3>
+              <p className="mt-1 truncate font-mono text-micro text-muted-foreground">
+                {workflowLabel}
+              </p>
+              <p className="mt-1 text-label text-muted-foreground">
+                {workbench.workflowSummary.taskCount} tasks · {workbench.workflowSummary.linkCount}{" "}
+                dependencies
+              </p>
             </div>
-            {workflowCanvas}
-            {workflowExpanded && (
-              <div className="flex h-[min(28rem,52vh)] min-h-80 items-center justify-center rounded-panel border border-dashed border-border bg-canvas text-label text-muted-foreground">
-                Open in modal…
-              </div>
-            )}
+            <WorkbenchAction
+              kind="secondary"
+              size="compact"
+              onClick={() => setEntityTab("workflow")}
+            >
+              Open workflow
+            </WorkbenchAction>
           </section>
         )}
       </DashboardCanvas>
@@ -706,18 +706,42 @@ export const ExperimentViewer = ({
               onOpenChange={setSweepOpen}
               onCreated={() => {
                 onRefresh();
-                setActiveTab("runs");
+                setEntityTab("runs");
               }}
             />
           </>
         }
-        activeTab={activeTab === "workflow" ? "overview" : activeTab}
+        activeTab={activeTab}
         onActiveTabChange={setEntityTab}
         tabs={[
           {
             value: "overview",
             label: "Overview",
             content: overviewContent,
+          },
+          {
+            value: "workflow",
+            label: "Workflow",
+            content: (
+              <OverviewSurface surfaceClassName="flex min-h-0 flex-col overflow-hidden">
+                <InventoryCanvas fill className="min-h-0 flex-1 gap-0 space-y-0">
+                  {hasWorkflowData && workflowViewer ? (
+                    <div className="min-h-0 flex-1 overflow-hidden bg-canvas">{workflowViewer}</div>
+                  ) : (
+                    <EmptyState
+                      title={
+                        workflowPluginEnabled ? "No workflow available" : "Workflow viewer disabled"
+                      }
+                      description={
+                        workflowPluginEnabled
+                          ? "This experiment does not have a workflow graph to display."
+                          : "Enable the Workflow plugin in Settings to inspect the graph."
+                      }
+                    />
+                  )}
+                </InventoryCanvas>
+              </OverviewSurface>
+            ),
           },
           {
             value: "runs",
@@ -745,7 +769,7 @@ export const ExperimentViewer = ({
                             size="compact"
                             type="button"
                             disabled={multi.selected.size === 0}
-                            onClick={() => setActiveTab("compare")}
+                            onClick={() => setEntityTab("compare")}
                           >
                             Compare
                           </WorkbenchAction>
@@ -810,21 +834,6 @@ export const ExperimentViewer = ({
           },
         ]}
       />
-      {hasWorkflowData && (
-        <Dialog open={workflowExpanded} onOpenChange={setWorkflowExpanded}>
-          <DialogContent
-            className="flex h-[min(92vh,56rem)] max-w-[min(96vw,80rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-[min(96vw,80rem)]"
-            showCloseButton
-          >
-            <DialogHeader className="shrink-0 border-b border-border px-4 py-3 pr-12 text-left">
-              <DialogTitle className="font-mono text-body-lg">{workflowLabel}</DialogTitle>
-            </DialogHeader>
-            <div className="min-h-0 flex-1 overflow-hidden bg-canvas">
-              {workflowExpanded ? workflowViewer : null}
-            </div>
-          </DialogContent>
-        </Dialog>
-      )}
       {confirmDialog}
     </>
   );

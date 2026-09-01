@@ -97,9 +97,9 @@ hero:
 
 ```python
 import molexp as me
-from molexp.workflow import WorkflowCompiler
+from molexp.workflow import Workflow, WorkflowCompiler
 
-wf = WorkflowCompiler(name="sum")
+wf = Workflow(name="sum")
 
 @wf.task
 def fetch(scale: float = 1.0) -> dict:
@@ -152,7 +152,7 @@ best = summary.min_by("summarize")
     me.Workspace("./lab", name="lab")
     .add_project("demo")
     .add_experiment("sum")
-    .define(wf.compile(), params={"scale": [1.0, 2.0]})
+    .define(WorkflowCompiler().compile(wf), params={"scale": [1.0, 2.0]})
 )
 ```
 

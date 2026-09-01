@@ -21,7 +21,7 @@ export const MolqRunInspector = (props: RendererProps): JSX.Element => {
 
   return (
     <div className="flex h-full flex-col bg-background">
-      <div className="flex items-center justify-between border-b border-border/70 bg-muted/20 px-3 py-2">
+      <div className="flex h-[35px] items-center justify-between border-b border-border bg-surface-subtle px-3">
         <div className="flex min-w-0 items-center gap-2">
           <ServerCog className="h-3.5 w-3.5 text-muted-foreground" />
           <h2 className="truncate text-micro font-medium uppercase tracking-wide text-muted-foreground">

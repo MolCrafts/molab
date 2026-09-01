@@ -8,8 +8,8 @@
 
 import { ClipboardList } from "lucide-react";
 import { type JSX, useEffect, useMemo, useState } from "react";
+import { plansApi } from "@/api";
 import type { PlanDetailResponse } from "@/api/generated/models/PlanDetailResponse";
-import { workspaceApi } from "@/app/state/api";
 import { MarkdownContent } from "@/components/ui/markdown";
 import { ProgressSpinner } from "@/components/ui/progress-spinner";
 import { cn } from "@/lib/utils";
@@ -76,7 +76,7 @@ export const PlanDocumentCard = ({
     let cancelled = false;
     setLoading(true);
     setError(null);
-    workspaceApi
+    plansApi
       .getPlan(projectId, experimentId, runId)
       .then((detail) => {
         if (!cancelled) setPlan(detail);

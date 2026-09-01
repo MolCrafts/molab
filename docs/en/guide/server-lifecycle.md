@@ -7,6 +7,10 @@
 
 Pick the foreground CLI unless you specifically need a daemonized process.
 
+Contributor command table (daily `--dev` vs `npm run build:web` vs
+`-C build-web=true`): [Serve and rebuild the UI](../development/ui-serve.md).
+This page covers auth, tunnels, several workspaces, and `ServerManager`.
+
 ## `molexp serve` (foreground CLI)
 
 ```bash
@@ -147,7 +151,10 @@ workspace tree before watching its run dashboard.
 ### Frontend HMR (`--dev`)
 
 From a source checkout (editable install), start the API and the Rsbuild
-dev server together:
+dev server together. This is the daily UI path — do not `uv pip install`
+to pick up frontend edits. Bundled preview is `npm run build:web` then
+`molexp serve` without `--dev`; see
+[Serve and rebuild the UI](../development/ui-serve.md).
 
 ```bash
 molexp serve --dev -ws ./lab --port 8000
@@ -252,7 +259,11 @@ if webapp.is_dir() and (webapp / "index.html").exists():
     mount(app, webapp)
 ```
 
-This works for editable installs, wheels, and packaged releases. The bundle is populated by `npm run build:web` before `python -m build --wheel`. If it is empty (typical dev), the server runs API-only with a `/` fallback advertising `/api/docs` and `/api/health`.
+This works for editable installs, wheels, and packaged releases. Populate
+the bundle with `npm run build:web` (enough for an editable install — no
+reinstall). `-C build-web=true` is the wheel path only. If `dist/` is empty
+(typical `--dev` work), the server runs API-only with a `/` fallback
+advertising `/api/docs` and `/api/health`.
 
 ## Troubleshooting
 

@@ -13,6 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from molexp.harness.store.file_artifact_store import FileArtifactStore
+from molexp.harness.store.paths import harness_artifact_root
 from molexp.server.app import create_app
 from molexp.server.dependencies import get_workspace
 from molexp.server.routes.plans import PlanDetailResponse
@@ -32,7 +33,7 @@ def seeded_plan_ids(plan_workspace: Workspace) -> tuple[str, str, str]:
     exp = project.add_experiment("exp")
     run = exp.add_run(params={"mode": "plan"}, id="plandetail1")
 
-    store = FileArtifactStore(root=run.run_dir / "artifacts")
+    store = FileArtifactStore(root=harness_artifact_root(run.run_dir))
     store.put_json(
         kind="experiment_plan",
         obj={

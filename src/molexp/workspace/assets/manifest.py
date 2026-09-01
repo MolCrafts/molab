@@ -18,13 +18,18 @@ coordination is out of scope (see spec §2).
 from __future__ import annotations
 
 import json
+import os
 import threading
 from collections.abc import Iterator
 from os import PathLike
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from ._adapter import ASSET_ADAPTER, parse_asset
 from .base import Asset
+
+if TYPE_CHECKING:
+    from ..fs import FileSystem
 
 SCHEMA_VERSION = 1
 MANIFEST_FILENAME = "assets.json"
@@ -37,23 +42,30 @@ type AssetList = list[Asset]
 class AssetManifest:
     """JSON-backed dict of assets for one scope.
 
-    ``scope_dir`` is coerced to :class:`pathlib.Path` because the manifest
-    does genuine local I/O (atomic rename, file locking) — callers may
-    pass :class:`molexp.Path` or :class:`str`.
+    ``scope_dir`` is the scope directory. I/O goes through *fs*
+    (``workspace.fs``); the default is the local filesystem.
     """
 
-    def __init__(self, scope_dir: str | PathLike[str]) -> None:
-        self.scope_dir = Path(scope_dir)
-        self.path = self.scope_dir / MANIFEST_FILENAME
+    def __init__(
+        self,
+        scope_dir: str | PathLike[str],
+        *,
+        fs: FileSystem | None = None,
+    ) -> None:
+        from ..fs_local import LocalFileSystem
+
+        self._fs = fs or LocalFileSystem()
+        self.scope_dir = Path(os.fspath(scope_dir))
+        self.path = Path(self._fs.join(os.fspath(scope_dir), MANIFEST_FILENAME))
         self._lock = threading.Lock()
 
     # ── Read ──────────────────────────────────────────────────────────────
 
     def load(self) -> dict[str, Asset]:
         """Return a fresh mapping ``{asset_id -> Asset}`` from disk."""
-        if not self.path.exists():
+        if not self._fs.exists(str(self.path)):
             return {}
-        with open(self.path) as fh:  # noqa: PTH123
+        with self._fs.open(str(self.path)) as fh:
             data = json.load(fh)
         raw_assets: dict = data.get("assets", {})
         return {aid: parse_asset(entry) for aid, entry in raw_assets.items()}
@@ -94,17 +106,15 @@ class AssetManifest:
     # ── Internal ──────────────────────────────────────────────────────────
 
     def _load_raw(self) -> dict:
-        if not self.path.exists():
+        if not self._fs.exists(str(self.path)):
             return {}
-        with open(self.path) as fh:  # noqa: PTH123
+        with self._fs.open(str(self.path)) as fh:
             data = json.load(fh)
         return dict(data.get("assets", {}))
 
     def _save_raw(self, assets: dict) -> None:
-        from ..base import atomic_write_json
-
         payload = {"schema_version": SCHEMA_VERSION, "assets": assets}
-        atomic_write_json(self.path, payload)
+        self._fs.atomic_write_json(str(self.path), payload)
 
 
 def _dump(asset: Asset) -> dict:

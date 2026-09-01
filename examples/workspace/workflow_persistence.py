@@ -19,12 +19,12 @@ from pathlib import Path
 
 import molexp as me
 from molexp.profile import ProfileConfig
-from molexp.workflow import WorkflowCompiler, WorkflowRuntime
+from molexp.workflow import Workflow, WorkflowCompiler, WorkflowRuntime
 
 # Module-level marker so the first attempt fails and the second succeeds.
 _FAIL_ONCE_MARKER: Path | None = None
 
-wf = WorkflowCompiler(name="flaky")
+wf = Workflow(name="flaky")
 
 
 @wf.task
@@ -37,7 +37,7 @@ async def flaky_train(epochs: int = 3) -> dict:
     return {"epochs": epochs}
 
 
-compiled = wf.compile()
+compiled = WorkflowCompiler().compile(wf)
 
 
 async def main() -> None:

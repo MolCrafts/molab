@@ -35,6 +35,7 @@ function NavSeparator({ label }: { label: string }): JSX.Element {
 
 interface SettingsShellProps {
   title?: string;
+  description?: string;
   entries: SettingsNavEntry[];
   defaultId?: string;
   className?: string;
@@ -42,6 +43,7 @@ interface SettingsShellProps {
 
 export function SettingsShell({
   title = "Settings",
+  description,
   entries,
   defaultId,
   className,
@@ -112,8 +114,11 @@ export function SettingsShell({
         className,
       )}
     >
-      <header className="shrink-0 border-b border-border/70 px-5 py-3.5">
+      <header className="shrink-0 border-b border-border/70 bg-surface-subtle px-5 py-3">
         <h2 className="text-title font-semibold tracking-tight">{title}</h2>
+        {description ? (
+          <p className="mt-0.5 text-micro text-muted-foreground">{description}</p>
+        ) : null}
       </header>
 
       <div className="flex min-h-0 flex-1">
@@ -128,14 +133,17 @@ export function SettingsShell({
             return (
               <Fragment key={item.id}>
                 {showGroup ? <NavSeparator label={item.groupLabel ?? item.group ?? ""} /> : null}
-                <button
-                  type="button"
-                  onClick={() => scrollToCategory(item.id)}
+                <a
+                  href={`#${item.id}`}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    scrollToCategory(item.id);
+                  }}
                   aria-current={isActive ? "true" : undefined}
                   className={cn(
                     "flex w-full items-center gap-2 rounded-control border-l-2 px-2.5 py-1.5 text-left text-micro transition-colors duration-(--motion-fast) ease-standard",
                     isActive
-                      ? "border-accent bg-accent/12 font-medium text-foreground"
+                      ? "border-accent bg-accent-muted font-medium text-foreground"
                       : "border-transparent text-muted-foreground hover:bg-interactive hover:text-foreground",
                   )}
                 >
@@ -147,7 +155,7 @@ export function SettingsShell({
                     </span>
                   ) : null}
                   <span className="truncate">{item.label}</span>
-                </button>
+                </a>
               </Fragment>
             );
           })}

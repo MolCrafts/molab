@@ -231,8 +231,9 @@ def curate_ask(
     rprint(f"  capability : {result.capability_id}")
     rprint(f"  summary    : {result.mutation_summary}")
     rprint(f"  granted    : {result.granted}")
-    rprint(f"\n  artifacts : {run.run_dir / 'artifacts'}")
-    rprint(f"  audit db  : {run.run_dir / 'harness.sqlite'}  (events + artifact lineage)")
+    rprint(f"\n  artifacts : {run.run_dir / 'harness' / 'artifacts'}")
+    rprint(f"  events    : {run.run_dir / 'events.jsonl'}")
+    rprint(f"  approvals : {run.run_dir / 'approvals.json'}")
 
 
 # ── deterministic (LLM-free) ops ──────────────────────────────────────────────

@@ -328,7 +328,7 @@ def add_workspace(
             from molexp.workspace import Workspace
 
             root = Path(sw.path)
-            if not (root / "workspace.json").exists() and not (root / "meta.json").exists():
+            if not (root / "workspace.json").exists():
                 Workspace(root).materialize()
     else:
         sw = _build_remote_served(name=body.name, path=body.path)

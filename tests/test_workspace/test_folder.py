@@ -35,10 +35,10 @@ class TestFolder:
         target = tmp_path / "alpha"
         assert not target.exists(), "construction must be side-effect-free"
 
-        first = Path(folder.path())
+        first = Path(folder.path)
         assert first == target
         assert first.is_dir()
-        assert Path(folder.path()) == first  # idempotent
+        assert Path(folder.path) == first  # idempotent
 
     def test_write_json_round_trips_and_survives_mid_write_failure(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
@@ -50,7 +50,7 @@ class TestFolder:
         written = Path(str(folder.write_json("data.json", {"k": 1})))
         assert json.loads(written.read_text()) == {"k": 1}
 
-        target_path = Path(folder.path()) / "data.json"
+        target_path = Path(folder.path) / "data.json"
 
         def _explode(*_args: object, **_kwargs: object) -> None:
             raise RuntimeError("simulated mid-write failure")
@@ -101,12 +101,12 @@ class TestFolder:
 
     def test_construction_shapes_parent_vs_root_path(self, tmp_path: Path) -> None:
         """``parent=None`` + ``root_path=None`` is the unmounted state (legal at
-        construction; ``.path()`` raises until mounted). ``parent`` + ``root_path``
+        construction; ``.path`` raises until mounted). ``parent`` + ``root_path``
         both set is a ``ValueError``. Nesting walks parent→child correctly."""
         unmounted = Folder(parent=None, name="alpha", kind="test.root", root_path=None)
         assert unmounted._parent is None
         with pytest.raises(RuntimeError, match="unmounted"):
-            Path(unmounted.path())
+            Path(unmounted.path)
 
         other = Folder(parent=None, name="other", kind="test.root", root_path=tmp_path)
         with pytest.raises(ValueError):
@@ -115,7 +115,7 @@ class TestFolder:
         root = Folder(parent=None, name="root", kind="test.root", root_path=tmp_path)
         mid = Folder(parent=root, name="mid", kind="test.mid")
         leaf = Folder(parent=mid, name="leaf", kind="test.leaf")
-        assert Path(leaf.path()) == Path(root.path()) / "mid" / "leaf"
+        assert Path(leaf.path) == Path(root.path) / "mid" / "leaf"
 
     def test_children_lists_materialized_subfolders_and_filters_by_kind(
         self, tmp_path: Path
@@ -143,9 +143,9 @@ class TestFolder:
         """``save()`` advances ``updated_at`` in ``meta.json`` (sole concept file)."""
         folder = Folder(parent=None, name="alpha", kind="test.root", root_path=tmp_path)
         folder.materialize()
-        meta_path = Path(folder.path()) / "meta.json"
+        meta_path = Path(folder.path) / "meta.json"
         assert meta_path.is_file()
-        assert not (Path(folder.path()) / "metadata.json").exists()
+        assert not (Path(folder.path) / "metadata.json").exists()
 
         time.sleep(0.001)  # let the clock tick so the bump is observable
         folder.save()
@@ -162,7 +162,7 @@ class TestFolder:
         folder.materialize()
         folder.write_json("file.json", {})
 
-        captured = Path(folder.path())  # capture before delete (re-path would re-mkdir)
+        captured = Path(folder.path)  # capture before delete (re-path would re-mkdir)
         assert captured.exists()
         folder.delete()
         assert not captured.exists()
@@ -175,7 +175,7 @@ class TestFolder:
 
         folder = Folder(parent=parent_a, name="movable", kind="test.child")
         folder.materialize()
-        old_path = Path(folder.path())
+        old_path = Path(folder.path)
         before = folder.metadata.updated_at
 
         time.sleep(0.001)
@@ -183,8 +183,8 @@ class TestFolder:
 
         assert not old_path.exists()
         assert folder.parent is parent_b
-        assert Path(folder.path()) == Path(parent_b.path()) / "movable"
-        assert Path(folder.path()).exists()
+        assert Path(folder.path) == Path(parent_b.path) / "movable"
+        assert Path(folder.path).exists()
         assert folder.metadata.updated_at > before
 
     def test_move_to_collision_raises(self, tmp_path: Path) -> None:
@@ -194,7 +194,7 @@ class TestFolder:
 
         folder = Folder(parent=parent_a, name="movable", kind="test.child")
         folder.materialize()
-        Path(parent_b.path()).joinpath("movable").mkdir(parents=True, exist_ok=True)
+        Path(parent_b.path).joinpath("movable").mkdir(parents=True, exist_ok=True)
 
         with pytest.raises(FolderMoveCollisionError):
             folder.move_to(parent_b)

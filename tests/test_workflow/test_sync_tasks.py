@@ -13,6 +13,7 @@ import asyncio
 import time
 
 from molexp.workflow import (
+    Workflow,
     WorkflowCompiler,
     WorkflowRuntime,
 )
@@ -24,24 +25,24 @@ def _run(compiled, **kwargs: object):
 
 class TestSyncDecoratorTask:
     def test_sync_task_executes(self) -> None:
-        wf = WorkflowCompiler(name="sync-single")
+        wf = Workflow(name="sync-single")
 
         @wf.task
         def double(x: int) -> int:
             return x * 2
 
-        result = _run(wf.compile(), config={"x": 21})
+        result = _run(WorkflowCompiler().compile(wf), config={"x": 21})
         assert result.status == "succeeded"
         assert result.outputs["double"] == 42
 
     def test_sync_task_exception_fails_workflow(self) -> None:
-        wf = WorkflowCompiler(name="sync-boom")
+        wf = Workflow(name="sync-boom")
 
         @wf.task
         def boom() -> None:
             raise ValueError("broken body")
 
-        result = _run(wf.compile())
+        result = _run(WorkflowCompiler().compile(wf))
         assert result.status == "failed"
 
 
@@ -49,7 +50,7 @@ class TestMixedSyncAsyncDag:
     def test_blocking_sync_body_does_not_stall_async_sibling(self) -> None:
         """A blocking sync body runs in a worker thread, so a same-level
         async sibling still makes progress (parallel levels stay parallel)."""
-        wf = WorkflowCompiler(name="mixed-parallel")
+        wf = Workflow(name="mixed-parallel")
 
         @wf.task
         def slow_sync() -> str:
@@ -65,7 +66,7 @@ class TestMixedSyncAsyncDag:
             return slow_sync + "+" + fast_async
 
         start = time.monotonic()
-        result = _run(wf.compile())
+        result = _run(WorkflowCompiler().compile(wf))
         elapsed = time.monotonic() - start
         assert result.outputs["join"] == "sync+async"
         # Generous bound: serialized-with-loop-stall would still pass, but a

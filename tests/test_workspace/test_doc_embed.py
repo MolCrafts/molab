@@ -30,9 +30,8 @@ from molexp.workspace import (
     ReferenceConcept,
     ReferenceMeta,
     Workspace,
-    summarize_entity,
 )
-from molexp.workspace.doc_embed import asset_record_dir
+from molexp.workspace.doc_embed import asset_record_dir, summarize_entity
 
 _VALID_ROLES = {"derived_from", "cites", "supersedes", "records", "references"}
 

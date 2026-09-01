@@ -527,7 +527,7 @@ def _retry_run(
 
     reap_zombie_run(run)
     from molexp.harness.workflow_recovery import compiled_workflow_for_run
-    from molexp.workflow import RunFailedError, RunNotExecutableError, execute_run
+    from molexp.workflow import RunFailedError, RunNotExecutableError
 
     try:
         workflow = compiled_workflow_for_run(run)
@@ -536,7 +536,7 @@ def _retry_run(
         raise typer.Exit(1) from None
     verb = "Resumed" if resume else "Reran"
     try:
-        execute_run(workflow, run, resume=resume, rerun=rerun, fresh=fresh)
+        run.execute(workflow, resume=resume, rerun=rerun, fresh=fresh)
     except RunNotExecutableError as exc:
         rprint(f"[red]Error:[/red] {exc}")
         raise typer.Exit(1) from None
@@ -596,7 +596,7 @@ def run_harvest(
     from molexp.workspace import ExperimentNotFoundError as _ExpNotFound
     from molexp.workspace import ProjectNotFoundError as _ProjNotFound
     from molexp.workspace import RunNotFoundError as _RunNotFound
-    from molexp.workspace import harvest_run, parse_knowledge_class
+    from molexp.workspace.knowledge import parse_knowledge_class
 
     try:
         project = ws.get_project(project_id)
@@ -606,8 +606,7 @@ def run_harvest(
         rprint(f"[red]Error:[/red] {exc}")
         raise typer.Exit(1) from None
     try:
-        item = harvest_run(
-            run,
+        item = run.harvest(
             cls=parse_knowledge_class(kind),
             narrative=narrative,
             created_by=created_by,
@@ -627,9 +626,10 @@ def run_ingest_metrics(
 ) -> None:
     """Ingest foreign logs into the run host metrics surface (additive).
 
-    A molexp Run is a host, not a MolRec record — writes ``*.mlp.jsonl``,
-    densifies to ``*.mlp.zarr/``, and rebuilds ``*.mlp.index.json``.
-    Source logs are untouched.
+    A molexp Run is a host, not a MolRec record — appends to the
+    ``*.mlp.jsonl`` WAL, the only metrics persist surface (leftover
+    ``*.mlp.zarr/`` / ``*.mlp.index.json`` are ignored). Source logs are
+    untouched.
     """
     ws = _open_ws(target_spec)
     from molexp.plugins.metrics_ingest import detect_log_formats, ingest_run

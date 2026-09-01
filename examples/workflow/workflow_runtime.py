@@ -16,11 +16,11 @@ from __future__ import annotations
 
 import asyncio
 
-from molexp.workflow import CompiledWorkflow, WorkflowCompiler, WorkflowRuntime
+from molexp.workflow import CompiledWorkflow, Workflow, WorkflowCompiler, WorkflowRuntime
 
 
 def build_slow_workflow() -> CompiledWorkflow:
-    wf = WorkflowCompiler(name="slow")
+    wf = Workflow(name="slow")
 
     @wf.task
     async def step_one() -> int:
@@ -33,7 +33,7 @@ def build_slow_workflow() -> CompiledWorkflow:
         await asyncio.sleep(0.05)
         return step_one + 1
 
-    return wf.compile()
+    return WorkflowCompiler().compile(wf)
 
 
 async def blocking_entry() -> None:

@@ -73,7 +73,7 @@ def _resolve_single_root(compiled: CompiledWorkflow) -> str:
     raise ValueError(
         f"SubWorkflow forwards an input into inner workflow {compiled.name!r}, "
         f"but it has {len(roots)} entry task(s) {roots!r}; give the inner spec a "
-        f"single entry (one root task, or WorkflowCompiler(entry='<task>')) so the "
+        f"single entry (one root task, or Workflow(entry='<task>')) so the "
         f"forwarded input has an unambiguous destination."
     )
 
@@ -89,10 +89,9 @@ def _resolve_cache(
 
     1. an explicit ``cache=`` kwarg passed to ``execute`` / ``start`` / …;
     2. the runtime's flat ``self.cache`` instance attribute;
-    3. auto-derived from a workspace ``run_context`` that exposes a cache
-       store (``run_context.run.experiment.project.workspace.cache`` →
-       ``.as_cache_store()``), probed defensively via ``getattr`` so a
-       duck-typed / stub context never raises;
+    3. auto-derived from a workspace ``run_context`` that exposes
+       ``run_dir`` — a :class:`FileCacheStore` at ``<run_dir>/cache``
+       (never the workspace-root ``cache/``);
     4. ``None`` (caching off — identical behaviour to before this spec).
     """
     if explicit is not None:
@@ -103,31 +102,28 @@ def _resolve_cache(
 
 
 def _auto_cache_from_run_context(run_context: RunContextLike | None) -> Caching | None:
-    """Best-effort: build a workspace-backed ``Caching`` from a run_context.
+    """Best-effort: build a run-local ``Caching`` from a run_context.
 
-    Returns ``None`` whenever the duck-typed surface does not expose a
-    workspace cache store — a plain stub run_context, a run_context with
-    no workspace ancestry, etc. Never raises.
+    Cache lives at ``<run_dir>/cache``. Returns ``None`` when the duck-typed
+    surface does not expose a ``run_dir``. Never raises. Never creates a
+    workspace-root ``cache/``.
     """
     if run_context is None:
         return None
-    run = getattr(run_context, "run", None)
-    if run is None:
-        return None
-    experiment = getattr(run, "experiment", None)
-    project = getattr(experiment, "project", None)
-    workspace = getattr(project, "workspace", None)
-    cache_folder = getattr(workspace, "cache", None)
-    as_cache_store = getattr(cache_folder, "as_cache_store", None)
-    if not callable(as_cache_store):
+    run_dir = getattr(run_context, "run_dir", None)
+    if run_dir is None:
+        run = getattr(run_context, "run", None)
+        run_dir = getattr(run, "run_dir", None)
+    if run_dir is None:
         return None
     try:
-        store = as_cache_store()
-    except Exception:
+        store_dir = Path(run_dir) / "cache"
+    except TypeError:
         return None
     from ..cache import Caching
+    from ..cache_store import FileCacheStore
 
-    return Caching(store=store)
+    return Caching(store=FileCacheStore(store_dir))
 
 
 logger = get_logger(__name__)
@@ -304,9 +300,12 @@ class WorkflowRuntime:
     ``self.cache`` is a flat, settable :class:`~molexp.workflow.cache.Caching`
     instance attribute (default ``None`` — caching off). It is the lowest
     priority cache source; an explicit ``cache=`` kwarg on any execution
-    method wins, and a workspace-backed cache is auto-derived from a
-    workspace ``run_context`` when neither is set (see :func:`_resolve_cache`).
+    method wins, and a run-local cache at ``<run_dir>/cache`` is auto-derived
+    from a ``run_context`` when neither is set (see :func:`_resolve_cache`).
     """
+
+    make_execution_id = staticmethod(make_execution_id)
+    request_fresh_execution = staticmethod(request_fresh_execution)
 
     def __init__(self) -> None:
         self.cache: Caching | None = None

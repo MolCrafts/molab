@@ -153,7 +153,10 @@ class TestCheckpointAccessor:
             asset = ctx.checkpoint("mid-run", data={"step": 5})
             assert isinstance(asset, CheckpointAsset)
             assert asset.ckpt_id.startswith("ckpt_")
-            assert asset.absolute_path(ctx.run_dir).exists()
+            saved = asset.absolute_path(ctx.run_dir)
+            assert saved.exists()
+            assert "checkpoints" in saved.parts
+            assert "executions" in saved.parts
             assert asset.load(ctx.run_dir)["data"] == {"step": 5}
 
     def test_checkpoints_chain_parent_ids(self, run):

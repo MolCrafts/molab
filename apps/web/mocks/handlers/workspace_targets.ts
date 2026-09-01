@@ -24,18 +24,18 @@ const seed = (t: WorkspaceTargetResponse): void => {
 seed({
   name: "lab",
   host: "me@lab.example.org",
-  root_path: "/scratch/me/molexp-lab",
+  rootPath: "/scratch/me/molexp-lab",
   port: null,
-  identity_file: null,
-  ssh_opts: [],
+  identityFile: null,
+  sshOpts: [],
 });
 seed({
   name: "hpc-allegro",
   host: "me@allegro.hpc.example.org",
-  root_path: "/scratch/me/allegro",
+  rootPath: "/scratch/me/allegro",
   port: 22,
-  identity_file: "~/.ssh/id_ed25519",
-  ssh_opts: ["-o", "StrictHostKeyChecking=accept-new"],
+  identityFile: "~/.ssh/id_ed25519",
+  sshOpts: ["-o", "StrictHostKeyChecking=accept-new"],
 });
 
 let activeDescriptor: string | null = null;
@@ -59,10 +59,10 @@ export const workspaceTargetsHandlers = [
     const created: WorkspaceTargetResponse = {
       name: body.name,
       host: body.host,
-      root_path: body.root_path,
+      rootPath: body.rootPath,
       port: body.port ?? null,
-      identity_file: body.identity_file ?? null,
-      ssh_opts: body.ssh_opts ?? [],
+      identityFile: body.identityFile ?? null,
+      sshOpts: body.sshOpts ?? [],
     };
     targets.set(created.name, created);
     return HttpResponse.json(created, { status: 201 });
@@ -95,7 +95,7 @@ export const workspaceTargetsHandlers = [
           name,
           ok: true,
           checks: [
-            { label: "mkdir root_path", ok: true, detail: null },
+            { label: "mkdir rootPath", ok: true, detail: null },
             { label: "file round-trip", ok: true, detail: null },
           ],
           error: null,
@@ -105,7 +105,7 @@ export const workspaceTargetsHandlers = [
           ok: false,
           checks: [
             {
-              label: "mkdir root_path",
+              label: "mkdir rootPath",
               ok: false,
               detail: "simulated mkdir failure (mock)",
             },

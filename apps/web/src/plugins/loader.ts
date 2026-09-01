@@ -25,7 +25,12 @@
 import { PluginsService } from "@/api/generated/services/PluginsService";
 import { registerPluginCatalogEntry } from "@/plugins/catalog";
 import { runWithPluginContext } from "@/plugins/contribution-runtime";
-import type { PluginManifest, UiBundleManifest, UiPluginModule } from "@/plugins/types";
+import type {
+  InternalPluginDescriptor,
+  PluginManifest,
+  UiBundleManifest,
+  UiPluginModule,
+} from "@/plugins/types";
 
 /**
  * UI-plugin contract version frozen into this build. Each third-party
@@ -52,6 +57,7 @@ const defaultFetchManifest: ManifestFetcher = async (url) => {
 
 export interface LoaderState {
   installed: Set<string>;
+  internalPromises: Map<string, Promise<void>>;
   remotePromises: Map<string, Promise<void>>;
   dynamicImport: DynamicImport;
   fetchManifest: ManifestFetcher;
@@ -59,10 +65,57 @@ export interface LoaderState {
 
 export const createLoaderState = (): LoaderState => ({
   installed: new Set<string>(),
+  internalPromises: new Map<string, Promise<void>>(),
   remotePromises: new Map<string, Promise<void>>(),
   dynamicImport: defaultDynamicImport,
   fetchManifest: defaultFetchManifest,
 });
+
+export const registerInternalPluginDescriptors = (
+  descriptors: readonly InternalPluginDescriptor[],
+): void => {
+  for (const descriptor of descriptors) {
+    registerPluginCatalogEntry({
+      id: descriptor.id,
+      name: descriptor.name,
+      description: descriptor.description,
+      userToggleable: descriptor.userToggleable,
+    });
+  }
+};
+
+/** Load one bundled plugin exactly once while isolating a broken chunk. */
+export const loadInternalPlugin = (
+  state: LoaderState,
+  descriptor: InternalPluginDescriptor,
+): Promise<void> => {
+  if (state.installed.has(descriptor.id)) {
+    return Promise.resolve();
+  }
+  const cached = state.internalPromises.get(descriptor.id);
+  if (cached) {
+    return cached;
+  }
+
+  const promise = descriptor
+    .load()
+    .then((module) => {
+      if (!looksLikePluginModule(module) || module.default.id !== descriptor.id) {
+        console.warn(
+          `[plugins] internal plugin "${descriptor.id}" did not export the matching UiPluginModule`,
+        );
+        return;
+      }
+      registerPluginInstance(state, module.default);
+    })
+    .catch((error) => {
+      console.warn(`[plugins] failed to load internal plugin "${descriptor.id}":`, error);
+      state.internalPromises.delete(descriptor.id);
+    });
+
+  state.internalPromises.set(descriptor.id, promise);
+  return promise;
+};
 
 export const registerPluginInstance = (state: LoaderState, plugin: UiPluginModule): void => {
   if (state.installed.has(plugin.id)) {
@@ -185,9 +238,9 @@ export const loadRemotePlugin = (state: LoaderState, descriptor: PluginManifest)
  * {@link loadRemotePlugin}. Failures are isolated.
  */
 export const discoverAndLoad = async (state: LoaderState): Promise<void> => {
-  let listing: Awaited<ReturnType<typeof PluginsService.listPluginsApiPluginsGet>>;
+  let listing: Awaited<ReturnType<typeof PluginsService.listPlugins>>;
   try {
-    listing = await PluginsService.listPluginsApiPluginsGet();
+    listing = await PluginsService.listPlugins();
   } catch (error) {
     console.warn("[plugins] /api/plugins fetch failed:", error);
     return;
@@ -197,6 +250,7 @@ export const discoverAndLoad = async (state: LoaderState): Promise<void> => {
 
 export const resetLoaderState = (state: LoaderState): void => {
   state.installed.clear();
+  state.internalPromises.clear();
   state.remotePromises.clear();
   state.dynamicImport = defaultDynamicImport;
   state.fetchManifest = defaultFetchManifest;

@@ -12,4 +12,4 @@
 
 ## 准备好深入时
 
-当你能够读懂调用 `wf.compile()` 和 `run.execute(wf)` 的脚本后，[核心概念](../concept/index.md) 会帮你巩固思维模型，[指南](../guide/index.md) 则涵盖更详细的话题。
+当你能够读懂调用 `WorkflowCompiler().compile(wf)` 和 `run.execute(wf)` 的脚本后，[核心概念](../concept/index.md) 会帮你巩固思维模型，[指南](../guide/index.md) 则涵盖更详细的话题。

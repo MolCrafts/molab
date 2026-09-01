@@ -113,3 +113,12 @@ class TestRunLoad:
         assert loaded.id == "r1"
         assert loaded.parameters["seed"] == 1
         assert loaded.experiment.id == "e"
+
+    def test_run_path_is_pathlib_and_run_dir_is_alias(self, tmp_path) -> None:
+        from pathlib import Path as LocalPath
+
+        ws = Workspace.create(tmp_path / "lab", name="lab")
+        run = ws.add_project("p").add_experiment("e").add_run(id="r1")
+        assert isinstance(run.path, LocalPath)
+        assert run.run_dir == run.path
+        assert (run.path / "run.json").is_file()

@@ -5,7 +5,7 @@
 import { useEffect, useState } from "react";
 import type { CurateTaskResponse } from "@/api/generated/models/CurateTaskResponse";
 import { CurateTasksService } from "@/api/generated/services/CurateTasksService";
-import { ApprovalsInbox } from "@/app/renderers/agent/ApprovalsInbox";
+import { ApprovalsInbox } from "@/app/approvals/ApprovalsInbox";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/components/ui/toast";
 import { WorkbenchAction, WorkbenchTag } from "@/components/workbench";
@@ -38,12 +38,7 @@ export function CurateComposer({
     let cancelled = false;
     const handle = window.setInterval(async () => {
       try {
-        const next =
-          await CurateTasksService.getCurateTaskApiProjectsProjectIdExperimentsExperimentIdCurateTasksTaskIdGet(
-            projectId,
-            experimentId,
-            taskId,
-          );
+        const next = await CurateTasksService.getCurateTask(projectId, experimentId, taskId);
         if (cancelled) return;
         setTask(next);
         if (next.status === "completed") {
@@ -70,12 +65,9 @@ export function CurateComposer({
     setSubmitting(true);
     setError(null);
     try {
-      const created =
-        await CurateTasksService.createCurateTaskApiProjectsProjectIdExperimentsExperimentIdCurateTasksPost(
-          projectId,
-          experimentId,
-          { request: text },
-        );
+      const created = await CurateTasksService.createCurateTask(projectId, experimentId, {
+        request: text,
+      });
       setTask(created);
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));

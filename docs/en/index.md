@@ -103,9 +103,9 @@ runs independent tasks in parallel, and caches by content.
 </div>
 
 ```python
-from molexp.workflow import WorkflowCompiler
+from molexp.workflow import Workflow, WorkflowCompiler
 
-wf = WorkflowCompiler(name="sum")
+wf = Workflow(name="sum")
 
 @wf.task
 def fetch(scale: float = 1.0) -> dict:
@@ -185,7 +185,7 @@ rerun, and scheduler-backed execution.
 ```python
 # train.py — register the experiment once
 ws.add_project("demo").add_experiment("sum").define(
-    wf.compile(), params={"scale": [1.0, 2.0]}
+    WorkflowCompiler().compile(wf), params={"scale": [1.0, 2.0]}
 )
 ```
 

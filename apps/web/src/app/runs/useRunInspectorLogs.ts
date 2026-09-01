@@ -1,11 +1,8 @@
 import { useEffect, useState } from "react";
-
+import { runsApi } from "@/api";
 import type { RunLogsResponse } from "@/api/generated";
-import { workspaceApi } from "@/app/state/api";
-
 import type { WorkspaceRunRow } from "./types";
 import { POLL_INTERVAL_MS } from "./useWorkspaceRuns";
-
 export type RunLogsPayload = {
   stdout: string | null;
   stderr: string | null;
@@ -22,7 +19,7 @@ interface UseRunInspectorLogsResult {
 const toPayload = (response: RunLogsResponse): RunLogsPayload => ({
   stdout: response.stdout ?? null,
   stderr: response.stderr ?? null,
-  executionId: response.execution_id ?? null,
+  executionId: response.executionId ?? null,
 });
 
 /**
@@ -69,8 +66,8 @@ export const useRunInspectorLogs = (
 
     const load = (): void => {
       const fetcher = selectedExecutionId
-        ? workspaceApi.getRunExecutionLogs(projectId, experimentId, runId, selectedExecutionId)
-        : workspaceApi.getRunLogs(projectId, experimentId, runId);
+        ? runsApi.getRunExecutionLogs(projectId, experimentId, runId, selectedExecutionId)
+        : runsApi.getRunLogs(projectId, experimentId, runId);
 
       fetcher
         .then((response) => {

@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
+import { knowledgeApi } from "@/api";
 import { KnowledgeService } from "@/api/generated/services/KnowledgeService";
-import { workspaceApi } from "@/app/state/api";
 
-const PATCH = "updateDocMetaApiKnowledgeDocMetaPatch" as const;
+const PATCH = "updateDocMeta" as const;
 
-describe("workspaceApi.updateNoteMeta", () => {
+describe("knowledgeApi.updateDocMeta", () => {
   afterEach(() => {
     rs.restoreAllMocks();
   });
@@ -20,7 +20,7 @@ describe("workspaceApi.updateNoteMeta", () => {
     const patchSpy = rs.spyOn(KnowledgeService, PATCH).mockResolvedValue(summary as never);
     const fetchSpy = rs.spyOn(globalThis, "fetch");
 
-    const result = await workspaceApi.updateNoteMeta("notes/intro", {
+    const result = await knowledgeApi.updateDocMeta("notes/intro", {
       status: "draft",
       tags: ["physics"],
     });

@@ -10,10 +10,8 @@ The local↔remote contract is intentionally narrow:
 * **Stage-in** mirrors the local ``run_dir`` (run.json, experiment metadata,
   workspace metadata, the workflow source) into ``target_run_dir`` on the
   transport's filesystem.  It excludes ``executions/`` and Python bytecode.
-* **Stage-out** mirrors the remote ``executions/<exec_id>/`` plus any new
-  files under ``artifacts/``, ``assets/`` and ``.ckpt/`` back to the local
-  ``run_dir``.  Run metadata (``run.json``) is also pulled so the local
-  status reflects what the worker reported.
+* **Stage-out** mirrors the remote ``executions/<exec_id>/`` plus ``run.json``
+  and the ``alive`` heartbeat file. Products live under the execution dir.
 
 Both operations are no-ops when the target's working dir resolves to the
 local ``run_dir`` (i.e. a local target with no scratch-root override) so the
@@ -99,30 +97,17 @@ def stage_out(
         # started — leave the local copy untouched and surface no error.
         return
 
-    # Top-level artifacts the run may have produced.
-    for sub in ("artifacts", ".ckpt", "assets.json"):
-        remote_path = f"{remote_run}/{sub}"
-        local_path = str(Path(local_run) / sub)
-        try:
-            if not transport.exists(remote_path):
-                continue
-        except TransportError:
-            continue
-        try:
-            transport.download(
-                remote_path,
-                local_path,
-                recursive=sub != "assets.json",
-                exclude=_RSYNC_EXCLUDES,
-            )
-        except TransportError:
-            continue
-
-    # Run metadata — always pulled so the local copy reflects worker outcomes.
+    # Run identity + heartbeat — always pulled so the local copy reflects
+    # worker outcomes. Products already came back with ``executions/<id>/``.
     with contextlib.suppress(TransportError):
         transport.download(
             f"{remote_run}/run.json",
             str(Path(local_run) / "run.json"),
+        )
+    with contextlib.suppress(TransportError):
+        transport.download(
+            f"{remote_run}/alive",
+            str(Path(local_run) / "alive"),
         )
 
 

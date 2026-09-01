@@ -33,7 +33,7 @@ export const runHandlers = [
                 experimentId: experimentId as string,
                 status: "pending",
                 finished: null,
-                parameters: body.parameters || {},
+                parameters: body.params || {},
                 results: {},
                 created: new Date().toISOString(),
                 executorInfo: {},
@@ -116,7 +116,7 @@ export const runHandlers = [
             const latest = history[history.length - 1];
             if (!latest) {
                 return HttpResponse.json({
-                    execution_id: null,
+                    executionId: null,
                     status: "pending",
                     steps: [],
                     end: null,
@@ -126,7 +126,7 @@ export const runHandlers = [
             const isSuccess = run.status === "succeeded";
             const isFailure = run.status === "failed";
             return HttpResponse.json({
-                execution_id: latest.executionId,
+                executionId: latest.executionId,
                 status: run.status,
                 steps: [
                     {
@@ -577,9 +577,9 @@ export const runHandlers = [
         }
     ),
 
-    // POST /api/projects/:projectId/experiments/:experimentId/runs/:runId/kill
+    // POST /api/projects/:projectId/experiments/:experimentId/runs/:runId/cancel
     http.post(
-        `${API_BASE}/projects/:projectId/experiments/:experimentId/runs/:runId/kill`,
+        `${API_BASE}/projects/:projectId/experiments/:experimentId/runs/:runId/cancel`,
         ({ params }) => {
             const run = getRun(params.runId as string);
             if (!run) {

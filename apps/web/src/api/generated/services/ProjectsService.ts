@@ -4,6 +4,7 @@
 /* eslint-disable */
 import type { AssetResponse } from '../models/AssetResponse';
 import type { Body_uploadProjectAsset } from '../models/Body_uploadProjectAsset';
+import type { Body_uploadProjectAssetWs } from '../models/Body_uploadProjectAssetWs';
 import type { MessageResponse } from '../models/MessageResponse';
 import type { ProjectCreateRequest } from '../models/ProjectCreateRequest';
 import type { ProjectResponse } from '../models/ProjectResponse';
@@ -229,7 +230,7 @@ export class ProjectsService {
      * @returns ProjectResponse Successful Response
      * @throws ApiError
      */
-    public static listProjects1(
+    public static listProjectsWs(
         ws: string,
         molexpSession?: (string | null),
     ): CancelablePromise<Array<ProjectResponse>> {
@@ -255,7 +256,7 @@ export class ProjectsService {
      * @returns ProjectResponse Successful Response
      * @throws ApiError
      */
-    public static createProject1(
+    public static createProjectWs(
         ws: string,
         requestBody: ProjectCreateRequest,
         molexpSession?: (string | null),
@@ -284,7 +285,7 @@ export class ProjectsService {
      * @returns MessageResponse Successful Response
      * @throws ApiError
      */
-    public static deleteProject1(
+    public static deleteProjectWs(
         projectId: string,
         ws: string,
         molexpSession?: (string | null),
@@ -312,7 +313,7 @@ export class ProjectsService {
      * @returns ProjectResponse Successful Response
      * @throws ApiError
      */
-    public static getProject1(
+    public static getProjectWs(
         projectId: string,
         ws: string,
         molexpSession?: (string | null),
@@ -342,7 +343,7 @@ export class ProjectsService {
      * @returns AssetResponse Successful Response
      * @throws ApiError
      */
-    public static listProjectAssets1(
+    public static listProjectAssetsWs(
         projectId: string,
         ws: string,
         limit: number = 100,
@@ -376,10 +377,10 @@ export class ProjectsService {
      * @returns AssetResponse Successful Response
      * @throws ApiError
      */
-    public static uploadProjectAsset1(
+    public static uploadProjectAssetWs(
         projectId: string,
         ws: string,
-        formData: Body_uploadProjectAsset,
+        formData: Body_uploadProjectAssetWs,
         molexpSession?: (string | null),
     ): CancelablePromise<AssetResponse> {
         return __request(OpenAPI, {
@@ -408,7 +409,7 @@ export class ProjectsService {
      * @returns AssetResponse Successful Response
      * @throws ApiError
      */
-    public static getProjectAsset1(
+    public static getProjectAssetWs(
         projectId: string,
         assetId: string,
         ws: string,
@@ -439,7 +440,7 @@ export class ProjectsService {
      * @returns any Successful Response
      * @throws ApiError
      */
-    public static downloadProjectAsset1(
+    public static downloadProjectAssetWs(
         projectId: string,
         assetId: string,
         ws: string,

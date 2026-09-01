@@ -1,6 +1,7 @@
 import { Plus } from "lucide-react";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useState } from "react";
+import { runsApi } from "@/api";
 import type { TargetResponse } from "@/api/generated/models/TargetResponse";
 import { ExperimentsService } from "@/api/generated/services/ExperimentsService";
 import { TargetsService } from "@/api/generated/services/TargetsService";
@@ -12,7 +13,6 @@ import {
   schemaDefaults,
 } from "@/app/runs/SchemaForm";
 import { AddTargetDialog } from "@/app/settings/AddTargetDialog";
-import { workspaceApi } from "@/app/state/api";
 import {
   Dialog,
   DialogContent,
@@ -67,7 +67,7 @@ export function CreateRunDialog({
 
   const refreshTargets = useCallback(async () => {
     try {
-      const res = await TargetsService.listTargetsEndpointApiTargetsGet();
+      const res = await TargetsService.listTargetsEndpoint();
       setTargets(res.targets);
     } catch {
       setTargets([]);
@@ -77,10 +77,7 @@ export function CreateRunDialog({
   useEffect(() => {
     if (!open) return;
     void refreshTargets();
-    void ExperimentsService.getExperimentApiProjectsProjectIdExperimentsExperimentIdGet(
-      projectId,
-      experimentId,
-    )
+    void ExperimentsService.getExperiment(projectId, experimentId)
       .then((exp) => {
         if (exp.defaultTarget) setTarget(exp.defaultTarget);
         const schema = parseInputSchema(exp.workflow);
@@ -98,8 +95,8 @@ export function CreateRunDialog({
     setError(null);
 
     try {
-      const created = await workspaceApi.createRun(projectId, experimentId, {
-        parameters,
+      const created = await runsApi.createScopedRun(projectId, experimentId, {
+        params: parameters,
         target: target === NO_TARGET_VALUE ? null : target,
       });
 

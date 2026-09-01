@@ -1,4 +1,4 @@
-import type { RendererKey, Selection, SemanticObjectType } from "@/app/types";
+import type { RendererKey, RendererSnapshot, Selection, SemanticObjectType } from "@/app/types";
 import {
   registerEntityTabContribution as addEntityTabContribution,
   registerExecutionColumnContribution as addExecutionColumnContribution,
@@ -69,7 +69,7 @@ export const listEntityTabs = (
   objectType: EntityTabContribution["objectType"],
   context?: {
     selection: import("@/app/types").Selection;
-    snapshot: import("@/app/types").WorkspaceSnapshot;
+    snapshot: import("@/app/types").RendererSnapshot;
   },
 ): EntityTabContribution[] => {
   const tabs = listEntityTabContributions(objectType);
@@ -205,3 +205,16 @@ export const buildRendererKeyFromSelection = (
     panelKind: target.panelKind,
   };
 };
+
+/** Resolve the enabled renderer contributions for one host panel slot. */
+export const resolveRenderersForSelection = (
+  selection: Selection,
+  snapshot: RendererSnapshot,
+  slot: keyof RenderPlan,
+): RendererContribution[] =>
+  renderPlanByObjectType[selection.objectType][slot]
+    .map((target) => {
+      const key = buildRendererKeyFromSelection(selection, target);
+      return tryResolveRenderer(key, { selection, snapshot, target });
+    })
+    .filter((renderer): renderer is RendererContribution => renderer !== null);

@@ -18,7 +18,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from molexp.workspace import ContextFocus, assemble_workspace_context
+from molexp.workspace import ContextFocus
 
 if TYPE_CHECKING:
     from molexp.workspace import Workspace
@@ -131,8 +131,7 @@ def _resolve_and_render(
     project, experiment, run = _resolve_scope(
         workspace, project_id=project_id, experiment_id=experiment_id, run_id=run_id
     )
-    context = assemble_workspace_context(
-        workspace,
+    context = workspace.context(
         focus=ContextFocus(project_id=project_id, experiment_id=experiment_id, run_id=run_id),
     )
     if run is not None:

@@ -68,7 +68,7 @@ export class TensorboardService {
      * @returns TensorboardScalarsResponse Successful Response
      * @throws ApiError
      */
-    public static getRunTensorboardScalars1(
+    public static getRunTensorboardScalarsWs(
         projectId: string,
         experimentId: string,
         runId: string,

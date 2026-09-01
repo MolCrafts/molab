@@ -22,7 +22,7 @@ from pathlib import Path
 
 import pytest
 
-from molexp.workflow import Task, TaskContext, WorkflowCompiler, WorkflowRuntime
+from molexp.workflow import Task, TaskContext, Workflow, WorkflowCompiler, WorkflowRuntime
 from molexp.workflow.cache import Caching
 from molexp.workflow.snapshot import TaskSnapshot
 from molexp.workspace import Workspace
@@ -111,14 +111,14 @@ class TestEngineInjectedCacheIdentity:
         """Regression — the first sweep cell's root result must NOT be served to
         every other cell. Different run params ⇒ root-task cache MISS ⇒ body runs."""
         counters = {"root": 0}
-        wf = WorkflowCompiler(name="sweep")
+        wf = Workflow(name="sweep")
 
         @wf.task
         async def root(ratio: str) -> str:
             counters["root"] += 1
             return ratio
 
-        compiled = wf.compile()
+        compiled = WorkflowCompiler().compile(wf)
         cache = Caching(store_dir=tmp_path / "shared-cache")
 
         run1 = _workspace_run(tmp_path, "a", {"ratio": "r1"})
@@ -138,14 +138,14 @@ class TestEngineInjectedCacheIdentity:
         Paths and execution ids) share one cache entry — workdir never poisons
         the key."""
         counters = {"root": 0}
-        wf = WorkflowCompiler(name="sweep-hit")
+        wf = Workflow(name="sweep-hit")
 
         @wf.task
         async def root(ratio: str) -> str:
             counters["root"] += 1
             return ratio
 
-        compiled = wf.compile()
+        compiled = WorkflowCompiler().compile(wf)
         cache = Caching(store_dir=tmp_path / "shared-cache")
 
         run1 = _workspace_run(tmp_path, "ws1", {"ratio": "r1"})

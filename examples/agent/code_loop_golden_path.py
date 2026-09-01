@@ -29,7 +29,7 @@ import tempfile
 from pathlib import Path
 
 import molexp as me
-from molexp.workflow import WorkflowCompiler
+from molexp.workflow import Workflow
 from molexp.workspace.param import GridSpace
 
 # Fixed names so tests can assert the on-disk layout contract.
@@ -41,9 +41,9 @@ TASK_NAME = "yy_score"
 FIGURE_REL = Path("figures") / "yy_scan.png"
 
 
-def build_yy_workflow() -> WorkflowCompiler:
+def build_yy_workflow() -> Workflow:
     """Compile a trivial workflow — stand-in for "implement YY" science."""
-    wf = WorkflowCompiler(name="yy")
+    wf = Workflow(name="yy")
 
     @wf.task
     def yy_score(x: float = 0.0) -> float:

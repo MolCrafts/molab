@@ -407,7 +407,7 @@ def main() -> int:
         print(f"\ncompile : status={execution.status} mode={execution.metadata.get('mode')}")
         print(f"final   : {result.final_artifact.kind} ({result.final_artifact.id})")
         print(f"\nartifacts : {run.run_dir / 'artifacts'}")
-        print(f"audit db  : {run.run_dir / 'harness.sqlite'}  (events + artifact lineage)")
+        print(f"audit db  : {run.run_dir / 'events.jsonl'}  (events + artifact lineage)")
     return 0
 
 

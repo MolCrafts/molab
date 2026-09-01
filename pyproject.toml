@@ -28,6 +28,8 @@ dependencies = [
     # these products directly. molrs is reached only through molpy.
     "molcrafts-molpy>=0.13.1",
     "zarr>=3",
+    # molrec is a protocol, not a library — never a runtime dependency.
+    # A conformance suite, if added, is a test-only extra (not imported from src/).
 ]
 
 [project.optional-dependencies]
@@ -42,6 +44,9 @@ dependencies = [
 agent = ["pydantic-ai>=1.105", "pytest>=7.0", "pytest-asyncio>=0.21"]
 tensorboard = ["tensorboard>=2.15"]
 all = ["molexp[agent,tensorboard]"]
+# Protocol suite only — never imported from src/. Sibling path in
+# [tool.uv.sources]; CI UV_NO_SOURCES=1 skips this extra.
+conformance = ["molrec"]
 dev = [
     "molexp[all]",
     "pytest>=7.0",
@@ -75,6 +80,7 @@ molcrafts-molcfg = { path = "../molcfg", editable = true }
 molcrafts-molq = { path = "../molq", editable = true }
 molcrafts-molpy = { path = "../molpy", editable = true }
 molcrafts-molrs = { path = "../molrs/molrs-python", editable = true }
+molrec = { path = "../molrec", editable = true }
 
 [project.scripts]
 molexp = "molexp.cli:app"

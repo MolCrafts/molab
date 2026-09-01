@@ -17,9 +17,9 @@ An experiment says *what should be repeatable*. A run records *what actually hap
 
 ```python
 import molexp as me
-from molexp.workflow import WorkflowCompiler
+from molexp.workflow import Workflow, WorkflowCompiler
 
-wf = WorkflowCompiler(name="baseline")
+wf = Workflow(name="baseline")
 
 @wf.task
 def train(lr: float) -> dict:
@@ -44,7 +44,7 @@ result = run.execute(wf)
 print(run.status, result.outputs["report"])  # succeeded 0.1
 ```
 
-The run's directory now holds `run.json` (identity and provenance), `ops/run.json` (status and ownership), and `executions/<exec_id>/` (per-task outputs). Read it back in a later session:
+The run's directory now holds `run.json` (identity and provenance), `run.json (hot state) + alive` (status and ownership), and `executions/<exec_id>/` (per-task outputs). Read it back in a later session:
 
 ```python
 same_run = exp.get_run(run.id)
@@ -100,7 +100,7 @@ print(best["lr"], best["run_id"])
 Bind the compiled workflow to the experiment so `molexp run` can discover it:
 
 ```python
-exp.define(wf.compile(), params={"lr": [1e-3, 5e-4]})
+exp.define(WorkflowCompiler().compile(wf), params={"lr": [1e-3, 5e-4]})
 ```
 
 Now `molexp run` owns run selection, profiles, resume flags, and scheduler-backed execution over the exact same runs. See [CLI and Profiles](cli-and-profiles.md).

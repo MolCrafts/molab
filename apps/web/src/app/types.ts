@@ -1,6 +1,7 @@
-import type { TaskGraphJson } from "@/plugins/workflow";
+import type { TaskGraphJson } from "@/plugins/workflow/task-graph-ir";
 
 export type LeftPanelView =
+  | "dashboard"
   | "workspace"
   | "projects"
   | "runs"
@@ -263,12 +264,21 @@ export interface WorkspaceSnapshot {
   consoleEntries: ConsoleEntry[];
 }
 
-export type ObjectView = "overview" | "executions" | "logs" | "metrics" | "scheduler";
+export type CoreObjectView = "overview" | "executions" | "logs" | "metrics" | "scheduler";
+/** Core views plus stable tab values contributed by independently loaded plugins. */
+export type ObjectView = CoreObjectView | (string & {});
+
+export type ExperimentView = "overview" | "workflow" | "runs" | "compare";
+export type ProjectView = "overview" | "experiments" | "assets" | "settings";
 
 export interface ObjectSelection {
   objectType: BaseObjectType;
   objectId: string;
   objectView?: ObjectView;
+  /** Route-backed view within an experiment. Only meaningful for experiment selections. */
+  experimentView?: ExperimentView;
+  /** Route-backed view within a project. Only meaningful for project selections. */
+  projectView?: ProjectView;
 }
 
 export interface WorkflowSelection {
@@ -340,14 +350,32 @@ export interface RendererKey {
   panelKind: PanelKind;
 }
 
+/**
+ * Entity catalog available to renderer contributions. Filesystem trees,
+ * console history, and other shell-owned state deliberately stay outside the
+ * renderer contract.
+ */
+export type RendererSnapshot = Pick<
+  WorkspaceSnapshot,
+  "projects" | "experiments" | "runs" | "assets" | "workflows" | "agentSessions" | "workspaces"
+>;
+
 export interface RendererProps {
   selection: Selection;
-  snapshot: WorkspaceSnapshot;
+  snapshot: RendererSnapshot;
   inspectorTarget: InspectorTarget;
 
   onInspectorTargetChange: (target: InspectorTarget) => void;
   onRefresh: () => void;
 }
+
+/** Compile-time field scope for feature renderers with smaller catalog needs. */
+export type ScopedRendererProps<K extends keyof RendererSnapshot> = Omit<
+  RendererProps,
+  "snapshot"
+> & {
+  snapshot: Pick<RendererSnapshot, K>;
+};
 
 export interface BreadcrumbItem {
   label: string;

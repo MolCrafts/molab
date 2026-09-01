@@ -86,7 +86,7 @@ def _execute_family(
     fresh: bool = False,
 ) -> dict[str, JSONValue]:
     """The shared reap → refuse-non-local → domain-check → recover → execute body."""
-    from molexp.workflow import RunNotExecutableError, execute_run
+    from molexp.workflow import RunNotExecutableError
 
     _reap(run)
     _refuse_non_local(run)
@@ -97,7 +97,7 @@ def _execute_family(
         )
     from molexp.harness.workflow_recovery import compiled_workflow_for_run
 
-    execute_run(compiled_workflow_for_run(run), run, resume=resume, rerun=rerun, fresh=fresh)
+    run.execute(compiled_workflow_for_run(run), resume=resume, rerun=rerun, fresh=fresh)
     return _summary(run)
 
 

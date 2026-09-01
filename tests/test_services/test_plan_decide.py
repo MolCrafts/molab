@@ -14,6 +14,7 @@ from unittest.mock import MagicMock
 
 from molexp.harness.schemas import ApprovalRequest, ReviewDecision
 from molexp.harness.store.file_artifact_store import FileArtifactStore
+from molexp.harness.store.paths import harness_artifact_root
 from molexp.services.plan_runtime.decide import decide_plan_review
 from molexp.workspace import Workspace
 
@@ -93,7 +94,7 @@ class TestDecidePlanReview:
         run_dir = Path(str(run.run_dir))
         assert not (run_dir / "harness.sqlite").exists()
 
-        store = FileArtifactStore(root=run_dir / "artifacts")
+        store = FileArtifactStore(root=harness_artifact_root(run_dir))
         ref = store.latest_by_kind("review_decision")
         assert ref is not None
         body = ReviewDecision.model_validate_json(store.get(ref.id))

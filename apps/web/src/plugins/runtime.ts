@@ -10,11 +10,10 @@
  * is ready, the first fetch escapes to the rsbuild proxy, and the
  * loader silently logs a warning instead of finding any plugins.
  *
- * Internal plugins (`core`, `editor`, `workflow`, `knowledge`, `molplot`, `molq`,
- * `molvis`, `tensorboard`, `deltaf`) are statically imported here and
- * registered eagerly inside `bootPlugins()`. They do NOT appear in
- * `/api/plugins`. Charts (including dense host metrics under ``*.mlp.zarr``
- * curves) are molplot only — no separate metrics product plugin.
+ * Internal plugins are represented by lightweight descriptors. Core is
+ * awaited before the application renders; optional enabled capabilities load
+ * concurrently afterwards, and disabled capabilities never enter the startup
+ * execution path. They do NOT appear in `/api/plugins`.
  * Third-party bundles discovered through Python's
  * `molexp.ui_plugins` entry-point group are the only consumers of
  * the dynamic-import loader path.
@@ -25,27 +24,20 @@
 
 import { resetPluginCatalogForTests } from "@/plugins/catalog";
 import { resetContributionRuntimeForTests } from "@/plugins/contribution-runtime";
-import corePlugin from "@/plugins/core";
-import deltafPlugin from "@/plugins/deltaf";
-import editorPlugin from "@/plugins/editor";
-import knowledgePlugin from "@/plugins/knowledge";
+import { getInternalPluginDescriptor, INTERNAL_PLUGIN_DESCRIPTORS } from "@/plugins/internal";
 import {
   createLoaderState,
   type DynamicImport,
   discoverAndLoad,
   type LoaderState,
+  loadInternalPlugin,
   loadRemotePlugin,
   type ManifestFetcher,
-  registerPluginInstance,
+  registerInternalPluginDescriptors,
   resetLoaderState,
   UI_PLUGIN_API_VERSION,
 } from "@/plugins/loader";
-import molplotPlugin from "@/plugins/molplot";
-import molqPlugin from "@/plugins/molq";
-import molvisPlugin from "@/plugins/molvis";
-import { resetPluginPreferencesForTests } from "@/plugins/preferences";
-import tensorboardPlugin from "@/plugins/tensorboard";
-import workflowPlugin from "@/plugins/workflow";
+import { isPluginEnabled, resetPluginPreferencesForTests } from "@/plugins/preferences";
 
 /**
  * UI-plugin contract version frozen into this build. Defined in
@@ -55,12 +47,12 @@ import workflowPlugin from "@/plugins/workflow";
 export { UI_PLUGIN_API_VERSION };
 
 const state: LoaderState = createLoaderState();
-let booted = false;
+let bootPromise: Promise<void> | null = null;
 
 /**
- * Eagerly install internal plugins, then schedule third-party
- * discovery against `/api/plugins`. Idempotent — calling twice is
- * a no-op.
+ * Register built-in metadata, install the core renderers, then start enabled
+ * optional capabilities and third-party discovery without delaying first
+ * render. Idempotent — calling twice returns the same promise.
  *
  * Must be called from the entry module **after** the application
  * has done any boot-time work that needs to land before plugin
@@ -68,45 +60,47 @@ let booted = false;
  * dev:mock mode. Otherwise the loader's first fetch will race the
  * service-worker activation and silently fail.
  */
-export const bootPlugins = (): void => {
-  if (booted) {
-    return;
+export const bootPlugins = (): Promise<void> => {
+  if (bootPromise) {
+    return bootPromise;
   }
-  booted = true;
-
-  // Internal plugins are statically imported and registered eagerly —
-  // they are part of the main bundle and do not appear in `/api/plugins`.
-  registerPluginInstance(state, corePlugin);
-  // Editor after core: core no longer owns the `editor` panel slot; the
-  // editor plugin hosts it and consumes core's preview contributions.
-  registerPluginInstance(state, editorPlugin);
-  // Workflow entity + workflow.json preview (was core registerDefaultRenderers).
-  registerPluginInstance(state, workflowPlugin);
-  registerPluginInstance(state, knowledgePlugin);
-  registerPluginInstance(state, deltafPlugin);
-  registerPluginInstance(state, molplotPlugin);
-  registerPluginInstance(state, molqPlugin);
-  registerPluginInstance(state, molvisPlugin);
-  registerPluginInstance(state, tensorboardPlugin);
-
-  if (typeof window === "undefined") {
-    return;
+  registerInternalPluginDescriptors(INTERNAL_PLUGIN_DESCRIPTORS);
+  const core = getInternalPluginDescriptor("core");
+  if (!core) {
+    throw new Error("Core plugin descriptor is missing");
   }
 
-  const idle = (
-    window as Window & {
-      requestIdleCallback?: (cb: () => void) => void;
+  bootPromise = loadInternalPlugin(state, core).then(() => {
+    const loadOptionalPlugins = (): void => {
+      for (const descriptor of INTERNAL_PLUGIN_DESCRIPTORS) {
+        if (descriptor.id !== "core" && isPluginEnabled(descriptor.id)) {
+          void loadInternalPlugin(state, descriptor);
+        }
+      }
+      void discoverAndLoad(state);
+    };
+
+    if (typeof window === "undefined") {
+      return;
     }
-  ).requestIdleCallback;
-  if (idle) {
-    idle(() => {
-      void discoverAndLoad(state);
-    });
-  } else {
-    setTimeout(() => {
-      void discoverAndLoad(state);
-    }, 0);
-  }
+
+    const idle = (
+      window as Window & {
+        requestIdleCallback?: (cb: () => void) => void;
+      }
+    ).requestIdleCallback;
+    if (idle) {
+      idle(loadOptionalPlugins);
+    } else {
+      setTimeout(loadOptionalPlugins, 0);
+    }
+  });
+  return bootPromise;
+};
+
+export const ensureInternalPlugin = (id: string): Promise<void> => {
+  const descriptor = getInternalPluginDescriptor(id);
+  return descriptor ? loadInternalPlugin(state, descriptor) : Promise.resolve();
 };
 
 export const ensureRemotePlugin = (
@@ -122,7 +116,7 @@ export const resetUiPluginsForTests = (): void => {
   resetContributionRuntimeForTests();
   resetPluginCatalogForTests();
   resetPluginPreferencesForTests();
-  booted = false;
+  bootPromise = null;
 };
 
 export const testHooks = {

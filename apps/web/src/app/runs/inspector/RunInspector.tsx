@@ -3,23 +3,25 @@ import type { JSX } from "react";
 import { useState } from "react";
 
 import { EmptyState } from "@/app/components/entity";
+import type { ObjectView, WorkspaceSnapshot } from "@/app/types";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { RunStatusBadge, WorkbenchIconAction } from "@/components/workbench";
 import { cn } from "@/lib/utils";
-import { RunMetricsView } from "@/plugins/molplot";
 import type { WorkspaceRunRow } from "../types";
 import { useRunInspectorLogs } from "../useRunInspectorLogs";
 import { RunInspectorDetails } from "./RunInspectorDetails";
 import { RunInspectorLogs } from "./RunInspectorLogs";
+import { RunPluginActions } from "./RunPluginActions";
 
-type InspectorTab = "details" | "logs" | "metrics";
+type InspectorTab = "details" | "logs";
 
 export interface RunInspectorProps {
   run: WorkspaceRunRow | null;
+  snapshot: WorkspaceSnapshot;
   selectedExecutionId: string | null;
   onSelectExecution: (id: string | null) => void;
   onClear: () => void;
-  onOpenRun: (run: WorkspaceRunRow) => void;
+  onOpenRun: (run: WorkspaceRunRow, view?: ObjectView) => void;
   className?: string;
 }
 
@@ -27,6 +29,7 @@ export type RunInspectorRegistration = Omit<RunInspectorProps, "className">;
 
 export const RunInspector = ({
   run,
+  snapshot,
   selectedExecutionId,
   onSelectExecution,
   onClear,
@@ -66,10 +69,30 @@ export const RunInspector = ({
         className,
       )}
     >
-      <header className="flex items-start justify-between gap-2 border-b border-border/60 px-4 py-3">
+      <header className="flex h-[35px] items-center justify-between gap-2 border-b border-border px-3">
+        <h2 className="text-micro font-medium uppercase tracking-wide text-muted-foreground">
+          Run details
+        </h2>
+        <WorkbenchIconAction
+          label="Close run details"
+          kind="ghost"
+          type="button"
+          onClick={onClear}
+          className="size-6 shrink-0 text-muted-foreground"
+        >
+          <X className="h-3.5 w-3.5" />
+        </WorkbenchIconAction>
+      </header>
+
+      <div className="border-b border-border/60 px-3 py-3">
         <div className="min-w-0 flex-1 space-y-1">
-          <div className="flex items-center gap-2">
+          <div className="flex items-start justify-between gap-2">
+            <p className="truncate font-mono text-micro text-muted-foreground" title={run.id}>
+              {run.id}
+            </p>
             <RunStatusBadge status={run.status} size="sm" />
+          </div>
+          <div className="flex items-center gap-2">
             <p
               className="min-w-0 truncate text-body-lg font-medium tracking-tight text-foreground"
               title={run.id}
@@ -82,21 +105,8 @@ export const RunInspector = ({
             <span className="mx-1 text-border">·</span>
             {run.experimentName}
           </p>
-          <p className="truncate font-mono text-micro text-muted-foreground/80" title={run.id}>
-            {run.id}
-          </p>
         </div>
-        <WorkbenchIconAction
-          label="Clear selection"
-          kind="ghost"
-          type="button"
-          onClick={onClear}
-          className="h-control-compact w-control-compact shrink-0 text-muted-foreground"
-          aria-label="Clear selection"
-        >
-          <X className="h-3.5 w-3.5" />
-        </WorkbenchIconAction>
-      </header>
+      </div>
 
       <Tabs
         value={tab}
@@ -112,7 +122,6 @@ export const RunInspector = ({
               [
                 ["details", "Details"],
                 ["logs", "Logs"],
-                ["metrics", "Metrics"],
               ] as const
             ).map(([value, label]) => (
               <TabsTrigger
@@ -148,18 +157,15 @@ export const RunInspector = ({
               onRefresh={logsState.refresh}
             />
           </TabsContent>
-          <TabsContent value="metrics" className="m-0 h-full overflow-y-auto">
-            <RunMetricsView
-              key={run.id}
-              projectId={run.projectId}
-              experimentId={run.experimentId}
-              runId={run.id}
-            />
-          </TabsContent>
         </div>
       </Tabs>
 
-      <footer className="flex justify-end border-t border-border/60 px-4 py-3">
+      <footer className="flex items-center justify-between gap-2 border-t border-border/60 px-3 py-2">
+        <RunPluginActions
+          run={run}
+          snapshot={snapshot}
+          onOpenTab={(view) => onOpenRun(run, view)}
+        />
         <WorkbenchIconAction label="Open run detail" onClick={() => onOpenRun(run)}>
           <ExternalLink className="h-3.5 w-3.5" />
         </WorkbenchIconAction>

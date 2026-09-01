@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from molexp.workflow import TaskContext, WorkflowCompiler, WorkflowRuntime
+from molexp.workflow import TaskContext, Workflow, WorkflowCompiler, WorkflowRuntime
 
 
 class _RunContextStub:
@@ -50,13 +50,13 @@ class _RunContextStub:
 @pytest.mark.asyncio
 class TestWorkflowRuntimeExecute:
     async def test_task_failure_propagates_to_failed_status(self):
-        wf = WorkflowCompiler(name="fail")
+        wf = Workflow(name="fail")
 
         @wf.task
         async def boom(ctx):
             raise RuntimeError("oops")
 
-        result = await WorkflowRuntime().execute(wf.compile())
+        result = await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
         assert result.status == "failed"
 
     async def test_external_runnable_protocol_body_executes(self):
@@ -66,7 +66,7 @@ class TestWorkflowRuntimeExecute:
             async def execute(self, ctx) -> int:
                 return 99
 
-        spec = WorkflowCompiler(name="ext").add(External(), name="ext").compile()
+        spec = WorkflowCompiler().compile(Workflow(name="ext").add(External(), name="ext"))
         result = await WorkflowRuntime().execute(spec)
         assert result.outputs["ext"] == 99
 
@@ -74,7 +74,7 @@ class TestWorkflowRuntimeExecute:
         # Pure-task-context contract: run_context is NOT forwarded to the public
         # TaskContext. A task accessing ctx.run_context raises AttributeError; the
         # engine still drives the run via its private channel.
-        wf = WorkflowCompiler(name="no-run-context")
+        wf = Workflow(name="no-run-context")
 
         run_ctx = _RunContextStub(
             run_dir=tmp_path / "run",
@@ -86,7 +86,9 @@ class TestWorkflowRuntimeExecute:
             assert not hasattr(ctx, "run_context")
             return True
 
-        result = await WorkflowRuntime().execute(wf.compile(), run_context=run_ctx)
+        result = await WorkflowRuntime().execute(
+            WorkflowCompiler().compile(wf), run_context=run_ctx
+        )
         assert result.status == "succeeded"
         assert result.outputs["inspect"] is True
 
@@ -94,7 +96,7 @@ class TestWorkflowRuntimeExecute:
         """The runtime drives a workflow with a stub run_context that has no
         Workspace ancestry whatsoever, and materializes workflow.json under
         run_dir/executions/<execution_id>/."""
-        wf = WorkflowCompiler(name="duck")
+        wf = Workflow(name="duck")
 
         run_ctx = _RunContextStub(run_dir=tmp_path / "stub-run")
 
@@ -102,7 +104,9 @@ class TestWorkflowRuntimeExecute:
         async def step(ctx: TaskContext) -> str:
             return "ok"
 
-        result = await WorkflowRuntime().execute(wf.compile(), run_context=run_ctx)
+        result = await WorkflowRuntime().execute(
+            WorkflowCompiler().compile(wf), run_context=run_ctx
+        )
         assert result.status == "succeeded"
         assert result.outputs["step"] == "ok"
 
@@ -119,7 +123,7 @@ class TestWorkflowRuntimeExecute:
         scratch files. ``scratch_root`` mounts the content-addressed materialization
         store at an explicit location so ``ctx.workdir`` is never ``None``.
         """
-        wf = WorkflowCompiler(name="scratch-demo")
+        wf = Workflow(name="scratch-demo")
 
         @wf.task
         async def write_report(ctx: TaskContext) -> dict:
@@ -129,7 +133,9 @@ class TestWorkflowRuntimeExecute:
             return {"report": str(path)}
 
         scratch = tmp_path / "scratch"
-        result = await WorkflowRuntime().execute(wf.compile(), scratch_root=scratch)
+        result = await WorkflowRuntime().execute(
+            WorkflowCompiler().compile(wf), scratch_root=scratch
+        )
         assert result.status == "succeeded"
         report = Path(result.outputs["write_report"]["report"])
         assert report.exists()
@@ -139,12 +145,12 @@ class TestWorkflowRuntimeExecute:
         """No silent default: a bare execution that mounts no scratch_root keeps
         ``ctx.workdir`` as ``None`` (embedders must opt in explicitly — a cwd
         default would litter every caller's working directory)."""
-        wf = WorkflowCompiler(name="no-scratch")
+        wf = Workflow(name="no-scratch")
 
         @wf.task
         async def probe(ctx: TaskContext) -> dict:
             return {"workdir": ctx.workdir}
 
-        result = await WorkflowRuntime().execute(wf.compile())
+        result = await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
         assert result.status == "succeeded"
         assert result.outputs["probe"]["workdir"] is None

@@ -65,14 +65,28 @@ uv pip install git+https://github.com/MolCrafts/molexp
 
 Requires Python >= 3.12. Core depends on `pydantic`, `pyyaml`, `typer`, `rich`, `fastapi`, `uvicorn`, `zarr`, and the MolCrafts libraries `mollog`, `molcfg`, `molq`, and `molpy` (the workflow engine is self-owned — `pydantic-graph` is no longer a dependency). Optional extras: `molexp[agent]` adds the PydanticAI LLM layer; `molexp[tensorboard]` adds the TensorBoard scalar reader; `molexp[all]` bundles both, and `molexp[dev]` pulls everything for development.
 
+Default `uv pip` / `pip` **does not** compile the React UI (no Node required). A published wheel already ships `src/molexp/dist/`.
+
+## Serve the UI
+
+Three jobs — do not mix them. Full table: [Serve and rebuild the UI](docs/en/development/ui-serve.md).
+
+| Job | Command | Open |
+|-----|---------|------|
+| Daily checkout (HMR) | `uv pip install -e ".[dev]"` once, then `molexp serve --dev -ws ./lab` | printed **Dev UI** (`:5173`) |
+| Bundled SPA preview | `npm run build:web` then `molexp serve -ws ./lab` | `:8000` |
+| Wheel with UI | `uv pip install . -C build-web=true` | then `molexp serve` on `:8000` |
+
+`--dev` starts `npm run dev:api` (real `/api` proxy). `npm run dev:web` is the MSW mock, not that path. After `npm run build:web` on an editable install, do **not** reinstall Python. The old flag `-C build-ui=true` is rejected.
+
 ## Quick start
 
 ```python
 import asyncio
 
-from molexp.workflow import WorkflowCompiler, WorkflowRuntime
+from molexp.workflow import Workflow, WorkflowCompiler, WorkflowRuntime
 
-wf = WorkflowCompiler(name="demo")
+wf = Workflow(name="demo")
 
 
 @wf.task
@@ -88,11 +102,11 @@ async def reduce(fetch: list[float]) -> float:
     return sum(fetch)
 
 
-result = asyncio.run(WorkflowRuntime().execute(wf.compile()))
+result = asyncio.run(WorkflowRuntime().execute(WorkflowCompiler().compile(wf)))
 print(result.outputs)  # {'fetch': [1.0, 4.0, 9.0], 'reduce': 14.0}
 ```
 
-Attaching a workflow to a tracked `Workspace` experiment (`ws.add_project(...).add_experiment(...).define(wf.compile(), params=...)`), running it with `molcfg` profiles via `molexp run`, and submitting to a cluster are covered in the docs.
+Attaching a workflow to a tracked `Workspace` experiment (`ws.add_project(...).add_experiment(...).define(WorkflowCompiler().compile(wf), params=...)`), running it with `molcfg` profiles via `molexp run`, and submitting to a cluster are covered in the docs.
 
 ## Documentation
 
@@ -100,7 +114,7 @@ Attaching a workflow to a tracked `Workspace` experiment (`ws.add_project(...).a
 - [Concepts](docs/en/concept/index.md) — the workflow / workspace / plugin mental model
 - [Guide](docs/en/guide/index.md) — task & actor authoring, runtime, assets, server, molq
 - [Architecture](docs/en/architecture/index.md) — layer boundaries the code preserves
-- [Development](docs/en/development/index.md) — compiler internals, task protocols, active specs
+- [Development](docs/en/development/index.md) — serve/rebuild the UI, compiler internals, task protocols
 
 ## MolCrafts ecosystem
 
@@ -121,7 +135,7 @@ Attaching a workflow to a tracked `Workspace` experiment (`ws.add_project(...).a
 
 ## Contributing
 
-Contributions are welcome — see the [development docs](docs/en/development/index.md) to get started.
+Contributions are welcome — see the [development docs](docs/en/development/index.md) (including [serve and rebuild the UI](docs/en/development/ui-serve.md)) to get started.
 
 ## License
 

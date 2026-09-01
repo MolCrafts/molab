@@ -7,8 +7,8 @@ import {
   Play,
   Workflow,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
-
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { experimentsApi, projectsApi } from "@/api";
 import { CreateRunDialog } from "@/app/components/CreateRunDialog";
 import type { DataTableColumn, DataTableRowAction } from "@/app/components/entity";
 import {
@@ -25,10 +25,18 @@ import {
   StatusDonut,
 } from "@/app/components/entity";
 import { statusDonutSegments, successRate } from "@/app/renderers/dashboardData";
-import { buildProjectWorkbenchData } from "@/app/renderers/entityWorkbenchData";
-import { workspaceApi } from "@/app/state/api";
+import {
+  buildProjectWorkbenchData,
+  experimentRunCompleteness,
+  projectSnapshotCompleteness,
+} from "@/app/renderers/entityWorkbenchData";
 import { useNavigationState } from "@/app/state/useNavigationState";
-import type { ApiAssetResponse, ExperimentSummary, RendererProps } from "@/app/types";
+import type {
+  ApiAssetResponse,
+  ExperimentSummary,
+  ProjectView,
+  ScopedRendererProps,
+} from "@/app/types";
 import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
 import {
   WorkbenchAction,
@@ -38,7 +46,15 @@ import {
 } from "@/components/workbench";
 import { formatDateTime } from "@/lib/datetime";
 
-export const ProjectViewer = ({ selection, snapshot, onRefresh }: RendererProps): JSX.Element => {
+type ProjectRendererProps = ScopedRendererProps<
+  "projects" | "experiments" | "runs" | "workflows" | "assets"
+>;
+
+export const ProjectViewer = ({
+  selection,
+  snapshot,
+  onRefresh,
+}: ProjectRendererProps): JSX.Element => {
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deletingExperimentId, setDeletingExperimentId] = useState<string | null>(null);
@@ -52,11 +68,20 @@ export const ProjectViewer = ({ selection, snapshot, onRefresh }: RendererProps)
   const [settledProjectAssetsId, setSettledProjectAssetsId] = useState<string | null>(null);
   const [projectAssetsRequestVersion, setProjectAssetsRequestVersion] = useState(0);
   const [createRunExperimentId, setCreateRunExperimentId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState("overview");
   const { setSelection } = useNavigationState(snapshot);
 
   const projectId = selection.objectId;
   const project = snapshot.projects.find((p) => p.id === projectId);
+  const activeTab: ProjectView =
+    selection.objectType === "project" ? (selection.projectView ?? "overview") : "overview";
+  const setProjectTab = useCallback(
+    (value: string): void => {
+      const projectView: ProjectView =
+        value === "experiments" || value === "assets" || value === "settings" ? value : "overview";
+      setSelection({ objectType: "project", objectId: projectId, projectView });
+    },
+    [projectId, setSelection],
+  );
 
   useEffect(() => {
     void projectAssetsRequestVersion;
@@ -72,8 +97,8 @@ export const ProjectViewer = ({ selection, snapshot, onRefresh }: RendererProps)
     setProjectAssets([]);
     setProjectAssetsLoading(true);
     setProjectAssetsError(null);
-    workspaceApi
-      .getProjectAssets(projectId)
+    projectsApi
+      .listProjectAssets(projectId)
       .then((assets) => {
         if (!cancelled) setProjectAssets(assets);
       })
@@ -118,7 +143,7 @@ export const ProjectViewer = ({ selection, snapshot, onRefresh }: RendererProps)
     setIsDeleting(true);
     setDeleteError(null);
     try {
-      await workspaceApi.deleteProject(projectId);
+      await projectsApi.deleteProject(projectId);
       onRefresh();
       setSelection(null);
     } catch (error) {
@@ -142,7 +167,7 @@ export const ProjectViewer = ({ selection, snapshot, onRefresh }: RendererProps)
     setDeletingExperimentId(experiment.id);
     setExperimentDeleteError(null);
     try {
-      await workspaceApi.deleteExperiment(experiment.projectId, experiment.id);
+      await experimentsApi.deleteExperiment(experiment.projectId, experiment.id);
       onRefresh();
     } catch (error) {
       setExperimentDeleteError({
@@ -184,9 +209,9 @@ export const ProjectViewer = ({ selection, snapshot, onRefresh }: RendererProps)
         onSelect: () => {
           if (workflow) {
             setSelection({
-              objectType: "workflow",
-              objectId: workflow.id,
-              workflowId: workflow.id,
+              objectType: "experiment",
+              objectId: exp.id,
+              experimentView: "workflow",
             });
           }
         },
@@ -236,6 +261,8 @@ export const ProjectViewer = ({ selection, snapshot, onRefresh }: RendererProps)
     );
   }
 
+  const completeness = projectSnapshotCompleteness(project, projectExperiments, projectRuns);
+
   const experimentColumns: DataTableColumn<ExperimentSummary>[] = [
     {
       key: "name",
@@ -261,16 +288,30 @@ export const ProjectViewer = ({ selection, snapshot, onRefresh }: RendererProps)
       width: "w-56",
       cell: (exp) => {
         const rollup = workbench.experiments.find((item) => item.experiment.id === exp.id);
-        if (!rollup || rollup.counts.total === 0) {
+        const loadedRunCount = rollup?.counts.total ?? 0;
+        const { runCount, runsComplete } = experimentRunCompleteness(exp, loadedRunCount);
+        if (runsComplete && runCount === 0) {
           return <span className="text-label text-muted-foreground">No runs</span>;
+        }
+        if (!runsComplete) {
+          return (
+            <div className="flex items-baseline gap-2">
+              <span className="font-medium tabular-nums text-foreground">
+                {runCount ?? (loadedRunCount > 0 ? `≥${loadedRunCount}` : "—")}
+              </span>
+              <span className="text-micro text-muted-foreground">
+                {runCount === null ? "loaded so far" : "status loads on open"}
+              </span>
+            </div>
+          );
         }
         return (
           <div className="flex items-center gap-3">
             <span className="w-control-compact font-medium tabular-nums text-foreground">
-              {rollup.counts.total}
+              {runCount}
             </span>
             <div className="min-w-32 flex-1">
-              <StatusDistribution counts={rollup.counts} legend={false} />
+              {rollup && <StatusDistribution counts={rollup.counts} legend={false} />}
             </div>
           </div>
         );
@@ -345,8 +386,8 @@ export const ProjectViewer = ({ selection, snapshot, onRefresh }: RendererProps)
       width: "w-40",
       cell: (asset) => (
         <span className="font-mono text-label text-muted-foreground">
-          {asset.scope_kind}
-          {asset.scope_ids.length > 0 ? ` · ${asset.scope_ids.join("/")}` : ""}
+          {asset.scopeKind}
+          {asset.scopeIds.length > 0 ? ` · ${asset.scopeIds.join("/")}` : ""}
         </span>
       ),
     },
@@ -368,8 +409,8 @@ export const ProjectViewer = ({ selection, snapshot, onRefresh }: RendererProps)
       header: "Updated",
       width: "w-44",
       cell: (asset) => (
-        <span className="text-muted-foreground" title={asset.updated_at}>
-          {formatDateTime(asset.updated_at)}
+        <span className="text-muted-foreground" title={asset.updatedAt}>
+          {formatDateTime(asset.updatedAt)}
         </span>
       ),
     },
@@ -380,12 +421,18 @@ export const ProjectViewer = ({ selection, snapshot, onRefresh }: RendererProps)
     : null;
   const projectSuccessRate = successRate(workbench.counts);
   const donutSegments = statusDonutSegments(workbench.counts);
+  const experimentCountValue =
+    completeness.experimentCount ??
+    (projectExperiments.length > 0 ? `≥${projectExperiments.length}` : "—");
+  const runCountValue =
+    completeness.runCount ?? (projectRuns.length > 0 ? `≥${projectRuns.length}` : "—");
 
-  // Overview = posture only (donut + metrics). No attention lists; inventory is other tabs.
+  // Overview only claims status posture when every child run is loaded. Shallow
+  // list counts remain useful, but partial snapshots must never look complete.
   const overviewWithNav = (
     <OverviewSurface>
       <DashboardCanvas>
-        {workbench.counts.total === 0 && projectExperiments.length === 0 ? (
+        {completeness.experimentsComplete && completeness.experimentCount === 0 ? (
           <EmptyState
             title={EMPTY_COPY.experiments.title}
             description={EMPTY_COPY.experiments.description}
@@ -393,7 +440,7 @@ export const ProjectViewer = ({ selection, snapshot, onRefresh }: RendererProps)
           />
         ) : (
           <section className="grid gap-10 lg:grid-cols-[auto_minmax(0,1fr)] lg:items-center">
-            {workbench.counts.total > 0 ? (
+            {completeness.runsComplete && workbench.counts.total > 0 ? (
               <StatusDonut
                 segments={donutSegments}
                 size={148}
@@ -401,20 +448,36 @@ export const ProjectViewer = ({ selection, snapshot, onRefresh }: RendererProps)
                 centerValue={workbench.counts.total}
                 centerLabel="runs"
               />
-            ) : (
+            ) : completeness.runsComplete ? (
               <div className="flex size-36 items-center justify-center rounded-full border border-dashed border-border text-micro text-muted-foreground">
                 no runs
               </div>
+            ) : (
+              <div className="flex size-36 items-center justify-center rounded-full border border-dashed border-border px-5 text-center text-micro leading-relaxed text-muted-foreground">
+                Run status appears after all experiment runs load
+              </div>
             )}
             <div className="grid gap-6 sm:grid-cols-3">
-              <OverviewHighlight label="Experiments" value={projectExperiments.length} />
+              <OverviewHighlight
+                label="Experiments"
+                value={experimentCountValue}
+                detail={
+                  completeness.experimentCount === null
+                    ? "loaded so far"
+                    : completeness.experimentsComplete
+                      ? undefined
+                      : `${projectExperiments.length} loaded`
+                }
+              />
               <OverviewHighlight
                 label="Runs"
-                value={projectRuns.length}
+                value={runCountValue}
                 detail={
-                  projectSuccessRate === null
-                    ? undefined
-                    : `${projectSuccessRate.toFixed(0)}% succeeded`
+                  completeness.runsComplete && projectSuccessRate !== null
+                    ? `${projectSuccessRate.toFixed(0)}% succeeded`
+                    : completeness.runCount === null
+                      ? "loaded so far"
+                      : `${projectRuns.length} loaded; status incomplete`
                 }
               />
               <OverviewHighlight
@@ -435,7 +498,7 @@ export const ProjectViewer = ({ selection, snapshot, onRefresh }: RendererProps)
         title={project.name}
         actions={<CopyButton value={project.id} label="project ID" />}
         activeTab={activeTab}
-        onActiveTabChange={setActiveTab}
+        onActiveTabChange={setProjectTab}
         tabs={[
           {
             value: "overview",
@@ -445,8 +508,8 @@ export const ProjectViewer = ({ selection, snapshot, onRefresh }: RendererProps)
           {
             value: "experiments",
             label:
-              projectExperiments.length > 0
-                ? `Experiments (${projectExperiments.length})`
+              (completeness.experimentCount ?? projectExperiments.length) > 0
+                ? `Experiments (${completeness.experimentCount ?? projectExperiments.length})`
                 : "Experiments",
             content: (
               <OverviewSurface surfaceClassName="flex min-h-0 flex-col overflow-hidden">
@@ -575,7 +638,7 @@ export const ProjectViewer = ({ selection, snapshot, onRefresh }: RendererProps)
                             Contents
                           </TableCell>
                           <TableCell className="font-mono text-label text-muted-foreground">
-                            {projectExperiments.length} experiments · {projectRuns.length} runs
+                            {experimentCountValue} experiments · {runCountValue} runs
                           </TableCell>
                         </TableRow>
                       </TableBody>

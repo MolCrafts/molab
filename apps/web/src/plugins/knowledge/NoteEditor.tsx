@@ -7,9 +7,9 @@ import { math } from "@milkdown/plugin-math";
 import { Milkdown, MilkdownProvider, useEditor } from "@milkdown/react";
 import { Code2, Eye, Save } from "lucide-react";
 import { type JSX, Suspense, useCallback, useMemo, useState } from "react";
+import { knowledgeApi } from "@/api";
 import type { NoteDetailResponse } from "@/api/generated/models/NoteDetailResponse";
-import { workspaceApi } from "@/app/state/api";
-import type { WorkspaceSnapshot } from "@/app/types";
+import type { RendererSnapshot } from "@/app/types";
 import { WorkbenchIconAction, WorkbenchToggleAction } from "@/components/workbench";
 import { MonacoEditor } from "@/plugins/editor";
 import { buildNoteDocUpdate, isDirty } from "@/plugins/knowledge/noteDraft";
@@ -69,7 +69,7 @@ const MilkdownSurface = ({
  * Editable view of a Note body. A Milkdown WYSIWYG editor and a Monaco source
  * editor share one markdown string; ``index.md`` stays the single source of
  * truth (we serialize to markdown, never block-JSON). Save is gated on the
- * normalized dirty state, routes through ``workspaceApi.updateNoteDoc`` (the
+ * normalized dirty state, routes through ``knowledgeApi.editDoc`` (the
  * generated client), and surfaces failures as an inline error bar — the repo
  * ships no toast library.
  */
@@ -82,7 +82,7 @@ export const NoteEditor = ({
   note: NoteDetailResponse;
   onSaved: (updated: NoteDetailResponse) => void;
   /** Workspace entities the "/" menu can embed; enables the SlashMenu when set. */
-  snapshot?: WorkspaceSnapshot;
+  snapshot?: RendererSnapshot;
   /** Fired after an embed edge is written so the host can refetch the cards. */
   onEmbedded?: () => void;
 }): JSX.Element => {
@@ -119,7 +119,7 @@ export const NoteEditor = ({
     setError(null);
     try {
       const update = buildNoteDocUpdate(note.relPath, markdown);
-      const persisted = await workspaceApi.updateNoteDoc(update.path, update.body);
+      const persisted = await knowledgeApi.editDoc(update.path, update.body);
       onSaved(persisted);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save note.");

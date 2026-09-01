@@ -83,15 +83,4 @@ class ContextStore:
                 self._context.results[key] = value
 
     def save(self) -> None:
-        from .file_store import FileStore
-        from .schema_version import versioned_payload
-
-        FileStore(self._run_dir, fs=self._run._disk()).put(
-            "run.json",
-            versioned_payload(
-                {
-                    **self._run.metadata.model_dump(mode="json"),
-                    "context": self._context.model_dump(mode="json"),
-                }
-            ),
-        )
+        self._run.persist_driver_context(self._context.model_dump(mode="json"))

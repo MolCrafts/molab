@@ -1,12 +1,13 @@
 import { Save } from "lucide-react";
 import { Suspense, useEffect, useMemo, useState } from "react";
-import { workspaceApi } from "@/app/state/api";
+import { workspaceApi } from "@/api";
+import { LazySurface } from "@/app/layout/LazySurface";
 import type { RendererProps } from "@/app/types";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { WorkbenchIconAction, WorkbenchOperationState } from "@/components/workbench";
+import { useContributionGeneration } from "@/lib/contribution-runtime";
 import { filePreviewPluginRegistry } from "@/lib/file-preview-plugins";
 import { MonacoEditor } from "./MonacoEditor";
-
 /**
  * Monaco-backed text editor for workspace files.
  *
@@ -25,7 +26,9 @@ export const TextEditor = ({ selection }: RendererProps): JSX.Element => {
   const [value, setValue] = useState<string>("");
   const [status, setStatus] = useState<"idle" | "loading" | "saving" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
+  const contributionGeneration = useContributionGeneration();
   const previewPlugin = useMemo(() => {
+    void contributionGeneration;
     if (selection.objectType !== "workspace-file") {
       return null;
     }
@@ -34,7 +37,7 @@ export const TextEditor = ({ selection }: RendererProps): JSX.Element => {
     return filePreviewPluginRegistry.getPluginForFile(name, selection.filePath, {
       hasPreviewSidecar: selection.hasPreviewSidecar,
     });
-  }, [selection]);
+  }, [selection, contributionGeneration]);
 
   const language = useMemo(() => {
     if (selection.objectType !== "workspace-file") {
@@ -153,15 +156,18 @@ export const TextEditor = ({ selection }: RendererProps): JSX.Element => {
 
             {previewPlugin && selection.objectType === "workspace-file" ? (
               <TabsContent value="preview" className="m-0 min-h-0 flex-1 overflow-auto">
-                <previewPlugin.Component
-                  content={value}
-                  name={selection.filePath.split("/").pop() ?? selection.filePath}
-                  path={selection.filePath}
-                  folderId="workspace"
-                  assetId={
-                    selection.objectType === "workspace-file" ? selection.assetId : undefined
-                  }
-                />
+                <LazySurface
+                  resetKey={`file-preview:${previewPlugin.id}:${selection.objectId}`}
+                  loadingTitle={`Loading ${previewPlugin.name} preview…`}
+                >
+                  <previewPlugin.Component
+                    content={value}
+                    name={selection.filePath.split("/").pop() ?? selection.filePath}
+                    path={selection.filePath}
+                    folderId="workspace"
+                    assetId={selection.assetId}
+                  />
+                </LazySurface>
               </TabsContent>
             ) : null}
           </Tabs>

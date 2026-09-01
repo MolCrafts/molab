@@ -5,10 +5,12 @@ import { buildTrail } from "@/app/entities/breadcrumbTrail";
 import { GlobalCommandPalette } from "@/app/entities/GlobalCommandPalette";
 import { ContextBar } from "@/app/layout/ContextBar";
 import { RemoteConnectDialog } from "@/app/layout/RemoteConnectDialog";
+import { getNavigationContribution } from "@/app/navigation/sections";
 import { CenterPanel } from "@/app/panels/CenterPanel";
+import type { InspectorSurfaceRegistration } from "@/app/panels/inspectorSurface";
 import { LeftPanel } from "@/app/panels/LeftPanel";
 import { RightPanel } from "@/app/panels/RightPanel";
-import { RunInspector, type RunInspectorRegistration } from "@/app/runs/inspector/RunInspector";
+import { resolveRenderersForSelection } from "@/app/registry";
 import { type InspectedTask, InspectedTaskContext } from "@/app/state/inspectedTask";
 import type { InspectorTarget, LeftPanelView, Selection, WorkspaceSnapshot } from "@/app/types";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
@@ -22,6 +24,8 @@ import {
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { WorkbenchStatusStrip, WorkbenchToggleAction } from "@/components/workbench";
 import { useIsMobile } from "@/hooks/use-is-mobile";
+import { useContributionGeneration } from "@/lib/contribution-runtime";
+import { usePluginPreferencesGeneration } from "@/plugins/preferences";
 
 interface AppShellProps {
   leftPanelView: LeftPanelView;
@@ -46,8 +50,8 @@ interface AppShellProps {
   onActiveRefresh: () => void;
 }
 
-const NAV_SIZE = { default: 22, min: 16, max: 30 };
-const INSPECTOR_SIZE = { default: 30, min: 20, max: 45 };
+const NAV_SIZE = { default: "272px", min: "216px", max: "384px" };
+const INSPECTOR_SIZE = { default: "280px", min: "240px", max: "420px" };
 const SHELL_PANEL_IDS = ["navigator", "workspace"];
 
 export const AppShell = ({
@@ -71,13 +75,18 @@ export const AppShell = ({
   onWorkspaceRefresh,
   onActiveRefresh,
 }: AppShellProps): JSX.Element => {
-  const [searchQuery, setSearchQuery] = useState("");
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [inspectedTask, setInspectedTask] = useState<InspectedTask | null>(null);
-  const [runInspector, setRunInspector] = useState<RunInspectorRegistration | null>(null);
-  const registeredRunId = useRef<string | null>(null);
+  const [inspectorSurface, setInspectorSurface] = useState<InspectorSurfaceRegistration | null>(
+    null,
+  );
+  const registeredInspectorId = useRef<string | null>(null);
+  const registeredSelectionInspectorId = useRef<string | null>(null);
   const isMobile = useIsMobile();
+  const contributionGeneration = useContributionGeneration();
+  const pluginPreferencesGeneration = usePluginPreferencesGeneration();
+  const railOnlyNavigation = getNavigationContribution(leftPanelView).shellMode === "rail-only";
 
   const inspectTask = useCallback((taskId: string, runId: string): void => {
     setInspectedTask({ taskId, runId });
@@ -88,14 +97,14 @@ export const AppShell = ({
     setInspectedTask(null);
   }, []);
 
-  const handleRunInspectorChange = useCallback(
-    (registration: RunInspectorRegistration | null): void => {
-      const nextRunId = registration?.run?.id ?? null;
-      setRunInspector(registration);
-      if (nextRunId && nextRunId !== registeredRunId.current) {
+  const handleInspectorSurfaceChange = useCallback(
+    (registration: InspectorSurfaceRegistration | null): void => {
+      const nextInspectorId = registration?.id ?? null;
+      setInspectorSurface(registration);
+      if (nextInspectorId && nextInspectorId !== registeredInspectorId.current) {
         setInspectorOpen(true);
       }
-      registeredRunId.current = nextRunId;
+      registeredInspectorId.current = nextInspectorId;
     },
     [],
   );
@@ -111,6 +120,26 @@ export const AppShell = ({
       selection?.objectType === "workflow" ||
       selection?.objectType === "experiment");
 
+  const selectionInspectorId = useMemo(() => {
+    void contributionGeneration;
+    void pluginPreferencesGeneration;
+    if (selection?.objectType !== "run") return null;
+    const renderer = resolveRenderersForSelection(selection, snapshot, "right").find(
+      (candidate) => candidate.pluginId && candidate.pluginId !== "core",
+    );
+    return renderer?.id ?? null;
+  }, [contributionGeneration, pluginPreferencesGeneration, selection, snapshot]);
+
+  useEffect(() => {
+    const nextId = selectionInspectorId
+      ? `${selectionInspectorId}:${selection?.objectId ?? ""}`
+      : null;
+    if (nextId && nextId !== registeredSelectionInspectorId.current) {
+      setInspectorOpen(true);
+    }
+    registeredSelectionInspectorId.current = nextId;
+  }, [selection?.objectId, selectionInspectorId]);
+
   const inspectorSelection: Selection | null =
     inspectedTask && pinnedTaskActive
       ? {
@@ -119,9 +148,14 @@ export const AppShell = ({
           runId: inspectedTask.runId,
           objectId: inspectedTask.taskId,
         }
-      : selection;
+      : selectionInspectorId
+        ? selection
+        : null;
 
-  const hasInspectorContent = Boolean(runInspector || inspectorSelection);
+  // The right side is contextual chrome, not a permanent second details page.
+  // It is available only when a feature explicitly registers a task/run surface,
+  // a workflow task has been pinned, or a plugin owns a contextual run inspector.
+  const hasInspectorContent = Boolean(inspectorSurface || inspectorSelection);
   const inspectorVisible = inspectorOpen && hasInspectorContent;
   const toggleDisabled = !hasInspectorContent;
   const toggleLabel = inspectorVisible ? "Hide details" : "Show details";
@@ -129,6 +163,7 @@ export const AppShell = ({
     () => (inspectorVisible ? ["work-surface", "inspector"] : ["work-surface"]),
     [inspectorVisible],
   );
+  const showWorkSurfaceHeader = !railOnlyNavigation;
 
   const trail = useMemo(
     () => buildTrail(selection, leftPanelView, snapshot),
@@ -210,7 +245,6 @@ export const AppShell = ({
       view={leftPanelView}
       selection={selection}
       snapshot={snapshot}
-      searchQuery={searchQuery}
       onViewChange={onLeftPanelViewChange}
       onSelect={isMobile ? handleNavSelect : onSelectionChange}
       onOpenWorkspace={onOpenWorkspace}
@@ -250,11 +284,19 @@ export const AppShell = ({
 
   const centerContent = (
     <div className="flex h-full min-h-0 flex-col">
-      {/* Work-surface header: breadcrumb left, primary chrome right — 40px */}
-      <div className="flex h-10 flex-none items-center justify-between gap-2 border-b border-border bg-surface px-3">
-        <Breadcrumb items={trail} />
-        {inspectorToggle}
-      </div>
+      {/* Editor context row: breadcrumb left, contextual inspector affordance right. */}
+      {showWorkSurfaceHeader ? (
+        <div className="flex h-[35px] flex-none items-center justify-between gap-2 border-b border-border bg-surface-subtle px-3">
+          {selection ? (
+            <Breadcrumb items={trail} omitCurrent />
+          ) : (
+            <span className="truncate text-micro text-muted-foreground">
+              {activeWorkspace?.label ?? "Workspace"}
+            </span>
+          )}
+          {hasInspectorContent ? inspectorToggle : null}
+        </div>
+      ) : null}
       <div className="min-h-0 flex-1 overflow-hidden bg-canvas">
         <CenterPanel
           selection={selection}
@@ -262,15 +304,15 @@ export const AppShell = ({
           leftPanelView={leftPanelView}
           inspectorTarget={inspectorTarget}
           onInspectorTargetChange={onInspectorTargetChange}
-          onRunInspectorChange={handleRunInspectorChange}
+          onInspectorChange={handleInspectorSurfaceChange}
           onRefresh={onWorkspaceRefresh}
         />
       </div>
     </div>
   );
 
-  const inspectorContent = runInspector ? (
-    <RunInspector {...runInspector} className="border-l-0 bg-surface-subtle" />
+  const inspectorContent = inspectorSurface ? (
+    inspectorSurface.render({ className: "border-l-0 bg-surface-subtle" })
   ) : (
     <RightPanel
       selection={inspectorSelection}
@@ -285,7 +327,10 @@ export const AppShell = ({
     <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
       <div className="min-h-0 flex-1 overflow-hidden">{centerContent}</div>
       <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
-        <SheetContent side="left" className="w-dialog-viewport max-w-sm p-0">
+        <SheetContent
+          side="left"
+          className={railOnlyNavigation ? "w-12 p-0" : "w-dialog-viewport max-w-sm p-0"}
+        >
           <SheetHeader className="sr-only">
             <SheetTitle>Navigation</SheetTitle>
             <SheetDescription>Workspace tree and views</SheetDescription>
@@ -303,6 +348,13 @@ export const AppShell = ({
         </SheetContent>
       </Sheet>
     </div>
+  ) : railOnlyNavigation ? (
+    <div className="flex min-h-0 flex-1 overflow-hidden">
+      <div className="h-full w-12 shrink-0 overflow-hidden border-r border-border bg-surface">
+        {navContent}
+      </div>
+      <div className="min-w-0 flex-1 overflow-hidden">{centerContent}</div>
+    </div>
   ) : (
     <ResizablePanelGroup
       id="molexp-workbench-shell"
@@ -319,8 +371,8 @@ export const AppShell = ({
       >
         <div className="h-full overflow-hidden border-r border-border bg-surface">{navContent}</div>
       </ResizablePanel>
-      <ResizableHandle withHandle />
-      <ResizablePanel id="workspace" defaultSize={100 - NAV_SIZE.default}>
+      <ResizableHandle />
+      <ResizablePanel id="workspace" defaultSize="calc(100% - 272px)">
         <ResizablePanelGroup
           id="molexp-workbench-detail"
           direction="horizontal"
@@ -330,13 +382,13 @@ export const AppShell = ({
         >
           <ResizablePanel
             id="work-surface"
-            defaultSize={inspectorVisible ? 100 - INSPECTOR_SIZE.default : 100}
+            defaultSize={inspectorVisible ? "calc(100% - 280px)" : "100%"}
           >
             {centerContent}
           </ResizablePanel>
           {inspectorVisible && (
             <>
-              <ResizableHandle withHandle />
+              <ResizableHandle />
               <ResizablePanel
                 id="inspector"
                 defaultSize={INSPECTOR_SIZE.default}
@@ -358,13 +410,7 @@ export const AppShell = ({
     <InspectedTaskContext.Provider value={inspectedTaskContext}>
       <GlobalCommandPalette snapshot={snapshot} commands={paletteCommands} />
       <div className="flex h-screen flex-col bg-background text-foreground">
-        <ContextBar
-          searchQuery={searchQuery}
-          onSearchChange={setSearchQuery}
-          onRefresh={onActiveRefresh}
-          isRefreshing={isRefreshing}
-          onMenuClick={isMobile ? () => setMobileNavOpen(true) : undefined}
-        />
+        <ContextBar onMenuClick={isMobile ? () => setMobileNavOpen(true) : undefined} />
         {/* Work surface above a full-width MolVis-style status bar. */}
         <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
           {workbenchColumns}

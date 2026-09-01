@@ -522,7 +522,8 @@ def test_provider(request: ProviderUpdateRequest) -> ProviderTestResponse:
     spend tokens or mutate state). ``reply`` describes what was verified.
     """
     from molexp.services.operator_config import load_operator_config
-    from molexp.services.plan_runtime import PlanPreflightError, preflight_plan_router
+    from molexp.services.plan_runtime import PlanPreflightError
+    from molexp.services.plan_runtime.gateway import preflight_plan_router
 
     agent = _agent_section(load_operator_config())
     stored_model = agent.get("model")

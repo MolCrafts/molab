@@ -19,9 +19,9 @@ import tempfile
 from pathlib import Path
 
 import molexp as me
-from molexp.workflow import TaskContext, WorkflowCompiler, WorkflowRuntime
+from molexp.workflow import TaskContext, Workflow, WorkflowCompiler, WorkflowRuntime
 
-wf = WorkflowCompiler(name="baseline")
+wf = Workflow(name="baseline")
 
 
 @wf.task
@@ -29,7 +29,7 @@ async def task(ctx: TaskContext) -> dict:
     return {"loss": 0.1}
 
 
-compiled = wf.compile()
+compiled = WorkflowCompiler().compile(wf)
 
 
 async def main() -> None:

@@ -81,6 +81,18 @@ class RunExistsError(_WorkspaceConflictError):
     _entity_kind = "run"
 
 
+class KnowledgeNotFoundError(_WorkspaceLookupError):
+    """Raised by ``Project.knowledge`` / ``Experiment.knowledge`` when missing."""
+
+    _entity_kind = "knowledge"
+
+
+class KnowledgeExistsError(_WorkspaceConflictError):
+    """Raised by a strict-create knowledge factory when the item exists."""
+
+    _entity_kind = "knowledge"
+
+
 class ConceptNotFoundError(_WorkspaceLookupError):
     """Raised by ``Bundle.get(rel_path)`` when no Concept lives at that path.
 
@@ -113,6 +125,8 @@ __all__ = [
     "ExperimentExistsError",
     "ExperimentNotFoundError",
     "FolderMoveCollisionError",
+    "KnowledgeExistsError",
+    "KnowledgeNotFoundError",
     "ProjectExistsError",
     "ProjectNotFoundError",
     "RunExistsError",

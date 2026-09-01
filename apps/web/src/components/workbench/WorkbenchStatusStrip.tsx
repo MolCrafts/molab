@@ -18,12 +18,12 @@ import {
   Loader2,
   RefreshCw,
   Server,
+  X,
 } from "lucide-react";
 import { type JSX, useEffect, useRef, useState } from "react";
 
 import { pulseSync, useSyncPulse } from "@/app/state/syncPulse";
 import type { ServedWorkspaceSummary } from "@/app/types";
-import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useStatusMessage } from "@/hooks/useStatusMessage";
 import { reportStatus, type StatusReportType } from "@/lib/status-report";
@@ -73,35 +73,25 @@ function ActivityIcon({
 }): JSX.Element {
   const className = "size-3 shrink-0";
   if (type === "error") {
-    return <AlertCircle className={cn(className, "text-status-failed")} />;
+    return <AlertCircle className={cn(className, "text-statusbar-foreground")} />;
   }
   if (type === "warning") {
-    return <AlertTriangle className={cn(className, "text-status-warning")} />;
+    return <AlertTriangle className={cn(className, "text-statusbar-foreground")} />;
   }
   if (type === "success") {
-    return <Check className={cn(className, "text-status-completed")} />;
+    return <Check className={cn(className, "text-statusbar-foreground")} />;
   }
   if (progress !== undefined || running) {
     return (
-      <Loader2
-        className={cn(className, "mol-motion-progress-spin text-status-running-foreground")}
-      />
+      <Loader2 className={cn(className, "mol-motion-progress-spin text-statusbar-foreground")} />
     );
   }
-  return <Info className={cn(className, "text-muted-foreground")} />;
+  return <Info className={cn(className, "text-statusbar-foreground")} />;
 }
 
 function activityTextClass(type: StatusReportType): string {
-  switch (type) {
-    case "error":
-      return "text-status-failed-foreground";
-    case "warning":
-      return "text-status-warning-foreground";
-    case "success":
-      return "text-status-completed-foreground";
-    default:
-      return "text-muted-foreground";
-  }
+  void type;
+  return "text-statusbar-foreground";
 }
 
 /**
@@ -123,7 +113,7 @@ function ProgressTrack({
 
   return (
     <div
-      className="relative h-1 min-w-[5.5rem] max-w-[12rem] flex-1 overflow-hidden rounded-full bg-muted sm:min-w-[8rem]"
+      className="relative h-1 min-w-[5.5rem] max-w-[12rem] flex-1 overflow-hidden rounded-full bg-statusbar-foreground/25 sm:min-w-[8rem]"
       role="progressbar"
       aria-valuenow={clamped !== undefined ? Math.round(clamped) : undefined}
       aria-valuemin={0}
@@ -132,11 +122,11 @@ function ProgressTrack({
     >
       {clamped !== undefined && !indeterminate ? (
         <div
-          className="h-full rounded-full bg-status-running-foreground transition-[width] duration-150 ease-out"
+          className="h-full rounded-full bg-statusbar-foreground transition-[width] duration-150 ease-out"
           style={{ width: `${clamped}%` }}
         />
       ) : (
-        <div className="mol-status-progress-indeterminate h-full w-1/3 rounded-full bg-status-running-foreground/90" />
+        <div className="mol-status-progress-indeterminate h-full w-1/3 rounded-full bg-statusbar-foreground/90" />
       )}
     </div>
   );
@@ -346,7 +336,7 @@ export const WorkbenchStatusStrip = ({
             : "Syncing remote tree…")
       : showSyncing
         ? "Loading workspace…"
-        : "";
+        : "Workspace ready";
 
   const lineType: StatusReportType = hasBusActivity
     ? activity.type
@@ -381,8 +371,7 @@ export const WorkbenchStatusStrip = ({
   return (
     <div
       className={cn(
-        // MolVis: h-statusbar + border-border/80 + bg-background
-        "flex h-statusbar shrink-0 items-center border-t border-border/80 bg-background",
+        "flex h-statusbar shrink-0 items-center bg-statusbar text-statusbar-foreground",
         className,
       )}
     >
@@ -393,6 +382,7 @@ export const WorkbenchStatusStrip = ({
               beat={beat}
               label={busy ? "Syncing — click for connection status" : "Connection status"}
               running={busy}
+              className="text-statusbar-foreground hover:bg-statusbar-foreground/15 hover:text-statusbar-foreground [&>span]:text-statusbar-foreground"
             />
           </PopoverTrigger>
           <PopoverContent side="top" align="start" sideOffset={8} className="w-64 p-2">
@@ -432,28 +422,36 @@ export const WorkbenchStatusStrip = ({
             </div>
           </PopoverContent>
         </Popover>
+        <span className="max-w-40 truncate font-mono text-micro text-statusbar-foreground/90">
+          {activeWorkspace ? shortWorkspaceLabel(activeWorkspace.label) : "No workspace"}
+        </span>
       </div>
-      <span className="mx-0.5 h-3.5 w-px shrink-0 bg-border/80" aria-hidden />
+      <span className="mx-1 h-3.5 w-px shrink-0 bg-statusbar-foreground/30" aria-hidden />
       <div
         role="status"
         aria-live={lineType === "error" ? "assertive" : "polite"}
         className="flex h-full min-w-0 flex-1 items-center gap-2 overflow-hidden px-2 font-mono text-micro tabular-nums"
       >
         {lineText && isAlert ? (
-          <Button
+          <div
             key={activity.pulse}
-            type="button"
-            variant="ghost"
-            size="content"
-            className="flex min-w-0 max-w-[55%] cursor-pointer justify-start gap-1.5 overflow-hidden rounded-none p-0 text-left font-mono text-micro tabular-nums hover:bg-transparent sm:max-w-[60%]"
-            title={`${lineText} (click to dismiss)`}
-            onClick={dismissActivity}
+            className="flex min-w-0 max-w-[55%] items-center gap-1 overflow-hidden sm:max-w-[60%]"
           >
-            <ActivityIcon type={lineType} progress={lineProgress} />
-            <span className={cn("min-w-0 truncate leading-none", activityTextClass(lineType))}>
-              {lineText}
-            </span>
-          </Button>
+            <div className="flex min-w-0 items-center gap-1.5 overflow-hidden" title={lineText}>
+              <ActivityIcon type={lineType} progress={lineProgress} />
+              <span className={cn("min-w-0 truncate leading-none", activityTextClass(lineType))}>
+                {lineText}
+              </span>
+            </div>
+            <WorkbenchIconAction
+              label="Dismiss status"
+              size="compact"
+              className="shrink-0 text-statusbar-foreground hover:bg-statusbar-foreground/15 hover:text-statusbar-foreground"
+              onClick={dismissActivity}
+            >
+              <X className="size-3" aria-hidden />
+            </WorkbenchIconAction>
+          </div>
         ) : lineText ? (
           <div
             key={
@@ -481,14 +479,19 @@ export const WorkbenchStatusStrip = ({
 
         {/* Explicit fraction when we have totals (easier to read than % alone). */}
         {remoteBusy && cacheStatus && cacheStatus.total > 0 && cacheStatus.phase !== "counting" ? (
-          <span className="shrink-0 font-mono text-micro tabular-nums text-muted-foreground">
+          <span className="shrink-0 font-mono text-micro tabular-nums text-statusbar-foreground/80">
             {cacheStatus.done}/{cacheStatus.total}
           </span>
         ) : lineProgress !== undefined && !indeterminate ? (
-          <span className="shrink-0 font-mono text-micro tabular-nums text-muted-foreground">
+          <span className="shrink-0 font-mono text-micro tabular-nums text-statusbar-foreground/80">
             {Math.round(lineProgress)}%
           </span>
         ) : null}
+      </div>
+      <div className="hidden shrink-0 items-center gap-2 px-2 font-mono text-micro text-statusbar-foreground/90 sm:flex">
+        <span>{activeWorkspace?.isRemote ? "Remote" : "Local"}</span>
+        <span aria-hidden>·</span>
+        <span>{unreachable ? "API unavailable" : "API connected"}</span>
       </div>
     </div>
   );

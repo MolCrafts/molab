@@ -50,6 +50,7 @@ _KIND_ORDER = (
     "FailureAnalysis",
     "Finding",
     "Decision",
+    "Plan",
     "Constraint",
     "Assumption",
     "ParameterRationale",
@@ -87,14 +88,14 @@ class AssembleKnowledgeContext(Stage):
         )
 
     def _render_digest(self, start: Path) -> str:
-        from molexp.workspace import Workspace, assemble_workspace_context
-        from molexp.workspace.knowledge_item import KNOWLEDGE_ITEM_KIND
+        from molexp.workspace import Workspace
+        from molexp.workspace.knowledge import Knowledge
 
         root = _find_workspace_root(start)
         if root is None:
             return _NO_WORKSPACE_DIGEST
         ws = Workspace(root)
-        refs = assemble_workspace_context(ws).knowledge
+        refs = ws.context().knowledge
         if not refs:
             return _EMPTY_DIGEST
 
@@ -104,21 +105,25 @@ class AssembleKnowledgeContext(Stage):
         items: list[tuple[int, datetime, str, str, Mapping[str, object], Folder]] = []
         titles: list[str] = []
         for ref in refs:
-            if ref.type != KNOWLEDGE_ITEM_KIND:
-                titles.append(f"- {ref.title} ({ref.type}) · {ref.path}")
-                continue
             try:
                 concept = bundle.get(ref.path)
             except (ConceptNotFoundError, FileNotFoundError):
-                # The inventory raced a concurrent deletion — record the gap
-                # honestly instead of silently shrinking the digest.
                 titles.append(f"- (vanished during digest) · {ref.path}")
                 continue
-            meta = concept.read_meta()
-            if meta.get("status", "active") != "active":
-                continue  # stale/superseded/conflicting knowledge never grounds a plan
-            kind = str(meta.get("kind", "Observation"))
-            priority = _KIND_ORDER.index(kind) if kind in _KIND_ORDER else len(_KIND_ORDER)
+            if not isinstance(concept, Knowledge):
+                titles.append(f"- {ref.title} ({ref.type}) · {ref.path}")
+                continue
+            if concept.metadata.status != "active":
+                continue
+            kind_name = type(concept).__name__
+            priority = (
+                _KIND_ORDER.index(kind_name) if kind_name in _KIND_ORDER else len(_KIND_ORDER)
+            )
+            meta = {
+                "kind": kind_name,
+                "status": concept.metadata.status,
+                "created_at": concept.metadata.created_at,
+            }
             items.append((priority, self._timestamp(meta), ref.path, ref.title, meta, concept))
 
         # kind priority asc, then recency desc (missing timestamps sort oldest).

@@ -11,7 +11,6 @@ server-tier flow, not a harness Mode.
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -92,8 +91,9 @@ def build_curate_gateway(*, model: str, run: Run) -> AgentGateway:
     from molexp.agent.router import ModelTier
     from molexp.harness import RouterBackedAgentGateway
     from molexp.harness.store.file_artifact_store import FileArtifactStore
+    from molexp.harness.store.paths import harness_artifact_root
 
-    store = FileArtifactStore(root=Path(run.run_dir / "artifacts"))
+    store = FileArtifactStore(root=harness_artifact_root(run.run_dir))
     router = PydanticAIRouter(models=dict.fromkeys(ModelTier, model))
     return RouterBackedAgentGateway(
         router=router,

@@ -129,7 +129,6 @@ def create_api_router() -> APIRouter:
     gated.include_router(preview.router)
     gated.include_router(catalog.router)
     gated.include_router(workspace.router)
-    gated.include_router(workspace.events_router)
     gated.include_router(workspaces.router)
     gated.include_router(registry.router)
     gated.include_router(molq.router)

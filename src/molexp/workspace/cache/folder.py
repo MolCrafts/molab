@@ -16,7 +16,7 @@ class CacheFolder(Folder):
     """Single-instance folder rooted at ``<workspace_root>/cache/``."""
 
     def entry_path(self, key: str) -> Path:
-        return Path(self._disk().join(self.path(), f"{key}.json"))
+        return Path(self._disk().join(self.path, f"{key}.json"))
 
     def read_entry(self, key: str) -> str | None:
         p = self.entry_path(key)
@@ -77,7 +77,7 @@ class CacheFolder(Folder):
 
     def blob_path(self, content_hash: str) -> Path:
         safe = content_hash.replace(":", "-")
-        return Path(self._disk().join(self.path(), "blobs", safe))
+        return Path(self._disk().join(self.path, "blobs", safe))
 
     def put_blob(self, content_hash: str, data: bytes) -> None:
         p = self.blob_path(content_hash)
@@ -108,7 +108,7 @@ class _CacheFolderAdapter:
 
     @property
     def store_dir(self) -> Path:
-        return self._folder.path()
+        return self._folder.path
 
     def read(self, key: str) -> str | None:
         return self._folder.read_entry(key)

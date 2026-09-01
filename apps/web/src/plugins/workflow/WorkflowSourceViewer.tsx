@@ -1,9 +1,8 @@
 import { Suspense, useEffect, useState } from "react";
-import { workspaceApi } from "@/app/state/api";
+import { workspaceApi } from "@/api";
 import type { RendererProps } from "@/app/types";
 import { WorkbenchOperationState, WorkbenchRetryAction } from "@/components/workbench";
 import { MonacoEditor } from "@/plugins/editor";
-
 export const WorkflowSourceViewer = ({ selection, snapshot }: RendererProps): JSX.Element => {
   const [content, setContent] = useState<string>("");
   const [isLoading, setIsLoading] = useState(false);

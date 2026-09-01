@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 if TYPE_CHECKING:
-    from .compiled import CompiledWorkflow as Workflow
+    from .compiled import CompiledWorkflow
 
 __all__ = [
     "ArtifactDecl",
@@ -168,7 +168,7 @@ def default_validation_checks() -> tuple[ValidationCheck, ...]:
 
 
 def _check_no_orphan_tasks(
-    contract: WorkflowContract, spec: Workflow | None
+    contract: WorkflowContract, spec: CompiledWorkflow | None
 ) -> list[ValidationIssue]:
     """Cross-check spec task set against contract.task_io."""
     if spec is None:
@@ -263,7 +263,7 @@ def _check_acyclic_data_edges(
 
 
 def _check_every_input_has_source(
-    contract: WorkflowContract, spec: Workflow | None
+    contract: WorkflowContract, spec: CompiledWorkflow | None
 ) -> list[ValidationIssue]:
     """Every input declares a non-None source (entry tasks exempt when spec provided)."""
     entry_ids: set[str] = set()
@@ -340,7 +340,7 @@ def _check_outputs_match_downstream_inputs(
 
 # ── Runner dispatch ──────────────────────────────────────────────────────
 
-_RunnerFn = Callable[["WorkflowContract", "Workflow | None"], list["ValidationIssue"]]
+_RunnerFn = Callable[["WorkflowContract", "CompiledWorkflow | None"], list["ValidationIssue"]]
 
 _RUNNERS: dict[ValidationCheckId, _RunnerFn] = {
     _C.no_orphan_tasks: _check_no_orphan_tasks,
@@ -358,7 +358,7 @@ _RUNNERS: dict[ValidationCheckId, _RunnerFn] = {
 def validate_workflow_contract(
     contract: WorkflowContract,
     *,
-    spec: Workflow | None = None,
+    spec: CompiledWorkflow | None = None,
 ) -> ValidationReport:
     """Run every selected check against the contract.
 

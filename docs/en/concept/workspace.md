@@ -43,14 +43,14 @@ workspace_root/
         ├── experiment.json ← entity metadata (singular)
         ├── runs.json       ← children index (runs; plural)
         └── runs/run-<id>/
-            ├── run.json    ← identity and provenance (singular)
-            ├── ops/run.json ← hot state (status, ownership)
-            ├── assets.json ← run-scoped asset manifest
+            ├── run.json    ← identity + hot state
+            ├── alive       ← heartbeat mtime
             └── executions/<exec_id>/
                 ├── execution.json
-                ├── workflow.json  ← per-task outputs
-                ├── stdout.log
-                └── stderr.log
+                ├── workflow.json
+                ├── artifacts/
+                ├── logs/
+                └── jobs/<job_id>/
 ```
 
 ## Next

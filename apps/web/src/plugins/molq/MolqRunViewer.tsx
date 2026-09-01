@@ -1,5 +1,6 @@
 import { FileQuestion, ServerCog } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { assetsApi } from "@/api";
 import {
   DashboardCanvas,
   EmptyState,
@@ -9,16 +10,15 @@ import {
   EntityTabs,
   OverviewSurface,
 } from "@/app/components/entity";
+import { LazySurface } from "@/app/layout/LazySurface";
 import { formatScalar } from "@/app/renderers/dashboardData";
 import { RunExecutionsPanel } from "@/app/renderers/RunExecutionsPanel";
 import { RunLogsPanel } from "@/app/renderers/RunLogsPanel";
 import { RunViewer } from "@/app/renderers/RunViewer";
 import { RunOutputsPanel } from "@/app/renderers/run/RunOutputsPanel";
-import { useRunViewer } from "@/app/renderers/useRunViewer";
+import { type RunRendererProps, useRunViewer } from "@/app/renderers/useRunViewer";
 import { POST_DISPATCH_TAB, RunToolbar } from "@/app/runs/RunToolbar";
-import { workspaceApi } from "@/app/state/api";
 import { useDiscoveredFileTypesForRun } from "@/app/state/useDiscoveredFileTypes";
-import { usePluginTabBadgeCounts } from "@/lib/use-plugin-tab-badge-counts";
 import type { ApiAssetResponse, RendererProps } from "@/app/types";
 import {
   Table,
@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/table";
 import { formatDateTime } from "@/lib/datetime";
 import { pluginTabLabel } from "@/lib/plugin-tab-label";
+import { usePluginTabBadgeCounts } from "@/lib/use-plugin-tab-badge-counts";
 
 const getExecutorEntry = (
   executorInfo: Record<string, string>,
@@ -44,7 +45,8 @@ const getExecutorEntry = (
   return null;
 };
 
-export const MolqRunViewer = (props: RendererProps): JSX.Element => {
+export const MolqRunViewer = (props: RunRendererProps): JSX.Element => {
+  const pluginRendererProps = props as RendererProps;
   const {
     run,
     workflow,
@@ -82,8 +84,8 @@ export const MolqRunViewer = (props: RendererProps): JSX.Element => {
       setRunAssets([]);
       return;
     }
-    workspaceApi
-      .getRunAssets(run.id)
+    assetsApi
+      .listRunAssets(run.id)
       .then((assets) => {
         if (!cancelled) setRunAssets(assets);
       })
@@ -189,13 +191,6 @@ export const MolqRunViewer = (props: RendererProps): JSX.Element => {
             tabs={[
               { value: "overview", label: "Overview" },
               {
-                value: "outputs",
-                label:
-                  runAssets.length + resultEntries.length > 0
-                    ? `Outputs (${runAssets.length + resultEntries.length})`
-                    : "Outputs",
-              },
-              {
                 value: "executions",
                 label: `Executions${attemptCount ? ` (${attemptCount})` : ""}`,
               },
@@ -211,6 +206,13 @@ export const MolqRunViewer = (props: RendererProps): JSX.Element => {
                   tabBadgeCounts[contribution.value],
                 ),
               })),
+              {
+                value: "outputs",
+                label:
+                  runAssets.length + resultEntries.length > 0
+                    ? `Outputs (${runAssets.length + resultEntries.length})`
+                    : "Outputs",
+              },
             ]}
           />
 
@@ -265,10 +267,6 @@ export const MolqRunViewer = (props: RendererProps): JSX.Element => {
             </OverviewSurface>
           </EntityTabContent>
 
-          <EntityTabContent value="outputs">
-            <RunOutputsPanel assets={runAssets} results={outputResults} />
-          </EntityTabContent>
-
           <EntityTabContent value="executions">
             <RunExecutionsPanel
               run={run}
@@ -307,7 +305,15 @@ export const MolqRunViewer = (props: RendererProps): JSX.Element => {
             const TabComponent = tab.Component;
             return (
               <EntityTabContent key={tab.id} value={tab.value}>
-                {activeTab === tab.value && <TabComponent key={selectedRunId} {...props} />}
+                {activeTab === tab.value && (
+                  <LazySurface
+                    key={selectedRunId}
+                    resetKey={`molq-run-tab:${tab.id}:${selectedRunId}`}
+                    loadingTitle={`Loading ${tab.label}…`}
+                  >
+                    <TabComponent {...pluginRendererProps} />
+                  </LazySurface>
+                )}
               </EntityTabContent>
             );
           })}
@@ -317,11 +323,21 @@ export const MolqRunViewer = (props: RendererProps): JSX.Element => {
             return (
               <EntityTabContent key={contribution.id} value={contribution.value}>
                 {activeTab === contribution.value && (
-                  <PluginComponent key={selectedRunId} {...props} discoveredFiles={files} />
+                  <LazySurface
+                    key={selectedRunId}
+                    resetKey={`molq-file-tab:${contribution.id}:${selectedRunId}`}
+                    loadingTitle={`Loading ${contribution.label}…`}
+                  >
+                    <PluginComponent {...pluginRendererProps} discoveredFiles={files} />
+                  </LazySurface>
                 )}
               </EntityTabContent>
             );
           })}
+
+          <EntityTabContent value="outputs">
+            <RunOutputsPanel assets={runAssets} results={outputResults} />
+          </EntityTabContent>
         </EntityTabs>
       </div>
       {confirmDialog}

@@ -11,15 +11,16 @@ import {
   Pencil,
   PlayCircle,
   Plus,
+  Search,
   Trash2,
   X,
 } from "lucide-react";
 import { type ComponentType, type JSX, useEffect, useState } from "react";
+import { knowledgeApi } from "@/api";
 import type { KnowledgeSearchRow } from "@/api/generated/models/KnowledgeSearchRow";
 import { StatusBadge } from "@/app/components/entity";
 import type { TreeNode, TreeNodeAction } from "@/app/panels/TreeView";
 import { TreeView } from "@/app/panels/TreeView";
-import { workspaceApi } from "@/app/state/api";
 import type { Selection, WorkspaceSnapshot } from "@/app/types";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { usePrompt } from "@/components/PromptDialog";
@@ -195,7 +196,7 @@ export const DocTree = ({ snapshot, activeId, onSelect }: DocTreeProps): JSX.Ele
     setSearchLoading(true);
     setSearchError(null);
     const handle = window.setTimeout(() => {
-      void workspaceApi
+      void knowledgeApi
         .searchKnowledge(query)
         .then((response) => {
           if (cancelled) return;
@@ -445,15 +446,35 @@ export const DocTree = ({ snapshot, activeId, onSelect }: DocTreeProps): JSX.Ele
     <div className="space-y-2" aria-busy={loading || searchLoading || operationLabel !== null}>
       {/* Same action density as LeftExplorer title actions (gap-0.5, compact icons). */}
       <div className="flex items-center justify-between gap-0.5">
-        <KnowledgeFilter
-          tags={tags}
-          statuses={statuses}
-          tag={tag}
-          status={status}
-          disabled={operationLabel !== null}
-          onTagChange={setTag}
-          onStatusChange={setStatus}
-        />
+        <div className="flex items-center gap-0.5">
+          <KnowledgeFilter
+            tags={tags}
+            statuses={statuses}
+            tag={tag}
+            status={status}
+            disabled={operationLabel !== null}
+            onTagChange={setTag}
+            onStatusChange={setStatus}
+          />
+          <Popover>
+            <PopoverTrigger asChild>
+              <WorkbenchIconAction label="Search knowledge" disabled={operationLabel !== null}>
+                <Search className="h-3.5 w-3.5" />
+                {searching ? <span className="size-1.5 rounded-full bg-info" /> : null}
+              </WorkbenchIconAction>
+            </PopoverTrigger>
+            <PopoverContent align="start" className="w-72 p-2">
+              <Input
+                value={search}
+                onChange={(event) => handleSearchChange(event.target.value)}
+                placeholder="Search notes…"
+                className="h-control-compact text-label"
+                aria-label="Search knowledge"
+                autoFocus
+              />
+            </PopoverContent>
+          </Popover>
+        </div>
         <WorkbenchIconAction
           label="New document"
           kind="ghost"
@@ -463,13 +484,6 @@ export const DocTree = ({ snapshot, activeId, onSelect }: DocTreeProps): JSX.Ele
           <Plus className="h-4 w-4" />
         </WorkbenchIconAction>
       </div>
-      <Input
-        value={search}
-        onChange={(e) => handleSearchChange(e.target.value)}
-        placeholder="Search notes (title, tags, body)…"
-        className="h-control-compact text-label"
-        aria-label="Search knowledge"
-      />
       {facetsLoading && tags.length === 0 && statuses.length === 0 && (
         <WorkbenchOperationState
           kind="loading"

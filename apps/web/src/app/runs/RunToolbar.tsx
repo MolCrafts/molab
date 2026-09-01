@@ -22,6 +22,7 @@ import {
   Stethoscope,
 } from "lucide-react";
 import { type JSX, useCallback, useEffect, useState } from "react";
+import { runsApi } from "@/api";
 import type { TargetResponse } from "@/api/generated/models/TargetResponse";
 import { ExperimentsService } from "@/api/generated/services/ExperimentsService";
 import { TargetsService } from "@/api/generated/services/TargetsService";
@@ -44,7 +45,6 @@ import {
   SchemaForm,
   schemaDefaults,
 } from "@/app/runs/SchemaForm";
-import { workspaceApi } from "@/app/state/api";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -144,7 +144,7 @@ export function RunToolbar({
   useEffect(() => {
     if (!startOpen) return;
     let cancelled = false;
-    TargetsService.listTargetsEndpointApiTargetsGet()
+    TargetsService.listTargetsEndpoint()
       .then((res) => {
         if (cancelled) return;
         setTargets(res.targets);
@@ -154,10 +154,7 @@ export function RunToolbar({
       .catch(() => {
         if (!cancelled) setTargets([]);
       });
-    ExperimentsService.getExperimentApiProjectsProjectIdExperimentsExperimentIdGet(
-      projectId,
-      experimentId,
-    )
+    ExperimentsService.getExperiment(projectId, experimentId)
       .then((exp) => {
         if (cancelled) return;
         const schema = parseInputSchema(exp.workflow);
@@ -181,7 +178,7 @@ export function RunToolbar({
     setStarting(true);
     setStartError(null);
     try {
-      await workspaceApi.startRun(projectId, experimentId, runId, target, startParams);
+      await runsApi.startRun(projectId, experimentId, runId, target, startParams);
       setStartOpen(false);
       toast.success("Started");
       afterDispatch();
@@ -209,7 +206,7 @@ export function RunToolbar({
     [afterDispatch],
   );
 
-  const exportUrl = workspaceApi.runExportUrl(projectId, experimentId, runId);
+  const exportUrl = runsApi.exportUrl(projectId, experimentId, runId);
 
   return (
     <>
@@ -299,7 +296,7 @@ export function RunToolbar({
             disabled={busy}
             deniedReason={writeDeniedReason}
             onClick={() =>
-              void runVerb("Resumed", () => workspaceApi.resumeRun(projectId, experimentId, runId))
+              void runVerb("Resumed", () => runsApi.resumeRun(projectId, experimentId, runId))
             }
           >
             <Play className="h-3.5 w-3.5" />
@@ -354,7 +351,7 @@ export function RunToolbar({
                   title={writeDeniedReason ?? undefined}
                   onClick={() =>
                     void runVerb("Rerun", () =>
-                      workspaceApi.rerunRun(projectId, experimentId, runId, false),
+                      runsApi.rerunRun(projectId, experimentId, runId, false),
                     )
                   }
                 >
@@ -366,7 +363,7 @@ export function RunToolbar({
                   title={writeDeniedReason ?? undefined}
                   onClick={() =>
                     void runVerb("Rerun fresh", () =>
-                      workspaceApi.rerunRun(projectId, experimentId, runId, true),
+                      runsApi.rerunRun(projectId, experimentId, runId, true),
                     )
                   }
                 >

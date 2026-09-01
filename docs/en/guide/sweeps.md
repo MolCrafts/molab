@@ -8,9 +8,9 @@ A sweep fans one workflow out over a grid of parameter cells — one content-add
 
 ```python
 import molexp as me
-from molexp.workflow import WorkflowCompiler
+from molexp.workflow import Workflow, WorkflowCompiler
 
-wf = WorkflowCompiler(name="scan")
+wf = Workflow(name="scan")
 
 
 @wf.task
@@ -59,7 +59,7 @@ The records are plain dicts — molexp deliberately ships no analysis-stack brid
 One cell blowing up must not cost you the other ninety-nine. A failing run is persisted as `failed` with its error captured, the summary reports it honestly, and its siblings keep executing:
 
 ```python
-risky = WorkflowCompiler(name="risky")
+risky = Workflow(name="risky")
 
 
 @risky.task

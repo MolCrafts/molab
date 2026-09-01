@@ -163,7 +163,7 @@ class SubmitHandler:
             Submitor,
         )
 
-        from molexp.workflow import make_execution_id
+        from molexp.workflow import WorkflowRuntime
 
         res = self._res
         sched = self._sched
@@ -178,7 +178,7 @@ class SubmitHandler:
         # running locally the per-attempt directory is created here so molq's
         # stdout/stderr/jobs paths land alongside the workflow.json the worker
         # writes; a remote target mirror-creates it during staging.
-        execution_id = execution_id or make_execution_id(mol_run.id, run_dir)
+        execution_id = execution_id or WorkflowRuntime.make_execution_id(mol_run.id, run_dir)
         local_exec_dir = run_dir / "executions" / execution_id
         local_exec_dir.mkdir(parents=True, exist_ok=True)
 
@@ -270,8 +270,6 @@ class SubmitHandler:
                 execution=JobExecution(
                     job_name=job_name,
                     cwd=target_exec_dir,
-                    output_file=f"{target_exec_dir}/stdout.log",
-                    error_file=f"{target_exec_dir}/stderr.log",
                     env=self._env or None,
                 ),
                 metadata={

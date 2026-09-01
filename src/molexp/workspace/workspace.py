@@ -17,8 +17,9 @@ children from disk or create + materialize new ones.
 from __future__ import annotations
 
 from pathlib import Path as _LocalPath
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
+from molexp._typing import JSONValue
 from molexp.knowledge.types import concept_type
 from molexp.path import Path
 
@@ -33,6 +34,7 @@ from .folder import (
     WORKSPACE_PROJECT_KIND,
     WORKSPACE_ROOT_KIND,
     Folder,
+    _load_concept_marker_dict,
 )
 from .fs import FileSystem, PathArg
 from .fs_local import LocalFileSystem
@@ -43,6 +45,8 @@ from .validate import ValidationReport, validate_workspace
 
 if TYPE_CHECKING:
     from .bundle import Bundle
+    from .models import ComputeTarget
+    from .workspace_context import ContextFocus, WorkspaceContext
     from .wp import WorkspacePaths
 
 # CLI-level root override: set by ``molexp run`` before executing the user
@@ -159,12 +163,12 @@ class Workspace(Folder):
     def from_disk(cls, child_dir: PathArg, parent: Folder) -> Workspace:
         """Reconstruct a Workspace rooted at *child_dir* (OKF concept rebuild).
 
-        A Workspace is its own root and persists ``workspace.json`` (not the
-        base ``meta.json`` alone), so the generic :meth:`Folder.from_disk` cannot
-        rebuild it. ``concept_from_dir`` reaches here when a ``meta.json`` typed
-        ``workspace.root`` is found; the constructor reloads ``workspace.json``
-        from *child_dir* and ignores the synthetic *parent* (a Workspace has
-        none). See the Folder.from_disk hook docs.
+        A Workspace is its own root and persists ``type`` on ``workspace.json``,
+        so the generic :meth:`Folder.from_disk` cannot rebuild it.
+        ``concept_from_dir`` reaches here when
+        ``workspace.json`` carries ``type: workspace.root``; the constructor
+        reloads that file from *child_dir* and ignores the synthetic *parent*
+        (a Workspace has none). See the Folder.from_disk hook docs.
         """
         return cls(root=child_dir, fs=parent._disk())
 
@@ -229,9 +233,7 @@ class Workspace(Folder):
     def data_assets(self) -> DataAssetLibrary:
         """Library for importing ``DataAsset`` inputs."""
         if self._data_assets is None:
-            self._data_assets = DataAssetLibrary(
-                self.root, self.scope, event_root=_LocalPath(str(self.root))
-            )
+            self._data_assets = DataAssetLibrary(self.root, self.scope)
         return self._data_assets
 
     # ── Conformance ─────────────────────────────────────────────────────
@@ -244,6 +246,37 @@ class Workspace(Folder):
         :func:`~molexp.workspace.validate.validate_workspace`.
         """
         return validate_workspace(self.resolve(), fs=self.fs)
+
+    def context(self, *, focus: ContextFocus | None = None) -> WorkspaceContext:
+        """Assemble the canonical workspace read-model. Writes nothing."""
+        from .workspace_context import assemble_workspace_context
+
+        return assemble_workspace_context(self, focus=focus)
+
+    def list_targets(self) -> list[ComputeTarget]:
+        from .targets import list_targets as _list
+
+        return _list(self)
+
+    def get_target(self, name: str) -> ComputeTarget:
+        from .targets import get_target as _get
+
+        return _get(self, name)
+
+    def has_target(self, name: str) -> bool:
+        from .targets import has_target as _has
+
+        return _has(self, name)
+
+    def add_target(self, target: ComputeTarget) -> None:
+        from .targets import add_target as _add
+
+        _add(self, target)
+
+    def remove_target(self, name: str) -> None:
+        from .targets import remove_target as _remove
+
+        _remove(self, name)
 
     # ── Path toolkit (layout fixes) ─────────────────────────────────────
 
@@ -262,11 +295,12 @@ class Workspace(Folder):
 
     @property
     def cache(self) -> CacheFolder:  # type: ignore[override]
-        """The (single) :class:`CacheFolder` for this workspace.
+        """Opt-in workspace-wide :class:`CacheFolder` (``<root>/cache/``).
 
         Lazily constructed; identity-stable. ``ws.cache is ws.cache``.
-        The underlying ``<root>/cache/`` directory is created on first
-        read/write through the folder.
+        Execution auto-cache does **not** use this — it writes
+        ``<run_dir>/cache``. The directory is created only on first
+        explicit read/write through this folder.
         """
         if self._cache_folder is None:
             self._cache_folder = CacheFolder(
@@ -282,14 +316,22 @@ class Workspace(Folder):
         """Write workspace scaffold to disk."""
         root_str = self.resolve()
         self.fs.mkdir(root_str, parents=True, exist_ok=True)
-        meta_path = self.fs.join(root_str, "workspace.json")
-        _save_metadata(self._entity_metadata, meta_path, fs=self.fs)
-        self.write_meta()  # sole concept identity (type); domain lives in workspace.json
+        self.save()
 
     def save(self) -> None:
-        """Persist current metadata to disk."""
+        """Persist current metadata to disk (includes OKF ``type``)."""
         meta_path = self.fs.join(self.resolve(), "workspace.json")
         _save_metadata(self._entity_metadata, meta_path, fs=self.fs)
+
+    def write_meta(self) -> str:
+        """Stamp concept ``type`` on ``workspace.json``."""
+        self.save()
+        return self.fs.join(self.resolve(), "workspace.json")
+
+    def read_meta(self) -> dict[str, JSONValue]:
+        """OKF identity: ``type`` (+ lifecycle) from ``workspace.json``."""
+        raw = _load_concept_marker_dict(self._disk(), self.resolve())
+        return cast("dict[str, JSONValue]", raw) if raw is not None else {}
 
     # ── Alternative constructors ─────────────────────────────────────────
 

@@ -3,13 +3,12 @@
  */
 import { Loader2 } from "lucide-react";
 import { type JSX, useCallback, useEffect, useId, useState } from "react";
-import { workspaceApi } from "@/app/state/api";
+import { workspacesApi } from "@/api";
 import type { ServedWorkspaceSummary } from "@/app/types";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { shortWorkspaceLabel } from "@/lib/workspace-path";
-
 export interface RemoteConnectDialogProps {
   workspace: ServedWorkspaceSummary | null;
   open: boolean;
@@ -58,7 +57,7 @@ export const RemoteConnectDialog = ({
     setBusy(true);
     setHint(null);
     try {
-      await workspaceApi.connectRemoteWorkspace(workspace.key, code.trim());
+      await workspacesApi.connectWorkspace(workspace.key, code.trim());
       onOpenChange(false);
       onConnected();
     } catch (err) {

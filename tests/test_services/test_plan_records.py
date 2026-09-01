@@ -24,14 +24,10 @@ from typing import Any
 import pytest
 
 from molexp.services.agent_task_store import list_agent_task_metadata
-from molexp.services.plan_runtime import (
-    PlanFailure,
-    PlanRecordError,
-    PlanRecordOutcome,
-    materialize_plan_records,
-)
+from molexp.services.plan_runtime import PlanFailure, PlanRecordError, PlanRecordOutcome
+from molexp.services.plan_runtime.materialize import materialize_plan_records
 from molexp.workspace import Bundle, Workspace
-from molexp.workspace.knowledge_item import KNOWLEDGE_ITEM_KIND, KnowledgeItem
+from molexp.workspace.knowledge import Knowledge
 
 _DRAFT = "Simulate NEMD ionic mobility"
 _MODEL = "stub-model"
@@ -48,14 +44,14 @@ _FINAL_REPORT = {
     "metrics": {"mobility": 0.42},
 }
 
-# Compiles through the public workflow API — persist_plan_workflow_to_experiment
-# execs it for the UI graph, so the clean-outcome test gets workflow_ir=written.
+# Compiles through the public workflow API — Plan.save dumps it for the UI
+# graph, so the clean-outcome test gets workflow_ir=written.
 _VALID_SOURCE = """\
-from molexp.workflow import TaskContext, WorkflowCompiler
+from molexp.workflow import TaskContext, Workflow, WorkflowCompiler
 
 
-def build_workflow() -> WorkflowCompiler:
-    wf = WorkflowCompiler(name="demo")
+def build_workflow() -> Workflow:
+    wf = Workflow(name="demo")
 
     @wf.task
     async def build_system(ctx: TaskContext) -> dict:
@@ -89,8 +85,9 @@ def run(experiment: Any) -> Any:
 def _seed(run: Any, kind: str, obj: dict[str, Any]) -> Any:
     """Put one canned *kind* artifact into the run's store; returns its ref."""
     from molexp.harness.store.file_artifact_store import FileArtifactStore
+    from molexp.harness.store.paths import harness_artifact_root
 
-    store = FileArtifactStore(root=Path(run.run_dir) / "artifacts")
+    store = FileArtifactStore(root=harness_artifact_root(run.run_dir))
     return store.put_json(kind, obj, created_by="test", parent_ids=[])
 
 
@@ -106,8 +103,8 @@ def _materialize(run: Any, experiment: Any, *, failure: PlanFailure | None = Non
     )
 
 
-def _source_pairs(item: KnowledgeItem) -> set[tuple[str, str]]:
-    return {(s.kind, s.ref) for s in item.read_knowledge_meta().sources}
+def _source_pairs(item: Knowledge) -> set[tuple[str, str]]:
+    return {(s.kind, s.ref) for s in item.metadata.sources}
 
 
 # ── honest outcome (§A) ──────────────────────────────────────────────────────
@@ -151,9 +148,7 @@ class TestPlanRecordOutcome:
         # Siblings were not aborted:
         assert "session_events" in outcome.written
         assert "experiment_record" in outcome.written
-        assert experiment.has_folder(
-            f"experiment-record-{experiment.id}-{run.id}", cls=KnowledgeItem
-        )
+        assert experiment.has_folder(f"experiment-record-{experiment.id}-{run.id}", cls=Knowledge)
 
 
 # ── mount flip + timestamp (§B) ──────────────────────────────────────────────
@@ -163,16 +158,17 @@ class TestRecordMountAndTimestamp:
     def test_decision_record_mounts_under_the_experiment_not_the_root(
         self, workspace: Workspace, run: Any, experiment: Any
     ) -> None:
-        """The record.py root-mount dodge is gone: the Decision item is a
-        direct child of its experiment, with no doubled path segments."""
+        """The record.py root-mount dodge is gone: the Decision item lives
+        under the experiment's ``knowledges/`` container, with no doubled
+        path segments and never at the workspace root."""
         _seed(run, "experiment_report", _EXPERIMENT_REPORT)
 
         _materialize(run, experiment)
 
         name = f"experiment-record-{experiment.id}-{run.id}"
-        item = experiment.get_folder(name, cls=KnowledgeItem)
+        item = experiment.get_folder(name, cls=Knowledge)
         item_dir = Path(item.resolve()).resolve()
-        assert item_dir.parent == Path(experiment.experiment_dir).resolve()
+        assert item_dir.parent == Path(experiment.experiment_dir).resolve() / "knowledges"
         parts = item_dir.relative_to(Path(workspace.root).resolve()).parts
         assert all(a != b for a, b in pairwise(parts)), parts
         assert not (Path(workspace.root) / name).exists(), "root-mount dodge must be deleted"
@@ -186,41 +182,21 @@ class TestRecordMountAndTimestamp:
 
         _materialize(run, experiment)
 
-        items = [c for c in Bundle(workspace.root).walk() if isinstance(c, KnowledgeItem)]
+        items = [c for c in Bundle(workspace.root).walk() if isinstance(c, Knowledge)]
         assert len(items) >= 2, [i.name for i in items]  # Decision + Finding
         for item in items:
-            assert item.read_knowledge_meta().timestamp is not None, item.name
+            assert item.metadata.created_at is not None, item.name
 
 
-# ── event spine (vision-loop-12): the record write is a knowledge.created emit ─
-
-
-class TestExperimentRecordEventEmit:
-    def test_writing_the_experiment_record_emits_knowledge_created(
+class TestExperimentRecordWrite:
+    def test_writing_the_experiment_record_creates_the_knowledge_item(
         self, workspace: Workspace, run: Any, experiment: Any
     ) -> None:
-        """The Decision-record write lands exactly one ``knowledge.created`` on
-        the workspace event spine: actor ``plan-record``, ref = the item's
-        workspace-relative path, payload ``{type, title}``."""
-        from molexp.workspace.events import read_workspace_events
-
         _seed(run, "experiment_report", _EXPERIMENT_REPORT)
-
         _materialize(run, experiment)
 
-        events = read_workspace_events(workspace.root, type="knowledge.created")
-        assert len(events) == 1
-        event = events[0]
-        assert event.actor == "plan-record"
-        item = experiment.get_folder(
-            f"experiment-record-{experiment.id}-{run.id}", cls=KnowledgeItem
-        )
-        rel_path = (
-            Path(item.resolve()).resolve().relative_to(Path(workspace.root).resolve()).as_posix()
-        )
-        assert event.refs == [rel_path]
-        assert event.payload["type"] == KNOWLEDGE_ITEM_KIND
-        assert event.payload["title"] == "Water NEMD"
+        item = experiment.get_folder(f"experiment-record-{experiment.id}-{run.id}", cls=Knowledge)
+        assert type(item).__name__ == "Decision"
 
 
 # ── Finding (execute-tail success, §B) ───────────────────────────────────────
@@ -236,8 +212,8 @@ class TestFindingRecord:
         outcome = _materialize(run, experiment)
 
         assert "finding" in outcome.written
-        item = experiment.get_folder(f"finding-{experiment.id}-{run.id}", cls=KnowledgeItem)
-        assert item.read_knowledge_meta().kind == "Finding"
+        item = experiment.get_folder(f"finding-{experiment.id}-{run.id}", cls=Knowledge)
+        assert type(item).__name__ == "Finding"
         pairs = _source_pairs(item)
         assert ("run", run.id) in pairs
         assert ("experiment", experiment.id) in pairs
@@ -254,7 +230,7 @@ class TestFindingRecord:
 
         _materialize(run, experiment)
 
-        item = experiment.get_folder(f"finding-{experiment.id}-{run.id}", cls=KnowledgeItem)
+        item = experiment.get_folder(f"finding-{experiment.id}-{run.id}", cls=Knowledge)
         edges = item.typed_out_edges()
         assert any(
             e.role == "derived_from" and str(e.target).endswith(f"run-{run.id}") for e in edges
@@ -271,7 +247,7 @@ class TestFindingRecord:
         outcome = _materialize(run, experiment)
 
         assert "finding" not in outcome.written
-        assert not experiment.has_folder(f"finding-{experiment.id}-{run.id}", cls=KnowledgeItem)
+        assert not experiment.has_folder(f"finding-{experiment.id}-{run.id}", cls=Knowledge)
 
 
 # ── FailureAnalysis (terminal plan failure, §B) ──────────────────────────────
@@ -292,10 +268,9 @@ class TestFailureAnalysisRecord:
         )
 
         assert "failure_analysis" in outcome.written
-        item = experiment.get_folder(f"failure-{experiment.id}-{run.id}", cls=KnowledgeItem)
-        meta = item.read_knowledge_meta()
-        assert meta.kind == "FailureAnalysis"
-        assert meta.timestamp is not None
+        item = experiment.get_folder(f"failure-{experiment.id}-{run.id}", cls=Knowledge)
+        assert type(item).__name__ == "FailureAnalysis"
+        assert item.metadata.created_at is not None
         pairs = _source_pairs(item)
         assert ("run", run.id) in pairs
         assert ("experiment", experiment.id) in pairs

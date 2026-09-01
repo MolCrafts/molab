@@ -11,6 +11,7 @@ import pytest
 
 from molexp.workflow import (
     CompiledWorkflow,
+    Workflow,
     WorkflowBindingRegistry,
     WorkflowCompiler,
     default_binding_registry,
@@ -30,7 +31,7 @@ def _isolate_registry():
 
 
 def _make_spec(name: str = "wf") -> CompiledWorkflow:
-    return WorkflowCompiler(name=name).compile()
+    return WorkflowCompiler().compile(Workflow(name=name))
 
 
 class TestWorkflowBindingRegistry:

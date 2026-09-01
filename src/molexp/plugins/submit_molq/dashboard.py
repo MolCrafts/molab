@@ -432,17 +432,26 @@ def _duration_seconds(record: JobRecord) -> float | None:
 def _resolve_log_path(record: JobRecord, stream: str) -> Path:
     """Locate the on-disk log file for *record*.
 
-    molexp's :class:`~molexp.plugins.submit_molq.submit.SubmitHandler` writes
-    ``stdout.log`` / ``stderr.log`` directly under the job's ``cwd`` (the
-    per-execution directory). For jobs submitted by other tooling we fall back
-    to ``cwd/.molq/jobs/<job_id>/{stream}.log``.
+    Streams live next to the molq job (``executions/<id>/jobs/<job_id>/``),
+    which is molq's default when ``output_file`` is unset. Older trees put
+    them on the execution root or under ``cwd/.molq/``.
     """
     cwd = Path(record.cwd) if record.cwd else Path.cwd()
-    primary = cwd / f"{stream}.log"
-    if primary.exists():
-        return primary
-    fallback = cwd / ".molq" / "jobs" / record.job_id / f"{stream}.log"
-    return fallback if fallback.exists() else primary
+    name = f"{stream}.log"
+    meta_key = f"molq.{stream}_path"
+    meta = getattr(record, "metadata", None) or {}
+    candidates = [
+        Path(meta[meta_key]) if meta_key in meta else None,
+        cwd / "jobs" / record.job_id / name,
+        cwd / "jobs" / "lammps" / name,
+        cwd / name,
+        cwd / ".molq" / "jobs" / record.job_id / name,
+        cwd / ".molq" / "lammps" / name,
+    ]
+    for path in candidates:
+        if path is not None and path.exists():
+            return path
+    return cwd / "jobs" / record.job_id / name
 
 
 __all__ = [

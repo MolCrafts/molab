@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
+import { workflowApi } from "@/api";
 import { WorkflowService } from "@/api/generated/services/WorkflowService";
-import { workflowApi } from "@/app/state/api";
 
-const PUT = "putWorkflowDocumentApiProjectsProjectIdExperimentsExperimentIdWorkflowPut" as const;
+const PUT = "putWorkflowDocument" as const;
 
 describe("workflowApi.save", () => {
   afterEach(() => {

@@ -14,19 +14,13 @@ export async function postAnalyzeFailure(
   projectId: string,
   experimentId: string,
   runId: string,
-  body: { narrative?: string; created_by?: string; force?: boolean } = {},
+  body: { narrative?: string; createdBy?: string; force?: boolean } = {},
 ): Promise<AnalyzeFailureResult> {
-  const res =
-    await RunsService.analyzeRunFailureRouteApiProjectsProjectIdExperimentsExperimentIdRunsRunIdAnalyzeFailurePost(
-      projectId,
-      experimentId,
-      runId,
-      {
-        narrative: body.narrative ?? null,
-        created_by: body.created_by ?? "ui",
-        force: body.force ?? false,
-      },
-    );
+  const res = await RunsService.analyzeRunFailureRoute(projectId, experimentId, runId, {
+    narrative: body.narrative ?? null,
+    createdBy: body.createdBy ?? "ui",
+    force: body.force ?? false,
+  });
   // Generated client types this as any/object; normalize to paths the UI expects.
   const json = res as { name?: string; path?: string };
   return {

@@ -1,4 +1,4 @@
-"""``drive_plan_mode`` — plan bundle inside the run lifecycle (honest status)."""
+"""``Plan.execute`` — plan bundle inside the run lifecycle (honest status)."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from molexp.services.plan_runtime import drive_plan_mode
+from molexp.harness import Plan
 from molexp.workspace import Workspace
 
 
@@ -15,8 +15,9 @@ class _FakeResult:
     pass
 
 
-class _FakePlan:
+class _FakePlan(Plan):
     def __init__(self, *, error: Exception | None = None) -> None:
+        super().__init__()
         self._error = error
         self.calls: list[dict[str, object]] = []
 
@@ -48,10 +49,10 @@ def run(tmp_path: Path):
     return exp.add_run(params={"mode": "plan", "draft": "x"}, id="plandrive1")
 
 
-class TestDrivePlanMode:
+class TestPlanExecute:
     def test_successful_pipeline_marks_run_succeeded(self, run) -> None:
         plan = _FakePlan()
-        result = asyncio.run(drive_plan_mode(plan, run=run, user_input="x", gateway=object()))
+        result = asyncio.run(plan.execute(run=run, user_input="x", gateway=object()))
         assert isinstance(result, _FakeResult)
         assert run.status == "succeeded"
         assert plan.calls[0]["user_input"] == "x"
@@ -61,12 +62,12 @@ class TestDrivePlanMode:
 
         plan = _FakePlan(error=StageExecutionError("stage 'x' exploded"))
         with pytest.raises(StageExecutionError):
-            asyncio.run(drive_plan_mode(plan, run=run, user_input="x", gateway=object()))
+            asyncio.run(plan.execute(run=run, user_input="x", gateway=object()))
         assert run.status == "failed"
 
     def test_reentry_on_a_succeeded_run_is_allowed(self, run) -> None:
         plan = _FakePlan()
-        asyncio.run(drive_plan_mode(plan, run=run, user_input="x", gateway=object()))
-        asyncio.run(drive_plan_mode(plan, run=run, user_input="x", gateway=object()))
+        asyncio.run(plan.execute(run=run, user_input="x", gateway=object()))
+        asyncio.run(plan.execute(run=run, user_input="x", gateway=object()))
         assert run.status == "succeeded"
         assert len(plan.calls) == 2

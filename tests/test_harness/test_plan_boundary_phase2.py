@@ -32,6 +32,7 @@ from molexp.harness.plan.bind_board import board_plan_to_bound_workflow
 from molexp.harness.schemas import PlanArtifactRef
 from molexp.harness.stages import auto_grant_approver
 from molexp.harness.stages.realize_board import RealizeBoard
+from molexp.harness.store.paths import harness_artifact_root
 from molexp.workspace import Workspace
 
 _USER_INPUT = '{"title": "Boundary phase2", "objective": "Unit-test realization wiring."}'
@@ -69,7 +70,7 @@ def run(tmp_path: Path):
 
 
 def _gateway(run: Any) -> StubAgentGateway:
-    gw = StubAgentGateway(FileArtifactStore(root=run.run_dir / "artifacts"))
+    gw = StubAgentGateway(FileArtifactStore(root=harness_artifact_root(run.run_dir)))
     gw.register(
         "plan_report_renderer",
         output={"title": "Plan report", "summary_md": "# ok"},
@@ -97,7 +98,7 @@ class TestRealizeFalseSkipsPhase2:
             user_input=_USER_INPUT,
             gateway=_gateway(run),
         )
-        store = FileArtifactStore(root=run.run_dir / "artifacts")
+        store = FileArtifactStore(root=harness_artifact_root(run.run_dir))
         assert store.latest_by_kind(FROZEN_PLAN_KIND) is not None
         assert store.latest_by_kind("plan_report") is not None
         assert store.latest_by_kind("bound_workflow") is None
@@ -135,7 +136,7 @@ class TestRealizeTrueInvokesPhase2:
         assert isinstance(result, ModeResult)
         assert result.final_artifact is not None
         assert result.final_artifact.kind == "execution_result"
-        store = FileArtifactStore(root=run.run_dir / "artifacts")
+        store = FileArtifactStore(root=harness_artifact_root(run.run_dir))
         assert store.latest_by_kind(FROZEN_PLAN_KIND) is not None
         assert store.latest_by_kind("plan_report") is not None
 

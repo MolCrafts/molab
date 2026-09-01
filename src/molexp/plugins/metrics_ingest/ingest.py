@@ -1,11 +1,11 @@
 """Ingest foreign run logs into a run's host metrics buffer.
 
-A molexp **Run is a host**, not a MolRec record: ``run.json`` / ``ops/run.json``
+A molexp **Run is a host**, not a MolRec record: ``run.json`` + run-root ``alive``
 are not molrec ``meta`` / ``status``, and nothing here writes those sections.
 Scientific packages follow the external molrec spec; molexp does not re-host it.
 
 What this module produces is the run-local **metrics surface**: JSONL WAL
-(``artifacts/metrics.mlp.jsonl``) via :class:`~molexp.workspace.metrics.MetricsWriter`.
+(``artifacts/metrics.mlp.jsonl``) via :class:`~molexp.plugins.metrics.MetricsWriter`.
 Foreign dialects (CSV, LAMMPS, TensorBoard, event JSONL) are equal sources.
 
 **Additive.** Source artifacts are never deleted, rewritten, moved, or
@@ -25,7 +25,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from molexp._typing import JSONValue
-from molexp.workspace.metrics import MetricsWriter
+from molexp.plugins.metrics import MetricsWriter
 
 from .detect import FormatHit, LogFormat, detect_log_formats
 from .lammps import thermo_records

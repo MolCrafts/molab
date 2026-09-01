@@ -16,4 +16,4 @@ When the question is "I have a research goal in prose, not yet a workflow," go t
 
 ## Operations and Scheduling
 
-When the question is about long-running services or scheduler transport, go to [Server Lifecycle](server-lifecycle.md) and [Molq Plugin](molq.md). Those pages are intentionally outside the onboarding path because they matter only after the local workflow and workspace model are already stable.
+When the question is about long-running services or scheduler transport, go to [Server Lifecycle](server-lifecycle.md) and [Molq Plugin](molq.md). Those pages are intentionally outside the onboarding path because they matter only after the local workflow and workspace model are already stable. Checkout vs bundled UI vs wheel: [Serve and rebuild the UI](../development/ui-serve.md).

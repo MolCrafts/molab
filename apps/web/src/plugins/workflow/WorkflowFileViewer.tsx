@@ -5,7 +5,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { workspaceApi } from "@/app/state/api";
+import { workspaceApi } from "@/api";
 import type { RendererProps, SemanticStatus } from "@/app/types";
 import { WorkbenchOperationState, WorkbenchRetryAction } from "@/components/workbench";
 import { FlowgramCanvas } from "@/components/workflow/flowgram-canvas";

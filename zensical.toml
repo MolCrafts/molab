@@ -56,6 +56,7 @@ nav = [
     ]},
     { "Development" = [
         { "Index" = "development/index.md" },
+        { "Serve and rebuild the UI" = "development/ui-serve.md" },
         { "Compiler" = "development/compiler.md" },
         { "Task Protocols" = "development/task-protocols.md" },
         { "Writing a Plugin" = "plugins.md" }

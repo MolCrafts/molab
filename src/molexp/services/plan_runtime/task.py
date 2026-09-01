@@ -241,7 +241,9 @@ class PlanTask:
                 run_dir = Path(str(self.run.run_dir))
                 board = read_board(board_path(run_dir))
                 step_count = len(getattr(board, "tasks", ()) or ())
-                store = FileArtifactStore(root=run_dir / "artifacts")
+                from molexp.harness.store.paths import harness_artifact_root
+
+                store = FileArtifactStore(root=harness_artifact_root(run_dir))
                 # Prefer LLM-filled plan_report (rendered before the review gate).
                 report_ref = store.latest_by_kind("plan_report")
                 if report_ref is not None:
@@ -346,7 +348,6 @@ class PlanTask:
     async def _drive(self, gateway: AgentGateway) -> None:
         from molexp.harness import ApprovalPendingError, Plan
 
-        from .drive import drive_plan_mode
         from .materialize import materialize_plan_records
 
         # Cap molmcp grounding so a hung MCP never leaves the UI on "running"
@@ -414,12 +415,7 @@ class PlanTask:
                     self.record_task_id,
                     turn_id=self.turn_id,
                 )
-            # drive_plan_mode wraps the pipeline in the run lifecycle so the
-            # plan Run's status is honest (running -> succeeded | failed) —
-            # the same shared path `molexp plan` uses.
-            # Phase 1 (board + freeze) + Phase 2 (RealizeBoard) when realize=True.
-            self.result = await drive_plan_mode(
-                Plan(realize=True, on_loop_event=on_loop_event),
+            self.result = await Plan(realize=True, on_loop_event=on_loop_event).execute(
                 run=self.run,
                 user_input=self.draft,
                 gateway=gateway,

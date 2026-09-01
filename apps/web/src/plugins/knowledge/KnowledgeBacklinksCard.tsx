@@ -33,12 +33,7 @@ export const KnowledgeBacklinksCard = ({
   useEffect(() => {
     let cancelled = false;
     setRows(null);
-    KnowledgeService.entityBacklinksApiKnowledgeEntityBacklinksGet(
-      kind,
-      projectId,
-      experimentId,
-      runId ?? null,
-    )
+    KnowledgeService.entityBacklinks(kind, projectId, experimentId, runId ?? null)
       .then((response) => {
         if (!cancelled) setRows(response.backlinks);
       })

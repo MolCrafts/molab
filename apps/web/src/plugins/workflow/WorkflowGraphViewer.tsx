@@ -16,9 +16,9 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useBlocker } from "react-router-dom";
-import { workflowApi } from "@/app/state/api";
+import { workflowApi } from "@/api";
 import { useInspectedTask } from "@/app/state/inspectedTask";
-import type { RendererProps } from "@/app/types";
+import type { ScopedRendererProps } from "@/app/types";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -40,8 +40,10 @@ import {
   taskGraphToWireDocument,
 } from "@/components/workflow/flowgram-document";
 import type { TaskGraphJson } from "@/components/workflow/task-graph-ir";
-
-export const WorkflowGraphViewer = ({ selection, snapshot }: RendererProps): JSX.Element => {
+export const WorkflowGraphViewer = ({
+  selection,
+  snapshot,
+}: ScopedRendererProps<"experiments" | "runs" | "workflows" | "workspaces">): JSX.Element => {
   const { inspectTask } = useInspectedTask();
   const workflow = snapshot.workflows.find((item) => item.id === selection.objectId) ?? null;
 

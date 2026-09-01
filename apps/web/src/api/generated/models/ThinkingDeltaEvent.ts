@@ -8,7 +8,7 @@
  * The orchestration-level projection of a
  * :class:`~molexp.agent.router.ThinkingDeltaChunk`: a reasoning model's
  * private chain-of-thought, streamed *before* the answer.
- * :class:`~molexp.agent.loops.interactive.InteractiveLoop` yields one per
+ * :class:`~molexp.agent.react` yields one per
  * reasoning delta so a CLI / SSE consumer can surface "thinking…" in a
  * collapsed / dimmed treatment, kept distinct from the answer's
  * :class:`TokenDeltaEvent`\ s. A model that does not reason emits none.

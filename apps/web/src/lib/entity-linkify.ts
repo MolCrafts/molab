@@ -8,18 +8,19 @@
 // untouched. Code spans/fences are never rewritten.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { entityPath, runPath } from "@/app/entities/paths";
-import type { WorkspaceSnapshot } from "@/app/types";
+import { experimentPath, runPath } from "@/app/entities/paths";
+import type { RendererSnapshot } from "@/app/types";
 
 /** id → canonical app path, for every entity the snapshot knows. */
-export const buildEntityLinkIndex = (snapshot: WorkspaceSnapshot): Map<string, string> => {
+export const buildEntityLinkIndex = (
+  snapshot: Pick<RendererSnapshot, "projects" | "experiments" | "runs">,
+): Map<string, string> => {
   const index = new Map<string, string>();
   for (const run of snapshot.runs) {
     index.set(run.id, runPath(run.projectId, run.experimentId, run.id));
   }
   for (const experiment of snapshot.experiments) {
-    const path = entityPath({ kind: "experiment", id: experiment.id }, snapshot);
-    if (path) index.set(experiment.id, path);
+    index.set(experiment.id, experimentPath(experiment.projectId, experiment.id));
   }
   for (const project of snapshot.projects) {
     index.set(project.id, `/projects/${encodeURIComponent(project.id)}`);

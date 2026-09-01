@@ -1,5 +1,7 @@
 import { Bot, Send, Settings, ShieldAlert, Square, XCircle } from "lucide-react";
 import { type JSX, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { plansApi } from "@/api";
+import { ApprovalsInbox } from "@/app/approvals/ApprovalsInbox";
 import { CommandPalette, useCommandPalette } from "@/app/components/CommandPalette";
 import { EntityHeader, StatusBadge } from "@/app/components/entity";
 import {
@@ -9,7 +11,6 @@ import {
   agentAdminApi,
   agentApi,
   commandsApi,
-  workspaceApi,
 } from "@/app/state/api";
 import { useNavigationState } from "@/app/state/useNavigationState";
 import type { ApiAgentSession, ApiSessionEvent, RendererProps } from "@/app/types";
@@ -28,7 +29,6 @@ import { agentTaskDisplayTitle } from "@/lib/agent-task-title";
 import { buildEntityLinkIndex } from "@/lib/entity-linkify";
 import { cn } from "@/lib/utils";
 import { AgentSettingsViewer } from "./AgentSettingsViewer";
-import { ApprovalsInbox } from "./agent/ApprovalsInbox";
 import { type AgentMode, nextAgentMode } from "./agent/agentMode";
 import { ConversationTurnView } from "./agent/conversation";
 import { DeliverablesPanel, hasDeliverables } from "./agent/DeliverablesPanel";
@@ -1050,7 +1050,7 @@ const AgentSessionViewer = ({
     }
     let cancelled = false;
     const pull = (): void => {
-      void workspaceApi
+      void plansApi
         .getPlan(planRef.projectId, planRef.experimentId, planRef.runId)
         .then((detail) => {
           if (cancelled) return;

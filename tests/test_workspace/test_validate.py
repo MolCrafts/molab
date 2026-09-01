@@ -14,7 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from molexp.workspace import Workspace, validate_workspace
+from molexp.workspace import Workspace
+from molexp.workspace.validate import validate_workspace
 
 
 def _workspace(tmp_path: Path) -> Workspace:

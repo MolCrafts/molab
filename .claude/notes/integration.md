@@ -49,7 +49,7 @@ those contracts and which existing module owns each side.
 **Ownership stance carried throughout** (these resolve the gaps in
 `architecture.md`'s audit):
 
-- Canonical state is **workspace on disk** (entity `*.json`, `ops/run.json`,
+- Canonical state is **workspace on disk** (entity `*.json`, `run.json (hot state) + alive`,
   `assets.json`, OKF `meta.json`/`index.md`). Agent memory and frontend state are
   **never** canonical.
 - The agent **proposes**; the harness **disposes**. High-risk mutations go
@@ -154,13 +154,13 @@ defines how they relate. **No stream is replaced.**
 
 | Stream | Scope | Persisted? | Existing module | Role |
 |---|---|---|---|---|
-| `HarnessEvent` | one harness run | yes (`run_dir/harness.sqlite`) | `harness/store/sqlite_event_log.py` | deep per-run audit (stage/agent/approval/artifact) |
+| `HarnessEvent` | one harness run | yes (`run_dir/events.jsonl / approvals.json`) | `harness/store/sqlite_event_log.py` | deep per-run audit (stage/agent/approval/artifact) |
 | `AgentEvent` | one agent loop | no (in-memory stream) | `agent/events.py` (`AsyncIteratorEventSink`) | live UI streaming (tokens, tool calls, thinking) |
-| **`WorkspaceEvent`** *(new, P0)* | whole workspace | yes (`<root>/workspace.events.sqlite`) | mirror `SQLiteEventLog` | **cross-object coordination spine** |
+| **`WorkspaceEvent`** *(new, P0)* | whole workspace | yes (`<root>/workspace.events.sqlite`) | mirror `JsonlEventLog` | **cross-object coordination spine** |
 
 The new `WorkspaceEvent` log is the canonical "what happened across objects"
 timeline — append-only, `seq`-ordered, never overwritten, at workspace scope.
-Per-run detail stays in `harness.sqlite`; the workspace log holds the coordination
+Per-run detail stays in `events.jsonl / approvals.json`; the workspace log holds the coordination
 event + a `run_id`/`content_hash` pointer to drill down. This keeps the deep audit
 local to a run while giving planners/copilot one place to observe the whole
 project.
@@ -251,7 +251,7 @@ Experiment ──references──► Workflow (IR)         Experiment.workflow.j
 - `Experiment.add_run(params=…)` / `add_runs(space)` create content-addressed
   Runs (`derive_run_id`). A `Run` binds: the referenced workflow, concrete
   `params`, environment (`profile`/`config_hash`), and time
-  (`ops/run.json` started/finished). This is the existing model — reuse as-is.
+  (`run.json (hot state) + alive` started/finished). This is the existing model — reuse as-is.
 - Execution persists node-level outputs under `executions/<exec_id>/workflow.json`
   (resume seed) — unchanged.
 
@@ -273,13 +273,13 @@ Experiment ──references──► Workflow (IR)         Experiment.workflow.j
 ### 4.1 One artifact concept, two stores — bridge, don't fork
 
 Audit finding: artifacts live in **two** systems — workspace `ArtifactAsset` +
-`assets.json` (run outputs) and harness `ArtifactRef` + `harness.sqlite`
+`assets.json` (run outputs) and harness `ArtifactRef` + `events.jsonl / approvals.json`
 (agent-pipeline products). The bridge (P1) is a **mapping + unified read**, not a
 merge-by-rewrite:
 
 - Harness stages register their durable products into the workspace manifest via
   the workspace API (so a plan's `experiment_spec`, `workflow_ir`, `final_report`
-  become queryable `ArtifactAsset`s with a `kind` mapping). `harness.sqlite`
+  become queryable `ArtifactAsset`s with a `kind` mapping). `events.jsonl / approvals.json`
   remains the per-run deep lineage; `scan_assets` becomes the single
   cross-cutting query.
 - `content_hash` (`compute_content_hash`, "sha256:…") is the shared identity that
@@ -514,7 +514,7 @@ class ChangeProposal(BaseModel):
 
 ```text
 agent.proposal.created (event, P✓)
-  → ApprovalGate decides (approval_requested → granted|rejected, harness.sqlite)
+  → ApprovalGate decides (approval_requested → granted|rejected, events.jsonl / approvals.json)
       rejected → recorded, no Act; proposal kept for audit
       granted  → Act (executor / lifecycle / curation op, bounded to affected_objects)
                  → execution_result filled

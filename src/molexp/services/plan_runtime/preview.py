@@ -9,7 +9,6 @@ synthesised from legacy artifact contents.
 from __future__ import annotations
 
 import json
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from molexp.harness.schemas import FormDocument, ReviewPack
@@ -95,8 +94,9 @@ def render_approval_preview(run: Run, intent: str) -> str:
 
 def _store(run: Run) -> FileArtifactStore:
     from molexp.harness.store.file_artifact_store import FileArtifactStore
+    from molexp.harness.store.paths import harness_artifact_root
 
-    return FileArtifactStore(root=Path(str(run.run_dir)) / "artifacts")
+    return FileArtifactStore(root=harness_artifact_root(run.run_dir))
 
 
 def _synthetic_spec_pack(store: FileArtifactStore) -> ReviewPack:

@@ -9,63 +9,6 @@ import "./side-effects";
  * skip it when there is no workflow data (see ExperimentViewer).
  */
 
-import { buildRegistryKey, registerRendererContribution } from "@/app/registry";
-import type { UiPluginModule } from "@/plugins/types";
-import { WorkflowFileViewer } from "@/plugins/workflow/WorkflowFileViewer";
-import { WorkflowInspector } from "@/plugins/workflow/WorkflowInspector";
-import { WorkflowViewer } from "@/plugins/workflow/WorkflowViewer";
-
-const workflowPlugin: UiPluginModule = {
-  id: "workflow",
-  name: "Workflow",
-  description: "Workflow graph viewer, source tab, and right-rail inspector.",
-  userToggleable: true,
-  register: () => {
-    registerRendererContribution({
-      id: "workflow:viewer",
-      key: {
-        objectType: "workflow",
-        fileKind: "yaml",
-        contentType: "metadata",
-        panelKind: "viewer",
-      },
-      title: "Workflow Overview",
-      panelSlot: "center",
-      priority: 0,
-      Component: WorkflowViewer,
-    });
-
-    registerRendererContribution({
-      id: "workflow:inspector",
-      key: {
-        objectType: "workflow",
-        fileKind: "yaml",
-        contentType: "metadata",
-        panelKind: "inspector",
-      },
-      title: "Workflow Inspector",
-      panelSlot: "right",
-      priority: 0,
-      Component: WorkflowInspector,
-    });
-
-    const fileKey = {
-      objectType: "workspace-file" as const,
-      fileKind: "json" as const,
-      contentType: "workflow-graph" as const,
-      panelKind: "viewer" as const,
-    };
-    registerRendererContribution({
-      id: `workflow:file:${buildRegistryKey(fileKey)}`,
-      key: fileKey,
-      title: "Workflow Preview",
-      panelSlot: "center",
-      priority: 0,
-      Component: WorkflowFileViewer,
-    });
-  },
-};
-
 export { FlowgramCanvas, type FlowgramCanvasProps } from "./flowgram-canvas";
 export {
   buildFlowgramDocument,
@@ -73,5 +16,5 @@ export {
   type FlowgramDocument,
   parseTaskGraphIr,
 } from "./flowgram-document";
+export { default } from "./plugin";
 export type { TaskGraphJson, TaskNodeJson } from "./task-graph-ir";
-export default workflowPlugin;

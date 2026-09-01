@@ -1,7 +1,8 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { Plus, Tag, X } from "lucide-react";
 import { type JSX, type KeyboardEvent, useEffect, useMemo, useState } from "react";
+import { knowledgeApi } from "@/api";
 import { StatusBadge } from "@/app/components/entity";
-import { workspaceApi } from "@/app/state/api";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -11,6 +12,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { WorkbenchIconAction, WorkbenchTag } from "@/components/workbench";
+import { knowledgeKeys, useKnowledgeListQuery } from "@/plugins/knowledge/queries";
 
 /** Common lifecycle labels offered in the status select; `status` is an open
  * string on the backend, so the current value is always included as an option. */
@@ -20,42 +22,28 @@ const STATUS_OPTIONS = ["active", "draft", "archived"] as const;
  * Writable document-level tag + status controls for a Note.
  *
  * Loads the note's 05 metadata (`tags` / `status`) through
- * `workspaceApi.listKnowledge` (the generated client), then persists edits via
- * `workspaceApi.updateNoteMeta` — the thin `PATCH /knowledge/doc/meta` route that
+ * `knowledgeApi.listKnowledge` (the generated client), then persists edits via
+ * `knowledgeApi.updateDocMeta` — the thin `PATCH /knowledge/doc/meta` route that
  * delegates to `Note.set_tags` / `Note.set_status` (the same verbs the CLI uses,
  * per the Python==UI invariant). Each save realigns local state with the
  * server-returned summary; a failed save surfaces an inline error and leaves the
  * prior state intact.
  */
 export const DocumentControls = ({ relPath }: { relPath: string }): JSX.Element | null => {
+  const queryClient = useQueryClient();
+  const listQuery = useKnowledgeListQuery();
   const [tags, setTags] = useState<string[]>([]);
   const [status, setStatus] = useState<string | null>(null);
-  const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tagInput, setTagInput] = useState("");
+  const summary = listQuery.data?.notes.find((note) => note.relPath === relPath) ?? null;
 
   useEffect(() => {
-    let cancelled = false;
     setError(null);
-    setLoaded(false);
-    workspaceApi
-      .listKnowledge()
-      .then((response) => {
-        if (cancelled) return;
-        const summary = response.notes.find((note) => note.relPath === relPath) ?? null;
-        setTags(summary?.tags ?? []);
-        setStatus(summary?.status ?? null);
-        setLoaded(true);
-      })
-      .catch((err) => {
-        if (!cancelled)
-          setError(err instanceof Error ? err.message : "Failed to load doc metadata.");
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [relPath]);
+    setTags(summary?.tags ?? []);
+    setStatus(summary?.status ?? null);
+  }, [summary]);
 
   const statusOptions = useMemo(() => {
     const opts = [...STATUS_OPTIONS] as string[];
@@ -67,9 +55,10 @@ export const DocumentControls = ({ relPath }: { relPath: string }): JSX.Element 
     setSaving(true);
     setError(null);
     try {
-      const updated = await workspaceApi.updateNoteMeta(relPath, patch);
+      const updated = await knowledgeApi.updateDocMeta(relPath, patch);
       setTags(updated.tags ?? []);
       setStatus(updated.status ?? null);
+      await queryClient.invalidateQueries({ queryKey: knowledgeKeys.lists() });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save doc metadata.");
     } finally {
@@ -95,10 +84,12 @@ export const DocumentControls = ({ relPath }: { relPath: string }): JSX.Element 
     }
   };
 
-  if (error && !loaded) {
-    return <p className="text-label text-destructive">{error}</p>;
+  if (listQuery.error) {
+    const message =
+      listQuery.error instanceof Error ? listQuery.error.message : "Failed to load doc metadata.";
+    return <p className="text-label text-destructive">{message}</p>;
   }
-  if (!loaded) {
+  if (listQuery.isPending) {
     return <p className="text-micro text-muted-foreground">Loading…</p>;
   }
 

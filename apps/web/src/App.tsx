@@ -1,12 +1,17 @@
 import { useCallback, useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
+import { workspaceApi } from "@/api";
 import { AuthGate, AuthProvider, LoginPage } from "@/app/auth";
 import { AppShell } from "@/app/layout/AppShell";
 import { ErrorBoundary } from "@/app/layout/ErrorBoundary";
+import { RouteProfiler } from "@/app/layout/RouteProfiler";
 import { OAuthCallbackPage } from "@/app/oauth/OAuthCallbackPage";
 import { useWorkspaceRuns } from "@/app/runs/useWorkspaceRuns";
-import { workspaceApi } from "@/app/state/api";
-import { getLeftPanelViewFromPath, useNavigationState } from "@/app/state/useNavigationState";
+import {
+  getLeftPanelViewFromPath,
+  hierarchyRouteContextFromPath,
+  useNavigationState,
+} from "@/app/state/useNavigationState";
 import { useWorkspaceState } from "@/app/state/useWorkspaceState";
 import type { InspectorTarget, Selection } from "@/app/types";
 
@@ -39,18 +44,54 @@ const WorkspaceApp = ({ pathname }: { pathname: string }): JSX.Element => {
     isProjectExpanded,
     isExperimentExpanded,
   } = useWorkspaceState(activeView);
-  // Subscribe to the runs poller only when the user is on the runs view; the
+  // Subscribe to the runs poller only when the user is on an operational runs surface; the
   // hook still gives us a refresh handle even when disabled so manual refresh
   // works regardless of polling state.
-  const runs = useWorkspaceRuns({ enabled: activeView === "runs" });
+  const runs = useWorkspaceRuns({ enabled: activeView === "runs" || activeView === "dashboard" });
   const { leftPanelView, selection, setLeftPanelView, setSelection } = useNavigationState(snapshot);
+  const hierarchyRoute = hierarchyRouteContextFromPath(pathname);
+  const routeProjectId = hierarchyRoute?.projectId ?? null;
+  const routeExperimentId = hierarchyRoute?.experimentId ?? null;
   const [inspectorTarget, setInspectorTarget] = useState<InspectorTarget>(
     buildDefaultInspectorTarget(selection),
   );
 
+  // A canonical deep link contains its parent ids even before the shallow
+  // workspace catalog does. Hydrate that chain in dependency order so opening
+  // an Experiment or Run URL never resolves to a misleading "not found" shell.
+  useEffect(() => {
+    if (!routeProjectId) return;
+    let cancelled = false;
+    void expandProject(routeProjectId).then(() => {
+      if (!cancelled && routeExperimentId) {
+        void expandExperiment(routeProjectId, routeExperimentId);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [expandExperiment, expandProject, routeExperimentId, routeProjectId]);
+
   useEffect(() => {
     setInspectorTarget(buildDefaultInspectorTarget(selection));
   }, [selection]);
+
+  // Preserve old shared links without keeping Workflow as a competing top-level
+  // workspace. Once its owner is available, replace `/workflows/:id` with the
+  // canonical experiment-scoped Workflow tab.
+  useEffect(() => {
+    if (selection?.objectType !== "workflow") return;
+    const workflow = snapshot.workflows.find((item) => item.id === selection.workflowId);
+    const experiment = workflow
+      ? snapshot.experiments.find((item) => item.id === workflow.experimentId)
+      : undefined;
+    if (!experiment) return;
+    setSelection({
+      objectType: "experiment",
+      objectId: experiment.id,
+      experimentView: "workflow",
+    });
+  }, [selection, setSelection, snapshot.experiments, snapshot.workflows]);
 
   if (error) {
     throw error;
@@ -82,14 +123,15 @@ const WorkspaceApp = ({ pathname }: { pathname: string }): JSX.Element => {
   // reads — runs view pulls from the runs poller; everything else reads from
   // the workspace snapshot.
   const handleActiveRefresh = useCallback((): void => {
-    if (activeView === "runs") {
+    if (activeView === "runs" || activeView === "dashboard") {
       runs.refresh();
       return;
     }
     refresh();
   }, [activeView, refresh, runs]);
 
-  const isRefreshing = activeView === "runs" ? runs.loading : status === "loading";
+  const isRefreshing =
+    activeView === "runs" || activeView === "dashboard" ? runs.loading : status === "loading";
 
   // Sync / mutation tips land only in the bottom status strip (heartbeat +
   // activity region). No floating "Syncing…" cards — aligned with MolVis.
@@ -134,7 +176,7 @@ const App = (): JSX.Element => {
     return <OAuthCallbackPage />;
   }
 
-  return (
+  const content = (
     <AuthProvider>
       {location.pathname === "/login" ? (
         <LoginPage />
@@ -145,6 +187,7 @@ const App = (): JSX.Element => {
       )}
     </AuthProvider>
   );
+  return <RouteProfiler id={location.pathname}>{content}</RouteProfiler>;
 };
 
 export default App;

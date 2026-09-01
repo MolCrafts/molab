@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { useState } from "react";
-import { workflowApi, workspaceApi } from "@/app/state/api";
+import { experimentsApi, workflowApi } from "@/api";
 import type { ProjectSummary } from "@/app/types";
 import {
   Dialog,
@@ -60,9 +60,9 @@ export function CreateWorkflowDialog({
     setError(null);
 
     try {
-      const experiment = await workspaceApi.createExperiment(projectId, {
+      const experiment = await experimentsApi.createExperiment(projectId, {
         name,
-        parameter_space: {},
+        parameterSpace: {},
       });
       await workflowApi.save(projectId, experiment.id, EMPTY_WORKFLOW_DOCUMENT);
 

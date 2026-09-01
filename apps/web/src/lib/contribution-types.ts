@@ -5,9 +5,9 @@ import type {
   PanelKind,
   RendererKey,
   RendererProps,
+  RendererSnapshot,
   Selection,
   SemanticObjectType,
-  WorkspaceSnapshot,
 } from "@/app/types";
 
 export type PanelSlot = "center" | "right";
@@ -28,7 +28,7 @@ export interface RenderTarget {
 export interface RendererResolutionContext {
   key: RendererKey;
   selection: Selection;
-  snapshot: WorkspaceSnapshot;
+  snapshot: RendererSnapshot;
   target: RenderTarget;
 }
 
@@ -64,6 +64,8 @@ export interface EntityTabContribution {
   objectType: SemanticObjectType;
   value: string;
   label: string;
+  /** Optional workbench glyph used by contextual plugin launchers. */
+  Icon?: React.ComponentType<React.SVGProps<SVGSVGElement>>;
   /** Owning UI plugin id — stamped at register time for enable/disable. */
   pluginId?: string;
   priority?: number;
@@ -71,7 +73,7 @@ export interface EntityTabContribution {
    * Optional gate (e.g. molq backend only). When omitted the tab is always
    * offered for ``objectType``.
    */
-  matches?: (context: { selection: Selection; snapshot: WorkspaceSnapshot }) => boolean;
+  matches?: (context: { selection: Selection; snapshot: RendererSnapshot }) => boolean;
   Component: React.ComponentType<RendererProps>;
 }
 
@@ -108,6 +110,8 @@ export interface FileTypeContribution {
   objectType: SemanticObjectType;
   value: string;
   label: string;
+  /** Optional workbench glyph used by contextual plugin launchers. */
+  Icon?: React.ComponentType<React.SVGProps<SVGSVGElement>>;
   /** Owning UI plugin id — stamped at register time for enable/disable. */
   pluginId?: string;
   priority?: number;

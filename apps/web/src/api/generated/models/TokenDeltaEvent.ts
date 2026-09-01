@@ -5,7 +5,7 @@
 /**
  * Emitted for one token-level text increment from the emergent loop.
  *
- * :class:`~molexp.agent.loops.interactive.InteractiveLoop` yields one
+ * :mod:`~molexp.agent.react` yields one
  * of these per assistant text delta so a CLI / SSE consumer can render
  * the reply as it streams. v1 keeps these in the accumulated
  * :attr:`~molexp.agent.loop.AgentRunResult.events` stream unfiltered.

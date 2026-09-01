@@ -1,11 +1,11 @@
-import { ArrowDown, ArrowRight, ArrowUp, FileText } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, FileText } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import { workspaceApi } from "@/app/state/api";
+import { assetsApi } from "@/api";
 import { useInspectedTask } from "@/app/state/inspectedTask";
 import { useNavigationState } from "@/app/state/useNavigationState";
-import type { ApiAssetResponse, RendererProps, TaskSelection } from "@/app/types";
+import type { ApiAssetResponse, ScopedRendererProps, TaskSelection } from "@/app/types";
 import { Code as InlineCode } from "@/components/ui/code";
-import { WorkbenchAction, WorkbenchTag } from "@/components/workbench";
+import { WorkbenchIconAction, WorkbenchTag } from "@/components/workbench";
 
 /**
  * TaskViewer — the right-inspector panel shown when a workflow-graph node is
@@ -39,7 +39,10 @@ const Section = ({
   </div>
 );
 
-export const TaskViewer = ({ selection, snapshot }: RendererProps): JSX.Element | null => {
+export const TaskViewer = ({
+  selection,
+  snapshot,
+}: ScopedRendererProps<"runs" | "workflows" | "experiments">): JSX.Element | null => {
   const { setSelection } = useNavigationState(snapshot);
   const { inspectTask, clearInspectedTask } = useInspectedTask();
   const [assets, setAssets] = useState<ApiAssetResponse[]>([]);
@@ -54,8 +57,8 @@ export const TaskViewer = ({ selection, snapshot }: RendererProps): JSX.Element 
       setAssets([]);
       return;
     }
-    workspaceApi
-      .getRunAssets(runId)
+    assetsApi
+      .listRunAssets(runId)
       .then((items) => {
         if (!cancelled) setAssets(items);
       })
@@ -91,17 +94,19 @@ export const TaskViewer = ({ selection, snapshot }: RendererProps): JSX.Element 
     ids.length === 0 ? (
       <span className="text-label text-muted-foreground">none</span>
     ) : (
-      <div className="flex flex-wrap gap-2">
+      <div className="min-w-0 divide-y divide-border/60">
         {ids.map((id) => (
-          <WorkbenchAction
-            kind="secondary"
-            size="compact"
-            key={id}
-            className="h-control-compact px-2 font-mono text-label"
-            onClick={() => inspectTask(id, runId)}
-          >
-            {id}
-          </WorkbenchAction>
+          <div key={id} className="flex min-w-0 items-center gap-2 py-1">
+            <span className="min-w-0 flex-1 truncate font-mono text-label text-foreground">
+              {id}
+            </span>
+            <WorkbenchIconAction
+              label={`Inspect task ${id}`}
+              onClick={() => inspectTask(id, runId)}
+            >
+              <ArrowRight className="size-3.5" />
+            </WorkbenchIconAction>
+          </div>
         ))}
       </div>
     );
@@ -126,14 +131,15 @@ export const TaskViewer = ({ selection, snapshot }: RendererProps): JSX.Element 
             [{node?.label ?? node?.type ?? "—"}]
           </p>
           {run && (
-            <WorkbenchAction
-              kind="link"
-              size="compact"
-              className="mt-1 h-auto p-0 text-label"
-              onClick={clearInspectedTask}
-            >
-              ← {run.name ?? run.id}
-            </WorkbenchAction>
+            <div className="mt-1 flex items-center gap-1 text-label text-muted-foreground">
+              <WorkbenchIconAction
+                label={`Back to ${run.name ?? run.id}`}
+                onClick={clearInspectedTask}
+              >
+                <ArrowLeft className="size-3.5" />
+              </WorkbenchIconAction>
+              <span className="truncate">{run.name ?? run.id}</span>
+            </div>
           )}
         </Section>
 
@@ -186,13 +192,9 @@ export const TaskViewer = ({ selection, snapshot }: RendererProps): JSX.Element 
           ) : (
             <div className="space-y-2">
               {products.map((asset) => (
-                <WorkbenchAction
-                  kind="ghost"
-                  size="content"
+                <div
                   key={asset.id}
-                  type="button"
-                  className="flex w-full items-start gap-2 rounded-control border border-border/70 bg-muted/20 p-2 text-left transition-colors hover:border-border hover:bg-muted/40"
-                  onClick={() => setSelection({ objectType: "asset", objectId: asset.id })}
+                  className="flex w-full items-start gap-2 border-b border-border/60 py-2"
                 >
                   <FileText className="mt-1 h-4 w-4 flex-none text-muted-foreground" />
                   <div className="min-w-0 flex-1">
@@ -203,8 +205,13 @@ export const TaskViewer = ({ selection, snapshot }: RendererProps): JSX.Element 
                       {asset.path}
                     </div>
                   </div>
-                  <ArrowRight className="mt-1 h-3.5 w-3.5 flex-none text-muted-foreground" />
-                </WorkbenchAction>
+                  <WorkbenchIconAction
+                    label={`Open asset ${asset.name}`}
+                    onClick={() => setSelection({ objectType: "asset", objectId: asset.id })}
+                  >
+                    <ArrowRight className="h-3.5 w-3.5" />
+                  </WorkbenchIconAction>
+                </div>
               ))}
             </div>
           )}

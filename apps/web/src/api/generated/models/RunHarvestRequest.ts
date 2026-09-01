@@ -11,7 +11,7 @@ export type RunHarvestRequest = {
      */
     createdBy?: string;
     /**
-     * Knowledge kind
+     * Knowledge class name
      */
     kind: RunHarvestRequest.kind;
     /**
@@ -29,7 +29,7 @@ export type RunHarvestRequest = {
 };
 export namespace RunHarvestRequest {
     /**
-     * Knowledge kind
+     * Knowledge class name
      */
     export enum kind {
         OBSERVATION = 'Observation',
@@ -41,6 +41,7 @@ export namespace RunHarvestRequest {
         PROTOCOL_NOTE = 'ProtocolNote',
         PARAMETER_RATIONALE = 'ParameterRationale',
         OPEN_QUESTION = 'OpenQuestion',
+        PLAN = 'Plan',
     }
 }
 

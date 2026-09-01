@@ -21,8 +21,8 @@ from typing import Any
 
 import pytest
 
-from molexp.workspace import Bundle, harvest_run
-from molexp.workspace.knowledge_item import KnowledgeItem
+from molexp.workspace import Bundle
+from molexp.workspace.knowledge import FailureAnalysis, Knowledge, Observation
 
 _NARRATIVE = "Mobility rises monotonically with temperature."
 
@@ -39,18 +39,18 @@ def _fail(run: Any, message: str) -> None:
         ctx.mark_failed(message)
 
 
-def _harvest(run: Any, **overrides: Any) -> KnowledgeItem:
+def _harvest(run: Any, **overrides: Any) -> Knowledge:
     kwargs: dict[str, Any] = {
-        "kind": "Observation",
+        "cls": Observation,
         "narrative": _NARRATIVE,
         "created_by": "roykid",
     }
     kwargs.update(overrides)
-    return harvest_run(run, **kwargs)
+    return run.harvest(**kwargs)
 
 
-def _knowledge_items(workspace: Any) -> list[KnowledgeItem]:
-    return [c for c in Bundle(workspace.root).walk() if isinstance(c, KnowledgeItem)]
+def _knowledge_items(workspace: Any) -> list[Knowledge]:
+    return [c for c in Bundle(workspace.root).walk() if isinstance(c, Knowledge)]
 
 
 class TestHarvestSucceededRun:
@@ -62,10 +62,10 @@ class TestHarvestSucceededRun:
 
         item = _harvest(run)
 
-        assert isinstance(item, KnowledgeItem)
+        assert isinstance(item, Observation)
         assert run.id in item.name  # default name is keyed on the run
         item_dir = Path(item.resolve()).resolve()
-        assert item_dir.parent == Path(experiment.experiment_dir).resolve()
+        assert item_dir.parent == Path(experiment.experiment_dir).resolve() / "knowledges"
 
     def test_meta_carries_kind_sources_and_created_by(self, experiment: Any) -> None:
         """The typed head: requested kind + run/experiment SourceRefs + author
@@ -73,9 +73,10 @@ class TestHarvestSucceededRun:
         run = experiment.add_run(params={"temperature": 350})
         _succeed(run)
 
-        meta = _harvest(run).read_knowledge_meta()
+        item = _harvest(run)
+        meta = item.metadata
 
-        assert meta.kind == "Observation"
+        assert type(item) is Observation
         pairs = {(s.kind, s.ref) for s in meta.sources}
         assert ("run", run.id) in pairs
         assert ("experiment", experiment.id) in pairs
@@ -183,7 +184,7 @@ class TestHarvestFailedRun:
 
         body = _harvest(
             run,
-            kind="FailureAnalysis",
+            cls=FailureAnalysis,
             narrative="Timestep too large for this thermostat.",
         ).body()
 

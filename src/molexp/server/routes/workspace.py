@@ -10,13 +10,11 @@ from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, Field
 
-from molexp._typing import JSONValue
 from molexp.services.auth import AuthError, AuthUser, get_auth_service, is_auth_enabled
 from molexp.workflow import Caching
-from molexp.workspace import ContextFocus, Workspace, assemble_workspace_context
-from molexp.workspace.events import WorkspaceEvent, WorkspaceEventType, read_workspace_events
+from molexp.workspace import ContextFocus, Workspace
 from molexp.workspace.fs_cached import CachedRemoteFileSystem, prefetch_workspace_indices
 from molexp.workspace.fs_local import LocalFileSystem
 
@@ -78,7 +76,7 @@ def get_cache_stats(workspace=Depends(get_workspace)) -> CacheStatsResponse:  # 
     cache = _workspace_cache(workspace)
     stats = cache.stats
     return CacheStatsResponse(
-        storeDir=str(workspace.cache.path()),
+        storeDir=str(workspace.cache.path),
         entryCount=entry_count if isinstance(entry_count := stats["entry_count"], int) else 0,
     )
 
@@ -89,61 +87,6 @@ def clear_cache(workspace=Depends(get_workspace)) -> CacheClearResponse:  # noqa
     cache = _workspace_cache(workspace)
     removed = cache.clear()
     return CacheClearResponse(removedCount=removed)
-
-
-# The activity stream mounts at the literal ``/api/events`` (no ``/workspace``
-# prefix) — same flat-router precedent as ``plans.flat_router``.
-events_router = APIRouter(tags=["workspace"])
-
-
-class WorkspaceEventResponse(BaseModel):
-    """One workspace-timeline event (read side of the event spine).
-
-    The ONE wire shape for spine reads — the per-run route
-    (``GET /runs/{run_id}/events``) aliases this model, so the two surfaces
-    can never drift (vision-loop-12).
-    """
-
-    model_config = ConfigDict(frozen=True)
-
-    id: str
-    seq: int
-    type: str
-    actor: str
-    created_at: datetime
-    payload: dict[str, JSONValue]
-    refs: list[str]
-
-    @classmethod
-    def from_event(cls, event: WorkspaceEvent) -> WorkspaceEventResponse:
-        """The one event→wire mapping (both routes call this — no drift)."""
-        return cls(
-            id=event.id,
-            seq=event.seq,
-            type=event.type,
-            actor=event.actor,
-            created_at=event.created_at,
-            payload=event.payload,
-            refs=event.refs,
-        )
-
-
-@events_router.get("/events", response_model=list[WorkspaceEventResponse])
-def get_workspace_events(
-    type: WorkspaceEventType | None = Query(default=None, description="Keep only this event type"),
-    ref: str | None = Query(default=None, description="Keep only events referencing this id"),
-    limit: int = Query(default=50, ge=1, le=500),
-    workspace: Workspace = Depends(get_workspace),
-) -> list[WorkspaceEventResponse]:
-    """The workspace-wide activity stream, newest first.
-
-    The global read over the event spine — the same shared
-    :func:`molexp.workspace.events.read_workspace_events` code path the
-    per-run route and ``molexp runs info`` use. A workspace with no timeline
-    yet answers ``[]`` without creating the DB (reading is side-effect free).
-    """
-    events = read_workspace_events(workspace.root, type=type, ref=ref, limit=limit)
-    return [WorkspaceEventResponse.from_event(e) for e in events]
 
 
 MAX_TEXT_BYTES = 2_000_000
@@ -221,7 +164,7 @@ def get_workspace_context(
     canonical *structure* and stays consistent with it.
     """
     focus = ContextFocus(project_id=project_id, experiment_id=experiment_id, run_id=run_id)
-    context = assemble_workspace_context(workspace, focus=focus)
+    context = workspace.context(focus=focus)
     return WorkspaceContextResponse.from_context(context)
 
 
@@ -235,7 +178,7 @@ def get_workspace_copilot(workspace=Depends(get_workspace)) -> WorkspaceSummaryR
     """
     from molexp.harness.copilot import summarize_workspace
 
-    summary = summarize_workspace(assemble_workspace_context(workspace))
+    summary = summarize_workspace(workspace.context())
     return WorkspaceSummaryResponse.from_summary(summary)
 
 
@@ -245,6 +188,7 @@ def list_workspace_runs(
     experiment_id: str | None = Query(default=None, alias="experimentId"),
     backend: str | None = Query(default=None, description="Filter by executor backend"),
     status: str | None = Query(default=None, description="Filter by run status"),
+    offset: int = Query(default=0, ge=0),
     limit: int = Query(default=500, ge=1, le=2000),
     workspace=Depends(get_workspace),  # noqa: ANN001
 ) -> WorkspaceRunsResponse:
@@ -277,14 +221,15 @@ def list_workspace_runs(
                 rows.append(row)
 
     rows.sort(key=lambda r: r.createdAt, reverse=True)
-    truncated = len(rows) > limit
-    if truncated:
-        rows = rows[:limit]
+    total = len(rows)
+    stats = compute_workspace_runs_stats(rows)
+    page = rows[offset : offset + limit]
+    truncated = offset + len(page) < total
 
     return WorkspaceRunsResponse(
-        runs=rows,
-        stats=compute_workspace_runs_stats(rows),
-        total=len(rows),
+        runs=page,
+        stats=stats,
+        total=total,
         truncated=truncated,
     )
 
@@ -905,7 +850,7 @@ class CurateResponse(BaseModel):
 
 
 async def _curate_reject_approver(request: ApprovalRequest) -> ApprovalDecision:
-    from datetime import UTC, datetime
+    from datetime import UTC
 
     from molexp.harness.schemas import ApprovalDecision
 
@@ -924,7 +869,7 @@ async def _curate_grant_approver(request: ApprovalRequest) -> ApprovalDecision:
     An explicit per-request decision by the HTTP caller — NOT a silent
     default — so ``decided_by`` names the caller, never "auto-approver".
     """
-    from datetime import UTC, datetime
+    from datetime import UTC
 
     from molexp.harness.schemas import ApprovalDecision
 

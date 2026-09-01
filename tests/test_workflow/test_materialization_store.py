@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from molexp.workflow import WorkflowCompiler, WorkflowRuntime
+from molexp.workflow import Workflow, WorkflowCompiler, WorkflowRuntime
 from molexp.workspace import Workspace
 
 
@@ -19,14 +19,14 @@ from molexp.workspace import Workspace
 async def test_json_return_is_not_auto_registered_as_artifact(tmp_path: Path) -> None:
     ws = Workspace(tmp_path / "lab")
     run = ws.add_project(name="p").add_experiment(name="e").add_run()
-    wf = WorkflowCompiler(name="plain")
+    wf = Workflow(name="plain")
 
     @wf.task
     async def produce() -> dict:
         return {"value": 42}
 
     with run.start() as ctx:
-        out = await WorkflowRuntime().execute(wf.compile(), run_context=ctx)
+        out = await WorkflowRuntime().execute(WorkflowCompiler().compile(wf), run_context=ctx)
 
     assert out.outputs["produce"] == {"value": 42}
     found = run.assets.query(producer_task="produce", kind="artifact")

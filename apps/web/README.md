@@ -10,20 +10,34 @@ Install once from the **repo root** (npm workspaces):
 npm install
 ```
 
+Daily UI against a real molexp API is **one command** from the repo root
+(after `uv pip install -e ".[dev]"`):
+
+```bash
+molexp serve --dev -ws ./lab --port 8000
+```
+
+Open the printed **Dev UI** (`:5173`), not the API port. Full three-path
+table (HMR / bundled preview / wheel):
+[Serve and rebuild the UI](../../docs/en/development/ui-serve.md).
+
 | Root script | Leaf (`cd apps/web`) | Backend | Notes |
 |-------------|----------------------|---------|--------|
-| `npm run dev:web` | `npm run dev` | **MSW mock** | Default frontend work; opens the seeded Protein Folding showcase |
-| `npm run dev:api` | `npm run dev:api` | Real API (`/api` proxy) | Needs `molexp serve` (or equivalent) on the API port; also what `molexp serve --dev` starts |
+| `molexp serve --dev` | (spawns leaf `dev:api`) | Real API | Daily checkout path |
+| `npm run dev:api` | `npm run dev:api` | Real API (`/api` proxy) | Same UI as `--dev`, API started separately |
+| `npm run dev:web` | `npm run dev` | **MSW mock** | Offline showcase; not a real molexp server |
 
 ```bash
 # Mock showcase (no Python server)
 npm run dev:web
 
-# Real backend (start the API separately, or use molexp serve --dev)
+# Real backend without molexp serve --dev (API already on :8000)
 npm run dev:api
 ```
 
-Build / check / preview (repo root):
+Build / check / preview (repo root). `npm run build:web` writes
+`src/molexp/dist/`; an editable install does **not** need `uv pip` again.
+`-C build-web=true` is the wheel path only (never `build:ui`).
 
 ```bash
 npm run build:web

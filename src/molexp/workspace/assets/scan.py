@@ -62,8 +62,15 @@ def _iter_scope_dirs(root: Path) -> Iterator[Path]:
             if not runs_dir.is_dir():
                 continue
             for run_dir in sorted(runs_dir.iterdir()):
-                if run_dir.is_dir():
-                    yield run_dir
+                if not run_dir.is_dir():
+                    continue
+                yield run_dir
+                execs = run_dir / "executions"
+                if not execs.is_dir():
+                    continue
+                for exec_dir in sorted(execs.iterdir()):
+                    if exec_dir.is_dir():
+                        yield exec_dir
 
 
 def _iter_scope_dirs_fs(fs: FileSystem, root: str) -> Iterator[str]:
@@ -90,8 +97,16 @@ def _iter_scope_dirs_fs(fs: FileSystem, root: str) -> Iterator[str]:
                 continue
             for run_name in sorted(fs.listdir(runs_dir)):
                 run_dir = fs.join(runs_dir, run_name)
-                if fs.is_dir(run_dir):
-                    yield run_dir
+                if not fs.is_dir(run_dir):
+                    continue
+                yield run_dir
+                execs = fs.join(run_dir, "executions")
+                if not fs.is_dir(execs):
+                    continue
+                for exec_name in sorted(fs.listdir(execs)):
+                    exec_dir = fs.join(execs, exec_name)
+                    if fs.is_dir(exec_dir):
+                        yield exec_dir
 
 
 def _load_data_assets(scope_dir: Path) -> Iterator[Asset]:

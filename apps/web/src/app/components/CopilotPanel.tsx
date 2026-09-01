@@ -105,7 +105,7 @@ export const CopilotPanel = ({ snapshot, refreshKey = 0 }: CopilotPanelProps): J
   const load = useCallback(() => {
     setLoading(true);
     setError(null);
-    WorkspaceService.getWorkspaceCopilotApiWorkspaceCopilotGet()
+    WorkspaceService.getWorkspaceCopilot()
       .then((res) => {
         setData(res);
         setLoading(false);

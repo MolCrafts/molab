@@ -61,7 +61,7 @@ flowchart TD
 
 ## 审批与恢复
 
-门禁写在 `run_dir/harness.sqlite`。共享 decide：
+门禁写在 `run_dir/events.jsonl + approvals.json`。共享 decide：
 `services.plan_runtime.decide_plan_review`。作用域：`approval_gate`（阶段 1）与
 `intervention_request`（阶段 2）。
 
@@ -71,7 +71,7 @@ flowchart TD
 runs/run-<id>/
 ├── plan/task_board.json
 ├── artifacts/
-└── harness.sqlite
+└── events.jsonl + approvals.json
 ```
 
 ## 入口

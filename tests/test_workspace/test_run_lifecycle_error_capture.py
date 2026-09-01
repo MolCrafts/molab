@@ -20,7 +20,8 @@ import json
 from pathlib import Path
 
 import molexp as me
-from molexp.workflow import WorkflowRuntime, promote_callable
+from molexp.workflow import WorkflowRuntime
+from molexp.workflow.promote import promote_callable
 
 
 def _boom(inputs, config):

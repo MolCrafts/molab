@@ -3,10 +3,10 @@
 ## Scientific data vs plugins (dependency DAG)
 
 **A molexp Run is not a MolRec record.** The Run is a workspace *host*
-(``run.json`` identity, ``ops/run.json`` hot lifecycle, ``artifacts/``,
-``source/``). Scientific packages are **MolRec** products landed under the
-run or written beside it. Do not treat ``ops`` / ``run.json`` as MolRec
-``status/`` / ``meta/``.
+(``run.json`` identity + hot state, run-root ``alive`` heartbeat, execution
+``artifacts/``, ``source/``). Scientific packages are **MolRec** products
+landed under the run or written beside it. Do not treat ``run.json`` as
+MolRec ``status/`` / ``meta/``.
 
 Latest molrec L4 (see molrec ``docs/spec/storage.md``):
 
@@ -15,16 +15,14 @@ molrec (protocol)  — never imported; products follow the spec by convention
                       ↓
               molexp / molvis / molplot  (the layers that obey and evolve it)
                       ↓
-              molexp Run (host: run.json / ops/run.json — not a Record)
+              molexp Run (host: run.json + alive — not a Record)
                       ↓
-   host metrics / plots (molrec L4 host layout; plugin activation by suffix):
-     *.mlp.jsonl       live WAL
-     *.mlp.zarr/       dense series SoT (Zarr V3)
-     *.mlp.index.json  host series cache only (never activates plugins)
+   host metrics / plots (plugin activation by suffix):
+     *.mlp.jsonl       live WAL under executions/<id>/artifacts/
      *.mlp.vl.json     Vega-Lite plot artifact
                       ↓
               UI plugins (filename match only — no protocol reimplementation):
-                molplot ← *.mlp.jsonl / *.mlp.zarr / *.mlp.vl.json
+                molplot ← *.mlp.jsonl / *.mlp.vl.json
                 molvis  ← classic trajectories; *.mrec/
                           (plugin hands a directory source; molvis opens the store)
                 molq    ← scheduler chrome only
@@ -39,23 +37,20 @@ molrec (protocol)  — never imported; products follow the spec by convention
 
 - **Core** Run UI lists products under **Outputs** and routes previews.
 - **Plugins** activate only when filenames match — never hard-wired as core tabs.
-- **Charts are molplot only** — training curves from densified ``*.mlp.zarr/``
-  (same layout as molexp ``ctx.metrics`` and molnex writers). There is no
+- **Charts are molplot only** — training curves from ``*.mlp.jsonl``
+  (same layout as molexp ``ctx.metrics``). There is no
   separate metrics product package.
-- Live append uses the **JSONL WAL** (``*.mlp.jsonl``); closed curves densify
-  into **Zarr arrays** under ``*.mlp.zarr/`` (never per-step Zarr chunk append).
-- ``*.mlp.index.json`` is a **host-derived series cache** (rebuildable listing
-  aid). It is not a Record section and does **not** activate plugins.
-- Builtin agent ``run_land`` tags MolRec roots via Zarr ``meta`` attributes
-  (``record_schema_version`` / ``format_name=mrec``) when present; training
-  writers own the WAL → densify path.
+- Live append uses the **JSONL WAL** (``*.mlp.jsonl``). Leftover zarr/index
+  files are ignored.
+- Builtin agent ``run_land`` tags MolRec roots via the Zarr ``meta``
+  attribute ``molrec_version`` (the record's sole version key) when present.
 
 ### Ingest foreign logs into the host metrics surface
 
 Scientific packages may leave **LAMMPS logs**, **TensorBoard event dirs**, or
 **CSV** tables beside a run. :mod:`molexp.plugins.metrics_ingest` classifies
 them by content and **normalizes** into the run-local metrics surface
-(JSONL WAL → densify to ``metrics.mlp.zarr/`` + rebuildable ``metrics.mlp.index.json``).
+(JSONL WAL at ``executions/<id>/artifacts/*.mlp.jsonl``).
 Source files are never deleted or rewritten. A molexp Run remains a **host** —
 ingest does not write MolRec ``meta`` / ``status``.
 

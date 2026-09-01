@@ -115,8 +115,8 @@ def validate(
 
     rprint(f"[bold]Workspace:[/bold] {target}")
 
-    # Rule ids are printed bare: rich would eat a bracketed ``[run.ops]`` as
-    # console markup and silently drop it.
+    # Rule ids are printed bare: rich would eat a bracketed ``[layout.stray]``
+    # as console markup and silently drop it.
     for v in report.errors:
         rprint(f"  [red]error[/red]   {v.rule} — {v.path}: {v.detail}")
         if v.hint:

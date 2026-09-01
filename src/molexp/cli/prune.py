@@ -233,7 +233,8 @@ def prune_runs(
         raise typer.Exit(0)
 
     # Two-phase core: plan (where the live-record refusal lives) → confirm → apply.
-    from molexp.workspace import LivePruneRefusedError, apply_execution_prune, plan_execution_prune
+    from molexp.workspace import LivePruneRefusedError
+    from molexp.workspace.prune import apply_execution_prune, plan_execution_prune
 
     history = run.execution_history
     selected_ids = [history[i].execution_id for i in indices]

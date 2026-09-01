@@ -157,8 +157,6 @@ describe("molq entity tab gate", () => {
         assets: [],
         workflows: [],
         agentSessions: [],
-        workspaceRoot: null,
-        consoleEntries: [],
       },
     });
     expect(molqTabs.map((t) => t.value)).toEqual(["molq"]);
@@ -174,8 +172,6 @@ describe("molq entity tab gate", () => {
         assets: [],
         workflows: [],
         agentSessions: [],
-        workspaceRoot: null,
-        consoleEntries: [],
       },
     });
     expect(localTabs.map((t) => t.value)).toEqual([]);

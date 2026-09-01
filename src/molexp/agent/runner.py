@@ -252,7 +252,7 @@ class AgentRunner:
                 sess_folder = agent_folder.get_session(session_id)
             else:
                 sess_folder = agent_folder.add_session(session_id)
-            return Path(str(sess_folder.path()))
+            return Path(sess_folder.path)
         except OSError as exc:  # pragma: no cover
             _LOG.warning(
                 f"[runner] session({session_id!r}): could not open on-disk "

@@ -40,10 +40,10 @@ async function enableMocking() {
   return start();
 }
 
-enableMocking().then(() => {
+enableMocking().then(async () => {
   // Service worker (in dev:mock mode) is now in control of the page —
   // safe to fire plugin discovery without racing MSW activation.
-  bootPlugins();
+  await bootPlugins();
 
   const root = ReactDOM.createRoot(rootElement);
   // No <React.StrictMode>: its dev-only double-mount re-initializes

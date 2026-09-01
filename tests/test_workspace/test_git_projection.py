@@ -124,7 +124,9 @@ class TestGitProjection:
         parts = {part for path in paths if path for part in path.split("/")}
         assert "alive" not in parts
         assert "cache" not in parts
-        assert "executions" not in parts
+        assert "work" not in parts
+        assert "jobs" not in parts
+        assert "logs" not in parts
         # The run ENTITY file is projected (identity + hot state); alive is not.
         assert any(p.endswith("run.json") for p in paths)
         # No plural children-index at a parent level (projects/experiments/runs.json).
@@ -166,13 +168,15 @@ class TestGitProjection:
         db = await ensure_object_db(tmp_path / "odb")
         res = await GitProjection(ws, db, blob_threshold_bytes=64).project()
         tree = res.run(run.id).tree
+        exec_id = run.execution_history[-1].execution_id
+        art = f"executions/{exec_id}/artifacts"
 
         # Small artifact: the blob holds the real bytes.
-        small = _git(db.path, "cat-file", "-p", f"{tree.hex}:artifacts/metrics.json")
+        small = _git(db.path, "cat-file", "-p", f"{tree.hex}:{art}/metrics.json")
         assert "loss" in small
 
         # Large artifact: the entry is a pointer (hash + size), not the bytes.
-        pointer = _git(db.path, "cat-file", "-p", f"{tree.hex}:artifacts/traj.bin")
+        pointer = _git(db.path, "cat-file", "-p", f"{tree.hex}:{art}/traj.bin")
         assert pointer.startswith(ARTIFACT_POINTER_MARKER)
         assert "sha256:" in pointer
         assert str(len(big)) in pointer

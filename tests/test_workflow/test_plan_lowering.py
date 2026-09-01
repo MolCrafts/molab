@@ -24,7 +24,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from molexp.workflow import TaskContext, WorkflowCompiler
+from molexp.workflow import TaskContext, Workflow, WorkflowCompiler
 from molexp.workflow._engine.plan import START, ExecutionPlan
 from molexp.workflow.types import BranchEdges, Next
 
@@ -58,7 +58,7 @@ class TestExecutionPlan:
     """The lowered ``ExecutionPlan`` structure carried by ``compiled.graph``."""
 
     def test_compiled_graph_is_execution_plan(self) -> None:
-        wf = WorkflowCompiler(name="g")
+        wf = Workflow(name="g")
 
         @wf.task
         async def a(ctx: TaskContext) -> int:
@@ -68,7 +68,7 @@ class TestExecutionPlan:
         async def b(value: int) -> int:
             return value + 1
 
-        compiled = wf.compile()
+        compiled = WorkflowCompiler().compile(wf)
         assert isinstance(compiled.graph, ExecutionPlan)
         assert set(compiled.graph.task_names) == {"a", "b"}
         # The entry frontier is the data-zero task; b is triggered by a.
@@ -77,7 +77,7 @@ class TestExecutionPlan:
         assert compiled.graph.in_sources["b"] == frozenset({"a"})
 
     def test_parallel_lowering_carries_fanout_maps(self) -> None:
-        wf = WorkflowCompiler(name="par", entry="seed")
+        wf = Workflow(name="par", entry="seed")
 
         @wf.task
         async def seed(ctx: TaskContext) -> list[int]:
@@ -92,7 +92,7 @@ class TestExecutionPlan:
             return sum(results)
 
         wf.parallel(map_over="seed", body="body", join="gather", max_concurrency=2)
-        plan = wf.compile().graph
+        plan = WorkflowCompiler().compile(wf).graph
 
         assert plan.parallel_by_map_over["seed"].body == "body"
         assert plan.parallel_by_body["body"].join == "gather"
@@ -100,7 +100,7 @@ class TestExecutionPlan:
         assert "body" in plan.in_sources["gather"]
 
     def test_branch_lowering_carries_routes(self) -> None:
-        wf = WorkflowCompiler(name="br", entry="route")
+        wf = Workflow(name="br", entry="route")
 
         @wf.task(routes={"a": "leg_a", "b": "leg_b"})
         async def route(ctx: TaskContext) -> Next:
@@ -114,7 +114,7 @@ class TestExecutionPlan:
         async def leg_b(ctx: TaskContext) -> str:
             return "b"
 
-        plan = wf.compile().graph
+        plan = WorkflowCompiler().compile(wf).graph
         edge_set = plan.out_edges["route"]
         assert isinstance(edge_set, BranchEdges)
         assert edge_set.routes == {"a": "leg_a", "b": "leg_b"}
@@ -122,7 +122,7 @@ class TestExecutionPlan:
         assert "route" not in plan.recurrent
 
     def test_loop_lowering_marks_back_edge_and_recurrence(self) -> None:
-        wf = WorkflowCompiler(name="loop", entry="step")
+        wf = Workflow(name="loop", entry="step")
 
         @wf.task
         async def step(ctx: TaskContext) -> int:
@@ -133,7 +133,7 @@ class TestExecutionPlan:
             return Next("exit")
 
         wf.loop(body=["step"], until="check", max_iters=3)
-        plan = wf.compile().graph
+        plan = WorkflowCompiler().compile(wf).graph
 
         assert ("check", "step") in plan.back_edges
         # Both cycle members are recurrent — a later iteration may re-fire them.

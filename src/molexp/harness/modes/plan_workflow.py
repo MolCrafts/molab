@@ -28,7 +28,7 @@ from molexp.harness.stages.review_pack_builders import build_experiment_plan_rev
 from molexp.harness.stages.step_audit_loop import StepAuditLoop
 from molexp.harness.store.file_artifact_store import FileArtifactStore
 from molexp.harness.validators import PlanFormValidator
-from molexp.workflow import Next, WorkflowCompiler
+from molexp.workflow import Next, Workflow, WorkflowCompiler
 from molexp.workflow.compiled import CompiledWorkflow
 
 if TYPE_CHECKING:
@@ -108,7 +108,7 @@ class PlanBag:
 
 def compile_plan_workflow(bag: PlanBag) -> CompiledWorkflow:
     """Compile the plan graph: assemble → (draft ⟲ form) → probe → persist → render."""
-    wf = WorkflowCompiler(name="plan", entry="assemble_knowledge")
+    wf = Workflow(name="plan", entry="assemble_knowledge")
 
     @wf.task
     async def assemble_knowledge() -> str:
@@ -259,7 +259,7 @@ def compile_plan_workflow(bag: PlanBag) -> CompiledWorkflow:
     wf.loop(
         body=["draft_board"], until="form_check", max_iters=bag.board_max_iters, on_exit="probe"
     )
-    return wf.compile()
+    return WorkflowCompiler().compile(wf)
 
 
 async def _draft_via_agent_call(bag: PlanBag) -> str:

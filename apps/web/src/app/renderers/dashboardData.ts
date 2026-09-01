@@ -2,25 +2,9 @@
 // donut, the status roll-up, and duration formatting in one place so the
 // Experiment / Run / Project overviews report identical numbers and colours.
 
-import type { DonutSegment, StatTone } from "@/app/components/entity";
+import type { DonutSegment } from "@/app/components/entity";
 import { groupForStatus, STATUS_GROUPS } from "@/app/runs/statusGroups";
 import type { RunSummary } from "@/app/types";
-
-/** Map a raw status string to a dashboard tone (for StatCards, dots, etc.). */
-export const statusTone = (status: string): StatTone => {
-  switch (groupForStatus(status)) {
-    case "succeeded":
-      return "success";
-    case "failed":
-      return "error";
-    case "running":
-      return "running";
-    case "pending":
-      return "warning";
-    default:
-      return "neutral";
-  }
-};
 
 export interface RunStatusCounts {
   total: number;

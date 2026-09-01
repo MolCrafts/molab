@@ -50,7 +50,7 @@ export class CatalogService {
      * @returns CatalogByPathResponse Successful Response
      * @throws ApiError
      */
-    public static catalogByPath1(
+    public static catalogByPathWs(
         ws: string,
         path: string,
         molexpSession?: (string | null),

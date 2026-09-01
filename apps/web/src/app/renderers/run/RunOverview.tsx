@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/table";
 import { formatDateTime } from "@/lib/datetime";
 // Module-path import (not the barrel) — see KnowledgeBacklinksCard loader note.
-import { KnowledgeBacklinksCard } from "@/plugins/knowledge";
+import { KnowledgeBacklinksCard } from "@/plugins/knowledge/KnowledgeBacklinksCard";
 
 interface RunOverviewProps {
   run: RunSummary;

@@ -51,8 +51,6 @@ class DataAssetLibrary:
         self,
         scope_dir: str | PathLike[str],
         scope: AssetScope,
-        *,
-        event_root: Path | None = None,
     ) -> None:
         # Coerce to pathlib.Path — DataAssetLibrary does genuine local I/O
         # (shutil.copy2, os.link, symlink_to); callers can pass molexp.Path
@@ -60,17 +58,6 @@ class DataAssetLibrary:
         self.scope_dir = Path(scope_dir)
         self.scope = scope
         self.root = self.scope_dir / "assets"
-        # Workspace root for the event spine; None (the default) keeps the
-        # library emit-free (vision-loop-12 — the owning Folder passes it).
-        self._event_root = event_root
-
-    def _emit_added(self, asset: DataAsset) -> None:
-        """Best-effort ``asset.added`` on the spine (non-fatal by contract)."""
-        if self._event_root is None:
-            return
-        from ._events import emit_asset_added
-
-        emit_asset_added(self._event_root, asset, name=asset.name)
 
     def import_asset(
         self,
@@ -127,7 +114,6 @@ class DataAssetLibrary:
             asset_dir.mkdir(parents=True, exist_ok=True)
             with open(asset_dir / "asset.json", "w") as f:  # noqa: PTH123
                 json.dump(asset.model_dump(mode="json"), f, indent=2)
-            self._emit_added(asset)
             return asset
 
         payload_dir = asset_dir / "payload"
@@ -156,7 +142,6 @@ class DataAssetLibrary:
         with open(asset_dir / "asset.json", "w") as f:  # noqa: PTH123
             json.dump(asset.model_dump(mode="json"), f, indent=2)
 
-        self._emit_added(asset)
         return asset
 
     def register_in_place(
@@ -218,8 +203,6 @@ class DataAssetLibrary:
         asset_dir.mkdir(parents=True, exist_ok=True)
         with open(asset_dir / "asset.json", "w") as f:  # noqa: PTH123
             json.dump(asset.model_dump(mode="json"), f, indent=2)
-
-        self._emit_added(asset)
 
         return asset
 

@@ -1,10 +1,3 @@
-import { registerFileTypeContribution } from "@/app/registry";
-import { RunMetricsTab } from "@/plugins/molplot/RunMetricsTab";
-import { resolveMolplotMetricsTabBadgeCount } from "@/plugins/molplot/tab-badge-count";
-import type { UiPluginModule } from "@/plugins/types";
-import { MolplotObservablesTab } from "./MolplotObservablesTab";
-import { isMlpMetricsSurface } from "./mlp-surface";
-
 export type { LineChartConfig, LineSeriesConfig, VegaLiteSpec } from "@molcrafts/molplot";
 export { MolplotBarChart } from "./MolplotBarChart";
 export { MolplotGanttChart } from "./MolplotGanttChart";
@@ -20,50 +13,9 @@ export { filterSpikes, smoothEma } from "./smoothing";
  *
  * Contract (see molexp.workspace.mlp_names):
  * - ``*.mlp.jsonl`` — live metrics WAL → Metrics tab
- * - ``*.mlp.zarr`` / ``<stem>.mlp.zarr/zarr.json`` — dense Zarr SoT → Metrics tab
- *   (nested arrays inside the store are not surfaces)
+ * - leftover ``*.mlp.zarr`` is not a metrics surface
  * - ``*.mlp.vl.json`` — Vega-Lite plot artifact → MolPlot tab
- * - ``*.mlp.index.json`` is a host cache only — never matched
+ * - ``*.mlp.index.json`` is a leftover host cache — never matched
  */
 
-const isMlpPlotSurface = (file: { name: string; relPath: string }): boolean => {
-  const path = `${file.relPath}`.toLowerCase().replace(/\\/g, "/");
-  const name = file.name.toLowerCase();
-  return name.endsWith(".mlp.vl.json") || path.endsWith(".mlp.vl.json");
-};
-
-const molplotPlugin: UiPluginModule = {
-  id: "molplot",
-  name: "MolPlot",
-  description: "Metrics and plot tabs when a run has *.mlp.jsonl / *.mlp.zarr / *.mlp.vl.json.",
-  userToggleable: true,
-  register: () => {
-    registerFileTypeContribution({
-      id: "molplot:run-metrics",
-      objectType: "run",
-      value: "metrics",
-      label: "Metrics",
-      priority: 40,
-      matcher: {
-        patterns: ["**/*.mlp.jsonl", "**/*.mlp.zarr", "**/*.mlp.zarr/zarr.json"],
-        matches: isMlpMetricsSurface,
-      },
-      resolveTabBadgeCount: resolveMolplotMetricsTabBadgeCount,
-      Component: RunMetricsTab,
-    });
-    registerFileTypeContribution({
-      id: "molplot:run-tab",
-      objectType: "run",
-      value: "plots",
-      label: "MolPlot",
-      priority: 45,
-      matcher: {
-        patterns: ["**/*.mlp.vl.json", "*.mlp.vl.json"],
-        matches: isMlpPlotSurface,
-      },
-      Component: MolplotObservablesTab,
-    });
-  },
-};
-
-export default molplotPlugin;
+export { default } from "./plugin";

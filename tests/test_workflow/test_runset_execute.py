@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 
 import molexp as me
-from molexp.workflow import WorkflowCompiler
+from molexp.workflow import Workflow
 from molexp.workspace.models import RunStatus
 from molexp.workspace.runset import RunSet
 
@@ -24,8 +24,8 @@ def experiment(tmp_path: Path):
     return ws.add_project("demo").add_experiment("scan")
 
 
-def _build_wf(calls: list | None = None) -> WorkflowCompiler:
-    wf = WorkflowCompiler(name="scan")
+def _build_wf(calls: list | None = None) -> Workflow:
+    wf = Workflow(name="scan")
 
     @wf.task
     def simulate(lr: float, batch: int) -> float:

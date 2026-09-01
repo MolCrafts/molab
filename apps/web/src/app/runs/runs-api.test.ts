@@ -1,7 +1,7 @@
 /**
  * Tests for the workspace runs API client. Filtering moved entirely to the
  * client layer (see aggregates.ts), so the API now only knows about a
- * pagination limit; this suite verifies URL composition and error format.
+ * pagination window; this suite verifies URL composition and error format.
  */
 
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
@@ -38,6 +38,15 @@ describe("workspaceRunsApi.listRuns", () => {
 
     const url = (fetchSpy.mock.calls[0]?.[0] as string) ?? "";
     expect(url).toBe("/api/workspace/runs?limit=500");
+  });
+
+  it("encodes an offset and limit for server pagination", async () => {
+    const fetchSpy = rs.spyOn(globalThis, "fetch").mockResolvedValue(emptyResponse());
+
+    await workspaceRunsApi.listRuns({ offset: 100, limit: 50 });
+
+    const url = (fetchSpy.mock.calls[0]?.[0] as string) ?? "";
+    expect(url).toBe("/api/workspace/runs?offset=100&limit=50");
   });
 
   it("throws a descriptive error on non-OK response", async () => {

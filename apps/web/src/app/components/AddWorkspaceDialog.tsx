@@ -4,11 +4,10 @@
  */
 import { Loader2 } from "lucide-react";
 import { type JSX, useCallback, useEffect, useId, useState } from "react";
-import { workspaceApi } from "@/app/state/api";
+import { workspacesApi } from "@/api";
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-
 export interface AddWorkspaceDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -67,13 +66,13 @@ export const AddWorkspaceDialog = ({
       const kind = detectKind(raw);
       if (kind === "remote") {
         if (raw.startsWith("@")) {
-          await workspaceApi.addServedWorkspace({
+          await workspacesApi.addWorkspace({
             kind: "remote",
             name: raw.slice(1),
             activate: true,
           });
         } else {
-          await workspaceApi.addServedWorkspace({
+          await workspacesApi.addWorkspace({
             kind: "remote",
             path: raw,
             activate: true,
@@ -81,7 +80,7 @@ export const AddWorkspaceDialog = ({
         }
       } else {
         try {
-          await workspaceApi.addServedWorkspace({
+          await workspacesApi.addWorkspace({
             kind: "local",
             path: raw,
             createIfMissing: false,
@@ -91,7 +90,7 @@ export const AddWorkspaceDialog = ({
           const msg = first instanceof Error ? first.message : String(first);
           if (msg.toLowerCase().includes("not found")) {
             // Offer create on second submit only when path missing — mirror Open Workspace.
-            await workspaceApi.addServedWorkspace({
+            await workspacesApi.addWorkspace({
               kind: "local",
               path: raw,
               createIfMissing: true,

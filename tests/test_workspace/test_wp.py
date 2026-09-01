@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from molexp.workspace import Workspace, mv, validate_workspace
+from molexp.workspace import Workspace
 
 
 def _ws(tmp_path: Path) -> Workspace:
@@ -23,7 +23,7 @@ class TestWorkspacePaths:
         stray.mkdir()
         (stray / "traj.pt").write_bytes(b"x")
 
-        report = validate_workspace(root)
+        report = ws.validate()
         assert "layout.stray" in {v.rule for v in report.errors}
 
         ws.wp.mkdir("projects/demo/assets")
@@ -33,7 +33,7 @@ class TestWorkspacePaths:
         assert Path(dest).is_dir()
         assert (Path(dest) / "traj.pt").is_file()
         # Stray at root is gone — layout.stray for that path clears.
-        again = validate_workspace(root)
+        again = ws.validate()
         assert "leftover-run-output" not in {
             v.path for v in again.errors if v.rule == "layout.stray"
         }
@@ -80,5 +80,5 @@ class TestWorkspacePaths:
     def test_module_level_mv_alias(self, tmp_path: Path) -> None:
         ws = _ws(tmp_path)
         (Path(ws.resolve()) / "x").write_text("y")
-        mv(ws, "x", "z")
+        ws.wp.mv("x", "z")
         assert (Path(ws.resolve()) / "z").read_text() == "y"

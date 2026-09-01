@@ -89,7 +89,7 @@ class ExperimentCreateRequest(ApiModel):
         description="Compute target name new runs should default to (must exist)",
     )
 
-    model_config = {"populate_by_name": True}
+    model_config = ConfigDict(populate_by_name=True)
 
 
 # ── Run ─────────────────────────────────────────────────────────────────────
@@ -106,7 +106,7 @@ class RunCreateRequest(ApiModel):
         description="Compute target name (must exist in workspace registry)",
     )
 
-    model_config = {"populate_by_name": True}
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class RunHarvestRequest(ApiModel):
@@ -122,7 +122,8 @@ class RunHarvestRequest(ApiModel):
         "ProtocolNote",
         "ParameterRationale",
         "OpenQuestion",
-    ] = Field(..., description="Knowledge kind")
+        "Plan",
+    ] = Field(..., description="Knowledge class name")
     narrative: str = Field(..., description="Non-empty interpretation")
     created_by: str = Field(default="ui", description="Author string")
     name: str | None = Field(default=None, description="Optional KnowledgeItem name")
@@ -171,7 +172,7 @@ class RunStartRequest(ApiModel):
         ),
     )
 
-    model_config = {"populate_by_name": True}
+    model_config = ConfigDict(populate_by_name=True)
 
 
 class RunStatusUpdateRequest(ApiModel):

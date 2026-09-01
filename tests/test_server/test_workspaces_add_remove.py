@@ -114,7 +114,7 @@ class TestWorkspacesAddRemove:
         )
         assert resp.status_code == 200, resp.text
         assert new_path.is_dir()
-        assert (new_path / "workspace.json").exists() or (new_path / "meta.json").exists()
+        assert (new_path / "workspace.json").exists()
 
     def test_remove_folder_switches_active(self, client):
         c, _root_a, tmp_path = client

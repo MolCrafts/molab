@@ -18,9 +18,10 @@ import {
   Table,
 } from "lucide-react";
 import { type ComponentType, type JSX, type ReactNode, useState } from "react";
+import type { EmbedTargetKind } from "@/api";
+import { knowledgeApi } from "@/api";
 import type { EmbedResponse } from "@/api/generated/models/EmbedResponse";
-import { type EmbedTargetKind, workspaceApi } from "@/app/state/api";
-import type { WorkspaceSnapshot } from "@/app/types";
+import type { RendererSnapshot } from "@/app/types";
 import {
   Command,
   CommandEmpty,
@@ -55,7 +56,9 @@ interface EmbedGroup {
   items: Array<{ id: string; label: string }>;
 }
 
-const buildEmbedGroups = (snapshot: WorkspaceSnapshot): EmbedGroup[] =>
+const buildEmbedGroups = (
+  snapshot: Pick<RendererSnapshot, "experiments" | "runs" | "assets">,
+): EmbedGroup[] =>
   [
     {
       kind: "experiment" as const,
@@ -81,7 +84,7 @@ interface SlashMenuProps {
   /** The source note's bundle-relative path (embed edge origin). */
   notePath: string;
   /** Workspace entities that can be embedded. */
-  snapshot: WorkspaceSnapshot;
+  snapshot: Pick<RendererSnapshot, "experiments" | "runs" | "assets">;
   /** Called with the markdown snippet to drop at the cursor for a block insert. */
   onInsert: (markdown: string) => void;
   /** Called after an embed edge is written, so the host can refetch the cards. */
@@ -93,7 +96,7 @@ interface SlashMenuProps {
 /**
  * The Notion-style "/" menu — a popover command palette listing block inserts
  * (driven by the pure `slashCommands` map) plus an "Embed entity" action that
- * writes one typed provenance edge through `workspaceApi.embedEntity`.
+ * writes one typed provenance edge through `knowledgeApi.embedEntity`.
  *
  * The interactive wiring (Milkdown keybinding, cursor insertion) is
  * UI-verification only; the binding unit is `slashCommands`. Blocks insert
@@ -132,7 +135,7 @@ export const SlashMenu = ({
     setEmbedding(true);
     setError(null);
     try {
-      const response = await workspaceApi.embedEntity(notePath, { targetKind, target });
+      const response = await knowledgeApi.embedEntity(notePath, { targetKind, target });
       onEmbedded?.(response);
       handleOpenChange(false);
     } catch (err) {

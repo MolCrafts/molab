@@ -110,7 +110,7 @@ Experiments also own `exp.assets`, the experiment-scoped asset view, and `exp.ex
 Creating an experiment does not automatically attach executable workflow code. The sanctioned way to pair the two is `Experiment.run(workflow, params=...)`:
 
 ```python
-from molexp.workflow import Task, TaskContext, WorkflowCompiler
+from molexp.workflow import Task, TaskContext, Workflow, WorkflowCompiler
 
 
 class TrainTask(Task):
@@ -118,14 +118,14 @@ class TrainTask(Task):
         return lr
 
 
-compiled = WorkflowCompiler(name="train").add(TrainTask()).compile()
+compiled = WorkflowCompiler().compile(Workflow(name="train").add(TrainTask()))
 
 exp = ws.project("demo").experiment("baseline").run(compiled, params={"lr": [1e-3, 1e-4]})
 ```
 
 `params` is the per-run sweep — a plain `{axis: [values]}` grid (expanded as a Cartesian product) or any `ParamSpace`. The call materializes one content-addressed `Run` per cell (idempotent: re-declaring the same sweep adds no duplicates), binds the compiled workflow to the experiment in `molexp.workflow.default_binding_registry` (an explicit, injectable `{experiment_id → CompiledWorkflow}` store that replaced the old class-level registry), records the workflow's graph IR on the experiment for the server/UI, and registers the workspace for CLI discovery. Read the binding back with `default_binding_registry.for_experiment(experiment)` from anywhere in the same process. Re-declaring replaces the earlier binding; the registry is process-local, so cluster workers re-establish it by re-importing the user script.
 
-The expected input is a `CompiledWorkflow` (the product of `WorkflowCompiler(...).compile()`). For a bare callable on the pure `fn(inputs, config)` contract, `molexp.workflow.promote_callable(fn, name=...)` wraps it into a single-task `CompiledWorkflow` that works in `Experiment.run` too: a module-level (importable) function is serialized into the experiment's graph IR as a `module:qualname` entrypoint ref and resolved back via importlib at execution time. Non-importable callables (lambdas, closures, functions defined in `__main__` / a REPL) cannot be serialized for tracked execution — `Experiment.run` raises a clear error for those; execute them in-memory through `WorkflowRuntime().execute(...)` instead.
+The expected input is a `CompiledWorkflow` (the product of `WorkflowCompiler().compile(workflow)`). For a bare callable on the pure `fn(inputs, config)` contract, `molexp.workflow.promote_callable(fn, name=...)` wraps it into a single-task `CompiledWorkflow` that works in `Experiment.run` too: a module-level (importable) function is serialized into the experiment's graph IR as a `module:qualname` entrypoint ref and resolved back via importlib at execution time. Non-importable callables (lambdas, closures, functions defined in `__main__` / a REPL) cannot be serialized for tracked execution — `Experiment.run` raises a clear error for those; execute them in-memory through `WorkflowRuntime().execute(...)` instead.
 
 Replica handling also lives on the experiment. `exp.n_replicas` and `exp.seeds` describe the declared policy, while `exp.get_seeds()` returns the effective seed list. If no explicit seeds were stored, Molexp expands a deterministic default seed sequence and truncates it to the requested replica count.
 
@@ -147,7 +147,7 @@ The CLI uses the content-addressing mechanism to achieve repeatable runs. `molex
 
 Each `Run` stores its data in `<experiment>/runs/run-<run_id>/`. The most important fields live on `run.metadata`, a `RunMetadata` model. Direct convenience properties such as `run.id`, `run.parameters`, `run.status`, and `run.run_dir` simply expose the corresponding metadata fields in a more ergonomic form, and `run.get_result(key)` reads back a result value persisted by `RunContext.set_result` — falling back, when no driver-side result exists, to the completed workflow node of that name in the run's most recent execution (so results of CLI-executed runs are readable through the same accessor).
 
-One logical run may be executed more than once. Molexp does not flatten those attempts; instead it appends `ExecutionRecord` entries to `run.execution_history`, with per-attempt state under `executions/<exec_id>/`. (Hot operational state — status, ownership, heartbeat, the execution records — lives in the run's `ops/run.json` sidecar, not in the `run.json` entity file; `run.status` and `run.execution_history` read from it transparently.)
+One logical run may be executed more than once. Molexp does not flatten those attempts; instead it appends `ExecutionRecord` entries to `run.execution_history`, with per-attempt state under `executions/<exec_id>/`. (Hot operational state — status, ownership, heartbeat, the execution records — lives in the run's `run.json (hot state) + alive` sidecar, not in the `run.json` entity file; `run.status` and `run.execution_history` read from it transparently.)
 
 If a run should be marked dead without completing normally, `run.cancel()` transitions it to `cancelled` and writes the terminal timestamp.
 
@@ -221,16 +221,16 @@ When workflows are launched from the CLI, the fluent chain is the registration p
 
 ```python
 import molexp as me
-from molexp.workflow import WorkflowCompiler
+from molexp.workflow import Workflow, WorkflowCompiler
 
-wf = WorkflowCompiler(name="train")
+wf = Workflow(name="train")
 # ... @wf.task definitions ...
 
 (
     me.Workspace("./lab", name="lab")
     .project("demo")
     .experiment("baseline")
-    .run(wf.compile(), params={"lr": [1e-3]})
+    .run(WorkflowCompiler().compile(wf), params={"lr": [1e-3]})
 )
 ```
 
@@ -242,9 +242,9 @@ The following example shows the full path from workflow definition to persistent
 
 ```python
 import molexp as me
-from molexp.workflow import TaskContext, WorkflowCompiler, WorkflowRuntime
+from molexp.workflow import TaskContext, Workflow, WorkflowCompiler, WorkflowRuntime
 
-wf = WorkflowCompiler(name="demo")
+wf = Workflow(name="demo")
 
 
 @wf.task
@@ -254,7 +254,7 @@ async def compute(ctx: TaskContext, lr: float, scale: float = 1.0) -> float:
     return lr * scale
 
 
-compiled = wf.compile()
+compiled = WorkflowCompiler().compile(wf)
 
 ws = me.Workspace("./lab", name="lab")
 exp = ws.project("walkthrough").experiment("baseline").run(compiled, params={"lr": [1e-3]})

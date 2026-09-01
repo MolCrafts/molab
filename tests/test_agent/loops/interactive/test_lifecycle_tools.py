@@ -31,7 +31,7 @@ class TestLifecycleTools:
         run = experiment.add_run(params={})
         assert run.status == "pending"
 
-        tools = {t.__name__: t for t in lifecycle_tools(workspace_root=ws.path())}
+        tools = {t.__name__: t for t in lifecycle_tools(workspace_root=ws.path)}
         result = tools["harvest_run"](
             project.id,
             experiment.id,

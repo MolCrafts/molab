@@ -6,7 +6,7 @@ from shutil import rmtree
 
 from fastapi import APIRouter, Depends
 
-from molexp.workspace.metrics import read_run_metrics
+from molexp.plugins.metrics import read_run_metrics
 
 from ..dependencies import get_workspace
 from ..schemas import (

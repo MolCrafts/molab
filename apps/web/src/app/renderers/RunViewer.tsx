@@ -1,17 +1,18 @@
 import { FileQuestion, PlayCircle } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { assetsApi } from "@/api";
 import { EmptyState, EntityPage } from "@/app/components/entity";
+import { LazySurface } from "@/app/layout/LazySurface";
 import { RunExecutionsPanel } from "@/app/renderers/RunExecutionsPanel";
 import { RunLogsPanel } from "@/app/renderers/RunLogsPanel";
 import { RunOutputsPanel } from "@/app/renderers/run/RunOutputsPanel";
 import { RunOverview } from "@/app/renderers/run/RunOverview";
-import { useRunViewer } from "@/app/renderers/useRunViewer";
+import { type RunRendererProps, useRunViewer } from "@/app/renderers/useRunViewer";
 import { POST_DISPATCH_TAB, RunToolbar } from "@/app/runs/RunToolbar";
-import { workspaceApi } from "@/app/state/api";
 import { useDiscoveredFileTypesForRun } from "@/app/state/useDiscoveredFileTypes";
-import { usePluginTabBadgeCounts } from "@/lib/use-plugin-tab-badge-counts";
 import type { ApiAssetResponse, RendererProps } from "@/app/types";
 import { pluginTabLabel } from "@/lib/plugin-tab-label";
+import { usePluginTabBadgeCounts } from "@/lib/use-plugin-tab-badge-counts";
 
 const openKnowledgePath = (
   path: string,
@@ -25,7 +26,10 @@ const openKnowledgePath = (
   setSelection({ objectType: "knowledge", objectId: rel });
 };
 
-export const RunViewer = (props: RendererProps): JSX.Element => {
+export const RunViewer = (props: RunRendererProps): JSX.Element => {
+  // Extension components retain the catalog-wide plugin ABI; the core run
+  // renderer itself is compile-time limited to its four entity collections.
+  const pluginRendererProps = props as RendererProps;
   const {
     run,
     workflow,
@@ -64,8 +68,8 @@ export const RunViewer = (props: RendererProps): JSX.Element => {
       setRunAssets([]);
       return;
     }
-    workspaceApi
-      .getRunAssets(run.id)
+    assetsApi
+      .listRunAssets(run.id)
       .then((assets) => {
         if (!cancelled) setRunAssets(assets);
       })
@@ -152,14 +156,6 @@ export const RunViewer = (props: RendererProps): JSX.Element => {
   const tabs = [
     { value: "overview", label: "Overview", content: overviewContent },
     {
-      value: "outputs",
-      label:
-        runAssets.length + resultEntries.length > 0
-          ? `Outputs (${runAssets.length + resultEntries.length})`
-          : "Outputs",
-      content: outputsContent,
-    },
-    {
       value: "executions",
       label: attemptCount ? `Executions (${attemptCount})` : "Executions",
       content: executionsContent,
@@ -171,7 +167,16 @@ export const RunViewer = (props: RendererProps): JSX.Element => {
       return {
         value: tab.value,
         label: tab.label,
-        content: activeTab === tab.value ? <TabComponent key={selectedRunId} {...props} /> : null,
+        content:
+          activeTab === tab.value ? (
+            <LazySurface
+              key={selectedRunId}
+              resetKey={`run-tab:${tab.id}:${selectedRunId}`}
+              loadingTitle={`Loading ${tab.label}…`}
+            >
+              <TabComponent {...pluginRendererProps} />
+            </LazySurface>
+          ) : null,
       };
     }),
     ...discoveredPlugins.map(({ contribution, files }) => {
@@ -186,10 +191,24 @@ export const RunViewer = (props: RendererProps): JSX.Element => {
         ),
         content:
           activeTab === contribution.value ? (
-            <PluginComponent key={selectedRunId} {...props} discoveredFiles={files} />
+            <LazySurface
+              key={selectedRunId}
+              resetKey={`run-file-tab:${contribution.id}:${selectedRunId}`}
+              loadingTitle={`Loading ${contribution.label}…`}
+            >
+              <PluginComponent {...pluginRendererProps} discoveredFiles={files} />
+            </LazySurface>
           ) : null,
       };
     }),
+    {
+      value: "outputs",
+      label:
+        runAssets.length + resultEntries.length > 0
+          ? `Outputs (${runAssets.length + resultEntries.length})`
+          : "Outputs",
+      content: outputsContent,
+    },
   ];
 
   return (

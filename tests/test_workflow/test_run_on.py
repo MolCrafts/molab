@@ -15,6 +15,7 @@ import pytest
 
 from molexp.workflow import (
     CompiledWorkflow,
+    Workflow,
     WorkflowCompiler,
     WorkflowRuntime,
     default_binding_registry,
@@ -33,23 +34,23 @@ def _isolate_registry():
 
 
 def _trivial_workflow() -> CompiledWorkflow:
-    builder = WorkflowCompiler(name="trivial")
+    builder = Workflow(name="trivial")
 
     @builder.task
     async def emit(ctx: TaskContext[None, None, None]) -> int:
         return 42
 
-    return builder.compile()
+    return WorkflowCompiler().compile(builder)
 
 
 def _failing_workflow() -> CompiledWorkflow:
-    builder = WorkflowCompiler(name="failing")
+    builder = Workflow(name="failing")
 
     @builder.task
     async def boom(ctx: TaskContext[None, None, None]) -> None:
         raise RuntimeError("intentional failure")
 
-    return builder.compile()
+    return WorkflowCompiler().compile(builder)
 
 
 class TestRunOn:

@@ -1,23 +1,21 @@
-import { GanttChartSquare, LayoutDashboard, Table2 } from "lucide-react";
 import type { JSX } from "react";
 
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 
-export const RUNS_TABS = ["overview", "jobs", "timeline"] as const;
+export const RUNS_TABS = ["jobs", "timeline"] as const;
 export type RunsTab = (typeof RUNS_TABS)[number];
 
-const TAB_DEFS: Array<{ id: RunsTab; label: string; icon: typeof LayoutDashboard }> = [
-  { id: "overview", label: "Overview", icon: LayoutDashboard },
-  { id: "jobs", label: "Jobs", icon: Table2 },
-  { id: "timeline", label: "Timeline", icon: GanttChartSquare },
+const TAB_DEFS: Array<{ id: RunsTab; label: string }> = [
+  { id: "jobs", label: "Jobs" },
+  { id: "timeline", label: "Timeline" },
 ];
 
 export const parseRunsTab = (raw: string | null | undefined): RunsTab => {
   if (raw && (RUNS_TABS as readonly string[]).includes(raw)) {
     return raw as RunsTab;
   }
-  return "overview";
+  return "jobs";
 };
 
 interface RunsTabBarProps {
@@ -32,17 +30,16 @@ export const RunsTabBar = ({ value, onChange, className }: RunsTabBarProps): JSX
       variant="line"
       className="h-10 w-full justify-start gap-4 rounded-none bg-transparent p-0 sm:gap-6 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
     >
-      {TAB_DEFS.map(({ id, label, icon: Icon }) => (
+      {TAB_DEFS.map(({ id, label }) => (
         <TabsTrigger
           key={id}
           value={id}
           className={cn(
-            "h-10 flex-none gap-2 rounded-none border-0 border-b border-transparent px-0 py-0",
+            "h-10 flex-none rounded-none border-0 border-b border-transparent px-0 py-0",
             "text-body-lg font-medium text-muted-foreground shadow-none after:hidden",
             "data-[state=active]:border-foreground data-[state=active]:bg-transparent data-[state=active]:text-foreground data-[state=active]:shadow-none",
           )}
         >
-          <Icon className="h-3.5 w-3.5" />
           {label}
         </TabsTrigger>
       ))}

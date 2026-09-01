@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from molexp.workflow import CycleError, WorkflowCompiler
+from molexp.workflow import CycleError, Workflow, WorkflowCompiler
 
 
 class TestWorkflowCompiler:
@@ -17,7 +17,7 @@ class TestWorkflowCompiler:
         """A ``depends_on`` cycle raises ``CycleError`` naming the *data graph*
         (and hinting at control edges) even when control edges form a valid
         loop — the control loop must not save the build."""
-        wf = WorkflowCompiler(name="bad-data-cycle", entry="a")
+        wf = Workflow(name="bad-data-cycle", entry="a")
 
         @wf.task
         async def a(ctx) -> int:
@@ -36,7 +36,7 @@ class TestWorkflowCompiler:
         wf.branch("x", "loop", "a")
 
         with pytest.raises(CycleError) as exc_info:
-            wf.compile()
+            WorkflowCompiler().compile(wf)
         msg = str(exc_info.value).lower()
         assert "data graph" in msg
         assert "control" in msg, "the error must hint at using control edges"

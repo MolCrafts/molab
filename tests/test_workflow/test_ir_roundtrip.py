@@ -15,6 +15,7 @@ import pytest
 from molexp.workflow import (
     CompiledWorkflow,
     TaskTypeRegistry,
+    Workflow,
     WorkflowCompiler,
     WorkflowRuntime,
     default_codec,
@@ -99,11 +100,11 @@ class TestToIR:
     ) -> None:
         from molexp.workflow.registry import _Add, _Constant
 
-        wf = WorkflowCompiler(name="py_built")
+        wf = Workflow(name="py_built")
         wf.add(_Constant(value=4), name="four")
         wf.add(_Constant(value=6), name="six")
         wf.add(_Add(), name="sum", depends_on=["four", "six"])
-        spec = wf.compile()
+        spec = WorkflowCompiler().compile(wf)
         ir = spec.to_ir()
         # IR reflects the topology faithfully
         assert ir["name"] == "py_built"
@@ -120,9 +121,9 @@ class TestToIR:
             async def execute(self, ctx: object) -> int:
                 return 1
 
-        wf = WorkflowCompiler(name="unslugged")
+        wf = Workflow(name="unslugged")
         wf.add(_Unregistered(), name="lonely")  # type not in the registry
-        spec = wf.compile()
+        spec = WorkflowCompiler().compile(wf)
         with pytest.raises(ValueError, match="task_type slug"):
             spec.to_ir()
 
@@ -151,7 +152,7 @@ class TestTypedEdgeRoundtrip:
 
     def _slug(
         self,
-        wf: WorkflowCompiler,
+        wf: Workflow,
         name: str,
         value: int,
         deps: list[str] | None = None,
@@ -163,12 +164,12 @@ class TestTypedEdgeRoundtrip:
 
     def test_branch_and_entry_round_trip(self) -> None:
         """A spec with wf.entry + wf.branch — previously rejected — now round-trips."""
-        wf = WorkflowCompiler(name="branchy", entry="fetch")
+        wf = Workflow(name="branchy", entry="fetch")
         self._slug(wf, "fetch", 1)
         self._slug(wf, "validate", 2, deps=["fetch"], routes={"ok": "publish", "fail": "rollback"})
         self._slug(wf, "publish", 3, deps=["validate"])
         self._slug(wf, "rollback", 4, deps=["validate"])
-        spec = wf.compile()
+        spec = WorkflowCompiler().compile(wf)
 
         ir = default_codec.spec_to_ir(spec)  # does not raise
         assert ir["entries"] == ["fetch"]
@@ -186,11 +187,11 @@ class TestTypedEdgeRoundtrip:
         assert _ir_excluding_id(rebuilt) == _ir_excluding_id(spec)
 
     def test_control_edge_round_trips(self) -> None:
-        wf = WorkflowCompiler(name="cf", entry="a")
+        wf = Workflow(name="cf", entry="a")
         self._slug(wf, "a", 1)
         self._slug(wf, "b", 2)
         wf.control("a", "b")
-        spec = wf.compile()
+        spec = WorkflowCompiler().compile(wf)
 
         ir = default_codec.spec_to_ir(spec)
         assert {link["kind"] for link in ir["links"]} == {"control"}
@@ -199,7 +200,7 @@ class TestTypedEdgeRoundtrip:
         assert _ir_excluding_id(rebuilt) == _ir_excluding_id(spec)
 
     def test_loop_and_parallel_round_trip(self) -> None:
-        wf = WorkflowCompiler(name="lp")
+        wf = Workflow(name="lp")
         self._slug(wf, "seed", 0)
         self._slug(wf, "compute", 1, deps=["seed"])
         self._slug(wf, "check_done", 2, deps=["compute"])
@@ -208,7 +209,7 @@ class TestTypedEdgeRoundtrip:
         self._slug(wf, "gather", 5, deps=["items"])
         wf.loop(body=["compute"], until="check_done", max_iters=10)
         wf.parallel(map_over="items", body="process", join="gather", max_concurrency=4)
-        spec = wf.compile()
+        spec = WorkflowCompiler().compile(wf)
 
         ir = default_codec.spec_to_ir(spec)
         assert ir["loops"] == [

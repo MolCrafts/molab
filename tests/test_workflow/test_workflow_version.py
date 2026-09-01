@@ -10,15 +10,15 @@ attribute from that record.
 
 from __future__ import annotations
 
-from molexp.workflow import WorkflowCompiler
+from molexp.workflow import Workflow, WorkflowCompiler
 from molexp.workflow.version import (
     TaskTopologyEntry,
     WorkflowVersion,
 )
 
 
-def _make_two_task_workflow(version: str = "1.0.0") -> WorkflowCompiler:
-    wf = WorkflowCompiler(name="pipeline", version=version)
+def _make_two_task_workflow(version: str = "1.0.0") -> Workflow:
+    wf = Workflow(name="pipeline", version=version)
 
     @wf.task
     async def fetch(ctx):
@@ -33,7 +33,7 @@ def _make_two_task_workflow(version: str = "1.0.0") -> WorkflowCompiler:
 
 class TestWorkflowVersion:
     def test_compile_derives_version_record(self):
-        spec = _make_two_task_workflow(version="1.0.0").compile()
+        spec = WorkflowCompiler().compile(_make_two_task_workflow(version="1.0.0"))
         record = spec.version
 
         assert isinstance(record, WorkflowVersion)
@@ -45,7 +45,7 @@ class TestWorkflowVersion:
         assert spec.version_label == "1.0.0"
 
     def test_version_records_task_topology(self):
-        record = _make_two_task_workflow(version="1.0.0").compile().version
+        record = WorkflowCompiler().compile(_make_two_task_workflow(version="1.0.0")).version
 
         assert len(record.topology) == 2
         assert all(isinstance(t, TaskTopologyEntry) for t in record.topology)

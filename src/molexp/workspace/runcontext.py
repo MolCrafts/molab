@@ -23,11 +23,11 @@ from pydantic import BaseModel
 from molexp._typing import JSONValue, TaskOutput
 from molexp.profile import ProfileConfig
 
-from .assets import ArtifactAsset, Asset, AssetScope, Producer
+from .assets import ArtifactAsset, Asset, AssetScope, CheckpointAccessor, LogAccessor, Producer
 from .assets.base import AssetKind
 from .base import _load_metadata, _reconstruct
 from .context import Context
-from .metrics import MetricRecord
+from .metrics_seam import MetricRecord, MetricsSink
 from .models import RunMetadata, RunStatus
 from .run_assets import RunAssets
 from .run_context import ContextStore
@@ -114,9 +114,18 @@ class RunContext:
         # Stream / chain accessors stay on the facade. File products go
         # through :meth:`register_artifact` — there is no ``ctx.artifact``.
         self.files = self._assets.files
-        self.log = self._assets.log
-        self.checkpoint = self._assets.checkpoint
-        self.metrics = self._assets.metrics
+
+    @property
+    def log(self) -> LogAccessor:
+        return self._assets.log
+
+    @property
+    def checkpoint(self) -> CheckpointAccessor:
+        return self._assets.checkpoint
+
+    @property
+    def metrics(self) -> MetricsSink:
+        return self._assets.metrics
 
     def _producer(self) -> Producer:
         return Producer(

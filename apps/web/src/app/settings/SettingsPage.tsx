@@ -86,6 +86,7 @@ export function SettingsPage(): JSX.Element {
     <div className="flex h-full min-h-0 flex-col p-3 sm:p-4">
       <SettingsShell
         title="Workspace settings"
+        description="Manage workspace connections, compute targets, UI plugins, and access."
         entries={entries}
         defaultId="remote-workspaces"
         className="h-full"

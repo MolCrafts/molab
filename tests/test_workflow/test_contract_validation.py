@@ -224,18 +224,15 @@ class TestNoOrphanTasks:
         assert ValidationCheckId.no_orphan_tasks not in _emitted_check_ids(rep)
 
     def test_passes_when_spec_set_matches_contract(self) -> None:
-        from molexp.workflow.compiler import WorkflowCompiler
+        from molexp.workflow.compiler import Workflow, WorkflowCompiler
         from molexp.workflow.task import Task
 
         class Inert(Task):
             async def execute(self, ctx):  # type: ignore[no-untyped-def, override]
                 return None
 
-        spec = (
-            WorkflowCompiler(name="wf")
-            .add(Inert(), name="A")
-            .add(Inert(), name="B", depends_on=["A"])
-            .compile()
+        spec = WorkflowCompiler().compile(
+            Workflow(name="wf").add(Inert(), name="A").add(Inert(), name="B", depends_on=["A"])
         )
         contract = WorkflowContract(
             workflow_id=spec.workflow_id,
@@ -251,18 +248,15 @@ class TestNoOrphanTasks:
         assert ValidationCheckId.no_orphan_tasks not in _emitted_check_ids(rep)
 
     def test_fails_when_spec_has_task_absent_from_contract(self) -> None:
-        from molexp.workflow.compiler import WorkflowCompiler
+        from molexp.workflow.compiler import Workflow, WorkflowCompiler
         from molexp.workflow.task import Task
 
         class Inert(Task):
             async def execute(self, ctx):  # type: ignore[no-untyped-def, override]
                 return None
 
-        spec = (
-            WorkflowCompiler(name="wf")
-            .add(Inert(), name="A")
-            .add(Inert(), name="B", depends_on=["A"])
-            .compile()
+        spec = WorkflowCompiler().compile(
+            Workflow(name="wf").add(Inert(), name="A").add(Inert(), name="B", depends_on=["A"])
         )
         # Contract is missing TaskIO for "B".
         contract = WorkflowContract(

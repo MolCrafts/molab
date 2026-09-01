@@ -101,15 +101,15 @@ def _looks_like_record_package(src: Path) -> bool:
     """True when *src* looks like a scientific record root (molrec layout).
 
     Preference order (per molrec storage binding, not reimplemented as a
-    library here): Zarr ``meta`` with ``record_schema_version``, else a
-    Zarr-ish tree with ``meta/``, else a bare ``meta/`` directory.
+    library here): Zarr ``meta`` with ``molrec_version`` — the sole version
+    key of a record — else a Zarr-ish tree with ``meta/``, else a bare
+    ``meta/`` directory.
     """
     if not src.is_dir():
         return False
     attrs = _read_zarr_group_attrs(src / "meta")
-    if attrs is not None and "record_schema_version" in attrs:
-        fmt = attrs.get("format_name")
-        return fmt is None or fmt == "molrec"
+    if attrs is not None and "molrec_version" in attrs:
+        return True
     if (src / "zarr.json").is_file() and (src / "meta").is_dir():
         return True
     if (src / "meta" / "zarr.json").is_file():
@@ -121,12 +121,9 @@ def _record_section_tags(src: Path) -> dict[str, str]:
     """Asset tags for plugin discovery when *src* is a record-shaped tree."""
     tags: dict[str, str] = {"molrec": "true"}
     attrs = _read_zarr_group_attrs(src / "meta")
-    if attrs is not None and "record_schema_version" in attrs:
+    if attrs is not None and "molrec_version" in attrs:
         tags["molrec_layout"] = "zarr"
-        tags["record_schema_version"] = str(attrs["record_schema_version"])
-        fmt = attrs.get("format_name")
-        if isinstance(fmt, str) and fmt:
-            tags["format_name"] = fmt
+        tags["molrec_version"] = str(attrs["molrec_version"])
     elif (src / "zarr.json").is_file() or (src / "meta" / "zarr.json").is_file():
         tags["molrec_layout"] = "zarr"
     else:
@@ -219,9 +216,13 @@ def land_run_outputs(
                 raise FileNotFoundError(f"path not found: {rel}")
             name = src.name
             tags = _infer_tags(rel, src)
+            exec_id = ctx.run.metadata.current_execution_id
+            if exec_id is None:
+                raise RuntimeError("land requires an active execution")
+            art_root = Path(ctx.run_dir) / "executions" / exec_id / "artifacts"
             if src.is_dir():
-                # Copy directory tree into artifacts/<name>/
-                dest = ctx.run_dir / "artifacts" / name
+                # Copy directory tree into executions/<id>/artifacts/<name>/
+                dest = art_root / name
                 if dest.exists():
                     shutil.rmtree(dest)
                 shutil.copytree(src, dest)
@@ -245,7 +246,7 @@ def land_run_outputs(
                     # Flat dir of loose files — register each file.
                     for child in dest.rglob("*"):
                         if child.is_file():
-                            rel_child = child.relative_to(ctx.run_dir / "artifacts").as_posix()
+                            rel_child = child.relative_to(art_root).as_posix()
                             ctx.register_artifact(
                                 child,
                                 name=rel_child,

@@ -307,7 +307,20 @@ def _detail_execution(node: TreeNode) -> list[RenderableType]:
     kv.add_row("execution_dir", str(exec_dir))
     # Per-attempt artifacts now live under executions/<id>/; surface
     # whichever ones exist so users can locate them at a glance.
-    for fname in ("stdout.log", "stderr.log", "workflow.json", "error.txt"):
+    for fname in ("workflow.json", "error.txt"):
+        candidate = exec_dir / fname
+        if candidate.exists():
+            kv.add_row(fname, str(candidate))
+    jobs_dir = Path(exec_dir) / "jobs"
+    if jobs_dir.is_dir():
+        streams = sorted(
+            str(p.relative_to(exec_dir))
+            for p in jobs_dir.glob("*/*.log")
+            if p.is_file() or p.is_symlink()
+        )
+        if streams:
+            kv.add_row("jobs/", ", ".join(streams))
+    for fname in ("stdout.log", "stderr.log"):
         candidate = exec_dir / fname
         if candidate.exists():
             kv.add_row(fname, str(candidate))

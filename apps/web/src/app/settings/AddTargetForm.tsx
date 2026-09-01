@@ -71,7 +71,7 @@ export function AddTargetForm({
         port: form.port == null ? null : Number(form.port),
         identityFile: form.identityFile?.trim() ? form.identityFile.trim() : null,
       };
-      const created = await TargetsService.createTargetEndpointApiTargetsPost(payload);
+      const created = await TargetsService.createTargetEndpoint(payload);
       setForm(emptyForm());
       onCreated?.(created);
     } catch (err) {

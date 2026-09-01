@@ -6,13 +6,13 @@
 
 A `Task` is a single async function (or class with `async def execute(self, ctx)`) that consumes the typed output of its upstream task and returns a typed output of its own. The compiled graph runs tasks as soon as their dependencies are satisfied — tasks with no unresolved dependency between them run in parallel.
 
-Three equivalent ways to define a task, all on the same `WorkflowCompiler`:
+Three equivalent ways to define a task, all on the same `Workflow`:
 
 ```python
 # 1. Function decorated with @wf.task
-from molexp.workflow import TaskContext, WorkflowCompiler
+from molexp.workflow import TaskContext, Workflow, WorkflowCompiler
 
-wf = WorkflowCompiler(name="pipeline")
+wf = Workflow(name="pipeline")
 
 @wf.task
 async def fetch(ctx: TaskContext) -> dict:
@@ -52,7 +52,7 @@ async def add_bias(square: float) -> float:
     return square + 10.0
 ```
 
-For instance registration, chain `.add(...)` calls and finish with `.compile()`:
+For instance registration, chain `.add(...)` calls and compile with `WorkflowCompiler().compile(workflow)`:
 
 ```python
 from molexp.workflow import WorkflowCompiler
@@ -68,12 +68,11 @@ class Report(Task):
         return f"n = {process}"
 
 
-compiled = (
-    WorkflowCompiler(name="pipeline")
+compiled = WorkflowCompiler().compile(
+    Workflow(name="pipeline")
     .add(Fetch())                                   # auto-named "fetch"
     .add(Process(), depends_on=["fetch"])           # name inferred from class
     .add(Report(), depends_on=["process"], name="report")
-    .compile()
 )
 ```
 
@@ -96,9 +95,9 @@ Plain `Task` (no generics) defaults to `Any` everywhere. Build-time configuratio
 
 ```python
 # Decorator style
-from molexp.workflow import TaskContext, WorkflowCompiler
+from molexp.workflow import TaskContext, Workflow, WorkflowCompiler
 
-wf = WorkflowCompiler(name="stream")
+wf = Workflow(name="stream")
 
 @wf.actor
 async def monitor(ctx: TaskContext):
@@ -116,7 +115,7 @@ class Monitor(Actor):
             yield {"seen": item}
 ```
 
-Any object with `async def run(self, ctx)` returning an async iterator satisfies the `Streamable` protocol and can be added via `WorkflowCompiler.add(obj)` — no molexp import required.
+Any object with `async def run(self, ctx)` returning an async iterator satisfies the `Streamable` protocol and can be added via `Workflow.add(obj)` — no molexp import required.
 
 ### Context and output
 
@@ -141,8 +140,8 @@ Relevant code: `molexp.workflow.task.Actor`, `molexp.workflow.context.TaskContex
 |------|-------------|
 | `@wf.task def fetch(...)` | Function name (`fetch`) |
 | `@wf.task(name="X")` | Explicit `name=` |
-| `WorkflowCompiler.add(FetchTask())` | Class name converted to snake_case, minus trailing `_task` / `_actor` → `fetch` |
-| `WorkflowCompiler.add(Fetch(), name="X")` | Explicit `name=` |
+| `Workflow.add(FetchTask())` | Class name converted to snake_case, minus trailing `_task` / `_actor` → `fetch` |
+| `Workflow.add(Fetch(), name="X")` | Explicit `name=` |
 
 `depends_on` values must match one of these resolved names exactly.
 
@@ -153,7 +152,7 @@ Fan-out over a runtime-produced list is declared with `wf.parallel`:
 ```python
 from molexp.workflow import WorkflowCompiler
 
-wf = WorkflowCompiler(name="fan-out", entry="scatter")
+wf = Workflow(name="fan-out", entry="scatter")
 
 @wf.task
 async def scatter() -> list[int]:

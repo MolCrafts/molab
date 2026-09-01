@@ -63,3 +63,16 @@ export interface UiPluginModule {
   userToggleable?: boolean;
   register: () => void | Promise<void>;
 }
+
+/**
+ * Lightweight metadata for one bundled plugin. The descriptor is safe to keep
+ * in the application entry chunk; `load` is the only edge to the plugin's
+ * implementation and therefore becomes a separate production chunk.
+ */
+export interface InternalPluginDescriptor {
+  id: string;
+  name: string;
+  description?: string;
+  userToggleable: boolean;
+  load: () => Promise<{ default: UiPluginModule }>;
+}

@@ -16,6 +16,11 @@ __version__ = "0.3.0"
 
 import molcfg
 
+# Wire the plugin-owned run metrics writer onto the workspace seam
+# (molexp.workspace.metrics_seam). The plugin is stdlib-only, so this keeps
+# ``import molexp`` light while ``RunContext.register_metric`` stays usable
+# in any process that imported molexp.
+import molexp.plugins.metrics as _plugins_metrics
 from molexp._logger import Logger, get_logger
 from molexp.entry import entry
 from molexp.path import Path
@@ -48,13 +53,12 @@ __all__ = [
     "RunContext",
     "TaskContext",
     "UniformSpace",
+    "Workflow",
     "WorkflowCompiler",
     "WorkflowRuntime",
     "Workspace",
-    "aexecute_run",
     "config",
     "entry",
-    "execute_run",
     "get_logger",
     "wp",
 ]
@@ -64,11 +68,10 @@ __all__ = [
 #: first access only — ``import molexp`` must stay light
 #: (tests/test_workspace/test_import_guard.py enforces this).
 _LAZY_WORKFLOW_ATTRS = (
+    "Workflow",
     "WorkflowCompiler",
     "TaskContext",
     "WorkflowRuntime",
-    "execute_run",
-    "aexecute_run",
 )
 
 

@@ -35,19 +35,19 @@ so this one process serves both the REST API and the interface — no
 Node.js required. If `./lab` does not exist or has no `workspace.json`,
 `serve` initializes it automatically.
 
-> **Editable installs / live UI:** from a source checkout
-> (`pip install -e .`), use **one command** for API + HMR frontend:
+> **Checkout / live UI:** from a source tree, one command for API + HMR:
 >
 > ```bash
 > molexp serve --dev -ws ./lab --port 8000
 > ```
 >
 > Open the printed **Dev UI** URL (default <http://localhost:5173>), not
-> the API port. `--dev` starts the web UI against this API (`npm run dev:api`);
-> offline mock UI is `npm run dev:web` (MSW). Requires Node and a one-time
-> `npm install` at the repo root. Override the UI port with
-> `--ui-port`, or the web app path with `MOLEXP_WEB_DIR`. See
-> [Server Lifecycle](../guide/server-lifecycle.md).
+> the API port. `--dev` starts `npm run dev:api` (real `/api` proxy).
+> `npm run dev:web` is the MSW mock, not this path. Rebuild the bundled SPA
+> with `npm run build:web` (no `uv pip` reinstall on an editable install);
+> `-C build-web=true` is the wheel path only. Full table:
+> [Serve and rebuild the UI](../development/ui-serve.md). Auth / tunnel /
+> several workspaces: [Server Lifecycle](../guide/server-lifecycle.md).
 
 You can serve several workspaces at once by repeating `-ws`;
 the UI shows each one in the left panel and you switch by clicking into
@@ -269,3 +269,4 @@ Once the click-through model feels natural, [Your First
 Workflow](first-workflow.md) shows how real workflows are authored in
 Python, and [Track a Run](tracked-runs.md) explains what all of this
 looks like on disk.
+disk.

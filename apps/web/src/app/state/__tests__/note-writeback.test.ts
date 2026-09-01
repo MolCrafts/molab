@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
+import { knowledgeApi } from "@/api";
 import { KnowledgeService } from "@/api/generated/services/KnowledgeService";
-import { workspaceApi } from "@/app/state/api";
 
-const PUT = "editDocApiKnowledgeDocPut" as const;
+const PUT = "editDoc" as const;
 
-describe("workspaceApi.updateNoteDoc", () => {
+describe("knowledgeApi.editDoc", () => {
   afterEach(() => {
     rs.restoreAllMocks();
   });
@@ -20,7 +20,7 @@ describe("workspaceApi.updateNoteDoc", () => {
     const putSpy = rs.spyOn(KnowledgeService, PUT).mockResolvedValue(detail as never);
     const fetchSpy = rs.spyOn(globalThis, "fetch");
 
-    const result = await workspaceApi.updateNoteDoc("notes/intro", "hello");
+    const result = await knowledgeApi.editDoc("notes/intro", "hello");
 
     expect(putSpy).toHaveBeenCalledWith("notes/intro", { body: "hello" });
     expect(fetchSpy).not.toHaveBeenCalled();

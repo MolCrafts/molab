@@ -24,10 +24,10 @@ import tempfile
 from pathlib import Path
 
 import molexp as me
-from molexp.workflow import WorkflowCompiler
+from molexp.workflow import Workflow, WorkflowCompiler
 from molexp.workspace.param import GridSpace, UniformSpace
 
-wf = WorkflowCompiler(name="train")
+wf = Workflow(name="train")
 
 
 @wf.task
@@ -41,7 +41,7 @@ def report(loss: float, accuracy: float) -> float:
     return loss
 
 
-compiled = wf.compile()
+compiled = WorkflowCompiler().compile(wf)
 
 
 def main() -> None:

@@ -18,7 +18,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { RunStatusBadge, WorkbenchAction, WorkbenchIconAction } from "@/components/workbench";
+import { RunStatusBadge, WorkbenchIconAction } from "@/components/workbench";
 import { formatDuration, formatRelative } from "@/lib/format-time";
 import { cn } from "@/lib/utils";
 
@@ -261,21 +261,23 @@ const SortableTh = ({
         column.className,
       )}
     >
-      <WorkbenchAction
-        kind="ghost"
-        size="content"
-        type="button"
-        onClick={onClick}
+      <span
         className={cn(
           "inline-flex items-center gap-1 transition-colors hover:text-foreground",
           column.align === "right" && "flex-row-reverse",
           active ? "text-foreground" : "text-muted-foreground",
         )}
       >
-        {column.label}
-        <Icon className="h-3 w-3 opacity-70" aria-hidden="true" />
-        <span className="sr-only">{active ? `sorted ${dir}` : "sort"}</span>
-      </WorkbenchAction>
+        <span>{column.label}</span>
+        <WorkbenchIconAction
+          label={`Sort by ${column.label}${active ? `, currently ${dir}` : ""}`}
+          size="compact"
+          onClick={onClick}
+          className="size-5 text-current"
+        >
+          <Icon className="size-3 opacity-70" aria-hidden="true" />
+        </WorkbenchIconAction>
+      </span>
     </TableHead>
   );
 };

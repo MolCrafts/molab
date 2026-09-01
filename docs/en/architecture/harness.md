@@ -17,9 +17,9 @@ workflow and workspace and is imported by none of them.
 | Concern | Where |
 |---|---|
 | Stage machinery | `Stage`, `StageRunner`, `HarnessRunContext` |
-| Artifacts + lineage | `ArtifactStore` / `FileArtifactStore`, `SQLiteArtifactLineageStore` |
-| Audit trail | `SQLiteEventLog`, `generate_audit_report`, `replay_metadata` |
-| Human gates | `ApprovalGate`, `SQLiteApprovalStore`, `ApprovalPendingError` |
+| Artifacts + lineage | `ArtifactStore` / `FileArtifactStore`, `FileLineageStore` |
+| Audit trail | `JsonlEventLog`, `generate_audit_report`, `replay_metadata` |
+| Human gates | `ApprovalGate`, `FileApprovalStore`, `ApprovalPendingError` |
 | Execution | `Executor` Protocol, `LocalExecutor`, `DryRunExecutor` |
 | LLM dispatch | `AgentGateway` Protocol, `RouterBackedAgentGateway` |
 | Capabilities | `CapabilityRegistry`, built-in `curation` + `lifecycle` catalogs |
@@ -82,7 +82,7 @@ and the preamble tells the agent to say so.
 - **The workflow engine is out of process.** It loads only inside executor
   subprocesses, never in the harness process.
 - **Suspend/resume is durable and scope-tagged.** `ApprovalScope` separates
-  `approval_gate` from `intervention_request` on the run's `harness.sqlite`;
+  `approval_gate` from `intervention_request` on the run's `events.jsonl + approvals.json`;
   the shared services resume path rebuilds the scoped session and replays.
   Resume correctness rides on store-first replay, not on a stage ledger —
   there is no `Mode` ABC and no completion ledger.

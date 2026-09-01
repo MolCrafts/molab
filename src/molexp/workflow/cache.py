@@ -11,21 +11,17 @@ Features:
 - Format version field for forward-compatible schema evolution
 - Pluggable backing storage via :class:`CacheStore`
   (``FileCacheStore`` for plain directories,
-  ``ws.cache.as_cache_store()`` for workspace-rooted caches)
+  ``FileCacheStore(run_dir / "cache")`` for run-local caches; ``ws.cache.as_cache_store()`` is opt-in)
 
 Usage::
 
-    # Workspace-backed (recommended for in-process workflow runs):
-    from molexp.workspace import Workspace
-    from molexp.workflow import Caching
-
-    ws = Workspace("./lab")
-    cache = Caching(store=ws.cache.as_cache_store(), max_entries=1000)
-
-    # Or plain filesystem (no workspace needed):
+    # Run-local (the execute default when a RunContext is attached):
     from pathlib import Path
-    from molexp.workflow import Caching
+    from molexp.workflow import Caching, FileCacheStore
 
+    cache = Caching(store=FileCacheStore(Path(run_dir) / "cache"), max_entries=1000)
+
+    # Or plain filesystem (no run needed):
     cache = Caching(store_dir=Path("./cache"), max_entries=1000)
 
     hit = cache.get(snapshot, inputs)
@@ -108,8 +104,7 @@ class Caching:
     Two construction shapes:
 
     - ``Caching(store=<CacheStore>)`` — supply any store directly. The
-      preferred form for workspace-backed caches:
-      ``Caching(store=ws.cache.as_cache_store())``.
+      execute default is ``FileCacheStore(run_dir / "cache")``.
     - ``Caching(store_dir=<Path>)`` — backward-compat shorthand that
       builds a :class:`FileCacheStore` rooted at *store_dir*.
 

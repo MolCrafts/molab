@@ -1,10 +1,13 @@
 import { defineConfig } from '@rsbuild/core';
 import { pluginReact } from '@rsbuild/plugin-react';
+import fs from 'node:fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+const siblingMolvisIo = path.resolve(__dirname, '../../../molvis/stage/src/io/index.ts');
 
 // Docs: https://rsbuild.rs/config/
 export default defineConfig(({ command }) => {
@@ -15,6 +18,11 @@ export default defineConfig(({ command }) => {
     resolve: {
       alias: {
         '@schemas': path.resolve(__dirname, '../../src/molexp/schemas'),
+        // Local sibling: directory Zarr loader lives in molvis, not this plugin.
+        // CI has no sibling checkout — published @molcrafts/molvis-stage is used.
+        ...(fs.existsSync(siblingMolvisIo)
+          ? { '@molcrafts/molvis-stage/io': siblingMolvisIo }
+          : {}),
       },
     },
     tools: {
@@ -40,27 +48,6 @@ export default defineConfig(({ command }) => {
         // module support rspack leaves that import undefined, so molvis-core's
         // ``Frame.frame_new`` is missing and trajectory rendering crashes.
         experiments: { asyncWebAssembly: true },
-        resolve: {
-          // Workaround for the published @molcrafts/molvis-core@0.0.7 tarball:
-          // its trajectory worker is spawned via
-          // `new Worker(new URL("./worker.ts", import.meta.url))`, but rslib
-          // builds the package bundleless and leaves that URL string verbatim,
-          // so the file actually shipped is worker.js. rsbuild 2 / rspack
-          // resolves the worker entry with a dedicated resolver that ignores
-          // `extensionAlias`, so map the exact published `.ts` path to the real
-          // `.js` file. Fixed at source in molvis-core (now references
-          // `./worker.js`); remove this once molexp depends on a release that
-          // includes that fix.
-          alias: {
-            [path.resolve(
-              __dirname,
-              '../../node_modules/@molcrafts/molvis-core/dist/transport/trajectory_worker/worker.ts',
-            )]: path.resolve(
-              __dirname,
-              '../../node_modules/@molcrafts/molvis-core/dist/transport/trajectory_worker/worker.js',
-            ),
-          },
-        },
       },
     },
     source: {

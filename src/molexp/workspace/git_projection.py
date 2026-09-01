@@ -23,9 +23,12 @@ What is projected, per run:
   over ``blob_threshold_bytes`` as a small **pointer** blob (the bytes stay in
   the molexp CAS / remote FS, never bloating the object DB).
 
-What is **excluded**: the run-root ``alive`` heartbeat file, ``cache/``, the
-per-attempt ``executions/`` churn, and every derived children-index ``*.json``
-(those live at container level and are rebuildable, not truth).
+What is **excluded**: the run-root ``alive`` heartbeat file, ``cache/``,
+execution scratch (``work/`` / ``jobs/`` / ``logs/``), and every derived
+children-index ``*.json`` (those live at container level and are
+rebuildable, not truth). Per-attempt **products** are projected from
+``executions/<id>/artifacts/`` (never flattened to the run root, never
+the last-attempt fallback).
 
 Each ``Execution`` becomes a commit over the run tree, chained in recorded
 order (``refs/molexp/runs/<run_id>`` points at the tip), so
@@ -223,18 +226,23 @@ class GitProjection:
         source_tree = await self._project_plain_subtree(run_dir / "source")
         if source_tree is not None:
             entries.append(TreeEntry(_MODE_DIR, "source", source_tree))
-        artifacts_dir = run_dir / "artifacts"
-        if not artifacts_dir.is_dir():
-            # persist-one-01: products live under executions/<id>/artifacts/
-            execs = run_dir / "executions"
-            if execs.is_dir():
-                for child in sorted(execs.iterdir(), key=lambda p: p.name):
-                    candidate = child / "artifacts"
-                    if candidate.is_dir():
-                        artifacts_dir = candidate
-        artifacts_tree = await self._project_artifacts(artifacts_dir)
-        if artifacts_tree is not None:
-            entries.append(TreeEntry(_MODE_DIR, "artifacts", artifacts_tree))
+        execs_dir = run_dir / "executions"
+        if execs_dir.is_dir():
+            exec_entries: list[TreeEntry] = []
+            for child in sorted(execs_dir.iterdir(), key=lambda p: p.name):
+                if not child.is_dir():
+                    continue
+                artifacts_tree = await self._project_artifacts(child / "artifacts")
+                if artifacts_tree is None:
+                    continue
+                inner = await build_tree(
+                    self._db, [TreeEntry(_MODE_DIR, "artifacts", artifacts_tree)]
+                )
+                exec_entries.append(TreeEntry(_MODE_DIR, child.name, inner))
+            if exec_entries:
+                entries.append(
+                    TreeEntry(_MODE_DIR, "executions", await build_tree(self._db, exec_entries))
+                )
         return await build_tree(self._db, entries)
 
     async def _project_plain_subtree(self, directory: Path) -> Oid | None:

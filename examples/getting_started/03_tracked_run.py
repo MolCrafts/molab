@@ -14,9 +14,9 @@ import tempfile
 from pathlib import Path
 
 import molexp as me
-from molexp.workflow import WorkflowCompiler, WorkflowRuntime
+from molexp.workflow import Workflow, WorkflowCompiler, WorkflowRuntime
 
-wf = WorkflowCompiler(name="baseline")
+wf = Workflow(name="baseline")
 
 
 @wf.task
@@ -25,7 +25,7 @@ async def experiment_body(seed: int = 0) -> dict:
     return {"score": 0.87, "seed": seed}
 
 
-compiled = wf.compile()
+compiled = WorkflowCompiler().compile(wf)
 
 
 async def main() -> None:

@@ -14,12 +14,14 @@ const handle = async <T>(response: Response, label: string): Promise<T> => {
 };
 
 export interface ListRunsOptions {
+  offset?: number;
   limit?: number;
 }
 
 export const workspaceRunsApi = {
   async listRuns(options: ListRunsOptions = {}): Promise<WorkspaceRunsResponse> {
     const params = new URLSearchParams();
+    if (options.offset !== undefined) params.set("offset", String(options.offset));
     if (options.limit !== undefined) params.set("limit", String(options.limit));
     const url = params.size > 0 ? `${ENDPOINT}?${params.toString()}` : ENDPOINT;
     const response = await fetch(url);

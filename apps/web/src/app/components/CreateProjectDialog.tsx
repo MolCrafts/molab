@@ -1,6 +1,6 @@
 import { Plus } from "lucide-react";
 import { useState } from "react";
-import { workspaceApi } from "@/app/state/api";
+import { projectsApi } from "@/api";
 import {
   Dialog,
   DialogContent,
@@ -46,7 +46,7 @@ export function CreateProjectDialog({
     setError(null);
 
     try {
-      await workspaceApi.createProject({
+      await projectsApi.createProject({
         name,
         description: "",
       });

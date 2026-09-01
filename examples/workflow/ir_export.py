@@ -21,6 +21,7 @@ import asyncio
 from molexp.workflow import (
     Task,
     TaskContext,
+    Workflow,
     WorkflowCompiler,
     WorkflowRuntime,
     default_registry,
@@ -40,8 +41,8 @@ class Summarize(Task):
 
 
 async def main() -> None:
-    compiled = (
-        WorkflowCompiler(name="demo").add(Fetch()).add(Summarize(), depends_on=["fetch"]).compile()
+    compiled = WorkflowCompiler().compile(
+        Workflow(name="demo").add(Fetch()).add(Summarize(), depends_on=["fetch"])
     )
 
     # 1. Data-DAG Mermaid diagram (``flowchart LR``)

@@ -24,11 +24,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import molexp as me
-from molexp.workflow import WorkflowCompiler
+from molexp.workflow import Workflow, WorkflowCompiler
 
 WORKSPACE_ROOT = Path(__file__).resolve().parent / "_workspace"
 
-wf = WorkflowCompiler(name="train")
+wf = Workflow(name="train")
 
 
 @wf.task
@@ -61,5 +61,5 @@ async def train(
     me.Workspace(WORKSPACE_ROOT, name="run-profiles-demo")
     .add_project("demo")
     .add_experiment("train")
-    .define(wf.compile(), params={"seed": [0]})
+    .define(WorkflowCompiler().compile(wf), params={"seed": [0]})
 )

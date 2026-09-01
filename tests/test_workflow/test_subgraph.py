@@ -19,12 +19,11 @@ from molexp.workflow import (
     CompiledWorkflow,
     Task,
     TaskContext,
+    Workflow,
     WorkflowCompiler,
     WorkflowRuntime,
 )
 from molexp.workflow._graph_decl import _BoundaryStubTask
-
-Workflow = CompiledWorkflow
 
 
 class _RecordTask(Task):
@@ -40,34 +39,34 @@ class _RecordTask(Task):
         return self._label
 
 
-def _build_chain() -> tuple[Workflow, list[str]]:
+def _build_chain() -> tuple[CompiledWorkflow, list[str]]:
     """Build a 4-node chain ``a → b → c → d`` and return the spec + recorder."""
     recorder: list[str] = []
-    wf = WorkflowCompiler(name="chain4")
+    wf = Workflow(name="chain4")
     wf.add(_RecordTask("a", recorder), name="a")
     wf.add(_RecordTask("b", recorder), name="b", depends_on=["a"])
     wf.add(_RecordTask("c", recorder), name="c", depends_on=["b"])
     wf.add(_RecordTask("d", recorder), name="d", depends_on=["c"])
-    return wf.compile(), recorder
+    return WorkflowCompiler().compile(wf), recorder
 
 
-def _build_diamond() -> tuple[Workflow, list[str]]:
+def _build_diamond() -> tuple[CompiledWorkflow, list[str]]:
     """Build a diamond ``a → (b, c) → d`` for downstream-closure tests."""
     recorder: list[str] = []
-    wf = WorkflowCompiler(name="diamond")
+    wf = Workflow(name="diamond")
     wf.add(_RecordTask("a", recorder), name="a")
     wf.add(_RecordTask("b", recorder), name="b", depends_on=["a"])
     wf.add(_RecordTask("c", recorder), name="c", depends_on=["a"])
     wf.add(_RecordTask("d", recorder), name="d", depends_on=["b", "c"])
-    return wf.compile(), recorder
+    return WorkflowCompiler().compile(wf), recorder
 
 
-def _selected_names(sub: Workflow) -> set[str]:
+def _selected_names(sub: CompiledWorkflow) -> set[str]:
     """Names of selected tasks — boundary stubs filtered out."""
     return {t.name for t in sub._tasks if not isinstance(t.fn_or_class, _BoundaryStubTask)}
 
 
-def _all_names(sub: Workflow) -> set[str]:
+def _all_names(sub: CompiledWorkflow) -> set[str]:
     """Every name registered on the subgraph (selection + boundary stubs)."""
     return {t.name for t in sub._tasks}
 
@@ -76,7 +75,7 @@ class TestSubgraph:
     def test_returns_frozen_subset_with_boundary_upstream_as_stub(self) -> None:
         spec, _ = _build_chain()
         sub = spec.subgraph(["c"])
-        assert isinstance(sub, Workflow)
+        assert isinstance(sub, CompiledWorkflow)
         # Only `c` is selected; the boundary stub is excluded.
         assert _selected_names(sub) == {"c"}
         by_name = {t.name: t for t in sub._tasks}
@@ -141,11 +140,11 @@ class TestSubgraphSeedOutputs:
                 captured["inputs"] = value
                 return f"consumed:{value}"
 
-        wf = WorkflowCompiler(name="ab")
+        wf = Workflow(name="ab")
         wf.add(_ProducerTask(), name="a")
         wf.add(_ConsumerTask(), name="b", depends_on=["a"])
 
-        sub = wf.compile().subgraph(["b"])
+        sub = WorkflowCompiler().compile(wf).subgraph(["b"])
         result = await WorkflowRuntime().execute(sub, seed_outputs={"a": "SEEDED"})
         assert result.status == "succeeded"
         assert result.outputs["b"] == "consumed:SEEDED"

@@ -1,4 +1,5 @@
 /**
+import { knowledgeApi } from "@/api";
  * Pure, DOM-free helpers for the Note editor.
  *
  * `index.md` is the single source of truth for a Note's body — the editor
@@ -8,7 +9,7 @@
  * a dirty-state predicate that ignores cosmetic whitespace differences.
  */
 
-/** Payload the {@link NoteEditor} hands to `workspaceApi.updateNoteDoc`. */
+/** Payload the {@link NoteEditor} hands to `knowledgeApi.editDoc`. */
 export interface NoteDocUpdate {
   path: string;
   body: string;

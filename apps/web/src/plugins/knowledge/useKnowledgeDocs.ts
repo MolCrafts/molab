@@ -1,22 +1,22 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useCallback, useMemo } from "react";
+import { knowledgeApi } from "@/api";
 import type { NoteSummary } from "@/api/generated/models/NoteSummary";
-import { workspaceApi } from "@/app/state/api";
-
+import {
+  type KnowledgeListFilters,
+  knowledgeBacklinksQueryOptions,
+  knowledgeKeys,
+  useKnowledgeListQuery,
+} from "./queries";
 /** Optional tag/status narrowing forwarded to `listKnowledge` (06 query support). */
-export interface KnowledgeDocFilters {
-  tag?: string | null;
-  status?: string | null;
-}
+export type KnowledgeDocFilters = KnowledgeListFilters;
 
 /**
- * Hand-written data + mutation hook for the Knowledge document tree — the
- * repo's `useState` + `useEffect` + zustand idiom (hand-rolled load + imperative
- * mutations), deliberately not a query-cache library.
- * It loads every Note through {@link workspaceApi.listKnowledge} and exposes
+ * Shared query-cache facade for the Knowledge document tree. It loads Notes
+ * through the canonical list query and exposes
  * imperative create / rename / move / delete verbs plus a backlinks lookup,
- * each routed through `workspaceApi` (thin wrappers over the generated
- * `KnowledgeService`). Every successful mutation triggers a refetch so the tree
- * realigns with the server-authoritative Note set.
+ * each routed through `knowledgeApi`. Successful mutations invalidate the
+ * shared list keys so tree, viewer, controls, inspector, and palette realign.
  */
 export interface UseKnowledgeDocs {
   notes: NoteSummary[];
@@ -35,68 +35,63 @@ const toMessage = (err: unknown, fallback: string): string =>
 
 export const useKnowledgeDocs = (filters: KnowledgeDocFilters = {}): UseKnowledgeDocs => {
   const { tag = null, status = null } = filters;
-  const [notes, setNotes] = useState<NoteSummary[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
+  const listQuery = useKnowledgeListQuery({ tag, status });
 
   const reload = useCallback(async (): Promise<void> => {
-    setLoading(true);
-    try {
-      const response = await workspaceApi.listKnowledge({ tag, status });
-      setNotes(response.notes);
-      setError(null);
-    } catch (err) {
-      setError(toMessage(err, "Failed to load knowledge documents."));
-    } finally {
-      setLoading(false);
-    }
-  }, [tag, status]);
+    await listQuery.refetch();
+  }, [listQuery.refetch]);
 
-  useEffect(() => {
-    void reload();
-  }, [reload]);
+  const invalidateLists = useCallback(async (): Promise<void> => {
+    await queryClient.invalidateQueries({ queryKey: knowledgeKeys.lists() });
+  }, [queryClient]);
 
   const createDoc = useCallback(
     async (name: string, parentPath?: string | null): Promise<void> => {
-      await workspaceApi.createKnowledgeDoc(name, { parentPath: parentPath ?? null });
-      await reload();
+      await knowledgeApi.createDoc(name, { parentPath: parentPath ?? null });
+      await invalidateLists();
     },
-    [reload],
+    [invalidateLists],
   );
 
   const renameDoc = useCallback(
     async (path: string, name: string): Promise<void> => {
-      await workspaceApi.renameKnowledgeDoc(path, name);
-      await reload();
+      await knowledgeApi.renameDoc(path, name);
+      await invalidateLists();
     },
-    [reload],
+    [invalidateLists],
   );
 
   const moveDoc = useCallback(
     async (path: string, parentPath: string): Promise<void> => {
-      await workspaceApi.moveKnowledgeDoc(path, parentPath);
-      await reload();
+      await knowledgeApi.moveDoc(path, parentPath);
+      await invalidateLists();
     },
-    [reload],
+    [invalidateLists],
   );
 
   const deleteDoc = useCallback(
     async (path: string): Promise<void> => {
-      await workspaceApi.deleteKnowledgeDoc(path);
-      await reload();
+      await knowledgeApi.deleteDoc(path);
+      await queryClient.invalidateQueries({ queryKey: knowledgeKeys.all });
     },
-    [reload],
+    [queryClient],
   );
 
-  const getBacklinks = useCallback(async (path: string): Promise<NoteSummary[]> => {
-    const response = await workspaceApi.getKnowledgeBacklinks(path);
-    return response.backlinks;
-  }, []);
+  const getBacklinks = useCallback(
+    async (path: string): Promise<NoteSummary[]> => {
+      const response = await queryClient.fetchQuery(knowledgeBacklinksQueryOptions(path));
+      return response.backlinks;
+    },
+    [queryClient],
+  );
 
   return {
-    notes,
-    loading,
-    error,
+    notes: listQuery.data?.notes ?? [],
+    loading: listQuery.isFetching,
+    error: listQuery.error
+      ? toMessage(listQuery.error, "Failed to load knowledge documents.")
+      : null,
     reload,
     createDoc,
     renameDoc,
@@ -108,8 +103,8 @@ export const useKnowledgeDocs = (filters: KnowledgeDocFilters = {}): UseKnowledg
 
 /**
  * The universe of tag + status values across all notes (unfiltered), used to
- * populate the knowledge-tree filter. Loaded once through `workspaceApi`, so the
- * option list never collapses when a filter is applied server-side.
+ * populate the knowledge-tree filter. The unfiltered shared query keeps the
+ * option list from collapsing when a filter is applied server-side.
  */
 export interface UseKnowledgeFacets {
   tags: string[];
@@ -120,26 +115,13 @@ export interface UseKnowledgeFacets {
 }
 
 export const useKnowledgeFacets = (): UseKnowledgeFacets => {
-  const [notes, setNotes] = useState<NoteSummary[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const listQuery = useKnowledgeListQuery();
 
   const reload = useCallback(async (): Promise<void> => {
-    setLoading(true);
-    try {
-      const response = await workspaceApi.listKnowledge();
-      setNotes(response.notes);
-      setError(null);
-    } catch (err) {
-      setError(toMessage(err, "Failed to load knowledge filters."));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+    await listQuery.refetch();
+  }, [listQuery.refetch]);
 
-  useEffect(() => {
-    void reload();
-  }, [reload]);
+  const notes = listQuery.data?.notes ?? [];
 
   const tags = useMemo(
     () => [...new Set(notes.flatMap((note) => note.tags ?? []))].sort(),
@@ -151,5 +133,11 @@ export const useKnowledgeFacets = (): UseKnowledgeFacets => {
     [notes],
   );
 
-  return { tags, statuses, loading, error, reload };
+  return {
+    tags,
+    statuses,
+    loading: listQuery.isFetching,
+    error: listQuery.error ? toMessage(listQuery.error, "Failed to load knowledge filters.") : null,
+    reload,
+  };
 };

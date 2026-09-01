@@ -21,7 +21,7 @@
     "@milkdown/kit": "^7.22.0",
     "@milkdown/plugin-math": "^7.5.9",
     "@milkdown/react": "^7.22.0",
-    "@molcrafts/molplot": "^0.1.5",
+    "@molcrafts/molplot": "^0.1.6",
     "@molcrafts/molvis-core": "^0.2.2",
     "@molcrafts/molvis-stage": "^0.2.2",
     "@monaco-editor/react": "^4.7.0",

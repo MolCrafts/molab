@@ -152,7 +152,9 @@ def _plan_title(store: FileArtifactStore, root: Path, run_id: str) -> str:
 
 
 def _artifacts_root(run: Run) -> Path:
-    return Path(run.run_dir) / "artifacts"
+    from molexp.harness.store.paths import harness_artifact_root
+
+    return harness_artifact_root(run.run_dir)
 
 
 def _artifact_store(run: Run) -> FileArtifactStore:

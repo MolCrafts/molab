@@ -12,15 +12,8 @@ import shutil
 
 from fastapi import APIRouter, Depends, HTTPException
 
-from molexp.workspace import (
-    ComputeTarget,
-    Workspace,
-    add_target,
-    effective_targets,
-    get_target,
-    remove_target,
-    to_transport,
-)
+from molexp.workspace import ComputeTarget, Workspace
+from molexp.workspace.targets import effective_targets, to_transport
 
 from ..dependencies import get_workspace
 from ..schemas import (
@@ -67,7 +60,7 @@ def create_target_endpoint(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     try:
-        add_target(workspace, target)
+        workspace.add_target(target)
     except ValueError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
 
@@ -81,7 +74,7 @@ def delete_target_endpoint(
 ) -> None:
     """Remove the named compute target from the workspace registry."""
     try:
-        remove_target(workspace, name)
+        workspace.remove_target(name)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -98,7 +91,7 @@ def test_target_endpoint(
     so the UI can render the failure inline.
     """
     try:
-        target = get_target(workspace, name)
+        target = workspace.get_target(name)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 

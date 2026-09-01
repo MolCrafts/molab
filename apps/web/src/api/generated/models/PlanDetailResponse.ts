@@ -5,7 +5,7 @@
 import type { PlanFile } from './PlanFile';
 import type { PlanTaskInfo } from './PlanTaskInfo';
 /**
- * Full plan deliverables for PlanOrchestrator (and legacy nine-step artifacts).
+ * Full plan deliverables for the plan bundle (and legacy nine-step artifacts).
  *
  * Primary kinds: ``experimentPlan`` (spec + task board), ``planReport``,
  * ``frozenExperimentPlan``, ``boundWorkflow``, then codegen/compile outputs.

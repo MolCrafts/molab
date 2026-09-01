@@ -10,7 +10,7 @@ import type { ComponentType, JSX } from "react";
 import type { EntityCard } from "@/api/generated/models/EntityCard";
 import { StatusBadge } from "@/app/components/entity";
 import { useNavigationState } from "@/app/state/useNavigationState";
-import type { Selection, WorkspaceSnapshot } from "@/app/types";
+import type { RendererSnapshot, Selection } from "@/app/types";
 import { WorkbenchAction } from "@/components/workbench";
 import { cn } from "@/lib/utils";
 
@@ -65,7 +65,7 @@ export const EntityRefCard = ({
   snapshot,
 }: {
   card: EntityCard;
-  snapshot: WorkspaceSnapshot;
+  snapshot: RendererSnapshot;
 }): JSX.Element => {
   const nav = useNavigationState(snapshot);
   const selection = toSelection(card);

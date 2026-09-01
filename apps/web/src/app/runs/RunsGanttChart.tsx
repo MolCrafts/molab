@@ -1,12 +1,9 @@
 import type { JSX } from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 
 import { MolplotGanttChart } from "@/plugins/molplot";
 
 import type { WorkspaceExecutionRow, WorkspaceRunRow } from "./types";
-
-/** Tick the wall-clock-derived end time for active bars at this cadence. */
-const LIVE_TICK_MS = 5_000;
 
 interface RunsGanttChartProps {
   rows: WorkspaceRunRow[];
@@ -162,18 +159,11 @@ export const RunsGanttChart = ({
   onSelectRun,
   onSelectExecution,
 }: RunsGanttChartProps): JSX.Element => {
-  // Tick `nowMs` periodically so in-progress bars keep growing without
-  // waiting for `rows` to refetch — `buildRunTask`/`buildExecutionTasks`
-  // pin open-ended `end` to this value rather than `Date.now()`.
-  const [nowMs, setNowMs] = useState(() => Date.now());
-  useEffect(() => {
-    const intervalId = window.setInterval(() => {
-      setNowMs(Date.now());
-    }, LIVE_TICK_MS);
-    return () => window.clearInterval(intervalId);
-  }, []);
-
+  // The workspace-runs store already polls server state. Derive open bar ends
+  // when rows/mode change instead of rebuilding every task/config on a second
+  // independent wall-clock interval.
   const tasks = useMemo<GanttTaskLocal[]>(() => {
+    const nowMs = Date.now();
     if (mode === "runs") {
       const out: GanttTaskLocal[] = [];
       for (const row of rows) {
@@ -183,7 +173,7 @@ export const RunsGanttChart = ({
       return out;
     }
     return rows.flatMap((row) => buildExecutionTasks(row, nowMs));
-  }, [rows, mode, nowMs]);
+  }, [rows, mode]);
 
   const config = useMemo(
     () => ({

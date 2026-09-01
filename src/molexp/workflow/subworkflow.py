@@ -2,7 +2,7 @@
 
 :class:`SubWorkflow` is the supported way to embed a reusable inner workflow
 as a single node of an outer workflow — including as the per-element ``body``
-of :meth:`WorkflowCompiler.parallel`. It replaces the ad-hoc pattern of
+of :meth:`Workflow.parallel`. It replaces the ad-hoc pattern of
 hand-building a child :class:`~molexp.workflow.context.TaskContext` and calling
 an inner task's ``execute`` directly.
 
@@ -29,10 +29,10 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from .compiled import CompiledWorkflow
+from .compiler import Workflow, WorkflowCompiler
 from .task import Task
 
 if TYPE_CHECKING:
-    from .compiler import WorkflowCompiler
     from .context import TaskContext
 
 
@@ -40,7 +40,7 @@ class SubWorkflow(Task):
     """Run a reusable inner workflow as one node of an outer workflow.
 
     Construct from an already-compiled :class:`CompiledWorkflow` or from a
-    :class:`WorkflowCompiler` (which is compiled eagerly at construction). Each
+    :class:`Workflow` (which is compiled eagerly at construction). Each
     :meth:`execute` call triggers one fresh inner execution through the
     engine-injected ``sub_runner`` capability, bound (via the engine's private
     channel) to the same workspace / run, so inner-task workspace helpers keep
@@ -48,7 +48,7 @@ class SubWorkflow(Task):
 
     Args:
         inner: The inner workflow to embed — a :class:`CompiledWorkflow`, or a
-            :class:`WorkflowCompiler` which is compiled on construction.
+            :class:`Workflow` which is compiled on construction.
         output: Name of the inner task whose output is returned. When omitted,
             the inner spec's single dependency-leaf (a task no other task
             depends on) is used; if the inner spec has more than one leaf and no
@@ -60,11 +60,9 @@ class SubWorkflow(Task):
     # Engine contract: inject a ``sub_runner`` closure as ``ctx._inputs``.
     __wf_capability__ = "sub_runner"
 
-    def __init__(
-        self, inner: CompiledWorkflow | WorkflowCompiler, *, output: str | None = None
-    ) -> None:
+    def __init__(self, inner: CompiledWorkflow | Workflow, *, output: str | None = None) -> None:
         self._inner: CompiledWorkflow = (
-            inner if isinstance(inner, CompiledWorkflow) else inner.compile()
+            inner if isinstance(inner, CompiledWorkflow) else WorkflowCompiler().compile(inner)
         )
         self._output = output
 

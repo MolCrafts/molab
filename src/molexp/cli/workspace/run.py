@@ -430,7 +430,7 @@ def _make_local_inprocess_handler(
 ) -> RunHandler:
     import asyncio
 
-    from molexp.workflow import seed_from_execution
+    from molexp.workflow._engine.persistence import seed_from_execution
     from molexp.workspace.run import RunContext
 
     def _handler(_script: Path, mol_run: Run, experiment: Experiment, _project: Project) -> None:
@@ -502,7 +502,7 @@ def execute(
 
     from molexp._run_display import read_run_json
     from molexp.entry import load_workspaces
-    from molexp.workflow import read_node_outputs
+    from molexp.workflow._engine.persistence import read_node_outputs
     from molexp.workspace import (
         ExperimentNotFoundError,
         ProjectNotFoundError,
@@ -721,11 +721,11 @@ def _select_backend(
 
     selected_target = None
     if target_cli is not None:
-        from molexp.workspace import Workspace, get_target
+        from molexp.workspace import Workspace
 
         ws = Workspace(target_path)
         try:
-            selected_target = get_target(ws, target_cli)
+            selected_target = ws.get_target(target_cli)
         except KeyError as exc:
             rprint(f"[red]{exc}[/red] — see `molexp target list`.")
             raise typer.Exit(1) from exc
@@ -884,14 +884,14 @@ def _submit_to_scheduler(
         # persisted marker in the execution slot. Derive the execution id here
         # (the marker write claims the slot directory), persist the marker,
         # and hand the SAME id to the submit handler so the worker reopens it.
-        from molexp.workflow import make_execution_id, request_fresh_execution
+        from molexp.workflow import WorkflowRuntime
 
         def _fresh_handler(
             script_arg: Path, mol_run: Run, experiment: Experiment, project: Project
         ) -> None:
             run_dir = Path(str(mol_run.run_dir))
-            execution_id = make_execution_id(mol_run.id, run_dir)
-            request_fresh_execution(run_dir, execution_id)
+            execution_id = WorkflowRuntime.make_execution_id(mol_run.id, run_dir)
+            WorkflowRuntime.request_fresh_execution(run_dir, execution_id)
             submit_handler(script_arg, mol_run, experiment, project, execution_id=execution_id)
 
         handler = _fresh_handler

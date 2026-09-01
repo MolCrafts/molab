@@ -1,12 +1,12 @@
 import { Check, ClipboardCopy, FileQuestion, Loader2, Package, WrapText } from "lucide-react";
 import { type JSX, useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { plansApi } from "@/api";
 import type { PlanDetailResponse } from "@/api/generated/models/PlanDetailResponse";
 import { StatusBadge } from "@/app/components/entity";
 import { runPath } from "@/app/entities/paths";
 import type { PlanRef } from "@/app/renderers/agentEvents";
 import { collectArtifacts, derivePlanRef } from "@/app/renderers/agentEvents";
-import { workspaceApi } from "@/app/state/api";
 import type { ApiSessionEvent, SemanticStatus } from "@/app/types";
 import { Code as InlineCode } from "@/components/ui/code";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
@@ -24,7 +24,6 @@ import { highlightCode, type TokenKind } from "@/lib/highlight";
 import { cn } from "@/lib/utils";
 import { ArtifactBody } from "./artifacts";
 import { planStage } from "./planStages";
-
 // ---------------------------------------------------------------------------
 // Deliverables panel — the right half of the agent session view.
 //
@@ -655,7 +654,7 @@ const AuditReportView = ({ report }: { report: Record<string, unknown> | null })
       </PanelSection>
       <p className="text-label text-muted-foreground/70">
         Every stage, artifact, and lineage edge of this run is also queryable in{" "}
-        <InlineCode className="font-mono">harness.sqlite</InlineCode>.
+        <InlineCode className="font-mono">events.jsonl and approvals.json</InlineCode>.
       </p>
     </div>
   );
@@ -877,7 +876,7 @@ const PlanDeliverables = ({
     let cancelled = false;
     setLoading(true);
     setError(null);
-    workspaceApi
+    plansApi
       .getPlan(planRef.projectId, planRef.experimentId, planRef.runId)
       .then((detail) => {
         if (!cancelled) setPlan(detail);

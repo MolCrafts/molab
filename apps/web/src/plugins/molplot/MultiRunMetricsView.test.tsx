@@ -6,9 +6,7 @@
  */
 
 import { describe, expect, it } from "@rstest/core";
-
-import type { MetricRecord } from "@/app/state/api";
-
+import type { MetricRecord } from "@/api";
 import {
   collectRunSeries,
   type MetricsFetcher,

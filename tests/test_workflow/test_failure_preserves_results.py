@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import pytest
 
-from molexp.workflow import WorkflowCompiler, WorkflowRuntime
+from molexp.workflow import Workflow, WorkflowCompiler, WorkflowRuntime
 
 
 class TestWorkflowRuntimeFailure:
@@ -21,7 +21,7 @@ class TestWorkflowRuntimeFailure:
     async def test_failed_result_preserves_completed_upstream_output(self) -> None:
         """A raising downstream task leaves the completed upstream's output in
         the failed result's ``outputs`` (not an empty dict)."""
-        wf = WorkflowCompiler(name="partial")
+        wf = Workflow(name="partial")
 
         @wf.task
         async def good(ctx) -> str:
@@ -31,7 +31,7 @@ class TestWorkflowRuntimeFailure:
         async def boom(ctx) -> str:
             raise RuntimeError("kaboom")
 
-        result = await WorkflowRuntime().execute(wf.compile())
+        result = await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
 
         assert result.status == "failed"
         assert result.outputs.get("good") == "good-out"  # preserved, not dropped

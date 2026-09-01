@@ -6,8 +6,16 @@ and does not subclass an Agent.
 
 from __future__ import annotations
 
+import ast
 import json
+import subprocess
+import sys
+import tempfile
+import textwrap
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
+
+from mollog import get_logger
 
 from molexp.harness.errors import StageExecutionError
 from molexp.harness.host.compose import compose_plan
@@ -19,7 +27,7 @@ from molexp.harness.plan_tools import BOARD_TOOLS, as_loop_tool
 from molexp.harness.schemas import ModeResult
 from molexp.harness.stages.plan_reachability_probe import PlanReachabilityProbe
 from molexp.harness.store.file_artifact_store import FileArtifactStore
-from molexp.workspace.utils import derive_execution_id
+from molexp.workspace.utils import derive_execution_id, derive_run_id
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -30,22 +38,19 @@ if TYPE_CHECKING:
     from molexp.harness.host.plugin import Plugin
     from molexp.harness.modes.plan_workflow import PlanDraft
     from molexp.harness.registry.capability_registry import CapabilityRegistry
-    from molexp.harness.schemas import PlanArtifactRef
+    from molexp.harness.schemas import PlanArtifactRef, WorkflowSource
     from molexp.harness.stages.approval_gate import Approver
+    from molexp.workspace.experiment import Experiment
+    from molexp.workspace.run import Run
 
     LoopEventObserver = Callable[[object], Awaitable[None]]
 
-__all__ = ["Plan", "plan_loop_system_prompt"]
+_LOG = get_logger(__name__)
+
+__all__ = ["Plan"]
 
 _PLAN_NAME = "plan"
 _TITLE_SEPARATORS = ("，", "。", "；", ",", ";", ".", "?", "？", "!", "：", ":")  # noqa: RUF001
-
-
-def plan_loop_system_prompt(knowledge_digest: str | None = None) -> str:
-    """Re-export — planning ReAct system prompt."""
-    from molexp.harness.modes.plan_workflow import plan_loop_system_prompt as _prompt
-
-    return _prompt(knowledge_digest)
 
 
 def _as_mapping(value: object) -> dict[str, Any]:
@@ -67,27 +72,12 @@ def _short_plan_title(text: str, *, max_len: int = 72) -> str:
     return first[: max_len - 1].rstrip() + "…"
 
 
-def derive_plan_spec(user_input: str) -> dict[str, Any]:
-    """Seed the opaque plan ``spec`` from the operator draft."""
-    try:
-        parsed = json.loads(user_input)
-    except (TypeError, ValueError):
-        parsed = None
-    if isinstance(parsed, dict):
-        return parsed
-    text = user_input.strip() or "experiment"
-    return {
-        "title": _short_plan_title(text),
-        "objective": text,
-        "raw_request": text,
-    }
-
-
 class Plan:
     """Plan bundle: mount the plan host and run the plan workflow.
 
-    Options live on the instance. ``run`` takes the workspace Run and the
-    model gateway. No Agent / Mode inheritance.
+    :meth:`open` binds a content-addressed workspace Run (same draft ⇒
+    same Run). :meth:`execute` runs the pipeline inside the Run lifecycle;
+    :meth:`save` lands the generated workflow IR on the owning experiment.
     """
 
     name = _PLAN_NAME
@@ -114,6 +104,103 @@ class Plan:
         self.on_loop_event = on_loop_event
         self.board_max_iters = board_max_iters
         self.plugins = plugins
+        self._run: Run | None = None
+        self._user_input: str | None = None
+
+    @classmethod
+    def open(
+        cls,
+        experiment: Experiment,
+        user_input: str,
+        *,
+        supersedes: str | None = None,
+        draft: PlanDraft | None = None,
+        probe: PlanReachabilityProbe | None = None,
+        approve: Approver | None = None,
+        realize: bool = True,
+        executor: Executor | None = None,
+        realize_attempts: int = 3,
+        on_loop_event: LoopEventObserver | None = None,
+        board_max_iters: int = 8,
+        plugins: tuple[Plugin, ...] = (),
+    ) -> Plan:
+        """Bind a content-addressed plan Run — same draft ⇒ same Run.
+
+        The run id is derived from ``mode`` / ``draft`` (and ``supersedes``
+        when a later plan replaces an earlier one). ``add_run`` is idempotent
+        on that id, so re-opening the same draft replays store-first on the
+        same Run instead of minting a new one.
+        """
+        from molexp._typing import JSONValue
+
+        params: dict[str, JSONValue] = {"mode": "plan", "draft": user_input}
+        if supersedes:
+            params["supersedes"] = supersedes
+        plan = cls(
+            draft=draft,
+            probe=probe,
+            approve=approve,
+            realize=realize,
+            executor=executor,
+            realize_attempts=realize_attempts,
+            on_loop_event=on_loop_event,
+            board_max_iters=board_max_iters,
+            plugins=plugins,
+        )
+        plan._run = experiment.add_run(params, id=derive_run_id(params))
+        plan._user_input = user_input
+        return plan
+
+    @property
+    def bound_run(self) -> Run:
+        """The workspace Run this plan is bound to via :meth:`open`."""
+        if self._run is None:
+            raise StageExecutionError("Plan is not bound; call Plan.open(...)")
+        return self._run
+
+    @staticmethod
+    def _spec(user_input: str) -> dict[str, Any]:
+        """Seed the opaque plan ``spec`` from the operator draft."""
+        try:
+            parsed = json.loads(user_input)
+        except (TypeError, ValueError):
+            parsed = None
+        if isinstance(parsed, dict):
+            return parsed
+        text = user_input.strip() or "experiment"
+        return {
+            "title": _short_plan_title(text),
+            "objective": text,
+            "raw_request": text,
+        }
+
+    async def execute(
+        self,
+        *,
+        gateway: AgentGateway,
+        capability_registry: CapabilityRegistry | None = None,
+        run: Run | None = None,
+        user_input: str | None = None,
+    ) -> ModeResult:
+        """Run this plan inside the workspace Run lifecycle.
+
+        Marks the run succeeded on completion. Failures propagate and the
+        RunContext settles the run failed. Uses the bound run from
+        :meth:`open` when ``run`` / ``user_input`` are omitted.
+        """
+        host = run if run is not None else self._run
+        text = user_input if user_input is not None else self._user_input
+        if host is None or text is None:
+            raise StageExecutionError("Plan is not bound; call Plan.open(...)")
+        with host.start() as run_ctx:
+            result = await self.run(
+                run=host,
+                user_input=text,
+                gateway=gateway,
+                capability_registry=capability_registry,
+            )
+            run_ctx.mark_succeeded()
+        return result
 
     async def run(
         self,
@@ -155,7 +242,7 @@ class Plan:
             raise StageExecutionError("plan host did not publish a FileArtifactStore")
         if ctx.agent_gateway is None:
             raise StageExecutionError("plan host did not publish ctx.llm")
-        spec = derive_plan_spec(user_input)
+        spec = self._spec(user_input)
         board_file = board_path(run.run_dir)
         disk_board = DiskTaskBoard(board_file, artifact_store=store)
         belt = host.ctx.require(Keys.TOOLS)
@@ -249,3 +336,227 @@ class Plan:
             stage_artifacts=tuple(a for a in stage_artifacts if a is not None),
             final_artifact=final,
         )
+
+    def save(self, *, run: Run | None = None) -> bool:
+        """Persist the generated workflow IR onto the run's owning experiment.
+
+        Compiles the run's ``workflow_source`` artifact and writes it on the
+        experiment (stamping ``plan_run_id``). Returns ``True`` when an IR
+        document was written. Uses the bound run from :meth:`open` when
+        ``run`` is omitted.
+        """
+        host = run if run is not None else self._run
+        if host is None:
+            raise StageExecutionError("Plan.save requires a bound run; call Plan.open(...)")
+        ir = self._ir(run=host)
+        if ir is None:
+            return False
+        experiment = host.experiment
+        experiment.metadata = experiment.metadata.model_copy(
+            update={
+                "workflow_source": json.dumps(ir, sort_keys=True),
+                "plan_run_id": host.id,
+            }
+        )
+        experiment.save()
+        return True
+
+    def _ir(self, *, run: Run) -> dict[str, Any] | None:
+        """Compile this plan run's ``workflow_source`` artifact to display IR."""
+        from molexp.harness.schemas import WorkflowSource
+        from molexp.harness.store.paths import harness_artifact_root
+
+        store = FileArtifactStore(root=harness_artifact_root(run.run_dir))
+        ref = store.latest_by_kind("workflow_source")
+        if ref is None:
+            return None
+        ws = WorkflowSource.model_validate_json(store.get(ref.id))
+        return _compile_package_to_ir(ws) if ws.files else _compile_source_to_ir(ws.source)
+
+
+# Compile helpers for :meth:`Plan.save`. Not a public persist API.
+
+_SAFE_BUILTINS: dict[str, Any] = {
+    "__import__": __import__,
+    "len": len,
+    "range": range,
+    "list": list,
+    "dict": dict,
+    "tuple": tuple,
+    "set": set,
+    "str": str,
+    "int": int,
+    "float": float,
+    "bool": bool,
+    "enumerate": enumerate,
+    "zip": zip,
+    "sorted": sorted,
+    "sum": sum,
+    "min": min,
+    "max": max,
+}
+
+
+def _attach_task_sources(ir: dict[str, Any], source: str) -> None:
+    """Annotate each ``task_config`` with its own source code (in place)."""
+    task_configs = ir.get("task_configs")
+    if not isinstance(task_configs, list):
+        return
+    wanted = {
+        tc["task_id"]
+        for tc in task_configs
+        if isinstance(tc, dict) and isinstance(tc.get("task_id"), str)
+    }
+    if not wanted:
+        return
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return
+    lines = source.splitlines()
+    by_name: dict[str, str] = {}
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        if node.name not in wanted or node.end_lineno is None:
+            continue
+        start = min([d.lineno for d in node.decorator_list] + [node.lineno])
+        segment = "\n".join(lines[start - 1 : node.end_lineno])
+        by_name[node.name] = textwrap.dedent(segment).strip("\n")
+    for tc in task_configs:
+        if not isinstance(tc, dict):
+            continue
+        task_id = tc.get("task_id")
+        if isinstance(task_id, str) and task_id in by_name:
+            tc["source"] = by_name[task_id]
+
+
+def _annotation_to_ui_type(ann: ast.expr | None) -> tuple[str, list | None]:
+    """Map a parameter annotation to a UI field type (+ enum options)."""
+    if isinstance(ann, ast.Name):
+        return {"float": "number", "int": "integer", "str": "text", "bool": "boolean"}.get(
+            ann.id, "text"
+        ), None
+    if isinstance(ann, ast.Subscript):
+        base = ann.value
+        base_name = base.id if isinstance(base, ast.Name) else getattr(base, "attr", None)
+        if base_name == "Literal":
+            elts = ann.slice.elts if isinstance(ann.slice, ast.Tuple) else [ann.slice]
+            options = [e.value for e in elts if isinstance(e, ast.Constant)]
+            return "enum", options
+    return "text", None
+
+
+def _extract_input_schema(ir: dict[str, Any], source: str) -> None:
+    """Derive the workflow's editable inputs from the tasks' typed parameters."""
+    task_configs = ir.get("task_configs")
+    if not isinstance(task_configs, list):
+        return
+    wanted = {
+        tc["task_id"]
+        for tc in task_configs
+        if isinstance(tc, dict) and isinstance(tc.get("task_id"), str)
+    }
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return
+    fields: dict[str, dict] = {}
+
+    def _record(arg: ast.arg, default: ast.expr | None) -> None:
+        name = arg.arg
+        if default is None or name in ("ctx", "self") or name in fields:
+            return
+        ftype, options = _annotation_to_ui_type(arg.annotation)
+        try:
+            default_value = ast.literal_eval(default)
+        except (ValueError, SyntaxError):
+            default_value = None
+        field: dict = {"name": name, "type": ftype, "default": default_value}
+        if options is not None:
+            field["options"] = options
+        fields[name] = field
+
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) or node.name not in wanted:
+            continue
+        pos = node.args.args
+        for arg, default in zip(
+            pos[len(pos) - len(node.args.defaults) :], node.args.defaults, strict=False
+        ):
+            _record(arg, default)
+        for arg, default in zip(node.args.kwonlyargs, node.args.kw_defaults, strict=False):
+            _record(arg, default)
+
+    if fields:
+        prior = ir.get("input_schema")
+        existing = {
+            f["name"]: f
+            for f in (prior if isinstance(prior, list) else [])
+            if isinstance(f, dict) and "name" in f
+        }
+        for name, field in fields.items():
+            existing.setdefault(name, field)
+        ir["input_schema"] = list(existing.values())
+
+
+def _compile_source_to_ir(source: str) -> dict[str, Any] | None:
+    """Compile a ``build_workflow()`` program to a UI-renderable IR document."""
+    import molexp.workflow as workflow
+
+    namespace: dict[str, Any] = {"__builtins__": _SAFE_BUILTINS}
+    try:
+        exec(compile(source, "<plan_workflow_source>", "exec"), namespace)
+        builder = namespace["build_workflow"]()
+        compiled = workflow.WorkflowCompiler().compile(builder)
+        ir = dict(workflow.default_codec.spec_to_ir(compiled, strict=False))
+        _attach_task_sources(ir, source)
+        _extract_input_schema(ir, source)
+        return ir
+    except Exception as exc:
+        _LOG.warning(f"plan workflow source did not compile for display: {exc!r}")
+        return None
+
+
+_PACKAGE_IR_SCRIPT = textwrap.dedent(
+    """
+    import importlib, json, sys
+
+    sys.path.insert(0, sys.argv[1])
+    module = importlib.import_module(sys.argv[2])
+    from molexp.workflow import WorkflowCompiler, default_codec
+    compiled = WorkflowCompiler().compile(module.build_workflow())
+
+    json.dump(dict(default_codec.spec_to_ir(compiled, strict=False)), sys.stdout)
+    """
+)
+
+
+def _compile_package_to_ir(ws: WorkflowSource) -> dict[str, Any] | None:
+    """Multi-file mode: build the display IR from ``ws.files`` in a subprocess."""
+    try:
+        with tempfile.TemporaryDirectory(prefix="molexp-plan-ir-") as tmp:
+            for f in ws.files:
+                target = Path(tmp) / f.path
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(f.source, encoding="utf-8")
+            proc = subprocess.run(
+                [sys.executable, "-c", _PACKAGE_IR_SCRIPT, tmp, ws.module_name],
+                capture_output=True,
+                text=True,
+                timeout=60,
+                check=False,
+            )
+        if proc.returncode != 0:
+            _LOG.warning(
+                f"plan workflow package did not compile for display: {proc.stderr.strip()[-500:]}"
+            )
+            return None
+        ir = dict(json.loads(proc.stdout))
+    except Exception as exc:
+        _LOG.warning(f"plan workflow package did not compile for display: {exc!r}")
+        return None
+    for f in ws.files:
+        _attach_task_sources(ir, f.source)
+        _extract_input_schema(ir, f.source)
+    return ir

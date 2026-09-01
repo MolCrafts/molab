@@ -16,7 +16,7 @@ This example, entirely offline (no LLM, no network):
    the intent / reversibility / approval-level the gate decided on,
 4. confirms the run actually moved on disk.
 
-The gate stores its audit (the ``change_proposal`` artifact + ``harness.sqlite``)
+The gate stores its audit (the ``change_proposal`` artifact + ``events.jsonl + approvals.json``)
 under an auto-created ``curations`` project — a side effect worth knowing about.
 
 Run directly::

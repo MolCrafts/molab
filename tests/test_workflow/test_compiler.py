@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from molexp.workflow import CompiledWorkflow, WorkflowCompiler
+from molexp.workflow import CompiledWorkflow, Workflow, WorkflowCompiler
 from molexp.workflow.version import WorkflowVersion
 
 
@@ -23,7 +23,7 @@ class _Exp:
 class TestWorkflowCompilerCompile:
     @pytest.mark.unit
     def test_emits_compiled_workflow_with_snapshots_version_and_graph(self):
-        wf = WorkflowCompiler(name="pipeline")
+        wf = Workflow(name="pipeline")
 
         @wf.task
         async def fetch(ctx):
@@ -33,7 +33,7 @@ class TestWorkflowCompilerCompile:
         async def train(ctx):
             return {"b": 2}
 
-        compiled = wf.compile()
+        compiled = WorkflowCompiler().compile(wf)
         assert isinstance(compiled, CompiledWorkflow)
         # exactly one TaskSnapshot per registered task
         assert set(compiled.snapshots) == {"fetch", "train"}
@@ -55,7 +55,7 @@ class TestWorkflowCompilerCompile:
 
     @pytest.mark.unit
     def test_binds_to_experiment_when_given(self):
-        wf = WorkflowCompiler(name="b")
+        wf = Workflow(name="b")
 
         @wf.task
         async def t(ctx):
@@ -65,8 +65,39 @@ class TestWorkflowCompilerCompile:
 
         reg = WorkflowBindingRegistry()
         exp = _Exp("exp-001")
-        compiled = wf.compile(experiment=exp, registry=reg)
+        compiled = WorkflowCompiler().compile(wf, experiment=exp, registry=reg)
         assert reg.for_experiment(exp) is compiled
         assert compiled.binding is not None
         assert compiled.binding.experiment_id == "exp-001"
         assert compiled.binding.workflow_id == compiled.workflow_id
+
+    @pytest.mark.unit
+    def test_compiler_compiles_a_workflow(self):
+        wf = Workflow(name="authored")
+
+        @wf.task
+        async def ping(ctx):
+            return 1
+
+        compiled = WorkflowCompiler().compile(wf)
+        assert compiled.name == "authored"
+        assert "ping" in compiled.registration_by_name
+
+    @pytest.mark.unit
+    def test_compiler_is_not_a_workflow(self):
+        assert not issubclass(WorkflowCompiler, Workflow)
+        assert not hasattr(Workflow, "compile")
+        wf = Workflow(name="x")
+        assert not hasattr(wf, "compile")
+
+    @pytest.mark.unit
+    def test_compiler_rejects_builder_constructor(self):
+        with pytest.raises(TypeError):
+            WorkflowCompiler(name="legacy")  # type: ignore[call-arg]
+
+    @pytest.mark.unit
+    def test_compiler_requires_a_workflow(self):
+        with pytest.raises(TypeError):
+            WorkflowCompiler().compile()  # type: ignore[call-arg]
+        with pytest.raises(TypeError, match="requires a Workflow"):
+            WorkflowCompiler().compile(object())  # type: ignore[arg-type]

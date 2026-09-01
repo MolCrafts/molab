@@ -14,9 +14,9 @@ import tempfile
 from pathlib import Path
 
 import molexp as me
-from molexp.workflow import WorkflowCompiler, WorkflowRuntime
+from molexp.workflow import Workflow, WorkflowCompiler, WorkflowRuntime
 
-wf = WorkflowCompiler(name="train")
+wf = Workflow(name="train")
 
 
 @wf.task
@@ -32,7 +32,7 @@ async def train(lr: float = 1e-3, epochs: int = 3) -> dict:
     return {"lr": lr, "epochs": epochs, "final_loss": final_loss}
 
 
-compiled = wf.compile()
+compiled = WorkflowCompiler().compile(wf)
 
 
 async def main() -> None:

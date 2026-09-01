@@ -12,8 +12,9 @@ from typing import Any
 
 import pytest
 
-from molexp.services.plan_runtime import PlanPreflightError, preflight_plan_router
+from molexp.services.plan_runtime import PlanPreflightError
 from molexp.services.plan_runtime import gateway as plan_gateway
+from molexp.services.plan_runtime.gateway import preflight_plan_router
 
 
 class TestMissingAgentExtraIsolated:

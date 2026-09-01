@@ -27,7 +27,6 @@ from .assets import AssetScope
 from .base import (
     _load_metadata,
     _reconstruct,
-    _save_metadata,
 )
 from .errors import RunExistsError, RunNotFoundError
 from .folder import WORKSPACE_RUN_KIND, Folder
@@ -43,6 +42,7 @@ from .utils import generate_id
 
 if TYPE_CHECKING:
     from .experiment import Experiment
+    from .knowledge import Knowledge
 
 # Re-exported for backward compatibility — the canonical definition now
 # lives in ``.models`` so the run-lifecycle collaborators can import it
@@ -95,11 +95,23 @@ class RunWorkflowExecutor(Protocol):
     """
 
     def execute(
-        self, run: Run, workflow: object | None, *, rerun: bool = False, fresh: bool = False
+        self,
+        run: Run,
+        workflow: object | None,
+        *,
+        resume: bool = False,
+        rerun: bool = False,
+        fresh: bool = False,
     ) -> object: ...
 
     async def aexecute(
-        self, run: Run, workflow: object | None, *, rerun: bool = False, fresh: bool = False
+        self,
+        run: Run,
+        workflow: object | None,
+        *,
+        resume: bool = False,
+        rerun: bool = False,
+        fresh: bool = False,
     ) -> object: ...
 
 
@@ -388,7 +400,21 @@ class Run(Folder):
         self.save()
 
     def save(self) -> None:
-        _save_metadata(self.metadata, self._disk().join(self.run_dir, "run.json"), fs=self._disk())
+        with self._metadata_lock():
+            self._write_run_json()
+
+    def persist_driver_context(self, context: dict[str, object]) -> None:
+        """Write the driver ``context`` blob under the same lock as identity.
+
+        ``run.json`` is one file: ``RunMetadata`` fields plus an optional
+        ``context`` section (results / workflow snapshot used by
+        :class:`~molexp.workspace.run_context.ContextStore`). Identity
+        writes preserve an existing ``context``; this method is the only
+        updater of that section.
+        """
+        with self._metadata_lock():
+            self._reload_metadata_from_disk()
+            self._write_run_json(context=context)
 
     @classmethod
     def load(cls, run_dir: PathArg) -> Run:
@@ -454,7 +480,15 @@ class Run(Folder):
         """
         return RunContext(self, profile_config=profile_config, execution_id=execution_id)
 
-    def execute(self, workflow: object, /, *, rerun: bool = False, fresh: bool = False) -> object:
+    def execute(
+        self,
+        workflow: object,
+        /,
+        *,
+        resume: bool = False,
+        rerun: bool = False,
+        fresh: bool = False,
+    ) -> object:
         """Execute *workflow* against this run in one step and return the result.
 
         Folds the driver dance — ``run.start()`` context, workflow-runtime
@@ -478,13 +512,23 @@ class Run(Folder):
         :meth:`aexecute`. Delegates through the :func:`set_run_executor`
         seam so workspace never imports the workflow layer.
         """
-        return require_run_executor().execute(self, workflow, rerun=rerun, fresh=fresh)
+        return require_run_executor().execute(
+            self, workflow, resume=resume, rerun=rerun, fresh=fresh
+        )
 
     async def aexecute(
-        self, workflow: object, /, *, rerun: bool = False, fresh: bool = False
+        self,
+        workflow: object,
+        /,
+        *,
+        resume: bool = False,
+        rerun: bool = False,
+        fresh: bool = False,
     ) -> object:
         """Async variant of :meth:`execute` — same semantics, awaitable."""
-        return await require_run_executor().aexecute(self, workflow, rerun=rerun, fresh=fresh)
+        return await require_run_executor().aexecute(
+            self, workflow, resume=resume, rerun=rerun, fresh=fresh
+        )
 
     # ── Sugar: ``with run as ctx:`` / ``async with run as ctx:`` ────────
     #
@@ -526,6 +570,27 @@ class Run(Folder):
             finished_at=now,
             owner_pid=None,
             owner_host=None,
+        )
+
+    def harvest(
+        self,
+        *,
+        cls: type,
+        narrative: str,
+        created_by: str,
+        results: dict[str, JSONValue] | None = None,
+        name: str | None = None,
+    ) -> Knowledge:
+        """Harvest this terminal run into sourced Knowledge under its experiment."""
+        from .harvest import harvest_run
+
+        return harvest_run(
+            self,
+            cls=cls,
+            narrative=narrative,
+            created_by=created_by,
+            results=results,
+            name=name,
         )
 
     def delete_execution(self, execution_id: str) -> None:
@@ -589,6 +654,30 @@ class Run(Folder):
         except Exception:
             _logger.debug(f"run {self.id}: could not reload run.json; keeping in-memory copy")
 
+    def _write_run_json(self, *, context: dict[str, object] | None = None) -> None:
+        """Atomically write ``run.json``. Caller holds :meth:`_metadata_lock`.
+
+        When *context* is omitted, any existing ``context`` section on disk is
+        preserved so status/ownership updates cannot drop driver results.
+        """
+        from .file_store import FileStore
+        from .schema_version import read_versioned_json, versioned_payload
+
+        fs = self._disk()
+        path = fs.join(self.run_dir, "run.json")
+        payload: dict[str, object] = dict(self.metadata.model_dump(mode="json"))
+        existing_context: object = None
+        try:
+            if fs.exists(path):
+                existing_context = read_versioned_json(path, fs=fs).get("context")
+        except Exception:
+            existing_context = None
+        if context is not None:
+            payload["context"] = context
+        elif isinstance(existing_context, dict):
+            payload["context"] = existing_context
+        FileStore(self.run_dir, fs=fs).put("run.json", versioned_payload(payload))
+
     def _update_metadata(self, **updates: object) -> None:
         """Forward field updates into ``RunMetadata.model_copy`` and persist.
 
@@ -607,7 +696,7 @@ class Run(Folder):
         with self._metadata_lock():
             self._reload_metadata_from_disk()
             self.metadata = self.metadata.model_copy(update=updates)
-            self.save()
+            self._write_run_json()
 
     def update_provenance(self, **updates: object) -> None:
         """Patch ``RunMetadata`` fields on ``run.json`` and persist.

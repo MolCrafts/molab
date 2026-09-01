@@ -9,6 +9,7 @@ import {
   Wrench,
 } from "lucide-react";
 import { type JSX, useMemo, useState } from "react";
+import { PlanDecisionBar } from "@/app/approvals/PlanDecisionBar";
 import {
   type ConversationTurn,
   EVENT_META,
@@ -31,7 +32,6 @@ import { cn } from "@/lib/utils";
 import { ToolResultArtifacts, TurnEmbedArtifacts } from "./artifacts";
 import { ExperimentScopeForm } from "./ExperimentScopeForm";
 import { LandDecisionBar, looksLikeLandOffer } from "./LandDecisionBar";
-import { PlanDecisionBar } from "./PlanDecisionBar";
 import { PlanDocumentCard } from "./PlanDocumentCard";
 
 const formatTs = (ts: string): string => {

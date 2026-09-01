@@ -16,6 +16,7 @@ import {
   setPluginEnabled,
   usePluginPreferencesGeneration,
 } from "@/plugins/preferences";
+import { ensureInternalPlugin } from "@/plugins/runtime";
 
 export function UiPluginsPanel(): JSX.Element {
   usePluginPreferencesGeneration();
@@ -53,7 +54,10 @@ export function UiPluginsPanel(): JSX.Element {
             <Switch
               id={switchId}
               checked={enabled}
-              onCheckedChange={(checked) => setPluginEnabled(plugin.id, checked)}
+              onCheckedChange={(checked) => {
+                setPluginEnabled(plugin.id, checked);
+                if (checked) void ensureInternalPlugin(plugin.id);
+              }}
               aria-label={`${enabled ? "Disable" : "Enable"} ${plugin.name}`}
             />
           </li>

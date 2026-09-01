@@ -65,7 +65,7 @@ A **seam** is one swappable capability with three roles. One role alone is not a
 | Role | Owns | molexp examples already close |
 |---|---|---|
 | **Service Definition** | `ctx.<key>` + vocabulary types | `AgentGateway`, `CapabilityRegistry`, `FileSystem`, `Executor`, `ApprovalStore` |
-| **Service Provider** | one implementation of that definition | `RouterBackedAgentGateway` / `StubAgentGateway`; `LocalFileSystem` / `RemoteFileSystem` / `CachingFileSystem`; `LocalExecutor` / `DryRunExecutor`; `SQLiteApprovalStore` |
+| **Service Provider** | one implementation of that definition | `RouterBackedAgentGateway` / `StubAgentGateway`; `LocalFileSystem` / `RemoteFileSystem` / `CachingFileSystem`; `LocalExecutor` / `DryRunExecutor`; `FileApprovalStore` |
 | **Consumer** | model-facing tool, Stage, or lifecycle verb that only talks to the definition | plan board tools, `InvokeCapability`, `Run.execute` via `set_run_executor`, harvest |
 
 Swapping a provider must move every consumer of that seam. Filesystem + subprocess share one execution world: point them at a remote target and Bash-equivalent, preview, and job submit move together. That is why compute target, `FileSystem`, and molq must be one world, not three forks.
@@ -151,7 +151,7 @@ Events (DeepSeek names where the seam matches): `agent/pre-step`, `llm/stream`, 
 
 ### 2.2 Workspace and workflow are plugins
 
-**Workspace plugin.** Provides durable identity and bytes (`Folder` family, `ops/run.json`, `assets.json`, OKF concepts). Providers differ by `FileSystem` and compute target; the definition does not. Consumers: workflow execute, agent session folders, harvest, plan tools, git projection. On-disk layout and the verb law (`run` / `resume` / `rerun` / `cancel`) are **this plugin's public contract**, not host internals — other plugins must not invent a parallel run record.
+**Workspace plugin.** Provides durable identity and bytes (`Folder` family, `run.json (hot state) + alive`, `assets.json`, OKF concepts). Providers differ by `FileSystem` and compute target; the definition does not. Consumers: workflow execute, agent session folders, harvest, plan tools, git projection. On-disk layout and the verb law (`run` / `resume` / `rerun` / `cancel`) are **this plugin's public contract**, not host internals — other plugins must not invent a parallel run record.
 
 **Workflow plugin.** Provides compile + values-on-edges execute + resume seed. It injects `ctx.workspace` (run dir, cache, atomic JSON). It must not inject `ctx.llm` as a required service. The `set_run_executor` inversion already is a seam: workspace consumes a provider registered by the workflow plugin.
 
@@ -226,7 +226,7 @@ These stay inside their plugin. The host does not re-encode them.
 
 | Plugin | Owns | Host must not |
 |---|---|---|
-| workspace | Run status × verbs; `ops/run.json`; Folder CRUD; asset manifests | invent a second run fingerprint or status store |
+| workspace | Run status × verbs; `run.json (hot state) + alive`; Folder CRUD; asset manifests | invent a second run fingerprint or status store |
 | workflow | compile / execute / resume seed; cache identity | load `_engine` in the host process |
 | agent | Session log; ChatLoop / InteractiveLoop | import `pydantic_ai` outside `_pydanticai/` |
 | approval | pending / grant / reject; store-first replay | treat `ApprovalPendingError` as failure |

@@ -12,6 +12,7 @@ repository. Its contents outlive any single feature or spec.
 | `integration.md` | How plugins cooperate — the WorkspaceContext → KnowledgeDelta loop as a bundle composition. Companion to `harness-plugins.md` + `harness-goal.md`. |
 | `open-questions.md` | Uncertainties recorded over time; resolved as answers become clear. |
 | `vision-gap-2026-07.md` | Snapshot of vision ↔ code gaps (July 2026); passive reference, not a live spec. |
+| `ui-serve.md` | UI serve / rebuild command table (`--dev` vs `npm run build:web` vs `-C build-web`). |
 
 ## What does *not* belong here
 

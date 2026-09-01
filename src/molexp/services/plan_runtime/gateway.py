@@ -359,7 +359,9 @@ def build_plan_gateway(
 
     if router is None:
         router = preflight_plan_router(model=model, models=models)
-    store = FileArtifactStore(root=Path(run.run_dir / "artifacts"))
+    from molexp.harness.store.paths import harness_artifact_root
+
+    store = FileArtifactStore(root=harness_artifact_root(run.run_dir))
     required_mcp = plan_agent_mcp_servers()
     mcp_tools_by_agent = _resolve_agent_mcp_tools(
         required_mcp,

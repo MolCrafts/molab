@@ -7,22 +7,10 @@
 // all — gets a consistent trail.
 // ─────────────────────────────────────────────────────────────────────────────
 
-import { entityPath, SECTION_PATH } from "@/app/entities/paths";
+import { entityPath } from "@/app/entities/paths";
+import { getNavigationContribution } from "@/app/navigation/sections";
 import type { BreadcrumbItem, LeftPanelView, Selection, WorkspaceSnapshot } from "@/app/types";
 import { agentTaskDisplayTitle } from "@/lib/agent-task-title";
-
-const SECTION_ROOT: Record<LeftPanelView, BreadcrumbItem> = {
-  // Top of the hierarchy is Project (not Experiment) — see LeftPanel viewOptions.
-  projects: { label: "Projects", to: SECTION_PATH.projects },
-  workspace: { label: "Workspace", to: SECTION_PATH.workspace },
-  runs: { label: "Runs", to: SECTION_PATH.runs },
-  activity: { label: "Activity", to: SECTION_PATH.activity },
-  workflow: { label: "Workflows", to: SECTION_PATH.workflows },
-  asset: { label: "Assets", to: SECTION_PATH.assets },
-  agent: { label: "Agent Tasks", to: SECTION_PATH.agents },
-  knowledge: { label: "Knowledge", to: SECTION_PATH.knowledge },
-  settings: { label: "Settings", to: SECTION_PATH.settings },
-};
 
 const crumb = (label: string, to?: string): BreadcrumbItem => (to ? { label, to } : { label });
 
@@ -31,7 +19,8 @@ export const buildTrail = (
   leftPanelView: LeftPanelView,
   snapshot: WorkspaceSnapshot,
 ): BreadcrumbItem[] => {
-  const root = SECTION_ROOT[leftPanelView];
+  const contribution = getNavigationContribution(leftPanelView);
+  const root = { label: contribution.breadcrumbLabel, to: contribution.route };
 
   if (!selection) {
     // Section landing page — root only, not a link to itself.

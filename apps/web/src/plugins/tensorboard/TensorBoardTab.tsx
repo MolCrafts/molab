@@ -1,8 +1,8 @@
 import { AlertTriangle, BarChart3, Download } from "lucide-react";
 import { type JSX, useEffect, useMemo, useState } from "react";
+import type { TensorboardScalarSeries, TensorboardScalarsResponse } from "@/api";
+import { TensorboardScalarsError, tensorboardApi } from "@/api";
 import { EmptyState, OverviewSection } from "@/app/components/entity";
-import type { TensorboardScalarSeries, TensorboardScalarsResponse } from "@/app/state/api";
-import { TensorboardScalarsError, workspaceApi } from "@/app/state/api";
 import type { RendererProps } from "@/app/types";
 import { Input } from "@/components/ui/input";
 import { WorkbenchAction } from "@/components/workbench";
@@ -108,7 +108,7 @@ export const TensorBoardTab = ({ selection, snapshot }: TensorBoardTabProps): JS
     }
     let cancelled = false;
     setState({ kind: "loading" });
-    workspaceApi
+    tensorboardApi
       .getRunTensorboardScalars(run.projectId, run.experimentId, run.id)
       .then((data) => {
         if (cancelled) return;

@@ -1,8 +1,8 @@
 import { Activity, AlertTriangle, Maximize2, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { MetricRecord } from "@/api";
+import { runsApi } from "@/api";
 import { EmptyState, OverviewSection } from "@/app/components/entity";
-import type { MetricRecord } from "@/app/state/api";
-import { workspaceApi } from "@/app/state/api";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import {
@@ -567,7 +567,7 @@ export const RunMetricsView = ({
     const fetchMetrics = async (): Promise<void> => {
       const sinceLine = nextLineRef.current;
       try {
-        const response = await workspaceApi.getRunMetrics(projectId, experimentId, runId, {
+        const response = await runsApi.getRunMetrics(projectId, experimentId, runId, {
           sinceLine,
         });
         if (cancelled) {

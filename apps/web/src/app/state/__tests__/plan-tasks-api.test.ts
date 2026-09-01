@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
+import { planTasksApi } from "@/api";
 import { PlanTasksService } from "@/api/generated/services/PlanTasksService";
-import { workspaceApi } from "@/app/state/api";
 
-const CREATE = "createPlanTaskApiProjectsProjectIdExperimentsExperimentIdPlanTasksPost" as const;
-const GET = "getPlanTaskApiProjectsProjectIdExperimentsExperimentIdPlanTasksTaskIdGet" as const;
+const CREATE = "createPlanTask" as const;
+const GET = "getPlanTask" as const;
 
 const RESPONSE = {
   taskId: "plan-1",
@@ -17,7 +17,7 @@ const RESPONSE = {
   workflowPersisted: false,
 };
 
-describe("workspaceApi plan tasks", () => {
+describe("planTasksApi", () => {
   afterEach(() => {
     rs.restoreAllMocks();
   });
@@ -26,7 +26,7 @@ describe("workspaceApi plan tasks", () => {
     const spy = rs.spyOn(PlanTasksService, CREATE).mockResolvedValue(RESPONSE as never);
     const fetchSpy = rs.spyOn(globalThis, "fetch");
 
-    const result = await workspaceApi.createPlanTask("proj", "exp", { draft: "screen ratios" });
+    const result = await planTasksApi.createPlanTask("proj", "exp", { draft: "screen ratios" });
 
     expect(spy).toHaveBeenCalledWith("proj", "exp", { draft: "screen ratios" });
     expect(fetchSpy).not.toHaveBeenCalled();
@@ -38,7 +38,7 @@ describe("workspaceApi plan tasks", () => {
     const done = { ...RESPONSE, status: "completed", workflowPersisted: true };
     const spy = rs.spyOn(PlanTasksService, GET).mockResolvedValue(done as never);
 
-    const result = await workspaceApi.getPlanTask("proj", "exp", "plan-1");
+    const result = await planTasksApi.getPlanTask("proj", "exp", "plan-1");
 
     expect(spy).toHaveBeenCalledWith("proj", "exp", "plan-1");
     expect(result.status).toBe("completed");

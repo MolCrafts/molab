@@ -9,22 +9,12 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import StreamingResponse
 
+from molexp.plugins.metrics import read_run_metrics
 from molexp.plugins.submit_molq.cancel import try_cancel
 from molexp.plugins.submit_molq.submit import SubmitHandler
-from molexp.workflow import (
-    WorkflowSnapshotRef,
-    default_binding_registry,
-    make_execution_id,
-    request_fresh_execution,
-    resolve_spec_entrypoint,
-)
-from molexp.workspace import (
-    LOCAL_TARGET_NAME,
-    RETRYABLE_STATUSES,
-    Experiment,
-    RunStatus,
-    reap_zombie_run,
-)
+from molexp.workflow import WorkflowRuntime, WorkflowSnapshotRef, default_binding_registry
+from molexp.workflow.promote import resolve_spec_entrypoint
+from molexp.workspace import LOCAL_TARGET_NAME, RETRYABLE_STATUSES, Experiment, RunStatus
 from molexp.workspace import (
     ExperimentNotFoundError as WorkspaceExperimentNotFoundError,
 )
@@ -34,13 +24,12 @@ from molexp.workspace import (
 from molexp.workspace import (
     RunNotFoundError as WorkspaceRunNotFoundError,
 )
-from molexp.workspace import resolve_compute_target as resolve_target
-from molexp.workspace.events import read_workspace_events
 from molexp.workspace.fs_cached import CachedRemoteFileSystem
 from molexp.workspace.fs_tree import list_tree_children, tree_to_run_file_dicts
 from molexp.workspace.lifecycle_ops import cancel_run as lifecycle_cancel_run
-from molexp.workspace.metrics import read_run_metrics
+from molexp.workspace.run_reaper import reap_zombie_run
 from molexp.workspace.targets import get_target
+from molexp.workspace.targets import resolve_compute_target as resolve_target
 
 from ..dependencies import get_workspace
 from ..exceptions import InvalidStatusError, RunNotFoundError
@@ -64,7 +53,6 @@ from ..schemas import (
     RunStatusResponse,
     RunStatusUpdateRequest,
 )
-from .workspace import WorkspaceEventResponse
 
 router = APIRouter(
     prefix="/projects/{project_id}/experiments/{experiment_id}/runs",
@@ -132,7 +120,9 @@ def _run_has_workflow_source(run) -> bool:  # noqa: ANN001
     from molexp.harness.store.file_artifact_store import FileArtifactStore
 
     try:
-        store = FileArtifactStore(root=Path(run.run_dir) / "artifacts")
+        from molexp.harness.store.paths import harness_artifact_root
+
+        store = FileArtifactStore(root=harness_artifact_root(run.run_dir))
         return store.latest_by_kind("workflow_source") is not None
     except Exception:
         return False
@@ -249,15 +239,27 @@ def create_scoped_run(
     return RunResponse.from_model(run)
 
 
+def _execution_stream(exec_dir: Path, name: str) -> Path | None:
+    """Stdout/stderr live under ``jobs/<id>/``; older trees kept them on the exec root."""
+    legacy = exec_dir / name
+    if legacy.exists():
+        return legacy
+    jobs = exec_dir / "jobs"
+    if not jobs.is_dir():
+        return None
+    found = sorted(p for p in jobs.glob(f"*/{name}") if p.is_file() or p.is_symlink())
+    return found[0] if found else None
+
+
 def _read_execution_logs(run, execution_id: str) -> RunLogsResponse:  # noqa: ANN001
     exec_dir = Path(run.run_dir) / "executions" / execution_id
     stdout: str | None = None
     stderr: str | None = None
-    out_file = exec_dir / "stdout.log"
-    err_file = exec_dir / "stderr.log"
-    if out_file.exists():
+    out_file = _execution_stream(exec_dir, "stdout.log")
+    err_file = _execution_stream(exec_dir, "stderr.log")
+    if out_file is not None:
         stdout = out_file.read_text(errors="replace")
-    if err_file.exists():
+    if err_file is not None:
         stderr = err_file.read_text(errors="replace")
     # Fall back to the workflow runtime log when stdout wasn't captured (e.g. an
     # in-process / non-molq execution writes only ``logs/run.log``), so the Logs
@@ -685,7 +687,7 @@ def start_run(
         synthesized = _synthesize_snapshot(run.experiment)
         if synthesized is not None:
             run.update_provenance(workflow_snapshot=synthesized)
-    execution_id = make_execution_id(run.id, Path(run.run_dir))
+    execution_id = WorkflowRuntime.make_execution_id(run.id, Path(run.run_dir))
     _dispatch_to_molq(target, run, execution_id=execution_id)
     return RunContinueResponse(
         runId=run.id,
@@ -721,7 +723,9 @@ def resume_run(
     reap_zombie_run(run)
     _require_retryable(run, run_id)
 
-    execution_id = _resumable_execution_id(run) or make_execution_id(run.id, Path(run.run_dir))
+    execution_id = _resumable_execution_id(run) or WorkflowRuntime.make_execution_id(
+        run.id, Path(run.run_dir)
+    )
     _dispatch_continuation(workspace, run, execution_id)
     return RunContinueResponse(
         runId=run.id,
@@ -767,9 +771,9 @@ def rerun_run(
     reap_zombie_run(run)
     _require_retryable(run, run_id)
 
-    execution_id = make_execution_id(run.id, Path(run.run_dir))
+    execution_id = WorkflowRuntime.make_execution_id(run.id, Path(run.run_dir))
     if fresh:
-        request_fresh_execution(str(run.run_dir), execution_id)
+        WorkflowRuntime.request_fresh_execution(str(run.run_dir), execution_id)
     _dispatch_continuation(workspace, run, execution_id)
     return RunContinueResponse(
         runId=run.id,
@@ -827,37 +831,6 @@ def cancel_run(
     )
 
 
-# The per-run events route reuses the workspace-wide wire shape — one frozen
-# model for every spine read; the alias keeps this module's public name.
-RunEventResponse = WorkspaceEventResponse
-
-
-@router.get("/{run_id}/events", response_model=list[RunEventResponse])
-def get_run_events(
-    project_id: str,
-    experiment_id: str,
-    run_id: str,
-    limit: int = Query(default=50, ge=1, le=500),
-    workspace=Depends(get_workspace),  # noqa: ANN001
-) -> list[RunEventResponse]:
-    """Return the run's recent workspace-timeline events, newest first.
-
-    Reads the default-on ``workspace.events.sqlite`` spine via the shared
-    :func:`molexp.workspace.events.read_workspace_events` (the same code path
-    ``molexp runs info`` uses). A workspace with no timeline yet (nothing has
-    emitted) returns ``[]``.
-    """
-    experiment = _get_experiment(workspace, project_id, experiment_id)
-    if not experiment:
-        raise RunNotFoundError(project_id, experiment_id, run_id)
-    run = _get_run_or_none(experiment, run_id)
-    if not run:
-        raise RunNotFoundError(project_id, experiment_id, run_id)
-
-    events = read_workspace_events(workspace.root, ref=run.id, limit=limit)
-    return [RunEventResponse.from_event(e) for e in events]
-
-
 @router.get("/{run_id}/export")
 def export_run(
     project_id: str,
@@ -897,7 +870,7 @@ def harvest_run_route(
     workspace=Depends(get_workspace),  # noqa: ANN001
 ) -> dict[str, str]:
     """Harvest a terminal run into a sourced KnowledgeItem under its experiment."""
-    from molexp.workspace import harvest_run as harvest_run_core
+    from molexp.workspace.knowledge import parse_knowledge_class
 
     experiment = _get_experiment(workspace, project_id, experiment_id)
     if not experiment:
@@ -906,9 +879,8 @@ def harvest_run_route(
     if not run:
         raise RunNotFoundError(project_id, experiment_id, run_id)
     try:
-        item = harvest_run_core(
-            run,
-            kind=body.kind,
+        item = run.harvest(
+            cls=parse_knowledge_class(body.kind),
             narrative=body.narrative,
             created_by=body.created_by,
             results=body.results,

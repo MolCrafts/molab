@@ -18,14 +18,12 @@ beforeEach(() => {
 });
 
 describe("sidecar-backed dataset discovery", () => {
-  it("discovers a dataset the server flags as sidecar-backed", () => {
-    // qm9.tar.bz2 matches no extension pattern, but the server set the flag.
+  it("does not put sidecar datasets on the molvis run tab", () => {
     const file = ctx("data/qm9.tar.bz2", { hasPreviewSidecar: true });
     const discovered = discoverPluginsForObject("run", [file]);
 
     const molvis = discovered.find((d) => d.contribution.id === "molvis:run-tab");
-    expect(molvis).toBeDefined();
-    expect(molvis?.files.map((f) => f.relPath)).toContain("data/qm9.tar.bz2");
+    expect(molvis).toBeUndefined();
   });
 
   it("does not discover an unflagged, non-matching file", () => {

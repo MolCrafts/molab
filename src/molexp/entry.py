@@ -11,11 +11,11 @@ script and retrieve all registered workspaces.
 Example (user script)::
 
     import molexp as me
-    from molexp.workflow import WorkflowCompiler
+    from molexp.workflow import Workflow, WorkflowCompiler
 
 
     def build_workflow():
-        return WorkflowCompiler(name="train").add(...).compile()
+        return WorkflowCompiler().compile(Workflow(name="train").add(...))
 
 
     (
@@ -46,7 +46,7 @@ from typing import TYPE_CHECKING
 from molexp.workspace.experiment import set_workflow_executor
 
 if TYPE_CHECKING:
-    from molexp.workflow import CompiledWorkflow as Workflow
+    from molexp.workflow import CompiledWorkflow
     from molexp.workspace.experiment import Experiment
     from molexp.workspace.run import Run
     from molexp.workspace.workspace import Workspace
@@ -78,17 +78,19 @@ def _execute_experiment(experiment: Experiment, workflow: object) -> None:
     the owning workspace as a CLI entry. Runs are already seeded by
     ``Experiment.run`` before this is called.
     """
-    from molexp.workflow import CompiledWorkflow, default_binding_registry
+    from molexp.workflow import (
+        CompiledWorkflow,
+        Workflow,
+        WorkflowCompiler,
+        default_binding_registry,
+    )
 
-    # Auto-compile an uncompiled WorkflowCompiler — same convenience as
-    # ``Experiment.sweep`` (duck-typed: compiled workflows have no ``compile``).
-    compile_hook = getattr(workflow, "compile", None)
-    if not isinstance(workflow, CompiledWorkflow) and callable(compile_hook):
-        workflow = compile_hook()
+    if isinstance(workflow, Workflow):
+        workflow = WorkflowCompiler().compile(workflow)
     if not isinstance(workflow, CompiledWorkflow):
         raise TypeError(
-            f"Experiment.define expects a workflow (WorkflowCompiler or "
-            f"WorkflowCompiler(...).compile()), got {type(workflow).__name__}."
+            f"Experiment.define expects a Workflow or CompiledWorkflow, "
+            f"got {type(workflow).__name__}."
         )
     default_binding_registry.bind(experiment, workflow)
     # Record the IR so the server/UI can render the graph; refresh on every
@@ -150,7 +152,7 @@ def load_workspaces(script: Path) -> list[Workspace]:
     return list(_registry)
 
 
-def find_workflow_for_run(workspaces: list[Workspace], run: Run) -> Workflow | None:
+def find_workflow_for_run(workspaces: list[Workspace], run: Run) -> CompiledWorkflow | None:
     """Return the workflow object matching *run*'s project and experiment IDs.
 
     Searches all registered workspaces returned by :func:`load_workspaces` for
@@ -164,7 +166,7 @@ def find_workflow_for_run(workspaces: list[Workspace], run: Run) -> Workflow | N
             ``experiment.id`` are used as lookup keys.
 
     Returns:
-        The matching :class:`~molexp.workflow.Workflow`, or ``None``.
+        The matching :class:`~molexp.workflow.CompiledWorkflow`, or ``None``.
     """
     from molexp.workflow import default_binding_registry
 
@@ -221,7 +223,7 @@ def _import_script(script: Path) -> None:
     spec.loader.exec_module(module)  # type: ignore[union-attr]
 
 
-def load_workflow_from_entrypoint(entrypoint: str) -> Workflow:
+def load_workflow_from_entrypoint(entrypoint: str) -> CompiledWorkflow:
     """Import the workflow object referenced by *entrypoint*.
 
     *entrypoint* is the colon-separated form
@@ -238,7 +240,7 @@ def load_workflow_from_entrypoint(entrypoint: str) -> Workflow:
 
     Returns:
         The resolved object — typically a
-        :class:`~molexp.workflow.Workflow` or a bare callable.
+        :class:`~molexp.workflow.CompiledWorkflow`.
 
     Raises:
         ValueError: If *entrypoint* is malformed.
@@ -276,6 +278,6 @@ def load_workflow_from_entrypoint(entrypoint: str) -> Workflow:
     if not isinstance(resolved, _Workflow):
         raise TypeError(
             f"Entrypoint {entrypoint!r} resolved to {type(resolved).__name__}, "
-            "expected a molexp.workflow.Workflow instance."
+            "expected a molexp.workflow.CompiledWorkflow instance."
         )
     return resolved

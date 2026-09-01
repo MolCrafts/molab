@@ -109,7 +109,8 @@ class TestBuildOpsTools:
         assert "status=succeeded" in land
         assert "plot.png" in land
         run_dir = tmp_path / "projects" / "p1" / "experiments" / "e1" / "runs" / f"run-{run_id}"
-        assert (run_dir / "artifacts" / "plot.png").is_file()
+        plots = list(run_dir.glob("executions/*/artifacts/plot.png"))
+        assert plots and plots[0].is_file()
         assert (run_dir / "source" / "analysis.py").is_file()
         assert not (run_dir / "metrics.mlp.jsonl").exists()
         assert "rg_mean" in land
@@ -135,8 +136,7 @@ class TestLandRecordTagging:
                     "zarr_format": 3,
                     "node_type": "group",
                     "attributes": {
-                        "record_schema_version": 1,
-                        "format_name": "molrec",
+                        "molrec_version": 1,
                     },
                 }
             ),
@@ -147,7 +147,7 @@ class TestLandRecordTagging:
         tags = _infer_tags("pkg", root)
         assert tags["molrec"] == "true"
         assert tags["molrec_layout"] == "zarr"
-        assert tags["record_schema_version"] == "1"
+        assert tags["molrec_version"] == "1"
         assert "status" in tags["molrec_sections"]
 
     def test_plain_artifact_not_tagged(self, tmp_path: Path) -> None:

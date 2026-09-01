@@ -1,29 +1,23 @@
 /**
- * Pure presentation core of the workspace activity feed (vision-loop-12).
- *
- * The component (`WorkspaceActivityFeed.tsx`) stays a thin fetch-and-render
- * shell; everything decidable — event-type → icon/label mapping and ref →
- * entity-link resolution — lives here so it is unit-testable in the node env.
+ * Activity rows derived from run records already in the snapshot.
+ * There is no workspace event store.
  */
 
-import {
-  BookOpen,
-  CheckCircle2,
-  CircleDot,
-  FileBox,
-  FlaskConical,
-  PlusCircle,
-  Workflow,
-  XCircle,
-} from "lucide-react";
+import { CheckCircle2, CircleDot, PlusCircle, XCircle } from "lucide-react";
+
+export interface ActivityRun {
+  id: string;
+  status: string;
+  createdAt?: string | null;
+  startedAt?: string | null;
+  finishedAt?: string | null;
+  updatedAt?: string | null;
+}
 
 export interface WorkspaceEventRow {
   id: string;
-  seq: number;
   type: string;
-  actor: string;
   created_at: string;
-  payload: Record<string, unknown>;
   refs: string[];
 }
 
@@ -33,25 +27,22 @@ export interface EventVisual {
   dotClass: string;
 }
 
+// Keep the legacy filter order explicit and aligned with the server contract;
+// Object key order is not a product-facing ordering mechanism.
+export const WORKSPACE_EVENT_TYPES = [
+  "run.created",
+  "run.started",
+  "run.failed",
+  "run.completed",
+] as const;
+
 const VISUALS: Record<string, EventVisual> = {
   "run.created": { icon: PlusCircle, label: "Run created", dotClass: "bg-muted-foreground/40" },
   "run.started": { icon: CircleDot, label: "Run started", dotClass: "bg-info" },
-  "run.completed": { icon: CheckCircle2, label: "Run completed", dotClass: "bg-success" },
   "run.failed": { icon: XCircle, label: "Run failed", dotClass: "bg-destructive" },
-  "asset.added": { icon: FileBox, label: "Asset added", dotClass: "bg-info" },
-  "knowledge.created": { icon: BookOpen, label: "Knowledge created", dotClass: "bg-success" },
-  "workflow.created": { icon: Workflow, label: "Workflow created", dotClass: "bg-info" },
-  "experiment.created": {
-    icon: FlaskConical,
-    label: "Experiment created",
-    dotClass: "bg-muted-foreground/40",
-  },
+  "run.completed": { icon: CheckCircle2, label: "Run completed", dotClass: "bg-success" },
 };
 
-/** Stable ordered list of known spine types for filter chips. */
-export const WORKSPACE_EVENT_TYPES: readonly string[] = Object.keys(VISUALS);
-
-/** Chip label for a filter (uses visual label without "created/started" verb if possible). */
 export const eventTypeFilterLabel = (type: string): string => VISUALS[type]?.label ?? type;
 
 const FALLBACK_VISUAL: EventVisual = {
@@ -60,41 +51,53 @@ const FALLBACK_VISUAL: EventVisual = {
   dotClass: "bg-muted-foreground/40",
 };
 
-/** Icon/label/color for an event type; unknown types render their raw name. */
 export const eventVisualFor = (type: string): EventVisual =>
   VISUALS[type] ?? { ...FALLBACK_VISUAL, label: type };
 
-export type ResolvedRef =
-  | { kind: "run"; runId: string; text: string }
-  | { kind: "knowledge"; path: string; text: string }
-  | { kind: "plain"; text: string };
+export const FEED_EMPTY_TEXT = "No run activity yet.";
 
-/**
- * Resolve one event ref into an entity link when the snapshot knows it.
- *
- * A ref matching a known run id links to the run inspector; a ref of a
- * `knowledge.created` event is a bundle-relative identity path and links to
- * the Knowledge section. Everything else (asset ids, hashes, ids the
- * snapshot no longer carries) stays plain text — never a dead link.
- */
-export const resolveEventRef = (
-  ref: string,
-  eventType: string,
-  knownRunIds: ReadonlySet<string>,
-  payload?: Record<string, unknown>,
-): ResolvedRef => {
-  if (knownRunIds.has(ref)) {
-    return { kind: "run", runId: ref, text: ref };
+export const eventsFromRuns = (
+  runs: readonly ActivityRun[],
+  eventType?: string | null,
+  max = 20,
+): WorkspaceEventRow[] => {
+  const rows: WorkspaceEventRow[] = [];
+  for (const run of runs) {
+    const created = run.createdAt ?? run.updatedAt;
+    if (created) {
+      rows.push({
+        id: `${run.id}:run.created`,
+        type: "run.created",
+        created_at: created,
+        refs: [run.id],
+      });
+    }
+    if (run.startedAt) {
+      rows.push({
+        id: `${run.id}:run.started`,
+        type: "run.started",
+        created_at: run.startedAt,
+        refs: [run.id],
+      });
+    }
+    if (run.finishedAt && run.status === "succeeded") {
+      rows.push({
+        id: `${run.id}:run.completed`,
+        type: "run.completed",
+        created_at: run.finishedAt,
+        refs: [run.id],
+      });
+    }
+    if (run.finishedAt && run.status === "failed") {
+      rows.push({
+        id: `${run.id}:run.failed`,
+        type: "run.failed",
+        created_at: run.finishedAt,
+        refs: [run.id],
+      });
+    }
   }
-  if (eventType === "knowledge.created") {
-    return { kind: "knowledge", path: ref, text: ref };
-  }
-  // An asset id is a bare UUID — the payload carries the human name the
-  // emit recorded, so show that (the UUID stays in the hover title).
-  if (eventType === "asset.added" && typeof payload?.name === "string" && payload.name) {
-    return { kind: "plain", text: payload.name };
-  }
-  return { kind: "plain", text: ref };
+  const filtered = eventType ? rows.filter((row) => row.type === eventType) : rows;
+  filtered.sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at));
+  return filtered.slice(0, max);
 };
-
-export const FEED_EMPTY_TEXT = "No events yet.";

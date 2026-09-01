@@ -1,6 +1,6 @@
+import { useSyncExternalStore } from "react";
 import type { RendererKey } from "@/app/types";
 import { ContributionRegistry } from "@/lib/contribution-registry";
-import { isPluginEnabled } from "@/lib/plugin-preferences";
 import type {
   EntityTabContribution,
   ExecutionColumnContribution,
@@ -11,6 +11,7 @@ import type {
   RendererResolutionContext,
 } from "@/lib/contribution-types";
 import { buildRendererRegistryKey } from "@/lib/contribution-types";
+import { isPluginEnabled } from "@/lib/plugin-preferences";
 
 const rendererRegistry = new ContributionRegistry<RendererContribution>("Renderer contribution");
 const filePreviewRegistry = new ContributionRegistry<FilePreviewPlugin>("File preview plugin");
@@ -24,6 +25,31 @@ const executionColumnRegistry = new ContributionRegistry<ExecutionColumnContribu
 const executionDetailRegistry = new ContributionRegistry<ExecutionDetailContribution>(
   "Execution detail contribution",
 );
+
+let contributionGeneration = 0;
+const contributionSubscribers = new Set<() => void>();
+
+const notifyContributionChange = (): void => {
+  contributionGeneration += 1;
+  for (const subscriber of contributionSubscribers) {
+    subscriber();
+  }
+};
+
+const subscribeToContributions = (subscriber: () => void): (() => void) => {
+  contributionSubscribers.add(subscriber);
+  return () => contributionSubscribers.delete(subscriber);
+};
+
+export const getContributionGeneration = (): number => contributionGeneration;
+
+/** Re-render hosts when a lazily loaded plugin adds a contribution. */
+export const useContributionGeneration = (): number =>
+  useSyncExternalStore(
+    subscribeToContributions,
+    getContributionGeneration,
+    getContributionGeneration,
+  );
 
 /**
  * Active plugin id while a plugin's `register()` runs. Contributions
@@ -64,6 +90,7 @@ const contributionEnabled = (pluginId: string | undefined): boolean => {
 
 export const registerRendererContribution = (contribution: RendererContribution): void => {
   rendererRegistry.register(stampPluginId(contribution));
+  notifyContributionChange();
 };
 
 export const resolveRendererContribution = (
@@ -92,10 +119,13 @@ export const resolveRendererContribution = (
 
 export const registerFilePreviewContribution = (plugin: FilePreviewPlugin): void => {
   filePreviewRegistry.register(stampPluginId(plugin), { onDuplicate: "skip" });
+  notifyContributionChange();
 };
 
 export const unregisterFilePreviewContribution = (pluginId: string): boolean => {
-  return filePreviewRegistry.unregister(pluginId);
+  const removed = filePreviewRegistry.unregister(pluginId);
+  if (removed) notifyContributionChange();
+  return removed;
 };
 
 export const listFilePreviewContributions = (): FilePreviewPlugin[] => {
@@ -107,6 +137,7 @@ export const listFilePreviewContributions = (): FilePreviewPlugin[] => {
 
 export const registerEntityTabContribution = (contribution: EntityTabContribution): void => {
   entityTabRegistry.register(stampPluginId(contribution), { onDuplicate: "skip" });
+  notifyContributionChange();
 };
 
 export const listEntityTabContributions = (
@@ -121,10 +152,13 @@ export const listEntityTabContributions = (
 
 export const registerFileTypeContribution = (contribution: FileTypeContribution): void => {
   fileTypeRegistry.register(stampPluginId(contribution), { onDuplicate: "skip" });
+  notifyContributionChange();
 };
 
 export const unregisterFileTypeContribution = (contributionId: string): boolean => {
-  return fileTypeRegistry.unregister(contributionId);
+  const removed = fileTypeRegistry.unregister(contributionId);
+  if (removed) notifyContributionChange();
+  return removed;
 };
 
 export const listFileTypeContributions = (
@@ -141,6 +175,7 @@ export const registerExecutionColumnContribution = (
   contribution: ExecutionColumnContribution,
 ): void => {
   executionColumnRegistry.register(stampPluginId(contribution), { onDuplicate: "skip" });
+  notifyContributionChange();
 };
 
 export const listExecutionColumnContributions = (
@@ -157,6 +192,7 @@ export const registerExecutionDetailContribution = (
   contribution: ExecutionDetailContribution,
 ): void => {
   executionDetailRegistry.register(stampPluginId(contribution), { onDuplicate: "skip" });
+  notifyContributionChange();
 };
 
 export const listExecutionDetailContributions = (
@@ -177,4 +213,5 @@ export const resetContributionRuntimeForTests = (): void => {
   executionColumnRegistry.clear();
   executionDetailRegistry.clear();
   activePluginId = null;
+  notifyContributionChange();
 };

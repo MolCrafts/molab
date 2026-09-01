@@ -1,13 +1,10 @@
-import { CopilotPanel } from "@/app/components/CopilotPanel";
 import { refFromSelection } from "@/app/entities/interop";
 import { RelatedPanel } from "@/app/entities/RelatedPanel";
-import {
-  buildRendererKeyFromSelection,
-  renderPlanByObjectType,
-  tryResolveRenderer,
-} from "@/app/registry";
+import { LazySurface } from "@/app/layout/LazySurface";
+import { resolveRenderersForSelection } from "@/app/registry";
 import type { InspectorTarget, Selection, WorkspaceSnapshot } from "@/app/types";
 import { NodeInspector } from "@/components/workbench";
+import { useContributionGeneration } from "@/lib/contribution-runtime";
 import { usePluginPreferencesGeneration } from "@/plugins/preferences";
 
 interface RightPanelProps {
@@ -26,36 +23,35 @@ export const RightPanel = ({
   onRefresh,
 }: RightPanelProps): JSX.Element => {
   usePluginPreferencesGeneration();
+  useContributionGeneration();
 
   if (!selection) {
     return (
       <div className="flex h-full flex-col overflow-auto">
-        <CopilotPanel snapshot={snapshot} />
         <NodeInspector title="Inspector" empty emptyHint="Select an entity for details." />
       </div>
     );
   }
 
-  const plan = renderPlanByObjectType[selection.objectType];
-  const renderers = plan.right
-    .map((target) => {
-      const key = buildRendererKeyFromSelection(selection, target);
-      return tryResolveRenderer(key, { selection, snapshot, target });
-    })
-    .filter((renderer): renderer is NonNullable<typeof renderer> => renderer !== null);
+  const renderers = resolveRenderersForSelection(selection, snapshot, "right");
 
   return (
     <div className="flex h-full flex-col overflow-auto">
-      <CopilotPanel snapshot={snapshot} />
       {renderers.map((renderer) => (
-        <renderer.Component
-          key={`${renderer.title}-${renderer.panelSlot}`}
-          selection={selection}
-          snapshot={snapshot}
-          inspectorTarget={inspectorTarget}
-          onInspectorTargetChange={onInspectorTargetChange}
-          onRefresh={onRefresh}
-        />
+        <LazySurface
+          key={renderer.id}
+          resetKey={`inspector:${renderer.id}:${selection.objectId}`}
+          loadingTitle={`Loading ${renderer.title}…`}
+          errorTitle={`Could not load ${renderer.title}`}
+        >
+          <renderer.Component
+            selection={selection}
+            snapshot={snapshot}
+            inspectorTarget={inspectorTarget}
+            onInspectorTargetChange={onInspectorTargetChange}
+            onRefresh={onRefresh}
+          />
+        </LazySurface>
       ))}
       <RelatedPanel entity={refFromSelection(selection)} snapshot={snapshot} />
     </div>

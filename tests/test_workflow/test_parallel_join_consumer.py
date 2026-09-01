@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from molexp.workflow import WorkflowCompiler, WorkflowRuntime
+from molexp.workflow import Workflow, WorkflowCompiler, WorkflowRuntime
 from molexp.workflow._engine.node import _collect_upstream_outputs
 from molexp.workflow._engine.state import WorkflowState
 from molexp.workflow._graph_decl import TaskRegistration
@@ -30,7 +30,7 @@ async def test_parallel_join_consumer_sees_real_output_not_none() -> None:
     """
     captured: dict[str, dict[str, object]] = {}
 
-    wf = WorkflowCompiler(name="join-consumer-happy")
+    wf = Workflow(name="join-consumer-happy")
 
     @wf.task
     async def M(ctx) -> list[int]:
@@ -57,7 +57,7 @@ async def test_parallel_join_consumer_sees_real_output_not_none() -> None:
 
     wf.parallel(map_over="M", body="B", join="J", max_concurrency=3)
 
-    result = await WorkflowRuntime().execute(wf.compile())
+    result = await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
 
     assert result.status == "succeeded"
     # J's actual reduced output is sum([1, 4, 9]) == 14 — never None.

@@ -15,7 +15,7 @@ import pytest
 
 from molexp.agent.folders import Agent, AgentSession
 from molexp.agent.harvest import export_session_zip, harvest_session
-from molexp.workspace import KnowledgeItem, read_workspace_events
+from molexp.workspace import Observation
 from molexp.workspace.workspace import Workspace
 
 
@@ -31,21 +31,19 @@ def agent_session(tmp_path: Path) -> tuple[Workspace, Agent, AgentSession]:
 
 
 class TestHarvestSession:
-    def test_writes_knowledge_item_and_emits_event(
+    def test_writes_knowledge_item(
         self, agent_session: tuple[Workspace, Agent, AgentSession]
     ) -> None:
         ws, _agent, session = agent_session
         item = harvest_session(
             session,
-            kind="Observation",
+            cls=Observation,
             narrative="User explored the workspace.",
             created_by="tester",
-            host=ws,  # knowledge + event spine live on the workspace root
+            host=ws,
         )
-        assert isinstance(item, KnowledgeItem)
+        assert isinstance(item, Observation)
         assert "explored" in item.body()
-        events = read_workspace_events(ws.root, type="knowledge.created")
-        assert len(events) == 1
 
     def test_empty_narrative_raises(
         self, agent_session: tuple[Workspace, Agent, AgentSession]
@@ -54,7 +52,7 @@ class TestHarvestSession:
         with pytest.raises(ValueError):
             harvest_session(
                 session,
-                kind="Observation",
+                cls=Observation,
                 narrative="  ",
                 created_by="tester",
                 host=agent,

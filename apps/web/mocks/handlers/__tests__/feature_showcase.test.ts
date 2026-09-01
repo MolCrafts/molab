@@ -36,13 +36,11 @@ describe("feature showcase mock", () => {
   it("populates the cross-feature navigation surfaces", async () => {
     const workspaces = await getJson<unknown[]>("/api/workspaces");
     const knowledge = await getJson<{ total: number }>("/api/knowledge");
-    const events = await getJson<unknown[]>("/api/events");
     const plans = await getJson<{ total: number }>("/api/plans");
     const approvals = await getJson<{ total: number }>("/api/approvals");
 
     expect(workspaces.length).toBeGreaterThan(0);
     expect(knowledge.total).toBeGreaterThan(0);
-    expect(events.length).toBeGreaterThan(0);
     expect(plans.total).toBeGreaterThan(0);
     expect(approvals.total).toBeGreaterThan(0);
   });

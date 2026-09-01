@@ -30,7 +30,7 @@ def context(
     target_spec: TargetOption = ".",
 ) -> None:
     """Print the workspace's canonical structural read-model (WorkspaceContext)."""
-    from molexp.workspace import ContextFocus, assemble_workspace_context
+    from molexp.workspace import ContextFocus
 
     try:
         _target, _transport, _fs, ws = open_workspace(target_spec)
@@ -40,7 +40,7 @@ def context(
         raise typer.Exit(1) from exc
 
     focus = ContextFocus(project_id=project, experiment_id=experiment, run_id=run)
-    _render(assemble_workspace_context(ws, focus=focus))
+    _render(ws.context(focus=focus))
 
 
 def _render(ctx: WorkspaceContext) -> None:

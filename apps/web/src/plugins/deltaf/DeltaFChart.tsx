@@ -1,7 +1,7 @@
 import type { BarChartConfig } from "@molcrafts/molplot";
 import type { JSX } from "react";
 import { useEffect, useMemo, useState } from "react";
-import { workspaceApi } from "@/app/state/api";
+import { runsApi } from "@/api";
 import type { RendererProps } from "@/app/types";
 import { DELTA_F_GROUP_COLORS } from "@/lib/chart-tokens";
 import { MolplotBarChart } from "@/plugins/molplot";
@@ -95,7 +95,7 @@ export const DeltaFChart = ({
     let cancelled = false;
     void (async () => {
       try {
-        const res = await workspaceApi.getRunFileText(projectId, experimentId, runId, relPath);
+        const res = await runsApi.getRunFileText(projectId, experimentId, runId, relPath);
         if (cancelled) {
           return;
         }

@@ -1,19 +1,17 @@
 import { useCallback, useMemo } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { leftPanelViewFromPath } from "@/app/entities/paths";
-import type { LeftPanelView, ObjectView, Selection, WorkspaceSnapshot } from "@/app/types";
+import { experimentPath, projectPath } from "@/app/entities/paths";
+import { getNavigationContribution, leftPanelViewFromPath } from "@/app/navigation/sections";
+import type {
+  ExperimentView,
+  LeftPanelView,
+  ObjectView,
+  ProjectView,
+  RendererSnapshot,
+  Selection,
+} from "@/app/types";
 
-const sectionRootByView: Record<LeftPanelView, string> = {
-  projects: "/projects",
-  workspace: "/workspace",
-  runs: "/runs",
-  activity: "/activity",
-  workflow: "/workflows",
-  asset: "/assets",
-  agent: "/agent-tasks",
-  knowledge: "/knowledge",
-  settings: "/settings",
-};
+type NavigationSnapshot = Pick<RendererSnapshot, "experiments" | "runs" | "workflows">;
 
 const buildWorkspaceFileSelection = (searchParams: URLSearchParams): Selection | null => {
   const filePath = searchParams.get("file");
@@ -42,22 +40,24 @@ const buildWorkspaceFileSelection = (searchParams: URLSearchParams): Selection |
   };
 };
 
-export { leftPanelViewFromPath as getLeftPanelViewFromPath } from "@/app/entities/paths";
+export { leftPanelViewFromPath as getLeftPanelViewFromPath } from "@/app/navigation/sections";
 
 const parseObjectView = (raw: string | null): ObjectView | undefined => {
-  if (
-    raw === "overview" ||
-    raw === "executions" ||
-    raw === "logs" ||
-    raw === "metrics" ||
-    raw === "scheduler"
-  ) {
-    return raw;
-  }
+  if (!raw || !/^[a-z0-9][a-z0-9:_-]{0,63}$/i.test(raw)) return undefined;
+  return raw;
+};
+
+const parseExperimentView = (raw: string | undefined): ExperimentView | undefined => {
+  if (raw === "workflow" || raw === "runs" || raw === "compare") return raw;
   return undefined;
 };
 
-const buildSelectionFromLocation = (
+const parseProjectView = (raw: string | undefined): ProjectView | undefined => {
+  if (raw === "experiments" || raw === "assets" || raw === "settings") return raw;
+  return undefined;
+};
+
+export const buildSelectionFromLocation = (
   pathname: string,
   searchParams: URLSearchParams,
 ): Selection | null => {
@@ -86,11 +86,31 @@ const buildSelectionFromLocation = (
     };
   }
 
+  const experimentViewMatch = pathname.match(
+    /^\/projects\/([^/]+)\/experiments\/([^/]+)\/(workflow|runs|compare)$/,
+  );
+  if (experimentViewMatch) {
+    return {
+      objectType: "experiment",
+      objectId: decodeURIComponent(experimentViewMatch[2]),
+      experimentView: parseExperimentView(experimentViewMatch[3]),
+    };
+  }
+
   const experimentMatch = pathname.match(/^\/projects\/([^/]+)\/experiments\/([^/]+)$/);
   if (experimentMatch) {
     return {
       objectType: "experiment",
       objectId: decodeURIComponent(experimentMatch[2]),
+    };
+  }
+
+  const projectViewMatch = pathname.match(/^\/projects\/([^/]+)\/(experiments|assets|settings)$/);
+  if (projectViewMatch) {
+    return {
+      objectType: "project",
+      objectId: decodeURIComponent(projectViewMatch[1]),
+      projectView: parseProjectView(projectViewMatch[2]),
     };
   }
 
@@ -156,20 +176,27 @@ const buildSelectionFromLocation = (
   return null;
 };
 
-const getSelectionPath = (selection: Selection | null, snapshot: WorkspaceSnapshot): string => {
+export const getSelectionPath = (
+  selection: Selection | null,
+  snapshot: NavigationSnapshot,
+): string => {
   if (!selection) {
     return "/projects";
   }
 
   switch (selection.objectType) {
     case "project":
-      return `/projects/${encodeURIComponent(selection.objectId)}`;
+      return projectPath(selection.objectId, selection.projectView ?? "overview");
     case "experiment": {
       const experiment = snapshot.experiments.find((item) => item.id === selection.objectId);
       if (!experiment) {
         return "/projects";
       }
-      return `/projects/${encodeURIComponent(experiment.projectId)}/experiments/${encodeURIComponent(experiment.id)}`;
+      return experimentPath(
+        experiment.projectId,
+        experiment.id,
+        selection.experimentView ?? "overview",
+      );
     }
     case "run": {
       const run = snapshot.runs.find((item) => item.id === selection.objectId);
@@ -190,8 +217,15 @@ const getSelectionPath = (selection: Selection | null, snapshot: WorkspaceSnapsh
       }
       return `/projects/${encodeURIComponent(run.projectId)}/experiments/${encodeURIComponent(run.experimentId)}/runs/${encodeURIComponent(run.id)}/tasks/${encodeURIComponent(selection.taskId)}`;
     }
-    case "workflow":
-      return `/workflows/${encodeURIComponent(selection.workflowId)}`;
+    case "workflow": {
+      const workflow = snapshot.workflows.find((item) => item.id === selection.workflowId);
+      const experiment = workflow
+        ? snapshot.experiments.find((item) => item.id === workflow.experimentId)
+        : undefined;
+      return experiment
+        ? experimentPath(experiment.projectId, experiment.id, "workflow")
+        : `/workflows/${encodeURIComponent(selection.workflowId)}`;
+    }
     case "asset":
       return `/assets/${encodeURIComponent(selection.objectId)}`;
     case "agent": {
@@ -229,6 +263,25 @@ const getSelectionPath = (selection: Selection | null, snapshot: WorkspaceSnapsh
   }
 };
 
+export interface HierarchyRouteContext {
+  projectId: string;
+  experimentId: string | null;
+}
+
+/**
+ * Parent coordinates encoded in canonical Project/Experiment/Run URLs.
+ * Unlike a Selection, this information is available before the lazy entity
+ * catalog has loaded, so direct links can hydrate their parent chain.
+ */
+export const hierarchyRouteContextFromPath = (pathname: string): HierarchyRouteContext | null => {
+  const match = pathname.match(/^\/projects\/([^/]+)(?:\/experiments\/([^/]+))?(?:\/|$)/);
+  if (!match) return null;
+  return {
+    projectId: decodeURIComponent(match[1]),
+    experimentId: match[2] ? decodeURIComponent(match[2]) : null,
+  };
+};
+
 export interface NavigationState {
   leftPanelView: LeftPanelView;
   selection: Selection | null;
@@ -236,7 +289,7 @@ export interface NavigationState {
   setSelection: (selection: Selection | null) => void;
 }
 
-export const useNavigationState = (snapshot: WorkspaceSnapshot): NavigationState => {
+export const useNavigationState = (snapshot: NavigationSnapshot): NavigationState => {
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -261,33 +314,13 @@ export const useNavigationState = (snapshot: WorkspaceSnapshot): NavigationState
 
   const setLeftPanelView = useCallback(
     (view: LeftPanelView): void => {
-      if (selection) {
-        if (
-          view === "projects" &&
-          ["project", "experiment", "run"].includes(selection.objectType)
-        ) {
-          navigate(getSelectionPath(selection, snapshot));
-          return;
-        }
-        if (view === "workflow" && selection.objectType === "workflow") {
-          navigate(getSelectionPath(selection, snapshot));
-          return;
-        }
-        if (view === "asset" && selection.objectType === "asset") {
-          navigate(getSelectionPath(selection, snapshot));
-          return;
-        }
-        if (view === "agent" && selection.objectType === "agent") {
-          navigate(getSelectionPath(selection, snapshot));
-          return;
-        }
-        if (view === "workspace" && selection.objectType === "workspace-file") {
-          navigate(getSelectionPath(selection, snapshot));
-          return;
-        }
+      const contribution = getNavigationContribution(view);
+      if (selection && contribution.retainSelectionFor.includes(selection.objectType)) {
+        navigate(getSelectionPath(selection, snapshot));
+        return;
       }
 
-      navigate(sectionRootByView[view]);
+      navigate(contribution.route);
     },
     [navigate, selection, snapshot],
   );

@@ -187,6 +187,12 @@ describe("entityPath / runPath", () => {
     );
   });
 
+  it("nests a workflow under its owning experiment", () => {
+    expect(entityPath({ kind: "workflow", id: "w1" }, snapshot)).toBe(
+      "/projects/p1/experiments/e1/workflow",
+    );
+  });
+
   it("returns null for a ref absent from the snapshot", () => {
     expect(entityPath({ kind: "run", id: "ghost" }, snapshot)).toBeNull();
   });

@@ -26,7 +26,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from .compiled import CompiledWorkflow
-from .compiler import WorkflowCompiler
+from .compiler import Workflow, WorkflowCompiler
 from .context import TaskContext
 from .task import Task
 
@@ -152,7 +152,7 @@ def promote_callable(fn: Callable, name: str) -> CompiledWorkflow:
         A :class:`CompiledWorkflow` with one task wrapping *fn*.
     """
     fn_name = getattr(fn, "__name__", None) or "anonymous"
-    return WorkflowCompiler(name=name).add(_EntryTask(fn), name=fn_name).compile()
+    return WorkflowCompiler().compile(Workflow(name=name).add(_EntryTask(fn), name=fn_name))
 
 
 def resolve_callable_entrypoint(fn: Callable) -> str:

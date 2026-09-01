@@ -23,8 +23,10 @@
   --color-input: var(--molexp-input);
   --color-ring: var(--molexp-accent);
   --color-overlay-scrim: var(--molexp-overlay-scrim);
+  --color-statusbar: var(--molexp-statusbar);
+  --color-statusbar-foreground: var(--molexp-statusbar-foreground);
 
-  /* Product accent (violet, hue 295 — outside status-running band) */
+  /* Product accent — shadcn blue. VS Code informs layout, not the palette. */
   --color-accent: var(--molexp-accent);
   --color-accent-hover: var(--molexp-accent-hover);
   --color-accent-foreground: var(--molexp-accent-foreground);
@@ -149,29 +151,28 @@
     color-scheme: light;
 
     /* Surfaces — light default (workbench) */
-    --molexp-background: oklch(0.985 0.003 255);
-    --molexp-surface: oklch(1 0 0);
-    --molexp-surface-subtle: oklch(0.965 0.006 255);
-    --molexp-canvas: oklch(0.972 0.005 255);
-    --molexp-muted: oklch(0.945 0.008 255);
-    --molexp-foreground: oklch(0.2 0.015 255);
-    --molexp-muted-foreground: oklch(0.46 0.018 255);
-    --molexp-subtle-foreground: oklch(0.52 0.016 255);
-    --molexp-border: oklch(0.89 0.012 255);
-    --molexp-input: oklch(0.89 0.012 255);
+    --molexp-background: #ffffff;
+    --molexp-surface: #ffffff;
+    --molexp-surface-subtle: #f8fafc;
+    --molexp-canvas: #ffffff;
+    --molexp-muted: #f1f5f9;
+    --molexp-foreground: #0f172a;
+    --molexp-muted-foreground: #64748b;
+    --molexp-subtle-foreground: #94a3b8;
+    --molexp-border: #e2e8f0;
+    --molexp-input: #e2e8f0;
     --molexp-overlay-scrim: oklch(0.12 0.01 255 / 50%);
 
-    /* Accent hue 295 (violet) — ≥40° from status-running 250.
-       Solid accent is for buttons/fills; selection rows use accent-muted. */
-    --molexp-accent: oklch(0.55 0.19 295);
-    --molexp-accent-hover: oklch(0.5 0.19 295);
-    --molexp-accent-foreground: oklch(0.985 0.003 295);
-    /* 淡紫 — day-mode row/tree selection (not solid purple) */
-    --molexp-accent-muted: oklch(0.94 0.04 295);
-    --molexp-accent-muted-foreground: oklch(0.28 0.08 295);
-    --molexp-interactive: oklch(0.94 0.01 255);
+    --molexp-accent: #2563eb;
+    --molexp-accent-hover: #1d4ed8;
+    --molexp-accent-foreground: #ffffff;
+    --molexp-accent-muted: #eff6ff;
+    --molexp-accent-muted-foreground: #1e40af;
+    --molexp-interactive: #f1f5f9;
     --molexp-interactive-foreground: var(--molexp-foreground);
-    --molexp-on-fill: oklch(0.985 0.003 255);
+    --molexp-on-fill: #ffffff;
+    --molexp-statusbar: #007acc;
+    --molexp-statusbar-foreground: #ffffff;
 
     /* Soft status washes on product surface (base roles from constitution). */
     --constitution-surface: var(--molexp-surface);
@@ -262,14 +263,16 @@
     --molexp-input: oklch(1 0 0 / 12%);
     --molexp-overlay-scrim: oklch(0.04 0.01 255 / 66%);
 
-    --molexp-accent: oklch(0.72 0.16 295);
-    --molexp-accent-hover: oklch(0.76 0.16 295);
-    --molexp-accent-foreground: oklch(0.16 0.02 295);
-    --molexp-accent-muted: oklch(0.30 0.07 295);
-    --molexp-accent-muted-foreground: oklch(0.92 0.03 295);
+    --molexp-accent: #60a5fa;
+    --molexp-accent-hover: #93c5fd;
+    --molexp-accent-foreground: #0f172a;
+    --molexp-accent-muted: #172554;
+    --molexp-accent-muted-foreground: #dbeafe;
     --molexp-interactive: oklch(0.26 0.012 255);
     --molexp-interactive-foreground: var(--molexp-foreground);
     --molexp-on-fill: oklch(0.985 0.003 255);
+    --molexp-statusbar: #0e639c;
+    --molexp-statusbar-foreground: #ffffff;
 
     --status-ready-foreground: oklch(0.78 0.02 255);
     --status-running-foreground: oklch(0.76 0.13 250);

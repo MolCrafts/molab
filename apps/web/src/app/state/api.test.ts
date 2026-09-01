@@ -159,7 +159,7 @@ describe("mapAssets", () => {
   });
 
   it("falls back to the projectId arg when the asset has no scope ids", () => {
-    const [result] = mapAssets([{ ...fixtureAsset, scope_ids: [] }], "proj-fallback");
+    const [result] = mapAssets([{ ...fixtureAsset, scopeIds: [] }], "proj-fallback");
     expect(result.projectId).toBe("proj-fallback");
     expect(result.experimentId).toBeUndefined();
     expect(result.runId).toBeUndefined();

@@ -6,14 +6,13 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { Search, Terminal } from "lucide-react";
-import { type JSX, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type JSX, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import type { NoteSummary } from "@/api/generated/models/NoteSummary";
 import { StatusBadge } from "@/app/components/entity";
 import { buildCatalog, searchCatalog } from "@/app/entities/catalog";
 import { entityMeta } from "@/app/entities/kinds";
 import { entityPath } from "@/app/entities/paths";
-import { workspaceApi } from "@/app/state/api";
+
 import type { SemanticStatus, WorkspaceSnapshot } from "@/app/types";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -22,7 +21,7 @@ import {
   WorkbenchOperationState,
   WorkbenchRetryAction,
 } from "@/components/workbench";
-
+import { useKnowledgeListQuery } from "@/plugins/knowledge/queries";
 export interface PaletteCommand {
   id: string;
   label: string;
@@ -97,28 +96,14 @@ export const GlobalCommandPalette = ({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
-  const [knowledgeDocs, setKnowledgeDocs] = useState<NoteSummary[]>([]);
-  const [knowledgeLoading, setKnowledgeLoading] = useState(true);
-  const [knowledgeError, setKnowledgeError] = useState<string | null>(null);
-
-  const loadKnowledge = useCallback(async (): Promise<void> => {
-    setKnowledgeLoading(true);
-    try {
-      const response = await workspaceApi.listKnowledge();
-      setKnowledgeDocs(response.notes);
-      setKnowledgeError(null);
-    } catch (err) {
-      setKnowledgeError(
-        err instanceof Error ? err.message : "Failed to load knowledge search entries.",
-      );
-    } finally {
-      setKnowledgeLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void loadKnowledge();
-  }, [loadKnowledge]);
+  const knowledgeQuery = useKnowledgeListQuery({}, open && mode === "goto");
+  const knowledgeDocs = knowledgeQuery.data?.notes ?? [];
+  const knowledgeLoading = knowledgeQuery.isFetching;
+  const knowledgeError = knowledgeQuery.error
+    ? knowledgeQuery.error instanceof Error
+      ? knowledgeQuery.error.message
+      : "Failed to load knowledge search entries."
+    : null;
 
   const catalog = useMemo(() => buildCatalog(snapshot, knowledgeDocs), [snapshot, knowledgeDocs]);
   const gotoResults = useMemo(() => searchCatalog(catalog, query), [catalog, query]);
@@ -234,7 +219,7 @@ export const GlobalCommandPalette = ({
             density="compact"
             title="Knowledge entries unavailable"
             detail={`${knowledgeError} Projects, experiments, runs, workflows, assets, and agents remain searchable.`}
-            action={<WorkbenchRetryAction onClick={() => void loadKnowledge()} />}
+            action={<WorkbenchRetryAction onClick={() => void knowledgeQuery.refetch()} />}
           />
         )}
 

@@ -8,8 +8,10 @@
 import { FileCode2, FileJson, FileQuestion, Image as ImageIcon, Package } from "lucide-react";
 import { type JSX, useEffect, useMemo, useState } from "react";
 import { EmptyState } from "@/app/components/entity";
+import { LazySurface } from "@/app/layout/LazySurface";
 import type { ApiAssetResponse } from "@/app/types";
 import { WorkbenchAction } from "@/components/workbench";
+import { useContributionGeneration } from "@/lib/contribution-runtime";
 import { filePreviewPluginRegistry } from "@/lib/file-preview-plugins";
 import { cn } from "@/lib/utils";
 
@@ -122,9 +124,10 @@ const AssetPreview = ({ asset }: { asset: ApiAssetResponse }): JSX.Element => {
   const [text, setText] = useState<string | null>(null);
   const [blobUrl, setBlobUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  useContributionGeneration();
 
   const hasSidecar =
-    Boolean(asset.has_preview_sidecar) ||
+    Boolean(asset.hasPreviewSidecar) ||
     Boolean((asset as { hasPreviewSidecar?: boolean }).hasPreviewSidecar);
   const plugin = filePreviewPluginRegistry.getPluginForFile(asset.name, asset.path, {
     hasPreviewSidecar: hasSidecar,
@@ -205,7 +208,12 @@ const AssetPreview = ({ asset }: { asset: ApiAssetResponse }): JSX.Element => {
     const Plugin = plugin.Component;
     return (
       <div className="h-full min-h-panel-sm overflow-auto p-2">
-        <Plugin content="" name={asset.name} path={asset.path} folderId="" assetId={asset.id} />
+        <LazySurface
+          resetKey={`asset-preview:${plugin.id}:${asset.id}`}
+          loadingTitle={`Loading ${plugin.name} preview…`}
+        >
+          <Plugin content="" name={asset.name} path={asset.path} folderId="" assetId={asset.id} />
+        </LazySurface>
       </div>
     );
   }

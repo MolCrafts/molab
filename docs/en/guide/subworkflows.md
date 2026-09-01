@@ -19,12 +19,13 @@ from molexp.workflow import (
     SubWorkflow,
     Task,
     TaskContext,
+    Workflow,
     WorkflowCompiler,
     WorkflowRuntime,
 )
 
-# Inner pipeline (a WorkflowCompiler — compiled eagerly when wrapped).
-inner = WorkflowCompiler(name="preprocess")
+# Inner pipeline (a Workflow — compiled eagerly when wrapped).
+inner = Workflow(name="preprocess")
 
 @inner.task
 async def load(seed: int = 0) -> list[float]:
@@ -43,11 +44,10 @@ class Train(Task):
         # The SubWorkflow node's terminal output (a list) binds to ``values``.
         return sum(values) / len(values)
 
-outer = (
-    WorkflowCompiler(name="train")
+outer = WorkflowCompiler().compile(
+    Workflow(name="train")
     .add(SubWorkflow(inner), name="preprocess")
     .add(Train(), depends_on=["preprocess"])
-    .compile()
 )
 
 result = await WorkflowRuntime().execute(outer)
@@ -60,7 +60,7 @@ other task depends on — `normalize` above). Pass `output="<task_name>"` to
 select a different inner output. If the inner spec has more than one leaf and no
 `output=` is given, `execute` raises a `ValueError` naming the candidates.
 
-`SubWorkflow(inner)` accepts either a `WorkflowCompiler` (compiled on
+`SubWorkflow(inner)` accepts either a `Workflow` (compiled on
 construction) or an already-compiled `CompiledWorkflow`.
 
 ## Pattern 2: `SubWorkflow` as a `parallel` body
@@ -73,7 +73,7 @@ for each element. The compiled task set stays exactly the declared outer tasks
 (no per-element node growth).
 
 ```python
-wf = WorkflowCompiler(name="fanout", entry="enumerate")
+wf = Workflow(name="fanout", entry="enumerate")
 
 @wf.task
 async def enumerate() -> list[int]:
@@ -88,7 +88,7 @@ async def collect(values: list[list[float]]) -> list[list[float]]:
 
 wf.parallel(map_over="enumerate", body="preprocess", join="collect", max_concurrency=2)
 
-compiled = wf.compile()
+compiled = WorkflowCompiler().compile(wf)
 result = await WorkflowRuntime().execute(compiled)
 # `collect` receives one inner output per element, in iteration order.
 ```
@@ -103,7 +103,7 @@ class can appear in multiple workflows — the lightest form of reuse when you d
 not need a whole sub-pipeline as one node:
 
 ```python
-from molexp.workflow import Task, TaskContext, WorkflowCompiler
+from molexp.workflow import Task, TaskContext, Workflow, WorkflowCompiler
 
 
 class Fetch(Task):
@@ -121,19 +121,17 @@ class Augment(Task):
         return clean + [x * 2 for x in clean]
 
 
-baseline = (
-    WorkflowCompiler(name="baseline")
+baseline = WorkflowCompiler().compile(
+    Workflow(name="baseline")
     .add(Fetch())
     .add(Clean(), depends_on=["fetch"])
-    .compile()
 )
 
-augmented = (
-    WorkflowCompiler(name="augmented")
+augmented = WorkflowCompiler().compile(
+    Workflow(name="augmented")
     .add(Fetch())
     .add(Clean(), depends_on=["fetch"])
     .add(Augment(), depends_on=["clean"])
-    .compile()
 )
 ```
 

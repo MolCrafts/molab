@@ -86,7 +86,7 @@ class RouterBackedResumeDriver:
 
     ``resume_main`` folds the operator payload into a guidance ``user_input`` and
     re-drives :class:`~molexp.harness.Plan` via
-    :func:`~molexp.services.plan_runtime.drive.drive_plan_mode` (store-first
+    :meth:`~molexp.harness.Plan.execute` (store-first
     replay carries a granted plan review straight through the gate).
     ``resume_subagent`` scopes that same re-drive to the named codegen subagent's
     stuck step. Model + workspace are resolved lazily so the driver is
@@ -117,7 +117,6 @@ class RouterBackedResumeDriver:
         return model
 
     async def resume_main(self, *, run: Run, payload: dict[str, object]) -> object:
-        from .drive import drive_plan_mode
         from .gateway import build_plan_gateway
 
         gateway = build_plan_gateway(
@@ -127,8 +126,7 @@ class RouterBackedResumeDriver:
         )
         from molexp.harness import Plan
 
-        return await drive_plan_mode(
-            Plan(realize=True),
+        return await Plan(realize=True).execute(
             run=run,
             user_input=_fold_guidance(payload),
             gateway=gateway,

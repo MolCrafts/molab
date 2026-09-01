@@ -1,8 +1,3 @@
-import { buildRegistryKey, registerRendererContribution } from "@/app/registry";
-import type { FileKind } from "@/app/types";
-import type { UiPluginModule } from "@/plugins/types";
-import { TextEditor } from "./TextEditor";
-
 /**
  * Internal `editor` UI plugin — peer of `molvis`, `molq`, `metrics`,
  * `tensorboard`. Owns the `panelKind:"editor"` renderer slot for workspace
@@ -22,39 +17,5 @@ import { TextEditor } from "./TextEditor";
  * `filePreviewPluginRegistry` resolves. Preview *content* is supplied by other
  * plugins (core, molvis, …); this plugin only owns the hosting surface.
  */
-const EDITOR_FILE_KINDS: readonly FileKind[] = [
-  "yaml",
-  "json",
-  "python",
-  "markdown",
-  "text",
-  "unknown",
-];
-
-const editorPlugin: UiPluginModule = {
-  id: "editor",
-  name: "Editor",
-  description: "Text editor and file preview host for workspace files.",
-  userToggleable: true,
-  register: () => {
-    for (const fileKind of EDITOR_FILE_KINDS) {
-      const key = {
-        objectType: "workspace-file" as const,
-        fileKind,
-        contentType: "text" as const,
-        panelKind: "editor" as const,
-      };
-      registerRendererContribution({
-        id: `editor:default:${buildRegistryKey(key)}`,
-        priority: 0,
-        key,
-        title: "Text Editor",
-        panelSlot: "center",
-        Component: TextEditor,
-      });
-    }
-  },
-};
-
 export { MonacoEditor } from "./MonacoEditor";
-export default editorPlugin;
+export { default } from "./plugin";

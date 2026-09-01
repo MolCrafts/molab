@@ -1,8 +1,8 @@
 """Session harvest + export — agent-record-export-05.
 
 ``harvest_session`` turns an on-disk :class:`~molexp.agent.folders.AgentSession`
-into a sourced :class:`~molexp.workspace.knowledge_item.KnowledgeItem` via
-:func:`~molexp.workspace.knowledge_write.write_knowledge_item`.
+into sourced :class:`~molexp.workspace.knowledge.Knowledge` via
+:func:`~molexp.workspace.knowledge_write.write_knowledge`.
 
 ``export_session_zip`` archives the session folder via
 :func:`~molexp.workspace.archive.archive_folder_zip` — the single zip writer.
@@ -14,8 +14,8 @@ from typing import TYPE_CHECKING
 
 from molexp.ids import slugify
 from molexp.workspace.archive import archive_folder_zip
-from molexp.workspace.knowledge_item import KnowledgeItem, KnowledgeKind, SourceRef
-from molexp.workspace.knowledge_write import write_knowledge_item
+from molexp.workspace.knowledge import Knowledge, SourceRef
+from molexp.workspace.knowledge_write import write_knowledge
 
 if TYPE_CHECKING:
     from molexp.agent.folders import AgentSession
@@ -27,25 +27,24 @@ __all__ = ["export_session_zip", "harvest_session"]
 def harvest_session(
     session: AgentSession,
     *,
-    kind: KnowledgeKind,
+    cls: type[Knowledge],
     narrative: str,
     created_by: str,
     host: Folder | None = None,
     name: str | None = None,
-) -> KnowledgeItem:
+) -> Knowledge:
     """Harvest a finished agent session into a typed KnowledgeItem.
 
     Args:
         session: On-disk agent session folder (has messages / meta).
-        kind: Knowledge category.
+        cls: Knowledge subclass (the category).
         narrative: Non-empty interpretation of the session.
         created_by: Author string.
-        host: Parent for the KnowledgeItem; defaults to the session's parent
-            folder (usually the Agent or workspace mount).
+        host: Parent Folder; defaults to the session's parent.
         name: Optional Concept name; default ``session-harvest-{slug}-{id}``.
 
     Returns:
-        The written KnowledgeItem.
+        The written Knowledge.
 
     Raises:
         ValueError: Empty narrative.
@@ -58,9 +57,9 @@ def harvest_session(
     if parent is None:
         raise ValueError("harvest_session needs a host Folder (session has no parent)")
 
-    item_name = name or f"session-{slugify(kind)}-{session.name}"
+    item_name = name or f"session-{slugify(cls.__name__)}-{session.name}"
     body_lines = [
-        f"# [{kind}] agent session {session.name}",
+        f"# [{cls.__name__}] agent session {session.name}",
         "",
         narrative.strip(),
         "",
@@ -77,10 +76,10 @@ def harvest_session(
         pass
     body = "\n".join(body_lines).rstrip() + "\n"
 
-    return write_knowledge_item(
+    return write_knowledge(
         parent,
         name=item_name,
-        kind=kind,
+        cls=cls,
         sources=[
             SourceRef(kind="agent_action", ref=session.name),
         ],
@@ -88,7 +87,6 @@ def harvest_session(
         body=body,
         cite=[(session, "derived_from")],
         title=f"Session {session.name}",
-        actor="agent-harvest",
     )
 
 

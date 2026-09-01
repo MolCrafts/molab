@@ -3,11 +3,11 @@ import type {
   AssetSummary,
   ExperimentSummary,
   ProjectSummary,
+  RendererSnapshot,
   RunSummary,
   Selection,
   SemanticObjectType,
   WorkflowSummary,
-  WorkspaceSnapshot,
 } from "@/app/types";
 
 export interface MetadataField {
@@ -15,27 +15,27 @@ export interface MetadataField {
   value: string;
 }
 
-const findProject = (snapshot: WorkspaceSnapshot, id: string): ProjectSummary | null => {
+const findProject = (snapshot: RendererSnapshot, id: string): ProjectSummary | null => {
   return snapshot.projects.find((project) => project.id === id) ?? null;
 };
 
-const findExperiment = (snapshot: WorkspaceSnapshot, id: string): ExperimentSummary | null => {
+const findExperiment = (snapshot: RendererSnapshot, id: string): ExperimentSummary | null => {
   return snapshot.experiments.find((experiment) => experiment.id === id) ?? null;
 };
 
-const findRun = (snapshot: WorkspaceSnapshot, id: string): RunSummary | null => {
+const findRun = (snapshot: RendererSnapshot, id: string): RunSummary | null => {
   return snapshot.runs.find((run) => run.id === id) ?? null;
 };
 
-const findAsset = (snapshot: WorkspaceSnapshot, id: string): AssetSummary | null => {
+const findAsset = (snapshot: RendererSnapshot, id: string): AssetSummary | null => {
   return snapshot.assets.find((asset) => asset.id === id) ?? null;
 };
 
-const findAgentSession = (snapshot: WorkspaceSnapshot, id: string): AgentSessionSummary | null => {
+const findAgentSession = (snapshot: RendererSnapshot, id: string): AgentSessionSummary | null => {
   return snapshot.agentSessions.find((s) => s.id === id) ?? null;
 };
 
-const findWorkflow = (snapshot: WorkspaceSnapshot, id: string): WorkflowSummary | null => {
+const findWorkflow = (snapshot: RendererSnapshot, id: string): WorkflowSummary | null => {
   return snapshot.workflows.find((workflow) => workflow.id === id) ?? null;
 };
 
@@ -49,7 +49,7 @@ const emptyFields = (objectType: SemanticObjectType, objectId: string): Metadata
 
 export const buildMetadataFields = (
   selection: Selection,
-  snapshot: WorkspaceSnapshot,
+  snapshot: RendererSnapshot,
 ): MetadataField[] => {
   const lookupByType: Record<SemanticObjectType, () => MetadataField[]> = {
     project: () => {

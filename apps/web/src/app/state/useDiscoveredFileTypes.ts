@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import type { RunFilesResponse } from "@/app/state/api";
-import { workspaceApi } from "@/app/state/api";
+import type { RunFilesResponse } from "@/api";
+import { runsApi } from "@/api";
 import type { SemanticObjectType } from "@/app/types";
+import { useContributionGeneration } from "@/lib/contribution-runtime";
 import type { DiscoveredPlugin } from "@/lib/file-type-discovery";
 import { discoverPluginsForObject, flattenFileNodes } from "@/lib/file-type-discovery";
 import { usePluginPreferencesGeneration } from "@/lib/plugin-preferences";
@@ -35,7 +36,7 @@ export const useDiscoveredFileTypesForRun = (
     setLoading(true);
     setError(null);
 
-    workspaceApi
+    runsApi
       .getRunFiles(coords.projectId, coords.experimentId, coords.runId)
       .then((value) => {
         if (!cancelled) {
@@ -60,15 +61,17 @@ export const useDiscoveredFileTypesForRun = (
 
   // File-type tabs are plugin contributions — refresh when the user toggles them.
   const pluginPrefsGeneration = usePluginPreferencesGeneration();
+  const contributionGeneration = useContributionGeneration();
 
   const discovered = useMemo(() => {
     void pluginPrefsGeneration;
+    void contributionGeneration;
     if (!response) {
       return [];
     }
     const files = flattenFileNodes(response.nodes);
     return discoverPluginsForObject(objectType, files);
-  }, [response, objectType, pluginPrefsGeneration]);
+  }, [response, objectType, pluginPrefsGeneration, contributionGeneration]);
 
   return { discovered, loading, error };
 };

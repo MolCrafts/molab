@@ -51,16 +51,20 @@ _CONTAINERS: dict[str, frozenset[str]] = {
     "experiment": frozenset({"runs", "assets", "cache", "knowledges"}),
     "run": frozenset(
         {
-            "artifacts",
-            "assets",
             "cache",
             "executions",
-            "metrics",
-            "logs",
-            "jobs",
+            "plan",
+            "source",
+            "assets",
+            "knowledges",
+            "harness",
         }
     ),
 }
+
+#: Per-attempt dirs under ``executions/<id>/``. Products, logs, scheduler
+#: jobs and scratch live here — never at the run root.
+_EXECUTION_CONTAINERS = frozenset({"artifacts", "logs", "jobs", "work", "checkpoints"})
 
 #: level -> entity filename (singular — lives on the concept's own directory)
 _ENTITY_FILE: dict[str, str] = {
@@ -419,9 +423,26 @@ class _Checker:
                 f"{child_level}(s) indexed but absent from disk: {extra}",
             )
 
+    def _check_execution(self, path: str) -> None:
+        """Every child of an execution dir is a known attempt container."""
+        for name in self._subdirs(path):
+            if name in _EXECUTION_CONTAINERS:
+                continue
+            child = self._fs.join(path, name)
+            self._add(
+                child,
+                "layout.stray",
+                f"{name!r} is not an execution container {sorted(_EXECUTION_CONTAINERS)}",
+            )
+
     def _check_run(self, path: str) -> None:
         self._check_concept(path, "run")
         self._check_strays(path, "run")
+        execs = self._fs.join(path, "executions")
+        if not self._fs.is_dir(execs):
+            return
+        for name in self._subdirs(execs):
+            self._check_execution(self._fs.join(execs, name))
 
     # -- entry point -----------------------------------------------------
 

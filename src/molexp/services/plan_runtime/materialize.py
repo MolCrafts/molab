@@ -25,7 +25,7 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict
 
-from molexp.services.plan_runtime.persist import persist_plan_workflow_to_experiment
+from molexp.harness import Plan
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -111,7 +111,7 @@ def materialize_plan_records(
     # must still bind the graph onto the experiment (UI reads experiment.workflow).
     # Missing artifact → not an error on failure (nothing to show); on success
     # it is an error (the pipeline claimed to finish without a workflow).
-    workflow_persisted = persist_plan_workflow_to_experiment(run, experiment)
+    workflow_persisted = Plan().save(run=run)
     if workflow_persisted:
         written.append("workflow_ir")
     elif failure is None:
@@ -143,6 +143,11 @@ def materialize_plan_records(
         ),
     )
     if failure is None:
+        if rec.has_artifact(run, "plan_report") or rec.has_artifact(run, "experiment_plan"):
+            _attempt(
+                "plan_book",
+                lambda: rec.write_plan_book(run=run, experiment=experiment, model=model),
+            )
         if rec.has_artifact(run, "experiment_report"):
             _attempt(
                 "experiment_record",

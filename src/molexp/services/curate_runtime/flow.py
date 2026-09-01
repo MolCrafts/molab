@@ -68,7 +68,7 @@ def resolve_curate_run(experiment: Experiment, request_text: str) -> Run:
 
     The ONE bootstrap shared by ``molexp curate ask`` and ``POST
     /curate-tasks`` ("Python 操作 = UI 操作"); twin of
-    :func:`molexp.services.plan_runtime.resolve_plan_run`.
+    :meth:`molexp.harness.Plan.open`.
     """
     from molexp._typing import JSONValue
     from molexp.workspace.utils import derive_run_id

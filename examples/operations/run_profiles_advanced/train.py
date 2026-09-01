@@ -23,11 +23,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import molexp as me
-from molexp.workflow import WorkflowCompiler
+from molexp.workflow import Workflow, WorkflowCompiler
 
 WORKSPACE_ROOT = Path(__file__).resolve().parent / "_workspace"
 
-wf = WorkflowCompiler(name="train")
+wf = Workflow(name="train")
 
 
 @wf.task
@@ -47,5 +47,5 @@ def train(
     me.Workspace(WORKSPACE_ROOT, name="profiles-advanced")
     .add_project("demo")
     .add_experiment("train")
-    .define(wf.compile(), params={"epochs": [3, 10]})
+    .define(WorkflowCompiler().compile(wf), params={"epochs": [3, 10]})
 )

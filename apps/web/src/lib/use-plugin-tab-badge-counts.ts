@@ -11,12 +11,16 @@ export const usePluginTabBadgeCounts = (
   coords: RunTabBadgeContext | null,
 ): Readonly<Record<string, number | null>> => {
   const [counts, setCounts] = useState<Record<string, number | null>>({});
+  const projectId = coords?.projectId ?? null;
+  const experimentId = coords?.experimentId ?? null;
+  const runId = coords?.runId ?? null;
 
   useEffect(() => {
-    if (!coords) {
+    if (!projectId || !experimentId || !runId) {
       setCounts({});
       return;
     }
+    const context: RunTabBadgeContext = { projectId, experimentId, runId };
 
     const withResolver = discovered.filter(({ contribution }) => contribution.resolveTabBadgeCount);
     if (withResolver.length === 0) {
@@ -31,7 +35,7 @@ export const usePluginTabBadgeCounts = (
         withResolver.map(async ({ contribution }) => {
           const resolver = contribution.resolveTabBadgeCount;
           if (!resolver) return;
-          next[contribution.value] = await resolver(coords);
+          next[contribution.value] = await resolver(context);
         }),
       );
       if (!cancelled) setCounts(next);
@@ -40,7 +44,7 @@ export const usePluginTabBadgeCounts = (
     return () => {
       cancelled = true;
     };
-  }, [discovered, coords?.projectId, coords?.experimentId, coords?.runId]);
+  }, [discovered, experimentId, projectId, runId]);
 
   return counts;
 };

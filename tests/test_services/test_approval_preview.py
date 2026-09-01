@@ -10,6 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from molexp.harness.store.file_artifact_store import FileArtifactStore
+from molexp.harness.store.paths import harness_artifact_root
 from molexp.services.plan_runtime.preview import (
     build_review_pack,
     render_approval_preview,
@@ -25,7 +26,7 @@ def _run(tmp_path: Path):
 
 
 def _store(run) -> FileArtifactStore:
-    return FileArtifactStore(root=Path(str(run.run_dir)) / "artifacts")
+    return FileArtifactStore(root=harness_artifact_root(run.run_dir))
 
 
 class TestRenderApprovalPreview:

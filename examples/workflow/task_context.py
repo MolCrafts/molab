@@ -35,7 +35,7 @@ from pathlib import Path
 
 import molexp as me
 from molexp.profile import ProfileConfig
-from molexp.workflow import Task, TaskContext, WorkflowCompiler, WorkflowRuntime
+from molexp.workflow import Task, TaskContext, Workflow, WorkflowCompiler, WorkflowRuntime
 
 
 class Seed(Task):
@@ -55,7 +55,9 @@ class Record(Task):
 
 
 # Module scope so the compiled artifact is importable across CLI re-imports.
-compiled = WorkflowCompiler(name="counter").add(Seed()).add(Record(), depends_on=["seed"]).compile()
+compiled = WorkflowCompiler().compile(
+    Workflow(name="counter").add(Seed()).add(Record(), depends_on=["seed"])
+)
 
 
 async def main() -> None:

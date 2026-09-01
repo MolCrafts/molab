@@ -113,9 +113,9 @@ and binds the compiled workflow), then either let `molexp run` drive the
 runs or execute one in-process through `WorkflowRuntime`:
 
 ```python
-from molexp.workflow import WorkflowCompiler, WorkflowRuntime
+from molexp.workflow import Workflow, WorkflowCompiler, WorkflowRuntime
 
-compiled = WorkflowCompiler(name="train").add(Train()).compile()
+compiled = WorkflowCompiler().compile(Workflow(name="train").add(Train()))
 
 exp = ws.project("demo").experiment("train").run(compiled, params={"lr": [1e-3]})
 

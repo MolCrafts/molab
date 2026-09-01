@@ -61,7 +61,7 @@ Re-calling `add_project` / `add_experiment` with the same name or id returns the
 Workspace itself stores no workflow-shaped types. The association is declared through `Experiment.define(workflow, params=...)`, which records the workflow's graph IR on the experiment and binds the live `CompiledWorkflow` in the workflow layer's `default_binding_registry`:
 
 ```python
-from molexp.workflow import Task, TaskContext, WorkflowCompiler, WorkflowRuntime
+from molexp.workflow import Task, TaskContext, Workflow, WorkflowCompiler, WorkflowRuntime
 
 
 class TrainTask(Task):
@@ -69,7 +69,7 @@ class TrainTask(Task):
         return {"loss": lr * 10}
 
 
-compiled = WorkflowCompiler(name="train").add(TrainTask()).compile()   # task auto-named "train"
+compiled = WorkflowCompiler().compile(Workflow(name="train").add(TrainTask()))   # task auto-named "train"
 exp = project.add_experiment("baseline").define(compiled, params={"lr": [1e-3]})
 
 # Workspace just provides the Run the workflow executes within.
@@ -111,7 +111,7 @@ Entering `run.start()` opens a `RunContext` which:
 5. On success, writes `status="succeeded"` plus the final timestamp.
 6. On failure, writes `status="failed"`, an `ErrorInfo`, and registers an `ErrorTraceAsset` pointing at `executions/<exec_id>/error.txt`.
 
-Every attempt appears in `run.execution_history`, newest last — a run that was retried twice will have three records. (Status, ownership, and the execution records live in the run's `ops/run.json` hot-state sidecar, not in the `run.json` entity file.)
+Every attempt appears in `run.execution_history`, newest last — a run that was retried twice will have three records. (Status, ownership, and the execution records live in the run's `run.json (hot state) + alive` hot-state sidecar, not in the `run.json` entity file.)
 
 ## Assets
 
@@ -155,7 +155,6 @@ molexp info      # show workspace summary
 ├── workspace.json
 ├── assets.json                     # workspace-scoped asset manifest (authoritative)
 ├── data_assets/<asset_id>/payload/ # imported DataAssets
-├── cache/                          # singleton CacheFolder — ws.cache
 └── projects/
     └── qm9/
         ├── project.json
@@ -169,9 +168,10 @@ molexp info      # show workspace summary
                 └── runs/
                     └── run-<run_id>/
                         ├── run.json        # identity/provenance (no status)
-                        ├── ops/run.json   # hot state: status, ownership, executions
+                        ├── run.json (hot state) + alive   # hot state: status, ownership, executions
                         ├── assets.json     # run-scoped asset manifest
                         ├── artifacts/
+                        ├── cache/          # per-run execution cache
                         ├── .ckpt/          # checkpoint payloads (when written)
                         └── executions/<exec_id>/  # per-attempt workflow.json, logs/, error.txt
 ```

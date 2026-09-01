@@ -23,11 +23,11 @@ import tempfile
 from pathlib import Path
 
 import molexp as me
-from molexp.workflow import WorkflowCompiler, WorkflowRuntime
+from molexp.workflow import Workflow, WorkflowCompiler, WorkflowRuntime
 from molexp.workspace.assets import scan
 
 # ── Workflow with both success and failure paths ─────────────────────────────
-wf = WorkflowCompiler(name="extended")
+wf = Workflow(name="extended")
 
 GOOD = True  # flip to False to see ErrorTraceAsset in action
 
@@ -44,7 +44,7 @@ def risky(data: list[float]) -> float:
     return sum(data)
 
 
-compiled = wf.compile()
+compiled = WorkflowCompiler().compile(wf)
 
 
 async def main() -> None:

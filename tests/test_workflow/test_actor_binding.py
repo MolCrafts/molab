@@ -11,12 +11,12 @@ like a task's, and the async-generator drain (last yield → output) is unchange
 
 from __future__ import annotations
 
-from molexp.workflow import TaskContext, WorkflowCompiler, WorkflowRuntime
+from molexp.workflow import TaskContext, Workflow, WorkflowCompiler, WorkflowRuntime
 
 
 class TestActorBinding:
     async def test_reads_upstream_output_by_name_without_ctx(self) -> None:
-        wf = WorkflowCompiler(name="actor-upstream")
+        wf = Workflow(name="actor-upstream")
 
         @wf.task
         async def source() -> list[int]:
@@ -28,11 +28,11 @@ class TestActorBinding:
             for x in source:
                 yield x * 10
 
-        result = await WorkflowRuntime().execute(wf.compile())
+        result = await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
         assert result.outputs["stream"] == 30  # last yield: 3 * 10
 
     async def test_reads_build_time_config_by_name(self) -> None:
-        wf = WorkflowCompiler(name="actor-config", entry="stream")
+        wf = Workflow(name="actor-config", entry="stream")
 
         @wf.actor
         async def stream(factor: int = 1):
@@ -40,17 +40,19 @@ class TestActorBinding:
             for x in [1, 2, 3]:
                 yield x * factor
 
-        result = await WorkflowRuntime().execute(wf.compile(), config={"factor": 100})
+        result = await WorkflowRuntime().execute(
+            WorkflowCompiler().compile(wf), config={"factor": 100}
+        )
         assert result.outputs["stream"] == 300  # last yield: 3 * 100
 
     async def test_ctx_only_actor_reduces_to_ctx_call(self) -> None:
         """Boundary: an actor whose sole param is ``ctx`` still drains unchanged."""
-        wf = WorkflowCompiler(name="actor-ctx-only", entry="stream")
+        wf = Workflow(name="actor-ctx-only", entry="stream")
 
         @wf.actor
         async def stream(ctx: TaskContext):
             for item in [1, 2, 3]:
                 yield {"seen": item}
 
-        result = await WorkflowRuntime().execute(wf.compile())
+        result = await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
         assert result.outputs["stream"] == {"seen": 3}

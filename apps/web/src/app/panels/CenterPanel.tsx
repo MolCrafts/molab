@@ -1,55 +1,27 @@
+import { Suspense } from "react";
+import { LazySurface } from "@/app/layout/LazySurface";
+import { SurfaceErrorBoundary } from "@/app/layout/SurfaceErrorBoundary";
 import {
-  buildRendererKeyFromSelection,
-  renderPlanByObjectType,
-  tryResolveRenderer,
-} from "@/app/registry";
-import { ActivityPage } from "@/app/runs/ActivityPage";
-import type { RunInspectorRegistration } from "@/app/runs/inspector/RunInspector";
-import { RunsPage } from "@/app/runs/RunsPage";
-import { SettingsPage } from "@/app/settings/SettingsPage";
+  getNavigationContribution,
+  type NavigationEmptySelection,
+} from "@/app/navigation/sections";
+import type { InspectorSurfaceRegistration } from "@/app/panels/inspectorSurface";
+import { resolveRenderersForSelection } from "@/app/registry";
 import type { InspectorTarget, LeftPanelView, Selection, WorkspaceSnapshot } from "@/app/types";
-import { WorkflowsPage } from "@/app/workflows/WorkflowsPage";
-import { WorkbenchOperationState } from "@/components/workbench";
+import { WorkbenchOperationState, WorkbenchRetryAction } from "@/components/workbench";
+import { useContributionGeneration } from "@/lib/contribution-runtime";
 import { usePluginPreferencesGeneration } from "@/plugins/preferences";
 
-interface EmptySelectionCopy {
-  title: string;
-  description: string;
-}
-
-// Per-view empty-selection copy — the placeholder must speak the language of
-// the section the user is looking at, not always the Projects tree.
-const EMPTY_SELECTION_COPY: Partial<Record<LeftPanelView, EmptySelectionCopy>> = {
-  agent: {
-    title: "No agent task selected",
-    description: "Select an agent task from the left, or start a new one.",
-  },
-  knowledge: {
-    title: "No document selected",
-    description: "Pick a note from the left, or create a new one.",
-  },
-  activity: {
-    title: "Workspace activity",
-    description: "The global event timeline fills the center panel for this section.",
-  },
-};
-
-const DEFAULT_EMPTY_SELECTION_COPY: EmptySelectionCopy = {
+const DEFAULT_EMPTY_SELECTION_COPY: NavigationEmptySelection = {
   title: "Select an item to begin",
-  description:
-    "Pick a project, experiment, run, or workflow from the left navigation, or open the Runs " +
-    "view to inspect every execution across the workspace.",
+  description: "Choose an item from the explorer to open its workspace.",
 };
 
-/** Resolve the placeholder copy for a left-panel view (exported for tests). */
-export const emptySelectionCopy = (view?: LeftPanelView): EmptySelectionCopy =>
-  (view && EMPTY_SELECTION_COPY[view]) || DEFAULT_EMPTY_SELECTION_COPY;
-
-const EmptySelectionPlaceholder = ({ view }: { view?: LeftPanelView }): JSX.Element => {
-  const copy = emptySelectionCopy(view);
+const EmptySelectionPlaceholder = ({ copy }: { copy?: NavigationEmptySelection }): JSX.Element => {
+  const content = copy ?? DEFAULT_EMPTY_SELECTION_COPY;
   return (
     <div className="flex h-full items-center justify-center p-6">
-      <WorkbenchOperationState kind="empty" title={copy.title} detail={copy.description} />
+      <WorkbenchOperationState kind="empty" title={content.title} detail={content.description} />
     </div>
   );
 };
@@ -61,7 +33,7 @@ interface CenterPanelProps {
   inspectorTarget: InspectorTarget;
 
   onInspectorTargetChange: (target: InspectorTarget) => void;
-  onRunInspectorChange: (registration: RunInspectorRegistration | null) => void;
+  onInspectorChange: (registration: InspectorSurfaceRegistration | null) => void;
   onRefresh: () => void;
 }
 
@@ -71,35 +43,57 @@ export const CenterPanel = ({
   leftPanelView,
   inspectorTarget,
   onInspectorTargetChange,
-  onRunInspectorChange,
+  onInspectorChange,
   onRefresh,
 }: CenterPanelProps): JSX.Element => {
   // Plugin enable flags gate contributions — re-resolve when toggled.
   usePluginPreferencesGeneration();
+  // Optional built-ins register after first render without requiring navigation.
+  useContributionGeneration();
 
   if (!selection) {
-    if (leftPanelView === "runs") {
-      return <RunsPage snapshot={snapshot} onInspectorChange={onRunInspectorChange} />;
+    const navigation = leftPanelView ? getNavigationContribution(leftPanelView) : undefined;
+    const Landing = navigation?.landing;
+    if (Landing) {
+      return (
+        <SurfaceErrorBoundary
+          resetKey={`landing:${navigation.id}`}
+          fallback={(error) => (
+            <div className="flex h-full items-center justify-center p-6">
+              <WorkbenchOperationState
+                kind="error"
+                title="Could not load this view"
+                detail={error.message}
+                action={
+                  <WorkbenchRetryAction
+                    label="Reload application"
+                    onClick={() => window.location.reload()}
+                  />
+                }
+              />
+            </div>
+          )}
+        >
+          <Suspense
+            fallback={
+              <div className="flex h-full items-center justify-center p-6">
+                <WorkbenchOperationState kind="loading" title="Loading view" />
+              </div>
+            }
+          >
+            <Landing
+              snapshot={snapshot}
+              onRefresh={onRefresh}
+              onInspectorChange={onInspectorChange}
+            />
+          </Suspense>
+        </SurfaceErrorBoundary>
+      );
     }
-    if (leftPanelView === "activity") {
-      return <ActivityPage snapshot={snapshot} />;
-    }
-    if (leftPanelView === "workflow") {
-      return <WorkflowsPage snapshot={snapshot} onRefresh={onRefresh} />;
-    }
-    if (leftPanelView === "settings") {
-      return <SettingsPage />;
-    }
-    return <EmptySelectionPlaceholder view={leftPanelView} />;
+    return <EmptySelectionPlaceholder copy={navigation?.emptySelection} />;
   }
 
-  const plan = renderPlanByObjectType[selection.objectType];
-  const renderers = plan.center
-    .map((target) => {
-      const key = buildRendererKeyFromSelection(selection, target);
-      return tryResolveRenderer(key, { selection, snapshot, target });
-    })
-    .filter((renderer): renderer is NonNullable<typeof renderer> => renderer !== null);
+  const renderers = resolveRenderersForSelection(selection, snapshot, "center");
 
   if (renderers.length === 0) {
     return (
@@ -116,14 +110,20 @@ export const CenterPanel = ({
   return (
     <div className="flex h-full flex-col">
       {renderers.map((renderer) => (
-        <renderer.Component
-          key={`${renderer.title}-${renderer.panelSlot}`}
-          selection={selection}
-          snapshot={snapshot}
-          inspectorTarget={inspectorTarget}
-          onInspectorTargetChange={onInspectorTargetChange}
-          onRefresh={onRefresh}
-        />
+        <LazySurface
+          key={renderer.id}
+          resetKey={`renderer:${renderer.id}:${selection.objectId}`}
+          loadingTitle={`Loading ${renderer.title}…`}
+          errorTitle={`Could not load ${renderer.title}`}
+        >
+          <renderer.Component
+            selection={selection}
+            snapshot={snapshot}
+            inspectorTarget={inspectorTarget}
+            onInspectorTargetChange={onInspectorTargetChange}
+            onRefresh={onRefresh}
+          />
+        </LazySurface>
       ))}
     </div>
   );

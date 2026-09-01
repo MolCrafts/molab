@@ -79,7 +79,7 @@ export class GitService {
      * @returns GitCheckpointResponse Successful Response
      * @throws ApiError
      */
-    public static gitCheckpointRoute1(
+    public static gitCheckpointRouteWs(
         ws: string,
         molexpSession?: (string | null),
     ): CancelablePromise<GitCheckpointResponse> {
@@ -105,7 +105,7 @@ export class GitService {
      * @returns string Successful Response
      * @throws ApiError
      */
-    public static gitPushRoute1(
+    public static gitPushRouteWs(
         ws: string,
         requestBody: GitPushRequest,
         molexpSession?: (string | null),
@@ -133,7 +133,7 @@ export class GitService {
      * @returns GitCheckpointResponse Successful Response
      * @throws ApiError
      */
-    public static gitRebuildRoute1(
+    public static gitRebuildRouteWs(
         ws: string,
         molexpSession?: (string | null),
     ): CancelablePromise<GitCheckpointResponse> {

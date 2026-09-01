@@ -132,10 +132,10 @@ class TestStageOut:
         stage_out(transport, run, _remote_target(), "exec-abc")
 
         remote_paths = [d[0] for d in transport.downloads]
-        # Always pulls executions/<id> and run.json.
+        # Always pulls executions/<id>, run.json, and alive.
         assert any(p.endswith("/executions/exec-abc") for p in remote_paths)
         assert any(p.endswith("/run.json") for p in remote_paths)
-        # Absent optional dirs are skipped, not pulled.
+        assert any(p.endswith("/alive") for p in remote_paths)
         assert not any(p.endswith("/artifacts") for p in remote_paths)
         assert not any(p.endswith("/.ckpt") for p in remote_paths)
         assert not any(p.endswith("/assets.json") for p in remote_paths)

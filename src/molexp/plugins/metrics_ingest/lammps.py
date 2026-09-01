@@ -74,7 +74,7 @@ def thermo_records(
 
     Yields:
         Compact-key metric records ready for
-        :meth:`molexp.workspace.metrics.MetricsWriter.log_many`.
+        :meth:`molexp.plugins.metrics.MetricsWriter.log_many`.
 
     Raises:
         ImportError: If molpy is unavailable (see :func:`require_molpy`).

@@ -2,7 +2,7 @@
  * Cross-feature fixtures for `npm run dev:web` (leaf `npm run dev`).
  *
  * Domain handlers own entity CRUD. This file fills the small read models that
- * span domains (knowledge, activity, plans, approvals, cache and workspaces),
+ * span domains (knowledge, plans, approvals, cache and workspaces),
  * so every navigation destination can be exercised without a Python server.
  */
 
@@ -91,58 +91,6 @@ export const featureShowcaseHandlers = [
       },
     ]),
   ),
-
-  http.get("/api/events", ({ request }) => {
-    const limit = Number(new URL(request.url).searchParams.get("limit") ?? 50);
-    const rows = [
-      {
-        id: "event-005",
-        seq: 5,
-        type: "run.failed",
-        created_at: "2025-01-15T11:56:00.000Z",
-        actor: "molq",
-        refs: ["protein-folding", "exp-001", "run-003"],
-        payload: { reason: "CUDA out of memory", scheduler_job_id: "421188" },
-      },
-      {
-        id: "event-004",
-        seq: 4,
-        type: "asset.added",
-        created_at: "2025-01-15T11:30:00.000Z",
-        actor: "train",
-        refs: ["run-001", "asset-003"],
-        payload: { kind: "checkpoint", size: 20971520 },
-      },
-      {
-        id: "event-003",
-        seq: 3,
-        type: "run.completed",
-        created_at: "2025-01-15T11:00:00.000Z",
-        actor: "local",
-        refs: ["catalyst-search", "exp-101", "run-101"],
-        payload: { hit_rate: 0.31 },
-      },
-      {
-        id: "event-002",
-        seq: 2,
-        type: "run.started",
-        created_at: "2025-01-15T10:28:00.000Z",
-        actor: "molq",
-        refs: ["protein-folding", "exp-002", "run-202"],
-        payload: { target: "dardel-gpu" },
-      },
-      {
-        id: "event-001",
-        seq: 1,
-        type: "knowledge.created",
-        created_at: "2025-01-15T09:15:00.000Z",
-        actor: "researcher",
-        refs: ["notes/alphafold-benchmark"],
-        payload: { title: "AlphaFold benchmark findings" },
-      },
-    ];
-    return HttpResponse.json(rows.slice(0, Number.isFinite(limit) ? limit : 50));
-  }),
 
   http.get("/api/knowledge", ({ request }) => {
     const url = new URL(request.url);

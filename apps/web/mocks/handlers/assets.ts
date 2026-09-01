@@ -15,14 +15,14 @@ interface LineageNodeShape {
     id: string;
     name: string;
     kind: string;
-    scope_kind: string;
+    scopeKind: string;
 }
 
 const _node = (a: ApiAssetResponse): LineageNodeShape => ({
     id: a.id,
     name: a.name,
     kind: a.kind,
-    scope_kind: a.scope_kind,
+    scopeKind: a.scopeKind,
 });
 
 const _ancestorIds = (assetId: string): Set<string> => {
@@ -76,7 +76,7 @@ const applyFilters = (
     params: URLSearchParams,
 ): ApiAssetResponse[] => {
     const kind = params.get("kind");
-    const scopeKind = params.get("scope_kind");
+    const scopeKind = params.get("scopeKind");
     const runId = params.get("run_id");
     const taskId = params.get("task_id");
     const limitRaw = params.get("limit");
@@ -84,7 +84,7 @@ const applyFilters = (
 
     let filtered = assets;
     if (kind) filtered = filtered.filter((a) => a.kind === kind);
-    if (scopeKind) filtered = filtered.filter((a) => a.scope_kind === scopeKind);
+    if (scopeKind) filtered = filtered.filter((a) => a.scopeKind === scopeKind);
     if (runId) filtered = filtered.filter((a) => a.producer?.run_id === runId);
     if (taskId) filtered = filtered.filter((a) => a.producer?.task_id === taskId);
     return filtered.slice(0, Number.isFinite(limit) ? limit : 100);
@@ -179,11 +179,11 @@ export const assetHandlers = [
             id: assetId,
             name: filename,
             kind: "data",
-            scope_kind: "workspace",
-            scope_ids: [],
+            scopeKind: "workspace",
+            scopeIds: [],
             path: `data_assets/${assetId}/payload`,
-            created_at: now,
-            updated_at: now,
+            createdAt: now,
+            updatedAt: now,
             producer: null,
             tags: { original_filename: filename },
             extra: {

@@ -34,7 +34,6 @@ from typing import TYPE_CHECKING, Annotated
 import typer
 
 if TYPE_CHECKING:
-    from molexp._typing import JSONValue
     from molexp.agent.router import Router
     from molexp.harness.gateways.gateway import AgentGateway
     from molexp.harness.registry.capability_registry import CapabilityRegistry
@@ -74,10 +73,10 @@ class InteractiveApprover:
 
     async def __call__(self, request: ApprovalRequest) -> ApprovalDecision:
         from datetime import UTC, datetime
-        from pathlib import Path
 
         from molexp.harness.schemas import ApprovalDecision, ReviewDecision
         from molexp.harness.store.file_artifact_store import FileArtifactStore
+        from molexp.harness.store.paths import harness_artifact_root
         from molexp.services.plan_runtime.preview import (
             build_review_pack,
             render_review_pack,
@@ -127,7 +126,7 @@ class InteractiveApprover:
             decided_at=datetime.now(tz=UTC),
             reason=f"operator answered {answer!r}",
         )
-        FileArtifactStore(root=Path(str(self._run.run_dir)) / "artifacts").put_json(
+        FileArtifactStore(root=harness_artifact_root(self._run.run_dir)).put_json(
             kind="review_decision",
             obj=decision.model_dump(mode="json"),
             created_by="cli.InteractiveApprover",
@@ -211,7 +210,7 @@ class PlanRuntime:
         one-line human-readable reason. A seam: tests monkeypatch this to a
         no-op returning ``None`` alongside a stubbed :meth:`build_gateway`.
         """
-        from molexp.services.plan_runtime import preflight_plan_router
+        from molexp.services.plan_runtime.gateway import preflight_plan_router
 
         return preflight_plan_router(model=model)
 
@@ -239,7 +238,7 @@ class PlanRuntime:
         LLM call is projected into the Agents-tab session cache.
         ``knowledge_sources`` pins molmcp package scope for this plan.
         """
-        from molexp.services.plan_runtime import build_plan_gateway
+        from molexp.services.plan_runtime.gateway import build_plan_gateway
 
         return build_plan_gateway(
             model=model,
@@ -356,7 +355,7 @@ def plan(
     ] = False,
 ) -> None:
     """Turn an experiment draft into a frozen experiment plan (emergent planning)."""
-    from molexp.cli._common import deterministic_run_id, rprint
+    from molexp.cli._common import rprint
     from molexp.harness import ApprovalPendingError, Plan, StageExecutionError
     from molexp.services.plan_runtime import PlanPreflightError
     from molexp.workspace import Workspace
@@ -386,18 +385,19 @@ def plan(
     workspace_root = (workspace or Path.cwd()).resolve()
     ws = Workspace(workspace_root)
     ws.materialize()
-    # Content-addressed run id: the same draft maps to the same Run, so a
-    # re-run replays store-first through the review gate on that Run.
-    params: dict[str, JSONValue] = {"mode": "plan", "draft": draft_text}
+    # Content-addressed run: same bootstrap as POST /plan-tasks.
     exp = ws.add_project(project).add_experiment(experiment)
-    run = exp.add_run(params, id=deterministic_run_id(params))
+    plan = Plan.open(exp, draft_text, realize=True)
+    run = plan.bound_run
 
     # Explicit or suspended, never implicit: an interactive approver exists
     # only on a TTY or with --yes; otherwise approve=None means the review gate
     # resolves store-first and SUSPENDS pending (exit 2) instead of granting.
     import sys
 
-    approver = InteractiveApprover(run=run, assume_yes=yes) if (yes or sys.stdin.isatty()) else None
+    plan.approve = (
+        InteractiveApprover(run=run, assume_yes=yes) if (yes or sys.stdin.isatty()) else None
+    )
     preview = draft_text.strip().splitlines()[0][:_DRAFT_PREVIEW_CHARS]
     rprint(f"[bold]molexp plan[/bold] — plan pipeline on run [bold]{run.id}[/bold]")
     rprint(f"  model     : {resolved_model}")
@@ -425,17 +425,9 @@ def plan(
         task=draft_text,
         sources=source_list,
     )
-    from molexp.services.plan_runtime import drive_plan_mode
-
     try:
-        # drive_plan_mode wraps the pipeline in the run lifecycle so the plan
-        # Run's status is honest (running -> succeeded | failed) — the same
-        # shared path the server's plan-tasks use.
         result = asyncio.run(
-            drive_plan_mode(
-                Plan(approve=approver, realize=True),
-                run=run,
-                user_input=draft_text,
+            plan.execute(
                 gateway=gateway,
                 capability_registry=capability_registry,
             )
@@ -462,7 +454,8 @@ def plan(
         # A terminally-failed plan still materializes (Agents-tab entry with
         # status failed + a FailureAnalysis knowledge record). The suspension
         # path above never reaches here — ApprovalPendingError is not a failure.
-        from molexp.services.plan_runtime import PlanFailure, materialize_plan_records
+        from molexp.services.plan_runtime import PlanFailure
+        from molexp.services.plan_runtime.materialize import materialize_plan_records
 
         outcome = materialize_plan_records(
             run=run,
@@ -488,7 +481,7 @@ def plan(
     # writes — persist the workflow IR onto the experiment + record the Agents
     # session (with the deliverables locator) and Knowledge note — so a plan
     # produced here is identical, in the UI, to one generated from the web app.
-    from molexp.services.plan_runtime import materialize_plan_records
+    from molexp.services.plan_runtime.materialize import materialize_plan_records
 
     outcome = materialize_plan_records(
         run=run,
@@ -511,8 +504,9 @@ def plan(
             "frozen plan + report."
         )
 
-    rprint(f"\n  artifacts : {run.run_dir / 'artifacts'}")
-    rprint(f"  audit db  : {run.run_dir / 'harness.sqlite'}  (events + artifact lineage)")
+    rprint(f"\n  artifacts : {run.run_dir / 'harness' / 'artifacts'}")
+    rprint(f"  events    : {run.run_dir / 'events.jsonl'}")
+    rprint(f"  approvals : {run.run_dir / 'approvals.json'}")
     rprint(
         "[dim]Re-running the same draft replays store-first through the review "
         "gate on the same content-addressed run.[/dim]"

@@ -1,6 +1,5 @@
-import { LogOut, User } from "lucide-react";
+import { LogOut } from "lucide-react";
 import { useAuth } from "@/app/auth/AuthContext";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -19,15 +18,25 @@ export function UserMenu(): JSX.Element | null {
     return null;
   }
 
+  const initials =
+    user.username
+      .split(/[\s._-]+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase())
+      .join("") || "U";
+
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="sm" className="gap-2" aria-label="Account menu">
-          <User className="h-4 w-4" />
-          <span className="max-w-[8rem] truncate">{user.username}</span>
-          <Badge variant="secondary" className="font-normal">
-            {user.role}
-          </Badge>
+        <Button
+          variant="ghost"
+          size="icon-sm"
+          className="rounded-full bg-background font-mono text-micro"
+          aria-label="Account menu"
+          title={user.username}
+        >
+          <span aria-hidden>{initials}</span>
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-48">

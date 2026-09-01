@@ -81,7 +81,7 @@ class AgentSession(Folder):
 
     def write_meta(self) -> str:
         """Write the rich :class:`AgentSessionMeta` as this session's meta.json."""
-        fpath = self._disk().join(self.path(), META_JSON_FILENAME)
+        fpath = self._disk().join(self.path, META_JSON_FILENAME)
         self._disk().atomic_write_json(fpath, self._session_meta.model_dump(mode="json"))
         return fpath
 
@@ -186,7 +186,7 @@ class Agent(Folder):
 
     def write_meta(self) -> str:
         """Write the rich :class:`AgentMeta` as this agent's meta.json."""
-        fpath = self._disk().join(self.path(), META_JSON_FILENAME)
+        fpath = self._disk().join(self.path, META_JSON_FILENAME)
         self._disk().atomic_write_json(fpath, self._agent_meta.model_dump(mode="json"))
         return fpath
 

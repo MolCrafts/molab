@@ -36,6 +36,13 @@ class TestWorkspace:
         ws.materialize()
         assert (tmp_path / "workspace.json").exists()
 
+    def test_materialize_stamps_type_on_workspace_json(self, tmp_path):
+        ws = Workspace(root=tmp_path, name="Lab")
+        ws.materialize()
+        data = json.loads((tmp_path / "workspace.json").read_text())
+        assert data["type"] == "workspace.root"
+        assert ws.read_meta()["type"] == "workspace.root"
+
     def test_child_factory_auto_materializes(self, tmp_path):
         ws = Workspace(root=tmp_path, name="Lab")
         ws.add_project("first")
@@ -94,7 +101,7 @@ class TestProject:
 
 class TestExperiment:
     def test_ir_workflow_source_externalized_to_workflow_json(self, project):
-        """A compiled-IR ``workflow_source`` lands as a standalone ``workflow.json``.
+        """A compiled-IR ``workflow_source`` lands as a standalone ``workflow.ir.json``.
 
         The IR is the contract the molexp VSCode preview reads directly, so it
         must be a clean, pretty-printed file (no ``schema_version`` envelope) and
@@ -104,7 +111,7 @@ class TestExperiment:
         ir = {"workflow_id": "wf", "name": "demo", "task_configs": [], "links": []}
         exp = project.add_experiment("ir-exp", workflow_source=json.dumps(ir))
 
-        doc = Path(exp.experiment_dir) / "workflow.json"
+        doc = Path(exp.experiment_dir) / "workflow.ir.json"
         assert doc.is_file()
         # Clean IR — directly previewable, no version-envelope pollution.
         assert json.loads(doc.read_text()) == ir
@@ -118,7 +125,7 @@ class TestExperiment:
     def test_non_ir_workflow_source_stays_embedded(self, project):
         """A non-JSON ``workflow_source`` (a Python path) is never externalized."""
         exp = project.add_experiment("py-exp", workflow_source="train.py")
-        assert not (Path(exp.experiment_dir) / "workflow.json").exists()
+        assert not (Path(exp.experiment_dir) / "workflow.ir.json").exists()
         raw = json.loads((Path(exp.experiment_dir) / "experiment.json").read_text())
         assert raw["workflow_source"] == "train.py"
 

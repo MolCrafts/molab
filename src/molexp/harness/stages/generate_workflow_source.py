@@ -212,7 +212,7 @@ def _render_assembly(bound: BoundWorkflow, slugs: dict[str, str]) -> str:
     """Synthesize ``workflow/__init__.py`` from the bound tasks + edges.
 
     Each task's module + function are named by its slug; this imports them and
-    registers them on a ``WorkflowCompiler`` with ``depends_on`` from the
+    registers them on a ``Workflow`` with ``depends_on`` from the
     dependency edges, in topological order (the first registered task has no
     dependencies — the molexp contract).
     """
@@ -224,15 +224,15 @@ def _render_assembly(bound: BoundWorkflow, slugs: dict[str, str]) -> str:
 
     lines = [
         "# workflow/__init__.py",
-        "from molexp.workflow import WorkflowCompiler",
+        "from molexp.workflow import Workflow",
     ]
     for tid in order:
         lines.append(f"from workflow.{slugs[tid]} import {slugs[tid]}")
     lines += [
         "",
         "",
-        "def build_workflow() -> WorkflowCompiler:",
-        '    wf = WorkflowCompiler(name="plan_workflow")',
+        "def build_workflow() -> Workflow:",
+        '    wf = Workflow(name="plan_workflow")',
     ]
     for tid in order:
         dep_slugs = [slugs[d] for d in deps[tid]]

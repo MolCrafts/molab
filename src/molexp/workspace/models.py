@@ -68,7 +68,7 @@ class FolderMetadata(BaseModel, frozen=True):
     semantics: stable id (slugified ``name``), human-readable ``name``,
     dotted-ASCII ``kind`` for child filtering, and monotonic
     ``created_at``/``updated_at`` timestamps. The ``extra`` slot lets
-    business subclasses (``SessionFolder`` / ``CacheFolder`` / ``PlanFolder``)
+    business subclasses (``CacheFolder`` / Knowledge / Agent folders)
     stash custom fields without forking the schema.
 
     The ``updated_at`` field is a deliberate deviation from rule 3 above

@@ -33,16 +33,11 @@ class _AccessorBase:
         scope: AssetScope,
         manifest: AssetManifest,
         producer_provider: Callable[[], Producer],
-        *,
-        event_root: Path | None = None,
     ) -> None:
         self._scope_dir = scope_dir
         self._scope = scope
         self._manifest = manifest
         self._producer_provider = producer_provider
-        # Workspace root for the event spine; None (the default) keeps the
-        # accessor emit-free (vision-loop-12 — only RunAssets passes it).
-        self._event_root = event_root
 
     def _register(self, asset) -> None:  # noqa: ANN001
         self._manifest.register(asset)
@@ -166,7 +161,7 @@ class LogAccessor(_AccessorBase):
 
 
 class CheckpointAccessor(_AccessorBase):
-    """Save JSON checkpoints to ``<run_dir>/.ckpt/<ckpt_id>.json``."""
+    """Save JSON checkpoints to ``executions/<id>/checkpoints/<ckpt_id>.json``."""
 
     def __init__(
         self,
@@ -175,10 +170,21 @@ class CheckpointAccessor(_AccessorBase):
         manifest: AssetManifest,
         producer_provider: Callable[[], Producer],
         files: FileStore,
+        execution_id_provider: Callable[[], str | None],
     ) -> None:
         super().__init__(scope_dir, scope, manifest, producer_provider)
         self._files = files
+        self._execution_id_provider = execution_id_provider
         self._last_ckpt_id: str | None = None
+
+    def _rel(self, ckpt_id: str) -> Path:
+        exec_id = self._execution_id_provider()
+        if exec_id is None:
+            raise RuntimeError(
+                "CheckpointAccessor requires an active execution_id; "
+                "call ctx.checkpoint(...) inside `with run.start() as ctx:`."
+            )
+        return Path("executions") / exec_id / "checkpoints" / f"{ckpt_id}.json"
 
     def __call__(
         self,
@@ -195,14 +201,15 @@ class CheckpointAccessor(_AccessorBase):
             "data": data or {},
             "timestamp": datetime.now().isoformat(),
         }
-        self._files.put(Path(".ckpt") / f"{ckpt_id}.json", payload)
+        rel = self._rel(ckpt_id)
+        self._files.put(rel, payload)
 
         now = datetime.now()
         asset = CheckpointAsset(
             asset_id=generate_asset_id(),
             name=name or ckpt_id,
             scope=self._scope,
-            path=Path(".ckpt") / f"{ckpt_id}.json",
+            path=rel,
             created_at=now,
             updated_at=now,
             producer=self._producer_provider(),

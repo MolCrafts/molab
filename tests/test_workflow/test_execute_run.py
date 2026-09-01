@@ -1,6 +1,6 @@
 """One-step tracked execution — ``execute_run`` / ``Run.execute`` (runset-api sub-task 1).
 
-``molexp.workflow.execute_run(workflow, run)`` folds the seven-touchpoint
+``molexp.workflow.run.execute(workflow)`` folds the seven-touchpoint
 driver dance (``run.start()`` + ``WorkflowRuntime().execute(run_context=...)``
 + asyncio plumbing) into one call that reuses the exact same execution path
 as ``molexp run``: RunContext lifecycle (status machine, ``ops`` sidecar,
@@ -22,8 +22,6 @@ from molexp.workflow import (
     RunNotExecutableError,
     Workflow,
     WorkflowCompiler,
-    aexecute_run,
-    execute_run,
 )
 from molexp.workspace.models import RunStatus
 
@@ -51,7 +49,7 @@ def _build_wf() -> Workflow:
 class TestExecuteRun:
     def test_one_step_execute_returns_per_task_outputs(self, tmp_path: Path) -> None:
         run = _make_run(tmp_path)
-        result = execute_run(WorkflowCompiler().compile(_build_wf()), run)
+        result = run.execute(WorkflowCompiler().compile(_build_wf()))
         assert result.status == "succeeded"
         assert result.outputs["double"] == 6
         assert result.outputs["summarize"] == "got 6"
@@ -67,7 +65,7 @@ class TestExecuteRun:
 
         run = _make_run(tmp_path)
         with pytest.raises(RunFailedError) as excinfo:
-            execute_run(wf, run)
+            run.execute(wf)
         assert run.status == RunStatus.FAILED.value
         # The exception surfaces WHY and carries the partial WorkflowResult.
         assert "ZeroDivisionError" in str(excinfo.value)
@@ -85,7 +83,7 @@ class TestExecuteRun:
 
         run = _make_run(tmp_path)
         with pytest.raises(RunFailedError):
-            execute_run(wf, run)
+            run.execute(wf)
 
         exec_id = run.execution_history[-1].execution_id
         error_txt = Path(str(run.run_dir)) / "executions" / exec_id / "error.txt"
@@ -102,15 +100,15 @@ class TestExecuteRun:
         check precedes the verb domain, so ``rerun=True`` cannot resurrect a
         done run (verb domain is failed/cancelled only)."""
         run = _make_run(tmp_path)
-        execute_run(_build_wf(), run)
+        run.execute(_build_wf())
         with pytest.raises(RunNotExecutableError, match="succeeded"):
-            execute_run(_build_wf(), run, rerun=True)
+            run.execute(_build_wf(), rerun=True)
         assert len(run.execution_history) == 1
 
     def test_fresh_requires_rerun(self, tmp_path: Path) -> None:
         run = _make_run(tmp_path)
         with pytest.raises(ValueError, match="rerun=True"):
-            execute_run(_build_wf(), run, fresh=True)
+            run.execute(_build_wf(), fresh=True)
 
     def test_failed_then_explicit_resume_reopens_same_execution(self, tmp_path: Path) -> None:
         """Retrying is explicit: a failed run refuses a plain call and
@@ -137,15 +135,15 @@ class TestExecuteRun:
 
         run = _make_run(tmp_path, params={"x": 1})
         with pytest.raises(RunFailedError):
-            execute_run(build(), run)
+            run.execute(build())
         assert run.status == RunStatus.FAILED.value
         exec_ids_before = [r.execution_id for r in run.execution_history]
 
         flag.write_text("ok")
         # A plain call on a retryable run refuses — retrying is an explicit verb.
         with pytest.raises(RunNotExecutableError, match="resume=True"):
-            execute_run(build(), run)
-        result = execute_run(build(), run, resume=True)
+            run.execute(build())
+        result = run.execute(build(), resume=True)
         assert result.status == "succeeded"
         assert result.outputs["stage_b"] == 200
         # Same execution reopened — no new attempt appended.
@@ -162,8 +160,8 @@ class TestExecuteRun:
 
         run = _make_run(tmp_path)
         with pytest.raises(RunFailedError):
-            execute_run(wf_fail, run)
-        result = execute_run(_build_wf(), run, rerun=True)
+            run.execute(wf_fail)
+        result = run.execute(_build_wf(), rerun=True)
         assert result.status == "succeeded"
         assert len(run.execution_history) == 2
 
@@ -172,20 +170,20 @@ class TestExecuteRun:
         run.materialize()
         run._update_metadata(status=RunStatus.RUNNING)
         with pytest.raises(RunNotExecutableError, match="cancel"):
-            execute_run(_build_wf(), run)
+            run.execute(_build_wf())
 
     def test_sync_facade_inside_event_loop_raises(self, tmp_path: Path) -> None:
         run = _make_run(tmp_path)
 
         async def inner() -> None:
-            execute_run(_build_wf(), run)
+            run.execute(_build_wf())
 
         with pytest.raises(RuntimeError, match="aexecute"):
             asyncio.run(inner())
 
     def test_async_variant(self, tmp_path: Path) -> None:
         run = _make_run(tmp_path)
-        result = asyncio.run(aexecute_run(_build_wf(), run))
+        result = asyncio.run(run.aexecute(_build_wf()))
         assert result.status == "succeeded"
         assert result.outputs["summarize"] == "got 6"
 

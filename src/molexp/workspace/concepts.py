@@ -25,6 +25,7 @@ via the :class:`~molexp.workspace.bundle.Bundle` façade.
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Iterable
 from typing import ClassVar, cast
 
@@ -114,7 +115,7 @@ class Note(Folder):
         on *meta* are preserved verbatim (``ConceptMeta`` is ``extra="allow"``).
         """
         meta = meta.model_copy(update={"type": self._kind, "id": self._name})
-        fpath = self._disk().join(self.path(), META_JSON_FILENAME)
+        fpath = self._disk().join(self.path, META_JSON_FILENAME)
         self._disk().atomic_write_text(fpath, meta.to_json())
 
     def tags(self) -> list[str]:
@@ -186,7 +187,7 @@ class ReferenceConcept(Folder):
         ``"reference"`` for the OKF bib payload).
         """
         meta = meta.model_copy(update={"type": self._kind, "id": self._name})
-        fpath = self._disk().join(self.path(), META_JSON_FILENAME)
+        fpath = self._disk().join(self.path, META_JSON_FILENAME)
         self._disk().atomic_write_text(fpath, meta.to_json())
 
     def citation(self) -> str:

@@ -40,14 +40,13 @@ from .folder import (
     _validate_target_registered,
 )
 from .fs import PathArg
-from .knowledge_item import KnowledgeItem, KnowledgeKind, SourceRef
-from .knowledge_write import write_knowledge_item
+from .knowledge import HasKnowledge
 from .models import FolderMetadata, ProjectMetadata
 from .utils import slugify
 
 
 @concept_type(WORKSPACE_PROJECT_KIND)
-class Project(Folder):
+class Project(Folder, HasKnowledge):
     """Research project container.
 
     Example::
@@ -198,9 +197,7 @@ class Project(Folder):
     @property
     def data_assets(self) -> DataAssetLibrary:
         if self._data_assets is None:
-            self._data_assets = DataAssetLibrary(
-                self.project_dir, self.scope, event_root=_LocalPath(str(self.workspace.root))
-            )
+            self._data_assets = DataAssetLibrary(self.project_dir, self.scope)
         return self._data_assets
 
     # ── Persistence ─────────────────────────────────────────────────────
@@ -209,9 +206,19 @@ class Project(Folder):
         """Create filesystem structure and persist metadata (non-recursive)."""
         d = self.project_dir
         self._disk().mkdir(d, parents=True, exist_ok=True)
-        meta_path = self._disk().join(d, "project.json")
-        _save_metadata(self._entity_metadata, meta_path, fs=self._disk())
-        self.write_meta()
+        self.save()
+
+    def write_meta(self) -> str:
+        """Stamp concept ``type`` on ``project.json``."""
+        self.save()
+        return self._disk().join(self.project_dir, "project.json")
+
+    def _sync_entity_identity(self) -> None:
+        """Mirror the folder identity into ``project.json`` (``move_to`` hook)."""
+        self._entity_metadata = self._entity_metadata.model_copy(
+            update={"id": self._name, "name": self._metadata.name}
+        )
+        self.save()
 
     def save(self) -> None:
         """Persist current metadata to disk."""
@@ -271,6 +278,11 @@ class Project(Folder):
 
     def experiment(self, name: str) -> Experiment:
         """Get an existing experiment by name (must exist).
+
+        This is the public spelling for run scripts:
+        ``workspace.project("peo-tg").experiment("size-convergence")``.
+        Creating a new experiment is workspace scaffolding
+        (:meth:`add_experiment`), not something a run script does.
 
         Raises:
             ExperimentNotFoundError: No experiment with that slug.
@@ -342,113 +354,8 @@ class Project(Folder):
         """Alias of :meth:`experiments`."""
         return self.experiments()
 
-    # ── Knowledge CRUD (same shape as experiments) ───────────────────────
-
-    def add_knowledge(
-        self,
-        name: str,
-        *,
-        kind: KnowledgeKind = "ProtocolNote",
-        body: str = "",
-        sources: list[SourceRef | Folder | str] | None = None,
-        created_by: str = "user",
-        title: str = "",
-    ) -> KnowledgeItem:
-        """Add a sourced knowledge item under this project."""
-        refs = _normalize_sources(sources, default_host=self)
-        return write_knowledge_item(
-            self,
-            name=name,
-            kind=kind,
-            sources=refs,
-            created_by=created_by,
-            body=body,
-            title=title or name,
-        )
-
-    def knowledge(self, name: str) -> KnowledgeItem:
-        """Get an existing knowledge item by name (must exist)."""
-        return self.get_folder(name, cls=KnowledgeItem)
-
-    def set_knowledge(
-        self,
-        name: str,
-        *,
-        kind: KnowledgeKind | None = None,
-        body: str | None = None,
-        sources: list[SourceRef | Folder | str] | None = None,
-        created_by: str | None = None,
-        title: str = "",
-    ) -> KnowledgeItem:
-        """Update an existing knowledge item (rewrites meta/body)."""
-        item = self.knowledge(name)
-        meta = item.read_knowledge_meta()
-        new_kind = kind if kind is not None else meta.kind
-        new_sources = (
-            _normalize_sources(sources, default_host=self)
-            if sources is not None
-            else list(meta.sources)
-        )
-        new_by = created_by if created_by is not None else meta.created_by
-        new_body = body if body is not None else item.body()
-        return write_knowledge_item(
-            self,
-            name=name,
-            kind=new_kind,
-            sources=new_sources,
-            created_by=new_by,
-            body=new_body,
-            title=title or name,
-        )
-
-    def del_knowledge(self, name: str) -> None:
-        """Delete a knowledge item directory."""
-        self.remove_folder(name, cls=KnowledgeItem)
-
-    def knowledges(self) -> list[KnowledgeItem]:
-        """List knowledge items mounted directly under this project."""
-        return self.list_folders(cls=KnowledgeItem)
-
     def children(self, kind: str | None = None) -> list[Folder]:
         """List entity children (experiments by default filter)."""
         if kind is not None and kind != WORKSPACE_EXPERIMENT_KIND:
             return []
         return list(self.experiments())
-
-
-def _normalize_sources(
-    sources: list[SourceRef | Folder | str] | None,
-    *,
-    default_host: Folder,
-) -> list[SourceRef]:
-    """Accept SourceRef, Folder, or free strings (dataset: / DOI: / path)."""
-    if not sources:
-        # Sourced knowledge requires ≥1 SourceRef — default to the host itself.
-        return [
-            SourceRef(
-                kind="experiment" if isinstance(default_host, Experiment) else "file",
-                ref=getattr(default_host, "id", default_host.name),
-            )
-        ]
-    out: list[SourceRef] = []
-    for s in sources:
-        if isinstance(s, SourceRef):
-            out.append(s)
-        elif isinstance(s, Folder):
-            kind = "experiment"
-            if s.__class__.__name__ == "Run":
-                kind = "run"
-            elif s.__class__.__name__ == "Project":
-                kind = "file"
-            elif s.__class__.__name__ == "Experiment":
-                kind = "experiment"
-            out.append(SourceRef(kind=kind, ref=getattr(s, "id", s.name)))  # type: ignore[arg-type]
-        else:
-            text = str(s)
-            if text.startswith(("dataset:", "model:", "plugin:")):
-                out.append(SourceRef(kind="file", ref=text))
-            elif text.upper().startswith("DOI:") or text.startswith("10."):
-                out.append(SourceRef(kind="reference", ref=text))
-            else:
-                out.append(SourceRef(kind="file", ref=text))
-    return out

@@ -4,7 +4,7 @@
  */
 
 import { useState } from "react";
-import { workspaceApi } from "@/app/state/api";
+import { runsApi } from "@/api";
 import {
   Dialog,
   DialogContent,
@@ -61,8 +61,8 @@ export function CreateSweepDialog({
     setError(null);
     try {
       for (const value of values) {
-        await workspaceApi.createRun(projectId, experimentId, {
-          parameters: { [key]: value },
+        await runsApi.createScopedRun(projectId, experimentId, {
+          params: { [key]: value },
         });
       }
       onOpenChange(false);

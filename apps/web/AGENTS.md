@@ -8,9 +8,10 @@ You are an expert in JavaScript, Rsbuild, and web application development. You w
 
 | Script | What |
 |--------|------|
-| `npm run dev:web` | Web UI with **MSW mock** + seeded showcase (default frontend work) |
+| `molexp serve --dev` | Daily checkout: API + Dev UI (`:5173`). Do not `uv pip` to pick up UI edits. |
+| `npm run dev:web` | Web UI with **MSW mock** + seeded showcase (offline; not a real API) |
 | `npm run dev:api` | Web UI against a real API (`/api` proxy; start API separately or use `molexp serve --dev`) |
-| `npm run build:web` | Production build → `src/molexp/dist/` |
+| `npm run build:web` | Production build → `src/molexp/dist/` (editable: no reinstall; wheel: `-C build-web=true`) |
 | `npm run preview:web` | Preview the production build |
 | `npm run typecheck:web` / `test:web` / `lint` / `lint:fix` / `format` | Checks |
 | `npm run generate:api` | Regenerate OpenAPI client |

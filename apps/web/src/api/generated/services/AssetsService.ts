@@ -5,6 +5,7 @@
 import type { AssetLineageResponse } from '../models/AssetLineageResponse';
 import type { AssetResponse } from '../models/AssetResponse';
 import type { Body_importDataAsset } from '../models/Body_importDataAsset';
+import type { Body_importDataAssetWs } from '../models/Body_importDataAssetWs';
 import type { DataAssetRegisterRequest } from '../models/DataAssetRegisterRequest';
 import type { CancelablePromise } from '../core/CancelablePromise';
 import { OpenAPI } from '../core/OpenAPI';
@@ -207,7 +208,7 @@ export class AssetsService {
      * AssetNotFoundError: Unknown asset id (404).
      * PreviewSidecarNotFoundError: No sidecar next to the dataset (404).
      * NoReaderInSidecarError / AmbiguousReaderError / PreviewReaderError:
-     * The sidecar is empty / ambiguous / broken (422).
+     * The molpy sidecar has no reader / too many / failed (422).
      * @param assetId
      * @param format
      * @param limit
@@ -288,7 +289,7 @@ export class AssetsService {
      * @returns AssetResponse Successful Response
      * @throws ApiError
      */
-    public static listAssets1(
+    public static listAssetsWs(
         ws: string,
         kind?: (string | null),
         scopeKind?: (string | null),
@@ -329,9 +330,9 @@ export class AssetsService {
      * @returns AssetResponse Successful Response
      * @throws ApiError
      */
-    public static importDataAsset1(
+    public static importDataAssetWs(
         ws: string,
-        formData: Body_importDataAsset,
+        formData: Body_importDataAssetWs,
         molexpSession?: (string | null),
     ): CancelablePromise<AssetResponse> {
         return __request(OpenAPI, {
@@ -362,7 +363,7 @@ export class AssetsService {
      * @returns AssetResponse Successful Response
      * @throws ApiError
      */
-    public static registerDataAsset1(
+    public static registerDataAssetWs(
         ws: string,
         requestBody: DataAssetRegisterRequest,
         molexpSession?: (string | null),
@@ -391,7 +392,7 @@ export class AssetsService {
      * @returns AssetResponse Successful Response
      * @throws ApiError
      */
-    public static getAsset1(
+    public static getAssetWs(
         assetId: string,
         ws: string,
         molexpSession?: (string | null),
@@ -420,7 +421,7 @@ export class AssetsService {
      * @returns any Successful Response
      * @throws ApiError
      */
-    public static assetContent1(
+    public static assetContentWs(
         assetId: string,
         ws: string,
         molexpSession?: (string | null),
@@ -453,7 +454,7 @@ export class AssetsService {
      * @returns AssetLineageResponse Successful Response
      * @throws ApiError
      */
-    public static getAssetLineage1(
+    public static getAssetLineageWs(
         assetId: string,
         ws: string,
         molexpSession?: (string | null),
@@ -491,7 +492,7 @@ export class AssetsService {
      * AssetNotFoundError: Unknown asset id (404).
      * PreviewSidecarNotFoundError: No sidecar next to the dataset (404).
      * NoReaderInSidecarError / AmbiguousReaderError / PreviewReaderError:
-     * The sidecar is empty / ambiguous / broken (422).
+     * The molpy sidecar has no reader / too many / failed (422).
      * @param assetId
      * @param ws
      * @param format
@@ -500,7 +501,7 @@ export class AssetsService {
      * @returns any Successful Response
      * @throws ApiError
      */
-    public static previewAsset1(
+    public static previewAssetWs(
         assetId: string,
         ws: string,
         format: 'frames' | 'png' = 'frames',
@@ -536,7 +537,7 @@ export class AssetsService {
      * @returns string Successful Response
      * @throws ApiError
      */
-    public static assetTail1(
+    public static assetTailWs(
         assetId: string,
         ws: string,
         n: number = 100,

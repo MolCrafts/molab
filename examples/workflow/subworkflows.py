@@ -3,7 +3,7 @@
 Matches ``docs/en/guide/subworkflows.md``.
 
 ``SubWorkflow`` is the sanctioned composition node: it wraps an inner
-``CompiledWorkflow`` (or a ``WorkflowCompiler``, compiled on construction) and,
+``CompiledWorkflow`` (or a ``Workflow``, compiled on construction) and,
 when executed, runs that inner spec end-to-end through the engine — forwarding
 the outer ``run_context`` by identity. From the outer graph's perspective it is
 a single registered task, so it also slots into ``builder.parallel(body=...)``
@@ -22,12 +22,13 @@ from molexp.workflow import (
     SubWorkflow,
     Task,
     TaskContext,
+    Workflow,
     WorkflowCompiler,
     WorkflowRuntime,
 )
 
 
-def build_preprocess() -> WorkflowCompiler:
+def build_preprocess() -> Workflow:
     """The inner pipeline — could live in its own module.
 
     ``load``'s ``seed`` parameter receives the value forwarded into the inner
@@ -35,7 +36,7 @@ def build_preprocess() -> WorkflowCompiler:
     fan-out element drives a *distinct* inner run; standalone, ``seed`` falls
     back to its default.
     """
-    wf = WorkflowCompiler(name="preprocess")
+    wf = Workflow(name="preprocess")
 
     @wf.task
     async def load(seed: int = 0) -> list[float]:
@@ -60,11 +61,10 @@ class Train(Task):
 
 async def run_chained() -> None:
     """SubWorkflow as one node of an outer chain: preprocess → train."""
-    outer = (
-        WorkflowCompiler(name="train")
+    outer = WorkflowCompiler().compile(
+        Workflow(name="train")
         .add(SubWorkflow(build_preprocess()), name="preprocess")
         .add(Train(), depends_on=["preprocess"])
-        .compile()
     )
 
     result = await WorkflowRuntime().execute(outer)
@@ -81,7 +81,7 @@ async def run_parallel_body() -> None:
     *distinct* inner output per element in iteration order. The compiled task set
     stays exactly {enumerate, preprocess, collect} — no per-element node growth.
     """
-    wf = WorkflowCompiler(name="fanout", entry="enumerate")
+    wf = Workflow(name="fanout", entry="enumerate")
 
     @wf.task
     async def enumerate() -> list[int]:
@@ -96,7 +96,7 @@ async def run_parallel_body() -> None:
 
     wf.parallel(map_over="enumerate", body="preprocess", join="collect", max_concurrency=2)
 
-    compiled = wf.compile()
+    compiled = WorkflowCompiler().compile(wf)
     result = await WorkflowRuntime().execute(compiled)
     print("── parallel body ──")
     print(f"task set: {sorted(t.name for t in compiled._tasks)}")

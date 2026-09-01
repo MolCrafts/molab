@@ -61,6 +61,7 @@ import json
 import sys
 
 from molexp import WorkflowRuntime
+from molexp.workflow import WorkflowCompiler
 
 from __MODULE_NAME__ import build_workflow
 
@@ -68,7 +69,7 @@ PARAMS = json.loads(r"""__PARAMS_JSON__""")
 
 
 def main() -> int:
-    compiled = build_workflow().compile()
+    compiled = WorkflowCompiler().compile(build_workflow())
     if "--compile-only" in sys.argv:
         # Plan-step-7 dry run: the source compiled and the DAG built. Do not
         # execute any task body — no real compute runs in the plan flow.

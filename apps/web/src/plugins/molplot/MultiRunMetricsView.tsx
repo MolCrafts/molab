@@ -1,7 +1,8 @@
 import { AlertTriangle, Layers, Settings2 } from "lucide-react";
 import { type JSX, useEffect, useMemo, useState } from "react";
+import type { MetricRecord } from "@/api";
+import { runsApi } from "@/api";
 import { EmptyState } from "@/app/components/entity";
-import { type MetricRecord, workspaceApi } from "@/app/state/api";
 import {
   Dialog,
   DialogContent,
@@ -141,7 +142,7 @@ export const selectAggregateConfig = (
 };
 
 const realFetcher: MetricsFetcher = async (projectId, experimentId, runId) => {
-  const response = await workspaceApi.getRunMetrics(projectId, experimentId, runId, {
+  const response = await runsApi.getRunMetrics(projectId, experimentId, runId, {
     type: "scalar",
     sinceLine: 0,
     limit: 100000,

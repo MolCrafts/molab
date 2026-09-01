@@ -18,7 +18,6 @@ import type { RunResponse } from '../models/RunResponse';
 import type { RunStartRequest } from '../models/RunStartRequest';
 import type { RunStatusResponse } from '../models/RunStatusResponse';
 import type { RunStatusUpdateRequest } from '../models/RunStatusUpdateRequest';
-import type { WorkspaceEventResponse } from '../models/WorkspaceEventResponse';
 import type { CancelablePromise } from '../core/CancelablePromise';
 import { OpenAPI } from '../core/OpenAPI';
 import { request as __request } from '../core/request';
@@ -52,7 +51,7 @@ export class RunsService {
         });
     }
     /**
-     * Create Run
+     * Create Scoped Run
      * @param projectId
      * @param experimentId
      * @param requestBody
@@ -60,7 +59,7 @@ export class RunsService {
      * @returns RunResponse Successful Response
      * @throws ApiError
      */
-    public static createRun(
+    public static createScopedRun(
         projectId: string,
         experimentId: string,
         requestBody: RunCreateRequest,
@@ -157,9 +156,8 @@ export class RunsService {
      * Cancel Run
      * Cancel a run.
      *
-     * ``cancel`` is the canonical verb (matching the CLI ``molexp runs cancel``
-     * and the resulting ``cancelled`` status); ``/kill`` remains as a
-     * deprecated alias route bound to this same handler.
+     * ``cancel`` is the stop verb (matching the CLI ``molexp runs cancel``
+     * and the resulting ``cancelled`` status).
      *
      * One shared body with the CLI and the harness capability:
      * :func:`molexp.workspace.lifecycle_ops.cancel_run` (reap → domain check →
@@ -191,48 +189,6 @@ export class RunsService {
             },
             cookies: {
                 'molexp_session': molexpSession,
-            },
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
-     * Get Run Events
-     * Return the run's recent workspace-timeline events, newest first.
-     *
-     * Reads the default-on ``workspace.events.sqlite`` spine via the shared
-     * :func:`molexp.workspace.events.read_workspace_events` (the same code path
-     * ``molexp runs info`` uses). A workspace with no timeline yet (nothing has
-     * emitted) returns ``[]``.
-     * @param projectId
-     * @param experimentId
-     * @param runId
-     * @param limit
-     * @param molexpSession
-     * @returns WorkspaceEventResponse Successful Response
-     * @throws ApiError
-     */
-    public static getRunEvents(
-        projectId: string,
-        experimentId: string,
-        runId: string,
-        limit: number = 50,
-        molexpSession?: (string | null),
-    ): CancelablePromise<Array<WorkspaceEventResponse>> {
-        return __request(OpenAPI, {
-            method: 'GET',
-            url: '/api/projects/{project_id}/experiments/{experiment_id}/runs/{run_id}/events',
-            path: {
-                'project_id': projectId,
-                'experiment_id': experimentId,
-                'run_id': runId,
-            },
-            cookies: {
-                'molexp_session': molexpSession,
-            },
-            query: {
-                'limit': limit,
             },
             errors: {
                 422: `Validation Error`,
@@ -347,7 +303,7 @@ export class RunsService {
      * Get Run File Text
      * Return the raw text content of a file under the run directory.
      *
-     * Routes through ``workspace._fs`` — same path as workspace file reads —
+     * Routes through ``workspace.fs`` — same path as workspace file reads —
      * so remote workspaces resolve correctly.
      * @param projectId
      * @param experimentId
@@ -388,7 +344,7 @@ export class RunsService {
      * Return the on-disk file tree for a run, enriched with catalog metadata.
      *
      * Uses the **same** :func:`~molexp.workspace.fs_tree.list_tree_children` walk
-     * as workspace file listing (via ``workspace._fs``) so remote workspaces
+     * as workspace file listing (via ``workspace.fs``) so remote workspaces
      * activate plugins the same way as local ones. Catalog enrichment is
      * best-effort for local asset scans only.
      * @param projectId
@@ -451,39 +407,6 @@ export class RunsService {
             },
             body: requestBody,
             mediaType: 'application/json',
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
-     * @deprecated
-     * Cancel Run
-     * Deprecated alias for `POST .../{run_id}/cancel` (same handler).
-     * @param projectId
-     * @param experimentId
-     * @param runId
-     * @param molexpSession
-     * @returns RunActionResponse Successful Response
-     * @throws ApiError
-     */
-    public static cancelRun1(
-        projectId: string,
-        experimentId: string,
-        runId: string,
-        molexpSession?: (string | null),
-    ): CancelablePromise<RunActionResponse> {
-        return __request(OpenAPI, {
-            method: 'POST',
-            url: '/api/projects/{project_id}/experiments/{experiment_id}/runs/{run_id}/kill',
-            path: {
-                'project_id': projectId,
-                'experiment_id': experimentId,
-                'run_id': runId,
-            },
-            cookies: {
-                'molexp_session': molexpSession,
-            },
             errors: {
                 422: `Validation Error`,
             },
@@ -863,7 +786,7 @@ export class RunsService {
      * @returns RunResponse Successful Response
      * @throws ApiError
      */
-    public static createRun1(
+    public static createRun(
         requestBody: ExecutionCreateRequest,
         molexpSession?: (string | null),
     ): CancelablePromise<RunResponse> {
@@ -889,7 +812,7 @@ export class RunsService {
      * @returns RunResponse Successful Response
      * @throws ApiError
      */
-    public static listRuns1(
+    public static listRunsWs(
         projectId: string,
         experimentId: string,
         ws: string,
@@ -912,7 +835,7 @@ export class RunsService {
         });
     }
     /**
-     * Create Run
+     * Create Scoped Run
      * @param projectId
      * @param experimentId
      * @param ws
@@ -921,7 +844,7 @@ export class RunsService {
      * @returns RunResponse Successful Response
      * @throws ApiError
      */
-    public static createRun2(
+    public static createScopedRunWs(
         projectId: string,
         experimentId: string,
         ws: string,
@@ -956,7 +879,7 @@ export class RunsService {
      * @returns RunResponse Successful Response
      * @throws ApiError
      */
-    public static getRun1(
+    public static getRunWs(
         projectId: string,
         experimentId: string,
         runId: string,
@@ -995,7 +918,7 @@ export class RunsService {
      * @returns string Successful Response
      * @throws ApiError
      */
-    public static analyzeRunFailureRoute1(
+    public static analyzeRunFailureRouteWs(
         projectId: string,
         experimentId: string,
         runId: string,
@@ -1026,9 +949,8 @@ export class RunsService {
      * Cancel Run
      * Cancel a run.
      *
-     * ``cancel`` is the canonical verb (matching the CLI ``molexp runs cancel``
-     * and the resulting ``cancelled`` status); ``/kill`` remains as a
-     * deprecated alias route bound to this same handler.
+     * ``cancel`` is the stop verb (matching the CLI ``molexp runs cancel``
+     * and the resulting ``cancelled`` status).
      *
      * One shared body with the CLI and the harness capability:
      * :func:`molexp.workspace.lifecycle_ops.cancel_run` (reap → domain check →
@@ -1045,7 +967,7 @@ export class RunsService {
      * @returns RunActionResponse Successful Response
      * @throws ApiError
      */
-    public static cancelRun2(
+    public static cancelRunWs(
         projectId: string,
         experimentId: string,
         runId: string,
@@ -1070,51 +992,6 @@ export class RunsService {
         });
     }
     /**
-     * Get Run Events
-     * Return the run's recent workspace-timeline events, newest first.
-     *
-     * Reads the default-on ``workspace.events.sqlite`` spine via the shared
-     * :func:`molexp.workspace.events.read_workspace_events` (the same code path
-     * ``molexp runs info`` uses). A workspace with no timeline yet (nothing has
-     * emitted) returns ``[]``.
-     * @param projectId
-     * @param experimentId
-     * @param runId
-     * @param ws
-     * @param limit
-     * @param molexpSession
-     * @returns WorkspaceEventResponse Successful Response
-     * @throws ApiError
-     */
-    public static getRunEvents1(
-        projectId: string,
-        experimentId: string,
-        runId: string,
-        ws: string,
-        limit: number = 50,
-        molexpSession?: (string | null),
-    ): CancelablePromise<Array<WorkspaceEventResponse>> {
-        return __request(OpenAPI, {
-            method: 'GET',
-            url: '/api/workspaces/{ws}/projects/{project_id}/experiments/{experiment_id}/runs/{run_id}/events',
-            path: {
-                'project_id': projectId,
-                'experiment_id': experimentId,
-                'run_id': runId,
-                'ws': ws,
-            },
-            cookies: {
-                'molexp_session': molexpSession,
-            },
-            query: {
-                'limit': limit,
-            },
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
      * Get Run Execution
      * Return runtime workflow graph state from workflow.json.
      * @param projectId
@@ -1126,7 +1003,7 @@ export class RunsService {
      * @returns RunExecutionResponse Successful Response
      * @throws ApiError
      */
-    public static getRunExecution1(
+    public static getRunExecutionWs(
         projectId: string,
         experimentId: string,
         runId: string,
@@ -1166,7 +1043,7 @@ export class RunsService {
      * @returns RunLogsResponse Successful Response
      * @throws ApiError
      */
-    public static getRunExecutionLogs1(
+    public static getRunExecutionLogsWs(
         projectId: string,
         experimentId: string,
         runId: string,
@@ -1203,7 +1080,7 @@ export class RunsService {
      * @returns any Successful Response
      * @throws ApiError
      */
-    public static exportRun1(
+    public static exportRunWs(
         projectId: string,
         experimentId: string,
         runId: string,
@@ -1231,7 +1108,7 @@ export class RunsService {
      * Get Run File Text
      * Return the raw text content of a file under the run directory.
      *
-     * Routes through ``workspace._fs`` — same path as workspace file reads —
+     * Routes through ``workspace.fs`` — same path as workspace file reads —
      * so remote workspaces resolve correctly.
      * @param projectId
      * @param experimentId
@@ -1242,7 +1119,7 @@ export class RunsService {
      * @returns RunFileTextResponse Successful Response
      * @throws ApiError
      */
-    public static getRunFileText1(
+    public static getRunFileTextWs(
         projectId: string,
         experimentId: string,
         runId: string,
@@ -1275,7 +1152,7 @@ export class RunsService {
      * Return the on-disk file tree for a run, enriched with catalog metadata.
      *
      * Uses the **same** :func:`~molexp.workspace.fs_tree.list_tree_children` walk
-     * as workspace file listing (via ``workspace._fs``) so remote workspaces
+     * as workspace file listing (via ``workspace.fs``) so remote workspaces
      * activate plugins the same way as local ones. Catalog enrichment is
      * best-effort for local asset scans only.
      * @param projectId
@@ -1286,7 +1163,7 @@ export class RunsService {
      * @returns RunFilesResponse Successful Response
      * @throws ApiError
      */
-    public static getRunFiles1(
+    public static getRunFilesWs(
         projectId: string,
         experimentId: string,
         runId: string,
@@ -1322,7 +1199,7 @@ export class RunsService {
      * @returns string Successful Response
      * @throws ApiError
      */
-    public static harvestRunRoute1(
+    public static harvestRunRouteWs(
         projectId: string,
         experimentId: string,
         runId: string,
@@ -1350,42 +1227,6 @@ export class RunsService {
         });
     }
     /**
-     * @deprecated
-     * Cancel Run
-     * Deprecated alias for `POST .../{run_id}/cancel` (same handler).
-     * @param projectId
-     * @param experimentId
-     * @param runId
-     * @param ws
-     * @param molexpSession
-     * @returns RunActionResponse Successful Response
-     * @throws ApiError
-     */
-    public static cancelRun3(
-        projectId: string,
-        experimentId: string,
-        runId: string,
-        ws: string,
-        molexpSession?: (string | null),
-    ): CancelablePromise<RunActionResponse> {
-        return __request(OpenAPI, {
-            method: 'POST',
-            url: '/api/workspaces/{ws}/projects/{project_id}/experiments/{experiment_id}/runs/{run_id}/kill',
-            path: {
-                'project_id': projectId,
-                'experiment_id': experimentId,
-                'run_id': runId,
-                'ws': ws,
-            },
-            cookies: {
-                'molexp_session': molexpSession,
-            },
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
      * Get Run Lammps Log
      * Parse a LAMMPS log file and return thermo stages.
      *
@@ -1401,7 +1242,7 @@ export class RunsService {
      * @returns LammpsLogResponse Successful Response
      * @throws ApiError
      */
-    public static getRunLammpsLog1(
+    public static getRunLammpsLogWs(
         projectId: string,
         experimentId: string,
         runId: string,
@@ -1440,7 +1281,7 @@ export class RunsService {
      * @returns RunLogsResponse Successful Response
      * @throws ApiError
      */
-    public static getRunLogs1(
+    public static getRunLogsWs(
         projectId: string,
         experimentId: string,
         runId: string,
@@ -1479,7 +1320,7 @@ export class RunsService {
      * @returns RunMetricsResponse Successful Response
      * @throws ApiError
      */
-    public static getRunMetrics1(
+    public static getRunMetricsWs(
         projectId: string,
         experimentId: string,
         runId: string,
@@ -1527,7 +1368,7 @@ export class RunsService {
      * @returns any Successful Response
      * @throws ApiError
      */
-    public static detectRunMetricsSources1(
+    public static detectRunMetricsSourcesWs(
         projectId: string,
         experimentId: string,
         runId: string,
@@ -1566,7 +1407,7 @@ export class RunsService {
      * @returns any Successful Response
      * @throws ApiError
      */
-    public static ingestRunMetrics1(
+    public static ingestRunMetricsWs(
         projectId: string,
         experimentId: string,
         runId: string,
@@ -1611,7 +1452,7 @@ export class RunsService {
      * @returns RunContinueResponse Successful Response
      * @throws ApiError
      */
-    public static rerunRun1(
+    public static rerunRunWs(
         projectId: string,
         experimentId: string,
         runId: string,
@@ -1657,7 +1498,7 @@ export class RunsService {
      * @returns RunContinueResponse Successful Response
      * @throws ApiError
      */
-    public static resumeRun1(
+    public static resumeRunWs(
         projectId: string,
         experimentId: string,
         runId: string,
@@ -1701,7 +1542,7 @@ export class RunsService {
      * @returns RunContinueResponse Successful Response
      * @throws ApiError
      */
-    public static startRun1(
+    public static startRunWs(
         projectId: string,
         experimentId: string,
         runId: string,
@@ -1747,7 +1588,7 @@ export class RunsService {
      * @returns RunStatusResponse Successful Response
      * @throws ApiError
      */
-    public static updateRunStatus1(
+    public static updateRunStatusWs(
         projectId: string,
         experimentId: string,
         runId: string,
@@ -1787,7 +1628,7 @@ export class RunsService {
      * @returns RunResponse Successful Response
      * @throws ApiError
      */
-    public static createRun3(
+    public static createRunWs(
         ws: string,
         requestBody: ExecutionCreateRequest,
         molexpSession?: (string | null),

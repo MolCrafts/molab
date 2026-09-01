@@ -1,7 +1,8 @@
 """Parameter spaces for experiment hyperparameter search.
 
 Provides:
-- ParamSpace: abstract base class
+- Params: one sweep cell (pydantic)
+- ParamSpace: abstract base class (iterate to list[Params])
 - GridSpace: exhaustive Cartesian product
 - UniformSpace: uniform random sampling
 """
@@ -10,18 +11,39 @@ from __future__ import annotations
 
 import random
 from abc import ABC, abstractmethod
-from collections.abc import Generator
+from collections.abc import Generator, Iterator, Mapping
 from itertools import product
 from typing import Any
 
-Params = dict[str, Any]
+from pydantic import BaseModel, ConfigDict
+
+
+class Params(BaseModel, Mapping[str, Any]):
+    """One sweep cell — extra fields allowed so a grid can carry any axes.
+
+    ``GridSpace`` / ``UniformSpace`` yield these; ``list(space)`` is
+    ``list[Params]``.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    def __iter__(self) -> Iterator[str]:
+        return iter(self.model_dump())
+
+    def __len__(self) -> int:
+        return len(self.model_dump())
+
+    def __getitem__(self, key: str) -> object:
+        data = self.model_dump()
+        if key not in data:
+            raise KeyError(key)
+        return data[key]
 
 
 class ParamSpace(ABC):
     """Abstract base class for parameter spaces.
 
-    A parameter space defines how to generate parameter combinations
-    for hyperparameter search.
+    Iterating yields :class:`Params`; ``list(space)`` is ``list[Params]``.
     """
 
     @abstractmethod
@@ -62,7 +84,7 @@ class GridSpace(ParamSpace):
 
     def __iter__(self) -> Generator[Params]:
         for combination in product(*self._param_values):
-            yield dict(zip(self._param_names, combination, strict=False))
+            yield Params(**dict(zip(self._param_names, combination, strict=True)))
 
     def __len__(self) -> int:
         return self._total
@@ -92,14 +114,14 @@ class UniformSpace(ParamSpace):
     def __iter__(self) -> Generator[Params]:
         rng = random.Random(self.seed)
         for _ in range(self.n_samples):
-            params: Params = {}
+            cell: dict[str, Any] = {}
             for name, values in self.param_values.items():
                 if not isinstance(values, list):
                     raise ValueError(f"Parameter '{name}' must be a list, got {type(values)}")
                 if len(values) == 0:
                     raise ValueError(f"Parameter '{name}' must have at least one value")
-                params[name] = rng.choice(values)
-            yield params
+                cell[name] = rng.choice(values)
+            yield Params(**cell)
 
     def __len__(self) -> int:
         return self.n_samples

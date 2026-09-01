@@ -99,7 +99,7 @@ def is_tensorboard_dir(path: Path) -> bool:
 
 def has_metrics_buffer(run_dir: Path) -> bool:
     """True when *run_dir* already carries a JSONL metrics WAL."""
-    from molexp.workspace.metrics import has_metrics
+    from molexp.plugins.metrics import has_metrics
 
     return has_metrics(run_dir)
 
