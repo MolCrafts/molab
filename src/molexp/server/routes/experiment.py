@@ -6,8 +6,6 @@ from shutil import rmtree
 
 from fastapi import APIRouter, Depends
 
-from molexp.plugins.metrics import read_run_metrics
-
 from ..dependencies import get_workspace
 from ..schemas import (
     ComparisonRunRow,
@@ -74,51 +72,35 @@ def get_experiment_comparison(
     experiment_id: str,
     workspace=Depends(get_workspace),  # noqa: ANN001
 ) -> ExperimentComparisonResponse:
-    """Comparison matrix: parameter columns x run rows + final metric values per run."""
+    """Compare immutable logical Run definitions.
+
+    Execution outcomes are intentionally absent: callers must select explicit
+    Execution identities before comparing observed metrics or results.
+    """
     project = workspace.get_project(project_id)
     experiment = project.get_experiment(experiment_id)
 
     runs = experiment.list_runs()
     rows: list[ComparisonRunRow] = []
     param_keys: set[str] = set()
-    metric_keys: set[str] = set()
 
     for run in runs:
         param_keys.update(run.parameters.keys())
-        metrics_summary: dict[str, object] = {}
-        try:
-            result = read_run_metrics(run.run_dir, fs=workspace.fs, limit=50000)
-            for series in result.series:
-                key_raw = series.get("key")
-                latest = series.get("latestValue")
-                if isinstance(key_raw, str) and key_raw and latest is not None:
-                    metrics_summary[key_raw] = latest
-                    metric_keys.add(key_raw)
-        except (FileNotFoundError, OSError, ValueError):
-            pass
-
-        duration: float | None = None
-        finished_at = run.finished_at
-        if finished_at and run.metadata.created_at:
-            duration = (finished_at - run.metadata.created_at).total_seconds()
-
-        error_dict: dict[str, str] | None = None
-        if run.metadata.error:
-            error_dict = {
-                "type": run.metadata.error.type,
-                "message": run.metadata.error.message,
-            }
-
+        summary = run.status_summary
         rows.append(
             ComparisonRunRow(
                 runId=run.id,
-                status=run.status,
+                definitionHash=run.metadata.definition_hash,
+                experimentRevisionId=run.metadata.experiment_revision_id,
+                inputAssetIds=list(run.metadata.input_asset_ids),
+                statusSummary={
+                    "total": summary.total,
+                    "active": summary.active,
+                    "notStarted": summary.not_started,
+                    "byStatus": summary.by_status,
+                },
                 parameters=dict(run.parameters),
-                metrics=metrics_summary,
-                durationSec=duration,
                 created=run.metadata.created_at.isoformat(),
-                finished=finished_at.isoformat() if finished_at else None,
-                error=error_dict,
             )
         )
 
@@ -126,7 +108,6 @@ def get_experiment_comparison(
         experimentId=experiment_id,
         projectId=project_id,
         paramKeys=sorted(param_keys),
-        metricKeys=sorted(metric_keys),
         runs=rows,
     )
 

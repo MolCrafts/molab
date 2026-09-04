@@ -89,33 +89,3 @@ class TestStubAgentGateway:
         assert result.raw_response_artifact.kind == "log"
         assert result.model == "stub-model"
         assert result.usage == {"prompt_tokens": 5, "completion_tokens": 10}
-
-    def test_call_wires_output_parent_ids_from_input_artifacts(
-        self, stub: StubAgentGateway
-    ) -> None:
-        """Output ``parent_ids`` == input ids so StageRunner wires derived_from edges."""
-        stub.register(
-            agent_name="experiment_report_writer",
-            output={
-                "title": "t",
-                "objective": "o",
-                "system_description": "s",
-                "experimental_design": "e",
-            },
-            output_kind="experiment_report",
-        )
-        spec = AgentCallSpec(
-            agent_name="experiment_report_writer",
-            input_artifact_ids=["abc12345", "def67890"],
-            output_schema=ExperimentReport.model_json_schema(),
-        )
-        result = asyncio.run(stub.call(spec))
-        assert set(result.output_artifact.parent_ids) == {"abc12345", "def67890"}
-
-    def test_call_raises_on_unknown_agent_name(self, stub: StubAgentGateway) -> None:
-        from molexp.harness.errors import AgentResponseNotRegisteredError, HarnessError
-
-        spec = AgentCallSpec(agent_name="never_registered", input_artifact_ids=[], output_schema={})
-        with pytest.raises(AgentResponseNotRegisteredError) as exc:
-            asyncio.run(stub.call(spec))
-        assert isinstance(exc.value, HarnessError)

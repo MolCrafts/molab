@@ -8,7 +8,7 @@ export type RunCreateRequest = {
      */
     params?: Record<string, any>;
     /**
-     * Compute target name (must exist in workspace registry)
+     * Declared compute-target hint (must exist in workspace registry)
      */
     target?: (string | null);
 };

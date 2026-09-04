@@ -209,8 +209,8 @@ def last_resumable_execution_id(run: Run) -> str | None:
     same "most-recent non-succeeded" rule.
     """
     for record in reversed(run.execution_history):
-        if record.status != "succeeded":
-            return record.execution_id
+        if record.status.value != "succeeded":
+            return record.id
     return None
 
 
@@ -326,7 +326,7 @@ def filter_resume_seeds(
 def _initial_document(execution_id: str, compiled: CompiledWorkflow | None) -> dict[str, JSONValue]:
     if compiled is None:
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "execution_id": execution_id,
             "status": "running",
             "started_at": _now(),
@@ -358,7 +358,7 @@ def _initial_document(execution_id: str, compiled: CompiledWorkflow | None) -> d
 
     document: dict[str, JSONValue] = {
         **ir,
-        "schema_version": 1,
+        "schema_version": 2,
         "execution_id": execution_id,
         "workflow_id": compiled.workflow_id,
         "workflow_name": compiled.name,

@@ -1,7 +1,6 @@
-import { Loader2, Puzzle } from "lucide-react";
+import { Puzzle } from "lucide-react";
 import { type ComponentType, type JSX, useMemo } from "react";
 import { listEntityTabs } from "@/app/registry";
-import { useDiscoveredFileTypesForRun } from "@/app/state/useDiscoveredFileTypes";
 import type {
   ObjectView,
   RendererSnapshot,
@@ -13,6 +12,12 @@ import { WorkbenchIconAction } from "@/components/workbench";
 import { useContributionGeneration } from "@/lib/contribution-runtime";
 import type { EntityTabContribution, FileTypeContribution } from "@/lib/contribution-types";
 import { usePluginPreferencesGeneration } from "@/plugins/preferences";
+import {
+  runActivityAt,
+  runFinishedAt,
+  runPresentationStatus,
+  runStartedAt,
+} from "../projections";
 import type { WorkspaceRunRow } from "../types";
 
 type PluginTabContribution = Pick<
@@ -27,21 +32,6 @@ export interface RunPluginAction {
   Icon?: ComponentType<React.SVGProps<SVGSVGElement>>;
 }
 
-const toExecutorInfo = (run: WorkspaceRunRow): Record<string, string> =>
-  Object.fromEntries(
-    Object.entries({
-      backend: run.backend,
-      cluster: run.cluster,
-      cluster_name: run.cluster,
-      scheduler: run.scheduler,
-      target: run.target,
-      profile: run.profile,
-      scheduler_job_id: run.latestSchedulerJobId,
-    }).filter(
-      (entry): entry is [string, string] => typeof entry[1] === "string" && entry[1] !== "",
-    ),
-  );
-
 /**
  * The workspace-runs endpoint is intentionally independent from the lazy
  * project tree. Build the minimal catalog row required by plugin matchers so a
@@ -50,26 +40,35 @@ const toExecutorInfo = (run: WorkspaceRunRow): Record<string, string> =>
 export const runSummaryForPluginMatching = (run: WorkspaceRunRow): RunSummary => ({
   id: run.id,
   name: run.name,
-  status: run.status as RunSummary["status"],
+  status: runPresentationStatus(run) as RunSummary["status"],
   summary: "",
-  updatedAt: run.finishedAt ?? run.createdAt,
+  updatedAt: runActivityAt(run),
   projectId: run.projectId,
   experimentId: run.experimentId,
-  executorInfo: toExecutorInfo(run),
-  profile: run.profile,
-  configHash: null,
+  definitionHash: run.definitionHash,
+  experimentRevisionId: run.experimentRevisionId,
+  statusSummary: run.statusSummary,
   parameters: run.parameters,
-  results: {},
   workflowSource: null,
   workflowSnapshot: null,
-  startedAt: run.executions.find((execution) => execution.startedAt)?.startedAt ?? null,
-  finishedAt: run.finishedAt,
+  startedAt: runStartedAt(run),
+  finishedAt: runFinishedAt(run),
   executionHistory: run.executions.map((execution) => ({
     executionId: execution.executionId,
+    mode: execution.mode,
+    createdAt: execution.createdAt,
     startedAt: execution.startedAt,
     finishedAt: execution.finishedAt,
     status: execution.status,
-    schedulerJobId: execution.schedulerJobId,
+    basedOnExecutionId: execution.basedOnExecutionId,
+    checkpointArtifactId: execution.checkpointArtifactId,
+    executor: {
+      ...(execution.backend ? { backend: execution.backend } : {}),
+      ...execution.backendMetadata,
+    },
+    environment: {},
+    artifactIds: [],
+    error: null,
   })),
   errorMessage: null,
 });
@@ -108,12 +107,6 @@ export const RunPluginActions = ({
 }: RunPluginActionsProps): JSX.Element | null => {
   const contributionGeneration = useContributionGeneration();
   const preferencesGeneration = usePluginPreferencesGeneration();
-  const coords = useMemo(
-    () => ({ projectId: run.projectId, experimentId: run.experimentId, runId: run.id }),
-    [run.experimentId, run.id, run.projectId],
-  );
-  const { discovered, loading } = useDiscoveredFileTypesForRun(coords, "run");
-
   const selection = useMemo<Selection>(() => ({ objectType: "run", objectId: run.id }), [run.id]);
   const hostSnapshot = useMemo<RendererSnapshot>(
     () => ({
@@ -132,11 +125,11 @@ export const RunPluginActions = ({
     const entityTabs = listEntityTabs("run", { selection, snapshot: hostSnapshot });
     return collectRunPluginActions(
       entityTabs,
-      discovered.map((item) => item.contribution),
+      [],
     );
-  }, [contributionGeneration, discovered, hostSnapshot, preferencesGeneration, selection]);
+  }, [contributionGeneration, hostSnapshot, preferencesGeneration, selection]);
 
-  if (actions.length === 0 && !loading) return null;
+  if (actions.length === 0) return null;
 
   return (
     <fieldset className="flex min-w-0 items-center gap-1 border-0 p-0">
@@ -155,12 +148,6 @@ export const RunPluginActions = ({
           </WorkbenchIconAction>
         );
       })}
-      {loading ? (
-        <Loader2
-          className="mol-motion-progress-spin ml-1 size-3 text-muted-foreground"
-          aria-label="Discovering run tools"
-        />
-      ) : null}
     </fieldset>
   );
 };

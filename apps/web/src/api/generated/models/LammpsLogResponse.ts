@@ -7,9 +7,9 @@ import type { LammpsThermoStage } from './LammpsThermoStage';
  * Parsed LAMMPS log thermo stages, produced by ``molpy.io.LAMMPSLog``.
  */
 export type LammpsLogResponse = {
-    nStages?: number;
     path: string;
-    stages?: Array<LammpsThermoStage>;
     version?: (string | null);
+    nStages?: number;
+    stages?: Array<LammpsThermoStage>;
 };
 

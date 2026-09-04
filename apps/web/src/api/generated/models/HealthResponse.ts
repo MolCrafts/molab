@@ -3,12 +3,12 @@
 /* tslint:disable */
 /* eslint-disable */
 export type HealthResponse = {
+    status: string;
+    workspaceAvailable: boolean;
+    capabilities?: Record<string, boolean>;
     /**
      * True when the server process has auth enabled (UI should gate on login).
      */
     authRequired?: boolean;
-    capabilities?: Record<string, boolean>;
-    status: string;
-    workspaceAvailable: boolean;
 };
 

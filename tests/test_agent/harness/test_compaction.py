@@ -30,12 +30,6 @@ def _chain(contents: list[str]) -> tuple[MessageEntry, ...]:
     return tuple(entries)
 
 
-class TestEstimateTokens:
-    def test_estimate_tokens_rounds_char_count_up_by_four(self) -> None:
-        assert estimate_tokens("a" * 40) == 10
-        assert estimate_tokens("") == 0
-
-
 class TestPrepareCompaction:
     def test_disabled_settings_is_a_noop(self) -> None:
         entries = _chain(["x" * 1000] * 10)

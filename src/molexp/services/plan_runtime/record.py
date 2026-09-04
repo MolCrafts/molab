@@ -53,13 +53,20 @@ def write_agent_task_record(
     workspace_root: str,
     task_id: str,
     draft: str,
+    execution_id: str,
     failed: bool = False,
 ) -> None:
     """Write the Agents-tab task entry (status ``failed`` for a failed plan)."""
-    report = _read_artifact_json(run, "experiment_report")
+    report = _read_artifact_json(run, execution_id, "experiment_report")
     title = _title(report, draft, run.id)
     _write_agent_task(
-        workspace_root, task_id=task_id, title=title, draft=draft, run=run, failed=failed
+        workspace_root,
+        task_id=task_id,
+        title=title,
+        draft=draft,
+        run=run,
+        execution_id=execution_id,
+        failed=failed,
     )
 
 
@@ -142,6 +149,7 @@ def write_session_events_record(
     workspace_root: str,
     task_id: str,
     draft: str,
+    execution_id: str,
     turn_id: str | None = None,
     failure_stage: str | None = None,
     failure_error: str | None = None,
@@ -152,7 +160,7 @@ def write_session_events_record(
     chat ends with an ``error`` + failed ``loop_completed`` carrying the real
     reason — not a green "plan ready" summary.
     """
-    report = _read_artifact_json(run, "experiment_report")
+    report = _read_artifact_json(run, execution_id, "experiment_report")
     _write_session_events(
         workspace_root,
         task_id=task_id,
@@ -160,6 +168,7 @@ def write_session_events_record(
         experiment=experiment,
         draft=draft,
         report=report,
+        execution_id=execution_id,
         turn_id=turn_id,
         failure_stage=failure_stage,
         failure_error=failure_error,
@@ -176,6 +185,7 @@ def _write_agent_task(
     title: str,
     draft: str,
     run: Run,
+    execution_id: str,
     failed: bool = False,
 ) -> None:
     from molexp.services.agent_task_store import (
@@ -194,7 +204,8 @@ def _write_agent_task(
     if failed:
         status = "failed"
     else:
-        status = run.status if run.status in {"succeeded", "failed"} else "completed"
+        execution_status = _execution(run, execution_id).status.value
+        status = "completed" if execution_status == "succeeded" else execution_status
     # Scope is the plan Run's experiment — always authoritative (chat parent
     # may have a broader mount; the plan itself is experiment-scoped).
     project_id = run.experiment.project.id
@@ -249,6 +260,7 @@ def _write_session_events(
     experiment: Experiment,
     draft: str,
     report: dict[str, Any] | None,
+    execution_id: str,
     turn_id: str | None = None,
     failure_stage: str | None = None,
     failure_error: str | None = None,
@@ -269,7 +281,7 @@ def _write_session_events(
     from molexp.services.agent_task_store import append_agent_task_events, read_agent_task_events
 
     ts = _created_at(run)
-    kinds = set(_artifact_kinds(run))
+    kinds = set(_artifact_kinds(run, execution_id))
     event_context = {"turn_id": turn_id, "mode": "plan"}
     existing = read_agent_task_events(workspace_root, task_id)
     has_started = any(
@@ -333,11 +345,12 @@ def _write_session_events(
         )
 
     tasks = _read_workflow_tasks(experiment)
-    source = _read_workflow_source(run)
+    source = _read_workflow_source(run, execution_id)
     project_id = experiment.project.id if hasattr(experiment, "project") else ""
     title = _title(report, draft, run.id)
     plan_ref = {
         "run_id": run.id,
+        "execution_id": execution_id,
         "project_id": project_id,
         "experiment_id": experiment.id,
         "title": title,
@@ -348,7 +361,7 @@ def _write_session_events(
     }
 
     if failure_error is not None and not has_failed_terminal:
-        detail = _failure_detail(run, failure_error)
+        detail = _failure_detail(run, execution_id, failure_error)
         stage = failure_stage or _infer_failure_stage(kinds)
         events.append(
             {
@@ -434,33 +447,29 @@ def _failure_summary(title: str, stage: str | None, error: str, detail: str | No
     return "\n".join(lines)
 
 
-def _failure_detail(run: Run, _error: str) -> str | None:
+def _failure_detail(run: Run, execution_id: str, _error: str) -> str | None:
     """Best-effort pytest / stage stderr to surface in chat (not just Knowledge)."""
     # Prefer the harness feedback artifact left by ExecuteTests for the repair loop.
     for kind in ("test_code_feedback", "stdout", "stderr"):
-        text = _read_artifact_text(run, kind)
+        text = _read_artifact_text(run, execution_id, kind)
         if text and text.strip():
             return text.strip()
     # Fall back to the execution error.txt if present.
     try:
-        err_path = Path(run.run_dir) / "executions"
-        if err_path.is_dir():
-            candidates = sorted(err_path.glob("*/error.txt"), key=lambda p: p.stat().st_mtime)
-            if candidates:
-                body = candidates[-1].read_text(encoding="utf-8", errors="replace")
-                if body.strip():
-                    return body.strip()
+        err_path = Path(run.run_dir) / "executions" / execution_id / "traceback.txt"
+        if err_path.is_file():
+            body = err_path.read_text(encoding="utf-8", errors="replace")
+            if body.strip():
+                return body.strip()
     except OSError:
         pass
     return None
 
 
-def _read_artifact_text(run: Run, kind: str) -> str | None:
+def _read_artifact_text(run: Run, execution_id: str, kind: str) -> str | None:
     from molexp.harness.store.file_artifact_store import FileArtifactStore
-    from molexp.harness.store.paths import harness_artifact_root
 
-    root = harness_artifact_root(run.run_dir)
-    store = FileArtifactStore(root=root)
+    store = FileArtifactStore.open_execution(run, execution_id)
     ref = store.latest_by_kind(kind)
     if ref is None:
         return None
@@ -487,13 +496,11 @@ def _infer_failure_stage(kinds: set[str]) -> str | None:
     return None
 
 
-def _artifact_kinds(run: Run) -> list[str]:
-    from molexp.harness.store.paths import harness_artifact_root
+def _artifact_kinds(run: Run, execution_id: str) -> list[str]:
+    from molexp.harness.store.file_artifact_store import FileArtifactStore
 
-    index_dir = harness_artifact_root(run.run_dir) / "_index"
-    if not index_dir.is_dir():
-        return []
-    return sorted(p.stem for p in index_dir.glob("*.json"))
+    store = FileArtifactStore.open_execution(run, execution_id)
+    return sorted({ref.kind for ref in store.list_refs()})
 
 
 def emit_artifact_stage_events(
@@ -501,6 +508,7 @@ def emit_artifact_stage_events(
     task_id: str,
     run: Run,
     *,
+    execution_id: str,
     turn_id: str | None = None,
     mode: str = "plan",
 ) -> int:
@@ -518,7 +526,7 @@ def emit_artifact_stage_events(
         read_agent_task_events,
     )
 
-    kinds = _artifact_kinds(run)
+    kinds = _artifact_kinds(run, execution_id)
     if not kinds:
         return 0
     existing = read_agent_task_events(workspace_root, task_id)
@@ -570,6 +578,7 @@ def write_experiment_record(
     experiment: Experiment,
     draft: str,
     model: str,
+    execution_id: str,
 ) -> Knowledge:
     """Write the Decision experiment record via ``write_knowledge``.
 
@@ -580,12 +589,12 @@ def write_experiment_record(
     from molexp.workspace.knowledge import Decision, SourceRef
     from molexp.workspace.knowledge_write import write_knowledge
 
-    report = _read_artifact_json(run, "experiment_report")
+    report = _read_artifact_json(run, execution_id, "experiment_report")
     if report is None:
         raise ValueError(f"run {run.id} has no experiment_report artifact to record")
     title = _title(report, draft, run.id)
     tasks = _read_workflow_tasks(experiment)
-    source = _read_workflow_source(run)
+    source = _read_workflow_source(run, execution_id)
     body = _render_markdown(
         title,
         draft,
@@ -597,12 +606,15 @@ def write_experiment_record(
         tasks=tasks,
         source=source,
     )
-    item_name = f"experiment-record-{experiment.id}-{run.id}"
+    # The record is already scoped by its Experiment parent. Repeating the
+    # Experiment UUID made the filesystem slug exceed its stable length and
+    # could collapse distinct Run suffixes after truncation.
+    item_name = f"experiment-record-{run.id}"
     sources = [
         SourceRef(kind="run", ref=run.id),
         SourceRef(kind="experiment", ref=experiment.id),
     ]
-    report_ref = _artifact_ref_id(run, "experiment_report")
+    report_ref = _artifact_ref_id(run, execution_id, "experiment_report")
     if report_ref is not None:
         sources.append(SourceRef(kind="artifact", ref=report_ref))
     return write_knowledge(
@@ -623,6 +635,7 @@ def write_finding_record(
     experiment: Experiment,
     draft: str,
     model: str,
+    execution_id: str,
 ) -> Knowledge:
     """Write the Finding from the execute tail's ``final_report``.
 
@@ -635,17 +648,17 @@ def write_finding_record(
     from molexp.workspace.knowledge import Finding, Knowledge, SourceRef
     from molexp.workspace.knowledge_write import write_knowledge
 
-    final_report = _read_artifact_json(run, "final_report")
+    final_report = _read_artifact_json(run, execution_id, "final_report")
     if final_report is None:
         raise ValueError(f"run {run.id} has no final_report artifact to harvest")
     title = _title(final_report, draft, run.id)
-    item_name = f"finding-{experiment.id}-{run.id}"
+    item_name = f"finding-{run.id}"
     sources = [
         SourceRef(kind="run", ref=run.id),
         SourceRef(kind="experiment", ref=experiment.id),
     ]
     for kind in ("final_report", "audit_report"):
-        ref_id = _artifact_ref_id(run, kind)
+        ref_id = _artifact_ref_id(run, execution_id, kind)
         if ref_id is not None:
             sources.append(SourceRef(kind="artifact", ref=ref_id))
     lines = [f"# Finding: {title}", ""]
@@ -655,9 +668,7 @@ def write_finding_record(
             lines += [f"## {label}", "", block, ""]
     cites: list[tuple[Folder, EdgeRole]] = [(run, "derived_from")]
     try:
-        decision = experiment.get_folder(
-            f"experiment-record-{experiment.id}-{run.id}", cls=Knowledge
-        )
+        decision = experiment.get_folder(f"experiment-record-{run.id}", cls=Knowledge)
     except Exception:
         decision = None  # no Decision record (its write raced/failed) — Finding stands alone
     if decision is not None:
@@ -681,6 +692,7 @@ def write_failure_analysis_record(
     model: str,
     failure_stage: str | None,
     failure_error: str,
+    execution_id: str,
 ) -> Knowledge:
     """Write the FailureAnalysis for a plan that terminally failed.
 
@@ -690,8 +702,8 @@ def write_failure_analysis_record(
     from molexp.workspace.knowledge import FailureAnalysis, SourceRef
     from molexp.workspace.knowledge_write import write_knowledge
 
-    item_name = f"failure-{experiment.id}-{run.id}"
-    completed = _artifact_kinds(run)
+    item_name = f"failure-{run.id}"
+    completed = _artifact_kinds(run, execution_id)
     lines = [
         f"# Failure analysis: plan run {run.id}",
         "",
@@ -731,6 +743,7 @@ def write_plan_book(
     run: Run,
     experiment: Experiment,
     model: str,
+    execution_id: str,
 ) -> Knowledge:
     """Land the 12-section plan book as ``experiment.knowledge("plan-book")``.
 
@@ -740,7 +753,7 @@ def write_plan_book(
     from molexp.workspace.knowledge import PLAN_BOOK_NAME, Plan, SourceRef
     from molexp.workspace.knowledge_write import write_knowledge
 
-    body = _plan_book_body(run)
+    body = _plan_book_body(run, execution_id)
     if not body.strip():
         raise ValueError(f"run {run.id} has no plan_report/experiment_plan to land as a plan book")
     sources = [
@@ -748,7 +761,7 @@ def write_plan_book(
         SourceRef(kind="experiment", ref=experiment.id),
     ]
     for kind in ("plan_report", "experiment_plan"):
-        ref_id = _artifact_ref_id(run, kind)
+        ref_id = _artifact_ref_id(run, execution_id, kind)
         if ref_id is not None:
             sources.append(SourceRef(kind="artifact", ref=ref_id))
     return write_knowledge(
@@ -763,8 +776,8 @@ def write_plan_book(
     )
 
 
-def _plan_book_body(run: Run) -> str:
-    text = _read_artifact_text(run, "plan_report")
+def _plan_book_body(run: Run, execution_id: str) -> str:
+    text = _read_artifact_text(run, execution_id, "plan_report")
     if text and text.strip():
         try:
             data = json.loads(text)
@@ -776,7 +789,7 @@ def _plan_book_body(run: Run) -> str:
                 if isinstance(value, str) and value.strip():
                     return value
         return text
-    plan = _read_artifact_json(run, "experiment_plan")
+    plan = _read_artifact_json(run, execution_id, "experiment_plan")
     if plan is None:
         return ""
     try:
@@ -798,9 +811,9 @@ _FINAL_REPORT_FIELDS: list[tuple[str, str]] = [
 ]
 
 
-def has_artifact(run: Run, kind: str) -> bool:
+def has_artifact(run: Run, execution_id: str, kind: str) -> bool:
     """Whether the run's artifact store holds at least one *kind* artifact."""
-    return _artifact_ref_id(run, kind) is not None
+    return _artifact_ref_id(run, execution_id, kind) is not None
 
 
 def _read_workflow_tasks(experiment: Experiment) -> list[str]:
@@ -824,18 +837,17 @@ def _read_workflow_tasks(experiment: Experiment) -> list[str]:
     ]
 
 
-def _artifact_ref_id(run: Run, kind: str) -> str | None:
+def _artifact_ref_id(run: Run, execution_id: str, kind: str) -> str | None:
     """The content-addressed id of the run's latest *kind* artifact (or None)."""
     from molexp.harness.store.file_artifact_store import FileArtifactStore
-    from molexp.harness.store.paths import harness_artifact_root
 
-    store = FileArtifactStore(root=harness_artifact_root(run.run_dir))
+    store = FileArtifactStore.open_execution(run, execution_id)
     ref = store.latest_by_kind(kind)
     return ref.id if ref is not None else None
 
 
-def _read_workflow_source(run: Run) -> str | None:
-    data = _read_artifact_json(run, "workflow_source")
+def _read_workflow_source(run: Run, execution_id: str) -> str | None:
+    data = _read_artifact_json(run, execution_id, "workflow_source")
     source = data.get("source") if isinstance(data, dict) else None
     return source if isinstance(source, str) else None
 
@@ -939,25 +951,26 @@ def _created_at(run: Run) -> str:
         return datetime.now(UTC).isoformat()
 
 
-def _read_artifact_json(run: Run, kind: str) -> dict[str, Any] | None:
+def _execution(run: Run, execution_id: str):  # noqa: ANN202
+    """Resolve exactly the selected physical Execution; never choose a latest one."""
+    for execution in run.executions:
+        if execution.id == execution_id:
+            return execution
+    raise KeyError(f"Execution {execution_id!r} does not belong to Run {run.id!r}")
+
+
+def _read_artifact_json(run: Run, execution_id: str, kind: str) -> dict[str, Any] | None:
     """The run's latest *kind* artifact parsed as a JSON object (or None)."""
     from molexp.harness.store.file_artifact_store import FileArtifactStore
-    from molexp.harness.store.paths import harness_artifact_root
 
-    root = harness_artifact_root(run.run_dir)
-    store = FileArtifactStore(root=root)
+    store = FileArtifactStore.open_execution(run, execution_id)
     ref = store.latest_by_kind(kind)
     if ref is None:
         return None
-    direct = root / kind / f"{ref.id}.json"
-    raw: str | bytes | None = None
     try:
-        raw = direct.read_text()
-    except OSError:
-        try:
-            raw = store.get(ref.id)
-        except Exception:
-            return None
+        raw: str | bytes = store.get(ref.id)
+    except Exception:
+        return None
     try:
         data = json.loads(raw)
     except (ValueError, TypeError):

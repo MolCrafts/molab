@@ -6,11 +6,11 @@
  * POST /provider/test result — an honest preflight, not a chat reply.
  */
 export type ProviderTestResponse = {
-    error?: (string | null);
-    latencyMs: number;
-    model: string;
     ok: boolean;
     provider: string;
+    model: string;
+    latencyMs: number;
     reply: string;
+    error?: (string | null);
 };
 

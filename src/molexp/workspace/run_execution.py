@@ -13,12 +13,13 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from .models import ExecutionMetadata, ExecutionRecord
+from .models import ExecutionMetadata
 from .utils import derive_execution_id
 
 if TYPE_CHECKING:
     from datetime import datetime
 
+    from .domain import ExecutionState
     from .run import Run
 
 
@@ -74,14 +75,14 @@ class ExecutionStore:
 
     def close_record(
         self, execution_id: str, status: str, finished_at: datetime
-    ) -> list[ExecutionRecord]:
+    ) -> list[ExecutionState]:
         """Return execution history with *execution_id*'s record closed.
 
         Sourced from ``run.json`` — the sole home of a run's execution history.
         """
         history = list(self._run.execution_history)
         for i, entry in enumerate(history):
-            if entry.execution_id == execution_id:
+            if entry.id == execution_id:
                 history[i] = entry.model_copy(update={"finished_at": finished_at, "status": status})
                 return history
         return history

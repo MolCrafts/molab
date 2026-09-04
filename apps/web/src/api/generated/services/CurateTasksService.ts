@@ -10,35 +10,6 @@ import { OpenAPI } from '../core/OpenAPI';
 import { request as __request } from '../core/request';
 export class CurateTasksService {
     /**
-     * List Curate Tasks
-     * List the live curate tasks in this workspace (in-memory; MVP).
-     * @param projectId
-     * @param experimentId
-     * @param molexpSession
-     * @returns CurateTaskListResponse Successful Response
-     * @throws ApiError
-     */
-    public static listCurateTasks(
-        projectId: string,
-        experimentId: string,
-        molexpSession?: (string | null),
-    ): CancelablePromise<CurateTaskListResponse> {
-        return __request(OpenAPI, {
-            method: 'GET',
-            url: '/api/projects/{project_id}/experiments/{experiment_id}/curate-tasks',
-            path: {
-                'project_id': projectId,
-                'experiment_id': experimentId,
-            },
-            cookies: {
-                'molexp_session': molexpSession,
-            },
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
      * Create Curate Task
      * Start the curation flow on a content-addressed run under the experiment.
      *
@@ -70,6 +41,35 @@ export class CurateTasksService {
             },
             body: requestBody,
             mediaType: 'application/json',
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * List Curate Tasks
+     * List the live curate tasks in this workspace (in-memory; MVP).
+     * @param projectId
+     * @param experimentId
+     * @param molexpSession
+     * @returns CurateTaskListResponse Successful Response
+     * @throws ApiError
+     */
+    public static listCurateTasks(
+        projectId: string,
+        experimentId: string,
+        molexpSession?: (string | null),
+    ): CancelablePromise<CurateTaskListResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/projects/{project_id}/experiments/{experiment_id}/curate-tasks',
+            path: {
+                'project_id': projectId,
+                'experiment_id': experimentId,
+            },
+            cookies: {
+                'molexp_session': molexpSession,
+            },
             errors: {
                 422: `Validation Error`,
             },

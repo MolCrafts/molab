@@ -3,8 +3,8 @@
 /* tslint:disable */
 /* eslint-disable */
 export type ContextFocusResponse = {
-    experimentId?: (string | null);
     projectId?: (string | null);
+    experimentId?: (string | null);
     runId?: (string | null);
     selectedObjectRefs?: Array<string>;
 };

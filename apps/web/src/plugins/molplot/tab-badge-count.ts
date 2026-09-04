@@ -5,7 +5,9 @@ export const resolveMolplotMetricsTabBadgeCount = async (
   ctx: RunTabBadgeContext,
 ): Promise<number | null> => {
   try {
-    const response = await runsApi.getRunMetrics(ctx.projectId, ctx.experimentId, ctx.runId);
+    const response = await runsApi.getRunMetrics(
+      ctx.projectId, ctx.experimentId, ctx.runId, ctx.executionId,
+    );
     const keys = new Set<string>();
     for (const record of response.records) {
       if (record.t === "scalar" && typeof record.k === "string") keys.add(record.k);

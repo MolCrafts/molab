@@ -34,27 +34,6 @@ export class ApprovalsService {
         });
     }
     /**
-     * Stream Approval Events
-     * SSE: one ``changed`` event per suspend/decision — the UI refetch signal.
-     * @param molexpSession
-     * @returns any Successful Response
-     * @throws ApiError
-     */
-    public static streamApprovalEvents(
-        molexpSession?: (string | null),
-    ): CancelablePromise<any> {
-        return __request(OpenAPI, {
-            method: 'GET',
-            url: '/api/approvals/events',
-            cookies: {
-                'molexp_session': molexpSession,
-            },
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
      * Decide Approval
      * Record a ReviewDecision-shaped answer and resume/reject the task.
      *
@@ -85,6 +64,27 @@ export class ApprovalsService {
             },
             body: requestBody,
             mediaType: 'application/json',
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * Stream Approval Events
+     * SSE: one ``changed`` event per suspend/decision — the UI refetch signal.
+     * @param molexpSession
+     * @returns any Successful Response
+     * @throws ApiError
+     */
+    public static streamApprovalEvents(
+        molexpSession?: (string | null),
+    ): CancelablePromise<any> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/approvals/events',
+            cookies: {
+                'molexp_session': molexpSession,
+            },
             errors: {
                 422: `Validation Error`,
             },

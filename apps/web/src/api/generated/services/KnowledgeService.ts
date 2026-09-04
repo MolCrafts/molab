@@ -20,6 +20,82 @@ import { OpenAPI } from '../core/OpenAPI';
 import { request as __request } from '../core/request';
 export class KnowledgeService {
     /**
+     * Entity Backlinks
+     * Knowledge documents citing one entity — a thin ``Bundle.backlinks`` read.
+     *
+     * Pure derived read (no reverse index persisted): resolves the entity
+     * Folder, then asks the bundle which Concepts' ``index.md`` edges point at
+     * it. 404 on an unresolvable entity — never an empty-list fallback for a
+     * bad ref (no-fallback law).
+     * @param kind Entity kind.
+     * @param projectId
+     * @param experimentId
+     * @param runId
+     * @param molexpSession
+     * @returns EntityBacklinksResponse Successful Response
+     * @throws ApiError
+     */
+    public static entityBacklinks(
+        kind: 'run' | 'experiment',
+        projectId: string,
+        experimentId: string,
+        runId?: (string | null),
+        molexpSession?: (string | null),
+    ): CancelablePromise<EntityBacklinksResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/knowledge/entity-backlinks',
+            cookies: {
+                'molexp_session': molexpSession,
+            },
+            query: {
+                'kind': kind,
+                'projectId': projectId,
+                'experimentId': experimentId,
+                'runId': runId,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * Search Knowledge
+     * Search the workspace bundle — wraps the ONE ``Bundle.search`` verb.
+     *
+     * Pure exposure (vision-loop-08): all matching semantics (body reads, caps,
+     * snippets, truncation) live in :meth:`molexp.workspace.Bundle.search`; this
+     * route only projects its ``SearchResult`` onto the wire.
+     * @param q Case-insensitive needle (path/title/tags/body).
+     * @param type Exact Concept type filter.
+     * @param tag Only concepts carrying this tag.
+     * @param molexpSession
+     * @returns KnowledgeSearchResponse Successful Response
+     * @throws ApiError
+     */
+    public static searchKnowledge(
+        q: string,
+        type?: (string | null),
+        tag?: (string | null),
+        molexpSession?: (string | null),
+    ): CancelablePromise<KnowledgeSearchResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/knowledge/search',
+            cookies: {
+                'molexp_session': molexpSession,
+            },
+            query: {
+                'q': q,
+                'type': type,
+                'tag': tag,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
      * List Knowledge
      * List every Note + ReferenceConcept in the active workspace's bundle.
      *
@@ -52,82 +128,26 @@ export class KnowledgeService {
         });
     }
     /**
-     * Get Backlinks
-     * Return every Concept linking at *path* — delegates to ``Bundle.backlinks``.
-     * @param path The target Concept's bundle-relative path (its identity).
+     * Get Note
+     * Return one note's full body (its ``index.md``) + its outgoing links + cards.
+     * @param path The note Concept's bundle-relative path (its identity).
      * @param molexpSession
-     * @returns BacklinksResponse Successful Response
+     * @returns NoteDetailResponse Successful Response
      * @throws ApiError
      */
-    public static getBacklinks(
+    public static getNote(
         path: string,
         molexpSession?: (string | null),
-    ): CancelablePromise<BacklinksResponse> {
+    ): CancelablePromise<NoteDetailResponse> {
         return __request(OpenAPI, {
             method: 'GET',
-            url: '/api/knowledge/backlinks',
+            url: '/api/knowledge/note',
             cookies: {
                 'molexp_session': molexpSession,
             },
             query: {
                 'path': path,
             },
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
-     * Delete Doc
-     * Delete a note (its directory subtree) — delegates to ``Bundle.delete_note``.
-     * @param path The note Concept's bundle-relative path (its identity).
-     * @param molexpSession
-     * @returns MessageResponse Successful Response
-     * @throws ApiError
-     */
-    public static deleteDoc(
-        path: string,
-        molexpSession?: (string | null),
-    ): CancelablePromise<MessageResponse> {
-        return __request(OpenAPI, {
-            method: 'DELETE',
-            url: '/api/knowledge/doc',
-            cookies: {
-                'molexp_session': molexpSession,
-            },
-            query: {
-                'path': path,
-            },
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
-     * Move Doc
-     * Rename and/or reparent a note — delegates to ``Bundle.rename_note`` / ``move_note``.
-     * @param path The note Concept's bundle-relative path (its identity).
-     * @param requestBody
-     * @param molexpSession
-     * @returns NoteSummary Successful Response
-     * @throws ApiError
-     */
-    public static moveDoc(
-        path: string,
-        requestBody: DocMoveRequest,
-        molexpSession?: (string | null),
-    ): CancelablePromise<NoteSummary> {
-        return __request(OpenAPI, {
-            method: 'PATCH',
-            url: '/api/knowledge/doc',
-            cookies: {
-                'molexp_session': molexpSession,
-            },
-            query: {
-                'path': path,
-            },
-            body: requestBody,
-            mediaType: 'application/json',
             errors: {
                 422: `Validation Error`,
             },
@@ -189,6 +209,62 @@ export class KnowledgeService {
         });
     }
     /**
+     * Move Doc
+     * Rename and/or reparent a note — delegates to ``Bundle.rename_note`` / ``move_note``.
+     * @param path The note Concept's bundle-relative path (its identity).
+     * @param requestBody
+     * @param molexpSession
+     * @returns NoteSummary Successful Response
+     * @throws ApiError
+     */
+    public static moveDoc(
+        path: string,
+        requestBody: DocMoveRequest,
+        molexpSession?: (string | null),
+    ): CancelablePromise<NoteSummary> {
+        return __request(OpenAPI, {
+            method: 'PATCH',
+            url: '/api/knowledge/doc',
+            cookies: {
+                'molexp_session': molexpSession,
+            },
+            query: {
+                'path': path,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * Delete Doc
+     * Delete a note (its directory subtree) — delegates to ``Bundle.delete_note``.
+     * @param path The note Concept's bundle-relative path (its identity).
+     * @param molexpSession
+     * @returns MessageResponse Successful Response
+     * @throws ApiError
+     */
+    public static deleteDoc(
+        path: string,
+        molexpSession?: (string | null),
+    ): CancelablePromise<MessageResponse> {
+        return __request(OpenAPI, {
+            method: 'DELETE',
+            url: '/api/knowledge/doc',
+            cookies: {
+                'molexp_session': molexpSession,
+            },
+            query: {
+                'path': path,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
      * Embed Doc
      * Embed a live entity into a document — delegates to ``Bundle.embed``.
      *
@@ -218,32 +294,6 @@ export class KnowledgeService {
             },
             body: requestBody,
             mediaType: 'application/json',
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
-     * Export Doc
-     * Export a note as portable Markdown — delegates to ``Bundle.export_markdown``.
-     * @param path The note Concept's bundle-relative path (its identity).
-     * @param molexpSession
-     * @returns any Successful Response
-     * @throws ApiError
-     */
-    public static exportDoc(
-        path: string,
-        molexpSession?: (string | null),
-    ): CancelablePromise<any> {
-        return __request(OpenAPI, {
-            method: 'GET',
-            url: '/api/knowledge/doc/export',
-            cookies: {
-                'molexp_session': molexpSession,
-            },
-            query: {
-                'path': path,
-            },
             errors: {
                 422: `Validation Error`,
             },
@@ -284,60 +334,20 @@ export class KnowledgeService {
         });
     }
     /**
-     * Entity Backlinks
-     * Knowledge documents citing one entity — a thin ``Bundle.backlinks`` read.
-     *
-     * Pure derived read (no reverse index persisted): resolves the entity
-     * Folder, then asks the bundle which Concepts' ``index.md`` edges point at
-     * it. 404 on an unresolvable entity — never an empty-list fallback for a
-     * bad ref (no-fallback law).
-     * @param kind Entity kind.
-     * @param projectId
-     * @param experimentId
-     * @param runId
+     * Get Backlinks
+     * Return every Concept linking at *path* — delegates to ``Bundle.backlinks``.
+     * @param path The target Concept's bundle-relative path (its identity).
      * @param molexpSession
-     * @returns EntityBacklinksResponse Successful Response
+     * @returns BacklinksResponse Successful Response
      * @throws ApiError
      */
-    public static entityBacklinks(
-        kind: 'run' | 'experiment',
-        projectId: string,
-        experimentId: string,
-        runId?: (string | null),
-        molexpSession?: (string | null),
-    ): CancelablePromise<EntityBacklinksResponse> {
-        return __request(OpenAPI, {
-            method: 'GET',
-            url: '/api/knowledge/entity-backlinks',
-            cookies: {
-                'molexp_session': molexpSession,
-            },
-            query: {
-                'kind': kind,
-                'projectId': projectId,
-                'experimentId': experimentId,
-                'runId': runId,
-            },
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
-     * Get Note
-     * Return one note's full body (its ``index.md``) + its outgoing links + cards.
-     * @param path The note Concept's bundle-relative path (its identity).
-     * @param molexpSession
-     * @returns NoteDetailResponse Successful Response
-     * @throws ApiError
-     */
-    public static getNote(
+    public static getBacklinks(
         path: string,
         molexpSession?: (string | null),
-    ): CancelablePromise<NoteDetailResponse> {
+    ): CancelablePromise<BacklinksResponse> {
         return __request(OpenAPI, {
             method: 'GET',
-            url: '/api/knowledge/note',
+            url: '/api/knowledge/backlinks',
             cookies: {
                 'molexp_session': molexpSession,
             },
@@ -350,35 +360,25 @@ export class KnowledgeService {
         });
     }
     /**
-     * Search Knowledge
-     * Search the workspace bundle — wraps the ONE ``Bundle.search`` verb.
-     *
-     * Pure exposure (vision-loop-08): all matching semantics (body reads, caps,
-     * snippets, truncation) live in :meth:`molexp.workspace.Bundle.search`; this
-     * route only projects its ``SearchResult`` onto the wire.
-     * @param q Case-insensitive needle (path/title/tags/body).
-     * @param type Exact Concept type filter.
-     * @param tag Only concepts carrying this tag.
+     * Export Doc
+     * Export a note as portable Markdown — delegates to ``Bundle.export_markdown``.
+     * @param path The note Concept's bundle-relative path (its identity).
      * @param molexpSession
-     * @returns KnowledgeSearchResponse Successful Response
+     * @returns any Successful Response
      * @throws ApiError
      */
-    public static searchKnowledge(
-        q: string,
-        type?: (string | null),
-        tag?: (string | null),
+    public static exportDoc(
+        path: string,
         molexpSession?: (string | null),
-    ): CancelablePromise<KnowledgeSearchResponse> {
+    ): CancelablePromise<any> {
         return __request(OpenAPI, {
             method: 'GET',
-            url: '/api/knowledge/search',
+            url: '/api/knowledge/doc/export',
             cookies: {
                 'molexp_session': molexpSession,
             },
             query: {
-                'q': q,
-                'type': type,
-                'tag': tag,
+                'path': path,
             },
             errors: {
                 422: `Validation Error`,

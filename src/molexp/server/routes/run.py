@@ -3,18 +3,16 @@
 from __future__ import annotations
 
 import io
-import json
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
 from molexp.plugins.metrics import read_run_metrics
-from molexp.plugins.submit_molq.cancel import try_cancel
 from molexp.plugins.submit_molq.submit import SubmitHandler
-from molexp.workflow import WorkflowRuntime, WorkflowSnapshotRef, default_binding_registry
+from molexp.workflow import WorkflowSnapshotRef, default_binding_registry
 from molexp.workflow.promote import resolve_spec_entrypoint
-from molexp.workspace import LOCAL_TARGET_NAME, RETRYABLE_STATUSES, Experiment, RunStatus
+from molexp.workspace import Experiment
 from molexp.workspace import (
     ExperimentNotFoundError as WorkspaceExperimentNotFoundError,
 )
@@ -24,22 +22,32 @@ from molexp.workspace import (
 from molexp.workspace import (
     RunNotFoundError as WorkspaceRunNotFoundError,
 )
+from molexp.workspace.artifact_repository import ArtifactRepository
+from molexp.workspace.assets import ArtifactAsset
+from molexp.workspace.domain import ExecutionMode, ExecutionStatus
+from molexp.workspace.execution_repository import ExecutionRepository
 from molexp.workspace.fs_cached import CachedRemoteFileSystem
 from molexp.workspace.fs_tree import list_tree_children, tree_to_run_file_dicts
-from molexp.workspace.lifecycle_ops import cancel_run as lifecycle_cancel_run
-from molexp.workspace.run_reaper import reap_zombie_run
+from molexp.workspace.provenance import AgentRef
+from molexp.workspace.schema_version import read_versioned_json
 from molexp.workspace.targets import get_target
-from molexp.workspace.targets import resolve_compute_target as resolve_target
 
 from ..dependencies import get_workspace
-from ..exceptions import InvalidStatusError, RunNotFoundError
+from ..exceptions import RunNotFoundError
 from ..schemas import (
+    ArtifactPromoteRequest,
+    ArtifactPromotionResponse,
+    ArtifactResponse,
+    AssetVersionResponse,
+    ExecutionAttemptCreateRequest,
+    ExecutionEvidenceResponse,
+    ExecutionOutputsResponse,
+    ExecutionRecordResponse,
     LammpsLogResponse,
     LammpsThermoStage,
+    ManagedAssetResponse,
     MetricSeriesResponse,
-    RunActionResponse,
     RunAnalyzeFailureRequest,
-    RunContinueResponse,
     RunCreateRequest,
     RunExecutionResponse,
     RunFileNode,
@@ -49,9 +57,6 @@ from ..schemas import (
     RunLogsResponse,
     RunMetricsResponse,
     RunResponse,
-    RunStartRequest,
-    RunStatusResponse,
-    RunStatusUpdateRequest,
 )
 
 router = APIRouter(
@@ -83,6 +88,103 @@ def _get_run_or_none(experiment, run_id: str):  # noqa: ANN001, ANN202
         return experiment.get_run(run_id)
     except WorkspaceRunNotFoundError:
         return None
+
+
+def _execution_repository(workspace, run) -> ExecutionRepository:  # noqa: ANN001
+    return ExecutionRepository(
+        workspace.root,
+        run.run_dir,
+        run_id=run.id,
+        project_id=run.experiment.project.id,
+        fs=workspace.fs,
+    )
+
+
+def _execution_response(state) -> ExecutionRecordResponse:  # noqa: ANN001
+    return ExecutionRecordResponse(
+        id=state.id,
+        runId=state.run_id,
+        mode=state.mode.value,
+        status=state.status.value,
+        createdAt=state.created_at.isoformat(),
+        startedAt=state.started_at.isoformat() if state.started_at else None,
+        finishedAt=state.finished_at.isoformat() if state.finished_at else None,
+        basedOnExecutionId=state.based_on_execution_id,
+        checkpointArtifactId=state.checkpoint_artifact_id,
+        executor=state.executor,
+        environment=state.environment,
+        artifactIds=list(state.artifact_ids),
+        error=state.error,
+    )
+
+
+def _execution_artifacts(
+    workspace,  # noqa: ANN001
+    project_id: str,
+    experiment_id: str,
+    run_id: str,
+    execution_id: str,
+) -> list[ArtifactAsset]:
+    """Return the ArtifactAssets owned by one execution from the authoritative manifest."""
+    from molexp.workspace.assets import ArtifactAsset, AssetScope
+    from molexp.workspace.assets.scan import scan_assets
+
+    scope = AssetScope(kind="run", ids=(project_id, experiment_id, run_id))
+    return [
+        asset
+        for asset in scan_assets(workspace.root, scope=scope, fs=workspace.fs)
+        if isinstance(asset, ArtifactAsset)
+        and asset.producer is not None
+        and asset.producer.execution_id == execution_id
+    ]
+
+
+def _asset_response(asset: ArtifactAsset) -> ArtifactResponse:
+    """Map a manifest :class:`ArtifactAsset` to the API response shape."""
+    producer = asset.producer
+    return ArtifactResponse(
+        id=asset.asset_id,
+        executionId=(producer.execution_id or "") if producer else "",
+        runId=(producer.run_id or "") if producer else "",
+        projectId=asset.scope.ids[0] if asset.scope.ids else "",
+        name=asset.name,
+        sourcePath=str(asset.path),
+        digest=asset.content_hash or "",
+        size=asset.size,
+        contentKind="file",
+        mediaType=asset.mime,
+        semanticType=None,
+        declarationId=None,
+        inputEntityIds=list(producer.inputs) if producer else [],
+        metadata={"task_id": producer.task_id} if producer and producer.task_id else {},
+        createdAt=asset.created_at.isoformat(),
+    )
+
+
+def _download_artifact(
+    workspace,  # noqa: ANN001
+    run,  # noqa: ANN001
+    execution_id: str,
+    artifact_id: str,
+) -> StreamingResponse:
+    """Stream one manifest-backed Artifact's bytes."""
+    from molexp.workspace.assets import ArtifactAsset
+    from molexp.workspace.assets.scan import get_asset
+
+    asset = get_asset(workspace.root, artifact_id, fs=workspace.fs)
+    if not isinstance(asset, ArtifactAsset):
+        raise HTTPException(status_code=404, detail=f"Artifact {artifact_id!r} not found")
+    producer = asset.producer
+    if producer is None or producer.run_id != run.id or producer.execution_id != execution_id:
+        raise HTTPException(status_code=404, detail="Artifact is not owned by this Execution")
+    target = workspace.fs.join(str(run.run_dir), str(asset.path))
+    if not workspace.fs.is_file(target):
+        raise HTTPException(status_code=404, detail="artifact payload not found")
+    return StreamingResponse(
+        workspace.fs.open(target, "rb"),
+        media_type=asset.mime or "application/octet-stream",
+        headers={"Content-Disposition": f'inline; filename="{asset.name}"'},
+    )
 
 
 def _synthesize_snapshot(experiment: Experiment) -> dict | None:
@@ -151,11 +253,6 @@ def _dispatch_to_molq(target, run, execution_id: str | None = None) -> None:  # 
             ),
         )
 
-    # Worker chdirs to submit_cwd before importing user code so cwd-relative
-    # paths resolve the same as at submit time.
-    if not run.metadata.submit_cwd:
-        run.update_provenance(submit_cwd=str(Path.cwd().resolve()))
-
     handler = SubmitHandler(
         scheduler=target.scheduler,
         cluster=None,
@@ -208,6 +305,241 @@ def get_run(
     return RunResponse.from_model(run)
 
 
+@router.post(
+    "/{run_id}/executions",
+    response_model=ExecutionRecordResponse,
+    status_code=201,
+)
+def create_execution(
+    project_id: str,
+    experiment_id: str,
+    run_id: str,
+    body: ExecutionAttemptCreateRequest,
+    workspace=Depends(get_workspace),  # noqa: ANN001
+) -> ExecutionRecordResponse:
+    """Create one queued physical attempt without mutating the Run."""
+    experiment = _get_experiment(workspace, project_id, experiment_id)
+    if not experiment:
+        raise RunNotFoundError(project_id, experiment_id, run_id)
+    run = _get_run_or_none(experiment, run_id)
+    if not run:
+        raise RunNotFoundError(project_id, experiment_id, run_id)
+    target = None
+    if body.target is not None:
+        try:
+            target = get_target(workspace, body.target)
+        except KeyError as exc:
+            raise HTTPException(status_code=422, detail=f"unknown target {body.target!r}") from exc
+    if body.dispatch and target is None:
+        raise HTTPException(status_code=422, detail="dispatch requires a compute target")
+    repo = _execution_repository(workspace, run)
+    try:
+        state = repo.create(
+            mode=ExecutionMode(body.mode),
+            created_by=AgentRef(id="ui", type="person", name="MolExp UI"),
+            based_on_execution_id=body.based_on_execution_id,
+            checkpoint_artifact_id=body.checkpoint_artifact_id,
+            executor={"backend": "molq", "target": body.target},
+            environment={"submit_cwd": str(Path.cwd().resolve())},
+        )
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if body.dispatch:
+        assert target is not None
+        try:
+            _dispatch_to_molq(target, run, execution_id=state.id)
+        except Exception as exc:
+            repo.seal(
+                state.id,
+                ExecutionStatus.FAILED,
+                error={"type": type(exc).__name__, "message": str(exc)},
+            )
+            raise
+    return _execution_response(state)
+
+
+@router.get(
+    "/{run_id}/executions/{execution_id}",
+    response_model=ExecutionRecordResponse,
+)
+def get_execution_record(
+    project_id: str,
+    experiment_id: str,
+    run_id: str,
+    execution_id: str,
+    workspace=Depends(get_workspace),  # noqa: ANN001
+) -> ExecutionRecordResponse:
+    experiment = _get_experiment(workspace, project_id, experiment_id)
+    run = _get_run_or_none(experiment, run_id) if experiment else None
+    if run is None:
+        raise RunNotFoundError(project_id, experiment_id, run_id)
+    try:
+        return _execution_response(_execution_repository(workspace, run).get(execution_id))
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+
+@router.get(
+    "/{run_id}/executions/{execution_id}/outputs",
+    response_model=ExecutionOutputsResponse,
+)
+def get_execution_outputs(
+    project_id: str,
+    experiment_id: str,
+    run_id: str,
+    execution_id: str,
+    workspace=Depends(get_workspace),  # noqa: ANN001
+) -> ExecutionOutputsResponse:
+    """Separate stdio, managed Artifacts, evidence, and unregistered work files."""
+    experiment = _get_experiment(workspace, project_id, experiment_id)
+    run = _get_run_or_none(experiment, run_id) if experiment else None
+    if run is None:
+        raise RunNotFoundError(project_id, experiment_id, run_id)
+    repo = _execution_repository(workspace, run)
+    try:
+        repo.get(execution_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    fs = workspace.fs
+    execution_dir = repo.execution_dir(execution_id)
+
+    def read_optional(name: str) -> str | None:
+        path = fs.join(execution_dir, name)
+        return fs.read_text(path, encoding="utf-8") if fs.is_file(path) else None
+
+    artifacts = _execution_artifacts(workspace, project_id, experiment_id, run_id, execution_id)
+    artifact_responses = [_asset_response(asset) for asset in artifacts]
+    registered_task_dirs = {
+        asset.producer.task_id
+        for asset in artifacts
+        if asset.producer is not None and asset.producer.task_id
+    }
+    work_dir = fs.join(execution_dir, "work")
+    unregistered: list[RunFileNode] = []
+    if fs.is_dir(work_dir):
+        prefix = work_dir.rstrip("/") + "/"
+        for path in sorted(fs.rglob(work_dir, "*")):
+            if not fs.is_file(path):
+                continue
+            rel = path[len(prefix) :] if path.startswith(prefix) else fs.basename(path)
+            if any(rel == task or rel.startswith(task + "/") for task in registered_task_dirs):
+                continue
+            stat = fs.stat(path)
+            unregistered.append(
+                RunFileNode(
+                    name=fs.basename(path),
+                    relPath=f"work/{rel}",
+                    type="file",
+                    size=stat.size,
+                    modified=stat.mtime,
+                )
+            )
+    sealed_record = repo.record(execution_id)
+    evidence = (
+        [
+            ExecutionEvidenceResponse(
+                kind=item.kind,
+                path=item.rel_path,
+                digest=item.digest,
+                size=item.size,
+            )
+            for item in sealed_record.evidence
+        ]
+        if sealed_record is not None
+        else []
+    )
+    results: dict[str, object] = {}
+    results_path = fs.join(execution_dir, "results.json")
+    if fs.is_file(results_path):
+        raw_results = read_versioned_json(results_path, fs=fs).get("results")
+        if isinstance(raw_results, dict):
+            results = raw_results
+    return ExecutionOutputsResponse(
+        executionId=execution_id,
+        stdout=read_optional("stdout.log"),
+        stderr=read_optional("stderr.log"),
+        runtime=read_optional("runtime.log"),
+        artifacts=artifact_responses,
+        evidence=evidence,
+        unregistered=unregistered,
+        results=results,
+    )
+
+
+@router.post(
+    "/{run_id}/executions/{execution_id}/artifacts/{artifact_id}/promote",
+    response_model=ArtifactPromotionResponse,
+    status_code=201,
+)
+def promote_artifact(
+    project_id: str,
+    experiment_id: str,
+    run_id: str,
+    execution_id: str,
+    artifact_id: str,
+    body: ArtifactPromoteRequest,
+    workspace=Depends(get_workspace),  # noqa: ANN001
+) -> ArtifactPromotionResponse:
+    experiment = _get_experiment(workspace, project_id, experiment_id)
+    run = _get_run_or_none(experiment, run_id) if experiment else None
+    if run is None:
+        raise RunNotFoundError(project_id, experiment_id, run_id)
+    try:
+        artifact = ArtifactRepository(workspace.root, fs=workspace.fs).get(artifact_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if artifact.execution_id != execution_id or artifact.run_id != run_id:
+        raise HTTPException(status_code=404, detail="Artifact is not owned by this Execution")
+    asset, version = run.experiment.project.assets.promote(
+        artifact,
+        created_by=AgentRef(id=body.created_by, type="person", name=body.created_by),
+        title=body.title,
+        into_asset_id=body.into_asset_id,
+        metadata=body.metadata,
+    )
+    return ArtifactPromotionResponse(
+        asset=ManagedAssetResponse(
+            id=asset.id,
+            projectId=asset.project_id,
+            title=asset.title,
+            createdAt=asset.created_at.isoformat(),
+            versionCount=len(run.experiment.project.assets.versions(asset.id)),
+        ),
+        version=AssetVersionResponse(
+            id=version.id,
+            assetId=version.asset_id,
+            sourceArtifactId=version.source_artifact_id,
+            version=version.version,
+            digest=version.content.digest,
+            size=version.content.size,
+            contentKind=version.content.kind,
+            mediaType=version.media_type,
+            semanticType=version.semantic_type,
+            metadata=version.metadata,
+            createdAt=version.created_at.isoformat(),
+        ),
+    )
+
+
+@router.get(
+    "/{run_id}/executions/{execution_id}/artifacts/{artifact_id}/content",
+)
+def download_artifact_content(
+    project_id: str,
+    experiment_id: str,
+    run_id: str,
+    execution_id: str,
+    artifact_id: str,
+    workspace=Depends(get_workspace),  # noqa: ANN001
+) -> StreamingResponse:
+    """Stream one Execution Artifact's bytes from the authoritative manifest."""
+    experiment = _get_experiment(workspace, project_id, experiment_id)
+    run = _get_run_or_none(experiment, run_id) if experiment else None
+    if run is None:
+        raise RunNotFoundError(project_id, experiment_id, run_id)
+    return _download_artifact(workspace, run, execution_id, artifact_id)
+
+
 @router.post("", response_model=RunResponse, status_code=201)
 def create_scoped_run(
     project_id: str,
@@ -219,31 +551,16 @@ def create_scoped_run(
     if not experiment:
         raise RunNotFoundError(project_id, experiment_id, "")
 
-    target = None
-    if run_req.target is not None:
-        try:
-            target = get_target(workspace, run_req.target)
-        except KeyError as exc:
-            raise HTTPException(
-                status_code=422,
-                detail=f"compute target {run_req.target!r} is not registered on this workspace",
-            ) from exc
-
     run = experiment.add_run(
         params=run_req.params,
         target=run_req.target,
         workflow_snapshot=_synthesize_snapshot(experiment),
     )
-    if target is not None:
-        _dispatch_to_molq(target, run)
     return RunResponse.from_model(run)
 
 
 def _execution_stream(exec_dir: Path, name: str) -> Path | None:
-    """Stdout/stderr live under ``jobs/<id>/``; older trees kept them on the exec root."""
-    legacy = exec_dir / name
-    if legacy.exists():
-        return legacy
+    """Stdout/stderr live under ``jobs/<id>/``."""
     jobs = exec_dir / "jobs"
     if not jobs.is_dir():
         return None
@@ -271,27 +588,6 @@ def _read_execution_logs(run, execution_id: str) -> RunLogsResponse:  # noqa: AN
     return RunLogsResponse(execution_id=execution_id, stdout=stdout, stderr=stderr)
 
 
-@router.get("/{run_id}/logs", response_model=RunLogsResponse)
-def get_run_logs(
-    project_id: str,
-    experiment_id: str,
-    run_id: str,
-    workspace=Depends(get_workspace),  # noqa: ANN001
-) -> RunLogsResponse:
-    """Return stdout/stderr for the most recent execution of a run."""
-    experiment = _get_experiment(workspace, project_id, experiment_id)
-    if not experiment:
-        raise RunNotFoundError(project_id, experiment_id, run_id)
-    run = _get_run_or_none(experiment, run_id)
-    if not run:
-        raise RunNotFoundError(project_id, experiment_id, run_id)
-
-    history = run.execution_history
-    if not history:
-        return RunLogsResponse()
-    return _read_execution_logs(run, history[-1].execution_id)
-
-
 @router.get(
     "/{run_id}/executions/{execution_id}/logs",
     response_model=RunLogsResponse,
@@ -313,27 +609,35 @@ def get_run_execution_logs(
     return _read_execution_logs(run, execution_id)
 
 
-@router.get("/{run_id}/metrics", response_model=RunMetricsResponse)
+@router.get(
+    "/{run_id}/executions/{execution_id}/molplot",
+    response_model=RunMetricsResponse,
+)
 def get_run_metrics(
     project_id: str,
     experiment_id: str,
     run_id: str,
+    execution_id: str,
     metric_type: str | None = Query(default=None, alias="type"),
     key: str | None = None,
     since_line: int = Query(default=0, ge=0),
     limit: int = Query(default=5000, ge=1, le=50000),
     workspace=Depends(get_workspace),  # noqa: ANN001
 ) -> RunMetricsResponse:
-    """Return run-local metrics (dense Zarr SoT, else JSONL WAL)."""
+    """Return MolPlot records emitted by one selected Execution."""
     experiment = _get_experiment(workspace, project_id, experiment_id)
     if not experiment:
         raise RunNotFoundError(project_id, experiment_id, run_id)
     run = _get_run_or_none(experiment, run_id)
     if not run:
         raise RunNotFoundError(project_id, experiment_id, run_id)
+    try:
+        _execution_repository(workspace, run).get(execution_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     result = read_run_metrics(
-        run.run_dir,
+        Path(run.run_dir) / "executions" / execution_id,
         fs=workspace.fs,
         metric_type=metric_type,
         key=key,
@@ -351,12 +655,16 @@ def get_run_metrics(
     )
 
 
-@router.get("/{run_id}/file/text", response_model=RunFileTextResponse)
+@router.get(
+    "/{run_id}/executions/{execution_id}/file/text",
+    response_model=RunFileTextResponse,
+)
 def get_run_file_text(
     project_id: str,
     experiment_id: str,
     run_id: str,
-    path: str = Query(..., description="Relative path under run_dir"),
+    execution_id: str,
+    path: str = Query(..., description="Relative path under the Execution directory"),
     workspace=Depends(get_workspace),  # noqa: ANN001
 ) -> RunFileTextResponse:
     """Return the raw text content of a file under the run directory.
@@ -372,14 +680,17 @@ def get_run_file_text(
         raise RunNotFoundError(project_id, experiment_id, run_id)
 
     fs = workspace.fs
-    run_dir = str(run.run_dir)
+    try:
+        execution_dir = _execution_repository(workspace, run).execution_dir(execution_id)
+        _execution_repository(workspace, run).get(execution_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     rel = path.lstrip("/")
     if ".." in Path(rel).parts:
         raise HTTPException(status_code=400, detail="path escapes run directory")
-    target = fs.join(run_dir, rel) if rel else run_dir
-    # Containment: target must stay under run_dir.
-    run_norm = run_dir.rstrip("/")
-    if target != run_norm and not target.startswith(run_norm + "/"):
+    target = fs.join(execution_dir, rel) if rel else execution_dir
+    execution_norm = execution_dir.rstrip("/")
+    if target != execution_norm and not target.startswith(execution_norm + "/"):
         raise HTTPException(status_code=400, detail="path escapes run directory")
     if not fs.exists(target) or not fs.is_file(target):
         raise HTTPException(status_code=404, detail=f"file not found: {path}")
@@ -391,12 +702,16 @@ def get_run_file_text(
     return RunFileTextResponse(path=path, content=content, size=fs.getsize(target))
 
 
-@router.get("/{run_id}/lammps-log", response_model=LammpsLogResponse)
+@router.get(
+    "/{run_id}/executions/{execution_id}/lammps-log",
+    response_model=LammpsLogResponse,
+)
 def get_run_lammps_log(
     project_id: str,
     experiment_id: str,
     run_id: str,
-    path: str = Query(..., description="Relative path of the log file under run_dir"),
+    execution_id: str,
+    path: str = Query(..., description="Relative path under the Execution directory"),
     workspace=Depends(get_workspace),  # noqa: ANN001
 ) -> LammpsLogResponse:
     """Parse a LAMMPS log file and return thermo stages.
@@ -414,10 +729,12 @@ def get_run_lammps_log(
     if not run:
         raise RunNotFoundError(project_id, experiment_id, run_id)
 
-    run_dir = Path(run.run_dir)
-    target = (run_dir / path).resolve()
+    execution_dir = Path(run.run_dir) / "executions" / execution_id
+    if not (execution_dir / "execution.json").is_file():
+        raise HTTPException(status_code=404, detail=f"Execution {execution_id!r} not found")
+    target = (execution_dir / path).resolve()
     try:
-        target.relative_to(run_dir.resolve())
+        target.relative_to(execution_dir.resolve())
     except ValueError as exc:
         raise HTTPException(status_code=400, detail="path escapes run directory") from exc
     if not target.is_file():
@@ -455,12 +772,15 @@ def get_run_lammps_log(
     )
 
 
-@router.get("/{run_id}/execution", response_model=RunExecutionResponse)
+@router.get(
+    "/{run_id}/executions/{execution_id}/workflow",
+    response_model=RunExecutionResponse,
+)
 def get_run_execution(
     project_id: str,
     experiment_id: str,
     run_id: str,
-    execution_id: str | None = Query(default=None, description="Execution attempt id."),
+    execution_id: str,
     workspace=Depends(get_workspace),  # noqa: ANN001
 ) -> RunExecutionResponse:
     """Return runtime workflow graph state from workflow.json."""
@@ -471,36 +791,33 @@ def get_run_execution(
     if not run:
         raise RunNotFoundError(project_id, experiment_id, run_id)
 
-    history = run.execution_history
-    if not history:
-        return RunExecutionResponse()
+    repo = _execution_repository(workspace, run)
+    try:
+        state = repo.get(execution_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    wf_file = workspace.fs.join(repo.execution_dir(execution_id), "workflow.json")
+    if not workspace.fs.is_file(wf_file):
+        return RunExecutionResponse(execution_id=execution_id, status=state.status.value)
 
-    known_ids = {rec.execution_id for rec in history}
-    selected_id = execution_id or history[-1].execution_id
-    if selected_id not in known_ids:
-        raise HTTPException(status_code=404, detail=f"Execution {selected_id!r} not found")
-
-    wf_file = Path(run.run_dir) / "executions" / selected_id / "workflow.json"
-    if not wf_file.exists():
-        return RunExecutionResponse(execution_id=selected_id)
-
-    data = json.loads(wf_file.read_text())
-    # Status-vocabulary migration (run-recovery): the workflow-level result
-    # status is now "succeeded"; documents persisted before the migration
-    # carry the legacy "completed" and are normalized on read.
-    raw_status = data.get("status", "running")
+    data = read_versioned_json(wf_file, fs=workspace.fs)
+    workflow = data.get("workflow")
     return RunExecutionResponse(
-        execution_id=data.get("execution_id", selected_id),
-        status="succeeded" if raw_status == "completed" else raw_status,
-        workflow=data,
+        execution_id=execution_id,
+        status=state.status.value,
+        workflow=workflow if isinstance(workflow, dict) else None,
     )
 
 
-@router.get("/{run_id}/files", response_model=RunFilesResponse)
+@router.get(
+    "/{run_id}/executions/{execution_id}/files",
+    response_model=RunFilesResponse,
+)
 def get_run_files(
     project_id: str,
     experiment_id: str,
     run_id: str,
+    execution_id: str,
     workspace=Depends(get_workspace),  # noqa: ANN001
 ) -> RunFilesResponse:
     """Return the on-disk file tree for a run, enriched with catalog metadata.
@@ -518,30 +835,24 @@ def get_run_files(
         raise RunNotFoundError(project_id, experiment_id, run_id)
 
     fs = workspace.fs
-    run_dir = str(run.run_dir)
+    repo = _execution_repository(workspace, run)
+    try:
+        repo.get(execution_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    run_dir = repo.execution_dir(execution_id)
     # Drop pinned listings so newly-written ``*.mlp.jsonl`` / artifacts show up.
     _invalidate_run_nav_cache(workspace, run_dir)
 
-    from molexp.workspace.assets import AssetScope, scan
-    from molexp.workspace.fs_local import LocalFileSystem
-
-    asset_index: dict[str, tuple[str, str, str | None]] = {}
-    if isinstance(fs, LocalFileSystem):
-        run_scope = AssetScope(kind="run", ids=(project_id, experiment_id, run_id))
-        for a in scan.scan_assets(workspace.root, scope=run_scope):
-            rel = str(a.path)
-            asset_index[rel] = (
-                a.asset_id,
-                a.kind,  # type: ignore[attr-defined]
-                a.producer.task_id if a.producer else None,
-            )
+    artifacts = ArtifactRepository(workspace.root, fs=workspace.fs).list_for_execution(execution_id)
+    artifact_index = {item.source_path: item for item in artifacts}
 
     tree = list_tree_children(fs, run_dir, max_depth=8)
     raw_nodes = tree_to_run_file_dicts(tree)
 
     def enrich(node: dict) -> RunFileNode:
         rel = node.get("relPath") or ""
-        info = asset_index.get(rel)
+        info = artifact_index.get(rel)
         children_raw = node.get("children") or []
         return RunFileNode(
             name=node.get("name") or "",
@@ -549,9 +860,11 @@ def get_run_files(
             type=node.get("type") or "file",
             size=node.get("size"),
             modified=node.get("modified"),
-            assetId=info[0] if info else None,
-            assetKind=info[1] if info else None,
-            taskId=info[2] if info else None,
+            assetId=info.id if info else None,
+            assetKind=info.semantic_type if info else None,
+            taskId=str(info.metadata.get("task_id"))
+            if info and info.metadata.get("task_id")
+            else None,
             children=[enrich(c) for c in children_raw],
         )
 
@@ -570,265 +883,41 @@ def get_run_files(
     )
 
 
-def _resumable_execution_id(run) -> str | None:  # noqa: ANN001
-    """Return the most recent non-succeeded execution_id, or ``None``."""
-    for record in reversed(run.execution_history):
-        if record.status != "succeeded":
-            return record.execution_id
-    return None
-
-
-def _require_retryable(run, run_id: str) -> None:  # noqa: ANN001
-    """409 unless *run* is in a retryable state (``failed`` / ``cancelled``).
-
-    resume / rerun own exactly the finished-but-not-succeeded runs. ``pending``
-    is started via the normal run/create flow, ``succeeded`` is done, and a live
-    ``running`` run must not get a second concurrent execution — keeping the
-    three verbs orthogonal. The retryable domain is the shared
-    :data:`molexp.workspace.RETRYABLE_STATUSES`.
-    """
-    if run.status not in RETRYABLE_STATUSES:
-        next_step = {
-            "running": "cancel it first (POST .../cancel or `molexp runs cancel`)",
-            "succeeded": "it finished — read its results instead",
-            "pending": "start it with the run verb (POST .../run or `molexp run`)",
-        }.get(str(run.status), "check the run's status")
+@router.post(
+    "/{run_id}/executions/{execution_id}/cancel",
+    response_model=ExecutionRecordResponse,
+)
+def cancel_execution(
+    project_id: str,
+    experiment_id: str,
+    run_id: str,
+    execution_id: str,
+    workspace=Depends(get_workspace),  # noqa: ANN001
+) -> ExecutionRecordResponse:
+    """Cancel one explicit Execution; Run has no cancellable scalar state."""
+    experiment = _get_experiment(workspace, project_id, experiment_id)
+    run = _get_run_or_none(experiment, run_id) if experiment else None
+    if run is None:
+        raise RunNotFoundError(project_id, experiment_id, run_id)
+    repo = _execution_repository(workspace, run)
+    try:
+        state = repo.get(execution_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if state.status.value not in {"queued", "running"}:
         raise HTTPException(
             status_code=409,
-            detail=(
-                f"run {run_id!r} is {run.status!r}; resume/rerun apply only to "
-                f"failed or cancelled runs — {next_step}"
-            ),
+            detail=f"Execution {execution_id!r} is already {state.status.value}",
         )
-
-
-def _dispatch_continuation(workspace, run, execution_id: str) -> None:  # noqa: ANN001
-    """Re-dispatch *run* on *execution_id* through its inherited target (if any).
-
-    Mirrors the create path: a targeted run is submitted via molq onto the
-    chosen execution_id; a target-less run is not executed server-side (the
-    operator runs ``molexp run`` locally). 422 when the target is unregistered.
-    """
-    inherited_target = run.metadata.target
-    if inherited_target is None:
-        return
-    try:
-        target = get_target(workspace, inherited_target)
-    except KeyError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail=f"compute target {inherited_target!r} is not registered on this workspace",
-        ) from exc
-    # Ensure the run carries a workflow entrypoint the worker can re-import.
-    snapshot = run.metadata.workflow_snapshot
-    if not (isinstance(snapshot, dict) and snapshot.get("entrypoint")):
-        synthesized = _synthesize_snapshot(run.experiment)
-        if synthesized is not None:
-            run.update_provenance(workflow_snapshot=synthesized)
-    _dispatch_to_molq(target, run, execution_id=execution_id)
-
-
-@router.post("/{run_id}/run", response_model=RunContinueResponse, status_code=201)
-def start_run(
-    project_id: str,
-    experiment_id: str,
-    run_id: str,
-    start_req: RunStartRequest,
-    workspace=Depends(get_workspace),  # noqa: ANN001
-) -> RunContinueResponse:
-    """Start a pending run by dispatching it to a compute target (the ``run`` verb).
-
-    The disjoint counterpart to resume/rerun: ``run`` owns ``pending`` runs only
-    (409 otherwise — retrying a failed/cancelled run is resume/rerun's job, and a
-    live ``running`` run must not get a second execution). A pending run is
-    target-less (the create+dispatch contract dispatches a targeted run on
-    create), so Start supplies the target to execute on; a target-less Start
-    (no body target, none recorded) 422s — those run via ``molexp run`` on the
-    host, since the server never executes a workflow in-process.
-    """
-    experiment = _get_experiment(workspace, project_id, experiment_id)
-    if not experiment:
-        raise RunNotFoundError(project_id, experiment_id, run_id)
-    run = _get_run_or_none(experiment, run_id)
-    if not run:
-        raise RunNotFoundError(project_id, experiment_id, run_id)
-    # A stale 'running' run whose owner died is reaped to 'failed' BEFORE the
-    # verb decides (same policy as the CLI — run-recovery bug 5); a live run
-    # is never touched.
-    reap_zombie_run(run)
-    if run.status != "pending":
+    # Executor-specific signalling belongs to the Execution adapter. Until all
+    # adapters expose a common cancel hook, refuse to claim a running process
+    # was cancelled when no signal can be proven.
+    if state.status.value == "running" and state.executor.get("backend"):
         raise HTTPException(
             status_code=409,
-            detail=(
-                f"run {run_id!r} is {run.status!r}; Start (run) applies only to pending runs — "
-                "use resume/rerun for failed/cancelled, or cancel a running run first"
-            ),
+            detail="executor cancellation is unavailable for this active Execution",
         )
-    # Default to the built-in `local` target — a run can always start on this
-    # machine without registering anything first.
-    target_name = start_req.target or run.metadata.target or LOCAL_TARGET_NAME
-    try:
-        target = resolve_target(workspace, target_name)
-    except KeyError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail=f"compute target {target_name!r} is not registered on this workspace",
-        ) from exc
-    # Apply edited inputs before dispatch — a pending run is not yet hashed, so
-    # its config_hash (computed at execution start) picks up the new parameters.
-    if start_req.params is not None:
-        run.update_provenance(parameters=dict(start_req.params))
-    # Record a newly-chosen target so any later resume/rerun inherits it.
-    if start_req.target and start_req.target != run.metadata.target:
-        run.update_provenance(target=start_req.target)
-    # Ensure the run carries a re-importable workflow entrypoint (mirrors continuation).
-    snapshot = run.metadata.workflow_snapshot
-    if not (isinstance(snapshot, dict) and snapshot.get("entrypoint")):
-        synthesized = _synthesize_snapshot(run.experiment)
-        if synthesized is not None:
-            run.update_provenance(workflow_snapshot=synthesized)
-    execution_id = WorkflowRuntime.make_execution_id(run.id, Path(run.run_dir))
-    _dispatch_to_molq(target, run, execution_id=execution_id)
-    return RunContinueResponse(
-        runId=run.id,
-        executionId=execution_id,
-        projectId=project_id,
-        experimentId=experiment_id,
-        status=run.status,
-    )
-
-
-@router.post("/{run_id}/resume", response_model=RunContinueResponse, status_code=201)
-def resume_run(
-    project_id: str,
-    experiment_id: str,
-    run_id: str,
-    workspace=Depends(get_workspace),  # noqa: ANN001
-) -> RunContinueResponse:
-    """Resume a failed/cancelled run: reopen its last non-succeeded execution.
-
-    The reopened execution is re-dispatched on the same ``execution_id``; the
-    worker seeds already-completed nodes from disk and recomputes the rest.
-    409 unless the run is failed/cancelled (pending/succeeded/running are not
-    resume's job). A stale ``running`` run with a dead owner is reaped to
-    ``failed`` first, so it enters the retryable domain instead of 409-ing
-    forever (run-recovery bug 5).
-    """
-    experiment = _get_experiment(workspace, project_id, experiment_id)
-    if not experiment:
-        raise RunNotFoundError(project_id, experiment_id, run_id)
-    run = _get_run_or_none(experiment, run_id)
-    if not run:
-        raise RunNotFoundError(project_id, experiment_id, run_id)
-    reap_zombie_run(run)
-    _require_retryable(run, run_id)
-
-    execution_id = _resumable_execution_id(run) or WorkflowRuntime.make_execution_id(
-        run.id, Path(run.run_dir)
-    )
-    _dispatch_continuation(workspace, run, execution_id)
-    return RunContinueResponse(
-        runId=run.id,
-        executionId=execution_id,
-        projectId=project_id,
-        experimentId=experiment_id,
-        status=run.status,
-    )
-
-
-@router.post("/{run_id}/rerun", response_model=RunContinueResponse, status_code=201)
-def rerun_run(
-    project_id: str,
-    experiment_id: str,
-    run_id: str,
-    fresh: bool = Query(
-        default=False,
-        description=(
-            "Bypass content-addressed cache reads for the new execution: every "
-            "task body actually re-runs (results are still written back to the "
-            "cache). Same capability as the CLI's `molexp run --rerun --fresh`."
-        ),
-    ),
-    workspace=Depends(get_workspace),  # noqa: ANN001
-) -> RunContinueResponse:
-    """Rerun a failed/cancelled run in a new execution (no clone).
-
-    A fresh ``exec-{run_id}-N`` is derived and, for a targeted run, dispatched
-    through molq; no parameters are cloned and no new Run is created. Note the
-    content-addressed cache may still serve deterministic tasks — pass
-    ``fresh=true`` to bypass cache reads (persisted as a marker in the new
-    execution slot, so whichever process executes it honors the request).
-    409 unless the run is failed/cancelled (pending/succeeded/running are not
-    rerun's job). A stale ``running`` run with a dead owner is reaped to
-    ``failed`` first (run-recovery bug 5).
-    """
-    experiment = _get_experiment(workspace, project_id, experiment_id)
-    if not experiment:
-        raise RunNotFoundError(project_id, experiment_id, run_id)
-    run = _get_run_or_none(experiment, run_id)
-    if not run:
-        raise RunNotFoundError(project_id, experiment_id, run_id)
-    reap_zombie_run(run)
-    _require_retryable(run, run_id)
-
-    execution_id = WorkflowRuntime.make_execution_id(run.id, Path(run.run_dir))
-    if fresh:
-        WorkflowRuntime.request_fresh_execution(str(run.run_dir), execution_id)
-    _dispatch_continuation(workspace, run, execution_id)
-    return RunContinueResponse(
-        runId=run.id,
-        executionId=execution_id,
-        projectId=project_id,
-        experimentId=experiment_id,
-        status=run.status,
-    )
-
-
-@router.post("/{run_id}/cancel", response_model=RunActionResponse)
-def cancel_run(
-    project_id: str,
-    experiment_id: str,
-    run_id: str,
-    request: Request,
-    response: Response,
-    workspace=Depends(get_workspace),  # noqa: ANN001
-) -> RunActionResponse:
-    """Cancel a run.
-
-    ``cancel`` is the stop verb (matching the CLI ``molexp runs cancel``
-    and the resulting ``cancelled`` status).
-
-    One shared body with the CLI and the harness capability:
-    :func:`molexp.workspace.lifecycle_ops.cancel_run` (reap → domain check →
-    signal → flip), with :func:`molexp.plugins.submit_molq.cancel.try_cancel`
-    injected as the executor-signal hook (molq :class:`molq.Submitor` for
-    cluster-submitted runs, ``SIGTERM`` for a local pid). A run outside the
-    cancellable domain (pending / succeeded / already stopped) is a 409 with
-    the verb that owns it — never a silent status flip.
-    """
-    if request.url.path.endswith("/kill"):
-        # Machine-readable deprecation signal for non-OpenAPI clients.
-        response.headers["Deprecation"] = "true"
-        response.headers["Link"] = (
-            f"</api/projects/{project_id}/experiments/{experiment_id}"
-            f'/runs/{run_id}/cancel>; rel="successor-version"'
-        )
-    experiment = _get_experiment(workspace, project_id, experiment_id)
-    if not experiment:
-        raise RunNotFoundError(project_id, experiment_id, run_id)
-    run = _get_run_or_none(experiment, run_id)
-    if not run:
-        raise RunNotFoundError(project_id, experiment_id, run_id)
-
-    try:
-        warning = lifecycle_cancel_run(run, signal_executor=try_cancel)
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-    return RunActionResponse(
-        runId=run.id,
-        status=run.status,
-        message=warning if warning is not None else "Run cancelled",
-    )
+    return _execution_response(repo.seal(execution_id, ExecutionStatus.CANCELLED))
 
 
 @router.get("/{run_id}/export")
@@ -896,11 +985,12 @@ def harvest_run_route(
     return {"name": item.name, "path": rel}
 
 
-@router.get("/{run_id}/metrics/detect")
+@router.get("/{run_id}/executions/{execution_id}/molplot/detect")
 def detect_run_metrics_sources(
     project_id: str,
     experiment_id: str,
     run_id: str,
+    execution_id: str,
     workspace=Depends(get_workspace),  # noqa: ANN001
 ) -> dict[str, object]:
     """Classify foreign log formats under the run directory (read-only).
@@ -916,7 +1006,12 @@ def detect_run_metrics_sources(
     run = _get_run_or_none(experiment, run_id)
     if not run:
         raise RunNotFoundError(project_id, experiment_id, run_id)
-    hits = detect_log_formats(run.run_dir)
+    execution_dir = _execution_repository(workspace, run).execution_dir(execution_id)
+    try:
+        _execution_repository(workspace, run).get(execution_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    hits = detect_log_formats(Path(execution_dir) / "work")
     return {
         "runId": run.id,
         "hits": [
@@ -929,11 +1024,12 @@ def detect_run_metrics_sources(
     }
 
 
-@router.post("/{run_id}/metrics/ingest")
+@router.post("/{run_id}/executions/{execution_id}/molplot/ingest")
 def ingest_run_metrics(
     project_id: str,
     experiment_id: str,
     run_id: str,
+    execution_id: str,
     workspace=Depends(get_workspace),  # noqa: ANN001
 ) -> dict[str, object]:
     """Ingest foreign logs into the run host metrics surface (additive).
@@ -950,7 +1046,12 @@ def ingest_run_metrics(
     run = _get_run_or_none(experiment, run_id)
     if not run:
         raise RunNotFoundError(project_id, experiment_id, run_id)
-    result = ingest_run(run.run_dir)
+    execution_dir = _execution_repository(workspace, run).execution_dir(execution_id)
+    try:
+        _execution_repository(workspace, run).get(execution_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    result = ingest_run(Path(execution_dir) / "work")
     return {
         "runId": run.id,
         "records": result.records,
@@ -1002,55 +1103,3 @@ def analyze_run_failure_route(
     except Exception:
         rel = item.name
     return {"name": item.name, "path": rel}
-
-
-@router.patch("/{run_id}/status", response_model=RunStatusResponse)
-def update_run_status(
-    project_id: str,
-    experiment_id: str,
-    run_id: str,
-    body: RunStatusUpdateRequest,
-    workspace=Depends(get_workspace),  # noqa: ANN001
-) -> RunStatusResponse:
-    """Mark a run ``cancelled`` — the one status a client may write directly.
-
-    Every other status is owned by the run lifecycle (the three-verb law):
-    ``running``/``succeeded``/``failed`` are stamped by the executing
-    process, never by a client, and retrying goes through the explicit
-    ``resume``/``rerun`` routes. Requests for any status but ``cancelled``
-    are refused with 409; prefer ``POST .../{run_id}/cancel`` (which also
-    signals the live executor) over this raw mark.
-    """
-    experiment = _get_experiment(workspace, project_id, experiment_id)
-    if not experiment:
-        raise RunNotFoundError(project_id, experiment_id, run_id)
-    run = _get_run_or_none(experiment, run_id)
-    if not run:
-        raise RunNotFoundError(project_id, experiment_id, run_id)
-
-    new_status_str = body.status
-    try:
-        RunStatus(new_status_str)
-    except ValueError:
-        raise InvalidStatusError(run.status, new_status_str)  # noqa: B904
-
-    if new_status_str != RunStatus.CANCELLED.value:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                f"status {new_status_str!r} is owned by the run lifecycle — "
-                f"use the run/resume/rerun verbs (POST .../run|resume|rerun) "
-                f"instead of writing status directly; only 'cancelled' may be "
-                f"marked by a client."
-            ),
-        )
-    try:
-        lifecycle_cancel_run(run, allow_pending=True)
-    except ValueError as exc:
-        raise HTTPException(status_code=409, detail=str(exc)) from exc
-
-    return RunStatusResponse(
-        id=run.id,
-        status=run.status,
-        finished=run.finished_at.isoformat() if run.finished_at else None,
-    )

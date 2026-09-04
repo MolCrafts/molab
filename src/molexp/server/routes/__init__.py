@@ -12,7 +12,6 @@ from . import (
     agent_admin,
     agent_tasks,
     approvals,
-    asset,
     auth,
     catalog,
     curate_tasks,
@@ -46,7 +45,6 @@ def _workspace_scoped_modules() -> tuple:
         experiment,
         run,
         runs_flat,
-        asset,
         preview,
         catalog,
         workflow,
@@ -125,7 +123,6 @@ def create_api_router() -> APIRouter:
     gated.include_router(experiment.router)
     gated.include_router(run.router)
     gated.include_router(runs_flat.flat_router)
-    gated.include_router(asset.router)
     gated.include_router(preview.router)
     gated.include_router(catalog.router)
     gated.include_router(workspace.router)

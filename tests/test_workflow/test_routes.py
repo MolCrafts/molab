@@ -258,21 +258,6 @@ class TestControlFlowRouting:
         assert "nonexistent" in str(exc_info.value)
 
 
-class TestMakeExecutionId:
-    def test_returns_base_id_without_prior_attempts(self, tmp_path) -> None:
-        """With a run_id but no prior execution directory, returns ``exec-{run_id}``."""
-        assert WorkflowRuntime.make_execution_id(run_id="abc123", run_dir=tmp_path) == "exec-abc123"
-
-    def test_increments_suffix_over_existing_attempts(self, tmp_path) -> None:
-        """A subsequent attempt adds a ``-N`` suffix derived from existing dirs."""
-        exec_root = tmp_path / "executions"
-        exec_root.mkdir()
-        (exec_root / "exec-abc123").mkdir()
-        assert (
-            WorkflowRuntime.make_execution_id(run_id="abc123", run_dir=tmp_path) == "exec-abc123-2"
-        )
-
-
 def test_submit_molq_plugins_do_not_reach_into_engine() -> None:
     """ac-009 — plugins must use the public ``make_execution_id``, never
     reach into ``molexp.workflow._engine`` (architectural boundary lock)."""

@@ -8,8 +8,8 @@
  * ``failed_checks`` holds the names of the failing ``PlanCheck``\ s.
  */
 export type PreflightFailedEvent = {
-    failed_checks: Array<string>;
-    kind?: string;
     timestamp?: string;
+    kind?: string;
+    failed_checks: Array<string>;
 };
 

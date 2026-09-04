@@ -3,9 +3,9 @@
 /* tslint:disable */
 /* eslint-disable */
 export type KnowledgeRefResponse = {
-    id?: (string | null);
     path: string;
-    title: string;
     type: string;
+    title: string;
+    id?: (string | null);
 };
 

@@ -126,12 +126,12 @@ class TestHarvestPreconditions:
     def test_non_terminal_run_raises_value_error(self, experiment: Any) -> None:
         """A run with no outcome yet (pending or running) is refused loudly."""
         run = experiment.add_run(params={"temperature": 350})
-        assert run.status == "pending"
+        assert run.status_summary.not_started
         with pytest.raises(ValueError):
             _harvest(run)
 
         with run.start():
-            assert run.status == "running"
+            assert run.status_summary.active > 0
             with pytest.raises(ValueError):
                 _harvest(run)
 

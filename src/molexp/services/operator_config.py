@@ -182,6 +182,26 @@ def set_operator_values(
     return config
 
 
+def resolve_configured_model() -> str | None:
+    """Effective ``agent.model``: in-code config after bridging the operator file."""
+    bridge_operator_config()
+    import molexp
+
+    value = molexp.config.get(AGENT_MODEL_KEY)
+    return value if isinstance(value, str) and value else None
+
+
+def resolve_configured_models() -> dict[str, str] | None:
+    """Effective cheap/default/heavy map after bridging the operator file."""
+    bridge_operator_config()
+    import molexp
+
+    value = molexp.config.get(AGENT_MODELS_KEY)
+    if not isinstance(value, dict) or not value:
+        return None
+    return {str(key): str(item) for key, item in value.items()}
+
+
 def bridge_operator_config(path: Path | None = None) -> None:
     """Bridge operator-config values into the in-code ``molexp.config``.
 
@@ -220,6 +240,8 @@ __all__ = [
     "configured_agent_models",
     "configured_api_keys",
     "load_operator_config",
+    "resolve_configured_model",
+    "resolve_configured_models",
     "save_operator_config",
     "set_operator_values",
 ]

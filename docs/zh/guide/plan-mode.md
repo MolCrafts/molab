@@ -10,7 +10,7 @@
 一个阶段，目前尚未由该命令驱动 — `molexp plan` 在冻结计划 + 报告处停止；
 传 `--execute` 只会打印一条提示。
 
-生产入口是 `molexp.harness.PlanOrchestrator`。内部细节见
+生产入口是 `molexp.harness.Plan`。内部细节见
 [Plan Mode 架构](../architecture/plan-mode.md)。
 
 ## 前置条件
@@ -46,7 +46,7 @@ molexp plan --file draft.md --yes   # 自动过审查门禁，停在冻结计划
 ## UI
 
 Agent 作曲器切到 **Plan**（模式胶囊或 `Shift+Tab`）。同一 `POST /plan-tasks`
-驱动 `PlanOrchestrator`。
+驱动 `Plan`。
 
 - **左轨** — 新阶段列表（任务板 → 审查 → 冻结 → 报告 → 绑定 → 源码 → 编译…）
 - **右栏** — 当前阶段交付物

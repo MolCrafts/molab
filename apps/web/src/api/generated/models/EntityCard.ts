@@ -6,10 +6,10 @@
  * A clickable summary card for an entity a document embeds (05 resolver).
  */
 export type EntityCard = {
-    id: string;
     kind: string;
+    id: string;
+    title: string;
     relPath?: (string | null);
     status?: (string | null);
-    title: string;
 };
 

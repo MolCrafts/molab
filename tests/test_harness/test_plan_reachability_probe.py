@@ -13,8 +13,6 @@ Written before the production symbol exists — importing
 
 from __future__ import annotations
 
-import inspect
-
 from molexp.harness.plan import BoardTask, Difficulty, TaskBoard, TaskStatus
 from molexp.harness.registry.in_memory import InMemoryCapabilityRegistry
 from molexp.harness.schemas import ToolCapability
@@ -128,13 +126,3 @@ class TestImmutabilityAndPurity:
         # Result is a fresh board whose task now carries the probe verdict.
         assert isinstance(result, TaskBoard)
         assert result.tasks[0].feasibility is not None
-
-    def test_annotate_takes_no_store_parameter(self) -> None:
-        params = inspect.signature(PlanReachabilityProbe.annotate).parameters
-        assert list(params) == ["self", "board", "registry"]
-        assert "store" not in params
-
-    def test_annotate_returns_a_task_board_not_an_artifact(self) -> None:
-        registry = InMemoryCapabilityRegistry([_cap("molpy.build.write", desc="build")])
-        result = PlanReachabilityProbe().annotate(_board(_task("t1", "build")), registry)
-        assert isinstance(result, TaskBoard)

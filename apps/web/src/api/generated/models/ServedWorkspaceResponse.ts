@@ -7,14 +7,6 @@
  */
 export type ServedWorkspaceResponse = {
     /**
-     * True for the workspace the flat routes / active tree address
-     */
-    active?: boolean;
-    /**
-     * True for an SSH-backed remote workspace
-     */
-    isRemote: boolean;
-    /**
      * Stable switch handle, unique per server process
      */
     key: string;
@@ -23,16 +15,24 @@ export type ServedWorkspaceResponse = {
      */
     label: string;
     /**
-     * True when the remote is unreachable and likely needs an interactive verification code (2FA/OTP). The UI should show a connect dialog.
+     * True for an SSH-backed remote workspace
      */
-    needsAuth?: boolean;
+    isRemote: boolean;
     /**
      * Absolute local root, null when remote
      */
     path?: (string | null);
     /**
+     * True for the workspace the flat routes / active tree address
+     */
+    active?: boolean;
+    /**
      * True when a remote workspace's transport could not be reached
      */
     unreachable?: boolean;
+    /**
+     * True when the remote is unreachable and likely needs an interactive verification code (2FA/OTP). The UI should show a connect dialog.
+     */
+    needsAuth?: boolean;
 };
 

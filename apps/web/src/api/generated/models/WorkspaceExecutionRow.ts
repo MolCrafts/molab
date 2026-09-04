@@ -3,17 +3,21 @@
 /* tslint:disable */
 /* eslint-disable */
 /**
- * One execution attempt of a run, surfaced for the workspace runs table.
+ * One physical attempt that realizes a logical Run.
  */
 export type WorkspaceExecutionRow = {
+    executionId: string;
+    runId: string;
+    mode: string;
+    status: string;
+    createdAt: string;
+    startedAt?: (string | null);
+    finishedAt?: (string | null);
+    durationSeconds?: (number | null);
+    basedOnExecutionId?: (string | null);
+    checkpointArtifactId?: (string | null);
+    schedulerJobId?: (string | null);
     backend?: (string | null);
     backendMetadata?: Record<string, string>;
-    durationSeconds?: (number | null);
-    executionId: string;
-    finishedAt?: (string | null);
-    runId: string;
-    schedulerJobId?: (string | null);
-    startedAt: string;
-    status: string;
 };
 

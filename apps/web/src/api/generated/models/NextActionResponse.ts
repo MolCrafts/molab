@@ -3,10 +3,10 @@
 /* tslint:disable */
 /* eslint-disable */
 export type NextActionResponse = {
-    advisory: boolean;
     kind: string;
+    target: string;
     rationale: string;
     requiresProposal: boolean;
-    target: string;
+    advisory: boolean;
 };
 

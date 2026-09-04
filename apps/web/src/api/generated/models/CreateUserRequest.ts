@@ -3,9 +3,9 @@
 /* tslint:disable */
 /* eslint-disable */
 export type CreateUserRequest = {
+    username: string;
     password: string;
     role?: CreateUserRequest.role;
-    username: string;
     workspaces?: Array<string>;
 };
 export namespace CreateUserRequest {

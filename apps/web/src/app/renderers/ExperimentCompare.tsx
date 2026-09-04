@@ -118,9 +118,8 @@ const RowGroup = ({
 };
 
 /**
- * Compares every run in an experiment field-by-field: a matrix of parameters
- * and results across runs, with the rows that actually differ pulled to the
- * eye. Real data straight from the run summaries — no mocks, no run pickers.
+ * Compares immutable Run definitions. Execution results are intentionally not
+ * folded in: users must choose concrete executions before comparing outcomes.
  */
 export const ExperimentCompare = ({ runs, onOpenRun }: ExperimentCompareProps): JSX.Element => {
   const ordered = useMemo(
@@ -134,7 +133,6 @@ export const ExperimentCompare = ({ runs, onOpenRun }: ExperimentCompareProps): 
   );
 
   const paramRows = useMemo(() => buildRows(ordered, (r) => r.parameters), [ordered]);
-  const resultRows = useMemo(() => buildRows(ordered, (r) => r.results), [ordered]);
 
   if (runs.length < 2) {
     return (
@@ -148,13 +146,13 @@ export const ExperimentCompare = ({ runs, onOpenRun }: ExperimentCompareProps): 
     );
   }
 
-  if (paramRows.length === 0 && resultRows.length === 0) {
+  if (paramRows.length === 0) {
     return (
       <div className="flex h-full items-center justify-center">
         <EmptyState
           icon={<GitCompareArrows className="h-6 w-6" />}
           title="Nothing to compare yet"
-          description="These runs have no recorded parameters or results."
+          description="These runs have no differing scientific parameters."
         />
       </div>
     );
@@ -196,7 +194,6 @@ export const ExperimentCompare = ({ runs, onOpenRun }: ExperimentCompareProps): 
         </TableHeader>
         <TableBody>
           <RowGroup title="Parameters" rows={paramRows} runIds={ordered.map((r) => r.id)} />
-          <RowGroup title="Results" rows={resultRows} runIds={ordered.map((r) => r.id)} />
         </TableBody>
       </Table>
       <div className="flex items-center gap-2 border-t border-border/60 px-3 py-2 text-micro text-muted-foreground">

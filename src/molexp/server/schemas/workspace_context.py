@@ -12,6 +12,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
+from pydantic import Field
+
 from molexp._typing import JSONValue
 
 from ._wire import ApiModel
@@ -35,7 +37,7 @@ class WorkspaceRefResponse(ApiModel):
     id: str
     name: str
     root: str
-    targets: list[str] = []
+    targets: list[str] = Field(default_factory=list)
 
     @classmethod
     def from_ref(cls, ref: WorkspaceRef) -> WorkspaceRefResponse:
@@ -55,7 +57,7 @@ class ExperimentRefResponse(ApiModel):
     id: str
     name: str
     projectId: str
-    parameterSpace: dict[str, JSONValue] = {}
+    parameterSpace: dict[str, JSONValue] = Field(default_factory=dict)
 
     @classmethod
     def from_ref(cls, ref: ExperimentRef) -> ExperimentRefResponse:
@@ -150,7 +152,7 @@ class ContextFocusResponse(ApiModel):
     projectId: str | None = None
     experimentId: str | None = None
     runId: str | None = None
-    selectedObjectRefs: list[str] = []
+    selectedObjectRefs: list[str] = Field(default_factory=list)
 
     @classmethod
     def from_focus(cls, focus: ContextFocus) -> ContextFocusResponse:
@@ -167,16 +169,16 @@ class WorkspaceContextResponse(ApiModel):
 
     workspace: WorkspaceRefResponse
     focus: ContextFocusResponse
-    projects: list[ProjectRefResponse] = []
-    experiments: list[ExperimentRefResponse] = []
-    workflows: list[WorkflowRefResponse] = []
-    recentRuns: list[RunRefResponse] = []
-    failedRuns: list[RunRefResponse] = []
-    runningRuns: list[RunRefResponse] = []
-    artifacts: list[ArtifactRefResponse] = []
-    knowledge: list[KnowledgeRefResponse] = []
-    openQuestions: list[KnowledgeRefResponse] = []
-    staleOrMissing: list[HealthFlagResponse] = []
+    projects: list[ProjectRefResponse] = Field(default_factory=list)
+    experiments: list[ExperimentRefResponse] = Field(default_factory=list)
+    workflows: list[WorkflowRefResponse] = Field(default_factory=list)
+    recentRuns: list[RunRefResponse] = Field(default_factory=list)
+    failedRuns: list[RunRefResponse] = Field(default_factory=list)
+    runningRuns: list[RunRefResponse] = Field(default_factory=list)
+    artifacts: list[ArtifactRefResponse] = Field(default_factory=list)
+    knowledge: list[KnowledgeRefResponse] = Field(default_factory=list)
+    openQuestions: list[KnowledgeRefResponse] = Field(default_factory=list)
+    staleOrMissing: list[HealthFlagResponse] = Field(default_factory=list)
 
     @classmethod
     def from_context(cls, ctx: WorkspaceContext) -> WorkspaceContextResponse:

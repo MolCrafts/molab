@@ -99,20 +99,6 @@ class TestDenseMapsAgree:
         assert set(plan_output_kinds()) == responses
         assert set(plan_system_prompts()) == responses
 
-    def test_new_agents_present_in_every_dense_map(self) -> None:
-        from molexp.harness.gateways import (
-            plan_agent_responses,
-            plan_agent_tiers,
-            plan_output_kinds,
-            plan_system_prompts,
-        )
-
-        for agent in ("create_experiment_plan", "plan_report_renderer"):
-            assert agent in plan_agent_responses()
-            assert agent in plan_agent_tiers()
-            assert agent in plan_output_kinds()
-            assert agent in plan_system_prompts()
-
 
 class TestNewAgentSchemasAndKinds:
     """The two new agents return the pinned schemas and persist under the pinned kinds."""
@@ -158,16 +144,6 @@ class TestMcpServersMap:
         from molexp.harness.gateways import plan_agent_mcp_servers
 
         assert "plan_report_renderer" not in plan_agent_mcp_servers()
-
-
-class TestWellKnownArtifactKinds:
-    """The two new output kinds are enumerated as well-known artifact kinds."""
-
-    def test_new_kinds_are_well_known(self) -> None:
-        from molexp.harness.schemas import WELL_KNOWN_ARTIFACT_KINDS
-
-        assert "experiment_plan" in WELL_KNOWN_ARTIFACT_KINDS
-        assert "plan_report" in WELL_KNOWN_ARTIFACT_KINDS
 
 
 class TestBuildPlanGatewaySmoke:

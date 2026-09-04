@@ -6,12 +6,13 @@
  * A generated plan + the project/experiment it belongs to (workspace-wide).
  */
 export type WorkspacePlanSummary = {
-    createdAt: string;
-    experimentId: string;
-    hasWorkflow: boolean;
     projectId: string;
+    experimentId: string;
     runId: string;
-    status: string;
+    executionId: string;
     title: string;
+    status: string;
+    createdAt: string;
+    hasWorkflow: boolean;
 };
 

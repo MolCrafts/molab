@@ -21,11 +21,17 @@ FIXED = datetime(2026, 6, 21, 12, 0, 0, tzinfo=UTC)
 CONCEPT_KIND = "bundle.concept"
 
 
-def _hierarchy(tmp_path: Path) -> Path:
+def _hierarchy(tmp_path: Path) -> tuple[Path, str, str, str]:
+    """Build a lab workspace and return ``(root, proj_rel, exp_rel, run_rel)``."""
     ws = Workspace(root=tmp_path / "lab")
     ws.materialize()
-    ws.add_project("p").add_experiment("e").add_run(id="r")
-    return tmp_path
+    proj = ws.add_project("p")
+    exp = proj.add_experiment("e")
+    exp.add_run(id="r")
+    proj_rel = f"lab/projects/{proj.id}"
+    exp_rel = f"{proj_rel}/experiments/{exp.id}"
+    run_rel = f"{exp_rel}/runs/run-r"
+    return tmp_path, proj_rel, exp_rel, run_rel
 
 
 def _concept(name: str, root_path: Path) -> Folder:
@@ -39,22 +45,22 @@ class TestBuildIndex:
     """``Bundle.build_index`` — the derived, rebuildable rollup."""
 
     def test_entries_equal_walk_set_with_typed_rows(self, tmp_path: Path) -> None:
-        root = _hierarchy(tmp_path)
+        root, _proj_rel, _exp_rel, run_rel = _hierarchy(tmp_path)
         b = Bundle(root)
         idx = b.build_index(now=FIXED)
         assert {e.path for e in idx.entries} == {b.rel_path(f) for f in b.walk()}
         by_path = {e.path: e for e in idx.entries}
         assert by_path["lab"].type == "workspace.root"
-        assert by_path["lab/projects/p/experiments/e/runs/run-r"].type == "workspace.run"
+        assert by_path[run_rel].type == "workspace.run"
 
     def test_writes_derived_siblings_not_mistaken_for_concepts(self, tmp_path: Path) -> None:
-        root = _hierarchy(tmp_path)
+        root, proj_rel, _exp_rel, _run_rel = _hierarchy(tmp_path)
         b = Bundle(root)
         b.build_index(now=FIXED)
         assert (root / INDEX_JSON_FILENAME).is_file()
         assert (root / INDEX_MD_FILENAME).is_file()
         md = (root / INDEX_MD_FILENAME).read_text()
-        assert "lab/projects/p" in md
+        assert proj_rel in md
         # the derived files are not mistaken for concepts
         assert all(not b.rel_path(f).endswith(".json") for f in b.walk())
         assert all(not b.rel_path(f).endswith(".md") for f in b.walk())
@@ -75,7 +81,7 @@ class TestBuildIndex:
         assert "beta" in by_path["alpha"].links
 
     def test_rebuild_restores_deleted_siblings(self, tmp_path: Path) -> None:
-        root = _hierarchy(tmp_path)
+        root, _proj_rel, _exp_rel, _run_rel = _hierarchy(tmp_path)
         b = Bundle(root)
         b.build_index(now=FIXED)
         (root / INDEX_JSON_FILENAME).unlink()
@@ -90,9 +96,10 @@ class TestSearchFilters:
     ``test_bundle_search.py``)."""
 
     def test_filter_by_type(self, tmp_path: Path) -> None:
-        b = Bundle(_hierarchy(tmp_path))
+        root, _proj_rel, _exp_rel, run_rel = _hierarchy(tmp_path)
+        b = Bundle(root)
         runs = b.search(concept_type="workspace.run")
-        assert [h.entry.path for h in runs.hits] == ["lab/projects/p/experiments/e/runs/run-r"]
+        assert [h.entry.path for h in runs.hits] == [run_rel]
         assert runs.truncated is False
 
     def test_filter_by_tag(self, tmp_path: Path) -> None:
@@ -115,17 +122,22 @@ class TestSearchFilters:
         assert [h.entry.path for h in result.hits] == ["tagged"]
 
     def test_text_and_type_use_and_semantics(self, tmp_path: Path) -> None:
-        b = Bundle(_hierarchy(tmp_path))
+        root, proj_rel, exp_rel, run_rel = _hierarchy(tmp_path)
+        b = Bundle(root)
         paths = {h.entry.path for h in b.search("p").hits}
-        assert {"lab/projects/p", "lab/projects/p/experiments/e"} <= paths
-        # AND: text + type
+        assert proj_rel in paths  # project's human name is "p"
+        # AND: text ("lab" matches the path) + type
         assert [h.entry.path for h in b.search("lab", concept_type="workspace.run").hits] == [
-            "lab/projects/p/experiments/e/runs/run-r"
+            run_rel
         ]
+        # experiment human name still resolves independently
+        assert exp_rel in {h.entry.path for h in b.search("e").hits}
 
     def test_rebuild_reflects_new_concept(self, tmp_path: Path) -> None:
-        root = _hierarchy(tmp_path)
+        root, _proj_rel, _exp_rel, _run_rel = _hierarchy(tmp_path)
         b = Bundle(root)
         b.build_index(now=FIXED)
-        Workspace(root=root / "lab").add_project("q")
-        assert any(h.entry.path == "lab/projects/q" for h in b.search(rebuild=True).hits)
+        new_proj = Workspace(root=root / "lab").add_project("q")
+        assert any(
+            h.entry.path == f"lab/projects/{new_proj.id}" for h in b.search(rebuild=True).hits
+        )

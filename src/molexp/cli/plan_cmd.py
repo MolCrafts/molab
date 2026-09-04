@@ -39,6 +39,7 @@ if TYPE_CHECKING:
     from molexp.harness.registry.capability_registry import CapabilityRegistry
     from molexp.harness.schemas import ApprovalDecision, ApprovalRequest
     from molexp.services.plan_runtime import PlanRecordOutcome
+    from molexp.workspace.execution_context import ExecutionContext
     from molexp.workspace.run import Run
 
 __all__ = ["plan"]
@@ -65,6 +66,11 @@ class InteractiveApprover:
     def __init__(self, *, run: Run, assume_yes: bool = False) -> None:
         self._run = run
         self._assume_yes = assume_yes
+        self._execution_context: ExecutionContext | None = None
+
+    def bind_execution(self, context: ExecutionContext) -> None:
+        """Bind the exact active Execution before the first review gate."""
+        self._execution_context = context
 
     def _interactive(self) -> bool:
         import sys
@@ -76,7 +82,6 @@ class InteractiveApprover:
 
         from molexp.harness.schemas import ApprovalDecision, ReviewDecision
         from molexp.harness.store.file_artifact_store import FileArtifactStore
-        from molexp.harness.store.paths import harness_artifact_root
         from molexp.services.plan_runtime.preview import (
             build_review_pack,
             render_review_pack,
@@ -94,7 +99,10 @@ class InteractiveApprover:
                 reason="auto-granted (--yes)",
             )
 
-        pack = build_review_pack(self._run, request.intent)
+        if self._execution_context is None:
+            raise RuntimeError("interactive approver has no bound Execution")
+        execution_id = str(self._execution_context.id)
+        pack = build_review_pack(self._run, execution_id, request.intent)
         from molexp.cli._common import rprint
 
         rprint("\n[bold]Review pack:[/bold]")
@@ -126,7 +134,7 @@ class InteractiveApprover:
             decided_at=datetime.now(tz=UTC),
             reason=f"operator answered {answer!r}",
         )
-        FileArtifactStore(root=harness_artifact_root(self._run.run_dir)).put_json(
+        FileArtifactStore.for_execution(self._execution_context).put_json(
             kind="review_decision",
             obj=decision.model_dump(mode="json"),
             created_by="cli.InteractiveApprover",
@@ -457,6 +465,9 @@ def plan(
         from molexp.services.plan_runtime import PlanFailure
         from molexp.services.plan_runtime.materialize import materialize_plan_records
 
+        failed_execution_id = plan.last_execution_id
+        if failed_execution_id is None:
+            raise typer.Exit(1) from exc
         outcome = materialize_plan_records(
             run=run,
             experiment=exp,
@@ -464,6 +475,7 @@ def plan(
             task_id=plan_task_id,
             draft=draft_text,
             model=resolved_model,
+            execution_id=failed_execution_id,
             failure=PlanFailure(stage=None, error=str(exc)),
         )
         _print_record_errors(outcome)
@@ -490,6 +502,7 @@ def plan(
         task_id=plan_task_id,
         draft=draft_text,
         model=resolved_model,
+        execution_id=result.execution_id,
     )
     _print_record_errors(outcome)
     rprint(f"  ui session: [bold]{plan_task_id}[/bold] (open the Agents tab to see this plan)")

@@ -15,6 +15,7 @@ interface TrajectoryViewerProps {
   projectId: string;
   experimentId: string;
   runId: string;
+  executionId: string;
   file: DiscoveredFile;
   /** Outer container classes. Defaults to a fixed-height card; pass ``h-full``
    *  to let the canvas fill a flex parent. */
@@ -37,6 +38,7 @@ export const TrajectoryViewer = ({
   projectId,
   experimentId,
   runId,
+  executionId,
   file,
   className,
 }: TrajectoryViewerProps): JSX.Element => {
@@ -91,6 +93,7 @@ export const TrajectoryViewer = ({
             projectId,
             experimentId,
             runId,
+            executionId,
             fileRelPath,
           );
           if (cancelled) return;
@@ -124,7 +127,7 @@ export const TrajectoryViewer = ({
         }
       }
     };
-  }, [projectId, experimentId, runId, file.relPath, file.name]);
+  }, [projectId, experimentId, runId, executionId, file.relPath, file.name]);
 
   return (
     // ``isolate`` establishes a new stacking context so molvis-core's injected

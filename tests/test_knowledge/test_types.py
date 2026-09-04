@@ -15,7 +15,6 @@ from __future__ import annotations
 import pytest
 
 from molexp.knowledge.types import (
-    concept_type,
     register_concept_type,
     resolve_concept_type,
 )
@@ -34,13 +33,6 @@ class TestConceptTypeRegistry:
 
         register_concept_type("test-custom-rt", CustomRT)
         assert resolve_concept_type("test-custom-rt", _Concept) is CustomRT
-
-    def test_decorator_registers_on_definition(self) -> None:
-        @concept_type("test-custom-deco")
-        class Decorated(_Concept):
-            pass
-
-        assert resolve_concept_type("test-custom-deco", _Concept) is Decorated
 
     def test_unknown_type_resolves_to_default(self) -> None:
         assert resolve_concept_type("totally-unknown-xyz", _Concept) is _Concept

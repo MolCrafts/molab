@@ -12,17 +12,17 @@
  * opts in.
  */
 export type CurateRequest = {
-    action?: string;
-    approve?: boolean;
-    asset?: (string | null);
-    experiment?: string;
-    folder?: (string | null);
     op: CurateRequest.op;
-    project?: string;
     run?: (string | null);
+    target_experiment?: (string | null);
+    folder?: (string | null);
+    asset?: (string | null);
     source?: (Record<string, string> | null);
     target?: (Record<string, string> | null);
-    target_experiment?: (string | null);
+    action?: string;
+    approve?: boolean;
+    project?: string;
+    experiment?: string;
 };
 export namespace CurateRequest {
     export enum op {

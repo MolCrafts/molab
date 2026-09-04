@@ -6,10 +6,10 @@
  * Emitted after the harness compacts the session entry tree.
  */
 export type CompactionPerformedEvent = {
-    entries_summarized: number;
+    timestamp?: string;
     kind?: string;
     summary: string;
-    timestamp?: string;
     tokens_before: number;
+    entries_summarized: number;
 };
 

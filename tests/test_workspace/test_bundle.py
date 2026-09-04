@@ -235,15 +235,20 @@ class TestTypedReconstruction:
 
         ws = Workspace(root=tmp_path / "lab")
         ws.materialize()
-        ws.add_project("p").add_experiment("e").add_run(id="r")
+        proj = ws.add_project("p")
+        exp = proj.add_experiment("e")
+        exp.add_run(id="r")
 
         # the bundle root sits ABOVE the workspace concept dir
         by_rel = {Bundle(tmp_path).rel_path(f): f for f in Bundle(tmp_path).walk()}
 
+        proj_rel = f"lab/projects/{proj.id}"
+        exp_rel = f"{proj_rel}/experiments/{exp.id}"
+        run_rel = f"{exp_rel}/runs/run-r"
         assert isinstance(by_rel["lab"], Workspace)
-        assert isinstance(by_rel["lab/projects/p"], Project)
-        assert isinstance(by_rel["lab/projects/p/experiments/e"], Experiment)
-        assert isinstance(by_rel["lab/projects/p/experiments/e/runs/run-r"], Run)
+        assert isinstance(by_rel[proj_rel], Project)
+        assert isinstance(by_rel[exp_rel], Experiment)
+        assert isinstance(by_rel[run_rel], Run)
 
 
 # ── nested-mount path-doubling regression ────────────────────────────────────
@@ -254,7 +259,6 @@ class TestTypedReconstruction:
 # that reanchor — get/link (resolution) and walk (enumeration) — are covered.
 
 KI_BODY_NEEDLE = "zwitterion-retrieval-needle"
-KI_REL = "projects/p/experiments/e/knowledges/ki"
 _DOUBLED_SEGMENTS = ("projects/projects", "experiments/experiments", "runs/runs")
 
 
@@ -267,12 +271,14 @@ class TestNestedMounts:
 
         ws = Workspace(root=tmp_path / "lab")
         ws.materialize()
-        run = ws.add_project("p").add_experiment("e").add_run(id="r")
+        proj = ws.add_project("p")
+        exp = proj.add_experiment("e")
+        run = exp.add_run(id="r")
         rec = cast("Note", run.add_folder(Note(parent=run, name="rec")))
         real = os.path.normpath(str(rec.resolve()))
 
         b = Bundle(ws.resolve())
-        rel = "projects/p/experiments/e/runs/run-r/rec"
+        rel = f"projects/{proj.id}/experiments/{exp.id}/runs/run-r/rec"
         got = b.get(rel)
 
         assert os.path.normpath(str(got.resolve())) == real
@@ -292,7 +298,8 @@ class TestNestedMounts:
 
         ws = Workspace(root=tmp_path / "lab")
         ws.materialize()
-        exp = ws.add_project("p").add_experiment("e")
+        proj = ws.add_project("p")
+        exp = proj.add_experiment("e")
         exp.add_run(id="r")
         item = exp.add_knowledge(
             "ki",
@@ -302,11 +309,12 @@ class TestNestedMounts:
             created_by="tests",
         )
 
+        ki_rel = f"projects/{proj.id}/experiments/{exp.id}/knowledges/ki"
         b = Bundle(ws.resolve())
         rels = [b.rel_path(f) for f in b.walk()]
-        assert rels.count(KI_REL) == 1
+        assert rels.count(ki_rel) == 1
 
-        walked = next(f for f in b.walk() if b.rel_path(f) == KI_REL)
+        walked = next(f for f in b.walk() if b.rel_path(f) == ki_rel)
         resolved = os.path.normpath(str(walked.resolve()))
         assert resolved == os.path.normpath(str(item.resolve()))
         for doubled in _DOUBLED_SEGMENTS:

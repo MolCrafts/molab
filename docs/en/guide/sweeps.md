@@ -87,11 +87,11 @@ print(all(row["status"] == "succeeded" for row in summary2.to_records()))
 A later session (or another tool) reads the finished sweep back without touching the workflow at all:
 
 ```python
-records = exp.runs().collect().to_records()
+records = exp.runset().collect().to_records()
 print(len(records))
 ```
 
-`Experiment.runs()` wraps the on-disk runs in a `RunSet`; `collect()` summarizes their current state — statuses and each run's latest persisted per-task outputs — without executing anything.
+`Experiment.runset()` wraps the on-disk runs in a `RunSet`; `collect()` summarizes their current state — statuses and each run's latest persisted per-task outputs — without executing anything.
 
 ## Random Sampling
 

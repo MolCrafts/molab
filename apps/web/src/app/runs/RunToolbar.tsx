@@ -1,437 +1,203 @@
-/**
- * Run header toolbar — one place for every status-gated action.
- *
- * Layout (left → right), deliberately sparse:
- *   1. One primary lifecycle verb (Start | Resume | Cancel)
- *   2. Harvest / Analyze when the outcome allows it
- *   3. More menu — Rerun variants, Export, Copy ID, Agent
- *
- * Shared by RunViewer and MolqRunViewer so molq runs get the same verbs.
- */
-
-import {
-  Ban,
-  BookMarked,
-  Bot,
-  Copy,
-  Download,
-  MoreHorizontal,
-  Play,
-  RefreshCw,
-  RotateCcw,
-  Stethoscope,
-} from "lucide-react";
-import { type JSX, useCallback, useEffect, useState } from "react";
+import { Ban, Bot, Copy, Download, MoreHorizontal, Play, Plus } from "lucide-react";
+import { type JSX, useEffect, useMemo, useState } from "react";
 import { runsApi } from "@/api";
+import { ExecutionAttemptCreateRequest } from "@/api/generated/models/ExecutionAttemptCreateRequest";
 import type { TargetResponse } from "@/api/generated/models/TargetResponse";
-import { ExperimentsService } from "@/api/generated/services/ExperimentsService";
 import { TargetsService } from "@/api/generated/services/TargetsService";
 import { usePermissions } from "@/app/auth";
-import { HarvestDialog } from "@/app/components/HarvestDialog";
-import { postAnalyzeFailure } from "@/app/runs/analyzeFailure";
-import { ParametersForm } from "@/app/runs/ParametersForm";
+import type { RunSummary } from "@/app/types";
 import {
-  canAnalyzeFailure,
-  canCancel,
-  canHarvest,
-  canRerun,
-  canResume,
-  canStart,
-  POST_DISPATCH_TAB,
-} from "@/app/runs/runLifecycle";
-import {
-  type InputField,
-  parseInputSchema,
-  SchemaForm,
-  schemaDefaults,
-} from "@/app/runs/SchemaForm";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
+  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
+  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { toast } from "@/components/ui/toast";
 import { WorkbenchAction, WorkbenchIconAction } from "@/components/workbench";
 
-function errMessage(err: unknown): string {
-  if (err && typeof err === "object" && "body" in err) {
-    const detail = (err as { body?: { detail?: unknown } }).body?.detail;
-    if (typeof detail === "string") return detail;
-    if (Array.isArray(detail)) {
-      return detail
-        .map((d) =>
-          d && typeof d === "object" && "msg" in d
-            ? String((d as { msg: unknown }).msg)
-            : String(d),
-        )
-        .join("; ");
-    }
-  }
-  return err instanceof Error ? err.message : String(err);
-}
+export const POST_DISPATCH_TAB = "executions";
+
+type ExecutionMode = ExecutionAttemptCreateRequest.mode;
+
+const modes: Array<{ value: ExecutionMode; label: string; description: string }> = [
+  { value: ExecutionAttemptCreateRequest.mode.INITIAL, label: "Initial", description: "Create an independent first realization." },
+  { value: ExecutionAttemptCreateRequest.mode.RETRY, label: "Retry", description: "Retry the selected execution after an operational failure." },
+  { value: ExecutionAttemptCreateRequest.mode.RERUN, label: "Rerun", description: "Run the same scientific definition again." },
+  { value: ExecutionAttemptCreateRequest.mode.RESUME, label: "Resume", description: "Continue from an explicitly selected checkpoint artifact." },
+  { value: ExecutionAttemptCreateRequest.mode.REPRODUCE, label: "Reproduce", description: "Create a reproducibility verification execution." },
+];
 
 export interface RunToolbarProps {
-  projectId: string;
-  experimentId: string;
-  runId: string;
-  status: string;
-  params: Record<string, unknown>;
+  run: RunSummary;
+  selectedExecutionId: string | null;
   onRefresh: () => void;
   onCancel: () => Promise<void>;
-  /** After start / resume / rerun — typically open Executions. */
-  onDispatched?: () => void;
+  onDispatched?: (executionId: string) => void;
   onOpenAgent: () => void;
-  onHarvested: (path: string) => void;
 }
 
 export function RunToolbar({
-  projectId,
-  experimentId,
-  runId,
-  status,
-  params,
-  onRefresh,
-  onCancel,
-  onDispatched,
-  onOpenAgent,
-  onHarvested,
+  run, selectedExecutionId, onRefresh, onCancel, onDispatched, onOpenAgent,
 }: RunToolbarProps): JSX.Element {
   const { writeDeniedReason } = usePermissions();
-  const showStart = canStart(status);
-  const showCancel = canCancel(status);
-  const showRetry = canResume(status) && canRerun(status);
-  const showHarvest = canHarvest(status);
-  const showAnalyze = canAnalyzeFailure(status);
-
-  const [startOpen, setStartOpen] = useState(false);
-  const [targets, setTargets] = useState<TargetResponse[]>([]);
+  const selectedExecution = run.executionHistory.find(
+    (execution) => execution.executionId === selectedExecutionId,
+  );
+  const canCancelSelected =
+    selectedExecution?.status === "queued" || selectedExecution?.status === "running";
+  const defaultMode = run.executionHistory.length === 0
+    ? ExecutionAttemptCreateRequest.mode.INITIAL
+    : ExecutionAttemptCreateRequest.mode.RERUN;
+  const [open, setOpen] = useState(false);
+  const [mode, setMode] = useState<ExecutionMode>(defaultMode);
   const [target, setTarget] = useState("local");
-  const [startParams, setStartParams] = useState<Record<string, unknown>>(params);
-  const [inputSchema, setInputSchema] = useState<InputField[] | null>(null);
-  const [starting, setStarting] = useState(false);
-  const [startError, setStartError] = useState<string | null>(null);
+  const [targets, setTargets] = useState<TargetResponse[]>([]);
+  const [checkpointArtifactId, setCheckpointArtifactId] = useState("");
   const [busy, setBusy] = useState(false);
-  const [verbError, setVerbError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!startOpen) return;
+    if (!open) return;
     let cancelled = false;
     TargetsService.listTargetsEndpoint()
-      .then((res) => {
+      .then((response) => {
         if (cancelled) return;
-        setTargets(res.targets);
-        const names = res.targets.map((t) => t.name);
+        setTargets(response.targets);
+        const names = response.targets.map((item) => item.name);
         setTarget(names.includes("local") ? "local" : (names[0] ?? "local"));
       })
-      .catch(() => {
-        if (!cancelled) setTargets([]);
-      });
-    ExperimentsService.getExperiment(projectId, experimentId)
-      .then((exp) => {
-        if (cancelled) return;
-        const schema = parseInputSchema(exp.workflow);
-        setInputSchema(schema);
-        if (schema) setStartParams({ ...schemaDefaults(schema), ...params });
-      })
-      .catch(() => {
-        if (!cancelled) setInputSchema(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [startOpen, projectId, experimentId, params]);
+      .catch(() => { if (!cancelled) setTargets([]); });
+    return () => { cancelled = true; };
+  }, [open]);
 
-  const afterDispatch = useCallback((): void => {
-    onRefresh();
-    onDispatched?.();
-  }, [onRefresh, onDispatched]);
+  useEffect(() => { if (open) setMode(defaultMode); }, [defaultMode, open]);
 
-  const handleStart = useCallback(async (): Promise<void> => {
-    setStarting(true);
-    setStartError(null);
+  const requiresParent = mode !== ExecutionAttemptCreateRequest.mode.INITIAL;
+  const invalid = requiresParent && !selectedExecutionId;
+  const selectedMode = useMemo(() => modes.find((item) => item.value === mode), [mode]);
+
+  const createExecution = async (): Promise<void> => {
+    if (invalid) return;
+    setBusy(true);
+    setError(null);
     try {
-      await runsApi.startRun(projectId, experimentId, runId, target, startParams);
-      setStartOpen(false);
-      toast.success("Started");
-      afterDispatch();
-    } catch (err) {
-      setStartError(errMessage(err));
+      const execution = await runsApi.createExecution(run.projectId, run.experimentId, run.id, {
+        mode,
+        basedOnExecutionId: requiresParent ? selectedExecutionId : null,
+        checkpointArtifactId: mode === ExecutionAttemptCreateRequest.mode.RESUME ? checkpointArtifactId || null : null,
+        target,
+        dispatch: true,
+      });
+      setOpen(false);
+      toast.success("Execution created");
+      onRefresh();
+      onDispatched?.(execution.id);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
     } finally {
-      setStarting(false);
+      setBusy(false);
     }
-  }, [projectId, experimentId, runId, target, startParams, afterDispatch]);
-
-  const runVerb = useCallback(
-    async (label: string, fn: () => Promise<unknown>): Promise<void> => {
-      setBusy(true);
-      setVerbError(null);
-      try {
-        await fn();
-        toast.success(label);
-        afterDispatch();
-      } catch (err) {
-        setVerbError(errMessage(err));
-      } finally {
-        setBusy(false);
-      }
-    },
-    [afterDispatch],
-  );
-
-  const exportUrl = runsApi.exportUrl(projectId, experimentId, runId);
+  };
 
   return (
-    <>
-      <div className="flex items-center gap-1">
-        {/* ── Lifecycle (status-disjoint) ─────────────────────────────── */}
-        {showStart &&
-          (writeDeniedReason ? (
-            <WorkbenchIconAction label="Start run" deniedReason={writeDeniedReason}>
-              <Play className="h-3.5 w-3.5" />
-            </WorkbenchIconAction>
-          ) : (
-            <Dialog
-              open={startOpen}
-              onOpenChange={(open) => {
-                setStartOpen(open);
-                if (open) setStartParams(params);
-                else setStartError(null);
-              }}
-            >
-              <DialogTrigger asChild>
-                <WorkbenchIconAction label="Start run">
-                  <Play className="h-3.5 w-3.5" />
-                </WorkbenchIconAction>
-              </DialogTrigger>
-              <DialogContent className="sm:max-w-dialog-md">
-                <DialogHeader>
-                  <DialogTitle>Start</DialogTitle>
-                  <DialogDescription className="sr-only">Inputs and target</DialogDescription>
-                </DialogHeader>
-                <div className="grid gap-3 py-2">
-                  <div className="grid gap-2">
-                    <span className="text-label font-medium">Inputs</span>
-                    {inputSchema ? (
-                      <SchemaForm
-                        key={String(startOpen)}
-                        schema={inputSchema}
-                        value={startParams}
-                        onChange={setStartParams}
-                      />
-                    ) : (
-                      <ParametersForm
-                        key={String(startOpen)}
-                        value={params}
-                        onChange={setStartParams}
-                      />
-                    )}
-                  </div>
-                  <div className="grid gap-2">
-                    <Label htmlFor="start-target">Target</Label>
-                    <Select value={target} onValueChange={setTarget}>
-                      <SelectTrigger id="start-target">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {targets.map((t) => (
-                          <SelectItem key={t.name} value={t.name}>
-                            <span className="flex items-center gap-2">
-                              <span className="font-medium">{t.name}</span>
-                              <span className="text-micro uppercase text-muted-foreground">
-                                {t.isRemote ? "remote" : "local"}
-                              </span>
-                            </span>
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  {startError && <p className="text-body-lg text-destructive">{startError}</p>}
-                </div>
-                <DialogFooter>
-                  <WorkbenchAction
-                    kind="primary"
-                    size="default"
-                    disabled={starting || !target}
-                    onClick={() => void handleStart()}
-                  >
-                    {starting ? "…" : "Start"}
-                  </WorkbenchAction>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
-          ))}
-
-        {showRetry && (
-          <WorkbenchIconAction
-            label="Continue last execution"
-            disabled={busy}
-            deniedReason={writeDeniedReason}
-            onClick={() =>
-              void runVerb("Resumed", () => runsApi.resumeRun(projectId, experimentId, runId))
-            }
-          >
-            <Play className="h-3.5 w-3.5" />
+    <div className="flex items-center gap-1">
+      <Dialog open={open} onOpenChange={(next) => { setOpen(next); if (!next) setError(null); }}>
+        <DialogTrigger asChild>
+          <WorkbenchIconAction label="Create execution" deniedReason={writeDeniedReason}>
+            {run.executionHistory.length === 0
+              ? <Play className="h-3.5 w-3.5" />
+              : <Plus className="h-3.5 w-3.5" />}
           </WorkbenchIconAction>
-        )}
-
-        {showCancel && (
-          <WorkbenchIconAction
-            label="Cancel run"
-            className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-            deniedReason={writeDeniedReason}
-            onClick={() => {
-              void onCancel();
-            }}
-          >
-            <Ban className="h-3.5 w-3.5" />
-          </WorkbenchIconAction>
-        )}
-
-        {/* ── Knowledge (outcome only) ────────────────────────────────── */}
-        {showHarvest &&
-          (writeDeniedReason ? (
-            <WorkbenchIconAction label="Harvest to knowledge" deniedReason={writeDeniedReason}>
-              <BookMarked className="h-3.5 w-3.5" />
-            </WorkbenchIconAction>
-          ) : (
-            <HarvestDialog
-              projectId={projectId}
-              experimentId={experimentId}
-              runId={runId}
-              onHarvested={onHarvested}
-              trigger={
-                <WorkbenchIconAction label="Harvest to knowledge">
-                  <BookMarked className="h-3.5 w-3.5" />
-                </WorkbenchIconAction>
-              }
-            />
-          ))}
-
-        {/* ── Utilities + secondary lifecycle ─────────────────────────── */}
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <WorkbenchIconAction label="More">
-              <MoreHorizontal className="h-4 w-4" />
-            </WorkbenchIconAction>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-44">
-            {showRetry && (
-              <>
-                <DropdownMenuItem
-                  disabled={busy || Boolean(writeDeniedReason)}
-                  title={writeDeniedReason ?? undefined}
-                  onClick={() =>
-                    void runVerb("Rerun", () =>
-                      runsApi.rerunRun(projectId, experimentId, runId, false),
-                    )
-                  }
-                >
-                  <RefreshCw className="h-3.5 w-3.5" />
-                  Rerun
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  disabled={busy || Boolean(writeDeniedReason)}
-                  title={writeDeniedReason ?? undefined}
-                  onClick={() =>
-                    void runVerb("Rerun fresh", () =>
-                      runsApi.rerunRun(projectId, experimentId, runId, true),
-                    )
-                  }
-                >
-                  <RotateCcw className="h-3.5 w-3.5" />
-                  Rerun fresh
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-              </>
+        </DialogTrigger>
+        <DialogContent className="sm:max-w-dialog-sm">
+          <DialogHeader>
+            <DialogTitle>Create execution</DialogTitle>
+            <DialogDescription>
+              Run parameters and scientific inputs are immutable. This creates one new physical attempt.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4 py-2">
+            <div className="grid gap-2">
+              <Label htmlFor="execution-mode">Mode</Label>
+              <Select value={mode} onValueChange={(value) => setMode(value as ExecutionMode)}>
+                <SelectTrigger id="execution-mode"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {modes.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}
+                </SelectContent>
+              </Select>
+              <p className="text-micro text-muted-foreground">{selectedMode?.description}</p>
+            </div>
+            {requiresParent && (
+              <div className="grid gap-1">
+                <Label>Based on execution</Label>
+                <p className="break-all font-mono text-micro text-muted-foreground">
+                  {selectedExecutionId ?? "Select an execution in the Executions tab first."}
+                </p>
+              </div>
             )}
-            {showAnalyze && (
-              <>
-                <DropdownMenuItem
-                  disabled={busy || Boolean(writeDeniedReason)}
-                  title={writeDeniedReason ?? undefined}
-                  onClick={() => {
-                    void runVerb("Failure analyzed", async () => {
-                      const result = await postAnalyzeFailure(projectId, experimentId, runId);
-                      onHarvested(result.path || result.name);
-                    });
-                  }}
-                >
-                  <Stethoscope className="h-3.5 w-3.5" />
-                  Analyze failure
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-              </>
+            {mode === ExecutionAttemptCreateRequest.mode.RESUME && (
+              <div className="grid gap-2">
+                <Label htmlFor="checkpoint-artifact">Checkpoint artifact ID</Label>
+                <Input id="checkpoint-artifact" value={checkpointArtifactId}
+                  onChange={(event) => setCheckpointArtifactId(event.target.value)} placeholder="Artifact UUID" />
+              </div>
             )}
-            <DropdownMenuItem asChild>
-              <a
-                href={exportUrl}
-                download={`run-${runId}.zip`}
-                onClick={() => toast("Downloading…")}
-              >
-                <Download className="h-3.5 w-3.5" />
-                Export
-              </a>
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={() => {
-                void navigator.clipboard.writeText(runId);
-                toast.success("Copied");
-              }}
-            >
-              <Copy className="h-3.5 w-3.5" />
-              Copy ID
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={onOpenAgent}>
-              <Bot className="h-3.5 w-3.5" />
-              Agent
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
+            <div className="grid gap-2">
+              <Label htmlFor="execution-target">Target</Label>
+              <Select value={target} onValueChange={setTarget}>
+                <SelectTrigger id="execution-target"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {targets.length === 0 && <SelectItem value="local">local</SelectItem>}
+                  {targets.map((item) => <SelectItem key={item.name} value={item.name}>{item.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </div>
+            {error && <p className="text-label text-destructive">{error}</p>}
+          </div>
+          <DialogFooter>
+            <WorkbenchAction kind="primary"
+              disabled={busy || invalid || (mode === ExecutionAttemptCreateRequest.mode.RESUME && !checkpointArtifactId)}
+              onClick={() => void createExecution()}>
+              {busy ? "Creating…" : "Create"}
+            </WorkbenchAction>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-      <AlertDialog open={verbError !== null} onOpenChange={(open) => !open && setVerbError(null)}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Failed</AlertDialogTitle>
-            <AlertDialogDescription className="break-words">{verbError}</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogAction onClick={() => setVerbError(null)}>OK</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </>
+      {canCancelSelected && (
+        <WorkbenchIconAction label="Cancel selected execution" deniedReason={writeDeniedReason}
+          className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+          onClick={() => void onCancel()}>
+          <Ban className="h-3.5 w-3.5" />
+        </WorkbenchIconAction>
+      )}
+
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <WorkbenchIconAction label="More"><MoreHorizontal className="h-4 w-4" /></WorkbenchIconAction>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-44">
+          <DropdownMenuItem asChild>
+            <a href={runsApi.exportUrl(run.projectId, run.experimentId, run.id)} download>
+              <Download className="h-3.5 w-3.5" /> Export run
+            </a>
+          </DropdownMenuItem>
+          <DropdownMenuItem onClick={() => void navigator.clipboard.writeText(run.id)}>
+            <Copy className="h-3.5 w-3.5" /> Copy run ID
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem onClick={onOpenAgent}>
+            <Bot className="h-3.5 w-3.5" /> Open agent
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    </div>
   );
 }
-
-export { POST_DISPATCH_TAB };

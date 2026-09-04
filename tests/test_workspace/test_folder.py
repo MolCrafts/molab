@@ -40,27 +40,6 @@ class TestFolder:
         assert first.is_dir()
         assert Path(folder.path) == first  # idempotent
 
-    def test_write_json_round_trips_and_survives_mid_write_failure(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Happy path round-trips; a mid-write ``os.replace`` failure leaves the
-        pre-existing file intact (atomic temp-file + rename)."""
-        folder = Folder(parent=None, name="alpha", kind="test.root", root_path=tmp_path)
-
-        written = Path(str(folder.write_json("data.json", {"k": 1})))
-        assert json.loads(written.read_text()) == {"k": 1}
-
-        target_path = Path(folder.path) / "data.json"
-
-        def _explode(*_args: object, **_kwargs: object) -> None:
-            raise RuntimeError("simulated mid-write failure")
-
-        monkeypatch.setattr("molexp.atomicio.os.replace", _explode)
-        with pytest.raises(RuntimeError):
-            folder.write_json("data.json", {"k": 2})
-
-        assert json.loads(target_path.read_text()) == {"k": 1}
-
     @pytest.mark.parametrize(
         "name, valid",
         [

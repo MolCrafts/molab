@@ -25,18 +25,21 @@ export const RunsStatusProgress = ({
   const { segments, total } = useMemo(() => {
     const counts = new Map<string, number>(STATUS_GROUPS.map((g) => [g.id, 0]));
     for (const run of runs) {
-      const group = groupForStatus(run.status);
-      if (group) counts.set(group, (counts.get(group) ?? 0) + 1);
+      for (const execution of run.executions) {
+        const group = groupForStatus(execution.status);
+        if (group) counts.set(group, (counts.get(group) ?? 0) + 1);
+      }
     }
+    const executionCount = runs.reduce((sum, run) => sum + run.statusSummary.total, 0);
     const built: SegmentData[] = STATUS_GROUPS.map((spec) => {
       const count = counts.get(spec.id) ?? 0;
-      return { spec, count, ratio: runs.length > 0 ? count / runs.length : 0 };
+      return { spec, count, ratio: executionCount > 0 ? count / executionCount : 0 };
     });
-    return { segments: built, total: runs.length };
+    return { segments: built, total: executionCount };
   }, [runs]);
 
   if (total === 0) {
-    return <p className="text-body-lg text-muted-foreground">No runs match the current filters.</p>;
+    return <p className="text-body-lg text-muted-foreground">No executions match the current filters.</p>;
   }
 
   const visible = segments.filter((segment) => segment.count > 0);
@@ -45,7 +48,7 @@ export const RunsStatusProgress = ({
     <div className="space-y-3">
       <div
         role="img"
-        aria-label={`Status distribution across ${total} runs`}
+        aria-label={`Status distribution across ${total} executions`}
         className="flex h-2 w-full overflow-hidden rounded-full bg-muted"
       >
         {visible.map((segment) => {
@@ -63,7 +66,7 @@ export const RunsStatusProgress = ({
                 onSelectStatus ? "cursor-pointer" : "cursor-default",
               )}
               style={{ width: `${widthPct}%`, backgroundColor: segment.spec.color }}
-              aria-label={`${segment.spec.label}: ${segment.count} runs`}
+              aria-label={`${segment.spec.label}: ${segment.count} executions`}
             />
           );
         })}

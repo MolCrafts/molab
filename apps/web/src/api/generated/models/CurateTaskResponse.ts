@@ -6,17 +6,17 @@
  * One background curate task's current state (UI polls this).
  */
 export type CurateTaskResponse = {
-    capabilityId?: (string | null);
-    createdAt: string;
-    error?: (string | null);
-    experimentId: string;
-    granted?: (boolean | null);
-    model: string;
-    mutationSummary?: (string | null);
-    projectId: string;
-    requestPreview: string;
-    runId: string;
-    status: string;
     taskId: string;
+    runId: string;
+    projectId: string;
+    experimentId: string;
+    status: string;
+    createdAt: string;
+    model: string;
+    requestPreview: string;
+    capabilityId?: (string | null);
+    mutationSummary?: (string | null);
+    granted?: (boolean | null);
+    error?: (string | null);
 };
 

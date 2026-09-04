@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from molexp.workspace.domain import ExecutionStatus
 from molexp.workspace.models import RunMetadata, RunStatus
 
 
@@ -46,6 +47,8 @@ class TestRunMetadata:
             {
                 "id": "r",
                 "status": "failed",
+                "definition_hash": "h",
+                "experiment_revision_id": "rev",
                 "heartbeat_at": "2026-01-01T00:00:00",
                 "labels": {"pid": "1", "host": "h"},
             }
@@ -55,37 +58,44 @@ class TestRunMetadata:
         assert not hasattr(meta, "heartbeat_at")
         assert not hasattr(meta, "labels")
 
-    def test_cancel_and_lifecycle_write_run_json_not_ops(self, run) -> None:
+    def test_cancel_and_lifecycle_write_execution_json_not_ops(self, run) -> None:
         ops, legacy = _ops_dirs(run)
-        with run.start():
+        with run.start() as ctx:
             on_disk = _read_run_json(run)
-            assert on_disk["status"] == "running"
-            assert on_disk["owner_pid"] is not None
-            assert on_disk["owner_host"] is not None
+            # Operational hot state no longer lives on run.json.
+            assert "status" not in on_disk
+            assert "owner_pid" not in on_disk
+            assert "owner_host" not in on_disk
             assert not ops.exists()
             assert not legacy.exists()
+            exec_json = json.loads(
+                (Path(str(run.run_dir)) / "executions" / ctx.id / "execution.json").read_text()
+            )
+            assert exec_json["status"] == "running"
 
         after = _read_run_json(run)
-        assert after["status"] == "succeeded"
-        assert after["owner_pid"] is None
-        assert after["owner_host"] is None
+        assert "status" not in after
+        assert "owner_pid" not in after
+        assert "owner_host" not in after
         assert not ops.exists()
         assert not legacy.exists()
+        assert run.executions[-1].status is ExecutionStatus.SUCCEEDED
 
         other = run.experiment.add_run(params={"lr": 2e-4})
-        other.materialize()
-        other.cancel()
+        with other.start() as other_ctx:
+            other.cancel(other_ctx.id)
         cancelled = _read_run_json(other)
-        assert cancelled["status"] == "cancelled"
-        assert cancelled["finished_at"] is not None
-        assert cancelled["owner_pid"] is None
-        assert cancelled["owner_host"] is None
+        assert "status" not in cancelled
+        assert "finished_at" not in cancelled
+        assert "owner_pid" not in cancelled
+        assert "owner_host" not in cancelled
         other_ops, other_legacy = _ops_dirs(other)
         assert not other_ops.exists()
         assert not other_legacy.exists()
-        assert other.status == "cancelled"
+        assert other.executions[-1].status is ExecutionStatus.CANCELLED
+        assert other.executions[-1].finished_at is not None
 
-    def test_failed_lifecycle_writes_error_and_status_to_run_json(self, run) -> None:
+    def test_failed_lifecycle_writes_error_and_status_to_execution_json(self, run) -> None:
         try:
             with run.start():
                 raise RuntimeError("boom")
@@ -93,11 +103,13 @@ class TestRunMetadata:
             pass
 
         on_disk = _read_run_json(run)
-        assert on_disk["status"] == "failed"
-        assert on_disk["error"] is not None
-        assert on_disk["error"]["type"] == "RuntimeError"
-        assert run.metadata.error is not None
-        assert run.metadata.error.message == "boom"
+        assert "status" not in on_disk
+        assert "error" not in on_disk
+        state = run.executions[-1]
+        assert state.status is ExecutionStatus.FAILED
+        assert state.error is not None
+        assert state.error["type"] == "RuntimeError"
+        assert state.error["message"] == "boom"
         ops, legacy = _ops_dirs(run)
         assert not ops.exists()
         assert not legacy.exists()
@@ -114,11 +126,17 @@ class TestUpdateProvenance:
             config_hash="abc",
             executor_info={"backend": "molq", "scheduler": "slurm"},
         )
+        # The deprecated in-memory compatibility shell retains submit fields.
         assert run.metadata.script == "/tmp/wf.py"
         assert run.metadata.submit_cwd == "/tmp"
         assert run.metadata.profile == "cpu"
         assert run.metadata.config == {"cpus": 8}
         assert run.metadata.executor_info["scheduler"] == "slurm"
+        # …but run.json persists only the logical definition fields.
         on_disk = _read_run_json(run)
-        assert on_disk["script"] == "/tmp/wf.py"
-        assert on_disk["executor_info"]["scheduler"] == "slurm"
+        assert "script" not in on_disk
+        assert "submit_cwd" not in on_disk
+        assert "profile" not in on_disk
+        assert "config" not in on_disk
+        assert "config_hash" not in on_disk
+        assert "executor_info" not in on_disk

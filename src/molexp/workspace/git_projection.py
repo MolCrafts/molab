@@ -2,9 +2,9 @@
 
 A **derived, rebuildable, single-direction** view of the authoritative
 workspace (spec: workspace-git-projection-03-map). The authoritative truth is
-always the on-disk ``*.json`` entities + per-scope ``assets.json`` manifests;
+always the on-disk ``*.json`` entities + append-only provenance events;
 git is a projection *target*, never a second truth. This module maps
-``Folder`` / ``Asset`` / ``RunMetadata`` / ``ExecutionRecord`` onto the
+``Folder`` / ``Run`` / ``Execution`` onto the
 content-agnostic git-object primitives from :mod:`molexp.git.objects` and
 writes refs under ``refs/molexp/*``.
 
@@ -12,14 +12,14 @@ The load-bearing guarantee is **deterministic rebuild**: :meth:`GitProjection.re
 erases the object database + ``refs/molexp/*`` and re-derives everything from
 the authoritative files, producing byte-identical OIDs. This is only possible
 because every commit's author/committer date is taken from the **recorded**
-``ExecutionRecord`` timestamps — never ``now()``.
+``Execution`` timestamps — never ``now()``.
 
 What is projected, per run:
 
-* ``run.json`` (entity identity: params / config / config_hash / source
-  snapshot / script) and ``assets.json`` (the manifest) as blobs;
+* ``run.json`` (the logical definition only: id / type / parameters /
+  ``definition_hash`` / workflow links) as a blob;
 * the ``source/`` snapshot directory as a subtree;
-* settled ``artifacts/`` as a subtree — small files inline as blobs, files
+* settled artifacts as a subtree — small files inline as blobs, files
   over ``blob_threshold_bytes`` as a small **pointer** blob (the bytes stay in
   the molexp CAS / remote FS, never bloating the object DB).
 
@@ -67,7 +67,6 @@ from molexp.git import (
 from molexp.git import (
     push as _git_push_refs,
 )
-from molexp.ids import compute_content_hash
 
 if TYPE_CHECKING:
     from molexp.workspace.run import Run
@@ -226,23 +225,17 @@ class GitProjection:
         source_tree = await self._project_plain_subtree(run_dir / "source")
         if source_tree is not None:
             entries.append(TreeEntry(_MODE_DIR, "source", source_tree))
-        execs_dir = run_dir / "executions"
-        if execs_dir.is_dir():
-            exec_entries: list[TreeEntry] = []
-            for child in sorted(execs_dir.iterdir(), key=lambda p: p.name):
-                if not child.is_dir():
-                    continue
-                artifacts_tree = await self._project_artifacts(child / "artifacts")
-                if artifacts_tree is None:
-                    continue
-                inner = await build_tree(
-                    self._db, [TreeEntry(_MODE_DIR, "artifacts", artifacts_tree)]
-                )
-                exec_entries.append(TreeEntry(_MODE_DIR, child.name, inner))
-            if exec_entries:
-                entries.append(
-                    TreeEntry(_MODE_DIR, "executions", await build_tree(self._db, exec_entries))
-                )
+        exec_entries: list[TreeEntry] = []
+        for execution in run.executions:
+            artifacts_tree = await self._project_execution_artifacts(execution.id)
+            if artifacts_tree is None:
+                continue
+            inner = await build_tree(self._db, [TreeEntry(_MODE_DIR, "artifacts", artifacts_tree)])
+            exec_entries.append(TreeEntry(_MODE_DIR, execution.id, inner))
+        if exec_entries:
+            entries.append(
+                TreeEntry(_MODE_DIR, "executions", await build_tree(self._db, exec_entries))
+            )
         return await build_tree(self._db, entries)
 
     async def _project_plain_subtree(self, directory: Path) -> Oid | None:
@@ -260,41 +253,59 @@ class GitProjection:
                 entries.append(TreeEntry(_MODE_FILE, child.name, oid))
         return await build_tree(self._db, entries)
 
-    async def _project_artifacts(self, directory: Path) -> Oid | None:
-        """Project ``artifacts/`` — small files inline, large files as pointers."""
-        if not directory.is_dir():
+    async def _project_execution_artifacts(self, execution_id: str) -> Oid | None:
+        """Project one Execution's settled artifacts — small inline, large as pointers.
+
+        Artifacts are read from the authoritative provenance-backed records and
+        their content-addressed bytes (never the execution scratch ``work/``).
+        Small payloads project as blobs under their recorded ``name``; payloads
+        over ``blob_threshold_bytes`` project as a pointer blob so the bytes
+        stay in the molexp CAS / remote FS.
+        """
+        from molexp.workspace.artifact_repository import ArtifactRepository
+        from molexp.workspace.content_store import ContentStore
+
+        artifacts = ArtifactRepository(self._ws.root, fs=self._ws.fs).list_for_execution(
+            execution_id
+        )
+        if not artifacts:
             return None
+        content = ContentStore(self._ws.root, fs=self._ws.fs)
         entries: list[TreeEntry] = []
-        for child in sorted(directory.iterdir(), key=lambda p: p.name):
-            if not child.is_file():
-                continue
-            size = child.stat().st_size
+        for artifact in sorted(artifacts, key=lambda a: a.name):
+            size = artifact.content.size
             if size > self._threshold:
-                oid = await write_blob(self._db, _artifact_pointer(child, size))
+                oid = await write_blob(
+                    self._db, _artifact_pointer(artifact.name, size, artifact.content.digest)
+                )
             else:
-                oid = await write_blob(self._db, child.read_bytes())
-            entries.append(TreeEntry(_MODE_FILE, child.name, oid))
+                oid = await write_blob(
+                    self._db, self._ws.fs.read_bytes(content.payload_path(artifact.content))
+                )
+            entries.append(TreeEntry(_MODE_FILE, artifact.name, oid))
         return await build_tree(self._db, entries)
 
     async def _project_run_commits(self, run: Run, tree: Oid) -> tuple[Oid, ...]:
-        """One commit per recorded ``ExecutionRecord``, chained in order.
+        """One commit per recorded Execution, chained in recorded order.
 
         Author date = ``started_at``; committer date = ``finished_at`` (or
-        ``started_at`` while still running). Both come from the recorded
-        timestamps so the projection rebuilds byte-identically.
+        ``started_at`` / ``created_at`` while still active). All come from the
+        recorded timestamps so the projection rebuilds byte-identically.
         """
         commits: list[Oid] = []
         parent: Oid | None = None
-        for record in run.execution_history:
+        for record in run.executions:
+            started = record.started_at or record.created_at
+            finished = record.finished_at or record.started_at or record.created_at
             author = Signature(
                 name=_PROJECTION_NAME,
                 email=_PROJECTION_EMAIL,
-                date=_git_date(record.started_at),
+                date=_git_date(started),
             )
             committer = Signature(
                 name=_PROJECTION_NAME,
                 email=_PROJECTION_EMAIL,
-                date=_git_date(record.finished_at or record.started_at),
+                date=_git_date(finished),
             )
             oid = await build_commit(
                 self._db,
@@ -309,23 +320,20 @@ class GitProjection:
         return tuple(commits)
 
 
-def _artifact_pointer(path: Path, size: int) -> bytes:
+def _artifact_pointer(name: str, size: int, content_hash: str) -> bytes:
     """A small pointer blob for an over-threshold artifact (bytes stay in CAS)."""
-    content_hash = compute_content_hash(path)
     return (
-        f"{ARTIFACT_POINTER_MARKER}\n"
-        f"name: {path.name}\n"
-        f"size: {size}\n"
-        f"content_hash: {content_hash}\n"
+        f"{ARTIFACT_POINTER_MARKER}\nname: {name}\nsize: {size}\ncontent_hash: {content_hash}\n"
     ).encode()
 
 
-def _execution_message(record) -> str:  # noqa: ANN001 — ExecutionRecord (workspace-internal)
+def _execution_message(record) -> str:  # noqa: ANN001 — ExecutionState (workspace-internal)
     """Deterministic commit message summarising one execution attempt."""
+    started = record.started_at or record.created_at
     finished = record.finished_at.isoformat() if record.finished_at else "-"
     return (
-        f"{record.status} {record.execution_id}\n\n"
-        f"started_at: {record.started_at.isoformat()}\n"
+        f"{record.status} {record.id}\n\n"
+        f"started_at: {started.isoformat()}\n"
         f"finished_at: {finished}\n"
     )
 

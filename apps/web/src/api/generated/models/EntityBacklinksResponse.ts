@@ -7,7 +7,7 @@ import type { EntityBacklinkRow } from './EntityBacklinkRow';
  * ``GET /knowledge/entity-backlinks`` — who cites this entity?
  */
 export type EntityBacklinksResponse = {
-    backlinks: Array<EntityBacklinkRow>;
     entity: string;
+    backlinks: Array<EntityBacklinkRow>;
 };
 

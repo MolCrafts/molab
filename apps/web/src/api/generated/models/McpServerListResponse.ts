@@ -4,8 +4,8 @@
 /* eslint-disable */
 import type { McpServerResponse } from './McpServerResponse';
 export type McpServerListResponse = {
-    servers: Array<McpServerResponse>;
-    userPath: string;
     workspacePath: string;
+    userPath: string;
+    servers: Array<McpServerResponse>;
 };
 

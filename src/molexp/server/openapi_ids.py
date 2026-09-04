@@ -10,7 +10,7 @@ def molexp_operation_id(route: APIRoute) -> str:
     explicit = getattr(route, "operation_id", None)
     if explicit:
         return explicit
-    name = route.endpoint.__name__
+    name = getattr(route.endpoint, "__name__", "endpoint")
     if name.startswith("_"):
         name = name[1:]
     parts = name.split("_")

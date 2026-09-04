@@ -27,9 +27,16 @@ from molexp._typing import JSONValue, TaskOutput
 
 from .execution_results import read_completed_node_outputs
 from .models import RunStatus
-from .run import RETRYABLE_STATUSES, Run, RunWorkflowExecutor, require_run_executor
+from .run import Run, RunWorkflowExecutor, require_run_executor
 
 __all__ = ["RunRecord", "RunSet", "RunSetResult"]
+
+
+def _run_status(run: Run) -> str:
+    """Derive the v2 summary status: pending before any Execution, else latest."""
+    if run.status_summary.not_started:
+        return RunStatus.PENDING.value
+    return run.executions[-1].status.value
 
 
 @dataclass(frozen=True)
@@ -209,10 +216,10 @@ class RunSet(Sequence[Run]):
     ) -> RunSetResult:
         semaphore = asyncio.Semaphore(parallel)
         retryable = resume or rerun
-        domain = RETRYABLE_STATUSES if retryable else frozenset({RunStatus.PENDING.value})
 
         async def _one(run: Run) -> RunRecord:
-            if run.status not in domain:
+            in_domain = run.is_retryable if retryable else run.status_summary.not_started
+            if not in_domain:
                 return self._record_for(run)
             async with semaphore:
                 try:
@@ -258,7 +265,7 @@ class RunSet(Sequence[Run]):
                 error = f"{type(exc).__name__}: {exc}"
         return RunRecord(
             run_id=run.id,
-            status=run.status,
+            status=_run_status(run),
             params=dict(run.parameters),
             outputs=outputs,
             error=error,
@@ -270,7 +277,7 @@ class RunSet(Sequence[Run]):
         history = run.execution_history
         if not history:
             return {}
-        execution_id = history[-1].execution_id
+        execution_id = history[-1].id
         if not execution_id:
             return {}
         records = read_completed_node_outputs(Path(str(run.run_dir)), execution_id)
@@ -278,7 +285,10 @@ class RunSet(Sequence[Run]):
 
     @staticmethod
     def _persisted_error(run: Run) -> str | None:
-        error = getattr(run.metadata, "error", None)
-        if error is None:
-            return None
-        return f"{error.type}: {error.message}"
+        for execution in reversed(run.executions):
+            error = execution.error
+            if error:
+                err_type = error.get("type", "Error")
+                message = error.get("message", "")
+                return f"{err_type}: {message}"
+        return None

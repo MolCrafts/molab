@@ -1,8 +1,13 @@
 """Index-only external asset pointers — no copy, symlink, or hardlink.
 
-``import_asset(..., action="reference")`` and ``ArtifactAccessor.point``
-record an ``external_uri`` in the asset index. The bytes stay where they
-already live (e.g. a training ``runs/`` tree outside the molexp workspace).
+``import_asset(..., action="reference")`` records an ``external_uri`` in the
+asset index. The bytes stay where they already live (e.g. a training
+``runs/`` tree outside the molexp workspace).
+
+Run-produced outputs no longer support external pointers: schema v2 snapshots
+them through :meth:`ExecutionContext.emit_artifact`, which requires the source
+to already live inside the execution workdir and content-addresses the bytes
+(no symlink / hardlink, no external pointer). Those invariants are locked here.
 """
 
 from __future__ import annotations
@@ -12,6 +17,7 @@ from pathlib import Path
 import pytest
 
 from molexp.workspace import Workspace
+from molexp.workspace.content_store import ContentStore
 
 
 def _outside_file(tmp_path: Path, name: str = "payload.bin", data: bytes = b"hello") -> Path:
@@ -60,35 +66,54 @@ class TestImportAssetReference:
             ws.data_assets.import_asset("ghost", tmp_path / "nope.bin", action="reference")
 
 
-class TestArtifactPoint:
-    def test_run_artifact_points_outside_without_copy(self, tmp_path: Path) -> None:
+class TestEmitArtifactSnapshots:
+    def test_run_artifact_snapshots_workdir_bytes_into_cas(self, tmp_path: Path) -> None:
         ws = Workspace(root=tmp_path / "ws", name="T")
         proj = ws.add_project("p")
         exp = proj.add_experiment("e")
         run = exp.add_run()
-        src = _outside_file(tmp_path, name="metrics.jsonl", data=b"t=1\n")
 
         with run.start() as ctx:
-            asset = ctx.artifact.point("metrics.jsonl", src)
+            src = ctx.workdir / "metrics.jsonl"
+            src.write_bytes(b"t=1\n")
+            artifact = ctx.emit_artifact(
+                src, name="metrics.jsonl", media_type="application/x-ndjson"
+            )
 
-        assert asset.external_uri == str(src.resolve())
-        assert asset.absolute_path(run.run_dir) == src.resolve()
-        assert asset.read_bytes(run.run_dir) == b"t=1\n"
-        assert not (run.run_dir / "artifacts" / "metrics.jsonl").exists()
+        # Content is addressed, not copied into ``artifacts/`` or linked.
+        assert artifact.source_path == "work/metrics.jsonl"
+        assert not artifact.source_path.startswith("/")
+        assert ContentStore(ws.root, fs=ws.fs).verify(artifact.content)
+
+        record = (
+            Path(run.run_dir)
+            / "executions"
+            / artifact.execution_id
+            / "artifacts"
+            / artifact.id
+            / "artifact.json"
+        )
+        assert record.is_file()
+        assert not (Path(run.run_dir) / "artifacts" / "metrics.jsonl").exists()
         assert not any(p.is_symlink() for p in Path(run.run_dir).rglob("*"))
 
-    def test_checkpoint_point(self, tmp_path: Path) -> None:
+    def test_emit_artifact_rejects_source_outside_workdir(self, tmp_path: Path) -> None:
         ws = Workspace(root=tmp_path / "ws", name="T")
-        proj = ws.add_project("p")
-        exp = proj.add_experiment("e")
-        run = exp.add_run()
-        src = _outside_file(tmp_path, name="last.pt", data=b"pt")
+        run = ws.add_project("p").add_experiment("e").add_run()
+        outside = _outside_file(tmp_path, name="metrics.jsonl", data=b"t=1\n")
+
+        with run.start() as ctx, pytest.raises(ValueError):
+            ctx.emit_artifact(outside, name="metrics.jsonl")
+
+    def test_checkpoint_emits_semantically_typed_artifact(self, tmp_path: Path) -> None:
+        ws = Workspace(root=tmp_path / "ws", name="T")
+        run = ws.add_project("p").add_experiment("e").add_run()
 
         with run.start() as ctx:
-            asset = ctx.checkpoint.point("last.pt", src)
+            artifact = ctx.checkpoint("last", data={"step": 1})
 
-        assert asset.external_uri == str(src.resolve())
-        assert asset.absolute_path(run.run_dir) == src.resolve()
-        assert not (run.run_dir / ".ckpt").exists() or not any(
-            (run.run_dir / ".ckpt").glob("*.json")
-        )
+        assert artifact.semantic_type == "checkpoint"
+        assert artifact.source_path == "work/checkpoints/last.json"
+        assert artifact.content.digest.startswith("sha256:")
+        assert ContentStore(ws.root, fs=ws.fs).verify(artifact.content)
+        assert not any(p.is_symlink() for p in Path(run.run_dir).rglob("*"))

@@ -14,7 +14,6 @@ time is the valid RED signal.
 from __future__ import annotations
 
 import pytest
-from pydantic import ValidationError
 
 from molexp.harness.plan import (
     BoardTask,
@@ -30,50 +29,7 @@ from molexp.harness.plan import (
 )
 
 
-class TestEnums:
-    def test_task_status_values(self) -> None:
-        assert TaskStatus.PENDING.value == "pending"
-        assert TaskStatus.BUILDING.value == "building"
-        assert TaskStatus.TESTED.value == "tested"
-        assert TaskStatus.COMPLETE.value == "complete"
-        assert TaskStatus.BLOCKED.value == "blocked"
-
-    def test_difficulty_values(self) -> None:
-        assert Difficulty.TRIVIAL.value == "trivial"
-        assert Difficulty.MODERATE.value == "moderate"
-        assert Difficulty.HARD.value == "hard"
-        assert Difficulty.UNKNOWN.value == "unknown"
-
-
-class TestFrozen:
-    def test_task_board_rejects_assignment(self) -> None:
-        board = TaskBoard()
-        with pytest.raises(ValidationError):
-            board.version = 5  # type: ignore[misc]
-
-    def test_board_task_rejects_assignment(self) -> None:
-        task = BoardTask(id="t1", name="build")
-        with pytest.raises(ValidationError):
-            task.name = "renamed"  # type: ignore[misc]
-
-    def test_feasibility_annotation_rejects_assignment(self) -> None:
-        ann = FeasibilityAnnotation(reachable=True)
-        with pytest.raises(ValidationError):
-            ann.reachable = False  # type: ignore[misc]
-
-
 class TestDefaults:
-    def test_board_defaults_to_version_zero_and_empty_tasks(self) -> None:
-        board = TaskBoard()
-        assert board.version == 0
-        assert board.tasks == ()
-
-    def test_board_task_defaults(self) -> None:
-        task = BoardTask(id="t1", name="build")
-        assert task.acceptance == ()
-        assert task.feasibility is None
-        assert task.status is TaskStatus.PENDING
-
     def test_acceptance_string_is_one_criterion_not_char_split(self) -> None:
         from molexp.harness.plan.task_board import coerce_acceptance
 
@@ -88,12 +44,6 @@ class TestDefaults:
             acceptance=tuple("molexp"),  # type: ignore[arg-type]
         )
         assert shredded.acceptance == ("molexp",)
-
-    def test_feasibility_defaults(self) -> None:
-        ann = FeasibilityAnnotation(reachable=False)
-        assert ann.difficulty is Difficulty.UNKNOWN
-        assert ann.rationale == ""
-        assert ann.probed_refs == ()
 
 
 class TestPlaceTask:
@@ -170,12 +120,3 @@ class TestRemoveTask:
     def test_remove_unknown_id_raises(self) -> None:
         with pytest.raises(TaskNotFoundError):
             remove_task(TaskBoard(), "nope")
-
-
-class TestTaskLookup:
-    def test_task_returns_matching_task(self) -> None:
-        board = place_task(TaskBoard(), BoardTask(id="t1", name="build"))
-        assert board.task("t1").id == "t1"
-
-    def test_task_returns_none_when_absent(self) -> None:
-        assert TaskBoard().task("missing") is None

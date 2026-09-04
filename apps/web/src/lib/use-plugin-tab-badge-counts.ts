@@ -14,13 +14,14 @@ export const usePluginTabBadgeCounts = (
   const projectId = coords?.projectId ?? null;
   const experimentId = coords?.experimentId ?? null;
   const runId = coords?.runId ?? null;
+  const executionId = coords?.executionId ?? null;
 
   useEffect(() => {
-    if (!projectId || !experimentId || !runId) {
+    if (!projectId || !experimentId || !runId || !executionId) {
       setCounts({});
       return;
     }
-    const context: RunTabBadgeContext = { projectId, experimentId, runId };
+    const context: RunTabBadgeContext = { projectId, experimentId, runId, executionId };
 
     const withResolver = discovered.filter(({ contribution }) => contribution.resolveTabBadgeCount);
     if (withResolver.length === 0) {
@@ -44,7 +45,7 @@ export const usePluginTabBadgeCounts = (
     return () => {
       cancelled = true;
     };
-  }, [discovered, experimentId, projectId, runId]);
+  }, [discovered, executionId, experimentId, projectId, runId]);
 
   return counts;
 };

@@ -2,17 +2,16 @@
 
 from __future__ import annotations
 
-import shutil
-import tempfile
-from pathlib import Path
-
-from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
+
+from molexp.workspace.content_store import ContentStore
 
 from ..dependencies import get_workspace
 from ..exceptions import AssetNotFoundError, ProjectNotFoundError
 from ..schemas import (
-    AssetResponse,
+    AssetVersionResponse,
+    ManagedAssetResponse,
     MessageResponse,
     ProjectCreateRequest,
     ProjectResponse,
@@ -58,80 +57,91 @@ def delete_project(project_id: str, workspace=Depends(get_workspace)) -> Message
 # ── Project Assets ──────────────────────────────────────────────────────────
 
 
-@router.get("/{project_id}/assets", response_model=list[AssetResponse])
+def _managed_asset_response(project, asset) -> ManagedAssetResponse:  # noqa: ANN001
+    return ManagedAssetResponse(
+        id=asset.id,
+        projectId=asset.project_id,
+        title=asset.title,
+        createdAt=asset.created_at.isoformat(),
+        versionCount=len(project.assets.versions(asset.id)),
+    )
+
+
+@router.get("/{project_id}/assets", response_model=list[ManagedAssetResponse])
 def list_project_assets(
     project_id: str,
     limit: int = 100,
     workspace=Depends(get_workspace),  # noqa: ANN001
-) -> list[AssetResponse]:
-    """List every asset (any kind) in the project scope via the catalog."""
+) -> list[ManagedAssetResponse]:
+    """List long-lived Project data identities."""
     project = workspace.get_project(project_id)
-    return [AssetResponse.from_model(a) for a in project.assets.list()[:limit]]
+    return [_managed_asset_response(project, asset) for asset in project.assets.list()[:limit]]
 
 
-@router.get("/{project_id}/assets/{asset_id}", response_model=AssetResponse)
+@router.get("/{project_id}/assets/{asset_id}", response_model=ManagedAssetResponse)
 def get_project_asset(
     project_id: str,
     asset_id: str,
     workspace=Depends(get_workspace),  # noqa: ANN001
-) -> AssetResponse:
+) -> ManagedAssetResponse:
     project = workspace.get_project(project_id)
-    asset = project.assets.get(asset_id)
-    if not asset:
-        raise AssetNotFoundError(asset_id)
-    return AssetResponse.from_model(asset)
-
-
-@router.post("/{project_id}/assets/upload", response_model=AssetResponse, status_code=201)
-async def upload_project_asset(
-    project_id: str,
-    file: UploadFile = File(...),
-    workspace=Depends(get_workspace),  # noqa: ANN001
-) -> AssetResponse:
-    """Upload a file into the project's ``DataAssetLibrary``."""
-    project = workspace.get_project(project_id)
-
-    with tempfile.NamedTemporaryFile(delete=False) as tmp:
-        shutil.copyfileobj(file.file, tmp)
-        tmp_path = Path(tmp.name)
-
     try:
-        filename = file.filename or "untitled"
-        asset = project.data_assets.import_asset(
-            name=filename,
-            src=tmp_path,
-            action="move",
-            meta={"original_filename": filename},
-        )
-        return AssetResponse.from_model(asset)
-    except Exception:
-        if tmp_path.exists():
-            tmp_path.unlink()
-        raise
+        asset = project.assets.get(asset_id)
+    except KeyError:
+        raise AssetNotFoundError(asset_id) from None
+    return _managed_asset_response(project, asset)
+
+
+def _asset_version_response(version) -> AssetVersionResponse:  # noqa: ANN001
+    return AssetVersionResponse(
+        id=version.id,
+        assetId=version.asset_id,
+        sourceArtifactId=version.source_artifact_id,
+        version=version.version,
+        digest=version.content.digest,
+        size=version.content.size,
+        contentKind=version.content.kind,
+        mediaType=version.media_type,
+        semanticType=version.semantic_type,
+        metadata=version.metadata,
+        createdAt=version.created_at.isoformat(),
+    )
+
+
+@router.get(
+    "/{project_id}/assets/{asset_id}/versions",
+    response_model=list[AssetVersionResponse],
+)
+def list_project_asset_versions(
+    project_id: str,
+    asset_id: str,
+    workspace=Depends(get_workspace),  # noqa: ANN001
+) -> list[AssetVersionResponse]:
+    """List immutable versions of a Project Asset."""
+    project = workspace.get_project(project_id)
+    try:
+        project.assets.get(asset_id)
+    except KeyError:
+        raise AssetNotFoundError(asset_id) from None
+    return [_asset_version_response(version) for version in project.assets.versions(asset_id)]
 
 
 @router.get("/{project_id}/assets/{asset_id}/download")
 def download_project_asset(project_id: str, asset_id: str, workspace=Depends(get_workspace)):  # noqa: ANN001, ANN201
     project = workspace.get_project(project_id)
-    asset = project.assets.get(asset_id)
-    if not asset:
+    try:
+        project.assets.get(asset_id)
+    except KeyError:
+        raise AssetNotFoundError(asset_id) from None
+    versions = project.assets.versions(asset_id)
+    if not versions:
         raise AssetNotFoundError(asset_id)
-
-    payload_dir = asset.absolute_path(project.project_dir)
-    if not payload_dir.exists():
+    version = versions[-1]
+    payload = ContentStore(workspace.root, fs=workspace.fs).payload_path(version.content)
+    if not workspace.fs.exists(payload) or workspace.fs.is_dir(payload):
         raise AssetNotFoundError(asset_id)
-
-    if payload_dir.is_dir():
-        files = list(payload_dir.iterdir())
-        if not files:
-            raise AssetNotFoundError(asset_id)
-        file_path = files[0]
-    else:
-        file_path = payload_dir
-
-    filename = asset.tags.get("original_filename") or file_path.name
     return StreamingResponse(
-        open(file_path, "rb"),  # noqa: PTH123
-        media_type="application/octet-stream",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        workspace.fs.open(payload, "rb"),
+        media_type=version.media_type or "application/octet-stream",
+        headers={"Content-Disposition": f'attachment; filename="{asset_id}"'},
     )

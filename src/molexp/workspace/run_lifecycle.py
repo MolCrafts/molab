@@ -34,7 +34,7 @@ from typing import TYPE_CHECKING
 from mollog import get_logger
 
 from .models import ErrorInfo, ExecutionMetadata, ExecutionRecord, RunStatus
-from .run_heartbeat import ALIVE_NAME, HEARTBEAT_INTERVAL_SECONDS, touch_alive, unlink_alive
+from .run_heartbeat import HEARTBEAT_INTERVAL_SECONDS, alive_mtime, touch_alive, unlink_alive
 
 if TYPE_CHECKING:
     from .runcontext import RunContext
@@ -158,6 +158,8 @@ class RunLifecycle:
         )
         ctx._assets.append_run_log(f"execution started  exec_id={ctx._execution_id}")
         ctx._ctx_store.save()
+        assert ctx._execution_id is not None
+        touch_alive(ctx.run, ctx._execution_id)
         self._start_heartbeat()
 
     def exit(self, exc_type, exc_val, exc_tb) -> bool:  # noqa: ANN001
@@ -165,11 +167,11 @@ class RunLifecycle:
         # writes below (the reaper must never see a fresh heartbeat on a
         # run whose status is already terminal-in-progress).
         self._stop_heartbeat()
-        unlink_alive(self._ctx.run)
         ctx = self._ctx
         # ``enter()`` always runs first and assigns a non-None execution id.
         execution_id = ctx._execution_id
         assert execution_id is not None
+        unlink_alive(ctx.run, execution_id)
         now = datetime.now()
         error_info: ErrorInfo | None = None
         noop = False
@@ -290,7 +292,6 @@ class RunLifecycle:
             status=RunStatus.RUNNING,
             started_at=ctx.run.metadata.started_at or now,
         )
-        touch_alive(ctx.run)
 
     # ── Heartbeat ────────────────────────────────────────────────────────
     #
@@ -337,7 +338,7 @@ class RunLifecycle:
         before the lifecycle claimed ownership) is left untouched.
         """
         run = self._ctx.run
-        fs = run._disk()
-        if not fs.exists(fs.join(run.run_dir, ALIVE_NAME)):
+        execution_id = self._ctx._execution_id
+        if execution_id is None or alive_mtime(run, execution_id) is None:
             return
-        touch_alive(run)
+        touch_alive(run, execution_id)

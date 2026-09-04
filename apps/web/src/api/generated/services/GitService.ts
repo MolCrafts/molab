@@ -29,6 +29,26 @@ export class GitService {
         });
     }
     /**
+     * Git Rebuild Route
+     * @param molexpSession
+     * @returns GitCheckpointResponse Successful Response
+     * @throws ApiError
+     */
+    public static gitRebuildRoute(
+        molexpSession?: (string | null),
+    ): CancelablePromise<GitCheckpointResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/git/rebuild',
+            cookies: {
+                'molexp_session': molexpSession,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
      * Git Push Route
      * @param requestBody
      * @param molexpSession
@@ -53,26 +73,6 @@ export class GitService {
         });
     }
     /**
-     * Git Rebuild Route
-     * @param molexpSession
-     * @returns GitCheckpointResponse Successful Response
-     * @throws ApiError
-     */
-    public static gitRebuildRoute(
-        molexpSession?: (string | null),
-    ): CancelablePromise<GitCheckpointResponse> {
-        return __request(OpenAPI, {
-            method: 'POST',
-            url: '/api/git/rebuild',
-            cookies: {
-                'molexp_session': molexpSession,
-            },
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
      * Git Checkpoint Route
      * @param ws
      * @param molexpSession
@@ -86,6 +86,31 @@ export class GitService {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/workspaces/{ws}/git/checkpoint',
+            path: {
+                'ws': ws,
+            },
+            cookies: {
+                'molexp_session': molexpSession,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * Git Rebuild Route
+     * @param ws
+     * @param molexpSession
+     * @returns GitCheckpointResponse Successful Response
+     * @throws ApiError
+     */
+    public static gitRebuildRouteWs(
+        ws: string,
+        molexpSession?: (string | null),
+    ): CancelablePromise<GitCheckpointResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/workspaces/{ws}/git/rebuild',
             path: {
                 'ws': ws,
             },
@@ -121,31 +146,6 @@ export class GitService {
             },
             body: requestBody,
             mediaType: 'application/json',
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
-     * Git Rebuild Route
-     * @param ws
-     * @param molexpSession
-     * @returns GitCheckpointResponse Successful Response
-     * @throws ApiError
-     */
-    public static gitRebuildRouteWs(
-        ws: string,
-        molexpSession?: (string | null),
-    ): CancelablePromise<GitCheckpointResponse> {
-        return __request(OpenAPI, {
-            method: 'POST',
-            url: '/api/workspaces/{ws}/git/rebuild',
-            path: {
-                'ws': ws,
-            },
-            cookies: {
-                'molexp_session': molexpSession,
-            },
             errors: {
                 422: `Validation Error`,
             },

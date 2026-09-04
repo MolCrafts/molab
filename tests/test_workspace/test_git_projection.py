@@ -13,17 +13,16 @@ keys are never perturbed.
 from __future__ import annotations
 
 import subprocess
-from datetime import datetime
 from pathlib import Path
 
 from molexp.git import ensure_object_db
 from molexp.ids import compute_content_hash
 from molexp.workspace import Workspace
+from molexp.workspace.domain import ExecutionMode
 from molexp.workspace.git_projection import (
     ARTIFACT_POINTER_MARKER,
     GitProjection,
 )
-from molexp.workspace.models import ExecutionRecord
 
 
 def _git(db_path: Path, *args: str) -> str:
@@ -41,23 +40,11 @@ def _seed_two_runs(ws_root: Path) -> tuple[Workspace, object, object]:
     exp = ws.add_project("demo").add_experiment("baseline", params={"lr": 1e-3})
     run_a = exp.add_run(params={"seed": 0})
     with run_a.start() as ctx:
-        ctx.register_artifact({"loss": 0.1}, name="metrics.json")
+        ctx.emit_artifact({"loss": 0.1}, name="metrics.json")
     run_b = exp.add_run(params={"seed": 1})
     with run_b.start() as ctx:
-        ctx.register_artifact({"loss": 0.2}, name="metrics.json")
+        ctx.emit_artifact({"loss": 0.2}, name="metrics.json")
     return ws, run_a, run_b
-
-
-def _append_execution(run, execution_id: str, started: datetime, finished: datetime) -> None:
-    """Seed an extra settled ExecutionRecord with fixed (deterministic) dates."""
-    rec = ExecutionRecord(
-        execution_id=execution_id,
-        started_at=started,
-        finished_at=finished,
-        status="succeeded",
-    )
-    history = (*tuple(run.execution_history), rec)
-    run._update_metadata(execution_history=history)
 
 
 class TestGitProjection:
@@ -82,14 +69,12 @@ class TestGitProjection:
         exp = ws.add_project("demo").add_experiment("baseline", params={})
         run = exp.add_run(params={"seed": 0})
         with run.start() as ctx:
-            ctx.register_artifact({"v": 1}, name="m.json")
-        # Two more (rerun) attempts with fixed dates → a 3-commit chain.
-        _append_execution(
-            run, f"exec-{run.id}-2", datetime(2026, 1, 1, 10, 0, 0), datetime(2026, 1, 1, 10, 5, 0)
-        )
-        _append_execution(
-            run, f"exec-{run.id}-3", datetime(2026, 1, 2, 10, 0, 0), datetime(2026, 1, 2, 10, 5, 0)
-        )
+            ctx.emit_artifact({"v": 1}, name="m.json")
+        # Two more (rerun) attempts → a 3-commit chain.
+        with run.start(mode=ExecutionMode.RERUN) as ctx:
+            ctx.emit_artifact({"v": 2}, name="m.json")
+        with run.start(mode=ExecutionMode.RERUN) as ctx:
+            ctx.emit_artifact({"v": 3}, name="m.json")
         db = await ensure_object_db(tmp_path / "odb")
         res = await GitProjection(ws, db).project()
 
@@ -162,13 +147,13 @@ class TestGitProjection:
         run = exp.add_run(params={"seed": 0})
         big = b"X" * 4096
         with run.start() as ctx:
-            ctx.register_artifact({"loss": 0.1}, name="metrics.json")  # small → blob
-            ctx.register_artifact(big, name="traj.bin")  # large → pointer
+            ctx.emit_artifact({"loss": 0.1}, name="metrics.json")  # small → blob
+            ctx.emit_artifact(big, name="traj.bin")  # large → pointer
 
         db = await ensure_object_db(tmp_path / "odb")
         res = await GitProjection(ws, db, blob_threshold_bytes=64).project()
         tree = res.run(run.id).tree
-        exec_id = run.execution_history[-1].execution_id
+        exec_id = run.executions[-1].id
         art = f"executions/{exec_id}/artifacts"
 
         # Small artifact: the blob holds the real bytes.

@@ -10,33 +10,6 @@ import { OpenAPI } from '../core/OpenAPI';
 import { request as __request } from '../core/request';
 export class RegistryService {
     /**
-     * List Plugins
-     * List entry-point–discovered UI bundles.
-     *
-     * Built-in plugins (``core``, ``molplot``, ``molq``, ``molvis``, …) are
-     * statically imported by the frontend and do **not** appear here. There
-     * is no metrics product plugin — plots are molplot only. The response
-     * carries no UI semantics — those live in each bundle's own
-     * ``manifest.json``, fetched by the browser-side loader.
-     * @param molexpSession
-     * @returns UiPluginListResponse Successful Response
-     * @throws ApiError
-     */
-    public static listPlugins(
-        molexpSession?: (string | null),
-    ): CancelablePromise<UiPluginListResponse> {
-        return __request(OpenAPI, {
-            method: 'GET',
-            url: '/api/plugins',
-            cookies: {
-                'molexp_session': molexpSession,
-            },
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
      * List Task Types
      * Return every task-type slug the agent / UI can compose into IR.
      * @param molexpSession
@@ -75,6 +48,33 @@ export class RegistryService {
             path: {
                 'slug': slug,
             },
+            cookies: {
+                'molexp_session': molexpSession,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * List Plugins
+     * List entry-point–discovered UI bundles.
+     *
+     * Built-in plugins (``core``, ``molplot``, ``molq``, ``molvis``, …) are
+     * statically imported by the frontend and do **not** appear here. There
+     * is no metrics product plugin — plots are molplot only. The response
+     * carries no UI semantics — those live in each bundle's own
+     * ``manifest.json``, fetched by the browser-side loader.
+     * @param molexpSession
+     * @returns UiPluginListResponse Successful Response
+     * @throws ApiError
+     */
+    public static listPlugins(
+        molexpSession?: (string | null),
+    ): CancelablePromise<UiPluginListResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/plugins',
             cookies: {
                 'molexp_session': molexpSession,
             },

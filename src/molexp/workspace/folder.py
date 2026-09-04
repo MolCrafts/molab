@@ -110,7 +110,7 @@ def entity_filename(cls: type) -> str:
     return f"{_snake_name(cls)}.json"
 
 
-def register_entity_class(cls: type[Folder]) -> type[Folder]:
+def register_entity_class(cls: type[F]) -> type[F]:  # noqa: UP047
     """Register *cls* for reconstruction from its entity filename."""
     _ENTITY_FILE_TO_CLS[entity_filename(cls)] = cls
     return cls
@@ -825,6 +825,15 @@ class Folder:
         children index by the old id. Default: no entity metadata, no-op.
         """
 
+    def _move_target_id(self, new_name: str | None) -> str:
+        """Directory basename for the move target.
+
+        Default (generic Folder): a rename slugs to a new id. Entity
+        subclasses (Project / Experiment / Run) override this to keep their
+        stable UUID id — ``new_name`` then changes only the human name.
+        """
+        return self._name if new_name is None else _validate_name_to_id(new_name)
+
     def move_to(
         self,
         new_parent: Folder,
@@ -841,7 +850,7 @@ class Folder:
                 "move_to is only supported for local-filesystem folders "
                 "(it uses OS-level shutil.move); remote-backed folders cannot be moved."
             )
-        target_id = self._name if new_name is None else _validate_name_to_id(new_name)
+        target_id = self._move_target_id(new_name)
         # Honor the child class's container layout (``runs/run-<id>``,
         # ``projects/<id>``, …) via the same ``child_dir`` hook that mounting
         # uses — a naive ``new_parent.path()/id`` join would strand the moved

@@ -14,9 +14,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-from pydantic import ValidationError
-
 from molexp.harness.plan import (
     FROZEN_PLAN_KIND,
     FROZEN_SPEC_KIND,
@@ -37,12 +34,6 @@ def _plan() -> ExperimentPlan:
     )
 
 
-class TestKindConstants:
-    def test_kind_constant_values(self) -> None:
-        assert FROZEN_SPEC_KIND == "frozen_experiment_spec"
-        assert FROZEN_PLAN_KIND == "frozen_experiment_plan"
-
-
 class TestFreezeExperimentPlan:
     def test_freezing_same_plan_twice_is_idempotent(self, tmp_path: Path) -> None:
         store = FileArtifactStore(root=tmp_path)
@@ -51,12 +42,6 @@ class TestFreezeExperimentPlan:
         second = freeze_experiment_plan(plan, store, created_by="planner")
         assert first.id == second.id
         assert first.sha256 == second.sha256
-
-    def test_content_equal_plans_freeze_to_same_id(self, tmp_path: Path) -> None:
-        store = FileArtifactStore(root=tmp_path)
-        first = freeze_experiment_plan(_plan(), store, created_by="planner")
-        second = freeze_experiment_plan(_plan(), store, created_by="planner")
-        assert first.id == second.id
 
     def test_board_change_changes_id(self, tmp_path: Path) -> None:
         store = FileArtifactStore(root=tmp_path)
@@ -96,14 +81,3 @@ class TestFreezeSpec:
         store = FileArtifactStore(root=tmp_path)
         ref = freeze_spec({"x": 1}, store, created_by="planner")
         assert ref.kind == FROZEN_SPEC_KIND
-
-
-class TestExperimentPlanExtraForbid:
-    def test_valid_construction(self) -> None:
-        plan = ExperimentPlan(spec={"a": 1}, board=TaskBoard())
-        assert plan.spec == {"a": 1}
-        assert plan.board == TaskBoard()
-
-    def test_extra_field_raises(self) -> None:
-        with pytest.raises(ValidationError):
-            ExperimentPlan(spec={}, board=TaskBoard(), workflow_source="x")  # type: ignore[call-arg]

@@ -39,6 +39,7 @@ if TYPE_CHECKING:
     from .workspace import Workspace
 
 from molexp._typing import JSONValue
+from molexp.ids import compute_definition_hash, generate_uuid7
 from molexp.knowledge.types import concept_type
 from molexp.path import Path
 
@@ -59,7 +60,6 @@ from .fs import PathArg
 from .knowledge import HasKnowledge
 from .models import ExperimentMetadata, FolderMetadata, RunStatus
 from .run import Run
-from .utils import generate_id
 
 # Default replica seeds — deterministic, well-separated
 _DEFAULT_SEEDS = [42, 123, 456, 789, 1234]
@@ -165,7 +165,7 @@ class Experiment(Folder, HasKnowledge):
             _entity_metadata
             if _entity_metadata is not None
             else ExperimentMetadata(
-                id=id if id is not None else generate_id(),
+                id=id if id is not None else generate_uuid7(),
                 name=name,
                 description=description,
                 tags=list(tags) if tags is not None else [],
@@ -176,6 +176,16 @@ class Experiment(Folder, HasKnowledge):
                 n_replicas=n_replicas,
                 seeds=list(seeds) if seeds is not None else None,
                 default_target=default_target,
+                revision_id=generate_uuid7(),
+                definition_hash=compute_definition_hash(
+                    {
+                        "name": name,
+                        "description": description,
+                        "parameter_space": params or {},
+                        "workflow_source": workflow_source,
+                        "workflow_type": workflow_type,
+                    }
+                ),
             )
         )
 
@@ -337,6 +347,11 @@ class Experiment(Folder, HasKnowledge):
         """Create filesystem structure and persist metadata (non-recursive)."""
         d = self.experiment_dir
         self._disk().mkdir(d, parents=True, exist_ok=True)
+        from .scientific_repository import ScientificRepository
+
+        ScientificRepository(self.workspace.root, fs=self._disk()).record_experiment(
+            self.metadata.model_dump(mode="json"), project_id=self.project.id
+        )
         self.save()
 
     def write_meta(self) -> str:
@@ -344,10 +359,18 @@ class Experiment(Folder, HasKnowledge):
         self.save()
         return self._disk().join(self.experiment_dir, "experiment.json")
 
+    def _move_target_id(self, new_name: str | None) -> str:
+        """An Experiment keeps its UUID id across a move; only the name changes."""
+        del new_name
+        return self._name
+
     def _sync_entity_identity(self) -> None:
-        """Mirror the folder identity into ``experiment.json`` (``move_to`` hook)."""
+        """Mirror the human name into ``experiment.json`` (``move_to`` hook).
+
+        The UUID id (and directory basename) is stable across a move.
+        """
         self._entity_metadata = self._entity_metadata.model_copy(
-            update={"id": self._name, "name": self._metadata.name}
+            update={"name": self._metadata.name}
         )
         self.save()
 
@@ -401,14 +424,24 @@ class Experiment(Folder, HasKnowledge):
         id: str | None = None,
         target: str | None = None,
         workflow_snapshot: dict[str, JSONValue] | None = None,
+        input_asset_ids: tuple[str, ...] = (),
     ) -> Run:
-        """Add a run under this experiment (idempotent on id).
+        """Add a new logical Run under this Experiment.
 
         ``params`` may be positional; ``id=`` sets the run slug. Re-adding the
-        same id returns the existing run. To change params of an existing run,
-        use :meth:`set_run`.
+        ``definition_hash`` supports comparison and duplicate detection, but
+        never substitutes for identity: every call without an explicit id gets
+        a fresh UUIDv7 Run.
         """
-        resolved_id = id if id is not None else generate_id()
+        definition_hash = compute_definition_hash(
+            {
+                "experiment_revision_id": self.metadata.revision_id,
+                "parameters": params or {},
+                "workflow_snapshot": workflow_snapshot,
+                "input_asset_ids": input_asset_ids,
+            }
+        )
+        resolved_id = id if id is not None else generate_uuid7()
         resolved_target = target if target is not None else self._entity_metadata.default_target
         _validate_target_registered(self.workspace, resolved_target)
         child = self._construct_child(
@@ -418,6 +451,9 @@ class Experiment(Folder, HasKnowledge):
             parameters=params,
             workflow_snapshot=workflow_snapshot,
             target=resolved_target,
+            definition_hash=definition_hash,
+            experiment_revision_id=self.metadata.revision_id,
+            input_asset_ids=input_asset_ids,
         )
         return self.add_folder(child)
 
@@ -428,20 +464,53 @@ class Experiment(Folder, HasKnowledge):
         target: str | None = None,
         workflow_snapshot: dict[str, JSONValue] | None = None,
     ) -> list[Run]:
-        """Add one content-addressed run per cell of a ``ParamSpace``.
-
-        Idempotent on derived id: re-seeding the same space returns existing
-        runs with no duplicates.
-        """
-        from .utils import derive_run_id
-
+        """Add one fresh UUID-addressed Run per cell in a ParamSpace."""
         runs: list[Run] = []
         for cell in space:
             cell_params = dict(cell)
             runs.append(
                 self.add_run(
-                    params=cell_params,
-                    id=derive_run_id(cell_params),
+                    params=cast("dict[str, JSONValue]", cell_params),
+                    target=target,
+                    workflow_snapshot=workflow_snapshot,
+                )
+            )
+        return runs
+
+    def _seed_missing_runs(
+        self,
+        space: ParamSpace,
+        *,
+        target: str | None = None,
+        workflow_snapshot: dict[str, JSONValue] | None = None,
+    ) -> list[Run]:
+        """Seed one fresh Run per *not yet present* cell (idempotent).
+
+        :meth:`add_runs` materializes every cell unconditionally — a Run is
+        immutable intent, so re-adding creates fresh Runs. ``define`` and
+        ``sweep`` are the *seeding* verbs and stay idempotent: a cell whose
+        ``definition_hash`` already exists is skipped, so re-declaring the
+        same sweep returns only newly-created runs (an empty list on a repeat
+        declaration) and never duplicates.
+        """
+        existing = {run.metadata.definition_hash for run in self.list_runs()}
+        runs: list[Run] = []
+        for cell in space:
+            cell_params = dict(cell)
+            definition_hash = compute_definition_hash(
+                {
+                    "experiment_revision_id": self.metadata.revision_id,
+                    "parameters": cell_params or {},
+                    "workflow_snapshot": workflow_snapshot,
+                    "input_asset_ids": (),
+                }
+            )
+            if definition_hash in existing:
+                continue
+            existing.add(definition_hash)
+            runs.append(
+                self.add_run(
+                    params=cast("dict[str, JSONValue]", cell_params),
                     target=target,
                     workflow_snapshot=workflow_snapshot,
                 )
@@ -467,7 +536,7 @@ class Experiment(Folder, HasKnowledge):
         space = (
             params if isinstance(params, ParamSpace) else GridSpace(dict(params or {}))  # ty: ignore[invalid-argument-type]
         )
-        self.add_runs(space)
+        self._seed_missing_runs(space)
         if _workflow_executor is None:
             raise RuntimeError(
                 "Experiment.define needs the workflow layer; `import molexp` "
@@ -499,12 +568,13 @@ class Experiment(Folder, HasKnowledge):
     ) -> RunSet:
         """Seed the *params* sweep for *workflow* and return the RunSet.
 
-        The batch-execution twin of :meth:`run` — identical seeding (one
-        content-addressed :class:`Run` per cell, idempotent) and identical
-        workflow association through the cross-layer
-        :class:`WorkflowExecutor` seam, but it returns the seeded
-        :class:`~molexp.workspace.runset.RunSet` so the caller can drive and
-        summarize the batch directly::
+        The batch-execution twin of :meth:`run` — identical idempotent
+        seeding (one :class:`Run` per cell; a repeat declaration of the same
+        sweep adds no new runs and returns an empty
+        :class:`~molexp.workspace.runset.RunSet`) and identical workflow
+        association through the cross-layer :class:`WorkflowExecutor` seam,
+        but it returns the newly-seeded :class:`~molexp.workspace.runset.RunSet`
+        so the caller can drive and summarize the batch directly::
 
             summary = exp.sweep(wf, {"lr": [1e-3, 1e-4], "batch": [16, 32]}).execute()
             best = summary.min_by("loss")
@@ -535,7 +605,7 @@ class Experiment(Folder, HasKnowledge):
             space = GridSpace(
                 {axis: values for axis, values in grid.items() if isinstance(values, list)}
             )
-        runs = self.add_runs(space)
+        runs = self._seed_missing_runs(space)
         if _workflow_executor is None:
             raise RuntimeError(
                 "Experiment.sweep needs the workflow layer; `import molexp` "
@@ -578,23 +648,18 @@ class Experiment(Folder, HasKnowledge):
         target: str | None = None,
         workflow_snapshot: dict[str, JSONValue] | None = None,
     ) -> Run:
-        """Update fields of an existing run and write to disk.
+        """Reject mutation of a Run's scientific definition.
 
-        Raises:
-            RunNotFoundError: Run missing.
+        Schema v2 assigns every Run a stable logical identity. Changes to
+        parameters, inputs, workflow, or target create a new Run.
         """
         run = self.get_run(run_id)
-        updates: dict[str, object] = {}
-        if params is not None:
-            updates["parameters"] = dict(params)
-        if target is not None:
-            _validate_target_registered(self.workspace, target)
-            updates["target"] = target
-        if workflow_snapshot is not None:
-            updates["workflow_snapshot"] = workflow_snapshot
-        if updates:
-            run._update_metadata(**updates)
-        return run
+        if params is None and target is None and workflow_snapshot is None:
+            return run
+        raise RuntimeError(
+            "Run definitions are immutable in schema v2; create a new Run "
+            "instead of changing parameters, workflow, inputs, or target"
+        )
 
     def del_run(self, run_id: str) -> None:
         """Delete a run directory."""
@@ -622,7 +687,7 @@ class Experiment(Folder, HasKnowledge):
         removed: list[str] = []
         for run in list(self.list_runs()):
             reap_zombie_run(run)
-            if run.status != RunStatus.FAILED.value:
+            if not run.status_summary.by_status.get(RunStatus.FAILED.value):
                 continue
             rid = run.id
             self.remove_run(rid)

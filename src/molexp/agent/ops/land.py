@@ -161,6 +161,19 @@ def _infer_tags(rel: str, src: Path) -> dict[str, str]:
     return tags
 
 
+def _scalar_status(run: Run) -> str:
+    """Derive the single run-status label from the Execution aggregate."""
+    summary = run.status_summary
+    if summary.not_started:
+        return "pending"
+    if summary.active > 0:
+        return "running"
+    for status in ("failed", "cancelled", "interrupted", "succeeded"):
+        if summary.by_status.get(status):
+            return status
+    return "succeeded" if summary.total else "pending"
+
+
 def land_run_outputs(
     workspace_root: Path,
     *,
@@ -194,7 +207,7 @@ def land_run_outputs(
     root = Path(workspace_root).resolve()
     run = resolve_run(root, project=project, experiment=experiment, run_id=run_id)
 
-    status = str(run.status)
+    status = _scalar_status(run)
     if status == "running":
         raise ValueError(
             f"run {run.id} is live 'running' — cancel it first, or land into a new run"
@@ -205,57 +218,29 @@ def land_run_outputs(
             f"(or use resume/rerun for a fresh attempt)"
         )
 
+    from molexp.workspace.domain import ExecutionMode
+
+    mode = ExecutionMode.INITIAL if status == "pending" else ExecutionMode.RERUN
+
     attached: list[str] = []
     sourced: list[str] = []
     result_keys: list[str] = []
 
-    with run.start() as ctx:
+    with run.start(mode=mode) as ctx:
         for rel in files or []:
             src = safe_path(root, rel)
             if not src.exists():
                 raise FileNotFoundError(f"path not found: {rel}")
             name = src.name
             tags = _infer_tags(rel, src)
-            exec_id = ctx.run.metadata.current_execution_id
-            if exec_id is None:
-                raise RuntimeError("land requires an active execution")
-            art_root = Path(ctx.run_dir) / "executions" / exec_id / "artifacts"
+            dest = ctx.workdir / name
             if src.is_dir():
-                # Copy directory tree into executions/<id>/artifacts/<name>/
-                dest = art_root / name
                 if dest.exists():
                     shutil.rmtree(dest)
                 shutil.copytree(src, dest)
-                # Register a marker file so the manifest has an entry plugins can find.
-                # Prefer registering the directory via a .molrec marker if present.
-                marker = dest / "meta"
-                if marker.exists():
-                    # Point asset at the directory root by saving a small index.
-                    index = dest / ".molexp-artifact.json"
-                    index.write_text(
-                        json.dumps({"kind": "molrec", "root": name, "tags": tags}),
-                        encoding="utf-8",
-                    )
-                    ctx.register_artifact(
-                        index,
-                        name=f"{name}/.molexp-artifact.json",
-                        mime="application/json",
-                        tags=tags,
-                    )
-                else:
-                    # Flat dir of loose files — register each file.
-                    for child in dest.rglob("*"):
-                        if child.is_file():
-                            rel_child = child.relative_to(art_root).as_posix()
-                            ctx.register_artifact(
-                                child,
-                                name=rel_child,
-                                mime=guess_mime(child),
-                                tags=tags,
-                            )
             else:
-                # save() copies into artifacts/<name>; same-path is a no-op copy.
-                ctx.register_artifact(src, name=name, mime=guess_mime(src), tags=tags)
+                shutil.copy2(src, dest)
+            ctx.emit_artifact(dest, name=name, mime=guess_mime(src), tags=tags)
             attached.append(name)
         for rel in sources or []:
             src = safe_path(root, rel)
@@ -270,19 +255,13 @@ def land_run_outputs(
                 with contextlib.suppress(shutil.SameFileError):
                     shutil.copy2(src, dest)
             sourced.append(src.name)
-            ctx.register_artifact(
-                dest if dest.exists() else src,
-                name=f"source/{src.name}",
-                mime=guess_mime(src) or "text/x-python",
-                tags={"role": "source", "landed_from": rel},
-            )
         for key, value in (results or {}).items():
             ctx.set_result(str(key), value)
             result_keys.append(str(key))
 
     return {
         "run_id": run.id,
-        "status": str(run.status),
+        "status": _scalar_status(run),
         "artifacts": attached,
         "sources": sourced,
         "results": result_keys,

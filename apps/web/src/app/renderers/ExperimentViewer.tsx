@@ -1,5 +1,4 @@
 import {
-  Ban,
   Bot,
   Check,
   Copy,
@@ -7,11 +6,10 @@ import {
   FlaskConical,
   Grid3x3,
   MoreHorizontal,
-  Play,
   Trash2,
 } from "lucide-react";
 import { lazy, Suspense, useCallback, useMemo, useState } from "react";
-import { experimentsApi, runsApi } from "@/api";
+import { experimentsApi } from "@/api";
 import { CreateRunDialog } from "@/app/components/CreateRunDialog";
 import { CreateSweepDialog } from "@/app/components/CreateSweepDialog";
 import type { DataTableColumn, DataTableRowAction } from "@/app/components/entity";
@@ -38,17 +36,13 @@ import {
 } from "@/app/renderers/dashboardData";
 import { ExperimentCompare } from "@/app/renderers/ExperimentCompare";
 import { buildExperimentWorkbenchData } from "@/app/renderers/entityWorkbenchData";
-import { canCancel } from "@/app/runs/runLifecycle";
 import {
   buildRunListActions,
-  primaryRunVerb,
   type RunListHandlers,
 } from "@/app/runs/runListActions";
 import { useRunMultiSelect } from "@/app/runs/useRunMultiSelect";
 import { useNavigationState } from "@/app/state/useNavigationState";
-import type { ExperimentView, ObjectView, RunSummary, ScopedRendererProps } from "@/app/types";
-import { useConfirm } from "@/components/ConfirmDialog";
-import { Code as InlineCode } from "@/components/ui/code";
+import type { ExperimentView, RunSummary, ScopedRendererProps } from "@/app/types";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -79,20 +73,6 @@ const WorkflowGraphViewer = lazy(() =>
     default: module.WorkflowGraphViewer,
   })),
 );
-
-const formatResultPreview = (results: Record<string, unknown>): string => {
-  const entries = Object.entries(results);
-  if (entries.length === 0) return "—";
-  if (entries.length === 1) {
-    const [k, v] = entries[0];
-    return `${k} = ${formatScalar(v)}`;
-  }
-  const head = entries
-    .slice(0, 2)
-    .map(([k, v]) => `${k}=${formatScalar(v)}`)
-    .join(", ");
-  return entries.length > 2 ? `${head}, +${entries.length - 2}` : head;
-};
 
 const ParametersCell = ({ run, keys }: { run: RunSummary; keys: string[] }): JSX.Element => {
   const entries = keys
@@ -152,7 +132,6 @@ export const ExperimentViewer = ({
   useContributionGeneration();
 
   const { setSelection } = useNavigationState(snapshot);
-  const { confirm, dialog: confirmDialog } = useConfirm();
 
   const experimentId = selection.objectId;
   const experiment = snapshot.experiments.find((e) => e.id === experimentId);
@@ -220,56 +199,6 @@ export const ExperimentViewer = ({
   const navigateToRun = (runId: string) => {
     setSelection({ objectType: "run", objectId: runId });
   };
-
-  const navigateToRunView = useCallback(
-    (run: RunSummary, objectView?: ObjectView) => {
-      setSelection({ objectType: "run", objectId: run.id, objectView });
-    },
-    [setSelection],
-  );
-
-  const handleCancelRun = useCallback(
-    async (run: RunSummary) => {
-      if (!canCancel(run.status)) return;
-      const ok = await confirm({
-        title: "Cancel run?",
-        description: (
-          <>
-            Stop{" "}
-            <InlineCode className="rounded-control bg-muted px-1 py-1 text-label">
-              {run.id}
-            </InlineCode>
-            ?
-          </>
-        ),
-        confirmLabel: "Cancel",
-        destructive: true,
-      });
-      if (!ok) return;
-      try {
-        await runsApi.cancelRun(run.projectId, run.experimentId, run.id);
-        toast.success("Cancelled");
-        onRefresh();
-      } catch (error) {
-        toast.error(error instanceof Error ? error.message : "Cancel failed");
-      }
-    },
-    [confirm, onRefresh],
-  );
-
-  const handleResumeRun = useCallback(
-    async (run: RunSummary) => {
-      try {
-        await runsApi.resumeRun(run.projectId, run.experimentId, run.id);
-        toast.success("Resumed");
-        onRefresh();
-        navigateToRunView(run, "executions");
-      } catch (error) {
-        toast.error(error instanceof Error ? error.message : "Resume failed");
-      }
-    },
-    [navigateToRunView, onRefresh],
-  );
 
   const runListHandlers: RunListHandlers = useMemo(() => {
     const active = snapshot.workspaces.find((w) => w.active) ?? snapshot.workspaces[0] ?? null;
@@ -347,23 +276,13 @@ export const ExperimentViewer = ({
       ),
     },
     {
-      key: "result",
-      header: "Result",
-      cell: (run) => {
-        const preview = formatResultPreview(run.results ?? {});
-        const full = JSON.stringify(run.results ?? {}, null, 2);
-        return (
-          <div className="flex max-w-72 items-center gap-1">
-            <span
-              className="min-w-0 flex-1 truncate font-mono text-label text-foreground"
-              title={full}
-            >
-              {preview}
-            </span>
-            <CopyButton value={full} label={`${run.name || run.id} results`} className="size-5" />
-          </div>
-        );
-      },
+      key: "executions",
+      header: "Executions",
+      cell: (run) => (
+        <span className="font-mono text-label text-muted-foreground">
+          {run.statusSummary.total} total · {run.statusSummary.active} active
+        </span>
+      ),
     },
     {
       key: "duration",
@@ -387,30 +306,6 @@ export const ExperimentViewer = ({
           {formatDateTime(run.updatedAt)}
         </span>
       ),
-    },
-    {
-      key: "action",
-      header: "",
-      width: "w-24",
-      align: "right",
-      cell: (run) => {
-        const verb = primaryRunVerb(run.status);
-        if (!verb) return null;
-        return (
-          <WorkbenchIconAction
-            label={verb.label}
-            className={`size-6 ${verb.kind === "cancel" ? "text-destructive hover:bg-destructive/10 hover:text-destructive" : ""}`}
-            onClick={(event) => {
-              event.stopPropagation();
-              if (verb.kind === "start") navigateToRunView(run);
-              else if (verb.kind === "cancel") void handleCancelRun(run);
-              else if (verb.kind === "resume") void handleResumeRun(run);
-            }}
-          >
-            {verb.kind === "cancel" ? <Ban className="size-3.5" /> : <Play className="size-3.5" />}
-          </WorkbenchIconAction>
-        );
-      },
     },
   ];
 
@@ -834,7 +729,6 @@ export const ExperimentViewer = ({
           },
         ]}
       />
-      {confirmDialog}
     </>
   );
 };

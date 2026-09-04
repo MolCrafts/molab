@@ -1,9 +1,10 @@
-"""``Experiment.sweep`` / ``Experiment.runs`` — RunSet-returning sugar (runset-api).
+"""``Experiment.sweep`` / ``Experiment.runset`` — RunSet-returning sugar (runset-api).
 
 ``sweep`` reuses the exact seeding path of ``Experiment.run`` (idempotent
-content-addressed ``add_runs``) and the same cross-layer ``WorkflowExecutor``
-seam for the workflow association; the only new behaviour is the returned
-:class:`~molexp.workspace.runset.RunSet` and the dict→GridSpace upgrade.
+``_seed_missing_runs`` over ``definition_hash``) and the same cross-layer
+``WorkflowExecutor`` seam for the workflow association; the only new behaviour
+is the returned :class:`~molexp.workspace.runset.RunSet` and the
+dict→GridSpace upgrade.
 """
 
 from __future__ import annotations
@@ -14,7 +15,6 @@ import pytest
 
 import molexp as me
 from molexp.workflow import Workflow, WorkflowCompiler, default_binding_registry
-from molexp.workspace import GridSpace
 from molexp.workspace.runset import RunSet
 
 
@@ -48,7 +48,9 @@ class TestSweep:
         compiled = WorkflowCompiler().compile(_build_wf())
         first = experiment.sweep(compiled, {"lr": [0.1, 0.2]})
         second = experiment.sweep(compiled, {"lr": [0.1, 0.2]})
-        assert sorted(r.id for r in first) == sorted(r.id for r in second)
+        # v2: sweep is a seeding verb — a repeat declaration adds no new runs.
+        assert len(first) == 2
+        assert len(second) == 0
         assert len(experiment.list_runs()) == 2
 
     def test_sweep_scalar_axis_fails_fast(self, experiment) -> None:
@@ -65,15 +67,3 @@ class TestSweep:
         compiled = WorkflowCompiler().compile(_build_wf())
         experiment.sweep(compiled, {"lr": [0.1]})
         assert default_binding_registry.for_experiment(experiment) is compiled
-
-
-class TestRuns:
-    def test_runs_wraps_existing_runs(self, experiment) -> None:
-        experiment.add_runs(GridSpace({"lr": [0.1, 0.2]}))
-        rs = experiment.runs()
-        assert isinstance(rs, RunSet)
-        assert len(rs) == 2
-        assert {r.id for r in rs} == {r.id for r in experiment.list_runs()}
-
-    def test_runs_empty_experiment(self, experiment) -> None:
-        assert len(experiment.runs()) == 0

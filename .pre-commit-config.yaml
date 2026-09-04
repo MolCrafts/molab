@@ -30,10 +30,11 @@ repos:
     hooks:
       # Matches the ci.yml lint job and mol_project.build.check. Whole-tree
       # (not per-file): a type error is usually raised by the *caller* of the
-      # file you edited.
+      # file you edited. --frozen: do not re-resolve; path molrs vs molpy's
+      # git molrs currently conflict in the python>=3.14 lock split.
       - id: ty
         name: "ty check src/"
-        entry: uv run ty check src/
+        entry: uv run --frozen ty check src/
         language: system
         pass_filenames: false
         files: '\.py$'

@@ -17,8 +17,10 @@ import pytest
 
 from molexp.git import ensure_object_db
 from molexp.workspace import Workspace
+from molexp.workspace.domain import ExecutionMode
 from molexp.workspace.git_projection import (
     checkpoint,
+    checkpoint_run,
     default_object_db_path,
     materialize_run,
 )
@@ -53,20 +55,19 @@ class TestCheckpointRunOnSettle:
         await _enable_projection(ws)
 
         with run.start() as ctx:
-            ctx.register_artifact({"v": 1}, name="m.json")
-        assert _commits(ws, run.id) == 1  # one settled execution → one commit
+            ctx.emit_artifact({"v": 1}, name="m.json")
+        await checkpoint_run(run)  # one settled execution → one commit
+        assert _commits(ws, run.id) == 1
 
         # N high-frequency workspace writes that are NOT execution settles.
-        for _ in range(5):
-            from molexp.workspace.run_heartbeat import touch_alive
-
-            touch_alive(run)
-        ws.add_project("noise")  # an add_folder write
+        for name in ("noise-a", "noise-b", "noise-c"):
+            ws.add_project(name)  # add_folder writes
         run.experiment.add_run(params={"seed": 99})  # another entity write
         assert _commits(ws, run.id) == 1  # unchanged — no settle, no commit
 
-        with run.start():  # a second execution (rerun) settles
+        with run.start(mode=ExecutionMode.RERUN):  # a second execution settles
             pass
+        await checkpoint_run(run)
         assert _commits(ws, run.id) == 2  # exactly +1 per settled execution
 
     async def test_failed_execution_is_a_settled_commit(self, tmp_path):
@@ -74,6 +75,7 @@ class TestCheckpointRunOnSettle:
         await _enable_projection(ws)
         with pytest.raises(ValueError, match="boom"), run.start():
             raise ValueError("boom")
+        await checkpoint_run(run)
         assert _commits(ws, run.id) == 1  # FAILED is a settled terminal → one commit
 
     async def test_no_checkpoint_until_projection_enabled(self, tmp_path):
@@ -89,7 +91,7 @@ class TestMaterializeRun:
     async def test_materialize_run_into_scratch_not_live_workspace(self, tmp_path):
         ws, run = _new_run(tmp_path / "lab")
         with run.start() as ctx:
-            ctx.register_artifact({"loss": 0.1}, name="metrics.json")
+            ctx.emit_artifact({"loss": 0.1}, name="metrics.json")
         await checkpoint(ws)  # build refs/molexp/runs/<id>
 
         scratch = tmp_path / "scratch"

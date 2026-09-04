@@ -72,18 +72,6 @@ class TestWorkflowCompilerCompile:
         assert compiled.binding.workflow_id == compiled.workflow_id
 
     @pytest.mark.unit
-    def test_compiler_compiles_a_workflow(self):
-        wf = Workflow(name="authored")
-
-        @wf.task
-        async def ping(ctx):
-            return 1
-
-        compiled = WorkflowCompiler().compile(wf)
-        assert compiled.name == "authored"
-        assert "ping" in compiled.registration_by_name
-
-    @pytest.mark.unit
     def test_compiler_is_not_a_workflow(self):
         assert not issubclass(WorkflowCompiler, Workflow)
         assert not hasattr(Workflow, "compile")

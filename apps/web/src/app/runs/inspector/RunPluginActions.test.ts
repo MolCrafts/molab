@@ -30,22 +30,25 @@ describe("RunPluginActions", () => {
       projectName: "Project 1",
       experimentId: "experiment-1",
       experimentName: "Experiment 1",
-      status: "running",
-      backend: "molq",
-      cluster: "dardel",
-      scheduler: "slurm",
-      target: "gpu",
-      profile: "dardel-gpu",
+      definitionHash: "sha256:definition",
+      experimentRevisionId: "revision-1",
+      inputAssetIds: [],
+      targetHint: "gpu",
+      statusSummary: { total: 1, active: 1, notStarted: false, byStatus: { running: 1 } },
       parameters: {},
       createdAt: "2026-09-01T10:00:00Z",
-      finishedAt: null,
-      executionCount: 0,
-      latestSchedulerJobId: "1234",
-      executions: [],
+      executions: [{
+        executionId: "exec-1", runId: "run-1", mode: "initial", status: "running",
+        createdAt: "2026-09-01T10:00:00Z",
+        startedAt: "2026-09-01T10:00:00Z", finishedAt: null, durationSeconds: null,
+        basedOnExecutionId: null, checkpointArtifactId: null,
+        schedulerJobId: "1234", backend: "molq",
+        backendMetadata: { cluster: "dardel", cluster_name: "dardel", scheduler: "slurm", scheduler_job_id: "1234" },
+      }],
     };
 
     const summary = runSummaryForPluginMatching(row);
-    expect(summary.executorInfo).toMatchObject({
+    expect(summary.executionHistory[0]?.executor).toMatchObject({
       backend: "molq",
       cluster: "dardel",
       scheduler: "slurm",

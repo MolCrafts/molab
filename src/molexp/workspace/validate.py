@@ -46,7 +46,9 @@ RUN_DIR_PREFIX = "run-"
 #: Structural container subdirs per level — directories that hold children or
 #: payload rather than being Concepts themselves, so they carry no meta.json.
 _CONTAINERS: dict[str, frozenset[str]] = {
-    "workspace": frozenset({"projects", "assets", "cache", "knowledges"}),
+    "workspace": frozenset(
+        {"projects", "assets", "cache", "knowledges", "provenance", "index", "content"}
+    ),
     "project": frozenset({"experiments", "assets", "cache", "knowledges"}),
     "experiment": frozenset({"runs", "assets", "cache", "knowledges"}),
     "run": frozenset(

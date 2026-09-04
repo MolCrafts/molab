@@ -3,7 +3,7 @@
 /* tslint:disable */
 /* eslint-disable */
 export type SwitchRequest = {
-    password: string;
     username: string;
+    password: string;
 };
 

@@ -27,7 +27,7 @@ class Params(BaseModel, Mapping[str, Any]):
 
     model_config = ConfigDict(extra="allow")
 
-    def __iter__(self) -> Iterator[str]:
+    def __iter__(self) -> Iterator[str]:  # ty: ignore[invalid-method-override]
         return iter(self.model_dump())
 
     def __len__(self) -> int:

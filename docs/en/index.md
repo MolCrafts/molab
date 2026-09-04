@@ -139,7 +139,7 @@ exp = ws.add_project("demo").add_experiment("sum")
 run = exp.add_run(params={"scale": 2.0})
 
 result = run.execute(wf)
-print(run.status, result.outputs["summarize"])  # succeeded 28.0
+print(run.executions[-1].status.value, result.outputs["summarize"])  # succeeded 28.0
 ```
 
 </section>
@@ -264,7 +264,7 @@ plugin channels.
   </a>
   <a href="architecture/plan-mode/">
     <strong>molmcp · capabilities</strong>
-    <em>Grounds the agent harness. PlanOrchestrator discovers the full toolchain through molmcp, then binds the minimal subset an experiment needs.</em>
+    <em>Grounds the agent harness. Plan discovers the full toolchain through molmcp, then binds the minimal subset an experiment needs.</em>
   </a>
   <a href="concept/plugins/">
     <strong>molvis · visualization</strong>
@@ -379,7 +379,7 @@ Common entry points you will reach for most often.
     <em>Grid-search parameters, execute in parallel, summarize with to_records().</em>
   </a>
   <a href="guide/plan-mode/">
-    <strong>PlanOrchestrator</strong>
+    <strong>Plan</strong>
     <em>Two-phase plan pipeline: interactive planning behind a review gate, then deterministic realization.</em>
   </a>
 </div>

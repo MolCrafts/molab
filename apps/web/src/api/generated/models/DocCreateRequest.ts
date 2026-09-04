@@ -3,8 +3,8 @@
 /* tslint:disable */
 /* eslint-disable */
 export type DocCreateRequest = {
-    body?: string;
     name: string;
+    body?: string;
     parentPath?: (string | null);
 };
 

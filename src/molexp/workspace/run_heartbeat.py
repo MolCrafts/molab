@@ -1,10 +1,11 @@
-"""Run-root ``alive`` file — ownership heartbeat by mtime, not JSON.
+"""Per-Execution ``alive`` heartbeat — ownership by mtime, not JSON.
 
-A live owner touches an empty file named :data:`ALIVE_NAME` at the run
-root every :data:`HEARTBEAT_INTERVAL_SECONDS`. Cross-host reapers treat
-the run as stale only when that file exists and its mtime is older than
-:data:`HEARTBEAT_STALE_SECONDS`. A missing file is **not** stale (the
-worker may still be starting, or an HPC job may not have claimed yet).
+A live owner touches an empty file named :data:`ALIVE_NAME` inside the
+physical Execution directory every :data:`HEARTBEAT_INTERVAL_SECONDS`.
+Cross-host reapers treat an Execution as stale only when that file exists
+and its mtime is older than :data:`HEARTBEAT_STALE_SECONDS`. A missing
+file is **not** stale (the worker may still be starting, or an HPC job may
+not have claimed yet).
 
 All I/O goes through :meth:`Folder._disk` (``FileSystem.touch`` /
 ``stat`` / ``remove``).
@@ -33,21 +34,20 @@ __all__ = [
 ]
 
 
-def _alive_path(run: Run) -> str:
+def _alive_path(run: Run, execution_id: str) -> str:
     fs = run._disk()
-    return fs.join(run.run_dir, ALIVE_NAME)
+    return fs.join(run.run_dir, "executions", execution_id, ALIVE_NAME)
 
 
-def touch_alive(run: Run) -> None:
-    """Create or refresh the empty run-root ``alive`` file (mtime heartbeat)."""
+def touch_alive(run: Run, execution_id: str) -> None:
+    """Create or refresh the empty per-Execution ``alive`` file."""
+    run._disk().touch(_alive_path(run, execution_id))
+
+
+def alive_mtime(run: Run, execution_id: str) -> float | None:
+    """Return the Execution's ``alive`` mtime, or ``None`` if it does not exist."""
     fs = run._disk()
-    fs.touch(_alive_path(run))
-
-
-def alive_mtime(run: Run) -> float | None:
-    """Return the ``alive`` file mtime, or ``None`` if it does not exist."""
-    fs = run._disk()
-    path = _alive_path(run)
+    path = _alive_path(run, execution_id)
     try:
         if not fs.exists(path):
             return None
@@ -56,17 +56,17 @@ def alive_mtime(run: Run) -> float | None:
         return None
 
 
-def is_alive_stale(run: Run) -> bool:
-    """Whether ``alive`` exists and is older than :data:`HEARTBEAT_STALE_SECONDS`.
+def is_alive_stale(run: Run, execution_id: str) -> bool:
+    """Whether the Execution's ``alive`` exists and is older than the threshold.
 
     A missing file is **not** stale.
     """
-    mtime = alive_mtime(run)
+    mtime = alive_mtime(run, execution_id)
     if mtime is None:
         return False
     return (time.time() - mtime) > HEARTBEAT_STALE_SECONDS
 
 
-def unlink_alive(run: Run) -> None:
-    """Remove the ``alive`` file; missing is a no-op."""
-    run._disk().remove(_alive_path(run))
+def unlink_alive(run: Run, execution_id: str) -> None:
+    """Remove the Execution's ``alive`` file; missing is a no-op."""
+    run._disk().remove(_alive_path(run, execution_id))

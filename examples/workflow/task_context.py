@@ -68,15 +68,16 @@ async def main() -> None:
     run = exp.list_runs()[0]
     cfg = ProfileConfig({"scale": 10}, name="smoke")
     with run.start(profile_config=cfg) as ctx:
+        execution_id = ctx.id
         result = await WorkflowRuntime().execute(compiled, run_context=ctx)
         # Workspace helpers are driver-side, on the RunContext.
         ctx.set_result("record", result.outputs["record"])
-        ctx.register_artifact({"value": result.outputs["record"]}, name="record.json")
-        ctx.log("record").append(f"value={result.outputs['record']}")
+        ctx.emit_artifact({"value": result.outputs["record"]}, name="record.json")
+        ctx.log("runtime").append(f"value={result.outputs['record']}")
 
     print(f"status:  {result.status}")
     print(f"outputs: {result.outputs}")
-    print(f"result:  {run.get_result('record')}")
+    print(f"result:  {run.get_result('record', execution_id=execution_id)}")
 
 
 if __name__ == "__main__":

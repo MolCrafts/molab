@@ -6,21 +6,21 @@
  * One MCP server row (no secret values — names/refs only).
  */
 export type McpServerResponse = {
-    args: Array<string>;
-    auth?: (Record<string, any> | null);
-    command: (string | null);
-    env?: Record<string, string>;
-    envKeys: Array<string>;
-    headerKeys: Array<string>;
-    invalidReason: string;
-    knowledgeSources?: Array<string>;
     name: string;
     scope: string;
-    secretRefs: Array<string>;
-    shadowed: boolean;
     transport: string;
-    unresolvedSecrets: Array<string>;
+    command: (string | null);
+    args: Array<string>;
     url: (string | null);
+    envKeys: Array<string>;
+    env?: Record<string, string>;
+    headerKeys: Array<string>;
+    secretRefs: Array<string>;
+    unresolvedSecrets: Array<string>;
+    shadowed: boolean;
     valid: boolean;
+    invalidReason: string;
+    auth?: (Record<string, any> | null);
+    knowledgeSources?: Array<string>;
 };
 

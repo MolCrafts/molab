@@ -76,10 +76,6 @@ class TestPlanFormValidatorWellFormed:
         assert report.passed is True
         assert report.violations == []
 
-    def test_target_kind_is_experiment_plan(self) -> None:
-        report = PlanFormValidator.validate(_plan())
-        assert report.target_kind == "experiment_plan"
-
     def test_target_id_prefers_spec_id(self) -> None:
         report = PlanFormValidator.validate(_plan())
         assert report.target_id == "exp-1"
@@ -162,10 +158,3 @@ class TestNeverRaises:
         assert report.passed is False
         assert "empty_board" in _codes(report)
         assert "spec_incomplete" in _codes(report)
-
-
-class TestExportedFromValidatorsPackage:
-    def test_symbol_is_re_exported(self) -> None:
-        from molexp.harness.validators import PlanFormValidator as Exported
-
-        assert Exported is PlanFormValidator

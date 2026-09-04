@@ -27,14 +27,14 @@ __all__ = [
 _SOURCE_PREVIEW_LINES = 120
 
 
-def build_review_pack(run: Run, intent: str) -> ReviewPack:
+def build_review_pack(run: Run, execution_id: str, intent: str) -> ReviewPack:
     """Return a :class:`ReviewPack` for the gated content of *intent*.
 
     Prefer the latest ``review_pack`` artifact written by StepAuditLoop; fall
     back to a synthesised pack from legacy previews. Never raises on missing
     artifacts.
     """
-    store = _store(run)
+    store = _store(run, execution_id)
     ref = store.latest_by_kind("review_pack")
     if ref is not None:
         try:
@@ -80,23 +80,22 @@ def render_review_pack(pack: ReviewPack) -> str:
     return text or "(empty review pack)"
 
 
-def render_approval_preview(run: Run, intent: str) -> str:
+def render_approval_preview(run: Run, execution_id: str, intent: str) -> str:
     """Render the text an operator should review before deciding *intent*.
 
     Thin wrapper: :func:`render_review_pack` over :func:`build_review_pack`.
     Best-effort — missing artifacts yield a stated absence, never an exception.
     """
     try:
-        return render_review_pack(build_review_pack(run, intent))
+        return render_review_pack(build_review_pack(run, execution_id, intent))
     except Exception:
         return "(preview unavailable)"
 
 
-def _store(run: Run) -> FileArtifactStore:
+def _store(run: Run, execution_id: str) -> FileArtifactStore:
     from molexp.harness.store.file_artifact_store import FileArtifactStore
-    from molexp.harness.store.paths import harness_artifact_root
 
-    return FileArtifactStore(root=harness_artifact_root(run.run_dir))
+    return FileArtifactStore.open_execution(run, execution_id)
 
 
 def _synthetic_spec_pack(store: FileArtifactStore) -> ReviewPack:

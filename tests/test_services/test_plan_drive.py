@@ -28,6 +28,7 @@ class _FakePlan(Plan):
         user_input: str,
         gateway: object,
         capability_registry: object = None,
+        execution_context: object = None,
     ) -> _FakeResult:
         self.calls.append(
             {
@@ -54,7 +55,7 @@ class TestPlanExecute:
         plan = _FakePlan()
         result = asyncio.run(plan.execute(run=run, user_input="x", gateway=object()))
         assert isinstance(result, _FakeResult)
-        assert run.status == "succeeded"
+        assert run.executions[-1].status.value == "succeeded"
         assert plan.calls[0]["user_input"] == "x"
 
     def test_failed_pipeline_marks_run_failed_and_propagates(self, run) -> None:
@@ -63,11 +64,11 @@ class TestPlanExecute:
         plan = _FakePlan(error=StageExecutionError("stage 'x' exploded"))
         with pytest.raises(StageExecutionError):
             asyncio.run(plan.execute(run=run, user_input="x", gateway=object()))
-        assert run.status == "failed"
+        assert run.executions[-1].status.value == "failed"
 
     def test_reentry_on_a_succeeded_run_is_allowed(self, run) -> None:
         plan = _FakePlan()
         asyncio.run(plan.execute(run=run, user_input="x", gateway=object()))
         asyncio.run(plan.execute(run=run, user_input="x", gateway=object()))
-        assert run.status == "succeeded"
+        assert run.executions[-1].status.value == "succeeded"
         assert len(plan.calls) == 2

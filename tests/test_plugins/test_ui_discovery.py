@@ -93,31 +93,6 @@ class TestDiscoverUiPluginDirs:
 
         assert discover_ui_plugin_dirs() == {"callable": tmp_path}
 
-    def test_callable_raising_is_isolated(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        tmp_path: Path,
-        warnings: list[str],
-    ) -> None:
-        good_dir = tmp_path / "good"
-        good_dir.mkdir()
-
-        def _explode() -> Path:
-            raise RuntimeError("boom")
-
-        _install_fake_eps(
-            monkeypatch,
-            [
-                _FakeEntryPoint("bad", lambda: _explode),
-                _FakeEntryPoint("good", lambda: good_dir),
-            ],
-        )
-
-        result = discover_ui_plugin_dirs()
-
-        assert result == {"good": good_dir}
-        assert any("bad" in msg for msg in warnings)
-
     def test_non_directory_path_is_filtered(
         self,
         monkeypatch: pytest.MonkeyPatch,
@@ -170,36 +145,3 @@ class TestDiscoverUiPluginDirs:
         _install_fake_eps(monkeypatch, [])
 
         assert discover_ui_plugin_dirs() == {}
-
-    def test_entry_point_load_failure_is_isolated(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        tmp_path: Path,
-        warnings: list[str],
-    ) -> None:
-        good_dir = tmp_path / "good"
-        good_dir.mkdir()
-
-        def _import_boom():
-            raise ImportError("missing dep")
-
-        _install_fake_eps(
-            monkeypatch,
-            [
-                _FakeEntryPoint("bad", _import_boom),
-                _FakeEntryPoint("good", lambda: good_dir),
-            ],
-        )
-
-        result = discover_ui_plugin_dirs()
-
-        assert result == {"good": good_dir}
-        assert any("bad" in msg for msg in warnings)
-
-    def test_module_does_not_define_uiplugin_class(self) -> None:
-        # Design invariant: the Python side has zero UI semantics — no
-        # ``UiPlugin`` dataclass, no ``api_version`` field. UI semantics live
-        # in the TS-side ``manifest.json``.
-        import molexp.plugins.ui as ui_mod
-
-        assert not hasattr(ui_mod, "UiPlugin")

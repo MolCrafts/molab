@@ -48,11 +48,12 @@ async def main() -> None:
     # Drive the seeded run in-process (`molexp run` does this for you).
     run = experiment.list_runs()[0]
     with run.start() as ctx:
+        execution_id = ctx.id
         result = await WorkflowRuntime().execute(compiled, run_context=ctx)
         ctx.set_result("final_loss", result.outputs["train"]["final_loss"])
 
     print(f"status:     {result.status}")
-    print(f"final_loss: {run.get_result('final_loss')}")
+    print(f"final_loss: {run.get_result('final_loss', execution_id=execution_id)}")
     print(f"run_dir:    {run.run_dir}")
 
 

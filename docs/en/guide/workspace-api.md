@@ -76,8 +76,8 @@ Once a workspace exists, its core properties are straightforward. `ws.id` and `w
 Projects are created through the workspace:
 
 ```python
-project = ws.project("QM9")          # fluent create-or-get
-project = ws.add_project("QM9")      # same operation, explicit spelling
+project = ws.add_project("QM9")      # create-or-get (idempotent on name)
+project = ws.project("QM9")          # strict getter — must already exist
 ```
 
 This operation is idempotent by project slug. If the corresponding directory already exists, Molexp loads it. If it does not exist, Molexp creates a new `Project`, writes `project.json`, and returns it. Repeated calls with the same project name inside one process return the same in-memory object, which lets later code keep bound state on child objects without accidentally duplicating handles.
@@ -91,7 +91,7 @@ Project lookup works in three styles. `ws.get_project(name)` is the strict gette
 Experiments are created through a project:
 
 ```python
-exp = project.experiment(            # fluent create-or-get (add_experiment also works)
+exp = project.add_experiment(        # create-or-get (idempotent on name)
     "baseline",
     params={"lr": 1e-3},
     n_replicas=3,
@@ -120,7 +120,7 @@ class TrainTask(Task):
 
 compiled = WorkflowCompiler().compile(Workflow(name="train").add(TrainTask()))
 
-exp = ws.project("demo").experiment("baseline").run(compiled, params={"lr": [1e-3, 1e-4]})
+exp = ws.add_project("demo").add_experiment("baseline").run(compiled, params={"lr": [1e-3, 1e-4]})
 ```
 
 `params` is the per-run sweep — a plain `{axis: [values]}` grid (expanded as a Cartesian product) or any `ParamSpace`. The call materializes one content-addressed `Run` per cell (idempotent: re-declaring the same sweep adds no duplicates), binds the compiled workflow to the experiment in `molexp.workflow.default_binding_registry` (an explicit, injectable `{experiment_id → CompiledWorkflow}` store that replaced the old class-level registry), records the workflow's graph IR on the experiment for the server/UI, and registers the workspace for CLI discovery. Read the binding back with `default_binding_registry.for_experiment(experiment)` from anywhere in the same process. Re-declaring replaces the earlier binding; the registry is process-local, so cluster workers re-establish it by re-importing the user script.
@@ -210,7 +210,7 @@ random_search = UniformSpace({"lr": [1e-3, 5e-4, 1e-4]}, n_samples=10, seed=42)
 These objects are iterable generators of parameter dictionaries, and `Experiment.run(workflow, params=...)` accepts any of them directly — one content-addressed `Run` per cell:
 
 ```python
-exp = project.experiment("sweep").run(compiled, params=grid)
+exp = project.add_experiment("sweep").run(compiled, params=grid)
 ```
 
 A plain `{axis: [values]}` mapping is shorthand for a `GridSpace`. Because the run ids derive from the cell parameters, re-materializing the same space is a no-op.
@@ -224,12 +224,17 @@ import molexp as me
 from molexp.workflow import Workflow, WorkflowCompiler
 
 wf = Workflow(name="train")
-# ... @wf.task definitions ...
+
+
+@wf.task
+def train(lr: float) -> float:
+    return lr
+
 
 (
     me.Workspace("./lab", name="lab")
-    .project("demo")
-    .experiment("baseline")
+    .add_project("demo")
+    .add_experiment("baseline")
     .run(WorkflowCompiler().compile(wf), params={"lr": [1e-3]})
 )
 ```
@@ -257,17 +262,18 @@ async def compute(ctx: TaskContext, lr: float, scale: float = 1.0) -> float:
 compiled = WorkflowCompiler().compile(wf)
 
 ws = me.Workspace("./lab", name="lab")
-exp = ws.project("walkthrough").experiment("baseline").run(compiled, params={"lr": [1e-3]})
+exp = ws.add_project("walkthrough").add_experiment("baseline").run(compiled, params={"lr": [1e-3]})
 
 run = exp.list_runs()[0]
 with run.start() as ctx:
+    execution_id = ctx.id
     result = await WorkflowRuntime().execute(compiled, run_context=ctx)
     ctx.set_result("scaled_lr", result.outputs["compute"])
-    ctx.register_artifact({"scaled_lr": result.outputs["compute"]}, name="metrics.json")
+    ctx.emit_artifact({"scaled_lr": result.outputs["compute"]}, name="metrics.json")
 
-print(run.status)
-print(run.execution_history[-1].status)
-print(run.get_result("scaled_lr"))
+print(run.executions[-1].status.value)
+print(run.executions[-1].status.value)
+print(run.get_result("scaled_lr", execution_id=execution_id))
 ```
 
 The important part is not the arithmetic. It is the shape of the interaction. A compiled workflow remains reusable. The experiment gives that workflow a stable scientific identity. The run gives one execution attempt a stable filesystem location. `RunContext` bridges the two during execution so that results, artifacts, profile data, and failures are recorded as part of the same durable object graph.

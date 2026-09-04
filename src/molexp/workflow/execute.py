@@ -40,7 +40,8 @@ from __future__ import annotations
 import asyncio
 from typing import TYPE_CHECKING
 
-from molexp.workspace.run import RETRYABLE_STATUSES, RunStatus, set_run_executor
+from molexp.workspace.domain import ExecutionMode, ExecutionStatus
+from molexp.workspace.run import set_run_executor
 
 from ._engine.persistence import seed_from_execution
 from ._engine.runtime import WorkflowRuntime
@@ -89,61 +90,65 @@ def _ensure_compiled(workflow: object) -> CompiledWorkflow:
     )
 
 
-def _select_verb(run: Run, *, resume: bool, rerun: bool) -> tuple[str | None, dict | None]:
-    """Map the run's status (+ ``resume``/``rerun``) to ``(execution_id, seed_outputs)``.
-
-    ``(None, None)`` means a fresh attempt (first run / explicit rerun); a
-    non-``None`` execution id reopens that attempt with its completed nodes
-    seeded. Raises :class:`RunNotExecutableError` outside the verb domain.
-    """
-    status = run.status
-    if status == RunStatus.RUNNING.value:
+def _select_verb(
+    run: Run,
+    *,
+    resume: bool,
+    rerun: bool,
+    checkpoint_artifact_id: str | None,
+) -> tuple[ExecutionMode, str | None, dict | None]:
+    """Select a new Execution; an existing attempt is never reopened."""
+    executions = run.executions
+    if not executions:
+        if resume or rerun:
+            raise RunNotExecutableError(
+                f"run {run.id} has no prior Execution; start it without a retry verb"
+            )
+        return ExecutionMode.INITIAL, None, None
+    if not (resume or rerun):
         raise RunNotExecutableError(
-            f"run {run.id} is running — one Run carries one ownership stamp and "
-            f"one status, so a second concurrent execution is never started. "
-            f"cancel it first (run.cancel() / `molexp runs cancel`)."
+            f"run {run.id} already has {len(executions)} Execution(s); choose rerun=True "
+            "or resume=True explicitly"
         )
-    if status == RunStatus.SUCCEEDED.value:
+    predecessor = executions[-1]
+    if predecessor.status in {
+        ExecutionStatus.QUEUED,
+        ExecutionStatus.RUNNING,
+        ExecutionStatus.FINALIZING,
+    }:
         raise RunNotExecutableError(
-            f"run {run.id} already succeeded — read results via run.get_result(...) "
-            f"or result.outputs. Re-executing a succeeded run is not a molexp "
-            f"operation; declare a run with different params instead."
+            f"latest Execution {predecessor.id} is still {predecessor.status.value}; "
+            "cancel it first, or select a terminal predecessor explicitly before retrying"
         )
-    if status in RETRYABLE_STATUSES:
-        if resume:
-            # resume: reopen the last execution, seed its completed nodes. The
-            # no-fallback semantics live in ``seed_from_execution``.
-            return seed_from_execution(run)
-        if rerun:
-            return None, None
+    if predecessor.status is ExecutionStatus.SUCCEEDED:
         raise RunNotExecutableError(
-            f"run {run.id} is {status!r} — retrying is an explicit verb: pass "
-            f"resume=True to reopen the last execution (completed nodes are "
-            f"seeded) or rerun=True for a fresh attempt from the top "
-            f"(add fresh=True to also bypass cache reads). CLI twins: "
-            f"`molexp run --resume` / `molexp run --rerun [--fresh]`."
+            f"run {run.id} is succeeded — done is done; start a new Run instead of retrying"
         )
-    if resume or rerun:
-        # pending — plain run's job; resume/rerun never start a first attempt.
-        verb = "resume" if resume else "rerun"
+    if rerun:
+        return ExecutionMode.RERUN, predecessor.id, None
+    if checkpoint_artifact_id is None:
         raise RunNotExecutableError(
-            f"run {run.id} is {status!r} — {verb} applies to failed/cancelled "
-            f"runs only; a pending run is started by a plain execute "
-            f"(no resume/rerun flag)."
+            "resume requires checkpoint_artifact_id; a workflow snapshot alone is "
+            "execution evidence, not a resumable data Artifact"
         )
-    return None, None
+    _prior_id, seeds = seed_from_execution(run)
+    return ExecutionMode.RESUME, predecessor.id, seeds
 
 
 def _raise_if_failed(run: Run, result: WorkflowResult) -> WorkflowResult:
     if result.status == "succeeded":
         return result
-    error = getattr(run.metadata, "error", None)
-    detail = f"{error.type}: {error.message}" if error is not None else "see the run's error logs"
+    execution = next(
+        (item for item in run.executions if item.id == getattr(result, "execution_id", None)),
+        None,
+    )
+    error = execution.error if execution is not None else None
+    detail = str(error.get("message")) if error is not None else "see Execution evidence"
     exec_id = getattr(result, "execution_id", None)
     error_txt = (
-        f"{run.run_dir}/executions/{exec_id}/error.txt"
+        f"{run.run_dir}/executions/{exec_id}/traceback.txt"
         if exec_id
-        else f"{run.run_dir}/executions/<exec_id>/error.txt"
+        else f"{run.run_dir}/executions/<exec_id>/traceback.txt"
     )
     raise RunFailedError(
         f"run {run.id} failed — {detail} "
@@ -161,6 +166,7 @@ async def aexecute_run(
     rerun: bool = False,
     fresh: bool = False,
     profile_config: ProfileConfig | None = None,
+    checkpoint_artifact_id: str | None = None,
 ) -> WorkflowResult:
     """Async one-step tracked execution. See :func:`execute_run`."""
     if resume and rerun:
@@ -174,12 +180,27 @@ async def aexecute_run(
             "requires rerun=True (mirroring `molexp run --rerun --fresh`)."
         )
     compiled = _ensure_compiled(workflow)
-    execution_id, seed_outputs = _select_verb(run, resume=resume, rerun=rerun)
-    with run.start(profile_config, execution_id=execution_id) as ctx:
+    mode, predecessor_id, seed_outputs = _select_verb(
+        run,
+        resume=resume,
+        rerun=rerun,
+        checkpoint_artifact_id=checkpoint_artifact_id,
+    )
+    if seed_outputs and predecessor_id is not None:
+        from ._engine.persistence import filter_resume_seeds
+
+        seed_outputs = filter_resume_seeds(
+            run.run_dir, predecessor_id, seed_outputs, compiled.snapshots
+        )
+    with run.start(
+        profile_config,
+        mode=mode,
+        based_on_execution_id=predecessor_id,
+        checkpoint_artifact_id=checkpoint_artifact_id,
+    ) as ctx:
         result = await WorkflowRuntime().execute(
             compiled,
             run_context=ctx,
-            execution_id=execution_id,
             seed_outputs=seed_outputs,
             bypass_cache=fresh,
         )
@@ -194,6 +215,7 @@ def execute_run(
     rerun: bool = False,
     fresh: bool = False,
     profile_config: ProfileConfig | None = None,
+    checkpoint_artifact_id: str | None = None,
 ) -> WorkflowResult:
     """Execute *workflow* against *run* in one step and return the result.
 
@@ -237,7 +259,13 @@ def execute_run(
         )
     return asyncio.run(
         aexecute_run(
-            workflow, run, resume=resume, rerun=rerun, fresh=fresh, profile_config=profile_config
+            workflow,
+            run,
+            resume=resume,
+            rerun=rerun,
+            fresh=fresh,
+            profile_config=profile_config,
+            checkpoint_artifact_id=checkpoint_artifact_id,
         )
     )
 
@@ -277,9 +305,15 @@ class _WorkspaceRunExecutor:
         resume: bool = False,
         rerun: bool = False,
         fresh: bool = False,
+        checkpoint_artifact_id: str | None = None,
     ) -> object:
         return execute_run(
-            self._resolve(run, workflow), run, resume=resume, rerun=rerun, fresh=fresh
+            self._resolve(run, workflow),
+            run,
+            resume=resume,
+            rerun=rerun,
+            fresh=fresh,
+            checkpoint_artifact_id=checkpoint_artifact_id,
         )
 
     async def aexecute(
@@ -290,9 +324,15 @@ class _WorkspaceRunExecutor:
         resume: bool = False,
         rerun: bool = False,
         fresh: bool = False,
+        checkpoint_artifact_id: str | None = None,
     ) -> object:
         return await aexecute_run(
-            self._resolve(run, workflow), run, resume=resume, rerun=rerun, fresh=fresh
+            self._resolve(run, workflow),
+            run,
+            resume=resume,
+            rerun=rerun,
+            fresh=fresh,
+            checkpoint_artifact_id=checkpoint_artifact_id,
         )
 
 

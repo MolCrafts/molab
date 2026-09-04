@@ -323,6 +323,11 @@ const TurnAnswer = ({
       (typeof (payload.plan as { run_id?: string } | undefined)?.run_id === "string"
         ? String((payload.plan as { run_id: string }).run_id)
         : "");
+    const executionId =
+      (typeof payload.execution_id === "string" && payload.execution_id) ||
+      (typeof (payload.plan as { execution_id?: string } | undefined)?.execution_id === "string"
+        ? String((payload.plan as { execution_id: string }).execution_id)
+        : null);
 
     return (
       <div className="space-y-3">
@@ -335,7 +340,12 @@ const TurnAnswer = ({
             <MarkdownContent text={bodyMd} />
           </div>
         ) : projectId && experimentId && runId ? (
-          <PlanDocumentCard projectId={projectId} experimentId={experimentId} runId={runId} />
+          <PlanDocumentCard
+            projectId={projectId}
+            experimentId={experimentId}
+            runId={runId}
+            executionId={executionId}
+          />
         ) : (
           <p className="text-body-lg text-muted-foreground">Plan document unavailable.</p>
         )}

@@ -3,12 +3,12 @@
 /* tslint:disable */
 /* eslint-disable */
 export type WorkspaceInfoResponse = {
+    root: string;
+    projectCount: number;
     assetCount: number;
+    warnings?: Array<string>;
     connected?: (boolean | null);
     indexed?: (boolean | null);
-    projectCount: number;
     ready?: (boolean | null);
-    root: string;
-    warnings?: Array<string>;
 };
 

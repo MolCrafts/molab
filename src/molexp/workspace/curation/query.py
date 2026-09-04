@@ -2,17 +2,20 @@
 
 ``find_asset_by_hash`` and ``aggregate_assets_by_kind`` are read-only
 compositions over the authoritative on-disk manifests (``scan.scan_assets``)
-and per-scope ``AssetsView``. A directly-registered asset (e.g. an imported
-``DataAsset``) is recorded as ``assets/<id>/asset.json`` and the scanner reads
-both that record and the per-scope ``assets.json``.
+and per-scope ``AssetsView``, plus the provenance-indexed emitted ``Artifact``
+records. A directly-registered asset (e.g. an imported ``DataAsset``) is
+recorded as ``assets/<id>/asset.json`` and the scanner reads both that record
+and the per-scope ``assets.json``; run-emitted artifacts are read from the
+provenance index.
 """
 
 from __future__ import annotations
 
 from collections import Counter
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, cast
 
 from ..assets import scan
+from ._assets import artifact_kind, iter_emitted_artifacts, run_asset_scopes, scope_matches
 
 if TYPE_CHECKING:
     from molexp.workspace.assets.base import Asset
@@ -49,7 +52,8 @@ def find_asset_by_hash(workspace: Workspace, content_hash: str) -> Asset | None:
 def aggregate_assets_by_kind(scope: _AssetScope, *, recursive: bool = False) -> dict[str, int]:
     """Count the assets in *scope* keyed by their ``kind``.
 
-    Composes ``scope.assets.query`` (no rebuild). Read-only.
+    Composes ``scope.assets.query`` (no rebuild) for imported data assets and
+    adds run-emitted artifacts from the provenance index. Read-only.
 
     Args:
         scope: Any workspace entity exposing ``.assets`` (Workspace / Project /
@@ -62,4 +66,15 @@ def aggregate_assets_by_kind(scope: _AssetScope, *, recursive: bool = False) -> 
     # ``kind`` is the discriminated-union tag on every concrete asset subclass;
     # the base ``Asset`` query() returns doesn't declare it (repo-wide pattern).
     counts: Counter[str] = Counter(asset.kind for asset in scope.assets.query(recursive=recursive))
+
+    workspace = cast("Workspace", getattr(scope, "workspace", scope))
+    target_scope = getattr(scope, "scope", None)
+    if target_scope is not None:
+        scopes = run_asset_scopes(workspace)
+        for artifact in iter_emitted_artifacts(workspace):
+            asset_scope = scopes.get(artifact.run_id)
+            if asset_scope is None:
+                continue
+            if scope_matches(asset_scope, target_scope, recursive):
+                counts[artifact_kind(artifact)] += 1
     return dict(counts)

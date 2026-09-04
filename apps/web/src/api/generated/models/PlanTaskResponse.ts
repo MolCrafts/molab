@@ -6,17 +6,17 @@
  * One background plan task's current state (UI polls this).
  */
 export type PlanTaskResponse = {
-    createdAt: string;
-    draftPreview: string;
-    error?: (string | null);
-    execute?: boolean;
-    experimentId: string;
-    model: string;
-    projectId: string;
-    recordErrors?: Array<string>;
-    runId: string;
-    status: string;
     taskId: string;
+    runId: string;
+    projectId: string;
+    experimentId: string;
+    status: string;
+    createdAt: string;
+    model: string;
+    draftPreview: string;
     workflowPersisted?: boolean;
+    execute?: boolean;
+    error?: (string | null);
+    recordErrors?: Array<string>;
 };
 

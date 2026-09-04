@@ -4,18 +4,18 @@
 /* eslint-disable */
 import type { RunSummary } from './RunSummary';
 export type ExperimentResponse = {
-    created: string;
-    defaultTarget?: (string | null);
-    description?: string;
-    gitCommit?: (string | null);
     id: string;
-    name: string;
-    parameterSpace?: Record<string, any>;
-    planRunId?: (string | null);
     projectId: string;
-    runCount?: (number | null);
-    runs?: Array<RunSummary>;
+    name: string;
+    description?: string;
     workflow?: (string | null);
     workflowType?: (string | null);
+    planRunId?: (string | null);
+    gitCommit?: (string | null);
+    parameterSpace?: Record<string, any>;
+    defaultTarget?: (string | null);
+    created: string;
+    runCount?: (number | null);
+    runs?: Array<RunSummary>;
 };
 

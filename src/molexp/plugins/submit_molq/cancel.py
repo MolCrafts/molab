@@ -22,13 +22,12 @@ import signal
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
+from molexp.workspace.domain import ACTIVE_EXECUTION_STATUSES, ExecutionState
+
 from .metadata import normalize_executor_info
 
 if TYPE_CHECKING:
     from molexp.workspace.run import Run
-
-
-from molexp.workspace.run import TERMINAL_STATUSES as _TERMINAL_STATUSES
 
 
 @dataclass(frozen=True)
@@ -43,17 +42,25 @@ class CancelPlan:
     scheduler_job_id: str | None = None  # native scheduler id fallback
 
 
+def _active_execution(run: Run) -> ExecutionState | None:
+    """Newest non-terminal Execution realizing *run*, else ``None``."""
+    active = [ex for ex in run.executions if ex.status in ACTIVE_EXECUTION_STATUSES]
+    return active[-1] if active else None
+
+
 def classify(run: Run) -> CancelPlan:
     """Decide how to cancel *run* without executing anything.
 
-    Pure inspection — reads only metadata.  The returned plan tells the
-    caller exactly what to do (or why it can't).
+    Pure inspection — reads only Execution state.  The returned plan tells
+    the caller exactly what to do (or why it can't).
     """
-    status = str(run.status).lower()
-    if status in _TERMINAL_STATUSES:
-        return CancelPlan(kind="none", detail="already terminal")
+    active = _active_execution(run)
+    if active is None:
+        detail = "already terminal" if run.executions else "no active execution"
+        return CancelPlan(kind="none", detail=detail)
 
-    info = normalize_executor_info(run.metadata.executor_info, {})
+    executor = dict(active.executor or {})
+    info = normalize_executor_info(executor, {})
     if info.get("backend") == "molq" and (info.get("job_id") or info.get("scheduler_job_id")):
         return CancelPlan(
             kind="molq",
@@ -64,8 +71,8 @@ def classify(run: Run) -> CancelPlan:
             scheduler_job_id=info.get("scheduler_job_id"),
         )
 
-    pid = run.metadata.owner_pid
-    host = run.metadata.owner_host
+    pid = executor.get("pid")
+    host = executor.get("host")
     if pid is not None and host == platform.node():
         return CancelPlan(kind="local", detail=str(pid))
 
@@ -94,17 +101,21 @@ def try_cancel(
     if plan.kind == "none":
         return f"cannot cancel {run.id[:6]}: {plan.detail}"
 
+    active = _active_execution(run)
+    if active is None:  # pragma: no cover — classify() guarantees an active Execution here
+        return f"cannot cancel {run.id[:6]}: no active execution"
+
     if plan.kind == "local":
         pid = int(plan.detail)
         try:
             os.kill(pid, signal.SIGTERM)
         except ProcessLookupError:
-            # Already dead — flip status and move on.
-            run.cancel()
+            # Already dead — seal the attempt and move on.
+            run.cancel(active.id)
             return None
         except PermissionError:
             return f"cannot signal pid {pid}: permission denied"
-        run.cancel()
+        run.cancel(active.id)
         return None
 
     # plan.kind == "molq"
@@ -125,5 +136,5 @@ def try_cancel(
     finally:
         with contextlib.suppress(Exception):
             submitor.close()
-    run.cancel()
+    run.cancel(active.id)
     return None

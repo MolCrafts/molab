@@ -187,7 +187,7 @@ def list_workspace_runs(
     project_id: str | None = Query(default=None, alias="projectId"),
     experiment_id: str | None = Query(default=None, alias="experimentId"),
     backend: str | None = Query(default=None, description="Filter by executor backend"),
-    status: str | None = Query(default=None, description="Filter by run status"),
+    status: str | None = Query(default=None, description="Filter by contained Execution status"),
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=500, ge=1, le=2000),
     workspace=Depends(get_workspace),  # noqa: ANN001
@@ -214,9 +214,18 @@ def list_workspace_runs(
                     project_name=project_name,
                     experiment_name=experiment_name,
                 )
-                if backend and (row.backend or "").lower() != backend.lower():
+                if backend and not any(
+                    (execution.backend or "").lower() == backend.lower()
+                    for execution in row.executions
+                ):
                     continue
-                if status and row.status.lower() != status.lower():
+                if status and (
+                    (status.lower() == "not_started" and not row.statusSummary.notStarted)
+                    or (
+                        status.lower() != "not_started"
+                        and row.statusSummary.byStatus.get(status.lower(), 0) == 0
+                    )
+                ):
                     continue
                 rows.append(row)
 

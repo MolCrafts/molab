@@ -393,6 +393,7 @@ const _str = (value: unknown): string => (typeof value === "string" ? value : ""
  */
 export interface PlanRef {
   runId: string;
+  executionId: string | null;
   projectId: string;
   experimentId: string;
   title: string;
@@ -402,6 +403,7 @@ export interface PlanRef {
 
 export type PlanRefFallback = {
   runId?: string | null;
+  executionId?: string | null;
   projectId?: string | null;
   experimentId?: string | null;
   title?: string | null;
@@ -425,6 +427,13 @@ const _planRefFromPayload = (
   if (!runId || !projectId || !experimentId) return null;
   return {
     runId,
+    executionId:
+      _str(plan.execution_id) ||
+      _str(plan.executionId) ||
+      _str(payload.execution_id) ||
+      _str(payload.executionId) ||
+      _str(fallback?.executionId) ||
+      null,
     projectId,
     experimentId,
     title: _str(plan.title) || _str(payload.title) || _str(fallback?.title),
@@ -456,6 +465,7 @@ export const derivePlanRef = (
   if (fallback?.runId && fallback.projectId && fallback.experimentId) {
     return {
       runId: String(fallback.runId),
+      executionId: fallback.executionId ? String(fallback.executionId) : null,
       projectId: String(fallback.projectId),
       experimentId: String(fallback.experimentId),
       title: _str(fallback.title),

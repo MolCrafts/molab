@@ -177,6 +177,8 @@ export const assetHandlers = [
         const assetId = `asset-${Date.now()}`;
         const asset: ApiAssetResponse = {
             id: assetId,
+            projectId: "protein-folding",
+            title: filename,
             name: filename,
             kind: "data",
             scopeKind: "workspace",

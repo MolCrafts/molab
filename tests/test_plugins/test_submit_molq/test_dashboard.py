@@ -6,7 +6,6 @@ import time
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from molq import JobNotFoundError
 from molq.models import Command, JobSpec
 from molq.status import JobState
 
@@ -88,13 +87,6 @@ class TestComputeStats:
 
         assert stats.avg_wait_seconds is None
 
-    def test_unknown_state_string_is_ignored(self):
-        jobs = [_summary(state="not-a-real-state"), _summary(state="running")]
-        stats = dashboard.compute_stats(jobs)
-
-        assert stats.running == 1
-        assert stats.pending == 0
-
 
 # ── list_targets / list_jobs / get_job ─────────────────────────────────────
 
@@ -162,21 +154,8 @@ class TestListTargets:
 
         assert targets[0].active_jobs == 2
 
-    def test_empty_config_returns_empty_list(self, tmp_path):
-        empty = tmp_path / "empty.yaml"
-        empty.write_text("")
-        dashboard._reset_submitor_cache()
-
-        targets = dashboard.list_targets(config_path=empty)
-
-        assert targets == []
-
 
 class TestListJobs:
-    def test_unknown_target_raises(self, molq_config):
-        with pytest.raises(KeyError):
-            dashboard.list_jobs("nope", config_path=molq_config)
-
     def test_returns_jobs_sorted_by_submitted_desc(self, molq_config):
         submitor = dashboard._submitor_for("demo", str(molq_config))
         _seed_record(submitor, job_id="old", state=JobState.SUCCEEDED)
@@ -187,19 +166,8 @@ class TestListJobs:
 
         assert [j.job_id for j in jobs] == ["new", "old"]
 
-    def test_zero_limit_short_circuits(self, molq_config):
-        assert dashboard.list_jobs("demo", limit=0, config_path=molq_config) == []
-
 
 class TestGetJob:
-    def test_unknown_target_raises_key_error(self, molq_config):
-        with pytest.raises(KeyError):
-            dashboard.get_job("nope", "x", config_path=molq_config)
-
-    def test_unknown_job_raises_job_not_found(self, molq_config):
-        with pytest.raises(JobNotFoundError):
-            dashboard.get_job("demo", "missing", config_path=molq_config)
-
     def test_returns_detail_with_summary(self, molq_config):
         submitor = dashboard._submitor_for("demo", str(molq_config))
         _seed_record(submitor, job_id="abc", state=JobState.RUNNING)

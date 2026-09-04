@@ -108,6 +108,16 @@ def _experiment_ids(task: Any) -> tuple[str, str]:  # noqa: ANN401 — plan/cura
     return experiment.project.id, experiment.id
 
 
+def _task_execution_id(task: Any) -> str:  # noqa: ANN401 — plan/curate task duck-type
+    execution_id = getattr(task, "execution_id", None)
+    if isinstance(execution_id, str) and execution_id:
+        return execution_id
+    executions = getattr(getattr(task, "run", None), "executions", ()) or ()
+    latest = executions[-1] if executions else None
+    latest_id = getattr(latest, "id", None)
+    return latest_id if isinstance(latest_id, str) else ""
+
+
 def _preview_for(kind: TaskKind, task: Any, intent: str) -> str:  # noqa: ANN401
     """Best-effort gated-content preview — never blocks the inbox listing."""
     if kind != "plan":
@@ -115,7 +125,7 @@ def _preview_for(kind: TaskKind, task: Any, intent: str) -> str:  # noqa: ANN401
     from molexp.services.plan_runtime.preview import render_approval_preview
 
     try:
-        return render_approval_preview(task.run, intent)
+        return render_approval_preview(task.run, _task_execution_id(task), intent)
     except Exception:  # a broken preview must not hide the pending decision
         return ""
 
@@ -134,7 +144,9 @@ def _pack_fields(
 
         # Prefer the durable review_pack artifact (correct for any gate);
         # intent only matters when synthesising a fallback pack.
-        pack = build_review_pack(task.run, intent or "approve_experiment_plan")
+        pack = build_review_pack(
+            task.run, _task_execution_id(task), intent or "approve_experiment_plan"
+        )
         form = pack.form.model_dump(mode="json")
         return pack.pack_id, form
     except Exception:
@@ -259,7 +271,7 @@ async def decide_approval(
         from molexp.services.plan_runtime.preview import build_review_pack
 
         try:
-            pack = build_review_pack(task.run, pending.intent)
+            pack = build_review_pack(task.run, _task_execution_id(task), pending.intent)
             pack_id = pack.pack_id
         except Exception:
             pack_id = f"pack-{pending.id}"

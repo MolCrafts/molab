@@ -4,12 +4,12 @@
 /* eslint-disable */
 export type ArtifactRefResponse = {
     assetId: string;
-    contentHash?: (string | null);
-    executionId?: (string | null);
+    scope: string;
     kind: string;
     path: string;
+    contentHash?: (string | null);
     runId?: (string | null);
-    scope: string;
+    executionId?: (string | null);
     taskId?: (string | null);
 };
 

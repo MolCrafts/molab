@@ -70,7 +70,7 @@ async def main() -> None:
     reopened_exp = reopened_proj.get_experiment(exp.id)
     print(f"  experiments: {[e.name for e in reopened_proj.list_experiments()]}")
     print(f"  runs:        {[r.id for r in reopened_exp.list_runs()]}")
-    print(f"  run status:  {[r.status for r in reopened_exp.list_runs()]}")
+    print(f"  run status:  {[r.executions[-1].status.value for r in reopened_exp.list_runs()]}")
 
 
 if __name__ == "__main__":

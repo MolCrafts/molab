@@ -6,9 +6,9 @@
  * Emitted once when a loop begins a run.
  */
 export type LoopStartedEvent = {
+    timestamp?: string;
     kind?: string;
     loop_name: string;
-    timestamp?: string;
     user_input: string;
 };
 

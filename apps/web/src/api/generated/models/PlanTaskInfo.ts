@@ -7,7 +7,7 @@
  */
 export type PlanTaskInfo = {
     id: string;
-    source?: (string | null);
     type?: (string | null);
+    source?: (string | null);
 };
 

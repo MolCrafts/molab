@@ -289,7 +289,7 @@ def _detail_execution(node: TreeNode) -> list[RenderableType]:
     ), "execution-kind node must hold a (Run, exec_id) tuple"
     run = node.ref[0]
     exec_id = node.ref[1]
-    rec = next((r for r in run.execution_history if r.execution_id == exec_id), None)
+    rec = next((r for r in run.execution_history if r.id == exec_id), None)
     kv = _kv_table()
     kv.add_row("execution_id", str(exec_id))
     kv.add_row("run_id", str(run.id))
@@ -299,8 +299,9 @@ def _detail_execution(node: TreeNode) -> list[RenderableType]:
             kv.add_row("started_at", _fmt_iso(rec.started_at.isoformat()))
         if rec.finished_at:
             kv.add_row("finished_at", _fmt_iso(rec.finished_at.isoformat()))
-        if rec.scheduler_job_id:
-            kv.add_row("scheduler_job_id", str(rec.scheduler_job_id))
+        job_id = rec.executor.get("scheduler_job_id")
+        if job_id:
+            kv.add_row("scheduler_job_id", str(job_id))
     if node.elapsed:
         kv.add_row("elapsed", node.elapsed)
     exec_dir = run.run_dir / "executions" / exec_id

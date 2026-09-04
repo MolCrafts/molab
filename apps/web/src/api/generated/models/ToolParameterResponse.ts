@@ -3,8 +3,8 @@
 /* tslint:disable */
 /* eslint-disable */
 export type ToolParameterResponse = {
-    annotation?: string;
     name: string;
+    annotation?: string;
     required?: boolean;
 };
 

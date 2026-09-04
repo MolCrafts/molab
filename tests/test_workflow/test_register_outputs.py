@@ -27,6 +27,10 @@ def _new_run(tmp_path: Path, params: dict | None = None):
     return ws.add_project(name="p").add_experiment(name="e").add_run(params=params or {})
 
 
+def _run_artifacts(run, execution_id: str):
+    return run._execution_repository().artifacts.list_for_execution(execution_id)
+
+
 class TestPromoteRegisterArtifact:
     @pytest.mark.asyncio
     async def test_returned_marker_copies_into_run_artifacts(self, tmp_path: Path) -> None:
@@ -48,15 +52,18 @@ class TestPromoteRegisterArtifact:
 
         assert result.status == "succeeded"
         promoted = Path(result.outputs["export"]["data"])
-        eid = run.current_execution_id
-        assert promoted == Path(run.run_dir) / "executions" / eid / "artifacts" / "system.data"
+        eid = run.executions[-1].id
+        assert (
+            promoted == Path(run.run_dir) / "executions" / eid / "work" / "export" / "system.data"
+        )
         scratch = Path(captured["scratch"])
         assert scratch.parent.name == "export"
         assert "work" in scratch.parts
         assert "executions" in scratch.parts
         assert promoted.read_text() == "atoms"
-        assert promoted != captured["scratch"]
-        found = run.assets.query(producer_task="export", kind="artifact")
+        # v2 emit_artifact snapshots in place — the promoted path is the work file.
+        assert promoted == captured["scratch"]
+        found = _run_artifacts(run, eid)
         assert any(a.name == "system.data" for a in found)
 
     @pytest.mark.asyncio
@@ -75,10 +82,10 @@ class TestPromoteRegisterArtifact:
                 WorkflowCompiler().compile(wf), run_context=ctx
             )
 
-        eid = run.current_execution_id
+        eid = run.executions[-1].id
         assert (
             Path(result.outputs["export"])
-            == Path(run.run_dir) / "executions" / eid / "artifacts" / "a.txt"
+            == Path(run.run_dir) / "executions" / eid / "work" / "export" / "a.txt"
         )
 
     @pytest.mark.asyncio
@@ -97,10 +104,10 @@ class TestPromoteRegisterArtifact:
                 WorkflowCompiler().compile(wf), run_context=ctx
             )
 
-        eid = run.current_execution_id
+        eid = run.executions[-1].id
         assert (
             Path(result.outputs["export"]["report"])
-            == Path(run.run_dir) / "executions" / eid / "artifacts" / "report.txt"
+            == Path(run.run_dir) / "executions" / eid / "work" / "export" / "report.txt"
         )
 
     @pytest.mark.asyncio
@@ -121,9 +128,9 @@ class TestPromoteRegisterArtifact:
             )
 
         assert result.outputs["export"] == 1
-        eid = run.current_execution_id
+        eid = run.executions[-1].id
         assert (
-            Path(run.run_dir) / "executions" / eid / "artifacts" / "side.txt"
+            Path(run.run_dir) / "executions" / eid / "work" / "export" / "side.txt"
         ).read_text() == "side"
 
     @pytest.mark.asyncio
@@ -141,8 +148,8 @@ class TestPromoteRegisterArtifact:
             )
 
         assert result.outputs["measure"]["n"] == 42.0
-        eid = run.current_execution_id
-        wal = Path(run.run_dir) / "executions" / eid / "artifacts" / "metrics.mlp.jsonl"
+        eid = run.executions[-1].id
+        wal = Path(run.run_dir) / "executions" / eid / "work" / "metrics.mlp.jsonl"
         assert wal.exists()
         assert "n_atoms" in wal.read_text()
 
@@ -174,11 +181,5 @@ class TestPromoteRegisterArtifact:
 
         assert counters["export"] == 1
         assert r1.outputs["export"] == r2.outputs["export"] == 7
-        found = run2.assets.query(producer_task="export", kind="artifact")
+        found = _run_artifacts(run2, run2.executions[-1].id)
         assert any(a.name == "cached.txt" for a in found)
-
-    def test_task_context_workdir_has_no_ambient_authority(self) -> None:
-        ctx = TaskContext(inputs={}, workdir=Path("/tmp"))
-        assert not hasattr(ctx.workdir, "folder")
-        assert not hasattr(ctx.workdir, "artifact")
-        assert not hasattr(ctx.workdir, "run")

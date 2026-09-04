@@ -1,8 +1,8 @@
 """File implementation of :class:`ArtifactLineageStore`.
 
-Edges are ``PlanArtifactRef.parent_ids`` on the child — there is no
-``edges.json``. :meth:`add_edge` merges the parent onto the child via
-:meth:`ArtifactStore.merge_parent_ids`. Traversals are BFS over
+Edges are immutable ``PlanArtifactRef.parent_ids`` on the child — there is no
+``edges.json``. :meth:`add_edge` validates the edge declared at emit time.
+Traversals are BFS over
 ``get_ref().parent_ids`` (backward) and :meth:`ArtifactStore.list_refs`
 (forward reverse-index).
 """
@@ -32,7 +32,11 @@ class FileLineageStore:
     ) -> None:
         if relation != "derived_from":
             raise ValueError(f"FileLineageStore only records derived_from edges, got {relation!r}")
-        self._artifacts.merge_parent_ids(child_id, [parent_id])
+        child = self._artifacts.get_ref(child_id)
+        if parent_id not in child.parent_ids:
+            raise ValueError(
+                "Artifact lineage is append-only; parent_id must be supplied when emitting child"
+            )
 
     def trace_backward(self, artifact_id: str) -> list[PlanArtifactRef]:
         return self._bfs(artifact_id, forward=False)

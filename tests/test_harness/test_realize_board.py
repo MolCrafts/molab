@@ -37,8 +37,6 @@ from molexp.harness.schemas import (
 )
 from molexp.harness.stages.realize_board import RealizeBoard
 
-pytestmark = pytest.mark.asyncio
-
 _MODULE_SRC = "async def make_task(ctx) -> dict:\n    return {}\n"
 _TEST_SRC = "def test_it():\n    assert True\n"
 _FAILURE_MARKER = "MARKER_TASK_FAILURE_XYZ"
@@ -302,11 +300,3 @@ class TestRealizeBoardBlock:
         # Compile NEVER ran: no execution_result, and no --compile-only command.
         assert ctx.artifact_store.list_by_kind("execution_result") == []
         assert not any("--compile-only" in " ".join(s.cmd) for s in executor.specs)
-
-
-class TestRealizeBoardExport:
-    def test_realize_board_exported_from_stages(self) -> None:
-        import molexp.harness.stages as stages_mod
-
-        assert "RealizeBoard" in stages_mod.__all__
-        assert stages_mod.RealizeBoard is RealizeBoard

@@ -79,19 +79,31 @@ def experiment(workspace: Workspace) -> Any:
 
 @pytest.fixture()
 def run(experiment: Any) -> Any:
-    return experiment.add_run(params={"mode": "plan", "draft": _DRAFT}, id="planrec1")
+    logical_run = experiment.add_run(params={"mode": "plan", "draft": _DRAFT}, id="planrec1")
+    execution = logical_run.start()
+    execution.__enter__()
+    logical_run._plan_record_test_execution = execution
+    try:
+        yield logical_run
+    finally:
+        if execution._entered:
+            execution.__exit__(None, None, None)
 
 
 def _seed(run: Any, kind: str, obj: dict[str, Any]) -> Any:
-    """Put one canned *kind* artifact into the run's store; returns its ref."""
+    """Emit one canned Artifact from the test's explicit Execution."""
     from molexp.harness.store.file_artifact_store import FileArtifactStore
-    from molexp.harness.store.paths import harness_artifact_root
 
-    store = FileArtifactStore(root=harness_artifact_root(run.run_dir))
+    store = FileArtifactStore.for_execution(run._plan_record_test_execution)
     return store.put_json(kind, obj, created_by="test", parent_ids=[])
 
 
 def _materialize(run: Any, experiment: Any, *, failure: PlanFailure | None = None):
+    execution = run._plan_record_test_execution
+    if failure is not None:
+        execution.mark_failed(failure.error)
+    if execution._entered:
+        execution.__exit__(None, None, None)
     return materialize_plan_records(
         run=run,
         experiment=experiment,
@@ -99,6 +111,7 @@ def _materialize(run: Any, experiment: Any, *, failure: PlanFailure | None = Non
         task_id=f"plan-{run.id}",
         draft=_DRAFT,
         model=_MODEL,
+        execution_id=execution.id,
         failure=failure,
     )
 
@@ -148,7 +161,7 @@ class TestPlanRecordOutcome:
         # Siblings were not aborted:
         assert "session_events" in outcome.written
         assert "experiment_record" in outcome.written
-        assert experiment.has_folder(f"experiment-record-{experiment.id}-{run.id}", cls=Knowledge)
+        assert experiment.has_folder(f"experiment-record-{run.id}", cls=Knowledge)
 
 
 # ── mount flip + timestamp (§B) ──────────────────────────────────────────────
@@ -165,7 +178,7 @@ class TestRecordMountAndTimestamp:
 
         _materialize(run, experiment)
 
-        name = f"experiment-record-{experiment.id}-{run.id}"
+        name = f"experiment-record-{run.id}"
         item = experiment.get_folder(name, cls=Knowledge)
         item_dir = Path(item.resolve()).resolve()
         assert item_dir.parent == Path(experiment.experiment_dir).resolve() / "knowledges"
@@ -195,7 +208,7 @@ class TestExperimentRecordWrite:
         _seed(run, "experiment_report", _EXPERIMENT_REPORT)
         _materialize(run, experiment)
 
-        item = experiment.get_folder(f"experiment-record-{experiment.id}-{run.id}", cls=Knowledge)
+        item = experiment.get_folder(f"experiment-record-{run.id}", cls=Knowledge)
         assert type(item).__name__ == "Decision"
 
 
@@ -212,7 +225,7 @@ class TestFindingRecord:
         outcome = _materialize(run, experiment)
 
         assert "finding" in outcome.written
-        item = experiment.get_folder(f"finding-{experiment.id}-{run.id}", cls=Knowledge)
+        item = experiment.get_folder(f"finding-{run.id}", cls=Knowledge)
         assert type(item).__name__ == "Finding"
         pairs = _source_pairs(item)
         assert ("run", run.id) in pairs
@@ -230,12 +243,12 @@ class TestFindingRecord:
 
         _materialize(run, experiment)
 
-        item = experiment.get_folder(f"finding-{experiment.id}-{run.id}", cls=Knowledge)
+        item = experiment.get_folder(f"finding-{run.id}", cls=Knowledge)
         edges = item.typed_out_edges()
         assert any(
             e.role == "derived_from" and str(e.target).endswith(f"run-{run.id}") for e in edges
         ), edges
-        decision_name = f"experiment-record-{experiment.id}-{run.id}"
+        decision_name = f"experiment-record-{run.id}"
         assert any(
             e.role == "references" and str(e.target).endswith(decision_name) for e in edges
         ), edges
@@ -247,7 +260,7 @@ class TestFindingRecord:
         outcome = _materialize(run, experiment)
 
         assert "finding" not in outcome.written
-        assert not experiment.has_folder(f"finding-{experiment.id}-{run.id}", cls=Knowledge)
+        assert not experiment.has_folder(f"finding-{run.id}", cls=Knowledge)
 
 
 # ── FailureAnalysis (terminal plan failure, §B) ──────────────────────────────
@@ -268,7 +281,7 @@ class TestFailureAnalysisRecord:
         )
 
         assert "failure_analysis" in outcome.written
-        item = experiment.get_folder(f"failure-{experiment.id}-{run.id}", cls=Knowledge)
+        item = experiment.get_folder(f"failure-{run.id}", cls=Knowledge)
         assert type(item).__name__ == "FailureAnalysis"
         assert item.metadata.created_at is not None
         pairs = _source_pairs(item)

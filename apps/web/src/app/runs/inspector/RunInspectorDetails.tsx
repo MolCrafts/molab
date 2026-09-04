@@ -4,6 +4,7 @@ import { RunStatusBadge, WorkbenchIconAction } from "@/components/workbench";
 import { formatDuration, formatRelative, formatTimestamp } from "@/lib/format-time";
 
 import { RunsRecentEvents } from "../RunsRecentEvents";
+import { runFinishedAt, runStartedAt } from "../projections";
 import type { WorkspaceExecutionRow, WorkspaceRunRow } from "../types";
 
 interface RunInspectorDetailsProps {
@@ -18,7 +19,8 @@ const computeRunDuration = (run: WorkspaceRunRow): number | null => {
     .filter((v) => !Number.isNaN(v))
     .sort((a, b) => a - b)[0];
   if (typeof start !== "number") return null;
-  const end = run.finishedAt ? new Date(run.finishedAt).getTime() : Date.now();
+  const finishedAt = run.statusSummary.active > 0 ? null : runFinishedAt(run);
+  const end = finishedAt ? new Date(finishedAt).getTime() : Date.now();
   if (Number.isNaN(end)) return null;
   return Math.max(0, (end - start) / 1000);
 };
@@ -30,36 +32,45 @@ export const RunInspectorDetails = ({
 }: RunInspectorDetailsProps): JSX.Element => {
   const parameterEntries = Object.entries(run.parameters);
   const duration = computeRunDuration(run);
+  const selectedExecution = run.executions.find(
+    (execution) => execution.executionId === selectedExecutionId,
+  );
 
   return (
     <div className="flex flex-col">
-      <Section title="Backend">
-        <Field label="Backend" value={run.backend ?? "—"} />
-        <Field label="Cluster" value={run.cluster ?? "—"} />
-        <Field label="Scheduler" value={run.scheduler ?? "—"} />
-        <Field label="Profile" value={run.profile ?? "—"} />
-        {run.latestSchedulerJobId && (
-          <Field label="Scheduler job" value={run.latestSchedulerJobId} mono />
-        )}
+      <Section title="Run definition">
+        <Field label="Definition" value={run.definitionHash} mono />
+        <Field label="Experiment revision" value={run.experimentRevisionId} mono />
+        <Field label="Target hint" value={run.targetHint ?? "—"} />
+        <Field label="Input assets" value={String(run.inputAssetIds.length)} />
       </Section>
 
-      <Section title="Lifecycle">
-        <Field label="Submitted" value={formatTimestamp(run.createdAt)} />
-        <Field
-          label="Started"
-          value={run.executions[0]?.startedAt ? formatTimestamp(run.executions[0].startedAt) : "—"}
-        />
-        <Field label="Finished" value={formatTimestamp(run.finishedAt)} />
+      <Section title="Execution summary">
+        <Field label="Run created" value={formatTimestamp(run.createdAt)} />
+        <Field label="First started" value={formatTimestamp(runStartedAt(run))} />
+        <Field label="Last finished" value={formatTimestamp(runFinishedAt(run))} />
         <Field label="Duration" value={formatDuration(duration)} />
-        <Field label="Executions" value={String(run.executionCount)} />
+        <Field label="Executions" value={String(run.statusSummary.total)} />
+        <Field label="Active" value={String(run.statusSummary.active)} />
       </Section>
+
+      {selectedExecution && (
+        <Section title="Selected execution">
+          <Field label="Mode" value={selectedExecution.mode} />
+          <Field label="Backend" value={selectedExecution.backend ?? "—"} />
+          <Field label="Cluster" value={selectedExecution.backendMetadata.cluster_name ?? "—"} />
+          <Field label="Scheduler" value={selectedExecution.backendMetadata.scheduler ?? "—"} />
+          <Field label="Profile" value={selectedExecution.backendMetadata.profile ?? "—"} />
+          <Field label="Scheduler job" value={selectedExecution.schedulerJobId ?? "—"} mono />
+        </Section>
+      )}
 
       <Section title={`Recent events (${Math.min(8, 1 + 2 * run.executions.length)})`}>
         <RunsRecentEvents run={run} />
       </Section>
 
       {run.executions.length > 0 && (
-        <Section title={`Attempts (${run.executions.length})`}>
+        <Section title={`Executions (${run.executions.length})`}>
           <ul className="space-y-1">
             {run.executions.map((execution) => (
               <ExecutionRow
@@ -137,11 +148,13 @@ const ExecutionRow = ({ execution, selected, onSelect }: ExecutionRowProps): JSX
       </span>
       <div className="mt-1 flex items-center gap-2">
         <RunStatusBadge status={execution.status} size="sm" />
-        <span className="text-muted-foreground">{formatRelative(execution.startedAt)}</span>
+        <span className="text-muted-foreground">
+          {formatRelative(execution.startedAt ?? execution.createdAt)}
+        </span>
       </div>
     </div>
     <WorkbenchIconAction
-      label={selected ? "Clear selected attempt" : `Inspect attempt ${execution.executionId}`}
+      label={selected ? "Clear selected execution" : `Inspect execution ${execution.executionId}`}
       onClick={onSelect}
       aria-pressed={selected}
       className={selected ? "bg-interactive" : undefined}

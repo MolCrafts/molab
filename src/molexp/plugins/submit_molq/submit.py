@@ -279,13 +279,41 @@ class SubmitHandler:
                 },
             )
 
-        mol_run.update_provenance(
-            executor_info=build_executor_info(
-                scheduler=scheduler_name,
-                cluster_name=self._cluster,
-                job_id=job.job_id,
-                scheduler_job_id=job.scheduler_job_id,
+        executor_info = build_executor_info(
+            scheduler=scheduler_name,
+            cluster_name=self._cluster,
+            job_id=job.job_id,
+            scheduler_job_id=job.scheduler_job_id,
+        )
+        from molexp.workspace.execution_repository import ExecutionRepository
+
+        repo = ExecutionRepository(
+            project.workspace.root,
+            mol_run.run_dir,
+            run_id=mol_run.id,
+            project_id=project.id,
+            fs=project.workspace.fs,
+        )
+        try:
+            current = repo.get(execution_id)
+        except KeyError:
+            # Direct plugin callers still receive a real queued Execution.
+            from molexp.workspace.domain import ExecutionMode
+            from molexp.workspace.scientific_repository import SYSTEM_AGENT
+
+            current = repo.create(
+                mode=ExecutionMode.INITIAL if not repo.list() else ExecutionMode.RERUN,
+                created_by=SYSTEM_AGENT,
+                execution_id=execution_id,
+                based_on_execution_id=repo.list()[-1].id if repo.list() else None,
             )
+        repo.update_operational(
+            current.id,
+            executor={**current.executor, **executor_info},
+        )
+        project.workspace.fs.atomic_write_json(
+            project.workspace.fs.join(mol_run.run_dir, "executions", execution_id, "job.json"),
+            {"schema_version": 2, **executor_info},
         )
         self.submitted_runs.append(mol_run)
 

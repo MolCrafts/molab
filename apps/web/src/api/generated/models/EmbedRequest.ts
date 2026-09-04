@@ -6,9 +6,9 @@
  * Embed a live workspace entity into a document as one typed provenance edge.
  */
 export type EmbedRequest = {
-    role?: ('derived_from' | 'cites' | 'supersedes' | 'records' | 'references' | null);
-    target: string;
     target_kind: EmbedRequest.target_kind;
+    target: string;
+    role?: ('derived_from' | 'cites' | 'supersedes' | 'records' | 'references' | null);
     text?: (string | null);
 };
 export namespace EmbedRequest {

@@ -4,6 +4,7 @@
  */
 
 import type { WorkspaceRunRow } from "./types";
+import { runExecutorFacetLabel, runFinishedAt, runPresentationStatus } from "./projections";
 
 export type JobsSortKey =
   | "status"
@@ -44,7 +45,8 @@ export const computeRunDurationSeconds = (run: WorkspaceRunRow): number | null =
     .filter((v) => !Number.isNaN(v))
     .sort((a, b) => a - b)[0];
   if (typeof start !== "number") return null;
-  const end = run.finishedAt ? new Date(run.finishedAt).getTime() : Date.now();
+  const finishedAt = run.statusSummary.active > 0 ? null : runFinishedAt(run);
+  const end = finishedAt ? new Date(finishedAt).getTime() : Date.now();
   if (Number.isNaN(end)) return null;
   return Math.max(0, (end - start) / 1000);
 };
@@ -64,15 +66,15 @@ const cmpNullableNumber = (a: number | null, b: number | null, dir: SortDir): nu
 const sortValue = (run: WorkspaceRunRow, key: JobsSortKey): string | number | null => {
   switch (key) {
     case "status":
-      return run.status;
+      return runPresentationStatus(run);
     case "name":
       return run.name || run.id;
     case "project":
       return `${run.projectName}\0${run.experimentName}`;
     case "backend":
-      return run.backend ?? "";
+      return runExecutorFacetLabel(run, "backend") ?? "";
     case "attempts":
-      return run.executionCount;
+      return run.statusSummary.total;
     case "duration":
       return computeRunDurationSeconds(run);
     case "submitted":

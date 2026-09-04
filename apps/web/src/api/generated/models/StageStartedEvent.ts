@@ -6,8 +6,8 @@
  * Emitted at the start of a logical stage in a loop's body.
  */
 export type StageStartedEvent = {
+    timestamp?: string;
     kind?: string;
     stage_name: string;
-    timestamp?: string;
 };
 

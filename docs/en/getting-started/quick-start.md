@@ -27,7 +27,7 @@ run = ws.add_project("demo").add_experiment("sum").add_run(params={"scale": 2.0}
 
 # 3. Execute and read the result
 result = run.execute(wf)
-print(run.status, result.outputs["summarize"])
+print(run.executions[-1].status.value, result.outputs["summarize"])
 ```
 
 Run it:
@@ -72,8 +72,8 @@ After the script exits, the run is still there. Open a new Python session and re
 # The run persists on disk — open the same workspace and read it back.
 # run.id was printed above; use it here.
 same_run = ws.project("demo").experiment("sum").get_run(run.id)
-print(same_run.status)                     # succeeded
-print(same_run.get_result("summarize"))    # 28.0
+print(same_run.executions[-1].status.value)                                      # succeeded
+print(same_run.get_result("summarize", execution_id=same_run.executions[-1].id))  # 28.0
 ```
 
 `get_run(run_id)` looks a run up by its id. You do not need to remember ids to rediscover runs, though: runs seeded by `exp.define(wf, params=...)` or `exp.sweep(...)` get content-addressed ids derived from their parameters, so re-declaring the same sweep resolves to the same runs.

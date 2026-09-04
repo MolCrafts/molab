@@ -3,13 +3,13 @@
 /* tslint:disable */
 /* eslint-disable */
 export type RunRefResponse = {
-    configHash?: (string | null);
-    currentExecutionId?: (string | null);
-    experimentId: string;
-    finishedAt?: (string | null);
-    projectId: string;
     runId: string;
-    startedAt?: (string | null);
+    experimentId: string;
+    projectId: string;
     status: string;
+    configHash?: (string | null);
+    startedAt?: (string | null);
+    finishedAt?: (string | null);
+    currentExecutionId?: (string | null);
 };
 

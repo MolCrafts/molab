@@ -8,19 +8,8 @@ from molexp.harness.plan import (
     TaskBoard,
     render_experiment_plan_document,
 )
-from molexp.harness.plan.document import EXPERIMENT_PLAN_OUTLINE, experiment_report_to_document
+from molexp.harness.plan.document import experiment_report_to_document
 from molexp.harness.schemas.experiment_report import ExperimentReport
-
-
-def test_outline_has_twelve_sections() -> None:
-    for n, heading in (
-        (1, "## 1. Goal"),
-        (2, "## 2. Scientific Questions"),
-        (7, "## 7. Tasks"),
-        (12, "## 12. Deliverables"),
-    ):
-        assert heading in EXPERIMENT_PLAN_OUTLINE, f"missing section {n}"
-    assert "# Experiment Plan" in EXPERIMENT_PLAN_OUTLINE
 
 
 def test_render_fills_goal_and_tasks() -> None:

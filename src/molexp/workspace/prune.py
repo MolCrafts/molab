@@ -100,8 +100,8 @@ def plan_execution_prune(
             itself is actively ``running`` — deleting a live attempt's state
             out from under it is never allowed.
     """
-    history = list(run.execution_history)
-    by_id = {rec.execution_id: rec for rec in history}
+    history = list(run.executions)
+    by_id = {rec.id: rec for rec in history}
 
     if execution_ids is not None:
         unknown = [eid for eid in execution_ids if eid not in by_id]
@@ -113,15 +113,15 @@ def plan_execution_prune(
         selected = [by_id[eid] for eid in execution_ids]
     elif statuses is not None:
         wanted = {s.lower() for s in statuses}
-        selected = [rec for rec in history if (rec.status or "running").lower() in wanted]
+        selected = [rec for rec in history if rec.status.value.lower() in wanted]
     else:
         selected = history
 
     # Refusal lives at PLAN time: a running record on an actively-running run
     # is live state, not prunable history. (On a terminal run it is a zombie
     # leftover and prunes normally — same rule the CLI enforced.)
-    run_is_running = str(run.status).lower() == "running"
-    live = [rec for rec in selected if rec.status == "running" and run_is_running]
+    run_is_running = run.status_summary.active > 0
+    live = [rec for rec in selected if rec.status.value == "running" and run_is_running]
     if live:
         raise LivePruneRefusedError(
             f"{len(live)} selected record(s) look live (status=running on an "
@@ -133,9 +133,9 @@ def plan_execution_prune(
         run_id=run.id,
         entries=tuple(
             ExecutionPruneEntry(
-                execution_id=rec.execution_id,
-                status=rec.status or "running",
-                dir_exists=(exec_root / rec.execution_id).exists(),
+                execution_id=rec.id,
+                status=rec.status.value,
+                dir_exists=(exec_root / rec.id).exists(),
             )
             for rec in selected
         ),
@@ -161,14 +161,15 @@ def apply_execution_prune(run: Run, plan: ExecutionPrunePlan) -> int:
     """
     if plan.run_id != run.id:
         raise ValueError(f"plan was built for run {plan.run_id!r}, not {run.id!r}")
+    import shutil
+
     removed_dirs = 0
     exec_root = Path(run.run_dir) / "executions"
     for entry in plan.entries:
-        existed = (exec_root / entry.execution_id).exists()
-        try:
-            run.delete_execution(entry.execution_id)
-        except KeyError:
-            continue  # already gone (raced another pruner) — plan said delete, it is deleted
-        if existed:
+        path = exec_root / entry.execution_id
+        if path.exists():
+            shutil.rmtree(path)
             removed_dirs += 1
+        # Already gone (raced another pruner) — provenance is immutable, so
+        # only the retained workspace bytes are removed; nothing else to do.
     return removed_dirs

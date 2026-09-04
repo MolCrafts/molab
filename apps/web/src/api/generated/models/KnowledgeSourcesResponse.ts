@@ -9,11 +9,11 @@
  * and capability grounding read the same pin from the MCP store.
  */
 export type KnowledgeSourcesResponse = {
-    configured?: boolean;
-    knownPackages?: Array<string>;
-    scope?: string;
-    serverName?: string;
     sources?: Array<string>;
+    knownPackages?: Array<string>;
     unrestricted?: boolean;
+    serverName?: string;
+    scope?: string;
+    configured?: boolean;
 };
 

@@ -18,4 +18,15 @@ export class SystemService {
             url: '/api/health',
         });
     }
+    /**
+     * Root
+     * @returns any Successful Response
+     * @throws ApiError
+     */
+    public static root(): CancelablePromise<any> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/',
+        });
+    }
 }

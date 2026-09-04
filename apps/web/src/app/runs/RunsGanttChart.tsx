@@ -3,6 +3,7 @@ import { useMemo } from "react";
 
 import { MolplotGanttChart } from "@/plugins/molplot";
 
+import { runExecutorFacetLabel, runPresentationStatus } from "./projections";
 import type { WorkspaceExecutionRow, WorkspaceRunRow } from "./types";
 
 interface RunsGanttChartProps {
@@ -89,7 +90,8 @@ const buildRunTask = (run: WorkspaceRunRow, nowMs: number): GanttTaskLocal | nul
     execStarts.length > 0 ? new Date(Math.min(...execStarts.map((d) => d.getTime()))) : created;
   if (!start) return null;
 
-  const isOpen = run.status.toLowerCase() === "running" || execStarts.length === 0;
+  const status = runPresentationStatus(run);
+  const isOpen = run.statusSummary.active > 0;
   const end = isOpen
     ? new Date(Math.max(start.getTime() + PENDING_BAR_DURATION_MIN * 60_000, nowMs))
     : execEnds.length > 0
@@ -100,9 +102,9 @@ const buildRunTask = (run: WorkspaceRunRow, nowMs: number): GanttTaskLocal | nul
   const hover =
     `<b>${run.name}</b><br>` +
     `${run.projectName} · ${run.experimentName}<br>` +
-    `Status: ${run.status}<br>` +
-    `Backend: ${run.backend ?? "—"}${run.cluster ? ` · ${run.cluster}` : ""}<br>` +
-    `Executions: ${run.executionCount}<br>` +
+    `Execution summary: ${status}<br>` +
+    `Backend: ${runExecutorFacetLabel(run, "backend") ?? "—"}${runExecutorFacetLabel(run, "cluster_name") ? ` · ${runExecutorFacetLabel(run, "cluster_name")}` : ""}<br>` +
+    `Executions: ${run.statusSummary.total}<br>` +
     `Started: ${start.toLocaleString()}<br>` +
     (hasNoStart ? "(estimated — queued)" : `Ended: ${end.toLocaleString()}`);
 
@@ -112,8 +114,8 @@ const buildRunTask = (run: WorkspaceRunRow, nowMs: number): GanttTaskLocal | nul
     label: run.name,
     start,
     end,
-    statusGroup: groupForStatus(run.status),
-    statusRaw: run.status,
+    statusGroup: groupForStatus(status),
+    statusRaw: status,
     hover,
     isPending: hasNoStart,
   };
@@ -122,7 +124,7 @@ const buildRunTask = (run: WorkspaceRunRow, nowMs: number): GanttTaskLocal | nul
 const buildExecutionTasks = (run: WorkspaceRunRow, nowMs: number): GanttTaskLocal[] => {
   const tasks: GanttTaskLocal[] = [];
   for (const exec of run.executions) {
-    const start = safeDate(exec.startedAt) ?? safeDate(run.createdAt);
+    const start = safeDate(exec.startedAt) ?? safeDate(exec.createdAt);
     if (!start) continue;
     const isOpen = exec.status.toLowerCase() === "running" || !exec.finishedAt;
     const end = isOpen

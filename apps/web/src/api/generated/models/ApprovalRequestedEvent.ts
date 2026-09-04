@@ -6,9 +6,9 @@
  * Emitted when the harness opens an approval gate for a reviewer.
  */
 export type ApprovalRequestedEvent = {
-    gate: string;
-    kind?: string;
-    summary?: string;
     timestamp?: string;
+    kind?: string;
+    gate: string;
+    summary?: string;
 };
 

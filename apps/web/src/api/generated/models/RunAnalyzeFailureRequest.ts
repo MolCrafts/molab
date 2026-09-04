@@ -7,6 +7,10 @@
  */
 export type RunAnalyzeFailureRequest = {
     /**
+     * Optional interpretation; when omitted a deterministic template is used
+     */
+    narrative?: (string | null);
+    /**
      * Author string
      */
     createdBy?: string;
@@ -18,9 +22,5 @@ export type RunAnalyzeFailureRequest = {
      * Optional KnowledgeItem name
      */
     name?: (string | null);
-    /**
-     * Optional interpretation; when omitted a deterministic template is used
-     */
-    narrative?: (string | null);
 };
 

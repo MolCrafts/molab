@@ -8,14 +8,14 @@ import type { TierModelsResponse } from './TierModelsResponse';
  * The Settings page's provider view — never carries a key value.
  */
 export type ProviderResponse = {
+    provider: string;
+    model: string;
+    baseUrl: string;
     apiKeyPreview: string;
     apiKeySet: boolean;
-    baseUrl: string;
-    configurations?: Array<ProviderConfigurationResponse>;
     instructions: string;
-    model: string;
-    models?: TierModelsResponse;
-    provider: string;
     supportedProviders?: Array<string>;
+    models?: TierModelsResponse;
+    configurations?: Array<ProviderConfigurationResponse>;
 };
 

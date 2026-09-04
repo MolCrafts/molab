@@ -7,7 +7,7 @@
  */
 export type TensorboardScalarPoint = {
     step: number;
-    value: number;
     wallTime: number;
+    value: number;
 };
 

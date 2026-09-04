@@ -7,10 +7,10 @@ import type { TierModelsResponse } from './TierModelsResponse';
  * One provider's credentials (+ legacy per-provider tier models).
  */
 export type ProviderConfigurationResponse = {
+    provider: string;
+    models?: TierModelsResponse;
+    baseUrl?: string;
     apiKeyPreview?: string;
     apiKeySet?: boolean;
-    baseUrl?: string;
-    models?: TierModelsResponse;
-    provider: string;
 };
 

@@ -208,18 +208,28 @@ def assemble_workspace_context(
             if experiment.workflow_source is not None:
                 workflows.append(WorkflowRef(experiment_id=experiment.id, name=experiment.name))
             for run in experiment.list_runs():
-                meta = run.metadata
-                err = meta.error
-                err_text = f"{err.type}: {err.message}" if err is not None else None
+                executions = run.executions
+                latest = executions[-1] if executions else None
+                err = latest.error if latest else None
+                err_text = (
+                    f"{err.get('type', 'Error')}: {err.get('message', '')}"
+                    if err is not None
+                    else None
+                )
+                status = RunStatus.PENDING.value if latest is None else latest.status.value
+                started = min(
+                    (e.started_at for e in executions if e.started_at is not None),
+                    default=None,
+                )
                 ref = RunRef(
                     run_id=run.id,
                     experiment_id=experiment.id,
                     project_id=project.id,
-                    status=str(meta.status),
-                    config_hash=meta.config_hash,
-                    started_at=meta.started_at,
-                    finished_at=meta.finished_at,
-                    current_execution_id=meta.current_execution_id,
+                    status=status,
+                    config_hash=run.metadata.definition_hash,
+                    started_at=started,
+                    finished_at=latest.finished_at if latest else None,
+                    current_execution_id=latest.id if latest else None,
                 )
                 run_refs.append(ref)
                 run_ids.add(run.id)
@@ -233,12 +243,12 @@ def assemble_workspace_context(
                         HealthFlag(
                             kind="failed_run",
                             ref=run.id,
-                            detail=f"run {run.id} is {meta.status} (retryable){reason}",
+                            detail=f"run {run.id} is {status} (retryable){reason}",
                         )
                     )
-                if meta.status == RunStatus.RUNNING:
+                if status == RunStatus.RUNNING.value:
                     running_runs.append(ref)
-                    if is_alive_stale(run):
+                    if latest is not None and is_alive_stale(run, latest.id):
                         flags.append(
                             HealthFlag(
                                 kind="stale_running",
@@ -272,6 +282,41 @@ def assemble_workspace_context(
                     detail=(
                         f"asset {asset.asset_id} names producer run "
                         f"{producer.run_id!r}, which no longer resolves"
+                    ),
+                )
+            )
+
+    # v2 artifacts (provenance-backed index — `emit_artifact` products).
+    from .domain import Artifact as V2Artifact
+    from .index_store import JsonIndexStore
+
+    index_store = JsonIndexStore(root, fs=workspace.fs)
+    for raw in index_store.list_entities("artifact"):
+        try:
+            art = V2Artifact.model_validate(raw)
+        except Exception:
+            continue
+        task_id = art.metadata.get("task_id") if isinstance(art.metadata, dict) else None
+        artifacts.append(
+            ArtifactRef(
+                asset_id=art.id,
+                scope=f"artifact:{art.project_id}:{art.run_id}:{art.execution_id}",
+                kind=art.semantic_type or "artifact",
+                path=art.source_path,
+                content_hash=art.content.digest,
+                run_id=art.run_id,
+                execution_id=art.execution_id,
+                task_id=str(task_id) if task_id is not None else None,
+            )
+        )
+        if art.run_id not in run_ids:
+            flags.append(
+                HealthFlag(
+                    kind="orphan_artifact",
+                    ref=art.id,
+                    detail=(
+                        f"artifact {art.id} names producer run "
+                        f"{art.run_id!r}, which no longer resolves"
                     ),
                 )
             )

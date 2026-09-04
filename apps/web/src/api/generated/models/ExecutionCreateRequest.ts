@@ -4,6 +4,10 @@
 /* eslint-disable */
 export type ExecutionCreateRequest = {
     /**
+     * Target project ID
+     */
+    projectId: string;
+    /**
      * Target experiment ID
      */
     experimentId: string;
@@ -11,10 +15,6 @@ export type ExecutionCreateRequest = {
      * Run params ('parameters' accepted as a deprecated alias)
      */
     params?: Record<string, any>;
-    /**
-     * Target project ID
-     */
-    projectId: string;
     /**
      * Optional workflow IR (matches schema/workflow.json). When provided and the experiment has no workflow bound yet, the server binds it and persists the IR to disk. Subsequent calls reuse the on-disk binding.
      */

@@ -40,15 +40,14 @@ export const RunInspectorLogs = ({
   const followRef = useRef(true);
 
   const history = run.executions;
-  const effectiveId =
-    selectedExecutionId ?? logs?.executionId ?? history[history.length - 1]?.executionId ?? null;
+  const effectiveId = selectedExecutionId ?? logs?.executionId ?? null;
   const effectiveIndex = effectiveId ? history.findIndex((e) => e.executionId === effectiveId) : -1;
   const attemptLabel =
     effectiveIndex >= 0
       ? `#${effectiveIndex + 1}`
       : effectiveId
         ? effectiveId.slice(0, 12)
-        : "latest";
+        : "select execution";
 
   // Keep the viewport pinned to the bottom while the operator is "following"
   // the live tail (scroll near bottom). Manual scroll-up freezes follow.
@@ -75,18 +74,15 @@ export const RunInspectorLogs = ({
           stdout / stderr · <span className="text-foreground">{attemptLabel}</span>
         </span>
         <div className="ml-auto flex items-center gap-1">
-          {history.length > 1 && (
+          {history.length > 0 && (
             <Select
-              value={selectedExecutionId ?? "__latest__"}
-              onValueChange={(value) => {
-                onSelectExecution(value === "__latest__" ? null : value);
-              }}
+              value={selectedExecutionId ?? undefined}
+              onValueChange={onSelectExecution}
             >
-              <SelectTrigger size="sm" className="max-w-36 text-micro" aria-label="Select attempt">
-                <SelectValue />
+              <SelectTrigger size="sm" className="max-w-36 text-micro" aria-label="Select execution">
+                <SelectValue placeholder="Execution" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="__latest__">Latest</SelectItem>
                 {history.map((exec, index) => (
                   <SelectItem key={exec.executionId} value={exec.executionId}>
                     #{index + 1} · {exec.status}
@@ -114,7 +110,11 @@ export const RunInspectorLogs = ({
         onScroll={handleScroll}
         className="min-h-0 flex-1 overflow-auto bg-muted/15 px-3 py-3 font-mono text-micro leading-relaxed"
       >
-        {error ? (
+        {!selectedExecutionId ? (
+          <div className="flex h-full items-center justify-center text-label text-muted-foreground">
+            Select an execution to inspect stdout and stderr.
+          </div>
+        ) : error ? (
           <WorkbenchOperationState
             kind="error"
             density="compact"

@@ -1051,7 +1051,7 @@ const AgentSessionViewer = ({
     let cancelled = false;
     const pull = (): void => {
       void plansApi
-        .getPlan(planRef.projectId, planRef.experimentId, planRef.runId)
+        .getPlan(planRef.projectId, planRef.experimentId, planRef.runId, planRef.executionId)
         .then((detail) => {
           if (cancelled) return;
           const kinds = detail.artifactKinds ?? [];
@@ -1085,6 +1085,7 @@ const AgentSessionViewer = ({
     planRef?.projectId,
     planRef?.experimentId,
     planRef?.runId,
+    planRef?.executionId,
     session?.status,
     planRefreshKey,
   ]);

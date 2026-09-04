@@ -25,14 +25,28 @@ _MAX_ERROR_CHARS = 4000
 _MAX_TAIL_LINES = 80
 
 
+def _scalar_status(run: Run) -> str:
+    """Derive the single run-status label from the Execution aggregate."""
+    summary = run.status_summary
+    if summary.not_started:
+        return "pending"
+    if summary.active > 0:
+        return "running"
+    for status in ("failed", "cancelled", "interrupted", "succeeded"):
+        if summary.by_status.get(status):
+            return status
+    return "succeeded" if summary.total else "pending"
+
+
 def build_failure_narrative(run: Run) -> str:
     """Build a non-empty deterministic FailureAnalysis narrative for *run*.
 
     Prefers ``executions/<last>/error.txt``, then run metadata error, then a
     status-only summary. Never returns empty string.
     """
+    status = _scalar_status(run)
     lines = [
-        f"Run `{run.id}` finished with status `{run.status}`.",
+        f"Run `{run.id}` finished with status `{status}`.",
         "",
         "## Evidence",
         "",
@@ -49,12 +63,12 @@ def build_failure_narrative(run: Run) -> str:
         lines.append("(no error.txt or metadata.error on disk)")
         lines.append("")
 
-    history = list(run.execution_history)
+    history = list(run.executions)
     if history:
         lines.append("### Executions")
         lines.append("")
         for rec in history:
-            exec_id = getattr(rec, "execution_id", None) or "?"
+            exec_id = getattr(rec, "id", None) or "?"
             status = getattr(rec, "status", "?")
             lines.append(f"- `{exec_id}`: {status}")
         lines.append("")
@@ -92,7 +106,7 @@ def analyze_run_failure(
     Raises:
         ValueError: Status domain refusal or empty effective narrative.
     """
-    status = run.status
+    status = _scalar_status(run)
     if status == "failed" or (force and status == "cancelled"):
         pass
     else:
@@ -114,10 +128,10 @@ def analyze_run_failure(
 def _read_error_text(run: Run) -> str:
     """Best-effort error body from last execution error.txt or metadata."""
     chunks: list[str] = []
-    history = list(run.execution_history)
+    history = list(run.executions)
     if history:
         last = history[-1]
-        exec_id = getattr(last, "execution_id", None)
+        exec_id = getattr(last, "id", None)
         if exec_id:
             path = Path(run.run_dir) / "executions" / str(exec_id) / "error.txt"
             if path.is_file():

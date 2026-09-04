@@ -3,14 +3,14 @@
 /* tslint:disable */
 /* eslint-disable */
 export type ReferenceSummary = {
-    authors?: Array<string>;
-    doi?: (string | null);
     name: string;
     relPath: string;
-    source?: string;
     title?: (string | null);
-    url?: (string | null);
-    venue?: (string | null);
+    authors?: Array<string>;
     year?: (number | null);
+    doi?: (string | null);
+    venue?: (string | null);
+    url?: (string | null);
+    source?: string;
 };
 

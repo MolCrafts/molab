@@ -393,6 +393,9 @@ class Workspace(Folder):
         project (does not error). To update fields, use :meth:`set_project`.
         """
         self._ensure_materialized()
+        for existing in self.projects():
+            if existing.name == name:
+                return existing
         child = self._construct_child(Project, name)
         return self.add_folder(child)
 
@@ -402,7 +405,13 @@ class Workspace(Folder):
         Raises:
             ProjectNotFoundError: No project with that slug.
         """
-        return self.get_folder(name, cls=Project)
+        try:
+            return self.get_folder(name, cls=Project)
+        except ProjectNotFoundError:
+            for project in self.projects():
+                if project.name == name:
+                    return project
+            raise
 
     def get_project(self, name: str) -> Project:
         """Alias of :meth:`project` (strict getter)."""
@@ -439,10 +448,14 @@ class Workspace(Folder):
 
     def del_project(self, name: str) -> None:
         """Delete a project directory and its children."""
-        self.remove_folder(name, cls=Project)
+        self.remove_folder(self.project(name).id, cls=Project)
 
     def has_project(self, name: str) -> bool:
-        return self.has_folder(name, cls=Project)
+        try:
+            self.project(name)
+        except ProjectNotFoundError:
+            return False
+        return True
 
     def remove_project(self, name: str) -> None:
         """Alias of :meth:`del_project`."""

@@ -141,15 +141,6 @@ export const selectAggregateConfig = (
   return buildErrorbandConfig(series, options);
 };
 
-const realFetcher: MetricsFetcher = async (projectId, experimentId, runId) => {
-  const response = await runsApi.getRunMetrics(projectId, experimentId, runId, {
-    type: "scalar",
-    sinceLine: 0,
-    limit: 100000,
-  });
-  return response.records;
-};
-
 const OP_LABELS: Record<AggregateOp, string> = {
   overlay: "Overlay",
   mean: "Mean",
@@ -161,12 +152,15 @@ export interface MultiRunMetricsViewProps {
   experimentId: string;
   /** Ordered ids of the runs selected for aggregation. */
   runIds: string[];
+  /** One explicit physical execution per Run; missing entries are reported as failures. */
+  executionIds: Record<string, string>;
 }
 
 export const MultiRunMetricsView = ({
   projectId,
   experimentId,
   runIds,
+  executionIds,
 }: MultiRunMetricsViewProps): JSX.Element => {
   const [perRunAll, setPerRunAll] = useState<RunAllSeries[]>([]);
   const [failures, setFailures] = useState<string[]>([]);
@@ -188,7 +182,16 @@ export const MultiRunMetricsView = ({
     setError(null);
     void (async () => {
       try {
-        const result = await collectRunSeries(realFetcher, projectId, experimentId, runIds);
+        const fetcher: MetricsFetcher = async (nextProjectId, nextExperimentId, runId) => {
+          const executionId = executionIds[runId];
+          if (!executionId) throw new Error(`No execution selected for ${runId}`);
+          const response = await runsApi.getRunMetrics(
+            nextProjectId, nextExperimentId, runId, executionId,
+            { type: "scalar", sinceLine: 0, limit: 100000 },
+          );
+          return response.records;
+        };
+        const result = await collectRunSeries(fetcher, projectId, experimentId, runIds);
         if (cancelled) {
           return;
         }
@@ -211,7 +214,7 @@ export const MultiRunMetricsView = ({
       cancelled = true;
     };
     // realFetcher is a module constant.
-  }, [projectId, experimentId, runIds]);
+  }, [executionIds, projectId, experimentId, runIds]);
 
   const keys = useMemo(() => availableKeys(perRunAll), [perRunAll]);
 

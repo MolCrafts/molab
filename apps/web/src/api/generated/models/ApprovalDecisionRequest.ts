@@ -8,11 +8,11 @@
  * ``action`` is required (approve|reject|revise).
  */
 export type ApprovalDecisionRequest = {
+    requestId: string;
     action: ApprovalDecisionRequest.action;
-    edits?: (Record<string, any> | null);
     fieldValues?: Record<string, any>;
     reason?: (string | null);
-    requestId: string;
+    edits?: (Record<string, any> | null);
 };
 export namespace ApprovalDecisionRequest {
     export enum action {

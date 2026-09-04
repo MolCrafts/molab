@@ -10,11 +10,11 @@
  * the error keeps users oriented instead of silently dropping the group.
  */
 export type McpToolGroupResponse = {
-    error?: (string | null);
-    ok: boolean;
-    scope: McpToolGroupResponse.scope;
     server: string;
+    scope: McpToolGroupResponse.scope;
+    ok: boolean;
     toolCount?: number;
+    error?: (string | null);
 };
 export namespace McpToolGroupResponse {
     export enum scope {

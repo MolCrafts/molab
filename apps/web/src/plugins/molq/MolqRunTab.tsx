@@ -17,9 +17,10 @@ import {
 const formatExecutorLabel = (key: string): string =>
   key.replace(/_/g, " ").replace(/\b\w/g, (match) => match.toUpperCase());
 
-export const MolqRunTab = ({ selection, snapshot }: RendererProps): JSX.Element => {
+export const MolqRunTab = ({ selection, snapshot, executionId }: RendererProps): JSX.Element => {
   const run = snapshot.runs.find((item) => item.id === selection.objectId) ?? null;
-  const entries = Object.entries(run?.executorInfo ?? {}).sort(([a], [b]) => a.localeCompare(b));
+  const execution = run?.executionHistory.find((item) => item.executionId === executionId) ?? null;
+  const entries = Object.entries(execution?.executor ?? {}).sort(([a], [b]) => a.localeCompare(b));
 
   return (
     <OverviewSurface>
@@ -27,10 +28,12 @@ export const MolqRunTab = ({ selection, snapshot }: RendererProps): JSX.Element 
         <section className="space-y-3">
           <h3 className="text-body-lg font-medium text-foreground">Molq</h3>
           <p className="text-label text-muted-foreground">
-            Submission and cluster fields from the run executor metadata.
+            Submission and cluster fields from the selected execution.
           </p>
           {entries.length === 0 ? (
-            <p className="py-4 text-label text-muted-foreground">No executor metadata.</p>
+            <p className="py-4 text-label text-muted-foreground">
+              {executionId ? "This execution has no Molq metadata." : "Select a Molq execution."}
+            </p>
           ) : (
             <Table>
               <TableHeader>
@@ -46,7 +49,7 @@ export const MolqRunTab = ({ selection, snapshot }: RendererProps): JSX.Element 
                       {formatExecutorLabel(key)}
                     </TableCell>
                     <TableCell className="break-all font-mono text-label text-foreground">
-                      {value}
+                      {typeof value === "string" ? value : JSON.stringify(value)}
                     </TableCell>
                   </TableRow>
                 ))}

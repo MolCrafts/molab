@@ -20,6 +20,7 @@ from pathlib import Path
 import molexp as me
 from molexp.profile import ProfileConfig
 from molexp.workflow import Workflow, WorkflowCompiler, WorkflowRuntime
+from molexp.workspace.domain import ExecutionMode
 
 # Module-level marker so the first attempt fails and the second succeeds.
 _FAIL_ONCE_MARKER: Path | None = None
@@ -55,23 +56,27 @@ async def main() -> None:
     # ``execute()`` captures task failures and records them on the run
     # without re-raising — inspect ``result.status`` instead.
     with run.start(profile_config=cfg) as ctx:
+        first_execution_id = ctx.id
         result = await WorkflowRuntime().execute(compiled, run_context=ctx)
     print(f"attempt 1: status={result.status}")
 
-    with run.start(profile_config=cfg) as ctx:
+    with run.start(
+        mode=ExecutionMode.RETRY,
+        based_on_execution_id=first_execution_id,
+        profile_config=cfg,
+    ) as ctx:
         result = await WorkflowRuntime().execute(compiled, run_context=ctx)
     print(f"attempt 2: status={result.status}")
 
     print("\nrun fields (public API)")
-    print(f"  id:           {run.id}")
-    print(f"  status:       {run.status}")
-    print(f"  profile:      {run.metadata.profile}")
-    print(f"  config_hash:  {run.metadata.config_hash}")
-    print(f"  config:       {run.metadata.config}")
-    print(f"  attempts:     {len(run.execution_history)}")
-    for i, entry in enumerate(run.execution_history):
+    print(f"  id:               {run.id}")
+    print(f"  status:           {run.executions[-1].status.value}")
+    print(f"  definition_hash:  {run.metadata.definition_hash}")
+    print(f"  parameters:       {run.parameters}")
+    print(f"  attempts:         {len(run.executions)}")
+    for i, entry in enumerate(run.executions):
         print(
-            f"    #{i + 1}: status={entry.status}, "
+            f"    #{i + 1}: status={entry.status.value}, "
             f"started={entry.started_at}, finished={entry.finished_at}"
         )
 

@@ -11,6 +11,7 @@ files.
 
 import json
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 
@@ -64,13 +65,14 @@ class TestWorkspace:
 class TestProject:
     def test_add_project_slugifies_display_name(self, workspace):
         proj = workspace.add_project("QM9")
-        assert proj.id == "qm9"
+        assert proj.id != "qm9"
+        UUID(proj.id)  # time-ordered UUIDv7, not a slug
         assert proj.name == "QM9"
 
     def test_get_project_resolves_slugified_display_name(self, workspace):
         workspace.add_project("My Project")
         found = workspace.get_project("My Project")
-        assert found.id == "my-project"
+        assert found.name == "My Project"
 
     def test_sync_folders_imports_orphan_dirs_into_index(self, tmp_path):
         """``sync_folders`` reconciles the per-class index with disk reality.
@@ -82,21 +84,21 @@ class TestProject:
         """
         from molexp.workspace import Project
 
+        ws = Workspace(tmp_path)
+        ws.add_project("registered")
         # Orphan project dir left by external tooling (not via add_project).
         orphan = tmp_path / "projects" / "orphan"
         orphan.mkdir(parents=True)
         (orphan / "project.json").write_text(
-            '{"schema_version":1,"id":"orphan","name":"orphan","description":"",'
+            '{"schema_version":2,"id":"orphan","name":"orphan","description":"",'
             '"owner":"","tags":[],"config":{},"created_at":"2026-04-21T12:00:00"}'
         )
-        ws = Workspace(tmp_path)
-        ws.add_project("registered")
         # Index is authoritative: ``list_projects`` sees only what was
         # added through the API. Orphan is invisible until sync.
-        assert {p.id for p in ws.list_projects()} == {"registered"}
+        assert {p.name for p in ws.list_projects()} == {"registered"}
         # Reconcile.
         ws.sync_folders(cls=Project)
-        assert {p.id for p in ws.list_projects()} == {"orphan", "registered"}
+        assert {p.name for p in ws.list_projects()} == {"orphan", "registered"}
 
 
 class TestExperiment:

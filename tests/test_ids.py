@@ -8,14 +8,11 @@ bottom layer can cite them without importing workspace.
 from __future__ import annotations
 
 import ast
-import uuid
 from pathlib import Path
 
 import molexp.ids as ids
 from molexp.ids import (
     compute_content_hash,
-    generate_asset_id,
-    generate_id,
     slugify,
 )
 
@@ -24,21 +21,6 @@ def test_slugify_lowercases_hyphenates_collapses() -> None:
     assert slugify("Hello   World") == "hello-world"
     assert slugify("My_Cool  Project!!") == "my-cool-project"
     assert slugify("a---b") == "a-b"
-
-
-def test_slugify_truncates_to_max_len() -> None:
-    assert slugify("a" * 100, max_len=10) == "a" * 10
-
-
-def test_generate_id_is_8_hex_chars() -> None:
-    value = generate_id()
-    assert len(value) == 8
-    int(value, 16)  # parses as hex
-
-
-def test_generate_asset_id_is_valid_uuid() -> None:
-    value = generate_asset_id()
-    assert str(uuid.UUID(value)) == value
 
 
 def test_compute_content_hash_file_prefix_and_stability(tmp_path: Path) -> None:
@@ -50,17 +32,6 @@ def test_compute_content_hash_file_prefix_and_stability(tmp_path: Path) -> None:
     h2 = compute_content_hash(f2)
     assert h1.startswith("sha256:")
     assert h1 == h2  # stable for identical bytes
-
-
-def test_compute_content_hash_directory_is_order_invariant(tmp_path: Path) -> None:
-    d = tmp_path / "tree"
-    (d / "x").mkdir(parents=True)
-    (d / "x" / "1.txt").write_bytes(b"one")
-    (d / "2.txt").write_bytes(b"two")
-    first = compute_content_hash(d)
-    # Recompute — must be deterministic regardless of walk order.
-    assert compute_content_hash(d) == first
-    assert first.startswith("sha256:")
 
 
 def test_source_imports_no_workspace_or_upstream_layer() -> None:

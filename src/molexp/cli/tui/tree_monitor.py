@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import contextlib
 import os
+import platform
 import select
 import sys
 import termios
@@ -49,7 +50,9 @@ from rich.layout import Layout
 from rich.live import Live
 
 from molexp.plugins.submit_molq.cancel import try_cancel
+from molexp.plugins.submit_molq.metadata import normalize_executor_info
 from molexp.workspace import Experiment, Project, Run, Workspace
+from molexp.workspace.domain import ACTIVE_EXECUTION_STATUSES
 
 from .rendering import (
     _DeleteDialog,
@@ -222,6 +225,27 @@ def _describe_target(node: TreeNode) -> str:
     return f"{kind} {node.display_label}"
 
 
+def _cancel_kind(run: Run) -> tuple[str, str]:
+    """Classify a running Run's cancel path from its active Executions.
+
+    The plugin ``classify`` still reads removed run-level status/ownership
+    fields; the v2 source of truth is each active Execution's ``executor``.
+    """
+    for state in run.executions:
+        if state.status not in ACTIVE_EXECUTION_STATUSES:
+            continue
+        info = normalize_executor_info(state.executor, {})
+        if info.get("backend") == "molq" and (info.get("job_id") or info.get("scheduler_job_id")):
+            return ("molq", info.get("cluster_name", ""))
+        pid = state.executor.get("pid")
+        host = state.executor.get("host")
+        if pid is not None and host == platform.node():
+            return ("local", str(pid))
+        if pid is not None and host and host != platform.node():
+            return ("none", f"pid on different host ({host!r})")
+    return ("none", "no molq job id")
+
+
 def _prepare_dialog(targets: list[TreeNode]) -> _DeleteDialog:
     """Classify each target's cancel prospects for display."""
     lines: list[tuple[str, str, str]] = []
@@ -229,24 +253,20 @@ def _prepare_dialog(targets: list[TreeNode]) -> _DeleteDialog:
         running = (node.status or "").lower() in ("running", "pending")
         if node.kind == "run" and running:
             assert isinstance(node.ref, Run)
-            from molexp.plugins.submit_molq.cancel import classify
-
-            plan = classify(node.ref)
-            if plan.kind == "none":
-                lines.append(("!", _describe_target(node), f"uncancellable: {plan.detail}"))
+            kind, detail = _cancel_kind(node.ref)
+            if kind == "none":
+                lines.append(("!", _describe_target(node), f"uncancellable: {detail}"))
             else:
-                lines.append(("⟳", _describe_target(node), f"cancel via {plan.kind}"))
+                lines.append(("⟳", _describe_target(node), f"cancel via {kind}"))
         elif node.kind == "execution" and running:
             # Executions share cancel path with their parent run.
             assert isinstance(node.ref, tuple) and isinstance(node.ref[0], Run)
             run = node.ref[0]
-            from molexp.plugins.submit_molq.cancel import classify
-
-            plan = classify(run)
-            if plan.kind == "none":
-                lines.append(("!", _describe_target(node), f"uncancellable: {plan.detail}"))
+            kind, detail = _cancel_kind(run)
+            if kind == "none":
+                lines.append(("!", _describe_target(node), f"uncancellable: {detail}"))
             else:
-                lines.append(("⟳", _describe_target(node), f"cancel via {plan.kind}"))
+                lines.append(("⟳", _describe_target(node), f"cancel via {kind}"))
         else:
             lines.append(("✓", _describe_target(node), ""))
     return _DeleteDialog(targets=targets, plan_lines=lines)

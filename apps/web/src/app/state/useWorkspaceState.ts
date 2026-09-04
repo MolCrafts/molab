@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  assetsApi,
   experimentsApi,
   projectsApi,
   projectsWsApi,
@@ -176,13 +175,9 @@ const fetchAllAssets = async (projects: ProjectSummary[]): Promise<WorkspaceSnap
       }
     }),
   );
-  try {
-    const allAssets = [...mapAssets(await assetsApi.listAssets()), ...projectAssets.flat()];
-    return Array.from(new Map(allAssets.map((item) => [item.id, item])).values());
-  } catch (err) {
-    console.warn("Workspace assets unavailable:", err);
-    return projectAssets.flat();
-  }
+  return Array.from(
+    new Map(projectAssets.flat().map((item) => [item.id, item])).values(),
+  );
 };
 
 const fetchAgentSessionsList = async (): Promise<WorkspaceSnapshot["agentSessions"]> => {

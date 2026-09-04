@@ -59,7 +59,6 @@ import type { RunCreateRequest } from "../api/generated/models/RunCreateRequest"
 export type { ExperimentCreateRequest, ProjectCreateRequest, RunCreateRequest };
 
 import type { AgentTaskResponse } from "../api/generated/models/AgentTaskResponse";
-import type { AssetResponse } from "../api/generated/models/AssetResponse";
 import type { CacheClearResponse } from "../api/generated/models/CacheClearResponse";
 import type { CacheStatsResponse } from "../api/generated/models/CacheStatsResponse";
 import type { ExperimentResponse } from "../api/generated/models/ExperimentResponse";
@@ -68,12 +67,50 @@ import type { RunResponse } from "../api/generated/models/RunResponse";
 import type { RunSummary as ApiRunSummaryModel } from "../api/generated/models/RunSummary";
 import type { SessionEventResponse } from "../api/generated/models/SessionEventResponse";
 import type { WorkflowSnapshotResponse } from "../api/generated/models/WorkflowSnapshotResponse";
+import type { RunStatusSummaryResponse } from "../api/generated/models/RunStatusSummaryResponse";
+import type { ExecutionOutputsResponse } from "../api/generated/models/ExecutionOutputsResponse";
 
 // Re-export as Api*Response for compatibility
 export type ApiProjectResponse = ProjectResponse;
 export type ApiExperimentResponse = ExperimentResponse;
-export type ApiRunResponse = RunResponse;
-export type ApiAssetResponse = AssetResponse;
+export type ApiRunResponse = Pick<RunResponse, "id" | "projectId" | "experimentId" | "created"> &
+  Partial<Omit<RunResponse, "error">> & {
+    /** Mock-only v1 fields; production mapping never treats them as truth. */
+    status?: string;
+    results?: Record<string, unknown>;
+    profile?: string | null;
+    configHash?: string | null;
+    executorInfo?: Record<string, unknown>;
+    executionHistory?: Array<{
+      executionId: string;
+      startedAt: string;
+      finishedAt?: string | null;
+      status: string;
+      schedulerJobId?: string | null;
+    }>;
+    error?: ({ message?: string } & Record<string, unknown>) | null;
+  };
+/** Transitional UI projection for Project Assets. Artifacts use their own type. */
+export interface ApiAssetResponse {
+  id: string;
+  projectId: string;
+  title: string;
+  createdAt: string;
+  versionCount?: number;
+  name: string;
+  kind: string;
+  path: string;
+  updatedAt: string;
+  scopeKind: string;
+  scopeIds: string[];
+  extra?: Record<string, unknown>;
+  tags?: Record<string, string>;
+  hasPreviewSidecar?: boolean;
+  /** Legacy mock-only metadata; production Project Assets use versions. */
+  producer?: Record<string, unknown> | null;
+  /** Legacy mock-only content field. */
+  contentHash?: string | null;
+}
 export type ApiWorkflowSnapshot = WorkflowSnapshotResponse;
 export type ApiRunSummary = ApiRunSummaryModel;
 export type ApiCacheStats = CacheStatsResponse;
@@ -137,10 +174,17 @@ export interface ExperimentSummary {
 
 export interface ExecutionRecordSummary {
   executionId: string;
-  startedAt: string;
+  mode: string;
+  createdAt: string;
+  startedAt: string | null;
   finishedAt: string | null;
   status: string;
-  schedulerJobId: string | null;
+  basedOnExecutionId: string | null;
+  checkpointArtifactId: string | null;
+  executor: Record<string, unknown>;
+  environment: Record<string, unknown>;
+  artifactIds: string[];
+  error: Record<string, unknown> | null;
 }
 
 export interface RunSummary {
@@ -151,11 +195,10 @@ export interface RunSummary {
   updatedAt: string;
   projectId: string;
   experimentId: string;
-  executorInfo: Record<string, string>;
-  profile: string | null;
-  configHash: string | null;
+  definitionHash: string;
+  experimentRevisionId: string;
+  statusSummary: RunStatusSummaryResponse;
   parameters: Record<string, unknown>;
-  results: Record<string, unknown>;
   workflowSource: string | null;
   workflowSnapshot: WorkflowSnapshotResponse | null;
   startedAt: string | null;
@@ -367,6 +410,10 @@ export interface RendererProps {
 
   onInspectorTargetChange: (target: InspectorTarget) => void;
   onRefresh: () => void;
+  /** Explicit physical attempt selected by the host. Never inferred as "latest". */
+  executionId?: string | null;
+  /** Host-fetched output inventory for that execution. */
+  executionOutputs?: ExecutionOutputsResponse | null;
 }
 
 /** Compile-time field scope for feature renderers with smaller catalog needs. */

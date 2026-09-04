@@ -1,14 +1,12 @@
-"""Workflow resume seeding sources ``run.execution_history`` (persist-one-02).
+"""Workflow resume seeding sources ``run.executions`` (persist-one-02).
 
 ``last_resumable_execution_id`` / ``seed_from_execution`` pick the most-recent
-non-succeeded execution from ``run.execution_history`` (``RunMetadata`` on
-``run.json``).
+non-succeeded Execution and read its persisted ``workflow.json`` node outputs.
 """
 
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
 from pathlib import Path
 
 import molexp as me
@@ -16,7 +14,7 @@ from molexp.workflow._engine.persistence import (
     last_resumable_execution_id,
     seed_from_execution,
 )
-from molexp.workspace.models import ExecutionRecord, RunStatus
+from molexp.workspace.domain import ExecutionMode
 
 
 def _make_run(tmp_path: Path):
@@ -24,36 +22,29 @@ def _make_run(tmp_path: Path):
     return ws.add_project("demo").add_experiment("train").add_run(params={"seed": 0})
 
 
-def _write_execution_history(run, records: list[dict]) -> None:
-    history = tuple(ExecutionRecord.model_validate(item) for item in records)
-    run._update_metadata(status=RunStatus.FAILED, execution_history=history)
+def _make_execution(run, *, failed: bool, mode: ExecutionMode = ExecutionMode.INITIAL) -> str:
+    """Create and seal one real Execution, returning its id."""
+    ctx = run.start(mode=mode)
+    ctx.__enter__()
+    execution_id = ctx.id
+    try:
+        if failed:
+            ctx.mark_failed("boom")
+        else:
+            ctx.mark_succeeded()
+    finally:
+        ctx.__exit__(None, None, None)
+    return execution_id
 
 
 class TestLastResumableExecutionId:
     def test_picks_last_non_succeeded(self, tmp_path: Path) -> None:
         run = _make_run(tmp_path)
-        _write_execution_history(
-            run,
-            [
-                {
-                    "execution_id": "exec-1",
-                    "started_at": datetime(2026, 1, 1, tzinfo=UTC).isoformat(),
-                    "status": "failed",
-                },
-                {
-                    "execution_id": "exec-2",
-                    "started_at": datetime(2026, 1, 2, tzinfo=UTC).isoformat(),
-                    "status": "succeeded",
-                },
-                {
-                    "execution_id": "exec-3",
-                    "started_at": datetime(2026, 1, 3, tzinfo=UTC).isoformat(),
-                    "status": "failed",
-                },
-            ],
-        )
-        assert last_resumable_execution_id(run) == "exec-3"
-        assert [r.execution_id for r in run.execution_history] == ["exec-1", "exec-2", "exec-3"]
+        id1 = _make_execution(run, failed=True)
+        id2 = _make_execution(run, failed=False, mode=ExecutionMode.RERUN)
+        id3 = _make_execution(run, failed=True, mode=ExecutionMode.RERUN)
+        assert last_resumable_execution_id(run) == id3
+        assert [e.id for e in run.executions] == [id1, id2, id3]
 
     def test_empty_history_returns_none(self, tmp_path: Path) -> None:
         run = _make_run(tmp_path)
@@ -64,19 +55,8 @@ class TestLastResumableExecutionId:
 class TestSeedFromExecutionHistory:
     def test_seeds_completed_outputs_from_execution_history(self, tmp_path: Path) -> None:
         run = _make_run(tmp_path)
-        exec_id = "exec-seed"
-        _write_execution_history(
-            run,
-            [
-                {
-                    "execution_id": exec_id,
-                    "started_at": datetime(2026, 1, 1, tzinfo=UTC).isoformat(),
-                    "status": "failed",
-                }
-            ],
-        )
+        exec_id = _make_execution(run, failed=True)
         exec_dir = Path(run.run_dir) / "executions" / exec_id
-        exec_dir.mkdir(parents=True, exist_ok=True)
         (exec_dir / "workflow.json").write_text(
             json.dumps(
                 {

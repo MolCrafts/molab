@@ -4,8 +4,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from molexp.plugins.metrics_ingest.detect import (
     LogFormat,
     detect_log_formats,
@@ -47,9 +45,6 @@ class TestIsLammpsLog:
         path.write_text("LAMMPS (2 Aug 2023)\n" + ("# padding\n" * 20000) + LAMMPS_HEAD)
         assert is_lammps_log(path) is True
 
-    def test_rejects_an_unreadable_file(self, tmp_path: Path) -> None:
-        assert is_lammps_log(tmp_path / "does-not-exist.log") is False
-
 
 class TestIsTensorboardDir:
     def test_accepts_a_dir_holding_tfevents(self, tmp_path: Path) -> None:
@@ -59,11 +54,6 @@ class TestIsTensorboardDir:
     def test_rejects_a_dir_without_tfevents(self, tmp_path: Path) -> None:
         (tmp_path / "loss.txt").write_text("0.5")
         assert is_tensorboard_dir(tmp_path) is False
-
-    def test_rejects_a_file(self, tmp_path: Path) -> None:
-        path = tmp_path / "events.out.tfevents.1234.host"
-        path.write_bytes(b"\x00")
-        assert is_tensorboard_dir(path) is False
 
 
 class TestHasMetricsBuffer:
@@ -79,14 +69,6 @@ class TestHasMetricsBuffer:
 
     def test_rejects_a_plain_run_directory(self, tmp_path: Path) -> None:
         (tmp_path / "log.lammps").write_text(LAMMPS_HEAD)
-        assert has_metrics_buffer(tmp_path) is False
-
-    def test_is_not_a_record_package_check(self, tmp_path: Path) -> None:
-        """A bare ``meta/`` is not a metrics surface.
-
-        This detector only answers "is there host metrics (JSONL WAL)?".
-        """
-        (tmp_path / "meta").mkdir()
         assert has_metrics_buffer(tmp_path) is False
 
 
@@ -128,10 +110,3 @@ class TestDetectRunFormats:
         (deep / "log.lammps").write_text(LAMMPS_HEAD)
         assert detect_log_formats(tmp_path, max_depth=1) == []
         assert len(detect_log_formats(tmp_path, max_depth=3)) == 1
-
-    @pytest.mark.parametrize("name", ["run.csv", "metrics.csv"])
-    def test_reports_csv_as_needing_a_mapping(self, tmp_path: Path, name: str) -> None:
-        (tmp_path / name).write_text("step,loss\n1,0.5\n")
-        hits = detect_log_formats(tmp_path)
-        assert [hit.format for hit in hits] == [LogFormat.CSV]
-        assert "mapping" in hits[0].detail

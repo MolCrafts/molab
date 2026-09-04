@@ -233,12 +233,6 @@ class TestToGraphIR:
         assert adder.config == {"value": 10}
 
     @pytest.mark.unit
-    def test_json_round_trip_is_exact(self):
-        ir = WorkflowCompiler().compile(_branchy_builder()).to_graph_ir()
-        restored = WorkflowGraphIR.model_validate_json(ir.model_dump_json())
-        assert restored == ir
-
-    @pytest.mark.unit
     def test_embeds_subworkflow_inner_graph(self):
         """A SubWorkflow node exposes the full inner WorkflowGraphIR under
         ``GraphTaskIR.subworkflow`` (UI drill-down); ordinary nodes carry

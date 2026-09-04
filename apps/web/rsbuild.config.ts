@@ -1,13 +1,10 @@
 import { defineConfig } from '@rsbuild/core';
 import { pluginReact } from '@rsbuild/plugin-react';
-import fs from 'node:fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
-
-const siblingMolvisIo = path.resolve(__dirname, '../../../molvis/stage/src/io/index.ts');
 
 // Docs: https://rsbuild.rs/config/
 export default defineConfig(({ command }) => {
@@ -18,11 +15,6 @@ export default defineConfig(({ command }) => {
     resolve: {
       alias: {
         '@schemas': path.resolve(__dirname, '../../src/molexp/schemas'),
-        // Local sibling: directory Zarr loader lives in molvis, not this plugin.
-        // CI has no sibling checkout — published @molcrafts/molvis-stage is used.
-        ...(fs.existsSync(siblingMolvisIo)
-          ? { '@molcrafts/molvis-stage/io': siblingMolvisIo }
-          : {}),
       },
     },
     tools: {

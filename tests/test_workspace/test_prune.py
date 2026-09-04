@@ -1,31 +1,33 @@
-"""Two-phase execution pruning — ``molexp.workspace.prune`` (vision-loop-07 §2).
+"""Two-phase execution pruning — ``molexp.workspace.prune`` (v2).
 
 The ONE prune core the CLI (``molexp runs prune``) and the harness lifecycle
 capability share: ``plan_execution_prune`` turns a selection (explicit ids /
 statuses / everything) into a frozen, reviewable ``ExecutionPrunePlan``;
-``apply_execution_prune`` deletes exactly what the plan lists via
-``Run.delete_execution`` (rmtree + ``ops`` history rewrite, atomic per entry).
+``apply_execution_prune`` removes exactly the retained workspace bytes the
+plan lists. Provenance is immutable, so apply never rewrites history — the
+derived ``run.executions`` view shrinks only because the removed
+``execution.json`` files are gone.
 
-Contract points under test (spec Testing strategy + CLI-parity with the old
-inline core at ``cli/prune.py``):
+Contract points under test:
 
-* planning is read-only and refusal lives at PLAN time — a ``running`` record
-  on an actively-running run raises the typed ``LivePruneRefusedError``;
-* a ``running`` record on a *terminal* run is a zombie leftover and prunes
-  normally (same rule the CLI enforced);
-* apply removes exactly the planned dirs and rewrites the ``ops`` execution
-  history — run status / params / other attempts are untouched.
+* planning is read-only and refusal lives at PLAN time — a ``running``
+  Execution on an actively-running run raises ``LivePruneRefusedError``;
+* terminal Executions prune normally;
+* apply removes exactly the planned dirs; run params / other attempts are
+  untouched, and an already-removed dir is tolerated (idempotent).
 """
 
 from __future__ import annotations
 
-from datetime import datetime
+import shutil
 from pathlib import Path
 
 import pytest
 
 from molexp.workspace import Workspace
-from molexp.workspace.models import ExecutionRecord, RunStatus
+from molexp.workspace.domain import ExecutionMode, ExecutionStatus
+from molexp.workspace.execution_repository import ExecutionRepository
+from molexp.workspace.provenance import AgentRef
 from molexp.workspace.prune import (
     ExecutionPrunePlan,
     LivePruneRefusedError,
@@ -34,34 +36,36 @@ from molexp.workspace.prune import (
 )
 from molexp.workspace.run import Run
 
-# ── fixtures ─────────────────────────────────────────────────────────────────
+_TEST_AGENT = AgentRef(id="test", type="person", name="test")
+
+
+def _repo(run: Run) -> ExecutionRepository:
+    ws = run.experiment.project.workspace
+    return ExecutionRepository(
+        ws.root,
+        run.run_dir,
+        run_id=run.id,
+        project_id=run.experiment.project.id,
+        fs=ws.fs,
+    )
 
 
 def _seed_executions(run: Run, statuses: tuple[str, ...]) -> list[str]:
-    """Seed one on-disk execution dir + history record per status; return ids."""
-    history: list[ExecutionRecord] = []
-    exec_ids: list[str] = []
-    for i, status in enumerate(statuses, start=1):
-        exec_id = f"exec-{run.id}" if i == 1 else f"exec-{run.id}-{i}"
-        exec_dir = Path(str(run.run_dir)) / "executions" / exec_id
-        exec_dir.mkdir(parents=True, exist_ok=True)
-        (exec_dir / "workflow.json").write_text(f'{{"status":"{status}"}}', encoding="utf-8")
-        history.append(
-            ExecutionRecord(
-                execution_id=exec_id,
-                started_at=datetime(2026, 7, 1, 10, i),
-                finished_at=datetime(2026, 7, 1, 10, i + 1),
-                status=status,
-            )
-        )
-        exec_ids.append(exec_id)
-    run._update_metadata(execution_history=tuple(history), status=RunStatus.SUCCEEDED)
-    return exec_ids
+    """Seed one physical Execution per status; return their ids."""
+    repo = _repo(run)
+    ids: list[str] = []
+    for i, status in enumerate(statuses):
+        mode = ExecutionMode.INITIAL if i == 0 else ExecutionMode.RERUN
+        state = repo.create(mode=mode, created_by=_TEST_AGENT)
+        repo.start(state.id)
+        repo.seal(state.id, ExecutionStatus(status))
+        ids.append(state.id)
+    return ids
 
 
 @pytest.fixture
 def seeded(tmp_path: Path) -> tuple[Path, Run, list[str]]:
-    """A terminal run with three attempts: one succeeded + two failed."""
+    """A run with three attempts: one succeeded + two failed."""
     ws = Workspace(root=tmp_path, name="prune-lab")
     exp = ws.add_project("proj-a").add_experiment("exp-x", workflow_source="s.py", params={})
     run = exp.add_run(params={"seed": 1})
@@ -70,10 +74,10 @@ def seeded(tmp_path: Path) -> tuple[Path, Run, list[str]]:
     return tmp_path, run, exec_ids
 
 
-def _reloaded_history_ids(ws_path: Path, run: Run) -> list[str]:
-    """Execution-history ids read back through a FRESH workspace (disk truth)."""
+def _reloaded_ids(ws_path: Path, run: Run) -> list[str]:
+    """Execution ids read back through a FRESH workspace (disk truth)."""
     reloaded = Workspace.load(ws_path).get_project("proj-a").get_experiment("exp-x").get_run(run.id)
-    return [rec.execution_id for rec in reloaded.execution_history]
+    return [rec.id for rec in reloaded.executions]
 
 
 # ── plan: selection semantics ────────────────────────────────────────────────
@@ -108,31 +112,14 @@ class TestPlanSelection:
         plan = plan_execution_prune(run, statuses=["cancelled"])
         assert plan.entries == ()
 
-    def test_history_entry_without_a_dir_reports_dir_exists_false(self, seeded) -> None:
-        _, run, exec_ids = seeded
-        ghost = f"exec-{run.id}-9"
-        history = [
-            *run.execution_history,
-            ExecutionRecord(
-                execution_id=ghost,
-                started_at=datetime(2026, 7, 1, 11, 0),
-                finished_at=datetime(2026, 7, 1, 11, 1),
-                status="failed",
-            ),
-        ]
-        run._update_metadata(execution_history=tuple(history))
-        plan = plan_execution_prune(run, execution_ids=[ghost])
-        assert [entry.dir_exists for entry in plan.entries] == [False]
-        del exec_ids  # selection is history-driven, not disk-driven
-
 
 class TestPlanIsReadOnlyAndFrozen:
     def test_planning_touches_no_disk_state(self, seeded) -> None:
         _, run, exec_ids = seeded
         plan_execution_prune(run, statuses=["failed"])
         exec_root = Path(str(run.run_dir)) / "executions"
-        assert sorted(p.name for p in exec_root.iterdir()) == sorted(exec_ids)
-        assert [rec.execution_id for rec in run.execution_history] == exec_ids
+        assert sorted(p.name for p in exec_root.iterdir() if p.is_dir()) == sorted(exec_ids)
+        assert [rec.id for rec in run.executions] == exec_ids
 
 
 # ── plan: live-record refusal (typed, at PLAN time) ──────────────────────────
@@ -145,39 +132,28 @@ class TestLiveRecordRefusal:
         exp = ws.add_project("proj-a").add_experiment("exp-x", workflow_source="s.py", params={})
         run = exp.add_run(params={})
         run.materialize()
-        exec_id = f"exec-{run.id}"
-        (Path(str(run.run_dir)) / "executions" / exec_id).mkdir(parents=True)
-        run._update_metadata(
-            status=RunStatus.RUNNING,
-            execution_history=(
-                ExecutionRecord(
-                    execution_id=exec_id,
-                    started_at=datetime(2026, 7, 1, 10, 0),
-                    status="running",
-                ),
-            ),
-        )
+        state = _repo(run).create(mode=ExecutionMode.INITIAL, created_by=_TEST_AGENT)
+        _repo(run).start(state.id)
         return run
 
     def test_running_record_on_active_run_refuses_at_plan_time(self, tmp_path: Path) -> None:
         run = self._live_run(tmp_path)
         with pytest.raises(LivePruneRefusedError):
             plan_execution_prune(run)
-        assert (Path(str(run.run_dir)) / "executions" / f"exec-{run.id}").exists()
-        assert len(run.execution_history) == 1
+        assert len(run.executions) == 1
 
-    def test_running_record_on_terminal_run_prunes_normally(self, tmp_path: Path) -> None:
-        """A zombie leftover (running record, terminal run) is prunable history."""
+    def test_terminal_execution_prunes_normally(self, tmp_path: Path) -> None:
+        """A terminal Execution is prunable history, never a refusal."""
         run = self._live_run(tmp_path)
-        run._update_metadata(status=RunStatus.FAILED)
-        plan = plan_execution_prune(run, statuses=["running"])
-        assert [entry.execution_id for entry in plan.entries] == [f"exec-{run.id}"]
+        execution_id = run.executions[-1].id
+        _repo(run).seal(execution_id, ExecutionStatus.FAILED)
+        plan = plan_execution_prune(run, statuses=["failed"])
+        assert [entry.execution_id for entry in plan.entries] == [execution_id]
         apply_execution_prune(run, plan)
-        assert not (Path(str(run.run_dir)) / "executions" / f"exec-{run.id}").exists()
-        assert run.execution_history == []
+        assert run.executions == []
 
 
-# ── apply: exact deletion + history rewrite ──────────────────────────────────
+# ── apply: exact deletion ────────────────────────────────────────────────────
 
 
 class TestApply:
@@ -187,38 +163,29 @@ class TestApply:
         removed = apply_execution_prune(run, plan)
         assert removed == 2
         exec_root = Path(str(run.run_dir)) / "executions"
-        assert sorted(p.name for p in exec_root.iterdir()) == [exec_ids[0]]
+        assert [p.name for p in exec_root.iterdir() if p.is_dir()] == [exec_ids[0]]
 
-    def test_apply_rewrites_the_ops_history(self, seeded) -> None:
+    def test_apply_shrinks_the_derived_executions_view(self, seeded) -> None:
         ws_path, run, exec_ids = seeded
         plan = plan_execution_prune(run, statuses=["failed"])
         apply_execution_prune(run, plan)
-        assert _reloaded_history_ids(ws_path, run) == [exec_ids[0]]
+        assert _reloaded_ids(ws_path, run) == [exec_ids[0]]
 
-    def test_apply_leaves_run_status_and_params_alone(self, seeded) -> None:
+    def test_apply_leaves_run_params_and_other_attempts_alone(self, seeded) -> None:
         _, run, _ = seeded
         plan = plan_execution_prune(run, statuses=["failed"])
         apply_execution_prune(run, plan)
-        assert run.status == "succeeded"
         assert run.parameters == {"seed": 1}
+        assert run.executions[-1].status is ExecutionStatus.SUCCEEDED
 
-    def test_apply_removes_history_row_even_without_a_dir(self, seeded) -> None:
-        ws_path, run, _exec_ids = seeded
-        ghost = f"exec-{run.id}-9"
-        history = [
-            *run.execution_history,
-            ExecutionRecord(
-                execution_id=ghost,
-                started_at=datetime(2026, 7, 1, 11, 0),
-                finished_at=datetime(2026, 7, 1, 11, 1),
-                status="failed",
-            ),
-        ]
-        run._update_metadata(execution_history=tuple(history))
-        plan = plan_execution_prune(run, execution_ids=[ghost])
+    def test_apply_tolerates_an_already_removed_dir(self, seeded) -> None:
+        _, run, exec_ids = seeded
+        plan = plan_execution_prune(run, execution_ids=[exec_ids[0]])
+        exec_root = Path(str(run.run_dir)) / "executions"
+        shutil.rmtree(exec_root / exec_ids[0])
         removed = apply_execution_prune(run, plan)
         assert removed == 0
-        assert ghost not in _reloaded_history_ids(ws_path, run)
+        assert [rec.id for rec in run.executions] == exec_ids[1:]
 
     def test_apply_refuses_a_plan_built_for_another_run(self, seeded, tmp_path: Path) -> None:
         _, run, _ = seeded

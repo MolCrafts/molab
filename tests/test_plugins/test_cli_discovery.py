@@ -1,7 +1,6 @@
 """Tests for ``molexp.plugins.cli`` — the CLI-only plugin layer.
 
-Covers the ``CliPlugin`` descriptor's required-``register`` contract and
-``discover_cli_plugins()``'s entry-point walk over the
+Covers ``discover_cli_plugins()``'s entry-point walk over the
 ``molexp.cli_plugins`` group (cache + failure isolation + api-version
 gating + first-wins de-duplication).
 """
@@ -11,7 +10,6 @@ from __future__ import annotations
 from collections.abc import Iterable
 
 import pytest
-import typer
 
 from molexp.plugins.cli import (
     CLI_PLUGIN_API_VERSION,
@@ -19,20 +17,6 @@ from molexp.plugins.cli import (
     _discover_cli_uncached,
     discover_cli_plugins,
 )
-
-
-class TestCliPlugin:
-    def test_register_is_a_required_field(self) -> None:
-        def reg(app: typer.Typer) -> None:
-            pass
-
-        # ``register`` has no default — 07-cli-ui-plugin-split retired the
-        # optional ``register_cli`` field, so a CLI plugin that registers
-        # nothing cannot be constructed.
-        assert CliPlugin(id="x", name="X", version="0.0.1", register=reg).register is reg
-        with pytest.raises(TypeError):
-            CliPlugin(id="x", name="X", version="0.0.1")  # type: ignore[call-arg]
-
 
 # ── discovery fixtures + helpers ──────────────────────────────────────────
 

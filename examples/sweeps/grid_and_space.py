@@ -72,9 +72,10 @@ def main() -> None:
     print()
     print("── Idempotent re-declaration ────────────────────────────")
     again = exp.sweep(wf, params=space)
-    assert len(again) == len(scan), "re-declaring the same sweep must produce the same run count"
+    assert len(again) == 0, "re-declaring the same sweep must add no new runs"
+    assert len(exp.list_runs()) == len(scan), "run count must be unchanged"
     print(f"  first declaration:  {len(scan)} runs")
-    print(f"  second declaration: {len(again)} runs (same ids)")
+    print(f"  second declaration: {len(again)} new runs (already present)")
 
     # ── 4. Read back finished sweep ────────────────────────────────────
     print()

@@ -15,17 +15,17 @@ import type { WorkspaceRefResponse } from './WorkspaceRefResponse';
  * Camel-cased HTTP view of the canonical ``WorkspaceContext`` read-model.
  */
 export type WorkspaceContextResponse = {
-    artifacts?: Array<ArtifactRefResponse>;
-    experiments?: Array<ExperimentRefResponse>;
-    failedRuns?: Array<RunRefResponse>;
+    workspace: WorkspaceRefResponse;
     focus: ContextFocusResponse;
+    projects?: Array<ProjectRefResponse>;
+    experiments?: Array<ExperimentRefResponse>;
+    workflows?: Array<WorkflowRefResponse>;
+    recentRuns?: Array<RunRefResponse>;
+    failedRuns?: Array<RunRefResponse>;
+    runningRuns?: Array<RunRefResponse>;
+    artifacts?: Array<ArtifactRefResponse>;
     knowledge?: Array<KnowledgeRefResponse>;
     openQuestions?: Array<KnowledgeRefResponse>;
-    projects?: Array<ProjectRefResponse>;
-    recentRuns?: Array<RunRefResponse>;
-    runningRuns?: Array<RunRefResponse>;
     staleOrMissing?: Array<HealthFlagResponse>;
-    workflows?: Array<WorkflowRefResponse>;
-    workspace: WorkspaceRefResponse;
 };
 

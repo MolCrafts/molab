@@ -1,7 +1,8 @@
-"""Schemas for the workspace-level Runs aggregator.
+"""Workspace Run projection with physical Executions nested below intent.
 
-A flat row per run with embedded executions, suitable for a tree-style
-table where each run row expands to show its execution attempts.
+This is deliberately not a flattened job model. A Run contributes immutable
+scientific definition fields and an aggregate status summary; every scheduler,
+runtime, timing, and terminal-status field belongs to an Execution row.
 """
 
 from __future__ import annotations
@@ -10,28 +11,33 @@ from pydantic import Field
 
 from molexp._typing import JSONValue
 from molexp.workspace import Run
-from molexp.workspace.models import ExecutionRecord
+from molexp.workspace.domain import ACTIVE_EXECUTION_STATUSES, ExecutionState
 
 from ._wire import ApiModel
 from .molq import MolqJobSummary  # noqa: F401  (preserve import surface)
+from .responses import RunStatusSummaryResponse
 
 
 class WorkspaceExecutionRow(ApiModel):
-    """One execution attempt of a run, surfaced for the workspace runs table."""
+    """One physical attempt that realizes a logical Run."""
 
     executionId: str
     runId: str
+    mode: str
     status: str
-    startedAt: str
+    createdAt: str
+    startedAt: str | None = None
     finishedAt: str | None = None
     durationSeconds: float | None = None
+    basedOnExecutionId: str | None = None
+    checkpointArtifactId: str | None = None
     schedulerJobId: str | None = None
     backend: str | None = None
     backendMetadata: dict[str, str] = Field(default_factory=dict)
 
 
 class WorkspaceRunRow(ApiModel):
-    """One run, with its execution history nested for tree expansion."""
+    """Logical Run definition plus a derived summary of its Executions."""
 
     id: str
     name: str
@@ -39,17 +45,13 @@ class WorkspaceRunRow(ApiModel):
     projectName: str
     experimentId: str
     experimentName: str
-    status: str
-    backend: str | None = None
-    cluster: str | None = None
-    scheduler: str | None = None
-    target: str | None = None
-    profile: str | None = None
+    definitionHash: str
+    experimentRevisionId: str
+    inputAssetIds: list[str] = Field(default_factory=list)
+    targetHint: str | None = None
+    statusSummary: RunStatusSummaryResponse
     parameters: dict[str, JSONValue] = Field(default_factory=dict)
     createdAt: str
-    finishedAt: str | None = None
-    executionCount: int = 0
-    latestSchedulerJobId: str | None = None
     executions: list[WorkspaceExecutionRow] = Field(default_factory=list)
 
     @classmethod
@@ -60,24 +62,8 @@ class WorkspaceRunRow(ApiModel):
         project_name: str,
         experiment_name: str,
     ) -> WorkspaceRunRow:
-        # ``executor_info`` is a JSON-shaped mapping (``dict[str, JSONValue]``);
-        # the metadata fields we surface are always string-valued at runtime,
-        # so narrow each cell to ``str | None`` at this boundary.
-        executor: dict[str, str | None] = {
-            k: v if isinstance(v, str) else None
-            for k, v in (run.metadata.executor_info or {}).items()
-        }
-        backend = executor.get("backend")
-        cluster = executor.get("cluster_name")
-        scheduler = executor.get("scheduler")
-
-        executions = [_build_execution_row(run.id, rec, executor) for rec in run.execution_history]
-        latest_sched_id: str | None = None
-        for rec in reversed(executions):
-            if rec.schedulerJobId:
-                latest_sched_id = rec.schedulerJobId
-                break
-
+        executions = [_build_execution_row(run.id, record) for record in run.executions]
+        summary = run.status_summary
         return cls(
             id=run.id,
             name=run.id,
@@ -85,59 +71,70 @@ class WorkspaceRunRow(ApiModel):
             projectName=project_name,
             experimentId=run.experiment.id,
             experimentName=experiment_name,
-            status=run.status,
-            backend=backend,
-            cluster=cluster,
-            scheduler=scheduler,
-            target=run.metadata.target,
-            profile=run.metadata.profile,
+            definitionHash=run.metadata.definition_hash,
+            experimentRevisionId=run.metadata.experiment_revision_id,
+            inputAssetIds=list(run.metadata.input_asset_ids),
+            targetHint=run.metadata.target,
+            statusSummary=RunStatusSummaryResponse(
+                total=summary.total,
+                active=summary.active,
+                notStarted=summary.not_started,
+                byStatus=summary.by_status,
+            ),
             parameters=dict(run.parameters),
             createdAt=run.metadata.created_at.isoformat(),
-            finishedAt=(run.finished_at.isoformat() if run.finished_at else None),
-            executionCount=len(executions),
-            latestSchedulerJobId=latest_sched_id,
             executions=executions,
         )
 
 
-def _build_execution_row(
-    run_id: str,
-    record: ExecutionRecord,
-    executor_info: dict[str, str | None],
-) -> WorkspaceExecutionRow:
+def _string_metadata(values: dict[str, JSONValue]) -> dict[str, str]:
+    """Expose small executor facets without moving them onto the Run."""
+    metadata: dict[str, str] = {}
+    for key, value in values.items():
+        if isinstance(value, str):
+            metadata[str(key)] = value
+        elif isinstance(value, bool):
+            metadata[str(key)] = str(value).lower()
+        elif isinstance(value, int | float):
+            metadata[str(key)] = str(value)
+    return metadata
+
+
+def _build_execution_row(run_id: str, record: ExecutionState) -> WorkspaceExecutionRow:
     started = record.started_at
     finished = record.finished_at
     duration: float | None = None
-    if finished is not None:
+    if started is not None and finished is not None:
         duration = max(0.0, (finished - started).total_seconds())
 
-    backend_metadata: dict[str, str] = {}
-    for key, value in executor_info.items():
-        if key == "backend" or value is None:
-            continue
-        backend_metadata[str(key)] = str(value)
-    if record.scheduler_job_id:
-        backend_metadata["scheduler_job_id"] = record.scheduler_job_id
+    executor = _string_metadata(record.executor)
+    scheduler_job_id = executor.get("scheduler_job_id") or executor.get("job_id")
+    backend = executor.get("backend") or executor.get("kind")
 
     return WorkspaceExecutionRow(
-        executionId=record.execution_id,
+        executionId=record.id,
         runId=run_id,
-        status=record.status,
-        startedAt=started.isoformat(),
+        mode=record.mode.value,
+        status=record.status.value,
+        createdAt=record.created_at.isoformat(),
+        startedAt=started.isoformat() if started else None,
         finishedAt=finished.isoformat() if finished else None,
         durationSeconds=duration,
-        schedulerJobId=record.scheduler_job_id,
-        backend=executor_info.get("backend"),
-        backendMetadata=backend_metadata,
+        basedOnExecutionId=record.based_on_execution_id,
+        checkpointArtifactId=record.checkpoint_artifact_id,
+        schedulerJobId=scheduler_job_id,
+        backend=backend,
+        backendMetadata=executor,
     )
 
 
 class WorkspaceRunsStats(ApiModel):
-    total: int = 0
-    running: int = 0
-    pending: int = 0
-    failed: int = 0
-    succeeded: int = 0
+    """Execution aggregates for the complete (unpaginated) Run result set."""
+
+    totalRuns: int = 0
+    totalExecutions: int = 0
+    activeExecutions: int = 0
+    byStatus: dict[str, int] = Field(default_factory=dict)
 
 
 class WorkspaceRunsResponse(ApiModel):
@@ -147,25 +144,17 @@ class WorkspaceRunsResponse(ApiModel):
     truncated: bool = False
 
 
-_RUNNING_STATES = {"running"}
-_PENDING_STATES = {"pending", "queued", "submitted", "created"}
-_FAILED_STATES = {"failed", "timed_out", "cancelled", "lost"}
-_SUCCEEDED_STATES = {"succeeded"}
-
-
 def compute_workspace_runs_stats(rows: list[WorkspaceRunRow]) -> WorkspaceRunsStats:
-    stats = WorkspaceRunsStats(total=len(rows))
+    counts: dict[str, int] = {}
     for row in rows:
-        state = row.status.lower()
-        if state in _RUNNING_STATES:
-            stats.running += 1
-        elif state in _PENDING_STATES:
-            stats.pending += 1
-        elif state in _FAILED_STATES:
-            stats.failed += 1
-        elif state in _SUCCEEDED_STATES:
-            stats.succeeded += 1
-    return stats
+        for status, count in row.statusSummary.byStatus.items():
+            counts[status] = counts.get(status, 0) + count
+    return WorkspaceRunsStats(
+        totalRuns=len(rows),
+        totalExecutions=sum(row.statusSummary.total for row in rows),
+        activeExecutions=sum(counts.get(status.value, 0) for status in ACTIVE_EXECUTION_STATUSES),
+        byStatus=counts,
+    )
 
 
 __all__ = [

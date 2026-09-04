@@ -24,6 +24,7 @@ from pathlib import Path
 import pytest
 
 from molexp.harness.store.file_artifact_store import FileArtifactStore
+from molexp.harness.store.paths import harness_artifact_root
 from molexp.harness.workflow_recovery import (
     WorkflowRecoveryError,
     compiled_workflow_for_run,
@@ -86,7 +87,7 @@ def _bare_run(tmp_path: Path, **run_kwargs: object) -> Run:
 
 def _persist_workflow_source(run: Run, source: str) -> None:
     """Persist a ``workflow_source`` artifact under the run (plan-run shape)."""
-    store = FileArtifactStore(root=Path(str(run.run_dir)) / "artifacts")
+    store = FileArtifactStore(root=harness_artifact_root(run.run_dir))
     store.put_json(
         kind="workflow_source",
         obj={

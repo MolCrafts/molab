@@ -18,8 +18,8 @@ def fetch(scale: float) -> list[float]:
 
 (
     me.Workspace("./lab", name="lab")
-    .project("demo")
-    .experiment("sum")
+    .add_project("demo")
+    .add_experiment("sum")
     .run(WorkflowCompiler().compile(wf), params={"scale": [1.0, 2.0]})
 )
 ```

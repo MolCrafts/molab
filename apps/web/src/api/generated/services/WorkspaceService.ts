@@ -27,86 +27,6 @@ import { OpenAPI } from '../core/OpenAPI';
 import { request as __request } from '../core/request';
 export class WorkspaceService {
     /**
-     * Clear Cache
-     * Clear the workspace content-addressed task cache.
-     * @param molexpSession
-     * @returns CacheClearResponse Successful Response
-     * @throws ApiError
-     */
-    public static clearCache(
-        molexpSession?: (string | null),
-    ): CancelablePromise<CacheClearResponse> {
-        return __request(OpenAPI, {
-            method: 'DELETE',
-            url: '/api/workspace/cache',
-            cookies: {
-                'molexp_session': molexpSession,
-            },
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
-     * Invalidate Workspace Cache
-     * Drop cached entries from the active workspace's mirror.
-     *
-     * ``scope="indices"`` is the "I added a run on the remote, refresh
-     * navigation" knob — it drops only entries whose basename identifies
-     * a navigation-index file, leaving log/blob bytes intact.
-     * @param requestBody
-     * @param molexpSession
-     * @returns CacheControlResponse Successful Response
-     * @throws ApiError
-     */
-    public static invalidateWorkspaceCache(
-        requestBody: CacheControlRequest,
-        molexpSession?: (string | null),
-    ): CancelablePromise<CacheControlResponse> {
-        return __request(OpenAPI, {
-            method: 'POST',
-            url: '/api/workspace/cache/invalidate',
-            cookies: {
-                'molexp_session': molexpSession,
-            },
-            body: requestBody,
-            mediaType: 'application/json',
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
-     * Refresh Workspace Cache
-     * Invalidate, then walk the navigation indices again.
-     *
-     * Saves the UI from issuing a follow-up call after a refresh button
-     * click.  Per-node failures during the walk surface as ``warnings`` —
-     * the response is still 200 so a single bad project does not blank
-     * the whole tree.
-     * @param requestBody
-     * @param molexpSession
-     * @returns CacheControlResponse Successful Response
-     * @throws ApiError
-     */
-    public static refreshWorkspaceCache(
-        requestBody: CacheControlRequest,
-        molexpSession?: (string | null),
-    ): CancelablePromise<CacheControlResponse> {
-        return __request(OpenAPI, {
-            method: 'POST',
-            url: '/api/workspace/cache/refresh',
-            cookies: {
-                'molexp_session': molexpSession,
-            },
-            body: requestBody,
-            mediaType: 'application/json',
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
      * Get Cache Stats
      * Workspace content-addressed task cache statistics.
      * @param molexpSession
@@ -128,21 +48,39 @@ export class WorkspaceService {
         });
     }
     /**
-     * Workspace Cache Status
-     * Poll remote-index progress (file-count total → fetch done).
-     *
-     * Local workspaces return ``cached=false`` with idle progress. The UI
-     * status strip polls this while ``phase`` is ``counting`` / ``fetching``.
+     * Clear Cache
+     * Clear the workspace content-addressed task cache.
      * @param molexpSession
-     * @returns CacheStatusResponse Successful Response
+     * @returns CacheClearResponse Successful Response
      * @throws ApiError
      */
-    public static workspaceCacheStatus(
+    public static clearCache(
         molexpSession?: (string | null),
-    ): CancelablePromise<CacheStatusResponse> {
+    ): CancelablePromise<CacheClearResponse> {
+        return __request(OpenAPI, {
+            method: 'DELETE',
+            url: '/api/workspace/cache',
+            cookies: {
+                'molexp_session': molexpSession,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * Get Workspace Info
+     * Get workspace information.
+     * @param molexpSession
+     * @returns WorkspaceInfoResponse Successful Response
+     * @throws ApiError
+     */
+    public static getWorkspaceInfo(
+        molexpSession?: (string | null),
+    ): CancelablePromise<WorkspaceInfoResponse> {
         return __request(OpenAPI, {
             method: 'GET',
-            url: '/api/workspace/cache/status',
+            url: '/api/workspace/info',
             cookies: {
                 'molexp_session': molexpSession,
             },
@@ -215,111 +153,44 @@ export class WorkspaceService {
         });
     }
     /**
-     * Curate Workspace
-     * Gate + execute one deterministic destructive-curation op (single stack).
+     * List Workspace Runs
+     * Cross-experiment list of runs, each with embedded execution attempts.
      *
-     * Shares the ``run_curation_proposal`` backend with ``molexp curate`` (Python ≡
-     * UI). ``approve=false`` (default) records the proposal and refuses; ``true``
-     * executes the mutation. Either way the §8 ``change_proposal`` artifact is the audit.
-     * @param requestBody
+     * Returns rows ordered by ``created_at`` desc.  Plugins surface
+     * backend-specific columns (cluster, scheduler job id, etc.) via the
+     * ``backend`` / ``backendMetadata`` fields on each execution row.
+     * @param projectId
+     * @param experimentId
+     * @param backend Filter by executor backend
+     * @param status Filter by contained Execution status
+     * @param offset
+     * @param limit
      * @param molexpSession
-     * @returns CurateResponse Successful Response
+     * @returns WorkspaceRunsResponse Successful Response
      * @throws ApiError
      */
-    public static curateWorkspace(
-        requestBody: CurateRequest,
+    public static listWorkspaceRuns(
+        projectId?: (string | null),
+        experimentId?: (string | null),
+        backend?: (string | null),
+        status?: (string | null),
+        offset?: number,
+        limit: number = 500,
         molexpSession?: (string | null),
-    ): CancelablePromise<CurateResponse> {
-        return __request(OpenAPI, {
-            method: 'POST',
-            url: '/api/workspace/curate',
-            cookies: {
-                'molexp_session': molexpSession,
-            },
-            body: requestBody,
-            mediaType: 'application/json',
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
-     * Create Directory
-     * Create a directory in the workspace.
-     * @param requestBody
-     * @param molexpSession
-     * @returns any Successful Response
-     * @throws ApiError
-     */
-    public static createDirectory(
-        requestBody: DirectoryCreateRequest,
-        molexpSession?: (string | null),
-    ): CancelablePromise<Record<string, any>> {
-        return __request(OpenAPI, {
-            method: 'POST',
-            url: '/api/workspace/directories',
-            cookies: {
-                'molexp_session': molexpSession,
-            },
-            body: requestBody,
-            mediaType: 'application/json',
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
-     * Read Workspace File
-     * Read a text file from the workspace.
-     *
-     * Routes through ``workspace.fs`` so remote workspaces (and the
-     * :class:`CachedRemoteFileSystem` mirror) take effect.
-     * @param path Workspace-relative path to read
-     * @param molexpSession
-     * @returns FileContentResponse Successful Response
-     * @throws ApiError
-     */
-    public static readWorkspaceFile(
-        path: string = '',
-        molexpSession?: (string | null),
-    ): CancelablePromise<FileContentResponse> {
+    ): CancelablePromise<WorkspaceRunsResponse> {
         return __request(OpenAPI, {
             method: 'GET',
-            url: '/api/workspace/file',
+            url: '/api/workspace/runs',
             cookies: {
                 'molexp_session': molexpSession,
             },
             query: {
-                'path': path,
-            },
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
-     * Read Workspace File Blob
-     * Read a binary file from the workspace.
-     *
-     * Routes through ``workspace.fs`` so remote workspaces (and the
-     * :class:`CachedRemoteFileSystem` mirror) take effect.
-     * @param path Workspace-relative path to read
-     * @param molexpSession
-     * @returns any Successful Response
-     * @throws ApiError
-     */
-    public static readWorkspaceFileBlob(
-        path: string = '',
-        molexpSession?: (string | null),
-    ): CancelablePromise<any> {
-        return __request(OpenAPI, {
-            method: 'GET',
-            url: '/api/workspace/file/blob',
-            cookies: {
-                'molexp_session': molexpSession,
-            },
-            query: {
-                'path': path,
+                'projectId': projectId,
+                'experimentId': experimentId,
+                'backend': backend,
+                'status': status,
+                'offset': offset,
+                'limit': limit,
             },
             errors: {
                 422: `Validation Error`,
@@ -395,20 +266,57 @@ export class WorkspaceService {
         });
     }
     /**
-     * Get Workspace Info
-     * Get workspace information.
+     * Read Workspace File
+     * Read a text file from the workspace.
+     *
+     * Routes through ``workspace.fs`` so remote workspaces (and the
+     * :class:`CachedRemoteFileSystem` mirror) take effect.
+     * @param path Workspace-relative path to read
      * @param molexpSession
-     * @returns WorkspaceInfoResponse Successful Response
+     * @returns FileContentResponse Successful Response
      * @throws ApiError
      */
-    public static getWorkspaceInfo(
+    public static readWorkspaceFile(
+        path: string = '',
         molexpSession?: (string | null),
-    ): CancelablePromise<WorkspaceInfoResponse> {
+    ): CancelablePromise<FileContentResponse> {
         return __request(OpenAPI, {
             method: 'GET',
-            url: '/api/workspace/info',
+            url: '/api/workspace/file',
             cookies: {
                 'molexp_session': molexpSession,
+            },
+            query: {
+                'path': path,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * Read Workspace File Blob
+     * Read a binary file from the workspace.
+     *
+     * Routes through ``workspace.fs`` so remote workspaces (and the
+     * :class:`CachedRemoteFileSystem` mirror) take effect.
+     * @param path Workspace-relative path to read
+     * @param molexpSession
+     * @returns any Successful Response
+     * @throws ApiError
+     */
+    public static readWorkspaceFileBlob(
+        path: string = '',
+        molexpSession?: (string | null),
+    ): CancelablePromise<any> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/workspace/file/blob',
+            cookies: {
+                'molexp_session': molexpSession,
+            },
+            query: {
+                'path': path,
             },
             errors: {
                 422: `Validation Error`,
@@ -447,45 +355,25 @@ export class WorkspaceService {
         });
     }
     /**
-     * List Workspace Runs
-     * Cross-experiment list of runs, each with embedded execution attempts.
-     *
-     * Returns rows ordered by ``created_at`` desc.  Plugins surface
-     * backend-specific columns (cluster, scheduler job id, etc.) via the
-     * ``backend`` / ``backendMetadata`` fields on each execution row.
-     * @param projectId
-     * @param experimentId
-     * @param backend Filter by executor backend
-     * @param status Filter by run status
-     * @param offset
-     * @param limit
+     * Create Directory
+     * Create a directory in the workspace.
+     * @param requestBody
      * @param molexpSession
-     * @returns WorkspaceRunsResponse Successful Response
+     * @returns any Successful Response
      * @throws ApiError
      */
-    public static listWorkspaceRuns(
-        projectId?: (string | null),
-        experimentId?: (string | null),
-        backend?: (string | null),
-        status?: (string | null),
-        offset?: number,
-        limit: number = 500,
+    public static createDirectory(
+        requestBody: DirectoryCreateRequest,
         molexpSession?: (string | null),
-    ): CancelablePromise<WorkspaceRunsResponse> {
+    ): CancelablePromise<Record<string, any>> {
         return __request(OpenAPI, {
-            method: 'GET',
-            url: '/api/workspace/runs',
+            method: 'POST',
+            url: '/api/workspace/directories',
             cookies: {
                 'molexp_session': molexpSession,
             },
-            query: {
-                'projectId': projectId,
-                'experimentId': experimentId,
-                'backend': backend,
-                'status': status,
-                'offset': offset,
-                'limit': limit,
-            },
+            body: requestBody,
+            mediaType: 'application/json',
             errors: {
                 422: `Validation Error`,
             },
@@ -585,6 +473,118 @@ export class WorkspaceService {
             cookies: {
                 'molexp_session': molexpSession,
             },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * Workspace Cache Status
+     * Poll remote-index progress (file-count total → fetch done).
+     *
+     * Local workspaces return ``cached=false`` with idle progress. The UI
+     * status strip polls this while ``phase`` is ``counting`` / ``fetching``.
+     * @param molexpSession
+     * @returns CacheStatusResponse Successful Response
+     * @throws ApiError
+     */
+    public static workspaceCacheStatus(
+        molexpSession?: (string | null),
+    ): CancelablePromise<CacheStatusResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/workspace/cache/status',
+            cookies: {
+                'molexp_session': molexpSession,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * Invalidate Workspace Cache
+     * Drop cached entries from the active workspace's mirror.
+     *
+     * ``scope="indices"`` is the "I added a run on the remote, refresh
+     * navigation" knob — it drops only entries whose basename identifies
+     * a navigation-index file, leaving log/blob bytes intact.
+     * @param requestBody
+     * @param molexpSession
+     * @returns CacheControlResponse Successful Response
+     * @throws ApiError
+     */
+    public static invalidateWorkspaceCache(
+        requestBody: CacheControlRequest,
+        molexpSession?: (string | null),
+    ): CancelablePromise<CacheControlResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/workspace/cache/invalidate',
+            cookies: {
+                'molexp_session': molexpSession,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * Refresh Workspace Cache
+     * Invalidate, then walk the navigation indices again.
+     *
+     * Saves the UI from issuing a follow-up call after a refresh button
+     * click.  Per-node failures during the walk surface as ``warnings`` —
+     * the response is still 200 so a single bad project does not blank
+     * the whole tree.
+     * @param requestBody
+     * @param molexpSession
+     * @returns CacheControlResponse Successful Response
+     * @throws ApiError
+     */
+    public static refreshWorkspaceCache(
+        requestBody: CacheControlRequest,
+        molexpSession?: (string | null),
+    ): CancelablePromise<CacheControlResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/workspace/cache/refresh',
+            cookies: {
+                'molexp_session': molexpSession,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * Curate Workspace
+     * Gate + execute one deterministic destructive-curation op (single stack).
+     *
+     * Shares the ``run_curation_proposal`` backend with ``molexp curate`` (Python ≡
+     * UI). ``approve=false`` (default) records the proposal and refuses; ``true``
+     * executes the mutation. Either way the §8 ``change_proposal`` artifact is the audit.
+     * @param requestBody
+     * @param molexpSession
+     * @returns CurateResponse Successful Response
+     * @throws ApiError
+     */
+    public static curateWorkspace(
+        requestBody: CurateRequest,
+        molexpSession?: (string | null),
+    ): CancelablePromise<CurateResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/workspace/curate',
+            cookies: {
+                'molexp_session': molexpSession,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
             errors: {
                 422: `Validation Error`,
             },

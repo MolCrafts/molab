@@ -64,7 +64,7 @@ async def main() -> None:
     print(f"status:      {outcome.status if outcome else 'failed'}  (granted → executed)")
 
     # 3. The ChangeProposal is preserved as an audit artifact — read it back.
-    store = FileArtifactStore(root=Path(audit_run.run_dir) / "artifacts")
+    store = FileArtifactStore(root=Path(audit_run.run_dir) / "scratch-artifacts")
     record = json.loads(store.get(store.list_by_kind("change_proposal")[0].id))
     print("\nthe §8 ChangeProposal the gate decided on:")
     print(f"  intent:         {record['intent']}")

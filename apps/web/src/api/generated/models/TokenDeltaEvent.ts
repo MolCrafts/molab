@@ -11,8 +11,8 @@
  * :attr:`~molexp.agent.loop.AgentRunResult.events` stream unfiltered.
  */
 export type TokenDeltaEvent = {
+    timestamp?: string;
     kind?: string;
     text: string;
-    timestamp?: string;
 };
 

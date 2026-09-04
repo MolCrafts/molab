@@ -79,6 +79,11 @@ def _gateway(run: Any) -> StubAgentGateway:
     return gw
 
 
+def _store(run: Any) -> FileArtifactStore:
+    assert run.executions, "expected at least one execution"
+    return FileArtifactStore.open_execution(run, run.executions[-1].id)
+
+
 class TestRealizeDefault:
     def test_plan_defaults_realize_true(self) -> None:
         import inspect
@@ -98,7 +103,7 @@ class TestRealizeFalseSkipsPhase2:
             user_input=_USER_INPUT,
             gateway=_gateway(run),
         )
-        store = FileArtifactStore(root=harness_artifact_root(run.run_dir))
+        store = _store(run)
         assert store.latest_by_kind(FROZEN_PLAN_KIND) is not None
         assert store.latest_by_kind("plan_report") is not None
         assert store.latest_by_kind("bound_workflow") is None
@@ -136,7 +141,7 @@ class TestRealizeTrueInvokesPhase2:
         assert isinstance(result, ModeResult)
         assert result.final_artifact is not None
         assert result.final_artifact.kind == "execution_result"
-        store = FileArtifactStore(root=harness_artifact_root(run.run_dir))
+        store = _store(run)
         assert store.latest_by_kind(FROZEN_PLAN_KIND) is not None
         assert store.latest_by_kind("plan_report") is not None
 

@@ -152,11 +152,11 @@ class TestSearch:
     def test_scope_trailing_slash_matches_scope_root_itself(self, tmp_path: Path) -> None:
         ws = Workspace(tmp_path / "lab", name="lab")
         ws.materialize()
-        ws.add_project("p")
+        proj = ws.add_project("p")
 
-        result = Bundle(ws.resolve()).search(scope="projects/p/")
+        result = Bundle(ws.resolve()).search(scope=f"projects/{proj.id}/")
 
-        assert any(h.entry.path == "projects/p" for h in result.hits)
+        assert any(h.entry.path == f"projects/{proj.id}" for h in result.hits)
 
     def test_limit_undercount_sets_truncated(self, tmp_path: Path) -> None:
         root = _root(tmp_path)

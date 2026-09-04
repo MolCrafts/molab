@@ -58,12 +58,12 @@ class TestProjectExperimentRunCrud:
         assert exp2.params["lr"] == 1e-4
         assert exp2.description == "new"
 
-    def test_set_run_updates_params(self, tmp_path) -> None:
+    def test_set_run_rejects_definition_mutation(self, tmp_path) -> None:
         ws = Workspace.create(tmp_path / "lab", name="lab")
         exp = ws.add_project("p").add_experiment("e")
         exp.add_run(params={"epochs": 10}, id="r1")
-        exp.set_run("r1", params={"epochs": 100})
-        assert exp.run("r1").parameters["epochs"] == 100
+        with pytest.raises(RuntimeError):
+            exp.set_run("r1", params={"epochs": 100})
 
     def test_del_experiment(self, tmp_path) -> None:
         ws = Workspace.create(tmp_path / "lab", name="lab")
@@ -78,18 +78,20 @@ class TestProjectExperimentRunCrud:
         p = ws.add_project("p")
         p.add_experiment("a")
         p.add_experiment("b")
-        assert {e.id for e in p.experiments()} == {"a", "b"}
-        assert {x.id for x in ws.projects()} == {"p"}
+        assert {e.name for e in p.experiments()} == {"a", "b"}
+        assert {x.name for x in ws.projects()} == {"p"}
 
 
 class TestKnowledgeCrud:
     def test_add_get_set_knowledge_on_project(self, tmp_path) -> None:
+        from molexp.workspace.knowledge import ProtocolNote
+
         ws = Workspace.create(tmp_path / "lab", name="lab")
         p = ws.add_project("p")
         exp = p.add_experiment("e")
         p.add_knowledge(
             "note-1",
-            kind="ProtocolNote",
+            cls=ProtocolNote,
             body="# hello\n",
             sources=[exp, "dataset:foo/bar@1"],
             created_by="test",
@@ -112,13 +114,4 @@ class TestRunLoad:
         loaded = Run.load(run_dir)
         assert loaded.id == "r1"
         assert loaded.parameters["seed"] == 1
-        assert loaded.experiment.id == "e"
-
-    def test_run_path_is_pathlib_and_run_dir_is_alias(self, tmp_path) -> None:
-        from pathlib import Path as LocalPath
-
-        ws = Workspace.create(tmp_path / "lab", name="lab")
-        run = ws.add_project("p").add_experiment("e").add_run(id="r1")
-        assert isinstance(run.path, LocalPath)
-        assert run.run_dir == run.path
-        assert (run.path / "run.json").is_file()
+        assert loaded.experiment.name == "e"

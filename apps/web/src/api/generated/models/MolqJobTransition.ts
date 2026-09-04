@@ -3,9 +3,9 @@
 /* tslint:disable */
 /* eslint-disable */
 export type MolqJobTransition = {
-    fromState?: (string | null);
-    reason?: (string | null);
     timestamp: string;
+    fromState?: (string | null);
     toState: string;
+    reason?: (string | null);
 };
 

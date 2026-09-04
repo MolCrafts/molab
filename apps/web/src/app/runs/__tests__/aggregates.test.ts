@@ -13,38 +13,85 @@ const HOUR = 60 * MIN;
 const exec = (over: Partial<WorkspaceExecutionRow>): WorkspaceExecutionRow => ({
   executionId: "exec-1",
   runId: "run-1",
+  mode: "initial",
   status: "succeeded",
+  createdAt: new Date(NOW - 35 * MIN).toISOString(),
   startedAt: new Date(NOW - 30 * MIN).toISOString(),
   finishedAt: new Date(NOW - 5 * MIN).toISOString(),
   durationSeconds: 1500,
   schedulerJobId: null,
   backend: "local",
-  metadata: {},
+  basedOnExecutionId: null,
+  checkpointArtifactId: null,
   backendMetadata: {},
   ...over,
 });
 
-const run = (over: Partial<WorkspaceRunRow>): WorkspaceRunRow => ({
-  id: "run-1",
-  name: "Run 1",
-  projectId: "proj-A",
-  projectName: "Project A",
-  experimentId: "exp-1",
-  experimentName: "Experiment 1",
-  status: "succeeded",
-  backend: "local",
-  cluster: null,
-  scheduler: null,
-  target: null,
-  profile: "default",
-  parameters: {},
-  createdAt: new Date(NOW - HOUR).toISOString(),
-  finishedAt: new Date(NOW - 5 * MIN).toISOString(),
-  executionCount: 1,
-  latestSchedulerJobId: null,
-  executions: [exec({})],
-  ...over,
-});
+type RunFixtureOverrides = Partial<Omit<WorkspaceRunRow, "executions" | "statusSummary">> & {
+  status?: string;
+  backend?: string;
+  cluster?: string | null;
+  target?: string | null;
+  profile?: string | null;
+  finishedAt?: string | null;
+  executions?: WorkspaceExecutionRow[];
+};
+
+const run = (over: RunFixtureOverrides): WorkspaceRunRow => {
+  const status = over.status === "pending" ? "queued" : (over.status ?? "succeeded");
+  const finishedAt = over.finishedAt === undefined
+    ? status === "running" || status === "queued" ? null : new Date(NOW - 5 * MIN).toISOString()
+    : over.finishedAt;
+  const executions = over.executions ?? [exec({
+    status,
+    finishedAt,
+    backend: over.backend ?? "local",
+    backendMetadata: {
+      ...(over.cluster ? { cluster_name: over.cluster } : {}),
+      ...(over.target ? { target: over.target } : {}),
+      ...(over.profile ? { profile: over.profile } : {}),
+    },
+  })];
+  const byStatus = Object.fromEntries(
+    [...new Set(executions.map((execution) => execution.status))].map((value) => [
+      value,
+      executions.filter((execution) => execution.status === value).length,
+    ]),
+  );
+  const {
+    status: _status,
+    backend: _backend,
+    cluster: _cluster,
+    target,
+    profile: _profile,
+    finishedAt: _finishedAt,
+    ...rowOverrides
+  } = over;
+  return {
+    id: "run-1",
+    name: "Run 1",
+    projectId: "proj-A",
+    projectName: "Project A",
+    experimentId: "exp-1",
+    experimentName: "Experiment 1",
+    definitionHash: "sha256:definition",
+    experimentRevisionId: "revision-1",
+    inputAssetIds: [],
+    targetHint: target ?? null,
+    statusSummary: {
+      total: executions.length,
+      active: executions.filter((execution) =>
+        ["queued", "running", "finalizing"].includes(execution.status)
+      ).length,
+      notStarted: executions.length === 0,
+      byStatus,
+    },
+    parameters: {},
+    createdAt: new Date(NOW - HOUR).toISOString(),
+    executions,
+    ...rowOverrides,
+  };
+};
 
 describe("applyFilters", () => {
   it("returns all runs when filters are empty", () => {

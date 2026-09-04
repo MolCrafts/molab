@@ -3,8 +3,8 @@
 /* tslint:disable */
 /* eslint-disable */
 export type SessionEventResponse = {
-    payload?: Record<string, any>;
-    ts: string;
     type: string;
+    ts: string;
+    payload?: Record<string, any>;
 };
 

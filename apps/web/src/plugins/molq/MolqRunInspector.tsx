@@ -13,11 +13,12 @@ export const MolqRunInspector = (props: RendererProps): JSX.Element => {
     return props.snapshot.runs.find((item) => item.id === props.selection.objectId) ?? null;
   }, [props.selection.objectId, props.snapshot.runs]);
 
-  if (run?.executorInfo.backend !== "molq") {
+  const execution = run?.executionHistory.find((item) => item.executionId === props.executionId);
+  if (execution?.executor.backend !== "molq") {
     return <MetadataInspector {...props} />;
   }
 
-  const rows = Object.entries(run.executorInfo);
+  const rows = Object.entries(execution.executor);
 
   return (
     <div className="flex h-full flex-col bg-background">
@@ -36,7 +37,9 @@ export const MolqRunInspector = (props: RendererProps): JSX.Element => {
             <dt className="text-micro font-medium uppercase tracking-wide text-muted-foreground">
               {formatExecutorLabel(key)}
             </dt>
-            <dd className="mt-1 break-words font-mono text-label text-foreground">{value}</dd>
+            <dd className="mt-1 break-words font-mono text-label text-foreground">
+              {typeof value === "string" ? value : JSON.stringify(value)}
+            </dd>
           </div>
         ))}
       </dl>

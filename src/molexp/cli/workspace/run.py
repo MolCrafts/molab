@@ -21,7 +21,7 @@ from molexp.cli._target import TargetOption, resolve_workspace_target
 from molexp.profile import MolCfg, ProfileConfig, load_molcfg
 from molexp.profile.loader import find_default_config
 from molexp.workflow import default_binding_registry
-from molexp.workspace.run import RETRYABLE_STATUSES, RunStatus
+from molexp.workspace.run import RunStatus
 from molexp.workspace.source_snapshot import snapshot_sources
 from molexp.workspace.target import LocalTarget, RemoteTarget
 from molexp.workspace.utils import run_id_from_dir_name
@@ -228,6 +228,19 @@ def _experiment_candidates(
     return candidates, use_declared_runs, total
 
 
+def _run_status(mol_run: Run) -> str:
+    """Derive the single display status from the Execution aggregate."""
+    summary = mol_run.status_summary
+    if summary.not_started:
+        return RunStatus.PENDING.value
+    if summary.active > 0:
+        return RunStatus.RUNNING.value
+    for status in ("failed", "cancelled", "interrupted"):
+        if summary.by_status.get(status):
+            return status
+    return RunStatus.SUCCEEDED.value
+
+
 def _select_candidate_runs(
     candidates: list[RunCandidate],
     *,
@@ -236,39 +249,38 @@ def _select_candidate_runs(
     profile_cfg: ProfileConfig,
 ) -> list[tuple[Run, str]]:
     """Apply the verb-specific skip/create rules and report each decision."""
+    del profile_cfg  # profile identity is folded into the run id (see _experiment_candidates)
     selected_runs: list[tuple[Run, str]] = []
     for existing, run_params, run_id, seed_label in candidates:
         mol_run = existing
-        if mol_run is not None and mol_run.status == "running" and reap_zombie_run(mol_run):
+        status = _run_status(mol_run) if mol_run is not None else RunStatus.PENDING.value
+        if mol_run is not None and status == RunStatus.RUNNING.value and reap_zombie_run(mol_run):
+            status = RunStatus.FAILED.value
             rprint(
                 f"  [yellow]![/yellow] {exp.id}  run={mol_run.id} (stale 'running' run reaped -> failed)"
             )
         if continue_verb is not None:
-            # resume / rerun own exactly the finished-but-not-
-            # succeeded runs (failed / cancelled). pending is plain
-            # run's job, succeeded is done, and a live running run
-            # must never get a second execution — all skipped, which
-            # keeps the three verbs orthogonal. The retryable domain
-            # is the shared workspace RETRYABLE_STATUSES.
+            # resume / rerun own exactly the finished-but-not-succeeded runs
+            # (failed / cancelled / interrupted). pending is plain run's job,
+            # succeeded is done, and a live running run must never get a
+            # second execution — all skipped, which keeps the three verbs
+            # orthogonal. The retryable domain is the shared workspace policy.
             if mol_run is None:
                 rprint(f"  [dim]- {exp.id}  run={run_id} (no existing run, skipped)[/dim]")
                 continue
-            if mol_run.status not in RETRYABLE_STATUSES:
+            if not mol_run.is_retryable:
                 rprint(
-                    f"  [dim]- {exp.id}  run={mol_run.id} ({mol_run.status}, skipped — "
+                    f"  [dim]- {exp.id}  run={mol_run.id} ({status}, skipped — "
                     f"{continue_verb} only retries failed/cancelled runs)[/dim]"
                 )
-                continue
-            if mol_run.metadata.profile != profile_cfg.name:
-                rprint(f"  [dim]- {exp.id}  run={mol_run.id} (profile mismatch, skipped)[/dim]")
                 continue
         elif mol_run is not None:
             # plain run: run only what has not run yet (pending).
             # Leave succeeded / running / failed / cancelled alone —
             # retrying a failure is an explicit --resume / --rerun.
-            if mol_run.status != "pending":
+            if not mol_run.status_summary.not_started:
                 rprint(
-                    f"  [dim]- {exp.id}  run={mol_run.id} ({mol_run.status}, skipped — "
+                    f"  [dim]- {exp.id}  run={mol_run.id} ({status}, skipped — "
                     "use --resume or --rerun to retry)[/dim]"
                 )
                 continue
@@ -606,7 +618,7 @@ def execute(
                 seed_outputs=seed_outputs,
             )
         )
-    status = run_obj.status
+    status = _run_status(run_obj)
     if status != RunStatus.SUCCEEDED.value:
         # The scheduler reads this exit code to mark the job failed; a failed run
         # reported as success would strand the whole pipeline.
@@ -801,11 +813,11 @@ def _report_local_results(dispatched_runs: list[Run], continue_verb: str | None)
     if not dispatched_runs:
         rprint(f"\n[dim]No runs {verb}.[/dim]")
         return
-    failed = [r for r in dispatched_runs if r.status != RunStatus.SUCCEEDED.value]
+    failed = [r for r in dispatched_runs if _run_status(r) != RunStatus.SUCCEEDED.value]
     if failed:
         rprint("")
         for mol_run in failed:
-            rprint(f"  [red]x[/red] run={mol_run.id}  status={mol_run.status}")
+            rprint(f"  [red]x[/red] run={mol_run.id}  status={_run_status(mol_run)}")
             error_txt = _latest_error_txt(mol_run)
             if error_txt is not None:
                 rprint(f"    [dim]error: {error_txt}[/dim]")

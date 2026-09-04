@@ -120,21 +120,10 @@ export const buildMetadataFields = (
       if (run.finishedAt) {
         fields.push({ label: "Finished", value: run.finishedAt });
       }
-      if (run.executorInfo.backend) {
-        fields.push({ label: "Backend", value: run.executorInfo.backend });
-      }
-      if (run.profile) {
-        fields.push({ label: "Profile", value: run.profile });
-      }
-      if (run.configHash) {
-        fields.push({ label: "Config Hash", value: run.configHash });
-      }
-      if (run.executorInfo.scheduler) {
-        fields.push({ label: "Scheduler", value: run.executorInfo.scheduler });
-      }
-      if (run.executorInfo.job_id) {
-        fields.push({ label: "Job ID", value: run.executorInfo.job_id });
-      }
+      fields.push({ label: "Definition Hash", value: run.definitionHash });
+      fields.push({ label: "Experiment Revision", value: run.experimentRevisionId });
+      fields.push({ label: "Executions", value: String(run.statusSummary.total) });
+      fields.push({ label: "Active Executions", value: String(run.statusSummary.active) });
       fields.push({ label: "Project ID", value: run.projectId });
       fields.push({ label: "Experiment ID", value: run.experimentId });
       return fields;

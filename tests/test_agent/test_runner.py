@@ -119,32 +119,6 @@ class TestAgentRunner:
             ModelTier.HEAVY: "openai:gpt-5.2",
         }
 
-    def test_string_keyed_models_map_coerced_to_tiers(self) -> None:
-        runner = AgentRunner(
-            models={
-                "cheap": "openai:gpt-5.2-mini",
-                "default": "openai:gpt-5.2",
-                "heavy": "openai:gpt-5.2-pro",
-            },
-        )
-        assert runner._tier_models == {
-            ModelTier.CHEAP: "openai:gpt-5.2-mini",
-            ModelTier.DEFAULT: "openai:gpt-5.2",
-            ModelTier.HEAVY: "openai:gpt-5.2-pro",
-        }
-
-    def test_custom_router_bypasses_tier_normalization(self) -> None:
-        class _Stub:
-            async def complete_text(self, **_):  # type: ignore[no-untyped-def]
-                raise AssertionError("not called by this test")
-
-            async def complete_structured(self, **_):  # type: ignore[no-untyped-def]
-                raise AssertionError("not called by this test")
-
-        runner = AgentRunner(router=_Stub())
-        assert runner._tier_models is None
-        assert runner.model is None
-
     # ── run surfaces ────────────────────────────────────────────────────────
 
     @pytest.mark.asyncio

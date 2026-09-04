@@ -32,6 +32,7 @@ import {
   sortJobs,
 } from "./jobsTable";
 import type { WorkspaceRunRow } from "./types";
+import { runExecutorFacetLabel, runPresentationStatus } from "./projections";
 
 interface RunsJobsTableProps {
   rows: WorkspaceRunRow[];
@@ -121,6 +122,9 @@ export const RunsJobsTable = ({
             {slice.items.map((run) => {
               const isSelected = run.id === selectedRunId;
               const duration = computeRunDurationSeconds(run);
+              const presentationStatus = runPresentationStatus(run);
+              const backend = runExecutorFacetLabel(run, "backend");
+              const cluster = runExecutorFacetLabel(run, "cluster_name");
               return (
                 <TableRow
                   key={run.id}
@@ -144,7 +148,7 @@ export const RunsJobsTable = ({
                   )}
                 >
                   <Td className="align-middle">
-                    <RunStatusBadge status={run.status} size="sm" />
+                    <RunStatusBadge status={presentationStatus} size="sm" />
                   </Td>
                   <Td className="align-middle">
                     <div className="min-w-0">
@@ -164,11 +168,11 @@ export const RunsJobsTable = ({
                     </div>
                   </Td>
                   <Td className="align-middle text-muted-foreground">
-                    {run.backend ? (
+                    {backend ? (
                       <div className="min-w-0">
-                        <p className="truncate text-foreground">{run.backend}</p>
-                        {run.cluster && (
-                          <p className="truncate font-mono text-micro">{run.cluster}</p>
+                        <p className="truncate text-foreground">{backend}</p>
+                        {cluster && (
+                          <p className="truncate font-mono text-micro">{cluster}</p>
                         )}
                       </div>
                     ) : (
@@ -176,7 +180,7 @@ export const RunsJobsTable = ({
                     )}
                   </Td>
                   <Td className="text-right align-middle tabular-nums text-muted-foreground">
-                    {run.executionCount}
+                    {run.statusSummary.total}
                   </Td>
                   <Td className="text-right align-middle font-mono text-label tabular-nums text-muted-foreground">
                     {formatDuration(duration)}

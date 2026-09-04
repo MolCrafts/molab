@@ -15,8 +15,8 @@
  * user must answer before planning can resume.
  */
 export type ClarificationRequiredEvent = {
+    timestamp?: string;
     kind?: string;
     questions: string;
-    timestamp?: string;
 };
 

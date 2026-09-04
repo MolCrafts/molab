@@ -10,6 +10,27 @@ import { OpenAPI } from '../core/OpenAPI';
 import { request as __request } from '../core/request';
 export class MolqService {
     /**
+     * List Targets
+     * List configured molq targets (one per profile in ``~/.molq/config.yaml``).
+     * @param molexpSession
+     * @returns MolqTargetListResponse Successful Response
+     * @throws ApiError
+     */
+    public static listTargets(
+        molexpSession?: (string | null),
+    ): CancelablePromise<MolqTargetListResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/plugins/molq/targets',
+            cookies: {
+                'molexp_session': molexpSession,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
      * List Jobs
      * List jobs across one or all targets, plus aggregate queue stats.
      * @param target Profile name to filter by.
@@ -103,27 +124,6 @@ export class MolqService {
             query: {
                 'target': target,
                 'stream': stream,
-            },
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
-     * List Targets
-     * List configured molq targets (one per profile in ``~/.molq/config.yaml``).
-     * @param molexpSession
-     * @returns MolqTargetListResponse Successful Response
-     * @throws ApiError
-     */
-    public static listTargets(
-        molexpSession?: (string | null),
-    ): CancelablePromise<MolqTargetListResponse> {
-        return __request(OpenAPI, {
-            method: 'GET',
-            url: '/api/plugins/molq/targets',
-            cookies: {
-                'molexp_session': molexpSession,
             },
             errors: {
                 422: `Validation Error`,

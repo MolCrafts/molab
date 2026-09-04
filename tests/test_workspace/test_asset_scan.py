@@ -1,21 +1,26 @@
-"""Manifest-scanning asset query layer (``assets/scan.py``).
+"""Provenance/index-backed artifact query layer (``artifact_repository`` + ``index_store``).
 
-The scanner is the asset query surface that replaced the derived SQLite
-``AssetCatalog``: every query shape is answered by scanning the authoritative
-``assets.json`` + ``assets/<id>/asset.json`` records
-(spec: workspace-git-projection-01-drop-catalog).
+The derived SQLite ``AssetCatalog`` was replaced by the append-only provenance
+event log and its disposable JSON index (spec: workspace-git-projection-01-drop-catalog).
+Every query shape is answered by the ``JsonIndexStore`` sharded entities
+(``index/entities/artifact/*.json``), which ``ArtifactRepository`` reads — and
+rebuilds from provenance when empty. Emitted artifacts are created by
+:meth:`molexp.workspace.execution_context.ExecutionContext.emit_artifact`.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from molexp.workspace import Workspace
-from molexp.workspace.assets import ArtifactAsset, scan
+import pytest
 
-# Each started run persists four assets: the user's artifact + "train" log +
-# checkpoint, plus the lifecycle's auto-created "run" log.
-ASSETS_PER_RUN = 4
+from molexp.workspace import Workspace
+from molexp.workspace.artifact_repository import ArtifactRepository
+from molexp.workspace.domain import Artifact
+from molexp.workspace.index_store import JsonIndexStore
+
+# Each started run persists two artifacts: the user's "artifact" + a checkpoint.
+ARTIFACTS_PER_RUN = 2
 
 
 def _seed_workspace(root: Path, n_runs: int = 3) -> Workspace:
@@ -25,96 +30,52 @@ def _seed_workspace(root: Path, n_runs: int = 3) -> Workspace:
     for i in range(n_runs):
         r = exp.add_run(params={"seed": i})
         with r.start() as ctx:
-            ctx.register_artifact({"loss": 0.1 * i}, name="metrics.json")
-            ctx.log("train").append(f"run {i} starting")
+            ctx.emit_artifact({"loss": 0.1 * i}, name="metrics.json", semantic_type="artifact")
             ctx.checkpoint("epoch1", data={"step": 1})
     return ws
 
 
-def _kinds(assets) -> set[str]:
-    return {a.kind for a in assets}
+def _all_artifacts(ws: Workspace) -> list[Artifact]:
+    index = JsonIndexStore(ws.root, fs=ws.fs)
+    return [Artifact.model_validate(raw) for raw in index.list_entities("artifact")]
 
 
-class TestScanAssets:
-    """Each query shape returns the expected asset set from the manifests."""
+def _repo(ws: Workspace) -> ArtifactRepository:
+    return ArtifactRepository(ws.root, fs=ws.fs)
 
-    def test_returns_every_asset_across_scopes(self, tmp_path):
-        ws = _seed_workspace(tmp_path / "lab")  # 3 runs x 4 assets
-        assets = scan.scan_assets(ws.root)
-        assert len(assets) == 3 * ASSETS_PER_RUN
-        assert _kinds(assets) == {"artifact", "log", "checkpoint"}
 
-    def test_kind_filter_accepts_str_or_asset_subclass(self, tmp_path):
-        ws = _seed_workspace(tmp_path / "lab")
-        by_str = scan.scan_assets(ws.root, kind="artifact")
-        by_type = scan.scan_assets(ws.root, kind=ArtifactAsset)
-        assert {a.asset_id for a in by_str} == {a.asset_id for a in by_type}
-        assert len(by_str) == 3
-        assert all(a.kind == "artifact" for a in by_str)
-
+class TestQueryArtifacts:
     def test_run_scope_matches_only_that_run(self, tmp_path):
         ws = _seed_workspace(tmp_path / "lab")
         run = ws.project("demo").experiment("baseline").list_runs()[0]
-        scoped = scan.scan_assets(ws.root, scope=run.scope)
-        assert len(scoped) == ASSETS_PER_RUN
-        assert all(a.scope == run.scope for a in scoped)
+        execution_id = run.executions[0].id
+        scoped = _repo(ws).list_for_execution(execution_id)
+        assert len(scoped) == ARTIFACTS_PER_RUN
+        assert all(a.execution_id == execution_id and a.run_id == run.id for a in scoped)
 
-    def test_experiment_scope_recursive_vs_exact(self, tmp_path):
+
+class TestGetArtifact:
+    def test_returns_artifact_by_id_else_keyerror(self, tmp_path):
         ws = _seed_workspace(tmp_path / "lab")
-        exp = ws.project("demo").experiment("baseline")
-        assert len(scan.scan_assets(ws.root, scope=exp.scope, recursive=True)) == 3 * ASSETS_PER_RUN
-        # Non-recursive experiment scope sees no run-scoped assets.
-        assert scan.scan_assets(ws.root, scope=exp.scope) == []
-
-    def test_limit_caps_result_count(self, tmp_path):
-        ws = _seed_workspace(tmp_path / "lab")
-        assert len(scan.scan_assets(ws.root, limit=2)) == 2
-
-    def test_results_sorted_by_created_at_then_id(self, tmp_path):
-        ws = _seed_workspace(tmp_path / "lab")
-        keys = [(a.created_at, a.asset_id) for a in scan.scan_assets(ws.root)]
-        assert keys == sorted(keys)
-
-    def test_empty_workspace_yields_no_assets(self, tmp_path):
-        ws = Workspace(tmp_path / "empty")
-        ws.materialize()
-        assert scan.scan_assets(ws.root) == []
-        assert scan.get_asset(ws.root, "x") is None
-
-
-class TestGetAsset:
-    def test_returns_asset_by_id_else_none(self, tmp_path):
-        ws = _seed_workspace(tmp_path / "lab")
-        some = scan.scan_assets(ws.root)[0]
-        assert scan.get_asset(ws.root, some.asset_id).asset_id == some.asset_id
-        assert scan.get_asset(ws.root, "nonexistent") is None
-
-
-class TestFindByContentHash:
-    def test_matches_hash_and_rejects_absent_or_empty(self, tmp_path):
-        ws = _seed_workspace(tmp_path / "lab")
-        artifact = scan.scan_assets(ws.root, kind="artifact")[0]
-        assert artifact.content_hash
-        found = scan.find_by_content_hash(ws.root, artifact.content_hash)
-        assert found is not None
-        assert found.content_hash == artifact.content_hash
-        assert scan.find_by_content_hash(ws.root, "sha256:absent") is None
-        assert scan.find_by_content_hash(ws.root, "") is None
+        some = _all_artifacts(ws)[0]
+        assert _repo(ws).get(some.id).id == some.id
+        with pytest.raises(KeyError):
+            _repo(ws).get("nonexistent")
 
 
 class TestNoDerivedSqliteIndex:
     """Invariant lock: the derived SQLite ``AssetCatalog`` is gone — the
-    authoritative per-scope ``assets.json`` manifests are the only on-disk
-    asset record (One-source-of-truth law)."""
+    authoritative on-disk records are the append-only provenance events plus
+    their disposable JSON index (One-source-of-truth law)."""
 
-    def test_seeded_workspace_writes_only_manifests_no_sqlite(self, tmp_path):
-        ws = _seed_workspace(tmp_path / "lab")  # 3 runs, assets persisted
+    def test_seeded_workspace_writes_json_index_not_sqlite(self, tmp_path):
+        ws = _seed_workspace(tmp_path / "lab")  # 3 runs, artifacts persisted
         root = Path(str(ws.root))
-        # Assets are queryable …
-        assert len(scan.scan_assets(ws.root)) == 3 * ASSETS_PER_RUN
-        # … yet nothing was written to a derived SQLite index. Run activity
-        # is derived from run.json / run.json (hot state) + alive, not a workspace sqlite.
+        # Artifacts are queryable …
+        assert len(_all_artifacts(ws)) == 3 * ARTIFACTS_PER_RUN
+        # … yet nothing was written to a derived SQLite index.
         assert not (root / "catalog").exists()
         assert not list(root.rglob("*.sqlite"))
-        # The authoritative record is the per-scope assets.json manifest.
-        assert list(root.rglob("assets.json"))
+        # The authoritative records are the provenance events + JSON index.
+        assert list(root.rglob("index/entities/artifact/*.json"))
+        assert list(root.rglob("provenance/events/*/*/*.json"))

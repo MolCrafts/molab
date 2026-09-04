@@ -6,13 +6,13 @@
  * Result of an interactive / OTP SSH login.
  */
 export type WorkspaceConnectResponse = {
-    host: string;
+    ok: boolean;
     key: string;
+    host: string;
     /**
      * True when OpenSSH ControlMaster is accepting clients after login
      */
     masterAlive: boolean;
     message?: string;
-    ok: boolean;
 };
 

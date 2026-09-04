@@ -14,7 +14,7 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 
 from molexp.server.dependencies import get_workspace
@@ -22,6 +22,7 @@ from molexp.server.dependencies import get_workspace
 if TYPE_CHECKING:
     from molexp.harness.store.file_artifact_store import FileArtifactStore
     from molexp.workspace import Workspace
+    from molexp.workspace.domain import ExecutionState
     from molexp.workspace.experiment import Experiment
     from molexp.workspace.run import Run
 
@@ -41,6 +42,7 @@ class PlanSummaryResponse(BaseModel):
     """One generated plan in the list (its backing run + report title)."""
 
     runId: str
+    executionId: str
     title: str
     status: str
     createdAt: str
@@ -58,6 +60,7 @@ class WorkspacePlanSummary(BaseModel):
     projectId: str
     experimentId: str
     runId: str
+    executionId: str
     title: str
     status: str
     createdAt: str
@@ -93,6 +96,7 @@ class PlanDetailResponse(BaseModel):
     """
 
     runId: str
+    executionId: str
     projectId: str
     experimentId: str
     title: str
@@ -151,16 +155,46 @@ def _plan_title(store: FileArtifactStore, root: Path, run_id: str) -> str:
     return f"plan-{run_id}"
 
 
-def _artifacts_root(run: Run) -> Path:
-    from molexp.harness.store.paths import harness_artifact_root
-
-    return harness_artifact_root(run.run_dir)
-
-
-def _artifact_store(run: Run) -> FileArtifactStore:
+def _artifact_store(run: Run, execution_id: str) -> FileArtifactStore:
     from molexp.harness.store.file_artifact_store import FileArtifactStore
 
-    return FileArtifactStore(root=_artifacts_root(run))
+    return FileArtifactStore.open_execution(run, execution_id)
+
+
+def _plan_candidates(run: Run) -> list[tuple[ExecutionState, FileArtifactStore, Path]]:
+    """Return every explicit Execution that emitted a plan marker Artifact."""
+    candidates: list[tuple[ExecutionState, FileArtifactStore, Path]] = []
+    for execution in run.executions:
+        store = _artifact_store(run, execution.id)
+        root = Path(run.run_dir) / "executions" / execution.id / "work" / "harness"
+        if _is_plan_run(store, root):
+            candidates.append((execution, store, root))
+    return candidates
+
+
+def _resolve_plan_execution(
+    run: Run, execution_id: str | None
+) -> tuple[ExecutionState, FileArtifactStore, Path]:
+    candidates = _plan_candidates(run)
+    if execution_id is not None:
+        for candidate in candidates:
+            if candidate[0].id == execution_id:
+                return candidate
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            f"Execution {execution_id!r} has no generated plan Artifacts",
+        )
+    if not candidates:
+        raise HTTPException(
+            status.HTTP_404_NOT_FOUND,
+            f"run {run.id!r} has no generated plan Artifacts",
+        )
+    if len(candidates) > 1:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "multiple Executions contain plan Artifacts; pass executionId explicitly",
+        )
+    return candidates[0]
 
 
 def _read_json_kind(store: FileArtifactStore, root: Path, kind: str) -> dict[str, Any] | None:
@@ -393,12 +427,9 @@ def _read_tasks(experiment: Experiment) -> list[PlanTaskInfo]:
     return tasks
 
 
-def _artifact_kinds(root: Path) -> list[str]:
-    """The harness stage artifact kinds this plan produced (from the index dir)."""
-    index_dir = root / "_index"
-    if not index_dir.is_dir():
-        return []
-    return sorted(p.stem for p in index_dir.glob("*.json"))
+def _artifact_kinds(store: FileArtifactStore) -> list[str]:
+    """Semantic types explicitly emitted by this plan Execution."""
+    return sorted({ref.kind for ref in store.list_refs()})
 
 
 @router.get("", response_model=PlanListResponse)
@@ -411,19 +442,17 @@ def list_plans(
     experiment = workspace.get_project(project_id).get_experiment(experiment_id)
     plans: list[PlanSummaryResponse] = []
     for run in experiment.list_runs():
-        root = _artifacts_root(run)
-        store = _artifact_store(run)
-        if not _is_plan_run(store, root):
-            continue
-        plans.append(
-            PlanSummaryResponse(
-                runId=run.id,
-                title=_plan_title(store, root, run.id),
-                status=run.status,
-                createdAt=run.metadata.created_at.isoformat(),
-                hasWorkflow=store.latest_by_kind("workflow_source") is not None,
+        for execution, store, root in _plan_candidates(run):
+            plans.append(
+                PlanSummaryResponse(
+                    runId=run.id,
+                    executionId=execution.id,
+                    title=_plan_title(store, root, run.id),
+                    status=execution.status.value,
+                    createdAt=execution.created_at.isoformat(),
+                    hasWorkflow=store.latest_by_kind("workflow_source") is not None,
+                )
             )
-        )
     plans.sort(key=lambda p: p.createdAt, reverse=True)  # newest first
     return PlanListResponse(plans=plans, total=len(plans))
 
@@ -435,21 +464,19 @@ def list_all_plans(workspace: Workspace = Depends(get_workspace)) -> WorkspacePl
     for project in workspace.list_projects():
         for experiment in project.list_experiments():
             for run in experiment.list_runs():
-                root = _artifacts_root(run)
-                store = _artifact_store(run)
-                if not _is_plan_run(store, root):
-                    continue
-                plans.append(
-                    WorkspacePlanSummary(
-                        projectId=project.id,
-                        experimentId=experiment.id,
-                        runId=run.id,
-                        title=_plan_title(store, root, run.id),
-                        status=run.status,
-                        createdAt=run.metadata.created_at.isoformat(),
-                        hasWorkflow=store.latest_by_kind("workflow_source") is not None,
+                for execution, store, root in _plan_candidates(run):
+                    plans.append(
+                        WorkspacePlanSummary(
+                            projectId=project.id,
+                            experimentId=experiment.id,
+                            runId=run.id,
+                            executionId=execution.id,
+                            title=_plan_title(store, root, run.id),
+                            status=execution.status.value,
+                            createdAt=execution.created_at.isoformat(),
+                            hasWorkflow=store.latest_by_kind("workflow_source") is not None,
+                        )
                     )
-                )
     plans.sort(key=lambda p: p.createdAt, reverse=True)
     return WorkspacePlanListResponse(plans=plans, total=len(plans))
 
@@ -459,6 +486,7 @@ def get_plan(
     project_id: str,
     experiment_id: str,
     run_id: str,
+    execution_id: str | None = Query(default=None, alias="executionId"),
     workspace: Workspace = Depends(get_workspace),
 ) -> PlanDetailResponse:
     """Return one generated plan's draft + structured experiment report."""
@@ -470,14 +498,7 @@ def get_plan(
     except RunNotFoundError as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"plan run {run_id!r} not found") from exc
 
-    root = _artifacts_root(run)
-    store = _artifact_store(run)
-    if not _is_plan_run(store, root):
-        raise HTTPException(
-            status.HTTP_404_NOT_FOUND,
-            f"run {run_id!r} has no generated plan "
-            "(no experiment_plan / plan_report / experiment_report artifact)",
-        )
+    execution, store, root = _resolve_plan_execution(run, execution_id)
     report = _read_json_kind(store, root, "experiment_report")
     plan_report = _read_json_kind(store, root, "plan_report")
     experiment_plan = _read_json_kind(store, root, "experiment_plan")
@@ -520,10 +541,11 @@ def get_plan(
     tasks = board_tasks or _read_tasks(experiment)
     return PlanDetailResponse(
         runId=run.id,
+        executionId=execution.id,
         projectId=project_id,
         experimentId=experiment_id,
         title=_plan_title(store, root, run.id),
-        status=run.status,
+        status=execution.status.value,
         draft=draft if isinstance(draft, str) else "",
         experimentReport=report or plan_report,
         experimentPlan=experiment_plan,
@@ -549,6 +571,6 @@ def get_plan(
         execution=real_execution,
         finalReport=_read_json_kind(store, root, "final_report"),
         auditReport=_read_json_kind(store, root, "audit_report"),
-        artifactKinds=_artifact_kinds(root),
+        artifactKinds=_artifact_kinds(store),
         hasWorkflow=store.latest_by_kind("workflow_source") is not None,
     )

@@ -59,19 +59,20 @@ from molexp.workflow import Workflow, WorkflowCompiler, WorkflowRuntime
 compiled = WorkflowCompiler().compile(Workflow(name="train").add(Train()))
 
 ws = me.Workspace("./lab", name="lab")
-exp = ws.project("demo").experiment("baseline").run(compiled, params={"lr": [1e-3]})
+exp = ws.add_project("demo").add_experiment("baseline").run(compiled, params={"lr": [1e-3]})
 run = exp.list_runs()[0]
 
 with run.start() as ctx:                  # run.start(profile_config=cfg) to attach a profile
+    execution_id = ctx.id
     result = await WorkflowRuntime().execute(compiled, run_context=ctx)
     ctx.set_result("final_loss", result.outputs["train"])
-    ctx.register_artifact(result.outputs["train"], name="metrics.json")
-    ctx.log("train").append("done")
+    ctx.emit_artifact(result.outputs["train"], name="metrics.json")
+    ctx.log("runtime").append("done")
 
-print(run.get_result("final_loss"))   # public read-back on the Run entity
+print(run.get_result("final_loss", execution_id=execution_id))   # public read-back on the Run entity
 ```
 
-`ctx.set_result(...)` stores lightweight values on the run record, `ctx.register_artifact(...)` registers an `ArtifactAsset`, `ctx.log(name)` appends to a `LogAsset`, `ctx.checkpoint(...)` chains `CheckpointAsset`s, and `ctx.find_asset(...)` walks run → experiment → project → workspace. Assets written this way carry a `Producer` record automatically; while a task body is executing, the engine tags the active task id so queries like `run.assets.query(producer_task="train")` work. See the [Unified Asset Model](assets.md) guide for the complete picture of scopes, the per-scope `assets.json` manifests, and the per-kind subclasses.
+`ctx.set_result(...)` stores lightweight values on the execution record, `ctx.emit_artifact(...)` emits an `Artifact`, `ctx.log(name)` appends to the execution evidence log, and `ctx.checkpoint(...)` emits a checkpoint `Artifact`. Emitted artifacts carry their `run_id` / `execution_id` automatically; while a task body is executing, the engine tags the active task id into `artifact.metadata["task_id"]`. See the [Artifacts, Assets, and Data Imports](assets.md) guide for the complete picture of artifacts, data imports, and their query paths.
 
 Inside the task, the run shows up only as data: a root task's sweep `params` bind to its like-named parameters, `ctx.workdir` points into the execution directory, and the resolved profile config binds by name too. The same task code therefore runs unchanged in pure in-memory execution — there is simply no workdir, and whatever `config=` the caller passed binds the same way.
 

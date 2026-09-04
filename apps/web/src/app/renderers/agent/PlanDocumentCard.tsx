@@ -54,12 +54,14 @@ export const PlanDocumentCard = ({
   projectId,
   experimentId,
   runId,
+  executionId = null,
   className,
   compact = false,
 }: {
   projectId: string;
   experimentId: string;
   runId: string;
+  executionId?: string | null;
   className?: string;
   compact?: boolean;
 }): JSX.Element | null => {
@@ -77,7 +79,7 @@ export const PlanDocumentCard = ({
     setLoading(true);
     setError(null);
     plansApi
-      .getPlan(projectId, experimentId, runId)
+      .getPlan(projectId, experimentId, runId, executionId)
       .then((detail) => {
         if (!cancelled) setPlan(detail);
       })
@@ -90,7 +92,7 @@ export const PlanDocumentCard = ({
     return () => {
       cancelled = true;
     };
-  }, [projectId, experimentId, runId]);
+  }, [projectId, experimentId, runId, executionId]);
 
   const documentMd = useMemo(() => {
     if (!plan) return "";

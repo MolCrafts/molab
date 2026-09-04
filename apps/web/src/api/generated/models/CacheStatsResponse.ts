@@ -3,7 +3,7 @@
 /* tslint:disable */
 /* eslint-disable */
 export type CacheStatsResponse = {
-    entryCount: number;
     storeDir: string;
+    entryCount: number;
 };
 

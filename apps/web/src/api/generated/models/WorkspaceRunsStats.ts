@@ -2,11 +2,13 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
+/**
+ * Execution aggregates for the complete (unpaginated) Run result set.
+ */
 export type WorkspaceRunsStats = {
-    failed?: number;
-    pending?: number;
-    running?: number;
-    succeeded?: number;
-    total?: number;
+    totalRuns?: number;
+    totalExecutions?: number;
+    activeExecutions?: number;
+    byStatus?: Record<string, number>;
 };
 

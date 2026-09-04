@@ -103,7 +103,7 @@ class RunCreateRequest(ApiModel):
     )
     target: str | None = Field(
         default=None,
-        description="Compute target name (must exist in workspace registry)",
+        description="Declared compute-target hint (must exist in workspace registry)",
     )
 
     model_config = ConfigDict(populate_by_name=True)
@@ -177,6 +177,28 @@ class RunStartRequest(ApiModel):
 
 class RunStatusUpdateRequest(ApiModel):
     status: str = Field(..., description="New status value")
+
+
+class ExecutionAttemptCreateRequest(ApiModel):
+    """Create one physical attempt for an existing logical Run."""
+
+    mode: Literal["initial", "retry", "rerun", "resume", "reproduce"] = "initial"
+    based_on_execution_id: str | None = None
+    checkpoint_artifact_id: str | None = None
+    target: str | None = None
+    dispatch: bool = Field(
+        default=False,
+        description="Submit the queued Execution after it is created.",
+    )
+
+
+class ArtifactPromoteRequest(ApiModel):
+    """Append an Artifact → Asset registration fact."""
+
+    title: str | None = None
+    into_asset_id: str | None = None
+    created_by: str = "ui"
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class WorkflowDocumentRequest(ApiModel):

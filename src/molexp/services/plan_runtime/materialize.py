@@ -72,6 +72,7 @@ def materialize_plan_records(
     task_id: str,
     draft: str,
     model: str,
+    execution_id: str,
     failure: PlanFailure | None = None,
     turn_id: str | None = None,
 ) -> PlanRecordOutcome:
@@ -111,7 +112,7 @@ def materialize_plan_records(
     # must still bind the graph onto the experiment (UI reads experiment.workflow).
     # Missing artifact → not an error on failure (nothing to show); on success
     # it is an error (the pipeline claimed to finish without a workflow).
-    workflow_persisted = Plan().save(run=run)
+    workflow_persisted = Plan().save(run=run, execution_id=execution_id)
     if workflow_persisted:
         written.append("workflow_ir")
     elif failure is None:
@@ -126,7 +127,12 @@ def materialize_plan_records(
     _attempt(
         "agent_task",
         lambda: rec.write_agent_task_record(
-            run=run, workspace_root=workspace_root, task_id=task_id, draft=draft, failed=failed
+            run=run,
+            workspace_root=workspace_root,
+            task_id=task_id,
+            draft=draft,
+            execution_id=execution_id,
+            failed=failed,
         ),
     )
     _attempt(
@@ -137,29 +143,42 @@ def materialize_plan_records(
             workspace_root=workspace_root,
             task_id=task_id,
             draft=draft,
+            execution_id=execution_id,
             turn_id=turn_id,
             failure_stage=failure.stage if failure is not None else None,
             failure_error=failure.error if failure is not None else None,
         ),
     )
     if failure is None:
-        if rec.has_artifact(run, "plan_report") or rec.has_artifact(run, "experiment_plan"):
+        if rec.has_artifact(run, execution_id, "plan_report") or rec.has_artifact(
+            run, execution_id, "experiment_plan"
+        ):
             _attempt(
                 "plan_book",
-                lambda: rec.write_plan_book(run=run, experiment=experiment, model=model),
+                lambda: rec.write_plan_book(
+                    run=run, experiment=experiment, model=model, execution_id=execution_id
+                ),
             )
-        if rec.has_artifact(run, "experiment_report"):
+        if rec.has_artifact(run, execution_id, "experiment_report"):
             _attempt(
                 "experiment_record",
                 lambda: rec.write_experiment_record(
-                    run=run, experiment=experiment, draft=draft, model=model
+                    run=run,
+                    experiment=experiment,
+                    draft=draft,
+                    model=model,
+                    execution_id=execution_id,
                 ),
             )
-        if rec.has_artifact(run, "final_report"):
+        if rec.has_artifact(run, execution_id, "final_report"):
             _attempt(
                 "finding",
                 lambda: rec.write_finding_record(
-                    run=run, experiment=experiment, draft=draft, model=model
+                    run=run,
+                    experiment=experiment,
+                    draft=draft,
+                    model=model,
+                    execution_id=execution_id,
                 ),
             )
     else:
@@ -171,6 +190,7 @@ def materialize_plan_records(
                 model=model,
                 failure_stage=failure.stage,
                 failure_error=failure.error,
+                execution_id=execution_id,
             ),
         )
 

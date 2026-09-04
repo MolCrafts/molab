@@ -1,8 +1,7 @@
-"""Run entity and RunContext execution lifecycle.
+"""Logical Run identity and its physical Execution factory.
 
-A **Run** represents a single execution instance within an experiment.
-**RunContext** is the context manager that handles lifecycle, artifacts,
-checkpoints, and asset access during execution.
+A :class:`Run` is immutable scientific intent. :class:`ExecutionContext`
+owns one real attempt and all mutable/runtime state beneath it.
 """
 
 from __future__ import annotations
@@ -19,11 +18,11 @@ from molexp._typing import (
     JSONValue,
     TaskOutput,
 )
+from molexp.ids import compute_definition_hash, generate_uuid7
 from molexp.knowledge.types import concept_type
 from molexp.path import Path as MolexpPath
 from molexp.profile import ProfileConfig
 
-from .assets import AssetScope
 from .base import (
     _load_metadata,
     _reconstruct,
@@ -31,14 +30,7 @@ from .base import (
 from .errors import RunExistsError, RunNotFoundError
 from .folder import WORKSPACE_RUN_KIND, Folder
 from .fs import PathArg
-from .models import (
-    ExecutionRecord,
-    FolderMetadata,
-    RunMetadata,
-    RunStatus,
-)
-from .run_heartbeat import unlink_alive
-from .utils import generate_id
+from .models import FolderMetadata, RunMetadata, RunStatus
 
 if TYPE_CHECKING:
     from .experiment import Experiment
@@ -47,7 +39,9 @@ if TYPE_CHECKING:
 # Re-exported for backward compatibility — the canonical definition now
 # lives in ``.models`` so the run-lifecycle collaborators can import it
 # without a circular ``run.py`` dependency.
-from .runcontext import RunContext
+from .domain import ExecutionMode, ExecutionState, ExecutionStatus, RunStatusSummary
+from .execution_context import RunContext
+from .execution_repository import ExecutionRepository
 
 _logger = get_logger(__name__)
 
@@ -102,6 +96,7 @@ class RunWorkflowExecutor(Protocol):
         resume: bool = False,
         rerun: bool = False,
         fresh: bool = False,
+        checkpoint_artifact_id: str | None = None,
     ) -> object: ...
 
     async def aexecute(
@@ -112,6 +107,7 @@ class RunWorkflowExecutor(Protocol):
         resume: bool = False,
         rerun: bool = False,
         fresh: bool = False,
+        checkpoint_artifact_id: str | None = None,
     ) -> object: ...
 
 
@@ -175,6 +171,9 @@ class Run(Folder):
         id: str | None = None,
         workflow_snapshot: dict[str, JSONValue] | None = None,
         target: str | None = None,
+        definition_hash: str | None = None,
+        experiment_revision_id: str | None = None,
+        input_asset_ids: tuple[str, ...] = (),
         _entity_metadata: RunMetadata | None = None,
     ) -> None:
         resolved_parent = parent if parent is not None else experiment
@@ -186,10 +185,21 @@ class Run(Folder):
             _entity_metadata
             if _entity_metadata is not None
             else RunMetadata(
-                id=id or name or generate_id(),
+                id=id or name or generate_uuid7(),
                 parameters=parameters or {},
                 workflow_snapshot=workflow_snapshot,
                 target=target,
+                definition_hash=definition_hash
+                or compute_definition_hash(
+                    {
+                        "experiment_revision_id": experiment_revision_id,
+                        "parameters": parameters or {},
+                        "workflow_snapshot": workflow_snapshot,
+                    }
+                ),
+                experiment_revision_id=experiment_revision_id
+                or resolved_parent.metadata.revision_id,
+                input_asset_ids=input_asset_ids,
             )
         )
 
@@ -274,50 +284,59 @@ class Run(Folder):
 
     @property
     def status(self) -> str:
-        """Current run status, sourced from ``run.json`` (:class:`RunMetadata`)."""
-        return self.metadata.status.value
+        """Deprecated scalar spelling; use :attr:`status_summary`."""
+        raise AttributeError(
+            "Run has no scalar status in schema v2; use run.status_summary or "
+            "inspect run.executions"
+        )
+
+    @property
+    def status_summary(self) -> RunStatusSummary:
+        """Derived counts across every Execution realizing this Run."""
+        return self._execution_repository().summary()
 
     @property
     def is_retryable(self) -> bool:
-        """Whether ``resume`` / ``rerun`` apply (status in :data:`RETRYABLE_STATUSES`)."""
-        return self.status in RETRYABLE_STATUSES
+        """Whether resume/rerun may open a new attempt.
+
+        A live Execution (queued/running) must not get a concurrent sibling.
+        Failed/cancelled/interrupted attempts otherwise make the run retryable.
+        """
+        if self.status_summary.active > 0:
+            return False
+        return any(
+            item.status.value in {"failed", "cancelled", "interrupted"} for item in self.executions
+        )
 
     @property
-    def execution_history(self) -> list[ExecutionRecord]:
-        """Run-level execution history, read from ``run.json``."""
-        return list(self.metadata.execution_history)
+    def executions(self) -> list[ExecutionState]:
+        """Every physical Execution, ordered by creation time."""
+        return self._execution_repository().list()
+
+    @property
+    def execution_history(self) -> list[ExecutionState]:
+        """Deprecated read alias; history is stored by Execution, not Run."""
+        return self.executions
 
     @property
     def finished_at(self) -> datetime | None:
         """Terminal timestamp, read from ``run.json``."""
-        return self.metadata.finished_at
+        finished = [item.finished_at for item in self.executions if item.finished_at is not None]
+        return max(finished, default=None)
 
     @property
     def current_execution_id(self) -> str | None:
         """Active/last execution id, read from ``run.json``."""
-        return self.metadata.current_execution_id
+        raise AttributeError(
+            "Run has no current_execution_id in schema v2; multiple Executions may be active"
+        )
 
     @property
     def run_dir(self) -> Path:
         """Alias of :attr:`Folder.path` — the run directory as ``pathlib.Path``."""
         return self.path
 
-    @property
-    def scope(self):  # noqa: ANN201
-
-        return AssetScope(
-            kind="run",
-            ids=(self.experiment.project.id, self.experiment.id, self.id),
-        )
-
-    @property
-    def assets(self):  # noqa: ANN201
-        """Scope-filtered asset view (read-only queries) for this run."""
-        from .assets import AssetsView
-
-        return AssetsView(self.experiment.project.workspace.root, self.scope)
-
-    def get_result(self, key: str) -> TaskOutput:
+    def get_result(self, key: str, *, execution_id: str) -> TaskOutput:
         """Read a result value for *key*.
 
         Resolution order:
@@ -340,31 +359,20 @@ class Run(Folder):
         """
         from .schema_version import read_versioned_json
 
-        run_json = Path(self.run_dir / "run.json")
-        if not run_json.exists() or run_json.stat().st_size == 0:
-            return None
+        results_path = Path(self.run_dir / "executions" / execution_id / "results.json")
+        if not results_path.exists() or results_path.stat().st_size == 0:
+            return self._execution_node_output(execution_id, key)
         try:
-            data = read_versioned_json(run_json)
+            data = read_versioned_json(results_path)
         except (OSError, ValueError):
             return None
-        results = data.get("context", {}).get("results", {})
+        results = data.get("results", {})
         if isinstance(results, dict) and key in results:
             return results[key]
-        return self._latest_execution_node_output(key)
+        return self._execution_node_output(execution_id, key)
 
-    def _latest_execution_node_output(self, key: str) -> TaskOutput:
-        """Fallback for :meth:`get_result` — read *key* from the latest execution.
-
-        The execution history (newest last) is sourced from ``run.json``;
-        its last entry names the most recent attempt. Read-only: nothing
-        is written back to disk.
-        """
-        history = self.metadata.execution_history
-        if not history:
-            return None
-        execution_id = history[-1].execution_id
-        if not execution_id:
-            return None
+    def _execution_node_output(self, execution_id: str, key: str) -> TaskOutput:
+        """Read one workflow node result from the selected Execution."""
         from .execution_results import read_completed_node_outputs
 
         record = read_completed_node_outputs(Path(str(self.run_dir)), execution_id).get(key)
@@ -387,6 +395,11 @@ class Run(Folder):
     def materialize(self) -> None:
         d = self.run_dir
         self._disk().mkdir(d, parents=True, exist_ok=True)
+        from .scientific_repository import ScientificRepository
+
+        ScientificRepository(self.experiment.project.workspace.root, fs=self._disk()).record_run(
+            self._definition_record(), experiment_id=self.experiment.id
+        )
         self.save()
 
     def write_meta(self) -> str:
@@ -394,27 +407,32 @@ class Run(Folder):
         self.save()
         return self._disk().join(self.run_dir, "run.json")
 
+    def _move_target_id(self, new_name: str | None) -> str:
+        """A Run keeps its UUID id across a move; it has no human name to change."""
+        del new_name
+        return self._name
+
     def _sync_entity_identity(self) -> None:
-        """Mirror the folder identity into ``run.json`` (``move_to`` hook)."""
-        self._entity_metadata = self._entity_metadata.model_copy(update={"id": self._name})
-        self.save()
+        # A Run's id is immutable and it has no separate human name, so a move
+        # changes nothing about its persisted identity.
+        return None
 
     def save(self) -> None:
         with self._metadata_lock():
             self._write_run_json()
 
     def persist_driver_context(self, context: dict[str, object]) -> None:
-        """Write the driver ``context`` blob under the same lock as identity.
+        """Reject the removed Run-level runtime state channel.
 
-        ``run.json`` is one file: ``RunMetadata`` fields plus an optional
-        ``context`` section (results / workflow snapshot used by
-        :class:`~molexp.workspace.run_context.ContextStore`). Identity
-        writes preserve an existing ``context``; this method is the only
-        updater of that section.
+        Results and workflow runtime state belong to a selected Execution.
+        Keeping this method as a loud tombstone prevents an older caller from
+        silently putting mutable history back into ``run.json``.
         """
-        with self._metadata_lock():
-            self._reload_metadata_from_disk()
-            self._write_run_json(context=context)
+        del context
+        raise RuntimeError(
+            "Run-level driver context was removed in schema v2; write through "
+            "ExecutionContext.set_result()/set_workflow()"
+        )
 
     @classmethod
     def load(cls, run_dir: PathArg) -> Run:
@@ -462,6 +480,9 @@ class Run(Folder):
         profile_config: ProfileConfig | None = None,
         *,
         execution_id: str | None = None,
+        mode: ExecutionMode = ExecutionMode.INITIAL,
+        based_on_execution_id: str | None = None,
+        checkpoint_artifact_id: str | None = None,
     ) -> RunContext:
         """Return a context manager for executing this run.
 
@@ -478,7 +499,14 @@ class Run(Folder):
         (sugar that calls ``self.start()`` internally); see
         :meth:`__enter__` / :meth:`__aenter__`.
         """
-        return RunContext(self, profile_config=profile_config, execution_id=execution_id)
+        return RunContext(
+            self,
+            profile_config=profile_config,
+            execution_id=execution_id,
+            mode=mode,
+            based_on_execution_id=based_on_execution_id,
+            checkpoint_artifact_id=checkpoint_artifact_id,
+        )
 
     def execute(
         self,
@@ -488,6 +516,7 @@ class Run(Folder):
         resume: bool = False,
         rerun: bool = False,
         fresh: bool = False,
+        checkpoint_artifact_id: str | None = None,
     ) -> object:
         """Execute *workflow* against this run in one step and return the result.
 
@@ -513,7 +542,12 @@ class Run(Folder):
         seam so workspace never imports the workflow layer.
         """
         return require_run_executor().execute(
-            self, workflow, resume=resume, rerun=rerun, fresh=fresh
+            self,
+            workflow,
+            resume=resume,
+            rerun=rerun,
+            fresh=fresh,
+            checkpoint_artifact_id=checkpoint_artifact_id,
         )
 
     async def aexecute(
@@ -524,10 +558,16 @@ class Run(Folder):
         resume: bool = False,
         rerun: bool = False,
         fresh: bool = False,
+        checkpoint_artifact_id: str | None = None,
     ) -> object:
         """Async variant of :meth:`execute` — same semantics, awaitable."""
         return await require_run_executor().aexecute(
-            self, workflow, resume=resume, rerun=rerun, fresh=fresh
+            self,
+            workflow,
+            resume=resume,
+            rerun=rerun,
+            fresh=fresh,
+            checkpoint_artifact_id=checkpoint_artifact_id,
         )
 
     # ── Sugar: ``with run as ctx:`` / ``async with run as ctx:`` ────────
@@ -556,26 +596,14 @@ class Run(Folder):
         del self._sugar_ctx
         return await ctx.__aexit__(exc_type, exc_val, exc_tb)
 
-    def cancel(self) -> None:
-        """Mark the run as cancelled and persist the terminal state.
-
-        Sets ``status=cancelled`` + ``finished_at``, clears the ownership
-        stamp, and unlinks the ``alive`` heartbeat file. All JSON writes
-        go through ``run.json``.
-        """
-        now = datetime.now()
-        unlink_alive(self)
-        self._update_metadata(
-            status=RunStatus.CANCELLED,
-            finished_at=now,
-            owner_pid=None,
-            owner_host=None,
-        )
+    def cancel(self, execution_id: str) -> None:
+        """Cancel one selected active Execution; a Run itself is not cancellable."""
+        self._execution_repository().seal(execution_id, ExecutionStatus.CANCELLED)
 
     def harvest(
         self,
         *,
-        cls: type,
+        cls: type[Knowledge],
         narrative: str,
         created_by: str,
         results: dict[str, JSONValue] | None = None,
@@ -594,29 +622,21 @@ class Run(Folder):
         )
 
     def delete_execution(self, execution_id: str) -> None:
-        """Delete a single execution attempt from this run.
-
-        Removes ``executions/<execution_id>/`` on disk and pops the matching
-        entry from ``execution_history``.  The run itself is left intact.
-
-        Raises:
-            KeyError: If the execution id is not present under this run.
-        """
-        import shutil
-
-        exec_dir = Path(self.run_dir / "executions" / execution_id)
-        history = list(self.metadata.execution_history)
-        matched_idx = next(
-            (i for i, rec in enumerate(history) if rec.execution_id == execution_id),
-            None,
+        """Execution provenance is immutable; only workspace bytes may be pruned."""
+        raise RuntimeError(
+            f"Execution {execution_id!r} cannot be deleted; use the explicit prune API "
+            "to remove retained workspace content while preserving provenance"
         )
-        if matched_idx is None and not exec_dir.exists():
-            raise KeyError(f"Execution '{execution_id}' not found under run '{self.id}'")
-        if exec_dir.exists():
-            shutil.rmtree(exec_dir)
-        if matched_idx is not None:
-            history.pop(matched_idx)
-            self._update_metadata(execution_history=tuple(history))
+
+    def _execution_repository(self) -> ExecutionRepository:
+        workspace = self.experiment.project.workspace
+        return ExecutionRepository(
+            workspace.root,
+            self.run_dir,
+            run_id=self.id,
+            project_id=self.experiment.project.id,
+            fs=workspace.fs,
+        )
 
     # ── Internal (frozen-metadata mutation helpers) ──────────────────────
 
@@ -655,28 +675,39 @@ class Run(Folder):
             _logger.debug(f"run {self.id}: could not reload run.json; keeping in-memory copy")
 
     def _write_run_json(self, *, context: dict[str, object] | None = None) -> None:
-        """Atomically write ``run.json``. Caller holds :meth:`_metadata_lock`.
+        """Write only logical Run definition fields to ``run.json``.
 
-        When *context* is omitted, any existing ``context`` section on disk is
-        preserved so status/ownership updates cannot drop driver results.
+        ``RunMetadata`` temporarily retains deprecated fields as an in-memory
+        compatibility shell for callers being migrated. They are deliberately
+        excluded here: operational state and results can only be persisted by
+        an Execution.
         """
         from .file_store import FileStore
-        from .schema_version import read_versioned_json, versioned_payload
+        from .schema_version import versioned_payload
 
         fs = self._disk()
-        path = fs.join(self.run_dir, "run.json")
-        payload: dict[str, object] = dict(self.metadata.model_dump(mode="json"))
-        existing_context: object = None
-        try:
-            if fs.exists(path):
-                existing_context = read_versioned_json(path, fs=fs).get("context")
-        except Exception:
-            existing_context = None
-        if context is not None:
-            payload["context"] = context
-        elif isinstance(existing_context, dict):
-            payload["context"] = existing_context
+        del context
+        payload: dict[str, object] = dict(self._definition_record())
         FileStore(self.run_dir, fs=fs).put("run.json", versioned_payload(payload))
+
+    def _definition_record(self) -> dict[str, JSONValue]:
+        """Return the portable logical definition shared by view + provenance."""
+        return self.metadata.model_dump(
+            mode="json",
+            include={
+                "id",
+                "type",
+                "parameters",
+                "created_at",
+                "definition_hash",
+                "experiment_revision_id",
+                "input_asset_ids",
+                "workflow_snapshot",
+                "target",
+                "workflow_id",
+                "workflow_version",
+            },
+        )
 
     def _update_metadata(self, **updates: object) -> None:
         """Forward field updates into ``RunMetadata.model_copy`` and persist.

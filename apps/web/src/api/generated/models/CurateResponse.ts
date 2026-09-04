@@ -7,8 +7,8 @@
  */
 export type CurateResponse = {
     proposalId: string;
+    status: string;
     reason?: (string | null);
     resultArtifactIds?: Array<string>;
-    status: string;
 };
 

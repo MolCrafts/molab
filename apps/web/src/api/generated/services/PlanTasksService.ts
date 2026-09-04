@@ -10,35 +10,6 @@ import { OpenAPI } from '../core/OpenAPI';
 import { request as __request } from '../core/request';
 export class PlanTasksService {
     /**
-     * List Plan Tasks
-     * List the live plan tasks in this workspace (in-memory; MVP).
-     * @param projectId
-     * @param experimentId
-     * @param molexpSession
-     * @returns PlanTaskListResponse Successful Response
-     * @throws ApiError
-     */
-    public static listPlanTasks(
-        projectId: string,
-        experimentId: string,
-        molexpSession?: (string | null),
-    ): CancelablePromise<PlanTaskListResponse> {
-        return __request(OpenAPI, {
-            method: 'GET',
-            url: '/api/projects/{project_id}/experiments/{experiment_id}/plan-tasks',
-            path: {
-                'project_id': projectId,
-                'experiment_id': experimentId,
-            },
-            cookies: {
-                'molexp_session': molexpSession,
-            },
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
      * Create Plan Task
      * Start a PlanOrchestrator pipeline on a content-addressed run under the experiment.
      *
@@ -70,6 +41,35 @@ export class PlanTasksService {
             },
             body: requestBody,
             mediaType: 'application/json',
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * List Plan Tasks
+     * List the live plan tasks in this workspace (in-memory; MVP).
+     * @param projectId
+     * @param experimentId
+     * @param molexpSession
+     * @returns PlanTaskListResponse Successful Response
+     * @throws ApiError
+     */
+    public static listPlanTasks(
+        projectId: string,
+        experimentId: string,
+        molexpSession?: (string | null),
+    ): CancelablePromise<PlanTaskListResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/projects/{project_id}/experiments/{experiment_id}/plan-tasks',
+            path: {
+                'project_id': projectId,
+                'experiment_id': experimentId,
+            },
+            cookies: {
+                'molexp_session': molexpSession,
+            },
             errors: {
                 422: `Validation Error`,
             },

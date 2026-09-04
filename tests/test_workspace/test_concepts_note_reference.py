@@ -104,7 +104,7 @@ class TestReferenceConcept:
         ref = _mount(root, ReferenceConcept(parent=root, name="smith2024"))
 
         ref.write_reference_meta(ReferenceMeta(title="T", doi="10.1/x", year=2024))
-        got = ref.read_ref_meta()
+        got = ref.read_reference_meta()
         assert isinstance(got, ReferenceMeta)
         assert got.title == "T"
         assert got.doi == "10.1/x"

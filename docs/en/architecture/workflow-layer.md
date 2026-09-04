@@ -113,7 +113,6 @@ from molexp.workflow import (
     TaskContext,
     Caching,
     FileCacheStore,
-    promote_callable,
     WorkflowSnapshotRef,
 )
 ```
@@ -121,6 +120,7 @@ from molexp.workflow import (
 Forbidden outside `molexp.workflow`:
 
 ```python
+# docs: skip — illustrates imports forbidden at the boundary (not runnable)
 import pydantic_graph                 # dependency removed — forbidden everywhere in src/
 import molexp.workflow._engine        # private subtree
 ```

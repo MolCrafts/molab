@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING
 
 from molexp.ids import slugify
 
+from .domain import ExecutionStatus
 from .knowledge import Knowledge, SourceRef
 from .knowledge_write import write_knowledge
 from .run import TERMINAL_STATUSES as _TERMINAL_STATUSES
@@ -38,6 +39,27 @@ _MAX_VALUE_CHARS = 400
 """Per-value cap in the rendered results table (repr-truncated)."""
 
 
+def _scalar_status(run: Run) -> str:
+    """Derive the single run-status label from the Execution aggregate."""
+    summary = run.status_summary
+    if summary.not_started:
+        return "pending"
+    if summary.active > 0:
+        return "running"
+    for status in ("failed", "cancelled", "interrupted", "succeeded"):
+        if summary.by_status.get(status):
+            return status
+    return "succeeded" if summary.total else "pending"
+
+
+def _last_error(run: Run) -> str | None:
+    """Return the message of the most recent failed Execution, if any."""
+    for state in run.executions:
+        if state.status is ExecutionStatus.FAILED and state.error:
+            return str(state.error.get("message") or state.error.get("type") or state.error)
+    return None
+
+
 def harvest_run(
     run: Run,
     *,
@@ -48,9 +70,10 @@ def harvest_run(
     name: str | None = None,
 ) -> Knowledge:
     """Harvest a terminal *run* into sourced Knowledge under its experiment."""
-    if run.status not in _TERMINAL_STATUSES:
+    status = _scalar_status(run)
+    if status not in _TERMINAL_STATUSES:
         raise ValueError(
-            f"run {run.id} is {run.status!r} — only a terminal run "
+            f"run {run.id} is {status!r} — only a terminal run "
             f"({sorted(_TERMINAL_STATUSES)}) has an outcome to harvest"
         )
     if not narrative.strip():
@@ -82,6 +105,7 @@ def _render_body(
     narrative: str,
     results: dict[str, JSONValue] | None,
 ) -> str:
+    status = _scalar_status(run)
     lines = [
         f"# [{cls.__name__}] run {run.id}",
         "",
@@ -89,14 +113,14 @@ def _render_body(
         "",
         "## Run",
         "",
-        f"- status: {run.status}",
+        f"- status: {status}",
     ]
     params = run.metadata.parameters
     if params:
         lines.append(f"- params: {_truncate(repr(params))}")
-    error = run.metadata.error
-    if run.status == "failed" and error:
-        lines += ["", "## Error", "", _truncate(str(error))]
+    error = _last_error(run)
+    if status == "failed" and error:
+        lines += ["", "## Error", "", _truncate(error)]
     if results:
         lines += ["", "## Results", ""]
         lines += [f"- **{key}**: {_truncate(repr(value))}" for key, value in results.items()]

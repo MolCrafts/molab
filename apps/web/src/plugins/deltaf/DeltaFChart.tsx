@@ -74,6 +74,7 @@ export const DeltaFChart = ({
   selection,
   snapshot,
   discoveredFiles,
+  executionId,
 }: DeltaFTabProps): JSX.Element => {
   const run = snapshot.runs.find((item) => item.id === selection.objectId) ?? null;
   // Depend on the stable string ids, NOT the `run` object: snapshot/SSE updates
@@ -89,13 +90,13 @@ export const DeltaFChart = ({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!projectId || !experimentId || !runId) {
+    if (!projectId || !experimentId || !runId || !executionId) {
       return;
     }
     let cancelled = false;
     void (async () => {
       try {
-        const res = await runsApi.getRunFileText(projectId, experimentId, runId, relPath);
+        const res = await runsApi.getRunFileText(projectId, experimentId, runId, executionId, relPath);
         if (cancelled) {
           return;
         }
@@ -110,7 +111,7 @@ export const DeltaFChart = ({
     return () => {
       cancelled = true;
     };
-  }, [projectId, experimentId, runId, relPath]);
+  }, [executionId, projectId, experimentId, runId, relPath]);
 
   const config = useMemo<BarChartConfig | null>(() => {
     if (!report?.deltaF) {

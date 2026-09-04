@@ -21,13 +21,11 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
 
 from molexp.harness.core.run_context import HarnessRunContext
 from molexp.harness.errors import ArtifactNotFoundError, HarnessError
 from molexp.harness.plan_tools import (
     BOARD_TOOLS,
-    PlanTool,
     PlanToolResult,
     TaskBoardHandle,
     block_task,
@@ -131,20 +129,6 @@ def _make_ctx(root: Path) -> HarnessRunContext:
     )
 
 
-async def _noop_fn(**kwargs: object) -> PlanToolResult:
-    return PlanToolResult(ok=True, summary="", data={}, artifact_ref=None)
-
-
-def _make_plan_tool() -> PlanTool:
-    return PlanTool(
-        name="probe",
-        description="A probe tool.",
-        input_schema={"type": "object"},
-        side_effects=[],
-        fn=_noop_fn,
-    )
-
-
 # The seven board-state tool functions + the immutable-write handle method each
 # routes through. ``inspect_artifact`` takes the uniform ``(*, ctx, board, ...)``
 # signature even though it reads through ``ctx.artifact_store``, not the board.
@@ -166,39 +150,6 @@ _WRITE_TOOL_CASES = [
 
 
 # ──────────────────────────────────────────────────────────────── ac-001
-
-
-class TestPlanToolDescriptor:
-    """``PlanTool`` is a frozen dataclass; ``PlanToolResult`` a frozen pydantic model."""
-
-    def test_plan_tool_exposes_declared_fields(self) -> None:
-        tool = _make_plan_tool()
-
-        assert tool.name == "probe"
-        assert tool.description == "A probe tool."
-        assert tool.input_schema == {"type": "object"}
-        assert tool.side_effects == []
-        assert tool.fn is _noop_fn
-
-    def test_plan_tool_is_a_frozen_dataclass(self) -> None:
-        tool = _make_plan_tool()
-
-        with pytest.raises(dataclasses.FrozenInstanceError):
-            tool.name = "changed"  # ty: ignore[invalid-assignment]
-
-    def test_plan_tool_result_exposes_declared_fields(self) -> None:
-        result = PlanToolResult(ok=True, summary="did it", data={"n": 1}, artifact_ref="art-1")
-
-        assert result.ok is True
-        assert result.summary == "did it"
-        assert result.data == {"n": 1}
-        assert result.artifact_ref == "art-1"
-
-    def test_plan_tool_result_is_a_frozen_pydantic_model(self) -> None:
-        result = PlanToolResult(ok=True, summary="", data={}, artifact_ref=None)
-
-        with pytest.raises(ValidationError):
-            result.ok = False  # ty: ignore[invalid-assignment]
 
 
 class TestTaskBoardHandleProtocol:

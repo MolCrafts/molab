@@ -9,16 +9,8 @@ round-trip, the session CRUD sugar (disk is truth), and the flat binary
 
 from __future__ import annotations
 
-from molexp.agent.folders import AGENT_KIND, AGENT_SESSION_KIND, Agent, AgentSession
+from molexp.agent.folders import AGENT_KIND, Agent, AgentSession
 from molexp.agent.folders_metadata import AgentMeta
-from molexp.knowledge.types import resolve_concept_type
-from molexp.workspace import Folder as WSFolder
-
-
-def test_agent_concept_kinds_resolve_to_subclasses() -> None:
-    """OKF registry maps each agent kind back to its Folder subclass."""
-    assert resolve_concept_type(AGENT_KIND, WSFolder) is Agent
-    assert resolve_concept_type(AGENT_SESSION_KIND, WSFolder) is AgentSession
 
 
 class TestAgent:

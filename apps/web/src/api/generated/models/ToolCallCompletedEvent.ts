@@ -10,11 +10,11 @@
  * ``artifacts`` is the full embed list (plot / structure / table) for the UI.
  */
 export type ToolCallCompletedEvent = {
-    artifacts?: Array<Record<string, any>>;
-    kind?: string;
-    ok?: boolean;
-    result_summary?: string;
     timestamp?: string;
+    kind?: string;
     tool_name: string;
+    result_summary?: string;
+    ok?: boolean;
+    artifacts?: Array<Record<string, any>>;
 };
 

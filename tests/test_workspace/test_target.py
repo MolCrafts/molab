@@ -70,10 +70,6 @@ class TestParseTarget:
         assert isinstance(target, RemoteTarget)
         assert target.path == "~/runs"
 
-    def test_at_name_raises_needs_resolution(self) -> None:
-        with pytest.raises(TargetNeedsResolution):
-            parse_target("@cluster")
-
 
 class TestResolveTarget:
     def test_local_spec_pairs_local_transport(self, tmp_path: Path) -> None:

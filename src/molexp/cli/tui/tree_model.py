@@ -13,11 +13,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Literal
 
-from molexp._run_display import elapsed, read_run_json
+from molexp._run_display import elapsed
 from molexp._typing import JSONValue
 from molexp.plugins.submit_molq.metadata import normalize_executor_info
 from molexp.workspace import Experiment, Project, Run, Workspace
-from molexp.workspace.models import ExecutionRecord
+from molexp.workspace.domain import ExecutionState
 
 # Per-node back-pointer used by the delete / detail flows. Each kind of
 # tree node carries a different concrete type — workspace nodes hold a
@@ -153,48 +153,61 @@ def _build_experiment_node(exp: Experiment, project_id: str) -> TreeNode:
     return node
 
 
+def _run_status(run: Run) -> str:
+    """Derive a single display status from a Run's Execution summary."""
+    summary = run.status_summary
+    if summary.not_started:
+        return "pending"
+    if summary.active:
+        return "running"
+    for status in ("failed", "cancelled", "interrupted", "succeeded"):
+        if summary.by_status.get(status):
+            return status
+    return "succeeded"
+
+
 def _build_run_node(run: Run, project_id: str, exp_id: str) -> TreeNode:
-    data = read_run_json(run.run_dir)
-    status = run.status
-    info = normalize_executor_info(_as_dict(data.get("executor_info")), {})
+    executions = run.executions
+    info = normalize_executor_info(executions[-1].executor if executions else None, {})
     note: str | None = None
-    err = data.get("error")
+    err = executions[-1].error if executions else None
     if isinstance(err, dict):
         note_raw = err.get("message")
         note = note_raw if isinstance(note_raw, str) else None
 
     finished = run.finished_at.isoformat() if run.finished_at else None
+    created_at = run.metadata.created_at.isoformat() if run.metadata.created_at else None
     node = TreeNode(
         kind="run",
         node_id=("project", project_id, "experiment", exp_id, "run", run.id),
         display_label=_short_id(run.id),
-        status=status,
-        elapsed=elapsed(_as_str(data.get("created_at")), finished),
+        status=_run_status(run),
+        elapsed=elapsed(created_at, finished),
         note=note,
         ref=run,
     )
 
-    history = run.execution_history
-    node.count_hint = f"{len(history)} attempts" if history else None
-    for rec in history:
+    node.count_hint = f"{len(executions)} attempts" if executions else None
+    for rec in executions:
         node.children.append(_build_execution_node(rec, project_id, exp_id, run, info))
     return node
 
 
 def _build_execution_node(
-    rec: ExecutionRecord,
+    rec: ExecutionState,
     project_id: str,
     exp_id: str,
     run: Run,
     run_executor_info: dict[str, str],
 ) -> TreeNode:
-    exec_id = rec.execution_id or ""
-    status = rec.status or "unknown"
+    exec_id = rec.id
+    status = rec.status.value
     duration = elapsed(
         rec.started_at.isoformat() if rec.started_at else None,
         rec.finished_at.isoformat() if rec.finished_at else None,
     )
-    sched = rec.scheduler_job_id or run_executor_info.get("scheduler_job_id")
+    exec_info = normalize_executor_info(rec.executor, run_executor_info)
+    sched = exec_info.get("scheduler_job_id")
     note = f"sched={sched}" if sched else None
     return TreeNode(
         kind="execution",

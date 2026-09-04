@@ -18,9 +18,15 @@ from mollog import get_logger
 
 from molexp.harness.errors import ApprovalPendingError, StageExecutionError
 from molexp.harness.executors.local import LocalExecutor
-from molexp.harness.plan import ExperimentPlan, freeze_experiment_plan, read_board, write_board
+from molexp.harness.plan import (
+    ExperimentPlan,
+    freeze_experiment_plan,
+    read_board,
+    remove_task,
+    write_board,
+)
 from molexp.harness.plan.bind_board import materialize_plan_for_realization
-from molexp.harness.schemas import AgentCallSpec, ApprovalRequest
+from molexp.harness.schemas import AgentCallSpec, ApprovalRequest, ReviewDecision
 from molexp.harness.stages.assemble_knowledge_context import AssembleKnowledgeContext
 from molexp.harness.stages.plan_reachability_probe import PlanReachabilityProbe
 from molexp.harness.stages.realize_board import RealizeBoard
@@ -190,6 +196,27 @@ def compile_plan_workflow(bag: PlanBag) -> CompiledWorkflow:
         if not ok or not id:
             return {"ok": False, "pending": False}
         from datetime import UTC, datetime
+
+        # A decision appended after the predecessor was sealed is projected
+        # into this new Execution as a review_decision Artifact. Apply its
+        # structured choices to this attempt's freshly generated board; never
+        # edit the predecessor workspace.
+        decision_ref = bag.ctx.artifact_store.latest_by_kind("review_decision")
+        if decision_ref is not None:
+            try:
+                decision = ReviewDecision.model_validate_json(
+                    bag.ctx.artifact_store.get(decision_ref.id)
+                )
+                keep = decision.field_values.get("keep_tasks")
+                if decision.action == "approve" and isinstance(keep, list) and keep:
+                    keep_ids = {str(value) for value in keep}
+                    board = read_board(bag.board_file)
+                    for task in list(board.tasks):
+                        if task.id not in keep_ids:
+                            board = remove_task(board, task.id)
+                    write_board(bag.board_file, board)
+            except Exception as exc:
+                _LOG.warning(f"could not apply stored review fields: {exc!r}")
 
         audit = StepAuditLoop(
             name="review_plan",

@@ -7,12 +7,12 @@
  */
 export type CurateTaskCreateRequest = {
     /**
-     * Model id; defaults to the configured agent.model.
-     */
-    model?: (string | null);
-    /**
      * Natural-language workspace-curation request.
      */
     request: string;
+    /**
+     * Model id; defaults to the configured agent.model.
+     */
+    model?: (string | null);
 };
 

@@ -30,18 +30,6 @@ class _CapturingHandler(mollog.Handler):
         self.records.append(record)
 
 
-def test_get_logger_returns_molexp_logger_subclass() -> None:
-    log = molexp.get_logger("molexp.test.subclass")
-    assert isinstance(log, molexp.Logger)
-    assert isinstance(log, mollog.Logger)
-
-
-def test_get_logger_is_cached_per_name() -> None:
-    a = molexp.get_logger("molexp.test.cache")
-    b = molexp.get_logger("molexp.test.cache")
-    assert a is b
-
-
 def test_ice_emits_tagged_record() -> None:
     handler = _CapturingHandler()
     log = molexp.get_logger("molexp.test.ice")
@@ -56,8 +44,3 @@ def test_ice_emits_tagged_record() -> None:
     assert record.extra.get("verb") == "ice"
     assert record.extra.get("agent_id") == "a-1"
     assert record.extra.get("step") == 3
-
-
-def test_import_molexp_does_not_mutate_mollog_logger() -> None:
-    """Plugin must not monkey-patch the upstream Logger class."""
-    assert not hasattr(mollog.Logger, "ice")

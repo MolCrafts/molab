@@ -10,11 +10,11 @@
  * Credential fields still use ``provider`` + ``api_key`` / ``base_url``.
  */
 export type ProviderUpdateRequest = {
+    provider?: (string | null);
+    model?: (string | null);
+    models?: (Record<string, string> | null);
     api_key?: (string | null);
     base_url?: (string | null);
     instructions?: (string | null);
-    model?: (string | null);
-    models?: (Record<string, string> | null);
-    provider?: (string | null);
 };
 

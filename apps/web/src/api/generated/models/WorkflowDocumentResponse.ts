@@ -7,16 +7,16 @@
  */
 export type WorkflowDocumentResponse = {
     /**
-     * Normalized workflow IR document
+     * Owning project id
      */
-    document: Record<string, any>;
+    projectId: string;
     /**
      * Owning experiment id
      */
     experimentId: string;
     /**
-     * Owning project id
+     * Normalized workflow IR document
      */
-    projectId: string;
+    document: Record<string, any>;
 };
 

@@ -3,8 +3,8 @@
 /* tslint:disable */
 /* eslint-disable */
 export type PatchUserRequest = {
-    disabled?: (boolean | null);
     role?: ('admin' | 'operator' | 'viewer' | null);
     workspaces?: (Array<string> | null);
+    disabled?: (boolean | null);
 };
 

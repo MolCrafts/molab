@@ -13,7 +13,10 @@ Mounted only when the ReAct surface is ``lifecycle``.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from molexp.workspace.run import Run
 
 __all__ = ["LIFECYCLE_TOOL_NAMES", "lifecycle_tools"]
 
@@ -23,6 +26,19 @@ LIFECYCLE_TOOL_NAMES = frozenset({"cancel_run", "harvest_run"})
 def _as_tool_error(exc: Exception) -> str:
     """Turn a tool failure into a model-visible string (never crash the loop)."""
     return f"error: {type(exc).__name__}: {exc}"
+
+
+def _scalar_status(run: Run) -> str:
+    """Derive the single run-status label from the Execution aggregate."""
+    summary = run.status_summary
+    if summary.not_started:
+        return "pending"
+    if summary.active > 0:
+        return "running"
+    for status in ("failed", "cancelled", "interrupted", "succeeded"):
+        if summary.by_status.get(status):
+            return status
+    return "succeeded" if summary.total else "pending"
 
 
 def lifecycle_tools(*, workspace_root: Path) -> tuple[Any, ...]:
@@ -46,7 +62,7 @@ def lifecycle_tools(*, workspace_root: Path) -> tuple[Any, ...]:
             ws = Workspace(root)
             run = ws.get_project(project_id).get_experiment(experiment_id).get_run(run_id)
             cancel_core(run)
-            return f"cancelled run {run_id} (status={run.status})"
+            return f"cancelled run {run_id} (status={_scalar_status(run)})"
         except Exception as exc:
             return _as_tool_error(exc)
 

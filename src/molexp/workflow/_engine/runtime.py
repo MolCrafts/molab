@@ -263,28 +263,19 @@ def fresh_requested(run_dir: str | Path, execution_id: str) -> bool:
 
 
 def make_execution_id(run_id: str | None, run_dir: Path | None) -> str:
-    """Build a human-readable execution ID.
-
-    First execution: ``exec-{run_id}``
-    Retries:         ``exec-{run_id}-2``, ``exec-{run_id}-3``, …
-
-    Falls back to a human-readable random name (e.g. ``exec-serene-mixing-reddy``)
-    when *run_id* is unavailable.
+    """Return a location-independent UUIDv7 Execution identity.
 
     Spec 04 §6 — promoted to the public API. Re-exported as
     :func:`molexp.workflow.make_execution_id`. ``submit_molq`` plugins
     must use the public name; reaching into ``_engine`` for
     this helper is rejected by ``test_submit_molq_plugins_do_not_reach_into_engine``.
+    ``run_id`` and ``run_dir`` remain accepted because this is a public helper,
+    but neither contributes to identity in schema v2.
     """
-    from molexp.workflow._names import generate_name
-    from molexp.workspace.utils import derive_execution_id
+    del run_id, run_dir
+    from molexp.ids import generate_uuid7
 
-    if run_id is None:
-        return f"exec-{generate_name()}"
-    if run_dir is None:
-        return f"exec-{run_id}"
-
-    return derive_execution_id(run_id, Path(run_dir) / "executions")
+    return generate_uuid7()
 
 
 class WorkflowRuntime:

@@ -89,6 +89,8 @@ class LocalFileSystem:
 
     @staticmethod
     def open(path: PathArg, mode: str = "r", encoding: str = "utf-8") -> IO[Any]:
+        if "b" in mode:
+            return Path(path).open(mode=mode)  # type: ignore[return]
         return Path(path).open(mode=mode, encoding=encoding)  # type: ignore[return]
 
     # ── Write ────────────────────────────────────────────────────────────
@@ -180,9 +182,9 @@ class LocalFileSystem:
     def atomic_write_json(path: PathArg, data: object) -> None:
         # ONE canonical byte form + write mechanics for all JSON writers —
         # delegate to the Layer-0 primitive (temp file, chmod 0600, rename).
-        from molexp.atomicio import atomic_write_json as _atomic_write_json
+        from molexp.atomicio import atomic_write_json
 
-        _atomic_write_json(Path(path), data)
+        atomic_write_json(Path(path), data)
 
     @staticmethod
     def atomic_write_text(path: PathArg, content: str, *, encoding: str = "utf-8") -> None:

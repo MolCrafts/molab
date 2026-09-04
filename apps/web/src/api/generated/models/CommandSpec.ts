@@ -7,12 +7,12 @@ import type { CommandParameterSpec } from './CommandParameterSpec';
  * A single slash command — skill-backed or builtin.
  */
 export type CommandSpec = {
-    defaultPlanMode?: boolean;
-    description?: string;
-    isBuiltin?: boolean;
-    name: string;
-    parameters?: Array<CommandParameterSpec>;
-    skillId?: (string | null);
     slashName: string;
+    name: string;
+    description?: string;
+    parameters?: Array<CommandParameterSpec>;
+    defaultPlanMode?: boolean;
+    isBuiltin?: boolean;
+    skillId?: (string | null);
 };
 

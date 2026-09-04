@@ -10,7 +10,6 @@ silent downgrade (no-fallback law).
 
 from __future__ import annotations
 
-from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -24,14 +23,8 @@ from molexp.workspace import (
 )
 from molexp.workspace.concepts import Note
 from molexp.workspace.experiment import Experiment
-from molexp.workspace.models import ErrorInfo, RunStatus
 from molexp.workspace.run import Run
 
-# Naive timestamp on purpose — the run lifecycle writes naive datetimes into
-# run.json, and mixing naive/aware breaks the assembler's run sort.
-_TS = datetime(2026, 1, 1)
-
-_CONFIG_HASH = "sha256:feedc0defeedc0de"
 _NOTE_TITLE = "Grand Unification Idea"
 
 
@@ -52,16 +45,11 @@ def _seed(tmp_path: Path) -> tuple[Workspace, Experiment, Run, Run]:
 
     ok = exp.add_run(params={"sigma": 0.25, "seed": 7})
     with ok.start() as ctx:
-        ctx.register_artifact({"loss": 0.1}, name="m1.json")
-    ok.metadata = ok.metadata.model_copy(update={"config_hash": _CONFIG_HASH})
-    ok.save()
+        ctx.emit_artifact({"loss": 0.1}, name="m1.json")
 
     failed = exp.add_run(params={"sigma": 0.5, "seed": 7})
-    failed._update_metadata(status=RunStatus.FAILED, started_at=_TS, finished_at=_TS)
-    failed.metadata = failed.metadata.model_copy(
-        update={"error": ErrorInfo(type="ValueError", message="lattice exploded", timestamp=_TS)}
-    )
-    failed.save()
+    with pytest.raises(ValueError), failed.start():
+        raise ValueError("lattice exploded")
 
     note = ws.add_folder(Note(parent=ws, name="idea"))
     note.write_index(f"# {_NOTE_TITLE}\n\nnarrative body\n")
@@ -98,7 +86,8 @@ class TestBuildMountContext:
         ws, exp, _, _ = _seed(tmp_path)
         # Second failed run → the failed count (2) differs from succeeded (1).
         extra = exp.add_run(params={"sigma": 0.75, "seed": 7})
-        extra._update_metadata(status=RunStatus.FAILED, started_at=_TS, finished_at=_TS)
+        with pytest.raises(ValueError), extra.start():
+            raise ValueError("exploded")
 
         out = build_mount_context(ws, project_id="proton-transport", experiment_id="sigma-scan")
         assert "succeeded" in out
@@ -134,17 +123,6 @@ class TestBuildMountContext:
                 experiment_id="sigma-scan",
                 run_id="deadbeef",
             )
-
-    @pytest.mark.parametrize("level", ["workspace", "experiment", "run"])
-    def test_render_is_deterministic(self, tmp_path: Path, level: str) -> None:
-        ws, _, ok, _ = _seed(tmp_path)
-        kwargs: dict[str, str] = {}
-        if level in ("experiment", "run"):
-            kwargs["project_id"] = "proton-transport"
-            kwargs["experiment_id"] = "sigma-scan"
-        if level == "run":
-            kwargs["run_id"] = ok.id
-        assert build_mount_context(ws, **kwargs) == build_mount_context(ws, **kwargs)
 
     def test_under_budget_has_no_truncation_marker(self, tmp_path: Path) -> None:
         ws, _, _, _ = _seed(tmp_path)

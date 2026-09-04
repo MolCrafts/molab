@@ -108,11 +108,20 @@ class TestBuildOpsTools:
         assert land.startswith("ok")
         assert "status=succeeded" in land
         assert "plot.png" in land
-        run_dir = tmp_path / "projects" / "p1" / "experiments" / "e1" / "runs" / f"run-{run_id}"
-        plots = list(run_dir.glob("executions/*/artifacts/plot.png"))
-        assert plots and plots[0].is_file()
-        assert (run_dir / "source" / "analysis.py").is_file()
-        assert not (run_dir / "metrics.mlp.jsonl").exists()
+
+        from molexp.workspace import Workspace
+        from molexp.workspace.domain import ExecutionStatus
+
+        landed_run = Workspace(tmp_path).get_project("p1").get_experiment("e1").get_run(run_id)
+        execution = landed_run.executions[-1]
+        assert execution.status is ExecutionStatus.SUCCEEDED
+        artifact_names = {
+            a.name
+            for a in landed_run._execution_repository().artifacts.list_for_execution(execution.id)
+        }
+        assert "plot.png" in artifact_names
+        assert (Path(landed_run.run_dir) / "source" / "analysis.py").is_file()
+        assert not (Path(landed_run.run_dir) / "metrics.mlp.jsonl").exists()
         assert "rg_mean" in land
 
 

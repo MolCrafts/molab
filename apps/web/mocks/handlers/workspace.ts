@@ -159,6 +159,15 @@ function buildMockWorkspaceRuns(): MockRunRow[] {
                         .slice()
                         .reverse()
                         .find((execution) => execution.schedulerJobId)?.schedulerJobId ?? null;
+                const status = run.status ?? (
+                    (run.statusSummary?.active ?? 0) > 0
+                        ? "running"
+                        : (run.statusSummary?.byStatus?.succeeded ?? 0) > 0
+                          ? "succeeded"
+                          : (run.statusSummary?.byStatus?.failed ?? 0) > 0
+                            ? "failed"
+                            : "pending"
+                );
 
                 return {
                     id: run.id,
@@ -167,7 +176,7 @@ function buildMockWorkspaceRuns(): MockRunRow[] {
                     projectName: project.name,
                     experimentId: experiment.id,
                     experimentName: experiment.name,
-                    status: run.status,
+                    status,
                     backend,
                     cluster,
                     scheduler,

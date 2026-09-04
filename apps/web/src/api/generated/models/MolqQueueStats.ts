@@ -3,10 +3,10 @@
 /* tslint:disable */
 /* eslint-disable */
 export type MolqQueueStats = {
-    avgWaitSeconds?: (number | null);
-    failed?: number;
-    pending?: number;
     running?: number;
+    pending?: number;
+    failed?: number;
     succeeded?: number;
+    avgWaitSeconds?: (number | null);
 };
 

@@ -16,7 +16,6 @@ from pathlib import Path
 from molexp.workspace import Workspace
 from molexp.workspace.assets import ArtifactAsset, AssetManifest, AssetScope, Producer
 from molexp.workspace.concepts import Note
-from molexp.workspace.models import RunStatus
 from molexp.workspace.workspace_context import (
     ContextFocus,
     assemble_workspace_context,
@@ -41,18 +40,18 @@ class TestAssembleWorkspaceContext:
         exp = ws.add_project("p").add_experiment("e", params={"lr": 1e-3})
         r1 = exp.add_run(params={"seed": 1})
         with r1.start() as ctx:
-            ctx.register_artifact({"loss": 0.1}, name="m1.json")
+            ctx.emit_artifact({"loss": 0.1}, name="m1.json")
         r2 = exp.add_run(params={"seed": 2})
         with r2.start() as ctx:
-            ctx.register_artifact({"loss": 0.2}, name="m2.json")
+            ctx.emit_artifact({"loss": 0.2}, name="m2.json")
         note = ws.add_folder(Note(parent=ws, name="idea"))
         note.set_body("# Idea\n\nnarrative\n")
 
         c = assemble_workspace_context(ws)
 
-        assert [p.id for p in c.projects] == ["p"]
-        assert [e.id for e in c.experiments] == ["e"]
-        assert c.experiments[0].project_id == "p"
+        assert [p.name for p in c.projects] == ["p"]
+        assert [e.name for e in c.experiments] == ["e"]
+        assert c.experiments[0].project_id == ws.get_project("p").id
         assert len(c.recent_runs) == 2
         assert len(c.artifacts) >= 2
         assert any("idea" in k.path for k in c.knowledge)
@@ -86,38 +85,40 @@ class TestAssembleWorkspaceContext:
         exp = ws.add_project("p").add_experiment("e")
 
         rf = exp.add_run(params={"k": 1})
-        rf._update_metadata(status=RunStatus.FAILED)
+        with rf.start() as ctx:
+            ctx.mark_failed("simulated failure")
 
         beat = datetime(2020, 1, 1, tzinfo=UTC)
         rr = exp.add_run(params={"k": 2})
-        rr._update_metadata(
-            status=RunStatus.RUNNING, started_at=beat, owner_pid=1, owner_host="hpc"
-        )
-        alive = Path(str(rr.run_dir)) / "alive"
-        alive.write_text("")
+        running_ctx = rr.start()
+        running_ctx.__enter__()
+        alive = Path(str(rr.run_dir)) / "executions" / running_ctx.id / "alive"
         # HEARTBEAT_STALE_SECONDS == 600.0
         old = time.time() - 601.0
         os.utime(alive, (old, old))
         now = beat + timedelta(minutes=20)
 
-        # a dangling-producer artifact registered into rf's run-scope manifest
-        AssetManifest(str(rf.run_dir)).register(
-            ArtifactAsset(
-                asset_id="a-ghost",
-                name="ghost.json",
-                scope=AssetScope(kind="run", ids=(rf.id,)),
-                path=Path("ghost.json"),
-                created_at=beat,
-                updated_at=beat,
-                producer=Producer(run_id="ghost-run"),
-                content_hash="sha256:00",
+        try:
+            # a dangling-producer artifact registered into rf's run-scope manifest
+            AssetManifest(str(rf.run_dir)).register(
+                ArtifactAsset(
+                    asset_id="a-ghost",
+                    name="ghost.json",
+                    scope=AssetScope(kind="run", ids=(rf.id,)),
+                    path=Path("ghost.json"),
+                    created_at=beat,
+                    updated_at=beat,
+                    producer=Producer(run_id="ghost-run"),
+                    content_hash="sha256:00",
+                )
             )
-        )
 
-        c = assemble_workspace_context(ws, now=now)
-        kinds = {h.kind for h in c.stale_or_missing}
-        assert "failed_run" in kinds
-        assert "stale_running" in kinds
-        assert "orphan_artifact" in kinds
-        assert any(x.run_id == rf.id for x in c.failed_runs)
-        assert any(x.run_id == rr.id for x in c.running_runs)
+            c = assemble_workspace_context(ws, now=now)
+            kinds = {h.kind for h in c.stale_or_missing}
+            assert "failed_run" in kinds
+            assert "stale_running" in kinds
+            assert "orphan_artifact" in kinds
+            assert any(x.run_id == rf.id for x in c.failed_runs)
+            assert any(x.run_id == rr.id for x in c.running_runs)
+        finally:
+            running_ctx.__exit__(None, None, None)

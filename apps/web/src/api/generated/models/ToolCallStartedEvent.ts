@@ -9,9 +9,9 @@
  * arguments — never the full payload, so the event stream stays cheap.
  */
 export type ToolCallStartedEvent = {
-    args_summary?: string;
-    kind?: string;
     timestamp?: string;
+    kind?: string;
     tool_name: string;
+    args_summary?: string;
 };
 

@@ -154,10 +154,11 @@ interface LogPreviewProps {
   projectId: string;
   experimentId: string;
   runId: string;
+  executionId: string;
   file: DiscoveredFile;
 }
 
-const LogPreview = ({ projectId, experimentId, runId, file }: LogPreviewProps): JSX.Element => {
+const LogPreview = ({ projectId, experimentId, runId, executionId, file }: LogPreviewProps): JSX.Element => {
   const [response, setResponse] = useState<LammpsLogResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -167,7 +168,7 @@ const LogPreview = ({ projectId, experimentId, runId, file }: LogPreviewProps): 
     setError(null);
 
     runsApi
-      .getRunLammpsLog(projectId, experimentId, runId, file.relPath)
+      .getRunLammpsLog(projectId, experimentId, runId, executionId, file.relPath)
       .then((value) => {
         if (!cancelled) setResponse(value);
       })
@@ -180,7 +181,7 @@ const LogPreview = ({ projectId, experimentId, runId, file }: LogPreviewProps): 
     return () => {
       cancelled = true;
     };
-  }, [projectId, experimentId, runId, file.relPath]);
+  }, [projectId, experimentId, runId, executionId, file.relPath]);
 
   if (error) {
     return (
@@ -231,6 +232,7 @@ interface PreviewPaneProps {
   projectId: string;
   experimentId: string;
   runId: string;
+  executionId: string;
   file: DiscoveredFile | null;
 }
 
@@ -239,7 +241,7 @@ interface PreviewPaneProps {
  * selected file: thermo charts for LAMMPS logs, a space-filling 3D canvas for
  * trajectories, a friendly notice for anything molvis cannot draw.
  */
-const PreviewPane = ({ projectId, experimentId, runId, file }: PreviewPaneProps): JSX.Element => {
+const PreviewPane = ({ projectId, experimentId, runId, executionId, file }: PreviewPaneProps): JSX.Element => {
   if (!file) {
     return (
       <div className="flex flex-1 items-center justify-center p-6">
@@ -266,7 +268,8 @@ const PreviewPane = ({ projectId, experimentId, runId, file }: PreviewPaneProps)
       <div className="flex min-h-0 flex-1 flex-col">
         {header}
         <div className="min-h-0 flex-1 overflow-auto p-4">
-          <LogPreview projectId={projectId} experimentId={experimentId} runId={runId} file={file} />
+          <LogPreview projectId={projectId} experimentId={experimentId} runId={runId}
+            executionId={executionId} file={file} />
         </div>
       </div>
     );
@@ -282,6 +285,7 @@ const PreviewPane = ({ projectId, experimentId, runId, file }: PreviewPaneProps)
               projectId={projectId}
               experimentId={experimentId}
               runId={runId}
+              executionId={executionId}
               file={file}
               className="h-full"
             />
@@ -306,6 +310,7 @@ export const MolvisTab = ({
   selection,
   snapshot,
   discoveredFiles = [],
+  executionId,
 }: MolvisTabProps): JSX.Element => {
   const run = useMemo(
     () => snapshot.runs.find((r) => r.id === selection.objectId) ?? null,
@@ -327,13 +332,13 @@ export const MolvisTab = ({
     }
   }, [activeFile, defaultRelPath]);
 
-  if (!run) {
+  if (!run || !executionId) {
     return (
       <div className="flex h-full items-center justify-center bg-background">
         <EmptyState
           icon={<Atom className="h-6 w-6" />}
-          title="Run not found"
-          description="The selected run is unavailable."
+          title={run ? "Select an execution" : "Run not found"}
+          description={run ? "MolVis files belong to one physical execution." : "The selected run is unavailable."}
         />
       </div>
     );
@@ -361,6 +366,7 @@ export const MolvisTab = ({
           projectId={run.projectId}
           experimentId={run.experimentId}
           runId={run.id}
+          executionId={executionId}
           file={selectedFile}
         />
       </main>

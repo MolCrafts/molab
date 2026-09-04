@@ -29,7 +29,6 @@ from molexp.services.curate_runtime import (
     run_curation_proposal,
 )
 from molexp.workspace import Workspace
-from molexp.workspace.models import ExecutionRecord, RunStatus
 from molexp.workspace.run import Run
 
 #: id → (lifecycle_verb, reversibility) — the spec table.
@@ -59,21 +58,11 @@ def _audit_run(ws: Workspace) -> Run:
 
 
 def _seed_failed_execution(run: Run) -> str:
-    """One failed on-disk attempt + matching ``ops`` history entry."""
+    """One failed on-disk attempt (a real v2 Execution)."""
     run.materialize()
-    exec_id = f"exec-{run.id}"
-    (Path(str(run.run_dir)) / "executions" / exec_id).mkdir(parents=True)
-    run._update_metadata(
-        status=RunStatus.FAILED,
-        execution_history=(
-            ExecutionRecord(
-                execution_id=exec_id,
-                started_at=datetime(2026, 7, 1, 10, 0),
-                finished_at=datetime(2026, 7, 1, 10, 5),
-                status="failed",
-            ),
-        ),
-    )
+    with run.start() as ctx:
+        exec_id = ctx.id
+        ctx.mark_failed("boom")
     return exec_id
 
 
@@ -195,5 +184,5 @@ class TestDeniedProposalMutatesNothing:
         assert (Path(str(target.run_dir)) / "executions" / exec_id).exists()
         fresh = Workspace(root=tmp_path, name="Lab")
         reloaded = fresh.get_project("p").get_experiment("e1").get_run("r1")
-        assert [rec.execution_id for rec in reloaded.execution_history] == [exec_id]
-        assert reloaded.status == "failed"
+        assert [rec.id for rec in reloaded.execution_history] == [exec_id]
+        assert reloaded.executions[0].status.value == "failed"

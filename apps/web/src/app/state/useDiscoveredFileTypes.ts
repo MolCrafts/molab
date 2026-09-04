@@ -11,6 +11,7 @@ interface RunCoords {
   projectId: string;
   experimentId: string;
   runId: string;
+  executionId: string;
 }
 
 interface UseDiscoveredFileTypesResult {
@@ -37,7 +38,7 @@ export const useDiscoveredFileTypesForRun = (
     setError(null);
 
     runsApi
-      .getRunFiles(coords.projectId, coords.experimentId, coords.runId)
+      .getRunFiles(coords.projectId, coords.experimentId, coords.runId, coords.executionId)
       .then((value) => {
         if (!cancelled) {
           setResponse(value);

@@ -14,6 +14,7 @@ from pathlib import Path as _LocalPath
 from typing import TYPE_CHECKING, Any, cast
 
 from molexp._typing import JSONValue
+from molexp.ids import compute_definition_hash, generate_uuid7
 from molexp.path import Path
 
 if TYPE_CHECKING:
@@ -22,13 +23,15 @@ if TYPE_CHECKING:
 
 from molexp.knowledge.types import concept_type
 
-from .assets import AssetScope, AssetsView, DataAssetLibrary, ImportAction
+from .artifact_repository import AssetRepository
+from .assets import AssetScope, DataAssetLibrary, ImportAction
 from .base import (
     _load_metadata,
     _reconstruct,
     _save_metadata,
 )
 from .errors import (
+    ExperimentNotFoundError,
     ProjectExistsError,
     ProjectNotFoundError,
 )
@@ -42,7 +45,6 @@ from .folder import (
 from .fs import PathArg
 from .knowledge import HasKnowledge
 from .models import FolderMetadata, ProjectMetadata
-from .utils import slugify
 
 
 @concept_type(WORKSPACE_PROJECT_KIND)
@@ -78,7 +80,7 @@ class Project(Folder, HasKnowledge):
             _entity_metadata
             if _entity_metadata is not None
             else ProjectMetadata(
-                id=id if id is not None else slugify(name),
+                id=id if id is not None else generate_uuid7(),
                 name=name,
             )
         )
@@ -190,9 +192,14 @@ class Project(Folder, HasKnowledge):
         return AssetScope(kind="project", ids=(self.id,))
 
     @property
-    def assets(self) -> AssetsView:
-        """Scope-filtered asset view (read-only queries)."""
-        return AssetsView(self.workspace.root, self.scope)
+    def assets(self) -> AssetRepository:
+        """Long-lived Project Asset registry and Artifact promotion API."""
+        return AssetRepository(
+            self.workspace.root,
+            self.id,
+            self.project_dir,
+            fs=self._disk(),
+        )
 
     @property
     def data_assets(self) -> DataAssetLibrary:
@@ -206,6 +213,11 @@ class Project(Folder, HasKnowledge):
         """Create filesystem structure and persist metadata (non-recursive)."""
         d = self.project_dir
         self._disk().mkdir(d, parents=True, exist_ok=True)
+        from .scientific_repository import ScientificRepository
+
+        ScientificRepository(self.workspace.root, fs=self._disk()).record_project(
+            self.metadata.model_dump(mode="json"), workspace_id=self.workspace.metadata.id
+        )
         self.save()
 
     def write_meta(self) -> str:
@@ -213,10 +225,18 @@ class Project(Folder, HasKnowledge):
         self.save()
         return self._disk().join(self.project_dir, "project.json")
 
+    def _move_target_id(self, new_name: str | None) -> str:
+        """A Project keeps its UUID id across a move; only the name changes."""
+        del new_name
+        return self._name
+
     def _sync_entity_identity(self) -> None:
-        """Mirror the folder identity into ``project.json`` (``move_to`` hook)."""
+        """Mirror the human name into ``project.json`` (``move_to`` hook).
+
+        The UUID id (and directory basename) is stable across a move.
+        """
         self._entity_metadata = self._entity_metadata.model_copy(
-            update={"id": self._name, "name": self._metadata.name}
+            update={"name": self._metadata.name}
         )
         self.save()
 
@@ -258,7 +278,11 @@ class Project(Folder, HasKnowledge):
         use :meth:`set_experiment` (second ``add_experiment`` does not merge
         new params into an existing record).
         """
-        resolved_id = id if id is not None else slugify(name)
+        if id is None:
+            for existing in self.experiments():
+                if existing.name == name:
+                    return existing
+        resolved_id = id if id is not None else generate_uuid7()
         _validate_target_registered(self.workspace, default_target)
         child = self._construct_child(
             Experiment,
@@ -287,7 +311,13 @@ class Project(Folder, HasKnowledge):
         Raises:
             ExperimentNotFoundError: No experiment with that slug.
         """
-        return self.get_folder(name, cls=Experiment)
+        try:
+            return self.get_folder(name, cls=Experiment)
+        except ExperimentNotFoundError:
+            for experiment in self.experiments():
+                if experiment.name == name:
+                    return experiment
+            raise
 
     def get_experiment(self, name: str) -> Experiment:
         """Alias of :meth:`experiment`."""
@@ -331,16 +361,51 @@ class Project(Folder, HasKnowledge):
             _validate_target_registered(self.workspace, default_target)
             updates["default_target"] = default_target
         if updates:
-            exp._entity_metadata = exp.metadata.model_copy(update=updates)
+            from datetime import UTC, datetime
+
+            next_values = exp.metadata.model_dump(mode="json") | updates
+            scientific_definition = {
+                key: next_values[key]
+                for key in (
+                    "name",
+                    "description",
+                    "tags",
+                    "workflow_source",
+                    "workflow_type",
+                    "parameter_space",
+                    "git_commit",
+                    "n_replicas",
+                    "seeds",
+                    "default_target",
+                )
+            }
+            exp._entity_metadata = exp.metadata.model_copy(
+                update={
+                    **updates,
+                    "revision_id": generate_uuid7(),
+                    "revision": exp.metadata.revision + 1,
+                    "revision_created_at": datetime.now(UTC),
+                    "definition_hash": compute_definition_hash(scientific_definition),
+                }
+            )
+            from .scientific_repository import ScientificRepository
+
+            ScientificRepository(self.workspace.root, fs=self._disk()).record_experiment_revision(
+                exp.metadata.model_dump(mode="json"), project_id=self.id
+            )
             exp.save()
         return exp
 
     def del_experiment(self, name: str) -> None:
         """Delete an experiment directory and its runs."""
-        self.remove_folder(name, cls=Experiment)
+        self.remove_folder(self.experiment(name).id, cls=Experiment)
 
     def has_experiment(self, name: str) -> bool:
-        return self.has_folder(name, cls=Experiment)
+        try:
+            self.experiment(name)
+        except ExperimentNotFoundError:
+            return False
+        return True
 
     def remove_experiment(self, name: str) -> None:
         """Alias of :meth:`del_experiment`."""

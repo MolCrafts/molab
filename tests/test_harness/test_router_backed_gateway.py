@@ -3,8 +3,7 @@
 The production :class:`AgentGateway` driven by a :class:`molexp.agent.router.Router`.
 Covers the ``complete_structured`` call path (raw-before-parsed persistence,
 tier / MCP resolution, the optional LLM observer, system-prompt + composed-prompt
-provenance) plus the plan-agent registry data those gateways are wired from
-(``plan_agents.py`` — its sole test owner).
+provenance).
 
 The router fakes here implement the :class:`molexp.agent.router.Router`
 Protocol with the minimum surface the gateway needs; importing
@@ -626,17 +625,6 @@ class TestStructuredCallModeIsDefault:
     """``AgentCallSpec.call_mode`` defaults to ``"structured"`` — every call
     that predates the agentic branch keeps driving ``complete_structured``."""
 
-    def test_default_call_mode_is_structured(self) -> None:
-        """A spec constructed without ``call_mode`` reports ``"structured"``."""
-        from molexp.harness.schemas import AgentCallSpec
-
-        spec = AgentCallSpec(
-            agent_name="tiny_writer",
-            input_artifact_ids=[],
-            output_schema={},
-        )
-        assert spec.call_mode == "structured"
-
     async def test_structured_mode_never_calls_stream_agentic(self, tmp_path: Path) -> None:
         """An explicit ``call_mode="structured"`` drives ``complete_structured``
         once and NEVER opens the agentic stream (record-style assertion)."""
@@ -835,49 +823,3 @@ class TestAgenticCallMode:
 
         # No parsed output artifact was persisted.
         assert store.list_by_kind("experiment_plan") == []
-
-
-class TestCallModeValidation:
-    """``call_mode`` is a closed ``Literal`` — unknown values are rejected."""
-
-    def test_illegal_call_mode_rejected_by_pydantic(self) -> None:
-        from pydantic import ValidationError
-
-        from molexp.harness.schemas import AgentCallSpec
-
-        with pytest.raises(ValidationError):
-            AgentCallSpec(
-                agent_name="tiny_writer",
-                input_artifact_ids=[],
-                output_schema={},
-                call_mode="totally-bogus",  # type: ignore[arg-type]
-            )
-
-
-class TestPlanAgentRegistry:
-    """The ``plan_agents.py`` registry the production gateway is wired from
-    (this file is its sole test owner)."""
-
-    def test_mcp_servers_cover_code_writers_only(self) -> None:
-        """The codegen agents are wired to consult molmcp; readers are not."""
-        from molexp.harness.gateways import plan_agent_mcp_servers, plan_agent_responses
-
-        servers = plan_agent_mcp_servers()
-        assert set(servers) <= set(plan_agent_responses())
-        for coder in ("workflow_source_writer", "test_code_file_writer"):
-            assert servers[coder] == ("molmcp",)
-        assert "plan_reviewer" not in servers
-
-    def test_tiers_cover_every_agent_explicitly(self) -> None:
-        """Every registered agent has an explicit tier — no omissions/fallback.
-
-        Authors (including codegen) are HEAVY; only plan_reviewer is DEFAULT.
-        """
-        from molexp.harness.gateways import plan_agent_responses, plan_agent_tiers
-
-        responses = plan_agent_responses()
-        tiers = plan_agent_tiers()
-        assert set(tiers) == set(responses)  # full coverage, no gateway fallback
-        assert tiers["plan_reviewer"] == ModelTier.DEFAULT
-        authors = set(responses) - {"plan_reviewer"}
-        assert all(tiers[a] == ModelTier.HEAVY for a in authors)

@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from .fs import FileSystem
 
-MOLEXP_SCHEMA_VERSION = 1
+MOLEXP_SCHEMA_VERSION = 2
 
 
 def versioned_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -48,9 +48,10 @@ def read_versioned_json(path: str | Path, *, fs: FileSystem | None = None) -> di
             f"schema_version={MOLEXP_SCHEMA_VERSION}."
         )
     sv = data.pop("schema_version")
-    if isinstance(sv, int) and sv > MOLEXP_SCHEMA_VERSION:
+    if sv != MOLEXP_SCHEMA_VERSION:
         raise IncompatibleSchemaError(
-            f"{path} has schema_version={sv}; this molexp supports up to "
-            f"schema_version={MOLEXP_SCHEMA_VERSION}."
+            f"{path} has schema_version={sv}; this build requires exactly "
+            f"schema_version={MOLEXP_SCHEMA_VERSION}. MolExp v2 is a breaking "
+            "provenance-format cutover and does not read v1 workspaces."
         )
     return data

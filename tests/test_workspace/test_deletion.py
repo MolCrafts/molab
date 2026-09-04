@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -11,7 +10,7 @@ from molexp.workspace import (
     RunNotFoundError,
     Workspace,
 )
-from molexp.workspace.models import ExecutionRecord, RunStatus
+from molexp.workspace.domain import ExecutionMode
 
 
 def _build(tmp_path):
@@ -21,34 +20,27 @@ def _build(tmp_path):
     e = p.add_experiment("exp-x", workflow_source="s.py", params={})
     r = e.add_run(params={"seed": 1})
 
-    # Seed two execution dirs + history entries
-    hist = []
-    for i, status in enumerate(("failed", "succeeded"), start=1):
-        eid = f"exec-{r.id}" if i == 1 else f"exec-{r.id}-{i}"
-        (Path(r.run_dir) / "executions" / eid).mkdir(parents=True)
-        hist.append(
-            ExecutionRecord(
-                execution_id=eid,
-                started_at=datetime.now(),
-                finished_at=datetime.now(),
-                status=status,
-            )
-        )
-    r._update_metadata(execution_history=tuple(hist))
+    # Seed two terminal Executions (both succeeded) so the run has history
+    # without becoming retryable.
+    with r.start():
+        pass
+    with r.start(mode=ExecutionMode.RERUN):
+        pass
     return ws, p, e, r
 
 
 class TestDeleteExecution:
-    def test_removes_dir_and_history_entry(self, tmp_path):
+    def test_delete_execution_is_an_immutability_tombstone(self, tmp_path):
         _ws, _p, _e, r = _build(tmp_path)
-        first_exec = r.execution_history[0].execution_id
-        r.delete_execution(first_exec)
-        assert not (Path(r.run_dir) / "executions" / first_exec).exists()
-        assert all(rec.execution_id != first_exec for rec in r.execution_history)
+        first_exec = r.executions[0].id
+        with pytest.raises(RuntimeError):
+            r.delete_execution(first_exec)
+        # Provenance is immutable — the execution dir survives.
+        assert (Path(r.run_dir) / "executions" / first_exec).exists()
 
-    def test_unknown_execution_raises(self, tmp_path):
+    def test_unknown_execution_also_raises(self, tmp_path):
         _ws, _p, _e, r = _build(tmp_path)
-        with pytest.raises(KeyError):
+        with pytest.raises(RuntimeError):
             r.delete_execution("exec-does-not-exist")
 
 
@@ -71,8 +63,10 @@ class TestRemoveFailedRuns:
         _ws, _p, e, seeded = _build(tmp_path)
         ok = e.add_run(params={"seed": 2})
         fail = e.add_run(params={"seed": 3})
-        ok._update_metadata(status=RunStatus.SUCCEEDED)
-        fail._update_metadata(status=RunStatus.FAILED)
+        with ok.start():
+            pass
+        with fail.start() as ctx:
+            ctx.mark_failed("boom")
         deleted = e.remove_failed_runs()
         assert fail.id in deleted
         assert ok.id not in deleted
@@ -83,7 +77,6 @@ class TestRemoveFailedRuns:
 
     def test_noop_when_nothing_failed(self, tmp_path):
         _ws, _p, e, r = _build(tmp_path)
-        r._update_metadata(status=RunStatus.SUCCEEDED)
         assert e.remove_failed_runs() == []
         assert e.has_run(r.id)
 

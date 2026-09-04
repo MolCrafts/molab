@@ -129,7 +129,7 @@ describe("resolveRenderer", () => {
       priority: 100,
       matches: ({ selection, snapshot }) => {
         const run = snapshot.runs.find((item) => item.id === selection.objectId);
-        return run?.executorInfo.backend === "molq";
+        return run?.executionHistory.some((execution) => execution.executor.backend === "molq") ?? false;
       },
       Component: (() => null) as unknown as RendererEntry["Component"],
     });
@@ -146,16 +146,20 @@ describe("resolveRenderer", () => {
           updatedAt: "2026-01-01T00:00:00Z",
           projectId: "proj-1",
           experimentId: "exp-1",
-          executorInfo: { backend: "molq" },
-          profile: null,
-          configHash: null,
+          definitionHash: "def-run-1",
+          experimentRevisionId: "rev-exp-1",
+          statusSummary: { total: 1, active: 1, notStarted: false, byStatus: { running: 1 } },
           parameters: {},
-          results: {},
           workflowSource: null,
           workflowSnapshot: null,
           startedAt: "2026-01-01T00:00:00Z",
           finishedAt: null,
-          executionHistory: [],
+          executionHistory: [{
+            executionId: "exec-1", mode: "initial", createdAt: "2026-01-01T00:00:00Z",
+            startedAt: "2026-01-01T00:00:00Z", finishedAt: null, status: "running",
+            basedOnExecutionId: null, checkpointArtifactId: null,
+            executor: { backend: "molq" }, environment: {}, artifactIds: [], error: null,
+          }],
           errorMessage: null,
         },
       ],

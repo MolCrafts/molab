@@ -3,7 +3,8 @@
 Pins ``find_asset_by_hash`` (content-addressed lookup over the authoritative
 manifests) and ``aggregate_assets_by_kind`` (counts a scope's assets by
 ``kind``, honoring the ``recursive`` flag). Both are read-only compositions
-over ``scan.scan_assets`` / per-scope ``AssetsView`` — no ``catalog.rebuild()``.
+over ``scan.scan_assets`` / per-scope ``AssetsView`` plus the provenance-indexed
+emitted artifacts — no ``catalog.rebuild()``.
 """
 
 from __future__ import annotations
@@ -46,7 +47,7 @@ class TestAggregateAssetsByKind:
         exp = ws.add_project("p").add_experiment("e", params={})
         run = exp.add_run(params={"seed": 0})
         with run.start() as ctx:
-            ctx.register_artifact({"x": 1}, name="m.json")
+            ctx.emit_artifact({"x": 1}, name="m.json")
 
         # Artifacts are run-scoped; the experiment scope is empty non-recursively.
         assert aggregate_assets_by_kind(exp) == {}
@@ -56,9 +57,7 @@ class TestAggregateAssetsByKind:
         exp = ws.add_project("p").add_experiment("e", params={})
         run = exp.add_run(params={"seed": 0})
         with run.start() as ctx:
-            ctx.register_artifact({"x": 1}, name="m.json")
+            ctx.emit_artifact({"x": 1}, name="m.json")
 
         result = aggregate_assets_by_kind(exp, recursive=True)
-        assert result.get("artifact") == 1
-        # the run lifecycle auto-creates a "run" log, also visible recursively
-        assert "log" in result
+        assert result == {"artifact": 1}

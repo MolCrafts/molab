@@ -14,8 +14,8 @@
  * :class:`TokenDeltaEvent`\ s. A model that does not reason emits none.
  */
 export type ThinkingDeltaEvent = {
+    timestamp?: string;
     kind?: string;
     text: string;
-    timestamp?: string;
 };
 

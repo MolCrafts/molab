@@ -11,9 +11,9 @@
  * the accumulated stream.
  */
 export type LoopCompletedEvent = {
-    kind?: string;
-    result?: (Record<string, any> | null);
-    text: string;
     timestamp?: string;
+    kind?: string;
+    text: string;
+    result?: (Record<string, any> | null);
 };
 

@@ -6,12 +6,12 @@
  * Wire-safe user summary (no password hash).
  */
 export type AuthUserPublic = {
-    created_at?: string;
-    disabled?: boolean;
-    role: AuthUserPublic.role;
-    updated_at?: string;
     username: string;
+    role: AuthUserPublic.role;
     workspaces?: Array<string>;
+    disabled?: boolean;
+    created_at?: string;
+    updated_at?: string;
 };
 export namespace AuthUserPublic {
     export enum role {

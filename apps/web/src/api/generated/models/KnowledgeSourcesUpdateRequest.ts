@@ -6,7 +6,7 @@
  * PUT body — empty list clears the pin (unrestricted).
  */
 export type KnowledgeSourcesUpdateRequest = {
-    scope?: (string | null);
     sources?: Array<string>;
+    scope?: (string | null);
 };
 

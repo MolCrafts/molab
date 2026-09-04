@@ -31,9 +31,10 @@ class TestFolderOKF:
         ws.materialize()
         alpha = ws.add_project("alpha")
         beta = ws.add_project("beta")
+        rel = os.path.relpath(str(beta.resolve()), str(alpha.resolve()))
 
         alpha.write_index(
-            "# Alpha\n\n- [to-beta](../beta)\n- [ext](https://example.com)\n- [nowhere](./nope)\n"
+            f"# Alpha\n\n- [to-beta]({rel})\n- [ext](https://example.com)\n- [nowhere](./nope)\n"
         )
 
         edges = {os.path.normpath(e) for e in alpha.out_edges()}

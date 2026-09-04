@@ -14,6 +14,7 @@
 
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { runsApi } from "@/api";
+import type { ExecutionOutputsResponse } from "@/api/generated/models/ExecutionOutputsResponse";
 import { listEntityTabs } from "@/app/registry";
 import { formatDuration } from "@/app/renderers/dashboardData";
 import { canCancel, canHarvest, isTerminalStatus } from "@/app/runs/runLifecycle";
@@ -41,6 +42,7 @@ export interface UseRunViewer {
   setActiveTab: (tab: string) => void;
   logs: RunLogs;
   logsError: string | null;
+  outputs: ExecutionOutputsResponse | null;
   selectedExecutionId: string | null;
   setSelectedExecutionId: (id: string | null) => void;
   duration: string | null;
@@ -66,6 +68,7 @@ export const useRunViewer = (props: RunRendererProps): UseRunViewer => {
   const { inspectTask } = useInspectedTask();
   const [logs, setLogs] = useState<RunLogs>(null);
   const [logsError, setLogsError] = useState<string | null>(null);
+  const [outputs, setOutputs] = useState<ExecutionOutputsResponse | null>(null);
   const [selectedExecutionId, setSelectedExecutionId] = useState<string | null>(null);
   // User-disabled plugins drop their entity tabs without a page reload.
   const pluginPrefsGeneration = usePluginPreferencesGeneration();
@@ -106,21 +109,20 @@ export const useRunViewer = (props: RunRendererProps): UseRunViewer => {
     let cancelled = false;
     setLogsError(null);
 
-    // Fetch eagerly (not only on the logs tab) so the RunViewer can decide
-    // whether to surface the Logs tab at all — the files are tiny.
-    if (!runId || !runProjectId || !runExperimentId) {
+    if (!runId || !runProjectId || !runExperimentId || !selectedExecutionId) {
+      setLogs(null);
+      setOutputs(null);
       return;
     }
 
     setLogs(null);
-    const fetcher = selectedExecutionId
-      ? runsApi.getRunExecutionLogs(runProjectId, runExperimentId, runId, selectedExecutionId)
-      : runsApi.getRunLogs(runProjectId, runExperimentId, runId);
-
-    fetcher
-      .then((nextLogs) => {
+    setOutputs(null);
+    runsApi
+      .getExecutionOutputs(runProjectId, runExperimentId, runId, selectedExecutionId)
+      .then((response) => {
         if (!cancelled) {
-          setLogs(nextLogs);
+          setOutputs(response);
+          setLogs({ stdout: response.stdout, stderr: response.stderr });
         }
       })
       .catch((error) => {
@@ -133,6 +135,10 @@ export const useRunViewer = (props: RunRendererProps): UseRunViewer => {
       cancelled = true;
     };
   }, [runProjectId, runExperimentId, runId, selectedExecutionId]);
+
+  useEffect(() => {
+    setSelectedExecutionId(null);
+  }, [runId]);
 
   const project = run ? snapshot.projects.find((item) => item.id === run.projectId) : undefined;
   const experiment = run
@@ -150,7 +156,7 @@ export const useRunViewer = (props: RunRendererProps): UseRunViewer => {
   const duration = run ? formatDuration(run.startedAt, run.finishedAt) : null;
   const attemptCount = run?.executionHistory.length ?? 0;
   const parameterEntries = Object.entries(run?.parameters ?? {});
-  const resultEntries = Object.entries(run?.results ?? {});
+  const resultEntries = Object.entries(outputs?.results ?? {});
   const isTerminal = run ? isTerminalStatus(run.status) : true;
   const isHarvestable = run ? canHarvest(run.status) : false;
 
@@ -160,14 +166,17 @@ export const useRunViewer = (props: RunRendererProps): UseRunViewer => {
   };
 
   const handleCancelRun = async (): Promise<void> => {
-    if (!run || !canCancel(run.status)) return;
+    const execution = run?.executionHistory.find(
+      (item) => item.executionId === selectedExecutionId,
+    );
+    if (!run || !execution || !canCancel(execution.status)) return;
     const confirmed = await confirm({
-      title: "Cancel run?",
+      title: "Cancel execution?",
       description: (
         <>
           Stop{" "}
           <InlineCode className="rounded-control bg-muted px-1 py-1 text-label">
-            {run.id}
+            {execution.executionId}
           </InlineCode>
           ?
         </>
@@ -177,7 +186,12 @@ export const useRunViewer = (props: RunRendererProps): UseRunViewer => {
     });
     if (!confirmed) return;
     try {
-      await runsApi.cancelRun(run.projectId, run.experimentId, run.id);
+      await runsApi.cancelExecution(
+        run.projectId,
+        run.experimentId,
+        run.id,
+        execution.executionId,
+      );
       onRefresh();
     } catch (error) {
       console.error("Failed to cancel run:", error);
@@ -198,6 +212,7 @@ export const useRunViewer = (props: RunRendererProps): UseRunViewer => {
     setActiveTab,
     logs,
     logsError,
+    outputs,
     selectedExecutionId,
     setSelectedExecutionId,
     duration,

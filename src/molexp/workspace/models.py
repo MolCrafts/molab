@@ -200,6 +200,10 @@ class ExperimentMetadata(BaseModel, frozen=True):
     description: str = ""
     tags: list[str] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=datetime.now)
+    revision_id: str
+    revision: int = 1
+    revision_created_at: datetime = Field(default_factory=datetime.now)
+    definition_hash: str
 
     # Advisory free-form workflow metadata — used by the UI for
     # grouping; workspace never interprets it.
@@ -257,32 +261,14 @@ class ExecutionMetadata(BaseModel, frozen=True):
 
 
 class RunMetadata(BaseModel, frozen=True):
-    """Single execution instance — identity, provenance, and hot state.
+    """Logical Run definition compatibility model.
 
-    ``RunMetadata`` (persisted to ``run.json``) is the sole source of a
-    run's identity *and* hot machine state: parameters, frozen config +
-    hash, activated profile, workflow snapshot/version, source snapshot,
-    intended compute target, executor info, the terminal ``error``
-    diagnostic, plus ``status`` / ownership / ``started_at`` /
-    ``finished_at`` / ``current_execution_id`` / ``execution_history``.
-    The framework treats profile/config contents as opaque user data —
-    it persists them for reproducibility but never interprets them.
-
-    Heartbeat is **not** a JSON field: the owner process touches an empty
-    run-root ``alive`` file (see :mod:`molexp.workspace.run_heartbeat`).
-    ``heartbeat_at`` and ownership ``labels`` are not modelled.
-
-    ``model_config`` uses ``extra="ignore"`` so a ``run.json`` written by
-    an older molexp version (which still carried ``heartbeat_at`` /
-    ``labels``) loads cleanly — unknown keys are dropped on read
-    (greenfield; no backfill migration).
-
-    ``submit_cwd`` is the absolute working directory at the moment
-    ``molexp run`` submitted this run.  The cluster worker chdirs here
-    before importing the user's workflow file so cwd-relative paths in
-    module-level code (e.g. ``Workspace("./lab")``) resolve to the same
-    location they did at submit time, preventing nested duplicate
-    workspaces under ``run_dir/``.
+    Only identity, parameters, definition/revision links, declared inputs,
+    workflow reference, and target hint are written to schema-v2 ``run.json``.
+    The execution-era fields below remain temporarily readable by legacy
+    callers but are never persisted by :class:`Run`; their authoritative
+    replacements live in ``executions/<execution-id>/execution.json`` and the
+    append-only provenance store.
     """
 
     model_config = ConfigDict(extra="ignore", frozen=True)
@@ -291,6 +277,9 @@ class RunMetadata(BaseModel, frozen=True):
     type: str = "workspace.run"
     parameters: dict[str, JSONValue] = Field(default_factory=dict)
     created_at: datetime = Field(default_factory=datetime.now)
+    definition_hash: str
+    experiment_revision_id: str
+    input_asset_ids: tuple[str, ...] = ()
     status: RunStatus = RunStatus.PENDING
     owner_pid: int | None = None
     owner_host: str | None = None

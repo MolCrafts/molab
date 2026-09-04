@@ -7,9 +7,9 @@ import type { TensorboardScalarSeries } from './TensorboardScalarSeries';
  * Parsed scalars across every tfevents logdir found under a run.
  */
 export type TensorboardScalarsResponse = {
-    logdirs?: Array<string>;
-    runDir: string;
     runId: string;
+    runDir: string;
+    logdirs?: Array<string>;
     series?: Array<TensorboardScalarSeries>;
 };
 

@@ -6,9 +6,9 @@
  * Emitted when the repair loop proposes a plan diff.
  */
 export type RepairProposedEvent = {
-    failed_invariant: string;
-    kind?: string;
-    rationale?: string;
     timestamp?: string;
+    kind?: string;
+    failed_invariant: string;
+    rationale?: string;
 };
 

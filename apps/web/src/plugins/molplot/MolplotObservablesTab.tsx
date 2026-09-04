@@ -20,6 +20,7 @@ export const MolplotObservablesTab = ({
   selection,
   snapshot,
   discoveredFiles,
+  executionId,
 }: RendererProps & { discoveredFiles: DiscoveredFile[] }): JSX.Element => {
   const [selected, setSelected] = useState(discoveredFiles[0]?.relPath ?? "");
   const [spec, setSpec] = useState<VegaLiteSpec | null>(null);
@@ -38,7 +39,7 @@ export const MolplotObservablesTab = ({
   }, [file, discoveredFiles]);
 
   useEffect(() => {
-    if (!file || !run) return;
+    if (!file || !run || !executionId) return;
     let cancelled = false;
     setSpec(null);
     setError(null);
@@ -53,7 +54,7 @@ export const MolplotObservablesTab = ({
 
     setLoading(true);
     runsApi
-      .getRunFileText(run.projectId, run.experimentId, run.id, file.relPath)
+      .getRunFileText(run.projectId, run.experimentId, run.id, executionId, file.relPath)
       .then((response) => {
         if (cancelled) return;
         const parsed: unknown = JSON.parse(response.content);
@@ -74,7 +75,7 @@ export const MolplotObservablesTab = ({
     return () => {
       cancelled = true;
     };
-  }, [file, run]);
+  }, [executionId, file, run]);
 
   return (
     <div className="flex min-h-0 flex-1">

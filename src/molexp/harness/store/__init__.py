@@ -30,6 +30,7 @@ from molexp.harness.store.file_lineage_store import FileLineageStore
 from molexp.harness.store.jsonl_event_log import JsonlEventLog
 from molexp.harness.store.lineage_store import ArtifactLineageStore
 from molexp.harness.store.paths import HARNESS_DIRNAME, harness_artifact_root
+from molexp.harness.store.provenance_approval_store import ProvenanceApprovalStore
 
 __all__ = [
     "HARNESS_DIRNAME",
@@ -41,5 +42,6 @@ __all__ = [
     "FileArtifactStore",
     "FileLineageStore",
     "JsonlEventLog",
+    "ProvenanceApprovalStore",
     "harness_artifact_root",
 ]

@@ -6,9 +6,9 @@
  * Echo of the written embed edge.
  */
 export type EmbedResponse = {
-    role: EmbedResponse.role;
     srcPath: string;
     target: string;
+    role: EmbedResponse.role;
 };
 export namespace EmbedResponse {
     export enum role {

@@ -294,7 +294,11 @@ class RunAssets:
             raise ValueError("register: kind='data' uses data_assets.import_asset")
         else:
             raise ValueError(f"register: unknown kind {kind!r}")
-        self._manifest.register(asset)
+        self._bind()
+        manifest = self._manifest
+        if manifest is None:
+            raise RuntimeError("asset manifest is not bound")
+        manifest.register(asset)
         return asset
 
     def register_artifact(

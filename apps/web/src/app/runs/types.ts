@@ -5,10 +5,27 @@
  * the runs feature module compiles before `npm run generate:api` is re-run.
  */
 
-import type { ExecutionRowData } from "@/plugins/types";
-
-export interface WorkspaceExecutionRow extends ExecutionRowData {
+export interface WorkspaceExecutionRow {
+  executionId: string;
+  runId: string;
+  mode: string;
+  status: string;
+  createdAt: string;
+  startedAt: string | null;
+  finishedAt: string | null;
+  durationSeconds: number | null;
+  basedOnExecutionId: string | null;
+  checkpointArtifactId: string | null;
+  schedulerJobId: string | null;
+  backend: string | null;
   backendMetadata: Record<string, string>;
+}
+
+export interface RunStatusSummary {
+  total: number;
+  active: number;
+  notStarted: boolean;
+  byStatus: Record<string, number>;
 }
 
 export interface WorkspaceRunRow {
@@ -18,26 +35,21 @@ export interface WorkspaceRunRow {
   projectName: string;
   experimentId: string;
   experimentName: string;
-  status: string;
-  backend: string | null;
-  cluster: string | null;
-  scheduler: string | null;
-  target: string | null;
-  profile: string | null;
+  definitionHash: string;
+  experimentRevisionId: string;
+  inputAssetIds: string[];
+  targetHint: string | null;
+  statusSummary: RunStatusSummary;
   parameters: Record<string, unknown>;
   createdAt: string;
-  finishedAt: string | null;
-  executionCount: number;
-  latestSchedulerJobId: string | null;
   executions: WorkspaceExecutionRow[];
 }
 
 export interface WorkspaceRunsStats {
-  total: number;
-  running: number;
-  pending: number;
-  failed: number;
-  succeeded: number;
+  totalRuns: number;
+  totalExecutions: number;
+  activeExecutions: number;
+  byStatus: Record<string, number>;
 }
 
 export interface WorkspaceRunsResponse {

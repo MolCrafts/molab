@@ -78,15 +78,6 @@ class TestInMemoryCapabilityRegistry:
         with pytest.raises(CapabilityNotFoundError):
             reg.get("ghost")
 
-    def test_constructor_seeds_capabilities_queryable_via_has(self) -> None:
-        from molexp.harness.registry.in_memory import InMemoryCapabilityRegistry
-
-        a = _make_capability(id_="cap.a")
-        b = _make_capability(id_="cap.b")
-        reg = InMemoryCapabilityRegistry(capabilities=[a, b])
-        assert reg.has("cap.a")
-        assert reg.has("cap.b")
-
     # --------------------------------------------------------- list / search
     def test_list_capabilities_preserves_insertion_order(self) -> None:
         from molexp.harness.registry.in_memory import InMemoryCapabilityRegistry

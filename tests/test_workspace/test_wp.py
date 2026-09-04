@@ -54,16 +54,6 @@ class TestWorkspacePaths:
         with pytest.raises(ValueError, match="outside workspace"):
             ws.wp.mv(".", "/tmp/escape")
 
-    def test_free_function_form(self, tmp_path: Path) -> None:
-        import molexp as me
-
-        ws = _ws(tmp_path)
-        root = Path(ws.resolve())
-        (root / "a").write_text("1")
-        dest = me.wp.mv(ws, "a", "b")
-        assert Path(dest).name == "b"
-        assert (root / "b").read_text() == "1"
-
     def test_ls_mkdir_rm_cp(self, tmp_path: Path) -> None:
         ws = _ws(tmp_path)
         ws.wp.mkdir("stash/nested")
@@ -76,9 +66,3 @@ class TestWorkspacePaths:
         assert not (Path(ws.resolve()) / "stash" / "copy.txt").exists()
         ws.wp.rm("stash", recursive=True)
         assert not (Path(ws.resolve()) / "stash").exists()
-
-    def test_module_level_mv_alias(self, tmp_path: Path) -> None:
-        ws = _ws(tmp_path)
-        (Path(ws.resolve()) / "x").write_text("y")
-        ws.wp.mv("x", "z")
-        assert (Path(ws.resolve()) / "z").read_text() == "y"

@@ -26,7 +26,13 @@ from molexp.workspace.curation.inventory import (
     scan_workspace,
 )
 from molexp.workspace.curation.query import aggregate_assets_by_kind, find_asset_by_hash
-from molexp.workspace.curation.reorg import delete_folder, move_run, rehome_asset
+from molexp.workspace.curation.reorg import (
+    delete_folder,
+    move_experiment,
+    move_run,
+    rehome_asset,
+    strip_legacy_ops,
+)
 
 __all__ = [
     "ExperimentInventory",
@@ -38,7 +44,9 @@ __all__ = [
     "dedupe_workflow_source",
     "delete_folder",
     "find_asset_by_hash",
+    "move_experiment",
     "move_run",
     "rehome_asset",
     "scan_workspace",
+    "strip_legacy_ops",
 ]

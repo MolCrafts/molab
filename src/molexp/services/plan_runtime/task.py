@@ -75,9 +75,15 @@ class PlanTask:
         self.workflow_persisted = False
         self.record_outcome: PlanRecordOutcome | None = None
         self.result: ModeResult | None = None
+        self._execution_id: str | None = None
         self.pending_requests: list[ApprovalRequest] = []
         self._gateway: AgentGateway | None = None
         self._task: asyncio.Task[None] | None = None
+
+    @property
+    def execution_id(self) -> str | None:
+        """Physical attempt currently associated with this task."""
+        return self._execution_id
 
     @classmethod
     def start(
@@ -218,7 +224,8 @@ class PlanTask:
         """
         root = self.workspace_root
         task_id = self.record_task_id
-        if not root or not task_id:
+        execution_id = self._execution_id
+        if not root or not task_id or execution_id is None:
             return
         try:
             from datetime import UTC, datetime
@@ -238,12 +245,10 @@ class PlanTask:
                 from molexp.harness.plan.document import experiment_report_to_document
                 from molexp.harness.store.file_artifact_store import FileArtifactStore
 
-                run_dir = Path(str(self.run.run_dir))
-                board = read_board(board_path(run_dir))
+                workdir = Path(str(self.run.run_dir)) / "executions" / execution_id / "work"
+                board = read_board(board_path(workdir))
                 step_count = len(getattr(board, "tasks", ()) or ())
-                from molexp.harness.store.paths import harness_artifact_root
-
-                store = FileArtifactStore(root=harness_artifact_root(run_dir))
+                store = FileArtifactStore.open_execution(self.run, execution_id)
                 # Prefer LLM-filled plan_report (rendered before the review gate).
                 report_ref = store.latest_by_kind("plan_report")
                 if report_ref is not None:
@@ -293,6 +298,7 @@ class PlanTask:
                 plan_title = (self.draft.strip().splitlines() or [""])[0][:80]
             plan_ref = {
                 "run_id": self.run.id,
+                "execution_id": execution_id,
                 "project_id": ctx["project_id"],
                 "experiment_id": ctx["experiment_id"],
                 "title": plan_title,
@@ -338,6 +344,7 @@ class PlanTask:
                     root,
                     task_id,
                     self.run,
+                    execution_id=execution_id,
                     turn_id=self.turn_id,
                 )
             except Exception as stage_exc:
@@ -415,12 +422,17 @@ class PlanTask:
                     self.record_task_id,
                     turn_id=self.turn_id,
                 )
-            self.result = await Plan(realize=True, on_loop_event=on_loop_event).execute(
+            plan = Plan(realize=True, on_loop_event=on_loop_event)
+            self.result = await plan.execute(
                 run=self.run,
                 user_input=self.draft,
                 gateway=gateway,
                 capability_registry=capability_registry,
             )
+            result = self.result
+            if result is None:
+                raise RuntimeError("plan completed without a ModeResult")
+            self._execution_id = result.execution_id
             # Persist the workflow IR + record the Agents-tab session and
             # Knowledge records. Shared with `molexp plan` (CLI) so the Python
             # and UI paths land identical workspace state. Blocking I/O — offloaded.
@@ -432,6 +444,7 @@ class PlanTask:
                     task_id=self.record_task_id,
                     draft=self.draft,
                     model=self.model,
+                    execution_id=result.execution_id,
                     turn_id=self.turn_id,
                 )
             )
@@ -444,6 +457,7 @@ class PlanTask:
             self._sync_status()
             raise
         except ApprovalPendingError as exc:
+            self._execution_id = plan.last_execution_id
             # Suspension, not failure: keep the pending requests for the inbox
             # and wait for a decision + resume(). No error is recorded — a plan
             # that later resumes and succeeds was never "failed".
@@ -457,6 +471,7 @@ class PlanTask:
             )
             self._notify_approvals()
         except Exception as exc:  # surface as task status, never crash the loop
+            self._execution_id = plan.last_execution_id if "plan" in locals() else None
             self.status = "failed"
             self.error = exc
             _LOG.warning(f"[plan-task {self.task_id}] failed: {exc!r}")
@@ -480,6 +495,9 @@ class PlanTask:
                     stage_name = None
             failure = PlanFailure(stage=stage_name, error=err_text)
             try:
+                execution_id = self._execution_id
+                if execution_id is None:
+                    raise RuntimeError("failed plan did not allocate an Execution")
                 self.record_outcome = await asyncio.to_thread(
                     lambda: materialize_plan_records(
                         run=self.run,
@@ -488,6 +506,7 @@ class PlanTask:
                         task_id=self.record_task_id,
                         draft=self.draft,
                         model=self.model,
+                        execution_id=execution_id,
                         turn_id=self.turn_id,
                         failure=failure,
                     )
@@ -529,10 +548,13 @@ class PlanTask:
             try:
                 from .record import emit_artifact_stage_events
 
+                if self._execution_id is None:
+                    raise RuntimeError("plan Execution identity is unavailable")
                 emit_artifact_stage_events(
                     self.workspace_root,
                     self.record_task_id,
                     self.run,
+                    execution_id=self._execution_id,
                     turn_id=self.turn_id,
                 )
             except Exception as stage_exc:

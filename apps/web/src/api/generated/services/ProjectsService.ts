@@ -2,9 +2,8 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
-import type { AssetResponse } from '../models/AssetResponse';
-import type { Body_uploadProjectAsset } from '../models/Body_uploadProjectAsset';
-import type { Body_uploadProjectAssetWs } from '../models/Body_uploadProjectAssetWs';
+import type { AssetVersionResponse } from '../models/AssetVersionResponse';
+import type { ManagedAssetResponse } from '../models/ManagedAssetResponse';
 import type { MessageResponse } from '../models/MessageResponse';
 import type { ProjectCreateRequest } from '../models/ProjectCreateRequest';
 import type { ProjectResponse } from '../models/ProjectResponse';
@@ -57,31 +56,6 @@ export class ProjectsService {
         });
     }
     /**
-     * Delete Project
-     * @param projectId
-     * @param molexpSession
-     * @returns MessageResponse Successful Response
-     * @throws ApiError
-     */
-    public static deleteProject(
-        projectId: string,
-        molexpSession?: (string | null),
-    ): CancelablePromise<MessageResponse> {
-        return __request(OpenAPI, {
-            method: 'DELETE',
-            url: '/api/projects/{project_id}',
-            path: {
-                'project_id': projectId,
-            },
-            cookies: {
-                'molexp_session': molexpSession,
-            },
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
      * Get Project
      * @param projectId
      * @param molexpSession
@@ -107,19 +81,44 @@ export class ProjectsService {
         });
     }
     /**
+     * Delete Project
+     * @param projectId
+     * @param molexpSession
+     * @returns MessageResponse Successful Response
+     * @throws ApiError
+     */
+    public static deleteProject(
+        projectId: string,
+        molexpSession?: (string | null),
+    ): CancelablePromise<MessageResponse> {
+        return __request(OpenAPI, {
+            method: 'DELETE',
+            url: '/api/projects/{project_id}',
+            path: {
+                'project_id': projectId,
+            },
+            cookies: {
+                'molexp_session': molexpSession,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
      * List Project Assets
-     * List every asset (any kind) in the project scope via the catalog.
+     * List long-lived Project data identities.
      * @param projectId
      * @param limit
      * @param molexpSession
-     * @returns AssetResponse Successful Response
+     * @returns ManagedAssetResponse Successful Response
      * @throws ApiError
      */
     public static listProjectAssets(
         projectId: string,
         limit: number = 100,
         molexpSession?: (string | null),
-    ): CancelablePromise<Array<AssetResponse>> {
+    ): CancelablePromise<Array<ManagedAssetResponse>> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/projects/{project_id}/assets',
@@ -138,51 +137,50 @@ export class ProjectsService {
         });
     }
     /**
-     * Upload Project Asset
-     * Upload a file into the project's ``DataAssetLibrary``.
-     * @param projectId
-     * @param formData
-     * @param molexpSession
-     * @returns AssetResponse Successful Response
-     * @throws ApiError
-     */
-    public static uploadProjectAsset(
-        projectId: string,
-        formData: Body_uploadProjectAsset,
-        molexpSession?: (string | null),
-    ): CancelablePromise<AssetResponse> {
-        return __request(OpenAPI, {
-            method: 'POST',
-            url: '/api/projects/{project_id}/assets/upload',
-            path: {
-                'project_id': projectId,
-            },
-            cookies: {
-                'molexp_session': molexpSession,
-            },
-            formData: formData,
-            mediaType: 'multipart/form-data',
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
      * Get Project Asset
      * @param projectId
      * @param assetId
      * @param molexpSession
-     * @returns AssetResponse Successful Response
+     * @returns ManagedAssetResponse Successful Response
      * @throws ApiError
      */
     public static getProjectAsset(
         projectId: string,
         assetId: string,
         molexpSession?: (string | null),
-    ): CancelablePromise<AssetResponse> {
+    ): CancelablePromise<ManagedAssetResponse> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/projects/{project_id}/assets/{asset_id}',
+            path: {
+                'project_id': projectId,
+                'asset_id': assetId,
+            },
+            cookies: {
+                'molexp_session': molexpSession,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * List Project Asset Versions
+     * List immutable versions of a Project Asset.
+     * @param projectId
+     * @param assetId
+     * @param molexpSession
+     * @returns AssetVersionResponse Successful Response
+     * @throws ApiError
+     */
+    public static listProjectAssetVersions(
+        projectId: string,
+        assetId: string,
+        molexpSession?: (string | null),
+    ): CancelablePromise<Array<AssetVersionResponse>> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/projects/{project_id}/assets/{asset_id}/versions',
             path: {
                 'project_id': projectId,
                 'asset_id': assetId,
@@ -278,34 +276,6 @@ export class ProjectsService {
         });
     }
     /**
-     * Delete Project
-     * @param projectId
-     * @param ws
-     * @param molexpSession
-     * @returns MessageResponse Successful Response
-     * @throws ApiError
-     */
-    public static deleteProjectWs(
-        projectId: string,
-        ws: string,
-        molexpSession?: (string | null),
-    ): CancelablePromise<MessageResponse> {
-        return __request(OpenAPI, {
-            method: 'DELETE',
-            url: '/api/workspaces/{ws}/projects/{project_id}',
-            path: {
-                'project_id': projectId,
-                'ws': ws,
-            },
-            cookies: {
-                'molexp_session': molexpSession,
-            },
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
      * Get Project
      * @param projectId
      * @param ws
@@ -334,13 +304,41 @@ export class ProjectsService {
         });
     }
     /**
+     * Delete Project
+     * @param projectId
+     * @param ws
+     * @param molexpSession
+     * @returns MessageResponse Successful Response
+     * @throws ApiError
+     */
+    public static deleteProjectWs(
+        projectId: string,
+        ws: string,
+        molexpSession?: (string | null),
+    ): CancelablePromise<MessageResponse> {
+        return __request(OpenAPI, {
+            method: 'DELETE',
+            url: '/api/workspaces/{ws}/projects/{project_id}',
+            path: {
+                'project_id': projectId,
+                'ws': ws,
+            },
+            cookies: {
+                'molexp_session': molexpSession,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
      * List Project Assets
-     * List every asset (any kind) in the project scope via the catalog.
+     * List long-lived Project data identities.
      * @param projectId
      * @param ws
      * @param limit
      * @param molexpSession
-     * @returns AssetResponse Successful Response
+     * @returns ManagedAssetResponse Successful Response
      * @throws ApiError
      */
     public static listProjectAssetsWs(
@@ -348,7 +346,7 @@ export class ProjectsService {
         ws: string,
         limit: number = 100,
         molexpSession?: (string | null),
-    ): CancelablePromise<Array<AssetResponse>> {
+    ): CancelablePromise<Array<ManagedAssetResponse>> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/workspaces/{ws}/projects/{project_id}/assets',
@@ -368,45 +366,12 @@ export class ProjectsService {
         });
     }
     /**
-     * Upload Project Asset
-     * Upload a file into the project's ``DataAssetLibrary``.
-     * @param projectId
-     * @param ws
-     * @param formData
-     * @param molexpSession
-     * @returns AssetResponse Successful Response
-     * @throws ApiError
-     */
-    public static uploadProjectAssetWs(
-        projectId: string,
-        ws: string,
-        formData: Body_uploadProjectAssetWs,
-        molexpSession?: (string | null),
-    ): CancelablePromise<AssetResponse> {
-        return __request(OpenAPI, {
-            method: 'POST',
-            url: '/api/workspaces/{ws}/projects/{project_id}/assets/upload',
-            path: {
-                'project_id': projectId,
-                'ws': ws,
-            },
-            cookies: {
-                'molexp_session': molexpSession,
-            },
-            formData: formData,
-            mediaType: 'multipart/form-data',
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
      * Get Project Asset
      * @param projectId
      * @param assetId
      * @param ws
      * @param molexpSession
-     * @returns AssetResponse Successful Response
+     * @returns ManagedAssetResponse Successful Response
      * @throws ApiError
      */
     public static getProjectAssetWs(
@@ -414,10 +379,42 @@ export class ProjectsService {
         assetId: string,
         ws: string,
         molexpSession?: (string | null),
-    ): CancelablePromise<AssetResponse> {
+    ): CancelablePromise<ManagedAssetResponse> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/workspaces/{ws}/projects/{project_id}/assets/{asset_id}',
+            path: {
+                'project_id': projectId,
+                'asset_id': assetId,
+                'ws': ws,
+            },
+            cookies: {
+                'molexp_session': molexpSession,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * List Project Asset Versions
+     * List immutable versions of a Project Asset.
+     * @param projectId
+     * @param assetId
+     * @param ws
+     * @param molexpSession
+     * @returns AssetVersionResponse Successful Response
+     * @throws ApiError
+     */
+    public static listProjectAssetVersionsWs(
+        projectId: string,
+        assetId: string,
+        ws: string,
+        molexpSession?: (string | null),
+    ): CancelablePromise<Array<AssetVersionResponse>> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/workspaces/{ws}/projects/{project_id}/assets/{asset_id}/versions',
             path: {
                 'project_id': projectId,
                 'asset_id': assetId,

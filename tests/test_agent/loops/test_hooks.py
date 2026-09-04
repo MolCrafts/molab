@@ -19,10 +19,7 @@ from __future__ import annotations
 from molexp.agent.loops.hooks import (
     HookDecision,
     HookOutcome,
-    LoopState,
-    invoke_after_tool,
     invoke_before_tool,
-    invoke_should_stop,
 )
 
 
@@ -48,14 +45,6 @@ class TestHookOutcome:
 class TestInvokeHelpers:
     async def test_invoke_before_tool_honors_none_as_proceed(self) -> None:
         outcome = await invoke_before_tool(None, tool_name="t", args={})
-        assert outcome == HookOutcome.proceed()
-
-    async def test_invoke_after_tool_honors_none_as_proceed(self) -> None:
-        outcome = await invoke_after_tool(None, tool_name="t", result="")
-        assert outcome == HookOutcome.proceed()
-
-    async def test_invoke_should_stop_honors_none_as_proceed(self) -> None:
-        outcome = await invoke_should_stop(None, state=LoopState(step=1))
         assert outcome == HookOutcome.proceed()
 
     async def test_invoke_before_tool_passes_hook_outcome_through_verbatim(self) -> None:

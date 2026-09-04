@@ -37,11 +37,12 @@ async def main() -> None:
 
     run = exp.list_runs()[0]
     with run.start() as ctx:
+        execution_id = ctx.id
         result = await WorkflowRuntime().execute(compiled, run_context=ctx)
         # Driver-side workspace helpers — results, artifacts, logs.
         ctx.set_result("score", result.outputs["experiment_body"]["score"])
-        ctx.register_artifact("summary goes here", name="report.txt")
-        ctx.log("train").append("epoch 1 complete")
+        ctx.emit_artifact("summary goes here", name="report.txt")
+        ctx.log("runtime").append("epoch 1 complete")
 
     for path in sorted(root.rglob("*")):
         if path.is_file():
@@ -49,11 +50,11 @@ async def main() -> None:
 
     print("\nselected run fields (public API)")
     print(f"  id:              {run.id}")
-    print(f"  status:          {run.status}")
+    print(f"  status:          {run.executions[-1].status.value}")
     print(f"  parameters:      {run.parameters}")
-    print(f"  profile:         {run.metadata.profile}")
-    print(f"  execution count: {len(run.execution_history)}")
-    print(f"  score:           {run.get_result('score')}")
+    print(f"  definition_hash: {run.metadata.definition_hash}")
+    print(f"  execution count: {len(run.executions)}")
+    print(f"  score:           {run.get_result('score', execution_id=execution_id)}")
 
 
 if __name__ == "__main__":

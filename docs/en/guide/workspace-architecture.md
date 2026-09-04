@@ -98,24 +98,26 @@ print(len(sweep.list_runs()))  # 6 — one per grid cell
 ## Executing a Run
 
 ```python
-with run.start() as ctx:
+from molexp.workspace.domain import ExecutionMode
+
+with run.start(mode=ExecutionMode.RERUN) as ctx:
     result = await WorkflowRuntime().execute(compiled, run_context=ctx)
 ```
 
 Entering `run.start()` opens a `RunContext` which:
 
-1. Ensures the run directory exists (asset subdirectories like `artifacts/` are created lazily by the accessors that write into them).
+1. Ensures the run directory exists (subdirectories like `work/` are created lazily by the accessors that write into them).
 2. Records temporary ownership metadata for the active execution.
-3. Appends a new `ExecutionRecord` to `run.execution_history`.
-4. Sets `run.status = "running"` and runs the workflow.
-5. On success, writes `status="succeeded"` plus the final timestamp.
-6. On failure, writes `status="failed"`, an `ErrorInfo`, and registers an `ErrorTraceAsset` pointing at `executions/<exec_id>/error.txt`.
+3. Appends a new `ExecutionState` to `run.executions`.
+4. Runs the workflow; the heartbeat `alive` file is touched every 30 s.
+5. On success, seals the execution as `succeeded` with the final timestamp.
+6. On failure, seals it as `failed` and writes `executions/<exec_id>/error.txt`.
 
-Every attempt appears in `run.execution_history`, newest last — a run that was retried twice will have three records. (Status, ownership, and the execution records live in the run's `run.json (hot state) + alive` hot-state sidecar, not in the `run.json` entity file.)
+Every attempt appears in `run.executions`, newest last — a run that was retried twice will have three executions. An execution is opened with `ExecutionMode.INITIAL` the first time; a re-execution needs an explicit `mode=` (`RERUN` to start fresh, `RETRY` after a failure, `RESUME` with a checkpoint, `REPRODUCE` after a success).
 
 ## Assets
 
-Every scope exposes a typed `assets` view — a read-only query surface over the authoritative per-scope `assets.json` manifests — and a `data_assets` library for importing external data. Run-time writes go through `ctx.register_artifact` / `ctx.log` / `ctx.checkpoint`, which register each asset in the scope's manifest as they write.
+Emitted artifacts are recorded by the execution (`ctx.emit_artifact` / `ctx.checkpoint`) and queried through the `ArtifactRepository`; imported data lives in a scope's `data_assets` library. See [Artifacts, Assets, and Data Imports](assets.md).
 
 ```python
 from pathlib import Path
@@ -125,14 +127,14 @@ ws.data_assets.import_asset("bert-model", "qm9.csv")
 project.data_assets.import_asset("dataset", "qm9.csv")
 
 # Driver-side, around the workflow execution
-with run.start() as ctx:
-    dataset = ctx.find_asset("dataset")       # walks run → experiment → project → workspace
+with run.start(mode=ExecutionMode.RERUN) as ctx:
+    dataset = project.data_assets.get("dataset")
     result = await WorkflowRuntime().execute(compiled, run_context=ctx)
-    ctx.register_artifact(result.outputs["train"], name="metrics.json")
-    ctx.log("train").append("epoch 1")
+    ctx.emit_artifact(result.outputs["train"], name="metrics.json")
+    ctx.log("runtime").append("epoch 1")
 ```
 
-`import_asset(name, src, action="copy", meta=None)` supports `"copy"`, `"move"`, `"symlink"`, and `"hardlink"` for ingestion. See [Unified Asset Model](assets.md) for the full list of asset kinds (artifact, log, checkpoint, error trace, execution state, data) and the manifest-scanning queries (`{scope}.assets.query(...)` / `molexp.workspace.assets.scan`).
+`import_asset(name, src, action="copy", meta=None)` supports `"copy"`, `"move"`, `"symlink"`, and `"hardlink"` for ingestion.
 
 ## CLI Surface
 

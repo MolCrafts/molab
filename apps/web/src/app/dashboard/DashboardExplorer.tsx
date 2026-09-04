@@ -4,6 +4,7 @@ import { Link } from "react-router-dom";
 
 import { runPath } from "@/app/entities/paths";
 import type { NavigationExplorerProps } from "@/app/navigation/sections";
+import { runPresentationStatus } from "@/app/runs/projections";
 import { groupForStatus } from "@/app/runs/statusGroups";
 import { useWorkspaceRuns } from "@/app/runs/useWorkspaceRuns";
 import { LeftExplorer } from "@/components/layout/ExplorerShell";
@@ -56,7 +57,7 @@ export const DashboardExplorer = ({ snapshot }: NavigationExplorerProps): JSX.El
     snapshot.workspaces[0] ?? { label: "Workspace", unreachable: false, isRemote: false };
   const pinnedRuns = rows
     .filter((run) => {
-      const group = groupForStatus(run.status);
+      const group = groupForStatus(runPresentationStatus(run));
       return group === "running" || group === "failed";
     })
     .slice(0, 3);
@@ -92,7 +93,7 @@ export const DashboardExplorer = ({ snapshot }: NavigationExplorerProps): JSX.El
           <>
             <SectionLabel>Pinned</SectionLabel>
             {pinnedRuns.map((run) => {
-              const group = groupForStatus(run.status);
+              const group = groupForStatus(runPresentationStatus(run));
               return (
                 <ExplorerLink
                   key={run.id}

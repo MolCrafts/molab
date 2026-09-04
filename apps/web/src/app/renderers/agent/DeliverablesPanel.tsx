@@ -877,7 +877,7 @@ const PlanDeliverables = ({
     setLoading(true);
     setError(null);
     plansApi
-      .getPlan(planRef.projectId, planRef.experimentId, planRef.runId)
+      .getPlan(planRef.projectId, planRef.experimentId, planRef.runId, planRef.executionId)
       .then((detail) => {
         if (!cancelled) setPlan(detail);
       })
@@ -890,7 +890,13 @@ const PlanDeliverables = ({
     return () => {
       cancelled = true;
     };
-  }, [planRef.projectId, planRef.experimentId, planRef.runId, refreshKey]);
+  }, [
+    planRef.projectId,
+    planRef.experimentId,
+    planRef.runId,
+    planRef.executionId,
+    refreshKey,
+  ]);
 
   const title = plan?.title || planRef.title || "Experiment plan";
   const status = (plan?.status ?? "succeeded") as SemanticStatus;

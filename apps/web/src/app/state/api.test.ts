@@ -132,10 +132,10 @@ describe("mapRuns", () => {
     expect(unfinished.updatedAt).toBe(fixtureRunPending.created);
   });
 
-  it("maps profile metadata when present", () => {
-    const [result] = mapRuns("p", "e", [{ ...fixtureRun, profile: "smoke", configHash: "abc123" }]);
-    expect(result.profile).toBe("smoke");
-    expect(result.configHash).toBe("abc123");
+  it("maps immutable Run identity fields", () => {
+    const [result] = mapRuns("p", "e", [fixtureRun]);
+    expect(result.definitionHash).toBe("def-run-abc");
+    expect(result.experimentRevisionId).toBe("rev-exp-001");
   });
 });
 

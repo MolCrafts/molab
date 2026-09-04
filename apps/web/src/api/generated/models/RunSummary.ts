@@ -2,12 +2,12 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
+import type { RunStatusSummaryResponse } from './RunStatusSummaryResponse';
 export type RunSummary = {
+    id: string;
+    statusSummary: RunStatusSummaryResponse;
     created: string;
     finished?: (string | null);
-    id: string;
     parameters?: Record<string, any>;
-    results?: Record<string, any>;
-    status: string;
 };
 

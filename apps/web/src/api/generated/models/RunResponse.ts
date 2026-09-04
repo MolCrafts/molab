@@ -3,24 +3,21 @@
 /* tslint:disable */
 /* eslint-disable */
 import type { ExecutionRecordResponse } from './ExecutionRecordResponse';
+import type { RunStatusSummaryResponse } from './RunStatusSummaryResponse';
 import type { WorkflowSnapshotResponse } from './WorkflowSnapshotResponse';
 export type RunResponse = {
-    config?: Record<string, any>;
-    configHash?: (string | null);
-    created: string;
-    error?: (Record<string, string> | null);
-    executionHistory?: Array<ExecutionRecordResponse>;
-    executorInfo?: Record<string, any>;
-    experimentId: string;
-    finished?: (string | null);
     id: string;
-    parameters?: Record<string, any>;
-    profile?: (string | null);
     projectId: string;
-    results?: Record<string, any>;
-    status: string;
-    target?: (string | null);
+    experimentId: string;
+    definitionHash: string;
+    experimentRevisionId: string;
+    statusSummary: RunStatusSummaryResponse;
+    created: string;
+    finished?: (string | null);
+    parameters?: Record<string, any>;
     workflow?: (WorkflowSnapshotResponse | null);
     workflowSource?: (string | null);
+    executions?: Array<ExecutionRecordResponse>;
+    target?: (string | null);
 };
 

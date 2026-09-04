@@ -105,11 +105,6 @@ class TestContextAttr:
             _ = ctx.jobs
         assert hasattr(ctx, "jobs") is False
 
-    def test_methods_are_not_shadowed(self) -> None:
-        ctx = Context()
-        assert callable(ctx.provide)
-        assert hasattr(ctx, "provide") is True
-
 
 class TestHostLifecycle:
     def test_missing_inject_fails_at_mount(self) -> None:
@@ -221,19 +216,6 @@ class TestWaterfall:
         )
         assert result.model == "swapped"
 
-    def test_sources_spell_pre_step_not_pre_call(self) -> None:
-        import inspect
-
-        from molexp.harness import errors
-        from molexp.harness.host.plugins import agent_call
-
-        err_src = inspect.getsource(errors.AgentCallRejectedError)
-        call_src = inspect.getsource(agent_call)
-        assert "pre-step" in err_src
-        assert "pre-call" not in err_src
-        assert "pre-step" in call_src
-        assert "pre-call" not in call_src
-
 
 class TestReflection:
     async def test_critic_replaces_result(self) -> None:
@@ -277,25 +259,6 @@ class TestReflection:
         )
         assert called["n"] == 0
         assert result.model == "fake"
-
-
-class TestKeys:
-    def test_spine_names_match_deepseek(self) -> None:
-        assert Keys.LLM == "llm"
-        assert Keys.TOOLS == "tools"
-        assert Keys.FS == "fs"
-        assert Keys.APPROVAL == "approval"
-        assert Keys.SESSIONS == "sessions"
-        assert Keys.SYSTEM_PROMPT == "systemPrompt"
-        assert Keys.JOBS == "jobs"
-        assert Keys.SANDBOX == "sandbox"
-        assert Keys.COMMANDS == "commands"
-        assert Keys.SETTINGS == "settings"
-        assert Keys.CREDENTIALS == "credentials"
-        assert Keys.WORKSPACE == "workspace"
-        assert Keys.WORKFLOW == "workflow"
-        assert not hasattr(Keys, "AGENT_LOOP")
-        assert not hasattr(Keys, "AGENT_CALL")
 
 
 class TestImportStayLight:
@@ -628,15 +591,6 @@ class TestDomainPlugins:
         host.unload()
         assert hasattr(host.ctx, "workspace") is False
         assert hasattr(host.ctx, "workflow") is False
-
-    def test_compose_does_not_import_workspace_class(self) -> None:
-        import inspect
-
-        from molexp.harness.host import compose as compose_mod
-
-        src = inspect.getsource(compose_mod)
-        assert "from molexp.workspace.workspace import Workspace" not in src
-        assert "WorkspacePlugin" in src
 
 
 class TestRunStoresPlugin:

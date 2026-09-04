@@ -101,7 +101,7 @@ class TestResolveObjectRef:
         run = resolve_object_ref(tmp_path, ObjectRef(kind="run", id="r1"))
         assert run.id == "r1"
         exp = resolve_object_ref(tmp_path, ObjectRef(kind="experiment", id="e2"))
-        assert exp.id == "e2"
+        assert exp.name == "e2"
         folder = resolve_object_ref(tmp_path, ObjectRef(kind="folder", id="scratch"))
         assert folder.name == "scratch"
         da = resolve_object_ref(tmp_path, ObjectRef(kind="data_asset", id=asset.asset_id))

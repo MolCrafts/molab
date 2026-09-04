@@ -7,21 +7,21 @@
  */
 export type RunHarvestRequest = {
     /**
-     * Author string
-     */
-    createdBy?: string;
-    /**
      * Knowledge class name
      */
     kind: RunHarvestRequest.kind;
     /**
-     * Optional KnowledgeItem name
-     */
-    name?: (string | null);
-    /**
      * Non-empty interpretation
      */
     narrative: string;
+    /**
+     * Author string
+     */
+    createdBy?: string;
+    /**
+     * Optional KnowledgeItem name
+     */
+    name?: (string | null);
     /**
      * Optional headline results table
      */

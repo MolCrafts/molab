@@ -11,11 +11,11 @@
  * var), or ``"none"`` (not configured).
  */
 export type AgentHealthResponse = {
-    envVar?: string;
-    model?: string;
-    provider?: string;
     ready?: boolean;
-    reason?: string;
+    provider?: string;
+    model?: string;
     source?: string;
+    reason?: string;
+    envVar?: string;
 };
 

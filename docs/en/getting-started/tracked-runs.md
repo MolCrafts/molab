@@ -41,14 +41,14 @@ exp = ws.add_project("qm9").add_experiment("baseline")
 ```python
 run = exp.add_run(params={"lr": 1e-3})
 result = run.execute(wf)
-print(run.status, result.outputs["report"])  # succeeded 0.1
+print(run.executions[-1].status.value, result.outputs["report"])  # succeeded 0.1
 ```
 
 The run's directory now holds `run.json` (identity and provenance), `run.json (hot state) + alive` (status and ownership), and `executions/<exec_id>/` (per-task outputs). Read it back in a later session:
 
 ```python
 same_run = exp.get_run(run.id)
-print(same_run.status, same_run.get_result("report"))  # succeeded 0.1
+print(same_run.executions[-1].status.value, same_run.get_result("report", execution_id=same_run.executions[-1].id))  # succeeded 0.1
 ```
 
 ## Failure, Resume, Rerun

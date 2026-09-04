@@ -103,6 +103,7 @@ export interface RunTabBadgeContext {
   projectId: string;
   experimentId: string;
   runId: string;
+  executionId: string;
 }
 
 export interface FileTypeContribution {

@@ -1,4 +1,5 @@
 import type { WorkspaceFileNode, WorkspaceFilesResponse } from "@/api/workspace";
+import type { ManagedAssetResponse } from "@/api/generated/models/ManagedAssetResponse";
 import { AgentUnavailableError, probeOnce, resetAgentProbes } from "@/app/state/agentProbe";
 import type {
   AgentSessionSummary,
@@ -126,50 +127,93 @@ export const mapRuns = (
   experimentId: string,
   runs: ApiRunResponse[],
 ): RunSummary[] => {
-  const mapStatus = (status: string): RunSummary["status"] => {
-    if (status === "running") {
-      return "running";
+  const mapStatus = (run: ApiRunResponse): RunSummary["status"] => {
+    if (!run.statusSummary) {
+      const legacy = run.status ?? "pending";
+      return legacy === "running" || legacy === "succeeded" || legacy === "failed" || legacy === "cancelled"
+        ? legacy
+        : "pending";
     }
-    if (status === "succeeded") {
-      return "succeeded";
-    }
-    if (status === "failed") {
-      return "failed";
-    }
-    if (status === "cancelled") {
-      return "cancelled";
-    }
+    const counts = run.statusSummary.byStatus ?? {};
+    if (run.statusSummary.active > 0) return "running";
+    if ((counts.succeeded ?? 0) > 0) return "succeeded";
+    if ((counts.failed ?? 0) > 0 || (counts.interrupted ?? 0) > 0) return "failed";
+    if ((counts.cancelled ?? 0) > 0) return "cancelled";
     return "pending";
   };
 
-  return runs.map((run) => ({
-    executorInfo: Object.fromEntries(
-      Object.entries(run.executorInfo ?? {}).map(([key, value]) => [key, String(value)]),
-    ),
-    id: run.id,
-    name: run.id,
-    status: mapStatus(run.status),
-    summary: `Status: ${run.status}`,
-    updatedAt: run.finished ?? run.created,
-    projectId,
-    experimentId,
-    profile: run.profile ?? null,
-    configHash: run.configHash ?? null,
-    parameters: (run.parameters ?? {}) as Record<string, unknown>,
-    results: (run.results ?? {}) as Record<string, unknown>,
-    workflowSource: run.workflowSource ?? run.workflow?.source ?? null,
-    workflowSnapshot: run.workflow ?? null,
-    startedAt: run.created ?? null,
-    finishedAt: run.finished ?? null,
-    executionHistory: (run.executionHistory ?? []).map((rec) => ({
-      executionId: rec.executionId,
-      startedAt: rec.startedAt,
-      finishedAt: rec.finishedAt ?? null,
-      status: rec.status,
-      schedulerJobId: rec.schedulerJobId ?? null,
-    })),
-    errorMessage: run.error?.message ?? null,
-  }));
+  return runs.map((run) => {
+    const executions =
+      run.executions ??
+      (run.executionHistory ?? []).map((item) => ({
+        id: item.executionId,
+        runId: run.id,
+        mode: "initial",
+        status: item.status,
+        createdAt: item.startedAt,
+        startedAt: item.startedAt,
+        finishedAt: item.finishedAt,
+        basedOnExecutionId: null,
+        checkpointArtifactId: null,
+        executor: item.schedulerJobId ? { scheduler_job_id: item.schedulerJobId } : {},
+        environment: {},
+        artifactIds: [],
+        error: null,
+      }));
+    const status = mapStatus(run);
+    const firstStarted = executions.find((item) => item.startedAt)?.startedAt ?? null;
+    const terminalErrors = executions.filter((item) => item.error);
+    const lastError = terminalErrors[terminalErrors.length - 1]?.error;
+    return {
+      id: run.id,
+      name: run.id,
+      status,
+      summary: run.statusSummary?.notStarted
+        ? "Not executed"
+        : `${run.statusSummary?.total ?? executions.length} execution${(run.statusSummary?.total ?? executions.length) === 1 ? "" : "s"}`,
+      updatedAt: run.finished ?? run.created,
+      projectId,
+      experimentId,
+      definitionHash: run.definitionHash ?? "",
+      experimentRevisionId: run.experimentRevisionId ?? "",
+      statusSummary:
+        run.statusSummary ??
+        ({
+          total: executions.length,
+          active: executions.filter((item) => ["queued", "running", "finalizing"].includes(item.status)).length,
+          notStarted: executions.length === 0,
+          byStatus: Object.fromEntries(
+            [...new Set(executions.map((item) => item.status))].map((value) => [
+              value,
+              executions.filter((item) => item.status === value).length,
+            ]),
+          ),
+        }),
+      parameters: (run.parameters ?? {}) as Record<string, unknown>,
+      workflowSource: run.workflowSource ?? run.workflow?.source ?? null,
+      workflowSnapshot: run.workflow ?? null,
+      startedAt: firstStarted,
+      finishedAt: run.finished ?? null,
+      executionHistory: executions.map((rec) => ({
+        executionId: rec.id,
+        mode: rec.mode,
+        createdAt: rec.createdAt,
+        startedAt: rec.startedAt ?? null,
+        finishedAt: rec.finishedAt ?? null,
+        status: rec.status,
+        basedOnExecutionId: rec.basedOnExecutionId ?? null,
+        checkpointArtifactId: rec.checkpointArtifactId ?? null,
+        executor: rec.executor ?? {},
+        environment: rec.environment ?? {},
+        artifactIds: rec.artifactIds ?? [],
+        error: rec.error ?? null,
+      })),
+      errorMessage:
+        lastError && typeof lastError.message === "string"
+          ? lastError.message
+          : (run.error?.message ?? null),
+    };
+  });
 };
 
 const assetSize = (asset: ApiAssetResponse): number | null => {
@@ -182,8 +226,24 @@ const assetSummary = (asset: ApiAssetResponse): string => {
   return `${asset.kind} · ${scope}`;
 };
 
-export const mapAssets = (assets: ApiAssetResponse[], projectId?: string): AssetSummary[] => {
+export const mapAssets = (
+  assets: (ApiAssetResponse | ManagedAssetResponse)[],
+  projectId?: string,
+): AssetSummary[] => {
   return assets.map((asset) => {
+    if (!("scopeIds" in asset)) {
+      return {
+        id: asset.id,
+        name: asset.title,
+        kind: "asset",
+        status: "active",
+        summary: `${asset.versionCount ?? 0} version${asset.versionCount === 1 ? "" : "s"}`,
+        updatedAt: asset.createdAt,
+        sizeBytes: null,
+        scopeKind: "project",
+        projectId: asset.projectId || projectId,
+      };
+    }
     // ``scopeIds`` is the parent chain ending at the leaf scope: a run-scoped
     // asset is ``[projectId, experimentId, runId]``, an experiment-scoped one
     // ``[projectId, experimentId]``, etc. This drives the Assets nav grouping.

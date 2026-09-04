@@ -13,7 +13,7 @@ import { RunInspectorDetails } from "./RunInspectorDetails";
 import { RunInspectorLogs } from "./RunInspectorLogs";
 import { RunPluginActions } from "./RunPluginActions";
 
-type InspectorTab = "details" | "logs";
+type InspectorTab = "details" | "output";
 
 export interface RunInspectorProps {
   run: WorkspaceRunRow | null;
@@ -37,7 +37,10 @@ export const RunInspector = ({
   className,
 }: RunInspectorProps): JSX.Element => {
   const [tab, setTab] = useState<InspectorTab>("details");
-  const logsState = useRunInspectorLogs(run, selectedExecutionId, tab === "logs" && run !== null);
+  const logsState = useRunInspectorLogs(run, selectedExecutionId, tab === "output" && run !== null);
+  const selectedExecution = run?.executions.find(
+    (execution) => execution.executionId === selectedExecutionId,
+  );
 
   if (!run) {
     return (
@@ -55,7 +58,7 @@ export const RunInspector = ({
             density="compact"
             icon={<Inbox className="h-5 w-5" />}
             title="No run selected"
-            description="Pick a row in Jobs or a bar on Timeline to inspect details, attempts, and logs."
+            description="Pick a row in Jobs or a bar on Timeline to inspect its definition and executions."
           />
         </div>
       </aside>
@@ -90,7 +93,13 @@ export const RunInspector = ({
             <p className="truncate font-mono text-micro text-muted-foreground" title={run.id}>
               {run.id}
             </p>
-            <RunStatusBadge status={run.status} size="sm" />
+            {selectedExecution ? (
+              <RunStatusBadge status={selectedExecution.status} size="sm" />
+            ) : (
+              <span className="shrink-0 text-micro text-muted-foreground">
+                {run.statusSummary.total} executions
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <p
@@ -121,7 +130,7 @@ export const RunInspector = ({
             {(
               [
                 ["details", "Details"],
-                ["logs", "Logs"],
+                ["output", "Output"],
               ] as const
             ).map(([value, label]) => (
               <TabsTrigger
@@ -146,7 +155,7 @@ export const RunInspector = ({
               onSelectExecution={onSelectExecution}
             />
           </TabsContent>
-          <TabsContent value="logs" className="m-0 flex h-full min-h-0 flex-col overflow-hidden">
+          <TabsContent value="output" className="m-0 flex h-full min-h-0 flex-col overflow-hidden">
             <RunInspectorLogs
               run={run}
               selectedExecutionId={selectedExecutionId}

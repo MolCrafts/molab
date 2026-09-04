@@ -72,8 +72,8 @@ async def main() -> None:
         ctx.checkpoint("epoch-3", data={"step": 3, "loss": 0.08})
 
         # 4. Artifacts and logs
-        ctx.register_artifact(result.outputs, name="result.json")
-        log = ctx.log("train")
+        ctx.emit_artifact(result.outputs, name="result.json")
+        log = ctx.log("runtime")
         log.append("training complete")
 
     # ── 5. Content-hash lookup ───────────────────────────────────────────
@@ -95,9 +95,9 @@ async def main() -> None:
         kind = type(asset).__name__.removesuffix("Asset").lower()
         print(f"  [{kind:<15}] {asset.name:<25} scope={asset.scope.kind}")
 
-    # ── 7. Multi-scope resolution (run → experiment → project → ws) ──────
-    dataset = ctx.find_asset("dataset-copy")
-    print(f"\nfind_asset 'dataset-copy': {dataset.path if dataset else 'not found'}")
+    # ── 7. Look up the imported DataAsset by name ─────────────────────────
+    dataset = ws.data_assets.get("dataset-copy")
+    print(f"\ndata_assets.get 'dataset-copy': {dataset.source_path if dataset else 'not found'}")
 
 
 if __name__ == "__main__":

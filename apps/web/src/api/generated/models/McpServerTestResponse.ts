@@ -3,12 +3,12 @@
 /* tslint:disable */
 /* eslint-disable */
 export type McpServerTestResponse = {
-    error?: (string | null);
-    latencyMs?: number;
-    name: string;
     ok: boolean;
+    name: string;
     scope: string;
-    toolCount?: number;
     transport: string;
+    latencyMs?: number;
+    toolCount?: number;
+    error?: (string | null);
 };
 

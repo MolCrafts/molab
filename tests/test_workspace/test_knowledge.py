@@ -5,13 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
 
 from molexp.workspace import (
     PLAN_BOOK_NAME,
     Finding,
     Knowledge,
-    KnowledgeMetadata,
     KnowledgeNotFoundError,
     Observation,
     Plan,
@@ -26,12 +24,6 @@ def _ws(tmp_path: Path) -> Workspace:
     ws = Workspace(root=tmp_path / "lab", name="Lab")
     ws.materialize()
     return ws
-
-
-class TestKnowledgeMetadata:
-    def test_empty_sources_raises(self) -> None:
-        with pytest.raises(ValidationError):
-            KnowledgeMetadata(id="x", name="x", sources=[], created_by="user")
 
 
 class TestKnowledgeLayout:

@@ -16,7 +16,6 @@ import pytest
 
 from molexp.harness import (
     ApprovalPendingError,
-    FileApprovalStore,
     FileArtifactStore,
     ModeResult,
 )
@@ -34,9 +33,8 @@ from molexp.harness.plan import (
 from molexp.harness.schemas import ApprovalDecision
 from molexp.harness.stages import auto_grant_approver
 from molexp.harness.store.paths import harness_artifact_root
+from molexp.harness.store.provenance_approval_store import ProvenanceApprovalStore
 from molexp.workspace import Workspace
-
-pytestmark = pytest.mark.asyncio
 
 _USER_INPUT = (
     '{"title": "Zwitterion CG", '
@@ -95,12 +93,23 @@ def _gateway(run: Any) -> StubAgentGateway:
     return gw
 
 
+def _last_execution_id(run: Any) -> str:
+    assert run.executions, "expected at least one execution"
+    return run.executions[-1].id
+
+
 def _store(run: Any) -> FileArtifactStore:
-    return FileArtifactStore(root=harness_artifact_root(run.run_dir))
+    return FileArtifactStore.open_execution(run, _last_execution_id(run))
 
 
-def _approvals(run: Any) -> FileApprovalStore:
-    return FileApprovalStore(path=run.run_dir / "approvals.json")
+def _approvals(run: Any) -> ProvenanceApprovalStore:
+    ws = run.experiment.project.workspace
+    return ProvenanceApprovalStore(
+        ws.root,
+        run_id=run.id,
+        execution_id=_last_execution_id(run),
+        fs=ws.fs,
+    )
 
 
 class TestStoreBundle:
@@ -117,9 +126,8 @@ class TestStoreBundle:
 
         assert isinstance(result, ModeResult)
         assert result.run_id == run.id
-        artifacts_dir = harness_artifact_root(run.run_dir)
-        assert artifacts_dir.is_dir() and any(artifacts_dir.iterdir())
-        assert (run.run_dir / "events.jsonl").is_file() or artifacts_dir.is_dir()
+        execution_dir = run.run_dir / "executions" / result.execution_id
+        assert (execution_dir / "events.jsonl").is_file()
         store = _store(run)
         assert store.latest_by_kind("review_pack") is not None
         assert store.latest_by_kind(FROZEN_PLAN_KIND) is not None
@@ -207,7 +215,7 @@ class TestStoredGrantReplay:
                 request_id=pending.id,
                 granted=True,
                 decided_by="ui-operator",
-                decided_at=datetime(2026, 7, 22, tzinfo=UTC),
+                decided_at=datetime.now(tz=UTC),
                 reason="looks correct",
             )
         )
@@ -236,7 +244,7 @@ class TestModeLikeShape:
             gateway=_gateway(run),
         )
         assert isinstance(result, ModeResult)
-        assert run.status == "succeeded"
+        assert run.status_summary.by_status.get("succeeded") == 1
 
 
 class TestPriorKnowledgeWire:
@@ -289,7 +297,7 @@ class TestPriorKnowledgeWire:
             gateway=_gateway(run),
         )
 
-        store = FileArtifactStore(root=harness_artifact_root(run.run_dir))
+        store = _store(run)
         knowledge = store.latest_by_kind("knowledge_context")
         assert knowledge is not None
         digest = store.get(knowledge.id).decode("utf-8")

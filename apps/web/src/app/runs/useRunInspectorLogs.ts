@@ -39,21 +39,17 @@ export const useRunInspectorLogs = (
   const runId = run?.id ?? null;
   const projectId = run?.projectId ?? null;
   const experimentId = run?.experimentId ?? null;
-  const runStatus = run?.status ?? null;
-
   const selectedExec = run?.executions.find((e) => e.executionId === selectedExecutionId);
   const shouldPoll =
     enabled &&
     !!run &&
-    (runStatus === "running" ||
-      selectedExec?.status === "running" ||
-      (selectedExecutionId === null &&
-        run.executions.some((e) => e.status === "running" || e.finishedAt === null)));
+    !!selectedExecutionId &&
+    (selectedExec?.status === "running" || selectedExec?.status === "finalizing");
 
   // `tick` is a manual refresh counter bumped by `refresh()` — required dep.
   // biome-ignore lint/correctness/useExhaustiveDependencies: tick forces re-fetch
   useEffect(() => {
-    if (!enabled || !runId || !projectId || !experimentId) {
+    if (!enabled || !runId || !projectId || !experimentId || !selectedExecutionId) {
       setLogs(null);
       setError(null);
       setLoading(false);
@@ -65,9 +61,9 @@ export const useRunInspectorLogs = (
     setError(null);
 
     const load = (): void => {
-      const fetcher = selectedExecutionId
-        ? runsApi.getRunExecutionLogs(projectId, experimentId, runId, selectedExecutionId)
-        : runsApi.getRunLogs(projectId, experimentId, runId);
+      const fetcher = runsApi.getRunExecutionLogs(
+        projectId, experimentId, runId, selectedExecutionId,
+      );
 
       fetcher
         .then((response) => {

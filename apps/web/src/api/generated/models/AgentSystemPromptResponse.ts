@@ -7,10 +7,10 @@
  */
 export type AgentSystemPromptResponse = {
     base: string;
-    effective: string;
-    planMode?: boolean;
-    sessionOverride?: (string | null);
-    skillInstructions?: string;
     workspaceInstructions?: string;
+    skillInstructions?: string;
+    sessionOverride?: (string | null);
+    planMode?: boolean;
+    effective: string;
 };
 

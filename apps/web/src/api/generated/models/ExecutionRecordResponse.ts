@@ -10,10 +10,18 @@
  * timeline.
  */
 export type ExecutionRecordResponse = {
-    executionId: string;
-    finishedAt?: (string | null);
-    schedulerJobId?: (string | null);
-    startedAt: string;
+    id: string;
+    runId: string;
+    mode: string;
     status: string;
+    createdAt: string;
+    startedAt?: (string | null);
+    finishedAt?: (string | null);
+    basedOnExecutionId?: (string | null);
+    checkpointArtifactId?: (string | null);
+    executor?: Record<string, any>;
+    environment?: Record<string, any>;
+    artifactIds?: Array<string>;
+    error?: (Record<string, any> | null);
 };
 

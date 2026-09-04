@@ -1,12 +1,15 @@
+import type { ArtifactPromoteRequest } from "@/api/generated/models/ArtifactPromoteRequest";
+import type { ExecutionAttemptCreateRequest } from "@/api/generated/models/ExecutionAttemptCreateRequest";
 import type { RunCreateRequest } from "@/api/generated/models/RunCreateRequest";
 import type { RunFilesResponse } from "@/api/generated/models/RunFilesResponse";
 import type { RunMetricsResponse as GeneratedRunMetricsResponse } from "@/api/generated/models/RunMetricsResponse";
 import { RunsService } from "@/api/generated/services/RunsService";
 
+export type { ArtifactResponse } from "@/api/generated/models/ArtifactResponse";
+export type { ExecutionOutputsResponse } from "@/api/generated/models/ExecutionOutputsResponse";
+export type { ExecutionRecordResponse } from "@/api/generated/models/ExecutionRecordResponse";
 export type { LammpsLogResponse } from "@/api/generated/models/LammpsLogResponse";
 export type { LammpsThermoStage } from "@/api/generated/models/LammpsThermoStage";
-export type { RunActionResponse } from "@/api/generated/models/RunActionResponse";
-export type { RunContinueResponse } from "@/api/generated/models/RunContinueResponse";
 export type { RunFilesResponse } from "@/api/generated/models/RunFilesResponse";
 export type { RunFileTextResponse } from "@/api/generated/models/RunFileTextResponse";
 
@@ -63,8 +66,36 @@ export const runsApi = {
     RunsService.createScopedRun(projectId, experimentId, data),
   getRun: (projectId: string, experimentId: string, runId: string) =>
     RunsService.getRun(projectId, experimentId, runId),
-  getRunLogs: (projectId: string, experimentId: string, runId: string) =>
-    RunsService.getRunLogs(projectId, experimentId, runId),
+  createExecution: (
+    projectId: string,
+    experimentId: string,
+    runId: string,
+    data: ExecutionAttemptCreateRequest,
+  ) => RunsService.createExecution(projectId, experimentId, runId, data),
+  getExecution: (projectId: string, experimentId: string, runId: string, executionId: string) =>
+    RunsService.getExecutionRecord(projectId, experimentId, runId, executionId),
+  getExecutionOutputs: (
+    projectId: string,
+    experimentId: string,
+    runId: string,
+    executionId: string,
+  ) => RunsService.getExecutionOutputs(projectId, experimentId, runId, executionId),
+  promoteArtifact: (
+    projectId: string,
+    experimentId: string,
+    runId: string,
+    executionId: string,
+    artifactId: string,
+    data: ArtifactPromoteRequest,
+  ) =>
+    RunsService.promoteArtifact(
+      projectId,
+      experimentId,
+      runId,
+      executionId,
+      artifactId,
+      data,
+    ),
   getRunExecutionLogs: (
     projectId: string,
     experimentId: string,
@@ -75,22 +106,34 @@ export const runsApi = {
     projectId: string,
     experimentId: string,
     runId: string,
-    executionId?: string | null,
+    executionId: string,
   ) => RunsService.getRunExecution(projectId, experimentId, runId, executionId),
-  getRunLammpsLog: (projectId: string, experimentId: string, runId: string, path: string) =>
-    RunsService.getRunLammpsLog(projectId, experimentId, runId, path),
-  getRunFileText: (projectId: string, experimentId: string, runId: string, path: string) =>
-    RunsService.getRunFileText(projectId, experimentId, runId, path),
+  getRunLammpsLog: (
+    projectId: string,
+    experimentId: string,
+    runId: string,
+    executionId: string,
+    path: string,
+  ) => RunsService.getRunLammpsLog(projectId, experimentId, runId, executionId, path),
+  getRunFileText: (
+    projectId: string,
+    experimentId: string,
+    runId: string,
+    executionId: string,
+    path: string,
+  ) => RunsService.getRunFileText(projectId, experimentId, runId, executionId, path),
   getRunMetrics: async (
     projectId: string,
     experimentId: string,
     runId: string,
+    executionId: string,
     query: RunMetricsQuery = {},
   ): Promise<RunMetricsResponse> => {
     const raw = await RunsService.getRunMetrics(
       projectId,
       experimentId,
       runId,
+      executionId,
       query.type,
       query.key,
       query.sinceLine,
@@ -98,36 +141,19 @@ export const runsApi = {
     );
     return mapMetrics(raw);
   },
-  updateRunStatus: async (
-    projectId: string,
-    experimentId: string,
-    runId: string,
-    status: string,
-  ): Promise<void> => {
-    await RunsService.updateRunStatus(projectId, experimentId, runId, { status });
-  },
   getRunFiles: (
     projectId: string,
     experimentId: string,
     runId: string,
-  ): Promise<RunFilesResponse> => RunsService.getRunFiles(projectId, experimentId, runId),
-  cancelRun: (projectId: string, experimentId: string, runId: string) =>
-    RunsService.cancelRun(projectId, experimentId, runId),
-  resumeRun: (projectId: string, experimentId: string, runId: string) =>
-    RunsService.resumeRun(projectId, experimentId, runId),
-  rerunRun: (projectId: string, experimentId: string, runId: string, fresh = false) =>
-    RunsService.rerunRun(projectId, experimentId, runId, fresh),
-  startRun: (
+    executionId: string,
+  ): Promise<RunFilesResponse> =>
+    RunsService.getRunFiles(projectId, experimentId, runId, executionId),
+  cancelExecution: (
     projectId: string,
     experimentId: string,
     runId: string,
-    target: string,
-    params?: Record<string, unknown>,
-  ) =>
-    RunsService.startRun(projectId, experimentId, runId, {
-      target,
-      params: params ?? null,
-    }),
+    executionId: string,
+  ) => RunsService.cancelExecution(projectId, experimentId, runId, executionId),
   exportUrl: (projectId: string, experimentId: string, runId: string): string =>
     `/api/projects/${encodeURIComponent(projectId)}/experiments/${encodeURIComponent(experimentId)}/runs/${encodeURIComponent(runId)}/export`,
 };

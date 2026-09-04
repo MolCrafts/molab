@@ -4,13 +4,12 @@
 /* eslint-disable */
 import type { ComparisonRunRow } from './ComparisonRunRow';
 /**
- * Comparison matrix: parameter columns x run rows + metric columns.
+ * Comparison matrix of scientific Run definitions only.
  */
 export type ExperimentComparisonResponse = {
     experimentId: string;
-    metricKeys?: Array<string>;
-    paramKeys?: Array<string>;
     projectId: string;
+    paramKeys?: Array<string>;
     runs?: Array<ComparisonRunRow>;
 };
 

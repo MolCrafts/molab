@@ -1,9 +1,7 @@
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, FileText } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
-import { assetsApi } from "@/api";
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp } from "lucide-react";
+import { useMemo } from "react";
 import { useInspectedTask } from "@/app/state/inspectedTask";
-import { useNavigationState } from "@/app/state/useNavigationState";
-import type { ApiAssetResponse, ScopedRendererProps, TaskSelection } from "@/app/types";
+import type { ScopedRendererProps, TaskSelection } from "@/app/types";
 import { Code as InlineCode } from "@/components/ui/code";
 import { WorkbenchIconAction, WorkbenchTag } from "@/components/workbench";
 
@@ -14,9 +12,6 @@ import { WorkbenchIconAction, WorkbenchTag } from "@/components/workbench";
  * identity, its place in the DAG (upstream → this → downstream, each clickable
  * to re-pin the inspector), and the run assets it produced.
  */
-const taskProducerId = (asset: ApiAssetResponse): string | undefined =>
-  (asset.producer as Record<string, unknown> | null | undefined)?.task_id as string | undefined;
-
 const formatConfigValue = (value: unknown): string => {
   if (value === null || value === undefined) return "—";
   if (Array.isArray(value)) return value.join(", ");
@@ -43,32 +38,11 @@ export const TaskViewer = ({
   selection,
   snapshot,
 }: ScopedRendererProps<"runs" | "workflows" | "experiments">): JSX.Element | null => {
-  const { setSelection } = useNavigationState(snapshot);
   const { inspectTask, clearInspectedTask } = useInspectedTask();
-  const [assets, setAssets] = useState<ApiAssetResponse[]>([]);
 
   const task = selection.objectType === "task" ? (selection as TaskSelection) : null;
   const runId = task?.runId ?? "";
   const taskId = task?.taskId ?? "";
-
-  useEffect(() => {
-    let cancelled = false;
-    if (!runId) {
-      setAssets([]);
-      return;
-    }
-    assetsApi
-      .listRunAssets(runId)
-      .then((items) => {
-        if (!cancelled) setAssets(items);
-      })
-      .catch(() => {
-        if (!cancelled) setAssets([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [runId]);
 
   const run = useMemo(() => snapshot.runs.find((r) => r.id === runId), [snapshot.runs, runId]);
   const workflow = useMemo(() => {
@@ -83,10 +57,6 @@ export const TaskViewer = ({
   const links = workflow?.graph?.links ?? [];
   const upstream = links.filter((e) => e.to === taskId).map((e) => e.from);
   const downstream = links.filter((e) => e.from === taskId).map((e) => e.to);
-  const products = useMemo(
-    () => assets.filter((a) => taskProducerId(a) === taskId),
-    [assets, taskId],
-  );
 
   if (!task) return null;
 
@@ -186,36 +156,6 @@ export const TaskViewer = ({
           </div>
         </Section>
 
-        <Section title={`Products (${products.length})`}>
-          {products.length === 0 ? (
-            <p className="text-label italic text-muted-foreground">No assets published.</p>
-          ) : (
-            <div className="space-y-2">
-              {products.map((asset) => (
-                <div
-                  key={asset.id}
-                  className="flex w-full items-start gap-2 border-b border-border/60 py-2"
-                >
-                  <FileText className="mt-1 h-4 w-4 flex-none text-muted-foreground" />
-                  <div className="min-w-0 flex-1">
-                    <div className="truncate text-label font-medium text-foreground">
-                      {asset.name}
-                    </div>
-                    <div className="truncate font-mono text-micro text-muted-foreground">
-                      {asset.path}
-                    </div>
-                  </div>
-                  <WorkbenchIconAction
-                    label={`Open asset ${asset.name}`}
-                    onClick={() => setSelection({ objectType: "asset", objectId: asset.id })}
-                  >
-                    <ArrowRight className="h-3.5 w-3.5" />
-                  </WorkbenchIconAction>
-                </div>
-              ))}
-            </div>
-          )}
-        </Section>
       </div>
     </div>
   );

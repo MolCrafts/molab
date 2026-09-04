@@ -18,9 +18,17 @@ it stays in ``molexp.workspace.utils``.
 from __future__ import annotations
 
 import hashlib
+import json
 import re
+import secrets
+import threading
+import time
 from pathlib import Path
-from uuid import uuid4
+from uuid import UUID, uuid4
+
+_UUID7_LOCK = threading.Lock()
+_UUID7_LAST_MS = -1
+_UUID7_RANDOM = 0
 
 
 def slugify(text: str, max_len: int = 50) -> str:
@@ -66,6 +74,43 @@ def generate_asset_id() -> str:
     return str(uuid4())
 
 
+def generate_uuid7() -> str:
+    """Generate a time-ordered RFC 9562 UUIDv7 string.
+
+    Python 3.12 is Molexp's supported floor and does not expose
+    :func:`uuid.uuid7`, so the small generator lives here instead of adding a
+    runtime dependency. Calls within one millisecond increment the 74-bit
+    random field, which preserves ordering and prevents same-process
+    collisions; different processes retain 74 bits of randomness.
+    """
+    global _UUID7_LAST_MS, _UUID7_RANDOM
+
+    with _UUID7_LOCK:
+        now_ms = int(time.time_ns() // 1_000_000)
+        if now_ms > _UUID7_LAST_MS:
+            _UUID7_LAST_MS = now_ms
+            _UUID7_RANDOM = secrets.randbits(74)
+        else:
+            now_ms = _UUID7_LAST_MS
+            _UUID7_RANDOM = (_UUID7_RANDOM + 1) & ((1 << 74) - 1)
+
+        rand_a = _UUID7_RANDOM >> 62
+        rand_b = _UUID7_RANDOM & ((1 << 62) - 1)
+        value = (now_ms & ((1 << 48) - 1)) << 80 | 0x7 << 76 | rand_a << 64 | 0b10 << 62 | rand_b
+    return str(UUID(int=value))
+
+
+def compute_definition_hash(value: object) -> str:
+    """Hash canonical JSON separately from an entity's UUID identity."""
+    encoded = json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    return f"sha256:{hashlib.sha256(encoded).hexdigest()}"
+
+
 def compute_content_hash(path: Path, algorithm: str = "sha256") -> str:
     """Compute hash of a file's bytes or a directory tree.
 
@@ -102,7 +147,9 @@ def compute_content_hash(path: Path, algorithm: str = "sha256") -> str:
 
 __all__ = [
     "compute_content_hash",
+    "compute_definition_hash",
     "generate_asset_id",
     "generate_id",
+    "generate_uuid7",
     "slugify",
 ]

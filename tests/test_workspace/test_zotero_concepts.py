@@ -126,10 +126,10 @@ class TestBundleImportZotero:
 
         refs = b.import_zotero(db, now=FIXED)
         assert all(isinstance(r, ReferenceConcept) for r in refs)
-        by_key = {r.read_ref_meta().source_key: r for r in b.references()}
+        by_key = {r.read_reference_meta().source_key: r for r in b.references()}
         assert set(by_key) == {"AAAA", "BBBB"}
 
-        a_meta = by_key["AAAA"].read_ref_meta()
+        a_meta = by_key["AAAA"].read_reference_meta()
         assert a_meta.source == "zotero"
         assert a_meta.title == "Deep Learning"
         assert a_meta.pdf_path is not None

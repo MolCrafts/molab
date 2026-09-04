@@ -20,13 +20,17 @@ from molexp.plugins.metrics import (
 
 
 def _exec_dir(run) -> Path:
-    eid = run.current_execution_id
-    assert eid is not None
-    return Path(run.run_dir) / "executions" / eid
+    executions = run.executions
+    assert executions
+    return Path(run.run_dir) / "executions" / executions[-1].id
 
 
 def _artifacts_wal(root: Path) -> Path:
     return root / "artifacts" / "metrics.mlp.jsonl"
+
+
+def _work_wal(root: Path) -> Path:
+    return root / "work" / "metrics.mlp.jsonl"
 
 
 def _assert_no_zarr_or_index(root: Path) -> None:
@@ -42,7 +46,7 @@ class TestMetricsWriter:
             ctx.metrics.scalar("train/loss", 0.25, step=1)
 
         root = _exec_dir(run)
-        metrics_file = _artifacts_wal(root)
+        metrics_file = _work_wal(root)
 
         assert metrics_file.is_file()
         assert not (root / "metrics.mlp.jsonl").exists()
@@ -138,13 +142,6 @@ class TestLogMany:
         writer.log_many([{"t": "scalar", "k": "a", "v": 1.0}], tags={"src": "bulk"})
         record = json.loads(_artifacts_wal(tmp_path).read_text().strip())
         assert record["tags"] == {"src": "bulk"}
-
-    def test_an_empty_stream_creates_nothing(self, tmp_path: Path) -> None:
-        writer = MetricsWriter(tmp_path)
-        assert writer.log_many(iter(())) == 0
-        assert not (tmp_path / "metrics.mlp.jsonl").exists()
-        assert not _artifacts_wal(tmp_path).exists()
-        _assert_no_zarr_or_index(tmp_path)
 
     def test_a_stream_that_raises_first_creates_nothing(self, tmp_path: Path) -> None:
         """No empty buffer left behind — callers treat its presence as truth."""

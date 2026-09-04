@@ -116,8 +116,8 @@ describe("molq entity tab gate", () => {
   it("listEntityTabs filters by matches so Molq only appears for molq backends", () => {
     const isMolq = (
       runId: string,
-      runs: Array<{ id: string; executorInfo: Record<string, string> }>,
-    ) => runs.find((r) => r.id === runId)?.executorInfo.backend === "molq";
+      runs: Array<{ id: string; executionHistory: Array<{ executor: Record<string, unknown> }> }>,
+    ) => runs.find((r) => r.id === runId)?.executionHistory.some((e) => e.executor.backend === "molq") ?? false;
 
     registerEntityTabContribution({
       id: "molq:run-tab",
@@ -135,15 +135,14 @@ describe("molq entity tab gate", () => {
       updatedAt: "",
       projectId: "p",
       experimentId: "e",
-      profile: null,
-      configHash: null,
+      definitionHash: "def-r",
+      experimentRevisionId: "rev-e",
+      statusSummary: { total: 1, active: 0, notStarted: false, byStatus: { succeeded: 1 } },
       parameters: {},
-      results: {},
       workflowSource: null,
       workflowSnapshot: null,
       startedAt: null,
       finishedAt: null,
-      executionHistory: [],
       errorMessage: null,
     };
 
@@ -153,7 +152,12 @@ describe("molq entity tab gate", () => {
         workspaces: [],
         projects: [],
         experiments: [],
-        runs: [{ ...baseRun, id: "r1", name: "r1", executorInfo: { backend: "molq" } }],
+        runs: [{ ...baseRun, id: "r1", name: "r1", executionHistory: [{
+          executionId: "x1", mode: "initial", createdAt: "", startedAt: null,
+          finishedAt: null, status: "succeeded", basedOnExecutionId: null,
+          checkpointArtifactId: null, executor: { backend: "molq" }, environment: {},
+          artifactIds: [], error: null,
+        }] }],
         assets: [],
         workflows: [],
         agentSessions: [],
@@ -168,7 +172,12 @@ describe("molq entity tab gate", () => {
         workspaces: [],
         projects: [],
         experiments: [],
-        runs: [{ ...baseRun, id: "r2", name: "r2", executorInfo: { backend: "local" } }],
+        runs: [{ ...baseRun, id: "r2", name: "r2", executionHistory: [{
+          executionId: "x2", mode: "initial", createdAt: "", startedAt: null,
+          finishedAt: null, status: "succeeded", basedOnExecutionId: null,
+          checkpointArtifactId: null, executor: { backend: "local" }, environment: {},
+          artifactIds: [], error: null,
+        }] }],
         assets: [],
         workflows: [],
         agentSessions: [],

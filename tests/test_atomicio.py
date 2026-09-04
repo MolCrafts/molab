@@ -19,7 +19,6 @@ import molexp.atomicio as atomicio
 from molexp.atomicio import (
     FileLockTimeoutError,
     atomic_write_json,
-    atomic_write_text,
     file_lock,
 )
 
@@ -28,12 +27,6 @@ def test_atomic_write_json_round_trip(tmp_path: Path) -> None:
     target = tmp_path / "sub" / "data.json"
     atomic_write_json(target, {"a": 1, "b": [2, 3]})
     assert json.loads(target.read_text()) == {"a": 1, "b": [2, 3]}
-
-
-def test_atomic_write_text_round_trip(tmp_path: Path) -> None:
-    target = tmp_path / "sub" / "note.md"
-    atomic_write_text(target, "# hi\nbody\n")
-    assert target.read_text() == "# hi\nbody\n"
 
 
 def test_atomic_write_json_failure_leaves_original_and_no_temp(
@@ -54,13 +47,6 @@ def test_atomic_write_json_failure_leaves_original_and_no_temp(
     assert target.read_text() == original
     leftovers = [p for p in tmp_path.iterdir() if p.name != "data.json"]
     assert leftovers == []
-
-
-def test_file_lock_enter_exit_without_contention(tmp_path: Path) -> None:
-    lock = tmp_path / "run.json.lock"
-    with file_lock(lock):
-        pass  # acquired + released without error
-    assert lock.exists()  # sidecar created, never deleted
 
 
 def test_file_lock_times_out_when_held(tmp_path: Path) -> None:

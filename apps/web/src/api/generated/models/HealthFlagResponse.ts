@@ -3,8 +3,8 @@
 /* tslint:disable */
 /* eslint-disable */
 export type HealthFlagResponse = {
-    detail: string;
     kind: string;
     ref: string;
+    detail: string;
 };
 

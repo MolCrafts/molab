@@ -10,7 +10,7 @@
  * field. A request with both ``None`` is a no-op that returns the current summary.
  */
 export type DocMetaUpdate = {
-    status?: (string | null);
     tags?: (Array<string> | null);
+    status?: (string | null);
 };
 

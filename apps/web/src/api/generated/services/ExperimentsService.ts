@@ -65,34 +65,6 @@ export class ExperimentsService {
         });
     }
     /**
-     * Delete Experiment
-     * @param projectId
-     * @param experimentId
-     * @param molexpSession
-     * @returns MessageResponse Successful Response
-     * @throws ApiError
-     */
-    public static deleteExperiment(
-        projectId: string,
-        experimentId: string,
-        molexpSession?: (string | null),
-    ): CancelablePromise<MessageResponse> {
-        return __request(OpenAPI, {
-            method: 'DELETE',
-            url: '/api/projects/{project_id}/experiments/{experiment_id}',
-            path: {
-                'project_id': projectId,
-                'experiment_id': experimentId,
-            },
-            cookies: {
-                'molexp_session': molexpSession,
-            },
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
      * Get Experiment
      * @param projectId
      * @param experimentId
@@ -121,8 +93,39 @@ export class ExperimentsService {
         });
     }
     /**
+     * Delete Experiment
+     * @param projectId
+     * @param experimentId
+     * @param molexpSession
+     * @returns MessageResponse Successful Response
+     * @throws ApiError
+     */
+    public static deleteExperiment(
+        projectId: string,
+        experimentId: string,
+        molexpSession?: (string | null),
+    ): CancelablePromise<MessageResponse> {
+        return __request(OpenAPI, {
+            method: 'DELETE',
+            url: '/api/projects/{project_id}/experiments/{experiment_id}',
+            path: {
+                'project_id': projectId,
+                'experiment_id': experimentId,
+            },
+            cookies: {
+                'molexp_session': molexpSession,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
      * Get Experiment Comparison
-     * Comparison matrix: parameter columns x run rows + final metric values per run.
+     * Compare immutable logical Run definitions.
+     *
+     * Execution outcomes are intentionally absent: callers must select explicit
+     * Execution identities before comparing observed metrics or results.
      * @param projectId
      * @param experimentId
      * @param molexpSession
@@ -210,37 +213,6 @@ export class ExperimentsService {
         });
     }
     /**
-     * Delete Experiment
-     * @param projectId
-     * @param experimentId
-     * @param ws
-     * @param molexpSession
-     * @returns MessageResponse Successful Response
-     * @throws ApiError
-     */
-    public static deleteExperimentWs(
-        projectId: string,
-        experimentId: string,
-        ws: string,
-        molexpSession?: (string | null),
-    ): CancelablePromise<MessageResponse> {
-        return __request(OpenAPI, {
-            method: 'DELETE',
-            url: '/api/workspaces/{ws}/projects/{project_id}/experiments/{experiment_id}',
-            path: {
-                'project_id': projectId,
-                'experiment_id': experimentId,
-                'ws': ws,
-            },
-            cookies: {
-                'molexp_session': molexpSession,
-            },
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
      * Get Experiment
      * @param projectId
      * @param experimentId
@@ -272,8 +244,42 @@ export class ExperimentsService {
         });
     }
     /**
+     * Delete Experiment
+     * @param projectId
+     * @param experimentId
+     * @param ws
+     * @param molexpSession
+     * @returns MessageResponse Successful Response
+     * @throws ApiError
+     */
+    public static deleteExperimentWs(
+        projectId: string,
+        experimentId: string,
+        ws: string,
+        molexpSession?: (string | null),
+    ): CancelablePromise<MessageResponse> {
+        return __request(OpenAPI, {
+            method: 'DELETE',
+            url: '/api/workspaces/{ws}/projects/{project_id}/experiments/{experiment_id}',
+            path: {
+                'project_id': projectId,
+                'experiment_id': experimentId,
+                'ws': ws,
+            },
+            cookies: {
+                'molexp_session': molexpSession,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
      * Get Experiment Comparison
-     * Comparison matrix: parameter columns x run rows + final metric values per run.
+     * Compare immutable logical Run definitions.
+     *
+     * Execution outcomes are intentionally absent: callers must select explicit
+     * Execution identities before comparing observed metrics or results.
      * @param projectId
      * @param experimentId
      * @param ws

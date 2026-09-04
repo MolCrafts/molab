@@ -60,22 +60,8 @@ def list_tree_children(
         return node[len(prefix) :]
 
     def build(node_path: str, depth: int, *, visited: set[str]) -> FsTreeNode:
-        try:
-            real = fs.resolve(node_path)
-        except OSError:
-            real = node_path
         name = fs.basename(node_path) or node_path
         rel = _rel(node_path)
-
-        if real in visited:
-            return FsTreeNode(
-                name=name,
-                rel_path=rel,
-                abs_path=node_path,
-                type="folder",
-                children=[],
-            )
-        visited.add(real)
 
         try:
             st = fs.stat(node_path)
@@ -102,6 +88,16 @@ def list_tree_children(
         )
         if is_file or depth >= max_depth:
             return node
+
+        try:
+            real = fs.resolve(node_path)
+        except OSError:
+            real = node_path
+        # Dedup symlink cycles / repeated directories without misclassifying
+        # an already-visited node: its type and size come from the stat above.
+        if real in visited:
+            return node
+        visited.add(real)
 
         try:
             names = fs.listdir(node_path)

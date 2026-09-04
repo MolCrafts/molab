@@ -3,6 +3,12 @@ import { type JSX, type ReactNode, useMemo } from "react";
 import { Link } from "react-router-dom";
 
 import { runPath } from "@/app/entities/paths";
+import {
+  runActivityAt,
+  runExecutorFacet,
+  runFinishedAt,
+  runPresentationStatus,
+} from "@/app/runs/projections";
 import { groupForStatus, STATUS_GROUPS } from "@/app/runs/statusGroups";
 import type { WorkspaceRunRow } from "@/app/runs/types";
 import { useWorkspaceRuns } from "@/app/runs/useWorkspaceRuns";
@@ -33,19 +39,19 @@ const startedAt = (run: WorkspaceRunRow): number => {
 };
 
 const activityAt = (run: WorkspaceRunRow): number => {
-  const finished = timestamp(run.finishedAt);
-  return Number.isFinite(finished) ? finished : timestamp(run.createdAt);
+  return timestamp(runActivityAt(run));
 };
 
 const averageWaitSeconds = (rows: WorkspaceRunRow[]): number | null => {
-  const waits = rows
-    .map((run) => {
-      const created = timestamp(run.createdAt);
-      const started = startedAt(run);
+  const waits = rows.flatMap((run) =>
+    run.executions.map((execution) => {
+      const created = timestamp(execution.createdAt);
+      const started = timestamp(execution.startedAt);
       return Number.isFinite(created) && Number.isFinite(started) && started >= created
         ? (started - created) / 1000
         : null;
-    })
+    }),
+  )
     .filter((value): value is number => value !== null);
   return waits.length > 0 ? waits.reduce((sum, value) => sum + value, 0) / waits.length : null;
 };
@@ -74,8 +80,10 @@ const Summary = ({ rows }: { rows: WorkspaceRunRow[] }): JSX.Element => {
   const counts = useMemo(() => {
     const next = { running: 0, pending: 0, failed: 0, succeeded: 0 };
     for (const run of rows) {
-      const group = groupForStatus(run.status);
-      if (group && group !== "cancelled") next[group] += 1;
+      for (const execution of run.executions) {
+        const group = groupForStatus(execution.status);
+        if (group && group !== "cancelled") next[group] += 1;
+      }
     }
     return next;
   }, [rows]);
@@ -96,7 +104,7 @@ const Summary = ({ rows }: { rows: WorkspaceRunRow[] }): JSX.Element => {
       <header className="flex h-9 items-center justify-between px-3">
         <div>
           <h2 id="dashboard-summary" className="text-label font-medium text-foreground">
-            Run summary
+            Execution summary
           </h2>
           <p className="text-micro text-muted-foreground">Current workspace</p>
         </div>
@@ -122,8 +130,9 @@ const Summary = ({ rows }: { rows: WorkspaceRunRow[] }): JSX.Element => {
 const StatusMix = ({ rows }: { rows: WorkspaceRunRow[] }): JSX.Element => (
   <div className="space-y-2">
     {STATUS_GROUPS.map((spec) => {
-      const count = rows.filter((run) => groupForStatus(run.status) === spec.id).length;
-      const ratio = rows.length > 0 ? count / rows.length : 0;
+      const executions = rows.flatMap((run) => run.executions);
+      const count = executions.filter((execution) => groupForStatus(execution.status) === spec.id).length;
+      const ratio = executions.length > 0 ? count / executions.length : 0;
       return (
         <div
           key={spec.id}
@@ -199,12 +208,16 @@ const BackendsAndFailures = ({ rows }: { rows: WorkspaceRunRow[] }): JSX.Element
   const backends = useMemo(() => {
     const counts = new Map<string, number>();
     for (const run of rows) {
-      const name = run.backend ?? "Unassigned";
-      counts.set(name, (counts.get(name) ?? 0) + 1);
+      for (const backend of runExecutorFacet(run, "backend")) {
+        counts.set(backend, (counts.get(backend) ?? 0) + 1);
+      }
     }
+    if (counts.size === 0) counts.set("Unassigned", 0);
     return [...counts.entries()].sort((left, right) => right[1] - left[1]).slice(0, 4);
   }, [rows]);
-  const failures = rows.filter((run) => groupForStatus(run.status) === "failed").slice(0, 3);
+  const failures = rows
+    .filter((run) => groupForStatus(runPresentationStatus(run)) === "failed")
+    .slice(0, 3);
   const maxBackend = Math.max(1, ...backends.map(([, count]) => count));
 
   return (
@@ -256,7 +269,7 @@ const RecentActivity = ({ rows }: { rows: WorkspaceRunRow[] }): JSX.Element => {
   return (
     <ol className="divide-y divide-border/60">
       {recent.map((run) => {
-        const group = groupForStatus(run.status);
+        const group = groupForStatus(runPresentationStatus(run));
         return (
           <li key={run.id}>
             <Link
@@ -277,7 +290,7 @@ const RecentActivity = ({ rows }: { rows: WorkspaceRunRow[] }): JSX.Element => {
                 {run.name || run.id}
               </span>
               <span className="shrink-0 text-micro text-muted-foreground">
-                {formatRelative(run.finishedAt ?? run.createdAt)}
+                {formatRelative(runActivityAt(run))}
               </span>
             </Link>
           </li>
@@ -292,7 +305,7 @@ const Timeline = ({ rows }: { rows: WorkspaceRunRow[] }): JSX.Element => {
   const starts = visible.map(startedAt).filter(Number.isFinite);
   const ends = visible
     .map((run) => {
-      const finished = timestamp(run.finishedAt);
+      const finished = timestamp(runFinishedAt(run));
       return Number.isFinite(finished) ? finished : Date.now();
     })
     .filter(Number.isFinite);
@@ -304,13 +317,13 @@ const Timeline = ({ rows }: { rows: WorkspaceRunRow[] }): JSX.Element => {
     <div className="divide-y divide-border/60 border-y border-border/70">
       {visible.map((run) => {
         const start = startedAt(run);
-        const finished = timestamp(run.finishedAt);
+        const finished = timestamp(runFinishedAt(run));
         const end = Number.isFinite(finished) ? finished : Date.now();
         const left = Number.isFinite(start) ? ((start - min) / span) * 100 : 0;
         const width = Number.isFinite(start)
           ? Math.max(1.5, ((Math.max(start, end) - start) / span) * 100)
           : 1.5;
-        const group = groupForStatus(run.status);
+        const group = groupForStatus(runPresentationStatus(run));
         return (
           <Link
             key={run.id}

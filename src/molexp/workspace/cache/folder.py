@@ -108,7 +108,7 @@ class _CacheFolderAdapter:
 
     @property
     def store_dir(self) -> Path:
-        return self._folder.path
+        return Path(str(self._folder.path))
 
     def read(self, key: str) -> str | None:
         return self._folder.read_entry(key)

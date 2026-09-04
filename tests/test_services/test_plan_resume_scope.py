@@ -35,10 +35,8 @@ from molexp.harness.schemas import ApprovalRequest, ReviewDecision
 from molexp.services.plan_runtime import resume_scope
 from molexp.services.plan_runtime.decide import decide_plan_review
 from molexp.services.plan_runtime.resume_scope import (
-    ResumeDriver,
     propose_plan_patch,
     reset_resume_driver_factory,
-    resolve_resume_scope,
     set_resume_driver_factory,
 )
 from molexp.services.plan_runtime.task import PlanTask
@@ -127,18 +125,7 @@ def _review(
     )
 
 
-class TestResolveResumeScope:
-    def test_returns_approval_gate_scope(self) -> None:
-        assert resolve_resume_scope(_gate_request()) == "approval_gate"
-
-    def test_returns_intervention_scope(self) -> None:
-        assert resolve_resume_scope(_intervention_request()) == "intervention_request"
-
-
 class TestResumeDriverSeam:
-    def test_fake_driver_satisfies_runtime_protocol(self) -> None:
-        assert isinstance(FakeResumeDriver(), ResumeDriver)
-
     @pytest.mark.asyncio
     async def test_resume_intervention_routes_to_subagent(self, tmp_path: Path) -> None:
         experiment, run = _run(tmp_path)

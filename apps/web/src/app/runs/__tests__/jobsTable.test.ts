@@ -17,38 +17,52 @@ import type { WorkspaceExecutionRow, WorkspaceRunRow } from "../types";
 const exec = (over: Partial<WorkspaceExecutionRow> = {}): WorkspaceExecutionRow => ({
   executionId: "exec-1",
   runId: "r1",
+  mode: "initial",
   status: "succeeded",
+  createdAt: "2026-01-01T00:00:00Z",
   startedAt: "2026-01-01T00:00:00Z",
   finishedAt: "2026-01-01T00:01:00Z",
   durationSeconds: 60,
   schedulerJobId: null,
   backend: "local",
-  metadata: {},
+  basedOnExecutionId: null,
+  checkpointArtifactId: null,
   backendMetadata: {},
   ...over,
 });
 
-const baseRun = (overrides: Partial<WorkspaceRunRow> = {}): WorkspaceRunRow => ({
-  id: "r1",
-  name: "run-a",
-  projectId: "p1",
-  projectName: "Project",
-  experimentId: "e1",
-  experimentName: "Exp",
-  status: "succeeded",
-  backend: "local",
-  cluster: null,
-  scheduler: null,
-  target: null,
-  profile: null,
-  parameters: {},
-  createdAt: "2026-01-01T00:00:00Z",
-  finishedAt: "2026-01-01T00:01:00Z",
-  executionCount: 1,
-  latestSchedulerJobId: null,
-  executions: [exec()],
-  ...overrides,
-});
+type RunFixtureOverrides = Partial<Omit<WorkspaceRunRow, "executions" | "statusSummary">> & {
+  status?: string;
+  executions?: WorkspaceExecutionRow[];
+};
+
+const baseRun = (overrides: RunFixtureOverrides = {}): WorkspaceRunRow => {
+  const status = overrides.status ?? "succeeded";
+  const executions = overrides.executions ?? [exec({ status })];
+  const { status: _status, ...rowOverrides } = overrides;
+  return {
+    id: "r1",
+    name: "run-a",
+    projectId: "p1",
+    projectName: "Project",
+    experimentId: "e1",
+    experimentName: "Exp",
+    definitionHash: "sha256:definition",
+    experimentRevisionId: "revision-1",
+    inputAssetIds: [],
+    targetHint: null,
+    statusSummary: {
+      total: executions.length,
+      active: executions.filter((execution) => ["queued", "running", "finalizing"].includes(execution.status)).length,
+      notStarted: executions.length === 0,
+      byStatus: { [status]: executions.length },
+    },
+    parameters: {},
+    createdAt: "2026-01-01T00:00:00Z",
+    executions,
+    ...rowOverrides,
+  };
+};
 
 describe("computeRunDurationSeconds", () => {
   it("returns null when no execution has startedAt", () => {
@@ -58,10 +72,14 @@ describe("computeRunDurationSeconds", () => {
     expect(computeRunDurationSeconds(run)).toBeNull();
   });
 
-  it("uses earliest start and finishedAt", () => {
+  it("uses earliest start and the latest Execution finish", () => {
     const run = baseRun({
-      finishedAt: "2026-01-01T00:02:00Z",
-      executions: [exec({ startedAt: "2026-01-01T00:00:00Z" })],
+      executions: [
+        exec({
+          startedAt: "2026-01-01T00:00:00Z",
+          finishedAt: "2026-01-01T00:02:00Z",
+        }),
+      ],
     });
     expect(computeRunDurationSeconds(run)).toBe(120);
   });

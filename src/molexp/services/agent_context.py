@@ -135,7 +135,7 @@ def _resolve_and_render(
         focus=ContextFocus(project_id=project_id, experiment_id=experiment_id, run_id=run_id),
     )
     if run is not None:
-        sections = _run_sections(run, experiment_id or "", project_id or "")
+        sections = _run_sections(run, context, experiment_id or "", project_id or "")
     elif experiment is not None:
         sections = _experiment_sections(context, experiment_id or "", project_id or "")
     else:
@@ -182,32 +182,55 @@ def _fit(sections: list[str], max_chars: int) -> str:
     return _SEP.join(out)
 
 
-def _run_sections(run: Run, experiment_id: str, project_id: str) -> list[str]:
+def _scalar_status(run: Run) -> str:
+    """Derive the single run-status label from the Execution aggregate."""
+    summary = run.status_summary
+    if summary.not_started:
+        return "pending"
+    if summary.active > 0:
+        return "running"
+    for status in ("failed", "cancelled", "interrupted", "succeeded"):
+        if summary.by_status.get(status):
+            return status
+    return "succeeded" if summary.total else "pending"
+
+
+def _last_error(run: Run) -> dict[str, object] | None:
+    """Return the error dict of the most recent failed Execution, if any."""
+    from molexp.workspace.domain import ExecutionStatus
+
+    for state in run.executions:
+        if state.status is ExecutionStatus.FAILED and state.error:
+            return dict(state.error)
+    return None
+
+
+def _run_sections(
+    run: Run, context: WorkspaceContext, experiment_id: str, project_id: str
+) -> list[str]:
     meta = run.metadata
+    status = _scalar_status(run)
     header = [
         f"# Mounted on run `{run.id}` ({project_id}/{experiment_id})",
-        f"- status: {run.status}",
+        f"- status: {status}",
         f"- params: {dict(meta.parameters) if meta.parameters else '{}'}",
     ]
-    if meta.config_hash:
-        header.append(f"- config_hash: {meta.config_hash}")
-    current = run.current_execution_id
-    if current:
-        header.append(f"- execution: {current}")
-    error = meta.error
+    if meta.definition_hash:
+        header.append(f"- definition_hash: {meta.definition_hash}")
+    executions = run.executions
+    if executions:
+        header.append(f"- executions: {len(executions)}")
     sections = ["\n".join(header)]
-    if run.status == "failed" and error is not None:
-        sections.append(f"## Error\n{error.type}: {error.message}")
+    error = _last_error(run)
+    if status == "failed" and error is not None:
+        error_type = error.get("type", "Error")
+        error_message = error.get("message", "")
+        sections.append(f"## Error\n{error_type}: {error_message}")
 
-    from molexp.workspace.assets import scan
-
-    root = run.experiment.project.workspace.root
-    artifacts = scan.scan_assets(root, producer_run=run.id, limit=_MAX_LIST_ROWS + 1)
+    artifacts = [a for a in context.artifacts if a.run_id == run.id]
     if artifacts:
         rows = [
-            # Base ``Asset`` deliberately declares no ``kind`` — concrete
-            # subclasses do (assets/base.py), hence the getattr.
-            f"- {a.asset_id} · {getattr(a, 'kind', 'asset')} · {a.name}"
+            f"- {a.asset_id} · {a.kind or 'artifact'} · {Path(a.path).name}"
             for a in artifacts[:_MAX_LIST_ROWS]
         ]
         if len(artifacts) > _MAX_LIST_ROWS:
@@ -220,19 +243,20 @@ def _experiment_sections(
     context: WorkspaceContext, experiment_id: str, project_id: str
 ) -> list[str]:
     exp_ref = next(
-        (e for e in context.experiments if e.id == experiment_id),
+        (e for e in context.experiments if e.id == experiment_id or e.name == experiment_id),
         None,
     )
+    exp_uuid = exp_ref.id if exp_ref is not None else experiment_id
     header = [f"# Mounted on experiment `{experiment_id}` ({project_id})"]
     if exp_ref is not None and exp_ref.parameter_space:
         header.append(f"- parameter space: {dict(exp_ref.parameter_space)}")
-    has_workflow = any(w.experiment_id == experiment_id for w in context.workflows)
+    has_workflow = any(w.experiment_id == exp_uuid for w in context.workflows)
     header.append(f"- workflow defined: {has_workflow}")
 
     runs = [
         r
         for r in (*context.recent_runs, *context.failed_runs, *context.running_runs)
-        if r.experiment_id == experiment_id
+        if r.experiment_id == exp_uuid
     ]
     counts: dict[str, int] = {}
     seen: set[str] = set()
@@ -258,7 +282,7 @@ def _workspace_sections(context: WorkspaceContext) -> list[str]:
     ]
     sections = ["\n".join(header)]
     if context.projects:
-        rows = [f"- {proj.id}" for proj in context.projects[:_MAX_LIST_ROWS]]
+        rows = [f"- {proj.name}" for proj in context.projects[:_MAX_LIST_ROWS]]
         if len(context.projects) > _MAX_LIST_ROWS:
             rows.append(f"- (+{len(context.projects) - _MAX_LIST_ROWS} more)")
         sections.append("## Projects\n" + "\n".join(rows))

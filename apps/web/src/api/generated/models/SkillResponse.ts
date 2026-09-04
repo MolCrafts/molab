@@ -6,22 +6,22 @@
  * A saved skill (goal template + tool scope + system addendum).
  */
 export type SkillResponse = {
-    allowedTools?: Array<string>;
-    builtin?: boolean;
-    constraints?: Array<string>;
-    createdAt?: string;
-    defaultPlanMode?: boolean;
-    deniedTools?: Array<string>;
+    id: string;
+    name: string;
     description?: string;
     goalTemplate: string;
-    id: string;
-    instructions?: string;
-    name: string;
-    requiresExitTool?: string;
-    scope?: string;
     slashName?: string;
+    instructions?: string;
+    defaultPlanMode?: boolean;
+    constraints?: Array<string>;
     successCriteria?: Array<string>;
     tags?: Array<string>;
+    allowedTools?: Array<string>;
+    deniedTools?: Array<string>;
+    requiresExitTool?: string;
+    builtin?: boolean;
+    scope?: string;
+    createdAt?: string;
     updatedAt?: string;
 };
 

@@ -3,28 +3,25 @@
 /* tslint:disable */
 /* eslint-disable */
 import type { JSONValue } from './JSONValue';
+import type { RunStatusSummaryResponse } from './RunStatusSummaryResponse';
 import type { WorkspaceExecutionRow } from './WorkspaceExecutionRow';
 /**
- * One run, with its execution history nested for tree expansion.
+ * Logical Run definition plus a derived summary of its Executions.
  */
 export type WorkspaceRunRow = {
-    backend?: (string | null);
-    cluster?: (string | null);
-    createdAt: string;
-    executionCount?: number;
-    executions?: Array<WorkspaceExecutionRow>;
-    experimentId: string;
-    experimentName: string;
-    finishedAt?: (string | null);
     id: string;
-    latestSchedulerJobId?: (string | null);
     name: string;
-    parameters?: Record<string, JSONValue>;
-    profile?: (string | null);
     projectId: string;
     projectName: string;
-    scheduler?: (string | null);
-    status: string;
-    target?: (string | null);
+    experimentId: string;
+    experimentName: string;
+    definitionHash: string;
+    experimentRevisionId: string;
+    inputAssetIds?: Array<string>;
+    targetHint?: (string | null);
+    statusSummary: RunStatusSummaryResponse;
+    parameters?: Record<string, JSONValue>;
+    createdAt: string;
+    executions?: Array<WorkspaceExecutionRow>;
 };
 

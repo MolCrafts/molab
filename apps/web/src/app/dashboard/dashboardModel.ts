@@ -1,6 +1,7 @@
 import type { PendingApprovalItem } from "@/api/generated/models/PendingApprovalItem";
 import { pendingApprovalPath, pendingApprovalTitle } from "@/app/approvals/presentation";
 import { experimentPath, projectPath, runPath } from "@/app/entities/paths";
+import { runActivityAt, runPresentationStatus } from "@/app/runs/projections";
 import { groupForStatus } from "@/app/runs/statusGroups";
 import type { WorkspaceRunRow } from "@/app/runs/types";
 import type { WorkspaceSnapshot } from "@/app/types";
@@ -49,14 +50,7 @@ const timestampValue = (value: string | null | undefined): number => {
 };
 
 export const runActivityTimestamp = (run: WorkspaceRunRow): string => {
-  if (run.finishedAt) return run.finishedAt;
-  const latestExecution = run.executions.reduce<string | null>((latest, execution) => {
-    if (!execution.startedAt) return latest;
-    return timestampValue(execution.startedAt) > timestampValue(latest)
-      ? execution.startedAt
-      : latest;
-  }, null);
-  return latestExecution ?? run.createdAt;
+  return runActivityAt(run);
 };
 
 const newestRunsFirst = (left: WorkspaceRunRow, right: WorkspaceRunRow): number =>
@@ -176,7 +170,7 @@ export const buildDashboardModel = (
   }
 
   const failedRuns = runs
-    .filter((run) => groupForStatus(run.status) === "failed")
+    .filter((run) => groupForStatus(runPresentationStatus(run)) === "failed")
     .sort(newestRunsFirst);
   for (const run of failedRuns) {
     addAttention(
@@ -213,8 +207,7 @@ export const buildDashboardModel = (
         };
   const activeRuns = runs
     .filter((run) => {
-      const group = groupForStatus(run.status);
-      return group === "running" || group === "pending";
+      return run.statusSummary.active > 0;
     })
     .sort(newestRunsFirst)
     .slice(0, MAX_ACTIVE_RUNS);
@@ -248,7 +241,7 @@ export const buildDashboardModel = (
     })),
     ...runs
       .filter((run) => {
-        const group = groupForStatus(run.status);
+        const group = groupForStatus(runPresentationStatus(run));
         return group !== "running" && group !== "pending" && group !== "failed";
       })
       .map((run) => ({

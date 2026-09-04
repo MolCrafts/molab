@@ -1,34 +1,17 @@
-"""Filesystem implementation of :class:`ArtifactStore`.
+"""Harness adapter over the canonical Execution Artifact repository.
 
-Layout under ``root``::
+Two projections share this class:
 
-    <kind>/<id>.json        # put_json content
-    <kind>/<id>.txt         # put_text content
-    <kind>/<id>-<original>  # put_file content (original filename preserved)
-    _refs/<id>.json         # full PlanArtifactRef as JSON
-    _index/<kind>.json      # ordered list of ids per kind
-
-Content writes go through :func:`molexp.workspace.atomic_write_json` /
-:func:`molexp.workspace.atomic_write_text`, so a crash mid-write leaves the
-original file (if any) intact. Content hash comes from
-:func:`molexp.workspace.utils.compute_content_hash` with the ``sha256:``
-prefix stripped before populating :attr:`PlanArtifactRef.sha256` (which stores
-bare hex per harness-goal.md §4.1).
-
-Idempotency: ``put_*`` is keyed on ``(kind, content_hash)``. The
-artifact id is the first 16 hex characters of
-``sha256(f"{kind}:{content_sha}")``, so two ``put_*`` calls with
-identical content under the same kind return the same
-:class:`PlanArtifactRef`, while identical content put under two *different*
-kinds yields two distinct ids — preventing the previous overwrite where
-``put_text(kind=A, …)`` and ``put_text(kind=B, …)`` of the same bytes
-clobbered each other's :class:`PlanArtifactRef`.
-
-Provenance merging: an idempotent hit (same kind + content) returns a
-ref with the *union* of historical ``parent_ids`` and the
-newly-supplied ones, so lineage doesn't lose edges when the same
-artifact is re-derived via a new path. The ref's existing
-``created_at`` / ``created_by`` are preserved.
+* **scratch** (``root=``) — content-addressed filesystem store for transient
+  harness profiles with no Project/Run/Execution (one-shot chat, unit tests).
+  ``put_*`` is idempotent per ``(kind, content)``: identical bytes under one
+  kind reuse the ref (id unions in newly supplied ``parent_ids``), identical
+  bytes under two kinds stay distinct.
+* **execution** (:meth:`for_execution` / :meth:`open_execution`) — bound to one
+  physical Execution. Each ``put_*`` is an ``ExecutionContext.emit_artifact``
+  call and the returned id is the canonical Artifact UUID. Equal bytes may
+  deduplicate in the Content Store while retaining distinct provenance
+  identities.
 """
 
 from __future__ import annotations
@@ -41,14 +24,22 @@ import tempfile
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from molexp.harness.errors import ArtifactNotFoundError
 from molexp.harness.schemas import ArtifactKind, PlanArtifactRef
+from molexp.ids import generate_uuid7
 from molexp.workspace import atomic_write_json, atomic_write_text
+from molexp.workspace.artifact_repository import ArtifactRepository
+from molexp.workspace.content_store import ContentStore
 from molexp.workspace.utils import compute_content_hash
 
-__all__ = ["FileArtifactStore"]
+if TYPE_CHECKING:
+    from molexp.workspace.domain import Artifact
+    from molexp.workspace.execution_context import ExecutionContext
+    from molexp.workspace.run import Run
 
+__all__ = ["FileArtifactStore"]
 
 _ID_LEN = 16  # 64 bits of sha256 — collision-free at harness scale.
 
@@ -59,24 +50,49 @@ def _hash_path(path: Path) -> str:
 
 
 def _derive_id(kind: ArtifactKind, sha: str) -> str:
-    """Derive an artifact id from ``(kind, content_sha)``.
-
-    Including ``kind`` in the digest prevents two distinct artifacts —
-    same bytes, different kind — from sharing the same id and
-    overwriting each other's ref in the ``_refs/`` directory.
-    """
+    """Derive a scratch artifact id from ``(kind, content_sha)``."""
     return hashlib.sha256(f"{kind}:{sha}".encode()).hexdigest()[:_ID_LEN]
 
 
 class FileArtifactStore:
-    """Content-addressed filesystem artifact store."""
+    """Compatibility projection of canonical Execution Artifacts."""
 
     def __init__(self, root: Path) -> None:
         self._root = Path(root)
         self._refs_dir = self._root / "_refs"
         self._index_dir = self._root / "_index"
+        self._context: ExecutionContext | None = None
+        self._run: Run | None = None
+        self._execution_id: str | None = None
+        self._repository: ArtifactRepository | None = None
+        self._content: ContentStore | None = None
 
-    # ------------------------------------------------------------------ put
+    @classmethod
+    def for_execution(cls, context: ExecutionContext) -> FileArtifactStore:
+        """Create the writable adapter for one entered Execution."""
+        store = cls(context.workdir / "harness")
+        workspace = context.run.experiment.project.workspace
+        store._context = context
+        store._run = context.run
+        store._execution_id = context.id
+        store._repository = ArtifactRepository(workspace.root, fs=workspace.fs)
+        store._content = ContentStore(workspace.root, fs=workspace.fs)
+        return store
+
+    @classmethod
+    def open_execution(cls, run: Run, execution_id: str) -> FileArtifactStore:
+        """Open the read-only Artifact projection for an explicit Execution."""
+        store = cls(Path(run.run_dir) / "executions" / execution_id / "work" / "harness")
+        workspace = run.experiment.project.workspace
+        store._run = run
+        store._execution_id = execution_id
+        store._repository = ArtifactRepository(workspace.root, fs=workspace.fs)
+        store._content = ContentStore(workspace.root, fs=workspace.fs)
+        return store
+
+    @property
+    def execution_id(self) -> str | None:
+        return self._execution_id
 
     def put_json(
         self,
@@ -85,6 +101,15 @@ class FileArtifactStore:
         created_by: str,
         parent_ids: list[str],
     ) -> PlanArtifactRef:
+        if self._context is not None:
+            return self._emit(
+                kind,
+                obj,
+                name=f"{kind}-{generate_uuid7()}.json",
+                media_type="application/json",
+                created_by=created_by,
+                parent_ids=parent_ids,
+            )
         return self._put_via_staging(
             kind=kind,
             suffix=".json",
@@ -100,6 +125,15 @@ class FileArtifactStore:
         created_by: str,
         parent_ids: list[str],
     ) -> PlanArtifactRef:
+        if self._context is not None:
+            return self._emit(
+                kind,
+                text,
+                name=f"{kind}-{generate_uuid7()}.txt",
+                media_type="text/plain",
+                created_by=created_by,
+                parent_ids=parent_ids,
+            )
         return self._put_via_staging(
             kind=kind,
             suffix=".txt",
@@ -115,8 +149,24 @@ class FileArtifactStore:
         created_by: str,
         parent_ids: list[str],
     ) -> PlanArtifactRef:
-        # Hash the source directly — no need to copy first.
-        sha = _hash_path(path)
+        source = Path(path)
+        if self._context is not None:
+            destination = (
+                self._context.workdir / "harness" / kind / (f"{generate_uuid7()}-{source.name}")
+            )
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            if source.is_dir():
+                shutil.copytree(source, destination)
+            else:
+                shutil.copy2(source, destination)
+            return self._emit_path(
+                kind,
+                destination,
+                created_by=created_by,
+                parent_ids=parent_ids,
+            )
+
+        sha = _hash_path(source)
         existing = self._find_existing(kind, sha)
         if existing is not None:
             return self.merge_parent_ids(existing.id, parent_ids)
@@ -124,8 +174,11 @@ class FileArtifactStore:
         artifact_id = _derive_id(kind, sha)
         dest_dir = self._root / kind
         dest_dir.mkdir(parents=True, exist_ok=True)
-        dest = dest_dir / f"{artifact_id}-{path.name}"
-        shutil.copy2(path, dest)
+        dest = dest_dir / f"{artifact_id}-{source.name}"
+        if source.is_dir():
+            shutil.copytree(source, dest)
+        else:
+            shutil.copy2(source, dest)
         return self._finalize(
             artifact_id=artifact_id,
             kind=kind,
@@ -134,6 +187,162 @@ class FileArtifactStore:
             created_by=created_by,
             parent_ids=parent_ids,
         )
+
+    def _emit(
+        self,
+        kind: ArtifactKind,
+        value: object,
+        *,
+        name: str,
+        media_type: str,
+        created_by: str,
+        parent_ids: list[str],
+    ) -> PlanArtifactRef:
+        assert self._context is not None
+        path = self._context.workdir / "harness" / kind / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        if isinstance(value, (bytes, bytearray)):
+            path.write_bytes(bytes(value))
+        elif isinstance(value, (dict, list)):
+            path.write_text(json.dumps(value, indent=2, default=str), encoding="utf-8")
+        else:
+            path.write_text(str(value), encoding="utf-8")
+        artifact = self._context.emit_artifact(
+            path,
+            name=f"harness/{kind}/{name}",
+            media_type=media_type,
+            semantic_type=kind,
+            metadata={"harness_created_by": created_by},
+            consumed=parent_ids,
+        )
+        return self._project(artifact)
+
+    def _emit_path(
+        self,
+        kind: ArtifactKind,
+        path: Path,
+        *,
+        created_by: str,
+        parent_ids: list[str],
+    ) -> PlanArtifactRef:
+        assert self._context is not None
+        artifact = self._context.emit_artifact(
+            path,
+            semantic_type=kind,
+            metadata={"harness_created_by": created_by},
+            consumed=parent_ids,
+        )
+        return self._project(artifact)
+
+    def get(self, artifact_id: str) -> bytes:
+        if self._repository is not None and self._content is not None:
+            try:
+                artifact = self._repository.get(artifact_id)
+            except KeyError as exc:
+                raise ArtifactNotFoundError(str(exc)) from exc
+            self._assert_execution(artifact)
+            path = self._content.payload_path(artifact.content)
+            if self._content.fs.is_dir(path):
+                raise IsADirectoryError(path)
+            if not self._content.fs.is_file(path):
+                raise ArtifactNotFoundError(f"artifact {artifact_id!r} content is missing")
+            return self._content.fs.read_bytes(path)
+        ref = self.get_ref(artifact_id)
+        path = Path(ref.uri.removeprefix("file://"))
+        if not path.exists():
+            raise ArtifactNotFoundError(f"artifact {artifact_id!r} content is missing")
+        return path.read_bytes()
+
+    def get_ref(self, artifact_id: str) -> PlanArtifactRef:
+        if self._repository is not None:
+            try:
+                artifact = self._repository.get(artifact_id)
+            except KeyError as exc:
+                raise ArtifactNotFoundError(str(exc)) from exc
+            self._assert_execution(artifact)
+            return self._project(artifact)
+        path = self._refs_dir / f"{artifact_id}.json"
+        if not path.exists():
+            raise ArtifactNotFoundError(f"artifact {artifact_id!r} not found")
+        return PlanArtifactRef.model_validate_json(path.read_text(encoding="utf-8"))
+
+    def list_by_kind(self, kind: ArtifactKind) -> list[PlanArtifactRef]:
+        if self._repository is not None and self._execution_id is not None:
+            return [ref for ref in self.list_refs() if ref.kind == kind]
+        return [self.get_ref(aid) for aid in self._read_index(kind)]
+
+    def latest_by_kind(self, kind: ArtifactKind) -> PlanArtifactRef | None:
+        if self._repository is not None and self._execution_id is not None:
+            refs = self.list_by_kind(kind)
+            if not refs:
+                return None
+            return max(refs, key=lambda item: (item.created_at, item.id))
+        index = self._read_index(kind)
+        if not index:
+            return None
+        return self.get_ref(index[-1])
+
+    def list_refs(self) -> list[PlanArtifactRef]:
+        if self._repository is not None and self._execution_id is not None:
+            return [
+                self._project(item)
+                for item in self._repository.list_for_execution(self._execution_id)
+                if item.semantic_type is not None
+            ]
+        if not self._refs_dir.exists():
+            return []
+        refs = [
+            PlanArtifactRef.model_validate_json(path.read_text(encoding="utf-8"))
+            for path in self._refs_dir.glob("*.json")
+        ]
+        return sorted(refs, key=lambda item: (item.created_at, item.id))
+
+    def merge_parent_ids(self, artifact_id: str, parent_ids: list[str]) -> PlanArtifactRef:
+        """Union *parent_ids* into a scratch ref; execution provenance is immutable."""
+        if self._repository is not None:
+            ref = self.get_ref(artifact_id)
+            missing = [value for value in parent_ids if value not in ref.parent_ids]
+            if missing:
+                raise RuntimeError(
+                    "Artifact provenance is immutable; supply parent_ids when emitting the Artifact"
+                )
+            return ref
+        existing = self.get_ref(artifact_id)
+        merged: list[str] = list(existing.parent_ids)
+        added = False
+        for pid in parent_ids:
+            if pid not in merged:
+                merged.append(pid)
+                added = True
+        if not added:
+            return existing
+        updated = existing.model_copy(update={"parent_ids": merged})
+        atomic_write_json(
+            self._refs_dir / f"{existing.id}.json",
+            json.loads(updated.model_dump_json()),
+        )
+        return updated
+
+    def _project(self, artifact: Artifact) -> PlanArtifactRef:
+        assert self._content is not None
+        return PlanArtifactRef(
+            id=artifact.id,
+            kind=artifact.semantic_type or "artifact",
+            uri=f"molexp-content://{artifact.content.digest}",
+            sha256=artifact.content.digest.removeprefix("sha256:"),
+            created_at=artifact.created_at,
+            created_by=artifact.created_by.name or artifact.created_by.id,
+            parent_ids=list(artifact.input_entity_ids),
+            metadata=dict(artifact.metadata),
+        )
+
+    def _assert_execution(self, artifact: Artifact) -> None:
+        if self._execution_id is not None and artifact.execution_id != self._execution_id:
+            raise ArtifactNotFoundError(
+                f"artifact {artifact.id!r} does not belong to Execution {self._execution_id!r}"
+            )
+
+    # ── scratch (content-addressed) internals ───────────────────────────────
 
     def _put_via_staging(
         self,
@@ -144,21 +353,12 @@ class FileArtifactStore:
         created_by: str,
         parent_ids: list[str],
     ) -> PlanArtifactRef:
-        """Write to a temp path, hash from disk, then move into place.
-
-        Hashing post-write (via :func:`compute_content_hash`) keeps
-        :attr:`PlanArtifactRef.sha256` byte-identical to the on-disk file, which
-        ``atomic_write_json``'s ``indent=2`` formatting would otherwise
-        diverge from an in-memory canonical hash.
-        """
         kind_dir = self._root / kind
         kind_dir.mkdir(parents=True, exist_ok=True)
-        # Stage in the destination directory so the final replace is atomic
-        # (same filesystem).
         fd, staged_str = tempfile.mkstemp(prefix=".staging_", suffix=suffix, dir=kind_dir)
         os.close(fd)
         staged = Path(staged_str)
-        staged.unlink()  # let write_staged create the file fresh
+        staged.unlink()
         try:
             write_staged(staged)
             sha = _hash_path(staged)
@@ -183,61 +383,6 @@ class FileArtifactStore:
             parent_ids=parent_ids,
         )
 
-    # ------------------------------------------------------------------ get
-
-    def get(self, artifact_id: str) -> bytes:
-        ref = self.get_ref(artifact_id)
-        content_path = Path(ref.uri.removeprefix("file://"))
-        if not content_path.exists():
-            raise ArtifactNotFoundError(
-                f"artifact {artifact_id!r} ref exists but content missing at {content_path}"
-            )
-        return content_path.read_bytes()
-
-    def get_ref(self, artifact_id: str) -> PlanArtifactRef:
-        ref_path = self._refs_dir / f"{artifact_id}.json"
-        if not ref_path.exists():
-            raise ArtifactNotFoundError(f"artifact {artifact_id!r} not found")
-        return PlanArtifactRef.model_validate_json(ref_path.read_text(encoding="utf-8"))
-
-    def list_by_kind(self, kind: ArtifactKind) -> list[PlanArtifactRef]:
-        index = self._read_index(kind)
-        return [self.get_ref(aid) for aid in index]
-
-    def latest_by_kind(self, kind: ArtifactKind) -> PlanArtifactRef | None:
-        index = self._read_index(kind)
-        if not index:
-            return None
-        return self.get_ref(index[-1])
-
-    def list_refs(self) -> list[PlanArtifactRef]:
-        if not self._refs_dir.exists():
-            return []
-        return [
-            PlanArtifactRef.model_validate_json(path.read_text(encoding="utf-8"))
-            for path in sorted(self._refs_dir.glob("*.json"))
-        ]
-
-    def merge_parent_ids(self, artifact_id: str, parent_ids: list[str]) -> PlanArtifactRef:
-        """Union *parent_ids* into the stored ref; preserve created_at / created_by."""
-        existing = self.get_ref(artifact_id)
-        merged: list[str] = list(existing.parent_ids)
-        added = False
-        for pid in parent_ids:
-            if pid not in merged:
-                merged.append(pid)
-                added = True
-        if not added:
-            return existing
-        updated = existing.model_copy(update={"parent_ids": merged})
-        atomic_write_json(
-            self._refs_dir / f"{existing.id}.json",
-            json.loads(updated.model_dump_json()),
-        )
-        return updated
-
-    # ----------------------------------------------------------- internals
-
     def _find_existing(self, kind: ArtifactKind, sha: str) -> PlanArtifactRef | None:
         artifact_id = _derive_id(kind, sha)
         ref_path = self._refs_dir / f"{artifact_id}.json"
@@ -245,8 +390,6 @@ class FileArtifactStore:
             return None
         ref = PlanArtifactRef.model_validate_json(ref_path.read_text(encoding="utf-8"))
         if ref.kind != kind or ref.sha256 != sha:
-            # Hash collision at 64 bits is essentially impossible; if it
-            # ever happens, fall through and treat as a new artifact.
             return None
         return ref
 

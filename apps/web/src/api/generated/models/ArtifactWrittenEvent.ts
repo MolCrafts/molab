@@ -6,9 +6,9 @@
  * Emitted when a loop materializes a file artefact.
  */
 export type ArtifactWrittenEvent = {
-    description?: string;
+    timestamp?: string;
     kind?: string;
     path: string;
-    timestamp?: string;
+    description?: string;
 };
 

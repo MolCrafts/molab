@@ -4,8 +4,8 @@
 /* eslint-disable */
 import type { AuthUserPublic } from './AuthUserPublic';
 export type AuthStatusResponse = {
-    authenticated: boolean;
     enabled: boolean;
+    authenticated: boolean;
     user?: (AuthUserPublic | null);
 };
 

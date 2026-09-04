@@ -24,18 +24,24 @@ import { OpenAPI } from '../core/OpenAPI';
 import { request as __request } from '../core/request';
 export class AgentAdminService {
     /**
-     * List Admin Providers
-     * Provider form registry for Settings (bootstrap schema; never 503).
+     * Agent Health
+     * Agent readiness for the UI banner — always 200, never the 503 catch-all.
+     *
+     * ``ready=False`` is a normal configuration state (no model / no API key).
+     * The legacy ``agent.router`` catch-all used to 503 unknown ``/api/agent*``
+     * paths, which made the UI treat "missing route" as "stack unavailable"
+     * and permanently stop probing. This endpoint exists so health is always a
+     * real JSON readiness document.
      * @param molexpSession
-     * @returns any Successful Response
+     * @returns AgentHealthResponse Successful Response
      * @throws ApiError
      */
-    public static listAdminProviders(
+    public static agentHealth(
         molexpSession?: (string | null),
-    ): CancelablePromise<Record<string, any>> {
+    ): CancelablePromise<AgentHealthResponse> {
         return __request(OpenAPI, {
             method: 'GET',
-            url: '/api/agent/admin/providers',
+            url: '/api/agent/health',
             cookies: {
                 'molexp_session': molexpSession,
             },
@@ -94,24 +100,22 @@ export class AgentAdminService {
         });
     }
     /**
-     * Agent Health
-     * Agent readiness for the UI banner — always 200, never the 503 catch-all.
+     * List Skills
+     * Return the configured skill catalog.
      *
-     * ``ready=False`` is a normal configuration state (no model / no API key).
-     * The legacy ``agent.router`` catch-all used to 503 unknown ``/api/agent*``
-     * paths, which made the UI treat "missing route" as "stack unavailable"
-     * and permanently stop probing. This endpoint exists so health is always a
-     * real JSON readiness document.
+     * Skill persistence is not wired into this admin service yet.  An empty
+     * catalog is a valid state, so the read surface must not fall through to
+     * the legacy agent 503 catch-all.
      * @param molexpSession
-     * @returns AgentHealthResponse Successful Response
+     * @returns SkillListResponse Successful Response
      * @throws ApiError
      */
-    public static agentHealth(
+    public static listSkills(
         molexpSession?: (string | null),
-    ): CancelablePromise<AgentHealthResponse> {
+    ): CancelablePromise<SkillListResponse> {
         return __request(OpenAPI, {
             method: 'GET',
-            url: '/api/agent/health',
+            url: '/api/agent/skills',
             cookies: {
                 'molexp_session': molexpSession,
             },
@@ -121,239 +125,25 @@ export class AgentAdminService {
         });
     }
     /**
-     * Get Knowledge Sources
-     * Read package pin from the molmcp MCP server entry (``MOLMCP_SOURCES``).
+     * List Tools
+     * Return agent tools: molexp **builtins** + MCP groups when discovered.
+     *
+     * Builtins (``workspace_ensure``, ``run_land``, ``code_write``, …) are
+     * always present with ``source="builtin"``. MCP tools attach as
+     * ``source="mcp:<server>"`` when runtime discovery is connected; until
+     * then ``mcpGroups`` may be empty without hiding builtins.
      * @param molexpSession
-     * @returns KnowledgeSourcesResponse Successful Response
+     * @returns AgentToolListResponse Successful Response
      * @throws ApiError
      */
-    public static getKnowledgeSources(
+    public static listTools(
         molexpSession?: (string | null),
-    ): CancelablePromise<KnowledgeSourcesResponse> {
+    ): CancelablePromise<AgentToolListResponse> {
         return __request(OpenAPI, {
             method: 'GET',
-            url: '/api/agent/knowledge-sources',
+            url: '/api/agent/tools',
             cookies: {
                 'molexp_session': molexpSession,
-            },
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
-     * Update Knowledge Sources
-     * Write package pin onto the molmcp server's env (per-MCP, not global agent).
-     * @param requestBody
-     * @param molexpSession
-     * @returns KnowledgeSourcesResponse Successful Response
-     * @throws ApiError
-     */
-    public static updateKnowledgeSources(
-        requestBody: KnowledgeSourcesUpdateRequest,
-        molexpSession?: (string | null),
-    ): CancelablePromise<KnowledgeSourcesResponse> {
-        return __request(OpenAPI, {
-            method: 'PUT',
-            url: '/api/agent/knowledge-sources',
-            cookies: {
-                'molexp_session': molexpSession,
-            },
-            body: requestBody,
-            mediaType: 'application/json',
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
-     * List Mcp Secrets
-     * List secret *keys* (never values) at the given scope.
-     * @param scope
-     * @param molexpSession
-     * @returns McpSecretListResponse Successful Response
-     * @throws ApiError
-     */
-    public static listMcpSecrets(
-        scope: string = 'user',
-        molexpSession?: (string | null),
-    ): CancelablePromise<McpSecretListResponse> {
-        return __request(OpenAPI, {
-            method: 'GET',
-            url: '/api/agent/mcp/secrets',
-            cookies: {
-                'molexp_session': molexpSession,
-            },
-            query: {
-                'scope': scope,
-            },
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
-     * Put Mcp Secret
-     * Set or delete a secret value (empty value deletes).
-     * @param key
-     * @param requestBody
-     * @param molexpSession
-     * @returns any Successful Response
-     * @throws ApiError
-     */
-    public static putMcpSecret(
-        key: string,
-        requestBody: McpSecretPutRequest,
-        molexpSession?: (string | null),
-    ): CancelablePromise<Record<string, any>> {
-        return __request(OpenAPI, {
-            method: 'PUT',
-            url: '/api/agent/mcp/secrets/{key}',
-            path: {
-                'key': key,
-            },
-            cookies: {
-                'molexp_session': molexpSession,
-            },
-            body: requestBody,
-            mediaType: 'application/json',
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
-     * List Mcp Servers
-     * Merged user + workspace MCP server entries (workspace shadows user).
-     * @param molexpSession
-     * @returns McpServerListResponse Successful Response
-     * @throws ApiError
-     */
-    public static listMcpServers(
-        molexpSession?: (string | null),
-    ): CancelablePromise<McpServerListResponse> {
-        return __request(OpenAPI, {
-            method: 'GET',
-            url: '/api/agent/mcp/servers',
-            cookies: {
-                'molexp_session': molexpSession,
-            },
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
-     * Create Mcp Server
-     * Upsert one MCP server entry at the requested scope.
-     * @param requestBody
-     * @param molexpSession
-     * @returns McpServerResponse Successful Response
-     * @throws ApiError
-     */
-    public static createMcpServer(
-        requestBody: McpServerUpsertRequest,
-        molexpSession?: (string | null),
-    ): CancelablePromise<McpServerResponse> {
-        return __request(OpenAPI, {
-            method: 'POST',
-            url: '/api/agent/mcp/servers',
-            cookies: {
-                'molexp_session': molexpSession,
-            },
-            body: requestBody,
-            mediaType: 'application/json',
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
-     * Delete Mcp Server
-     * Delete one MCP server entry at the given scope.
-     * @param name
-     * @param scope
-     * @param molexpSession
-     * @returns void
-     * @throws ApiError
-     */
-    public static deleteMcpServer(
-        name: string,
-        scope: string = 'user',
-        molexpSession?: (string | null),
-    ): CancelablePromise<void> {
-        return __request(OpenAPI, {
-            method: 'DELETE',
-            url: '/api/agent/mcp/servers/{name}',
-            path: {
-                'name': name,
-            },
-            cookies: {
-                'molexp_session': molexpSession,
-            },
-            query: {
-                'scope': scope,
-            },
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
-     * Replace Mcp Server
-     * Replace one MCP server entry (name path must match body).
-     * @param name
-     * @param requestBody
-     * @param molexpSession
-     * @returns McpServerResponse Successful Response
-     * @throws ApiError
-     */
-    public static replaceMcpServer(
-        name: string,
-        requestBody: McpServerUpsertRequest,
-        molexpSession?: (string | null),
-    ): CancelablePromise<McpServerResponse> {
-        return __request(OpenAPI, {
-            method: 'PUT',
-            url: '/api/agent/mcp/servers/{name}',
-            path: {
-                'name': name,
-            },
-            cookies: {
-                'molexp_session': molexpSession,
-            },
-            body: requestBody,
-            mediaType: 'application/json',
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
-     * Test Mcp Server
-     * Best-effort stdio/HTTP reachability probe (list_tools when possible).
-     * @param name
-     * @param scope
-     * @param molexpSession
-     * @returns McpServerTestResponse Successful Response
-     * @throws ApiError
-     */
-    public static testMcpServer(
-        name: string,
-        scope: string = 'user',
-        molexpSession?: (string | null),
-    ): CancelablePromise<McpServerTestResponse> {
-        return __request(OpenAPI, {
-            method: 'POST',
-            url: '/api/agent/mcp/servers/{name}/test',
-            path: {
-                'name': name,
-            },
-            cookies: {
-                'molexp_session': molexpSession,
-            },
-            query: {
-                'scope': scope,
             },
             errors: {
                 422: `Validation Error`,
@@ -441,22 +231,18 @@ export class AgentAdminService {
         });
     }
     /**
-     * List Skills
-     * Return the configured skill catalog.
-     *
-     * Skill persistence is not wired into this admin service yet.  An empty
-     * catalog is a valid state, so the read surface must not fall through to
-     * the legacy agent 503 catch-all.
+     * List Mcp Servers
+     * Merged user + workspace MCP server entries (workspace shadows user).
      * @param molexpSession
-     * @returns SkillListResponse Successful Response
+     * @returns McpServerListResponse Successful Response
      * @throws ApiError
      */
-    public static listSkills(
+    public static listMcpServers(
         molexpSession?: (string | null),
-    ): CancelablePromise<SkillListResponse> {
+    ): CancelablePromise<McpServerListResponse> {
         return __request(OpenAPI, {
             method: 'GET',
-            url: '/api/agent/skills',
+            url: '/api/agent/mcp/servers',
             cookies: {
                 'molexp_session': molexpSession,
             },
@@ -466,23 +252,237 @@ export class AgentAdminService {
         });
     }
     /**
-     * List Tools
-     * Return agent tools: molexp **builtins** + MCP groups when discovered.
-     *
-     * Builtins (``workspace_ensure``, ``run_land``, ``code_write``, …) are
-     * always present with ``source="builtin"``. MCP tools attach as
-     * ``source="mcp:<server>"`` when runtime discovery is connected; until
-     * then ``mcpGroups`` may be empty without hiding builtins.
+     * Create Mcp Server
+     * Upsert one MCP server entry at the requested scope.
+     * @param requestBody
      * @param molexpSession
-     * @returns AgentToolListResponse Successful Response
+     * @returns McpServerResponse Successful Response
      * @throws ApiError
      */
-    public static listTools(
+    public static createMcpServer(
+        requestBody: McpServerUpsertRequest,
         molexpSession?: (string | null),
-    ): CancelablePromise<AgentToolListResponse> {
+    ): CancelablePromise<McpServerResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/agent/mcp/servers',
+            cookies: {
+                'molexp_session': molexpSession,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * Replace Mcp Server
+     * Replace one MCP server entry (name path must match body).
+     * @param name
+     * @param requestBody
+     * @param molexpSession
+     * @returns McpServerResponse Successful Response
+     * @throws ApiError
+     */
+    public static replaceMcpServer(
+        name: string,
+        requestBody: McpServerUpsertRequest,
+        molexpSession?: (string | null),
+    ): CancelablePromise<McpServerResponse> {
+        return __request(OpenAPI, {
+            method: 'PUT',
+            url: '/api/agent/mcp/servers/{name}',
+            path: {
+                'name': name,
+            },
+            cookies: {
+                'molexp_session': molexpSession,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * Delete Mcp Server
+     * Delete one MCP server entry at the given scope.
+     * @param name
+     * @param scope
+     * @param molexpSession
+     * @returns void
+     * @throws ApiError
+     */
+    public static deleteMcpServer(
+        name: string,
+        scope: string = 'user',
+        molexpSession?: (string | null),
+    ): CancelablePromise<void> {
+        return __request(OpenAPI, {
+            method: 'DELETE',
+            url: '/api/agent/mcp/servers/{name}',
+            path: {
+                'name': name,
+            },
+            cookies: {
+                'molexp_session': molexpSession,
+            },
+            query: {
+                'scope': scope,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * Test Mcp Server
+     * Best-effort stdio/HTTP reachability probe (list_tools when possible).
+     * @param name
+     * @param scope
+     * @param molexpSession
+     * @returns McpServerTestResponse Successful Response
+     * @throws ApiError
+     */
+    public static testMcpServer(
+        name: string,
+        scope: string = 'user',
+        molexpSession?: (string | null),
+    ): CancelablePromise<McpServerTestResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/agent/mcp/servers/{name}/test',
+            path: {
+                'name': name,
+            },
+            cookies: {
+                'molexp_session': molexpSession,
+            },
+            query: {
+                'scope': scope,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * List Mcp Secrets
+     * List secret *keys* (never values) at the given scope.
+     * @param scope
+     * @param molexpSession
+     * @returns McpSecretListResponse Successful Response
+     * @throws ApiError
+     */
+    public static listMcpSecrets(
+        scope: string = 'user',
+        molexpSession?: (string | null),
+    ): CancelablePromise<McpSecretListResponse> {
         return __request(OpenAPI, {
             method: 'GET',
-            url: '/api/agent/tools',
+            url: '/api/agent/mcp/secrets',
+            cookies: {
+                'molexp_session': molexpSession,
+            },
+            query: {
+                'scope': scope,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * Put Mcp Secret
+     * Set or delete a secret value (empty value deletes).
+     * @param key
+     * @param requestBody
+     * @param molexpSession
+     * @returns any Successful Response
+     * @throws ApiError
+     */
+    public static putMcpSecret(
+        key: string,
+        requestBody: McpSecretPutRequest,
+        molexpSession?: (string | null),
+    ): CancelablePromise<Record<string, any>> {
+        return __request(OpenAPI, {
+            method: 'PUT',
+            url: '/api/agent/mcp/secrets/{key}',
+            path: {
+                'key': key,
+            },
+            cookies: {
+                'molexp_session': molexpSession,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * Get Knowledge Sources
+     * Read package pin from the molmcp MCP server entry (``MOLMCP_SOURCES``).
+     * @param molexpSession
+     * @returns KnowledgeSourcesResponse Successful Response
+     * @throws ApiError
+     */
+    public static getKnowledgeSources(
+        molexpSession?: (string | null),
+    ): CancelablePromise<KnowledgeSourcesResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/agent/knowledge-sources',
+            cookies: {
+                'molexp_session': molexpSession,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * Update Knowledge Sources
+     * Write package pin onto the molmcp server's env (per-MCP, not global agent).
+     * @param requestBody
+     * @param molexpSession
+     * @returns KnowledgeSourcesResponse Successful Response
+     * @throws ApiError
+     */
+    public static updateKnowledgeSources(
+        requestBody: KnowledgeSourcesUpdateRequest,
+        molexpSession?: (string | null),
+    ): CancelablePromise<KnowledgeSourcesResponse> {
+        return __request(OpenAPI, {
+            method: 'PUT',
+            url: '/api/agent/knowledge-sources',
+            cookies: {
+                'molexp_session': molexpSession,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * List Admin Providers
+     * Provider form registry for Settings (bootstrap schema; never 503).
+     * @param molexpSession
+     * @returns any Successful Response
+     * @throws ApiError
+     */
+    public static listAdminProviders(
+        molexpSession?: (string | null),
+    ): CancelablePromise<Record<string, any>> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/agent/admin/providers',
             cookies: {
                 'molexp_session': molexpSession,
             },

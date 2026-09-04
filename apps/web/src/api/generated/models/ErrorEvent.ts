@@ -6,10 +6,10 @@
  * Emitted when a stage or the whole run raises.
  */
 export type ErrorEvent = {
-    error_type?: string;
+    timestamp?: string;
     kind?: string;
     message: string;
+    error_type?: string;
     stage_name?: string;
-    timestamp?: string;
 };
 

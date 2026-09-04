@@ -5,7 +5,7 @@
 import type { AgentToolResponse } from './AgentToolResponse';
 import type { McpToolGroupResponse } from './McpToolGroupResponse';
 export type AgentToolListResponse = {
-    mcpGroups?: Array<McpToolGroupResponse>;
     tools?: Array<AgentToolResponse>;
+    mcpGroups?: Array<McpToolGroupResponse>;
 };
 

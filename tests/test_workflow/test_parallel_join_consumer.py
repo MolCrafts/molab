@@ -104,12 +104,6 @@ class TestCollectUpstreamOutputs:
         assert "b" in message
         assert "a" in message
 
-    def test_zero_dep_returns_none_without_raising(self) -> None:
-        registration = _registration("noseed", depends_on=[])
-        state = WorkflowState()
-
-        assert _collect_upstream_outputs(registration, state) is None
-
     def test_single_dep_missing_also_fails_fast(self) -> None:
         """Boundary — a one-dep consumer whose sole dep is unrecorded raises
         rather than coalescing to ``None`` (the bug's root shape)."""

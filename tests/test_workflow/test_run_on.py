@@ -20,7 +20,7 @@ from molexp.workflow import (
     WorkflowRuntime,
     default_binding_registry,
 )
-from molexp.workspace import RunStatus, Workspace
+from molexp.workspace import Workspace
 
 if TYPE_CHECKING:
     from molexp.workflow.context import TaskContext
@@ -61,7 +61,7 @@ class TestRunOn:
         exp = ws.add_project(name="demo").add_experiment(name="trivial-exp")
 
         runs_before = exp.list_runs()
-        result = await WorkflowRuntime().run_on(_trivial_workflow(), exp, parameters={"lr": 1e-3})
+        result = await WorkflowRuntime().run_on(_trivial_workflow(), exp, params={"lr": 1e-3})
 
         assert result.outputs.get("emit") == 42
         assert len(exp.list_runs()) == len(runs_before) + 1
@@ -88,4 +88,5 @@ class TestRunOn:
 
         runs = exp.list_runs()
         assert len(runs) == 1
-        assert runs[0].status == RunStatus.FAILED
+        assert runs[0].status_summary.by_status == {"failed": 1}
+        assert runs[0].is_retryable is True

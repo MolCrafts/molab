@@ -684,7 +684,8 @@ const DiffSummaryBar = ({ diffs }: { diffs: TaskDiff[] }): JSX.Element => {
 // ============================================================================
 
 interface RunSnapshotPanelProps {
-  run: Pick<RunSummary, "id" | "projectId" | "experimentId" | "workflowSnapshot" | "status">;
+  run: Pick<RunSummary, "id" | "projectId" | "experimentId" | "workflowSnapshot">;
+  executionId: string | null;
 }
 
 const snapshotMissing = <span className="italic text-muted-foreground">—</span>;
@@ -728,10 +729,10 @@ const SnapshotHeader = ({
 };
 
 /**
- * Displays the immutable workflow snapshot + live runtime workflow graph for
- * the latest attempt of a single run.
+ * Displays the immutable workflow snapshot + observed graph for one explicitly
+ * selected execution.
  */
-export const RunSnapshotPanel = ({ run }: RunSnapshotPanelProps): JSX.Element => {
+export const RunSnapshotPanel = ({ run, executionId }: RunSnapshotPanelProps): JSX.Element => {
   const [execution, setExecution] = useState<RunExecutionResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -741,9 +742,14 @@ export const RunSnapshotPanel = ({ run }: RunSnapshotPanelProps): JSX.Element =>
     let interval: ReturnType<typeof setInterval> | null = null;
     setLoading(true);
     setError(null);
+    if (!executionId) {
+      setExecution(null);
+      setLoading(false);
+      return;
+    }
     const load = (): void => {
       runsApi
-        .getRunExecution(run.projectId, run.experimentId, run.id)
+        .getRunExecution(run.projectId, run.experimentId, run.id, executionId)
         .then((data) => {
           if (cancelled) return;
           setExecution(data);
@@ -758,14 +764,11 @@ export const RunSnapshotPanel = ({ run }: RunSnapshotPanelProps): JSX.Element =>
         });
     };
     load();
-    if (run.status === "running") {
-      interval = setInterval(load, 1000);
-    }
     return () => {
       cancelled = true;
       if (interval) clearInterval(interval);
     };
-  }, [run.experimentId, run.id, run.projectId, run.status]);
+  }, [executionId, run.experimentId, run.id, run.projectId]);
 
   const graph = useMemo<TaskGraphJson | null>(() => {
     return execution?.workflow ? normalizeTaskGraph(execution.workflow) : null;

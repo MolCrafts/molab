@@ -4,7 +4,7 @@
 /* eslint-disable */
 export type WorkflowRefResponse = {
     experimentId: string;
-    irHash?: (string | null);
     name: string;
+    irHash?: (string | null);
 };
 

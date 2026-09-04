@@ -35,9 +35,9 @@ class TestRunMetadataRmw:
         run.materialize()
         other = _second_handle(tmp_path, run)
 
-        run._update_metadata(script="train.py")
-        other._update_metadata(target="cluster-a")  # stale handle, distinct field
+        run._update_metadata(target="cluster-a")
+        other._update_metadata(workflow_version="v2")  # stale handle, distinct field
 
         data = _read_run_json(run)
-        assert data["script"] == "train.py"  # not clobbered by the stale handle
-        assert data["target"] == "cluster-a"
+        assert data["target"] == "cluster-a"  # not clobbered by the stale handle
+        assert data["workflow_version"] == "v2"

@@ -3,10 +3,10 @@
 /* tslint:disable */
 /* eslint-disable */
 export type NoteSummary = {
-    excerpt: string;
     name: string;
     relPath: string;
-    status?: (string | null);
+    excerpt: string;
     tags?: Array<string>;
+    status?: (string | null);
 };
 

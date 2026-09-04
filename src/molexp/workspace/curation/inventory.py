@@ -3,8 +3,8 @@
 ``scan_workspace`` classifies the ``Workspace -> Project -> Experiment -> Run``
 tree into a frozen snapshot: a per-project / per-experiment / per-run breakdown
 plus tree-wide totals. It composes the typed ``list_*`` walkers with each run's
-``status`` and the manifest-scan asset count — it does not re-implement any
-traversal.
+derived lifecycle status and the total asset count (imported data assets plus
+run-emitted artifacts) — it does not re-implement any traversal.
 """
 
 from __future__ import annotations
@@ -14,8 +14,10 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, ConfigDict
 
 from ..assets import scan
+from ._assets import count_emitted_artifacts
 
 if TYPE_CHECKING:
+    from molexp.workspace.run import Run
     from molexp.workspace.workspace import Workspace
 
 __all__ = [
@@ -69,13 +71,22 @@ class WorkspaceInventory(BaseModel):
     asset_count: int
 
 
+def _run_status(run: Run) -> str:
+    """Derive a scalar lifecycle label: pending before any Execution, else latest."""
+    if run.status_summary.not_started:
+        return "pending"
+    return run.executions[-1].status.value
+
+
 def scan_workspace(workspace: Workspace) -> WorkspaceInventory:
     """Classify a workspace tree into a frozen :class:`WorkspaceInventory`.
 
     Composes ``workspace.list_projects`` / ``Project.list_experiments`` /
-    ``Experiment.list_runs`` and each run's ``status`` for the structural
-    breakdown, and ``scan.scan_assets(workspace.root)`` for ``asset_count``.
-    The scan reads the authoritative on-disk manifests; it is read-only.
+    ``Experiment.list_runs`` and each run's derived lifecycle status for the
+    structural breakdown, and the total asset count (imported data assets via
+    ``scan.scan_assets`` plus run-emitted artifacts) for ``asset_count``. The
+    scan reads the authoritative on-disk manifests and provenance index; it is
+    read-only.
 
     Args:
         workspace: The workspace to inventory.
@@ -92,7 +103,7 @@ def scan_workspace(workspace: Workspace) -> WorkspaceInventory:
         experiments: list[ExperimentInventory] = []
         for experiment in project.list_experiments():
             runs = tuple(
-                RunInventory(id=run.id, status=run.status) for run in experiment.list_runs()
+                RunInventory(id=run.id, status=_run_status(run)) for run in experiment.list_runs()
             )
             run_count += len(runs)
             experiment_count += 1
@@ -106,7 +117,7 @@ def scan_workspace(workspace: Workspace) -> WorkspaceInventory:
                 experiments=tuple(experiments),
             )
         )
-    asset_count = len(scan.scan_assets(workspace.root))
+    asset_count = len(scan.scan_assets(workspace.root)) + count_emitted_artifacts(workspace)
     return WorkspaceInventory(
         name=workspace.metadata.name,
         projects=tuple(projects),

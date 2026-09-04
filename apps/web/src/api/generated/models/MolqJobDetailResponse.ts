@@ -4,25 +4,25 @@
 /* eslint-disable */
 import type { MolqJobTransition } from './MolqJobTransition';
 export type MolqJobDetailResponse = {
-    clusterName?: (string | null);
-    commandDisplay?: (string | null);
-    cwd?: (string | null);
-    downstreamTotal?: number;
-    durationSeconds?: (number | null);
-    exitCode?: (number | null);
-    failureReason?: (string | null);
-    finishedAt?: (string | null);
+    target: string;
     jobId: string;
-    metadata?: Record<string, string>;
-    name?: (string | null);
-    scheduler?: (string | null);
     schedulerJobId?: (string | null);
-    startedAt?: (string | null);
+    clusterName?: (string | null);
+    scheduler?: (string | null);
+    name?: (string | null);
     state: string;
     submittedAt?: (string | null);
-    target: string;
+    startedAt?: (string | null);
+    finishedAt?: (string | null);
+    exitCode?: (number | null);
+    durationSeconds?: (number | null);
+    cwd?: (string | null);
+    failureReason?: (string | null);
+    metadata?: Record<string, string>;
+    commandDisplay?: (string | null);
     transitions?: Array<MolqJobTransition>;
-    upstreamSatisfied?: number;
     upstreamTotal?: number;
+    upstreamSatisfied?: number;
+    downstreamTotal?: number;
 };
 

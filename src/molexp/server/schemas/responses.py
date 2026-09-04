@@ -126,11 +126,15 @@ class ExperimentResponse(ApiModel):
             run_list = [
                 RunSummary(
                     id=r.id,
-                    status=r.status,
+                    statusSummary=RunStatusSummaryResponse(
+                        total=r.status_summary.total,
+                        active=r.status_summary.active,
+                        notStarted=r.status_summary.not_started,
+                        byStatus=r.status_summary.by_status,
+                    ),
                     created=r.metadata.created_at.isoformat(),
                     finished=(r.finished_at.isoformat() if r.finished_at else None),
                     parameters=r.parameters,
-                    results=_read_context_results(r),
                 )
                 for r in run_objs
             ]
@@ -158,13 +162,19 @@ class ExperimentResponse(ApiModel):
 # ── Run ─────────────────────────────────────────────────────────────────────
 
 
+class RunStatusSummaryResponse(ApiModel):
+    total: int
+    active: int
+    notStarted: bool
+    byStatus: dict[str, int] = Field(default_factory=dict)
+
+
 class RunSummary(ApiModel):
     id: str
-    status: str
+    statusSummary: RunStatusSummaryResponse
     created: str
     finished: str | None = None
     parameters: dict[str, Any] = Field(default_factory=dict)
-    results: dict[str, Any] = Field(default_factory=dict)
 
 
 class WorkflowSnapshotResponse(ApiModel):
@@ -182,30 +192,34 @@ class ExecutionRecordResponse(ApiModel):
     timeline.
     """
 
-    executionId: str
-    startedAt: str
-    finishedAt: str | None = None
+    id: str
+    runId: str
+    mode: str
     status: str
-    schedulerJobId: str | None = None
+    createdAt: str
+    startedAt: str | None = None
+    finishedAt: str | None = None
+    basedOnExecutionId: str | None = None
+    checkpointArtifactId: str | None = None
+    executor: dict[str, Any] = Field(default_factory=dict)
+    environment: dict[str, Any] = Field(default_factory=dict)
+    artifactIds: list[str] = Field(default_factory=list)
+    error: dict[str, Any] | None = None
 
 
 class RunResponse(ApiModel):
     id: str
     projectId: str
     experimentId: str
-    status: str
+    definitionHash: str
+    experimentRevisionId: str
+    statusSummary: RunStatusSummaryResponse
     created: str
     finished: str | None = None
     parameters: dict[str, Any] = Field(default_factory=dict)
-    results: dict[str, Any] = Field(default_factory=dict)
     workflow: WorkflowSnapshotResponse | None = None
     workflowSource: str | None = None
-    error: dict[str, str] | None = None
-    executorInfo: dict[str, Any] = Field(default_factory=dict)
-    profile: str | None = None
-    config: dict[str, Any] = Field(default_factory=dict)
-    configHash: str | None = None
-    executionHistory: list[ExecutionRecordResponse] = Field(default_factory=list)
+    executions: list[ExecutionRecordResponse] = Field(default_factory=list)
     target: str | None = None
 
     @classmethod
@@ -236,39 +250,43 @@ class RunResponse(ApiModel):
                 codeHash=None,
                 configHash=None,
             )
-        error = None
-        if run.metadata.error:
-            error = {
-                "type": run.metadata.error.type,
-                "message": run.metadata.error.message,
-            }
-        history = [
+        executions = [
             ExecutionRecordResponse(
-                executionId=rec.execution_id,
-                startedAt=rec.started_at.isoformat(),
+                id=rec.id,
+                runId=rec.run_id,
+                mode=rec.mode.value,
+                status=rec.status.value,
+                createdAt=rec.created_at.isoformat(),
+                startedAt=rec.started_at.isoformat() if rec.started_at else None,
                 finishedAt=rec.finished_at.isoformat() if rec.finished_at else None,
-                status=rec.status,
-                schedulerJobId=rec.scheduler_job_id,
+                basedOnExecutionId=rec.based_on_execution_id,
+                checkpointArtifactId=rec.checkpoint_artifact_id,
+                executor=rec.executor,
+                environment=rec.environment,
+                artifactIds=list(rec.artifact_ids),
+                error=rec.error,
             )
-            for rec in run.execution_history
+            for rec in run.executions
         ]
+        summary = run.status_summary
         return cls(
             id=run.id,
             projectId=run.experiment.project.id,
             experimentId=run.experiment.id,
-            status=run.status,
+            definitionHash=run.metadata.definition_hash,
+            experimentRevisionId=run.metadata.experiment_revision_id,
+            statusSummary=RunStatusSummaryResponse(
+                total=summary.total,
+                active=summary.active,
+                notStarted=summary.not_started,
+                byStatus=summary.by_status,
+            ),
             created=run.metadata.created_at.isoformat(),
             finished=run.finished_at.isoformat() if run.finished_at else None,
             parameters=run.parameters,
-            results=_read_context_results(run),
             workflow=wf_snap,
             workflowSource=wf_source,
-            error=error,
-            executorInfo=run.metadata.executor_info,
-            profile=run.metadata.profile,
-            config=run.metadata.config,
-            configHash=run.metadata.config_hash,
-            executionHistory=history,
+            executions=executions,
             target=run.metadata.target,
         )
 
@@ -764,29 +782,90 @@ class RunFilesResponse(ApiModel):
     nodes: list[RunFileNode] = Field(default_factory=list)
 
 
+class ArtifactResponse(ApiModel):
+    id: str
+    executionId: str
+    runId: str
+    projectId: str
+    name: str
+    sourcePath: str
+    digest: str
+    size: int
+    contentKind: str
+    mediaType: str | None = None
+    semanticType: str | None = None
+    declarationId: str | None = None
+    inputEntityIds: list[str] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    createdAt: str
+
+
+class ExecutionEvidenceResponse(ApiModel):
+    kind: str
+    path: str
+    digest: str | None = None
+    size: int
+
+
+class ExecutionOutputsResponse(ApiModel):
+    executionId: str
+    stdout: str | None = None
+    stderr: str | None = None
+    runtime: str | None = None
+    artifacts: list[ArtifactResponse] = Field(default_factory=list)
+    evidence: list[ExecutionEvidenceResponse] = Field(default_factory=list)
+    unregistered: list[RunFileNode] = Field(default_factory=list)
+    results: dict[str, Any] = Field(default_factory=dict)
+
+
+class ManagedAssetResponse(ApiModel):
+    id: str
+    projectId: str
+    title: str
+    createdAt: str
+    versionCount: int = 0
+
+
+class AssetVersionResponse(ApiModel):
+    id: str
+    assetId: str
+    sourceArtifactId: str
+    version: int
+    digest: str
+    size: int
+    contentKind: str
+    mediaType: str | None = None
+    semanticType: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    createdAt: str
+
+
+class ArtifactPromotionResponse(ApiModel):
+    asset: ManagedAssetResponse
+    version: AssetVersionResponse
+
+
 # ── Experiment comparison ───────────────────────────────────────────────────
 
 
 class ComparisonRunRow(ApiModel):
-    """One run row in the experiment comparison matrix."""
+    """One immutable Run definition in the experiment comparison matrix."""
 
     runId: str
-    status: str
+    definitionHash: str
+    experimentRevisionId: str
+    inputAssetIds: list[str] = Field(default_factory=list)
+    statusSummary: RunStatusSummaryResponse
     parameters: dict[str, Any] = Field(default_factory=dict)
-    metrics: dict[str, Any] = Field(default_factory=dict)
-    durationSec: float | None = None
     created: str
-    finished: str | None = None
-    error: dict[str, str] | None = None
 
 
 class ExperimentComparisonResponse(ApiModel):
-    """Comparison matrix: parameter columns x run rows + metric columns."""
+    """Comparison matrix of scientific Run definitions only."""
 
     experimentId: str
     projectId: str
     paramKeys: list[str] = Field(default_factory=list)
-    metricKeys: list[str] = Field(default_factory=list)
     runs: list[ComparisonRunRow] = Field(default_factory=list)
 
 

@@ -129,11 +129,11 @@ def _metrics_roots(run_dir: Path | str, fs: FileSystem) -> list[str]:
 
 
 def _discover_jsonl_in_root(root: str, *, fs: FileSystem) -> str | None:
-    """Prefer ``artifacts/*.mlp.jsonl``; fall back to the root (old trees)."""
-    artifacts = fs.join(root, "artifacts")
-    hit = _discover_named(artifacts, fs=fs, suffix=MLP_JSONL_SUFFIX, want_dir=False)
-    if hit is not None:
-        return hit
+    """Prefer ``artifacts/*.mlp.jsonl``, then ``work/*.mlp.jsonl``, then the root."""
+    for sub in ("artifacts", "work"):
+        hit = _discover_named(fs.join(root, sub), fs=fs, suffix=MLP_JSONL_SUFFIX, want_dir=False)
+        if hit is not None:
+            return hit
     return _discover_named(root, fs=fs, suffix=MLP_JSONL_SUFFIX, want_dir=False)
 
 

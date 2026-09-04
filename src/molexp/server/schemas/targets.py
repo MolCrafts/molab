@@ -41,8 +41,6 @@ class TargetCreateRequest(ApiModel):
         description="Extra ssh argv tokens",
     )
 
-    model_config = {"populate_by_name": True}
-
 
 class TargetResponse(ApiModel):
     """Wire form for a :class:`ComputeTarget`."""
@@ -57,8 +55,6 @@ class TargetResponse(ApiModel):
     is_remote: bool = Field(..., alias="isRemote")
     default_resources: dict[str, Any] = Field(default_factory=dict, alias="defaultResources")
     default_scheduling: dict[str, Any] = Field(default_factory=dict, alias="defaultScheduling")
-
-    model_config = {"populate_by_name": True}
 
     @classmethod
     def from_model(cls, target: ComputeTarget) -> TargetResponse:

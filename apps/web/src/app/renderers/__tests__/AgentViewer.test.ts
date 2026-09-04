@@ -334,6 +334,7 @@ describe("derivePlanRef", () => {
         text: "**Melt plan** — ready.",
         plan: {
           run_id: "run-1",
+          execution_id: "exec-1",
           project_id: "proj",
           experiment_id: "exp",
           title: "Melt plan",
@@ -344,6 +345,7 @@ describe("derivePlanRef", () => {
     ];
     expect(derivePlanRef(events)).toEqual({
       runId: "run-1",
+      executionId: "exec-1",
       projectId: "proj",
       experimentId: "exp",
       title: "Melt plan",
@@ -376,6 +378,7 @@ describe("derivePlanRef", () => {
     ];
     expect(derivePlanRef(events)).toEqual({
       runId: "run-42",
+      executionId: null,
       projectId: "p",
       experimentId: "e",
       title: "Rg",
@@ -394,6 +397,7 @@ describe("derivePlanRef", () => {
       }),
     ).toEqual({
       runId: "run-9",
+      executionId: null,
       projectId: "proj",
       experimentId: "exp",
       title: "Goal",

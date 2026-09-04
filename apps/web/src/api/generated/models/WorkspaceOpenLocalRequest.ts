@@ -7,10 +7,6 @@
  */
 export type WorkspaceOpenLocalRequest = {
     /**
-     * Create if missing
-     */
-    createIfMissing?: boolean;
-    /**
      * Discriminator
      */
     kind?: string;
@@ -18,5 +14,9 @@ export type WorkspaceOpenLocalRequest = {
      * Absolute path to the workspace
      */
     path: string;
+    /**
+     * Create if missing
+     */
+    createIfMissing?: boolean;
 };
 

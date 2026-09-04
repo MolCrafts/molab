@@ -1,38 +1,46 @@
-"""Run hot-state read accessors resolve from ``RunMetadata`` on ``run.json``.
+"""Run hot-state read accessors derive from Executions, not ``run.json``.
 
-``Run.status`` / ``Run.is_retryable`` / ``Run.execution_history`` read
-``self.metadata``. There is no ``ops/run.json`` sidecar.
+``Run.status`` (scalar) is removed in schema v2 — it raises
+``AttributeError``. The query surface is ``run.status_summary`` (a
+:class:`~molexp.workspace.domain.RunStatusSummary`) and ``run.executions``
+(a list of :class:`~molexp.workspace.domain.ExecutionState`).
+``Run.is_retryable`` and ``Run.execution_history`` (deprecated read alias)
+both read ``run.executions``. There is no ``ops/run.json`` sidecar.
 """
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+import pytest
 
-from molexp.workspace.models import ExecutionRecord, RunStatus
+from molexp.workspace.domain import ExecutionStatus
 
 
-class TestStatusReadsFromMetadata:
-    def test_status_reads_from_run_json(self, run) -> None:
-        run.materialize()
-        run._update_metadata(status=RunStatus.FAILED)
-        assert run.status == "failed"
-        assert run.metadata.status is RunStatus.FAILED
+class TestStatusReadsFromExecutions:
+    def test_scalar_status_is_removed_in_favor_of_summary(self, run) -> None:
+        with pytest.raises(AttributeError):
+            _ = run.status
 
-    def test_is_retryable_reads_from_run_json(self, run) -> None:
-        run.materialize()
+        summary = run.status_summary
+        assert summary.total == 0
+        assert summary.not_started is True
+        assert summary.by_status == {}
+
+    def test_is_retryable_reads_from_executions(self, run) -> None:
         assert run.is_retryable is False
-        run._update_metadata(status=RunStatus.CANCELLED)
+
+        with pytest.raises(RuntimeError, match="boom"), run.start():
+            raise RuntimeError("boom")
         assert run.is_retryable is True
-        run._update_metadata(status=RunStatus.SUCCEEDED)
-        assert run.is_retryable is False
 
-    def test_execution_history_reads_from_run_json(self, run) -> None:
-        run.materialize()
-        rec = ExecutionRecord(
-            execution_id="exec-a",
-            started_at=datetime(2026, 1, 1, tzinfo=UTC),
-            status="failed",
-        )
-        run._update_metadata(status=RunStatus.FAILED, execution_history=(rec,))
-        assert [r.execution_id for r in run.execution_history] == ["exec-a"]
-        assert [r.execution_id for r in run.metadata.execution_history] == ["exec-a"]
+        other = run.experiment.add_run(params={"lr": 2e-4})
+        with other.start():
+            pass
+        assert other.is_retryable is False
+
+    def test_execution_history_reads_from_executions(self, run) -> None:
+        with run.start() as ctx:
+            exec_id = ctx.id
+
+        assert [e.id for e in run.execution_history] == [exec_id]
+        assert [e.id for e in run.executions] == [exec_id]
+        assert run.executions[0].status is ExecutionStatus.SUCCEEDED

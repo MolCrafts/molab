@@ -22,14 +22,14 @@ export const STATUS_GROUPS: readonly StatusGroupSpec[] = [
     id: "running",
     label: "Running",
     color: "var(--status-running)",
-    aliases: ["running"],
+    aliases: ["running", "finalizing"],
     filterValue: "running",
   },
   {
     id: "pending",
     label: "Queued",
     color: "var(--status-queued)",
-    aliases: ["pending", "queued", "submitted"],
+    aliases: ["pending", "queued", "submitted", "created", "not_started"],
     filterValue: "pending",
   },
   {
@@ -50,7 +50,7 @@ export const STATUS_GROUPS: readonly StatusGroupSpec[] = [
     id: "cancelled",
     label: "Cancelled",
     color: "var(--status-cancelled)",
-    aliases: ["cancelled", "skipped"],
+    aliases: ["cancelled", "interrupted", "skipped"],
     filterValue: "cancelled",
   },
 ];

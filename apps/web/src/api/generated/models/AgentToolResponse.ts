@@ -14,8 +14,8 @@ import type { ToolParameterResponse } from './ToolParameterResponse';
  * attach it to that server's expanded row
  */
 export type AgentToolResponse = {
-    description?: string;
     name: string;
+    description?: string;
     parameters?: Array<ToolParameterResponse>;
     requiresApproval?: boolean;
     source: string;

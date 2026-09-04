@@ -11,14 +11,14 @@ import type { WorkspaceRefResponse } from './WorkspaceRefResponse';
  * Camel-cased HTTP view of the read-only ``WorkspaceSummary``.
  */
 export type WorkspaceSummaryResponse = {
+    workspace: WorkspaceRefResponse;
+    headline: string;
     counts: Record<string, number>;
     failedRuns?: Array<RunRefResponse>;
-    headline: string;
+    runningRuns?: Array<RunRefResponse>;
     healthFlags?: Array<HealthFlagResponse>;
-    nextActions?: Array<NextActionResponse>;
     openQuestions?: Array<KnowledgeRefResponse>;
     relevantKnowledge?: Array<KnowledgeRefResponse>;
-    runningRuns?: Array<RunRefResponse>;
-    workspace: WorkspaceRefResponse;
+    nextActions?: Array<NextActionResponse>;
 };
 

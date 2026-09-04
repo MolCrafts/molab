@@ -6,9 +6,9 @@
  * Post-decision task summary.
  */
 export type ApprovalDecisionResponse = {
-    status: string;
-    taskId: string;
     taskKind: ApprovalDecisionResponse.taskKind;
+    taskId: string;
+    status: string;
 };
 export namespace ApprovalDecisionResponse {
     export enum taskKind {

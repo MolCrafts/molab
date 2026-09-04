@@ -16,9 +16,6 @@ class TestIsMlpMetricsSurface:
     def test_zarr_is_not_metrics_surface(self) -> None:
         assert is_mlp_metrics_surface("metrics.mlp.zarr") is False
 
-    def test_zarr_json_nested_is_not_metrics_surface(self) -> None:
-        assert is_mlp_metrics_surface("zarr.json", rel_path="metrics.mlp.zarr/zarr.json") is False
-
     def test_index_is_not_metrics_surface(self) -> None:
         assert is_mlp_metrics_surface("metrics.mlp.index.json") is False
 

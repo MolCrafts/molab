@@ -11,21 +11,21 @@
  * id that the UI cannot navigate to.
  */
 export type PendingApprovalItem = {
-    experimentId: string;
-    formDocument?: (Record<string, any> | null);
-    intent: string;
-    metadata?: Record<string, any>;
-    packId?: (string | null);
-    preview?: string;
-    projectId: string;
-    reason: string;
-    requestId: string;
-    requestedAt: string;
+    taskKind: PendingApprovalItem.taskKind;
+    taskId: string;
     runId: string;
+    projectId: string;
+    experimentId: string;
+    requestId: string;
+    intent: string;
+    reason: string;
+    metadata?: Record<string, any>;
+    requestedAt: string;
+    preview?: string;
+    packId?: (string | null);
+    formDocument?: (Record<string, any> | null);
     scope?: string;
     targetAgentId?: (string | null);
-    taskId: string;
-    taskKind: PendingApprovalItem.taskKind;
 };
 export namespace PendingApprovalItem {
     export enum taskKind {

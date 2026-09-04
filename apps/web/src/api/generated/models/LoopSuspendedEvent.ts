@@ -19,9 +19,9 @@
  * id), the durable resume anchor.
  */
 export type LoopSuspendedEvent = {
-    kind?: string;
-    leaf_id?: string;
-    reason?: string;
     timestamp?: string;
+    kind?: string;
+    reason?: string;
+    leaf_id?: string;
 };
 

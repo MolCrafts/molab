@@ -59,6 +59,7 @@ export interface RunMetricsViewProps {
   projectId: string;
   experimentId: string;
   runId: string;
+  executionId: string;
 }
 
 const isFiniteNumber = (value: unknown): value is number => {
@@ -535,6 +536,7 @@ export const RunMetricsView = ({
   projectId,
   experimentId,
   runId,
+  executionId,
 }: RunMetricsViewProps): JSX.Element => {
   const [records, setRecords] = useState<MetricRecord[]>([]);
   const [nextLine, setNextLine] = useState(0);
@@ -567,7 +569,7 @@ export const RunMetricsView = ({
     const fetchMetrics = async (): Promise<void> => {
       const sinceLine = nextLineRef.current;
       try {
-        const response = await runsApi.getRunMetrics(projectId, experimentId, runId, {
+        const response = await runsApi.getRunMetrics(projectId, experimentId, runId, executionId, {
           sinceLine,
         });
         if (cancelled) {
@@ -599,7 +601,7 @@ export const RunMetricsView = ({
       cancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [projectId, experimentId, runId]);
+  }, [executionId, projectId, experimentId, runId]);
 
   if (loading && records.length === 0) {
     return (

@@ -7,25 +7,25 @@
  */
 export type WorkspaceAddRequest = {
     /**
-     * Switch active workspace to the newly added root
-     */
-    activate?: boolean;
-    /**
-     * When kind=local, create the directory if it does not exist
-     */
-    create_if_missing?: boolean;
-    /**
      * ``local`` path or ``remote`` (registered target or Host:/path)
      */
     kind?: WorkspaceAddRequest.kind;
+    /**
+     * Local absolute path (kind=local) or SCP Host:/abs (kind=remote)
+     */
+    path?: (string | null);
     /**
      * Registered workspace-target name (kind=remote alternative to path)
      */
     name?: (string | null);
     /**
-     * Local absolute path (kind=local) or SCP Host:/abs (kind=remote)
+     * When kind=local, create the directory if it does not exist
      */
-    path?: (string | null);
+    create_if_missing?: boolean;
+    /**
+     * Switch active workspace to the newly added root
+     */
+    activate?: boolean;
 };
 export namespace WorkspaceAddRequest {
     /**

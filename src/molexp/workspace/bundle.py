@@ -72,6 +72,11 @@ _MAX_BODY_SEARCH_BYTES = 512 * 1024
 REFERENCES_GROUP = "references"
 SOURCES_FILENAME = "sources.json"
 
+#: Directory names that are sidecars, never Concepts — ``ops/`` (and the
+#: pre-rename ``_ops/`` location) are skipped during a walk so a planted
+#: ``meta.json`` inside them cannot resurrect a phantom Concept.
+_SIDECAR_DIRS = frozenset({"ops", "_ops"})
+
 
 class Backlink(NamedTuple):
     """One resolved reverse edge, as returned by :meth:`Bundle.backlinks`.
@@ -285,6 +290,8 @@ class Bundle:
         root_resolved = self.fs.resolve(str(self._root))
 
         for name in sorted(names):
+            if name in _SIDECAR_DIRS:
+                continue
             entry = self.fs.join(directory, name)
             try:
                 if not self.fs.is_dir(entry):

@@ -11,13 +11,13 @@ export type CacheStatusResponse = {
      */
     cached: boolean;
     connected?: (boolean | null);
-    done?: number;
     indexed?: (boolean | null);
-    indexing?: (boolean | null);
-    message?: string;
-    percent?: (number | null);
-    phase?: string;
     ready?: (boolean | null);
+    indexing?: (boolean | null);
+    phase?: string;
     total?: number;
+    done?: number;
+    percent?: (number | null);
+    message?: string;
 };
 

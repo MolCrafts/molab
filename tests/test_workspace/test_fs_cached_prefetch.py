@@ -258,14 +258,14 @@ class TestPrefetchWorkspaceIndices:
 
         # Plural indexes on parents (derived).
         assert (root / "projects.json").is_file()
-        assert (root / "projects" / "alpha" / "experiments.json").is_file()
-        assert (root / "projects" / "alpha" / "experiments" / "counter" / "runs.json").is_file()
+        assert (root / "projects" / proj.id / "experiments.json").is_file()
+        assert (root / "projects" / proj.id / "experiments" / exp.id / "runs.json").is_file()
         # No executions.json (never an index level).
         assert not list(root.rglob("executions.json"))
         # Singular is entity-only — not at parent as an index.
         assert not (root / "project.json").exists()
-        assert not (root / "projects" / "alpha" / "experiment.json").exists()
-        assert not (root / "projects" / "alpha" / "experiments" / "counter" / "run.json").exists()
+        assert not (root / "projects" / proj.id / "experiment.json").exists()
+        assert not (root / "projects" / proj.id / "experiments" / exp.id / "run.json").exists()
 
         # Observe the prefetch through a fresh cached remote FS over the same disk.
         cached = CachedRemoteFileSystem(
@@ -277,8 +277,10 @@ class TestPrefetchWorkspaceIndices:
 
         cached_paths = cached.cached_paths()
         assert any(p.endswith("/workspace.json") for p in cached_paths), cached_paths
-        assert any(p.endswith("/projects/alpha/project.json") for p in cached_paths), cached_paths
-        assert any(p.endswith("/experiments/counter/experiment.json") for p in cached_paths), (
+        assert any(p.endswith(f"/projects/{proj.id}/project.json") for p in cached_paths), (
+            cached_paths
+        )
+        assert any(p.endswith(f"/experiments/{exp.id}/experiment.json") for p in cached_paths), (
             cached_paths
         )
         assert any("/runs/" in p and p.endswith("/run.json") for p in cached_paths), cached_paths

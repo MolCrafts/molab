@@ -23,7 +23,6 @@ from molexp.workflow import (
     Workflow,
     WorkflowCompiler,
 )
-from molexp.workspace.models import RunStatus
 
 
 def _make_run(tmp_path: Path, params: dict | None = None):
@@ -53,8 +52,9 @@ class TestExecuteRun:
         assert result.status == "succeeded"
         assert result.outputs["double"] == 6
         assert result.outputs["summarize"] == "got 6"
-        assert run.status == RunStatus.SUCCEEDED.value
-        assert len(run.execution_history) == 1
+        assert run.status_summary.by_status == {"succeeded": 1}
+        assert [e.status.value for e in run.executions] == ["succeeded"]
+        assert len(run.executions) == 1
 
     def test_task_failure_raises_and_persists_failed_run(self, tmp_path: Path) -> None:
         wf = Workflow(name="boom")
@@ -66,14 +66,16 @@ class TestExecuteRun:
         run = _make_run(tmp_path)
         with pytest.raises(RunFailedError) as excinfo:
             run.execute(wf)
-        assert run.status == RunStatus.FAILED.value
+        assert run.status_summary.by_status == {"failed": 1}
+        assert run.is_retryable is True
+        assert [e.status.value for e in run.executions] == ["failed"]
         # The exception surfaces WHY and carries the partial WorkflowResult.
         assert "ZeroDivisionError" in str(excinfo.value)
         assert excinfo.value.result.status == "failed"
 
     def test_task_failure_persists_real_traceback_in_error_txt(self, tmp_path: Path) -> None:
         """The engine swallows the task exception, but its live traceback must
-        still reach ``executions/<exec_id>/error.txt`` — the documented "with
+        still reach ``executions/<exec_id>/traceback.txt`` — the documented "with
         traceback" trace file, not a placeholder note."""
         wf = Workflow(name="boom")
 
@@ -85,8 +87,8 @@ class TestExecuteRun:
         with pytest.raises(RunFailedError):
             run.execute(wf)
 
-        exec_id = run.execution_history[-1].execution_id
-        error_txt = Path(str(run.run_dir)) / "executions" / exec_id / "error.txt"
+        exec_id = run.executions[-1].id
+        error_txt = Path(str(run.run_dir)) / "executions" / exec_id / "traceback.txt"
         assert error_txt.exists()
         content = error_txt.read_text()
         assert "Traceback (most recent call last):" in content
@@ -103,26 +105,23 @@ class TestExecuteRun:
         run.execute(_build_wf())
         with pytest.raises(RunNotExecutableError, match="succeeded"):
             run.execute(_build_wf(), rerun=True)
-        assert len(run.execution_history) == 1
+        assert len(run.executions) == 1
 
     def test_fresh_requires_rerun(self, tmp_path: Path) -> None:
         run = _make_run(tmp_path)
         with pytest.raises(ValueError, match="rerun=True"):
             run.execute(_build_wf(), fresh=True)
 
-    def test_failed_then_explicit_resume_reopens_same_execution(self, tmp_path: Path) -> None:
-        """Retrying is explicit: a failed run refuses a plain call and
-        ``resume=True`` reopens the same execution, seeds completed nodes,
-        and recomputes only the rest."""
+    def test_failed_then_explicit_retry_verbs(self, tmp_path: Path) -> None:
+        """Retrying is explicit: a failed run refuses a plain call, resume is
+        checkpoint-gated, and ``rerun=True`` opens a fresh Execution."""
         flag = tmp_path / "healed"
-        first_calls: list[int] = []
 
         def build() -> Workflow:
             wf = Workflow(name="healing")
 
             @wf.task
             def stage_a(x: int) -> int:
-                first_calls.append(x)
                 return x + 1
 
             @wf.task(depends_on=["stage_a"])
@@ -136,41 +135,32 @@ class TestExecuteRun:
         run = _make_run(tmp_path, params={"x": 1})
         with pytest.raises(RunFailedError):
             run.execute(build())
-        assert run.status == RunStatus.FAILED.value
-        exec_ids_before = [r.execution_id for r in run.execution_history]
+        assert run.status_summary.by_status == {"failed": 1}
+        assert len(run.executions) == 1
 
         flag.write_text("ok")
         # A plain call on a retryable run refuses — retrying is an explicit verb.
-        with pytest.raises(RunNotExecutableError, match="resume=True"):
+        with pytest.raises(RunNotExecutableError, match="rerun=True"):
             run.execute(build())
-        result = run.execute(build(), resume=True)
+        # resume is checkpoint-gated in schema v2 — no checkpoint, no resume.
+        with pytest.raises(RunNotExecutableError, match="checkpoint"):
+            run.execute(build(), resume=True)
+        result = run.execute(build(), rerun=True)
         assert result.status == "succeeded"
         assert result.outputs["stage_b"] == 200
-        # Same execution reopened — no new attempt appended.
-        assert [r.execution_id for r in run.execution_history] == exec_ids_before
-        # stage_a was seeded from the persisted node output, not recomputed.
-        assert first_calls == [1]
-
-    def test_failed_then_rerun_opens_new_execution(self, tmp_path: Path) -> None:
-        wf_fail = Workflow(name="always-fails")
-
-        @wf_fail.task
-        def explode(x: int) -> int:
-            raise RuntimeError("boom")
-
-        run = _make_run(tmp_path)
-        with pytest.raises(RunFailedError):
-            run.execute(wf_fail)
-        result = run.execute(_build_wf(), rerun=True)
-        assert result.status == "succeeded"
-        assert len(run.execution_history) == 2
+        # A retry opens a NEW execution (v2 never reopens an attempt).
+        assert len(run.executions) == 2
+        assert [e.mode.value for e in run.executions] == ["initial", "rerun"]
 
     def test_running_run_raises(self, tmp_path: Path) -> None:
         run = _make_run(tmp_path)
-        run.materialize()
-        run._update_metadata(status=RunStatus.RUNNING)
-        with pytest.raises(RunNotExecutableError, match="cancel"):
-            run.execute(_build_wf())
+        ctx = run.start()
+        ctx.__enter__()
+        try:
+            with pytest.raises(RunNotExecutableError, match="cancel"):
+                run.execute(_build_wf(), rerun=True)
+        finally:
+            ctx.__exit__(None, None, None)
 
     def test_sync_facade_inside_event_loop_raises(self, tmp_path: Path) -> None:
         run = _make_run(tmp_path)
@@ -186,12 +176,3 @@ class TestExecuteRun:
         result = asyncio.run(run.aexecute(_build_wf()))
         assert result.status == "succeeded"
         assert result.outputs["summarize"] == "got 6"
-
-
-class TestRunExecuteMethod:
-    def test_run_execute_delegates_through_seam(self, tmp_path: Path) -> None:
-        run = _make_run(tmp_path, params={"x": 4})
-        result = run.execute(WorkflowCompiler().compile(_build_wf()))
-        assert result.status == "succeeded"
-        assert result.outputs["summarize"] == "got 8"
-        assert run.status == RunStatus.SUCCEEDED.value

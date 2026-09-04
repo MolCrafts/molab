@@ -19,6 +19,7 @@ if TYPE_CHECKING:
     from molexp.harness.gateways.gateway import AgentGateway
     from molexp.harness.host.plugin import Plugin
     from molexp.harness.registry.capability_registry import CapabilityRegistry
+    from molexp.workspace.execution_context import ExecutionContext
 
 __all__ = ["compose_chat", "compose_curate", "compose_plan", "compose_run"]
 
@@ -56,18 +57,26 @@ def compose_plan(
     gateway: AgentGateway,
     capability_registry: CapabilityRegistry | None = None,
     workspace_root: Path | None = None,
+    execution_context: ExecutionContext | None = None,
     extra: tuple[Plugin, ...] = (),
 ) -> Host:
     """``plan`` bundle: stores + tools + approval + workspace + workflow + llm."""
     from molexp.workspace.plugin import WorkspacePlugin
 
     host = Host()
-    root = Path(workspace_root) if workspace_root is not None else Path(run_dir)
+    root = (
+        Path(workspace_root)
+        if workspace_root is not None
+        else execution_context.workdir
+        if execution_context is not None
+        else Path(run_dir)
+    )
     host.mount(
         RunStoresPlugin(
             run_id=run_id,
             run_dir=Path(run_dir),
-            workspace_root=workspace_root,
+            workspace_root=root,
+            execution_context=execution_context,
         )
     )
     if capability_registry is not None:
@@ -89,6 +98,7 @@ def compose_curate(
     gateway: AgentGateway | None = None,
     capability_registry: CapabilityRegistry | None = None,
     extra: tuple[Plugin, ...] = (),
+    execution_context: ExecutionContext | None = None,
 ) -> Host:
     """``curate`` bundle: run-local stores; Stage root is the real workspace."""
     host = Host()
@@ -97,6 +107,7 @@ def compose_curate(
             run_id=run_id,
             run_dir=Path(run_dir),
             workspace_root=Path(workspace_root),
+            execution_context=execution_context,
         )
     )
     if capability_registry is not None:
@@ -116,6 +127,7 @@ def compose_run(
     workspace_root: Path | None = None,
     executor: Executor | None = None,
     extra: tuple[Plugin, ...] = (),
+    execution_context: ExecutionContext | None = None,
 ) -> Host:
     """``run`` bundle: stores + executor + workspace + workflow. Science extras last."""
     from molexp.workspace.plugin import WorkspacePlugin
@@ -127,6 +139,7 @@ def compose_run(
             run_id=run_id,
             run_dir=Path(run_dir),
             workspace_root=workspace_root,
+            execution_context=execution_context,
         )
     )
     host.mount(ExecutorPlugin(executor))

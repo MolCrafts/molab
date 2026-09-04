@@ -1,10 +1,10 @@
 """Engine-automatic artifact lineage (vision-loop-09).
 
-THE FAIR anchor: a tracked run's workflow DAG projects into ``Producer.inputs``
-with ZERO task-author annotation — the engine (``_engine.node_cache._upstream_asset_ids``)
-records each task's upstream asset ids, so "which input produced this result?" is
-answerable for every tracked run through ``lineage.ancestors`` / the
-``GET /assets/{id}/lineage`` surface.
+THE FAIR anchor: a tracked run's workflow DAG projects into Artifact
+``input_entity_ids`` with ZERO task-author annotation — the engine
+(``_engine.node_cache._upstream_asset_ids``) records each task's upstream
+artifact ids, so "which input produced this result?" is answerable for every
+tracked run through ``lineage.ancestors``.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from pathlib import Path
 
 from molexp.workflow import TaskContext, Workflow
 from molexp.workspace import Workspace
-from molexp.workspace.assets import lineage, scan
+from molexp.workspace.assets import lineage
 
 
 def _workspace(tmp_path: Path) -> Workspace:
@@ -22,8 +22,10 @@ def _workspace(tmp_path: Path) -> Workspace:
     return ws
 
 
-def _artifact_for(ws: Workspace, run_id: str, task: str):
-    found = scan.scan_assets(ws.root, kind="artifact", producer_run=run_id, producer_task=task)
+def _artifact_for(run, task: str):
+    execution_id = run.executions[-1].id
+    artifacts = run._execution_repository().artifacts.list_for_execution(execution_id)
+    found = [a for a in artifacts if a.metadata.get("task_id") == task]
     assert found, f"no artifact registered for task {task!r}"
     return found[0]
 
@@ -50,24 +52,23 @@ class TestEngineAutomaticLineage:
     def test_chain_projects_upstream_id_into_downstream_producer_inputs(
         self, tmp_path: Path
     ) -> None:
-        """THE test: downstream's producer.inputs carries upstream's asset_id and
+        """THE test: downstream's input_entity_ids carries upstream's artifact id and
         the ``lineage.ancestors`` traversal answers it — zero task annotation."""
         ws = _workspace(tmp_path)
         run = ws.add_project("p").add_experiment("e").add_run(params=None)
         run.execute(_chain_workflow())
 
-        up = _artifact_for(ws, run.id, "upstream")
-        down = _artifact_for(ws, run.id, "downstream")
-        assert up.asset_id in (down.producer.inputs if down.producer else ())
-        assert up.asset_id in lineage.ancestors(ws, down.asset_id)
+        up = _artifact_for(run, "upstream")
+        down = _artifact_for(run, "downstream")
+        assert up.id in down.input_entity_ids
+        assert up.id in lineage.ancestors(ws, down.id)
 
     def test_root_task_artifact_has_empty_inputs(self, tmp_path: Path) -> None:
         ws = _workspace(tmp_path)
         run = ws.add_project("p").add_experiment("e").add_run(params=None)
         run.execute(_chain_workflow())
-        up = _artifact_for(ws, run.id, "upstream")
-        assert up.producer is not None
-        assert up.producer.inputs == ()
+        up = _artifact_for(run, "upstream")
+        assert up.input_entity_ids == ()
 
     def test_diamond_fan_in_records_both_upstreams_deduped(self, tmp_path: Path) -> None:
         wf = Workflow(name="diamond")
@@ -94,15 +95,15 @@ class TestEngineAutomaticLineage:
         run = ws.add_project("p").add_experiment("e").add_run(params=None)
         run.execute(wf)
 
-        join_asset = _artifact_for(ws, run.id, "join")
-        inputs = set(join_asset.producer.inputs if join_asset.producer else ())
-        left_id = _artifact_for(ws, run.id, "left").asset_id
-        right_id = _artifact_for(ws, run.id, "right").asset_id
+        join_artifact = _artifact_for(run, "join")
+        inputs = set(join_artifact.input_entity_ids)
+        left_id = _artifact_for(run, "left").id
+        right_id = _artifact_for(run, "right").id
         assert {left_id, right_id} <= inputs
-        assert len(join_asset.producer.inputs) == len(inputs)  # deduped
+        assert len(join_artifact.input_entity_ids) == len(inputs)  # deduped
         # Independent parallel tasks record no cross-edges.
-        left_asset = _artifact_for(ws, run.id, "left")
-        assert right_id not in (left_asset.producer.inputs if left_asset.producer else ())
+        left_artifact = _artifact_for(run, "left")
+        assert right_id not in left_artifact.input_entity_ids
 
     def test_cache_hit_upstream_still_chains_downstream(self, tmp_path: Path) -> None:
         """A second run whose upstream cache-hits still chains downstream→upstream."""
@@ -115,10 +116,10 @@ class TestEngineAutomaticLineage:
         run2 = exp.add_run(params=None, id="second")
         run2.execute(_chain_workflow())
 
-        down2 = _artifact_for(ws, "second", "downstream")
-        up2 = _artifact_for(ws, "second", "upstream")
-        assert up2.asset_id in (down2.producer.inputs if down2.producer else ())
-        assert up2.asset_id in lineage.ancestors(ws, down2.asset_id)
+        down2 = _artifact_for(run2, "downstream")
+        up2 = _artifact_for(run2, "upstream")
+        assert up2.id in down2.input_entity_ids
+        assert up2.id in lineage.ancestors(ws, down2.id)
 
     def test_raising_lineage_computation_never_fails_the_run(
         self, tmp_path: Path, monkeypatch

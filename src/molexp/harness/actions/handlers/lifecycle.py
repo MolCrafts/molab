@@ -71,8 +71,18 @@ def _reap(run: Run) -> None:
     reap_zombie_run(run)
 
 
+def _run_status(run: Run) -> str:
+    """Derive the scalar status string the lifecycle domain checks key on."""
+    summary = run.status_summary
+    if summary.active > 0:
+        return "running"
+    if summary.total == 0:
+        return "pending"
+    return run.executions[-1].status.value
+
+
 def _summary(run: Run) -> dict[str, JSONValue]:
-    return {"run": run.id, "status": run.status}
+    return {"run": run.id, "status": _run_status(run)}
 
 
 def _execute_family(
@@ -90,10 +100,11 @@ def _execute_family(
 
     _reap(run)
     _refuse_non_local(run)
-    if run.status not in allowed:
+    status = _run_status(run)
+    if status not in allowed:
         raise RunNotExecutableError(
             f"{verb} acts on {'/'.join(allowed)} runs only; run {run.id} is "
-            f"{run.status!r} — {domain_hint}"
+            f"{status!r} — {domain_hint}"
         )
     from molexp.harness.workflow_recovery import compiled_workflow_for_run
 

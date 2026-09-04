@@ -243,7 +243,7 @@ export function seed(): void {
             runs: [
                 {
                     id: "run-001",
-                    status: "succeeded",
+                    statusSummary: { total: 1, active: 0, notStarted: false, byStatus: { succeeded: 1 } },
                     parameters: { batch_size: 32 },
                     created: isoAt(-120),
                 },
@@ -276,7 +276,7 @@ export function seed(): void {
             runs: [
                 {
                     id: "run-101",
-                    status: "succeeded",
+                    statusSummary: { total: 1, active: 0, notStarted: false, byStatus: { succeeded: 1 } },
                     parameters: { batch_size: 16 },
                     created: isoAt(-100),
                 },
@@ -410,6 +410,8 @@ export function seed(): void {
     const assets: ApiAssetResponse[] = [
         {
             id: "asset-001",
+            projectId: "protein-folding",
+            title: "qm9",
             name: "qm9",
             kind: "data",
             scopeKind: "workspace",
@@ -430,6 +432,8 @@ export function seed(): void {
         },
         {
             id: "asset-002",
+            projectId: "catalyst-search",
+            title: "ligands",
             name: "ligands",
             kind: "data",
             scopeKind: "project",
@@ -448,6 +452,8 @@ export function seed(): void {
         },
         {
             id: "asset-003",
+            projectId: "protein-folding",
+            title: "alphafold.pt",
             name: "alphafold.pt",
             kind: "artifact",
             scopeKind: "run",
@@ -471,6 +477,8 @@ export function seed(): void {
         },
         {
             id: "asset-004",
+            projectId: "protein-folding",
+            title: "run",
             name: "run",
             kind: "log",
             scopeKind: "run",
@@ -491,6 +499,8 @@ export function seed(): void {
         },
         {
             id: "asset-005",
+            projectId: "protein-folding",
+            title: "epoch1",
             name: "epoch1",
             kind: "checkpoint",
             scopeKind: "run",

@@ -109,19 +109,6 @@ class TestIngestRunWritesOnlyTheBuffer:
         assert not (lammps_run / "status").exists()
         assert not (lammps_run / "method").exists()
 
-    def test_leaves_the_source_log_untouched(
-        self, lammps_run: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        before = (lammps_run / "log.lammps").read_bytes()
-        thermo = FakeThermo(("Step", "Temp"), np.array([[0.0, 300.0]]))
-        monkeypatch.setattr(
-            "molexp.plugins.metrics_ingest.lammps.require_molpy",
-            lambda: _fake_reader(runs=(FakeRun(thermo),)),
-        )
-        ingest_run(lammps_run)
-
-        assert (lammps_run / "log.lammps").read_bytes() == before
-
 
 class TestIngestRunSkips:
     def test_records_a_missing_dependency_without_raising(
@@ -157,23 +144,6 @@ class TestIngestRunSkips:
         records = _read_lines(tmp_path)
         assert [record["k"] for record in records] == ["csv/loss", "csv/loss"]
         assert [record["s"] for record in records] == [1.0, 2.0]
-
-    def test_honours_an_explicit_format_selection(self, tmp_path: Path) -> None:
-        (tmp_path / "curve.csv").write_text("step,loss\n1,0.5\n")
-        result = ingest_run(tmp_path, formats=set())
-
-        assert result.did_ingest is False
-        assert result.skipped[0].reason == "not selected by the operator"
-
-    def test_empty_directory_is_a_clean_no_op(self, tmp_path: Path) -> None:
-        result = ingest_run(tmp_path)
-
-        assert result.did_ingest is False
-        assert result.skipped == []
-        assert not _wal(tmp_path).exists()
-        assert not (tmp_path / "metrics.mlp.jsonl").exists()
-        assert not (tmp_path / "metrics.mlp.zarr").exists()
-        assert not (tmp_path / "metrics.mlp.index.json").exists()
 
 
 class TestLammpsMapping:

@@ -6,7 +6,7 @@ import type { JSONValue } from './JSONValue';
 export type ExperimentRefResponse = {
     id: string;
     name: string;
-    parameterSpace?: Record<string, JSONValue>;
     projectId: string;
+    parameterSpace?: Record<string, JSONValue>;
 };
 

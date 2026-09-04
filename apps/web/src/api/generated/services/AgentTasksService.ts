@@ -31,27 +31,6 @@ import { OpenAPI } from '../core/OpenAPI';
 import { request as __request } from '../core/request';
 export class AgentTasksService {
     /**
-     * List Agent Tasks
-     * List active and historical agent tasks.
-     * @param molexpSession
-     * @returns AgentTaskListResponse Successful Response
-     * @throws ApiError
-     */
-    public static listAgentTasks(
-        molexpSession?: (string | null),
-    ): CancelablePromise<AgentTaskListResponse> {
-        return __request(OpenAPI, {
-            method: 'GET',
-            url: '/api/agent-tasks',
-            cookies: {
-                'molexp_session': molexpSession,
-            },
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
      * Create Agent Task
      * Create a user-facing agent task.
      *
@@ -80,20 +59,45 @@ export class AgentTasksService {
         });
     }
     /**
-     * Delete Agent Task Route
-     * Cancel any live turn, drop the runtime, and remove task metadata.
-     * @param taskId
+     * List Agent Tasks
+     * List active and historical agent tasks.
      * @param molexpSession
-     * @returns MessageResponse Successful Response
+     * @returns AgentTaskListResponse Successful Response
      * @throws ApiError
      */
-    public static deleteAgentTaskRoute(
+    public static listAgentTasks(
+        molexpSession?: (string | null),
+    ): CancelablePromise<AgentTaskListResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/agent-tasks',
+            cookies: {
+                'molexp_session': molexpSession,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * Get Agent Task System Prompt
+     * Return the composed system prompt for an agent task (inspector).
+     *
+     * Accepts either a task id or a runtime session id. Live surface replacement
+     * for the retired ``GET /api/agent/sessions/{id}/system-prompt`` (which
+     * 503s via the legacy agent catch-all).
+     * @param taskId
+     * @param molexpSession
+     * @returns AgentSystemPromptResponse Successful Response
+     * @throws ApiError
+     */
+    public static getAgentTaskSystemPrompt(
         taskId: string,
         molexpSession?: (string | null),
-    ): CancelablePromise<MessageResponse> {
+    ): CancelablePromise<AgentSystemPromptResponse> {
         return __request(OpenAPI, {
-            method: 'DELETE',
-            url: '/api/agent-tasks/{task_id}',
+            method: 'GET',
+            url: '/api/agent-tasks/{task_id}/system-prompt',
             path: {
                 'task_id': taskId,
             },
@@ -132,25 +136,20 @@ export class AgentTasksService {
         });
     }
     /**
-     * Cancel Agent Task
-     * Stop the in-flight turn for this task (idempotent when already idle).
-     *
-     * Always succeeds when task metadata exists on disk — including zombie
-     * ``running`` / ``waiting_approval`` rows after a server restart (no live
-     * plan or chat runtime). Previously the chat cancel path 404'd when the
-     * session registry was empty, leaving the UI without a Stop recovery.
+     * Delete Agent Task Route
+     * Cancel any live turn, drop the runtime, and remove task metadata.
      * @param taskId
      * @param molexpSession
      * @returns MessageResponse Successful Response
      * @throws ApiError
      */
-    public static cancelAgentTask(
+    public static deleteAgentTaskRoute(
         taskId: string,
         molexpSession?: (string | null),
     ): CancelablePromise<MessageResponse> {
         return __request(OpenAPI, {
-            method: 'POST',
-            url: '/api/agent-tasks/{task_id}/cancel',
+            method: 'DELETE',
+            url: '/api/agent-tasks/{task_id}',
             path: {
                 'task_id': taskId,
             },
@@ -227,24 +226,25 @@ export class AgentTasksService {
         });
     }
     /**
-     * Get Agent Task System Prompt
-     * Return the composed system prompt for an agent task (inspector).
+     * Cancel Agent Task
+     * Stop the in-flight turn for this task (idempotent when already idle).
      *
-     * Accepts either a task id or a runtime session id. Live surface replacement
-     * for the retired ``GET /api/agent/sessions/{id}/system-prompt`` (which
-     * 503s via the legacy agent catch-all).
+     * Always succeeds when task metadata exists on disk — including zombie
+     * ``running`` / ``waiting_approval`` rows after a server restart (no live
+     * plan or chat runtime). Previously the chat cancel path 404'd when the
+     * session registry was empty, leaving the UI without a Stop recovery.
      * @param taskId
      * @param molexpSession
-     * @returns AgentSystemPromptResponse Successful Response
+     * @returns MessageResponse Successful Response
      * @throws ApiError
      */
-    public static getAgentTaskSystemPrompt(
+    public static cancelAgentTask(
         taskId: string,
         molexpSession?: (string | null),
-    ): CancelablePromise<AgentSystemPromptResponse> {
+    ): CancelablePromise<MessageResponse> {
         return __request(OpenAPI, {
-            method: 'GET',
-            url: '/api/agent-tasks/{task_id}/system-prompt',
+            method: 'POST',
+            url: '/api/agent-tasks/{task_id}/cancel',
             path: {
                 'task_id': taskId,
             },

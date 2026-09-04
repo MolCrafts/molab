@@ -4,12 +4,11 @@ Matches ``docs/en/guide/assets.md``.
 
 Walks through:
 
-1. ``ctx.register_artifact`` — writes a file and registers an ``ArtifactAsset``.
-2. ``ctx.log(name).append`` — appends to a ``LogAsset`` scoped to the run.
-3. ``ctx.checkpoint`` — writes a ``CheckpointAsset`` with parent chaining.
+1. ``ctx.emit_artifact`` — writes a file and records an ``Artifact``.
+2. ``ctx.log("runtime").append`` — appends to the execution evidence log.
+3. ``ctx.checkpoint`` — writes a checkpoint ``Artifact``.
 4. ``ws.data_assets.import_asset`` — pulls external data into the workspace.
-5. ``ctx.find_asset`` — scope-walking lookup (run → experiment → project →
-   workspace) on the driver-side ``RunContext``.
+5. ``ws.data_assets.get`` — look up an imported ``DataAsset`` by name.
 6. ``scan.scan_assets`` — workspace-wide asset queries over the authoritative
    on-disk manifests (the manifest scanner that replaced the SQLite catalog).
 
@@ -56,23 +55,25 @@ async def main() -> None:
     with run.start() as ctx:
         result = await WorkflowRuntime().execute(compiled, run_context=ctx)
 
-        # 1. Artifact — arbitrary payload written to run_dir/artifacts/.
-        ctx.register_artifact(result.outputs["train"], name="metrics.json")
+        # 1. Artifact — arbitrary payload snapshotted into the execution.
+        ctx.emit_artifact(result.outputs["train"], name="metrics.json")
 
-        # 2. Log — line-oriented, appendable, scoped to this run.
-        log = ctx.log("train")
+        # 2. Log — line-oriented evidence log, scoped to this execution.
+        log = ctx.log("runtime")
         log.append("epoch 1 start")
         log.append("epoch 1 done  loss=0.10")
         log.append("epoch 2 done  loss=0.08")
 
-        # 3. Checkpoints — chained via parent_ckpt_id.
+        # 3. Checkpoints.
         ctx.checkpoint("epoch-1", data={"step": 1})
         ctx.checkpoint("epoch-2", data={"step": 2})
 
-        # 5. find_asset walks run → experiment → project → workspace.
-        dataset = ctx.find_asset("toy-dataset")
+        # 5. The imported DataAsset is looked up by name (no scope walk).
+        dataset = ws.data_assets.get("toy-dataset")
         if dataset is not None:
-            ctx.register_artifact(str(dataset.path), name="dataset-path.txt")
+            ctx.emit_artifact(
+                {"dataset": dataset.name, "source": dataset.source_path}, name="dataset-path.json"
+            )
 
     # 6. Asset queries — flat view over the whole workspace, scanned from the
     #    authoritative on-disk manifests.

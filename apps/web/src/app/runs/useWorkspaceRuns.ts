@@ -30,11 +30,10 @@ export const POLL_INTERVAL_MS = 3_000;
 const FETCH_LIMIT = 1000;
 
 const EMPTY_STATS: WorkspaceRunsStats = {
-  total: 0,
-  running: 0,
-  pending: 0,
-  failed: 0,
-  succeeded: 0,
+  totalRuns: 0,
+  totalExecutions: 0,
+  activeExecutions: 0,
+  byStatus: {},
 };
 
 const EMPTY_SNAPSHOT: StoreSnapshot = {

@@ -91,40 +91,48 @@ def _cache_inputs(
 def _artifact_manifest(deps: WorkflowDeps, name: str) -> list[dict[str, JSONValue]]:
     """Build the JSON artifact manifest for task *name* in the current run.
 
-    Queries the current run's catalog view for artifacts whose producer
+    Queries the run's Execution artifact index for artifacts whose producing
     task is *name* and snapshots each as a JSON dict
     ``{name, kind, content_hash, asset_id}``. Returns ``[]`` when no
-    workspace asset view is reachable.
+    workspace run / execution id is reachable.
     """
     run_context = deps.run_context
     if run_context is None:
         return []
-    # The scope-filtered asset view lives on the Run (``run_context.run``);
-    # fall back to a direct ``.assets`` on the context for duck-typed stubs.
     run = getattr(run_context, "run", None)
-    assets_view = getattr(run, "assets", None) or getattr(run_context, "assets", None)
-    query = getattr(assets_view, "query", None)
-    if not callable(query):
+    execution_id = deps.execution_id
+    if run is None or execution_id is None:
+        return []
+    repository = getattr(run, "_execution_repository", None)
+    if not callable(repository):
         return []
     try:
-        found = query(producer_task=name, kind="artifact")
+        artifacts = repository().artifacts.list_for_execution(execution_id)
     except Exception:
         return []
     manifest: list[dict[str, JSONValue]] = []
-    for asset in found or []:
-        content_hash = getattr(asset, "content_hash", None)
-        if not content_hash:
+    for artifact in artifacts:
+        metadata = getattr(artifact, "metadata", None) or {}
+        if metadata.get("task_id") != name:
             continue
-        path = getattr(asset, "path", None)
+        content = getattr(artifact, "content", None)
+        digest = getattr(content, "digest", None)
+        if not digest:
+            continue
+        source_path = getattr(artifact, "source_path", None)
         manifest.append(
             {
-                "name": getattr(asset, "name", None),
-                "kind": getattr(asset, "kind", "artifact"),
-                "content_hash": content_hash,
-                "asset_id": getattr(asset, "asset_id", None),
-                "mime": getattr(asset, "mime", None),
-                "tags": getattr(asset, "tags", None) or {},
-                "path": str(path) if path is not None else None,
+                "name": getattr(artifact, "name", None),
+                "kind": "artifact",
+                "content_hash": digest,
+                "asset_id": getattr(artifact, "id", None),
+                "mime": getattr(artifact, "media_type", None),
+                "tags": metadata.get("tags") or {},
+                "path": (
+                    str(Path("executions") / execution_id / source_path)
+                    if source_path is not None
+                    else None
+                ),
             }
         )
     return manifest
@@ -191,12 +199,12 @@ def _restore_cached_files(
     *,
     consumed: tuple[str, ...] = (),
 ) -> None:
-    """Publish cached file blobs onto the current run via register_artifact."""
+    """Publish cached file blobs onto the current run via emit_artifact."""
     run_context = deps.run_context
-    register = getattr(run_context, "register_artifact", None)
+    emit = getattr(run_context, "emit_artifact", None)
     store = getattr(getattr(deps, "cache", None), "store", None)
     get_blob = getattr(store, "get_blob", None)
-    if not callable(register) or not callable(get_blob) or not manifest:
+    if not callable(emit) or not callable(get_blob) or not manifest:
         return
     for entry in manifest:
         content_hash = entry.get("content_hash")
@@ -211,7 +219,7 @@ def _restore_cached_files(
             continue
         tags = entry.get("tags")
         try:
-            register(
+            emit(
                 blob,
                 name=str(name),
                 mime=entry.get("mime"),

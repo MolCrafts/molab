@@ -27,7 +27,7 @@ run = ws.add_project("demo").add_experiment("sum").add_run(params={"scale": 2.0}
 
 # 3. 执行并读取结果
 result = run.execute(wf)
-print(run.status, result.outputs["summarize"])
+print(run.executions[-1].status.value, result.outputs["summarize"])
 ```
 
 运行它：
@@ -73,8 +73,8 @@ import molexp as me
 
 ws = me.Workspace("./lab", name="lab")
 same_run = ws.project("demo").experiment("sum").get_run(run.id)
-print(same_run.status)                     # succeeded
-print(same_run.get_result("summarize"))    # 28.0
+print(same_run.executions[-1].status.value)                     # succeeded
+print(same_run.get_result("summarize", execution_id=same_run.executions[-1].id))    # 28.0
 ```
 
 ## 下一步

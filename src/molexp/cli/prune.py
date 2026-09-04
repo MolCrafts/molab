@@ -121,11 +121,11 @@ def _execution_rows(run: Run) -> list[tuple[str, ...]]:
     rows: list[tuple[str, ...]] = []
     for rec in run.execution_history:
         finished = rec.finished_at.strftime("%Y-%m-%d %H:%M") if rec.finished_at else "—"
-        started = rec.started_at.strftime("%Y-%m-%d %H:%M")
+        started = rec.started_at.strftime("%Y-%m-%d %H:%M") if rec.started_at else "—"
         status = rec.status or "running"
         rows.append(
             (
-                rec.execution_id,
+                rec.id,
                 status,
                 started,
                 finished,
@@ -237,7 +237,7 @@ def prune_runs(
     from molexp.workspace.prune import apply_execution_prune, plan_execution_prune
 
     history = run.execution_history
-    selected_ids = [history[i].execution_id for i in indices]
+    selected_ids = [history[i].id for i in indices]
     try:
         plan = plan_execution_prune(run, execution_ids=selected_ids)
     except LivePruneRefusedError as exc:

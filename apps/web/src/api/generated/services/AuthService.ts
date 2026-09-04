@@ -16,6 +16,26 @@ import { OpenAPI } from '../core/OpenAPI';
 import { request as __request } from '../core/request';
 export class AuthService {
     /**
+     * Auth Status
+     * @param molexpSession
+     * @returns AuthStatusResponse Successful Response
+     * @throws ApiError
+     */
+    public static authStatus(
+        molexpSession?: (string | null),
+    ): CancelablePromise<AuthStatusResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/auth/status',
+            cookies: {
+                'molexp_session': molexpSession,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
      * Auth Login
      * @param requestBody
      * @returns AuthUserPublic Successful Response
@@ -75,6 +95,26 @@ export class AuthService {
         });
     }
     /**
+     * Auth Token
+     * @param molexpSession
+     * @returns AuthTokenResponse Successful Response
+     * @throws ApiError
+     */
+    public static authToken(
+        molexpSession?: (string | null),
+    ): CancelablePromise<AuthTokenResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/auth/token',
+            cookies: {
+                'molexp_session': molexpSession,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
      * Auth Refresh
      * @param molexpSession
      * @returns AuthUserPublic Successful Response
@@ -86,26 +126,6 @@ export class AuthService {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/auth/refresh',
-            cookies: {
-                'molexp_session': molexpSession,
-            },
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
-     * Auth Status
-     * @param molexpSession
-     * @returns AuthStatusResponse Successful Response
-     * @throws ApiError
-     */
-    public static authStatus(
-        molexpSession?: (string | null),
-    ): CancelablePromise<AuthStatusResponse> {
-        return __request(OpenAPI, {
-            method: 'GET',
-            url: '/api/auth/status',
             cookies: {
                 'molexp_session': molexpSession,
             },
@@ -133,26 +153,6 @@ export class AuthService {
             },
             body: requestBody,
             mediaType: 'application/json',
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
-     * Auth Token
-     * @param molexpSession
-     * @returns AuthTokenResponse Successful Response
-     * @throws ApiError
-     */
-    public static authToken(
-        molexpSession?: (string | null),
-    ): CancelablePromise<AuthTokenResponse> {
-        return __request(OpenAPI, {
-            method: 'GET',
-            url: '/api/auth/token',
-            cookies: {
-                'molexp_session': molexpSession,
-            },
             errors: {
                 422: `Validation Error`,
             },
@@ -203,31 +203,6 @@ export class AuthService {
         });
     }
     /**
-     * Delete User
-     * @param username
-     * @param molexpSession
-     * @returns void
-     * @throws ApiError
-     */
-    public static deleteUser(
-        username: string,
-        molexpSession?: (string | null),
-    ): CancelablePromise<void> {
-        return __request(OpenAPI, {
-            method: 'DELETE',
-            url: '/api/auth/users/{username}',
-            path: {
-                'username': username,
-            },
-            cookies: {
-                'molexp_session': molexpSession,
-            },
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
      * Patch User
      * @param username
      * @param requestBody
@@ -251,6 +226,31 @@ export class AuthService {
             },
             body: requestBody,
             mediaType: 'application/json',
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * Delete User
+     * @param username
+     * @param molexpSession
+     * @returns void
+     * @throws ApiError
+     */
+    public static deleteUser(
+        username: string,
+        molexpSession?: (string | null),
+    ): CancelablePromise<void> {
+        return __request(OpenAPI, {
+            method: 'DELETE',
+            url: '/api/auth/users/{username}',
+            path: {
+                'username': username,
+            },
+            cookies: {
+                'molexp_session': molexpSession,
+            },
             errors: {
                 422: `Validation Error`,
             },

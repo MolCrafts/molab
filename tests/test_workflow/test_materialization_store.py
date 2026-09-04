@@ -29,5 +29,7 @@ async def test_json_return_is_not_auto_registered_as_artifact(tmp_path: Path) ->
         out = await WorkflowRuntime().execute(WorkflowCompiler().compile(wf), run_context=ctx)
 
     assert out.outputs["produce"] == {"value": 42}
-    found = run.assets.query(producer_task="produce", kind="artifact")
-    assert list(found) == []
+    execution_id = run.executions[-1].id
+    artifacts = run._execution_repository().artifacts.list_for_execution(execution_id)
+    found = [a for a in artifacts if a.metadata.get("task_id") == "produce"]
+    assert found == []

@@ -6,10 +6,11 @@
  * One generated plan in the list (its backing run + report title).
  */
 export type PlanSummaryResponse = {
+    runId: string;
+    executionId: string;
+    title: string;
+    status: string;
     createdAt: string;
     hasWorkflow: boolean;
-    runId: string;
-    status: string;
-    title: string;
 };
 

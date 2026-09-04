@@ -10,9 +10,9 @@
  * to serialize; consumers re-load the graph from disk by ``plan_id``.
  */
 export type PlanEmittedEvent = {
+    timestamp?: string;
     kind?: string;
     plan_id: string;
     step_count?: number;
-    timestamp?: string;
 };
 

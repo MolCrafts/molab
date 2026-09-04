@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 from molexp.workflow import Task, Workflow, WorkflowCompiler
-from molexp.workflow._graph_decl import TaskRegistration
-from molexp.workflow._helpers import _stable_workflow_id
 
 
 class TestWorkflowCompiler:
@@ -40,12 +38,3 @@ class TestWorkflowCompiler:
         wf.add(PostTask(), depends_on=["pre"])
         spec = WorkflowCompiler().compile(wf)
         assert [t.name for t in spec._tasks] == ["pre", "post"]
-
-
-class TestStableWorkflowId:
-    def test_is_deterministic(self):
-        regs = [
-            TaskRegistration("a", lambda: None, []),
-            TaskRegistration("b", lambda: None, ["a"]),
-        ]
-        assert _stable_workflow_id("test", regs) == _stable_workflow_id("test", regs)

@@ -336,9 +336,9 @@ def _promote_outputs(
     def _promote_one(marker: RegisterArtifact | RegisterMetric) -> object:
         if isinstance(marker, RegisterArtifact):
             path = Path(marker.path)
-            register = getattr(run_context, "register_artifact", None)
-            if callable(register):
-                asset = register(
+            emit = getattr(run_context, "emit_artifact", None)
+            if callable(emit):
+                artifact = emit(
                     path,
                     name=marker.name,
                     tags=marker.tags,
@@ -346,9 +346,10 @@ def _promote_outputs(
                     consumed=list(consumed) or None,
                 )
                 run_dir = getattr(run_context, "run_dir", None)
-                asset_path = getattr(asset, "path", None)
-                if run_dir is not None and asset_path is not None:
-                    return str(Path(run_dir) / asset_path)
+                source_path = getattr(artifact, "source_path", None)
+                execution_id = getattr(artifact, "execution_id", None)
+                if run_dir is not None and source_path is not None and execution_id is not None:
+                    return str(Path(run_dir) / "executions" / execution_id / source_path)
                 return str(path)
             return str(path)
         register_metric = getattr(run_context, "register_metric", None)

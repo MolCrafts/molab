@@ -70,14 +70,15 @@ class TestValidateWorkspace:
 
     def test_missing_concept_marker_is_an_error(self, tmp_path: Path) -> None:
         ws = _workspace(tmp_path)
-        entity = Path(ws.get_project("alpha").resolve()) / "project.json"
+        proj = ws.get_project("alpha")
+        entity = Path(proj.resolve()) / "project.json"
         payload = json.loads(entity.read_text())
         payload.pop("type", None)
         entity.write_text(json.dumps(payload))
 
         report = ws.validate()
         marker = [v for v in report.errors if v.rule == "concept.marker"]
-        assert marker and marker[0].path == "projects/alpha"
+        assert marker and marker[0].path == f"projects/{proj.id}"
 
     def test_workspace_type_on_entity_is_the_concept_marker(self, tmp_path: Path) -> None:
         ws = _workspace(tmp_path)
@@ -122,16 +123,18 @@ class TestValidateWorkspace:
         root = Path(ws.resolve())
         assert (root / "projects.json").is_file()
         assert not (root / "project.json").exists()  # no singular index at root
-        proj = root / "projects" / "alpha"
-        assert (proj / "project.json").is_file()  # entity
-        assert (proj / "experiments.json").is_file()  # index
-        assert not (proj / "experiment.json").exists()  # not an index here
-        exp = proj / "experiments" / "sweep"
-        assert (exp / "experiment.json").is_file()  # entity
-        assert (exp / "runs.json").is_file()  # index
+        proj = ws.get_project("alpha")
+        proj_dir = root / "projects" / proj.id
+        assert (proj_dir / "project.json").is_file()  # entity
+        assert (proj_dir / "experiments.json").is_file()  # index
+        assert not (proj_dir / "experiment.json").exists()  # not an index here
+        exp = proj.get_experiment("sweep")
+        exp_dir = proj_dir / "experiments" / exp.id
+        assert (exp_dir / "experiment.json").is_file()  # entity
+        assert (exp_dir / "runs.json").is_file()  # index
         # Singular run.json only under runs/run-*/ (entity), not as the index.
-        assert not (exp / "run.json").exists()
-        run_dirs = list((exp / "runs").iterdir())
+        assert not (exp_dir / "run.json").exists()
+        run_dirs = list((exp_dir / "runs").iterdir())
         assert run_dirs and (run_dirs[0] / "run.json").is_file()
 
     def test_leftover_singular_index_is_flagged_and_not_read(self, tmp_path: Path) -> None:
@@ -152,8 +155,9 @@ class TestValidateWorkspace:
 
     def test_project_dir_that_is_not_a_slug_is_flagged(self, tmp_path: Path) -> None:
         ws = _workspace(tmp_path)
+        proj = ws.get_project("alpha")
         projects = Path(ws.resolve()) / "projects"
-        (projects / "alpha").rename(projects / "Not_A_Slug")
+        (projects / proj.id).rename(projects / "Not_A_Slug")
 
         report = ws.validate()
         assert "project.slug" in {v.rule for v in report.errors}

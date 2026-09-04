@@ -13,7 +13,7 @@
  */
 export type RunLogsResponse = {
     executionId?: (string | null);
-    stderr?: (string | null);
     stdout?: (string | null);
+    stderr?: (string | null);
 };
 

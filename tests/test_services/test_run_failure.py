@@ -8,18 +8,20 @@ import pytest
 
 from molexp.services.run_failure import analyze_run_failure, build_failure_narrative
 from molexp.workspace import Workspace
-from molexp.workspace.models import RunStatus
 
 
-def _failed_run(tmp_path: Path, *, run_id: str = "aabbccdd", error: str = "boom"):
+def _run(tmp_path: Path, *, run_id: str = "aabbccdd"):
     ws = Workspace(tmp_path / "ws", name="lab")
     ws.materialize()
     exp = ws.add_project("p").add_experiment("e")
-    run = exp.add_run(params={"x": 1}, id=run_id)
-    run._update_metadata(status=RunStatus.FAILED)
-    exec_dir = run.run_dir / "executions" / f"exec-{run_id}"
-    exec_dir.mkdir(parents=True, exist_ok=True)
-    (exec_dir / "error.txt").write_text(error + "\n", encoding="utf-8")
+    return ws, exp, exp.add_run(params={"x": 1}, id=run_id)
+
+
+def _failed_run(tmp_path: Path, *, run_id: str = "aabbccdd", error: str = "boom"):
+    ws, exp, run = _run(tmp_path, run_id=run_id)
+    with run.start() as ctx:
+        (ctx.execution_dir / "error.txt").write_text(error + "\n", encoding="utf-8")
+        ctx.mark_failed(error)
     return ws, exp, run
 
 
@@ -40,8 +42,9 @@ class TestAnalyzeRunFailure:
         assert "updated narrative body" in b.read_index()
 
     def test_refuses_non_failed(self, tmp_path: Path) -> None:
-        _ws, _exp, run = _failed_run(tmp_path)
-        run._update_metadata(status=RunStatus.SUCCEEDED)
+        _ws, _exp, run = _run(tmp_path)
+        with run.start() as ctx:
+            ctx.mark_succeeded()
         with pytest.raises(ValueError, match="succeeded"):
             analyze_run_failure(run, created_by="test")
 

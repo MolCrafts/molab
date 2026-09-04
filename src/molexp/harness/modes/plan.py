@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any
 
 from mollog import get_logger
 
-from molexp.harness.errors import StageExecutionError
+from molexp.harness.errors import ApprovalPendingError, StageExecutionError
 from molexp.harness.host.compose import compose_plan
 from molexp.harness.host.keys import Keys
 from molexp.harness.host.plugins.tools import ToolBelt
@@ -27,7 +27,7 @@ from molexp.harness.plan_tools import BOARD_TOOLS, as_loop_tool
 from molexp.harness.schemas import ModeResult
 from molexp.harness.stages.plan_reachability_probe import PlanReachabilityProbe
 from molexp.harness.store.file_artifact_store import FileArtifactStore
-from molexp.workspace.utils import derive_execution_id, derive_run_id
+from molexp.workspace.domain import ExecutionMode, ExecutionStatus
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable
@@ -106,6 +106,7 @@ class Plan:
         self.plugins = plugins
         self._run: Run | None = None
         self._user_input: str | None = None
+        self._last_execution_id: str | None = None
 
     @classmethod
     def open(
@@ -132,6 +133,7 @@ class Plan:
         same Run instead of minting a new one.
         """
         from molexp._typing import JSONValue
+        from molexp.workspace.utils import derive_run_id
 
         params: dict[str, JSONValue] = {"mode": "plan", "draft": user_input}
         if supersedes:
@@ -157,6 +159,11 @@ class Plan:
         if self._run is None:
             raise StageExecutionError("Plan is not bound; call Plan.open(...)")
         return self._run
+
+    @property
+    def last_execution_id(self) -> str | None:
+        """Execution allocated by the most recent :meth:`execute`/``run`` call."""
+        return self._last_execution_id
 
     @staticmethod
     def _spec(user_input: str) -> dict[str, Any]:
@@ -192,13 +199,23 @@ class Plan:
         text = user_input if user_input is not None else self._user_input
         if host is None or text is None:
             raise StageExecutionError("Plan is not bound; call Plan.open(...)")
-        with host.start() as run_ctx:
-            result = await self.run(
-                run=host,
-                user_input=text,
-                gateway=gateway,
-                capability_registry=capability_registry,
-            )
+        prior = host.executions
+        mode = self._next_execution_mode(prior)
+        predecessor = prior[-1].id if prior else None
+        with host.start(mode=mode, based_on_execution_id=predecessor) as run_ctx:
+            self._bind_approver_execution(run_ctx)
+            self._seed_review_decision(host, run_ctx)
+            try:
+                result = await self.run(
+                    run=host,
+                    user_input=text,
+                    gateway=gateway,
+                    capability_registry=capability_registry,
+                    execution_context=run_ctx,
+                )
+            except ApprovalPendingError as exc:
+                run_ctx.mark_interrupted(str(exc))
+                raise
             run_ctx.mark_succeeded()
         return result
 
@@ -209,19 +226,88 @@ class Plan:
         user_input: str,
         gateway: AgentGateway,
         capability_registry: CapabilityRegistry | None = None,
+        execution_context: Any | None = None,  # noqa: ANN401 — workspace ExecutionContext
     ) -> ModeResult:
         """Run this bundle on *run* and return a :class:`ModeResult`."""
+        if execution_context is None:
+            prior = run.executions
+            mode = self._next_execution_mode(prior)
+            predecessor = prior[-1].id if prior else None
+            with run.start(mode=mode, based_on_execution_id=predecessor) as owned_context:
+                self._bind_approver_execution(owned_context)
+                self._seed_review_decision(run, owned_context)
+                try:
+                    return await self.run(
+                        run=run,
+                        user_input=user_input,
+                        gateway=gateway,
+                        capability_registry=capability_registry,
+                        execution_context=owned_context,
+                    )
+                except ApprovalPendingError as exc:
+                    owned_context.mark_interrupted(str(exc))
+                    raise
+        self._last_execution_id = execution_context.id
         host = compose_plan(
             run_id=run.id,
             run_dir=run.run_dir,
             gateway=gateway,
             capability_registry=capability_registry,
+            execution_context=execution_context,
             extra=self.plugins,
         )
         try:
-            return await self._run_on_host(host, run=run, user_input=user_input)
+            result = await self._run_on_host(
+                host,
+                run=run,
+                user_input=user_input,
+                execution_context=execution_context,
+            )
+            return result
         finally:
             host.unload()
+
+    @staticmethod
+    def _next_execution_mode(prior: list[Any]) -> ExecutionMode:
+        if not prior:
+            return ExecutionMode.INITIAL
+        if prior[-1].status in {
+            ExecutionStatus.FAILED,
+            ExecutionStatus.CANCELLED,
+            ExecutionStatus.INTERRUPTED,
+        }:
+            return ExecutionMode.RETRY
+        return ExecutionMode.RERUN
+
+    def _bind_approver_execution(self, context: Any) -> None:  # noqa: ANN401
+        bind = getattr(self.approve, "bind_execution", None)
+        if callable(bind):
+            bind(context)
+
+    @staticmethod
+    def _seed_review_decision(run: Any, context: Any) -> None:  # noqa: ANN401
+        """Materialize an appended operator decision as input to a new attempt."""
+        if not context.based_on_execution_id:
+            return
+        from molexp.harness.store.provenance_approval_store import ProvenanceApprovalStore
+
+        workspace = run.experiment.project.workspace
+        approvals = ProvenanceApprovalStore(
+            workspace.root,
+            run_id=run.id,
+            execution_id=context.based_on_execution_id,
+            fs=workspace.fs,
+        )
+        review = approvals.latest_review_decision()
+        if review is None:
+            return
+        context.emit_artifact(
+            review.model_dump(mode="json"),
+            name="harness/review_decision/operator-review.json",
+            media_type="application/json",
+            semantic_type="review_decision",
+            metadata={"source": "provenance", "decision_action": review.action},
+        )
 
     async def _run_on_host(
         self,
@@ -229,6 +315,7 @@ class Plan:
         *,
         run: Any,  # noqa: ANN401
         user_input: str,
+        execution_context: Any,  # noqa: ANN401 — workspace ExecutionContext
     ) -> ModeResult:
         from molexp.harness.host.plugins.workflow import WorkflowHandle
         from molexp.harness.modes.plan_workflow import PlanBag, compile_plan_workflow
@@ -243,7 +330,7 @@ class Plan:
         if ctx.agent_gateway is None:
             raise StageExecutionError("plan host did not publish ctx.llm")
         spec = self._spec(user_input)
-        board_file = board_path(run.run_dir)
+        board_file = board_path(execution_context.workdir)
         disk_board = DiskTaskBoard(board_file, artifact_store=store)
         belt = host.ctx.require(Keys.TOOLS)
         if not isinstance(belt, ToolBelt):
@@ -271,7 +358,7 @@ class Plan:
             run_id=run.id,
         )
         compiled = compile_plan_workflow(bag)
-        scratch = run.run_dir / ".plan_scratch"
+        scratch = execution_context.workdir / ".plan_scratch"
         scratch.mkdir(parents=True, exist_ok=True)
         wf_handle = host.ctx.get(Keys.WORKFLOW)
         if isinstance(wf_handle, WorkflowHandle):
@@ -280,6 +367,9 @@ class Plan:
                 persist=True,
                 run_dir=run.run_dir,
                 scratch_root=scratch,
+                run_context=execution_context,
+                execution_id=execution_context.id,
+                bypass_cache=True,
             )
         else:
             raw = await WorkflowRuntime().execute(
@@ -287,6 +377,9 @@ class Plan:
                 persist=True,
                 run_dir=run.run_dir,
                 scratch_root=scratch,
+                run_context=execution_context,
+                execution_id=execution_context.id,
+                bypass_cache=True,
             )
         if not isinstance(raw, WorkflowResult):
             raise StageExecutionError("plan workflow execute did not return a WorkflowResult")
@@ -332,12 +425,12 @@ class Plan:
         return ModeResult(
             mode_name=self.name,
             run_id=run.id,
-            execution_id=derive_execution_id(run.id, run.run_dir / "executions"),
+            execution_id=execution_context.id,
             stage_artifacts=tuple(a for a in stage_artifacts if a is not None),
             final_artifact=final,
         )
 
-    def save(self, *, run: Run | None = None) -> bool:
+    def save(self, *, run: Run | None = None, execution_id: str | None = None) -> bool:
         """Persist the generated workflow IR onto the run's owning experiment.
 
         Compiles the run's ``workflow_source`` artifact and writes it on the
@@ -348,7 +441,8 @@ class Plan:
         host = run if run is not None else self._run
         if host is None:
             raise StageExecutionError("Plan.save requires a bound run; call Plan.open(...)")
-        ir = self._ir(run=host)
+        selected_execution_id = execution_id or self._last_execution_id
+        ir = self._ir(run=host, execution_id=selected_execution_id)
         if ir is None:
             return False
         experiment = host.experiment
@@ -361,12 +455,15 @@ class Plan:
         experiment.save()
         return True
 
-    def _ir(self, *, run: Run) -> dict[str, Any] | None:
+    def _ir(self, *, run: Run, execution_id: str | None) -> dict[str, Any] | None:
         """Compile this plan run's ``workflow_source`` artifact to display IR."""
         from molexp.harness.schemas import WorkflowSource
         from molexp.harness.store.paths import harness_artifact_root
 
-        store = FileArtifactStore(root=harness_artifact_root(run.run_dir))
+        if execution_id is not None:
+            store = FileArtifactStore.open_execution(run, execution_id)
+        else:
+            store = FileArtifactStore(root=harness_artifact_root(run.run_dir))
         ref = store.latest_by_kind("workflow_source")
         if ref is None:
             return None

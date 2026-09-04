@@ -3,8 +3,8 @@
 /* tslint:disable */
 /* eslint-disable */
 export type McpSecretListResponse = {
+    scope: string;
     keys: Array<string>;
     path: string;
-    scope: string;
 };
 

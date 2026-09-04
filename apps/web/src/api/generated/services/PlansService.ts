@@ -10,27 +10,6 @@ import { OpenAPI } from '../core/OpenAPI';
 import { request as __request } from '../core/request';
 export class PlansService {
     /**
-     * List All Plans
-     * List every generated plan in the active workspace (across all experiments).
-     * @param molexpSession
-     * @returns WorkspacePlanListResponse Successful Response
-     * @throws ApiError
-     */
-    public static listAllPlans(
-        molexpSession?: (string | null),
-    ): CancelablePromise<WorkspacePlanListResponse> {
-        return __request(OpenAPI, {
-            method: 'GET',
-            url: '/api/plans',
-            cookies: {
-                'molexp_session': molexpSession,
-            },
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
      * List Plans
      * List the experiment's runs that carry a generated plan (experiment_report).
      * @param projectId
@@ -65,6 +44,7 @@ export class PlansService {
      * @param projectId
      * @param experimentId
      * @param runId
+     * @param executionId
      * @param molexpSession
      * @returns PlanDetailResponse Successful Response
      * @throws ApiError
@@ -73,6 +53,7 @@ export class PlansService {
         projectId: string,
         experimentId: string,
         runId: string,
+        executionId?: (string | null),
         molexpSession?: (string | null),
     ): CancelablePromise<PlanDetailResponse> {
         return __request(OpenAPI, {
@@ -83,6 +64,30 @@ export class PlansService {
                 'experiment_id': experimentId,
                 'run_id': runId,
             },
+            cookies: {
+                'molexp_session': molexpSession,
+            },
+            query: {
+                'executionId': executionId,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * List All Plans
+     * List every generated plan in the active workspace (across all experiments).
+     * @param molexpSession
+     * @returns WorkspacePlanListResponse Successful Response
+     * @throws ApiError
+     */
+    public static listAllPlans(
+        molexpSession?: (string | null),
+    ): CancelablePromise<WorkspacePlanListResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/plans',
             cookies: {
                 'molexp_session': molexpSession,
             },

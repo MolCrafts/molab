@@ -6,10 +6,10 @@
  * Emitted with the verdict once an approval gate resolves.
  */
 export type ApprovalDecidedEvent = {
-    approved: boolean;
-    gate: string;
-    kind?: string;
-    reason?: string;
     timestamp?: string;
+    kind?: string;
+    gate: string;
+    approved: boolean;
+    reason?: string;
 };
 

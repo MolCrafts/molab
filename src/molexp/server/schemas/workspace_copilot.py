@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+from pydantic import Field
+
 from ._wire import ApiModel
 from .workspace_context import (
     HealthFlagResponse,
@@ -45,12 +47,12 @@ class WorkspaceSummaryResponse(ApiModel):
     workspace: WorkspaceRefResponse
     headline: str
     counts: dict[str, int]
-    failedRuns: list[RunRefResponse] = []
-    runningRuns: list[RunRefResponse] = []
-    healthFlags: list[HealthFlagResponse] = []
-    openQuestions: list[KnowledgeRefResponse] = []
-    relevantKnowledge: list[KnowledgeRefResponse] = []
-    nextActions: list[NextActionResponse] = []
+    failedRuns: list[RunRefResponse] = Field(default_factory=list)
+    runningRuns: list[RunRefResponse] = Field(default_factory=list)
+    healthFlags: list[HealthFlagResponse] = Field(default_factory=list)
+    openQuestions: list[KnowledgeRefResponse] = Field(default_factory=list)
+    relevantKnowledge: list[KnowledgeRefResponse] = Field(default_factory=list)
+    nextActions: list[NextActionResponse] = Field(default_factory=list)
 
     @classmethod
     def from_summary(cls, summary: WorkspaceSummary) -> WorkspaceSummaryResponse:

@@ -10,12 +10,12 @@
  * schema is now the canonical shape and any future parser must produce it.
  */
 export type CommandParseResponse = {
-    error?: string;
     kind: CommandParseResponse.kind;
     name?: string;
+    skillId?: string;
     parameters?: Record<string, string>;
     planMode?: boolean;
-    skillId?: string;
+    error?: string;
 };
 export namespace CommandParseResponse {
     export enum kind {

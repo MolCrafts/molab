@@ -50,6 +50,13 @@ def _new_run(workspace: Workspace, name: str):
     return experiment.add_run(params={})
 
 
+def _run_artifacts(run, *, name: str | None = None):
+    artifacts = run._execution_repository().artifacts.list_for_execution(run.executions[-1].id)
+    if name is not None:
+        artifacts = [a for a in artifacts if a.name == name]
+    return artifacts
+
+
 class _FailingPutStore:
     """A CacheStore whose writes always fail (full disk / permissions shape)."""
 
@@ -144,21 +151,21 @@ class TestRuntimeCaching:
         with run1.start() as ctx1:
             await WorkflowRuntime().execute(compiled, run_context=ctx1, cache=cache)
         assert _COUNTERS["produce"] == 1
-        art1 = run1.assets.query(producer_task="produce", kind="artifact")
+        art1 = _run_artifacts(run1, name="produce.txt")
         assert len(art1) == 1
-        hash1 = art1[0].content_hash
+        hash1 = art1[0].content.digest
         assert hash1
 
         # Second run — cache HIT. The producer body must not run, yet the artifact
-        # must be resolvable in run2's scope with a byte-identical content_hash.
+        # must be resolvable in run2's scope with a byte-identical content digest.
         run2 = _new_run(workspace, "art2")
         with run2.start() as ctx2:
             await WorkflowRuntime().execute(compiled, run_context=ctx2, cache=cache)
         assert _COUNTERS["produce"] == 1  # no recompute
 
-        art2 = run2.assets.query(producer_task="produce", kind="artifact")
+        art2 = _run_artifacts(run2, name="produce.txt")
         assert len(art2) == 1
-        assert art2[0].content_hash == hash1
+        assert art2[0].content.digest == hash1
 
     async def test_config_change_forces_miss(self, workspace: Workspace) -> None:
         """The runtime threads the compiled snapshot's config identity into the

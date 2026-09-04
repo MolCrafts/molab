@@ -3,11 +3,9 @@
  * Equivalent role to Python's conftest.py — import from here, do not inline in test files.
  */
 
-import type { AssetResponse } from "@/api/generated/models/AssetResponse";
 import type { ExperimentResponse } from "@/api/generated/models/ExperimentResponse";
 import type { ProjectResponse } from "@/api/generated/models/ProjectResponse";
-import type { RunResponse } from "@/api/generated/models/RunResponse";
-import type { ExperimentSummary, ProjectSummary, RunSummary } from "@/app/types";
+import type { ApiAssetResponse, ApiRunResponse, ExperimentSummary, ProjectSummary, RunSummary } from "@/app/types";
 
 export const fixtureProject: ProjectResponse = {
   id: "proj-alpha",
@@ -39,42 +37,59 @@ export const fixtureExperimentNoDescription: ExperimentResponse = {
   workflow: "variant.py",
 };
 
-export const fixtureRun: RunResponse = {
+const fixtureStatus = (status: string) => ({
+  total: status === "pending" ? 0 : 1,
+  active: status === "running" ? 1 : 0,
+  notStarted: status === "pending",
+  byStatus: status === "pending" ? {} : { [status]: 1 },
+});
+
+export const fixtureRun: ApiRunResponse = {
   id: "run-abc",
   projectId: "proj-alpha",
   experimentId: "exp-001",
-  status: "succeeded",
+  definitionHash: "def-run-abc",
+  experimentRevisionId: "rev-exp-001",
+  statusSummary: fixtureStatus("succeeded"),
   created: "2026-03-01T11:00:00Z",
   finished: "2026-03-01T12:00:00Z",
   parameters: { lr: 0.001 },
 };
 
-export const fixtureRunPending: RunResponse = {
+export const fixtureRunPending: ApiRunResponse = {
   id: "run-def",
   projectId: "proj-alpha",
   experimentId: "exp-001",
-  status: "pending",
+  definitionHash: "def-run-def",
+  experimentRevisionId: "rev-exp-001",
+  statusSummary: fixtureStatus("pending"),
   created: "2026-03-01T13:00:00Z",
 };
 
-export const fixtureRunFailed: RunResponse = {
+export const fixtureRunFailed: ApiRunResponse = {
   id: "run-ghi",
   projectId: "proj-alpha",
   experimentId: "exp-001",
-  status: "failed",
+  definitionHash: "def-run-ghi",
+  experimentRevisionId: "rev-exp-001",
+  statusSummary: fixtureStatus("failed"),
   created: "2026-03-01T14:00:00Z",
 };
 
-export const fixtureRunCancelled: RunResponse = {
+export const fixtureRunCancelled: ApiRunResponse = {
   id: "run-jkl",
   projectId: "proj-alpha",
   experimentId: "exp-001",
-  status: "cancelled",
+  definitionHash: "def-run-jkl",
+  experimentRevisionId: "rev-exp-001",
+  statusSummary: fixtureStatus("cancelled"),
   created: "2026-03-01T15:00:00Z",
 };
 
-export const fixtureAsset: AssetResponse = {
+export const fixtureAsset: ApiAssetResponse = {
   id: "asset-001",
+  projectId: "proj-alpha",
+  title: "checkpoint.pt",
   name: "checkpoint.pt",
   kind: "artifact",
   scopeKind: "run",
@@ -123,11 +138,10 @@ export const fixtureRunSummary: RunSummary = {
   updatedAt: "2026-03-01T12:00:00Z",
   projectId: "proj-alpha",
   experimentId: "exp-001",
-  executorInfo: { backend: "local" },
-  profile: null,
-  configHash: null,
+  definitionHash: "def-run-abc",
+  experimentRevisionId: "rev-exp-001",
+  statusSummary: { total: 1, active: 0, notStarted: false, byStatus: { succeeded: 1 } },
   parameters: {},
-  results: {},
   workflowSource: "workflow.py",
   workflowSnapshot: null,
   startedAt: "2026-03-01T12:00:00Z",
