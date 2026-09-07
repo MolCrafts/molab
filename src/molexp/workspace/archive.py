@@ -5,7 +5,7 @@ The one workspace-layer zip archiver shared by agent export, server
 disk (``folder._disk()``)
 (local and remote backends). Consumers import this module directly
 (``from molexp.workspace.archive import archive_folder_zip``) — not
-re-exported from ``molexp.workspace`` (same pattern as ``git_projection``).
+re-exported from ``molexp.workspace``.
 
 Known debt (accepted):
 * mode bits are not preserved (``ZipInfo.external_attr = 0``);

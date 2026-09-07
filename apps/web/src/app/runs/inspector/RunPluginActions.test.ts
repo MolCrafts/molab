@@ -26,6 +26,8 @@ describe("RunPluginActions", () => {
     const row: WorkspaceRunRow = {
       id: "run-1",
       name: "Run 1",
+      workspaceKey: "ws",
+      path: "projects/project-1/experiments/experiment-1/runs/Run 1",
       projectId: "project-1",
       projectName: "Project 1",
       experimentId: "experiment-1",
@@ -37,14 +39,28 @@ describe("RunPluginActions", () => {
       statusSummary: { total: 1, active: 1, notStarted: false, byStatus: { running: 1 } },
       parameters: {},
       createdAt: "2026-09-01T10:00:00Z",
-      executions: [{
-        executionId: "exec-1", runId: "run-1", mode: "initial", status: "running",
-        createdAt: "2026-09-01T10:00:00Z",
-        startedAt: "2026-09-01T10:00:00Z", finishedAt: null, durationSeconds: null,
-        basedOnExecutionId: null, checkpointArtifactId: null,
-        schedulerJobId: "1234", backend: "molq",
-        backendMetadata: { cluster: "dardel", cluster_name: "dardel", scheduler: "slurm", scheduler_job_id: "1234" },
-      }],
+      executions: [
+        {
+          executionId: "exec-1",
+          runId: "run-1",
+          mode: "initial",
+          status: "running",
+          createdAt: "2026-09-01T10:00:00Z",
+          startedAt: "2026-09-01T10:00:00Z",
+          finishedAt: null,
+          durationSeconds: null,
+          basedOnExecutionId: null,
+          checkpointArtifactId: null,
+          schedulerJobId: "1234",
+          backend: "molq",
+          backendMetadata: {
+            cluster: "dardel",
+            cluster_name: "dardel",
+            scheduler: "slurm",
+            scheduler_job_id: "1234",
+          },
+        },
+      ],
     };
 
     const summary = runSummaryForPluginMatching(row);

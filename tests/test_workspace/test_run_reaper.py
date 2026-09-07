@@ -17,7 +17,7 @@ import pytest
 
 from molexp.workspace.domain import ExecutionMode, ExecutionStatus
 from molexp.workspace.execution_repository import ExecutionRepository
-from molexp.workspace.provenance import AgentRef
+from molexp.workspace.history import AgentRef
 from molexp.workspace.run_heartbeat import ALIVE_NAME, HEARTBEAT_STALE_SECONDS, touch_alive
 from molexp.workspace.run_reaper import reap_zombie_run
 

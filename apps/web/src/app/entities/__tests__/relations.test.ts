@@ -12,12 +12,20 @@ import type { WorkspaceSnapshot } from "@/app/types";
 
 const snapshot: WorkspaceSnapshot = {
   projects: [
-    { id: "p1", name: "Proj One", status: "active", summary: "first", updatedAt: "2026-01-01" },
+    {
+      id: "p1",
+      name: "Proj One",
+      path: "projects/proj-one",
+      status: "active",
+      summary: "first",
+      updatedAt: "2026-01-01",
+    },
   ],
   experiments: [
     {
       id: "e1",
       name: "Exp One",
+      path: "projects/proj-one/experiments/exp-one",
       status: "active",
       summary: "",
       workflowFile: "",
@@ -32,6 +40,7 @@ const snapshot: WorkspaceSnapshot = {
     {
       id: "r1",
       name: "Run One",
+      path: "projects/p1/experiments/e1/runs/Run One",
       status: "succeeded",
       summary: "",
       updatedAt: "2026-01-01",
@@ -51,6 +60,7 @@ const snapshot: WorkspaceSnapshot = {
     {
       id: "r2",
       name: "Run Two",
+      path: "projects/p1/experiments/e1/runs/Run Two",
       status: "failed",
       summary: "",
       updatedAt: "2026-01-01",

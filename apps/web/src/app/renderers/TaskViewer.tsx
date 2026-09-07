@@ -155,7 +155,6 @@ export const TaskViewer = ({
             <TaskChips ids={downstream} />
           </div>
         </Section>
-
       </div>
     </div>
   );

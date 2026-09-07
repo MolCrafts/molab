@@ -19,6 +19,8 @@ const snapshot: WorkspaceSnapshot = {
 const run = (id: string, status: string, createdAt: string): WorkspaceRunRow => ({
   id,
   name: id,
+  workspaceKey: "ws",
+  path: `projects/project/experiments/experiment/runs/${id}`,
   projectId: "project",
   projectName: "Project",
   experimentId: "experiment",
@@ -35,21 +37,23 @@ const run = (id: string, status: string, createdAt: string): WorkspaceRunRow => 
   },
   parameters: {},
   createdAt,
-  executions: [{
-    executionId: `execution-${id}`,
-    runId: id,
-    mode: "initial",
-    status,
-    createdAt,
-    startedAt: createdAt,
-    finishedAt: status === "failed" || status === "succeeded" ? createdAt : null,
-    durationSeconds: 0,
-    basedOnExecutionId: null,
-    checkpointArtifactId: null,
-    schedulerJobId: null,
-    backend: null,
-    backendMetadata: {},
-  }],
+  executions: [
+    {
+      executionId: `execution-${id}`,
+      runId: id,
+      mode: "initial",
+      status,
+      createdAt,
+      startedAt: createdAt,
+      finishedAt: status === "failed" || status === "succeeded" ? createdAt : null,
+      durationSeconds: 0,
+      basedOnExecutionId: null,
+      checkpointArtifactId: null,
+      schedulerJobId: null,
+      backend: null,
+      backendMetadata: {},
+    },
+  ],
 });
 
 const approval = (requestId: string, requestedAt: string): PendingApprovalItem => ({

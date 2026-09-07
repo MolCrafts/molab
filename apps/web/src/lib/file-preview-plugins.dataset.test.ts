@@ -1,12 +1,13 @@
 import { beforeEach, describe, expect, it } from "@rstest/core";
 import { filePreviewPluginRegistry } from "@/lib/file-preview-plugins";
+import { createPluginAPI } from "@/plugins/api/create_api";
 import { resetContributionRuntimeForTests } from "@/plugins/contribution-runtime";
 import molvisPlugin from "@/plugins/molvis";
 
 beforeEach(() => {
   // Clears both the FileTypeContribution and FilePreviewPlugin runtimes.
   resetContributionRuntimeForTests();
-  molvisPlugin.register();
+  void molvisPlugin.activate(createPluginAPI("molvis").api);
 });
 
 describe("molvis dataset FilePreviewPlugin", () => {

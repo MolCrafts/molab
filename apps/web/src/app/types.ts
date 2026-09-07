@@ -1,16 +1,7 @@
 import type { TaskGraphJson } from "@/plugins/workflow/task-graph-ir";
 
-export type LeftPanelView =
-  | "dashboard"
-  | "workspace"
-  | "projects"
-  | "runs"
-  | "activity"
-  | "asset"
-  | "workflow"
-  | "agent"
-  | "knowledge"
-  | "settings";
+/** Activity-bar / left-panel id. Core and plugins register these as view ids. */
+export type LeftPanelView = string;
 
 export type SemanticObjectType =
   | "project"
@@ -61,19 +52,25 @@ export type { ExperimentCreateRequest, ProjectCreateRequest, RunCreateRequest };
 import type { AgentTaskResponse } from "../api/generated/models/AgentTaskResponse";
 import type { CacheClearResponse } from "../api/generated/models/CacheClearResponse";
 import type { CacheStatsResponse } from "../api/generated/models/CacheStatsResponse";
+import type { ExecutionOutputsResponse } from "../api/generated/models/ExecutionOutputsResponse";
 import type { ExperimentResponse } from "../api/generated/models/ExperimentResponse";
 import type { ProjectResponse } from "../api/generated/models/ProjectResponse";
 import type { RunResponse } from "../api/generated/models/RunResponse";
+import type { RunStatusSummaryResponse } from "../api/generated/models/RunStatusSummaryResponse";
 import type { RunSummary as ApiRunSummaryModel } from "../api/generated/models/RunSummary";
 import type { SessionEventResponse } from "../api/generated/models/SessionEventResponse";
 import type { WorkflowSnapshotResponse } from "../api/generated/models/WorkflowSnapshotResponse";
-import type { RunStatusSummaryResponse } from "../api/generated/models/RunStatusSummaryResponse";
-import type { ExecutionOutputsResponse } from "../api/generated/models/ExecutionOutputsResponse";
 
 // Re-export as Api*Response for compatibility
 export type ApiProjectResponse = ProjectResponse;
 export type ApiExperimentResponse = ExperimentResponse;
-export type ApiRunResponse = Pick<RunResponse, "id" | "projectId" | "experimentId" | "created"> &
+// ``name`` and ``path`` are as required as ``id``: only the server knows what a
+// run is called and where it lives, and there is no id-shaped substitute for
+// either — a fallback would put a UUID in front of the user.
+export type ApiRunResponse = Pick<
+  RunResponse,
+  "id" | "name" | "path" | "projectId" | "experimentId" | "created"
+> &
   Partial<Omit<RunResponse, "error">> & {
     /** Mock-only v1 fields; production mapping never treats them as truth. */
     status?: string;
@@ -143,6 +140,8 @@ export type AssetKind =
 export interface ProjectSummary {
   id: string;
   name: string;
+  /** Workspace-relative directory, as the server reported it — never composed. */
+  path: string;
   status: SemanticStatus;
   summary: string;
   updatedAt: string;
@@ -159,6 +158,8 @@ export interface ProjectSummary {
 export interface ExperimentSummary {
   id: string;
   name: string;
+  /** Workspace-relative directory, as the server reported it — never composed. */
+  path: string;
   status: SemanticStatus;
   summary: string;
   workflowFile: string;
@@ -190,6 +191,8 @@ export interface ExecutionRecordSummary {
 export interface RunSummary {
   id: string;
   name: string;
+  /** Workspace-relative directory, as the server reported it — never composed. */
+  path: string;
   status: SemanticStatus;
   summary: string;
   updatedAt: string;
@@ -414,6 +417,14 @@ export interface RendererProps {
   executionId?: string | null;
   /** Host-fetched output inventory for that execution. */
   executionOutputs?: ExecutionOutputsResponse | null;
+  /**
+   * The attempt's workspace-relative directory, as the server reported it.
+   *
+   * File paths a renderer receives are relative to *this*, not to the run —
+   * anything resolving them against the run root misses the
+   * ``executions/<id>/`` segment and reads a directory that is not there.
+   */
+  executionDir?: string | null;
 }
 
 /** Compile-time field scope for feature renderers with smaller catalog needs. */

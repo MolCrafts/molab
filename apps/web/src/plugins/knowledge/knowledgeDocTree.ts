@@ -31,8 +31,8 @@ export interface DocTreeNode {
   kind: DocTreeNodeKind;
   /** The Note's bundle-relative identity path — set only for `kind === "doc"`. */
   relPath: string | null;
-  /** For entity groups: the owning entity kind + id. Absent on the KB group. */
-  entity?: { kind: DocEntityKind; id: string };
+  /** For entity groups: the owning entity kind + its directory name. Absent on the KB group. */
+  entity?: { kind: DocEntityKind; dir: string };
   children: DocTreeNode[];
 }
 
@@ -48,46 +48,47 @@ const KB_GROUP_NAME = "Knowledge base";
 interface Owner {
   groupId: string;
   groupName: string;
-  entity?: { kind: DocEntityKind; id: string };
+  entity?: { kind: DocEntityKind; dir: string };
   /** Number of leading path segments consumed by the entity prefix. */
   prefixLen: number;
 }
 
-/** Drop the mandatory `run-` directory prefix to recover the bare run id. */
-const stripRunPrefix = (segment: string): string =>
-  segment.startsWith("run-") ? segment.slice("run-".length) : segment;
-
 /**
  * Classify a Note by its relPath: which top-level group owns it and how many
  * leading segments are the entity-container prefix. A relPath under
- * `projects/…[/experiments/…[/runs/run-…]]` belongs to the deepest such entity;
+ * `projects/…[/experiments/…[/runs/…]]` belongs to the deepest such entity;
  * everything else is a root-bundle knowledge-base doc.
+ *
+ * What a segment holds is a *directory name*, never an id — an experiment's
+ * slug, a run's parameters. It is carried as `dir` so a consumer resolving it
+ * against the entity list compares it with what the server reports as that
+ * entity's path, not with a UUIDv7 that appears nowhere in the tree.
  */
 const classify = (segments: string[]): Owner => {
   if (segments[0] === "projects" && segments.length >= 2) {
-    const projectId = segments[1];
+    const projectDir = segments[1];
     if (segments[2] === "experiments" && segments.length >= 4) {
-      const experimentId = segments[3];
+      const experimentDir = segments[3];
       if (segments[4] === "runs" && segments.length >= 6) {
-        const runId = stripRunPrefix(segments[5]);
+        const runDir = segments[5];
         return {
-          groupId: `group:run:${runId}`,
-          groupName: runId,
-          entity: { kind: "run", id: runId },
+          groupId: `group:run:${runDir}`,
+          groupName: runDir,
+          entity: { kind: "run", dir: runDir },
           prefixLen: 6,
         };
       }
       return {
-        groupId: `group:experiment:${experimentId}`,
-        groupName: experimentId,
-        entity: { kind: "experiment", id: experimentId },
+        groupId: `group:experiment:${experimentDir}`,
+        groupName: experimentDir,
+        entity: { kind: "experiment", dir: experimentDir },
         prefixLen: 4,
       };
     }
     return {
-      groupId: `group:project:${projectId}`,
-      groupName: projectId,
-      entity: { kind: "project", id: projectId },
+      groupId: `group:project:${projectDir}`,
+      groupName: projectDir,
+      entity: { kind: "project", dir: projectDir },
       prefixLen: 2,
     };
   }
@@ -192,7 +193,7 @@ export const buildDocTree = (entries: DocEntry[]): DocTreeNode[] => {
     if (a.entity.kind !== b.entity.kind) {
       return ENTITY_RANK[a.entity.kind] - ENTITY_RANK[b.entity.kind];
     }
-    return a.entity.id.localeCompare(b.entity.id);
+    return a.entity.dir.localeCompare(b.entity.dir);
   });
 
   for (const group of ordered) sortChildren(group.children);

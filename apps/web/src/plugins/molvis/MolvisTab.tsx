@@ -1,17 +1,12 @@
 import { Atom, FileText } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
-import type { LammpsLogResponse, LammpsThermoStage } from "@/api";
-import { runsApi } from "@/api";
 import { EmptyState } from "@/app/components/entity";
 import type { RendererProps } from "@/app/types";
 import { WorkbenchAction } from "@/components/workbench";
-import { CHART_SERIES_PALETTE } from "@/lib/chart-tokens";
 import { formatBytes } from "@/lib/format-bytes";
-import { MolplotLineChart } from "@/plugins/molplot";
 import type { DiscoveredFile } from "@/plugins/types";
 import { MolvisErrorBoundary } from "./MolvisErrorBoundary";
 import {
-  isMolvisLog,
   isMolvisTrajectory,
   isMolvisTrajectoryName,
   isMolvisZarr,
@@ -60,195 +55,36 @@ const FileList = ({ files, active, onSelect }: FileListProps): JSX.Element => {
   );
 };
 
-interface ThermoChartProps {
-  stage: LammpsThermoStage;
-  columnIndex: number;
-  color: string;
-}
-
-const ThermoChart = ({ stage, columnIndex, color }: ThermoChartProps): JSX.Element => {
-  // Defaults live inside useMemo so a missing ``stage.columns``/``rows``
-  // doesn't materialise a fresh ``[]`` per render and invalidate the
-  // memo, which would tear down + re-mount the plotly chart on every
-  // parent update.
-  const config = useMemo(() => {
-    const columns = stage.columns ?? [];
-    const rows = stage.rows ?? [];
-    const stepIndex = columns.indexOf("Step");
-    return {
-      series: [
-        {
-          id: columns[columnIndex] ?? `col${columnIndex}`,
-          label: columns[columnIndex],
-          color,
-          initialPoints: rows.map((row, idx) => ({
-            x: stepIndex >= 0 ? row[stepIndex] : idx,
-            y: row[columnIndex],
-          })),
-        },
-      ],
-      xAxis: { label: "Step" },
-      hovertemplate: "%{y:.6g}<extra></extra>",
-      hovermode: "x unified" as const,
-      modebar: true,
-      modebarRemove: ["lasso2d", "select2d", "toggleSpikelines"],
-      theme: "auto" as const,
-    };
-  }, [color, stage, columnIndex]);
-
-  return (
-    <MolplotLineChart
-      config={config}
-      style={{ width: "100%", height: "var(--spacing-chart-md)" }}
-    />
-  );
-};
-
-interface ThermoStageProps {
-  stage: LammpsThermoStage;
-}
-
-const ThermoStageView = ({ stage }: ThermoStageProps): JSX.Element => {
-  const columns = stage.columns ?? [];
-  const rows = stage.rows ?? [];
-  const stepIndex = columns.indexOf("Step");
-  const seriesColumns = columns
-    .map((name, index) => ({ name, index }))
-    .filter(({ index }) => index !== stepIndex);
-
-  if (seriesColumns.length === 0) {
-    return (
-      <div className="bg-surface/60 px-3 py-6 text-center text-body-lg text-muted-foreground">
-        Stage parsed but contains no plottable columns.
-      </div>
-    );
-  }
-
-  return (
-    <div className="grid gap-3 lg:grid-cols-2">
-      {seriesColumns.map(({ name, index }, paletteIdx) => {
-        const lastValue = rows[rows.length - 1]?.[index];
-        return (
-          <section key={name} className="min-w-0 bg-surface/65 p-3">
-            <div className="flex items-baseline justify-between gap-3">
-              <div className="min-w-0 truncate text-body-lg font-medium text-foreground">
-                {name}
-              </div>
-              <div className="font-mono text-label text-muted-foreground">
-                {Number.isFinite(lastValue) ? lastValue.toPrecision(4) : "—"}
-              </div>
-            </div>
-            <ThermoChart
-              stage={stage}
-              columnIndex={index}
-              color={CHART_SERIES_PALETTE[paletteIdx % CHART_SERIES_PALETTE.length]}
-            />
-          </section>
-        );
-      })}
-    </div>
-  );
-};
-
-interface LogPreviewProps {
-  projectId: string;
-  experimentId: string;
-  runId: string;
-  executionId: string;
-  file: DiscoveredFile;
-}
-
-const LogPreview = ({ projectId, experimentId, runId, executionId, file }: LogPreviewProps): JSX.Element => {
-  const [response, setResponse] = useState<LammpsLogResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    setResponse(null);
-    setError(null);
-
-    runsApi
-      .getRunLammpsLog(projectId, experimentId, runId, executionId, file.relPath)
-      .then((value) => {
-        if (!cancelled) setResponse(value);
-      })
-      .catch((reason) => {
-        if (!cancelled) {
-          setError(reason instanceof Error ? reason.message : "Failed to load log");
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [projectId, experimentId, runId, executionId, file.relPath]);
-
-  if (error) {
-    return (
-      <EmptyState
-        icon={<FileText className="h-6 w-6" />}
-        title="Cannot read log"
-        description={error}
-      />
-    );
-  }
-
-  if (response === null) {
-    return <div className="text-body-lg text-muted-foreground">Loading {file.relPath}…</div>;
-  }
-
-  const stages = response.stages ?? [];
-  if ((response.nStages ?? 0) === 0 || stages.length === 0) {
-    return (
-      <EmptyState
-        icon={<FileText className="h-6 w-6" />}
-        title="No thermo data found"
-        description={`molpy parsed ${file.relPath} but found no Per-MPI-rank thermo blocks.`}
-      />
-    );
-  }
-
-  return (
-    <div className="flex flex-col gap-4">
-      {stages.map((stage, idx) => {
-        const firstStep = stage.rows?.[0]?.[stage.columns?.indexOf("Step") ?? -1];
-        const stageKey = `${file.relPath}:${Number.isFinite(firstStep) ? firstStep : idx}`;
-        return (
-          <div key={stageKey} className="flex flex-col gap-2">
-            {stages.length > 1 && (
-              <div className="text-label uppercase tracking-wide text-muted-foreground">
-                Stage {idx + 1}
-              </div>
-            )}
-            <ThermoStageView stage={stage} />
-          </div>
-        );
-      })}
-    </div>
-  );
-};
-
 interface PreviewPaneProps {
   projectId: string;
   experimentId: string;
   runId: string;
+  executionDir: string;
   executionId: string;
   file: DiscoveredFile | null;
 }
 
 /**
  * Right-hand content area. Fills the blank space (with padding) and renders the
- * selected file: thermo charts for LAMMPS logs, a space-filling 3D canvas for
- * trajectories, a friendly notice for anything molvis cannot draw.
+ * selected file as a space-filling 3D canvas, or a friendly notice for
+ * anything molvis cannot draw. Solver logs are not molvis's: they are numbers
+ * over time, and charts are molplot's alone.
  */
-const PreviewPane = ({ projectId, experimentId, runId, executionId, file }: PreviewPaneProps): JSX.Element => {
+const PreviewPane = ({
+  projectId,
+  experimentId,
+  runId,
+  executionDir,
+  executionId,
+  file,
+}: PreviewPaneProps): JSX.Element => {
   if (!file) {
     return (
       <div className="flex flex-1 items-center justify-center p-6">
         <EmptyState
           icon={<Atom className="h-6 w-6" />}
           title="Select a file"
-          description="Pick a PDB, XYZ, LAMMPS dump, Zarr store, or LAMMPS log to preview."
+          description="Pick a PDB, XYZ, LAMMPS dump, or Zarr store to preview."
         />
       </div>
     );
@@ -263,18 +99,6 @@ const PreviewPane = ({ projectId, experimentId, runId, executionId, file }: Prev
     </div>
   );
 
-  if (isMolvisLog(file.name)) {
-    return (
-      <div className="flex min-h-0 flex-1 flex-col">
-        {header}
-        <div className="min-h-0 flex-1 overflow-auto p-4">
-          <LogPreview projectId={projectId} experimentId={experimentId} runId={runId}
-            executionId={executionId} file={file} />
-        </div>
-      </div>
-    );
-  }
-
   if (isMolvisTrajectory(file)) {
     return (
       <div className="flex min-h-0 flex-1 flex-col">
@@ -285,6 +109,7 @@ const PreviewPane = ({ projectId, experimentId, runId, executionId, file }: Prev
               projectId={projectId}
               experimentId={experimentId}
               runId={runId}
+              executionDir={executionDir}
               executionId={executionId}
               file={file}
               className="h-full"
@@ -300,7 +125,7 @@ const PreviewPane = ({ projectId, experimentId, runId, executionId, file }: Prev
       <EmptyState
         icon={<FileText className="h-6 w-6" />}
         title="Cannot open in MolVis"
-        description={`${file.name} is not a molvis log, trajectory, or Zarr store.`}
+        description={`${file.name} is not a molvis trajectory or Zarr store.`}
       />
     </div>
   );
@@ -311,6 +136,7 @@ export const MolvisTab = ({
   snapshot,
   discoveredFiles = [],
   executionId,
+  executionDir,
 }: MolvisTabProps): JSX.Element => {
   const run = useMemo(
     () => snapshot.runs.find((r) => r.id === selection.objectId) ?? null,
@@ -322,8 +148,7 @@ export const MolvisTab = ({
   const defaultRelPath = useMemo(() => {
     const trajectory = openableFiles.find((file) => isMolvisTrajectoryName(file.name));
     const zarr = openableFiles.find((file) => isMolvisZarr(file));
-    const log = openableFiles.find((file) => isMolvisLog(file.name));
-    return (trajectory ?? zarr ?? log ?? openableFiles[0])?.relPath ?? null;
+    return (trajectory ?? zarr ?? openableFiles[0])?.relPath ?? null;
   }, [openableFiles]);
 
   useEffect(() => {
@@ -332,13 +157,17 @@ export const MolvisTab = ({
     }
   }, [activeFile, defaultRelPath]);
 
-  if (!run || !executionId) {
+  if (!run || !executionId || !executionDir) {
     return (
       <div className="flex h-full items-center justify-center bg-background">
         <EmptyState
           icon={<Atom className="h-6 w-6" />}
           title={run ? "Select an execution" : "Run not found"}
-          description={run ? "MolVis files belong to one physical execution." : "The selected run is unavailable."}
+          description={
+            run
+              ? "MolVis files belong to one physical execution."
+              : "The selected run is unavailable."
+          }
         />
       </div>
     );
@@ -350,7 +179,7 @@ export const MolvisTab = ({
         <EmptyState
           icon={<Atom className="h-6 w-6" />}
           title="Nothing MolVis can open"
-          description="This run has no PDB, XYZ, LAMMPS dump, Zarr trajectory, or LAMMPS log."
+          description="This run has no PDB, XYZ, LAMMPS dump, or Zarr trajectory."
         />
       </div>
     );
@@ -366,6 +195,7 @@ export const MolvisTab = ({
           projectId={run.projectId}
           experimentId={run.experimentId}
           runId={run.id}
+          executionDir={executionDir}
           executionId={executionId}
           file={selectedFile}
         />

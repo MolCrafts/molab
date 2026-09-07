@@ -74,30 +74,21 @@ class TestProject:
         found = workspace.get_project("My Project")
         assert found.name == "My Project"
 
-    def test_sync_folders_imports_orphan_dirs_into_index(self, tmp_path):
-        """``sync_folders`` reconciles the per-class index with disk reality.
+    def test_directory_left_by_external_tooling_is_listed(self, tmp_path):
+        """The tree *is* the index, so there is nothing to reconcile.
 
-        External tooling (rsync, manual rm) may leave directories that
-        ``add_*`` never indexed. ``sync_folders`` is the explicit
-        reconciliation hook; without it, the index stays authoritative
-        for ``list_*``.
+        External tooling (rsync, an unpacked archive, a hand-written dir) can
+        drop a project into ``projects/`` and ``list_projects`` sees it on the
+        next call — no sync hook, no index that can disagree with disk.
         """
-        from molexp.workspace import Project
-
         ws = Workspace(tmp_path)
         ws.add_project("registered")
-        # Orphan project dir left by external tooling (not via add_project).
         orphan = tmp_path / "projects" / "orphan"
         orphan.mkdir(parents=True)
         (orphan / "project.json").write_text(
-            '{"schema_version":2,"id":"orphan","name":"orphan","description":"",'
+            '{"schema_version":3,"id":"orphan","name":"orphan","description":"",'
             '"owner":"","tags":[],"config":{},"created_at":"2026-04-21T12:00:00"}'
         )
-        # Index is authoritative: ``list_projects`` sees only what was
-        # added through the API. Orphan is invisible until sync.
-        assert {p.name for p in ws.list_projects()} == {"registered"}
-        # Reconcile.
-        ws.sync_folders(cls=Project)
         assert {p.name for p in ws.list_projects()} == {"orphan", "registered"}
 
 

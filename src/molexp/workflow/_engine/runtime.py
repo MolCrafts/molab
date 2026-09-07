@@ -90,7 +90,7 @@ def _resolve_cache(
     1. an explicit ``cache=`` kwarg passed to ``execute`` / ``start`` / …;
     2. the runtime's flat ``self.cache`` instance attribute;
     3. auto-derived from a workspace ``run_context`` that exposes
-       ``run_dir`` — a :class:`FileCacheStore` at ``<run_dir>/cache``
+       ``run_dir`` — a :class:`FileCacheStore` under ``<workspace>/.molexp/cache/``
        (never the workspace-root ``cache/``);
     4. ``None`` (caching off — identical behaviour to before this spec).
     """
@@ -101,10 +101,26 @@ def _resolve_cache(
     return _auto_cache_from_run_context(run_context)
 
 
+def _cache_dir(run_dir: Path) -> Path:
+    """Cache location for *run_dir* — machine state, so it lives in ``.molexp/``.
+
+    Walks up to the workspace root (the directory holding ``workspace.json``)
+    and keys the cache by the run's path below it, so two runs never share a
+    cache and no scientific directory gains a machine-only subdirectory.
+    """
+    from molexp.workspace.naming import workspace_root
+
+    root = workspace_root(run_dir)
+    if root is None:
+        return run_dir / ".cache"
+    rel = run_dir.relative_to(root).as_posix().replace("/", "%")
+    return root / ".molexp" / "cache" / rel
+
+
 def _auto_cache_from_run_context(run_context: RunContextLike | None) -> Caching | None:
     """Best-effort: build a run-local ``Caching`` from a run_context.
 
-    Cache lives at ``<run_dir>/cache``. Returns ``None`` when the duck-typed
+    Cache lives under ``<workspace>/.molexp/cache/``. Returns ``None`` when the duck-typed
     surface does not expose a ``run_dir``. Never raises. Never creates a
     workspace-root ``cache/``.
     """
@@ -117,7 +133,7 @@ def _auto_cache_from_run_context(run_context: RunContextLike | None) -> Caching 
     if run_dir is None:
         return None
     try:
-        store_dir = Path(run_dir) / "cache"
+        store_dir = _cache_dir(Path(run_dir))
     except TypeError:
         return None
     from ..cache import Caching
@@ -291,7 +307,7 @@ class WorkflowRuntime:
     ``self.cache`` is a flat, settable :class:`~molexp.workflow.cache.Caching`
     instance attribute (default ``None`` — caching off). It is the lowest
     priority cache source; an explicit ``cache=`` kwarg on any execution
-    method wins, and a run-local cache at ``<run_dir>/cache`` is auto-derived
+    method wins, and a run-local cache under ``<workspace>/.molexp/cache/`` is auto-derived
     from a ``run_context`` when neither is set (see :func:`_resolve_cache`).
     """
 

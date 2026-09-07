@@ -97,10 +97,14 @@ describe("workspace-path (pure POSIX)", () => {
     ).toBe("Arrhenius:/home/jicli594/work/mace-nve/projects/p1");
   });
 
-  it("runWorkspaceRelativePath", () => {
-    expect(runWorkspaceRelativePath({ projectId: "p1", experimentId: "e1", id: "abc12345" })).toBe(
-      "projects/p1/experiments/e1/runs/run-abc12345",
-    );
+  it("runWorkspaceRelativePath reports the server's path instead of composing one", () => {
+    // Every segment is a name — an experiment's slug, a run's parameters —
+    // and none of them is recoverable from the ids the client holds.
+    expect(
+      runWorkspaceRelativePath({
+        path: "projects/peo-tg/experiments/size-convergence/runs/dp=25_seed=42",
+      }),
+    ).toBe("projects/peo-tg/experiments/size-convergence/runs/dp=25_seed=42");
   });
 
   it("shortWorkspaceLabel compresses host-qualified serve labels", () => {

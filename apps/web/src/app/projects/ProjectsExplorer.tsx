@@ -225,7 +225,9 @@ export const buildProjectNodes = (
           label: "Copy Path",
           icon: Copy,
           onSelect: () =>
-            actions.onCopyText(formatQualifiedPath(`projects/${project.id}`, actions.pathContext)),
+            // The server reports where a project lives; composing it from ids
+            // yields a directory that was never created.
+            actions.onCopyText(formatQualifiedPath(project.path, actions.pathContext)),
         },
         {
           id: "refresh",
@@ -309,12 +311,7 @@ export const buildProjectNodes = (
               label: "Copy Path",
               icon: Copy,
               onSelect: () =>
-                actions.onCopyText(
-                  formatQualifiedPath(
-                    `projects/${project.id}/experiments/${experiment.id}`,
-                    actions.pathContext,
-                  ),
-                ),
+                actions.onCopyText(formatQualifiedPath(experiment.path, actions.pathContext)),
             },
             gateTreeWrite(
               {

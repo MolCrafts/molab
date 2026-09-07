@@ -1,3 +1,5 @@
+import type { MolexpPluginModule, PluginAPI } from "@molcrafts/molexp-plugin";
+
 export type {
   DiscoveredFile,
   EntityTabContribution,
@@ -19,6 +21,8 @@ export type {
   RunTabBadgeContext,
 } from "@/lib/contribution-types";
 export { buildRendererRegistryKey } from "@/lib/contribution-types";
+
+export type { MolexpPluginModule, PluginAPI };
 
 /**
  * One entry returned by ``GET /api/plugins`` — a discovered third-party
@@ -50,7 +54,7 @@ export interface UiBundleManifest {
   capabilities?: string[];
 }
 
-export interface UiPluginModule {
+export interface UiPluginModule extends Partial<MolexpPluginModule> {
   id: string;
   /** Human-readable name for Settings / catalog. Defaults to `id`. */
   name?: string;
@@ -61,7 +65,15 @@ export interface UiPluginModule {
    * Defaults to true (panel plugins are user-controllable).
    */
   userToggleable?: boolean;
-  register: () => void | Promise<void>;
+  /**
+   * Preferred entry. Host constructs `PluginAPI` and tracks disposers.
+   */
+  activate?: (api: PluginAPI) => void | Promise<void>;
+  deactivate?: (api: PluginAPI) => void | Promise<void>;
+  /**
+   * @deprecated v1 shim. Host still accepts `register()`-only modules.
+   */
+  register?: () => void | Promise<void>;
 }
 
 /**

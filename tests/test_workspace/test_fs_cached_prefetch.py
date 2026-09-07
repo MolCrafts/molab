@@ -239,14 +239,12 @@ class TestPrefetchWorkspaceIndices:
         assert any("projects/gamma/project.json" in k for k in cached_paths)
 
     @pytest.mark.unit
-    def test_prefetch_reconstructs_tree_with_plural_indexes(self, tmp_path: Path):
-        """Full tree uses plural children indexes + singular entities.
+    def test_prefetch_reconstructs_tree_without_any_index(self, tmp_path: Path):
+        """The tree is the index: entity ``*.json`` inside each directory.
 
-        Entity ``*.json`` is the sole truth source; plural children indexes
-        (``projects.json`` / ``experiments.json`` / ``runs.json``) are derived
-        on the parent. Singular basenames must never be used as the parent
-        index. Prefetch still reconstructs the navigation tree over a cached
-        remote FS.
+        No parent carries a children list, so nothing can drift from disk.
+        Prefetch still reconstructs the navigation tree over a cached remote
+        FS by walking the containers.
         """
         root = tmp_path / "ws"
         ws = Workspace(root=root, name="ws")
@@ -256,16 +254,15 @@ class TestPrefetchWorkspaceIndices:
         with run.start():
             pass
 
-        # Plural indexes on parents (derived).
-        assert (root / "projects.json").is_file()
-        assert (root / "projects" / proj.id / "experiments.json").is_file()
-        assert (root / "projects" / proj.id / "experiments" / exp.id / "runs.json").is_file()
-        # No executions.json (never an index level).
+        # No children index anywhere.
+        assert not list(root.rglob("projects.json"))
+        assert not list(root.rglob("experiments.json"))
+        assert not list(root.rglob("runs.json"))
         assert not list(root.rglob("executions.json"))
-        # Singular is entity-only — not at parent as an index.
+        # The singular entity file lives on the entity's own directory.
         assert not (root / "project.json").exists()
-        assert not (root / "projects" / proj.id / "experiment.json").exists()
-        assert not (root / "projects" / proj.id / "experiments" / exp.id / "run.json").exists()
+        assert (root / "projects" / proj._name / "project.json").is_file()
+        assert (root / "projects" / proj._name / "experiments" / exp._name).is_dir()
 
         # Observe the prefetch through a fresh cached remote FS over the same disk.
         cached = CachedRemoteFileSystem(
@@ -277,10 +274,10 @@ class TestPrefetchWorkspaceIndices:
 
         cached_paths = cached.cached_paths()
         assert any(p.endswith("/workspace.json") for p in cached_paths), cached_paths
-        assert any(p.endswith(f"/projects/{proj.id}/project.json") for p in cached_paths), (
+        assert any(p.endswith(f"/projects/{proj._name}/project.json") for p in cached_paths), (
             cached_paths
         )
-        assert any(p.endswith(f"/experiments/{exp.id}/experiment.json") for p in cached_paths), (
+        assert any(p.endswith(f"/experiments/{exp._name}/experiment.json") for p in cached_paths), (
             cached_paths
         )
         assert any("/runs/" in p and p.endswith("/run.json") for p in cached_paths), cached_paths

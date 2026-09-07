@@ -5,12 +5,12 @@ are not molrec ``meta`` / ``status``, and nothing here writes those sections.
 Scientific packages follow the external molrec spec; molexp does not re-host it.
 
 What this module produces is the run-local **metrics surface**: JSONL WAL
-(``artifacts/metrics.mlp.jsonl``) via :class:`~molexp.plugins.metrics.MetricsWriter`.
+(``out/metrics.mlp.jsonl``) via :class:`~molexp.plugins.metrics.MetricsWriter`.
 Foreign dialects (CSV, LAMMPS, TensorBoard, event JSONL) are equal sources.
 
 **Additive.** Source artifacts are never deleted, rewritten, moved, or
 truncated — metrics are written beside them, so an unwanted ingest is undone
-by removing ``artifacts/metrics.mlp.jsonl``.
+by removing ``out/metrics.mlp.jsonl``.
 
 **Never fails the caller.** A converter that cannot run (missing optional
 dependency, unreadable file, unmapped CSV) is recorded as a skip with its
@@ -28,16 +28,17 @@ from molexp._typing import JSONValue
 from molexp.plugins.metrics import MetricsWriter
 
 from .detect import FormatHit, LogFormat, detect_log_formats
-from .lammps import thermo_records
-from .tabular import ColumnMapping, table_records
-from .tb import scalar_records
+from .readers import ReadRequest, reader_for
 
 
 @dataclass(frozen=True, slots=True)
 class Skip:
     """One artifact that was not ingested, and why."""
 
-    format: LogFormat
+    format: str
+    """The reader's format id, as :class:`FormatHit` carries it — an open
+    vocabulary, since a format belongs to whichever package can parse it."""
+
     path: Path
     reason: str
 
@@ -47,7 +48,7 @@ class IngestResult:
     """What :func:`ingest_run` did to one run directory."""
 
     run_dir: Path
-    ingested: dict[LogFormat, int] = field(default_factory=dict)
+    ingested: dict[str, int] = field(default_factory=dict)
     """Metric records written, per source format."""
 
     skipped: list[Skip] = field(default_factory=list)
@@ -71,41 +72,36 @@ def _relative(path: Path, root: Path) -> str:
         return path.name
 
 
-def _records_for(
-    hit: FormatHit,
-    run_dir: Path,
-    csv_mapping: ColumnMapping | None,
-) -> Iterator[dict[str, JSONValue]]:
-    source = _relative(hit.path, run_dir)
-    if hit.format is LogFormat.LAMMPS_LOG:
-        return thermo_records(hit.path, extra_tags={"source": source})
-    if hit.format is LogFormat.TENSORBOARD:
-        return scalar_records(hit.path)
-    if hit.format is LogFormat.CSV:
-        if csv_mapping is None:
-            raise ValueError("CSV needs a ColumnMapping; none supplied")
-        return table_records(hit.path, csv_mapping, extra_tags={"source": source})
-    raise ValueError(f"no converter for {hit.format}")
+def _records_for(hit: FormatHit, run_dir: Path) -> Iterator[dict[str, JSONValue]]:
+    """Hand the file to whichever reader claimed it.
+
+    There is no ladder of formats here on purpose: a format molexp has never
+    heard of ingests exactly like any other, because every one arrives through
+    the same Protocol. Ingest takes the whole stream — it is persisting the
+    source, so it does not get to sample it.
+    """
+    reader = reader_for(hit.format)
+    if reader is None:
+        raise ValueError(f"no reader registered for {hit.format!r}")
+    return reader.read(hit.path, source=_relative(hit.path, run_dir), request=ReadRequest())
 
 
 def ingest_run(
     run_dir: Path | str,
     *,
-    formats: set[LogFormat] | None = None,
-    csv_mapping: ColumnMapping | None = None,
+    formats: set[str] | None = None,
 ) -> IngestResult:
     """Turn a run's foreign logs into its host metrics buffer.
 
-    Writes ``artifacts/metrics.mlp.jsonl`` — no ``meta`` / ``status`` sections,
-    because a Run is a host, not a record. Leftover zarr / index are not written.
+    Writes ``out/metrics.mlp.jsonl`` — no ``meta`` / ``status`` sections,
+    because a Run is a host, not a record. Persisting is optional: a chart
+    reads the sources directly (see :mod:`.sources`), so ingest is for when
+    records should outlive the log they came from.
 
     Args:
         run_dir: The run root. The buffer is written under it.
-        formats: Only ingest these formats. ``None`` ingests every format that
-            has a converter (CSV only when *csv_mapping* is given). An empty
-            set ingests nothing.
-        csv_mapping: Column mapping for CSV artifacts. Without it, CSV hits are
-            skipped with a reason rather than guessed.
+        formats: Only ingest these format ids. ``None`` ingests every format a
+            registered reader claims; an empty set ingests nothing.
 
     Returns:
         An :class:`IngestResult` with per-format record counts and every skip
@@ -113,11 +109,18 @@ def ingest_run(
     """
     root = Path(run_dir)
     result = IngestResult(run_dir=root)
+    writer = MetricsWriter(root)
+    # The WAL this call is about to append to is itself a readable format, so
+    # without excluding it a second ingest would read the file it is writing
+    # and never terminate.
+    destination = writer.path.resolve()
 
     hits = detect_log_formats(root)
     selected: list[FormatHit] = []
     for hit in hits:
-        if hit.format is LogFormat.UNKNOWN:
+        if hit.path.resolve() == destination:
+            result.skipped.append(Skip(hit.format, hit.path, "this is the ingest destination"))
+        elif hit.format == LogFormat.UNKNOWN:
             result.skipped.append(Skip(hit.format, hit.path, "unrecognised format — not guessed"))
         elif formats is not None and hit.format not in formats:
             result.skipped.append(Skip(hit.format, hit.path, "not selected by the operator"))
@@ -127,10 +130,9 @@ def ingest_run(
     if not selected:
         return result
 
-    writer = MetricsWriter(root)
     for hit in selected:
         try:
-            written = writer.log_many(_records_for(hit, root, csv_mapping))
+            written = writer.log_many(_records_for(hit, root))
         except ImportError as exc:
             result.skipped.append(Skip(hit.format, hit.path, f"dependency unavailable: {exc}"))
             continue

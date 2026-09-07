@@ -1,4 +1,8 @@
-import { describe, expect, it } from "@rstest/core";
+import { beforeEach, describe, expect, it } from "@rstest/core";
+import { createPluginAPI } from "@/plugins/api/create_api";
+import { resetContributionRuntimeForTests } from "@/plugins/contribution-runtime";
+import { registerCoreNavigation } from "@/plugins/core/navigation";
+import { registerKnowledgeNavigation } from "@/plugins/knowledge/navigation";
 import {
   getNavigationContribution,
   leftPanelViewFromPath,
@@ -8,8 +12,14 @@ import {
 } from "./sections";
 
 describe("navigation contributions", () => {
+  beforeEach(() => {
+    resetContributionRuntimeForTests();
+    registerCoreNavigation(createPluginAPI("core").api);
+    registerKnowledgeNavigation(createPluginAPI("knowledge").api);
+  });
+
   it("exposes the operational rail without legacy collection routes", () => {
-    expect(railNavigationContributions.map(({ id }) => id)).toEqual([
+    expect(railNavigationContributions().map(({ id }) => id)).toEqual([
       "dashboard",
       "projects",
       "runs",
@@ -18,7 +28,7 @@ describe("navigation contributions", () => {
       "asset",
       "workspace",
     ]);
-    expect(managementNavigationContribution?.id).toBe("settings");
+    expect(managementNavigationContribution()?.id).toBe("settings");
     expect(navigationContributions.find(({ id }) => id === "activity")?.placement).toBe("legacy");
     expect(navigationContributions.find(({ id }) => id === "workflow")?.placement).toBe("legacy");
   });

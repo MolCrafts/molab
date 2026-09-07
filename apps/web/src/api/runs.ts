@@ -2,62 +2,12 @@ import type { ArtifactPromoteRequest } from "@/api/generated/models/ArtifactProm
 import type { ExecutionAttemptCreateRequest } from "@/api/generated/models/ExecutionAttemptCreateRequest";
 import type { RunCreateRequest } from "@/api/generated/models/RunCreateRequest";
 import type { RunFilesResponse } from "@/api/generated/models/RunFilesResponse";
-import type { RunMetricsResponse as GeneratedRunMetricsResponse } from "@/api/generated/models/RunMetricsResponse";
 import { RunsService } from "@/api/generated/services/RunsService";
 
 export type { ArtifactResponse } from "@/api/generated/models/ArtifactResponse";
 export type { ExecutionOutputsResponse } from "@/api/generated/models/ExecutionOutputsResponse";
-export type { ExecutionRecordResponse } from "@/api/generated/models/ExecutionRecordResponse";
-export type { LammpsLogResponse } from "@/api/generated/models/LammpsLogResponse";
-export type { LammpsThermoStage } from "@/api/generated/models/LammpsThermoStage";
 export type { RunFilesResponse } from "@/api/generated/models/RunFilesResponse";
 export type { RunFileTextResponse } from "@/api/generated/models/RunFileTextResponse";
-
-export interface MetricRecord {
-  t: string;
-  k: string;
-  s?: number;
-  w?: string;
-  v?: unknown;
-  tags?: Record<string, unknown>;
-}
-
-export interface MetricSeriesSummary {
-  key: string;
-  type: string;
-  count: number;
-  latestStep?: number | null;
-  latestTimestamp?: string | null;
-  latestValue?: unknown;
-}
-
-export interface RunMetricsResponse {
-  nextLine: number;
-  records: MetricRecord[];
-  series: MetricSeriesSummary[];
-  parseErrors: number;
-}
-
-export interface RunMetricsQuery {
-  type?: string;
-  key?: string;
-  sinceLine?: number;
-  limit?: number;
-}
-
-const mapMetrics = (raw: GeneratedRunMetricsResponse): RunMetricsResponse => ({
-  nextLine: raw.nextLine ?? 0,
-  records: (raw.records ?? []) as MetricRecord[],
-  series: (raw.series ?? []).map((row) => ({
-    key: row.key,
-    type: row.type,
-    count: row.count,
-    latestStep: row.latestStep,
-    latestTimestamp: row.latestTimestamp,
-    latestValue: row.latestValue,
-  })),
-  parseErrors: raw.parseErrors ?? 0,
-});
 
 export const runsApi = {
   listRuns: (projectId: string, experimentId: string) =>
@@ -87,34 +37,15 @@ export const runsApi = {
     executionId: string,
     artifactId: string,
     data: ArtifactPromoteRequest,
-  ) =>
-    RunsService.promoteArtifact(
-      projectId,
-      experimentId,
-      runId,
-      executionId,
-      artifactId,
-      data,
-    ),
+  ) => RunsService.promoteArtifact(projectId, experimentId, runId, executionId, artifactId, data),
   getRunExecutionLogs: (
     projectId: string,
     experimentId: string,
     runId: string,
     executionId: string,
   ) => RunsService.getRunExecutionLogs(projectId, experimentId, runId, executionId),
-  getRunExecution: (
-    projectId: string,
-    experimentId: string,
-    runId: string,
-    executionId: string,
-  ) => RunsService.getRunExecution(projectId, experimentId, runId, executionId),
-  getRunLammpsLog: (
-    projectId: string,
-    experimentId: string,
-    runId: string,
-    executionId: string,
-    path: string,
-  ) => RunsService.getRunLammpsLog(projectId, experimentId, runId, executionId, path),
+  getRunExecution: (projectId: string, experimentId: string, runId: string, executionId: string) =>
+    RunsService.getRunExecution(projectId, experimentId, runId, executionId),
   getRunFileText: (
     projectId: string,
     experimentId: string,
@@ -122,25 +53,6 @@ export const runsApi = {
     executionId: string,
     path: string,
   ) => RunsService.getRunFileText(projectId, experimentId, runId, executionId, path),
-  getRunMetrics: async (
-    projectId: string,
-    experimentId: string,
-    runId: string,
-    executionId: string,
-    query: RunMetricsQuery = {},
-  ): Promise<RunMetricsResponse> => {
-    const raw = await RunsService.getRunMetrics(
-      projectId,
-      experimentId,
-      runId,
-      executionId,
-      query.type,
-      query.key,
-      query.sinceLine,
-      query.limit,
-    );
-    return mapMetrics(raw);
-  },
   getRunFiles: (
     projectId: string,
     experimentId: string,
@@ -148,12 +60,36 @@ export const runsApi = {
     executionId: string,
   ): Promise<RunFilesResponse> =>
     RunsService.getRunFiles(projectId, experimentId, runId, executionId),
-  cancelExecution: (
+  /**
+   * The same reads, addressed at an explicit served workspace.
+   *
+   * `/api/workspaces/{ws}/…` is a full mirror of the run routes, gated on a
+   * valid `{ws}` — so a comparison spanning workspaces reads every run through
+   * the same surface, with the workspace named rather than implied by whichever
+   * one happens to be active.
+   */
+  getRunFilesWs: (
+    ws: string,
     projectId: string,
     experimentId: string,
     runId: string,
     executionId: string,
-  ) => RunsService.cancelExecution(projectId, experimentId, runId, executionId),
+  ): Promise<RunFilesResponse> =>
+    RunsService.getRunFilesWs(projectId, experimentId, runId, executionId, ws),
+  getRunFileTextWs: (
+    ws: string,
+    projectId: string,
+    experimentId: string,
+    runId: string,
+    executionId: string,
+    path: string,
+  ) => RunsService.getRunFileTextWs(projectId, experimentId, runId, executionId, ws, path),
+  listExecutions: (projectId: string, experimentId: string, runId: string) =>
+    RunsService.listExecutions(projectId, experimentId, runId),
+  listExecutionsWs: (ws: string, projectId: string, experimentId: string, runId: string) =>
+    RunsService.listExecutionsWs(projectId, experimentId, runId, ws),
+  cancelExecution: (projectId: string, experimentId: string, runId: string, executionId: string) =>
+    RunsService.cancelExecution(projectId, experimentId, runId, executionId),
   exportUrl: (projectId: string, experimentId: string, runId: string): string =>
     `/api/projects/${encodeURIComponent(projectId)}/experiments/${encodeURIComponent(experimentId)}/runs/${encodeURIComponent(runId)}/export`,
 };

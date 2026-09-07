@@ -739,7 +739,7 @@ export const RunSnapshotPanel = ({ run, executionId }: RunSnapshotPanelProps): J
 
   useEffect(() => {
     let cancelled = false;
-    let interval: ReturnType<typeof setInterval> | null = null;
+    const interval: ReturnType<typeof setInterval> | null = null;
     setLoading(true);
     setError(null);
     if (!executionId) {

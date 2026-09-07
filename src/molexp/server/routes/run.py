@@ -8,7 +8,6 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
-from molexp.plugins.metrics import read_run_metrics
 from molexp.plugins.submit_molq.submit import SubmitHandler
 from molexp.workflow import WorkflowSnapshotRef, default_binding_registry
 from molexp.workflow.promote import resolve_spec_entrypoint
@@ -22,13 +21,13 @@ from molexp.workspace import (
 from molexp.workspace import (
     RunNotFoundError as WorkspaceRunNotFoundError,
 )
-from molexp.workspace.artifact_repository import ArtifactRepository
 from molexp.workspace.assets import ArtifactAsset
 from molexp.workspace.domain import ExecutionMode, ExecutionStatus
+from molexp.workspace.execution_dirs import JOBS, WORK
 from molexp.workspace.execution_repository import ExecutionRepository
 from molexp.workspace.fs_cached import CachedRemoteFileSystem
 from molexp.workspace.fs_tree import list_tree_children, tree_to_run_file_dicts
-from molexp.workspace.provenance import AgentRef
+from molexp.workspace.history import AgentRef
 from molexp.workspace.schema_version import read_versioned_json
 from molexp.workspace.targets import get_target
 
@@ -42,11 +41,8 @@ from ..schemas import (
     ExecutionAttemptCreateRequest,
     ExecutionEvidenceResponse,
     ExecutionOutputsResponse,
-    ExecutionRecordResponse,
-    LammpsLogResponse,
-    LammpsThermoStage,
+    ExecutionResponse,
     ManagedAssetResponse,
-    MetricSeriesResponse,
     RunAnalyzeFailureRequest,
     RunCreateRequest,
     RunExecutionResponse,
@@ -55,7 +51,6 @@ from ..schemas import (
     RunFileTextResponse,
     RunHarvestRequest,
     RunLogsResponse,
-    RunMetricsResponse,
     RunResponse,
 )
 
@@ -100,8 +95,8 @@ def _execution_repository(workspace, run) -> ExecutionRepository:  # noqa: ANN00
     )
 
 
-def _execution_response(state) -> ExecutionRecordResponse:  # noqa: ANN001
-    return ExecutionRecordResponse(
+def _execution_response(state) -> ExecutionResponse:  # noqa: ANN001
+    return ExecutionResponse(
         id=state.id,
         runId=state.run_id,
         mode=state.mode.value,
@@ -307,7 +302,7 @@ def get_run(
 
 @router.post(
     "/{run_id}/executions",
-    response_model=ExecutionRecordResponse,
+    response_model=ExecutionResponse,
     status_code=201,
 )
 def create_execution(
@@ -316,7 +311,7 @@ def create_execution(
     run_id: str,
     body: ExecutionAttemptCreateRequest,
     workspace=Depends(get_workspace),  # noqa: ANN001
-) -> ExecutionRecordResponse:
+) -> ExecutionResponse:
     """Create one queued physical attempt without mutating the Run."""
     experiment = _get_experiment(workspace, project_id, experiment_id)
     if not experiment:
@@ -359,8 +354,31 @@ def create_execution(
 
 
 @router.get(
+    "/{run_id}/executions",
+    response_model=list[ExecutionResponse],
+)
+def list_executions(
+    project_id: str,
+    experiment_id: str,
+    run_id: str,
+    workspace=Depends(get_workspace),  # noqa: ANN001
+) -> list[ExecutionResponse]:
+    """Every attempt at this Run, oldest first (``e01``, ``e02``, …).
+
+    The Run detail already embeds these; this is the addressable list for a
+    caller that wants the attempts alone, and the GET counterpart of the POST
+    on the same path.
+    """
+    experiment = _get_experiment(workspace, project_id, experiment_id)
+    run = _get_run_or_none(experiment, run_id) if experiment else None
+    if run is None:
+        raise RunNotFoundError(project_id, experiment_id, run_id)
+    return [_execution_response(state) for state in _execution_repository(workspace, run).list()]
+
+
+@router.get(
     "/{run_id}/executions/{execution_id}",
-    response_model=ExecutionRecordResponse,
+    response_model=ExecutionResponse,
 )
 def get_execution_record(
     project_id: str,
@@ -368,7 +386,7 @@ def get_execution_record(
     run_id: str,
     execution_id: str,
     workspace=Depends(get_workspace),  # noqa: ANN001
-) -> ExecutionRecordResponse:
+) -> ExecutionResponse:
     experiment = _get_experiment(workspace, project_id, experiment_id)
     run = _get_run_or_none(experiment, run_id) if experiment else None
     if run is None:
@@ -414,7 +432,7 @@ def get_execution_outputs(
         for asset in artifacts
         if asset.producer is not None and asset.producer.task_id
     }
-    work_dir = fs.join(execution_dir, "work")
+    work_dir = fs.join(execution_dir, WORK.name)
     unregistered: list[RunFileNode] = []
     if fs.is_dir(work_dir):
         prefix = work_dir.rstrip("/") + "/"
@@ -485,11 +503,9 @@ def promote_artifact(
     if run is None:
         raise RunNotFoundError(project_id, experiment_id, run_id)
     try:
-        artifact = ArtifactRepository(workspace.root, fs=workspace.fs).get(artifact_id)
+        artifact = _execution_repository(workspace, run).get(execution_id).artifact(artifact_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    if artifact.execution_id != execution_id or artifact.run_id != run_id:
-        raise HTTPException(status_code=404, detail="Artifact is not owned by this Execution")
     asset, version = run.experiment.project.assets.promote(
         artifact,
         created_by=AgentRef(id=body.created_by, type="person", name=body.created_by),
@@ -561,7 +577,7 @@ def create_scoped_run(
 
 def _execution_stream(exec_dir: Path, name: str) -> Path | None:
     """Stdout/stderr live under ``jobs/<id>/``."""
-    jobs = exec_dir / "jobs"
+    jobs = exec_dir / JOBS.name
     if not jobs.is_dir():
         return None
     found = sorted(p for p in jobs.glob(f"*/{name}") if p.is_file() or p.is_symlink())
@@ -610,52 +626,6 @@ def get_run_execution_logs(
 
 
 @router.get(
-    "/{run_id}/executions/{execution_id}/molplot",
-    response_model=RunMetricsResponse,
-)
-def get_run_metrics(
-    project_id: str,
-    experiment_id: str,
-    run_id: str,
-    execution_id: str,
-    metric_type: str | None = Query(default=None, alias="type"),
-    key: str | None = None,
-    since_line: int = Query(default=0, ge=0),
-    limit: int = Query(default=5000, ge=1, le=50000),
-    workspace=Depends(get_workspace),  # noqa: ANN001
-) -> RunMetricsResponse:
-    """Return MolPlot records emitted by one selected Execution."""
-    experiment = _get_experiment(workspace, project_id, experiment_id)
-    if not experiment:
-        raise RunNotFoundError(project_id, experiment_id, run_id)
-    run = _get_run_or_none(experiment, run_id)
-    if not run:
-        raise RunNotFoundError(project_id, experiment_id, run_id)
-    try:
-        _execution_repository(workspace, run).get(execution_id)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-
-    result = read_run_metrics(
-        Path(run.run_dir) / "executions" / execution_id,
-        fs=workspace.fs,
-        metric_type=metric_type,
-        key=key,
-        since_line=since_line,
-        limit=limit,
-    )
-    return RunMetricsResponse(
-        nextLine=result.next_line,
-        records=result.records,
-        # ``entry`` is ``dict[str, JSONValue]``; ``model_validate`` runs
-        # pydantic's per-field coercion / validation rather than the
-        # static-typed positional constructor.
-        series=[MetricSeriesResponse.model_validate(entry) for entry in result.series],
-        parseErrors=result.parse_errors,
-    )
-
-
-@router.get(
     "/{run_id}/executions/{execution_id}/file/text",
     response_model=RunFileTextResponse,
 )
@@ -700,76 +670,6 @@ def get_run_file_text(
     except UnicodeDecodeError as exc:
         raise HTTPException(status_code=415, detail="file is not text-decodable as UTF-8") from exc
     return RunFileTextResponse(path=path, content=content, size=fs.getsize(target))
-
-
-@router.get(
-    "/{run_id}/executions/{execution_id}/lammps-log",
-    response_model=LammpsLogResponse,
-)
-def get_run_lammps_log(
-    project_id: str,
-    experiment_id: str,
-    run_id: str,
-    execution_id: str,
-    path: str = Query(..., description="Relative path under the Execution directory"),
-    workspace=Depends(get_workspace),  # noqa: ANN001
-) -> LammpsLogResponse:
-    """Parse a LAMMPS log file and return thermo stages.
-
-    Inlined parser — ``molpy.io`` does not export a multi-stage log
-    reader, so the route owns this lightweight regex-based parse to
-    avoid coupling the API surface to a transient molpy refactor.
-    """
-    import re
-
-    experiment = _get_experiment(workspace, project_id, experiment_id)
-    if not experiment:
-        raise RunNotFoundError(project_id, experiment_id, run_id)
-    run = _get_run_or_none(experiment, run_id)
-    if not run:
-        raise RunNotFoundError(project_id, experiment_id, run_id)
-
-    execution_dir = Path(run.run_dir) / "executions" / execution_id
-    if not (execution_dir / "execution.json").is_file():
-        raise HTTPException(status_code=404, detail=f"Execution {execution_id!r} not found")
-    target = (execution_dir / path).resolve()
-    try:
-        target.relative_to(execution_dir.resolve())
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail="path escapes run directory") from exc
-    if not target.is_file():
-        raise HTTPException(status_code=404, detail=f"log file not found: {path}")
-
-    text = target.read_text(encoding="utf-8", errors="replace")
-    version = text.split("\n", 1)[0].strip() if text else None
-
-    stages: list[LammpsThermoStage] = []
-    for block in re.findall(
-        r"Per MPI rank memory allocation .*?\n(.*?)Loop time of",
-        text,
-        flags=re.DOTALL,
-    ):
-        lines = [ln for ln in block.splitlines() if ln.strip()]
-        if not lines:
-            continue
-        columns = lines[0].split()
-        rows: list[list[float]] = []
-        for ln in lines[1:]:
-            parts = ln.split()
-            if len(parts) != len(columns):
-                continue
-            try:
-                rows.append([float(x) for x in parts])
-            except ValueError:
-                continue
-        stages.append(LammpsThermoStage(columns=columns, rows=rows))
-
-    return LammpsLogResponse(
-        path=path,
-        version=version,
-        nStages=len(stages),
-        stages=stages,
-    )
 
 
 @router.get(
@@ -844,8 +744,10 @@ def get_run_files(
     # Drop pinned listings so newly-written ``*.mlp.jsonl`` / artifacts show up.
     _invalidate_run_nav_cache(workspace, run_dir)
 
-    artifacts = ArtifactRepository(workspace.root, fs=workspace.fs).list_for_execution(execution_id)
-    artifact_index = {item.source_path: item for item in artifacts}
+    artifacts = repo.get(execution_id).artifacts
+    artifact_index = {
+        item.path.rsplit(f"/executions/{execution_id}/", 1)[-1]: item for item in artifacts
+    }
 
     tree = list_tree_children(fs, run_dir, max_depth=8)
     raw_nodes = tree_to_run_file_dicts(tree)
@@ -885,7 +787,7 @@ def get_run_files(
 
 @router.post(
     "/{run_id}/executions/{execution_id}/cancel",
-    response_model=ExecutionRecordResponse,
+    response_model=ExecutionResponse,
 )
 def cancel_execution(
     project_id: str,
@@ -893,7 +795,7 @@ def cancel_execution(
     run_id: str,
     execution_id: str,
     workspace=Depends(get_workspace),  # noqa: ANN001
-) -> ExecutionRecordResponse:
+) -> ExecutionResponse:
     """Cancel one explicit Execution; Run has no cancellable scalar state."""
     experiment = _get_experiment(workspace, project_id, experiment_id)
     run = _get_run_or_none(experiment, run_id) if experiment else None
@@ -985,45 +887,6 @@ def harvest_run_route(
     return {"name": item.name, "path": rel}
 
 
-@router.get("/{run_id}/executions/{execution_id}/molplot/detect")
-def detect_run_metrics_sources(
-    project_id: str,
-    experiment_id: str,
-    run_id: str,
-    execution_id: str,
-    workspace=Depends(get_workspace),  # noqa: ANN001
-) -> dict[str, object]:
-    """Classify foreign log formats under the run directory (read-only).
-
-    Does not write the metrics buffer. Host ≠ MolRec: detection never invents
-    meta/status sections.
-    """
-    from molexp.plugins.metrics_ingest import detect_log_formats
-
-    experiment = _get_experiment(workspace, project_id, experiment_id)
-    if not experiment:
-        raise RunNotFoundError(project_id, experiment_id, run_id)
-    run = _get_run_or_none(experiment, run_id)
-    if not run:
-        raise RunNotFoundError(project_id, experiment_id, run_id)
-    execution_dir = _execution_repository(workspace, run).execution_dir(execution_id)
-    try:
-        _execution_repository(workspace, run).get(execution_id)
-    except KeyError as exc:
-        raise HTTPException(status_code=404, detail=str(exc)) from exc
-    hits = detect_log_formats(Path(execution_dir) / "work")
-    return {
-        "runId": run.id,
-        "hits": [
-            {
-                "format": hit.format.value,
-                "path": hit.path.name,
-            }
-            for hit in hits
-        ],
-    }
-
-
 @router.post("/{run_id}/executions/{execution_id}/molplot/ingest")
 def ingest_run_metrics(
     project_id: str,
@@ -1051,14 +914,16 @@ def ingest_run_metrics(
         _execution_repository(workspace, run).get(execution_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    result = ingest_run(Path(execution_dir) / "work")
+    # Read from the whole attempt; the WAL is written to the attempt root, so
+    # it lands in ``out/metrics.mlp.jsonl`` where the metrics reader looks.
+    result = ingest_run(Path(execution_dir))
     return {
         "runId": run.id,
         "records": result.records,
-        "ingested": {fmt.value: n for fmt, n in result.ingested.items()},
+        "ingested": dict(result.ingested),
         "skipped": [
             {
-                "format": s.format.value,
+                "format": s.format,
                 "path": s.path.name,
                 "reason": s.reason,
             }

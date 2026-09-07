@@ -1,9 +1,26 @@
 export type { LineChartConfig, LineSeriesConfig, VegaLiteSpec } from "@molcrafts/molplot";
+export {
+  ChartLegend,
+  type ChartLegendPlacement,
+  type ChartLegendProps,
+  legendEntries,
+} from "./ChartLegend";
+export { ChartWorkbench, type ChartWorkbenchProps } from "./ChartWorkbench";
 export { MolplotBarChart } from "./MolplotBarChart";
-export { MolplotGanttChart } from "./MolplotGanttChart";
 export { MolplotLineChart, type MolplotLineChartHandle } from "./MolplotLineChart";
 export { MolplotRawChart } from "./MolplotRawChart";
-export { MultiRunMetricsView } from "./MultiRunMetricsView";
+export {
+  type AggregateOp,
+  type AggregateResult,
+  type CollectResult,
+  collectRunSeries,
+  type MetricRunSource,
+  type MetricsFetcher,
+  pickKeySeries,
+  type RunAllSeries,
+  selectAggregateConfig,
+  stepResets,
+} from "./multiRunMetrics";
 export { RunMetricsTab } from "./RunMetricsTab";
 export { RunMetricsView } from "./RunMetricsView";
 export { filterSpikes, smoothEma } from "./smoothing";

@@ -43,6 +43,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import IO, TYPE_CHECKING, Any
 
+from .execution_dirs import execution_dir_names
 from .fs import FileSystem, PathArg, StatResult
 from .fs_local import LocalFileSystem
 
@@ -1279,7 +1280,9 @@ def prefetch_workspace_indices(
 
 
 # Container / infrastructure dirs that are never free-form knowledge mounts.
-_KNOWLEDGE_SKIP_DEFAULT = frozenset(
+# The per-attempt ones come from their declarations, so a directory declared
+# later cannot be mistaken for a knowledge mount.
+_KNOWLEDGE_SKIP_DEFAULT = execution_dir_names() | frozenset(
     {
         "projects",
         "experiments",
@@ -1287,11 +1290,8 @@ _KNOWLEDGE_SKIP_DEFAULT = frozenset(
         "assets",
         "cache",
         "executions",
-        "artifacts",
         "plan",
         "source",
-        "jobs",
-        "work",
         "harness",
         "alive",
     }

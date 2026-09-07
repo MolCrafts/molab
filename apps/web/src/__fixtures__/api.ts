@@ -5,11 +5,18 @@
 
 import type { ExperimentResponse } from "@/api/generated/models/ExperimentResponse";
 import type { ProjectResponse } from "@/api/generated/models/ProjectResponse";
-import type { ApiAssetResponse, ApiRunResponse, ExperimentSummary, ProjectSummary, RunSummary } from "@/app/types";
+import type {
+  ApiAssetResponse,
+  ApiRunResponse,
+  ExperimentSummary,
+  ProjectSummary,
+  RunSummary,
+} from "@/app/types";
 
 export const fixtureProject: ProjectResponse = {
   id: "proj-alpha",
   name: "Alpha Project",
+  path: "projects/alpha-project",
   created: "2026-03-01T00:00:00Z",
   description: "First project",
 };
@@ -17,6 +24,7 @@ export const fixtureProject: ProjectResponse = {
 export const fixtureProjectNoDescription: ProjectResponse = {
   id: "proj-beta",
   name: "Beta Project",
+  path: "projects/beta-project",
   created: "2026-03-02T00:00:00Z",
 };
 
@@ -24,6 +32,7 @@ export const fixtureExperiment: ExperimentResponse = {
   id: "exp-001",
   projectId: "proj-alpha",
   name: "Baseline",
+  path: "projects/alpha-project/experiments/baseline",
   created: "2026-03-01T10:00:00Z",
   workflow: "workflow.py",
   description: "Baseline experiment",
@@ -33,6 +42,7 @@ export const fixtureExperimentNoDescription: ExperimentResponse = {
   id: "exp-002",
   projectId: "proj-alpha",
   name: "Variant",
+  path: "projects/alpha-project/experiments/variant",
   created: "2026-03-02T10:00:00Z",
   workflow: "variant.py",
 };
@@ -46,6 +56,8 @@ const fixtureStatus = (status: string) => ({
 
 export const fixtureRun: ApiRunResponse = {
   id: "run-abc",
+  name: "lr=0.001",
+  path: "projects/proj-alpha/experiments/exp-001/runs/lr=0.001",
   projectId: "proj-alpha",
   experimentId: "exp-001",
   definitionHash: "def-run-abc",
@@ -58,6 +70,8 @@ export const fixtureRun: ApiRunResponse = {
 
 export const fixtureRunPending: ApiRunResponse = {
   id: "run-def",
+  name: "lr=0.01",
+  path: "projects/proj-alpha/experiments/exp-001/runs/lr=0.01",
   projectId: "proj-alpha",
   experimentId: "exp-001",
   definitionHash: "def-run-def",
@@ -68,6 +82,8 @@ export const fixtureRunPending: ApiRunResponse = {
 
 export const fixtureRunFailed: ApiRunResponse = {
   id: "run-ghi",
+  name: "lr=0.1",
+  path: "projects/proj-alpha/experiments/exp-001/runs/lr=0.1",
   projectId: "proj-alpha",
   experimentId: "exp-001",
   definitionHash: "def-run-ghi",
@@ -78,6 +94,8 @@ export const fixtureRunFailed: ApiRunResponse = {
 
 export const fixtureRunCancelled: ApiRunResponse = {
   id: "run-jkl",
+  name: "lr=1",
+  path: "projects/proj-alpha/experiments/exp-001/runs/lr=1",
   projectId: "proj-alpha",
   experimentId: "exp-001",
   definitionHash: "def-run-jkl",
@@ -112,6 +130,7 @@ export const fixtureAsset: ApiAssetResponse = {
 export const fixtureProjectSummary: ProjectSummary = {
   id: "proj-alpha",
   name: "Alpha Project",
+  path: "projects/alpha-project",
   status: "active",
   summary: "First project",
   updatedAt: "2026-03-01T00:00:00Z",
@@ -120,6 +139,7 @@ export const fixtureProjectSummary: ProjectSummary = {
 export const fixtureExperimentSummary: ExperimentSummary = {
   id: "exp-001",
   name: "Baseline",
+  path: "projects/alpha-project/experiments/baseline",
   status: "active",
   summary: "Baseline experiment",
   workflowFile: "workflow.py",
@@ -132,7 +152,8 @@ export const fixtureExperimentSummary: ExperimentSummary = {
 
 export const fixtureRunSummary: RunSummary = {
   id: "run-abc",
-  name: "run-abc",
+  name: "lr=0.001",
+  path: "projects/proj-alpha/experiments/exp-001/runs/lr=0.001",
   status: "succeeded",
   summary: "Status: succeeded",
   updatedAt: "2026-03-01T12:00:00Z",

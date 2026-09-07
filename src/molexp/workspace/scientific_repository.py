@@ -1,4 +1,9 @@
-"""Append-only declarations for Project, Experiment revisions, and Runs."""
+"""Record scientific intent — Project, Experiment revision, Run — in history.
+
+The entity JSON files are the declarations; this class only commits them so
+the workspace's git log reads as a scientific narrative rather than a series
+of anonymous file changes.
+"""
 
 from __future__ import annotations
 
@@ -8,45 +13,55 @@ from molexp._typing import JSONValue
 
 from .fs import FileSystem, PathArg
 from .fs_local import LocalFileSystem
-from .index_store import JsonIndexStore
-from .provenance import (
-    AgentRef,
-    EntityRef,
-    ProvenanceRelation,
-    ProvenanceStore,
-    create_event,
-)
+from .history import SYSTEM_AGENT, EntityRef, GitHistory, Relation
 
-SYSTEM_AGENT = AgentRef(id="molexp", type="system", name="MolExp")
+__all__ = ["SYSTEM_AGENT", "ScientificRepository"]
+
+
+def _when(record: dict[str, JSONValue], key: str) -> datetime:
+    raw = record.get(key)
+    if isinstance(raw, str):
+        try:
+            return datetime.fromisoformat(raw)
+        except ValueError:
+            pass
+    return datetime.now(UTC)
 
 
 class ScientificRepository:
-    """Persist scientific intent as provenance, separate from folder views."""
+    """Commit each declaration with a typed fact in the message trailers."""
 
     def __init__(
         self,
         workspace_root: PathArg,
         *,
         fs: FileSystem | None = None,
-        provenance: ProvenanceStore | None = None,
-        index: JsonIndexStore | None = None,
+        history: GitHistory | None = None,
     ) -> None:
         self.root = str(workspace_root)
         self.fs = fs or LocalFileSystem()
-        self.provenance = provenance or ProvenanceStore(self.root, fs=self.fs)
-        self.index = index or JsonIndexStore(self.root, fs=self.fs)
+        self.history = history or GitHistory(self.root)
 
-    def record_project(self, record: dict[str, JSONValue], *, workspace_id: str) -> None:
-        self._append_once(
+    def record_project(
+        self,
+        record: dict[str, JSONValue],
+        *,
+        workspace_id: str,
+        path: PathArg | None = None,
+    ) -> None:
+        self.history.record(
             "ProjectCreated",
-            EntityRef(id=str(record["id"]), type="project"),
+            subject=EntityRef(id=str(record["id"]), type="project"),
+            agent=SYSTEM_AGENT,
             relations=(
-                ProvenanceRelation(
+                Relation(
                     predicate="wasAttributedTo",
                     object=EntityRef(id=workspace_id, type="workspace"),
                 ),
             ),
-            record=record,
+            summary=str(record.get("name") or record["id"]),
+            paths=(path,) if path else (),
+            occurred_at=_when(record, "created_at"),
         )
 
     def record_experiment(
@@ -54,42 +69,45 @@ class ScientificRepository:
         record: dict[str, JSONValue],
         *,
         project_id: str,
+        path: PathArg | None = None,
     ) -> None:
-        experiment_id = str(record["id"])
-        self._append_once(
+        self.history.record(
             "ExperimentCreated",
-            EntityRef(id=experiment_id, type="experiment"),
+            subject=EntityRef(id=str(record["id"]), type="experiment"),
+            agent=SYSTEM_AGENT,
             relations=(
-                ProvenanceRelation(
-                    predicate="partOf",
-                    object=EntityRef(id=project_id, type="project"),
+                Relation(predicate="partOf", object=EntityRef(id=project_id, type="project")),
+                Relation(
+                    predicate="hasRevision",
+                    object=EntityRef(id=str(record["revision_id"]), type="experiment-revision"),
                 ),
             ),
-            record=record,
+            summary=str(record.get("name") or record["id"]),
+            paths=(path,) if path else (),
+            occurred_at=_when(record, "created_at"),
         )
-        self.record_experiment_revision(record, project_id=project_id)
 
     def record_experiment_revision(
         self,
         record: dict[str, JSONValue],
         *,
         project_id: str,
+        path: PathArg | None = None,
     ) -> None:
-        revision_id = str(record["revision_id"])
-        self._append_once(
-            "ExperimentRevisionCreated",
-            EntityRef(id=revision_id, type="experiment-revision"),
+        self.history.record(
+            "ExperimentRevised",
+            subject=EntityRef(id=str(record["revision_id"]), type="experiment-revision"),
+            agent=SYSTEM_AGENT,
             relations=(
-                ProvenanceRelation(
+                Relation(
                     predicate="revisionOf",
                     object=EntityRef(id=str(record["id"]), type="experiment"),
                 ),
-                ProvenanceRelation(
-                    predicate="partOf",
-                    object=EntityRef(id=project_id, type="project"),
-                ),
+                Relation(predicate="partOf", object=EntityRef(id=project_id, type="project")),
             ),
-            record=record,
+            summary=f"{record.get('name') or record['id']} rev {record.get('revision', '?')}",
+            paths=(path,) if path else (),
+            occurred_at=_when(record, "revision_created_at"),
         )
 
     def record_run(
@@ -97,67 +115,30 @@ class ScientificRepository:
         record: dict[str, JSONValue],
         *,
         experiment_id: str,
+        path: PathArg | None = None,
     ) -> None:
         relations = [
-            ProvenanceRelation(
+            Relation(
                 predicate="instanceOf",
                 object=EntityRef(
-                    id=str(record["experiment_revision_id"]),
-                    type="experiment-revision",
+                    id=str(record["experiment_revision_id"]), type="experiment-revision"
                 ),
             ),
-            ProvenanceRelation(
-                predicate="partOf",
-                object=EntityRef(id=experiment_id, type="experiment"),
-            ),
+            Relation(predicate="partOf", object=EntityRef(id=experiment_id, type="experiment")),
         ]
         raw_ids = record.get("input_asset_ids", [])
-        asset_ids = raw_ids if isinstance(raw_ids, list) else []
-        for asset_id in asset_ids:
-            relations.append(
-                ProvenanceRelation(
-                    predicate="uses",
-                    object=EntityRef(id=str(asset_id), type="asset"),
-                )
+        if isinstance(raw_ids, list):
+            relations.extend(
+                Relation(predicate="uses", object=EntityRef(id=str(value), type="asset"))
+                for value in raw_ids
             )
-        self._append_once(
+        name = self.fs.basename(str(path)) if path else str(record["id"])
+        self.history.record(
             "RunDefined",
-            EntityRef(id=str(record["id"]), type="run"),
-            relations=tuple(relations),
-            record=record,
-        )
-
-    def _append_once(
-        self,
-        event_type: str,
-        subject: EntityRef,
-        *,
-        relations: tuple[ProvenanceRelation, ...],
-        record: dict[str, JSONValue],
-    ) -> None:
-        if any(
-            event.event_type == event_type and event.subject == subject
-            for event in self.provenance.events_for(subject.id)
-        ):
-            return
-        occurred_at_raw = record.get(
-            "revision_created_at" if event_type == "ExperimentRevisionCreated" else "created_at"
-        )
-        occurred_at = (
-            datetime.fromisoformat(occurred_at_raw)
-            if isinstance(occurred_at_raw, str)
-            else datetime.now(UTC)
-        )
-        event = create_event(
-            event_type,
-            subject=subject,
+            subject=EntityRef(id=str(record["id"]), type="run"),
             agent=SYSTEM_AGENT,
-            relations=relations,
-            attributes={"record": record},
-            occurred_at=occurred_at,
+            relations=tuple(relations),
+            summary=name,
+            paths=(path,) if path else (),
+            occurred_at=_when(record, "created_at"),
         )
-        self.provenance.append(event)
-        self.index.index_event(event)
-
-
-__all__ = ["SYSTEM_AGENT", "ScientificRepository"]

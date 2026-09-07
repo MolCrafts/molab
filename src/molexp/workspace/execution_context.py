@@ -19,11 +19,20 @@ from molexp._typing import JSONValue, TaskOutput
 from molexp.profile import ProfileConfig
 
 from .artifact_repository import ArtifactRepository
-from .domain import Artifact, Asset, ExecutionMode, ExecutionState, ExecutionStatus
+from .domain import Artifact, Asset, Execution, ExecutionMode, ExecutionStatus
+from .execution_dirs import (
+    ARTIFACTS,
+    CHECKPOINTS,
+    OUT,
+    WORK,
+    ExecutionDir,
+    list_execution_dirs,
+    resolve_execution_dir,
+)
 from .execution_repository import ExecutionRepository
 from .file_store import FileStore
+from .history import AgentRef
 from .metrics_seam import MetricRecord, MetricsSink, create_metrics_writer
-from .provenance import AgentRef
 from .schema_version import read_versioned_json, write_versioned_json
 
 if TYPE_CHECKING:
@@ -63,11 +72,10 @@ class _ExecutionLogs:
     def __init__(self, execution_dir: Path) -> None:
         self._execution_dir = execution_dir
 
-    def __call__(self, name: str = "runtime") -> _BoundEvidenceLog:
-        normalized = "runtime" if name == "run" else name
-        if normalized not in {"runtime", "stdout", "stderr"}:
-            raise ValueError("Execution log name must be runtime, stdout, or stderr")
-        return _BoundEvidenceLog(self._execution_dir / f"{normalized}.log")
+    def __call__(self, name: str = "run") -> _BoundEvidenceLog:
+        if name not in {"run", "stdout", "stderr"}:
+            raise ValueError("Execution log name must be run, stdout, or stderr")
+        return _BoundEvidenceLog(self._execution_dir / f"{name}.log")
 
 
 class _CheckpointWriter:
@@ -84,8 +92,7 @@ class _CheckpointWriter:
         tags: dict[str, str] | None = None,
     ) -> Artifact:
         label = name or f"checkpoint-{datetime.now(UTC).strftime('%Y%m%dT%H%M%S%f')}"
-        path = self._context.workdir / "checkpoints" / f"{label}.json"
-        path.parent.mkdir(parents=True, exist_ok=True)
+        path = self._context.get_dir(CHECKPOINTS.name) / f"{label}.json"
         path.write_text(
             json.dumps(
                 {
@@ -135,7 +142,7 @@ class ExecutionContext:
         self._based_on_execution_id = based_on_execution_id
         self._checkpoint_artifact_id = checkpoint_artifact_id
         self._created_by = created_by or _system_agent()
-        self._state: ExecutionState | None = None
+        self._state: Execution | None = None
         self._active_task_id: str | None = None
         self._failure: dict[str, JSONValue] | None = None
         self._terminal_override: ExecutionStatus | None = None
@@ -170,15 +177,29 @@ class ExecutionContext:
         """Selected predecessor for retry/resume/reproduction provenance."""
         return self._state.based_on_execution_id if self._state is not None else None
 
-    @property
-    def workdir(self) -> Path:
-        path = self.execution_dir / "work"
+    def get_dir(self, name: str, *parts: str) -> Path:
+        """One of this attempt's directories, created on demand.
+
+        Peers: ``get_dir("work")`` and ``get_dir("artifacts")`` differ in
+        what they promise, never in how you reach them. An undeclared name
+        raises rather than creating a directory nothing validates.
+        """
+        resolve_execution_dir(name)
+        path = self.execution_dir.joinpath(name, *parts)
         path.mkdir(parents=True, exist_ok=True)
         return path
 
+    def has_dir(self, name: str) -> bool:
+        """True when this attempt has actually created *name* on disk."""
+        return (self.execution_dir / name).is_dir()
+
+    def list_dirs(self) -> tuple[ExecutionDir, ...]:
+        """Every declared directory and what it promises."""
+        return list_execution_dirs()
+
     @property
     def files(self) -> FileStore:
-        return FileStore(self.workdir, fs=self.run._disk())
+        return FileStore(self.get_dir(WORK.name), fs=self.run._disk())
 
     @property
     def params(self) -> dict[str, JSONValue]:
@@ -199,16 +220,29 @@ class ExecutionContext:
     @property
     def metrics(self) -> MetricsSink:
         if self._metrics is None:
+            # Into the versioned tier: a metrics WAL is small and is the
+            # record of what the run measured. Appended through a store
+            # rooted at the attempt so the tier is part of the path.
+            store = FileStore(self.execution_dir, fs=self.run._disk())
             self._metrics = create_metrics_writer(
                 self.execution_dir,
-                lambda name, line: self.files.append(name, line),
+                lambda name, line: store.append(Path(ARTIFACTS.name) / name, line),
             )
         return self._metrics
 
     def task_workdir(self, task_name: str) -> Path:
-        path = self.workdir / task_name
-        path.mkdir(parents=True, exist_ok=True)
-        return path
+        """Where one workflow task writes: ``out/<task>/``.
+
+        The bulk tier, not scratch. What a task body writes is genuinely
+        mixed — the inputs it generated, its intermediates, and the
+        trajectory — and those cannot be separated from outside the body.
+        They land in the tier that is *kept*; anything worth citing is then
+        promoted into ``artifacts/`` by ``register_artifact``.
+
+        ``work/`` is left to the framework's own scratch (plan boards,
+        harness staging), which is genuinely disposable.
+        """
+        return self.get_dir(OUT.name, task_name)
 
     def set_active_task(self, task_id: str | None) -> None:
         self._active_task_id = task_id
@@ -216,7 +250,7 @@ class ExecutionContext:
     def __enter__(self) -> ExecutionContext:
         if self._entered:
             raise RuntimeError("ExecutionContext cannot be entered twice")
-        state: ExecutionState
+        state: Execution
         if self._explicit_execution_id is not None:
             try:
                 state = self._executions.get(self._explicit_execution_id)
@@ -232,7 +266,7 @@ class ExecutionContext:
         self._state = self._executions.start(state.id)
         self._execution_id = state.id
         self._prepare_execution_files()
-        self.log("runtime").append(
+        self.log("run").append(
             f"{datetime.now(UTC).isoformat()} execution started mode={state.mode.value}"
         )
         self._entered = True
@@ -256,14 +290,14 @@ class ExecutionContext:
         )
         if self._metrics is not None:
             self._metrics.flush()
-            metrics_path = self.workdir / "metrics.mlp.jsonl"
+            metrics_path = self.get_dir(ARTIFACTS.name) / "metrics.mlp.jsonl"
             if metrics_path.is_file():
                 self.emit_artifact(
                     metrics_path,
                     media_type="application/x-ndjson",
                     semantic_type="molplot.metrics",
                 )
-        self.log("runtime").append(
+        self.log("run").append(
             f"{datetime.now(UTC).isoformat()} execution finished status={status.value}"
         )
         self._executions.seal(self.id, status, error=self._failure)
@@ -305,7 +339,7 @@ class ExecutionContext:
         else:
             if name is None:
                 raise ValueError("emit_artifact requires name for in-memory data")
-            source = self.workdir / name
+            source = self.get_dir(WORK.name) / name
             source.parent.mkdir(parents=True, exist_ok=True)
             if isinstance(data, (bytes, bytearray)):
                 source.write_bytes(bytes(data))
@@ -335,67 +369,8 @@ class ExecutionContext:
             input_entity_ids=inputs,
             metadata=combined_metadata,
         )
-        self._register_manifest_artifact(
-            artifact,
-            source=source,
-            name=name or artifact.name,
-            mime=media_type or mime,
-            tags=tags or {},
-            inputs=inputs,
-        )
+        self._executions.add_artifact(self.id, artifact)
         return artifact
-
-    def _register_manifest_artifact(
-        self,
-        artifact: Artifact,
-        *,
-        source: Path,
-        name: str,
-        mime: str | None,
-        tags: dict[str, str],
-        inputs: tuple[str, ...],
-    ) -> None:
-        """Mirror an emitted Artifact into the run's ``assets.json`` manifest.
-
-        The manifest is the authoritative asset index (One-source-of-truth
-        law); provenance lineage is appended independently by
-        :class:`ArtifactRepository`. Both carry the same ``artifact.id`` so
-        ``execution.json.artifact_ids`` and manifest queries agree.
-        """
-        import shutil
-
-        from .assets import ArtifactAsset, AssetManifest, AssetScope, Producer
-        from .utils import compute_content_hash
-
-        rel = Path("executions") / self.id / "artifacts" / name
-        dest = self.run_dir / rel
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        if source.resolve() != dest.resolve():
-            shutil.copy2(source, dest)
-        manifest = AssetManifest(self.execution_dir, fs=self.run._disk())
-        manifest.register(
-            ArtifactAsset(
-                asset_id=artifact.id,
-                name=name,
-                scope=AssetScope(
-                    kind="run",
-                    ids=(self.run.experiment.project.id, self.run.experiment.id, self.run.id),
-                ),
-                path=rel,
-                created_at=artifact.created_at,
-                updated_at=artifact.created_at,
-                producer=Producer(
-                    run_id=self.run.id,
-                    execution_id=self.id,
-                    task_id=self._active_task_id,
-                    inputs=inputs,
-                ),
-                tags=tags,
-                mime=mime,
-                size=dest.stat().st_size,
-                content_hash=compute_content_hash(dest),
-            )
-        )
 
     def register_metric(
         self,
@@ -445,9 +420,9 @@ class ExecutionContext:
         """
         self._terminal_override = ExecutionStatus.INTERRUPTED
         if reason:
-            self.log("runtime").append(f"interrupted: {reason}")
+            self.log("run").append(f"interrupted: {reason}")
 
-    def _create(self, execution_id: str | None) -> ExecutionState:
+    def _create(self, execution_id: str | None) -> Execution:
         environment: dict[str, JSONValue] = {
             "python": sys.version,
             "platform": platform.platform(),
@@ -472,13 +447,9 @@ class ExecutionContext:
         )
 
     def _prepare_execution_files(self) -> None:
+        """Make the attempt's two directories. Its state is already one file."""
         self.execution_dir.mkdir(parents=True, exist_ok=True)
-        self.workdir.mkdir(parents=True, exist_ok=True)
-        assert self._state is not None
-        write_versioned_json(
-            self.execution_dir / "environment.json",
-            {"environment": self._state.environment},
-        )
+        self.get_dir(OUT.name)
 
     def _write_exception(
         self,
@@ -492,12 +463,10 @@ class ExecutionContext:
                 "message": str(exc_val),
                 "timestamp": datetime.now(UTC).isoformat(),
             }
-        (self.execution_dir / "exception.json").write_text(
-            json.dumps(self._failure, indent=2, sort_keys=True), encoding="utf-8"
-        )
-        (self.execution_dir / "traceback.txt").write_text(
-            "".join(traceback.format_exception(exc_type, exc_val, exc_tb)), encoding="utf-8"
-        )
+        # The failure is carried on the Execution itself (sealed into
+        # ``execution.json``); only the traceback text is too big for a field,
+        # and it belongs in the attempt's one log.
+        self.log("run").append("".join(traceback.format_exception(exc_type, exc_val, exc_tb)))
 
     def _read_results(self) -> dict[str, TaskOutput]:
         path = self.execution_dir / "results.json"

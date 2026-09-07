@@ -41,19 +41,22 @@ class TestRunContextLifecycle:
         assert state.error["type"] == "ValueError"
         assert state.error["message"] == "boom"
 
-    def test_exception_writes_traceback_txt(self, experiment):
-        """The exception-propagation exit path lands a physical ``traceback.txt``
-        trace under the execution dir (distinct from the engine-swallowed path
-        owned by ``test_run_lifecycle_recovery``)."""
+    def test_exception_lands_in_the_attempt_log_and_its_sealed_state(self, experiment):
+        """The exception-propagation exit path records the failure in the two
+        places an attempt has: its one log, and its own ``execution.json``."""
         run = experiment.add_run()
         ctx_ref: dict[str, object] = {}
         with pytest.raises(RuntimeError), run.start() as ctx:
             ctx_ref["ctx"] = ctx
             raise RuntimeError("detailed error")
         ctx = ctx_ref["ctx"]
-        traceback_txt = ctx.run_dir / "executions" / ctx.id / "traceback.txt"
-        assert traceback_txt.exists()
-        assert "RuntimeError" in traceback_txt.read_text()
+        log = ctx.run_dir / "executions" / ctx.id / "run.log"
+        assert log.exists()
+        assert "RuntimeError" in log.read_text()
+        sealed = run.executions[-1]
+        assert sealed.status.value == "failed"
+        assert sealed.error is not None
+        assert sealed.error["type"] == "RuntimeError"
 
 
 class TestRunContextResults:
@@ -66,18 +69,15 @@ class TestRunContextResults:
 class TestEmitArtifactProduct:
     def test_emits_file_and_registers_artifact(self, run):
         with run.start() as ctx:
-            dest = ctx.workdir / "nve.pt"
+            dest = ctx.get_dir("work") / "nve.pt"
             dest.write_bytes(b"traj")
             artifact = ctx.emit_artifact(dest, name="nve.pt")
             assert artifact.name == "nve.pt"
-            names = [
-                a.name for a in run._execution_repository().artifacts.list_for_execution(ctx.id)
-            ]
-            assert "nve.pt" in names
+        assert [a.name for a in run.executions[-1].artifacts] == ["nve.pt"]
 
     def test_emitting_same_content_is_content_addressed(self, run):
         with run.start() as ctx:
-            dest = ctx.workdir / "nve.pt"
+            dest = ctx.get_dir("work") / "nve.pt"
             dest.write_bytes(b"traj")
             first = ctx.emit_artifact(dest, name="nve.pt")
             second = ctx.emit_artifact(dest, name="nve.pt")
@@ -91,7 +91,7 @@ class TestEmitArtifactProduct:
 
     def test_missing_src_raises(self, run):
         with run.start() as ctx, pytest.raises(FileNotFoundError):
-            ctx.emit_artifact(ctx.workdir / "gone.pt")
+            ctx.emit_artifact(ctx.get_dir("work") / "gone.pt")
 
 
 class TestEmitArtifact:
@@ -99,13 +99,13 @@ class TestEmitArtifact:
         with run.start() as ctx:
             artifact = ctx.emit_artifact({"key": "value"}, name="data.json")
             assert artifact.name == "data.json"
-            src = ctx.workdir / "data.json"
+            src = ctx.get_dir("work") / "data.json"
             assert src.exists()
             assert json.loads(src.read_text()) == {"key": "value"}
 
     def test_emit_artifact_from_path_defaults_name(self, run):
         with run.start() as ctx:
-            src = ctx.workdir / "report.txt"
+            src = ctx.get_dir("work") / "report.txt"
             src.write_text("ok")
             artifact = ctx.emit_artifact(src)
             assert artifact.name == "report.txt"
@@ -120,7 +120,9 @@ class TestEmitArtifact:
     def test_register_metric_writes_wal(self, run):
         with run.start() as ctx:
             ctx.register_metric("score", 0.87, step=1)
-            wal = ctx.workdir / "metrics.mlp.jsonl"
+            # The versioned tier: a metrics WAL is the record of what the run
+            # measured, so it belongs in the history rather than in scratch.
+            wal = ctx.get_dir("artifacts") / "metrics.mlp.jsonl"
             assert wal.exists()
             assert "score" in wal.read_text()
 
@@ -139,7 +141,7 @@ class TestCheckpointAccessor:
         with run.start() as ctx:
             artifact = ctx.checkpoint("mid-run", data={"step": 5})
             assert artifact.name == "mid-run.json"
-            saved = ctx.workdir / "checkpoints" / artifact.name
+            saved = ctx.get_dir("checkpoints") / artifact.name
             assert saved.exists()
             assert "checkpoints" in saved.parts
             assert "executions" in saved.parts
@@ -187,21 +189,47 @@ class TestAsyncRunContext:
         assert run.executions[-1].status is ExecutionStatus.SUCCEEDED
 
 
-class TestRunContextWorkdir:
-    def test_workdir_is_under_execution_work(self, run):
+class TestExecutionDirectories:
+    def test_every_tier_is_reached_the_same_way(self, run):
+        # The point of the redesign: no directory has an accessor the others
+        # lack, so a caller switching tiers changes one string.
         with run.start() as ctx:
-            d = ctx.workdir
+            for name in ("work", "out", "artifacts"):
+                d = ctx.get_dir(name)
+                assert d.is_dir()
+                assert d.name == name
+                assert d.relative_to(ctx.run_dir).parts[0] == "executions"
+
+    def test_subdirectories_come_from_the_same_call(self, run):
+        with run.start() as ctx:
+            d = ctx.get_dir("out", "md")
             assert d.is_dir()
-            assert d.name == "work"
-            assert d.relative_to(ctx.run_dir).parts[0] == "executions"
+            assert d.parent.name == "out"
+
+    def test_an_undeclared_directory_is_refused(self, run):
+        from molexp.workspace.execution_dirs import UnknownExecutionDirError
+
+        # Silently creating it would make a directory nothing validates,
+        # nothing versions, and no reader looks in.
+        with run.start() as ctx, pytest.raises(UnknownExecutionDirError):
+            ctx.get_dir("outputs")
+
+    def test_has_dir_reports_what_is_actually_there(self, run):
+        with run.start() as ctx:
+            assert ctx.has_dir("artifacts") is False
+            ctx.get_dir("artifacts")
+            assert ctx.has_dir("artifacts") is True
 
     def test_requires_active_execution(self, run):
         ctx = run.start()  # constructed but not entered → no execution yet
         with pytest.raises(RuntimeError, match="not been entered"):
-            _ = ctx.workdir
+            _ = ctx.get_dir("work")
 
     def test_removed_spellings_are_gone(self, run):
         with run.start() as ctx:
+            # ``workdir`` was the bespoke property that made one directory
+            # more equal than the rest.
+            assert not hasattr(ctx, "workdir")
             assert not hasattr(ctx, "work_dir")
             assert not hasattr(ctx, "artifact")
             assert not hasattr(ctx, "folder")

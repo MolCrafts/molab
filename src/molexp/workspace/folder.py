@@ -337,22 +337,6 @@ class Folder:
 
     # ── Index filename ───────────────────────────────────────────────────
     #
-    # Children-index lives on the PARENT and lists children of *this* class.
-    # One file, JSON only: the **plural** of the child kind
-    # (``experiments.json``, ``runs.json``, ``projects.json``) so it never
-    # collides with the **singular** entity file on the child dir
-    # (``experiment.json``, ``run.json``, ``project.json``).
-
-    @classmethod
-    def _index_filename(cls) -> str:
-        """Canonical children-index basename (plural of the child kind)."""
-        singular = _CAMEL_TO_SNAKE.sub("_", cls.__name__).lower()
-        return f"{singular}s.json"
-
-    def _index_path_for(self, cls: type[Folder]) -> str:
-        """Resolved path of the children-index for *cls* under this folder."""
-        return self._disk().join(self.resolve(), cls._index_filename())
-
     # ── Atomic JSON IO ───────────────────────────────────────────────────
 
     def read_json(self, name: str) -> dict[str, JSONValue]:
@@ -561,12 +545,19 @@ class Folder:
         cls,
         parent: Folder,
         meta: FolderMetadata,
+        *,
+        slug: str | None = None,
     ) -> dict[str, object]:
         """Common attrs dict for ``_reconstruct`` — call this from every
-        subclass ``from_disk`` to guarantee the parent link (and thus the disk)."""
+        subclass ``from_disk`` to guarantee the parent link (and thus the disk).
+
+        ``slug`` is the child's directory basename, which is what mounts it
+        under its parent. Identity (``meta.id``) is a field inside the entity
+        file, never the path.
+        """
         return {
             "_parent": parent,
-            "_name": meta.id,
+            "_name": slug if slug is not None else meta.id,
             "_kind": meta.kind,
             "_root_path": None,
             "_metadata": meta,
@@ -585,7 +576,10 @@ class Folder:
         if raw is None:
             raise FileNotFoundError(fs.join(child_dir, META_JSON_FILENAME))
         child_meta = _folder_metadata_from_marker(child_dir, raw)
-        return _reconstruct(cls, cls.base_from_disk_attrs(parent, child_meta))
+        return _reconstruct(
+            cls,
+            cls.base_from_disk_attrs(parent, child_meta, slug=parent._disk().basename(child_dir)),
+        )
 
     # ── Generic five-verb CRUD ───────────────────────────────────────────
 
@@ -635,10 +629,24 @@ class Folder:
         if _load_concept_marker_dict(self._disk(), child.resolve()) is None:
             child.write_meta()
         self._children_cache[slug] = child
-        self._upsert_index_row(child)
         return child
 
     def get_folder(self, name: str, *, cls: type[F]) -> F:
+        """Resolve a child by its directory name, its display name, or its id.
+
+        The directory name is the primary handle — that is what a person types.
+        A UUIDv7 identity still resolves, because references between entities
+        cite ids, not paths.
+        """
+        found = self._find_folder(name, cls)
+        if found is None:
+            raise cls._not_found_error_cls(name)
+        return found
+
+    def has_folder(self, name: str, *, cls: type[Folder]) -> bool:
+        return self._find_folder(name, cls) is not None
+
+    def _find_folder(self, name: str, cls: type[F]) -> F | None:
         for candidate in (name, slugify(name)):
             if not candidate:
                 continue
@@ -651,102 +659,42 @@ class Folder:
                 if isinstance(loaded, cls):
                     self._children_cache[loaded._name] = loaded
                     return loaded
-        raise cls._not_found_error_cls(name)
-
-    def has_folder(self, name: str, *, cls: type[Folder]) -> bool:
-        for candidate in (name, slugify(name)):
-            if not candidate:
-                continue
-            cached = self._children_cache.get(candidate)
-            if isinstance(cached, cls):
-                return True
-            if cls.child_dir(self, candidate) and self._disk().is_dir(
-                cls.child_dir(self, candidate)
-            ):
-                return True
-        return False
+        for child in self.list_folders(cls=cls):
+            if child.metadata.id == name:
+                return child
+        return None
 
     def list_folders(self, *, cls: type[F] | None = None) -> list[F]:
-        self_path = self.resolve()
-        if not self._disk().is_dir(self_path):
+        """List children by scanning disk — the tree *is* the index."""
+        if cls is None:
+            return cast("list[F]", self.children())
+        container = cls._container_dir(self)
+        if not self._disk().is_dir(container):
             return []
         out: list[F] = []
-        if cls is None:
-            for entry_name in sorted(self._disk().listdir(self_path)):
-                if entry_name in _FORBIDDEN_FILE_NAMES:
-                    continue
-                entry_path = self._disk().join(self_path, entry_name)
-                if not self._disk().is_dir(entry_path):
-                    continue
-                child_meta = self._try_child_folder_metadata(entry_path)
-                if child_meta is None:
-                    continue
-                child = _reconstruct(
-                    Folder,
-                    {
-                        "_parent": self,
-                        "_name": child_meta.id,
-                        "_kind": child_meta.kind,
-                        "_root_path": None,
-                        "_metadata": child_meta,
-                        "_children_cache": {},
-                    },
-                )
-                out.append(cast(F, child))
-            return out
-        index_path = self._index_path_for(cls)
-        if not self._disk().exists(index_path):
-            self.sync_folders(cls=cls)
-            index_path = self._index_path_for(cls)
-            if not self._disk().exists(index_path):
-                return []
-        try:
-            with self._disk().open(index_path) as fh:
-                raw: object = json.load(fh)
-        except (OSError, json.JSONDecodeError):
-            return []
-        if not isinstance(raw, dict):
-            return []
-        for slug in raw:
-            cached = self._children_cache.get(str(slug))
+        for entry_name in sorted(self._disk().listdir(container)):
+            if entry_name in _FORBIDDEN_FILE_NAMES:
+                continue
+            cached = self._children_cache.get(entry_name)
             if isinstance(cached, cls):
                 out.append(cached)
                 continue
-            child_dir = cls.child_dir(self, str(slug))
-            if not self._disk().is_dir(child_dir):
+            entry_path = self._disk().join(container, entry_name)
+            if not self._disk().is_dir(entry_path):
                 continue
             try:
-                loaded = cls.from_disk(child_dir, self)
-            except (FileNotFoundError, OSError):
+                loaded = cls.from_disk(entry_path, self)
+            except (FileNotFoundError, OSError, ValueError):
                 continue
             if isinstance(loaded, cls):
                 self._children_cache[loaded._name] = loaded
                 out.append(loaded)
         return out
 
-    def sync_folders(self, *, cls: type[Folder]) -> None:
-        container = cls._container_dir(self)
-        index_path = self._index_path_for(cls)
-        if not self._disk().is_dir(container):
-            if self._disk().exists(index_path):
-                self._disk().remove(index_path)
-            return
-        rows: dict[str, dict[str, JSONValue]] = {}
-        for entry_name in sorted(self._disk().listdir(container)):
-            if entry_name in _FORBIDDEN_FILE_NAMES:
-                continue
-            entry_path = self._disk().join(container, entry_name)
-            if not self._disk().is_dir(entry_path):
-                continue
-            try:
-                child = cls.from_disk(entry_path, self)
-            except (FileNotFoundError, OSError):
-                continue
-            if isinstance(child, cls):
-                rows[child._name] = child._to_index_row()
-        self._disk().atomic_write_json(index_path, rows)
-
     def remove_folder(self, name: str, *, cls: type[Folder]) -> None:
+        found = self._find_folder(name, cls)
+        if found is not None:
+            name = found._name
         for candidate in (name, slugify(name)):
             if not candidate:
                 continue
@@ -754,12 +702,10 @@ class Folder:
             if self._disk().is_dir(child_dir):
                 self._disk().remove(child_dir, recursive=True)
                 self._children_cache.pop(candidate, None)
-                self._remove_index_row(cls, candidate)
                 return
             cached = self._children_cache.get(candidate)
             if isinstance(cached, cls):
                 self._children_cache.pop(candidate, None)
-                self._remove_index_row(cls, candidate)
                 return
         raise cls._not_found_error_cls(name)
 
@@ -768,43 +714,6 @@ class Folder:
     @classmethod
     def _container_dir(cls, parent: Folder) -> Path:
         return Path(parent._disk().dirname(cls.child_dir(parent, "_probe_")))
-
-    def _upsert_index_row(self, child: Folder) -> None:
-        child_cls = type(child)
-        fpath = self._index_path_for(child_cls)
-        rows: dict[str, dict[str, JSONValue]] = {}
-        if self._disk().exists(fpath):
-            try:
-                with self._disk().open(fpath) as fh:
-                    raw: object = json.load(fh)
-            except (OSError, json.JSONDecodeError):
-                raw = None
-            if isinstance(raw, dict):
-                for k, v in raw.items():
-                    if isinstance(v, dict):
-                        rows[str(k)] = cast("dict[str, JSONValue]", v)
-        rows[child._name] = child._to_index_row()
-        self._disk().atomic_write_json(fpath, rows)
-
-    def _remove_index_row(self, cls: type[Folder], slug: str) -> None:
-        fpath = self._index_path_for(cls)
-        if not self._disk().exists(fpath):
-            return
-        try:
-            with self._disk().open(fpath) as fh:
-                raw: object = json.load(fh)
-        except (OSError, json.JSONDecodeError):
-            return
-        if not isinstance(raw, dict):
-            return
-        rows = cast("dict[str, JSONValue]", raw)
-        if slug not in rows:
-            return
-        rows.pop(slug)
-        self._disk().atomic_write_json(fpath, rows)
-
-    def _to_index_row(self) -> dict[str, JSONValue]:
-        return cast("dict[str, JSONValue]", self._metadata.model_dump(mode="json"))
 
     # ── Delete + move ────────────────────────────────────────────────────
 
@@ -885,11 +794,6 @@ class Folder:
         self._sync_entity_identity()
         new_parent._children_cache[target_id] = self
         self.write_meta()
-        # Children indexes are derived; rebuild both endpoints from on-disk truth
-        # so a typed ``list_folders(cls=…)`` on either parent reflects the move.
-        if old_parent is not None:
-            old_parent.sync_folders(cls=type(self))
-        new_parent.sync_folders(cls=type(self))
 
 
 def append_link(

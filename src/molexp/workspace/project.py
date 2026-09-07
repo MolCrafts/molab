@@ -17,6 +17,8 @@ from molexp._typing import JSONValue
 from molexp.ids import compute_definition_hash, generate_uuid7
 from molexp.path import Path
 
+from .naming import entity_slug
+
 if TYPE_CHECKING:
     from .fs import FileSystem
     from .workspace import Workspace
@@ -86,7 +88,7 @@ class Project(Folder, HasKnowledge):
         )
 
         self._parent = resolved_parent
-        self._name = meta.id
+        self._name = entity_slug(meta.name, fallback=meta.id)
         self._kind = kind
         self._root_path = None
         if fs is not None:
@@ -130,7 +132,9 @@ class Project(Folder, HasKnowledge):
             created_at=meta.created_at,
             updated_at=meta.created_at,
         )
-        attrs = cls.base_from_disk_attrs(parent, folder_meta) | {
+        attrs = cls.base_from_disk_attrs(
+            parent, folder_meta, slug=parent._disk().basename(child_dir)
+        ) | {
             "_entity_metadata": meta,
             "_data_assets": None,
         }
@@ -185,7 +189,7 @@ class Project(Folder, HasKnowledge):
     @property
     def project_dir(self) -> Path:
         ws_root = self.workspace.resolve()
-        return Path(self._disk().join(ws_root, "projects", self.id))
+        return Path(self._disk().join(ws_root, "projects", self._name))
 
     @property
     def scope(self) -> AssetScope:
@@ -216,7 +220,9 @@ class Project(Folder, HasKnowledge):
         from .scientific_repository import ScientificRepository
 
         ScientificRepository(self.workspace.root, fs=self._disk()).record_project(
-            self.metadata.model_dump(mode="json"), workspace_id=self.workspace.metadata.id
+            self.metadata.model_dump(mode="json"),
+            workspace_id=self.workspace.metadata.id,
+            path=self.project_dir,
         )
         self.save()
 
@@ -278,10 +284,9 @@ class Project(Folder, HasKnowledge):
         use :meth:`set_experiment` (second ``add_experiment`` does not merge
         new params into an existing record).
         """
-        if id is None:
-            for existing in self.experiments():
-                if existing.name == name:
-                    return existing
+        slug = entity_slug(name, fallback=name)
+        if id is None and self.has_folder(slug, cls=Experiment):
+            return self.get_folder(slug, cls=Experiment)
         resolved_id = id if id is not None else generate_uuid7()
         _validate_target_registered(self.workspace, default_target)
         child = self._construct_child(
@@ -311,13 +316,7 @@ class Project(Folder, HasKnowledge):
         Raises:
             ExperimentNotFoundError: No experiment with that slug.
         """
-        try:
-            return self.get_folder(name, cls=Experiment)
-        except ExperimentNotFoundError:
-            for experiment in self.experiments():
-                if experiment.name == name:
-                    return experiment
-            raise
+        return self.get_folder(name, cls=Experiment)
 
     def get_experiment(self, name: str) -> Experiment:
         """Alias of :meth:`experiment`."""
@@ -391,7 +390,9 @@ class Project(Folder, HasKnowledge):
             from .scientific_repository import ScientificRepository
 
             ScientificRepository(self.workspace.root, fs=self._disk()).record_experiment_revision(
-                exp.metadata.model_dump(mode="json"), project_id=self.id
+                exp.metadata.model_dump(mode="json"),
+                project_id=self.id,
+                path=exp.experiment_dir,
             )
             exp.save()
         return exp

@@ -5,8 +5,6 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
-from molexp.workspace.content_store import ContentStore
-
 from ..dependencies import get_workspace
 from ..exceptions import AssetNotFoundError, ProjectNotFoundError
 from ..schemas import (
@@ -137,8 +135,8 @@ def download_project_asset(project_id: str, asset_id: str, workspace=Depends(get
     if not versions:
         raise AssetNotFoundError(asset_id)
     version = versions[-1]
-    payload = ContentStore(workspace.root, fs=workspace.fs).payload_path(version.content)
-    if not workspace.fs.exists(payload) or workspace.fs.is_dir(payload):
+    payload = workspace.fs.join(workspace.root, version.path) if version.path else ""
+    if not payload or not workspace.fs.exists(payload) or workspace.fs.is_dir(payload):
         raise AssetNotFoundError(asset_id)
     return StreamingResponse(
         workspace.fs.open(payload, "rb"),

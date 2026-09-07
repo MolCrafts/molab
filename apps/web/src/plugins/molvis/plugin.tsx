@@ -1,8 +1,6 @@
+import type { MolexpPluginModule, PluginAPI } from "@molcrafts/molexp-plugin";
 import { Atom } from "lucide-react";
 import { lazy } from "react";
-import { registerFileTypeContribution } from "@/app/registry";
-import { filePreviewPluginRegistry } from "@/lib/file-preview-plugins";
-import type { UiPluginModule } from "@/plugins/types";
 import { isMolvisOpenable } from "./openable";
 
 const MolvisDatasetPreview = lazy(() =>
@@ -14,14 +12,14 @@ const MolvisTab = lazy(() =>
   import("./MolvisTab").then((module) => ({ default: module.MolvisTab })),
 );
 
-const molvisPlugin: UiPluginModule = {
+const molvisPlugin: MolexpPluginModule = {
   id: "molvis",
   name: "MolVis",
+  version: "1.0.0",
   description:
     "Trajectory and structure viewer tab when a run has PDB/XYZ/LAMMPS dumps or a *.mrec store.",
-  userToggleable: true,
-  register: () => {
-    registerFileTypeContribution({
+  activate: (api: PluginAPI) => {
+    api.fileTypes.register({
       id: "molvis:run-tab",
       objectType: "run",
       value: "molvis",
@@ -34,7 +32,7 @@ const molvisPlugin: UiPluginModule = {
       Component: MolvisTab,
     });
 
-    filePreviewPluginRegistry.register({
+    api.filePreviews.register({
       id: "molvis:dataset-preview",
       name: "Molvis",
       extensions: [],

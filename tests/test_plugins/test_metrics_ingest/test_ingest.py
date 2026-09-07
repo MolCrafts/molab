@@ -1,222 +1,92 @@
-"""Unit tests for :mod:`molexp.plugins.metrics_ingest.ingest`.
+"""Discovery and persistence, with no format knowledge in molexp.
 
-Outbound dependencies (molpy, tensorboard) are faked — a unit is green on its
-own tests, never on a sibling's real implementation.
+These exercise molexp's half of the seam — walking a run, dispatching to
+whatever reader claimed a file, and writing the WAL. What a LAMMPS thermo
+table maps to is molpy's business and is tested there.
 """
 
 from __future__ import annotations
 
-import json
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
-import numpy as np
-import pytest
+from molexp.plugins.metrics_ingest import detect_log_formats, ingest_run
+from molexp.workspace.execution_dirs import ARTIFACTS
 
-from molexp.plugins.metrics_ingest import ingest as ingest_mod
-from molexp.plugins.metrics_ingest.detect import LogFormat
-from molexp.plugins.metrics_ingest.ingest import ingest_run
-from molexp.plugins.metrics_ingest.tabular import ColumnMapping
-
-LAMMPS_HEAD = """LAMMPS (2 Aug 2023)
-Per MPI rank memory allocation (min/avg/max) = 3.5 | 3.5 | 3.5 Mbytes
-   Step          Temp          PotEng
-         0   300.00        -1234.5
-Loop time of 4.21 on 4 procs for 200 steps with 1000 atoms
-Total wall time: 0:00:04
-"""
-
-
-@dataclass
-class FakeThermo:
-    columns: tuple[str, ...]
-    data: np.ndarray
-
-
-@dataclass
-class FakeRun:
-    thermo: FakeThermo | None
-
-
-@dataclass
-class FakeLog:
-    runs: tuple[FakeRun, ...]
-    total_wall_time: str | None = "0:00:04"
-
-
-def _fake_reader(**kwargs: Any):
-    def read(file: Path) -> FakeLog:
-        return FakeLog(**kwargs)
-
-    return read
-
-
-@pytest.fixture
-def lammps_run(tmp_path: Path) -> Path:
-    (tmp_path / "log.lammps").write_text(LAMMPS_HEAD)
-    return tmp_path
+FAKE_SUFFIX = ".fakelog"
 
 
 def _wal(run_dir: Path) -> Path:
-    return run_dir / "artifacts" / "metrics.mlp.jsonl"
+    return run_dir / ARTIFACTS.name / "metrics.mlp.jsonl"
 
 
-def _read_lines(run_dir: Path) -> list[dict[str, Any]]:
-    stream = _wal(run_dir)
-    return [json.loads(line) for line in stream.read_text().splitlines() if line.strip()]
+def _read_wal(run_dir: Path) -> list[dict]:
+    import json
+
+    return [json.loads(x) for x in _wal(run_dir).read_text().splitlines() if x.strip()]
 
 
-def _assert_no_zarr_or_index(run_dir: Path) -> None:
-    assert not (run_dir / "metrics.mlp.jsonl").exists()
-    assert not (run_dir / "metrics.mlp.index.json").exists()
-    assert not (run_dir / "metrics.mlp.zarr").exists()
-    assert not (run_dir / "artifacts" / "metrics.mlp.index.json").exists()
-    assert not (run_dir / "artifacts" / "metrics.mlp.zarr").exists()
+class TestDiscovery:
+    def test_reports_a_claimed_file(self, fake_run: Path) -> None:
+        assert [hit.format for hit in detect_log_formats(fake_run)] == ["fake_sim_log"]
+
+    def test_skips_hidden_directories(self, tmp_path: Path) -> None:
+        hidden = tmp_path / ".cache"
+        hidden.mkdir()
+        (hidden / f"x{FAKE_SUFFIX}").write_text("a 1\n", encoding="utf-8")
+        assert detect_log_formats(tmp_path) == []
+
+    def test_respects_max_depth(self, tmp_path: Path) -> None:
+        deep = tmp_path / "a" / "b" / "c" / "d"
+        deep.mkdir(parents=True)
+        (deep / f"x{FAKE_SUFFIX}").write_text("a 1\n", encoding="utf-8")
+        assert detect_log_formats(tmp_path, max_depth=2) == []
+        assert len(detect_log_formats(tmp_path, max_depth=5)) == 1
+
+    def test_an_unreadable_format_is_simply_not_reported(self, tmp_path: Path) -> None:
+        (tmp_path / "notes.md").write_text("# notes", encoding="utf-8")
+        assert detect_log_formats(tmp_path) == []
 
 
-class TestIngestRunWritesOnlyTheBuffer:
-    def test_writes_jsonl_in_artifacts(
-        self, lammps_run: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        thermo = FakeThermo(("Step", "Temp"), np.array([[0.0, 300.0], [100.0, 298.0]]))
-        monkeypatch.setattr(
-            "molexp.plugins.metrics_ingest.lammps.require_molpy",
-            lambda: _fake_reader(runs=(FakeRun(thermo),)),
-        )
-        result = ingest_run(lammps_run)
+class TestIngestWritesOnlyTheBuffer:
+    def test_writes_jsonl_in_the_products_dir(self, fake_run: Path) -> None:
+        result = ingest_run(fake_run)
+        assert result.records == 2
+        assert _wal(fake_run).is_file()
+        assert {row["k"] for row in _read_wal(fake_run)} == {"energy", "temp"}
 
-        assert result.ingested == {LogFormat.LAMMPS_LOG: 2}
-        assert _wal(lammps_run).is_file()
-        _assert_no_zarr_or_index(lammps_run)
+    def test_never_writes_molrec_sections(self, fake_run: Path) -> None:
+        """A Run is a host, not a MolRec record."""
+        ingest_run(fake_run)
+        assert not (fake_run / "meta").exists()
+        assert not (fake_run / "status").exists()
+        assert not list(fake_run.rglob("*.mlp.zarr"))
+        assert not list(fake_run.rglob("metrics.mlp.index.json"))
 
-    def test_never_writes_molrec_sections(
-        self, lammps_run: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """A Run is a host, not a MolRec record.
+    def test_a_second_ingest_appends_rather_than_truncating(self, fake_run: Path) -> None:
+        ingest_run(fake_run)
+        ingest_run(fake_run)
+        assert len(_read_wal(fake_run)) == 4
 
-        Writing ``meta/`` or ``status/`` here would make every ingested run
-        claim to be a record. This test is the gate on that invariant.
-        """
-        thermo = FakeThermo(("Step", "Temp"), np.array([[0.0, 300.0]]))
-        monkeypatch.setattr(
-            "molexp.plugins.metrics_ingest.lammps.require_molpy",
-            lambda: _fake_reader(runs=(FakeRun(thermo),)),
-        )
-        ingest_run(lammps_run)
-
-        assert not (lammps_run / "meta").exists()
-        assert not (lammps_run / "status").exists()
-        assert not (lammps_run / "method").exists()
+    def test_tags_carry_the_source_path(self, fake_run: Path) -> None:
+        ingest_run(fake_run)
+        assert {row["tags"]["source"] for row in _read_wal(fake_run)} == {"run.fakelog"}
 
 
-class TestIngestRunSkips:
-    def test_records_a_missing_dependency_without_raising(
-        self, lammps_run: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        def boom() -> Any:
-            raise ImportError("no molpy here")
-
-        monkeypatch.setattr("molexp.plugins.metrics_ingest.lammps.require_molpy", boom)
-        result = ingest_run(lammps_run)
-
-        assert result.did_ingest is False
-        assert len(result.skipped) == 1
-        assert "no molpy here" in result.skipped[0].reason
-        assert not _wal(lammps_run).exists()
-        assert not (lammps_run / "metrics.mlp.jsonl").exists()
-
-    def test_skips_csv_without_a_mapping(self, tmp_path: Path) -> None:
-        (tmp_path / "curve.csv").write_text("step,loss\n1,0.5\n")
+class TestIngestNeverFailsTheCaller:
+    def test_a_missing_dependency_is_a_skip_not_an_exception(self, tmp_path: Path) -> None:
+        (tmp_path / "sim.broken").write_text("x", encoding="utf-8")
         result = ingest_run(tmp_path)
+        assert result.records == 0
+        assert len(result.skipped) == 1
+        assert "not installed" in result.skipped[0].reason
 
-        assert result.did_ingest is False
-        assert result.skipped[0].format is LogFormat.CSV
-        assert "ColumnMapping" in result.skipped[0].reason
+    def test_one_broken_source_does_not_stop_the_others(self, fake_run: Path) -> None:
+        (fake_run / "sim.broken").write_text("x", encoding="utf-8")
+        result = ingest_run(fake_run)
+        assert result.records == 2
+        assert [skip.format for skip in result.skipped] == ["broken_log"]
 
-    def test_ingests_csv_with_a_mapping(self, tmp_path: Path) -> None:
-        (tmp_path / "curve.csv").write_text("step,loss,note\n1,0.5,a\n2,0.25,b\n")
-        result = ingest_run(
-            tmp_path, csv_mapping=ColumnMapping(step_column="step", series_columns=("loss",))
-        )
-
-        assert result.ingested == {LogFormat.CSV: 2}
-        records = _read_lines(tmp_path)
-        assert [record["k"] for record in records] == ["csv/loss", "csv/loss"]
-        assert [record["s"] for record in records] == [1.0, 2.0]
-
-
-class TestLammpsMapping:
-    def test_tags_wall_time_as_ingest_not_measurement(
-        self, lammps_run: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """Thermo rows carry no wall-clock; ``w`` must not pass as one."""
-        thermo = FakeThermo(("Step", "Temp"), np.array([[0.0, 300.0]]))
-        monkeypatch.setattr(
-            "molexp.plugins.metrics_ingest.lammps.require_molpy",
-            lambda: _fake_reader(runs=(FakeRun(thermo),)),
-        )
-        ingest_run(lammps_run)
-
-        record = _read_lines(lammps_run)[0]
-        assert record["tags"]["wall_time_source"] == "ingest"
-
-    def test_keeps_column_names_verbatim(
-        self, lammps_run: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        thermo = FakeThermo(("Step", "E_pair", "TotEng"), np.array([[0.0, -1.0, -2.0]]))
-        monkeypatch.setattr(
-            "molexp.plugins.metrics_ingest.lammps.require_molpy",
-            lambda: _fake_reader(runs=(FakeRun(thermo),)),
-        )
-        ingest_run(lammps_run)
-
-        keys = {record["k"] for record in _read_lines(lammps_run)}
-        assert keys == {"lammps/E_pair", "lammps/TotEng"}
-
-    def test_separates_run_blocks_by_tag(
-        self, lammps_run: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        thermo_a = FakeThermo(("Step", "Temp"), np.array([[0.0, 300.0]]))
-        thermo_b = FakeThermo(("Step", "Temp"), np.array([[0.0, 250.0]]))
-        monkeypatch.setattr(
-            "molexp.plugins.metrics_ingest.lammps.require_molpy",
-            lambda: _fake_reader(runs=(FakeRun(thermo_a), FakeRun(thermo_b))),
-        )
-        ingest_run(lammps_run)
-
-        indices = [record["tags"]["run_index"] for record in _read_lines(lammps_run)]
-        assert indices == [0, 1]
-
-    def test_skips_a_run_block_with_no_thermo(
-        self, lammps_run: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        thermo = FakeThermo(("Step", "Temp"), np.array([[0.0, 300.0]]))
-        monkeypatch.setattr(
-            "molexp.plugins.metrics_ingest.lammps.require_molpy",
-            lambda: _fake_reader(runs=(FakeRun(None), FakeRun(thermo))),
-        )
-        result = ingest_run(lammps_run)
-
-        assert result.ingested == {LogFormat.LAMMPS_LOG: 1}
-
-
-class TestIngestIsAdditive:
-    def test_a_second_ingest_appends_rather_than_truncating(
-        self, lammps_run: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        thermo = FakeThermo(("Step", "Temp"), np.array([[0.0, 300.0]]))
-        monkeypatch.setattr(
-            "molexp.plugins.metrics_ingest.lammps.require_molpy",
-            lambda: _fake_reader(runs=(FakeRun(thermo),)),
-        )
-        ingest_run(lammps_run)
-        ingest_run(lammps_run)
-
-        assert len(_read_lines(lammps_run)) == 2
-
-
-def test_module_never_imports_molpy_at_module_scope() -> None:
-    """molpy is heavy and optional at import time — the import stays lazy."""
-    source = Path(ingest_mod.__file__).read_text()
-    assert "import molpy" not in source
+    def test_a_run_with_nothing_to_read_is_not_an_error(self, tmp_path: Path) -> None:
+        result = ingest_run(tmp_path)
+        assert result.records == 0
+        assert not result.did_ingest

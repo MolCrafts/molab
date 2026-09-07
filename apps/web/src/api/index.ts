@@ -6,14 +6,7 @@ export { knowledgeApi } from "@/api/knowledge";
 export { plansApi } from "@/api/plans";
 export { planTasksApi } from "@/api/planTasks";
 export { projectsApi, projectsWsApi } from "@/api/projects";
-export type {
-  LammpsLogResponse,
-  LammpsThermoStage,
-  MetricRecord,
-  RunFilesResponse,
-  RunMetricsQuery,
-  RunMetricsResponse,
-} from "@/api/runs";
+export type { RunFilesResponse } from "@/api/runs";
 export { runsApi } from "@/api/runs";
 export type {
   TensorboardScalarSeries,

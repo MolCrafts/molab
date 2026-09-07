@@ -2,12 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { runsApi } from "@/api";
 import { cn } from "@/lib/utils";
 import type { DiscoveredFile } from "@/plugins/types";
-import {
-  collectZarrStore,
-  runWorkspaceRelPath,
-  scopedZarrSource,
-  workspaceZarrSource,
-} from "./host-zarr";
+import { collectZarrStore, scopedZarrSource, workspaceZarrSource } from "./host-zarr";
 import { loadMolvisCore } from "./loadMolvisCore";
 import { isMolvisZarr, zarrStoreRoot } from "./openable";
 
@@ -15,6 +10,14 @@ interface TrajectoryViewerProps {
   projectId: string;
   experimentId: string;
   runId: string;
+  /**
+   * The attempt's workspace-relative directory, from the server.
+   *
+   * A discovered ``relPath`` is relative to this. Rooting the Zarr source at
+   * the *run* instead drops the ``executions/<id>/`` segment, and every read
+   * 404s against a directory that does not exist.
+   */
+  executionDir: string;
   executionId: string;
   file: DiscoveredFile;
   /** Outer container classes. Defaults to a fixed-height card; pass ``h-full``
@@ -38,6 +41,7 @@ export const TrajectoryViewer = ({
   projectId,
   experimentId,
   runId,
+  executionDir,
   executionId,
   file,
   className,
@@ -77,10 +81,7 @@ export const TrajectoryViewer = ({
         const molvisApp = app as unknown as Parameters<typeof loadFileContent>[0];
         if (isMolvisZarr(zarrFile)) {
           const storeRoot = zarrStoreRoot(fileRelPath);
-          const source = scopedZarrSource(
-            workspaceZarrSource(runWorkspaceRelPath(projectId, experimentId, runId)),
-            storeRoot,
-          );
+          const source = scopedZarrSource(workspaceZarrSource(executionDir), storeRoot);
           const storeName = storeRoot.split("/").pop() || fileName;
           if (loadZarrSource) {
             await loadZarrSource(molvisApp, source, storeName);
@@ -127,7 +128,7 @@ export const TrajectoryViewer = ({
         }
       }
     };
-  }, [projectId, experimentId, runId, executionId, file.relPath, file.name]);
+  }, [projectId, experimentId, runId, executionDir, executionId, file.relPath, file.name]);
 
   return (
     // ``isolate`` establishes a new stacking context so molvis-core's injected

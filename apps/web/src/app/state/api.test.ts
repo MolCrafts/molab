@@ -106,10 +106,13 @@ describe("mapExperiments", () => {
 });
 
 describe("mapRuns", () => {
-  it("maps id/name from runId plus the parent coordinates", () => {
+  it("takes the name and directory from the server, never from the id", () => {
     const [result] = mapRuns("proj-alpha", "exp-001", [fixtureRun]);
     expect(result.id).toBe("run-abc");
-    expect(result.name).toBe("run-abc");
+    // What a run is called is its parameters, and where it lives is a path of
+    // names. Neither is derivable here, so neither is invented here.
+    expect(result.name).toBe("lr=0.001");
+    expect(result.path).toBe("projects/proj-alpha/experiments/exp-001/runs/lr=0.001");
     expect(result.projectId).toBe("proj-alpha");
     expect(result.experimentId).toBe("exp-001");
   });

@@ -10,20 +10,22 @@ const readAppSource = (path: string): string => readFileSync(resolve(appRoot, pa
 describe("navigation contribution boundary", () => {
   it("keeps product metadata in one descriptor", () => {
     const sections = readAppSource("navigation/sections.tsx");
-    expect(sections).toContain("navigationContributions");
+    const coreNav = readAppSource("../plugins/core/navigation.tsx");
+    const knowledgeNav = readAppSource("../plugins/knowledge/navigation.tsx");
+    expect(sections).toContain("listNavigationContributions");
     expect(sections).toContain("retainSelectionFor");
     expect(sections).toContain("emptySelection");
-    expect(sections).toContain("explorer: RunsExplorer");
-    expect(sections).toContain("explorer: KnowledgeExplorer");
-    expect(sections).toContain("explorer: AssetsExplorer");
-    expect(sections).toContain("explorer: AgentExplorer");
-    expect(sections).toContain("explorer: FilesExplorer");
-    expect(sections).toContain("explorer: ProjectsExplorer");
-    expect(sections).toContain("explorer: ActivityExplorer");
-    expect(sections).toContain("explorer: WorkflowExplorer");
-    expect(sections).toContain("landing: DashboardPage");
-    expect(sections).toContain("landing: RunsPage");
-    expect(sections).toContain("landing: SettingsPage");
+    expect(coreNav).toContain("explorer: RunsExplorer");
+    expect(coreNav).toContain("explorer: AssetsExplorer");
+    expect(coreNav).toContain("explorer: AgentExplorer");
+    expect(coreNav).toContain("explorer: FilesExplorer");
+    expect(coreNav).toContain("explorer: ProjectsExplorer");
+    expect(coreNav).toContain("explorer: ActivityExplorer");
+    expect(coreNav).toContain("explorer: WorkflowExplorer");
+    expect(coreNav).toContain("landing: DashboardPage");
+    expect(coreNav).toContain("landing: RunsPage");
+    expect(coreNav).toContain("landing: SettingsPage");
+    expect(knowledgeNav).toContain("explorer: KnowledgeExplorer");
   });
 
   it("keeps the rail and explorer host out of the legacy LeftPanel body", () => {
@@ -34,7 +36,10 @@ describe("navigation contribution boundary", () => {
     expect(leftPanel).toContain("<NavigationRail");
     expect(leftPanel).toContain("<NavigationExplorerHost");
     expect(leftPanel).not.toContain("<LeftIconRail");
-    expect(leftPanel).not.toContain("<LeftExplorer");
+    expect(leftPanel).not.toContain("<LeftExplorer ");
+    // The panel splits its own column (explorer over the docked Comparison)
+    // through domain-free chrome; it still builds neither rail nor explorer.
+    expect(leftPanel).toContain("<ExplorerDock");
     expect(rail).toContain("LeftIconRail");
     expect(host).toContain("LeftExplorer");
   });

@@ -1,4 +1,4 @@
-import { registerRenderer } from "@/app/registry";
+import type { PluginAPI, PluginComponent } from "@molcrafts/molexp-plugin";
 import { AgentSessionInspector } from "@/app/renderers/AgentSessionInspector";
 import { AgentViewer } from "@/app/renderers/AgentViewer";
 import { AssetViewer } from "@/app/renderers/AssetViewer";
@@ -8,63 +8,80 @@ import { MetadataInspector } from "@/app/renderers/MetadataInspector";
 import { ProjectViewer } from "@/app/renderers/ProjectViewer";
 import { RunViewer } from "@/app/renderers/RunViewer";
 import { TaskViewer } from "@/app/renderers/TaskViewer";
-// WorkflowViewer / WorkflowInspector / WorkflowFileViewer live in the
-// internal `workflow` UI plugin (`@/plugins/workflow`), registered by
-// `bootPlugins()` — same pattern as the `editor` panel slot.
+import type { FileKind } from "@/app/types";
 
-export const registerDefaultRenderers = (): void => {
-  registerRenderer({
-    key: {
-      objectType: "project",
-      fileKind: "json",
-      contentType: "metadata",
-      panelKind: "viewer",
-    },
-    title: "Project Overview",
-    panelSlot: "center",
-    Component: ProjectViewer,
-  });
+const rendererId = (
+  objectType: string,
+  fileKind: string,
+  contentType: string,
+  panelKind: string,
+): string => `exact:${objectType}::${fileKind}::${contentType}::${panelKind}`;
 
-  registerRenderer({
-    key: {
-      objectType: "experiment",
-      fileKind: "json",
-      contentType: "metadata",
-      panelKind: "viewer",
-    },
-    title: "Experiment Overview",
-    panelSlot: "center",
-    Component: ExperimentViewer,
-  });
+export const registerDefaultRenderers = (api: PluginAPI): void => {
+  const editor = (
+    objectType: string,
+    fileKind: string,
+    contentType: string,
+    panelKind: string,
+    title: string,
+    Component: PluginComponent,
+  ): void => {
+    api.editors.register({
+      id: rendererId(objectType, fileKind, contentType, panelKind),
+      key: { objectType, fileKind, contentType, panelKind },
+      title,
+      panelSlot: "center",
+      Component,
+    });
+  };
 
-  registerRenderer({
-    key: {
-      objectType: "run",
-      fileKind: "json",
-      contentType: "metadata",
-      panelKind: "viewer",
-    },
-    title: "Run Overview",
-    panelSlot: "center",
-    Component: RunViewer,
-  });
+  const inspector = (
+    objectType: string,
+    fileKind: string,
+    contentType: string,
+    panelKind: string,
+    title: string,
+    Component: PluginComponent,
+  ): void => {
+    api.inspectors.register({
+      id: rendererId(objectType, fileKind, contentType, panelKind),
+      key: { objectType, fileKind, contentType, panelKind },
+      title,
+      panelSlot: "right",
+      Component,
+    });
+  };
 
-  registerRenderer({
-    key: {
-      objectType: "asset",
-      fileKind: "json",
-      contentType: "metadata",
-      panelKind: "viewer",
-    },
-    title: "Asset Overview",
-    panelSlot: "center",
-    Component: AssetViewer,
-  });
+  editor("project", "json", "metadata", "viewer", "Project Overview", ProjectViewer);
+  editor("experiment", "json", "metadata", "viewer", "Experiment Overview", ExperimentViewer);
+  editor("run", "json", "metadata", "viewer", "Run Overview", RunViewer);
+  editor("asset", "json", "metadata", "viewer", "Asset Overview", AssetViewer);
+  editor("workspace-file", "image", "image", "viewer", "Image Preview", ImageViewer);
+  editor("agent", "json", "metadata", "viewer", "Agent Task", AgentViewer);
+  editor("task", "json", "metadata", "viewer", "Task Overview", TaskViewer);
 
-  // The `panelKind:"editor"` renderer is owned by the internal `editor`
-  // plugin (`@/plugins/editor`), registered eagerly in `bootPlugins()`.
-  // Workflow center/right + workflow.json preview: `@/plugins/workflow`.
-  const workspaceFileKinds = [
+  inspector("project", "json", "metadata", "inspector", "Project Inspector", MetadataInspector);
+  inspector(
+    "experiment",
+    "json",
+    "metadata",
+    "inspector",
+    "Experiment Inspector",
+    MetadataInspector,
+  );
+  inspector("run", "json", "metadata", "inspector", "Run Inspector", MetadataInspector);
+  inspector("asset", "json", "metadata", "inspector", "Asset Inspector", MetadataInspector);
+  inspector(
+    "agent",
+    "json",
+    "metadata",
+    "inspector",
+    "Agent Task Inspector",
+    AgentSessionInspector,
+  );
+  inspector("task", "json", "metadata", "inspector", "Task Inspector", TaskViewer);
+
+  const workspaceFileKinds: readonly FileKind[] = [
     "yaml",
     "json",
     "python",
@@ -72,127 +89,15 @@ export const registerDefaultRenderers = (): void => {
     "text",
     "unknown",
     "image",
-  ] as const;
-
-  registerRenderer({
-    key: {
-      objectType: "workspace-file",
-      fileKind: "image",
-      contentType: "image",
-      panelKind: "viewer",
-    },
-    title: "Image Preview",
-    panelSlot: "center",
-    Component: ImageViewer,
-  });
-
-  registerRenderer({
-    key: {
-      objectType: "project",
-      fileKind: "json",
-      contentType: "metadata",
-      panelKind: "inspector",
-    },
-    title: "Project Inspector",
-    panelSlot: "right",
-    Component: MetadataInspector,
-  });
-
-  registerRenderer({
-    key: {
-      objectType: "experiment",
-      fileKind: "json",
-      contentType: "metadata",
-      panelKind: "inspector",
-    },
-    title: "Experiment Inspector",
-    panelSlot: "right",
-    Component: MetadataInspector,
-  });
-
-  registerRenderer({
-    key: {
-      objectType: "run",
-      fileKind: "json",
-      contentType: "metadata",
-      panelKind: "inspector",
-    },
-    title: "Run Inspector",
-    panelSlot: "right",
-    Component: MetadataInspector,
-  });
-
-  registerRenderer({
-    key: {
-      objectType: "asset",
-      fileKind: "json",
-      contentType: "metadata",
-      panelKind: "inspector",
-    },
-    title: "Asset Inspector",
-    panelSlot: "right",
-    Component: MetadataInspector,
-  });
-
-  workspaceFileKinds.forEach((fileKind) => {
-    registerRenderer({
-      key: {
-        objectType: "workspace-file",
-        fileKind,
-        contentType: "metadata",
-        panelKind: "inspector",
-      },
-      title: "File Inspector",
-      panelSlot: "right",
-      Component: MetadataInspector,
-    });
-  });
-
-  registerRenderer({
-    key: {
-      objectType: "agent",
-      fileKind: "json",
-      contentType: "metadata",
-      panelKind: "viewer",
-    },
-    title: "Agent Task",
-    panelSlot: "center",
-    Component: AgentViewer,
-  });
-
-  registerRenderer({
-    key: {
-      objectType: "agent",
-      fileKind: "json",
-      contentType: "metadata",
-      panelKind: "inspector",
-    },
-    title: "Agent Task Inspector",
-    panelSlot: "right",
-    Component: AgentSessionInspector,
-  });
-
-  registerRenderer({
-    key: {
-      objectType: "task",
-      fileKind: "json",
-      contentType: "metadata",
-      panelKind: "viewer",
-    },
-    title: "Task Overview",
-    panelSlot: "center",
-    Component: TaskViewer,
-  });
-
-  registerRenderer({
-    key: {
-      objectType: "task",
-      fileKind: "json",
-      contentType: "metadata",
-      panelKind: "inspector",
-    },
-    title: "Task Inspector",
-    panelSlot: "right",
-    Component: TaskViewer,
-  });
+  ];
+  for (const fileKind of workspaceFileKinds) {
+    inspector(
+      "workspace-file",
+      fileKind,
+      "metadata",
+      "inspector",
+      "File Inspector",
+      MetadataInspector,
+    );
+  }
 };

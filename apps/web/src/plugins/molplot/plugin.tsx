@@ -1,9 +1,8 @@
+import type { MolexpPluginModule, PluginAPI } from "@molcrafts/molexp-plugin";
 import { ChartNoAxesCombined } from "lucide-react";
-import { registerFileTypeContribution } from "@/app/registry";
-import type { UiPluginModule } from "@/plugins/types";
-import { isMlpMetricsSurface } from "./mlp-surface";
-import { resolveMolplotMetricsTabBadgeCount } from "./tab-badge-count";
 import { MolplotRunTab } from "./MolplotRunTab";
+import { isMetricSurface } from "./metric-formats";
+import { resolveMolplotMetricsTabBadgeCount } from "./tab-badge-count";
 
 const isMlpPlotSurface = (file: { name: string; relPath: string }): boolean => {
   const path = `${file.relPath}`.toLowerCase().replace(/\\/g, "/");
@@ -11,13 +10,15 @@ const isMlpPlotSurface = (file: { name: string; relPath: string }): boolean => {
   return name.endsWith(".mlp.vl.json") || path.endsWith(".mlp.vl.json");
 };
 
-const molplotPlugin: UiPluginModule = {
+const molplotPlugin: MolexpPluginModule = {
   id: "molplot",
   name: "MolPlot",
-  description: "Metrics and plot tabs when a run has *.mlp.jsonl / *.mlp.vl.json.",
-  userToggleable: true,
-  register: () => {
-    registerFileTypeContribution({
+  version: "1.0.0",
+  description: "Metrics and plot tabs for any format the reader registry reports.",
+  activate: (api: PluginAPI) => {
+    // molplot owns no format: whichever readers are contributed decide what
+    // it can draw, and a new one needs no change here.
+    api.fileTypes.register({
       id: "molplot:run-tab",
       objectType: "run",
       value: "molplot",
@@ -25,8 +26,10 @@ const molplotPlugin: UiPluginModule = {
       Icon: ChartNoAxesCombined,
       priority: 40,
       matcher: {
-        patterns: ["**/*.mlp.jsonl", "**/*.mlp.vl.json", "*.mlp.vl.json"],
-        matches: (file) => isMlpMetricsSurface(file) || isMlpPlotSurface(file),
+        // Vega-Lite plots are molplot's own artifact, so they stay a literal
+        // pattern; everything else is whatever the registry claims.
+        patterns: ["**/*.mlp.vl.json", "*.mlp.vl.json"],
+        matches: (file) => isMetricSurface(file) || isMlpPlotSurface(file),
       },
       resolveTabBadgeCount: resolveMolplotMetricsTabBadgeCount,
       Component: MolplotRunTab,

@@ -23,6 +23,7 @@ from molexp._run_display import read_run_json
 from molexp._typing import JSONValue
 from molexp.plugins.submit_molq.metadata import normalize_executor_info
 from molexp.workspace import Experiment, Project, Run, Workspace
+from molexp.workspace.execution_dirs import JOBS
 
 from .tree_model import (
     NodePath,
@@ -268,8 +269,8 @@ def _detail_run(node: TreeNode) -> list[RenderableType]:
         for key in ("backend", "scheduler", "cluster", "job_id", "scheduler_job_id"):
             if norm.get(key):
                 kv.add_row(key, str(norm[key]))
-    if run.execution_history:
-        kv.add_row("attempts", str(len(run.execution_history)))
+    if run.executions:
+        kv.add_row("attempts", str(len(run.executions)))
     kv.add_row("run_dir", str(run.run_dir))
 
     cfg = _as_dict(data.get("config"))
@@ -289,7 +290,7 @@ def _detail_execution(node: TreeNode) -> list[RenderableType]:
     ), "execution-kind node must hold a (Run, exec_id) tuple"
     run = node.ref[0]
     exec_id = node.ref[1]
-    rec = next((r for r in run.execution_history if r.id == exec_id), None)
+    rec = next((r for r in run.executions if r.id == exec_id), None)
     kv = _kv_table()
     kv.add_row("execution_id", str(exec_id))
     kv.add_row("run_id", str(run.id))
@@ -312,7 +313,7 @@ def _detail_execution(node: TreeNode) -> list[RenderableType]:
         candidate = exec_dir / fname
         if candidate.exists():
             kv.add_row(fname, str(candidate))
-    jobs_dir = Path(exec_dir) / "jobs"
+    jobs_dir = Path(exec_dir) / JOBS.name
     if jobs_dir.is_dir():
         streams = sorted(
             str(p.relative_to(exec_dir))

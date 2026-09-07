@@ -72,7 +72,7 @@ Swapping a provider must move every consumer of that seam. Filesystem + subproce
 
 ### 1.3 What is *not* the plugin host
 
-`molexp.plugins.PluginRegistry` (today: optional-extra loaders for `gh` / tensorboard / molpy preview / molvis / submit_molq) is **one bundle of optional providers**, not the host. Entry-point groups `molexp.cli_plugins` / `molexp.ui_plugins` are consumers of the same host, not a second kernel.
+`molexp.plugins.PluginRegistry` (today: optional GH loader) is **not** the host. Science extras (`MolqPlugin` → `ctx.jobs`, `MetricsPlugin` → metrics seam) live in `molexp.plugins` and are constructed at the face (`molexp.plugins.extras.default_science_extras`) then passed as `compose_*(extra=…)`. Entry-point groups `molexp.cli_plugins` / `molexp.ui_plugins` are consumers of the same host, not a second kernel.
 
 The host belongs in the harness kernel (context + lifecycle + AgentCall dispatch). Do not grow a parallel registry in `workspace` or `agent`.
 

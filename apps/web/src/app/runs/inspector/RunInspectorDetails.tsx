@@ -2,9 +2,8 @@ import { Eye } from "lucide-react";
 import type { JSX, ReactNode } from "react";
 import { RunStatusBadge, WorkbenchIconAction } from "@/components/workbench";
 import { formatDuration, formatRelative, formatTimestamp } from "@/lib/format-time";
-
-import { RunsRecentEvents } from "../RunsRecentEvents";
 import { runFinishedAt, runStartedAt } from "../projections";
+import { RunsRecentEvents } from "../RunsRecentEvents";
 import type { WorkspaceExecutionRow, WorkspaceRunRow } from "../types";
 
 interface RunInspectorDetailsProps {

@@ -371,10 +371,19 @@ export const DocTree = ({ snapshot, activeId, onSelect }: DocTreeProps): JSX.Ele
     ];
   };
 
-  const entityLabel = (kind: DocEntityKind, id: string): string => {
-    if (kind === "project") return snapshot.projects.find((p) => p.id === id)?.name ?? id;
-    if (kind === "experiment") return snapshot.experiments.find((e) => e.id === id)?.name ?? id;
-    return snapshot.runs.find((r) => r.id === id)?.name ?? id;
+  /**
+   * Name the entity a doc group hangs off, given its directory.
+   *
+   * Matched on the path each entity reports, because that directory is a name
+   * and the id is a UUIDv7 that never appears in the tree. The directory is
+   * itself readable, so it stands in when nothing matches.
+   */
+  const entityLabel = (kind: DocEntityKind, dir: string): string => {
+    const ownsDir = (path: string): boolean => path.split("/").pop() === dir;
+    if (kind === "project") return snapshot.projects.find((p) => ownsDir(p.path))?.name ?? dir;
+    if (kind === "experiment")
+      return snapshot.experiments.find((e) => ownsDir(e.path))?.name ?? dir;
+    return snapshot.runs.find((r) => ownsDir(r.path))?.name ?? dir;
   };
 
   const toTreeNode = (node: DocTreeNode): TreeNode => {
@@ -392,7 +401,7 @@ export const DocTree = ({ snapshot, activeId, onSelect }: DocTreeProps): JSX.Ele
     }
     if (node.kind === "group") {
       const isKb = node.entity === undefined;
-      const label = node.entity ? entityLabel(node.entity.kind, node.entity.id) : node.name;
+      const label = node.entity ? entityLabel(node.entity.kind, node.entity.dir) : node.name;
       const icon = node.entity ? ENTITY_ICON[node.entity.kind] : BookOpen;
       return {
         id: node.id,

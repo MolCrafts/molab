@@ -29,7 +29,7 @@ import { usePluginPreferencesGeneration } from "@/plugins/preferences";
 type RunRow = WorkspaceSnapshot["runs"][number];
 type RunLogs = { stdout?: string | null; stderr?: string | null } | null;
 export type RunRendererProps = ScopedRendererProps<
-  "projects" | "experiments" | "runs" | "workflows"
+  "projects" | "experiments" | "runs" | "workflows" | "workspaces"
 >;
 
 export interface UseRunViewer {
@@ -61,6 +61,19 @@ export interface UseRunViewer {
   confirmDialog: ReactNode;
   alertDialog: ReactNode;
 }
+
+/**
+ * Which attempt a run opens on: its latest.
+ *
+ * Everything discovered from files hangs off an execution — molplot, molvis
+ * and tensorboard all take their coordinates from it — so leaving this unset
+ * renders a run with no plugin tabs at all until the user happens to click an
+ * attempt, which reads as "the feature is missing" rather than "nothing is
+ * selected". The last attempt is what a person means by the run's output.
+ */
+export const defaultExecutionId = (
+  history: readonly { executionId: string }[] | undefined,
+): string | null => (history?.length ? history[history.length - 1].executionId : null);
 
 export const useRunViewer = (props: RunRendererProps): UseRunViewer => {
   const { selection, snapshot, onRefresh } = props;
@@ -136,9 +149,13 @@ export const useRunViewer = (props: RunRendererProps): UseRunViewer => {
     };
   }, [runProjectId, runExperimentId, runId, selectedExecutionId]);
 
+  const latestExecutionId = defaultExecutionId(run?.executionHistory);
   useEffect(() => {
-    setSelectedExecutionId(null);
-  }, [runId]);
+    // Derived from the run, so switching runs re-fires this. Two runs whose
+    // latest attempt is both `e01` set the same value and skip the effect —
+    // harmless, because the file coordinates carry the run id as well.
+    setSelectedExecutionId(latestExecutionId);
+  }, [latestExecutionId]);
 
   const project = run ? snapshot.projects.find((item) => item.id === run.projectId) : undefined;
   const experiment = run
@@ -186,12 +203,7 @@ export const useRunViewer = (props: RunRendererProps): UseRunViewer => {
     });
     if (!confirmed) return;
     try {
-      await runsApi.cancelExecution(
-        run.projectId,
-        run.experimentId,
-        run.id,
-        execution.executionId,
-      );
+      await runsApi.cancelExecution(run.projectId, run.experimentId, run.id, execution.executionId);
       onRefresh();
     } catch (error) {
       console.error("Failed to cancel run:", error);

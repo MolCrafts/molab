@@ -69,6 +69,17 @@ dependencies (e.g. TensorBoard) skip that format without failing the call.
 
 ---
 
+Science adapters that the **plugin host** should see (molq jobs,
+metrics writer) are duck-typed Host extras. CLI and server construct
+them with :func:`molexp.plugins.extras.default_science_extras` and pass
+``compose_run(..., extra=…)`` / ``compose_plan(..., extra=…)``. Harness
+never imports ``molexp.plugins``. Inspect the tree with
+``molexp config dump --profile run``.
+
+``PluginRegistry`` is only the leftover optional-dep cache (GitHub
+client). It is not the host. Entry-point groups below are **face**
+channels (CLI subcommands, UI bundles), not a second kernel.
+
 molexp ships **two completely independent** plugin channels so a
 downstream Python package can extend molexp without forking it or
 re-bundling the frontend:
@@ -223,24 +234,41 @@ time. Bundles with a mismatched version are skipped (logged via
 
 ```javascript
 // my_plugin/ui_dist/index.js
-const greeter = {
-  id: "greeter",
-  register() {
-    // Use @/app/registry / @/plugins/contribution-runtime APIs to
-    // contribute renderers, file-preview plugins, execution columns,
-    // etc. The same APIs built-in plugins use.
-  },
-};
+import { MolexpPlugin } from "@molcrafts/molexp-plugin";
 
-export default greeter;
+export default class Greeter extends MolexpPlugin {
+  id = "greeter";
+  name = "Greeter";
+  version = "0.1.0";
+  activate(api) {
+    api.commands.register("hello", () => api.log.info("hello"), {
+      title: "Say hello",
+    });
+    api.fileTypes.register({
+      id: "greeter:run-tab",
+      objectType: "run",
+      value: "greeter",
+      label: "Greeter",
+      matcher: { patterns: ["*.greet.json"] },
+      Component: () => null,
+    });
+  }
+}
 ```
 
-The bundle must be a valid native ESM module (``<script type="module">``
-form). The default export must match the ``UiPluginModule`` shape:
-``{ id: string, register: () => void | Promise<void> }``. Bundle React
-and any other dependencies — the file is served as a static asset and
-must be fully self-contained. Use whatever build tool you like
-(rsbuild / vite / rollup) so long as the output is a single ESM file.
+The bundle must be a valid native ESM module. Default-export
+``{ id, activate(api) }`` (or a ``MolexpPlugin`` subclass). The v1
+``register()``-only shape still works for one compatibility version.
+
+**Do not import ``@/app/registry``.** Contribute through ``PluginAPI``
+domains (``commands``, ``views``, ``editors``, ``inspectors``,
+``panels``, ``statusBar``, ``settings``, ``fileTypes``, ``entityTabs``,
+``execution``, ``filePreviews``).
+
+**Externalize host modules** with ``pluginExternals`` from
+``@molcrafts/molexp-plugin/externals`` (``react``, ``react-dom``, jsx
+runtimes, ``@molcrafts/molexp-plugin``, ``@molcrafts/molexp-plugin/ui``).
+The host injects a single React / SDK instance. Do not ship a second copy.
 
 ### How it gets served
 
@@ -253,7 +281,9 @@ descriptor through ``GET /api/plugins`` as
 1. fetches ``manifestUrl`` and validates the body;
 2. checks ``manifest.api_version`` matches the build constant;
 3. dynamic-imports ``entryUrl`` (or the override from
-   ``manifest.entry``) and calls ``register()`` on the default export.
+   ``manifest.entry``), rewrites bare host specifiers to the host
+   singletons, and calls ``activate(api)`` on the default export
+   (or the v1 ``register()`` shim).
 
 Per-plugin failures at every step are isolated with ``console.warn``
 so a single broken bundle cannot prevent other plugins from loading.

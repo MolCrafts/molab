@@ -15,6 +15,10 @@ export default defineConfig(({ command }) => {
     resolve: {
       alias: {
         '@schemas': path.resolve(__dirname, '../../src/molexp/schemas'),
+        '@molcrafts/molexp-plugin/ui': path.resolve(__dirname, '../plugin/src/ui'),
+        '@molcrafts/molexp-plugin/testing': path.resolve(__dirname, '../plugin/src/testing.ts'),
+        '@molcrafts/molexp-plugin/externals': path.resolve(__dirname, '../plugin/src/externals.ts'),
+        '@molcrafts/molexp-plugin': path.resolve(__dirname, '../plugin/src'),
       },
     },
     tools: {

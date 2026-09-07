@@ -1,5 +1,5 @@
-import type { WorkspaceFileNode, WorkspaceFilesResponse } from "@/api/workspace";
 import type { ManagedAssetResponse } from "@/api/generated/models/ManagedAssetResponse";
+import type { WorkspaceFileNode, WorkspaceFilesResponse } from "@/api/workspace";
 import { AgentUnavailableError, probeOnce, resetAgentProbes } from "@/app/state/agentProbe";
 import type {
   AgentSessionSummary,
@@ -20,15 +20,7 @@ import { parseTaskGraphIr } from "@/plugins/workflow/flowgram-document";
 import type { TaskGraphJson } from "@/plugins/workflow/task-graph-ir";
 
 export type { EmbedRole, EmbedTargetKind, EntityCard } from "@/api/knowledge";
-export type {
-  LammpsLogResponse,
-  LammpsThermoStage,
-  MetricRecord,
-  RunFilesResponse,
-  RunFileTextResponse,
-  RunMetricsQuery,
-  RunMetricsResponse,
-} from "@/api/runs";
+export type { RunFilesResponse, RunFileTextResponse } from "@/api/runs";
 export type {
   TensorboardScalarSeries,
   TensorboardScalarsResponse,
@@ -58,6 +50,7 @@ export const mapProjects = (
   return projects.map((project) => ({
     id: project.id,
     name: project.name,
+    path: project.path,
     status: "active",
     summary: project.description || "No description",
     updatedAt: project.created,
@@ -109,6 +102,7 @@ export const mapExperiments = (
     return {
       id: experiment.id,
       name: experiment.name,
+      path: experiment.path,
       status: "active",
       summary: experiment.description || "",
       workflowFile,
@@ -130,7 +124,10 @@ export const mapRuns = (
   const mapStatus = (run: ApiRunResponse): RunSummary["status"] => {
     if (!run.statusSummary) {
       const legacy = run.status ?? "pending";
-      return legacy === "running" || legacy === "succeeded" || legacy === "failed" || legacy === "cancelled"
+      return legacy === "running" ||
+        legacy === "succeeded" ||
+        legacy === "failed" ||
+        legacy === "cancelled"
         ? legacy
         : "pending";
     }
@@ -166,7 +163,10 @@ export const mapRuns = (
     const lastError = terminalErrors[terminalErrors.length - 1]?.error;
     return {
       id: run.id,
-      name: run.id,
+      // What the run is called is its parameters, and where it lives is a path
+      // of names — both come from the server, neither is derivable from ids.
+      name: run.name,
+      path: run.path,
       status,
       summary: run.statusSummary?.notStarted
         ? "Not executed"
@@ -176,19 +176,19 @@ export const mapRuns = (
       experimentId,
       definitionHash: run.definitionHash ?? "",
       experimentRevisionId: run.experimentRevisionId ?? "",
-      statusSummary:
-        run.statusSummary ??
-        ({
-          total: executions.length,
-          active: executions.filter((item) => ["queued", "running", "finalizing"].includes(item.status)).length,
-          notStarted: executions.length === 0,
-          byStatus: Object.fromEntries(
-            [...new Set(executions.map((item) => item.status))].map((value) => [
-              value,
-              executions.filter((item) => item.status === value).length,
-            ]),
-          ),
-        }),
+      statusSummary: run.statusSummary ?? {
+        total: executions.length,
+        active: executions.filter((item) =>
+          ["queued", "running", "finalizing"].includes(item.status),
+        ).length,
+        notStarted: executions.length === 0,
+        byStatus: Object.fromEntries(
+          [...new Set(executions.map((item) => item.status))].map((value) => [
+            value,
+            executions.filter((item) => item.status === value).length,
+          ]),
+        ),
+      },
       parameters: (run.parameters ?? {}) as Record<string, unknown>,
       workflowSource: run.workflowSource ?? run.workflow?.source ?? null,
       workflowSnapshot: run.workflow ?? null,

@@ -233,7 +233,7 @@ def land_run_outputs(
                 raise FileNotFoundError(f"path not found: {rel}")
             name = src.name
             tags = _infer_tags(rel, src)
-            dest = ctx.workdir / name
+            dest = ctx.get_dir("work") / name
             if src.is_dir():
                 if dest.exists():
                     shutil.rmtree(dest)

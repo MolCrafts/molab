@@ -96,7 +96,13 @@ export const DeltaFChart = ({
     let cancelled = false;
     void (async () => {
       try {
-        const res = await runsApi.getRunFileText(projectId, experimentId, runId, executionId, relPath);
+        const res = await runsApi.getRunFileText(
+          projectId,
+          experimentId,
+          runId,
+          executionId,
+          relPath,
+        );
         if (cancelled) {
           return;
         }

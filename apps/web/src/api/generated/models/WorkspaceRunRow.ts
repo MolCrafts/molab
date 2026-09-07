@@ -11,6 +11,7 @@ import type { WorkspaceExecutionRow } from './WorkspaceExecutionRow';
 export type WorkspaceRunRow = {
     id: string;
     name: string;
+    path: string;
     projectId: string;
     projectName: string;
     experimentId: string;

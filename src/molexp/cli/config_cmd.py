@@ -124,6 +124,7 @@ def config_dump(
         compose_plan,
         compose_run,
     )
+    from molexp.plugins.extras import default_science_extras
 
     class _DumpGateway:
         async def call(self, spec: object, *, runtime: object | None = None) -> object:
@@ -133,14 +134,15 @@ def config_dump(
     scratch = Path(tempfile.mkdtemp(prefix="molexp-dump-"))
     name = profile.strip().lower()
     dump_gw = cast(AgentGateway, _DumpGateway())
+    extras = default_science_extras()
     if name == "chat":
         host = compose_chat(gateway=dump_gw, scratch_dir=scratch)
     elif name == "plan":
-        host = compose_plan(run_id="dump", run_dir=scratch, gateway=dump_gw)
+        host = compose_plan(run_id="dump", run_dir=scratch, gateway=dump_gw, extra=extras)
     elif name == "curate":
         host = compose_curate(run_id="dump", run_dir=scratch, workspace_root=scratch)
     elif name == "run":
-        host = compose_run(run_id="dump", run_dir=scratch)
+        host = compose_run(run_id="dump", run_dir=scratch, extra=extras)
     else:
         rprint(f"[red]Unknown profile:[/red] {profile!r}. Use chat, plan, run, or curate.")
         raise typer.Exit(1)

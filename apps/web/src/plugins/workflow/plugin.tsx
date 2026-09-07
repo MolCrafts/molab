@@ -1,6 +1,6 @@
+import type { MolexpPluginModule, PluginAPI } from "@molcrafts/molexp-plugin";
 import { lazy } from "react";
-import { buildRegistryKey, registerRendererContribution } from "@/app/registry";
-import type { UiPluginModule } from "@/plugins/types";
+import { buildRendererRegistryKey } from "@/lib/contribution-types";
 
 const WorkflowFileViewer = lazy(() =>
   import("./WorkflowFileViewer").then((module) => ({ default: module.WorkflowFileViewer })),
@@ -12,13 +12,13 @@ const WorkflowViewer = lazy(() =>
   import("./WorkflowViewer").then((module) => ({ default: module.WorkflowViewer })),
 );
 
-const workflowPlugin: UiPluginModule = {
+const workflowPlugin: MolexpPluginModule = {
   id: "workflow",
   name: "Workflow",
+  version: "1.0.0",
   description: "Workflow graph viewer, source tab, and right-rail inspector.",
-  userToggleable: true,
-  register: () => {
-    registerRendererContribution({
+  activate: (api: PluginAPI) => {
+    api.editors.register({
       id: "workflow:viewer",
       key: {
         objectType: "workflow",
@@ -32,7 +32,7 @@ const workflowPlugin: UiPluginModule = {
       Component: WorkflowViewer,
     });
 
-    registerRendererContribution({
+    api.inspectors.register({
       id: "workflow:inspector",
       key: {
         objectType: "workflow",
@@ -52,8 +52,8 @@ const workflowPlugin: UiPluginModule = {
       contentType: "workflow-graph" as const,
       panelKind: "viewer" as const,
     };
-    registerRendererContribution({
-      id: `workflow:file:${buildRegistryKey(fileKey)}`,
+    api.editors.register({
+      id: `workflow:file:${buildRendererRegistryKey(fileKey)}`,
       key: fileKey,
       title: "Workflow Preview",
       panelSlot: "center",

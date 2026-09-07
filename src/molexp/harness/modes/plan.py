@@ -289,14 +289,12 @@ class Plan:
         """Materialize an appended operator decision as input to a new attempt."""
         if not context.based_on_execution_id:
             return
-        from molexp.harness.store.provenance_approval_store import ProvenanceApprovalStore
+        from molexp.harness.store.run_approval_store import RunApprovalStore
 
-        workspace = run.experiment.project.workspace
-        approvals = ProvenanceApprovalStore(
-            workspace.root,
+        approvals = RunApprovalStore(
+            run.run_dir,
             run_id=run.id,
             execution_id=context.based_on_execution_id,
-            fs=workspace.fs,
         )
         review = approvals.latest_review_decision()
         if review is None:
@@ -330,7 +328,7 @@ class Plan:
         if ctx.agent_gateway is None:
             raise StageExecutionError("plan host did not publish ctx.llm")
         spec = self._spec(user_input)
-        board_file = board_path(execution_context.workdir)
+        board_file = board_path(execution_context.get_dir("work"))
         disk_board = DiskTaskBoard(board_file, artifact_store=store)
         belt = host.ctx.require(Keys.TOOLS)
         if not isinstance(belt, ToolBelt):
@@ -358,7 +356,7 @@ class Plan:
             run_id=run.id,
         )
         compiled = compile_plan_workflow(bag)
-        scratch = execution_context.workdir / ".plan_scratch"
+        scratch = execution_context.get_dir("work", ".plan_scratch")
         scratch.mkdir(parents=True, exist_ok=True)
         wf_handle = host.ctx.get(Keys.WORKFLOW)
         if isinstance(wf_handle, WorkflowHandle):

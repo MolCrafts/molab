@@ -10,6 +10,9 @@ atomic helpers on a remote). Catalog registration is orthogonal.
 
 from __future__ import annotations
 
+import os
+import shutil
+from collections.abc import Iterable
 from os import PathLike, fspath
 from pathlib import Path, PurePosixPath
 
@@ -17,6 +20,29 @@ from molexp.atomicio import atomic_write_bytes, atomic_write_json, atomic_write_
 
 from .fs import FileSystem
 from .fs_local import LocalFileSystem
+
+
+def _unshare(target: Path) -> None:
+    """Break a hard link before appending, so only this file grows.
+
+    A hard-linked file is the *same* file under two names, so appending to it
+    inside a workspace also appends to whatever else points at that inode —
+    which is exactly how an archive built with hard links (``molexp migrate``)
+    stops being a snapshot of its source. Replacing the file with a private
+    copy first costs one copy the first time and nothing after.
+    """
+    try:
+        if not target.is_file() or target.stat().st_nlink < 2:
+            return
+    except OSError:
+        return
+    private = target.with_name(f"{target.name}.unshare.{os.getpid()}")
+    try:
+        shutil.copy2(target, private)
+        private.replace(target)
+    except OSError:
+        private.unlink(missing_ok=True)
+
 
 _PutData = Path | bytes | bytearray | dict | list | str
 
@@ -88,12 +114,27 @@ class FileStore:
         else:
             disk.atomic_write_text(target, str(data))
 
+    def append_many(self, relpath: str | Path, lines: Iterable[str]) -> Path:
+        """Append every line in one open — the bulk path, unshared once."""
+        target = self.resolve(relpath)
+        if isinstance(self._fs, LocalFileSystem):
+            target.parent.mkdir(parents=True, exist_ok=True)
+            _unshare(target)
+            with target.open("a", encoding="utf-8") as fh:
+                for line in lines:
+                    fh.write(line if line.endswith("\n") else line + "\n")
+            return target
+        for line in lines:
+            self.append(relpath, line)
+        return target
+
     def append(self, relpath: str | Path, line: str) -> Path:
         """Append *line* (a trailing newline is added if missing)."""
         target = self.resolve(relpath)
         payload = line if line.endswith("\n") else line + "\n"
         if isinstance(self._fs, LocalFileSystem):
             target.parent.mkdir(parents=True, exist_ok=True)
+            _unshare(target)
             with target.open("a", encoding="utf-8") as fh:
                 fh.write(payload)
             return target

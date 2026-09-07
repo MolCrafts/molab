@@ -237,14 +237,14 @@ class TestTypedReconstruction:
         ws.materialize()
         proj = ws.add_project("p")
         exp = proj.add_experiment("e")
-        exp.add_run(id="r")
+        run = exp.add_run(id="r")
 
         # the bundle root sits ABOVE the workspace concept dir
         by_rel = {Bundle(tmp_path).rel_path(f): f for f in Bundle(tmp_path).walk()}
 
-        proj_rel = f"lab/projects/{proj.id}"
-        exp_rel = f"{proj_rel}/experiments/{exp.id}"
-        run_rel = f"{exp_rel}/runs/run-r"
+        proj_rel = f"lab/projects/{proj._name}"
+        exp_rel = f"{proj_rel}/experiments/{exp._name}"
+        run_rel = f"{exp_rel}/runs/{run._name}"
         assert isinstance(by_rel["lab"], Workspace)
         assert isinstance(by_rel[proj_rel], Project)
         assert isinstance(by_rel[exp_rel], Experiment)
@@ -278,7 +278,7 @@ class TestNestedMounts:
         real = os.path.normpath(str(rec.resolve()))
 
         b = Bundle(ws.resolve())
-        rel = f"projects/{proj.id}/experiments/{exp.id}/runs/run-r/rec"
+        rel = f"projects/{proj._name}/experiments/{exp._name}/runs/{run._name}/rec"
         got = b.get(rel)
 
         assert os.path.normpath(str(got.resolve())) == real
@@ -309,7 +309,7 @@ class TestNestedMounts:
             created_by="tests",
         )
 
-        ki_rel = f"projects/{proj.id}/experiments/{exp.id}/knowledges/ki"
+        ki_rel = f"projects/{proj._name}/experiments/{exp._name}/knowledges/ki"
         b = Bundle(ws.resolve())
         rels = [b.rel_path(f) for f in b.walk()]
         assert rels.count(ki_rel) == 1

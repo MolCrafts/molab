@@ -9,6 +9,16 @@ import type { ProjectCreateRequest } from "../../src/api/generated/models/Projec
 
 const API_BASE = "/api";
 
+/**
+ * A directory name derived from a display name — the same shape the server
+ * produces, so the mock shows a path a person would recognise.
+ */
+const slugify = (name: string): string =>
+    name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "") || "unnamed";
+
 export const projectHandlers = [
     // GET /api/projects - List all projects
     http.get(`${API_BASE}/projects`, () => {
@@ -45,6 +55,7 @@ export const projectHandlers = [
         const newProject: ApiProjectResponse = {
             id,
             name: body.name || "New Project",
+            path: `projects/${slugify(body.name || "New Project")}`,
             description: body.description || "",
             owner: body.owner || "molexp",
             tags: body.tags || [],

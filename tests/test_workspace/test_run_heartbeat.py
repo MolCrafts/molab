@@ -14,7 +14,7 @@ from pathlib import Path
 
 from molexp.workspace.domain import ExecutionMode
 from molexp.workspace.execution_repository import ExecutionRepository
-from molexp.workspace.provenance import AgentRef
+from molexp.workspace.history import AgentRef
 from molexp.workspace.run_heartbeat import (
     ALIVE_NAME,
     HEARTBEAT_INTERVAL_SECONDS,

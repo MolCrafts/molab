@@ -31,6 +31,7 @@ from .errors import RunExistsError, RunNotFoundError
 from .folder import WORKSPACE_RUN_KIND, Folder
 from .fs import PathArg
 from .models import FolderMetadata, RunMetadata, RunStatus
+from .naming import run_slug
 
 if TYPE_CHECKING:
     from .experiment import Experiment
@@ -39,7 +40,13 @@ if TYPE_CHECKING:
 # Re-exported for backward compatibility — the canonical definition now
 # lives in ``.models`` so the run-lifecycle collaborators can import it
 # without a circular ``run.py`` dependency.
-from .domain import ExecutionMode, ExecutionState, ExecutionStatus, RunStatusSummary
+from .domain import (
+    ACTIVE_EXECUTION_STATUSES,
+    Execution,
+    ExecutionMode,
+    ExecutionStatus,
+    RunStatusSummary,
+)
 from .execution_context import RunContext
 from .execution_repository import ExecutionRepository
 
@@ -179,13 +186,13 @@ class Run(Folder):
         resolved_parent = parent if parent is not None else experiment
         if resolved_parent is None:
             raise ValueError("Run: parent (or experiment) is required")
-        # ``name`` (Folder convention) is the Run's id — Run has no
-        # human-readable name distinct from its slug.
+        # ``name`` (Folder convention) is the Run's *directory*: its parameters.
+        # Identity is the UUIDv7 in ``id`` and never leaks into the path.
         meta = (
             _entity_metadata
             if _entity_metadata is not None
             else RunMetadata(
-                id=id or name or generate_uuid7(),
+                id=id or generate_uuid7(),
                 parameters=parameters or {},
                 workflow_snapshot=workflow_snapshot,
                 target=target,
@@ -204,13 +211,13 @@ class Run(Folder):
         )
 
         self._parent = resolved_parent
-        self._name = meta.id
+        self._name = name or run_slug(meta.parameters, fallback=meta.definition_hash)
         self._kind = kind
         self._root_path = None
         # Disk is resolved via the parent chain (:meth:`Folder._disk`).
         self._metadata = FolderMetadata(
             id=meta.id,
-            name=meta.id,  # Run has no separate display name
+            name=name or run_slug(meta.parameters, fallback=meta.definition_hash),
             kind=kind,
             created_at=meta.created_at,
             updated_at=meta.created_at,
@@ -223,15 +230,13 @@ class Run(Folder):
     # ── Folder hooks ─────────────────────────────────────────────────────
 
     def resolve(self) -> MolexpPath:
-        return MolexpPath(
-            self._disk().join(self.experiment.experiment_dir, "runs", f"run-{self.id}")
-        )
+        return MolexpPath(self._disk().join(self.experiment.experiment_dir, "runs", self._name))
 
     @classmethod
     def child_dir(cls, parent: Folder, derived_id: str) -> MolexpPath:
-        """Folder hook — runs live under ``runs/run-<id>/``."""
+        """Folder hook — runs live under ``runs/<params>/``."""
         # resolve() not path() — pure layout math must not mkdir on remote.
-        return MolexpPath(parent._disk().join(parent.resolve(), "runs", f"run-{derived_id}"))
+        return MolexpPath(parent._disk().join(parent.resolve(), "runs", derived_id))
 
     @classmethod
     def from_disk(cls, child_dir: PathArg, parent: Folder) -> Run:
@@ -247,7 +252,9 @@ class Run(Folder):
             created_at=meta.created_at,
             updated_at=meta.created_at,
         )
-        attrs = cls.base_from_disk_attrs(parent, folder_meta) | {
+        attrs = cls.base_from_disk_attrs(
+            parent, folder_meta, slug=parent._disk().basename(child_dir)
+        ) | {
             "_entity_metadata": meta,
         }
         return _reconstruct(cls, attrs)
@@ -309,12 +316,12 @@ class Run(Folder):
         )
 
     @property
-    def executions(self) -> list[ExecutionState]:
+    def executions(self) -> list[Execution]:
         """Every physical Execution, ordered by creation time."""
         return self._execution_repository().list()
 
     @property
-    def execution_history(self) -> list[ExecutionState]:
+    def execution_history(self) -> list[Execution]:
         """Deprecated read alias; history is stored by Execution, not Run."""
         return self.executions
 
@@ -326,10 +333,9 @@ class Run(Folder):
 
     @property
     def current_execution_id(self) -> str | None:
-        """Active/last execution id, read from ``run.json``."""
-        raise AttributeError(
-            "Run has no current_execution_id in schema v2; multiple Executions may be active"
-        )
+        """Id of the newest still-active attempt, if any."""
+        active = [item for item in self.executions if item.status in ACTIVE_EXECUTION_STATUSES]
+        return active[-1].id if active else None
 
     @property
     def run_dir(self) -> Path:
@@ -398,7 +404,9 @@ class Run(Folder):
         from .scientific_repository import ScientificRepository
 
         ScientificRepository(self.experiment.project.workspace.root, fs=self._disk()).record_run(
-            self._definition_record(), experiment_id=self.experiment.id
+            self._definition_record(),
+            experiment_id=self.experiment.id,
+            path=self.run_dir,
         )
         self.save()
 
@@ -647,14 +655,17 @@ class Run(Folder):
     def _metadata_lock(self) -> Iterator[None]:
         """Advisory inter-process lock guarding ``run.json`` read-modify-write.
 
-        Uses a ``run.json.lock`` sidecar next to ``run.json``. Degrades to
-        a no-op when the run directory is not a lockable local path (remote
-        filesystems, non-POSIX platforms) — see
+        The lock file lives under the workspace's ``.molexp/locks/`` — machine
+        state never sits in a scientific directory. Degrades to a no-op when
+        the workspace is not a lockable local path (remote filesystems,
+        non-POSIX platforms) — see
         :func:`molexp.workspace._file_lock.file_lock`.
         """
         from ._file_lock import file_lock
 
-        with file_lock(Path(str(self.run_dir)) / "run.json.lock"):
+        locks = Path(str(self.experiment.project.workspace.root)) / ".molexp" / "locks"
+        locks.mkdir(parents=True, exist_ok=True)
+        with file_lock(locks / f"{self.id}.run.lock"):
             yield
 
     def _reload_metadata_from_disk(self) -> None:

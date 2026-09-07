@@ -62,7 +62,10 @@ export const useRunInspectorLogs = (
 
     const load = (): void => {
       const fetcher = runsApi.getRunExecutionLogs(
-        projectId, experimentId, runId, selectedExecutionId,
+        projectId,
+        experimentId,
+        runId,
+        selectedExecutionId,
       );
 
       fetcher

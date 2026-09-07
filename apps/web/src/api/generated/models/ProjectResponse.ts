@@ -5,6 +5,7 @@
 export type ProjectResponse = {
     id: string;
     name: string;
+    path: string;
     description?: string;
     owner?: string;
     tags?: Array<string>;

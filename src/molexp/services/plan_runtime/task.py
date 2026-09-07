@@ -22,6 +22,8 @@ from typing import TYPE_CHECKING, Literal
 
 from mollog import get_logger
 
+from molexp.workspace.execution_dirs import WORK
+
 if TYPE_CHECKING:
     from molexp.harness.gateways.gateway import AgentGateway
     from molexp.harness.schemas import ApprovalRequest, ModeResult
@@ -245,7 +247,7 @@ class PlanTask:
                 from molexp.harness.plan.document import experiment_report_to_document
                 from molexp.harness.store.file_artifact_store import FileArtifactStore
 
-                workdir = Path(str(self.run.run_dir)) / "executions" / execution_id / "work"
+                workdir = Path(str(self.run.run_dir)) / "executions" / execution_id / WORK.name
                 board = read_board(board_path(workdir))
                 step_count = len(getattr(board, "tasks", ()) or ())
                 store = FileArtifactStore.open_execution(self.run, execution_id)

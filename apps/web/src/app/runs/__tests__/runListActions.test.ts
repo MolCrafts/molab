@@ -6,6 +6,7 @@ const baseRun = (status: string): RunSummary =>
   ({
     id: "abc12345",
     name: "run",
+    path: "projects/p/experiments/e/runs/run",
     status,
     summary: "",
     updatedAt: "",

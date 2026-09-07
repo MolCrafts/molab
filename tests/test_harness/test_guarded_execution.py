@@ -176,7 +176,11 @@ class TestGateChangeProposal:
     def test_runtime_failure_recorded_failed_not_raised(self, tmp_path: Path) -> None:
         """A reorg runtime failure yields status=failed; the gate does not raise."""
         ws = _workspace(tmp_path)
-        ws.get_project("p").get_experiment("e2").add_run(id="r1")  # collision on move
+        # A run's directory is its parameters, so seeding the target experiment
+        # with the same directory name is what collides on the move.
+        source = ws.get_project("p").get_experiment("e1").get_run("r1")
+        target = ws.get_project("p").get_experiment("e2")
+        (Path(target.experiment_dir) / "runs" / source._name).mkdir(parents=True)
         ctx = _ctx(tmp_path)
         result = asyncio.run(
             gate_change_proposal(

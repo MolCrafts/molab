@@ -11,11 +11,11 @@ from pydantic import Field
 
 from molexp._typing import JSONValue
 from molexp.workspace import Run
-from molexp.workspace.domain import ACTIVE_EXECUTION_STATUSES, ExecutionState
+from molexp.workspace.domain import ACTIVE_EXECUTION_STATUSES, Execution
 
 from ._wire import ApiModel
 from .molq import MolqJobSummary  # noqa: F401  (preserve import surface)
-from .responses import RunStatusSummaryResponse
+from .responses import RunStatusSummaryResponse, workspace_relative
 
 
 class WorkspaceExecutionRow(ApiModel):
@@ -40,7 +40,15 @@ class WorkspaceRunRow(ApiModel):
     """Logical Run definition plus a derived summary of its Executions."""
 
     id: str
+    """UUIDv7 — what other records cite."""
+
     name: str
+    """What the run is called: its parameters. This is what a person reads."""
+
+    path: str
+    """Workspace-relative directory — the server's answer, never the client's
+    guess: every segment is a name, not an id."""
+
     projectId: str
     projectName: str
     experimentId: str
@@ -66,7 +74,8 @@ class WorkspaceRunRow(ApiModel):
         summary = run.status_summary
         return cls(
             id=run.id,
-            name=run.id,
+            name=run.name,
+            path=workspace_relative(run.experiment.project.workspace.resolve(), run.run_dir),
             projectId=run.experiment.project.id,
             projectName=project_name,
             experimentId=run.experiment.id,
@@ -100,7 +109,7 @@ def _string_metadata(values: dict[str, JSONValue]) -> dict[str, str]:
     return metadata
 
 
-def _build_execution_row(run_id: str, record: ExecutionState) -> WorkspaceExecutionRow:
+def _build_execution_row(run_id: str, record: Execution) -> WorkspaceExecutionRow:
     started = record.started_at
     finished = record.finished_at
     duration: float | None = None

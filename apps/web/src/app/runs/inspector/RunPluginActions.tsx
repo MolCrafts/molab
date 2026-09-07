@@ -12,12 +12,7 @@ import { WorkbenchIconAction } from "@/components/workbench";
 import { useContributionGeneration } from "@/lib/contribution-runtime";
 import type { EntityTabContribution, FileTypeContribution } from "@/lib/contribution-types";
 import { usePluginPreferencesGeneration } from "@/plugins/preferences";
-import {
-  runActivityAt,
-  runFinishedAt,
-  runPresentationStatus,
-  runStartedAt,
-} from "../projections";
+import { runActivityAt, runFinishedAt, runPresentationStatus, runStartedAt } from "../projections";
 import type { WorkspaceRunRow } from "../types";
 
 type PluginTabContribution = Pick<
@@ -40,6 +35,7 @@ export interface RunPluginAction {
 export const runSummaryForPluginMatching = (run: WorkspaceRunRow): RunSummary => ({
   id: run.id,
   name: run.name,
+  path: run.path,
   status: runPresentationStatus(run) as RunSummary["status"],
   summary: "",
   updatedAt: runActivityAt(run),
@@ -123,10 +119,7 @@ export const RunPluginActions = ({
     void contributionGeneration;
     void preferencesGeneration;
     const entityTabs = listEntityTabs("run", { selection, snapshot: hostSnapshot });
-    return collectRunPluginActions(
-      entityTabs,
-      [],
-    );
+    return collectRunPluginActions(entityTabs, []);
   }, [contributionGeneration, hostSnapshot, preferencesGeneration, selection]);
 
   if (actions.length === 0) return null;

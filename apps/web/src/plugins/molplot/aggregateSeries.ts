@@ -18,8 +18,10 @@ import { PALETTE, type ScalarSeries } from "./RunMetricsView";
  * repo's node test environment — see aggregateSeries.test.ts.
  */
 
-export type XMode = "step" | "wall";
+export type XMode = "step" | "wall" | "progress";
 export type YScale = "linear" | "log";
+/** Per-series rescaling, for overlaying metrics whose units do not match. */
+export type YNormalize = "none" | "first" | "minmax";
 
 export interface AggregateOptions {
   xMode: XMode;
@@ -28,11 +30,23 @@ export interface AggregateOptions {
   smoothing: number;
   /** The metric key being aggregated — used for axis + series labels. */
   metricKey: string;
+  /** Per-series rescaling. Defaults to "none". */
+  normalize?: YNormalize;
 }
 
-/** One selected run's scalar series for the chosen metric key. */
+/**
+ * One selected run's scalar series, with identity and colour-group separated.
+ *
+ * `key` is the run's own address and becomes the molplot series `id`, which
+ * `lineSpec` puts on the `detail` channel — one polyline per run, always.
+ * `label` becomes the series `label`, which `lineSpec` dedupes to build the
+ * colour scale and the legend. Setting several runs to the same `label` is
+ * therefore how "colour by experiment" works: one legend entry, one colour,
+ * still N separate curves.
+ */
 export interface RunSeries {
-  runId: string;
+  key: string;
+  label: string;
   series: ScalarSeries;
 }
 
@@ -103,16 +117,25 @@ const sampleStd = (xs: number[]): number => {
 };
 
 /** Shared axis / theme block, mirroring RunMetricsView's chart config. */
+const X_LABEL: Record<XMode, string> = {
+  step: "step",
+  wall: "wall time",
+  progress: "progress (0-1)",
+};
+
 const baseConfig = (
   series: LineSeriesConfig[],
-  options: Pick<AggregateOptions, "xMode" | "yScale" | "metricKey">,
+  options: Pick<AggregateOptions, "xMode" | "yScale" | "metricKey" | "normalize">,
 ): LineChartConfig => ({
   series,
   xAxis: {
-    label: options.xMode === "step" ? "step" : "wall time",
+    label: X_LABEL[options.xMode],
     type: "linear",
   },
-  yAxis: { type: options.yScale, label: options.metricKey },
+  yAxis: {
+    type: options.yScale,
+    label: yAxisLabel(options.metricKey, options.normalize ?? "none"),
+  },
   hovertemplate: "%{y:.6g}<extra></extra>",
   hovermode: "x unified",
   showLegend: true,
@@ -123,6 +146,54 @@ const baseConfig = (
 // both ScalarPoint and the aggregated AlignedStep (which has no single `y`) pass.
 const xValue = (point: Pick<ScalarPoint, "step" | "wall">, xMode: XMode): number =>
   xMode === "step" ? point.step : point.wall;
+
+/**
+ * X values for one series under the chosen mode.
+ *
+ * `progress` maps each series onto [0, 1] by its own extent. Comparing an
+ * epoch-indexed training run against an MD run indexed in timesteps is
+ * meaningless on a shared step axis — the two axes are different quantities
+ * that happen to share a name — so this offers "how far through" instead of
+ * pretending the numbers are commensurable. A single-point series collapses to
+ * 0 rather than dividing by zero.
+ */
+const xValues = (points: readonly Pick<ScalarPoint, "step" | "wall">[], xMode: XMode): number[] => {
+  const raw = points.map((point) => xValue(point, xMode === "progress" ? "step" : xMode));
+  if (xMode !== "progress") return raw;
+  const lo = Math.min(...raw);
+  const hi = Math.max(...raw);
+  const span = hi - lo;
+  return span === 0 ? raw.map(() => 0) : raw.map((value) => (value - lo) / span);
+};
+
+/**
+ * Rescale one series so curves with different units share a y-axis.
+ *
+ * `first` divides by the first finite value, turning every curve into a factor
+ * of where it started; `minmax` maps each onto [0, 1]. Both are per-series by
+ * construction — that is the whole point — so the y-axis is a ratio, and the
+ * label says so.
+ */
+export const normalizeSeries = (ys: readonly number[], mode: YNormalize): number[] => {
+  if (mode === "none" || ys.length === 0) return [...ys];
+  if (mode === "first") {
+    const base = ys.find((y) => Number.isFinite(y) && y !== 0);
+    return base === undefined ? [...ys] : ys.map((y) => y / base);
+  }
+  const finite = ys.filter((y) => Number.isFinite(y));
+  const lo = Math.min(...finite);
+  const hi = Math.max(...finite);
+  const span = hi - lo;
+  return span === 0 ? ys.map(() => 0) : ys.map((y) => (y - lo) / span);
+};
+
+/** Axis label that admits when the values are no longer the metric's own. */
+const yAxisLabel = (metricKey: string, normalize: YNormalize): string =>
+  normalize === "first"
+    ? `${metricKey} (relative to first)`
+    : normalize === "minmax"
+      ? `${metricKey} (normalised 0-1)`
+      : metricKey;
 
 const applySmoothing = (ys: number[], smoothing: number): number[] =>
   smoothing > 0 ? smoothEma(ys, smoothing) : ys;
@@ -135,22 +206,75 @@ export const buildOverlayConfig = (
   perRun: RunSeries[],
   options: AggregateOptions,
 ): LineChartConfig => {
-  const series: LineSeriesConfig[] = perRun.map(({ runId, series: s }, index) => {
-    const xs = s.points.map((p) => xValue(p, options.xMode));
+  // Colour follows the *group*, not the row order. Runs sharing a label (all
+  // the seeds of one experiment, say) must come out one colour and one legend
+  // entry; palette-by-index would scatter them across the wheel and lose the
+  // grouping the user asked for.
+  const groups: string[] = [];
+  for (const { label } of perRun) {
+    if (!groups.includes(label)) groups.push(label);
+  }
+
+  const series: LineSeriesConfig[] = perRun.map(({ key, label, series: s }) => {
+    const xs = xValues(s.points, options.xMode);
     const ys = applySmoothing(
-      s.points.map((p) => p.y),
+      normalizeSeries(
+        s.points.map((p) => p.y),
+        options.normalize ?? "none",
+      ),
       options.smoothing,
     );
     return {
-      id: runId,
-      label: runId,
-      color: PALETTE[index % PALETTE.length],
+      id: key,
+      label,
+      color: PALETTE[groups.indexOf(label) % PALETTE.length],
       width: 2,
       mode: "lines+markers",
       initialPoints: ys.map((y, i) => ({ x: xs[i], y })),
     };
   });
   return baseConfig(series, options);
+};
+
+/**
+ * Whether a per-step aggregate is meaningful for this set.
+ *
+ * `alignSteps` intersects step axes exactly, with no interpolation, so runs
+ * that were logged on different grids — epochs against timesteps, or two
+ * solvers with different thermo frequencies — share almost nothing. Averaging
+ * across one or zero common steps produces an empty or single-point chart that
+ * looks like a bug rather than the mismatch it is, so callers ask first and
+ * show the reason instead of the empty chart.
+ */
+export interface AlignFeasibility {
+  ok: boolean;
+  common: number;
+  dropped: number;
+  reason: string | null;
+}
+
+export const aggregateFeasibility = (series: ScalarSeries[]): AlignFeasibility => {
+  if (series.length < 2) {
+    return {
+      ok: false,
+      common: 0,
+      dropped: 0,
+      reason: "Per-step aggregation needs at least two runs with this metric.",
+    };
+  }
+  const { points, dropped } = alignSteps(series);
+  if (points.length < 2) {
+    return {
+      ok: false,
+      common: points.length,
+      dropped,
+      reason:
+        points.length === 0
+          ? "The selected runs share no common step, so there is nothing to average. Use Overlay."
+          : "The selected runs share only one common step. Use Overlay.",
+    };
+  }
+  return { ok: true, common: points.length, dropped, reason: null };
 };
 
 /**
@@ -185,9 +309,12 @@ export const buildMeanConfig = (
   options: AggregateOptions,
 ): { config: LineChartConfig; dropped: number } => {
   const { mean: meanSeries, dropped } = buildMeanSeries(series);
-  const xs = meanSeries.points.map((p) => xValue(p, options.xMode));
+  const xs = xValues(meanSeries.points, options.xMode);
   const ys = applySmoothing(
-    meanSeries.points.map((p) => p.y),
+    normalizeSeries(
+      meanSeries.points.map((p) => p.y),
+      options.normalize ?? "none",
+    ),
     options.smoothing,
   );
   const line: LineSeriesConfig = {
@@ -217,12 +344,27 @@ export const buildErrorbandConfig = (
   options: AggregateOptions,
 ): { config: LineChartConfig; dropped: number } => {
   const { points, dropped } = alignSteps(series);
-  const xs = points.map((p) => xValue(p, options.xMode));
+  const xs = xValues(points, options.xMode);
+  // The band is offset by the raw per-step spread, but both mean and
+  // spread are rescaled together so the band still brackets the drawn mean.
+  const normalize = options.normalize ?? "none";
   const means = applySmoothing(
-    points.map((p) => mean(p.ys)),
+    normalizeSeries(
+      points.map((p) => mean(p.ys)),
+      normalize,
+    ),
     options.smoothing,
   );
-  const stds = points.map((p) => sampleStd(p.ys));
+  const rawMeans = points.map((p) => mean(p.ys));
+  const scale =
+    normalize === "none"
+      ? 1
+      : (() => {
+          const before = Math.max(...rawMeans) - Math.min(...rawMeans);
+          const after = Math.max(...means) - Math.min(...means);
+          return before === 0 ? 1 : after / before;
+        })();
+  const stds = points.map((p) => sampleStd(p.ys) * scale);
   const color = PALETTE[0];
 
   const upper: LineSeriesConfig = {

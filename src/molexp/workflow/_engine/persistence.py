@@ -205,10 +205,10 @@ def last_resumable_execution_id(run: Run) -> str | None:
     the caller errors (no fallback to a fresh execution).
 
     Execution history is read from ``run.json``
-    (``run.execution_history``) — the same ``ExecutionRecord`` shape, the
+    (``run.executions``) — the same ``ExecutionRecord`` shape, the
     same "most-recent non-succeeded" rule.
     """
-    for record in reversed(run.execution_history):
+    for record in reversed(run.executions):
         if record.status.value != "succeeded":
             return record.id
     return None

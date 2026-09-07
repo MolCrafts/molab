@@ -4,7 +4,7 @@
  */
 
 import { describe, expect, it } from "@rstest/core";
-import type { MetricRecord } from "@/api";
+import type { MetricRecordSample as MetricRecord } from "@/lib/contribution-types";
 import { lineChartStructureKey, planSeriesUpdate } from "./MolplotLineChart";
 import { buildLineChartConfig, buildScalarSeries, groupSeries } from "./RunMetricsView";
 

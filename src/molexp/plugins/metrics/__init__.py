@@ -2,7 +2,7 @@
 
 Owns the molplot filename contract (:mod:`.mlp_names`) and the JSONL WAL
 writer / reader (:mod:`.wal`). A molexp Run is a **host**, not a MolRec
-record; the only metrics persist surface is ``artifacts/<stem>.mlp.jsonl``,
+record; the only metrics persist surface is ``out/<stem>.mlp.jsonl``,
 and leftover ``*.mlp.zarr/`` / ``*.mlp.index.json`` are ignored.
 
 Importing this package registers the writer factory on
@@ -15,6 +15,7 @@ workspace importing plugins. ``molexp/__init__`` performs that import, so any
 from collections.abc import Callable
 from pathlib import Path
 
+from molexp.plugins.metrics.host import MetricsPlugin
 from molexp.plugins.metrics.mlp_names import (
     DEFAULT_MLP_STEM,
     MLP_INDEX_SUFFIX,
@@ -39,6 +40,7 @@ from molexp.plugins.metrics.wal import (
     has_metrics,
     has_metrics_wal,
     read_run_metrics,
+    validate_record,
 )
 from molexp.workspace.metrics_seam import set_metrics_writer_factory
 
@@ -57,6 +59,7 @@ __all__ = [
     "MLP_ZARR_SUFFIX",
     "MetricReadResult",
     "MetricRecord",
+    "MetricsPlugin",
     "MetricsWriter",
     "discover_mlp_jsonl",
     "has_metrics",
@@ -71,4 +74,5 @@ __all__ = [
     "mlp_jsonl_name",
     "mlp_zarr_name",
     "read_run_metrics",
+    "validate_record",
 ]

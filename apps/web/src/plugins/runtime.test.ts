@@ -62,11 +62,11 @@ describe("plugin loader (manifest-based)", () => {
     rs.restoreAllMocks();
   });
 
-  it("fetches manifest, checks api_version, dynamic-imports entry, calls register", async () => {
-    const registerSpy = rs.fn();
+  it("fetches manifest, checks api_version, dynamic-imports entry, calls activate(api)", async () => {
+    const activateSpy = rs.fn();
     fetchManifestSpy.mockResolvedValueOnce(makeManifest("alpha"));
     dynamicImportSpy.mockResolvedValueOnce({
-      default: { id: "alpha", register: registerSpy },
+      default: { id: "alpha", activate: activateSpy },
     });
     rs.spyOn(PluginsService, "listPlugins").mockResolvedValueOnce({
       plugins: [makeDescriptor("alpha")],
@@ -79,6 +79,23 @@ describe("plugin loader (manifest-based)", () => {
     expect(fetchManifestSpy).toHaveBeenCalledWith("/api/plugins/alpha/manifest.json");
     expect(dynamicImportSpy).toHaveBeenCalledTimes(1);
     expect(dynamicImportSpy).toHaveBeenCalledWith("/api/plugins/alpha/index.js");
+    expect(activateSpy).toHaveBeenCalledTimes(1);
+    expect(activateSpy.mock.calls[0]?.[0]).toMatchObject({ pluginId: "alpha" });
+  });
+
+  it("still accepts the v1 register() shim", async () => {
+    const registerSpy = rs.fn();
+    fetchManifestSpy.mockResolvedValueOnce(makeManifest("legacy"));
+    dynamicImportSpy.mockResolvedValueOnce({
+      default: { id: "legacy", register: registerSpy },
+    });
+    rs.spyOn(PluginsService, "listPlugins").mockResolvedValueOnce({
+      plugins: [makeDescriptor("legacy")],
+      total: 1,
+    } as never);
+
+    await discoverAndLoad(state);
+
     expect(registerSpy).toHaveBeenCalledTimes(1);
   });
 

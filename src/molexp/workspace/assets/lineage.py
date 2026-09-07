@@ -52,31 +52,10 @@ def _fs_arg(workspace: Workspace) -> FileSystem | None:
 
 
 def _artifact_upstreams(workspace: Workspace) -> dict[str, tuple[str, ...]]:
-    """Map v2 ``Artifact`` id → consumed entity ids from the provenance index.
+    """Map Artifact id → consumed entity ids, read from the owning Executions."""
+    from ..artifact_repository import scan_artifacts
 
-    The provenance index is a derived view; when empty it is rebuilt from the
-    append-only event log so a fresh workspace scan still resolves edges.
-    """
-    from ..index_store import JsonIndexStore
-    from ..provenance import ProvenanceStore
-
-    fs = _fs_arg(workspace)
-    index = JsonIndexStore(workspace.root, fs=fs)
-    records = index.list_entities("artifact")
-    if not records:
-        provenance = ProvenanceStore(workspace.root, fs=fs)
-        if provenance.iter_events():
-            index.rebuild(provenance)
-            records = index.list_entities("artifact")
-    out: dict[str, tuple[str, ...]] = {}
-    for raw in records:
-        artifact_id = raw.get("id")
-        inputs = raw.get("input_entity_ids") or ()
-        if isinstance(artifact_id, str):
-            out[artifact_id] = (
-                tuple(str(item) for item in inputs) if isinstance(inputs, (list, tuple)) else ()
-            )
-    return out
+    return {artifact.id: tuple(artifact.input_entity_ids) for artifact in scan_artifacts(workspace)}
 
 
 def _upstream_ids(

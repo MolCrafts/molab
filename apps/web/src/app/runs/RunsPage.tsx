@@ -1,12 +1,15 @@
 import { ListChecks, RefreshCw } from "lucide-react";
-import { type JSX, lazy, Suspense, useCallback, useEffect, useMemo } from "react";
+import { type JSX, lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { ComparePane, useCompareSet } from "@/app/compare";
+import { entryFromWorkspaceRunRow } from "@/app/compare/entries";
 import { EntityHeader } from "@/app/components/entity";
 import { runPath } from "@/app/entities/paths";
 import { SurfaceErrorBoundary } from "@/app/layout/SurfaceErrorBoundary";
 import type { InspectorSurfaceRegistration } from "@/app/panels/inspectorSurface";
 import type { ObjectView, WorkspaceSnapshot } from "@/app/types";
 import {
+  WorkbenchAction,
   WorkbenchIconAction,
   WorkbenchOperationState,
   WorkbenchRetryAction,
@@ -26,15 +29,12 @@ import {
 } from "./jobsTable";
 import { RunsJobsTable } from "./RunsJobsTable";
 import { parseRunsTab, type RunsTab, RunsTabBar } from "./RunsTabBar";
-import type { GanttMode } from "./RunsTimelineView";
-import type { WorkspaceExecutionRow, WorkspaceRunRow, WorkspaceRunsFilters } from "./types";
+import type { WorkspaceRunRow, WorkspaceRunsFilters } from "./types";
+import { type MultiSelectState, nextSelection } from "./useRunMultiSelect";
 import { useWorkspaceRuns } from "./useWorkspaceRuns";
 
 const RunInspector = lazy(() =>
   import("./inspector/RunInspector").then((module) => ({ default: module.RunInspector })),
-);
-const RunsTimelineView = lazy(() =>
-  import("./RunsTimelineView").then((module) => ({ default: module.RunsTimelineView })),
 );
 
 interface RunsPageProps {
@@ -42,18 +42,12 @@ interface RunsPageProps {
   onInspectorChange: (registration: InspectorSurfaceRegistration | null) => void;
 }
 
-const VALID_GANTT_MODES: ReadonlySet<string> = new Set<string>(["runs", "executions"]);
-
-const parseGanttMode = (raw: string | null): GanttMode =>
-  raw && VALID_GANTT_MODES.has(raw) ? (raw as GanttMode) : "runs";
-
 const writeRunsParams = (
   prev: URLSearchParams,
   patch: {
     tab?: RunsTab;
     runId?: string | null;
     executionId?: string | null;
-    mode?: GanttMode;
     sort?: JobsSort | null;
     page?: number | null;
     pageSize?: number | null;
@@ -71,10 +65,6 @@ const writeRunsParams = (
   if (patch.executionId !== undefined) {
     if (patch.executionId === null || patch.executionId === "") next.delete("executionId");
     else next.set("executionId", patch.executionId);
-  }
-  if (patch.mode !== undefined) {
-    if (patch.mode === "runs") next.delete("mode");
-    else next.set("mode", patch.mode);
   }
   if (patch.sort !== undefined) {
     if (
@@ -106,16 +96,49 @@ export const RunsPage = ({ snapshot, onInspectorChange }: RunsPageProps): JSX.El
   );
 
   const tab = parseRunsTab(searchParams.get("tab"));
-  const ganttMode = parseGanttMode(searchParams.get("mode"));
   const selectedRunId = searchParams.get("runId");
   const selectedExecutionId = searchParams.get("executionId");
   const jobsSort = useMemo(() => parseJobsSort(searchParams.get("sort")), [searchParams]);
   const jobsPage = useMemo(() => parsePage(searchParams.get("page")), [searchParams]);
   const jobsPageSize = useMemo(() => parsePageSize(searchParams.get("pageSize")), [searchParams]);
 
-  const { rows, truncated, loading, error, lastSyncedAt, refresh } = useWorkspaceRuns();
+  const { rows, truncated, unreachable, loading, error, lastSyncedAt, refresh } =
+    useWorkspaceRuns();
 
   const filteredRuns = useMemo(() => applyFilters(rows, filters), [rows, filters]);
+
+  // Gathering runs for comparison is additive and never navigates: ticking a
+  // row adds it, clicking the row still opens it.
+  const compare = useCompareSet();
+  const [compareSelection, setCompareSelection] = useState<MultiSelectState>(() => ({
+    selected: new Set<string>(),
+    anchor: null,
+  }));
+  // `orderedIds` comes from the table, in the order it actually rendered.
+  const selectCompareAt = useCallback(
+    (index: number, orderedIds: string[], modifiers: { shift: boolean; meta: boolean }) => {
+      setCompareSelection((current) => nextSelection(current, index, orderedIds, modifiers));
+    },
+    [],
+  );
+
+  const workspaceLabels = useMemo(
+    () => new Map(snapshot.workspaces.map((ws) => [ws.key, ws.label])),
+    [snapshot.workspaces],
+  );
+
+  const addSelectedToCompare = useCallback(() => {
+    const picked = filteredRuns.filter((run) => compareSelection.selected.has(run.id));
+    compare.addMany(
+      picked.map((run) =>
+        entryFromWorkspaceRunRow(run, {
+          key: run.workspaceKey,
+          label: workspaceLabels.get(run.workspaceKey) ?? run.workspaceKey,
+        }),
+      ),
+    );
+    setCompareSelection({ selected: new Set<string>(), anchor: null });
+  }, [compare, compareSelection.selected, filteredRuns, workspaceLabels]);
 
   const selectedRun = useMemo<WorkspaceRunRow | null>(
     () => (selectedRunId ? (rows.find((row) => row.id === selectedRunId) ?? null) : null),
@@ -125,13 +148,6 @@ export const RunsPage = ({ snapshot, onInspectorChange }: RunsPageProps): JSX.El
   const setTab = useCallback(
     (next: RunsTab): void => {
       setSearchParams((prev) => writeRunsParams(prev, { tab: next }), { replace: true });
-    },
-    [setSearchParams],
-  );
-
-  const setGanttMode = useCallback(
-    (next: GanttMode): void => {
-      setSearchParams((prev) => writeRunsParams(prev, { mode: next }), { replace: true });
     },
     [setSearchParams],
   );
@@ -164,16 +180,6 @@ export const RunsPage = ({ snapshot, onInspectorChange }: RunsPageProps): JSX.El
       setSearchParams((prev) => writeRunsParams(prev, { runId: run.id, executionId: null }), {
         replace: true,
       });
-    },
-    [setSearchParams],
-  );
-
-  const selectExecution = useCallback(
-    (run: WorkspaceRunRow, execution: WorkspaceExecutionRow): void => {
-      setSearchParams(
-        (prev) => writeRunsParams(prev, { runId: run.id, executionId: execution.executionId }),
-        { replace: true },
-      );
     },
     [setSearchParams],
   );
@@ -268,6 +274,13 @@ export const RunsPage = ({ snapshot, onInspectorChange }: RunsPageProps): JSX.El
     ? `Showing first ${rows.length} runs (truncated). Narrow filters or raise the limit.`
     : `${filteredRuns.length} of ${rows.length} runs match current filters`;
 
+  // A served workspace that failed this poll contributes no rows. Say so —
+  // an absent workspace is otherwise indistinguishable from an empty one.
+  const unreachableNote =
+    unreachable.length > 0
+      ? ` · ${unreachable.length} workspace${unreachable.length === 1 ? "" : "s"} unreachable (${unreachable.join(", ")})`
+      : "";
+
   return (
     <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
       <EntityHeader
@@ -298,6 +311,7 @@ export const RunsPage = ({ snapshot, onInspectorChange }: RunsPageProps): JSX.El
       <div className="border-b border-border/60 px-3 pb-2 text-micro text-muted-foreground">
         {headerSummary}
         {lastSyncedAt ? ` · synced ${formatRelative(lastSyncedAt.toISOString())}` : ""}
+        {unreachableNote}
       </div>
       <div className="shrink-0 border-b border-border/60 bg-background px-4">
         <RunsTabBar value={tab} onChange={setTab} />
@@ -314,11 +328,33 @@ export const RunsPage = ({ snapshot, onInspectorChange }: RunsPageProps): JSX.El
           />
         ) : null}
 
+        {tab === "jobs" && compareSelection.selected.size > 0 && (
+          <div className="mb-2 flex items-center gap-2">
+            <span className="text-label text-muted-foreground">
+              {compareSelection.selected.size} selected
+            </span>
+            <WorkbenchAction kind="secondary" size="compact" onClick={addSelectedToCompare}>
+              Add to comparison
+            </WorkbenchAction>
+            <WorkbenchAction
+              kind="ghost"
+              size="compact"
+              onClick={() => setCompareSelection({ selected: new Set<string>(), anchor: null })}
+            >
+              Clear selection
+            </WorkbenchAction>
+          </div>
+        )}
+
         {tab === "jobs" && (
           <RunsJobsTable
             rows={filteredRuns}
             selectedRunId={selectedRunId}
             onSelectRun={selectRun}
+            selection={{
+              selected: compareSelection.selected,
+              selectAt: selectCompareAt,
+            }}
             sort={jobsSort}
             onSortChange={setJobsSort}
             page={jobsPage}
@@ -328,42 +364,11 @@ export const RunsPage = ({ snapshot, onInspectorChange }: RunsPageProps): JSX.El
           />
         )}
 
-        {tab === "timeline" ? (
-          <SurfaceErrorBoundary
-            resetKey="runs-timeline"
-            fallback={(timelineError) => (
-              <WorkbenchOperationState
-                kind="error"
-                title="Could not load the timeline"
-                detail={timelineError.message}
-                action={
-                  <WorkbenchRetryAction
-                    label="Reload application"
-                    onClick={() => window.location.reload()}
-                  />
-                }
-              />
-            )}
-          >
-            <Suspense
-              fallback={
-                <WorkbenchOperationState
-                  kind="loading"
-                  title="Loading timeline…"
-                  skeletonRows={5}
-                />
-              }
-            >
-              <RunsTimelineView
-                rows={filteredRuns}
-                mode={ganttMode}
-                onModeChange={setGanttMode}
-                onSelectRun={selectRun}
-                onSelectExecution={selectExecution}
-              />
-            </Suspense>
-          </SurfaceErrorBoundary>
-        ) : null}
+        {tab === "compare" && (
+          <div className="h-full min-h-0">
+            <ComparePane />
+          </div>
+        )}
       </div>
     </div>
   );

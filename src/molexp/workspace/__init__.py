@@ -52,6 +52,11 @@ from .cache import WORKSPACE_CACHE_KIND, CacheFolder
 from .concepts import Note, ReferenceConcept
 from .context import Context
 from .doc_embed import EntitySummary
+
+# ``Asset`` / ``AssetVersion`` deliberately stay unexported here: the names
+# belong to the manifest family above. Reach the Project data identities as
+# ``molexp.workspace.domain.Asset`` / ``.AssetVersion``.
+from .domain import Artifact, ContentRef, Execution, ExecutionStatus
 from .edges import DEFAULT_EDGE_ROLE, Edge, EdgeRole
 from .errors import (
     ConceptNotFoundError,
@@ -74,6 +79,7 @@ from .folder import (
     WORKSPACE_RUN_KIND,
     Folder,
 )
+from .history import AgentRef, EntityRef, GitHistory
 from .knowledge import (
     PLAN_BOOK_NAME,
     Assumption,
@@ -94,7 +100,6 @@ from .knowledge import (
 from .models import (
     ComputeTarget,
     ErrorInfo,
-    ExecutionRecord,
     ExperimentMetadata,
     FolderMetadata,
     ProjectMetadata,
@@ -138,11 +143,14 @@ __all__ = [
     "WORKSPACE_PROJECT_KIND",
     "WORKSPACE_ROOT_KIND",
     "WORKSPACE_RUN_KIND",
+    "AgentRef",
+    "Artifact",
     "ArtifactAsset",
     "ArtifactRef",
     "Asset",
     "AssetManifest",
     "AssetScope",
+    "AssetVersion",
     "AssetsView",
     "Assumption",
     "Backlink",
@@ -154,6 +162,7 @@ __all__ = [
     "ConceptIndexEntry",
     "ConceptNotFoundError",
     "Constraint",
+    "ContentRef",
     "Context",
     "ContextFocus",
     "DataAsset",
@@ -161,12 +170,14 @@ __all__ = [
     "Decision",
     "Edge",
     "EdgeRole",
+    "EntityRef",
     "EntitySummary",
     "ErrorInfo",
     "ErrorTraceAsset",
+    "Execution",
     "ExecutionPruneEntry",
     "ExecutionPrunePlan",
-    "ExecutionRecord",
+    "ExecutionStatus",
     "Experiment",
     "ExperimentExistsError",
     "ExperimentMetadata",
@@ -178,6 +189,7 @@ __all__ = [
     "Folder",
     "FolderMetadata",
     "FolderMoveCollisionError",
+    "GitHistory",
     "GridSpace",
     "HealthFlag",
     "Knowledge",

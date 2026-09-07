@@ -10,6 +10,8 @@ import {
 } from "lucide-react";
 import { lazy, Suspense, useCallback, useMemo, useState } from "react";
 import { experimentsApi } from "@/api";
+import { useCompareSet } from "@/app/compare";
+import { activeWorkspace, entryFromRunSummary } from "@/app/compare/entries";
 import { CreateRunDialog } from "@/app/components/CreateRunDialog";
 import { CreateSweepDialog } from "@/app/components/CreateSweepDialog";
 import type { DataTableColumn, DataTableRowAction } from "@/app/components/entity";
@@ -36,10 +38,7 @@ import {
 } from "@/app/renderers/dashboardData";
 import { ExperimentCompare } from "@/app/renderers/ExperimentCompare";
 import { buildExperimentWorkbenchData } from "@/app/renderers/entityWorkbenchData";
-import {
-  buildRunListActions,
-  type RunListHandlers,
-} from "@/app/runs/runListActions";
+import { buildRunListActions, type RunListHandlers } from "@/app/runs/runListActions";
 import { useRunMultiSelect } from "@/app/runs/useRunMultiSelect";
 import { useNavigationState } from "@/app/state/useNavigationState";
 import type { ExperimentView, RunSummary, ScopedRendererProps } from "@/app/types";
@@ -124,7 +123,9 @@ export const ExperimentViewer = ({
   inspectorTarget,
   onInspectorTargetChange,
   onRefresh,
-}: ScopedRendererProps<"experiments" | "runs" | "workflows" | "workspaces">): JSX.Element => {
+}: ScopedRendererProps<
+  "projects" | "experiments" | "runs" | "workflows" | "workspaces"
+>): JSX.Element => {
   const [isDeleting, setIsDeleting] = useState(false);
   const [sweepOpen, setSweepOpen] = useState(false);
   // Re-render when the user toggles the Workflow plugin in Settings.
@@ -179,6 +180,30 @@ export const ExperimentViewer = ({
     [orderedRunIds],
   );
   const multi = useRunMultiSelect(orderedRunIds);
+  const compare = useCompareSet();
+
+  // The comparison set spans workspaces, so a run added from here has to carry
+  // the workspace it came from. An experiment page always shows the active one.
+  const compareScope = useMemo(() => {
+    const ws = activeWorkspace(snapshot.workspaces);
+    if (!ws) return null;
+    return {
+      workspaceKey: ws.key,
+      workspaceLabel: ws.label,
+      projectName: snapshot.projects.find((project) => project.id === projectId)?.name ?? projectId,
+      experimentName: experiment?.name ?? experimentId,
+    };
+  }, [snapshot.workspaces, snapshot.projects, projectId, experiment?.name, experimentId]);
+
+  const selectedRuns = useMemo(
+    () => runs.filter((run) => multi.selected.has(run.id)),
+    [runs, multi.selected],
+  );
+
+  const addSelectedToCompare = useCallback(() => {
+    if (!compareScope) return;
+    compare.addMany(selectedRuns.map((run) => entryFromRunSummary(run, compareScope)));
+  }, [compare, compareScope, selectedRuns]);
 
   const handleDelete = async () => {
     if (!projectId) return;
@@ -669,6 +694,20 @@ export const ExperimentViewer = ({
                             Compare
                           </WorkbenchAction>
                           <WorkbenchAction
+                            kind="secondary"
+                            size="compact"
+                            type="button"
+                            disabled={multi.selected.size === 0 || !compareScope}
+                            deniedReason={
+                              compareScope
+                                ? null
+                                : "No served workspace to attribute these runs to."
+                            }
+                            onClick={addSelectedToCompare}
+                          >
+                            Add to comparison
+                          </WorkbenchAction>
+                          <WorkbenchAction
                             kind="ghost"
                             size="compact"
                             type="button"
@@ -722,7 +761,10 @@ export const ExperimentViewer = ({
             content: (
               <OverviewSurface>
                 <InventoryCanvas>
-                  <ExperimentCompare runs={runs} onOpenRun={navigateToRun} />
+                  <ExperimentCompare
+                    runs={selectedRuns.length > 0 ? selectedRuns : runs}
+                    onOpenRun={navigateToRun}
+                  />
                 </InventoryCanvas>
               </OverviewSurface>
             ),

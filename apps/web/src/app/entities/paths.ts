@@ -6,7 +6,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import type { EntityRef } from "@/app/entities/kinds";
-import { getNavigationContribution, leftPanelViewFromPath } from "@/app/navigation/sections";
+import { leftPanelViewFromPath } from "@/app/navigation/sections";
 import type { ExperimentView, ObjectView, ProjectView, WorkspaceSnapshot } from "@/app/types";
 
 const enc = encodeURIComponent;
@@ -98,16 +98,16 @@ export const entityPath = (ref: EntityRef, snapshot: WorkspaceSnapshot): string 
 /** Section landing routes — the collection pages reached from a breadcrumb
  *  root or the nav rail. */
 export const SECTION_PATH = {
-  dashboard: getNavigationContribution("dashboard").route,
-  projects: getNavigationContribution("projects").route,
-  workspace: getNavigationContribution("workspace").route,
-  runs: getNavigationContribution("runs").route,
-  activity: getNavigationContribution("activity").route,
-  workflows: getNavigationContribution("workflow").route,
-  assets: getNavigationContribution("asset").route,
-  agents: getNavigationContribution("agent").route,
-  knowledge: getNavigationContribution("knowledge").route,
-  settings: getNavigationContribution("settings").route,
+  dashboard: "/",
+  projects: "/projects",
+  workspace: "/workspace",
+  runs: "/runs",
+  activity: "/activity",
+  workflows: "/workflows",
+  assets: "/assets",
+  agents: "/agent-tasks",
+  knowledge: "/knowledge",
+  settings: "/settings",
 } as const;
 
 export { leftPanelViewFromPath };

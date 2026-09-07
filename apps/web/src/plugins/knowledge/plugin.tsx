@@ -1,6 +1,6 @@
+import type { MolexpPluginModule, PluginAPI } from "@molcrafts/molexp-plugin";
 import { lazy } from "react";
-import { registerRendererContribution } from "@/app/registry";
-import type { UiPluginModule } from "@/plugins/types";
+import { registerKnowledgeNavigation } from "./navigation";
 
 const KnowledgeDocPanel = lazy(() =>
   import("./KnowledgeDocPanel").then((module) => ({ default: module.KnowledgeDocPanel })),
@@ -9,13 +9,14 @@ const KnowledgeViewer = lazy(() =>
   import("./KnowledgeViewer").then((module) => ({ default: module.KnowledgeViewer })),
 );
 
-const knowledgePlugin: UiPluginModule = {
+const knowledgePlugin: MolexpPluginModule = {
   id: "knowledge",
   name: "Knowledge",
+  version: "1.0.0",
   description: "Notes and literature browser with Milkdown editing.",
-  userToggleable: true,
-  register: () => {
-    registerRendererContribution({
+  activate: (api: PluginAPI) => {
+    registerKnowledgeNavigation(api);
+    api.editors.register({
       id: "knowledge:viewer",
       key: {
         objectType: "knowledge",
@@ -28,7 +29,7 @@ const knowledgePlugin: UiPluginModule = {
       priority: 0,
       Component: KnowledgeViewer,
     });
-    registerRendererContribution({
+    api.inspectors.register({
       id: "knowledge:inspector",
       key: {
         objectType: "knowledge",

@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "@rstest/core";
 import { discoverPluginsForObject } from "@/lib/file-type-discovery";
+import { createPluginAPI } from "@/plugins/api/create_api";
 import { resetContributionRuntimeForTests } from "@/plugins/contribution-runtime";
 import molvisPlugin from "@/plugins/molvis";
 import type { FileMatchContext } from "@/plugins/types";
@@ -14,7 +15,7 @@ const ctx = (relPath: string, overrides: Partial<FileMatchContext> = {}): FileMa
 
 beforeEach(() => {
   resetContributionRuntimeForTests();
-  molvisPlugin.register();
+  void molvisPlugin.activate(createPluginAPI("molvis").api);
 });
 
 describe("sidecar-backed dataset discovery", () => {

@@ -1,5 +1,5 @@
-import { groupForStatus } from "./statusGroups";
 import { runExecutorFacet } from "./projections";
+import { groupForStatus } from "./statusGroups";
 import type { RunsQuickView, WorkspaceRunRow, WorkspaceRunsFilters } from "./types";
 
 const HOUR_MS = 60 * 60 * 1000;
@@ -31,10 +31,10 @@ const matchesQuickView = (run: WorkspaceRunRow, view: RunsQuickView, now: number
       const earliestStart = run.executions
         .filter((execution) => groupForStatus(execution.status) === "running")
         .reduce<number | null>((min, exec) => {
-        const start = safeDate(exec.startedAt);
-        if (!start) return min;
-        return min === null ? start.getTime() : Math.min(min, start.getTime());
-      }, null);
+          const start = safeDate(exec.startedAt);
+          if (!start) return min;
+          return min === null ? start.getTime() : Math.min(min, start.getTime());
+        }, null);
       if (earliestStart === null) return false;
       return now - earliestStart >= HOUR_MS;
     }
@@ -62,7 +62,8 @@ const buildPredicates = (filters: WorkspaceRunsFilters, now: number): FilterPred
     return filters.status.some((filter) => {
       const filterGroup = groupForStatus(filter);
       return observed.some(
-        (status) => status === filter || (filterGroup !== null && groupForStatus(status) === filterGroup),
+        (status) =>
+          status === filter || (filterGroup !== null && groupForStatus(status) === filterGroup),
       );
     });
   },
@@ -77,7 +78,10 @@ const buildPredicates = (filters: WorkspaceRunsFilters, now: number): FilterPred
     return !filters.cluster?.length || filters.cluster.some((value) => values.includes(value));
   },
   target: (run) => {
-    const values = [...runExecutorFacet(run, "target"), ...(run.targetHint ? [run.targetHint] : [])];
+    const values = [
+      ...runExecutorFacet(run, "target"),
+      ...(run.targetHint ? [run.targetHint] : []),
+    ];
     return !filters.target?.length || filters.target.some((value) => values.includes(value));
   },
   quickView: (run) => {
@@ -175,7 +179,10 @@ export const computeFacetCounts = (
     status: tally(statusRuns, (run) =>
       run.statusSummary.notStarted
         ? [{ value: "not_started", label: "not started" }]
-        : Object.keys(run.statusSummary.byStatus).map((status) => ({ value: status, label: status })),
+        : Object.keys(run.statusSummary.byStatus).map((status) => ({
+            value: status,
+            label: status,
+          })),
     ),
     backend: tally(backendRuns, (run) =>
       runExecutorFacet(run, "backend").map((value) => ({ value, label: value })),
@@ -184,8 +191,12 @@ export const computeFacetCounts = (
       runExecutorFacet(run, "cluster_name").map((value) => ({ value, label: value })),
     ),
     target: tally(targetRuns, (run) =>
-      [...new Set([...runExecutorFacet(run, "target"), ...(run.targetHint ? [run.targetHint] : [])])]
-        .map((value) => ({ value, label: value })),
+      [
+        ...new Set([
+          ...runExecutorFacet(run, "target"),
+          ...(run.targetHint ? [run.targetHint] : []),
+        ]),
+      ].map((value) => ({ value, label: value })),
     ),
     projectId: tally(projectRuns, (run) => [{ value: run.projectId, label: run.projectName }]),
     experimentId: tally(experimentRuns, (run) => [

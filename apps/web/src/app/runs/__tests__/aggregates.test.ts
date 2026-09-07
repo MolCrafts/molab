@@ -39,19 +39,24 @@ type RunFixtureOverrides = Partial<Omit<WorkspaceRunRow, "executions" | "statusS
 
 const run = (over: RunFixtureOverrides): WorkspaceRunRow => {
   const status = over.status === "pending" ? "queued" : (over.status ?? "succeeded");
-  const finishedAt = over.finishedAt === undefined
-    ? status === "running" || status === "queued" ? null : new Date(NOW - 5 * MIN).toISOString()
-    : over.finishedAt;
-  const executions = over.executions ?? [exec({
-    status,
-    finishedAt,
-    backend: over.backend ?? "local",
-    backendMetadata: {
-      ...(over.cluster ? { cluster_name: over.cluster } : {}),
-      ...(over.target ? { target: over.target } : {}),
-      ...(over.profile ? { profile: over.profile } : {}),
-    },
-  })];
+  const finishedAt =
+    over.finishedAt === undefined
+      ? status === "running" || status === "queued"
+        ? null
+        : new Date(NOW - 5 * MIN).toISOString()
+      : over.finishedAt;
+  const executions = over.executions ?? [
+    exec({
+      status,
+      finishedAt,
+      backend: over.backend ?? "local",
+      backendMetadata: {
+        ...(over.cluster ? { cluster_name: over.cluster } : {}),
+        ...(over.target ? { target: over.target } : {}),
+        ...(over.profile ? { profile: over.profile } : {}),
+      },
+    }),
+  ];
   const byStatus = Object.fromEntries(
     [...new Set(executions.map((execution) => execution.status))].map((value) => [
       value,
@@ -70,6 +75,8 @@ const run = (over: RunFixtureOverrides): WorkspaceRunRow => {
   return {
     id: "run-1",
     name: "Run 1",
+    workspaceKey: "ws",
+    path: "projects/proj-A/experiments/exp-1/runs/Run 1",
     projectId: "proj-A",
     projectName: "Project A",
     experimentId: "exp-1",
@@ -81,7 +88,7 @@ const run = (over: RunFixtureOverrides): WorkspaceRunRow => {
     statusSummary: {
       total: executions.length,
       active: executions.filter((execution) =>
-        ["queued", "running", "finalizing"].includes(execution.status)
+        ["queued", "running", "finalizing"].includes(execution.status),
       ).length,
       notStarted: executions.length === 0,
       byStatus,
@@ -141,15 +148,27 @@ describe("applyFilters", () => {
   });
 
   it("detects long-running executions", () => {
+    // A Run has no scalar status: "still running" is a property of an
+    // attempt, so the attempt is what has to say so.
     const long = run({
       id: "long",
-      status: "running",
-      executions: [exec({ startedAt: new Date(NOW - 90 * MIN).toISOString(), finishedAt: null })],
+      executions: [
+        exec({
+          status: "running",
+          startedAt: new Date(NOW - 90 * MIN).toISOString(),
+          finishedAt: null,
+        }),
+      ],
     });
     const short = run({
       id: "short",
-      status: "running",
-      executions: [exec({ startedAt: new Date(NOW - 10 * MIN).toISOString(), finishedAt: null })],
+      executions: [
+        exec({
+          status: "running",
+          startedAt: new Date(NOW - 10 * MIN).toISOString(),
+          finishedAt: null,
+        }),
+      ],
     });
     expect(applyFilters([long, short], { quickView: ["longRunning"] }, NOW)).toEqual([long]);
   });

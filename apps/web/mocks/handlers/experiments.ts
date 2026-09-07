@@ -15,6 +15,16 @@ import type { ExperimentCreateRequest } from "../../src/api/generated/models/Exp
 
 const API_BASE = "/api";
 
+/**
+ * A directory name derived from a display name — the same shape the server
+ * produces, so the mock shows a path a person would recognise.
+ */
+const slugify = (name: string): string =>
+    name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, "-")
+        .replace(/^-+|-+$/g, "") || "unnamed";
+
 export const experimentHandlers = [
     // GET /api/projects/:projectId/experiments - List experiments for a project
     http.get(`${API_BASE}/projects/:projectId/experiments`, ({ params }) => {
@@ -33,6 +43,7 @@ export const experimentHandlers = [
             id: experimentId,
             projectId: projectId as string,
             name: body.name,
+            path: `projects/${projectId}/experiments/${slugify(body.name)}`,
             description: body.description || "",
             workflow: body.workflowSource ?? null,
             workflowType: "yaml",

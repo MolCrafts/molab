@@ -27,7 +27,7 @@ import pytest
 from molexp.workspace import Workspace
 from molexp.workspace.domain import ExecutionMode, ExecutionStatus
 from molexp.workspace.execution_repository import ExecutionRepository
-from molexp.workspace.provenance import AgentRef
+from molexp.workspace.history import AgentRef
 from molexp.workspace.prune import (
     ExecutionPrunePlan,
     LivePruneRefusedError,

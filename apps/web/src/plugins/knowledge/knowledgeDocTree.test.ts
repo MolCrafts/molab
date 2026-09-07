@@ -48,7 +48,7 @@ describe("buildDocTree (ac-001)", () => {
       { relPath: "kb/a", name: "A" },
       { relPath: "projects/p1/note-x", name: "X" },
       { relPath: "projects/p1/experiments/e1/note-y", name: "Y" },
-      { relPath: "projects/p1/experiments/e1/runs/run-r1/note-z", name: "Z" },
+      { relPath: "projects/p1/experiments/e1/runs/dp=25_seed=42/note-z", name: "Z" },
     ];
 
     const tree = buildDocTree(entries);
@@ -62,9 +62,10 @@ describe("buildDocTree (ac-001)", () => {
     expect(findByRelPath(kbGroup?.children ?? [], "kb/a")).not.toBeNull();
 
     // One group per attached entity (project / experiment / run).
-    const project = tree.find((n) => n.entity?.kind === "project" && n.entity.id === "p1");
-    const experiment = tree.find((n) => n.entity?.kind === "experiment" && n.entity.id === "e1");
-    const run = tree.find((n) => n.entity?.kind === "run" && n.entity.id === "r1");
+    const project = tree.find((n) => n.entity?.kind === "project" && n.entity.dir === "p1");
+    const experiment = tree.find((n) => n.entity?.kind === "experiment" && n.entity.dir === "e1");
+    // A run's directory is its parameters, so that is what the group carries.
+    const run = tree.find((n) => n.entity?.kind === "run" && n.entity.dir === "dp=25_seed=42");
     expect(project).toBeDefined();
     expect(experiment).toBeDefined();
     expect(run).toBeDefined();
@@ -75,7 +76,7 @@ describe("buildDocTree (ac-001)", () => {
       findByRelPath(experiment?.children ?? [], "projects/p1/experiments/e1/note-y"),
     ).not.toBeNull();
     expect(
-      findByRelPath(run?.children ?? [], "projects/p1/experiments/e1/runs/run-r1/note-z"),
+      findByRelPath(run?.children ?? [], "projects/p1/experiments/e1/runs/dp=25_seed=42/note-z"),
     ).not.toBeNull();
   });
 

@@ -24,7 +24,7 @@ def _workspace(tmp_path: Path) -> Workspace:
 
 def _artifact_for(run, task: str):
     execution_id = run.executions[-1].id
-    artifacts = run._execution_repository().artifacts.list_for_execution(execution_id)
+    artifacts = run._execution_repository().get(execution_id).artifacts
     found = [a for a in artifacts if a.metadata.get("task_id") == task]
     assert found, f"no artifact registered for task {task!r}"
     return found[0]

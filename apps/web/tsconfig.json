@@ -27,6 +27,18 @@
       ],
       "@schemas/*": [
         "../src/molexp/workflow/schema/*"
+      ],
+      "@molcrafts/molexp-plugin": [
+        "../plugin/src/index.ts"
+      ],
+      "@molcrafts/molexp-plugin/ui": [
+        "../plugin/src/ui/index.ts"
+      ],
+      "@molcrafts/molexp-plugin/testing": [
+        "../plugin/src/testing.ts"
+      ],
+      "@molcrafts/molexp-plugin/externals": [
+        "../plugin/src/externals.ts"
       ]
     }
   },

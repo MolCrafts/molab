@@ -274,7 +274,7 @@ class RunSet(Sequence[Run]):
     @staticmethod
     def _persisted_outputs(run: Run) -> dict[str, TaskOutput]:
         """Latest execution's completed-node outputs (lossy records dropped)."""
-        history = run.execution_history
+        history = run.executions
         if not history:
             return {}
         execution_id = history[-1].id

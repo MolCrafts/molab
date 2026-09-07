@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-
+import { workspacesApi } from "@/api/workspaces";
 import { pulseSync } from "@/app/state/syncPulse";
 
 import { workspaceRunsApi } from "./api";
@@ -7,6 +7,8 @@ import type { WorkspaceRunRow, WorkspaceRunsResponse, WorkspaceRunsStats } from 
 
 interface UseWorkspaceRunsResult {
   rows: WorkspaceRunRow[];
+  /** Served workspaces whose page failed this poll; the rest still loaded. */
+  unreachable: string[];
   stats: WorkspaceRunsStats;
   total: number;
   truncated: boolean;
@@ -18,6 +20,7 @@ interface UseWorkspaceRunsResult {
 
 interface StoreSnapshot {
   rows: WorkspaceRunRow[];
+  unreachable: string[];
   stats: WorkspaceRunsStats;
   total: number;
   truncated: boolean;
@@ -29,6 +32,9 @@ interface StoreSnapshot {
 export const POLL_INTERVAL_MS = 3_000;
 const FETCH_LIMIT = 1000;
 
+/** Stand-in key when the server serves no named set (single-workspace mode). */
+const ACTIVE_WORKSPACE_KEY = "";
+
 const EMPTY_STATS: WorkspaceRunsStats = {
   totalRuns: 0,
   totalExecutions: 0,
@@ -38,6 +44,7 @@ const EMPTY_STATS: WorkspaceRunsStats = {
 
 const EMPTY_SNAPSHOT: StoreSnapshot = {
   rows: [],
+  unreachable: [],
   stats: EMPTY_STATS,
   total: 0,
   truncated: false,
@@ -66,13 +73,100 @@ const sameResponse = (response: WorkspaceRunsResponse): boolean => {
   return false;
 };
 
+/**
+ * Merge one page of runs per served workspace into a single response.
+ *
+ * Failures are isolated per workspace: one unreachable remote must not empty
+ * the table for the local roots beside it. A workspace that fails contributes
+ * nothing and is named in `unreachable`, which the caller surfaces instead of
+ * treating the whole poll as an error.
+ */
+export const mergeWorkspaceRuns = (
+  results: readonly { key: string; response: WorkspaceRunsResponse | null }[],
+): WorkspaceRunsResponse & { unreachable: string[] } => {
+  const rows: WorkspaceRunRow[] = [];
+  const unreachable: string[] = [];
+  const byStatus: Record<string, number> = {};
+  let totalExecutions = 0;
+  let activeExecutions = 0;
+  let total = 0;
+  let truncated = false;
+
+  for (const { key, response } of results) {
+    if (!response) {
+      unreachable.push(key);
+      continue;
+    }
+    // Stamp the workspace here: this is the only point that knows which one
+    // was asked, and every consumer downstream needs it to address the run.
+    for (const run of response.runs) rows.push({ ...run, workspaceKey: key });
+    totalExecutions += response.stats.totalExecutions;
+    activeExecutions += response.stats.activeExecutions;
+    for (const [status, count] of Object.entries(response.stats.byStatus)) {
+      byStatus[status] = (byStatus[status] ?? 0) + count;
+    }
+    total += response.total;
+    truncated = truncated || response.truncated;
+  }
+
+  rows.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+
+  return {
+    runs: rows,
+    stats: { totalRuns: rows.length, totalExecutions, activeExecutions, byStatus },
+    total,
+    truncated,
+    unreachable,
+  };
+};
+
+/**
+ * One page of runs from every served workspace.
+ *
+ * `/api/workspace/runs` is mounted flat only — there is no
+ * `/api/workspaces/{ws}/workspace/runs` — so each workspace is addressed with
+ * `?ws=`, which `get_workspace` resolves the same way the `{ws}` segment does.
+ * The served set is re-read each poll so adding or removing a workspace shows
+ * up without a reload.
+ */
+const fetchAllWorkspaces = async (): Promise<WorkspaceRunsResponse & { unreachable: string[] }> => {
+  let served: Awaited<ReturnType<typeof workspacesApi.listWorkspaces>>;
+  try {
+    served = await workspacesApi.listWorkspaces();
+  } catch {
+    // No served-set endpoint (older server, or it is down): fall back to the
+    // active workspace, which is what this hook did before it fanned out.
+    served = [];
+  }
+
+  if (served.length === 0) {
+    const response = await workspaceRunsApi.listRuns({ limit: FETCH_LIMIT });
+    return mergeWorkspaceRuns([{ key: ACTIVE_WORKSPACE_KEY, response }]);
+  }
+
+  const results = await Promise.all(
+    served.map(async (ws) => {
+      if (ws.unreachable) return { key: ws.key, response: null };
+      try {
+        return {
+          key: ws.key,
+          response: await workspaceRunsApi.listRuns({ ws: ws.key, limit: FETCH_LIMIT }),
+        };
+      } catch {
+        return { key: ws.key, response: null };
+      }
+    }),
+  );
+  return mergeWorkspaceRuns(results);
+};
+
 const fetchOnce = async (silent: boolean): Promise<void> => {
   if (!silent && !snapshot.loading) {
     snapshot = { ...snapshot, loading: true };
     notify();
   }
   try {
-    const response = await workspaceRunsApi.listRuns({ limit: FETCH_LIMIT });
+    const response = await fetchAllWorkspaces();
     if (sameResponse(response)) {
       // Preserve row/stats array refs so downstream useMemo deps stay stable
       // (Plotly charts won't re-render). Only loading/error need to clear.
@@ -94,6 +188,7 @@ const fetchOnce = async (silent: boolean): Promise<void> => {
       stats: response.stats,
       total: response.total,
       truncated: response.truncated,
+      unreachable: response.unreachable,
       loading: false,
       error: null,
       lastSyncedAt: new Date(),

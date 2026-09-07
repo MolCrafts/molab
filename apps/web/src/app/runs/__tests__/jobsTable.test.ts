@@ -43,6 +43,8 @@ const baseRun = (overrides: RunFixtureOverrides = {}): WorkspaceRunRow => {
   return {
     id: "r1",
     name: "run-a",
+    workspaceKey: "ws",
+    path: "projects/p1/experiments/e1/runs/run-a",
     projectId: "p1",
     projectName: "Project",
     experimentId: "e1",
@@ -53,7 +55,9 @@ const baseRun = (overrides: RunFixtureOverrides = {}): WorkspaceRunRow => {
     targetHint: null,
     statusSummary: {
       total: executions.length,
-      active: executions.filter((execution) => ["queued", "running", "finalizing"].includes(execution.status)).length,
+      active: executions.filter((execution) =>
+        ["queued", "running", "finalizing"].includes(execution.status),
+      ).length,
       notStarted: executions.length === 0,
       byStatus: { [status]: executions.length },
     },

@@ -32,8 +32,6 @@ class TestRunMetadata:
             "owner_host",
             "started_at",
             "finished_at",
-            "current_execution_id",
-            "execution_history",
         ):
             assert name in fields, f"{name!r} must live on RunMetadata"
 

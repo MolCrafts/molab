@@ -3,7 +3,7 @@
  */
 
 import { http, HttpResponse } from "msw";
-import { getRun, getRunsByExperiment, setRun, deleteRun } from "../db";
+import { getRun, getRunsByExperiment, mockRunSlug, setRun, deleteRun } from "../db";
 import type { ApiRunResponse } from "../../src/app/types";
 import type { RunCreateRequest } from "../../src/api/generated/models/RunCreateRequest";
 
@@ -26,14 +26,18 @@ export const runHandlers = [
             const { projectId, experimentId } = params;
             const body = (await request.json()) as RunCreateRequest;
             const runId = `run-${Date.now()}`;
+            const params_ = body.params || {};
+            const runName = mockRunSlug(runId, params_);
 
             const newRun: ApiRunResponse = {
                 id: runId,
+                name: runName,
+                path: `projects/${projectId}/experiments/${experimentId}/runs/${runName}`,
                 projectId: projectId as string,
                 experimentId: experimentId as string,
                 status: "pending",
                 finished: null,
-                parameters: body.params || {},
+                parameters: params_,
                 results: {},
                 created: new Date().toISOString(),
                 executorInfo: {},
@@ -549,8 +553,12 @@ export const runHandlers = [
                 return HttpResponse.json({ detail: "Run not found" }, { status: 404 });
             }
             const newRunId = `run-${Date.now()}`;
+            const clonedName = mockRunSlug(newRunId, run.parameters ?? {});
             const cloned: ApiRunResponse = {
                 id: newRunId,
+                name: clonedName,
+                // A rerun is the same intent, so the same directory name.
+                path: `projects/${run.projectId}/experiments/${run.experimentId}/runs/${clonedName}`,
                 projectId: run.projectId,
                 experimentId: run.experimentId,
                 status: "pending",

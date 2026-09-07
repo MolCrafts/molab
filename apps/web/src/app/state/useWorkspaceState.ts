@@ -175,9 +175,7 @@ const fetchAllAssets = async (projects: ProjectSummary[]): Promise<WorkspaceSnap
       }
     }),
   );
-  return Array.from(
-    new Map(projectAssets.flat().map((item) => [item.id, item])).values(),
-  );
+  return Array.from(new Map(projectAssets.flat().map((item) => [item.id, item])).values());
 };
 
 const fetchAgentSessionsList = async (): Promise<WorkspaceSnapshot["agentSessions"]> => {

@@ -6,7 +6,7 @@ Each op enforces the frozen verb law itself — the capability layer adds
 gating, never semantics.
 
 Schema v2: a :class:`Run` is immutable intent, so ``cancel`` intervenes on the
-active physical :class:`~molexp.workspace.domain.ExecutionState` objects —
+active physical :class:`~molexp.workspace.domain.Execution` objects —
 never on a scalar run status.
 """
 
@@ -73,7 +73,7 @@ def cancel_run(
             ``run`` for pending unless ``allow_pending``).
     """
     from .domain import ACTIVE_EXECUTION_STATUSES, ExecutionMode, ExecutionStatus
-    from .provenance import AgentRef
+    from .history import AgentRef
     from .run_reaper import reap_zombie_run
 
     reap_zombie_run(run)

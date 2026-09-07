@@ -16,7 +16,7 @@ from pathlib import Path
 import pytest
 
 from molexp.workspace.domain import ExecutionMode, ExecutionStatus
-from molexp.workspace.provenance import AgentRef
+from molexp.workspace.history import AgentRef
 
 
 class TestReopenExecution:

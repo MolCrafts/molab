@@ -7,6 +7,7 @@ export type ExperimentResponse = {
     id: string;
     projectId: string;
     name: string;
+    path: string;
     description?: string;
     workflow?: (string | null);
     workflowType?: (string | null);

@@ -24,6 +24,7 @@ from molexp.workspace import (
     Project,
     Run,
 )
+from molexp.workspace.execution_dirs import ExecutionDir, list_execution_dirs
 
 from ._wire import ApiModel
 
@@ -71,6 +72,9 @@ def _read_context_results(run: Run) -> dict[str, Any]:
 class ProjectResponse(ApiModel):
     id: str
     name: str
+    path: str
+    """Workspace-relative directory. See :func:`workspace_relative`."""
+
     description: str = ""
     owner: str = ""
     tags: list[str] = Field(default_factory=list)
@@ -83,6 +87,7 @@ class ProjectResponse(ApiModel):
         return cls(
             id=project.id,
             name=project.name,
+            path=workspace_relative(project.workspace.resolve(), project.path),
             description=project.description,
             owner=project.owner,
             tags=project.tags,
@@ -104,6 +109,9 @@ class ExperimentResponse(ApiModel):
     id: str
     projectId: str
     name: str
+    path: str
+    """Workspace-relative directory. See :func:`workspace_relative`."""
+
     description: str = ""
     workflow: str | None = None
     workflowType: str | None = None
@@ -146,6 +154,7 @@ class ExperimentResponse(ApiModel):
             id=experiment.id,
             projectId=experiment.project.id,
             name=experiment.name,
+            path=workspace_relative(experiment.project.workspace.resolve(), experiment.path),
             description=experiment.description,
             workflow=experiment.metadata.workflow_source,
             workflowType=experiment.metadata.workflow_type,
@@ -184,7 +193,7 @@ class WorkflowSnapshotResponse(ApiModel):
     configHash: str | None = None
 
 
-class ExecutionRecordResponse(ApiModel):
+class ExecutionResponse(ApiModel):
     """One execution attempt of a Run.
 
     Mirrors :class:`molexp.workspace.models.ExecutionRecord` with
@@ -207,8 +216,36 @@ class ExecutionRecordResponse(ApiModel):
     error: dict[str, Any] | None = None
 
 
+def workspace_relative(root: object, full: object) -> str:
+    """*full* as a path under the workspace *root*, or *full* if outside it.
+
+    Every entity response carries one, because only the server knows it: each
+    segment of a workspace path is a *name* — a project's slug, an
+    experiment's slug, a run's parameters — and none of them is recoverable
+    from the ids a client holds. A path composed there points at a directory
+    that was never created.
+    """
+    root_text = str(root).rstrip("/")
+    full_text = str(full)
+    return full_text[len(root_text) :].lstrip("/") if full_text.startswith(root_text) else full_text
+
+
+def _workspace_relative(run: Run) -> str:
+    """A run's directory, relative to the workspace root."""
+    return workspace_relative(run.experiment.project.workspace.resolve(), run.run_dir)
+
+
 class RunResponse(ApiModel):
     id: str
+    name: str
+    """What the run is called: its parameters. This is what a person reads;
+    ``id`` is the UUIDv7 other records cite."""
+
+    path: str
+    """Workspace-relative directory. Sent because only the server knows it:
+    every segment is a *name*, and a client that rebuilt one from ids would
+    get a path that does not exist."""
+
     projectId: str
     experimentId: str
     definitionHash: str
@@ -219,7 +256,7 @@ class RunResponse(ApiModel):
     parameters: dict[str, Any] = Field(default_factory=dict)
     workflow: WorkflowSnapshotResponse | None = None
     workflowSource: str | None = None
-    executions: list[ExecutionRecordResponse] = Field(default_factory=list)
+    executions: list[ExecutionResponse] = Field(default_factory=list)
     target: str | None = None
 
     @classmethod
@@ -251,7 +288,7 @@ class RunResponse(ApiModel):
                 configHash=None,
             )
         executions = [
-            ExecutionRecordResponse(
+            ExecutionResponse(
                 id=rec.id,
                 runId=rec.run_id,
                 mode=rec.mode.value,
@@ -271,6 +308,8 @@ class RunResponse(ApiModel):
         summary = run.status_summary
         return cls(
             id=run.id,
+            name=run.name,
+            path=_workspace_relative(run),
             projectId=run.experiment.project.id,
             experimentId=run.experiment.id,
             definitionHash=run.metadata.definition_hash,
@@ -610,48 +649,12 @@ class RunLogsResponse(ApiModel):
     stderr: str | None = None
 
 
-class MetricSeriesResponse(ApiModel):
-    """Summary for one metric series in a run-local metrics query."""
-
-    key: str
-    type: str
-    count: int
-    latestStep: int | float | None = None
-    latestTimestamp: str | None = None
-    latestValue: Any | None = None
-
-
-class RunMetricsResponse(ApiModel):
-    """Run-local metrics query response."""
-
-    nextLine: int = 0
-    records: list[dict[str, Any]] = Field(default_factory=list)
-    series: list[MetricSeriesResponse] = Field(default_factory=list)
-    parseErrors: int = 0
-
-
 class RunFileTextResponse(ApiModel):
     """Raw UTF-8 text content of a file under a run directory."""
 
     path: str
     content: str
     size: int
-
-
-class LammpsThermoStage(ApiModel):
-    """One ``Per MPI rank ... Loop time`` block as columns + numeric rows."""
-
-    columns: list[str] = Field(default_factory=list)
-    rows: list[list[float]] = Field(default_factory=list)
-
-
-class LammpsLogResponse(ApiModel):
-    """Parsed LAMMPS log thermo stages, produced by ``molpy.io.LAMMPSLog``."""
-
-    path: str
-    version: str | None = None
-    nStages: int = 0
-    stages: list[LammpsThermoStage] = Field(default_factory=list)
 
 
 class TensorboardScalarPoint(ApiModel):
@@ -774,12 +777,45 @@ class RunFileNode(ApiModel):
 RunFileNode.model_rebuild()
 
 
+class ExecutionDirResponse(ApiModel):
+    """One of an attempt's directories, and what it promises.
+
+    Sent so a client never has to know a layout. Which directory holds
+    results, and which is scratch it should not chart, is answered by these
+    flags — the same declaration the server itself queries.
+    """
+
+    name: str
+    purpose: str
+    versioned: bool
+    products: bool
+
+    @classmethod
+    def from_declaration(cls, directory: ExecutionDir) -> ExecutionDirResponse:
+        return cls(
+            name=directory.name,
+            purpose=directory.purpose,
+            versioned=directory.versioned,
+            products=directory.products,
+        )
+
+
 class RunFilesResponse(ApiModel):
     """Per-run output file tree, enriched with catalog producer metadata."""
 
     runId: str
     runDir: str
     nodes: list[RunFileNode] = Field(default_factory=list)
+    dirs: list[ExecutionDirResponse] = Field(
+        default_factory=lambda: [
+            ExecutionDirResponse.from_declaration(d) for d in list_execution_dirs()
+        ]
+    )
+    """Every declared attempt directory, in lookup order.
+
+    Travels with the tree because that is where a client decides what to
+    read: a ``.mlp.jsonl`` in a ``products`` directory is a result, the same
+    name under scratch is a half-written intermediate."""
 
 
 class ArtifactResponse(ApiModel):

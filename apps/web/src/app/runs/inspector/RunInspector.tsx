@@ -58,7 +58,7 @@ export const RunInspector = ({
             density="compact"
             icon={<Inbox className="h-5 w-5" />}
             title="No run selected"
-            description="Pick a row in Jobs or a bar on Timeline to inspect its definition and executions."
+            description="Pick a row in Jobs to inspect its definition and executions."
           />
         </div>
       </aside>

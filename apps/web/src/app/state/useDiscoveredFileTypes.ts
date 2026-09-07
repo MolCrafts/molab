@@ -16,6 +16,8 @@ interface RunCoords {
 
 interface UseDiscoveredFileTypesResult {
   discovered: DiscoveredPlugin[];
+  /** The attempt's directory — what the discovered paths are relative to. */
+  executionDir: string | null;
   loading: boolean;
   error: string | null;
 }
@@ -74,5 +76,5 @@ export const useDiscoveredFileTypesForRun = (
     return discoverPluginsForObject(objectType, files);
   }, [response, objectType, pluginPrefsGeneration, contributionGeneration]);
 
-  return { discovered, loading, error };
+  return { discovered, executionDir: response?.runDir ?? null, loading, error };
 };

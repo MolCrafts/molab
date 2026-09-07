@@ -43,9 +43,19 @@ export const INTERNAL_PLUGIN_DESCRIPTORS: readonly InternalPluginDescriptor[] = 
   {
     id: "molplot",
     name: "MolPlot",
-    description: "Metrics and plot tabs when a run has *.mlp.jsonl / *.mlp.vl.json.",
+    description: "Metrics and plot tabs for any format a reader contributes.",
     userToggleable: true,
     load: () => import("@/plugins/molplot/plugin"),
+  },
+  {
+    id: "molrs",
+    name: "MolRS formats",
+    description:
+      "Reads solver logs and metric files in the browser via WASM, for whoever is drawing.",
+    // Not user-toggleable: disabling it would silently empty every chart
+    // rather than remove a visible surface.
+    userToggleable: false,
+    load: () => import("@/plugins/molrs/plugin"),
   },
   {
     id: "molq",

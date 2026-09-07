@@ -147,15 +147,13 @@ CURATION_CAPABILITIES: tuple[ToolCapability, ...] = (
     ToolCapability(
         id="molexp.curation.git_push",
         package="molexp",
-        name="git_push",
-        description="Push the workspace's projected refs/molexp/* to a git remote.",
-        input_schema=_input_schema(
-            ["workspace", "remote", "refspec", "db_path"], ["workspace", "remote"]
-        ),
+        name="history_push",
+        description="Push the workspace history to a git remote.",
+        input_schema=_input_schema(["workspace", "remote"], ["workspace", "remote"]),
         output_schema={"type": "object"},
-        callable_path="molexp.workspace.git_projection.push",
+        callable_path="molexp.workspace.history.push_workspace",
         side_effects=["push:remote"],
-        tags=["curation", "git", "destructive"],
+        tags=["curation", "history", "destructive"],
     ),
 )
 

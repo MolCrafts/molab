@@ -47,8 +47,17 @@ MetricsWriterFactory = Callable[[Path, MetricsAppend], MetricsSink]
 _factory: MetricsWriterFactory | None = None
 
 
-def set_metrics_writer_factory(factory: MetricsWriterFactory) -> None:
-    """Register the writer factory. Called by ``molexp.plugins.metrics`` on import."""
+def get_metrics_writer_factory() -> MetricsWriterFactory | None:
+    """Return the registered factory, or ``None`` if the seam is unwired."""
+    return _factory
+
+
+def set_metrics_writer_factory(factory: MetricsWriterFactory | None) -> None:
+    """Register the writer factory, or ``None`` to unwind it.
+
+    Called by ``molexp.plugins.metrics`` on import and by
+    :class:`~molexp.plugins.metrics.host.MetricsPlugin` on host apply/unload.
+    """
     global _factory
     _factory = factory
 
@@ -74,5 +83,6 @@ __all__ = [
     "MetricsSink",
     "MetricsWriterFactory",
     "create_metrics_writer",
+    "get_metrics_writer_factory",
     "set_metrics_writer_factory",
 ]

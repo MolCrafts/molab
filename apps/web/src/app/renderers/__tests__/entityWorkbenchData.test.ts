@@ -16,6 +16,7 @@ import type {
 const project: ProjectSummary = {
   id: "matrix",
   name: "Matrix",
+  path: "projects/matrix",
   status: "active",
   summary: "",
   updatedAt: "2026-06-01T00:00:00Z",
@@ -27,6 +28,7 @@ const experiment = (
 ): ExperimentSummary => ({
   id,
   name: id,
+  path: `projects/${project.id}/experiments/${id}`,
   status: "active",
   summary: "",
   workflowFile: "workflow.json",
@@ -44,6 +46,7 @@ const run = (
 ): RunSummary => ({
   id,
   name: id,
+  path: `projects/${project.id}/experiments/series/runs/${id}`,
   status,
   summary: "",
   updatedAt: `2026-06-02T00:0${id.slice(-1)}:00Z`,

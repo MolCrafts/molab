@@ -1,5 +1,5 @@
 import { PanelRightClose, PanelRightOpen } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Breadcrumb } from "@/app/entities/Breadcrumb";
 import { buildTrail } from "@/app/entities/breadcrumbTrail";
 import { GlobalCommandPalette } from "@/app/entities/GlobalCommandPalette";
@@ -25,7 +25,11 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { WorkbenchStatusStrip, WorkbenchToggleAction } from "@/components/workbench";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { useContributionGeneration } from "@/lib/contribution-runtime";
+import { listStatusBarItems, useWorkbenchGeneration } from "@/plugins/contributions/workbench";
+import { setHostActions } from "@/plugins/host_actions";
 import { usePluginPreferencesGeneration } from "@/plugins/preferences";
+import { CommandKeymap, runCommand } from "@/plugins/ui/CommandKeymap";
+import { PluginBottomPanelHost } from "@/plugins/ui/PluginBottomPanelHost";
 
 interface AppShellProps {
   leftPanelView: LeftPanelView;
@@ -86,6 +90,7 @@ export const AppShell = ({
   const isMobile = useIsMobile();
   const contributionGeneration = useContributionGeneration();
   const pluginPreferencesGeneration = usePluginPreferencesGeneration();
+  useWorkbenchGeneration();
   const railOnlyNavigation = getNavigationContribution(leftPanelView).shellMode === "rail-only";
 
   const inspectTask = useCallback((taskId: string, runId: string): void => {
@@ -204,33 +209,16 @@ export const AppShell = ({
     onWorkspaceRefresh();
   }, [activeWorkspace?.isRemote, onWorkspaceRefresh]);
 
-  const paletteCommands = useMemo(
-    () => [
-      {
-        id: "reload-window",
-        label: "Reload Window",
-        detail: "Refresh workspace data",
-        run: () => onWorkspaceRefresh(),
-      },
-      ...(activeWorkspace?.isRemote
-        ? [
-            {
-              id: "reconnect-remote",
-              label: "Reconnect Remote",
-              detail: "Verification code / SSH session",
-              run: () => setConnectOpen(true),
-            },
-          ]
-        : []),
-      {
-        id: "reload-active",
-        label: "Reload Active View",
-        detail: "Soft refresh",
-        run: () => onActiveRefresh(),
-      },
-    ],
-    [activeWorkspace?.isRemote, onWorkspaceRefresh, onActiveRefresh],
-  );
+  useLayoutEffect(() => {
+    setHostActions({
+      reloadWindow: onWorkspaceRefresh,
+      reloadActiveView: onActiveRefresh,
+      reconnectRemote: () => setConnectOpen(true),
+      isRemote: () => Boolean(activeWorkspace?.isRemote),
+    });
+  }, [activeWorkspace?.isRemote, onWorkspaceRefresh, onActiveRefresh]);
+
+  const statusBarExtras = listStatusBarItems();
 
   const handleNavSelect = useCallback(
     (next: Selection): void => {
@@ -408,17 +396,32 @@ export const AppShell = ({
 
   return (
     <InspectedTaskContext.Provider value={inspectedTaskContext}>
-      <GlobalCommandPalette snapshot={snapshot} commands={paletteCommands} />
+      <CommandKeymap />
+      <GlobalCommandPalette snapshot={snapshot} />
       <div className="flex h-screen flex-col bg-background text-foreground">
         <ContextBar onMenuClick={isMobile ? () => setMobileNavOpen(true) : undefined} />
-        {/* Work surface above a full-width MolVis-style status bar. */}
+        {/* Work surface above a plugin bottom drawer and a 28px status bar. */}
         <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
           {workbenchColumns}
+          <PluginBottomPanelHost />
           <WorkbenchStatusStrip
             isRefreshing={isRefreshing}
             onRemoteIndexReady={onWorkspaceRefresh}
             activeWorkspace={activeWorkspace}
             onReconnect={handleReconnect}
+            extras={statusBarExtras.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                title={item.tooltip ?? item.text}
+                className="max-w-40 truncate px-1 font-mono text-micro text-statusbar-foreground/90 hover:text-statusbar-foreground"
+                onClick={() => {
+                  if (item.command) runCommand(item.command);
+                }}
+              >
+                {item.text}
+              </button>
+            ))}
           />
         </main>
         <RemoteConnectDialog

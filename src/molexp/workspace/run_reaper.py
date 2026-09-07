@@ -7,7 +7,7 @@ live in ``molexp.cli._common``, which left UI users facing a permanent 409 on
 runs whose host process had died.
 
 Schema v2: a :class:`Run` is immutable intent; the "live" unit is a physical
-:class:`~molexp.workspace.domain.ExecutionState` whose status is in
+:class:`~molexp.workspace.domain.Execution` whose status is in
 :data:`~molexp.workspace.domain.ACTIVE_EXECUTION_STATUSES`. Reaping seals each
 stale active Execution as ``FAILED`` — it never mutates the Run definition.
 
@@ -37,7 +37,7 @@ from .domain import ACTIVE_EXECUTION_STATUSES, ExecutionStatus
 from .run_heartbeat import HEARTBEAT_STALE_SECONDS, alive_mtime, is_alive_stale, unlink_alive
 
 if TYPE_CHECKING:
-    from .domain import ExecutionState
+    from .domain import Execution
     from .run import Run
 
 __all__ = ["pid_alive", "reap_zombie_run"]
@@ -56,7 +56,7 @@ def pid_alive(pid: int) -> bool:
     return True
 
 
-def _executor_field(state: ExecutionState, key: str) -> object | None:
+def _executor_field(state: Execution, key: str) -> object | None:
     for container in (state.executor, state.environment):
         if isinstance(container, dict):
             value = container.get(key)
@@ -65,7 +65,7 @@ def _executor_field(state: ExecutionState, key: str) -> object | None:
     return None
 
 
-def _owner_is_live(state: ExecutionState, run: Run) -> bool:
+def _owner_is_live(state: Execution, run: Run) -> bool:
     host = _executor_field(state, "host")
     pid = _executor_field(state, "pid")
     if host == platform.node():
@@ -75,7 +75,7 @@ def _owner_is_live(state: ExecutionState, run: Run) -> bool:
     return not is_alive_stale(run, state.id)
 
 
-def _build_reason(state: ExecutionState, run: Run) -> str:
+def _build_reason(state: Execution, run: Run) -> str:
     host = _executor_field(state, "host")
     pid = _executor_field(state, "pid")
     if host == platform.node():

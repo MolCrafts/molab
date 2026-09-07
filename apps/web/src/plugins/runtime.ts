@@ -24,6 +24,8 @@
 
 import { resetPluginCatalogForTests } from "@/plugins/catalog";
 import { resetContributionRuntimeForTests } from "@/plugins/contribution-runtime";
+import { resetHostActionsForTests } from "@/plugins/host_actions";
+import { ensurePluginHostModules, rewriteModuleGraph } from "@/plugins/host_loader";
 import { getInternalPluginDescriptor, INTERNAL_PLUGIN_DESCRIPTORS } from "@/plugins/internal";
 import {
   createLoaderState,
@@ -65,15 +67,30 @@ export const bootPlugins = (): Promise<void> => {
     return bootPromise;
   }
   registerInternalPluginDescriptors(INTERNAL_PLUGIN_DESCRIPTORS);
+  state.rewriteRemoteEntry = async (url) => {
+    await ensurePluginHostModules();
+    return rewriteModuleGraph(url);
+  };
   const core = getInternalPluginDescriptor("core");
   if (!core) {
     throw new Error("Core plugin descriptor is missing");
   }
 
-  bootPromise = loadInternalPlugin(state, core).then(() => {
+  bootPromise = loadInternalPlugin(state, core).then(async () => {
+    // Knowledge owns a rail view — load it before first paint so `/knowledge`
+    // and the activity bar do not flash empty. Other optional plugins stay idle.
+    const knowledge = getInternalPluginDescriptor("knowledge");
+    if (knowledge && isPluginEnabled(knowledge.id)) {
+      await loadInternalPlugin(state, knowledge);
+    }
+
     const loadOptionalPlugins = (): void => {
       for (const descriptor of INTERNAL_PLUGIN_DESCRIPTORS) {
-        if (descriptor.id !== "core" && isPluginEnabled(descriptor.id)) {
+        if (
+          descriptor.id !== "core" &&
+          descriptor.id !== "knowledge" &&
+          isPluginEnabled(descriptor.id)
+        ) {
           void loadInternalPlugin(state, descriptor);
         }
       }
@@ -116,6 +133,7 @@ export const resetUiPluginsForTests = (): void => {
   resetContributionRuntimeForTests();
   resetPluginCatalogForTests();
   resetPluginPreferencesForTests();
+  resetHostActionsForTests();
   bootPromise = null;
 };
 

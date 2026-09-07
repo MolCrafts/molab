@@ -21,6 +21,7 @@ import {
   WorkbenchOperationState,
   WorkbenchRetryAction,
 } from "@/components/workbench";
+import { listCommands, useWorkbenchGeneration } from "@/plugins/contributions/workbench";
 import { useKnowledgeListQuery } from "@/plugins/knowledge/queries";
 export interface PaletteCommand {
   id: string;
@@ -56,6 +57,7 @@ export const GlobalCommandPalette = ({
   snapshot,
   commands = [],
 }: GlobalCommandPaletteProps): JSX.Element => {
+  useWorkbenchGeneration();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<PaletteMode>("goto");
@@ -108,13 +110,22 @@ export const GlobalCommandPalette = ({
   const catalog = useMemo(() => buildCatalog(snapshot, knowledgeDocs), [snapshot, knowledgeDocs]);
   const gotoResults = useMemo(() => searchCatalog(catalog, query), [catalog, query]);
 
-  const commandResults = useMemo(() => {
-    const scored = commands
-      .map((c) => ({ cmd: c, score: scoreCommand(query, c.label, c.detail) }))
-      .filter((x) => x.score > 0)
-      .sort((a, b) => b.score - a.score || a.cmd.label.localeCompare(b.cmd.label));
-    return scored.map((x) => x.cmd);
-  }, [commands, query]);
+  const allCommands: PaletteCommand[] = [
+    ...listCommands().map((command) => ({
+      id: command.id,
+      label: command.title,
+      detail: command.category,
+      run: () => {
+        void command.run();
+      },
+    })),
+    ...commands,
+  ];
+  const commandResults = allCommands
+    .map((c) => ({ cmd: c, score: scoreCommand(query, c.label, c.detail) }))
+    .filter((x) => x.score > 0)
+    .sort((a, b) => b.score - a.score || a.cmd.label.localeCompare(b.cmd.label))
+    .map((x) => x.cmd);
 
   const resultsLen = mode === "goto" ? gotoResults.length : commandResults.length;
 

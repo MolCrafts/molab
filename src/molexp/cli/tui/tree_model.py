@@ -17,7 +17,7 @@ from molexp._run_display import elapsed
 from molexp._typing import JSONValue
 from molexp.plugins.submit_molq.metadata import normalize_executor_info
 from molexp.workspace import Experiment, Project, Run, Workspace
-from molexp.workspace.domain import ExecutionState
+from molexp.workspace.domain import Execution
 
 # Per-node back-pointer used by the delete / detail flows. Each kind of
 # tree node carries a different concrete type — workspace nodes hold a
@@ -194,7 +194,7 @@ def _build_run_node(run: Run, project_id: str, exp_id: str) -> TreeNode:
 
 
 def _build_execution_node(
-    rec: ExecutionState,
+    rec: Execution,
     project_id: str,
     exp_id: str,
     run: Run,

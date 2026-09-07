@@ -7,8 +7,7 @@ import type { ArtifactPromotionResponse } from '../models/ArtifactPromotionRespo
 import type { ExecutionAttemptCreateRequest } from '../models/ExecutionAttemptCreateRequest';
 import type { ExecutionCreateRequest } from '../models/ExecutionCreateRequest';
 import type { ExecutionOutputsResponse } from '../models/ExecutionOutputsResponse';
-import type { ExecutionRecordResponse } from '../models/ExecutionRecordResponse';
-import type { LammpsLogResponse } from '../models/LammpsLogResponse';
+import type { ExecutionResponse } from '../models/ExecutionResponse';
 import type { RunAnalyzeFailureRequest } from '../models/RunAnalyzeFailureRequest';
 import type { RunCreateRequest } from '../models/RunCreateRequest';
 import type { RunExecutionResponse } from '../models/RunExecutionResponse';
@@ -16,7 +15,6 @@ import type { RunFilesResponse } from '../models/RunFilesResponse';
 import type { RunFileTextResponse } from '../models/RunFileTextResponse';
 import type { RunHarvestRequest } from '../models/RunHarvestRequest';
 import type { RunLogsResponse } from '../models/RunLogsResponse';
-import type { RunMetricsResponse } from '../models/RunMetricsResponse';
 import type { RunResponse } from '../models/RunResponse';
 import type { CancelablePromise } from '../core/CancelablePromise';
 import { OpenAPI } from '../core/OpenAPI';
@@ -121,7 +119,7 @@ export class RunsService {
      * @param runId
      * @param requestBody
      * @param molexpSession
-     * @returns ExecutionRecordResponse Successful Response
+     * @returns ExecutionResponse Successful Response
      * @throws ApiError
      */
     public static createExecution(
@@ -130,7 +128,7 @@ export class RunsService {
         runId: string,
         requestBody: ExecutionAttemptCreateRequest,
         molexpSession?: (string | null),
-    ): CancelablePromise<ExecutionRecordResponse> {
+    ): CancelablePromise<ExecutionResponse> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/projects/{project_id}/experiments/{experiment_id}/runs/{run_id}/executions',
@@ -150,13 +148,49 @@ export class RunsService {
         });
     }
     /**
+     * List Executions
+     * Every attempt at this Run, oldest first (``e01``, ``e02``, …).
+     *
+     * The Run detail already embeds these; this is the addressable list for a
+     * caller that wants the attempts alone, and the GET counterpart of the POST
+     * on the same path.
+     * @param projectId
+     * @param experimentId
+     * @param runId
+     * @param molexpSession
+     * @returns ExecutionResponse Successful Response
+     * @throws ApiError
+     */
+    public static listExecutions(
+        projectId: string,
+        experimentId: string,
+        runId: string,
+        molexpSession?: (string | null),
+    ): CancelablePromise<Array<ExecutionResponse>> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/projects/{project_id}/experiments/{experiment_id}/runs/{run_id}/executions',
+            path: {
+                'project_id': projectId,
+                'experiment_id': experimentId,
+                'run_id': runId,
+            },
+            cookies: {
+                'molexp_session': molexpSession,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
      * Get Execution Record
      * @param projectId
      * @param experimentId
      * @param runId
      * @param executionId
      * @param molexpSession
-     * @returns ExecutionRecordResponse Successful Response
+     * @returns ExecutionResponse Successful Response
      * @throws ApiError
      */
     public static getExecutionRecord(
@@ -165,7 +199,7 @@ export class RunsService {
         runId: string,
         executionId: string,
         molexpSession?: (string | null),
-    ): CancelablePromise<ExecutionRecordResponse> {
+    ): CancelablePromise<ExecutionResponse> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/projects/{project_id}/experiments/{experiment_id}/runs/{run_id}/executions/{execution_id}',
@@ -261,7 +295,7 @@ export class RunsService {
     }
     /**
      * Download Artifact Content
-     * Stream the immutable content snapshot for one Execution Artifact.
+     * Stream one Execution Artifact's bytes from the authoritative manifest.
      * @param projectId
      * @param experimentId
      * @param runId
@@ -333,55 +367,6 @@ export class RunsService {
         });
     }
     /**
-     * Get Run Metrics
-     * Return MolPlot records emitted by one selected Execution.
-     * @param projectId
-     * @param experimentId
-     * @param runId
-     * @param executionId
-     * @param type
-     * @param key
-     * @param sinceLine
-     * @param limit
-     * @param molexpSession
-     * @returns RunMetricsResponse Successful Response
-     * @throws ApiError
-     */
-    public static getRunMetrics(
-        projectId: string,
-        experimentId: string,
-        runId: string,
-        executionId: string,
-        type?: (string | null),
-        key?: (string | null),
-        sinceLine?: number,
-        limit: number = 5000,
-        molexpSession?: (string | null),
-    ): CancelablePromise<RunMetricsResponse> {
-        return __request(OpenAPI, {
-            method: 'GET',
-            url: '/api/projects/{project_id}/experiments/{experiment_id}/runs/{run_id}/executions/{execution_id}/molplot',
-            path: {
-                'project_id': projectId,
-                'experiment_id': experimentId,
-                'run_id': runId,
-                'execution_id': executionId,
-            },
-            cookies: {
-                'molexp_session': molexpSession,
-            },
-            query: {
-                'type': type,
-                'key': key,
-                'since_line': sinceLine,
-                'limit': limit,
-            },
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
      * Get Run File Text
      * Return the raw text content of a file under the run directory.
      *
@@ -407,50 +392,6 @@ export class RunsService {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/projects/{project_id}/experiments/{experiment_id}/runs/{run_id}/executions/{execution_id}/file/text',
-            path: {
-                'project_id': projectId,
-                'experiment_id': experimentId,
-                'run_id': runId,
-                'execution_id': executionId,
-            },
-            cookies: {
-                'molexp_session': molexpSession,
-            },
-            query: {
-                'path': path,
-            },
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
-     * Get Run Lammps Log
-     * Parse a LAMMPS log file and return thermo stages.
-     *
-     * Inlined parser — ``molpy.io`` does not export a multi-stage log
-     * reader, so the route owns this lightweight regex-based parse to
-     * avoid coupling the API surface to a transient molpy refactor.
-     * @param projectId
-     * @param experimentId
-     * @param runId
-     * @param executionId
-     * @param path Relative path under the Execution directory
-     * @param molexpSession
-     * @returns LammpsLogResponse Successful Response
-     * @throws ApiError
-     */
-    public static getRunLammpsLog(
-        projectId: string,
-        experimentId: string,
-        runId: string,
-        executionId: string,
-        path: string,
-        molexpSession?: (string | null),
-    ): CancelablePromise<LammpsLogResponse> {
-        return __request(OpenAPI, {
-            method: 'GET',
-            url: '/api/projects/{project_id}/experiments/{experiment_id}/runs/{run_id}/executions/{execution_id}/lammps-log',
             path: {
                 'project_id': projectId,
                 'experiment_id': experimentId,
@@ -551,7 +492,7 @@ export class RunsService {
      * @param runId
      * @param executionId
      * @param molexpSession
-     * @returns ExecutionRecordResponse Successful Response
+     * @returns ExecutionResponse Successful Response
      * @throws ApiError
      */
     public static cancelExecution(
@@ -560,7 +501,7 @@ export class RunsService {
         runId: string,
         executionId: string,
         molexpSession?: (string | null),
-    ): CancelablePromise<ExecutionRecordResponse> {
+    ): CancelablePromise<ExecutionResponse> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/projects/{project_id}/experiments/{experiment_id}/runs/{run_id}/executions/{execution_id}/cancel',
@@ -641,44 +582,6 @@ export class RunsService {
             },
             body: requestBody,
             mediaType: 'application/json',
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
-     * Detect Run Metrics Sources
-     * Classify foreign log formats under the run directory (read-only).
-     *
-     * Does not write the metrics buffer. Host ≠ MolRec: detection never invents
-     * meta/status sections.
-     * @param projectId
-     * @param experimentId
-     * @param runId
-     * @param executionId
-     * @param molexpSession
-     * @returns any Successful Response
-     * @throws ApiError
-     */
-    public static detectRunMetricsSources(
-        projectId: string,
-        experimentId: string,
-        runId: string,
-        executionId: string,
-        molexpSession?: (string | null),
-    ): CancelablePromise<Record<string, any>> {
-        return __request(OpenAPI, {
-            method: 'GET',
-            url: '/api/projects/{project_id}/experiments/{experiment_id}/runs/{run_id}/executions/{execution_id}/molplot/detect',
-            path: {
-                'project_id': projectId,
-                'experiment_id': experimentId,
-                'run_id': runId,
-                'execution_id': executionId,
-            },
-            cookies: {
-                'molexp_session': molexpSession,
-            },
             errors: {
                 422: `Validation Error`,
             },
@@ -900,7 +803,7 @@ export class RunsService {
      * @param ws
      * @param requestBody
      * @param molexpSession
-     * @returns ExecutionRecordResponse Successful Response
+     * @returns ExecutionResponse Successful Response
      * @throws ApiError
      */
     public static createExecutionWs(
@@ -910,7 +813,7 @@ export class RunsService {
         ws: string,
         requestBody: ExecutionAttemptCreateRequest,
         molexpSession?: (string | null),
-    ): CancelablePromise<ExecutionRecordResponse> {
+    ): CancelablePromise<ExecutionResponse> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/workspaces/{ws}/projects/{project_id}/experiments/{experiment_id}/runs/{run_id}/executions',
@@ -931,6 +834,45 @@ export class RunsService {
         });
     }
     /**
+     * List Executions
+     * Every attempt at this Run, oldest first (``e01``, ``e02``, …).
+     *
+     * The Run detail already embeds these; this is the addressable list for a
+     * caller that wants the attempts alone, and the GET counterpart of the POST
+     * on the same path.
+     * @param projectId
+     * @param experimentId
+     * @param runId
+     * @param ws
+     * @param molexpSession
+     * @returns ExecutionResponse Successful Response
+     * @throws ApiError
+     */
+    public static listExecutionsWs(
+        projectId: string,
+        experimentId: string,
+        runId: string,
+        ws: string,
+        molexpSession?: (string | null),
+    ): CancelablePromise<Array<ExecutionResponse>> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/workspaces/{ws}/projects/{project_id}/experiments/{experiment_id}/runs/{run_id}/executions',
+            path: {
+                'project_id': projectId,
+                'experiment_id': experimentId,
+                'run_id': runId,
+                'ws': ws,
+            },
+            cookies: {
+                'molexp_session': molexpSession,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
      * Get Execution Record
      * @param projectId
      * @param experimentId
@@ -938,7 +880,7 @@ export class RunsService {
      * @param executionId
      * @param ws
      * @param molexpSession
-     * @returns ExecutionRecordResponse Successful Response
+     * @returns ExecutionResponse Successful Response
      * @throws ApiError
      */
     public static getExecutionRecordWs(
@@ -948,7 +890,7 @@ export class RunsService {
         executionId: string,
         ws: string,
         molexpSession?: (string | null),
-    ): CancelablePromise<ExecutionRecordResponse> {
+    ): CancelablePromise<ExecutionResponse> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/workspaces/{ws}/projects/{project_id}/experiments/{experiment_id}/runs/{run_id}/executions/{execution_id}',
@@ -1051,7 +993,7 @@ export class RunsService {
     }
     /**
      * Download Artifact Content
-     * Stream the immutable content snapshot for one Execution Artifact.
+     * Stream one Execution Artifact's bytes from the authoritative manifest.
      * @param projectId
      * @param experimentId
      * @param runId
@@ -1129,58 +1071,6 @@ export class RunsService {
         });
     }
     /**
-     * Get Run Metrics
-     * Return MolPlot records emitted by one selected Execution.
-     * @param projectId
-     * @param experimentId
-     * @param runId
-     * @param executionId
-     * @param ws
-     * @param type
-     * @param key
-     * @param sinceLine
-     * @param limit
-     * @param molexpSession
-     * @returns RunMetricsResponse Successful Response
-     * @throws ApiError
-     */
-    public static getRunMetricsWs(
-        projectId: string,
-        experimentId: string,
-        runId: string,
-        executionId: string,
-        ws: string,
-        type?: (string | null),
-        key?: (string | null),
-        sinceLine?: number,
-        limit: number = 5000,
-        molexpSession?: (string | null),
-    ): CancelablePromise<RunMetricsResponse> {
-        return __request(OpenAPI, {
-            method: 'GET',
-            url: '/api/workspaces/{ws}/projects/{project_id}/experiments/{experiment_id}/runs/{run_id}/executions/{execution_id}/molplot',
-            path: {
-                'project_id': projectId,
-                'experiment_id': experimentId,
-                'run_id': runId,
-                'execution_id': executionId,
-                'ws': ws,
-            },
-            cookies: {
-                'molexp_session': molexpSession,
-            },
-            query: {
-                'type': type,
-                'key': key,
-                'since_line': sinceLine,
-                'limit': limit,
-            },
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
      * Get Run File Text
      * Return the raw text content of a file under the run directory.
      *
@@ -1208,53 +1098,6 @@ export class RunsService {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/workspaces/{ws}/projects/{project_id}/experiments/{experiment_id}/runs/{run_id}/executions/{execution_id}/file/text',
-            path: {
-                'project_id': projectId,
-                'experiment_id': experimentId,
-                'run_id': runId,
-                'execution_id': executionId,
-                'ws': ws,
-            },
-            cookies: {
-                'molexp_session': molexpSession,
-            },
-            query: {
-                'path': path,
-            },
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
-     * Get Run Lammps Log
-     * Parse a LAMMPS log file and return thermo stages.
-     *
-     * Inlined parser — ``molpy.io`` does not export a multi-stage log
-     * reader, so the route owns this lightweight regex-based parse to
-     * avoid coupling the API surface to a transient molpy refactor.
-     * @param projectId
-     * @param experimentId
-     * @param runId
-     * @param executionId
-     * @param ws
-     * @param path Relative path under the Execution directory
-     * @param molexpSession
-     * @returns LammpsLogResponse Successful Response
-     * @throws ApiError
-     */
-    public static getRunLammpsLogWs(
-        projectId: string,
-        experimentId: string,
-        runId: string,
-        executionId: string,
-        ws: string,
-        path: string,
-        molexpSession?: (string | null),
-    ): CancelablePromise<LammpsLogResponse> {
-        return __request(OpenAPI, {
-            method: 'GET',
-            url: '/api/workspaces/{ws}/projects/{project_id}/experiments/{experiment_id}/runs/{run_id}/executions/{execution_id}/lammps-log',
             path: {
                 'project_id': projectId,
                 'experiment_id': experimentId,
@@ -1363,7 +1206,7 @@ export class RunsService {
      * @param executionId
      * @param ws
      * @param molexpSession
-     * @returns ExecutionRecordResponse Successful Response
+     * @returns ExecutionResponse Successful Response
      * @throws ApiError
      */
     public static cancelExecutionWs(
@@ -1373,7 +1216,7 @@ export class RunsService {
         executionId: string,
         ws: string,
         molexpSession?: (string | null),
-    ): CancelablePromise<ExecutionRecordResponse> {
+    ): CancelablePromise<ExecutionResponse> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/workspaces/{ws}/projects/{project_id}/experiments/{experiment_id}/runs/{run_id}/executions/{execution_id}/cancel',
@@ -1461,47 +1304,6 @@ export class RunsService {
             },
             body: requestBody,
             mediaType: 'application/json',
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
-     * Detect Run Metrics Sources
-     * Classify foreign log formats under the run directory (read-only).
-     *
-     * Does not write the metrics buffer. Host ≠ MolRec: detection never invents
-     * meta/status sections.
-     * @param projectId
-     * @param experimentId
-     * @param runId
-     * @param executionId
-     * @param ws
-     * @param molexpSession
-     * @returns any Successful Response
-     * @throws ApiError
-     */
-    public static detectRunMetricsSourcesWs(
-        projectId: string,
-        experimentId: string,
-        runId: string,
-        executionId: string,
-        ws: string,
-        molexpSession?: (string | null),
-    ): CancelablePromise<Record<string, any>> {
-        return __request(OpenAPI, {
-            method: 'GET',
-            url: '/api/workspaces/{ws}/projects/{project_id}/experiments/{experiment_id}/runs/{run_id}/executions/{execution_id}/molplot/detect',
-            path: {
-                'project_id': projectId,
-                'experiment_id': experimentId,
-                'run_id': runId,
-                'execution_id': executionId,
-                'ws': ws,
-            },
-            cookies: {
-                'molexp_session': molexpSession,
-            },
             errors: {
                 422: `Validation Error`,
             },

@@ -130,10 +130,15 @@ class TestSummarizeEntity:
     def test_summary_per_target_kind(self, scene: SimpleNamespace) -> None:
         s_run = summarize_entity(scene.run)
         assert isinstance(s_run, EntitySummary)
-        assert (s_run.id, s_run.kind, s_run.title) == ("r", "workspace.run", "r")
+        # A Run's title is its directory: the parameters it was run at.
+        assert (s_run.id, s_run.kind, s_run.title) == ("r", "workspace.run", scene.run._name)
 
         s_exp = summarize_entity(scene.exp)
-        assert (s_exp.id, s_exp.kind, s_exp.title) == ("e", "workspace.experiment", "e")
+        assert (s_exp.id, s_exp.kind, s_exp.title) == (
+            scene.exp.id,
+            "workspace.experiment",
+            "e",
+        )
 
         s_ref = summarize_entity(scene.ref)
         assert (s_ref.id, s_ref.kind) == ("smith2024", "reference.reference")

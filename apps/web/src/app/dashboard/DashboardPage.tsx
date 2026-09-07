@@ -43,15 +43,16 @@ const activityAt = (run: WorkspaceRunRow): number => {
 };
 
 const averageWaitSeconds = (rows: WorkspaceRunRow[]): number | null => {
-  const waits = rows.flatMap((run) =>
-    run.executions.map((execution) => {
-      const created = timestamp(execution.createdAt);
-      const started = timestamp(execution.startedAt);
-      return Number.isFinite(created) && Number.isFinite(started) && started >= created
-        ? (started - created) / 1000
-        : null;
-    }),
-  )
+  const waits = rows
+    .flatMap((run) =>
+      run.executions.map((execution) => {
+        const created = timestamp(execution.createdAt);
+        const started = timestamp(execution.startedAt);
+        return Number.isFinite(created) && Number.isFinite(started) && started >= created
+          ? (started - created) / 1000
+          : null;
+      }),
+    )
     .filter((value): value is number => value !== null);
   return waits.length > 0 ? waits.reduce((sum, value) => sum + value, 0) / waits.length : null;
 };
@@ -131,7 +132,9 @@ const StatusMix = ({ rows }: { rows: WorkspaceRunRow[] }): JSX.Element => (
   <div className="space-y-2">
     {STATUS_GROUPS.map((spec) => {
       const executions = rows.flatMap((run) => run.executions);
-      const count = executions.filter((execution) => groupForStatus(execution.status) === spec.id).length;
+      const count = executions.filter(
+        (execution) => groupForStatus(execution.status) === spec.id,
+      ).length;
       const ratio = executions.length > 0 ? count / executions.length : 0;
       return (
         <div

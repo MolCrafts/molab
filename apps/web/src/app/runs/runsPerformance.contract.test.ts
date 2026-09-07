@@ -7,17 +7,16 @@ const here = dirname(fileURLToPath(import.meta.url));
 const readRunsSource = (path: string): string => readFileSync(resolve(here, path), "utf8");
 
 describe("Runs performance boundaries", () => {
-  it("keeps timeline and inspector code out of the default list chunk", () => {
+  it("keeps inspector code out of the default list chunk", () => {
     const page = readRunsSource("RunsPage.tsx");
-    expect(page).toContain('lazy(() =>\n  import("./RunsTimelineView")');
     expect(page).toContain('lazy(() =>\n  import("./inspector/RunInspector")');
-    expect(page).toContain('tab === "timeline"');
   });
 
-  it("does not rebuild the complete Gantt config on a wall-clock interval", () => {
-    const chart = readRunsSource("RunsGanttChart.tsx");
-    expect(chart).not.toContain("setInterval");
-    expect(chart).not.toContain("LIVE_TICK_MS");
-    expect(chart).toContain("[rows, mode]");
+  // The Gantt timeline was a second, worse answer to "what ran when" that the
+  // jobs table already gives — it is gone, chart and tab alike.
+  it("has no timeline surface left to lazy-load", () => {
+    const page = readRunsSource("RunsPage.tsx");
+    expect(page).not.toContain("RunsTimelineView");
+    expect(page).not.toContain("Gantt");
   });
 });

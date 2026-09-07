@@ -51,7 +51,7 @@ def _new_run(workspace: Workspace, name: str):
 
 
 def _run_artifacts(run, *, name: str | None = None):
-    artifacts = run._execution_repository().artifacts.list_for_execution(run.executions[-1].id)
+    artifacts = run._execution_repository().get(run.executions[-1].id).artifacts
     if name is not None:
         artifacts = [a for a in artifacts if a.name == name]
     return artifacts
@@ -113,7 +113,7 @@ class TestRuntimeCaching:
         assert r2.outputs["step"] == 42
         assert _COUNTERS["step"] == 1
 
-    async def test_auto_cache_from_run_context_writes_under_run_cache(
+    async def test_auto_cache_from_run_context_writes_under_molexp_cache(
         self, workspace: Workspace
     ) -> None:
         wf = Workflow(name="auto-cache")
@@ -128,9 +128,11 @@ class TestRuntimeCaching:
         with run.start() as ctx:
             result = await WorkflowRuntime().execute(compiled, run_context=ctx)
         assert result.outputs["step"] == 7
-        run_cache = Path(run.run_dir) / "cache"
-        assert run_cache.is_dir()
-        assert list(run_cache.glob("*.json"))
+        # Machine state lives under .molexp/, never inside a scientific dir.
+        cache_root = Path(workspace.root) / ".molexp" / "cache"
+        assert cache_root.is_dir()
+        assert list(cache_root.glob("*/*.json"))
+        assert not (Path(run.run_dir) / "cache").exists()
         assert not (Path(workspace.root) / "cache").exists()
 
     async def test_artifact_reregistered_on_hit_without_recompute(

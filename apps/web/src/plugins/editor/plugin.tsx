@@ -1,7 +1,7 @@
+import type { MolexpPluginModule, PluginAPI } from "@molcrafts/molexp-plugin";
 import { lazy } from "react";
-import { buildRegistryKey, registerRendererContribution } from "@/app/registry";
 import type { FileKind } from "@/app/types";
-import type { UiPluginModule } from "@/plugins/types";
+import { buildRendererRegistryKey } from "@/lib/contribution-types";
 
 const TextEditor = lazy(() =>
   import("./TextEditor").then((module) => ({ default: module.TextEditor })),
@@ -16,12 +16,12 @@ const EDITOR_FILE_KINDS: readonly FileKind[] = [
   "unknown",
 ];
 
-const editorPlugin: UiPluginModule = {
+const editorPlugin: MolexpPluginModule = {
   id: "editor",
   name: "Editor",
+  version: "1.0.0",
   description: "Text editor and file preview host for workspace files.",
-  userToggleable: true,
-  register: () => {
+  activate: (api: PluginAPI) => {
     for (const fileKind of EDITOR_FILE_KINDS) {
       const key = {
         objectType: "workspace-file" as const,
@@ -29,8 +29,8 @@ const editorPlugin: UiPluginModule = {
         contentType: "text" as const,
         panelKind: "editor" as const,
       };
-      registerRendererContribution({
-        id: `editor:default:${buildRegistryKey(key)}`,
+      api.editors.register({
+        id: `editor:default:${buildRendererRegistryKey(key)}`,
         priority: 0,
         key,
         title: "Text Editor",

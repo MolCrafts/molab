@@ -225,41 +225,6 @@ class ExperimentMetadata(BaseModel, frozen=True):
     default_target: str | None = None
 
 
-class ExecutionRecord(BaseModel, frozen=True):
-    """One attempt to execute a Run.
-
-    A Run may be executed multiple times (e.g. retries after failure).
-    Each attempt is recorded here so the full execution history is
-    queryable from run.json without scanning execution sub-directories.
-    """
-
-    execution_id: str
-    started_at: datetime
-    finished_at: datetime | None = None
-    status: str = "running"
-    scheduler_job_id: str | None = None
-
-
-class ExecutionMetadata(BaseModel, frozen=True):
-    """Per-attempt metadata persisted to ``executions/<exec_id>/execution.json``.
-
-    Mirrors the matching :class:`ExecutionRecord` entry in
-    ``run.json.execution_history`` so a single ``executions/<exec_id>/``
-    directory is self-describing without consulting the parent run.
-    Fields beyond the record are populated from the active
-    :class:`RunContext` (executor info, error summary).
-    """
-
-    execution_id: str
-    run_id: str
-    started_at: datetime
-    finished_at: datetime | None = None
-    status: str = "running"
-    scheduler_job_id: str | None = None
-    executor_info: dict[str, JSONValue] = Field(default_factory=dict)
-    error: ErrorInfo | None = None
-
-
 class RunMetadata(BaseModel, frozen=True):
     """Logical Run definition compatibility model.
 
@@ -285,8 +250,6 @@ class RunMetadata(BaseModel, frozen=True):
     owner_host: str | None = None
     started_at: datetime | None = None
     finished_at: datetime | None = None
-    current_execution_id: str | None = None
-    execution_history: tuple[ExecutionRecord, ...] = ()
     error: ErrorInfo | None = None
     # Opaque workflow-snapshot payload — the canonical type lives in
     # ``molexp.workflow.snapshot_ref.WorkflowSnapshotRef``; workspace

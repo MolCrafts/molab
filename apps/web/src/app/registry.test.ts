@@ -129,7 +129,9 @@ describe("resolveRenderer", () => {
       priority: 100,
       matches: ({ selection, snapshot }) => {
         const run = snapshot.runs.find((item) => item.id === selection.objectId);
-        return run?.executionHistory.some((execution) => execution.executor.backend === "molq") ?? false;
+        return (
+          run?.executionHistory.some((execution) => execution.executor.backend === "molq") ?? false
+        );
       },
       Component: (() => null) as unknown as RendererEntry["Component"],
     });
@@ -141,6 +143,7 @@ describe("resolveRenderer", () => {
         {
           id: "run-1",
           name: "run-1",
+          path: "projects/proj-1/experiments/exp-1/runs/run-1",
           status: "running",
           summary: "Status: running",
           updatedAt: "2026-01-01T00:00:00Z",
@@ -154,12 +157,22 @@ describe("resolveRenderer", () => {
           workflowSnapshot: null,
           startedAt: "2026-01-01T00:00:00Z",
           finishedAt: null,
-          executionHistory: [{
-            executionId: "exec-1", mode: "initial", createdAt: "2026-01-01T00:00:00Z",
-            startedAt: "2026-01-01T00:00:00Z", finishedAt: null, status: "running",
-            basedOnExecutionId: null, checkpointArtifactId: null,
-            executor: { backend: "molq" }, environment: {}, artifactIds: [], error: null,
-          }],
+          executionHistory: [
+            {
+              executionId: "exec-1",
+              mode: "initial",
+              createdAt: "2026-01-01T00:00:00Z",
+              startedAt: "2026-01-01T00:00:00Z",
+              finishedAt: null,
+              status: "running",
+              basedOnExecutionId: null,
+              checkpointArtifactId: null,
+              executor: { backend: "molq" },
+              environment: {},
+              artifactIds: [],
+              error: null,
+            },
+          ],
           errorMessage: null,
         },
       ],

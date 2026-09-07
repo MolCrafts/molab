@@ -31,6 +31,24 @@ export interface RunStatusSummary {
 export interface WorkspaceRunRow {
   id: string;
   name: string;
+  /**
+   * Served-workspace key this row was fetched from.
+   *
+   * Stamped by the client, not the server: `/api/workspace/runs` answers for
+   * whichever workspace the request selected, so only the caller knows which
+   * one it asked. Without it a run id is ambiguous the moment two workspaces
+   * are served — `run-001` exists in most of them.
+   */
+  workspaceKey: string;
+  /**
+   * Workspace-relative directory, as the server reported it.
+   *
+   * Never rebuilt from ids: every segment is a name — a project slug, an
+   * experiment slug, a run's parameters — and an experiment whose id is a
+   * UUIDv7 lives in a directory named after itself, so a composed path points
+   * nowhere.
+   */
+  path: string;
   projectId: string;
   projectName: string;
   experimentId: string;

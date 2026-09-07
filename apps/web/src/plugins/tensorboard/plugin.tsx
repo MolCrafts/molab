@@ -1,18 +1,17 @@
+import type { MolexpPluginModule, PluginAPI } from "@molcrafts/molexp-plugin";
 import { lazy } from "react";
-import { registerFileTypeContribution } from "@/app/registry";
-import type { UiPluginModule } from "@/plugins/types";
 
 const TensorBoardTab = lazy(() =>
   import("./TensorBoardTab").then((module) => ({ default: module.TensorBoardTab })),
 );
 
-const tensorboardPlugin: UiPluginModule = {
+const tensorboardPlugin: MolexpPluginModule = {
   id: "tensorboard",
   name: "TensorBoard",
+  version: "1.0.0",
   description: "TensorBoard tab when tfevents files are discovered on a run.",
-  userToggleable: true,
-  register: () => {
-    registerFileTypeContribution({
+  activate: (api: PluginAPI) => {
+    api.fileTypes.register({
       id: "tensorboard:run-tab",
       objectType: "run",
       value: "tensorboard",

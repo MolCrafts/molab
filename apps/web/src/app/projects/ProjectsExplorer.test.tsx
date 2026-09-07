@@ -28,6 +28,7 @@ describe("Projects explorer", () => {
       {
         id: "project-1",
         name: "Catalyst search",
+        path: "projects/catalyst-search",
         status: "active",
         summary: "Screen catalyst candidates",
         updatedAt: "2026-08-30T12:00:00Z",
@@ -58,6 +59,7 @@ describe("Projects explorer", () => {
       {
         id: "project-1",
         name: "Catalyst search",
+        path: "projects/catalyst-search",
         status: "active",
         summary: "Screen catalyst candidates",
         updatedAt: "2026-08-30T12:00:00Z",

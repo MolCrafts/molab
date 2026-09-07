@@ -11,7 +11,7 @@ from molexp.harness.store.file_approval_store import FileApprovalStore
 from molexp.harness.store.file_artifact_store import FileArtifactStore
 from molexp.harness.store.file_lineage_store import FileLineageStore
 from molexp.harness.store.jsonl_event_log import JsonlEventLog
-from molexp.harness.store.provenance_approval_store import ProvenanceApprovalStore
+from molexp.harness.store.run_approval_store import RunApprovalStore
 
 if TYPE_CHECKING:
     from molexp.workspace.execution_context import ExecutionContext
@@ -55,12 +55,10 @@ class RunStoresPlugin:
         else:
             storage_dir = self._execution_context.execution_dir
             artifact_store = FileArtifactStore.for_execution(self._execution_context)
-            workspace = self._execution_context.run.experiment.project.workspace
-            approval_store = ProvenanceApprovalStore(
-                workspace.root,
+            approval_store = RunApprovalStore(
+                self._execution_context.run.run_dir,
                 run_id=self._run_id,
                 execution_id=self._execution_context.id,
-                fs=workspace.fs,
             )
         ctx.provide(Keys.RUN_ID, self._run_id)
         ctx.provide(Keys.WORKSPACE_ROOT, self._workspace_root)

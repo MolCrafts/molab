@@ -35,7 +35,6 @@ from .bundle_index import extract_title
 from .concepts import REFERENCE_KIND
 from .edges import DEFAULT_EDGE_ROLE, EdgeRole
 from .folder import Folder
-from .utils import RUN_DIR_PREFIX, run_dir_name
 
 # Per-kind default edge roles, all members of the frozen ``EdgeRole`` vocabulary
 # (edges.py). A kind absent here defaults to ``DEFAULT_EDGE_ROLE`` ("references").
@@ -65,11 +64,9 @@ class EntitySummary(BaseModel, frozen=True):
 def _scope_dir(root: Path, scope: AssetScope) -> Path:
     """Anchor an :class:`AssetScope` to its on-disk directory under *root*.
 
-    Mirrors the frozen Layout naming law (the same shape
-    :func:`molexp.workspace.assets.scan` enumerates): ``projects/<id>`` /
-    ``experiments/<id>`` containers, and the mandatory ``run-`` prefix on a run
-    directory. The ``run-`` prefix is added only when absent, so a bare run id in
-    ``scope.ids`` and an already-prefixed one both resolve correctly.
+    A scope carries entity **ids**; a path carries human **names**. The two are
+    deliberately different, so this walks the tree and matches ids rather than
+    string-building a path out of them.
 
     Args:
         root: The workspace root directory.
@@ -77,19 +74,22 @@ def _scope_dir(root: Path, scope: AssetScope) -> Path:
 
     Returns:
         The scope's on-disk directory.
+
+    Raises:
+        FileNotFoundError: If any id in the scope names no entity.
     """
-    directory = root
-    ids = scope.ids
+    from .workspace import Workspace
+
     if scope.kind == "workspace":
-        return directory
-    directory = directory / "projects" / ids[0]
+        return Path(root)
+    workspace = Workspace(root)
+    project = workspace.get_project(scope.ids[0])
     if scope.kind == "project":
-        return directory
-    directory = directory / "experiments" / ids[1]
+        return Path(project.project_dir)
+    experiment = project.get_experiment(scope.ids[1])
     if scope.kind == "experiment":
-        return directory
-    run_seg = ids[2] if ids[2].startswith(RUN_DIR_PREFIX) else run_dir_name(ids[2])
-    return directory / "runs" / run_seg
+        return Path(experiment.experiment_dir)
+    return Path(experiment.get_run(scope.ids[2]).run_dir)
 
 
 def asset_record_dir(asset: Asset, root: str | PathLike[str] | None) -> Path:
@@ -185,9 +185,11 @@ def summarize_entity(
     """Project *target* to an :class:`EntitySummary` (a pure read; writes nothing).
 
     - A ``Folder`` (``Run`` / ``Experiment`` / ``ReferenceConcept``): ``id`` is
-      the folder name, ``kind`` is its ``meta.json`` type (falling back to the
+      the entity's own id (never its directory name -- the two are deliberately
+      different), ``kind`` is its ``meta.json`` type (falling back to the
       folder's kind), and ``title`` is the ``index.md`` H1 -- with a
-      ``ReferenceConcept``'s ``ReferenceMeta.title`` preferred -- else the name.
+      ``ReferenceConcept``'s ``ReferenceMeta.title`` preferred -- else the
+      directory name.
     - An ``Asset``: ``id`` is the ``asset_id``, ``kind`` is the asset kind, and
       ``title`` is the asset name. *root* is required to anchor the asset (its
       record dir must be locatable), matching the embed verb's precondition.
@@ -223,7 +225,7 @@ def summarize_entity(
                 title = ref_title
         if title is None:
             title = extract_title(target.read_index()) or target.name
-        return EntitySummary(id=target.name, kind=kind, title=title)
+        return EntitySummary(id=target.metadata.id, kind=kind, title=title)
     raise TypeError(f"summary target must be a Folder or Asset, got {type(target).__name__}")
 
 

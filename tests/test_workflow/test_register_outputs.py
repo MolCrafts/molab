@@ -20,6 +20,7 @@ from molexp.workflow import (
 )
 from molexp.workflow.cache import Caching
 from molexp.workspace import Workspace
+from molexp.workspace.execution_dirs import ARTIFACTS, OUT
 
 
 def _new_run(tmp_path: Path, params: dict | None = None):
@@ -28,7 +29,7 @@ def _new_run(tmp_path: Path, params: dict | None = None):
 
 
 def _run_artifacts(run, execution_id: str):
-    return run._execution_repository().artifacts.list_for_execution(execution_id)
+    return run._execution_repository().get(execution_id).artifacts
 
 
 class TestPromoteRegisterArtifact:
@@ -53,15 +54,18 @@ class TestPromoteRegisterArtifact:
         assert result.status == "succeeded"
         promoted = Path(result.outputs["export"]["data"])
         eid = run.executions[-1].id
+        # A task writes into the bulk tier, not scratch: what a body produces
+        # mixes intermediates with results, and ``out/`` is the tier that is
+        # kept. Promotion into ``artifacts/`` is what ``register_artifact`` is.
         assert (
-            promoted == Path(run.run_dir) / "executions" / eid / "work" / "export" / "system.data"
+            promoted == Path(run.run_dir) / "executions" / eid / OUT.name / "export" / "system.data"
         )
         scratch = Path(captured["scratch"])
         assert scratch.parent.name == "export"
-        assert "work" in scratch.parts
+        assert OUT.name in scratch.parts
         assert "executions" in scratch.parts
         assert promoted.read_text() == "atoms"
-        # v2 emit_artifact snapshots in place — the promoted path is the work file.
+        # v2 emit_artifact snapshots in place — the promoted path is that file.
         assert promoted == captured["scratch"]
         found = _run_artifacts(run, eid)
         assert any(a.name == "system.data" for a in found)
@@ -85,7 +89,7 @@ class TestPromoteRegisterArtifact:
         eid = run.executions[-1].id
         assert (
             Path(result.outputs["export"])
-            == Path(run.run_dir) / "executions" / eid / "work" / "export" / "a.txt"
+            == Path(run.run_dir) / "executions" / eid / OUT.name / "export" / "a.txt"
         )
 
     @pytest.mark.asyncio
@@ -107,7 +111,7 @@ class TestPromoteRegisterArtifact:
         eid = run.executions[-1].id
         assert (
             Path(result.outputs["export"]["report"])
-            == Path(run.run_dir) / "executions" / eid / "work" / "export" / "report.txt"
+            == Path(run.run_dir) / "executions" / eid / OUT.name / "export" / "report.txt"
         )
 
     @pytest.mark.asyncio
@@ -130,7 +134,7 @@ class TestPromoteRegisterArtifact:
         assert result.outputs["export"] == 1
         eid = run.executions[-1].id
         assert (
-            Path(run.run_dir) / "executions" / eid / "work" / "export" / "side.txt"
+            Path(run.run_dir) / "executions" / eid / OUT.name / "export" / "side.txt"
         ).read_text() == "side"
 
     @pytest.mark.asyncio
@@ -149,7 +153,9 @@ class TestPromoteRegisterArtifact:
 
         assert result.outputs["measure"]["n"] == 42.0
         eid = run.executions[-1].id
-        wal = Path(run.run_dir) / "executions" / eid / "work" / "metrics.mlp.jsonl"
+        # The versioned tier — a metrics WAL is the record of what the run
+        # measured, so it is not left in scratch.
+        wal = Path(run.run_dir) / "executions" / eid / ARTIFACTS.name / "metrics.mlp.jsonl"
         assert wal.exists()
         assert "n_atoms" in wal.read_text()
 

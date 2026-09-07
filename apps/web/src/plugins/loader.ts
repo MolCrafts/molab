@@ -12,8 +12,8 @@
  *   4. Resolve the entry URL — `manifest.entry` (default `index.js`)
  *      against the descriptor's `entryUrl` directory — and dynamic-
  *      import it through `state.dynamicImport`.
- *   5. Validate the module's default export shape (`{id, register}`)
- *      and call `register()`.
+ *   5. Validate the module's default export shape (`{id, activate}` or
+ *      the v1 `{id, register}` shim) and call `activate(api)`.
  *
  * Failures at every step are isolated with `console.warn` so a single
  * broken third-party bundle cannot block other plugins.
@@ -23,6 +23,7 @@
  */
 
 import { PluginsService } from "@/api/generated/services/PluginsService";
+import { createPluginAPI } from "@/plugins/api/create_api";
 import { registerPluginCatalogEntry } from "@/plugins/catalog";
 import { runWithPluginContext } from "@/plugins/contribution-runtime";
 import type {
@@ -55,20 +56,27 @@ const defaultFetchManifest: ManifestFetcher = async (url) => {
   return (await response.json()) as UiBundleManifest;
 };
 
+export type RemoteEntryRewriter = (entryUrl: string) => Promise<string>;
+
 export interface LoaderState {
   installed: Set<string>;
   internalPromises: Map<string, Promise<void>>;
   remotePromises: Map<string, Promise<void>>;
+  disposers: Map<string, () => void>;
   dynamicImport: DynamicImport;
   fetchManifest: ManifestFetcher;
+  /** Identity by default so unit tests can stub `dynamicImport` against the raw URL. */
+  rewriteRemoteEntry: RemoteEntryRewriter;
 }
 
 export const createLoaderState = (): LoaderState => ({
   installed: new Set<string>(),
   internalPromises: new Map<string, Promise<void>>(),
   remotePromises: new Map<string, Promise<void>>(),
+  disposers: new Map(),
   dynamicImport: defaultDynamicImport,
   fetchManifest: defaultFetchManifest,
+  rewriteRemoteEntry: async (url) => url,
 });
 
 export const registerInternalPluginDescriptors = (
@@ -100,13 +108,14 @@ export const loadInternalPlugin = (
   const promise = descriptor
     .load()
     .then((module) => {
-      if (!looksLikePluginModule(module) || module.default.id !== descriptor.id) {
+      const plugin = pluginFromModule(module);
+      if (!plugin || plugin.id !== descriptor.id) {
         console.warn(
           `[plugins] internal plugin "${descriptor.id}" did not export the matching UiPluginModule`,
         );
         return;
       }
-      registerPluginInstance(state, module.default);
+      registerPluginInstance(state, plugin);
     })
     .catch((error) => {
       console.warn(`[plugins] failed to load internal plugin "${descriptor.id}":`, error);
@@ -130,16 +139,42 @@ export const registerPluginInstance = (state: LoaderState, plugin: UiPluginModul
     userToggleable: plugin.userToggleable ?? true,
   });
 
+  const { api, disposeAll } = createPluginAPI(plugin.id);
+  state.disposers.set(plugin.id, () => {
+    try {
+      void plugin.deactivate?.(api);
+    } catch (error) {
+      console.warn(`[plugins] "${plugin.id}" deactivate() threw:`, error);
+    }
+    disposeAll();
+  });
+
   try {
-    const result = runWithPluginContext(plugin.id, () => plugin.register());
+    const result = runWithPluginContext(plugin.id, () => {
+      if (plugin.activate) {
+        return plugin.activate(api);
+      }
+      if (plugin.register) {
+        return plugin.register();
+      }
+      console.warn(`[plugins] "${plugin.id}" has neither activate() nor register()`);
+    });
     if (result instanceof Promise) {
       result.catch((error) => {
-        console.warn(`[plugins] "${plugin.id}" register() rejected:`, error);
+        console.warn(`[plugins] "${plugin.id}" activate() rejected:`, error);
       });
     }
   } catch (error) {
-    console.warn(`[plugins] "${plugin.id}" register() threw:`, error);
+    console.warn(`[plugins] "${plugin.id}" activate() threw:`, error);
   }
+};
+
+export const disposePluginInstance = (state: LoaderState, pluginId: string): void => {
+  const dispose = state.disposers.get(pluginId);
+  if (!dispose) return;
+  dispose();
+  state.disposers.delete(pluginId);
+  state.installed.delete(pluginId);
 };
 
 const looksLikeUiBundleManifest = (mod: unknown): mod is UiBundleManifest => {
@@ -155,17 +190,44 @@ const looksLikeUiBundleManifest = (mod: unknown): mod is UiBundleManifest => {
   );
 };
 
-const looksLikePluginModule = (mod: unknown): mod is { default: UiPluginModule } => {
-  if (!mod || typeof mod !== "object") {
+const hasPluginShape = (value: unknown): value is UiPluginModule => {
+  if (!value || typeof value !== "object") {
     return false;
   }
-  const candidate = (mod as { default?: unknown }).default;
-  return (
-    typeof candidate === "object" &&
-    candidate !== null &&
-    typeof (candidate as { id?: unknown }).id === "string" &&
-    typeof (candidate as { register?: unknown }).register === "function"
-  );
+  const candidate = value as { id?: unknown; activate?: unknown; register?: unknown };
+  if (typeof candidate.id !== "string") {
+    return false;
+  }
+  return typeof candidate.activate === "function" || typeof candidate.register === "function";
+};
+
+const coercePluginModule = (exported: unknown): UiPluginModule | null => {
+  if (typeof exported === "function") {
+    const callable = exported as unknown as {
+      (): unknown;
+      new (): unknown;
+    };
+    let produced: unknown;
+    try {
+      produced = new callable();
+    } catch {
+      try {
+        produced = callable();
+      } catch {
+        return null;
+      }
+    }
+    return coercePluginModule(produced);
+  }
+  return hasPluginShape(exported) ? exported : null;
+};
+
+const pluginFromModule = (mod: unknown): UiPluginModule | null => {
+  if (!mod || typeof mod !== "object") {
+    return null;
+  }
+  const candidate = (mod as { default?: unknown }).default ?? mod;
+  return coercePluginModule(candidate);
 };
 
 const resolveEntryUrl = (descriptor: PluginManifest, manifest: UiBundleManifest): string => {
@@ -213,14 +275,16 @@ export const loadRemotePlugin = (state: LoaderState, descriptor: PluginManifest)
 
     const entryUrl = resolveEntryUrl(descriptor, manifest);
     try {
-      const mod = await state.dynamicImport(entryUrl);
-      if (!looksLikePluginModule(mod)) {
+      const specifier = await state.rewriteRemoteEntry(entryUrl);
+      const mod = await state.dynamicImport(specifier);
+      const plugin = pluginFromModule(mod);
+      if (!plugin) {
         console.warn(
           `[plugins] remote plugin "${descriptor.id}" loaded from ${entryUrl} did not export a UiPluginModule`,
         );
         return;
       }
-      registerPluginInstance(state, mod.default);
+      registerPluginInstance(state, plugin);
     } catch (error) {
       console.warn(
         `[plugins] failed to load remote plugin "${descriptor.id}" from ${entryUrl}:`,
@@ -249,9 +313,18 @@ export const discoverAndLoad = async (state: LoaderState): Promise<void> => {
 };
 
 export const resetLoaderState = (state: LoaderState): void => {
+  for (const dispose of state.disposers.values()) {
+    try {
+      dispose();
+    } catch {
+      /* isolate */
+    }
+  }
+  state.disposers.clear();
   state.installed.clear();
   state.internalPromises.clear();
   state.remotePromises.clear();
   state.dynamicImport = defaultDynamicImport;
   state.fetchManifest = defaultFetchManifest;
+  state.rewriteRemoteEntry = async (url) => url;
 };

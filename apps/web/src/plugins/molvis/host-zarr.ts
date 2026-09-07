@@ -1,7 +1,10 @@
 /**
  * Host I/O adapter: workspace.fs as a molvis Zarr directory source.
  *
- * No record-root walking here — molvis resolves the store.
+ * No record-root walking here — molvis resolves the store. The run directory
+ * this is rooted at comes from the run the server described; a workspace path
+ * is made of names (an experiment's slug, a run's parameters) and rebuilding
+ * one from ids points at a directory that was never there.
  */
 
 import { getWorkspaceFs, type WorkspaceFs } from "@/lib/workspace-fs";
@@ -16,12 +19,6 @@ export interface ZarrDirectorySource {
   list(path: string): Promise<readonly ZarrDirent[]>;
   read(path: string): Promise<Uint8Array>;
 }
-
-export const runWorkspaceRelPath = (
-  projectId: string,
-  experimentId: string,
-  runId: string,
-): string => `projects/${projectId}/experiments/${experimentId}/runs/run-${runId}`;
 
 export const workspaceZarrSource = (
   runDirRel: string,

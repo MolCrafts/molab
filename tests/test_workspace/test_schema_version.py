@@ -1,9 +1,9 @@
-"""Tests for workspace JSON schema versioning (spec: core-versioning).
+"""Tests for workspace JSON schema versioning.
 
-Covers acceptance criteria:
-- ac-003: Every entity JSON writer emits schema_version: 1
-- ac-004: JSON missing schema_version is rejected
-- ac-005: Future schema_version raises IncompatibleSchemaError
+Writes stamp the current version, so a file records the build that made it.
+Reads do **not** gate on it: while the format is still moving the tree
+routinely holds files an older build wrote, and refusing to open a workspace
+over a version stamp costs more than the mismatch does.
 """
 
 from __future__ import annotations
@@ -11,13 +11,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
 from molexp.workspace import Workspace
-from molexp.workspace.schema_version import (
-    MOLEXP_SCHEMA_VERSION,
-    IncompatibleSchemaError,
-)
+from molexp.workspace.schema_version import MOLEXP_SCHEMA_VERSION
 
 
 def _seed_workspace(root) -> Workspace:
@@ -61,8 +56,8 @@ class TestSchemaVersionEmitted:
             assert data["schema_version"] == MOLEXP_SCHEMA_VERSION
 
 
-class TestMissingSchemaRejected:
-    def test_workspace_without_schema_version_raises(self, tmp_path):
+class TestMissingSchemaAccepted:
+    def test_workspace_without_schema_version_loads(self, tmp_path):
         root = tmp_path / "ws_v0"
         root.mkdir()
         (root / "workspace.json").write_text(
@@ -76,12 +71,11 @@ class TestMissingSchemaRejected:
             )
         )
 
-        with pytest.raises(IncompatibleSchemaError, match="missing schema_version"):
-            Workspace.load(root)
+        assert Workspace.load(root).name == "Lab"
 
 
-class TestFutureSchemaRejected:
-    def test_workspace_future_schema_raises(self, tmp_path):
+class TestOtherSchemaAccepted:
+    def test_workspace_future_schema_loads(self, tmp_path):
         root = tmp_path / "ws_future"
         root.mkdir()
         (root / "workspace.json").write_text(
@@ -95,5 +89,21 @@ class TestFutureSchemaRejected:
                 }
             )
         )
-        with pytest.raises(IncompatibleSchemaError):
-            Workspace.load(root)
+        assert Workspace.load(root).name == "From Tomorrow"
+
+    def test_workspace_older_schema_loads(self, tmp_path):
+        # The real case: `lab` on disk is schema 2 while the build writes 3.
+        root = tmp_path / "ws_old"
+        root.mkdir()
+        (root / "workspace.json").write_text(
+            json.dumps(
+                {
+                    "schema_version": MOLEXP_SCHEMA_VERSION - 1,
+                    "id": "ws_old",
+                    "name": "Yesterday",
+                    "created_at": "2020-01-01T00:00:00",
+                    "targets": [],
+                }
+            )
+        )
+        assert Workspace.load(root).name == "Yesterday"

@@ -33,7 +33,7 @@ from molexp.harness.plan import (
 from molexp.harness.schemas import ApprovalDecision
 from molexp.harness.stages import auto_grant_approver
 from molexp.harness.store.paths import harness_artifact_root
-from molexp.harness.store.provenance_approval_store import ProvenanceApprovalStore
+from molexp.harness.store.run_approval_store import RunApprovalStore
 from molexp.workspace import Workspace
 
 _USER_INPUT = (
@@ -102,13 +102,11 @@ def _store(run: Any) -> FileArtifactStore:
     return FileArtifactStore.open_execution(run, _last_execution_id(run))
 
 
-def _approvals(run: Any) -> ProvenanceApprovalStore:
-    ws = run.experiment.project.workspace
-    return ProvenanceApprovalStore(
-        ws.root,
+def _approvals(run: Any) -> RunApprovalStore:
+    return RunApprovalStore(
+        run.run_dir,
         run_id=run.id,
         execution_id=_last_execution_id(run),
-        fs=ws.fs,
     )
 
 

@@ -652,7 +652,7 @@ def run_ingest_metrics(
         f"records={result.records} hits={len(hits)} skips={len(result.skipped)}"
     )
     for skip in result.skipped:
-        rprint(f"  [dim]skip[/dim] {skip.format.value}: {skip.path.name} — {skip.reason}")
+        rprint(f"  [dim]skip[/dim] {skip.format}: {skip.path.name} — {skip.reason}")
 
 
 @run_app.command("analyze-failure")
@@ -751,7 +751,7 @@ def run_info(
         if r.metadata.config:
             rprint(f"  Config: {json.dumps(r.metadata.config, indent=2, default=str)}")
     rprint(f"  Parameters: {json.dumps(r.parameters, indent=2, default=str)}")
-    history = r.execution_history
+    history = r.executions
     if history:
         rprint("  Executions:")
         for rec in history[-5:]:

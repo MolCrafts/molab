@@ -3,7 +3,7 @@
 Entered via ``with run.start() as ctx:``; orchestrates the lifecycle, result
 binding, checkpointing, artifact/log/metric I/O, and asset access for one run
 attempt. The work is delegated to four collaborators (``RunLifecycle`` /
-``ContextStore`` / ``ExecutionStore`` / ``RunAssets``); this facade wires them
+``ContextStore`` / ``ExecutionRepository`` / ``RunAssets``); this facade wires them
 together and re-exposes the typed accessor handles. Split out of ``run.py``
 (where the :class:`Run` entity lives): ``Run.start`` constructs a
 ``RunContext`` and ``RunContext.open`` lazily reconstructs a ``Run`` via a
@@ -27,11 +27,12 @@ from .assets import ArtifactAsset, Asset, AssetScope, CheckpointAccessor, LogAcc
 from .assets.base import AssetKind
 from .base import _load_metadata, _reconstruct
 from .context import Context
+from .execution_dirs import ExecutionDir
+from .execution_repository import ExecutionRepository
 from .metrics_seam import MetricRecord, MetricsSink
 from .models import RunMetadata, RunStatus
 from .run_assets import RunAssets
 from .run_context import ContextStore
-from .run_execution import ExecutionStore
 from .run_lifecycle import RunLifecycle
 
 if TYPE_CHECKING:
@@ -67,9 +68,9 @@ class RunContext:
     construction is not permitted.
 
     ``run_dir`` is the run's on-disk root as a :class:`~pathlib.Path`
-    (same path as :attr:`Run.run_dir`). ``workdir`` is the execution-scoped
-    scratch directory where the driver writes files
-    (``<run_dir>/executions/<exec_id>/work``).
+    (same path as :attr:`Run.run_dir`). The attempt's own directories are
+    reached uniformly through :meth:`get_dir` — they are peers, and which
+    one a file belongs in is the author's choice, not an API's.
     """
 
     run: Run
@@ -107,7 +108,13 @@ class RunContext:
             ids=(run.experiment.project.id, run.experiment.id, run.id),
         )
         self._ctx_store = ContextStore(run, self.run_dir)
-        self._executions = ExecutionStore(run, self.run_dir)
+        self._executions = ExecutionRepository(
+            run.experiment.project.workspace.root,
+            self.run_dir,
+            run_id=run.id,
+            project_id=run.experiment.project.id,
+            fs=run._disk(),
+        )
         self._assets = RunAssets(run, self.run_dir, scope, self._producer, self._get_execution_id)
         self._lifecycle = RunLifecycle(self)
 
@@ -141,22 +148,42 @@ class RunContext:
         """Set the active task id so future accessor writes set ``Producer.task_id``."""
         self._active_task_id = task_id
 
-    # ── Working directories ─────────────────────────────────────────────
+    # ── The attempt's directories ───────────────────────────────────────
 
-    @property
-    def workdir(self) -> Path:
-        """Execution-scoped scratch directory for this attempt.
+    def get_dir(self, name: str, *parts: str) -> Path:
+        """One of this attempt's directories, created on demand.
 
-        ``<run_dir>/executions/<execution_id>/work``, created on access.
-        Write files here, then :meth:`register_artifact` to publish them.
+        ``<run_dir>/executions/<execution_id>/<name>/``. The three tiers a
+        task chooses between:
+
+        ``get_dir("work")``
+            Scratch — tool droppings, intermediates. Not kept.
+        ``get_dir("out")``
+            Bulk output this attempt produced: trajectories, restarts,
+            solver logs. Kept on disk, out of the git history.
+        ``get_dir("artifacts")``
+            Promoted products. :meth:`register_artifact` writes here, and
+            these are what the history records.
+
+        Nothing routes automatically — only the author knows whether a file
+        is a dropping or a result.
 
         Raises:
             RuntimeError: if no execution is active.
+            UnknownExecutionDirError: if nobody declared *name*.
         """
-        return self._assets.workdir
+        return self._assets.get_dir(name, *parts)
+
+    def has_dir(self, name: str) -> bool:
+        """True when this attempt has actually created *name* on disk."""
+        return self._assets.has_dir(name)
+
+    def list_dirs(self) -> tuple[ExecutionDir, ...]:
+        """Every declared directory and what it promises."""
+        return self._assets.list_dirs()
 
     def task_workdir(self, task_name: str) -> Path:
-        """Scratch directory for one workflow task under this execution."""
+        """Per-task scratch under this execution's ``work`` section."""
         return self._assets.task_workdir(task_name)
 
     def register_product(

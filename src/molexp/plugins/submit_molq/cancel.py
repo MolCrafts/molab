@@ -22,7 +22,7 @@ import signal
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
-from molexp.workspace.domain import ACTIVE_EXECUTION_STATUSES, ExecutionState
+from molexp.workspace.domain import ACTIVE_EXECUTION_STATUSES, Execution
 
 from .metadata import normalize_executor_info
 
@@ -42,7 +42,7 @@ class CancelPlan:
     scheduler_job_id: str | None = None  # native scheduler id fallback
 
 
-def _active_execution(run: Run) -> ExecutionState | None:
+def _active_execution(run: Run) -> Execution | None:
     """Newest non-terminal Execution realizing *run*, else ``None``."""
     active = [ex for ex in run.executions if ex.status in ACTIVE_EXECUTION_STATUSES]
     return active[-1] if active else None

@@ -33,6 +33,13 @@ from .assets import (
     Producer,
 )
 from .assets.base import AssetKind
+from .execution_dirs import (
+    ARTIFACTS,
+    OUT,
+    ExecutionDir,
+    list_execution_dirs,
+    resolve_execution_dir,
+)
 from .file_store import FileStore
 from .metrics_seam import MetricsSink, create_metrics_writer
 from .utils import compute_content_hash, generate_asset_id
@@ -99,7 +106,7 @@ class RunAssets:
         )
         self._metrics = create_metrics_writer(
             exec_dir,
-            lambda name, line: self.files.append(rel / "artifacts" / name, line),
+            lambda name, line: self.files.append(rel / ARTIFACTS.name / name, line),
         )
 
     @property
@@ -120,32 +127,49 @@ class RunAssets:
         assert self._metrics is not None
         return self._metrics
 
-    # ── Working directories ─────────────────────────────────────────────
+    # ── The attempt's directories ───────────────────────────────────────
 
-    @property
-    def workdir(self) -> Path:
-        """Execution-scoped scratch directory ``<run>/executions/<id>/work``.
+    def get_dir(self, name: str, *parts: str) -> Path:
+        """One of this attempt's directories, created on demand.
 
-        Created on access. Requires an active execution
-        (``with run.start() as ctx:``).
+        The single way to reach any of them — ``get_dir("work")`` for
+        scratch, ``get_dir("out")`` for bulk output, ``get_dir("artifacts")``
+        for promoted products. They are peers: what each promises is its
+        :class:`~molexp.workspace.execution_dirs.ExecutionDir` declaration,
+        not a bespoke property here.
+
+        Requires an active execution (``with run.start() as ctx:``), and
+        refuses a name nobody declared.
         """
+        resolve_execution_dir(name)
         execution_id = self._get_execution_id()
         if execution_id is None:
             raise RuntimeError(
-                "RunContext.workdir requires an active execution; call it inside "
-                "`with run.start() as ctx:`."
-            )
-        return self.files.mkdir(Path("executions") / execution_id / "work")
-
-    def task_workdir(self, task_name: str) -> Path:
-        """Scratch directory for one task: ``executions/<id>/work/<task>/``."""
-        execution_id = self._get_execution_id()
-        if execution_id is None:
-            raise RuntimeError(
-                "RunContext.task_workdir requires an active execution; "
+                f"RunContext.get_dir({name!r}) requires an active execution; "
                 "call it inside `with run.start() as ctx:`."
             )
-        return self.files.mkdir(Path("executions") / execution_id / "work" / task_name)
+        return self.files.mkdir(Path("executions", execution_id, name, *parts))
+
+    def has_dir(self, name: str) -> bool:
+        """True when this attempt has actually created *name* on disk."""
+        execution_id = self._get_execution_id()
+        if execution_id is None:
+            return False
+        return (self._run_dir / "executions" / execution_id / name).is_dir()
+
+    def list_dirs(self) -> tuple[ExecutionDir, ...]:
+        """Every declared directory and what it promises."""
+        return list_execution_dirs()
+
+    def task_workdir(self, task_name: str) -> Path:
+        """Where one workflow task writes: ``out/<task>/``.
+
+        The bulk tier, not scratch — what a body writes mixes intermediates
+        with the trajectory, and the two cannot be told apart from outside.
+        Kept as named sugar because the workflow engine reaches it through
+        the ``RunContextLike`` protocol to build ``TaskContext.workdir``.
+        """
+        return self.get_dir(OUT.name, task_name)
 
     def get_data_dir(
         self,
@@ -201,7 +225,7 @@ class RunAssets:
         dest_name = name or (path.name if path is not None else None)
         if dest_name is None:
             raise ValueError("register_product requires src or name")
-        dest = self._run_dir / self._exec_rel() / "artifacts" / dest_name
+        dest = self._run_dir / self._exec_rel() / ARTIFACTS.name / dest_name
         dest.parent.mkdir(parents=True, exist_ok=True)
         if path is None:
             return dest
@@ -322,7 +346,7 @@ class RunAssets:
             payload = bytes(data)
         else:
             payload = str(data)
-        dest = self.files.put(self._exec_rel() / "artifacts" / name, payload)
+        dest = self.files.put(self._exec_rel() / ARTIFACTS.name / name, payload)
         asset = self.register(
             dest, kind="artifact", name=name, mime=mime, tags=tags, consumed=consumed
         )

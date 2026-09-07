@@ -221,9 +221,13 @@ export const formatQualifiedPath = (path: WorkspacePath, ctx: PathDisplayContext
   return rel ? join(knownRoot, rel) : knownRoot;
 };
 
-/** On-disk relative path of a run dir (layout law: ``runs/run-<id>``). */
-export const runWorkspaceRelativePath = (run: {
-  projectId: string;
-  experimentId: string;
-  id: string;
-}): string => `projects/${run.projectId}/experiments/${run.experimentId}/runs/run-${run.id}`;
+/**
+ * On-disk relative path of a run directory.
+ *
+ * Reported by the server, never rebuilt here. Every segment of a workspace
+ * path is a *name* — a project's slug, an experiment's slug, a run's
+ * parameters — and none of them is derivable from the ids the client holds:
+ * an experiment whose id is a UUIDv7 lives in a directory named after itself.
+ * Composing one from ids yields a path that does not exist.
+ */
+export const runWorkspaceRelativePath = (run: { path: string }): string => run.path;

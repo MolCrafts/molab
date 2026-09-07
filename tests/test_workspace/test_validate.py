@@ -52,15 +52,6 @@ class TestValidateWorkspace:
         assert not report.ok
         assert [v.rule for v in report.errors] == ["workspace.missing"]
 
-    def test_run_dir_without_the_run_prefix_is_an_error(self, tmp_path: Path) -> None:
-        ws = _workspace(tmp_path)
-        runs = Path(ws.get_project("alpha").get_experiment("sweep").resolve()) / "runs"
-        run_dir = next(d for d in runs.iterdir() if d.is_dir())
-        run_dir.rename(runs / run_dir.name.removeprefix("run-"))
-
-        report = ws.validate()
-        assert "run.prefix" in {v.rule for v in report.errors}
-
     def test_missing_entity_file_is_an_error(self, tmp_path: Path) -> None:
         ws = _workspace(tmp_path)
         (Path(ws.get_project("alpha").resolve()) / "project.json").unlink()
@@ -78,7 +69,7 @@ class TestValidateWorkspace:
 
         report = ws.validate()
         marker = [v for v in report.errors if v.rule == "concept.marker"]
-        assert marker and marker[0].path == f"projects/{proj.id}"
+        assert marker and marker[0].path == f"projects/{proj._name}"
 
     def test_workspace_type_on_entity_is_the_concept_marker(self, tmp_path: Path) -> None:
         ws = _workspace(tmp_path)
@@ -106,58 +97,11 @@ class TestValidateWorkspace:
         assert "layout.stray" not in {v.rule for v in report.errors}
         assert report.ok
 
-    def test_stale_children_index_is_flagged_against_disk(self, tmp_path: Path) -> None:
-        ws = _workspace(tmp_path)
-        index = Path(ws.resolve()) / "projects.json"
-        payload = json.loads(index.read_text())
-        payload["ghost"] = dict(next(iter(payload.values())), id="ghost", name="ghost")
-        index.write_text(json.dumps(payload))
-
-        report = ws.validate()
-        stale = [v for v in report.errors if v.rule == "index.stale"]
-        assert stale and "ghost" in stale[0].detail
-
-    def test_children_index_is_plural_not_singular(self, tmp_path: Path) -> None:
-        """Index basenames are plural; entity basenames stay singular."""
-        ws = _workspace(tmp_path)
-        root = Path(ws.resolve())
-        assert (root / "projects.json").is_file()
-        assert not (root / "project.json").exists()  # no singular index at root
-        proj = ws.get_project("alpha")
-        proj_dir = root / "projects" / proj.id
-        assert (proj_dir / "project.json").is_file()  # entity
-        assert (proj_dir / "experiments.json").is_file()  # index
-        assert not (proj_dir / "experiment.json").exists()  # not an index here
-        exp = proj.get_experiment("sweep")
-        exp_dir = proj_dir / "experiments" / exp.id
-        assert (exp_dir / "experiment.json").is_file()  # entity
-        assert (exp_dir / "runs.json").is_file()  # index
-        # Singular run.json only under runs/run-*/ (entity), not as the index.
-        assert not (exp_dir / "run.json").exists()
-        run_dirs = list((exp_dir / "runs").iterdir())
-        assert run_dirs and (run_dirs[0] / "run.json").is_file()
-
-    def test_leftover_singular_index_is_flagged_and_not_read(self, tmp_path: Path) -> None:
-        """A leftover singular file on the parent is never the children index."""
-        ws = _workspace(tmp_path)
-        root = Path(ws.resolve())
-        plural = root / "projects.json"
-        leftover = root / "project.json"
-        leftover.write_text(plural.read_text())
-        plural.unlink()
-
-        ws2 = Workspace(root=root)
-        assert [p.name for p in ws2.list_projects()] == ["alpha"]
-        assert plural.is_file()
-
-        report = ws2.validate()
-        assert "index.legacy_name" in {v.rule for v in report.errors}
-
     def test_project_dir_that_is_not_a_slug_is_flagged(self, tmp_path: Path) -> None:
         ws = _workspace(tmp_path)
         proj = ws.get_project("alpha")
         projects = Path(ws.resolve()) / "projects"
-        (projects / proj.id).rename(projects / "Not_A_Slug")
+        (projects / proj._name).rename(projects / "Not_A_Slug")
 
         report = ws.validate()
         assert "project.slug" in {v.rule for v in report.errors}

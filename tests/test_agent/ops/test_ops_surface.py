@@ -116,8 +116,7 @@ class TestBuildOpsTools:
         execution = landed_run.executions[-1]
         assert execution.status is ExecutionStatus.SUCCEEDED
         artifact_names = {
-            a.name
-            for a in landed_run._execution_repository().artifacts.list_for_execution(execution.id)
+            a.name for a in landed_run._execution_repository().get(execution.id).artifacts
         }
         assert "plot.png" in artifact_names
         assert (Path(landed_run.run_dir) / "source" / "analysis.py").is_file()

@@ -7,17 +7,29 @@ import { TargetsService } from "@/api/generated/services/TargetsService";
 import { usePermissions } from "@/app/auth";
 import type { RunSummary } from "@/app/types";
 import {
-  Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
-  Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from "@/components/ui/select";
 import { toast } from "@/components/ui/toast";
 import { WorkbenchAction, WorkbenchIconAction } from "@/components/workbench";
@@ -27,11 +39,31 @@ export const POST_DISPATCH_TAB = "executions";
 type ExecutionMode = ExecutionAttemptCreateRequest.mode;
 
 const modes: Array<{ value: ExecutionMode; label: string; description: string }> = [
-  { value: ExecutionAttemptCreateRequest.mode.INITIAL, label: "Initial", description: "Create an independent first realization." },
-  { value: ExecutionAttemptCreateRequest.mode.RETRY, label: "Retry", description: "Retry the selected execution after an operational failure." },
-  { value: ExecutionAttemptCreateRequest.mode.RERUN, label: "Rerun", description: "Run the same scientific definition again." },
-  { value: ExecutionAttemptCreateRequest.mode.RESUME, label: "Resume", description: "Continue from an explicitly selected checkpoint artifact." },
-  { value: ExecutionAttemptCreateRequest.mode.REPRODUCE, label: "Reproduce", description: "Create a reproducibility verification execution." },
+  {
+    value: ExecutionAttemptCreateRequest.mode.INITIAL,
+    label: "Initial",
+    description: "Create an independent first realization.",
+  },
+  {
+    value: ExecutionAttemptCreateRequest.mode.RETRY,
+    label: "Retry",
+    description: "Retry the selected execution after an operational failure.",
+  },
+  {
+    value: ExecutionAttemptCreateRequest.mode.RERUN,
+    label: "Rerun",
+    description: "Run the same scientific definition again.",
+  },
+  {
+    value: ExecutionAttemptCreateRequest.mode.RESUME,
+    label: "Resume",
+    description: "Continue from an explicitly selected checkpoint artifact.",
+  },
+  {
+    value: ExecutionAttemptCreateRequest.mode.REPRODUCE,
+    label: "Reproduce",
+    description: "Create a reproducibility verification execution.",
+  },
 ];
 
 export interface RunToolbarProps {
@@ -44,7 +76,12 @@ export interface RunToolbarProps {
 }
 
 export function RunToolbar({
-  run, selectedExecutionId, onRefresh, onCancel, onDispatched, onOpenAgent,
+  run,
+  selectedExecutionId,
+  onRefresh,
+  onCancel,
+  onDispatched,
+  onOpenAgent,
 }: RunToolbarProps): JSX.Element {
   const { writeDeniedReason } = usePermissions();
   const selectedExecution = run.executionHistory.find(
@@ -52,9 +89,10 @@ export function RunToolbar({
   );
   const canCancelSelected =
     selectedExecution?.status === "queued" || selectedExecution?.status === "running";
-  const defaultMode = run.executionHistory.length === 0
-    ? ExecutionAttemptCreateRequest.mode.INITIAL
-    : ExecutionAttemptCreateRequest.mode.RERUN;
+  const defaultMode =
+    run.executionHistory.length === 0
+      ? ExecutionAttemptCreateRequest.mode.INITIAL
+      : ExecutionAttemptCreateRequest.mode.RERUN;
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<ExecutionMode>(defaultMode);
   const [target, setTarget] = useState("local");
@@ -73,11 +111,17 @@ export function RunToolbar({
         const names = response.targets.map((item) => item.name);
         setTarget(names.includes("local") ? "local" : (names[0] ?? "local"));
       })
-      .catch(() => { if (!cancelled) setTargets([]); });
-    return () => { cancelled = true; };
+      .catch(() => {
+        if (!cancelled) setTargets([]);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [open]);
 
-  useEffect(() => { if (open) setMode(defaultMode); }, [defaultMode, open]);
+  useEffect(() => {
+    if (open) setMode(defaultMode);
+  }, [defaultMode, open]);
 
   const requiresParent = mode !== ExecutionAttemptCreateRequest.mode.INITIAL;
   const invalid = requiresParent && !selectedExecutionId;
@@ -91,7 +135,8 @@ export function RunToolbar({
       const execution = await runsApi.createExecution(run.projectId, run.experimentId, run.id, {
         mode,
         basedOnExecutionId: requiresParent ? selectedExecutionId : null,
-        checkpointArtifactId: mode === ExecutionAttemptCreateRequest.mode.RESUME ? checkpointArtifactId || null : null,
+        checkpointArtifactId:
+          mode === ExecutionAttemptCreateRequest.mode.RESUME ? checkpointArtifactId || null : null,
         target,
         dispatch: true,
       });
@@ -108,28 +153,43 @@ export function RunToolbar({
 
   return (
     <div className="flex items-center gap-1">
-      <Dialog open={open} onOpenChange={(next) => { setOpen(next); if (!next) setError(null); }}>
+      <Dialog
+        open={open}
+        onOpenChange={(next) => {
+          setOpen(next);
+          if (!next) setError(null);
+        }}
+      >
         <DialogTrigger asChild>
           <WorkbenchIconAction label="Create execution" deniedReason={writeDeniedReason}>
-            {run.executionHistory.length === 0
-              ? <Play className="h-3.5 w-3.5" />
-              : <Plus className="h-3.5 w-3.5" />}
+            {run.executionHistory.length === 0 ? (
+              <Play className="h-3.5 w-3.5" />
+            ) : (
+              <Plus className="h-3.5 w-3.5" />
+            )}
           </WorkbenchIconAction>
         </DialogTrigger>
         <DialogContent className="sm:max-w-dialog-sm">
           <DialogHeader>
             <DialogTitle>Create execution</DialogTitle>
             <DialogDescription>
-              Run parameters and scientific inputs are immutable. This creates one new physical attempt.
+              Run parameters and scientific inputs are immutable. This creates one new physical
+              attempt.
             </DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-2">
             <div className="grid gap-2">
               <Label htmlFor="execution-mode">Mode</Label>
               <Select value={mode} onValueChange={(value) => setMode(value as ExecutionMode)}>
-                <SelectTrigger id="execution-mode"><SelectValue /></SelectTrigger>
+                <SelectTrigger id="execution-mode">
+                  <SelectValue />
+                </SelectTrigger>
                 <SelectContent>
-                  {modes.map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}
+                  {modes.map((item) => (
+                    <SelectItem key={item.value} value={item.value}>
+                      {item.label}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
               <p className="text-micro text-muted-foreground">{selectedMode?.description}</p>
@@ -145,26 +205,42 @@ export function RunToolbar({
             {mode === ExecutionAttemptCreateRequest.mode.RESUME && (
               <div className="grid gap-2">
                 <Label htmlFor="checkpoint-artifact">Checkpoint artifact ID</Label>
-                <Input id="checkpoint-artifact" value={checkpointArtifactId}
-                  onChange={(event) => setCheckpointArtifactId(event.target.value)} placeholder="Artifact UUID" />
+                <Input
+                  id="checkpoint-artifact"
+                  value={checkpointArtifactId}
+                  onChange={(event) => setCheckpointArtifactId(event.target.value)}
+                  placeholder="Artifact UUID"
+                />
               </div>
             )}
             <div className="grid gap-2">
               <Label htmlFor="execution-target">Target</Label>
               <Select value={target} onValueChange={setTarget}>
-                <SelectTrigger id="execution-target"><SelectValue /></SelectTrigger>
+                <SelectTrigger id="execution-target">
+                  <SelectValue />
+                </SelectTrigger>
                 <SelectContent>
                   {targets.length === 0 && <SelectItem value="local">local</SelectItem>}
-                  {targets.map((item) => <SelectItem key={item.name} value={item.name}>{item.name}</SelectItem>)}
+                  {targets.map((item) => (
+                    <SelectItem key={item.name} value={item.name}>
+                      {item.name}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
             {error && <p className="text-label text-destructive">{error}</p>}
           </div>
           <DialogFooter>
-            <WorkbenchAction kind="primary"
-              disabled={busy || invalid || (mode === ExecutionAttemptCreateRequest.mode.RESUME && !checkpointArtifactId)}
-              onClick={() => void createExecution()}>
+            <WorkbenchAction
+              kind="primary"
+              disabled={
+                busy ||
+                invalid ||
+                (mode === ExecutionAttemptCreateRequest.mode.RESUME && !checkpointArtifactId)
+              }
+              onClick={() => void createExecution()}
+            >
               {busy ? "Creating…" : "Create"}
             </WorkbenchAction>
           </DialogFooter>
@@ -172,16 +248,21 @@ export function RunToolbar({
       </Dialog>
 
       {canCancelSelected && (
-        <WorkbenchIconAction label="Cancel selected execution" deniedReason={writeDeniedReason}
+        <WorkbenchIconAction
+          label="Cancel selected execution"
+          deniedReason={writeDeniedReason}
           className="text-destructive hover:bg-destructive/10 hover:text-destructive"
-          onClick={() => void onCancel()}>
+          onClick={() => void onCancel()}
+        >
           <Ban className="h-3.5 w-3.5" />
         </WorkbenchIconAction>
       )}
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <WorkbenchIconAction label="More"><MoreHorizontal className="h-4 w-4" /></WorkbenchIconAction>
+          <WorkbenchIconAction label="More">
+            <MoreHorizontal className="h-4 w-4" />
+          </WorkbenchIconAction>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-44">
           <DropdownMenuItem asChild>

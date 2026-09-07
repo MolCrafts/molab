@@ -13,7 +13,6 @@ from pathlib import Path
 
 import pytest
 
-from molexp.ids import generate_uuid7
 from molexp.workspace import FolderMoveCollisionError, Workspace
 from molexp.workspace.curation import (
     delete_folder,
@@ -41,15 +40,15 @@ class TestMoveRun:
         assert not old_dir.exists()
 
     def test_collision_propagates(self, tmp_path: Path) -> None:
-        # The target already holds a run at the same id; the underlying move_to
-        # must refuse rather than clobber — the typed collision error propagates.
+        # A run's directory is its parameters, so the target already holds a
+        # directory of that name; move_to must refuse rather than clobber and
+        # the typed collision error propagates.
         ws = Workspace(root=tmp_path / "lab", name="Collision Lab")
         proj = ws.add_project("proj")
         source_exp = proj.add_experiment("source-exp", params={})
         target_exp = proj.add_experiment("target-exp", params={})
-        shared_id = generate_uuid7()
-        run = source_exp.add_run(params={"seed": 0}, id=shared_id)
-        target_exp.add_run(params={"seed": 1}, id=shared_id)
+        run = source_exp.add_run(params={"seed": 0})
+        target_exp.add_run(params={"seed": 0})
 
         with pytest.raises(FolderMoveCollisionError):
             move_run(run, target_exp)

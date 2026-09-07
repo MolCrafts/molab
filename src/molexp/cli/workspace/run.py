@@ -24,7 +24,6 @@ from molexp.workflow import default_binding_registry
 from molexp.workspace.run import RunStatus
 from molexp.workspace.source_snapshot import snapshot_sources
 from molexp.workspace.target import LocalTarget, RemoteTarget
-from molexp.workspace.utils import run_id_from_dir_name
 
 if TYPE_CHECKING:
     from molexp.workflow.protocols import RunContextLike
@@ -420,8 +419,13 @@ async def _execute_on_run_host(
     """Run a compiled workflow through the ``run`` plugin profile."""
     from molexp.harness.host import Keys, compose_run
     from molexp.harness.host.plugins.workflow import WorkflowHandle
+    from molexp.plugins.extras import default_science_extras
 
-    host = compose_run(run_id=run.id, run_dir=Path(run.run_dir))
+    host = compose_run(
+        run_id=run.id,
+        run_dir=Path(run.run_dir),
+        extra=default_science_extras(),
+    )
     try:
         handle = host.ctx.require(Keys.WORKFLOW)
         if not isinstance(handle, WorkflowHandle):
@@ -532,11 +536,7 @@ def execute(
     # to dict[str, str] so the ids below type as ``str`` for Path()/get_project/…
     # (runtime shape is unchanged; this is a typing-only narrowing).
     ctx_meta = cast("dict[str, str]", meta.get("context") or {})
-    run_id = (
-        cast("str | None", meta.get("id"))
-        or ctx_meta.get("run_id")
-        or run_id_from_dir_name(run_dir.name)
-    )
+    run_id = cast("str | None", meta.get("id")) or ctx_meta.get("run_id") or run_dir.name
     # project/experiment ids are not stored in run.json; derive them from the
     # canonical layout …/projects/<P>/experiments/<E>/runs/run-<id>. The run
     # context only carries them once a run has executed, so a fresh run relies on

@@ -4,7 +4,7 @@ Tier-2 collaborator of :class:`~molexp.workspace.run.RunContext` (see the
 ``workspace-slim-03-runcontext`` decomposition). Owns the in-memory
 :class:`~molexp.workspace.context.Context` and its round-trip to the
 ``context`` section of ``run.json`` — task results and the workflow
-snapshot. Independent of :class:`ExecutionStore`; each maps to a distinct
+snapshot. Independent of :class:`ExecutionRepository`; each maps to a distinct
 on-disk substructure.
 """
 

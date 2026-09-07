@@ -32,14 +32,14 @@ describe("workbench layout contract", () => {
   });
 
   it("keeps Dashboard exploratory and Settings rail-only", () => {
-    const sections = readWebSource("app/navigation/sections.tsx");
+    const coreNav = readWebSource("plugins/core/navigation.tsx");
     const dashboard = readWebSource("app/dashboard/DashboardPage.tsx");
 
-    expect(sections).toContain("explorer: DashboardExplorer");
-    expect(sections).toMatch(/id: "dashboard"[\s\S]*?shellMode: "explorer"/);
-    expect(sections).toMatch(/id: "settings"[\s\S]*?shellMode: "rail-only"/);
+    expect(coreNav).toContain("explorer: DashboardExplorer");
+    expect(coreNav).toMatch(/id: "dashboard"[\s\S]*?shellMode: "explorer"/);
+    expect(coreNav).toMatch(/id: "settings"[\s\S]*?shellMode: "rail-only"/);
     for (const panel of [
-      "Run summary",
+      "Execution summary",
       "Status mix",
       "Run activity",
       "Backends & failures",

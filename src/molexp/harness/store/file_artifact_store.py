@@ -30,8 +30,7 @@ from molexp.harness.errors import ArtifactNotFoundError
 from molexp.harness.schemas import ArtifactKind, PlanArtifactRef
 from molexp.ids import generate_uuid7
 from molexp.workspace import atomic_write_json, atomic_write_text
-from molexp.workspace.artifact_repository import ArtifactRepository
-from molexp.workspace.content_store import ContentStore
+from molexp.workspace.execution_dirs import WORK
 from molexp.workspace.utils import compute_content_hash
 
 if TYPE_CHECKING:
@@ -64,30 +63,30 @@ class FileArtifactStore:
         self._context: ExecutionContext | None = None
         self._run: Run | None = None
         self._execution_id: str | None = None
-        self._repository: ArtifactRepository | None = None
-        self._content: ContentStore | None = None
+        self._workspace_root: str | None = None
+        self._fs = None
 
     @classmethod
     def for_execution(cls, context: ExecutionContext) -> FileArtifactStore:
         """Create the writable adapter for one entered Execution."""
-        store = cls(context.workdir / "harness")
+        store = cls(context.get_dir("work", "harness"))
         workspace = context.run.experiment.project.workspace
         store._context = context
         store._run = context.run
         store._execution_id = context.id
-        store._repository = ArtifactRepository(workspace.root, fs=workspace.fs)
-        store._content = ContentStore(workspace.root, fs=workspace.fs)
+        store._workspace_root = str(workspace.root)
+        store._fs = workspace.fs
         return store
 
     @classmethod
     def open_execution(cls, run: Run, execution_id: str) -> FileArtifactStore:
         """Open the read-only Artifact projection for an explicit Execution."""
-        store = cls(Path(run.run_dir) / "executions" / execution_id / "work" / "harness")
+        store = cls(Path(run.run_dir) / "executions" / execution_id / WORK.name / "harness")
         workspace = run.experiment.project.workspace
         store._run = run
         store._execution_id = execution_id
-        store._repository = ArtifactRepository(workspace.root, fs=workspace.fs)
-        store._content = ContentStore(workspace.root, fs=workspace.fs)
+        store._workspace_root = str(workspace.root)
+        store._fs = workspace.fs
         return store
 
     @property
@@ -152,7 +151,7 @@ class FileArtifactStore:
         source = Path(path)
         if self._context is not None:
             destination = (
-                self._context.workdir / "harness" / kind / (f"{generate_uuid7()}-{source.name}")
+                self._context.get_dir("work", "harness", kind) / f"{generate_uuid7()}-{source.name}"
             )
             destination.parent.mkdir(parents=True, exist_ok=True)
             if source.is_dir():
@@ -199,7 +198,7 @@ class FileArtifactStore:
         parent_ids: list[str],
     ) -> PlanArtifactRef:
         assert self._context is not None
-        path = self._context.workdir / "harness" / kind / name
+        path = self._context.get_dir("work", "harness", kind) / name
         path.parent.mkdir(parents=True, exist_ok=True)
         if isinstance(value, (bytes, bytearray)):
             path.write_bytes(bytes(value))
@@ -235,18 +234,14 @@ class FileArtifactStore:
         return self._project(artifact)
 
     def get(self, artifact_id: str) -> bytes:
-        if self._repository is not None and self._content is not None:
-            try:
-                artifact = self._repository.get(artifact_id)
-            except KeyError as exc:
-                raise ArtifactNotFoundError(str(exc)) from exc
-            self._assert_execution(artifact)
-            path = self._content.payload_path(artifact.content)
-            if self._content.fs.is_dir(path):
+        if self._fs is not None and self._workspace_root is not None:
+            artifact = self._lookup(artifact_id)
+            path = self._fs.join(self._workspace_root, artifact.path)
+            if self._fs.is_dir(path):
                 raise IsADirectoryError(path)
-            if not self._content.fs.is_file(path):
+            if not self._fs.is_file(path):
                 raise ArtifactNotFoundError(f"artifact {artifact_id!r} content is missing")
-            return self._content.fs.read_bytes(path)
+            return self._fs.read_bytes(path)
         ref = self.get_ref(artifact_id)
         path = Path(ref.uri.removeprefix("file://"))
         if not path.exists():
@@ -254,25 +249,20 @@ class FileArtifactStore:
         return path.read_bytes()
 
     def get_ref(self, artifact_id: str) -> PlanArtifactRef:
-        if self._repository is not None:
-            try:
-                artifact = self._repository.get(artifact_id)
-            except KeyError as exc:
-                raise ArtifactNotFoundError(str(exc)) from exc
-            self._assert_execution(artifact)
-            return self._project(artifact)
+        if self._run is not None and self._execution_id is not None:
+            return self._project(self._lookup(artifact_id))
         path = self._refs_dir / f"{artifact_id}.json"
         if not path.exists():
             raise ArtifactNotFoundError(f"artifact {artifact_id!r} not found")
         return PlanArtifactRef.model_validate_json(path.read_text(encoding="utf-8"))
 
     def list_by_kind(self, kind: ArtifactKind) -> list[PlanArtifactRef]:
-        if self._repository is not None and self._execution_id is not None:
+        if self._run is not None and self._execution_id is not None:
             return [ref for ref in self.list_refs() if ref.kind == kind]
         return [self.get_ref(aid) for aid in self._read_index(kind)]
 
     def latest_by_kind(self, kind: ArtifactKind) -> PlanArtifactRef | None:
-        if self._repository is not None and self._execution_id is not None:
+        if self._run is not None and self._execution_id is not None:
             refs = self.list_by_kind(kind)
             if not refs:
                 return None
@@ -283,10 +273,10 @@ class FileArtifactStore:
         return self.get_ref(index[-1])
 
     def list_refs(self) -> list[PlanArtifactRef]:
-        if self._repository is not None and self._execution_id is not None:
+        if self._run is not None and self._execution_id is not None:
             return [
                 self._project(item)
-                for item in self._repository.list_for_execution(self._execution_id)
+                for item in self._execution_artifacts()
                 if item.semantic_type is not None
             ]
         if not self._refs_dir.exists():
@@ -299,7 +289,7 @@ class FileArtifactStore:
 
     def merge_parent_ids(self, artifact_id: str, parent_ids: list[str]) -> PlanArtifactRef:
         """Union *parent_ids* into a scratch ref; execution provenance is immutable."""
-        if self._repository is not None:
+        if self._run is not None:
             ref = self.get_ref(artifact_id)
             missing = [value for value in parent_ids if value not in ref.parent_ids]
             if missing:
@@ -323,26 +313,32 @@ class FileArtifactStore:
         )
         return updated
 
+    def _execution_artifacts(self) -> list[Artifact]:
+        """Products of this attempt, read from its own ``execution.json``."""
+        if self._run is None or self._execution_id is None:
+            return []
+        for execution in self._run.executions:
+            if execution.id == self._execution_id:
+                return list(execution.artifacts)
+        return []
+
+    def _lookup(self, artifact_id: str) -> Artifact:
+        for artifact in self._execution_artifacts():
+            if artifact.id == artifact_id:
+                return artifact
+        raise ArtifactNotFoundError(f"artifact {artifact_id!r} not found")
+
     def _project(self, artifact: Artifact) -> PlanArtifactRef:
-        assert self._content is not None
         return PlanArtifactRef(
             id=artifact.id,
             kind=artifact.semantic_type or "artifact",
-            uri=f"molexp-content://{artifact.content.digest}",
+            uri=f"molexp://{artifact.path}",
             sha256=artifact.content.digest.removeprefix("sha256:"),
             created_at=artifact.created_at,
             created_by=artifact.created_by.name or artifact.created_by.id,
             parent_ids=list(artifact.input_entity_ids),
             metadata=dict(artifact.metadata),
         )
-
-    def _assert_execution(self, artifact: Artifact) -> None:
-        if self._execution_id is not None and artifact.execution_id != self._execution_id:
-            raise ArtifactNotFoundError(
-                f"artifact {artifact.id!r} does not belong to Execution {self._execution_id!r}"
-            )
-
-    # ── scratch (content-addressed) internals ───────────────────────────────
 
     def _put_via_staging(
         self,

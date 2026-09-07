@@ -70,6 +70,7 @@ describe("workspace bootstrap slice plan", () => {
     const project = {
       id: "project-1",
       name: "Project 1",
+      path: "projects/project-1",
       status: "active" as const,
       summary: "",
       updatedAt: "2026-08-31T00:00:00Z",

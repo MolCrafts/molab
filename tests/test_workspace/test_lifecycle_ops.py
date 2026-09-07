@@ -26,8 +26,8 @@ import pytest
 from molexp.workspace import Workspace
 from molexp.workspace.domain import ExecutionMode, ExecutionStatus
 from molexp.workspace.execution_repository import ExecutionRepository
+from molexp.workspace.history import AgentRef
 from molexp.workspace.lifecycle_ops import cancel_run
-from molexp.workspace.provenance import AgentRef
 from molexp.workspace.run import Run
 
 _TEST_AGENT = AgentRef(id="test", type="person", name="test")

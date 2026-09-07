@@ -1,5 +1,8 @@
 import { FileQuestion, PlayCircle } from "lucide-react";
 import { useMemo } from "react";
+import { useCompareSet } from "@/app/compare";
+import { activeWorkspace, entryFromRunSummary } from "@/app/compare/entries";
+import { refKey } from "@/app/compare/types";
 import { EmptyState, EntityPage } from "@/app/components/entity";
 import { LazySurface } from "@/app/layout/LazySurface";
 import { RunExecutionsPanel } from "@/app/renderers/RunExecutionsPanel";
@@ -8,28 +11,69 @@ import { type RunRendererProps, useRunViewer } from "@/app/renderers/useRunViewe
 import { RunToolbar } from "@/app/runs/RunToolbar";
 import { useDiscoveredFileTypesForRun } from "@/app/state/useDiscoveredFileTypes";
 import type { RendererProps } from "@/app/types";
+import { WorkbenchAction } from "@/components/workbench";
 import { pluginTabLabel } from "@/lib/plugin-tab-label";
 import { usePluginTabBadgeCounts } from "@/lib/use-plugin-tab-badge-counts";
 
 export const RunViewer = (props: RunRendererProps): JSX.Element => {
   const {
-    run, workflow, selectedRunId, activeTab, setActiveTab, outputs, logsError,
-    selectedExecutionId, setSelectedExecutionId, attemptCount, parameterEntries,
-    runTabContributions, inspectTask, setSelection, handleCancelRun, confirmDialog, alertDialog,
+    run,
+    workflow,
+    selectedRunId,
+    activeTab,
+    setActiveTab,
+    outputs,
+    logsError,
+    selectedExecutionId,
+    setSelectedExecutionId,
+    attemptCount,
+    parameterEntries,
+    runTabContributions,
+    inspectTask,
+    setSelection,
+    handleCancelRun,
+    confirmDialog,
+    alertDialog,
   } = useRunViewer(props);
 
+  const compare = useCompareSet();
+  const project = props.snapshot.projects.find((p) => p.id === run?.projectId);
+  const experiment = props.snapshot.experiments.find((e) => e.id === run?.experimentId);
+  const compareWorkspace = activeWorkspace(props.snapshot.workspaces);
+
+  // Adding from the run page pins the attempt on screen rather than "latest":
+  // the user is looking at a specific execution and means that one.
+  const compareEntry = useMemo(() => {
+    if (!run || !compareWorkspace) return null;
+    return {
+      ...entryFromRunSummary(run, {
+        workspaceKey: compareWorkspace.key,
+        workspaceLabel: compareWorkspace.label,
+        projectName: project?.name ?? run.projectId,
+        experimentName: experiment?.name ?? run.experimentId,
+      }),
+      executionId: selectedExecutionId,
+    };
+  }, [run, compareWorkspace, project?.name, experiment?.name, selectedExecutionId]);
+
+  const inCompareSet = compareEntry ? compare.keys.has(refKey(compareEntry.ref)) : false;
+
   const runCoords = useMemo(
-    () => run && selectedExecutionId
-      ? {
-          projectId: run.projectId,
-          experimentId: run.experimentId,
-          runId: run.id,
-          executionId: selectedExecutionId,
-        }
-      : null,
+    () =>
+      run && selectedExecutionId
+        ? {
+            projectId: run.projectId,
+            experimentId: run.experimentId,
+            runId: run.id,
+            executionId: selectedExecutionId,
+          }
+        : null,
     [run, selectedExecutionId],
   );
-  const { discovered: discoveredPlugins } = useDiscoveredFileTypesForRun(runCoords, "run");
+  const { discovered: discoveredPlugins, executionDir } = useDiscoveredFileTypesForRun(
+    runCoords,
+    "run",
+  );
   const tabBadgeCounts = usePluginTabBadgeCounts(discoveredPlugins, runCoords);
 
   if (!run) {
@@ -44,6 +88,7 @@ export const RunViewer = (props: RunRendererProps): JSX.Element => {
     ...(props as RendererProps),
     executionId: selectedExecutionId,
     executionOutputs: outputs,
+    executionDir,
   };
   const tabs = [
     {
@@ -64,9 +109,16 @@ export const RunViewer = (props: RunRendererProps): JSX.Element => {
           outputs={outputs}
           logsError={logsError}
           onPromoted={props.onRefresh}
-          onOpenWorkflow={workflow ? () => setSelection({
-            objectType: "workflow", objectId: workflow.id, workflowId: workflow.id,
-          }) : undefined}
+          onOpenWorkflow={
+            workflow
+              ? () =>
+                  setSelection({
+                    objectType: "workflow",
+                    objectId: workflow.id,
+                    workflowId: workflow.id,
+                  })
+              : undefined
+          }
         />
       ),
     },
@@ -75,28 +127,38 @@ export const RunViewer = (props: RunRendererProps): JSX.Element => {
       return {
         value: tab.value,
         label: tab.label,
-        content: activeTab === tab.value ? (
-          <LazySurface key={`${selectedRunId}:${selectedExecutionId ?? "none"}`}
-            resetKey={`run-tab:${tab.id}:${selectedRunId}:${selectedExecutionId ?? "none"}`}
-            loadingTitle={`Loading ${tab.label}…`}>
-            <TabComponent {...pluginRendererProps} />
-          </LazySurface>
-        ) : null,
+        content:
+          activeTab === tab.value ? (
+            <LazySurface
+              key={`${selectedRunId}:${selectedExecutionId ?? "none"}`}
+              resetKey={`run-tab:${tab.id}:${selectedRunId}:${selectedExecutionId ?? "none"}`}
+              loadingTitle={`Loading ${tab.label}…`}
+            >
+              <TabComponent {...pluginRendererProps} />
+            </LazySurface>
+          ) : null,
       };
     }),
     ...discoveredPlugins.map(({ contribution, files }) => {
       const PluginComponent = contribution.Component;
       return {
         value: contribution.value,
-        label: pluginTabLabel(contribution.label, files.length,
-          Boolean(contribution.resolveTabBadgeCount), tabBadgeCounts[contribution.value]),
-        content: activeTab === contribution.value ? (
-          <LazySurface key={`${selectedRunId}:${selectedExecutionId}`}
-            resetKey={`run-file-tab:${contribution.id}:${selectedRunId}:${selectedExecutionId}`}
-            loadingTitle={`Loading ${contribution.label}…`}>
-            <PluginComponent {...pluginRendererProps} discoveredFiles={files} />
-          </LazySurface>
-        ) : null,
+        label: pluginTabLabel(
+          contribution.label,
+          files.length,
+          Boolean(contribution.resolveTabBadgeCount),
+          tabBadgeCounts[contribution.value],
+        ),
+        content:
+          activeTab === contribution.value ? (
+            <LazySurface
+              key={`${selectedRunId}:${selectedExecutionId}`}
+              resetKey={`run-file-tab:${contribution.id}:${selectedRunId}:${selectedExecutionId}`}
+              loadingTitle={`Loading ${contribution.label}…`}
+            >
+              <PluginComponent {...pluginRendererProps} discoveredFiles={files} />
+            </LazySurface>
+          ) : null,
       };
     }),
   ];
@@ -107,20 +169,43 @@ export const RunViewer = (props: RunRendererProps): JSX.Element => {
         icon={PlayCircle}
         title={run.name}
         actions={
-          <RunToolbar
-            run={run}
-            selectedExecutionId={selectedExecutionId}
-            onRefresh={props.onRefresh}
-            onCancel={handleCancelRun}
-            onDispatched={(executionId) => {
-              setSelectedExecutionId(executionId);
-              setActiveTab("executions");
-            }}
-            onOpenAgent={() => setSelection({
-              objectType: "agent", objectId: "new",
-              scope: { projectId: run.projectId, experimentId: run.experimentId, runId: run.id },
-            })}
-          />
+          <>
+            {compareEntry && (
+              <WorkbenchAction
+                kind={inCompareSet ? "ghost" : "secondary"}
+                size="compact"
+                type="button"
+                onClick={() =>
+                  inCompareSet
+                    ? compare.remove(refKey(compareEntry.ref))
+                    : compare.add(compareEntry)
+                }
+              >
+                {inCompareSet ? "In comparison" : "Add to comparison"}
+              </WorkbenchAction>
+            )}
+            <RunToolbar
+              run={run}
+              selectedExecutionId={selectedExecutionId}
+              onRefresh={props.onRefresh}
+              onCancel={handleCancelRun}
+              onDispatched={(executionId) => {
+                setSelectedExecutionId(executionId);
+                setActiveTab("executions");
+              }}
+              onOpenAgent={() =>
+                setSelection({
+                  objectType: "agent",
+                  objectId: "new",
+                  scope: {
+                    projectId: run.projectId,
+                    experimentId: run.experimentId,
+                    runId: run.id,
+                  },
+                })
+              }
+            />
+          </>
         }
         activeTab={activeTab}
         onActiveTabChange={setActiveTab}

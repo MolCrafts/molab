@@ -1,10 +1,9 @@
 """Private unified asset enumeration for the curation toolset.
 
-Schema-v2 keeps two disjoint asset systems: imported ``DataAsset`` inputs
-live in per-scope ``assets.json`` / ``assets/<id>/asset.json`` (read via
-``assets.scan``), while run-emitted products are provenance-indexed
-``Artifact`` records (``index/entities/artifact/*.json``). Curation composes
-both without duplicating either scanner.
+Two disjoint asset systems: imported ``DataAsset`` inputs live in per-scope
+``assets.json`` / ``assets/<id>/asset.json`` (read via ``assets.scan``), while
+run-emitted products are the ``Artifact`` records inside each Execution.
+Curation composes both without duplicating either scanner.
 """
 
 from __future__ import annotations
@@ -12,9 +11,9 @@ from __future__ import annotations
 from collections.abc import Iterator
 from typing import TYPE_CHECKING
 
+from ..artifact_repository import scan_artifacts
 from ..assets.base import AssetScope
 from ..domain import Artifact
-from ..index_store import JsonIndexStore
 
 if TYPE_CHECKING:
     from ..workspace import Workspace
@@ -38,10 +37,8 @@ def run_asset_scopes(workspace: Workspace) -> dict[str, AssetScope]:
 
 
 def iter_emitted_artifacts(workspace: Workspace) -> Iterator[Artifact]:
-    """Yield every provenance-indexed ``Artifact`` emitted by any Execution."""
-    index = JsonIndexStore(workspace.root, fs=workspace.fs)
-    for raw in index.list_entities("artifact"):
-        yield Artifact.model_validate(raw)
+    """Yield every ``Artifact`` emitted by any Execution in the workspace."""
+    yield from scan_artifacts(workspace)
 
 
 def artifact_kind(artifact: Artifact) -> str:

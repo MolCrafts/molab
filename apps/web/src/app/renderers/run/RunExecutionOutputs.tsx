@@ -34,10 +34,7 @@ const artifactUrl = (
 const formatSize = (size: number | null | undefined): string | undefined =>
   size == null ? undefined : `${size} B`;
 
-const buildFileTree = (
-  rows: RunFileNode[],
-  onSelect: (path: string) => void,
-): TreeNode[] => {
+const buildFileTree = (rows: RunFileNode[], onSelect: (path: string) => void): TreeNode[] => {
   const roots: TreeNode[] = [];
   const dirs = new Map<string, TreeNode>();
   for (const row of rows) {
@@ -144,7 +141,9 @@ export const RunExecutionOutputs = ({
   const artifacts = outputs.artifacts ?? [];
   const files = outputs.unregistered ?? [];
   const selectedArtifact =
-    selected?.kind === "artifact" ? (artifacts.find((item) => item.id === selected.id) ?? null) : null;
+    selected?.kind === "artifact"
+      ? (artifacts.find((item) => item.id === selected.id) ?? null)
+      : null;
 
   const artifactNodes: TreeNode[] = artifacts.map((item) => ({
     id: `artifact:${item.id}`,

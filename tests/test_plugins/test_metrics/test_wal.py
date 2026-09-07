@@ -1,7 +1,7 @@
 """``molexp.plugins.metrics.wal`` — JSONL-only host metrics under a run.
 
 ``MetricsWriter`` (``ctx.metrics``) appends to
-``executions/<id>/artifacts/metrics.mlp.jsonl``. ``flush()`` does not densify.
+``executions/eNN/out/metrics.mlp.jsonl``. ``flush()`` does not densify.
 ``read_run_metrics`` reads JSONL. Metrics are run-local — never workspace
 assets, never ``metrics.mlp.zarr`` / ``metrics.mlp.index.json``.
 """
@@ -17,6 +17,7 @@ from molexp.plugins.metrics import (
     MetricsWriter,
     read_run_metrics,
 )
+from molexp.workspace.execution_dirs import ARTIFACTS
 
 
 def _exec_dir(run) -> Path:
@@ -25,19 +26,15 @@ def _exec_dir(run) -> Path:
     return Path(run.run_dir) / "executions" / executions[-1].id
 
 
-def _artifacts_wal(root: Path) -> Path:
-    return root / "artifacts" / "metrics.mlp.jsonl"
-
-
-def _work_wal(root: Path) -> Path:
-    return root / "work" / "metrics.mlp.jsonl"
+def _products_wal(root: Path) -> Path:
+    return root / ARTIFACTS.name / "metrics.mlp.jsonl"
 
 
 def _assert_no_zarr_or_index(root: Path) -> None:
     assert not (root / "metrics.mlp.zarr").exists()
     assert not (root / "metrics.mlp.index.json").exists()
-    assert not (root / "artifacts" / "metrics.mlp.zarr").exists()
-    assert not (root / "artifacts" / "metrics.mlp.index.json").exists()
+    assert not (root / ARTIFACTS.name / "metrics.mlp.zarr").exists()
+    assert not (root / ARTIFACTS.name / "metrics.mlp.index.json").exists()
 
 
 class TestMetricsWriter:
@@ -46,7 +43,10 @@ class TestMetricsWriter:
             ctx.metrics.scalar("train/loss", 0.25, step=1)
 
         root = _exec_dir(run)
-        metrics_file = _work_wal(root)
+        # One location for both writers. They used to disagree — the
+        # execution context wrote into scratch while the run context wrote
+        # into products, so a WAL could land where nothing looked.
+        metrics_file = _products_wal(root)
 
         assert metrics_file.is_file()
         assert not (root / "metrics.mlp.jsonl").exists()
@@ -108,7 +108,7 @@ class TestReadRunMetrics:
     def test_unparseable_lines_are_skipped_and_counted(self, tmp_path: Path):
         writer = MetricsWriter(tmp_path)
         writer.scalar("train/loss", 0.3, step=1)
-        metrics_file = _artifacts_wal(tmp_path)
+        metrics_file = _products_wal(tmp_path)
         assert metrics_file.is_file()
         with metrics_file.open("a", encoding="utf-8") as fh:
             fh.write("{bad json\n")
@@ -129,7 +129,7 @@ class TestLogMany:
             {"t": "scalar", "k": "train/loss", "s": i, "v": float(i)} for i in range(5)
         )
         assert written == 5
-        wal = _artifacts_wal(tmp_path)
+        wal = _products_wal(tmp_path)
         assert wal.is_file()
         assert not (tmp_path / "metrics.mlp.jsonl").exists()
         lines = wal.read_text().splitlines()
@@ -140,7 +140,7 @@ class TestLogMany:
     def test_applies_batch_tags_to_every_record(self, tmp_path: Path) -> None:
         writer = MetricsWriter(tmp_path)
         writer.log_many([{"t": "scalar", "k": "a", "v": 1.0}], tags={"src": "bulk"})
-        record = json.loads(_artifacts_wal(tmp_path).read_text().strip())
+        record = json.loads(_products_wal(tmp_path).read_text().strip())
         assert record["tags"] == {"src": "bulk"}
 
     def test_a_stream_that_raises_first_creates_nothing(self, tmp_path: Path) -> None:
@@ -153,7 +153,7 @@ class TestLogMany:
         writer = MetricsWriter(tmp_path)
         with pytest.raises(RuntimeError):
             writer.log_many(exploding())
-        assert not _artifacts_wal(tmp_path).exists()
+        assert not _products_wal(tmp_path).exists()
         assert not (tmp_path / "metrics.mlp.jsonl").exists()
 
     def test_validates_each_record(self, tmp_path: Path) -> None:

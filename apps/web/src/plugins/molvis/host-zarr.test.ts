@@ -2,12 +2,7 @@ import { describe, expect, it } from "@rstest/core";
 
 import type { WorkspaceDirent, WorkspaceFs } from "@/lib/workspace-fs";
 
-import {
-  collectZarrStore,
-  runWorkspaceRelPath,
-  scopedZarrSource,
-  workspaceZarrSource,
-} from "./host-zarr";
+import { collectZarrStore, scopedZarrSource, workspaceZarrSource } from "./host-zarr";
 
 const dirent = (
   path: string,
@@ -21,14 +16,6 @@ const dirent = (
   mtime: null,
   children,
   childrenLoaded: true,
-});
-
-describe("runWorkspaceRelPath", () => {
-  it("follows the run- prefix layout law", () => {
-    expect(runWorkspaceRelPath("water", "md", "abcd1234")).toBe(
-      "projects/water/experiments/md/runs/run-abcd1234",
-    );
-  });
 });
 
 describe("workspaceZarrSource", () => {
@@ -100,5 +87,46 @@ describe("workspaceZarrSource", () => {
     };
     const files = await collectZarrStore(source);
     expect(files["zarr.json"]).toBe(btoa(String.fromCharCode(1, 2, 3)));
+  });
+});
+
+describe("what the store is rooted at", () => {
+  /**
+   * A discovered ``relPath`` is relative to the *attempt*, not the run.
+   *
+   * Rooting the source at the run directory drops the ``executions/<id>/``
+   * segment, so every read resolves to a directory that does not exist and
+   * molvis fails on open. The server reports the attempt's directory as
+   * ``RunFilesResponse.runDir``; that is what must be passed here.
+   */
+  it("reads under the attempt, not the run", async () => {
+    const asked: string[] = [];
+    const fs: WorkspaceFs = {
+      root: null,
+      listdir: async (path) => {
+        asked.push(path);
+        return [];
+      },
+      readText: async () => {
+        throw new Error("unused");
+      },
+      readBlob: async (path) => {
+        asked.push(path);
+        return new Blob([new ArrayBuffer(0)]);
+      },
+    };
+    const attempt = "projects/p/experiments/e/runs/dp=5_seed=42/executions/e02";
+    const source = scopedZarrSource(workspaceZarrSource(attempt, fs), "out/grow/final.mrec");
+
+    await source.list("");
+    await source.read("zarr.json");
+
+    expect(asked).toEqual([
+      `${attempt}/out/grow/final.mrec`,
+      `${attempt}/out/grow/final.mrec/zarr.json`,
+    ]);
+    for (const path of asked) {
+      expect(path).toContain("/executions/e02/");
+    }
   });
 });

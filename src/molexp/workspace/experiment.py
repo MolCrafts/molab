@@ -49,7 +49,7 @@ from .base import (
     _reconstruct,
     _save_metadata,
 )
-from .errors import ExperimentExistsError, ExperimentNotFoundError
+from .errors import ExperimentExistsError, ExperimentNotFoundError, RunNotFoundError
 from .folder import (
     WORKSPACE_EXPERIMENT_KIND,
     WORKSPACE_RUN_KIND,
@@ -59,6 +59,7 @@ from .folder import (
 from .fs import PathArg
 from .knowledge import HasKnowledge
 from .models import ExperimentMetadata, FolderMetadata, RunStatus
+from .naming import disambiguate, entity_slug, run_slug
 from .run import Run
 
 # Default replica seeds — deterministic, well-separated
@@ -190,7 +191,7 @@ class Experiment(Folder, HasKnowledge):
         )
 
         self._parent = resolved_parent
-        self._name = meta.id
+        self._name = entity_slug(meta.name, fallback=meta.id)
         self._kind = kind
         self._root_path = None
         # Disk is resolved via the parent chain (:meth:`Folder._disk`).
@@ -244,7 +245,9 @@ class Experiment(Folder, HasKnowledge):
             created_at=meta.created_at,
             updated_at=meta.created_at,
         )
-        attrs = cls.base_from_disk_attrs(parent, folder_meta) | {
+        attrs = cls.base_from_disk_attrs(
+            parent, folder_meta, slug=parent._disk().basename(child_dir)
+        ) | {
             "_entity_metadata": meta,
             "_data_assets": None,
         }
@@ -314,7 +317,7 @@ class Experiment(Folder, HasKnowledge):
 
     @property
     def experiment_dir(self) -> Path:
-        return Path(self._disk().join(self.project.project_dir, "experiments", self.id))
+        return Path(self._disk().join(self.project.project_dir, "experiments", self._name))
 
     @property
     def scope(self) -> AssetScope:
@@ -350,7 +353,9 @@ class Experiment(Folder, HasKnowledge):
         from .scientific_repository import ScientificRepository
 
         ScientificRepository(self.workspace.root, fs=self._disk()).record_experiment(
-            self.metadata.model_dump(mode="json"), project_id=self.project.id
+            self.metadata.model_dump(mode="json"),
+            project_id=self.project.id,
+            path=self.experiment_dir,
         )
         self.save()
 
@@ -428,7 +433,8 @@ class Experiment(Folder, HasKnowledge):
     ) -> Run:
         """Add a new logical Run under this Experiment.
 
-        ``params`` may be positional; ``id=`` sets the run slug. Re-adding the
+        ``params`` may be positional. The run's directory is its parameters
+        (``dp=5_seed=42``); ``id=`` overrides only the UUIDv7 identity. Re-adding the
         ``definition_hash`` supports comparison and duplicate detection, but
         never substitutes for identity: every call without an explicit id gets
         a fresh UUIDv7 Run.
@@ -444,9 +450,18 @@ class Experiment(Folder, HasKnowledge):
         resolved_id = id if id is not None else generate_uuid7()
         resolved_target = target if target is not None else self._entity_metadata.default_target
         _validate_target_registered(self.workspace, resolved_target)
+        siblings = self.list_runs()
+        if id is not None:
+            for sibling in siblings:
+                if sibling.id == id:
+                    return self.get_folder(sibling._name, cls=Run)
+        slug = disambiguate(
+            run_slug(params, fallback=definition_hash),
+            {run._name for run in siblings},
+        )
         child = self._construct_child(
             Run,
-            resolved_id,
+            slug,
             id=resolved_id,
             parameters=params,
             workflow_snapshot=workflow_snapshot,
@@ -637,8 +652,14 @@ class Experiment(Folder, HasKnowledge):
         return self.runset()
 
     def get_run(self, run_id: str) -> Run:
-        """Get an existing run by id (must exist)."""
-        return self.get_folder(run_id, cls=Run)
+        """Get a run by its directory name (its parameters) or its UUIDv7 id."""
+        try:
+            return self.get_folder(run_id, cls=Run)
+        except RunNotFoundError:
+            for run in self.list_runs():
+                if run.id == run_id:
+                    return run
+            raise
 
     def set_run(
         self,

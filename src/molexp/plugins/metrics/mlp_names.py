@@ -9,12 +9,12 @@ no nested ``metrics/`` directory, no free-form heuristics.
 
 Layout under a run (or any host root)::
 
-    artifacts/<stem>.mlp.jsonl   # live JSONL WAL — the metrics persist surface
+    out/<stem>.mlp.jsonl   # live JSONL WAL — the metrics persist surface
     <stem>.mlp.zarr/             # leftover dense store (ignored; never a surface)
     <stem>.mlp.index.json        # leftover host cache (never activates plugins)
     <name>.mlp.vl.json           # Vega-Lite plot artifact → MolPlot tab
 
-Default writer stem is ``metrics`` → ``artifacts/metrics.mlp.jsonl``.
+Default writer stem is ``metrics`` → ``out/metrics.mlp.jsonl``.
 ``is_mlp_zarr`` / ``is_mlp_index`` remain so leftover files can be ignored.
 There is no backward-compat path for the former ``metrics/metrics.jsonl`` layout.
 """

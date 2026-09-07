@@ -16,6 +16,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from ..execution_dirs import CHECKPOINTS
 from ..utils import generate_asset_id
 from .base import AssetScope, Producer
 from .checkpoint import CheckpointAsset
@@ -184,7 +185,7 @@ class CheckpointAccessor(_AccessorBase):
                 "CheckpointAccessor requires an active execution_id; "
                 "call ctx.checkpoint(...) inside `with run.start() as ctx:`."
             )
-        return Path("executions") / exec_id / "checkpoints" / f"{ckpt_id}.json"
+        return Path("executions") / exec_id / CHECKPOINTS.name / f"{ckpt_id}.json"
 
     def __call__(
         self,

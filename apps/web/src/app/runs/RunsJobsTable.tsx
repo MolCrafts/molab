@@ -3,6 +3,7 @@ import type { JSX, ReactNode } from "react";
 import { useEffect, useMemo } from "react";
 import { EmptyState } from "@/app/components/entity";
 import { ROW_PADDING_DEFAULT } from "@/app/components/entity/density";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -31,13 +32,37 @@ import {
   paginate,
   sortJobs,
 } from "./jobsTable";
-import type { WorkspaceRunRow } from "./types";
 import { runExecutorFacetLabel, runPresentationStatus } from "./projections";
+import type { WorkspaceRunRow } from "./types";
+
+/**
+ * Optional tick column for gathering runs into the comparison set.
+ *
+ * Ticking is additive and never navigates, so a user can keep opening runs to
+ * inspect them while building a set — the row click still means "open".
+ * Indices are into the table's current sort order, which is what a shift-range
+ * has to follow to match what the eye sees.
+ */
+export interface RunsTableSelection {
+  selected: ReadonlySet<string>;
+  /**
+   * Apply a tick. The table supplies both the index and the id order it refers
+   * to, because the table owns the sort — a caller passing its own unsorted
+   * list would resolve a shift-range to entirely different rows than the ones
+   * the user dragged across.
+   */
+  selectAt: (
+    index: number,
+    orderedIds: string[],
+    modifiers: { shift: boolean; meta: boolean },
+  ) => void;
+}
 
 interface RunsJobsTableProps {
   rows: WorkspaceRunRow[];
   selectedRunId: string | null;
   onSelectRun: (run: WorkspaceRunRow) => void;
+  selection?: RunsTableSelection;
   sort: JobsSort;
   onSortChange: (next: JobsSort) => void;
   page: number;
@@ -73,12 +98,18 @@ export const RunsJobsTable = ({
   onSelectRun,
   sort,
   onSortChange,
+  selection,
   page,
   pageSize,
   onPageChange,
   onPageSizeChange,
 }: RunsJobsTableProps): JSX.Element => {
   const sorted = useMemo(() => sortJobs(rows, sort), [rows, sort]);
+  const sortedIds = useMemo(() => sorted.map((run) => run.id), [sorted]);
+  const sortedIndex = useMemo(
+    () => new Map(sortedIds.map((id, index) => [id, index] as const)),
+    [sortedIds],
+  );
   const slice = useMemo(() => paginate(sorted, page, pageSize), [sorted, page, pageSize]);
 
   // Parent may still hold a page past the end after a filter shrink.
@@ -107,6 +138,7 @@ export const RunsJobsTable = ({
         <Table className="w-full text-body">
           <TableHeader className="sticky top-0 z-10 border-b border-border/60 bg-background">
             <TableRow className="text-label text-muted-foreground">
+              {selection && <TableHead className="w-10" aria-label="Select" />}
               {COLUMNS.map((col) => (
                 <SortableTh
                   key={col.key}
@@ -147,6 +179,24 @@ export const RunsJobsTable = ({
                     isSelected ? "bg-accent/5" : "hover:bg-muted/40",
                   )}
                 >
+                  {selection && (
+                    <Td className="align-middle">
+                      {/* Stop propagation: ticking gathers, it does not open. */}
+                      <Checkbox
+                        checked={selection.selected.has(run.id)}
+                        aria-label={`${
+                          selection.selected.has(run.id) ? "Remove" : "Add"
+                        } run ${run.name || run.id}`}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          selection.selectAt(sortedIndex.get(run.id) ?? 0, sortedIds, {
+                            shift: event.shiftKey,
+                            meta: !event.shiftKey,
+                          });
+                        }}
+                      />
+                    </Td>
+                  )}
                   <Td className="align-middle">
                     <RunStatusBadge status={presentationStatus} size="sm" />
                   </Td>
@@ -171,9 +221,7 @@ export const RunsJobsTable = ({
                     {backend ? (
                       <div className="min-w-0">
                         <p className="truncate text-foreground">{backend}</p>
-                        {cluster && (
-                          <p className="truncate font-mono text-micro">{cluster}</p>
-                        )}
+                        {cluster && <p className="truncate font-mono text-micro">{cluster}</p>}
                       </div>
                     ) : (
                       <span>—</span>

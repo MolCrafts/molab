@@ -107,7 +107,7 @@ def _artifact_manifest(deps: WorkflowDeps, name: str) -> list[dict[str, JSONValu
     if not callable(repository):
         return []
     try:
-        artifacts = repository().artifacts.list_for_execution(execution_id)
+        artifacts = repository().get(execution_id).artifacts
     except Exception:
         return []
     manifest: list[dict[str, JSONValue]] = []
@@ -119,7 +119,6 @@ def _artifact_manifest(deps: WorkflowDeps, name: str) -> list[dict[str, JSONValu
         digest = getattr(content, "digest", None)
         if not digest:
             continue
-        source_path = getattr(artifact, "source_path", None)
         manifest.append(
             {
                 "name": getattr(artifact, "name", None),
@@ -128,11 +127,7 @@ def _artifact_manifest(deps: WorkflowDeps, name: str) -> list[dict[str, JSONValu
                 "asset_id": getattr(artifact, "id", None),
                 "mime": getattr(artifact, "media_type", None),
                 "tags": metadata.get("tags") or {},
-                "path": (
-                    str(Path("executions") / execution_id / source_path)
-                    if source_path is not None
-                    else None
-                ),
+                "path": getattr(artifact, "path", None),
             }
         )
     return manifest
@@ -178,7 +173,12 @@ def _put_file_blobs(deps: WorkflowDeps, manifest: list[dict]) -> None:
     run_dir = getattr(deps.run_context, "run_dir", None) or getattr(deps, "run_dir", None)
     if run_dir is None:
         return
-    root = Path(run_dir)
+    from molexp.workspace.naming import workspace_root
+
+    # Artifact paths are workspace-relative — that is what makes them portable.
+    root = workspace_root(Path(run_dir))
+    if root is None:
+        return
     for entry in manifest:
         content_hash = entry.get("content_hash")
         rel = entry.get("path")

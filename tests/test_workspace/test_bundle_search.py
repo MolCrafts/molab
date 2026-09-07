@@ -154,9 +154,9 @@ class TestSearch:
         ws.materialize()
         proj = ws.add_project("p")
 
-        result = Bundle(ws.resolve()).search(scope=f"projects/{proj.id}/")
+        result = Bundle(ws.resolve()).search(scope=f"projects/{proj._name}/")
 
-        assert any(h.entry.path == f"projects/{proj.id}" for h in result.hits)
+        assert any(h.entry.path == f"projects/{proj._name}" for h in result.hits)
 
     def test_limit_undercount_sets_truncated(self, tmp_path: Path) -> None:
         root = _root(tmp_path)

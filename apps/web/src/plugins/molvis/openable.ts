@@ -1,7 +1,6 @@
 /** Formats molvis-stage can load in-browser today. Not a file tree. */
 
 const TRAJECTORY = /\.(lammpstrj|lmptrj|lammpsdump|dump|xyz|extxyz|pdb)$/i;
-const LOG = /(^log\.lammps$|\.lammps\.log$|^lmp\.log$)/i;
 const ZARR_GROUP = /(?:^|\/)(?:frame|trajectory|meta)\/zarr\.json$/i;
 
 const posix = (relPath: string): string => relPath.replace(/\\/g, "/").replace(/\/+$/, "");
@@ -14,8 +13,6 @@ const hasMrecAncestor = (path: string): boolean =>
   path.split("/").some((seg) => seg.endsWith(".mrec"));
 
 export const isMolvisTrajectoryName = (name: string): boolean => TRAJECTORY.test(name);
-
-export const isMolvisLog = (name: string): boolean => LOG.test(name);
 
 /**
  * True when this file is a molvis-openable ``*.mrec`` store marker.
@@ -53,10 +50,14 @@ export const zarrStoreRoot = (relPath: string): string => {
 export const isMolvisTrajectory = (file: { name: string; relPath: string }): boolean =>
   isMolvisTrajectoryName(file.name) || isMolvisZarr(file);
 
-/** True when molvis can actually open this file (not a nested array sidecar). */
+/**
+ * True when molvis can actually open this file (not a nested array sidecar).
+ *
+ * Structures only. A solver log is numbers over time — molplot's surface,
+ * read in the browser by whichever contributed reader claims it.
+ */
 export const isMolvisOpenable = (file: { name: string; relPath?: string }): boolean =>
   isMolvisTrajectoryName(file.name) ||
-  isMolvisLog(file.name) ||
   isMolvisZarr({ name: file.name, relPath: file.relPath ?? file.name });
 
 export interface MolvisListedFile {

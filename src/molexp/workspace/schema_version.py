@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from .fs import FileSystem
 
-MOLEXP_SCHEMA_VERSION = 2
+MOLEXP_SCHEMA_VERSION = 3
 
 
 def versioned_payload(payload: dict[str, Any]) -> dict[str, Any]:
@@ -18,7 +18,13 @@ def versioned_payload(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 class IncompatibleSchemaError(RuntimeError):
-    """Raised when a JSON file's schema_version exceeds what this build understands."""
+    """Retained so callers that catch it keep importing.
+
+    Nothing raises it while the format is still moving: during development the
+    tree routinely holds files written by an older build, and refusing to open
+    a workspace over a version stamp costs more than the mismatch does. Writes
+    still stamp the current version, so a file records the build that made it.
+    """
 
 
 def write_versioned_json(
@@ -35,23 +41,16 @@ def write_versioned_json(
 
 
 def read_versioned_json(path: str | Path, *, fs: FileSystem | None = None) -> dict[str, Any]:
-    """Read a JSON file and return the payload with ``schema_version`` stripped."""
+    """Read a JSON file and return the payload with ``schema_version`` stripped.
+
+    The stamp is dropped, not checked. See :class:`IncompatibleSchemaError`.
+    """
     if fs is not None:
         with fs.open(str(path)) as fh:
             data = json.load(fh)
     else:
         with open(path) as fh:  # noqa: PTH123
             data = json.load(fh)
-    if "schema_version" not in data:
-        raise IncompatibleSchemaError(
-            f"{path} is missing schema_version; this molexp requires "
-            f"schema_version={MOLEXP_SCHEMA_VERSION}."
-        )
-    sv = data.pop("schema_version")
-    if sv != MOLEXP_SCHEMA_VERSION:
-        raise IncompatibleSchemaError(
-            f"{path} has schema_version={sv}; this build requires exactly "
-            f"schema_version={MOLEXP_SCHEMA_VERSION}. MolExp v2 is a breaking "
-            "provenance-format cutover and does not read v1 workspaces."
-        )
+    # No version gate: a stamp that does not match this build is read anyway.
+    data.pop("schema_version", None)
     return data

@@ -1,10 +1,10 @@
-"""Provenance/index-backed artifact query layer (``artifact_repository`` + ``index_store``).
+"""Artifact queries answered by the Executions that own the artifacts.
 
-The derived SQLite ``AssetCatalog`` was replaced by the append-only provenance
-event log and its disposable JSON index (spec: workspace-git-projection-01-drop-catalog).
-Every query shape is answered by the ``JsonIndexStore`` sharded entities
-(``index/entities/artifact/*.json``), which ``ArtifactRepository`` reads — and
-rebuilds from provenance when empty. Emitted artifacts are created by
+There is no artifact index. An Execution records its own products in its
+``execution.json``, so "which artifacts exist" is a walk of the run tree
+(:func:`molexp.workspace.artifact_repository.scan_artifacts`) and "which
+artifacts did this attempt emit" is one file read. Emitted artifacts are
+created by
 :meth:`molexp.workspace.execution_context.ExecutionContext.emit_artifact`.
 """
 
@@ -15,9 +15,8 @@ from pathlib import Path
 import pytest
 
 from molexp.workspace import Workspace
-from molexp.workspace.artifact_repository import ArtifactRepository
+from molexp.workspace.artifact_repository import scan_artifacts
 from molexp.workspace.domain import Artifact
-from molexp.workspace.index_store import JsonIndexStore
 
 # Each started run persists two artifacts: the user's "artifact" + a checkpoint.
 ARTIFACTS_PER_RUN = 2
@@ -36,46 +35,47 @@ def _seed_workspace(root: Path, n_runs: int = 3) -> Workspace:
 
 
 def _all_artifacts(ws: Workspace) -> list[Artifact]:
-    index = JsonIndexStore(ws.root, fs=ws.fs)
-    return [Artifact.model_validate(raw) for raw in index.list_entities("artifact")]
-
-
-def _repo(ws: Workspace) -> ArtifactRepository:
-    return ArtifactRepository(ws.root, fs=ws.fs)
+    return scan_artifacts(ws)
 
 
 class TestQueryArtifacts:
     def test_run_scope_matches_only_that_run(self, tmp_path):
         ws = _seed_workspace(tmp_path / "lab")
         run = ws.project("demo").experiment("baseline").list_runs()[0]
-        execution_id = run.executions[0].id
-        scoped = _repo(ws).list_for_execution(execution_id)
-        assert len(scoped) == ARTIFACTS_PER_RUN
-        assert all(a.execution_id == execution_id and a.run_id == run.id for a in scoped)
+        execution = run.executions[0]
+        assert len(execution.artifacts) == ARTIFACTS_PER_RUN
+        assert all(
+            a.execution_id == execution.id and a.run_id == run.id for a in execution.artifacts
+        )
+
+    def test_scan_sees_every_run(self, tmp_path):
+        ws = _seed_workspace(tmp_path / "lab")
+        assert len(_all_artifacts(ws)) == 3 * ARTIFACTS_PER_RUN
 
 
 class TestGetArtifact:
-    def test_returns_artifact_by_id_else_keyerror(self, tmp_path):
+    def test_execution_resolves_its_own_artifact_else_keyerror(self, tmp_path):
         ws = _seed_workspace(tmp_path / "lab")
-        some = _all_artifacts(ws)[0]
-        assert _repo(ws).get(some.id).id == some.id
+        run = ws.project("demo").experiment("baseline").list_runs()[0]
+        execution = run.executions[0]
+        some = execution.artifacts[0]
+        assert execution.artifact(some.id).id == some.id
         with pytest.raises(KeyError):
-            _repo(ws).get("nonexistent")
+            execution.artifact("nonexistent")
 
 
-class TestNoDerivedSqliteIndex:
-    """Invariant lock: the derived SQLite ``AssetCatalog`` is gone — the
-    authoritative on-disk records are the append-only provenance events plus
-    their disposable JSON index (One-source-of-truth law)."""
+class TestNoDerivedArtifactIndex:
+    """Invariant lock: nothing re-encodes an artifact outside its Execution."""
 
-    def test_seeded_workspace_writes_json_index_not_sqlite(self, tmp_path):
-        ws = _seed_workspace(tmp_path / "lab")  # 3 runs, artifacts persisted
+    def test_seeded_workspace_keeps_artifacts_only_in_executions(self, tmp_path):
+        ws = _seed_workspace(tmp_path / "lab")
         root = Path(str(ws.root))
-        # Artifacts are queryable …
         assert len(_all_artifacts(ws)) == 3 * ARTIFACTS_PER_RUN
-        # … yet nothing was written to a derived SQLite index.
         assert not (root / "catalog").exists()
+        assert not (root / "index").exists()
+        assert not (root / "provenance").exists()
+        assert not (root / "content").exists()
         assert not list(root.rglob("*.sqlite"))
-        # The authoritative records are the provenance events + JSON index.
-        assert list(root.rglob("index/entities/artifact/*.json"))
-        assert list(root.rglob("provenance/events/*/*/*.json"))
+        assert not list(root.rglob("artifact.json"))
+        # The bytes live where a person would look for them.
+        assert list(root.rglob("executions/e01/artifacts/metrics.json"))

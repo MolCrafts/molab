@@ -245,9 +245,9 @@ class TestFindingRecord:
 
         item = experiment.get_folder(f"finding-{run.id}", cls=Knowledge)
         edges = item.typed_out_edges()
-        assert any(
-            e.role == "derived_from" and str(e.target).endswith(f"run-{run.id}") for e in edges
-        ), edges
+        assert any(e.role == "derived_from" and str(e.target).endswith(run._name) for e in edges), (
+            edges
+        )
         decision_name = f"experiment-record-{run.id}"
         assert any(
             e.role == "references" and str(e.target).endswith(decision_name) for e in edges

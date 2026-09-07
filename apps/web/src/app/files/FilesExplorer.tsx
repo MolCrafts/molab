@@ -83,15 +83,27 @@ interface WorkspaceTreeActions {
   writeDeniedReason: string | null;
 }
 
+/**
+ * Which entity, if any, owns this directory on disk.
+ *
+ * Matched on the path each entity reports, not on its id: a directory is
+ * named for a person — a project's slug, an experiment's slug, a run's
+ * parameters — while the id is a UUIDv7 that appears nowhere in the tree.
+ * Comparing against ids silently matched only the entities whose slug
+ * happened to equal their id.
+ */
 const detectWorkspaceSemantic = (
   path: string,
   snapshot: WorkspaceSnapshot,
 ): WorkspaceSemantic | null => {
-  const project = snapshot.projects.find((item) => path.endsWith(`projects/${item.id}`));
+  const owns = (entityPath: string): boolean =>
+    Boolean(entityPath) && (path === entityPath || path.endsWith(`/${entityPath}`));
+
+  const project = snapshot.projects.find((item) => owns(item.path));
   if (project) {
     return { type: "project", id: project.id, icon: Blocks, iconClass: "text-muted-foreground" };
   }
-  const experiment = snapshot.experiments.find((item) => path.endsWith(`experiments/${item.id}`));
+  const experiment = snapshot.experiments.find((item) => owns(item.path));
   if (experiment) {
     return {
       type: "experiment",
@@ -100,7 +112,7 @@ const detectWorkspaceSemantic = (
       iconClass: "text-muted-foreground",
     };
   }
-  const run = snapshot.runs.find((item) => path.endsWith(`runs/${item.id}`));
+  const run = snapshot.runs.find((item) => owns(item.path));
   if (run) {
     return { type: "run", id: run.id, icon: PlayCircle, iconClass: "text-muted-foreground" };
   }

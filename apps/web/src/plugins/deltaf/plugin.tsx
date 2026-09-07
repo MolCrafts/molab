@@ -1,18 +1,17 @@
+import type { MolexpPluginModule, PluginAPI } from "@molcrafts/molexp-plugin";
 import { lazy } from "react";
-import { registerFileTypeContribution } from "@/app/registry";
-import type { UiPluginModule } from "@/plugins/types";
 
 const DeltaFChart = lazy(() =>
   import("./DeltaFChart").then((module) => ({ default: module.DeltaFChart })),
 );
 
-const deltafPlugin: UiPluginModule = {
+const deltafPlugin: MolexpPluginModule = {
   id: "deltaf",
   name: "ΔF",
+  version: "1.0.0",
   description: "Force-deviation (ΔF) chart tab for phase-1 quantization runs.",
-  userToggleable: true,
-  register: () => {
-    registerFileTypeContribution({
+  activate: (api: PluginAPI) => {
+    api.fileTypes.register({
       id: "deltaf:run-tab",
       objectType: "run",
       value: "deltaf",

@@ -13,7 +13,11 @@ type RunMetricsTabProps = RendererProps & { discoveredFiles?: DiscoveredFile[] }
  * {@link RunMetricsView}. The metrics rendering core lives in RunMetricsView
  * so the runs-dashboard `RunInspector` can reuse it without `snapshot.runs`.
  */
-export const RunMetricsTab = ({ selection, snapshot, executionId }: RunMetricsTabProps): JSX.Element => {
+export const RunMetricsTab = ({
+  selection,
+  snapshot,
+  executionId,
+}: RunMetricsTabProps): JSX.Element => {
   const run = snapshot.runs.find((item) => item.id === selection.objectId) ?? null;
 
   if (!run || !executionId) {
@@ -22,7 +26,11 @@ export const RunMetricsTab = ({ selection, snapshot, executionId }: RunMetricsTa
         <EmptyState
           icon={<AlertTriangle className="h-6 w-6" />}
           title={run ? "Select an execution" : "Run not found"}
-          description={run ? "MolPlot data belongs to one physical execution." : "It may have been deleted or not yet synced."}
+          description={
+            run
+              ? "MolPlot data belongs to one physical execution."
+              : "It may have been deleted or not yet synced."
+          }
         />
       </div>
     );

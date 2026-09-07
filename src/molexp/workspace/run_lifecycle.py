@@ -33,8 +33,10 @@ from typing import TYPE_CHECKING
 
 from mollog import get_logger
 
-from .models import ErrorInfo, ExecutionMetadata, ExecutionRecord, RunStatus
+from .domain import ExecutionMode, ExecutionStatus
+from .models import ErrorInfo, RunStatus
 from .run_heartbeat import HEARTBEAT_INTERVAL_SECONDS, alive_mtime, touch_alive, unlink_alive
+from .scientific_repository import SYSTEM_AGENT
 
 if TYPE_CHECKING:
     from .runcontext import RunContext
@@ -115,47 +117,29 @@ class RunLifecycle:
         ctx._start_time = datetime.now()
         ctx._entered = True
 
-        # Determine which execution attempt this is and record it. When the
-        # caller pre-allocated an execution_id that matches an existing record,
-        # *reopen* that record in place (resume) — flip it back to running and
-        # clear finished_at — instead of appending a new one. Any other case
-        # (no id, or an id matching no record) appends a fresh record (rerun /
-        # first attempt).
+        # One attempt is one Execution, owned end-to-end by ExecutionRepository:
+        # it allocates ``executions/eNN/`` and is the only writer of
+        # ``execution.json``. A pre-allocated id that already exists is
+        # reopened in place (resume); anything else opens a fresh attempt.
+        repo = ctx._executions
         explicit = ctx._explicit_execution_id
-        history = ctx.run.metadata.execution_history
-        reopened = (
-            next((r for r in history if r.execution_id == explicit), None)
-            if explicit is not None
-            else None
-        )
-        if reopened is not None:
-            ctx._execution_id = reopened.execution_id
-            running = reopened.model_copy(
-                update={"status": RunStatus.RUNNING.value, "finished_at": None}
+        state = None
+        if explicit is not None:
+            try:
+                state = repo.get(explicit)
+            except KeyError:
+                state = None
+        if state is None:
+            state = repo.create(
+                mode=ExecutionMode.INITIAL if not repo.list() else ExecutionMode.RERUN,
+                created_by=SYSTEM_AGENT,
+                execution_id=explicit,
             )
-            new_executions = tuple(
-                running if r.execution_id == reopened.execution_id else r for r in history
-            )
-        else:
-            ctx._execution_id = explicit or ctx._executions.next_execution_id()
-            new_record = ExecutionRecord(
-                execution_id=ctx._execution_id,
-                started_at=ctx._start_time,
-            )
-            new_executions = (*history, new_record)
-        active_execution_id = ctx._execution_id
-        ctx.run._update_metadata(
-            current_execution_id=active_execution_id,
-            execution_history=new_executions,
-        )
-        ctx._executions.write_metadata(
-            ExecutionMetadata(
-                execution_id=ctx._execution_id,
-                run_id=ctx.run.id,
-                started_at=ctx._start_time,
-                status=RunStatus.RUNNING.value,
-            )
-        )
+        ctx._execution_id = state.id
+        if state.status is ExecutionStatus.QUEUED:
+            repo.start(state.id)
+        elif state.sealed:
+            raise RuntimeError(f"Execution {state.id!r} is sealed and cannot be reopened")
         ctx._assets.append_run_log(f"execution started  exec_id={ctx._execution_id}")
         ctx._ctx_store.save()
         assert ctx._execution_id is not None
@@ -231,39 +215,32 @@ class RunLifecycle:
             # A successful terminal state must not keep describing an old
             # failure (bug 2) — the canonical record tells the truth.
             ctx.run._update_metadata(error=None)
-        # A no-op attempt closes its record as "aborted" — it neither
-        # succeeded nor failed; the run-level status stays what it was.
+        # A no-op attempt seals as "interrupted" — it neither succeeded nor
+        # failed; the run-level status stays what it was.
         record_status = "aborted" if noop else final.value
-        closed_executions = tuple(ctx._executions.close_record(execution_id, record_status, now))
         ctx.run._update_metadata(
             status=final,
             finished_at=now,
-            execution_history=closed_executions,
             owner_pid=None,
             owner_host=None,
         )
-        ctx._executions.update_metadata(
+        terminal = {
+            "succeeded": ExecutionStatus.SUCCEEDED,
+            "failed": ExecutionStatus.FAILED,
+            "cancelled": ExecutionStatus.CANCELLED,
+            "aborted": ExecutionStatus.INTERRUPTED,
+        }[record_status]
+        ctx._executions.seal(
             execution_id,
-            finished_at=now,
-            status=record_status,
-            error=error_info,
+            terminal,
+            error=error_info.model_dump(mode="json") if error_info is not None else None,
         )
         ctx._assets.append_run_log(
             f"execution finished exec_id={ctx._execution_id}  status={record_status}"
         )
         ctx._ctx_store.save()
-        # Low-frequency git checkpoint at the Execution-settled boundary: one
-        # commit per settled execution, and only when the projection DB already
-        # exists (opt-in by existence). Best-effort — never breaks the run.
-        self._checkpoint_git_on_settle()
         ctx._entered = False
         return False
-
-    def _checkpoint_git_on_settle(self) -> None:
-        """Trigger the opt-in, best-effort git checkpoint for this settled run."""
-        from molexp.workspace.git_projection import checkpoint_run_on_settle
-
-        checkpoint_run_on_settle(self._ctx.run)
 
     def _apply_profile_metadata(self) -> None:
         """Persist the active profile name / data / hash into RunMetadata."""

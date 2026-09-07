@@ -1,7 +1,10 @@
+import { ComparisonPanel } from "@/app/compare";
 import { NavigationExplorerHost } from "@/app/navigation/NavigationExplorerHost";
 import { NavigationRail } from "@/app/navigation/NavigationRail";
 import { getNavigationContribution } from "@/app/navigation/sections";
 import type { LeftPanelView, Selection, WorkspaceSnapshot } from "@/app/types";
+import { ExplorerDock } from "@/components/layout/ExplorerShell";
+import { useWorkbenchGeneration } from "@/plugins/contributions/workbench";
 
 interface LeftPanelProps {
   view: LeftPanelView;
@@ -43,11 +46,12 @@ export const LeftPanel = ({
   isExperimentExpanded,
   dataEpoch = 0,
   searchQuery = "",
-}: LeftPanelProps): JSX.Element => (
-  <div className="flex h-full min-h-0">
-    <NavigationRail activeId={view} onSelect={onViewChange} />
+}: LeftPanelProps): JSX.Element => {
+  useWorkbenchGeneration();
+  const contribution = getNavigationContribution(view);
+  const explorerHost = (
     <NavigationExplorerHost
-      contribution={getNavigationContribution(view)}
+      contribution={contribution}
       explorerProps={{
         snapshot,
         selection,
@@ -70,5 +74,21 @@ export const LeftPanel = ({
         },
       }}
     />
-  </div>
-);
+  );
+
+  return (
+    <div className="flex h-full min-h-0">
+      <NavigationRail activeId={view} onSelect={onViewChange} />
+      {/* The comparison belongs to the panel, not to one explorer: runs are gathered
+          from Projects and Files as readily as from the Runs table, and a
+          staging area that disappears when you leave the section it was born
+          in cannot span the walk between two projects. Rail-only sections have
+          no column to dock it in. */}
+      {contribution.shellMode === "explorer" ? (
+        <ExplorerDock dock={<ComparisonPanel />}>{explorerHost}</ExplorerDock>
+      ) : (
+        explorerHost
+      )}
+    </div>
+  );
+};

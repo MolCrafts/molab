@@ -18,11 +18,12 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 
 from molexp.server.dependencies import get_workspace
+from molexp.workspace.execution_dirs import WORK
 
 if TYPE_CHECKING:
     from molexp.harness.store.file_artifact_store import FileArtifactStore
     from molexp.workspace import Workspace
-    from molexp.workspace.domain import ExecutionState
+    from molexp.workspace.domain import Execution
     from molexp.workspace.experiment import Experiment
     from molexp.workspace.run import Run
 
@@ -161,12 +162,12 @@ def _artifact_store(run: Run, execution_id: str) -> FileArtifactStore:
     return FileArtifactStore.open_execution(run, execution_id)
 
 
-def _plan_candidates(run: Run) -> list[tuple[ExecutionState, FileArtifactStore, Path]]:
+def _plan_candidates(run: Run) -> list[tuple[Execution, FileArtifactStore, Path]]:
     """Return every explicit Execution that emitted a plan marker Artifact."""
-    candidates: list[tuple[ExecutionState, FileArtifactStore, Path]] = []
+    candidates: list[tuple[Execution, FileArtifactStore, Path]] = []
     for execution in run.executions:
         store = _artifact_store(run, execution.id)
-        root = Path(run.run_dir) / "executions" / execution.id / "work" / "harness"
+        root = Path(run.run_dir) / "executions" / execution.id / WORK.name / "harness"
         if _is_plan_run(store, root):
             candidates.append((execution, store, root))
     return candidates
@@ -174,7 +175,7 @@ def _plan_candidates(run: Run) -> list[tuple[ExecutionState, FileArtifactStore, 
 
 def _resolve_plan_execution(
     run: Run, execution_id: str | None
-) -> tuple[ExecutionState, FileArtifactStore, Path]:
+) -> tuple[Execution, FileArtifactStore, Path]:
     candidates = _plan_candidates(run)
     if execution_id is not None:
         for candidate in candidates:

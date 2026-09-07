@@ -119,7 +119,7 @@ def _select_many(
 
 def _execution_rows(run: Run) -> list[tuple[str, ...]]:
     rows: list[tuple[str, ...]] = []
-    for rec in run.execution_history:
+    for rec in run.executions:
         finished = rec.finished_at.strftime("%Y-%m-%d %H:%M") if rec.finished_at else "—"
         started = rec.started_at.strftime("%Y-%m-%d %H:%M") if rec.started_at else "—"
         status = rec.status or "running"
@@ -188,7 +188,7 @@ def prune_runs(
     run_rows: list[tuple[str, ...]] = []
     for r in runs:
         status = str(r.status).lower()
-        n_exec = len(r.execution_history)
+        n_exec = len(r.executions)
         run_rows.append(
             (
                 r.id,
@@ -236,7 +236,7 @@ def prune_runs(
     from molexp.workspace import LivePruneRefusedError
     from molexp.workspace.prune import apply_execution_prune, plan_execution_prune
 
-    history = run.execution_history
+    history = run.executions
     selected_ids = [history[i].id for i in indices]
     try:
         plan = plan_execution_prune(run, execution_ids=selected_ids)
@@ -260,7 +260,7 @@ def prune_runs(
             rprint(f"  [dim]skip[/dim]  {entry.execution_id} (no directory)")
     deleted_dirs = apply_execution_prune(run, plan)
 
-    remaining = len(run.execution_history)
+    remaining = len(run.executions)
     rprint(
         f"[green]Done.[/green] Removed {deleted_dirs} dir(s), "
         f"pruned {len(plan.entries)} history entry/entries.  "

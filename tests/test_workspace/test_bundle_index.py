@@ -27,10 +27,10 @@ def _hierarchy(tmp_path: Path) -> tuple[Path, str, str, str]:
     ws.materialize()
     proj = ws.add_project("p")
     exp = proj.add_experiment("e")
-    exp.add_run(id="r")
-    proj_rel = f"lab/projects/{proj.id}"
-    exp_rel = f"{proj_rel}/experiments/{exp.id}"
-    run_rel = f"{exp_rel}/runs/run-r"
+    run = exp.add_run(id="r")
+    proj_rel = f"lab/projects/{proj._name}"
+    exp_rel = f"{proj_rel}/experiments/{exp._name}"
+    run_rel = f"{exp_rel}/runs/{run._name}"
     return tmp_path, proj_rel, exp_rel, run_rel
 
 
@@ -139,5 +139,5 @@ class TestSearchFilters:
         b.build_index(now=FIXED)
         new_proj = Workspace(root=root / "lab").add_project("q")
         assert any(
-            h.entry.path == f"lab/projects/{new_proj.id}" for h in b.search(rebuild=True).hits
+            h.entry.path == f"lab/projects/{new_proj._name}" for h in b.search(rebuild=True).hits
         )

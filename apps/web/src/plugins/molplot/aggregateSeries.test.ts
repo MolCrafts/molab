@@ -37,8 +37,16 @@ const makeSeries = (key: string, ys: number[], startStep = 0): ScalarSeries => (
   latest: ys[ys.length - 1] ?? 0,
 });
 
-const RUN_A: RunSeries = { runId: "run-a", series: makeSeries("loss", [1.0, 0.8, 0.6]) };
-const RUN_B: RunSeries = { runId: "run-b", series: makeSeries("loss", [2.0, 1.0, 0.4]) };
+const RUN_A: RunSeries = {
+  key: "run-a",
+  label: "run-a",
+  series: makeSeries("loss", [1.0, 0.8, 0.6]),
+};
+const RUN_B: RunSeries = {
+  key: "run-b",
+  label: "run-b",
+  series: makeSeries("loss", [2.0, 1.0, 0.4]),
+};
 
 interface ConfigShape {
   series: Array<{ id: string; color?: string; initialPoints?: Array<{ x: number; y: number }> }>;
@@ -63,7 +71,8 @@ describe("buildOverlayConfig (ac-001)", () => {
 
   it("cycles the palette past its length for > PALETTE.length runs", () => {
     const many: RunSeries[] = Array.from({ length: PALETTE.length + 1 }, (_v, i) => ({
-      runId: `run-${i}`,
+      key: `run-${i}`,
+      label: `run-${i}`,
       series: makeSeries("loss", [i]),
     }));
     const config = buildOverlayConfig(many, OPTS) as ConfigShape;

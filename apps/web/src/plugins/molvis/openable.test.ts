@@ -74,7 +74,13 @@ describe("uniqueMolvisFiles", () => {
 
   it("still treats classic dumps as openable", () => {
     expect(isMolvisOpenable(file("dump.lammpstrj"))).toBe(true);
-    expect(isMolvisOpenable(file("log.lammps"))).toBe(true);
     expect(isMolvisOpenable(file("notes.txt"))).toBe(false);
+  });
+
+  it("leaves solver logs to molplot", () => {
+    // Numbers over time are not a structure. Claiming them here would put the
+    // same file behind two tabs, one of which cannot draw it.
+    expect(isMolvisOpenable(file("log.lammps"))).toBe(false);
+    expect(isMolvisOpenable(file("lmp.log"))).toBe(false);
   });
 });

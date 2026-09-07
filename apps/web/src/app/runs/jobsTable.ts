@@ -3,8 +3,8 @@
  * Kept free of React so sort/page rules are unit-testable.
  */
 
-import type { WorkspaceRunRow } from "./types";
 import { runExecutorFacetLabel, runFinishedAt, runPresentationStatus } from "./projections";
+import type { WorkspaceRunRow } from "./types";
 
 export type JobsSortKey =
   | "status"

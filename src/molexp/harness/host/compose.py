@@ -67,7 +67,7 @@ def compose_plan(
     root = (
         Path(workspace_root)
         if workspace_root is not None
-        else execution_context.workdir
+        else execution_context.get_dir("work")
         if execution_context is not None
         else Path(run_dir)
     )

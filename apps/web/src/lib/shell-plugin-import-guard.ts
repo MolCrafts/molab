@@ -1,8 +1,9 @@
 /**
  * Ensures shell registry paths do not import bundled plugin modules.
  *
- * Plugins may import ``@/app/registry``; the reverse must not hold for the
- * contribution registry stack under ``app/registry`` and ``lib/`` helpers.
+ * Plugins must not import ``@/app/registry`` (they `activate(api)`). The
+ * reverse also must not hold for the contribution registry stack under
+ * ``app/registry`` and ``lib/`` helpers.
  */
 
 import { existsSync, readFileSync } from "node:fs";

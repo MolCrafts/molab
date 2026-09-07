@@ -286,16 +286,10 @@ def assemble_workspace_context(
                 )
             )
 
-    # v2 artifacts (provenance-backed index — `emit_artifact` products).
-    from .domain import Artifact as V2Artifact
-    from .index_store import JsonIndexStore
+    # Emitted products, read from the Executions that own them.
+    from .artifact_repository import scan_artifacts
 
-    index_store = JsonIndexStore(root, fs=workspace.fs)
-    for raw in index_store.list_entities("artifact"):
-        try:
-            art = V2Artifact.model_validate(raw)
-        except Exception:
-            continue
+    for art in scan_artifacts(workspace):
         task_id = art.metadata.get("task_id") if isinstance(art.metadata, dict) else None
         artifacts.append(
             ArtifactRef(

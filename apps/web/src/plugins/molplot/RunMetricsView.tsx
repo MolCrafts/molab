@@ -1,7 +1,5 @@
-import { Activity, AlertTriangle, Maximize2, PanelLeftClose, PanelLeftOpen } from "lucide-react";
+import { Activity, AlertTriangle, Maximize2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { MetricRecord } from "@/api";
-import { runsApi } from "@/api";
 import { EmptyState, OverviewSection } from "@/app/components/entity";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
@@ -16,8 +14,16 @@ import { Slider } from "@/components/ui/slider";
 import { Switch } from "@/components/ui/switch";
 import { WorkbenchAction, WorkbenchIconAction } from "@/components/workbench";
 import { CHART_SERIES_PALETTE } from "@/lib/chart-tokens";
+import type { MetricRecordSample as MetricRecord } from "@/lib/contribution-types";
 import { cn } from "@/lib/utils";
-import { MolplotLineChart } from "@/plugins/molplot";
+import {
+  ChartLegend,
+  type ChartLegendPlacement,
+  ChartWorkbench,
+  MolplotLineChart,
+} from "@/plugins/molplot";
+import { readExecutionMetrics, type SourceRead } from "@/plugins/molplot/read-metrics";
+import { STEP_INTERVAL } from "@/plugins/molplot/resolution";
 import {
   DEFAULT_SCALAR_FORMAT,
   formatScalar,
@@ -27,7 +33,7 @@ import {
 import { filterSpikes, smoothEma } from "@/plugins/molplot/smoothing";
 
 /**
- * Coord-driven run-metrics view: polls `getRunMetrics` for the run named by
+ * Coord-driven run-metrics view: reads the attempt's own files for the run named by
  * its explicit `{projectId, experimentId, runId}` props and renders a molplot
  * line chart per scalar series. It deliberately takes explicit coordinates
  * rather than resolving the run from a workspace tree — so every consumer (the
@@ -194,6 +200,8 @@ interface ChartProps {
   spikeSigma: number;
   color: string;
   height: string;
+  /** Where to put the legend, if this surface has room for one. */
+  legend?: ChartLegendPlacement;
 }
 
 const MetricChart = ({
@@ -205,6 +213,7 @@ const MetricChart = ({
   spikeSigma,
   color,
   height,
+  legend,
 }: ChartProps): JSX.Element => {
   const config = useMemo(
     () =>
@@ -219,7 +228,21 @@ const MetricChart = ({
     [series, xMode, yScale, smoothing, spikeFilter, spikeSigma, color],
   );
 
-  return <MolplotLineChart config={config} style={{ width: "100%", height }} />;
+  return (
+    <MolplotLineChart
+      config={config}
+      style={{ width: "100%", height }}
+      overlay={
+        legend ? (
+          // `minEntries={1}` on purpose: with smoothing off there is one
+          // trace, and naming it is still what says this corner is the
+          // legend — a legend that comes and goes with the smoothing slider
+          // reads as a glitch.
+          <ChartLegend series={config.series} placement={legend} minEntries={1} />
+        ) : null
+      }
+    />
+  );
 };
 
 interface CardSettings {
@@ -352,6 +375,7 @@ const MetricPanel = ({
               spikeSigma={settings.spikeSigma}
               color={color}
               height="100%"
+              legend="overlay"
             />
             <div
               className="pointer-events-none absolute right-1 bottom-1 h-2.5 w-2.5 border-r-2 border-b-2 border-muted-foreground/50"
@@ -539,8 +563,7 @@ export const RunMetricsView = ({
   executionId,
 }: RunMetricsViewProps): JSX.Element => {
   const [records, setRecords] = useState<MetricRecord[]>([]);
-  const [nextLine, setNextLine] = useState(0);
-  const [parseErrors, setParseErrors] = useState(0);
+  const [sources, setSources] = useState<SourceRead[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [panelOpen, setPanelOpen] = useState(false);
@@ -551,14 +574,11 @@ export const RunMetricsView = ({
   const grouped = useMemo(() => groupSeries(scalarSeries), [scalarSeries]);
   const selectedSeries = scalarSeries.find((item) => item.key === selectedKey) ?? null;
 
-  // Track the latest tail position in a ref so the polling effect doesn't list
-  // it as a dependency — otherwise every successful fetch (which advances
-  // nextLine) tears down the interval and re-fires an immediate fetch,
-  // collapsing POLL_INTERVAL_MS into a tight loop.
-  const nextLineRef = useRef(nextLine);
-  useEffect(() => {
-    nextLineRef.current = nextLine;
-  }, [nextLine]);
+  // What was read last time, so a poll that finds nothing new can skip the
+  // work. Held in a ref rather than a dependency: keying the effect on it
+  // would tear down the interval after every successful read and collapse
+  // POLL_INTERVAL_MS into a tight loop.
+  const lastRevisionsRef = useRef<string>("");
 
   // The fetch effect re-keys on the run coords; callers also mount this view
   // with `key={runId}` so a run switch remounts it with fresh state (cursor +
@@ -567,19 +587,25 @@ export const RunMetricsView = ({
     let cancelled = false;
 
     const fetchMetrics = async (): Promise<void> => {
-      const sinceLine = nextLineRef.current;
       try {
-        const response = await runsApi.getRunMetrics(projectId, experimentId, runId, executionId, {
-          sinceLine,
-        });
+        // The server lists the attempt's files and hands back bytes; every
+        // decision about what is plottable and what the numbers mean happens
+        // here, through whichever reader claimed the file.
+        const read = await readExecutionMetrics(
+          { projectId, experimentId, runId, executionId },
+          { stepInterval: STEP_INTERVAL },
+        );
         if (cancelled) {
           return;
         }
-        setRecords((current) =>
-          sinceLine === 0 ? response.records : [...current, ...response.records],
-        );
-        setNextLine(response.nextLine);
-        setParseErrors((current) => current + response.parseErrors);
+        // A finished log re-reads to the same bytes; only re-render when a
+        // source actually moved.
+        const revisions = read.sources.map((item) => `${item.path}@${item.revision}`).join("|");
+        if (revisions !== lastRevisionsRef.current) {
+          lastRevisionsRef.current = revisions;
+          setRecords(read.records);
+          setSources(read.sources);
+        }
         setError(null);
       } catch (metricsError) {
         if (!cancelled) {
@@ -648,54 +674,49 @@ export const RunMetricsView = ({
     }));
   };
 
-  const displayPanel = panelOpen ? (
-    <aside className="mol-motion-enter-from-left flex w-60 shrink-0 flex-col gap-4 overflow-y-auto border-r border-border bg-muted/20 px-4 py-4">
-      <div className="flex items-center justify-between gap-2">
-        <div className="min-w-0 truncate text-body-lg font-medium text-foreground">Display</div>
-        <WorkbenchIconAction label="Hide display settings" onClick={() => setPanelOpen(false)}>
-          <PanelLeftClose className="h-4 w-4" />
-        </WorkbenchIconAction>
-      </div>
-
-      {selectedSeries ? (
-        <>
-          <p className="truncate font-mono text-label text-muted-foreground">
-            {selectedSeries.key}
-          </p>
-          {isPlotSeries(selectedSeries) ? (
-            <PlotDisplayControls
-              settings={settingsOf(cardSettings, selectedSeries.key)}
-              onChange={patchSelected}
-            />
-          ) : (
-            <ScalarDisplayControls
-              settings={settingsOf(cardSettings, selectedSeries.key)}
-              onChange={patchSelected}
-            />
-          )}
-        </>
+  const settings = selectedSeries ? (
+    <>
+      <p className="truncate font-mono text-label text-muted-foreground">{selectedSeries.key}</p>
+      {isPlotSeries(selectedSeries) ? (
+        <PlotDisplayControls
+          settings={settingsOf(cardSettings, selectedSeries.key)}
+          onChange={patchSelected}
+        />
       ) : (
-        <p className="text-label text-muted-foreground">Select a metric to format it.</p>
+        <ScalarDisplayControls
+          settings={settingsOf(cardSettings, selectedSeries.key)}
+          onChange={patchSelected}
+        />
       )}
-
-      <div className="mt-auto flex flex-col gap-1 border-t border-border pt-3 text-label text-muted-foreground">
-        <span>{records.length} records</span>
-        <span>{scalarSeries.length} scalars</span>
-        {parseErrors > 0 && <span>{parseErrors} parse errors</span>}
-      </div>
-    </aside>
+    </>
   ) : (
-    <div className="flex w-10 shrink-0 flex-col items-center border-r border-border bg-muted/20 pt-3">
-      <WorkbenchIconAction label="Show display settings" onClick={() => setPanelOpen(true)}>
-        <PanelLeftOpen className="h-4 w-4" />
-      </WorkbenchIconAction>
-    </div>
+    <p className="text-label text-muted-foreground">Select a metric to format it.</p>
+  );
+
+  const readSummary = (
+    <>
+      <span>{records.length} records</span>
+      <span>{scalarSeries.length} scalars</span>
+      {sources.length > 0 && (
+        <span>
+          {sources.length} source{sources.length === 1 ? "" : "s"}:{" "}
+          {sources.map((item) => item.label).join(", ")}
+        </span>
+      )}
+      {sources.some((item) => item.error) && (
+        <span>{sources.filter((item) => item.error).length} unreadable</span>
+      )}
+    </>
   );
 
   return (
-    <div className="flex flex-1 overflow-hidden bg-background">
-      {displayPanel}
-      <div className="min-w-0 flex-1 overflow-auto">
+    <ChartWorkbench
+      settings={settings}
+      settingsFooter={readSummary}
+      open={panelOpen}
+      onOpenChange={setPanelOpen}
+    >
+      <div className="min-h-0 min-w-0 flex-1 overflow-auto">
         <div className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-4 md:px-6">
           {grouped.length > 0 ? (
             grouped.map(([groupName, items]) => (
@@ -725,6 +746,6 @@ export const RunMetricsView = ({
           <OtherRecords records={records} />
         </div>
       </div>
-    </div>
+    </ChartWorkbench>
   );
 };

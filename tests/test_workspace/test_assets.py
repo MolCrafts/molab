@@ -1,14 +1,14 @@
 """Invariant tests for the v2 artifact/asset model.
 
-Covers the emitted-artifact surface (``ArtifactRepository`` / ``JsonIndexStore``
-/ ``ContentStore``) plus the retained asset-model classes (``Asset`` hierarchy,
+Covers the emitted-artifact surface (``ArtifactRepository`` + the owning
+``Execution``) plus the retained asset-model classes (``Asset`` hierarchy,
 ``parse_asset``, ``DataAssetLibrary``) and their success criteria:
 
-- Artifact records are self-contained (relative ``source_path`` + content digest).
-- Emitted payloads verify against the content-addressed store.
+- Artifact records are self-contained (workspace-relative path + content digest).
+- Emitted payloads hash to the digest recorded for them.
 - Subclass dispatch survives serialization round-trips.
 - The active task id populates ``Artifact.metadata``.
-- Concurrent artifact writes all land in the provenance index.
+- Concurrent artifact writes all land on the Execution.
 - The scope-bound ``AssetsView`` filters to its own scope; imports land there.
 
 (Cross-cutting query shapes are owned by ``test_asset_scan.py``.)
@@ -23,7 +23,7 @@ from datetime import datetime
 from pathlib import Path
 
 from molexp.workspace import Workspace
-from molexp.workspace.artifact_repository import ArtifactRepository
+from molexp.workspace.artifact_repository import ArtifactRepository, content_ref, scan_artifacts
 from molexp.workspace.assets import (
     ArtifactAsset,
     AssetScope,
@@ -34,9 +34,8 @@ from molexp.workspace.assets import (
     parse_asset,
     scan,
 )
-from molexp.workspace.content_store import ContentStore
 from molexp.workspace.domain import Artifact
-from molexp.workspace.index_store import JsonIndexStore
+from molexp.workspace.execution_dirs import execution_dir_names
 
 ARTIFACTS_PER_RUN = 2
 
@@ -54,8 +53,7 @@ def _seed_workspace(root: Path, n_runs: int = 2) -> Workspace:
 
 
 def _all_artifacts(ws: Workspace) -> list[Artifact]:
-    index = JsonIndexStore(ws.root, fs=ws.fs)
-    return [Artifact.model_validate(raw) for raw in index.list_entities("artifact")]
+    return scan_artifacts(ws)
 
 
 def _query(ws: Workspace, *, run_id: str | None = None) -> list[Artifact]:
@@ -69,8 +67,8 @@ def _repo(ws: Workspace) -> ArtifactRepository:
 
 class TestArtifactRecordPortability:
     def test_artifact_records_relocate_with_run_dir(self, tmp_path):
-        """A run directory copied under a *different* workspace stays queryable
-        via its self-contained ``artifact.json`` records — no absolute paths."""
+        """A run directory copied elsewhere carries its own artifact records —
+        they live in the attempt's ``execution.json``, never in a side index."""
         ws = _seed_workspace(tmp_path / "source", n_runs=1)
         run = ws.project("demo").experiment("baseline").list_runs()[0]
         src_run_dir = Path(run.run_dir)
@@ -79,23 +77,26 @@ class TestArtifactRecordPortability:
         dst_run_dir.parent.mkdir(parents=True, exist_ok=True)
         shutil.copytree(src_run_dir, dst_run_dir)
 
-        records = list(dst_run_dir.rglob("artifacts/*/artifact.json"))
+        states = list(dst_run_dir.rglob("executions/*/execution.json"))
+        assert len(states) == 1
+        records = json.loads(states[0].read_text())["artifacts"]
         assert len(records) == ARTIFACTS_PER_RUN  # artifact + checkpoint
         for record in records:
-            data = json.loads(record.read_text())
-            assert data["source_path"].startswith("work/")
-            assert data["content"]["digest"].startswith("sha256:")
+            # Every product came from one of the attempt's own directories.
+            assert record["source_path"].split("/")[0] in execution_dir_names()
+            assert record["path"].startswith("projects/")
+            assert record["content"]["digest"].startswith("sha256:")
 
 
 class TestArtifactContent:
     def test_every_artifact_payload_verifies(self, tmp_path):
         ws = _seed_workspace(tmp_path / "lab", n_runs=2)
-        store = ContentStore(ws.root, fs=ws.fs)
         artifacts = _all_artifacts(ws)
         assert len(artifacts) == 2 * ARTIFACTS_PER_RUN
         for artifact in artifacts:
             assert artifact.content.digest.startswith("sha256:")
-            assert store.verify(artifact.content)
+            payload = ws.fs.join(str(ws.root), artifact.path)
+            assert content_ref(ws.fs, payload) == artifact.content
 
     def test_parallel_emits_all_land_in_index(self, tmp_path):
         ws = Workspace(tmp_path / "lab", name="Test")
@@ -114,7 +115,7 @@ class TestArtifactContent:
 
         assert len(results) == n
         assert len(_query(ws, run_id=run.id)) == n
-        assert len(_repo(ws).list_for_execution(run.executions[0].id)) == n
+        assert len(run.executions[0].artifacts) == n
 
 
 class TestParseAsset:

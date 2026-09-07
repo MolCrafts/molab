@@ -75,11 +75,12 @@ export const RunInspectorLogs = ({
         </span>
         <div className="ml-auto flex items-center gap-1">
           {history.length > 0 && (
-            <Select
-              value={selectedExecutionId ?? undefined}
-              onValueChange={onSelectExecution}
-            >
-              <SelectTrigger size="sm" className="max-w-36 text-micro" aria-label="Select execution">
+            <Select value={selectedExecutionId ?? undefined} onValueChange={onSelectExecution}>
+              <SelectTrigger
+                size="sm"
+                className="max-w-36 text-micro"
+                aria-label="Select execution"
+              >
                 <SelectValue placeholder="Execution" />
               </SelectTrigger>
               <SelectContent>

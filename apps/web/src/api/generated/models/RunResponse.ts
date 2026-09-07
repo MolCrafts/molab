@@ -2,11 +2,13 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
-import type { ExecutionRecordResponse } from './ExecutionRecordResponse';
+import type { ExecutionResponse } from './ExecutionResponse';
 import type { RunStatusSummaryResponse } from './RunStatusSummaryResponse';
 import type { WorkflowSnapshotResponse } from './WorkflowSnapshotResponse';
 export type RunResponse = {
     id: string;
+    name: string;
+    path: string;
     projectId: string;
     experimentId: string;
     definitionHash: string;
@@ -17,7 +19,7 @@ export type RunResponse = {
     parameters?: Record<string, any>;
     workflow?: (WorkflowSnapshotResponse | null);
     workflowSource?: (string | null);
-    executions?: Array<ExecutionRecordResponse>;
+    executions?: Array<ExecutionResponse>;
     target?: (string | null);
 };
 

@@ -20,7 +20,7 @@ import {
   Server,
   X,
 } from "lucide-react";
-import { type JSX, useEffect, useRef, useState } from "react";
+import { type JSX, type ReactNode, useEffect, useRef, useState } from "react";
 
 import { pulseSync, useSyncPulse } from "@/app/state/syncPulse";
 import type { ServedWorkspaceSummary } from "@/app/types";
@@ -49,6 +49,8 @@ export interface WorkbenchStatusStripProps {
    * the connection popover — no label text.
    */
   onReconnect?: () => void;
+  /** Plugin status-bar items (right-aligned, before Local/Remote). */
+  extras?: ReactNode;
 }
 
 interface CacheStatus {
@@ -161,6 +163,7 @@ export const WorkbenchStatusStrip = ({
   onRemoteIndexReady,
   activeWorkspace = null,
   onReconnect,
+  extras,
 }: WorkbenchStatusStripProps): JSX.Element => {
   const pulse = useSyncPulse();
   const beat = beatProp ?? pulse;
@@ -488,6 +491,7 @@ export const WorkbenchStatusStrip = ({
           </span>
         ) : null}
       </div>
+      {extras ? <div className="flex shrink-0 items-center gap-1 px-1">{extras}</div> : null}
       <div className="hidden shrink-0 items-center gap-2 px-2 font-mono text-micro text-statusbar-foreground/90 sm:flex">
         <span>{activeWorkspace?.isRemote ? "Remote" : "Local"}</span>
         <span aria-hidden>·</span>

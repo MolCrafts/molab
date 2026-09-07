@@ -1,8 +1,8 @@
 """Validate a workspace tree against the frozen layout + OKF laws.
 
 Read-only. The layout law lives in one place — the ``Folder`` family and the
-on-disk contract it derives (container subdir, the mandatory ``run-`` prefix,
-entity vs children-index filenames, the per-concept ``meta.json`` marker).
+on-disk contract it derives (container subdir, human-readable directory
+names, the singular entity filename, the per-concept ``meta.json`` marker).
 This module is that law expressed as a checker, so a tree assembled by hand,
 by an adoption tool, or by an older molexp can be held to the same standard
 the writers obey.
@@ -15,10 +15,11 @@ merely incomplete one:
 * ``error``   — the layout law is violated; readers may mis-resolve the tree.
 * ``warning`` — legal but lazily-created state is absent.
 
-Derived indexes are checked *against* the authoritative entity dirs, never
-the other way round: the One-source-of-truth law makes the plural
-children-index (``projects.json`` / ``experiments.json`` / ``runs.json``)
-a rebuildable cache, so a disagreement is always the index's fault.
+There is nothing derived left to disagree with: the directory tree *is* the
+index, so a level's children are exactly its entity subdirectories. What the
+checker enforces instead is that every path segment is legible — a Run's
+directory names its parameters, an Execution's names its attempt number —
+and that machine state never leaks into a scientific directory.
 """
 
 from __future__ import annotations
@@ -29,6 +30,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, computed_field
 
+from .execution_dirs import execution_dir_names
 from .fs_local import LocalFileSystem
 
 if TYPE_CHECKING:
@@ -41,19 +43,16 @@ Severity = Literal["error", "warning"]
 _SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
 META_JSON = "meta.json"
-RUN_DIR_PREFIX = "run-"
+_EXECUTION_RE = re.compile(r"^e\d+$")
 
 #: Structural container subdirs per level — directories that hold children or
 #: payload rather than being Concepts themselves, so they carry no meta.json.
 _CONTAINERS: dict[str, frozenset[str]] = {
-    "workspace": frozenset(
-        {"projects", "assets", "cache", "knowledges", "provenance", "index", "content"}
-    ),
-    "project": frozenset({"experiments", "assets", "cache", "knowledges"}),
-    "experiment": frozenset({"runs", "assets", "cache", "knowledges"}),
+    "workspace": frozenset({"projects", "assets", "knowledges"}),
+    "project": frozenset({"experiments", "assets", "knowledges"}),
+    "experiment": frozenset({"runs", "assets", "knowledges"}),
     "run": frozenset(
         {
-            "cache",
             "executions",
             "plan",
             "source",
@@ -65,8 +64,9 @@ _CONTAINERS: dict[str, frozenset[str]] = {
 }
 
 #: Per-attempt dirs under ``executions/<id>/``. Products, logs, scheduler
-#: jobs and scratch live here — never at the run root.
-_EXECUTION_CONTAINERS = frozenset({"artifacts", "logs", "jobs", "work", "checkpoints"})
+#: jobs and scratch live here — never at the run root. Read from the
+#: declarations so a directory cannot be legal on disk yet illegal here.
+_EXECUTION_CONTAINERS = execution_dir_names()
 
 #: level -> entity filename (singular — lives on the concept's own directory)
 _ENTITY_FILE: dict[str, str] = {
@@ -75,26 +75,6 @@ _ENTITY_FILE: dict[str, str] = {
     "experiment": "experiment.json",
     "run": "run.json",
 }
-#: level -> children-index filename on the PARENT (plural of the child kind).
-#: Disambiguates from the singular entity file on each child dir.
-_INDEX_FILE: dict[str, str] = {
-    "project": "projects.json",
-    "experiment": "experiments.json",
-    "run": "runs.json",
-}
-#: Singular basenames that used to be children indexes. They collide with
-#: the child entity file and are never a valid index on the parent.
-_SINGULAR_INDEX_FILE: dict[str, str] = {
-    "project": "project.json",
-    "experiment": "experiment.json",
-    "run": "run.json",
-}
-_CHILD_OF: dict[str, str] = {
-    "workspace": "project",
-    "project": "experiment",
-    "experiment": "run",
-}
-
 #: Stable rule id → agent-facing remediation. Keep ids stable — MCP tools
 #: and agent loops filter / dispatch on them.
 _RULE_HINTS: dict[str, str] = {
@@ -108,10 +88,6 @@ _RULE_HINTS: dict[str, str] = {
         "Workspace(root).materialize(); do not nest a second workspace under "
         "an existing one — use add_project instead."
     ),
-    "workspace.index": (
-        "Regenerate the project children index: re-open via Workspace and "
-        "list/add projects so projects.json is rewritten from disk."
-    ),
     "project.entity": (
         "Missing project.json. Prefer add_project(name=…) (create-or-get) so "
         "the entity file is written; hand-written dirs need project.json + meta.json."
@@ -120,31 +96,18 @@ _RULE_HINTS: dict[str, str] = {
         "Rename the directory to a kebab-case slug (e.g. mace-r2san); ids are "
         "slug(name) with no prefix."
     ),
-    "project.index": (
-        "Regenerate experiments.json under the project by listing/adding "
-        "experiments through the Folder API."
-    ),
     "experiment.entity": (
         "Missing experiment.json. Use add_experiment(project_id, name) or "
         "write experiment.json + meta.json under experiments/<slug>/."
     ),
     "experiment.slug": ("Rename the experiment directory to a kebab-case slug (no prefix)."),
-    "experiment.index": (
-        "Regenerate runs.json under the experiment by listing/adding runs "
-        "through the Folder API (disk is authoritative)."
-    ),
-    "index.legacy_name": (
-        "Children index is the plural JSON only (projects.json / "
-        "experiments.json / runs.json). Delete the singular file on the "
-        "parent; it is the child entity basename, never an index."
-    ),
     "run.entity": (
-        "Missing run.json. Scaffold with create_run / experiment.add_run(params=…); "
-        "do not leave a bare run-*/ directory without the entity file."
+        "Missing run.json. Scaffold with experiment.add_run(params=…); do not "
+        "leave a bare directory under runs/ without the entity file."
     ),
-    "run.prefix": (
-        "Rename the directory so it is always under runs/run-<run_id> "
-        "(the run- prefix is mandatory)."
+    "execution.name": (
+        "Rename the attempt directory to its sequence number (e01, e02, …); "
+        "the id in execution.json must match it."
     ),
     "concept.marker": (
         "Stamp type on workspace.json / project.json / experiment.json / "
@@ -154,18 +117,6 @@ _RULE_HINTS: dict[str, str] = {
         "Move with ws.wp.mv(src, dst) / me.wp.mv(ws, src, dst) under the "
         "four-tier tree (e.g. projects/<id>/assets/…), or add meta.json to "
         "make it an OKF Concept, or ws.wp.rm(path, recursive=True) if disposable."
-    ),
-    "index.stale": (
-        "Children index disagrees with disk (disk wins). Rebuild the index by "
-        "re-scanning entity dirs / re-adding children; never treat the index as truth."
-    ),
-    "index.unreadable": (
-        "Fix or delete the corrupt children-index JSON so it can be rebuilt "
-        "from the authoritative entity directories."
-    ),
-    "index.malformed": (
-        "Children index must be a JSON object mapping id → entry; rewrite or "
-        "delete it and let the Folder API regenerate it."
     ),
 }
 
@@ -313,18 +264,6 @@ class _Checker:
             n for n in names if not n.startswith(".") and self._fs.is_dir(self._fs.join(path, n))
         ]
 
-    def _read_index(self, path: str) -> dict[str, object] | None:
-        """Parse a children-index file; report and return None when unreadable."""
-        try:
-            payload = json.loads(self._fs.read_text(path))
-        except (OSError, ValueError) as exc:
-            self._add(path, "index.unreadable", f"{type(exc).__name__}: {exc}")
-            return None
-        if not isinstance(payload, dict):
-            self._add(path, "index.malformed", "children index must be a JSON object")
-            return None
-        return payload
-
     # -- per-level checks ------------------------------------------------
 
     def _has_concept_marker(self, path: str) -> bool:
@@ -382,49 +321,6 @@ class _Checker:
                 f"{name!r} under knowledges/ has no knowledge entity JSON",
             )
 
-    def _check_index(self, path: str, level: str, child_dirs: list[str]) -> None:
-        """The derived children index must match the entity dirs on disk."""
-        child_level = _CHILD_OF[level]
-        index_name = _INDEX_FILE[child_level]
-        index_path = self._fs.join(path, index_name)
-        singular_name = _SINGULAR_INDEX_FILE[child_level]
-        singular_path = self._fs.join(path, singular_name)
-
-        on_disk = {d[len(RUN_DIR_PREFIX) :] if child_level == "run" else d for d in child_dirs}
-
-        if self._fs.is_file(singular_path):
-            self._add(
-                singular_path,
-                "index.legacy_name",
-                f"children index must be {index_name!r}, not singular {singular_name!r}",
-            )
-
-        if not self._fs.is_file(index_path):
-            if on_disk:
-                self._add(
-                    path,
-                    f"{level}.index",
-                    f"missing children index {index_name} for {len(on_disk)} {child_level}(s)",
-                )
-            return
-
-        payload = self._read_index(index_path)
-        if payload is None:
-            return
-        indexed = set(payload)
-        if missing := sorted(on_disk - indexed):
-            self._add(
-                index_path,
-                "index.stale",
-                f"{child_level}(s) on disk but absent from the index: {missing}",
-            )
-        if extra := sorted(indexed - on_disk):
-            self._add(
-                index_path,
-                "index.stale",
-                f"{child_level}(s) indexed but absent from disk: {extra}",
-            )
-
     def _check_execution(self, path: str) -> None:
         """Every child of an execution dir is a known attempt container."""
         for name in self._subdirs(path):
@@ -444,7 +340,14 @@ class _Checker:
         if not self._fs.is_dir(execs):
             return
         for name in self._subdirs(execs):
-            self._check_execution(self._fs.join(execs, name))
+            attempt = self._fs.join(execs, name)
+            if not _EXECUTION_RE.match(name):
+                self._add(
+                    attempt,
+                    "execution.name",
+                    f"{name!r} is not an attempt number (e01, e02, …)",
+                )
+            self._check_execution(attempt)
 
     # -- entry point -----------------------------------------------------
 
@@ -463,7 +366,6 @@ class _Checker:
 
         projects_dir = self._fs.join(root, "projects")
         project_dirs = self._subdirs(projects_dir)
-        self._check_index(root, "workspace", project_dirs)
 
         for pname in project_dirs:
             pdir = self._fs.join(projects_dir, pname)
@@ -475,7 +377,6 @@ class _Checker:
 
             experiments_dir = self._fs.join(pdir, "experiments")
             experiment_dirs = self._subdirs(experiments_dir)
-            self._check_index(pdir, "project", experiment_dirs)
 
             for ename in experiment_dirs:
                 edir = self._fs.join(experiments_dir, ename)
@@ -487,17 +388,9 @@ class _Checker:
 
                 runs_dir = self._fs.join(edir, "runs")
                 run_dirs = self._subdirs(runs_dir)
-                self._check_index(edir, "experiment", run_dirs)
 
                 for rname in run_dirs:
-                    rdir = self._fs.join(runs_dir, rname)
-                    if not rname.startswith(RUN_DIR_PREFIX):
-                        self._add(
-                            rdir,
-                            "run.prefix",
-                            f"{rname!r} must be prefixed {RUN_DIR_PREFIX!r}",
-                        )
-                    self._check_run(rdir)
+                    self._check_run(self._fs.join(runs_dir, rname))
 
         return self._found
 

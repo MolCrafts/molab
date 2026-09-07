@@ -5,12 +5,12 @@ A molexp **Run is a host**, not a MolRec record. Nothing here writes molrec
 molrec spec; molexp does not ship a molrec module.
 
 What these tools produce is the run-local metrics surface: a JSONL **WAL**
-at ``artifacts/metrics.mlp.jsonl``. That is what ``GET …/runs/{id}/metrics``
+at ``out/metrics.mlp.jsonl``. That is what ``GET …/runs/{id}/metrics``
 and the UI read. Leftover zarr / index files are ignored.
 
 Public surface::
 
-    from molexp.plugins.metrics_ingest import LogFormat, detect_log_formats, ingest_run
+    from molexp.plugins.metrics_ingest import detect_log_formats, ingest_run
 
     hits = detect_log_formats(run_dir)  # classify source logs, by content
     result = ingest_run(run_dir)  # append to metrics.mlp.jsonl
@@ -19,13 +19,12 @@ Detection never guesses: a file it cannot confirm is ``UNKNOWN`` and is left
 alone. Ingestion is additive — source artifacts are never deleted, rewritten,
 or moved.
 
-Converters, and what each is built on:
-
-============  ==================================================
-LAMMPS log    ``molpy.io.read_LAMMPS_log`` (lazy — molpy owns the format)
-TensorBoard   :mod:`molexp.plugins.tensorboard` (optional dependency)
-CSV           stdlib :mod:`csv`, operator-supplied column mapping
-============  ==================================================
+**molexp ships no reader.** Formats arrive through the
+:class:`~molexp.plugins.metrics_ingest.readers.MetricReader` Protocol, declared
+by whichever package owns the format — molpy publishes ``lammps_log`` /
+``mrec`` / ``mlp_jsonl`` in the ``molcrafts.metric_readers`` entry-point group.
+No format is privileged, molexp's own WAL included, so a chart never has to
+ask whether something was converted first. See :mod:`.readers`.
 
 All three write through
 :meth:`molexp.plugins.metrics.MetricsWriter.log_many`, the single-open bulk
@@ -38,25 +37,35 @@ from molexp.plugins.metrics_ingest.detect import (
     LogFormat,
     detect_log_formats,
     has_metrics_buffer,
-    is_lammps_log,
-    is_tensorboard_dir,
 )
 from molexp.plugins.metrics_ingest.ingest import (
     IngestResult,
     Skip,
     ingest_run,
 )
-from molexp.plugins.metrics_ingest.tabular import ColumnMapping
+from molexp.plugins.metrics_ingest.readers import (
+    ENTRY_POINT_GROUP,
+    MetricReader,
+    ReadRequest,
+    describe_readers,
+    reader_for,
+    readers,
+    register_reader,
+)
 
 __all__ = [
-    "ColumnMapping",
+    "ENTRY_POINT_GROUP",
     "FormatHit",
     "IngestResult",
     "LogFormat",
+    "MetricReader",
+    "ReadRequest",
     "Skip",
+    "describe_readers",
     "detect_log_formats",
     "has_metrics_buffer",
     "ingest_run",
-    "is_lammps_log",
-    "is_tensorboard_dir",
+    "reader_for",
+    "readers",
+    "register_reader",
 ]

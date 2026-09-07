@@ -7,6 +7,7 @@ import type {
   ExecutionDetailContribution,
   FilePreviewPlugin,
   FileTypeContribution,
+  MetricReaderContribution,
   RendererContribution,
   RendererResolutionContext,
 } from "@/lib/contribution-types";
@@ -93,6 +94,12 @@ export const registerRendererContribution = (contribution: RendererContribution)
   notifyContributionChange();
 };
 
+export const unregisterRendererContribution = (id: string): boolean => {
+  const removed = rendererRegistry.unregister(id);
+  if (removed) notifyContributionChange();
+  return removed;
+};
+
 export const resolveRendererContribution = (
   key: RendererKey,
   context?: Omit<RendererResolutionContext, "key">,
@@ -140,6 +147,12 @@ export const registerEntityTabContribution = (contribution: EntityTabContributio
   notifyContributionChange();
 };
 
+export const unregisterEntityTabContribution = (contributionId: string): boolean => {
+  const removed = entityTabRegistry.unregister(contributionId);
+  if (removed) notifyContributionChange();
+  return removed;
+};
+
 export const listEntityTabContributions = (
   objectType: EntityTabContribution["objectType"],
 ): EntityTabContribution[] => {
@@ -178,6 +191,12 @@ export const registerExecutionColumnContribution = (
   notifyContributionChange();
 };
 
+export const unregisterExecutionColumnContribution = (contributionId: string): boolean => {
+  const removed = executionColumnRegistry.unregister(contributionId);
+  if (removed) notifyContributionChange();
+  return removed;
+};
+
 export const listExecutionColumnContributions = (
   backend?: string | null,
 ): ExecutionColumnContribution[] => {
@@ -193,6 +212,12 @@ export const registerExecutionDetailContribution = (
 ): void => {
   executionDetailRegistry.register(stampPluginId(contribution), { onDuplicate: "skip" });
   notifyContributionChange();
+};
+
+export const unregisterExecutionDetailContribution = (contributionId: string): boolean => {
+  const removed = executionDetailRegistry.unregister(contributionId);
+  if (removed) notifyContributionChange();
+  return removed;
 };
 
 export const listExecutionDetailContributions = (
@@ -214,4 +239,86 @@ export const resetContributionRuntimeForTests = (): void => {
   executionDetailRegistry.clear();
   activePluginId = null;
   notifyContributionChange();
+};
+
+const metricReaderRegistry = new ContributionRegistry<MetricReaderContribution>(
+  "Metric reader contribution",
+);
+
+/** Register a format a viewer can plot. Contributed by whoever owns it. */
+export const registerMetricReaderContribution = (contribution: MetricReaderContribution): void => {
+  metricReaderRegistry.register(stampPluginId(contribution), { onDuplicate: "replace" });
+  notifyContributionChange();
+};
+
+export const unregisterMetricReaderContribution = (contributionId: string): boolean => {
+  const removed = metricReaderRegistry.unregister(contributionId);
+  if (removed) notifyContributionChange();
+  return removed;
+};
+
+/** Every enabled reader, most specific first. */
+export const listMetricReaderContributions = (): MetricReaderContribution[] =>
+  metricReaderRegistry
+    .getAll()
+    .filter((contribution) => contributionEnabled(contribution.pluginId))
+    .sort((left, right) => (right.priority ?? 0) - (left.priority ?? 0));
+
+/**
+ * The reader whose patterns claim *path*, or `undefined`.
+ *
+ * Name-only: this is what decides whether to offer a chart before fetching
+ * anything. Once the bytes are in hand, {@link resolveMetricReaderForText}
+ * has the final say.
+ */
+export const resolveMetricReaderForPath = (path: string): MetricReaderContribution | undefined => {
+  const normalized = path.toLowerCase().replace(/\\/g, "/");
+  const name = normalized.split("/").pop() ?? normalized;
+  return listMetricReaderContributions().find((contribution) =>
+    contribution.patterns.some((pattern) => {
+      const regex = globToRegExp(pattern.toLowerCase());
+      return regex.test(normalized) || regex.test(name);
+    }),
+  );
+};
+
+/** The reader that both claims *path* by name and confirms *text* by content. */
+export const resolveMetricReaderForText = (
+  path: string,
+  text: string,
+): MetricReaderContribution | undefined => {
+  const byName = resolveMetricReaderForPath(path);
+  if (byName && (byName.claims?.(text) ?? true)) {
+    return byName;
+  }
+  return listMetricReaderContributions().find((contribution) => contribution.claims?.(text));
+};
+
+/**
+ * Compile one glob to a regex.
+ *
+ * Only the constructs a reader actually declares are supported — `**` spans
+ * any number of leading segments, `*` stays inside one, `?` is one character
+ * — because these describe file-name shapes, not arbitrary path expressions.
+ */
+const globToRegExp = (pattern: string): RegExp => {
+  let source = "";
+  for (let index = 0; index < pattern.length; index += 1) {
+    const char = pattern[index];
+    if (char === "*") {
+      if (pattern[index + 1] === "*") {
+        index += pattern[index + 2] === "/" ? 2 : 1;
+        source += "(?:.*/)?";
+        continue;
+      }
+      source += "[^/]*";
+      continue;
+    }
+    if (char === "?") {
+      source += "[^/]";
+      continue;
+    }
+    source += char.replace(/[.+^${}()|[\]\\]/g, "\\$&");
+  }
+  return new RegExp(`^${source}$`);
 };

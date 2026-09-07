@@ -122,6 +122,18 @@ interface MockRunOptions {
     results?: Record<string, unknown>;
 }
 
+/**
+ * A run's directory name: its parameters, ``key=value`` sorted and joined —
+ * the same derivation the server applies, so the mock shows what production
+ * shows rather than a UUID.
+ */
+export const mockRunSlug = (id: string, parameters: Record<string, unknown>): string => {
+    const parts = Object.keys(parameters)
+        .sort()
+        .map((key) => `${key}=${String(parameters[key])}`.replace(/[^A-Za-z0-9._=+-]+/g, "-"));
+    return parts.length > 0 ? parts.join("_") : id.slice(0, 8);
+};
+
 const mockRun = (
     id: string,
     projectId: string,
@@ -134,8 +146,11 @@ const mockRun = (
 ): ApiRunResponse => {
     const terminal = status === "succeeded" || status === "failed" || status === "cancelled";
     const schedulerJobId = options.schedulerJobId ?? (options.backend === "molq" ? "482017" : null);
+    const name = mockRunSlug(id, parameters);
     return {
         id,
+        name,
+        path: `projects/${projectId}/experiments/${experimentId}/runs/${name}`,
         projectId,
         experimentId,
         status,
@@ -207,6 +222,7 @@ export function seed(): void {
         {
             id: "protein-folding",
             name: "Protein Folding",
+            path: "projects/protein-folding",
             description: "Benchmarking folding pipelines",
             owner: "molexp",
             tags: ["biology", "gpu"],
@@ -217,6 +233,7 @@ export function seed(): void {
         {
             id: "catalyst-search",
             name: "Catalyst Search",
+            path: "projects/catalyst-search",
             description: "Screening catalysts for CO2 reduction",
             owner: "molexp",
             tags: ["chemistry"],
@@ -234,6 +251,7 @@ export function seed(): void {
             id: "exp-001",
             projectId: "protein-folding",
             name: "AlphaFold Baseline",
+            path: "projects/protein-folding/experiments/alphafold-baseline",
             description: "Initial baseline run with AF2",
             workflow: workflowIr("alphafold-baseline", "model.alphafold"),
             workflowType: "yaml",
@@ -254,6 +272,7 @@ export function seed(): void {
             id: "exp-002",
             projectId: "protein-folding",
             name: "Structure Sweep",
+            path: "projects/protein-folding/experiments/structure-sweep",
             description: "Parameter sweep on secondary structure",
             workflow: workflowIr("structure-sweep", "simulation.gromacs"),
             workflowType: "yaml",
@@ -267,6 +286,7 @@ export function seed(): void {
             id: "exp-101",
             projectId: "catalyst-search",
             name: "Catalyst Sweep",
+            path: "projects/catalyst-search/experiments/catalyst-sweep",
             description: "Screening ligand libraries",
             workflow: workflowIr("catalyst-screen", "simulation.dft"),
             workflowType: "yaml",

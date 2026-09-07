@@ -3,12 +3,12 @@ import type { JSX } from "react";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
 
-export const RUNS_TABS = ["jobs", "timeline"] as const;
+export const RUNS_TABS = ["jobs", "compare"] as const;
 export type RunsTab = (typeof RUNS_TABS)[number];
 
 const TAB_DEFS: Array<{ id: RunsTab; label: string }> = [
   { id: "jobs", label: "Jobs" },
-  { id: "timeline", label: "Timeline" },
+  { id: "compare", label: "Compare" },
 ];
 
 export const parseRunsTab = (raw: string | null | undefined): RunsTab => {
@@ -17,6 +17,14 @@ export const parseRunsTab = (raw: string | null | undefined): RunsTab => {
   }
   return "jobs";
 };
+
+/**
+ * URL of the Runs section on one of its tabs — the inverse of `parseRunsTab`,
+ * and the one place outside this section that may name a Runs tab in a link.
+ * The default tab is spelled by its absence, as `writeRunsParams` writes it.
+ */
+export const runsTabPath = (tab: RunsTab): string =>
+  tab === "jobs" ? "/runs" : `/runs?tab=${tab}`;
 
 interface RunsTabBarProps {
   value: RunsTab;

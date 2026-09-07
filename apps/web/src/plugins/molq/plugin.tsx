@@ -1,11 +1,6 @@
+import type { MolexpPluginModule, PluginAPI } from "@molcrafts/molexp-plugin";
 import { ServerCog } from "lucide-react";
 import { lazy } from "react";
-import {
-  registerEntityTabContribution,
-  registerExecutionColumn,
-  registerExecutionDetail,
-} from "@/app/registry";
-import type { UiPluginModule } from "@/plugins/types";
 
 const MolqExecutionColumn = {
   Cluster: lazy(() =>
@@ -33,24 +28,33 @@ const isMolqRun = (
   return run?.executionHistory.some((execution) => execution.executor.backend === "molq") ?? false;
 };
 
-const molqPlugin: UiPluginModule = {
+const molqPlugin: MolexpPluginModule = {
   id: "molq",
   name: "Molq",
+  version: "1.0.0",
   description: "Scheduler run monitor, Molq tab, and execution columns for molq backends.",
-  userToggleable: true,
-  register: () => {
-    registerEntityTabContribution({
+  activate: (api: PluginAPI) => {
+    api.entityTabs.register({
       id: "molq:run-tab",
       objectType: "run",
       value: "molq",
       label: "Molq",
       Icon: ServerCog,
       priority: 40,
-      matches: ({ selection, snapshot }) => isMolqRun(selection.objectId, snapshot.runs),
+      matches: (context) => {
+        const selection = context.selection as { objectId: string };
+        const snapshot = context.snapshot as {
+          runs: Array<{
+            id: string;
+            executionHistory: Array<{ executor: Record<string, unknown> }>;
+          }>;
+        };
+        return isMolqRun(selection.objectId, snapshot.runs);
+      },
       Component: MolqRunTab,
     });
 
-    registerExecutionColumn({
+    api.execution.registerColumn({
       id: "molq:column:cluster",
       backend: "molq",
       columnId: "cluster",
@@ -58,7 +62,7 @@ const molqPlugin: UiPluginModule = {
       priority: 100,
       Cell: MolqExecutionColumn.Cluster,
     });
-    registerExecutionColumn({
+    api.execution.registerColumn({
       id: "molq:column:scheduler-job",
       backend: "molq",
       columnId: "scheduler-job",
@@ -67,7 +71,7 @@ const molqPlugin: UiPluginModule = {
       Cell: MolqExecutionColumn.SchedulerJob,
     });
 
-    registerExecutionDetail({
+    api.execution.registerDetail({
       id: "molq:detail:submission",
       backend: "molq",
       title: "Molq submission",

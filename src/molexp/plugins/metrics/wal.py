@@ -1,4 +1,4 @@
-"""Run-local host metrics: JSONL WAL under ``artifacts/`` (``.mlp.jsonl``).
+"""Run-local host metrics: JSONL WAL under an attempt's ``artifacts/`` (``.mlp.jsonl``).
 
 On-disk layout under a run / execution root (see
 :mod:`molexp.plugins.metrics.mlp_names`)::
@@ -44,6 +44,7 @@ from molexp.plugins.metrics.mlp_names import (
     mlp_jsonl_name,
     mlp_zarr_name,
 )
+from molexp.workspace.execution_dirs import ARTIFACTS, product_dirs
 from molexp.workspace.file_store import FileStore
 from molexp.workspace.fs import FileSystem
 from molexp.workspace.fs_local import LocalFileSystem
@@ -129,9 +130,15 @@ def _metrics_roots(run_dir: Path | str, fs: FileSystem) -> list[str]:
 
 
 def _discover_jsonl_in_root(root: str, *, fs: FileSystem) -> str | None:
-    """Prefer ``artifacts/*.mlp.jsonl``, then ``work/*.mlp.jsonl``, then the root."""
-    for sub in ("artifacts", "work"):
-        hit = _discover_named(fs.join(root, sub), fs=fs, suffix=MLP_JSONL_SUFFIX, want_dir=False)
+    """Search every directory declared to hold products, then the root itself.
+
+    Which directories those are is the declaration's answer, not a list
+    written here — a tier added later is searched without touching this.
+    """
+    for directory in product_dirs():
+        hit = _discover_named(
+            fs.join(root, directory.name), fs=fs, suffix=MLP_JSONL_SUFFIX, want_dir=False
+        )
         if hit is not None:
             return hit
     return _discover_named(root, fs=fs, suffix=MLP_JSONL_SUFFIX, want_dir=False)
@@ -140,8 +147,8 @@ def _discover_jsonl_in_root(root: str, *, fs: FileSystem) -> str | None:
 def discover_mlp_jsonl(run_dir: Path | str, *, fs: FileSystem | None = None) -> str | None:
     """Locate a ``*.mlp.jsonl`` WAL under *run_dir* or its executions.
 
-    At each root, ``artifacts/`` wins over a same-level file. Later execution
-    directories override earlier ones and the run root.
+    At each root, a declared product directory wins over a same-level file.
+    Later execution directories override earlier ones and the run root.
     """
     fs = fs or _default_fs()
     found: str | None = None
@@ -190,7 +197,7 @@ def _validate_key(key: JSONValue) -> str:
     return key
 
 
-def _validate_record(record: MetricRecord) -> MetricRecord:
+def validate_record(record: MetricRecord) -> MetricRecord:
     event_type = record.get("t")
     if event_type not in _VALID_TYPES:
         raise ValueError(f"unknown metric type: {event_type!r}")
@@ -285,7 +292,7 @@ def _records_from_wal(
             continue
 
         try:
-            record = _validate_record(json.loads(stripped))
+            record = validate_record(json.loads(stripped))
         except (json.JSONDecodeError, ValueError, TypeError):
             parse_errors += 1
             continue
@@ -336,13 +343,17 @@ def _file_store_append(run_dir: Path) -> _Append:
     store = FileStore(run_dir)
 
     def append(name: str | Path, line: str) -> object:
-        return store.append(Path("artifacts") / name, line)
+        return store.append(Path(ARTIFACTS.name) / name, line)
 
     return append
 
 
 class MetricsWriter:
-    """Append metrics to ``artifacts/metrics.mlp.jsonl`` via :class:`FileStore`."""
+    """Append metrics to ``artifacts/metrics.mlp.jsonl`` via :class:`FileStore`.
+
+    The versioned tier on purpose: the metrics WAL is small and is the
+    record of what the run measured, so it belongs in the history.
+    """
 
     def __init__(
         self,
@@ -353,6 +364,12 @@ class MetricsWriter:
         self._run_dir = Path(run_dir)
         self._lock = threading.Lock()
         self._append = append if append is not None else _file_store_append(self._run_dir)
+
+    @property
+    def path(self) -> Path:
+        """Where this writer appends. Readable as a format like any other, so
+        a caller that also *reads* the run must exclude it from its sources."""
+        return self._run_dir / ARTIFACTS.name / METRICS_JSONL_NAME
 
     def scalar(
         self,
@@ -449,7 +466,7 @@ class MetricsWriter:
         if tags is not None:
             payload["tags"] = tags
 
-        payload = _validate_record(payload)
+        payload = validate_record(payload)
         line = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
 
         with self._lock:
@@ -474,7 +491,7 @@ class MetricsWriter:
                 payload.setdefault("w", datetime.now().isoformat())
                 if tags is not None:
                     payload["tags"] = tags
-                payload = _validate_record(payload)
+                payload = validate_record(payload)
                 line = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
                 self._append(mlp_jsonl_name(), line)
                 count += 1

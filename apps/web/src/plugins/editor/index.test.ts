@@ -15,7 +15,6 @@
 
 import { beforeEach, describe, expect, it } from "@rstest/core";
 import type React from "react";
-
 import { registerRendererContribution } from "@/app/registry";
 import type {
   ContentType,
@@ -25,6 +24,7 @@ import type {
   SemanticObjectType,
 } from "@/app/types";
 import { filePreviewPluginRegistry } from "@/lib/file-preview-plugins";
+import { createPluginAPI } from "@/plugins/api/create_api";
 import {
   resetContributionRuntimeForTests,
   resolveRendererContribution,
@@ -49,6 +49,11 @@ const SentinelRenderer: React.ComponentType<RendererProps> = () => null;
 /** Trivial sentinel preview component. */
 const SentinelPreview: React.ComponentType<FilePreviewContentProps> = () => null;
 
+const activateEditor = (): void => {
+  const { api } = createPluginAPI("editor");
+  void editorPlugin.activate(api);
+};
+
 beforeEach(() => {
   resetContributionRuntimeForTests();
 });
@@ -57,7 +62,7 @@ describe("editor plugin renderer registration", () => {
   it.each(EDITOR_FILE_KINDS)(
     "resolves a non-null editor renderer for fileKind=%s after register()",
     (fileKind) => {
-      editorPlugin.register();
+      activateEditor();
 
       const contribution = resolveRendererContribution(editorKey(fileKind));
 
@@ -71,7 +76,7 @@ describe("editor plugin override / extension point", () => {
   const ALT_EDITOR: React.ComponentType<RendererProps> = () => null;
 
   beforeEach(() => {
-    editorPlugin.register();
+    activateEditor();
   });
 
   it("lets a higher-priority alternative editor override the default for python", () => {
@@ -120,7 +125,7 @@ describe("editor plugin override / extension point", () => {
 
 describe("editor preview-host contract", () => {
   it("resolves a registered file-preview plugin the editor's Preview tab consumes", () => {
-    editorPlugin.register();
+    activateEditor();
 
     const markdownPreview = {
       id: "test:markdown-preview",
@@ -136,7 +141,7 @@ describe("editor preview-host contract", () => {
   });
 
   it("keeps the default editor renderer addressable alongside the preview registry", () => {
-    editorPlugin.register();
+    activateEditor();
 
     // Guard: registering a preview plugin must not perturb editor renderers.
     filePreviewPluginRegistry.register({

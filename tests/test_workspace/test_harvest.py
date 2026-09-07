@@ -117,9 +117,9 @@ class TestHarvestSucceededRun:
 
         edges = _harvest(run).typed_out_edges()
 
-        assert any(
-            e.role == "derived_from" and str(e.target).endswith(f"run-{run.id}") for e in edges
-        ), edges
+        assert any(e.role == "derived_from" and str(e.target).endswith(run._name) for e in edges), (
+            edges
+        )
 
 
 class TestHarvestPreconditions:
