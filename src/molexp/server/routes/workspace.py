@@ -151,6 +151,7 @@ def _events_seq(workspace: Workspace) -> int:
 
 @events_router.get("/workspace/events/stream")
 async def stream_workspace_changes(
+    request: Request,
     since: int | None = Query(default=None, description="Resume after this spine ``seq``"),
     workspace: Workspace = Depends(get_workspace),
     read_model: WorkspaceReadModel = Depends(get_read_model),
@@ -177,7 +178,7 @@ async def stream_workspace_changes(
     import asyncio
     import json as _json
 
-    from molexp.services.workspace_notify import subscribe_workspace_changes
+    from molexp.services.workspace_notify import open_workspace_subscription
 
     from ..shutdown import is_shutting_down
 
@@ -215,36 +216,55 @@ async def stream_workspace_changes(
             }
             yield f"event: change\ndata: {_json.dumps(frame)}\n\n"
 
-        stream = subscribe_workspace_changes(root)
+        # A *subscription handle*, not an async generator: the poll below times
+        # out every second, and ``wait_for`` cancels what it waits on. Cancelling
+        # a generator's ``anext`` throws into its body and runs its ``finally``,
+        # which unregisters the subscriber — so the stream would go deaf one
+        # second after connecting and deliver nothing for the rest of its life.
+        # Cancelling ``subscription.get()`` only drops a queue waiter.
+        subscription = open_workspace_subscription(root)
         idle = 0.0
-        while True:
-            try:
-                # Poll finely but comment rarely: the wait is what notices a
-                # shutdown or a disconnect, so a 15 s one would keep the
-                # worker (and uvicorn's connection drain) hanging that long.
-                change = await asyncio.wait_for(anext(stream), timeout=_STREAM_POLL_SECONDS)
-            except TimeoutError:
-                if is_shutting_down():
+        try:
+            while True:
+                try:
+                    # Poll finely but comment rarely: the wait is what notices a
+                    # shutdown or a disconnect, so a 15 s one would keep the
+                    # worker (and uvicorn's connection drain) hanging that long.
+                    change = await asyncio.wait_for(
+                        subscription.get(), timeout=_STREAM_POLL_SECONDS
+                    )
+                except TimeoutError:
+                    # Both exits matter: shutdown is the server going away, and
+                    # a disconnect is the far more common case of a tab closing.
+                    # Relying on task cancellation alone leaves the generator
+                    # running under any transport that does not cancel it.
+                    # Both exits matter: shutdown is the server going away, and
+                    # a disconnect is the far more common case of a tab closing.
+                    # Relying on task cancellation alone leaves the generator
+                    # running under any transport that does not cancel it.
+                    if is_shutting_down() or await request.is_disconnected():
+                        return
+                    idle += _STREAM_POLL_SECONDS
+                    if idle >= _KEEP_ALIVE_SECONDS:
+                        idle = 0.0
+                        read_model.touch()
+                        yield ": keep-alive\n\n"
+                    continue
+                if change is None:  # shutdown woke the subscription
                     return
-                idle += _STREAM_POLL_SECONDS
-                if idle >= _KEEP_ALIVE_SECONDS:
-                    idle = 0.0
-                    read_model.touch()
-                    yield ": keep-alive\n\n"
-                continue
-            except StopAsyncIteration:
-                return
-            idle = 0.0
-            payload = {
-                "kind": change.kind,
-                "ref": change.ref,
-                "seq": change.seq,
-                "projectId": change.project_id,
-                "experimentId": change.experiment_id,
-                "runId": change.run_id,
-                "versions": change.versions or read_model.versions(),
-            }
-            yield f"event: change\ndata: {_json.dumps(payload)}\n\n"
+                idle = 0.0
+                payload = {
+                    "kind": change.kind,
+                    "ref": change.ref,
+                    "seq": change.seq,
+                    "projectId": change.project_id,
+                    "experimentId": change.experiment_id,
+                    "runId": change.run_id,
+                    "versions": change.versions or read_model.versions(),
+                }
+                yield f"event: change\ndata: {_json.dumps(payload)}\n\n"
+        finally:
+            subscription.close()
 
     return StreamingResponse(
         _generate(),

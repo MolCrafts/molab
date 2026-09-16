@@ -10,8 +10,6 @@ import { RunStatusBadge, WorkbenchAction, WorkbenchIconAction } from "@/componen
 
 interface WorkflowsPageProps {
   snapshot: WorkspaceSnapshot;
-  /** Retained for the renderer contract; refreshes are targeted invalidations. */
-  onRefresh?: () => void;
 }
 
 /**

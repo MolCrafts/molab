@@ -1,8 +1,9 @@
 """``params`` is the one spelling for parameter dicts across the factories.
 
 Frozen interface-naming contract (CLAUDE.md): ``Experiment.add_run(params=...)``
-and ``Project.add_experiment(params=...)`` share the canonical keyword, and
-``add_run(parameters=...)`` survives only as a deprecation-warned alias.
+and ``Project.add_experiment(params=...)`` share the canonical keyword. It is
+the *only* spelling — the former ``parameters=`` alias is gone, so passing it
+is a ``TypeError`` rather than a warning.
 
 Explicit-``id`` honouring and slug idempotency of the ``add_*`` factories are
 owned by ``test_crud_convergence.py``, not here.
@@ -26,10 +27,11 @@ class TestExperimentAddRun:
         run = experiment.add_run(params={"lr": 1e-3})
         assert run.parameters == {"lr": 1e-3}
 
-    def test_parameters_alias_warns_but_works(self, experiment):
-        with pytest.warns(DeprecationWarning, match="use params="):
-            run = experiment.add_run(parameters={"seed": 7})
-        assert run.parameters == {"seed": 7}
+    def test_parameters_alias_is_gone(self, experiment):
+        # The removed alias must fail loudly, not silently create a run whose
+        # params were swallowed as an unknown keyword.
+        with pytest.raises(TypeError):
+            experiment.add_run(parameters={"seed": 7})
 
 
 class TestProjectAddExperiment:

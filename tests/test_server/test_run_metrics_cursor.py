@@ -41,11 +41,13 @@ class TestCursor:
         second = client.get(url, params={"since_offset": first["nextOffset"]}).json()
         assert second["records"] == []
 
-    def test_legacy_line_cursor_still_works(self, client, url, writer):
+    def test_legacy_line_cursor_is_rejected(self, client, url, writer):
+        # since_line was removed; an unknown query param must not silently
+        # behave like "no cursor" and re-send the whole stream as new data.
         writer.scalar("loss", 1.0, step=0)
         writer.scalar("loss", 0.5, step=1)
         body = client.get(url, params={"since_line": 1}).json()
-        assert [r["v"] for r in body["records"]] == [0.5]
+        assert [r["v"] for r in body["records"]] == [1.0, 0.5]
 
     def test_scan_budget_reports_truncation(self, client, url, writer):
         for i in range(200):

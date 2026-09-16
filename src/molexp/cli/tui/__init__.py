@@ -11,8 +11,8 @@ Hosts the ``molexp explore`` tree explorer, split into:
 plus :mod:`~molexp.cli.tui.run_monitor` — the :class:`RunMonitor`
 lifecycle controller for the full-screen molq run dashboard.
 
-The legacy import path ``molexp.tree_monitor`` is kept as a thin
-deprecation shim over this package.
+This package is the only import path; the former ``molexp.tree_monitor``
+deprecation shim has been removed.
 """
 
 from .run_monitor import RunMonitor

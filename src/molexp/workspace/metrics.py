@@ -47,7 +47,6 @@ class MetricReadResult:
     """Result returned by a metrics read query."""
 
     records: list[MetricRecord] = field(default_factory=list)
-    next_line: int = 0
     series: list[dict[str, JSONValue]] = field(default_factory=list)
     parse_errors: int = 0
     next_offset: int = 0
@@ -256,7 +255,6 @@ def read_run_metrics(
     *,
     metric_type: str | None = None,
     key: str | None = None,
-    since_line: int = 0,
     since_offset: int | None = None,
     max_scan_bytes: int = 8 * 1024 * 1024,
     limit: int = 5000,
@@ -265,17 +263,15 @@ def read_run_metrics(
 
     A live chart polls this every few seconds. Resuming by *since_offset*
     seeks straight to the new bytes, so each poll costs what was appended
-    rather than the whole file so far; *since_line* is kept for callers that
-    have not moved to the cursor yet, and still has to re-read from the top.
+    rather than the whole file so far.
 
     Args:
         run_dir: The run directory.
         metric_type: Only records of this type.
         key: Only records with this key.
-        since_line: Skip this many leading lines (legacy cursor).
         since_offset: Byte offset to resume from — ``next_offset`` of the
-            previous result. Takes precedence over *since_line*. An offset past
-            EOF (the file was truncated or rotated) restarts from 0.
+            previous result. An offset past EOF (the file was truncated or
+            rotated) restarts from 0.
         max_scan_bytes: Stop after scanning this many bytes and report
             ``truncated``, so one enormous file cannot stall a request.
         limit: Maximum records returned.
@@ -289,7 +285,6 @@ def read_run_metrics(
 
     records: list[MetricRecord] = []
     parse_errors = 0
-    next_line = 0
     truncated = False
 
     total = metrics_file.stat().st_size
@@ -301,21 +296,10 @@ def read_run_metrics(
         if start:
             fh.seek(start)
         scanned = 0
-        line_no = -1
         offset = start
         for raw in fh:
-            line_no += 1
             offset += len(raw)
             scanned += len(raw)
-            # A cursor resume already skipped the earlier lines by seeking, so
-            # the line filter only applies when reading from the top.
-            if since_offset is None:
-                next_line = line_no + 1
-                if line_no < since_line:
-                    continue
-            else:
-                next_line = since_line + line_no + 1
-
             stripped = raw.decode("utf-8", errors="replace").strip()
             if stripped:
                 try:
@@ -338,7 +322,6 @@ def read_run_metrics(
 
     return MetricReadResult(
         records=records,
-        next_line=next_line,
         series=_summarize_records(records),
         parse_errors=parse_errors,
         next_offset=offset,

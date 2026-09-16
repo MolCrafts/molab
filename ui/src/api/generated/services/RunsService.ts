@@ -100,9 +100,8 @@ export class RunsService {
      * Cancel Run
      * Cancel a run.
      *
-     * ``cancel`` is the canonical verb (matching the CLI ``molexp runs cancel``
-     * and the resulting ``cancelled`` status); ``/kill`` remains as a
-     * deprecated alias route bound to this same handler.
+     * ``cancel`` is the canonical — and only — verb, matching the CLI
+     * ``molexp runs cancel`` and the resulting ``cancelled`` status.
      *
      * Routes through :func:`molexp.plugins.submit_molq.cancel.try_cancel`, which signals
      * molq via :class:`molq.Submitor` for cluster-submitted runs and
@@ -401,34 +400,6 @@ export class RunsService {
         });
     }
     /**
-     * @deprecated
-     * Cancel Run
-     * Deprecated alias for `POST .../{run_id}/cancel` (same handler).
-     * @param projectId
-     * @param experimentId
-     * @param runId
-     * @returns RunActionResponse Successful Response
-     * @throws ApiError
-     */
-    public static cancelRunApiProjectsProjectIdExperimentsExperimentIdRunsRunIdKillPost(
-        projectId: string,
-        experimentId: string,
-        runId: string,
-    ): CancelablePromise<RunActionResponse> {
-        return __request(OpenAPI, {
-            method: 'POST',
-            url: '/api/projects/{project_id}/experiments/{experiment_id}/runs/{run_id}/kill',
-            path: {
-                'project_id': projectId,
-                'experiment_id': experimentId,
-                'run_id': runId,
-            },
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
      * Get Run Lammps Log
      * Parse a LAMMPS log file and return thermo stages.
      *
@@ -523,7 +494,6 @@ export class RunsService {
      * @param runId
      * @param type
      * @param key
-     * @param sinceLine Legacy cursor; prefer since_offset.
      * @param sinceOffset Byte cursor from a previous nextOffset (O(1) resume).
      * @param maxScanBytes
      * @param limit
@@ -536,7 +506,6 @@ export class RunsService {
         runId: string,
         type?: (string | null),
         key?: (string | null),
-        sinceLine?: number,
         sinceOffset?: (number | null),
         maxScanBytes: number = 8388608,
         limit: number = 5000,
@@ -552,7 +521,6 @@ export class RunsService {
             query: {
                 'type': type,
                 'key': key,
-                'since_line': sinceLine,
                 'since_offset': sinceOffset,
                 'max_scan_bytes': maxScanBytes,
                 'limit': limit,
@@ -795,9 +763,8 @@ export class RunsService {
      * Cancel Run
      * Cancel a run.
      *
-     * ``cancel`` is the canonical verb (matching the CLI ``molexp runs cancel``
-     * and the resulting ``cancelled`` status); ``/kill`` remains as a
-     * deprecated alias route bound to this same handler.
+     * ``cancel`` is the canonical — and only — verb, matching the CLI
+     * ``molexp runs cancel`` and the resulting ``cancelled`` status.
      *
      * Routes through :func:`molexp.plugins.submit_molq.cancel.try_cancel`, which signals
      * molq via :class:`molq.Submitor` for cluster-submitted runs and
@@ -1120,37 +1087,6 @@ export class RunsService {
         });
     }
     /**
-     * @deprecated
-     * Cancel Run
-     * Deprecated alias for `POST .../{run_id}/cancel` (same handler).
-     * @param projectId
-     * @param experimentId
-     * @param runId
-     * @param ws
-     * @returns RunActionResponse Successful Response
-     * @throws ApiError
-     */
-    public static cancelRunApiWorkspacesWsProjectsProjectIdExperimentsExperimentIdRunsRunIdKillPost(
-        projectId: string,
-        experimentId: string,
-        runId: string,
-        ws: string,
-    ): CancelablePromise<RunActionResponse> {
-        return __request(OpenAPI, {
-            method: 'POST',
-            url: '/api/workspaces/{ws}/projects/{project_id}/experiments/{experiment_id}/runs/{run_id}/kill',
-            path: {
-                'project_id': projectId,
-                'experiment_id': experimentId,
-                'run_id': runId,
-                'ws': ws,
-            },
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
      * Get Run Lammps Log
      * Parse a LAMMPS log file and return thermo stages.
      *
@@ -1252,7 +1188,6 @@ export class RunsService {
      * @param ws
      * @param type
      * @param key
-     * @param sinceLine Legacy cursor; prefer since_offset.
      * @param sinceOffset Byte cursor from a previous nextOffset (O(1) resume).
      * @param maxScanBytes
      * @param limit
@@ -1266,7 +1201,6 @@ export class RunsService {
         ws: string,
         type?: (string | null),
         key?: (string | null),
-        sinceLine?: number,
         sinceOffset?: (number | null),
         maxScanBytes: number = 8388608,
         limit: number = 5000,
@@ -1283,7 +1217,6 @@ export class RunsService {
             query: {
                 'type': type,
                 'key': key,
-                'since_line': sinceLine,
                 'since_offset': sinceOffset,
                 'max_scan_bytes': maxScanBytes,
                 'limit': limit,

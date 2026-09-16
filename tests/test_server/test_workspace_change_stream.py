@@ -10,7 +10,6 @@ deltas or must invalidate its lists once.
 from __future__ import annotations
 
 import contextlib
-import json
 
 import pytest
 from fastapi.testclient import TestClient
@@ -18,6 +17,8 @@ from fastapi.testclient import TestClient
 from molexp.server.app import create_app
 from molexp.server.dependencies import get_workspace
 from molexp.workspace import Workspace
+
+from ._live_server import LiveServer, read_sse_frames
 
 
 @pytest.fixture
@@ -35,49 +36,43 @@ def client(workspace: Workspace):
         yield c
 
 
-def _frames(response, limit: int = 2) -> list[tuple[str, dict]]:
-    """Parse up to *limit* SSE ``event:``/``data:`` pairs from a live response."""
-    out: list[tuple[str, dict]] = []
-    event: str | None = None
-    for raw in response.iter_lines():
-        line = raw if isinstance(raw, str) else raw.decode()
-        if line.startswith("event: "):
-            event = line[len("event: ") :]
-        elif line.startswith("data: ") and event is not None:
-            out.append((event, json.loads(line[len("data: ") :])))
-            event = None
-            if len(out) >= limit:
-                break
-    return out
+@pytest.fixture
+def live(workspace: Workspace, monkeypatch):
+    """The stream over a real socket — ``TestClient`` cannot read an open SSE.
+
+    Keep-alives are made immediate so a reader learns "nothing more is coming"
+    in one poll instead of fifteen seconds; the interval is right in
+    production and merely slow here.
+    """
+    from molexp.server.routes import workspace as workspace_routes
+
+    monkeypatch.setattr(workspace_routes, "_KEEP_ALIVE_SECONDS", 0.0)
+    app = create_app()
+    app.dependency_overrides[get_workspace] = lambda: workspace
+    with LiveServer(app) as server:
+        yield server
 
 
 class TestHelloFrame:
-    def test_stream_opens_with_hello_carrying_versions_and_seq(self, client: TestClient) -> None:
-        with client.stream("GET", "/api/workspace/events/stream") as response:
-            assert response.status_code == 200
-            assert response.headers["content-type"].startswith("text/event-stream")
-            kind, payload = _frames(response, limit=1)[0]
+    async def test_stream_opens_with_hello_carrying_versions_and_seq(self, live) -> None:
+        kind, payload = (await read_sse_frames(live.base, limit=1))[0]
         assert kind == "hello"
         assert set(payload) == {"versions", "seq", "replayed"}
         assert set(payload["versions"]) == {"runs", "assets", "knowledge"}
         assert isinstance(payload["seq"], int)
 
-    def test_fresh_connection_without_since_is_not_marked_replayed(
-        self, client: TestClient
-    ) -> None:
-        with client.stream("GET", "/api/workspace/events/stream") as response:
-            _kind, payload = _frames(response, limit=1)[0]
+    async def test_fresh_connection_without_since_is_not_marked_replayed(self, live) -> None:
+        _kind, payload = (await read_sse_frames(live.base, limit=1))[0]
         assert payload["replayed"] is False
 
-    def test_reconnect_with_since_replays_the_missed_events(
-        self, client: TestClient, workspace: Workspace
+    async def test_reconnect_with_since_replays_the_missed_events(
+        self, live, workspace: Workspace
     ) -> None:
         """The gap case: a client that was away must not silently miss a change."""
         from molexp.workspace.events import emit_workspace_event
 
         emit_workspace_event(workspace.root, "run.completed", "test", refs=["r1"])
-        with client.stream("GET", "/api/workspace/events/stream", params={"since": 0}) as response:
-            frames = _frames(response, limit=4)
+        frames = await read_sse_frames(live.base, params={"since": 0}, limit=4)
 
         hello_kind, hello = frames[0]
         assert hello_kind == "hello"
@@ -91,11 +86,15 @@ class TestHelloFrame:
 class TestLiveChanges:
     """What a mutating route publishes onto the bus the stream re-emits.
 
-    Asserted against the bus rather than through an open SSE response: the
-    in-process test transports serialize the app and the test, so a push that
-    happens *while* a stream is being read cannot be observed there. The frame
-    encoding those changes go through is covered by the replay tests above,
-    and bus delivery itself by ``tests/test_services/test_workspace_notify``.
+    Asserted against the bus rather than through an open SSE response, because
+    ``TestClient`` buffers a response to completion and so cannot read a stream
+    that stays open. That keeps these cheap and focused on *payload shape* —
+    that a cancel carries the parent ids a client needs to invalidate one
+    experiment's run list.
+
+    The end-to-end claim these cannot make — a change published while a client
+    is reading actually reaches that client — is covered over a real socket in
+    ``test_change_stream_live_socket.py``.
     """
 
     @pytest.mark.asyncio
@@ -172,14 +171,13 @@ class TestReplayTruncation:
         for i in range(count):
             emit_workspace_event(workspace.root, "run.completed", "test", refs=[f"r{i}"])
 
-    def test_backlog_over_the_cap_is_reported_as_not_replayed(
-        self, client: TestClient, workspace: Workspace
+    async def test_backlog_over_the_cap_is_reported_as_not_replayed(
+        self, live, workspace: Workspace
     ) -> None:
         from molexp.server.routes.workspace import _REPLAY_LIMIT
 
         self._emit(workspace, _REPLAY_LIMIT + 5)
-        with client.stream("GET", "/api/workspace/events/stream", params={"since": 0}) as response:
-            frames = _frames(response, limit=2)
+        frames = await read_sse_frames(live.base, params={"since": 0}, limit=2)
 
         kind, hello = frames[0]
         assert kind == "hello"
@@ -188,28 +186,25 @@ class TestReplayTruncation:
             "would trust partial deltas and serve stale data"
         )
 
-    def test_backlog_over_the_cap_sends_no_partial_change_frames(
-        self, client: TestClient, workspace: Workspace
+    async def test_backlog_over_the_cap_sends_no_partial_change_frames(
+        self, live, workspace: Workspace
     ) -> None:
         """Not-replayed means the client invalidates; partial frames are waste."""
         from molexp.server.routes.workspace import _REPLAY_LIMIT
 
         self._emit(workspace, _REPLAY_LIMIT + 5)
-        with client.stream("GET", "/api/workspace/events/stream", params={"since": 0}) as response:
-            # Ask for more than one frame; a keep-alive ends the read if the
-            # server correctly has nothing more to say.
-            frames = _frames(response, limit=3)
+        # Ask for more than one frame; a keep-alive ends the read if the
+        # server correctly has nothing more to say.
+        frames = await read_sse_frames(live.base, params={"since": 0}, limit=3)
 
         assert [k for k, _ in frames] == ["hello"], (
             f"expected hello only, got {[k for k, _ in frames]}"
         )
 
-    def test_backlog_at_exactly_the_cap_still_replays_in_full(
-        self, tmp_path, workspace: Workspace
+    async def test_backlog_at_exactly_the_cap_still_replays_in_full(
+        self, live, workspace: Workspace
     ) -> None:
         """The boundary is inclusive: cap events fit, so they are delivered."""
-        from molexp.server.app import create_app
-        from molexp.server.dependencies import get_workspace
         from molexp.server.routes.workspace import _REPLAY_LIMIT
         from molexp.workspace.events import read_workspace_events
 
@@ -218,13 +213,7 @@ class TestReplayTruncation:
         since = max((e.seq for e in read_workspace_events(workspace.root, limit=1)), default=0)
         self._emit(workspace, _REPLAY_LIMIT)
 
-        app = create_app()
-        app.dependency_overrides[get_workspace] = lambda: workspace
-        with (
-            TestClient(app) as c,
-            c.stream("GET", "/api/workspace/events/stream", params={"since": since}) as response,
-        ):
-            frames = _frames(response, limit=2)
+        frames = await read_sse_frames(live.base, params={"since": since}, limit=2)
 
         kind, hello = frames[0]
         assert kind == "hello"

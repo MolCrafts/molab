@@ -274,7 +274,8 @@ export const RUN_METRICS_POLL_MS = 3_000;
 
 export interface RunMetricsPage {
   records: MetricRecord[];
-  nextLine: number;
+  /** Byte offset to resume from — an O(1) seek, not a line count. */
+  nextOffset: number;
   /** Cumulative count of unparseable lines across every page so far. */
   parseErrors: number;
 }
@@ -283,7 +284,7 @@ export interface RunMetricsPage {
  * A run's metrics stream, appended in place.
  *
  * The query reads its own last page out of the cache and asks the server only
- * for records after `nextLine`, so a long-running sweep re-parses nothing.
+ * for records after `nextOffset`, so a long-running sweep re-parses nothing.
  */
 export function useRunMetricsQuery(
   coords: RunLogsCoords | null,
@@ -298,19 +299,19 @@ export function useRunMetricsQuery(
     queryFn: async (): Promise<RunMetricsPage> => {
       if (!coords) throw new Error("run metrics requested without a run");
       const previous = client.getQueryData<RunMetricsPage>(queryKey);
-      const sinceLine = previous?.nextLine ?? 0;
+      const sinceOffset = previous?.nextOffset ?? 0;
       const response = await workspaceApi.getRunMetrics(
         coords.projectId,
         coords.experimentId,
         coords.runId,
-        { sinceLine },
+        { sinceOffset },
       );
       const records =
-        sinceLine === 0 ? response.records : [...(previous?.records ?? []), ...response.records];
+        sinceOffset === 0 ? response.records : [...(previous?.records ?? []), ...response.records];
       return {
         records,
-        nextLine: response.nextLine,
-        parseErrors: (sinceLine === 0 ? 0 : (previous?.parseErrors ?? 0)) + response.parseErrors,
+        nextOffset: response.nextOffset,
+        parseErrors: (sinceOffset === 0 ? 0 : (previous?.parseErrors ?? 0)) + response.parseErrors,
       };
     },
     enabled: enabled && coords !== null,

@@ -5,7 +5,7 @@ into a sourced :class:`~molexp.workspace.knowledge_item.KnowledgeItem` via
 :func:`~molexp.workspace.knowledge_write.write_knowledge_item`.
 
 ``export_session_zip`` archives the session folder via
-:func:`~molexp.workspace.archive.archive_folder_zip` — the single zip writer.
+:func:`~molexp.workspace.archive.archive_folder_zip_iter` — the single zip writer.
 """
 
 from __future__ import annotations
@@ -13,11 +13,13 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from molexp.ids import slugify
-from molexp.workspace.archive import archive_folder_zip
+from molexp.workspace.archive import archive_folder_zip_iter
 from molexp.workspace.knowledge_item import KnowledgeItem, KnowledgeKind, SourceRef
 from molexp.workspace.knowledge_write import write_knowledge_item
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from molexp.agent.folders import AgentSession
     from molexp.workspace.folder import Folder
 
@@ -92,10 +94,13 @@ def harvest_session(
     )
 
 
-def export_session_zip(session: AgentSession) -> bytes:
+def export_session_zip(session: AgentSession) -> Iterator[bytes]:
     """Zip the session directory via the workspace archive core.
 
-    Returns:
-        Zip bytes of the session folder (meta, entries, messages, …).
+    Streams compressed chunks rather than returning one ``bytes``, so a session
+    carrying large attachments is never held whole in memory.
+
+    Yields:
+        Zip chunks for the session folder (meta, entries, messages, …).
     """
-    return archive_folder_zip(session)
+    return archive_folder_zip_iter(session)

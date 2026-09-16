@@ -65,20 +65,17 @@ class TestMetricsWriter:
 
 
 class TestReadRunMetrics:
-    def test_filters_by_type_key_and_since_line(self, run):
+    def test_filters_by_type_and_key(self, run):
         with run.start() as ctx:
             ctx.metrics.scalar("train/loss", 0.3, step=1)
             ctx.metrics.text("note", "warmup", step=1)
             ctx.metrics.scalar("train/loss", 0.2, step=2)
 
-        result = read_run_metrics(
-            Path(run.run_dir), metric_type="scalar", key="train/loss", since_line=1
-        )
+        result = read_run_metrics(Path(run.run_dir), metric_type="scalar", key="train/loss")
 
-        assert result.next_line == 3
-        assert len(result.records) == 1
-        assert result.records[0]["v"] == 0.2
+        assert [record["v"] for record in result.records] == [0.3, 0.2]
         assert result.series[0]["key"] == "train/loss"
+        assert result.next_offset > 0
 
     def test_unparseable_lines_are_skipped_and_counted(self, run):
         with run.start() as ctx:
@@ -94,7 +91,7 @@ class TestReadRunMetrics:
 
         assert result.parse_errors == 1
         assert [record["v"] for record in result.records] == [0.3, 0.2]
-        assert result.next_line == 3
+        assert result.next_offset == metrics_file.stat().st_size
 
 
 class TestIncrementalReads:
@@ -146,9 +143,11 @@ class TestIncrementalReads:
 
         assert seen == [float(i) for i in range(37)]
 
-    def test_since_line_still_works_for_legacy_callers(self, tmp_path: Path) -> None:
+    def test_line_cursor_is_gone(self, tmp_path: Path) -> None:
+        # Only the byte cursor remains; the line cursor was removed outright.
         self._write(tmp_path, 20)
-        assert len(read_run_metrics(tmp_path, since_line=15).records) == 5
+        with pytest.raises(TypeError):
+            read_run_metrics(tmp_path, since_line=15)
 
 
 class TestScanCeiling:

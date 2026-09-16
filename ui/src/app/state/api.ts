@@ -95,7 +95,7 @@ export interface MetricSeriesSummary {
 }
 
 export interface RunMetricsResponse {
-  nextLine: number;
+  nextOffset: number;
   records: MetricRecord[];
   series: MetricSeriesSummary[];
   parseErrors: number;
@@ -104,7 +104,7 @@ export interface RunMetricsResponse {
 export interface RunMetricsQuery {
   type?: string;
   key?: string;
-  sinceLine?: number;
+  sinceOffset?: number;
   limit?: number;
 }
 
@@ -362,7 +362,7 @@ export const workspaceApi = {
     const params = new URLSearchParams();
     if (query.type) params.set("type", query.type);
     if (query.key) params.set("key", query.key);
-    if (query.sinceLine !== undefined) params.set("since_line", String(query.sinceLine));
+    if (query.sinceOffset !== undefined) params.set("since_offset", String(query.sinceOffset));
     if (query.limit !== undefined) params.set("limit", String(query.limit));
 
     const suffix = params.toString() ? `?${params.toString()}` : "";

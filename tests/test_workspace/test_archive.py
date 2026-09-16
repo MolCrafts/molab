@@ -1,4 +1,4 @@
-"""``archive_folder_zip`` — Folder directory → deterministic zip bytes.
+"""``archive_folder_zip_iter`` — Folder directory → deterministic streamed zip.
 
 The single workspace-layer zip archiver (agent-record-export-03), shared by
 agent export and server ``export_run``.
@@ -13,12 +13,16 @@ import zipfile
 from pathlib import Path
 
 from molexp.workspace.archive import (
-    archive_folder_zip,
     archive_folder_zip_iter,
     archive_size,
 )
 from molexp.workspace.folder import Folder
 from molexp.workspace.fs_local import LocalFileSystem
+
+
+def archive_folder_zip(folder: Folder) -> bytes:
+    """Join the streamed archive — these tests assert on whole-archive bytes."""
+    return b"".join(archive_folder_zip_iter(folder))
 
 
 def _folder_at(path: Path) -> Folder:

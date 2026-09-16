@@ -41,8 +41,7 @@ import { parseFilterParams, writeFilterParams } from "@/app/runs/filterParams";
 import { RunsFacetPanel } from "@/app/runs/RunsFacetPanel";
 import { canCancel } from "@/app/runs/runLifecycle";
 import { buildRunListActions } from "@/app/runs/runListActions";
-import type { WorkspaceRunsFilters } from "@/app/runs/types";
-import { useWorkspaceRuns } from "@/app/runs/useWorkspaceRuns";
+import type { WorkspaceRunRow, WorkspaceRunsFilters } from "@/app/runs/types";
 import { agentApi, workspaceApi } from "@/app/state/api";
 import {
   prefetchExperimentRuns,
@@ -50,6 +49,7 @@ import {
   qk,
   type SliceErrors,
   useInvalidate,
+  useRunsIndexQuery,
 } from "@/app/state/queries";
 import type {
   AgentSessionSummary,
@@ -82,6 +82,9 @@ import {
 import { agentTaskDisplayTitle } from "@/lib/agent-task-title";
 import { countLabel } from "@/lib/count-label";
 import { join as joinWorkspacePath } from "@/lib/workspace-path";
+
+/** Stable identity while the runs query is pending, so the facet memo holds. */
+const EMPTY_RUNS_ROWS: WorkspaceRunRow[] = [];
 
 const errorDetail = (error: unknown): string => {
   if (error instanceof ApiError) {
@@ -952,7 +955,8 @@ export const LeftPanel = ({
   // Only subscribe to the runs poller when the user is actually looking at
   // the runs view; otherwise the LeftPanel would keep hitting /api/runs in
   // the background even on the workspace/projects views.
-  const { rows: runsRows } = useWorkspaceRuns({ enabled: view === "runs" });
+  const runsQuery = useRunsIndexQuery(undefined, { enabled: view === "runs" });
+  const runsRows = runsQuery.data?.rows ?? EMPTY_RUNS_ROWS;
   const runsFacets = useMemo(
     () => computeFacetCounts(runsRows, runsFilters),
     [runsRows, runsFilters],

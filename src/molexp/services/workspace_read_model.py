@@ -417,7 +417,7 @@ class WorkspaceReadModel:
         since = cached[1] if cached is not None else 0
         latest: dict[str, JSONValue] = dict(cached[2]) if cached is not None else {}
         try:
-            result = read_run_metrics(Path(run_dir), since_line=since, limit=50000)
+            result = read_run_metrics(Path(run_dir), since_offset=since, limit=50000)
         except (FileNotFoundError, OSError, ValueError):
             return latest
         for series in result.series:
@@ -426,7 +426,7 @@ class WorkspaceReadModel:
             if isinstance(key_raw, str) and key_raw and value is not None:
                 latest[key_raw] = value
         with self._lock:
-            self._metrics_cache[str(run_dir)] = (key, result.next_line, latest)
+            self._metrics_cache[str(run_dir)] = (key, result.next_offset, latest)
             # Bounded: a workspace with 10k runs must not pin 10k folds.
             if len(self._metrics_cache) > _METRICS_CACHE_MAX:
                 for stale in list(self._metrics_cache)[: len(self._metrics_cache) // 2]:

@@ -11,6 +11,7 @@ import {
   commandsApi,
 } from "@/app/state/api";
 import {
+  qk,
   useAgentHealthQuery,
   useAgentSessionQuery,
   useInvalidate,
@@ -685,16 +686,12 @@ const AgentSettingsViewerWrapper = ({ snapshot }: RendererProps): JSX.Element =>
   );
 };
 
-const AgentSessionViewer = ({
-  selection,
-  snapshot,
-  onRefresh,
-}: RendererProps): JSX.Element | null => {
+const AgentSessionViewer = ({ selection, snapshot }: RendererProps): JSX.Element | null => {
   const sessionId = selection.objectId === "new" ? null : selection.objectId;
   const mountScope =
     selection.objectType === "agent" && selection.objectId === "new" ? selection.scope : undefined;
   const nav = useNavigationState(snapshot);
-  const { afterAgentCreate, afterAgentCancel, afterAgentMessage, afterPlanDecision } =
+  const { afterAgentCreate, afterAgentCancel, afterAgentMessage, afterPlanDecision, apply } =
     useInvalidate();
   const [session, setSession] = useState<ApiAgentSession | null>(null);
   const [events, setEvents] = useState<ApiSessionEvent[]>([]);
@@ -725,9 +722,9 @@ const AgentSessionViewer = ({
     nav.setSelection({ objectType: "agent", objectId: "settings" });
   }, [nav]);
 
-  // Load session when the selected task changes — not when onRefresh identity
-  // changes (that would re-fetch and snap composerMode back to disk activeMode,
-  // undoing a Chat↔Plan toggle the user just made).
+  // Load session when the selected task changes, and only then: re-fetching on
+  // any other dependency would snap composerMode back to the on-disk activeMode
+  // and undo a Chat↔Plan toggle the user just made.
   useEffect(() => {
     if (!sessionId) {
       setSession(null);
@@ -1094,7 +1091,9 @@ const AgentSessionViewer = ({
               onOpenItem={(item) =>
                 nav.setSelection({ objectType: "agent", objectId: item.taskId })
               }
-              onDecided={onRefresh}
+              onDecided={() => {
+                void apply([{ queryKey: qk.agentSessions(), exact: true }]);
+              }}
             />
 
             <div className="flex flex-col items-center gap-2 pt-4 text-center">

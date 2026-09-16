@@ -156,7 +156,6 @@ export const MolqRunViewer = (props: RendererProps): JSX.Element => {
             runId={run.id}
             status={run.status}
             params={run.parameters ?? {}}
-            onRefresh={props.onRefresh}
             onCancel={handleCancelRun}
             onDispatched={() => setActiveTab(POST_DISPATCH_TAB)}
             onOpenAgent={() =>

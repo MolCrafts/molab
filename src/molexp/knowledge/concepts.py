@@ -16,7 +16,6 @@ from a directory's ``meta.yaml`` ``type``.
 
 from __future__ import annotations
 
-import warnings
 from collections.abc import Iterable
 from typing import ClassVar, cast
 
@@ -135,20 +134,6 @@ class ReferenceConcept(Concept):
         to the bare ``"reference"`` for the OKF bib payload.
         """
         self.write_meta(meta)
-
-    def write_ref_meta(self, meta: ReferenceMeta) -> None:
-        """Deprecated alias for :meth:`write_reference_meta`.
-
-        Renamed to the full-word spelling that matches
-        :meth:`Note.write_note_meta`; this alias warns and delegates.
-        """
-        warnings.warn(
-            "ReferenceConcept.write_ref_meta is deprecated; "
-            "use ReferenceConcept.write_reference_meta instead",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        self.write_reference_meta(meta)
 
     def citation(self) -> str:
         """The human-readable citation text (its ``index.md``)."""

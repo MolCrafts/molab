@@ -340,7 +340,6 @@ export interface RendererProps {
   inspectorTarget: InspectorTarget;
 
   onInspectorTargetChange: (target: InspectorTarget) => void;
-  onRefresh: () => void;
 }
 
 export interface BreadcrumbItem {

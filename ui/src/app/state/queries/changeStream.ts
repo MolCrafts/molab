@@ -19,7 +19,8 @@
  * {@link useFallbackInterval} re-enables slow polling), and it reconnects with
  * exponential backoff — silently: a missing route must never spam the console.
  *
- * Until the server route exists this module is only *defined*, not mounted.
+ * Mounted once by `WorkspaceApp`, so invalidation is push-driven and the
+ * fallback polls only run while the stream is down.
  */
 
 import { type QueryClient, useQueryClient } from "@tanstack/react-query";

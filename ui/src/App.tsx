@@ -4,7 +4,6 @@ import { useLocation } from "react-router-dom";
 import { AppShell } from "@/app/layout/AppShell";
 import { ErrorBoundary } from "@/app/layout/ErrorBoundary";
 import { OAuthCallbackPage } from "@/app/oauth/OAuthCallbackPage";
-import { useWorkspaceRuns } from "@/app/runs/useWorkspaceRuns";
 import { workspaceApi } from "@/app/state/api";
 import { useInvalidate, useWorkspaceChangeStream, viewInvalidations } from "@/app/state/queries";
 import { getLeftPanelViewFromPath, useNavigationState } from "@/app/state/useNavigationState";
@@ -61,11 +60,7 @@ const WorkspaceApp = ({ pathname }: { pathname: string }): JSX.Element => {
     isProjectExpanded,
     isExperimentExpanded,
   } = useWorkspaceState(activeView);
-  // Subscribe to the runs poller only when the user is on the runs view; the
-  // hook still gives us a refresh handle even when disabled so manual refresh
-  // works regardless of polling state.
-  const runs = useWorkspaceRuns({ enabled: activeView === "runs" });
-  const { afterFsWrite, afterWorkspaceSwitch } = useInvalidate();
+  const { afterFsWrite, afterWorkspaceSwitch, invalidateView } = useInvalidate();
   const { leftPanelView, selection, setLeftPanelView, setSelection } = useNavigationState(snapshot);
   const [inspectorTarget, setInspectorTarget] = useState<InspectorTarget>(
     buildDefaultInspectorTarget(selection),
@@ -105,15 +100,15 @@ const WorkspaceApp = ({ pathname }: { pathname: string }): JSX.Element => {
   };
 
   // The toolbar refresh button targets only the data the active view actually
-  // reads — runs view pulls from the runs poller; everything else reads from
-  // the workspace snapshot.
+  // reads — the runs view reads the runs index, everything else the workspace
+  // snapshot — so it never refetches the whole workspace to update one list.
   const handleActiveRefresh = useCallback((): void => {
     if (activeView === "runs") {
-      runs.refresh();
+      void invalidateView("runs");
       return;
     }
     refresh();
-  }, [activeView, refresh, runs]);
+  }, [activeView, refresh, invalidateView]);
 
   // Background revalidation shows in the heartbeat, not as a blocked shell:
   // the first load is `status === "loading"`, everything after is a fetch count

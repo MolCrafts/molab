@@ -144,7 +144,7 @@ export const selectAggregateConfig = (
 const realFetcher: MetricsFetcher = async (projectId, experimentId, runId) => {
   const response = await workspaceApi.getRunMetrics(projectId, experimentId, runId, {
     type: "scalar",
-    sinceLine: 0,
+    sinceOffset: 0,
     limit: 100000,
   });
   return response.records;

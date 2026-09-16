@@ -28,7 +28,6 @@ the same slug already exists, it is loaded and returned).
 from __future__ import annotations
 
 import json
-import warnings
 from pathlib import Path as _LocalPath
 from typing import TYPE_CHECKING, Protocol, cast
 
@@ -382,7 +381,6 @@ class Experiment(Folder):
         self,
         params: dict[str, JSONValue] | None = None,
         *,
-        parameters: dict[str, JSONValue] | None = None,
         id: str | None = None,
         target: str | None = None,
         workflow_snapshot: dict[str, JSONValue] | None = None,
@@ -393,22 +391,7 @@ class Experiment(Folder):
         canonical spelling (matching :meth:`Project.add_experiment` and
         :meth:`Experiment.run`) and may be passed positionally; an
         explicit ``id=`` overrides auto-generation.
-
-        ``parameters=`` is a deprecated alias kept for backward
-        compatibility; passing both raises ``TypeError``.
         """
-        if parameters is not None:
-            if params is not None:
-                raise TypeError(
-                    "add_run() got both 'params' and its deprecated alias "
-                    "'parameters'; pass only 'params'"
-                )
-            warnings.warn(
-                "Experiment.add_run(parameters=...) is deprecated; use params=...",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            params = parameters
         resolved_id = id if id is not None else generate_id()
         resolved_target = target if target is not None else self._entity_metadata.default_target
         _validate_target_registered(self.workspace, resolved_target)

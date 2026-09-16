@@ -7,6 +7,7 @@ import { RunOutputsPanel } from "@/app/renderers/run/RunOutputsPanel";
 import { RunOverview } from "@/app/renderers/run/RunOverview";
 import { useRunViewer } from "@/app/renderers/useRunViewer";
 import { POST_DISPATCH_TAB, RunToolbar } from "@/app/runs/RunToolbar";
+import { useInvalidate } from "@/app/state/queries/invalidation";
 import { useRunAssetsQuery } from "@/app/state/queries/runs";
 import { useDiscoveredFileTypesForRun } from "@/app/state/useDiscoveredFileTypes";
 import type { ApiAssetResponse, RendererProps } from "@/app/types";
@@ -51,6 +52,7 @@ export const RunViewer = (props: RendererProps): JSX.Element => {
     confirmDialog,
     alertDialog,
   } = useRunViewer(props);
+  const invalidate = useInvalidate();
 
   const runCoords = useMemo(
     () =>
@@ -210,7 +212,6 @@ export const RunViewer = (props: RendererProps): JSX.Element => {
               runId={run.id}
               status={run.status}
               params={run.parameters ?? {}}
-              onRefresh={props.onRefresh}
               onCancel={handleCancelRun}
               onDispatched={() => setActiveTab(POST_DISPATCH_TAB)}
               onOpenAgent={() =>
@@ -225,7 +226,7 @@ export const RunViewer = (props: RendererProps): JSX.Element => {
                 })
               }
               onHarvested={(path) => {
-                props.onRefresh();
+                void invalidate.afterHarvest({ runId: run.id });
                 if (path) openKnowledgePath(path, setSelection);
               }}
             />

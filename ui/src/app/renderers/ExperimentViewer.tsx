@@ -145,7 +145,6 @@ export const ExperimentViewer = ({
   snapshot,
   inspectorTarget,
   onInspectorTargetChange,
-  onRefresh,
 }: RendererProps): JSX.Element => {
   const [isDeleting, setIsDeleting] = useState(false);
   const [activeTab, setActiveTab] = useState("overview");
@@ -696,7 +695,6 @@ export const ExperimentViewer = ({
         snapshot={snapshot}
         inspectorTarget={inspectorTarget}
         onInspectorTargetChange={onInspectorTargetChange}
-        onRefresh={onRefresh}
       />
     </Suspense>
   ) : (

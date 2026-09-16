@@ -74,7 +74,6 @@ interface CenterPanelProps {
 
   onInspectorTargetChange: (target: InspectorTarget) => void;
   onRunInspectorChange: (registration: RunInspectorRegistration | null) => void;
-  onRefresh: () => void;
 }
 
 export const CenterPanel = ({
@@ -84,7 +83,6 @@ export const CenterPanel = ({
   inspectorTarget,
   onInspectorTargetChange,
   onRunInspectorChange,
-  onRefresh,
 }: CenterPanelProps): JSX.Element => {
   if (!selection) {
     if (leftPanelView === "runs") {
@@ -97,7 +95,7 @@ export const CenterPanel = ({
     if (leftPanelView === "workflow") {
       return (
         <Suspense fallback={<PageFallback />}>
-          <WorkflowsPage snapshot={snapshot} onRefresh={onRefresh} />
+          <WorkflowsPage snapshot={snapshot} />
         </Suspense>
       );
     }
@@ -126,7 +124,6 @@ export const CenterPanel = ({
           snapshot={snapshot}
           inspectorTarget={inspectorTarget}
           onInspectorTargetChange={onInspectorTargetChange}
-          onRefresh={onRefresh}
         />
       ))}
     </div>

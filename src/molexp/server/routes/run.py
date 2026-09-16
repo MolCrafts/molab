@@ -406,7 +406,6 @@ def get_run_metrics(
     run_id: str,
     metric_type: str | None = Query(default=None, alias="type"),
     key: str | None = None,
-    since_line: int = Query(default=0, ge=0, description="Legacy cursor; prefer since_offset."),
     since_offset: int | None = Query(
         default=None, ge=0, description="Byte cursor from a previous nextOffset (O(1) resume)."
     ),
@@ -431,13 +430,11 @@ def get_run_metrics(
         run.run_dir,
         metric_type=metric_type,
         key=key,
-        since_line=since_line,
         since_offset=since_offset,
         max_scan_bytes=max_scan_bytes,
         limit=limit,
     )
     return RunMetricsResponse(
-        nextLine=result.next_line,
         nextOffset=result.next_offset,
         records=result.records,
         # ``entry`` is ``dict[str, JSONValue]``; ``model_validate`` runs
@@ -1019,12 +1016,6 @@ def rerun_run(
 
 
 @router.post("/{run_id}/cancel", response_model=RunActionResponse)
-@router.post(
-    "/{run_id}/kill",
-    response_model=RunActionResponse,
-    deprecated=True,
-    description="Deprecated alias for `POST .../{run_id}/cancel` (same handler).",
-)
 def cancel_run(
     project_id: str,
     experiment_id: str,
@@ -1033,9 +1024,8 @@ def cancel_run(
 ) -> RunActionResponse:
     """Cancel a run.
 
-    ``cancel`` is the canonical verb (matching the CLI ``molexp runs cancel``
-    and the resulting ``cancelled`` status); ``/kill`` remains as a
-    deprecated alias route bound to this same handler.
+    ``cancel`` is the canonical — and only — verb, matching the CLI
+    ``molexp runs cancel`` and the resulting ``cancelled`` status.
 
     Routes through :func:`molexp.plugins.submit_molq.cancel.try_cancel`, which signals
     molq via :class:`molq.Submitor` for cluster-submitted runs and

@@ -49,9 +49,11 @@ if TYPE_CHECKING:
 __all__ = [
     "ChangeKind",
     "WorkspaceChange",
+    "WorkspaceSubscription",
     "close_workspace_subscribers",
     "install_workspace_event_observer",
     "notify_workspace_changed",
+    "open_workspace_subscription",
     "reset_workspace_subscribers",
     "subscribe_workspace_changes",
     "uninstall_workspace_event_observer",
@@ -172,20 +174,77 @@ def reset_workspace_subscribers() -> None:
     _subscribers.clear()
 
 
+class WorkspaceSubscription:
+    """A live subscription to one workspace's changes.
+
+    Two properties a caller that polls with a timeout depends on, neither of
+    which an async generator can offer:
+
+    * **Registered on creation, not on first read.** A generator's body does
+      not run until its first ``__anext__``, so a caller that opened one and
+      then waited would not be in :data:`_subscribers` while it waited, and a
+      change published in that window would go nowhere.
+    * **Cancel-safe reads.** :meth:`get` parks on :meth:`asyncio.Queue.get`,
+      and cancelling that only drops the waiter — the subscription and any
+      queued change survive. Cancelling a generator's ``anext`` instead throws
+      into the generator body and runs its ``finally``, which unregisters it:
+      one timed-out poll would silently kill the stream.
+
+    So a caller may wrap :meth:`get` in :func:`asyncio.wait_for` to notice a
+    shutdown promptly without tearing its own subscription down.
+    """
+
+    __slots__ = ("_active", "_sub")
+
+    def __init__(self, root: str) -> None:
+        self._sub = _Subscriber(str(root), asyncio.get_running_loop())
+        # A subscription opened after shutdown is inert rather than an error:
+        # the caller learns by getting ``None`` on its first read.
+        self._active = not _closed
+        if self._active:
+            _subscribers.add(self._sub)
+
+    async def get(self) -> WorkspaceChange | None:
+        """Wait for the next change, or ``None`` once the stream is finished.
+
+        Cancellation-safe: a cancelled wait leaves the subscription registered
+        and any pending change queued for the next call.
+        """
+        if not self._active or _closed:
+            return None
+        item = await self._sub.queue.get()
+        if item is _CLOSED or _closed or not isinstance(item, WorkspaceChange):
+            return None
+        return item
+
+    def close(self) -> None:
+        """Unregister. Idempotent, so a ``finally`` may always call it."""
+        self._active = False
+        _subscribers.discard(self._sub)
+
+
+def open_workspace_subscription(root: str) -> WorkspaceSubscription:
+    """Register a subscription to *root* immediately (see the class docstring)."""
+    return WorkspaceSubscription(root)
+
+
 async def subscribe_workspace_changes(root: str) -> AsyncIterator[WorkspaceChange]:
-    """Yield each change published for *root* until disconnect or shutdown."""
-    if _closed:
-        return
-    sub = _Subscriber(str(root), asyncio.get_running_loop())
-    _subscribers.add(sub)
+    """Yield each change published for *root* until disconnect or shutdown.
+
+    The iterator form, for callers that consume with a plain ``async for`` and
+    never wait under a timeout. A caller that *does* need a timeout must use
+    :func:`open_workspace_subscription` — cancelling a step of this generator
+    ends the subscription.
+    """
+    sub = open_workspace_subscription(root)
     try:
-        while not _closed:
-            item = await sub.queue.get()
-            if item is _CLOSED or _closed or not isinstance(item, WorkspaceChange):
+        while True:
+            change = await sub.get()
+            if change is None:
                 return
-            yield item
+            yield change
     finally:
-        _subscribers.discard(sub)
+        sub.close()
 
 
 # ── Event-spine bridge ──────────────────────────────────────────────────────

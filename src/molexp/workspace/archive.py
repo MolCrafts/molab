@@ -1,16 +1,16 @@
-"""Folder directory → zip, streamed or buffered.
+"""Folder directory → streamed zip.
 
 The one workspace-layer zip archiver shared by agent export, server
 ``export_run``, and any future CLI. All I/O goes through ``folder._fs``
 (local and remote backends). Consumers import this module directly
-(``from molexp.workspace.archive import archive_folder_zip``) — not
+(``from molexp.workspace.archive import archive_folder_zip_iter``) — not
 re-exported from ``molexp.workspace`` (same pattern as ``git_projection``).
 
-:func:`archive_folder_zip_iter` is the streaming form: it yields compressed
-chunks and never holds more than one file plus one chunk in memory, so
-exporting a run with gigabytes of trajectories does not size the server's RAM
-to the run. :func:`archive_folder_zip` keeps the buffered ``bytes`` signature
-for callers that genuinely want the whole archive at once.
+:func:`archive_folder_zip_iter` is the only form: it yields compressed chunks
+and never holds more than one file plus one chunk in memory, so exporting a run
+with gigabytes of trajectories does not size the server's RAM to the run. There
+is deliberately no buffered ``bytes`` variant — a caller that wants the whole
+archive at once can ``b"".join`` it and own that decision explicitly.
 
 Known debt (accepted):
 * mode bits are not preserved (``ZipInfo.external_attr = 0``);
@@ -29,7 +29,7 @@ from molexp.path import Path as MolexpPath
 
 from .folder import Folder
 
-__all__ = ["archive_folder_zip", "archive_folder_zip_iter", "archive_size"]
+__all__ = ["archive_folder_zip_iter", "archive_size"]
 
 DEFAULT_CHUNK_BYTES = 1 << 20
 
@@ -159,19 +159,3 @@ def archive_folder_zip_iter(
     tail = sink.drain()
     if tail:
         yield tail
-
-
-def archive_folder_zip(folder: Folder) -> bytes:
-    """Zip every file under *folder* into a DEFLATED in-memory archive.
-
-    The buffered form of :func:`archive_folder_zip_iter`; prefer the iterator
-    for anything user-sized.
-
-    Args:
-        folder: Any :class:`Folder` (Run, AgentSession, …).
-
-    Returns:
-        Zip file bytes. Missing or non-directory roots yield an empty but
-        valid zip (no exception, no directory creation).
-    """
-    return b"".join(archive_folder_zip_iter(folder))

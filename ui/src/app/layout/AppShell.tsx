@@ -201,7 +201,6 @@ export const AppShell = ({
           inspectorTarget={inspectorTarget}
           onInspectorTargetChange={onInspectorTargetChange}
           onRunInspectorChange={handleRunInspectorChange}
-          onRefresh={onWorkspaceRefresh}
         />
       </div>
     </div>
@@ -215,7 +214,6 @@ export const AppShell = ({
       snapshot={snapshot}
       inspectorTarget={inspectorTarget}
       onInspectorTargetChange={onInspectorTargetChange}
-      onRefresh={onWorkspaceRefresh}
     />
   );
 

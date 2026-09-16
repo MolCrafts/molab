@@ -101,7 +101,6 @@ export interface RunToolbarProps {
   runId: string;
   status: string;
   params: Record<string, unknown>;
-  onRefresh: () => void;
   onCancel: () => Promise<void>;
   /** After start / resume / rerun — typically open Executions. */
   onDispatched?: () => void;

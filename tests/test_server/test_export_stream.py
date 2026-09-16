@@ -40,15 +40,15 @@ class TestExportContent:
             assert "artifacts/result.dat" in names
             assert zf.read("artifacts/result.dat") == b"payload"
 
-    def test_stream_matches_the_buffered_archive_contents(self, client, run, url):
+    def test_stream_matches_the_direct_archive_contents(self, client, run, url):
         """The streamed form must not quietly drop or reorder entries."""
-        from molexp.workspace.archive import archive_folder_zip
+        from molexp.workspace.archive import archive_folder_zip_iter
 
         _touch(run, "artifacts/a.dat", "aaa")
         _touch(run, "artifacts/nested/b.dat", "bbb")
 
         streamed = client.get(url).content
-        buffered = archive_folder_zip(run)
+        buffered = b"".join(archive_folder_zip_iter(run))
         with (
             zipfile.ZipFile(io.BytesIO(streamed)) as s,
             zipfile.ZipFile(io.BytesIO(buffered)) as b,

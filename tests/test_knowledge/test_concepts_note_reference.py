@@ -12,8 +12,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import pytest
-
 from molexp.fs import LocalFileSystem
 from molexp.knowledge.concept import Concept, concept_from_dir
 from molexp.knowledge.concepts import Note, ReferenceConcept
@@ -145,10 +143,7 @@ class TestReferenceConcept:
         assert ref.read_meta()["type"] == "reference.reference"
         assert isinstance(concept_from_dir(ref.path, fs=LocalFileSystem()), ReferenceConcept)
 
-    def test_write_ref_meta_is_deprecated_alias(self, tmp_path: Path) -> None:
+    def test_write_ref_meta_alias_is_gone(self, tmp_path: Path) -> None:
+        # The short spelling was removed; only write_reference_meta remains.
         ref = _mount(ReferenceConcept, tmp_path, "smith2024")
-
-        with pytest.warns(DeprecationWarning, match="write_reference_meta"):
-            ref.write_ref_meta(ReferenceMeta(title="Alias", year=2024))
-
-        assert ref.read_ref_meta().title == "Alias"
+        assert not hasattr(ref, "write_ref_meta")
