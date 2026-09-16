@@ -840,7 +840,7 @@ def concept_from_dir(child_dir: PathArg, parent: Folder) -> Folder:
         meta = yaml.safe_load(fs.read_text(meta_path))
         if isinstance(meta, dict):
             type_str = str(meta.get("type", ""))
-    cls = resolve_concept_type(type_str, Folder)
+    cls = resolve_concept_type(type_str, Folder, base=Folder)
     return cls.from_disk(child_dir, parent)
 
 

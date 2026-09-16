@@ -63,3 +63,43 @@ class TestConceptTypeRegistry:
         register_concept_type("test-collide", First)
         with pytest.raises(ValueError):
             register_concept_type("test-collide", Second)
+
+
+class TestResolveConceptTypeBaseFilter:
+    """``base=`` keeps two storage families apart inside one open registry.
+
+    After the OKF migration the registry holds ``knowledge.Concept`` subclasses
+    (``note.note``, …) *and* ``workspace.Folder`` subclasses (``workspace.run``,
+    ``agent.agent``). Each family's reconstructor must only ever receive its own
+    classes — otherwise it calls a constructor that does not exist.
+    """
+
+    def test_foreign_class_is_treated_as_unknown(self) -> None:
+        class OtherFamily:
+            """A class from a different storage family entirely."""
+
+        class MyFamily:
+            pass
+
+        register_concept_type("test-foreign-family", OtherFamily)
+        assert resolve_concept_type("test-foreign-family", MyFamily, base=MyFamily) is MyFamily
+
+    def test_own_family_subclass_still_resolves(self) -> None:
+        class MyBase:
+            pass
+
+        class MyChild(MyBase):
+            pass
+
+        register_concept_type("test-own-family", MyChild)
+        assert resolve_concept_type("test-own-family", MyBase, base=MyBase) is MyChild
+
+    def test_base_none_keeps_pre_split_behaviour(self) -> None:
+        class Unrelated:
+            pass
+
+        register_concept_type("test-base-none", Unrelated)
+        assert resolve_concept_type("test-base-none", _Concept) is Unrelated
+
+    def test_unknown_type_with_base_still_returns_default(self) -> None:
+        assert resolve_concept_type("no-such-type-abc", _Concept, base=_Concept) is _Concept

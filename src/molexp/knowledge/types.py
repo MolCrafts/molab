@@ -47,13 +47,40 @@ def concept_type[C: type](type_str: str) -> Callable[[C], C]:
     return register
 
 
-def resolve_concept_type[D: type](type_str: str, default: D) -> D:
+def resolve_concept_type[D: type](
+    type_str: str,
+    default: D,
+    *,
+    base: type | None = None,
+) -> D:
     """Return the class registered for *type_str*, or *default* if unknown.
 
     The return type matches *default* (a type parameter), so a caller passing its
     own ``Folder`` base gets its own ``Folder`` subtype back.
+
+    A registered class that is **not** a subclass of *base* is treated as
+    unknown, so *default* is returned. One open registry is therefore shared by
+    disjoint storage families — a ``molexp.workspace`` ``Folder`` tree and a
+    ``molexp.knowledge`` ``Concept`` bundle — without either ever receiving the
+    other's class. Both families reconstruct an out-of-family directory
+    read-only from its bare ``meta.yaml`` marker, so each walk stays *total*
+    over a heterogeneous tree rather than raising.
+
+    ``base`` is an explicit opt-in rather than inferred from *default*:
+    third-party callers may legitimately register classes that are not subclasses
+    of the default they pass, and inferring would silently change that contract.
+
+    Args:
+        type_str: The Concept ``type`` string read from ``meta.yaml``.
+        default: The class to fall back to when *type_str* is unknown.
+        base: When given, only a registered subclass of *base* is returned.
     """
-    return cast("D", _REGISTRY.get(type_str, default))
+    cls = _REGISTRY.get(type_str)
+    if cls is None:
+        return default
+    if base is not None and not issubclass(cls, base):
+        return default
+    return cast("D", cls)
 
 
 __all__ = ["concept_type", "register_concept_type", "resolve_concept_type"]

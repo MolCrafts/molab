@@ -8,7 +8,9 @@ One paragraph carries the whole design. A note is a directory: its path is its i
 
 Because every workspace entity (`Workspace`, `Project`, `Experiment`, `Run`) is itself a `Folder` with a `meta.yaml`, notes and references mount anywhere in the hierarchy and can link to anything in it: a note under an experiment can cite a paper, reference a run, or point at a sibling note, all with the same Markdown-link edge.
 
-The management entry point is the `Bundle` façade. A bundle wraps a root directory (typically the workspace root) and exposes the Concept tree beneath it: `create_note`, `link`, `walk`, `backlinks`, `search`, `import_zotero`.
+The management entry point is the `Bundle` façade. A bundle wraps a root directory and exposes the Concept tree beneath it: `create_note`, `link`, `walk`, `backlinks`, `search`, `import_zotero`.
+
+**A bundle is just a directory, so it does not need a workspace.** The Open Knowledge Format lives in `molexp.knowledge`, a self-contained library: your group's wiki can be its own git repository, and MolExp can search it exactly as it searches a workspace. That is the subject of the last two sections.
 
 !!! note "Opening the workspace in Obsidian (or any Markdown editor)"
     Because notes are plain directories of Markdown, you can open the workspace root as an Obsidian vault and every `index.md` renders and cross-links normally. Two caveats: MolExp's knowledge graph is built from **standard Markdown links** (`[text](../other-concept)`) — Obsidian-style `[[wikilinks]]` are *not* parsed as edges, so write links in standard form (or configure Obsidian to prefer Markdown links) if you want them to count as citations/backlinks. And each Concept's narrative lives in `index.md` inside its own directory — the "folder note" convention — which reads best in Obsidian with a folder-note plugin enabled.
@@ -18,7 +20,8 @@ The management entry point is the `Bundle` façade. A bundle wraps a root direct
 Create a note under an experiment by passing the experiment as the note's `parent`. Names are slugified into directory names, and `create_note` is idempotent — calling it again with the same name returns the existing note instead of duplicating it.
 
 ```python
-from molexp.workspace import Bundle, Workspace
+from molexp.knowledge import Bundle
+from molexp.workspace import Workspace
 
 ws = Workspace("./lab", name="Lab")
 exp = ws.project("polymer-cg").experiment("solvation-sweep")
@@ -37,7 +40,7 @@ print(bundle.rel_path(note))
 The `body` is the note's `index.md`; read it back with `note.body()` and replace it with `note.set_body(...)`. Structured document metadata — categorical tags and a lifecycle status — lives in the note's `meta.yaml` as a typed `NoteMeta` payload, written with `write_note_meta`:
 
 ```python
-from molexp.workspace import NoteMeta
+from molexp.knowledge import NoteMeta
 
 note.write_note_meta(NoteMeta(tags=["analysis", "rdf"], status="draft"))
 
@@ -60,9 +63,10 @@ lab/projects/polymer-cg/experiments/solvation-sweep/
 A reference is its own Concept type, `ReferenceConcept`: one directory per work, with the structured bibliographic record (`ReferenceMeta`) in `meta.yaml` and the human-readable citation text in `index.md`. Mount it wherever it belongs — here, next to the note under the same experiment — using the generic `add_folder` verb every `Folder` supports:
 
 ```python
-from molexp.workspace import ReferenceConcept, ReferenceMeta
+from molexp.knowledge import ReferenceConcept, ReferenceMeta
 
-ref = exp.add_folder(ReferenceConcept(parent=exp, name="frenkel-smit-2002"))
+ref = ReferenceConcept(exp.resolve() / "frenkel-smit-2002")
+ref.write_meta()
 ref.write_reference_meta(
     ReferenceMeta(
         title="Understanding Molecular Simulation",
@@ -108,12 +112,75 @@ for backlink in bundle.backlinks(ref):
 # projects/polymer-cg/experiments/solvation-sweep/analysis-notes links here (role=cites)
 ```
 
-Typed views over the whole bundle come from the same walk, and `bundle.search(text, concept_type=..., tag=...)` filters a derived index when the tree grows large:
+Typed views over the whole bundle come from the same walk:
 
 ```python
 print([bundle.rel_path(n) for n in bundle.notes()])
 print([bundle.rel_path(r) for r in bundle.references()])
 ```
+
+## Search: ask a question, not a filename
+
+`bundle.search(text, concept_type=..., tag=...)` ranks Concepts by keyword relevance (BM25F over title, tags, path and body). Ranking rather than substring matching is what lets you ask a real question:
+
+```python
+for hit in bundle.search("how do we choose the cooling rate for Tg?").hits:
+    print(f"{hit.score:.2f}  {hit.entry.path}  {hit.snippet}")
+```
+
+This matters most in Chinese, which is written without spaces: the question 「计算 Tg 的时候升降温怎么选择」 shares no substring with a note titled 「降温速率的选择」, yet shares the term 降温. CJK text is split into single characters **and** adjacent character pairs, and the ranking's own IDF weighting decides which of those carry signal — so there is no segmenter to install and no dictionary to maintain.
+
+This is deliberately not RAG. There are no embeddings, no chunking and no re-ranking model; retrieval's job ends at putting the right document first and handing you the whole thing.
+
+## Search a group wiki
+
+Research groups usually keep methodology in a shared wiki rather than in any one workspace. Point MolExp at it once and every search reaches it:
+
+```console
+$ molexp knowledge init /data/group/wiki          # only if it is not an OKF bundle yet
+$ molexp knowledge sources add lab-wiki /data/group/wiki --description "group wiki"
+$ molexp knowledge sources list
+```
+
+Registration is a name bound to a directory, recorded in `~/.molexp/knowledge.json` — or, with `--workspace`, in `<workspace>/.molexp/knowledge.json`, where an entry of the same name fully replaces the user-level one. Searching then spans every registered wiki plus the workspace you are standing in, and each hit says where it came from:
+
+```console
+$ molexp knowledge search "计算Tg的时候升降温怎么选择"
+                     knowledge search: '计算Tg的时候升降温怎么选择'
+┏━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━━━━━━━━┓
+┃ Ref                  ┃ Title                        ┃ Source   ┃ Score ┃ Match             ┃
+┡━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━━━━━━━━┩
+│ lab-wiki:tg-protocol │ 玻璃化转变温度 Tg 的模拟流程 │ lab-wiki │  3.15 │ ## 降温速率的选择 │
+└──────────────────────┴──────────────────────────────┴──────────┴───────┴───────────────────┘
+
+$ molexp knowledge read lab-wiki:tg-protocol      # the whole markdown
+```
+
+The `<source>:<path>` ref is the portable address of a document: it is what `read` takes, what the API returns, and what an agent passes back to you. The same calls in Python:
+
+```python
+# docs: skip — needs a registered wiki on the executing machine
+from molexp.knowledge.sources import search_sources
+
+for hit in search_sources("cooling rate for Tg", limit=5):
+    print(hit.ref, hit.abs_path)     # abs_path is the index.md itself
+```
+
+Nothing about a wiki is MolExp-specific: it is markdown in directories, so it lives in git, reviews in pull requests, and reads fine in any editor.
+
+## Let an agent search it
+
+An agent that can reach the group's wiki answers from the group's own practice instead of from generic priors. Two surfaces expose the same search:
+
+- The **interactive agent** (`molexp agent`) ships `search_knowledge`, `read_knowledge` and `list_knowledge_sources`, covering the workspace and every registered wiki.
+- **molmcp** — the MCP server the wider MolCrafts ecosystem talks to — exposes the same three tools through its `molexp` provider, so any MCP client (Claude Code, Cursor, …) can use them:
+
+```console
+$ pip install molcrafts-molmcp
+$ molmcp config add providers molexp
+```
+
+Both read the registry you populated above; there is no second place to register a wiki. Asked "how do we pick the cooling rate for Tg?", the agent searches, gets `lab-wiki:tg-protocol`, reads it, and answers with your group's three-stage protocol — citing the file.
 
 ## Import a Zotero library
 
