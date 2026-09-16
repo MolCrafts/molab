@@ -4,6 +4,7 @@ import "reflect-metadata";
 import ReactDOM from "react-dom/client";
 import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import { RouteErrorBoundary } from "@/app/layout/RouteErrorBoundary";
+import { QueryProvider } from "@/app/state/queries/QueryProvider";
 import { ToastProvider } from "@/components/ui/toast";
 import { bootPlugins } from "@/plugins/runtime";
 import App from "./App";
@@ -52,8 +53,10 @@ enableMocking().then(() => {
   // this changes dev behavior only. Re-enable if flowgram becomes
   // StrictMode-safe upstream.
   root.render(
-    <ToastProvider>
-      <RouterProvider router={router} />
-    </ToastProvider>,
+    <QueryProvider>
+      <ToastProvider>
+        <RouterProvider router={router} />
+      </ToastProvider>
+    </QueryProvider>,
   );
 });

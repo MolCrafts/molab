@@ -17,12 +17,17 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 
 import type { TargetTestResponse } from "@/api/generated/models/TargetTestResponse";
-import type { WorkspaceTargetResponse } from "@/api/generated/models/WorkspaceTargetResponse";
 import { WorkspaceService } from "@/api/generated/services/WorkspaceService";
-import { WorkbenchIconAction, WorkbenchTag } from "@/components/workbench";
+import { useInvalidateWorkspaceTargets, useWorkspaceTargetsQuery } from "@/app/state/queries";
+import {
+  WorkbenchIconAction,
+  WorkbenchOperationState,
+  WorkbenchRetryAction,
+  WorkbenchTag,
+} from "@/components/workbench";
 import { emitWorkspaceSwitching } from "../state/workspaceSwitchEvents";
 import { AddRemoteWorkspaceDialog } from "./AddRemoteWorkspaceDialog";
 
@@ -32,9 +37,11 @@ interface CacheStatus {
 }
 
 export function RemoteWorkspacesPanel(): JSX.Element {
-  const [targets, setTargets] = useState<WorkspaceTargetResponse[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [listError, setListError] = useState<string | null>(null);
+  // Keyed cross-workspace: this is the list you switch *between*, so a switch
+  // must not evict it out from under the panel that triggered it.
+  const targetsResult = useWorkspaceTargetsQuery();
+  const targets = targetsResult.data ?? [];
+  const refresh = useInvalidateWorkspaceTargets();
 
   const [busy, setBusy] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<TargetTestResponse | null>(null);
@@ -42,23 +49,6 @@ export function RemoteWorkspacesPanel(): JSX.Element {
   const [activeName, setActiveName] = useState<string | null>(null);
   const [openWarnings, setOpenWarnings] = useState<string[]>([]);
   const [cacheStatus, setCacheStatus] = useState<CacheStatus | null>(null);
-
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    setListError(null);
-    try {
-      const res = await WorkspaceService.listWorkspaceTargetsApiWorkspaceTargetsGet();
-      setTargets(res.targets);
-    } catch (err) {
-      setListError(err instanceof Error ? err.message : "Failed to list remote workspaces");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
 
   const handleDelete = async (name: string): Promise<void> => {
     setBusy(name);
@@ -151,9 +141,15 @@ export function RemoteWorkspacesPanel(): JSX.Element {
           onCreated={() => void refresh()}
         />
       </header>
-      {listError && <p className="text-body-lg text-status-failed-foreground">{listError}</p>}
-      {loading && targets.length === 0 ? (
-        <p className="text-body-lg text-muted-foreground">Loading…</p>
+      {targetsResult.isPending ? (
+        <WorkbenchOperationState kind="loading" title="Loading connections…" skeletonRows={3} />
+      ) : targetsResult.isError && targets.length === 0 ? (
+        <WorkbenchOperationState
+          kind="error"
+          title="Could not list remote workspaces"
+          detail={targetsResult.error instanceof Error ? targetsResult.error.message : undefined}
+          action={<WorkbenchRetryAction onClick={() => void targetsResult.refetch()} />}
+        />
       ) : targets.length === 0 ? (
         <p className="bg-surface/60 px-4 py-8 text-center text-body text-muted-foreground">
           No remote workspaces registered. Add one to mount a workspace hosted on an HPC node.

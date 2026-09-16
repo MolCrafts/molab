@@ -1,9 +1,23 @@
-import { useSyncExternalStore } from "react";
+/**
+ * The workspace runs index, as the navigator and dashboard consume it.
+ *
+ * This is now a thin adapter over {@link useRunsIndexQuery}: the query cache
+ * owns deduplication, freshness and polling, so the module-level singleton
+ * (one `setInterval`, a `JSON.stringify` diff to keep array identities stable,
+ * a manual subscriber count) is gone. Two consumers mounting this hook still
+ * share exactly one request — that is now a property of the shared query key
+ * rather than hand-written bookkeeping.
+ *
+ * The 3 s poll is gone with it. Freshness comes from SSE invalidation, with a
+ * 30 s fallback poll only while that stream is down, and no polling at all on
+ * a hidden tab.
+ */
 
-import { pulseSync } from "@/app/state/syncPulse";
+import { useMemo } from "react";
 
-import { workspaceRunsApi } from "./api";
-import type { WorkspaceRunRow, WorkspaceRunsResponse, WorkspaceRunsStats } from "./types";
+import { EMPTY_RUN_STATS, useRunsIndexQuery } from "@/app/state/queries/runs";
+
+import type { WorkspaceRunRow, WorkspaceRunsStats } from "./types";
 
 interface UseWorkspaceRunsResult {
   rows: WorkspaceRunRow[];
@@ -16,139 +30,39 @@ interface UseWorkspaceRunsResult {
   refresh: () => void;
 }
 
-interface StoreSnapshot {
-  rows: WorkspaceRunRow[];
-  stats: WorkspaceRunsStats;
-  total: number;
-  truncated: boolean;
-  loading: boolean;
-  error: string | null;
-  lastSyncedAt: Date | null;
-}
-
+/**
+ * Retained for the consumers that still import it as their own cadence
+ * (`useRunInspectorLogs`, `WorkspaceActivityFeed`). The runs index itself no
+ * longer polls on this interval.
+ */
 export const POLL_INTERVAL_MS = 3_000;
-const FETCH_LIMIT = 1000;
 
-const EMPTY_STATS: WorkspaceRunsStats = {
-  total: 0,
-  running: 0,
-  pending: 0,
-  failed: 0,
-  succeeded: 0,
-};
-
-const EMPTY_SNAPSHOT: StoreSnapshot = {
-  rows: [],
-  stats: EMPTY_STATS,
-  total: 0,
-  truncated: false,
-  loading: false,
-  error: null,
-  lastSyncedAt: null,
-};
-
-// Module-level singleton: one fetch loop shared across all hook consumers
-// (LeftPanel facet counts + RunsPage dashboard) so the API is hit once per
-// poll instead of once per mounted component.
-let snapshot: StoreSnapshot = EMPTY_SNAPSHOT;
-let lastResponseSignature: string | null = null;
-const subscribers = new Set<() => void>();
-let intervalId: ReturnType<typeof setInterval> | null = null;
-let inflight: Promise<void> | null = null;
-
-const notify = (): void => {
-  for (const fn of subscribers) fn();
-};
-
-const sameResponse = (response: WorkspaceRunsResponse): boolean => {
-  const next = JSON.stringify(response);
-  if (next === lastResponseSignature) return true;
-  lastResponseSignature = next;
-  return false;
-};
-
-const fetchOnce = async (silent: boolean): Promise<void> => {
-  if (!silent && !snapshot.loading) {
-    snapshot = { ...snapshot, loading: true };
-    notify();
-  }
-  try {
-    const response = await workspaceRunsApi.listRuns({ limit: FETCH_LIMIT });
-    if (sameResponse(response)) {
-      // Preserve row/stats array refs so downstream useMemo deps stay stable
-      // (Plotly charts won't re-render). Only loading/error need to clear.
-      if (snapshot.loading || snapshot.error !== null || snapshot.lastSyncedAt === null) {
-        snapshot = {
-          ...snapshot,
-          loading: false,
-          error: null,
-          lastSyncedAt: snapshot.lastSyncedAt ?? new Date(),
-        };
-        notify();
-      }
-      // Poll completed even when payload is unchanged — still breathe.
-      pulseSync();
-      return;
-    }
-    snapshot = {
-      rows: response.runs,
-      stats: response.stats,
-      total: response.total,
-      truncated: response.truncated,
-      loading: false,
-      error: null,
-      lastSyncedAt: new Date(),
-    };
-    notify();
-    pulseSync();
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown error";
-    snapshot = { ...snapshot, loading: false, error: message };
-    notify();
-    pulseSync();
-  }
-};
-
-const triggerFetch = (silent: boolean): void => {
-  if (inflight) return;
-  inflight = fetchOnce(silent).finally(() => {
-    inflight = null;
-  });
-};
-
-const subscribe = (fn: () => void): (() => void) => {
-  if (subscribers.size === 0) {
-    triggerFetch(false);
-    intervalId = setInterval(() => triggerFetch(true), POLL_INTERVAL_MS);
-  }
-  subscribers.add(fn);
-  return () => {
-    subscribers.delete(fn);
-    if (subscribers.size === 0 && intervalId !== null) {
-      clearInterval(intervalId);
-      intervalId = null;
-    }
-  };
-};
-
-const getSnapshot = (): StoreSnapshot => snapshot;
-
-// No-op subscribe used when the caller asks us to stand down (e.g. when the
-// active left-panel view isn't "runs"). Keeps the Rules of Hooks intact while
-// letting subscriber count fall to zero so the poll loop stops.
-const noopSubscribe = (): (() => void) => (): void => undefined;
+const EMPTY_ROWS: WorkspaceRunRow[] = [];
 
 export interface UseWorkspaceRunsOptions {
-  /** When false, the hook returns the cached snapshot but does not subscribe
-   *  or trigger fetches. Use to gate polling by active view. Defaults to true. */
+  /** When false the hook reads cache only and issues no request. */
   enabled?: boolean;
 }
 
 export const useWorkspaceRuns = (options: UseWorkspaceRunsOptions = {}): UseWorkspaceRunsResult => {
   const { enabled = true } = options;
-  const data = useSyncExternalStore(enabled ? subscribe : noopSubscribe, getSnapshot, getSnapshot);
+  const query = useRunsIndexQuery(undefined, { enabled });
+
+  const lastSyncedAt = useMemo(
+    () => (query.dataUpdatedAt > 0 ? new Date(query.dataUpdatedAt) : null),
+    [query.dataUpdatedAt],
+  );
+
   return {
-    ...data,
-    refresh: () => triggerFetch(false),
+    rows: query.data?.rows ?? EMPTY_ROWS,
+    stats: query.data?.stats ?? EMPTY_RUN_STATS,
+    total: query.data?.total ?? 0,
+    truncated: query.data?.truncated ?? false,
+    loading: query.isFetching,
+    error: query.error instanceof Error ? query.error.message : null,
+    lastSyncedAt,
+    refresh: () => {
+      void query.refetch();
+    },
   };
 };

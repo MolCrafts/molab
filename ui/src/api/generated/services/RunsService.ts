@@ -205,11 +205,14 @@ export class RunsService {
     }
     /**
      * Get Run Execution Logs
-     * Return stdout/stderr for a specific execution attempt.
+     * Return a stdout/stderr tail window for a specific execution attempt.
      * @param projectId
      * @param experimentId
      * @param runId
      * @param executionId
+     * @param maxBytes
+     * @param sinceStdout
+     * @param sinceStderr
      * @returns RunLogsResponse Successful Response
      * @throws ApiError
      */
@@ -218,6 +221,9 @@ export class RunsService {
         experimentId: string,
         runId: string,
         executionId: string,
+        maxBytes: number = 256000,
+        sinceStdout?: (number | null),
+        sinceStderr?: (number | null),
     ): CancelablePromise<RunLogsResponse> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -228,6 +234,11 @@ export class RunsService {
                 'run_id': runId,
                 'execution_id': executionId,
             },
+            query: {
+                'max_bytes': maxBytes,
+                'since_stdout': sinceStdout,
+                'since_stderr': sinceStderr,
+            },
             errors: {
                 422: `Validation Error`,
             },
@@ -236,6 +247,11 @@ export class RunsService {
     /**
      * Export Run
      * Stream a zip archive of the run directory (artifacts, logs, metadata).
+     *
+     * Genuinely streamed: the archive is produced chunk by chunk, so exporting a
+     * run with gigabytes of trajectories never sizes the server's memory to the
+     * run. Above :data:`EXPORT_MAX_BYTES` the request is refused outright rather
+     * than tying up a worker for minutes.
      * @param projectId
      * @param experimentId
      * @param runId
@@ -262,11 +278,18 @@ export class RunsService {
     }
     /**
      * Get Run File Text
-     * Return the raw text content of a file under the run directory.
+     * Return a bounded text window over a file under the run directory.
+     *
+     * Defaults to the *head* — a source or config viewer reads from the top —
+     * and to the largest window the server will emit, so small files come back
+     * whole exactly as before.  Page with ``since_offset=end``.
      * @param projectId
      * @param experimentId
      * @param runId
      * @param path Relative path under run_dir
+     * @param mode
+     * @param maxBytes
+     * @param sinceOffset
      * @returns RunFileTextResponse Successful Response
      * @throws ApiError
      */
@@ -275,6 +298,9 @@ export class RunsService {
         experimentId: string,
         runId: string,
         path: string,
+        mode: 'head' | 'tail' = 'head',
+        maxBytes: number = 2000000,
+        sinceOffset?: (number | null),
     ): CancelablePromise<RunFileTextResponse> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -286,6 +312,9 @@ export class RunsService {
             },
             query: {
                 'path': path,
+                'mode': mode,
+                'max_bytes': maxBytes,
+                'since_offset': sinceOffset,
             },
             errors: {
                 422: `Validation Error`,
@@ -299,9 +328,16 @@ export class RunsService {
      * Files registered in the asset catalog (artifacts, logs, checkpoints,
      * error traces) carry ``assetId``, ``assetKind``, and ``taskId`` so the
      * UI can render lineage chips inline.
+     *
+     * The walk is bounded in both directions: ``max_depth`` levels down, and
+     * ``max_entries`` children per directory. A run that wrote 100k frames into
+     * one directory therefore costs a bounded response; the containing folder
+     * node reports ``entryCount`` and ``truncated`` so the UI can say so.
      * @param projectId
      * @param experimentId
      * @param runId
+     * @param maxDepth
+     * @param maxEntries
      * @returns RunFilesResponse Successful Response
      * @throws ApiError
      */
@@ -309,6 +345,8 @@ export class RunsService {
         projectId: string,
         experimentId: string,
         runId: string,
+        maxDepth: number = 6,
+        maxEntries: number = 2000,
     ): CancelablePromise<RunFilesResponse> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -318,6 +356,10 @@ export class RunsService {
                 'experiment_id': experimentId,
                 'run_id': runId,
             },
+            query: {
+                'max_depth': maxDepth,
+                'max_entries': maxEntries,
+            },
             errors: {
                 422: `Validation Error`,
             },
@@ -326,6 +368,10 @@ export class RunsService {
     /**
      * Harvest Run Route
      * Harvest a terminal run into a sourced KnowledgeItem under its experiment.
+     *
+     * Harvest reads the run's outputs and writes a Concept, so it is
+     * filesystem-bound; it runs on the heavy pool to keep the shared request
+     * threads free for cheap reads.
      * @param projectId
      * @param experimentId
      * @param runId
@@ -389,6 +435,12 @@ export class RunsService {
      * Inlined parser — ``molpy.io`` does not export a multi-stage log
      * reader, so the route owns this lightweight regex-based parse to
      * avoid coupling the API surface to a transient molpy refactor.
+     *
+     * A production MD log can be gigabytes; above
+     * :data:`LAMMPS_LOG_MAX_BYTES` only the tail is parsed (the latest stages,
+     * which is what a progress view wants) and ``truncated`` is set. Reading
+     * and regexing the file is CPU- and IO-bound, so it runs on the heavy pool
+     * rather than the shared request threads.
      * @param projectId
      * @param experimentId
      * @param runId
@@ -420,10 +472,16 @@ export class RunsService {
     }
     /**
      * Get Run Logs
-     * Return stdout/stderr for the most recent execution of a run.
+     * Return a stdout/stderr tail window for the most recent execution.
+     *
+     * Poll incrementally by passing the previous response's ``stdout_end`` /
+     * ``stderr_end`` back as ``since_stdout`` / ``since_stderr``.
      * @param projectId
      * @param experimentId
      * @param runId
+     * @param maxBytes
+     * @param sinceStdout
+     * @param sinceStderr
      * @returns RunLogsResponse Successful Response
      * @throws ApiError
      */
@@ -431,6 +489,9 @@ export class RunsService {
         projectId: string,
         experimentId: string,
         runId: string,
+        maxBytes: number = 256000,
+        sinceStdout?: (number | null),
+        sinceStderr?: (number | null),
     ): CancelablePromise<RunLogsResponse> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -440,6 +501,11 @@ export class RunsService {
                 'experiment_id': experimentId,
                 'run_id': runId,
             },
+            query: {
+                'max_bytes': maxBytes,
+                'since_stdout': sinceStdout,
+                'since_stderr': sinceStderr,
+            },
             errors: {
                 422: `Validation Error`,
             },
@@ -448,12 +514,18 @@ export class RunsService {
     /**
      * Get Run Metrics
      * Return run-local metrics from ``metrics/metrics.jsonl``.
+     *
+     * A live chart should follow by passing the previous ``nextOffset`` back as
+     * ``since_offset``: that seeks straight to the appended bytes instead of
+     * re-reading the stream from line 0 on every poll.
      * @param projectId
      * @param experimentId
      * @param runId
      * @param type
      * @param key
-     * @param sinceLine
+     * @param sinceLine Legacy cursor; prefer since_offset.
+     * @param sinceOffset Byte cursor from a previous nextOffset (O(1) resume).
+     * @param maxScanBytes
      * @param limit
      * @returns RunMetricsResponse Successful Response
      * @throws ApiError
@@ -465,6 +537,8 @@ export class RunsService {
         type?: (string | null),
         key?: (string | null),
         sinceLine?: number,
+        sinceOffset?: (number | null),
+        maxScanBytes: number = 8388608,
         limit: number = 5000,
     ): CancelablePromise<RunMetricsResponse> {
         return __request(OpenAPI, {
@@ -479,6 +553,8 @@ export class RunsService {
                 'type': type,
                 'key': key,
                 'since_line': sinceLine,
+                'since_offset': sinceOffset,
+                'max_scan_bytes': maxScanBytes,
                 'limit': limit,
             },
             errors: {
@@ -833,12 +909,15 @@ export class RunsService {
     }
     /**
      * Get Run Execution Logs
-     * Return stdout/stderr for a specific execution attempt.
+     * Return a stdout/stderr tail window for a specific execution attempt.
      * @param projectId
      * @param experimentId
      * @param runId
      * @param executionId
      * @param ws
+     * @param maxBytes
+     * @param sinceStdout
+     * @param sinceStderr
      * @returns RunLogsResponse Successful Response
      * @throws ApiError
      */
@@ -848,6 +927,9 @@ export class RunsService {
         runId: string,
         executionId: string,
         ws: string,
+        maxBytes: number = 256000,
+        sinceStdout?: (number | null),
+        sinceStderr?: (number | null),
     ): CancelablePromise<RunLogsResponse> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -859,6 +941,11 @@ export class RunsService {
                 'execution_id': executionId,
                 'ws': ws,
             },
+            query: {
+                'max_bytes': maxBytes,
+                'since_stdout': sinceStdout,
+                'since_stderr': sinceStderr,
+            },
             errors: {
                 422: `Validation Error`,
             },
@@ -867,6 +954,11 @@ export class RunsService {
     /**
      * Export Run
      * Stream a zip archive of the run directory (artifacts, logs, metadata).
+     *
+     * Genuinely streamed: the archive is produced chunk by chunk, so exporting a
+     * run with gigabytes of trajectories never sizes the server's memory to the
+     * run. Above :data:`EXPORT_MAX_BYTES` the request is refused outright rather
+     * than tying up a worker for minutes.
      * @param projectId
      * @param experimentId
      * @param runId
@@ -896,12 +988,19 @@ export class RunsService {
     }
     /**
      * Get Run File Text
-     * Return the raw text content of a file under the run directory.
+     * Return a bounded text window over a file under the run directory.
+     *
+     * Defaults to the *head* — a source or config viewer reads from the top —
+     * and to the largest window the server will emit, so small files come back
+     * whole exactly as before.  Page with ``since_offset=end``.
      * @param projectId
      * @param experimentId
      * @param runId
      * @param ws
      * @param path Relative path under run_dir
+     * @param mode
+     * @param maxBytes
+     * @param sinceOffset
      * @returns RunFileTextResponse Successful Response
      * @throws ApiError
      */
@@ -911,6 +1010,9 @@ export class RunsService {
         runId: string,
         ws: string,
         path: string,
+        mode: 'head' | 'tail' = 'head',
+        maxBytes: number = 2000000,
+        sinceOffset?: (number | null),
     ): CancelablePromise<RunFileTextResponse> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -923,6 +1025,9 @@ export class RunsService {
             },
             query: {
                 'path': path,
+                'mode': mode,
+                'max_bytes': maxBytes,
+                'since_offset': sinceOffset,
             },
             errors: {
                 422: `Validation Error`,
@@ -936,10 +1041,17 @@ export class RunsService {
      * Files registered in the asset catalog (artifacts, logs, checkpoints,
      * error traces) carry ``assetId``, ``assetKind``, and ``taskId`` so the
      * UI can render lineage chips inline.
+     *
+     * The walk is bounded in both directions: ``max_depth`` levels down, and
+     * ``max_entries`` children per directory. A run that wrote 100k frames into
+     * one directory therefore costs a bounded response; the containing folder
+     * node reports ``entryCount`` and ``truncated`` so the UI can say so.
      * @param projectId
      * @param experimentId
      * @param runId
      * @param ws
+     * @param maxDepth
+     * @param maxEntries
      * @returns RunFilesResponse Successful Response
      * @throws ApiError
      */
@@ -948,6 +1060,8 @@ export class RunsService {
         experimentId: string,
         runId: string,
         ws: string,
+        maxDepth: number = 6,
+        maxEntries: number = 2000,
     ): CancelablePromise<RunFilesResponse> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -958,6 +1072,10 @@ export class RunsService {
                 'run_id': runId,
                 'ws': ws,
             },
+            query: {
+                'max_depth': maxDepth,
+                'max_entries': maxEntries,
+            },
             errors: {
                 422: `Validation Error`,
             },
@@ -966,6 +1084,10 @@ export class RunsService {
     /**
      * Harvest Run Route
      * Harvest a terminal run into a sourced KnowledgeItem under its experiment.
+     *
+     * Harvest reads the run's outputs and writes a Concept, so it is
+     * filesystem-bound; it runs on the heavy pool to keep the shared request
+     * threads free for cheap reads.
      * @param projectId
      * @param experimentId
      * @param runId
@@ -1035,6 +1157,12 @@ export class RunsService {
      * Inlined parser — ``molpy.io`` does not export a multi-stage log
      * reader, so the route owns this lightweight regex-based parse to
      * avoid coupling the API surface to a transient molpy refactor.
+     *
+     * A production MD log can be gigabytes; above
+     * :data:`LAMMPS_LOG_MAX_BYTES` only the tail is parsed (the latest stages,
+     * which is what a progress view wants) and ``truncated`` is set. Reading
+     * and regexing the file is CPU- and IO-bound, so it runs on the heavy pool
+     * rather than the shared request threads.
      * @param projectId
      * @param experimentId
      * @param runId
@@ -1069,11 +1197,17 @@ export class RunsService {
     }
     /**
      * Get Run Logs
-     * Return stdout/stderr for the most recent execution of a run.
+     * Return a stdout/stderr tail window for the most recent execution.
+     *
+     * Poll incrementally by passing the previous response's ``stdout_end`` /
+     * ``stderr_end`` back as ``since_stdout`` / ``since_stderr``.
      * @param projectId
      * @param experimentId
      * @param runId
      * @param ws
+     * @param maxBytes
+     * @param sinceStdout
+     * @param sinceStderr
      * @returns RunLogsResponse Successful Response
      * @throws ApiError
      */
@@ -1082,6 +1216,9 @@ export class RunsService {
         experimentId: string,
         runId: string,
         ws: string,
+        maxBytes: number = 256000,
+        sinceStdout?: (number | null),
+        sinceStderr?: (number | null),
     ): CancelablePromise<RunLogsResponse> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -1092,6 +1229,11 @@ export class RunsService {
                 'run_id': runId,
                 'ws': ws,
             },
+            query: {
+                'max_bytes': maxBytes,
+                'since_stdout': sinceStdout,
+                'since_stderr': sinceStderr,
+            },
             errors: {
                 422: `Validation Error`,
             },
@@ -1100,13 +1242,19 @@ export class RunsService {
     /**
      * Get Run Metrics
      * Return run-local metrics from ``metrics/metrics.jsonl``.
+     *
+     * A live chart should follow by passing the previous ``nextOffset`` back as
+     * ``since_offset``: that seeks straight to the appended bytes instead of
+     * re-reading the stream from line 0 on every poll.
      * @param projectId
      * @param experimentId
      * @param runId
      * @param ws
      * @param type
      * @param key
-     * @param sinceLine
+     * @param sinceLine Legacy cursor; prefer since_offset.
+     * @param sinceOffset Byte cursor from a previous nextOffset (O(1) resume).
+     * @param maxScanBytes
      * @param limit
      * @returns RunMetricsResponse Successful Response
      * @throws ApiError
@@ -1119,6 +1267,8 @@ export class RunsService {
         type?: (string | null),
         key?: (string | null),
         sinceLine?: number,
+        sinceOffset?: (number | null),
+        maxScanBytes: number = 8388608,
         limit: number = 5000,
     ): CancelablePromise<RunMetricsResponse> {
         return __request(OpenAPI, {
@@ -1134,6 +1284,8 @@ export class RunsService {
                 'type': type,
                 'key': key,
                 'since_line': sinceLine,
+                'since_offset': sinceOffset,
+                'max_scan_bytes': maxScanBytes,
                 'limit': limit,
             },
             errors: {

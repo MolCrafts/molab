@@ -1,14 +1,32 @@
+import { type JSX, lazy, Suspense } from "react";
 import {
   buildRendererKeyFromSelection,
   renderPlanByObjectType,
   resolveRenderer,
 } from "@/app/registry";
 import type { RunInspectorRegistration } from "@/app/runs/inspector/RunInspector";
-import { RunsPage } from "@/app/runs/RunsPage";
-import { SettingsPage } from "@/app/settings/SettingsPage";
 import type { InspectorTarget, LeftPanelView, Selection, WorkspaceSnapshot } from "@/app/types";
-import { WorkflowsPage } from "@/app/workflows/WorkflowsPage";
 import { WorkbenchOperationState } from "@/components/workbench";
+
+// Full-panel pages reached from the left nav rather than from a selection.
+// Each is its own chunk: the dashboards pull in chart and aggregation code that
+// a session which never leaves the entity tree should not have to download.
+const RunsPage = lazy(async () => ({
+  default: (await import("@/app/runs/RunsPage")).RunsPage,
+}));
+const WorkflowsPage = lazy(async () => ({
+  default: (await import("@/app/workflows/WorkflowsPage")).WorkflowsPage,
+}));
+const SettingsPage = lazy(async () => ({
+  default: (await import("@/app/settings/SettingsPage")).SettingsPage,
+}));
+
+/** Full-panel loading surface shared by the lazy page chunks. */
+const PageFallback = (): JSX.Element => (
+  <div className="flex h-full items-center justify-center p-6">
+    <WorkbenchOperationState kind="loading" title="Loading…" />
+  </div>
+);
 
 interface EmptySelectionCopy {
   title: string;
@@ -70,13 +88,25 @@ export const CenterPanel = ({
 }: CenterPanelProps): JSX.Element => {
   if (!selection) {
     if (leftPanelView === "runs") {
-      return <RunsPage snapshot={snapshot} onInspectorChange={onRunInspectorChange} />;
+      return (
+        <Suspense fallback={<PageFallback />}>
+          <RunsPage snapshot={snapshot} onInspectorChange={onRunInspectorChange} />
+        </Suspense>
+      );
     }
     if (leftPanelView === "workflow") {
-      return <WorkflowsPage snapshot={snapshot} onRefresh={onRefresh} />;
+      return (
+        <Suspense fallback={<PageFallback />}>
+          <WorkflowsPage snapshot={snapshot} onRefresh={onRefresh} />
+        </Suspense>
+      );
     }
     if (leftPanelView === "settings") {
-      return <SettingsPage />;
+      return (
+        <Suspense fallback={<PageFallback />}>
+          <SettingsPage />
+        </Suspense>
+      );
     }
     return <EmptySelectionPlaceholder view={leftPanelView} />;
   }

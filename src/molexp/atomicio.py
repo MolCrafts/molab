@@ -17,12 +17,14 @@ sites keep working unchanged.
 from __future__ import annotations
 
 import contextlib
+import errno
 import json
 import os
 import tempfile
 import time
 from collections.abc import Iterator
 from pathlib import Path
+from typing import Literal
 
 from mollog import get_logger
 
@@ -39,6 +41,18 @@ logger = get_logger(__name__)
 DEFAULT_LOCK_TIMEOUT_SECONDS = 10.0
 # Poll cadence while waiting for a contended lock.
 _POLL_INTERVAL_SECONDS = 0.02
+
+LockBackend = Literal["flock", "o_excl", "none"]
+"""Which lock mechanism to use; see :func:`file_lock`."""
+
+# Errnos that mean "someone else holds it" — the only ones worth waiting on.
+_CONTENDED_ERRNOS = frozenset({errno.EAGAIN, errno.EWOULDBLOCK, errno.EACCES})
+# Errnos that mean "this filesystem does not do flock" — waiting is pointless.
+_UNSUPPORTED_ERRNOS = frozenset({errno.ENOLCK, errno.ENOSYS, errno.EOPNOTSUPP, errno.EINVAL})
+
+# One warning per process per lock backend downgrade; a per-call warning would
+# fire on every metadata write.
+_warned_unsupported = False
 
 
 def atomic_write_json(path: Path, data: object) -> None:
@@ -107,33 +121,105 @@ class FileLockTimeoutError(TimeoutError):
 
 
 @contextlib.contextmanager
+def _o_excl_lock(lock_path: Path, timeout: float) -> Iterator[None]:
+    """Lock by exclusive file *creation* — the portable fallback.
+
+    ``O_CREAT | O_EXCL`` is atomic even on NFS, which is why it is the
+    fallback where ``flock`` is unavailable or lies. The cost is that a
+    process killed mid-section leaves the file behind, so a lock older than
+    ``3 x timeout`` is treated as abandoned and broken — long enough that a
+    live holder is never evicted, short enough that a crash does not wedge the
+    workspace forever.
+    """
+    marker = lock_path.with_suffix(lock_path.suffix + ".excl")
+    deadline = time.monotonic() + timeout
+    fd: int | None = None
+    while True:
+        try:
+            marker.parent.mkdir(parents=True, exist_ok=True)
+            fd = os.open(str(marker), os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o644)
+            break
+        except FileExistsError:
+            try:
+                age = time.time() - marker.stat().st_mtime
+            except OSError:
+                age = 0.0
+            if age > 3 * timeout:
+                logger.warning(f"file_lock: breaking stale lock {marker} (age {age:.0f}s)")
+                with contextlib.suppress(OSError):
+                    marker.unlink()
+                continue
+            if time.monotonic() >= deadline:
+                raise FileLockTimeoutError(
+                    f"could not acquire advisory lock {marker} within "
+                    f"{timeout:.1f}s — another molexp process is holding it"
+                ) from None
+            time.sleep(_POLL_INTERVAL_SECONDS)
+        except OSError:
+            logger.debug(f"file_lock: cannot create {marker}; proceeding without lock")
+            yield
+            return
+    try:
+        yield
+    finally:
+        if fd is not None:
+            with contextlib.suppress(OSError):
+                os.close(fd)
+        with contextlib.suppress(OSError):
+            marker.unlink()
+
+
+@contextlib.contextmanager
 def file_lock(
     lock_path: Path,
     *,
     timeout: float = DEFAULT_LOCK_TIMEOUT_SECONDS,
+    backend: LockBackend = "flock",
 ) -> Iterator[None]:
     """Hold an exclusive advisory lock on *lock_path* for the ``with`` body.
 
     Serializes read-modify-write cycles on a JSON file written by several
     uncoordinated processes (server, foreground CLI, detached workers).
     Each write is atomic, but an RMW without a lock can still drop a
-    concurrent update — this lock closes that window via ``fcntl.flock``
-    on a sidecar ``.lock`` file.
+    concurrent update — this lock closes that window.
 
-    The sidecar lock file is created on demand (never deleted — deleting
-    a lock file open in another process would break ``flock`` semantics).
+    The sidecar lock file is created on demand (never deleted under the
+    ``flock`` backend — deleting a lock file open in another process would
+    break ``flock`` semantics).
 
-    Graceful degradation: ``fcntl`` is POSIX-only and the sidecar may live
-    on a filesystem that rejects lock files (remote mounts). In both cases
-    the context manager degrades to a no-op with a debug log line.
+    Backends:
+
+    * ``"flock"`` (default) — ``fcntl.flock`` on a sidecar. Correct and
+      self-releasing on crash, but not honoured by every filesystem.
+    * ``"o_excl"`` — exclusive file creation; for mounts where ``flock`` is
+      unsupported (Lustre without ``-o flock``, some NFS setups).
+    * ``"none"`` — no locking, for filesystems where neither is meaningful
+      (a remote tree reached over SSH).
+
+    ``"flock"`` degrades to ``"o_excl"`` by itself when the kernel reports the
+    operation unsupported. That distinction is the point: the previous version
+    treated *every* ``OSError`` as contention, so on a Lustre mount without
+    ``-o flock`` each metadata write spun for the full timeout and then raised
+    a "another molexp process is holding it" error that named a conflict which
+    did not exist.
 
     Args:
         lock_path: Sidecar lock-file path (e.g. ``run.json.lock``).
         timeout: Seconds to wait for a contended lock.
+        backend: Lock mechanism; see above.
 
     Raises:
         FileLockTimeoutError: The lock stayed contended past *timeout*.
     """
+    global _warned_unsupported
+
+    if backend == "none":
+        yield
+        return
+    if backend == "o_excl":
+        with _o_excl_lock(lock_path, timeout):
+            yield
+        return
     if not _HAS_FCNTL:
         logger.debug(f"file_lock: fcntl unavailable; proceeding without lock for {lock_path}")
         yield
@@ -149,31 +235,56 @@ def file_lock(
         yield
         return
 
+    unsupported = False
     try:
         deadline = time.monotonic() + timeout
         while True:
             try:
                 fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
                 break
-            except OSError:
+            except OSError as exc:
+                if exc.errno in _UNSUPPORTED_ERRNOS:
+                    # This filesystem does not implement flock — waiting would
+                    # burn the whole timeout and then raise a false conflict.
+                    if not _warned_unsupported:
+                        _warned_unsupported = True
+                        logger.warning(
+                            f"file_lock: flock unsupported on this filesystem "
+                            f"({errno.errorcode.get(exc.errno, exc.errno)}); "
+                            f"falling back to exclusive-create locks"
+                        )
+                    unsupported = True
+                    break
+                if exc.errno is not None and exc.errno not in _CONTENDED_ERRNOS:
+                    raise
                 if time.monotonic() >= deadline:
                     raise FileLockTimeoutError(
                         f"could not acquire advisory lock {lock_path} within "
                         f"{timeout:.1f}s — another molexp process is holding it"
                     ) from None
                 time.sleep(_POLL_INTERVAL_SECONDS)
-        try:
+    except BaseException:
+        os.close(fd)
+        raise
+
+    if unsupported:
+        os.close(fd)
+        with _o_excl_lock(lock_path, timeout):
             yield
-        finally:
-            with contextlib.suppress(OSError):
-                fcntl.flock(fd, fcntl.LOCK_UN)
+        return
+
+    try:
+        yield
     finally:
+        with contextlib.suppress(OSError):
+            fcntl.flock(fd, fcntl.LOCK_UN)
         os.close(fd)
 
 
 __all__ = [
     "DEFAULT_LOCK_TIMEOUT_SECONDS",
     "FileLockTimeoutError",
+    "LockBackend",
     "atomic_write_json",
     "atomic_write_text",
     "file_lock",

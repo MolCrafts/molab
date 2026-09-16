@@ -21,7 +21,40 @@ so ``import molexp.fs`` never pulls ``molq`` — a knowledge bundle opened over 
 plain directory imports stdlib and nothing else.
 """
 
-from .base import FileSystem, PathArg, StatResult
+from .base import DirEntry, FileSystem, PathArg, StatResult, bulk
 from .local import LocalFileSystem
+from .memo import StatMemo
+from .profile import (
+    LOCAL_FAST_PROFILE,
+    NETWORK_LOCAL_PROFILE,
+    REMOTE_SSH_PROFILE,
+    FsKind,
+    FsProfile,
+    detect_fs_profile,
+)
+from .window import (
+    DEFAULT_TEXT_WINDOW_BYTES,
+    MAX_TEXT_WINDOW_BYTES,
+    TextWindow,
+    read_text_window,
+)
 
-__all__ = ["FileSystem", "LocalFileSystem", "PathArg", "StatResult"]
+__all__ = [
+    "DEFAULT_TEXT_WINDOW_BYTES",
+    "LOCAL_FAST_PROFILE",
+    "MAX_TEXT_WINDOW_BYTES",
+    "NETWORK_LOCAL_PROFILE",
+    "REMOTE_SSH_PROFILE",
+    "DirEntry",
+    "FileSystem",
+    "FsKind",
+    "FsProfile",
+    "LocalFileSystem",
+    "PathArg",
+    "StatMemo",
+    "StatResult",
+    "TextWindow",
+    "bulk",
+    "detect_fs_profile",
+    "read_text_window",
+]

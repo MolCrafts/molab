@@ -24,6 +24,11 @@ from molexp.server.deps.folder_store import (
     get_workspace_folder_store,
     reset_workspace_folder_store,
 )
+from molexp.server.deps.read_model import (
+    get_read_model,
+    read_model_for,
+    reset_read_models,
+)
 from molexp.server.deps.resolution import (
     get_active_workspace,
     get_workspace,
@@ -59,6 +64,7 @@ __all__ = [
     "assert_workspace_writable",
     "get_active_workspace",
     "get_agent_runtime",
+    "get_read_model",
     "get_remote_fs_factory",
     "get_served_workspaces",
     "get_settings",
@@ -67,8 +73,10 @@ __all__ = [
     "get_workspace_folder_store",
     "get_workspace_path",
     "get_workspace_target_registry",
+    "read_model_for",
     "register_workspace_subscriber",
     "reset_agent_runtime",
+    "reset_read_models",
     "reset_workspace_cache",
     "reset_workspace_folder_store",
     "reset_workspace_target_registry",

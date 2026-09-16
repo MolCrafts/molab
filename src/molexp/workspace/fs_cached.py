@@ -29,6 +29,7 @@ Layer rule: lives in the workspace layer next to ``fs_local.py`` and
 
 from __future__ import annotations
 
+import atexit
 import contextlib
 import json
 import logging
@@ -38,11 +39,11 @@ import threading
 import time
 from collections.abc import Callable, Iterable, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import IO, TYPE_CHECKING, Any
 
-from .fs import FileSystem, PathArg, StatResult
+from .fs import DirEntry, FileSystem, PathArg, StatResult
 from .fs_local import LocalFileSystem
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -79,26 +80,63 @@ truth source for the navigation tree.  Their basenames double as the
 navigation metadata while sparing log/asset bytes.
 """
 
+NAVIGATION_FILE_NAMES: frozenset[str] = frozenset(
+    INDEX_FILE_NAMES | {"assets.json", "meta.yaml", "metadata.json"}
+)
+"""Basenames whose mirrored bytes are never evicted to make room.
+
+These are what the navigation tree is *made of*; evicting them to cache a
+log tail would trade a 0-round-trip tree for a re-fetch of every node. The
+run ops sidecar (``_ops/run.json``) is navigation too but shares its
+basename with the run entity file, so it is matched by path suffix instead.
+"""
+
+_OPS_SUFFIX = "/_ops/run.json"
+
 _SIDECAR_FILENAME = "_index.json"
-_SIDECAR_VERSION = 1
+# v2: ``dirs`` holds typed DirEntry rows (not bare names) so a cached listing
+# also answers stat/is_dir for its children. A v1 sidecar is simply ignored —
+# this is a cache, and re-walking costs one prefetch.
+_SIDECAR_VERSION = 2
+
+_DEFAULT_MIRROR_MAX_FILE_BYTES = 64 * 1024 * 1024
+_DEFAULT_MIRROR_BUDGET_BYTES = 4 * 1024 * 1024 * 1024
+_SIDECAR_DEBOUNCE_SECONDS = 1.0
 
 
 @dataclass(frozen=True)
 class _Entry:
-    """One cached file/dir/missing record."""
+    """One cached file/dir/missing record.
+
+    ``mirrored`` tracks whether the bytes are on local disk: an evicted file
+    keeps its entry (so ``stat``/``exists``/``is_dir`` still answer with zero
+    round-trips) and only loses its mirror copy.
+    """
 
     size: int
     mtime: float
     fetched_at: float
     kind: str  # "file" | "dir" | "missing"
+    mirrored: bool = False
+    last_used: float = 0.0
 
 
 @dataclass(frozen=True)
-class _DirEntry:
-    """One cached listdir result."""
+class _DirListing:
+    """One cached directory listing, with per-entry type and metadata."""
 
-    names: tuple[str, ...]
+    entries: tuple[DirEntry, ...]
     fetched_at: float
+
+    @property
+    def names(self) -> tuple[str, ...]:
+        """Entry names — the shape the pre-scandir cache exposed."""
+        return tuple(e.name for e in self.entries)
+
+
+def _is_navigation(key: str) -> bool:
+    """Whether *key* holds navigation metadata (never evicted from the mirror)."""
+    return key.rsplit("/", 1)[-1] in NAVIGATION_FILE_NAMES or key.endswith(_OPS_SUFFIX)
 
 
 @dataclass(frozen=True)
@@ -132,6 +170,15 @@ class CachedRemoteFileSystem:
             first write.
         ttl_seconds: ``>0`` (default) = pin-until-refresh.  ``0`` =
             revalidate via remote ``stat`` on every read.
+        revalidate_before: Entries cached before this wall-clock time are
+            revalidated **once** on next use, then re-pinned.  A CLI process
+            passes ``time.time()`` so a single invocation sees fresh data
+            without giving up pinning for the rest of its run.
+        mirror_max_file_bytes: Files larger than this are returned to the
+            caller but never written to the mirror — a multi-GB artifact
+            previewed once must not be copied whole and pinned forever.
+        mirror_budget_bytes: Total mirrored bytes allowed; exceeding it
+            evicts least-recently-used non-navigation files.
     """
 
     def __init__(
@@ -140,6 +187,9 @@ class CachedRemoteFileSystem:
         *,
         mirror_root: Path | str,
         ttl_seconds: int = 300,
+        revalidate_before: float | None = None,
+        mirror_max_file_bytes: int = _DEFAULT_MIRROR_MAX_FILE_BYTES,
+        mirror_budget_bytes: int = _DEFAULT_MIRROR_BUDGET_BYTES,
     ) -> None:
         if ttl_seconds < 0:
             raise ValueError("ttl_seconds must be >= 0")
@@ -148,8 +198,12 @@ class CachedRemoteFileSystem:
         self._mirror_root = Path(mirror_root)
         self._files_root = self._mirror_root / "files"
         self._ttl_seconds = ttl_seconds
+        self._revalidate_before = revalidate_before
+        self._mirror_max_file_bytes = mirror_max_file_bytes
+        self._mirror_budget_bytes = mirror_budget_bytes
+        self._mirrored_bytes = 0
         self._index: dict[str, _Entry] = {}
-        self._dir_index: dict[str, _DirEntry] = {}
+        self._dir_index: dict[str, _DirListing] = {}
         self._sidecar = self._mirror_root / _SIDECAR_FILENAME
         # Sidecar write batching: while ``_defer_persist`` is set (inside
         # ``batched()``), per-op writes only mark ``_sidecar_dirty`` and the
@@ -157,6 +211,12 @@ class CachedRemoteFileSystem:
         # (e.g. ``prefetch_workspace_indices``) from O(records²) into O(records).
         self._defer_persist = False
         self._sidecar_dirty = False
+        # Outside batched(), writes are debounced to at most one per second:
+        # a walk that records 1000 entries rewrites the sidecar a handful of
+        # times instead of 1000, which is what made it O(records²) in bytes.
+        self._sidecar_timer: threading.Timer | None = None
+        self._sidecar_last_write = 0.0
+        self._atexit_registered = False
         # Lifecycle flags — a brand-new remote root has no sidecar; that is
         # normal. ``connect`` / ``index`` (or ``prepare``) flip these once
         # the local mirror is ready and navigation metadata is warm.
@@ -173,6 +233,8 @@ class CachedRemoteFileSystem:
         # ``_index.json`` never surfaces as "Path not found" on first write.
         self._ensure_mirror_dirs()
         self._load_sidecar()
+        self._mirrored_bytes = sum(e.size for e in self._index.values() if e.mirrored)
+        atexit.register(self.flush)
         if self._index or self._dir_index:
             # Survived a previous session — treat as already indexed until
             # the caller re-runs ``index()`` / invalidates.
@@ -439,16 +501,9 @@ class CachedRemoteFileSystem:
         self._invalidate_dir(self._inner.dirname(key))
 
     def listdir(self, path: PathArg) -> list[str]:
-        key = self.resolve(path)
-        cached = self._pinned_dir(key)
-        if cached is not None:
-            return list(cached.names)
-        self._ensure_connected()
-        names = self._inner.listdir(key)
-        with self._lock:
-            self._dir_index[key] = _DirEntry(names=tuple(names), fetched_at=time.time())
-            self._persist_sidecar()
-        return names
+        # Names come from the typed listing, so one round-trip also answers
+        # stat/is_dir/exists for every child (see ``scandir``).
+        return [entry.name for entry in self.scandir(path, with_stat=True)]
 
     def glob(self, path: PathArg, pattern: str) -> Iterable[str]:
         # Glob is intentionally uncached — patterns are open-ended and
@@ -457,6 +512,51 @@ class CachedRemoteFileSystem:
 
     def rglob(self, path: PathArg, pattern: str) -> Iterable[str]:
         return self._inner.rglob(path, pattern)
+
+    def scandir(self, path: PathArg, *, with_stat: bool = True) -> list[DirEntry]:  # noqa: ARG002 — remote listings carry metadata for free
+        """List a directory, pinning the listing **and** every child entry.
+
+        This is the round-trip multiplier that matters on a remote workspace:
+        one ``scandir`` of ``runs/`` answers the later ``stat`` / ``is_dir`` /
+        ``exists`` / ``is_file`` of every run directory beneath it for free,
+        instead of one SSH round-trip apiece.
+
+        ``with_stat`` is ignored for the same reason the remote FS ignores it:
+        the listing carries size and mtime whether or not we ask.
+        """
+        key = self.resolve(path)
+        cached = self._pinned_dir(key)
+        if cached is not None:
+            return list(cached.entries)
+        self._ensure_connected()
+        entries = tuple(self._inner.scandir(key, with_stat=True))
+        now = time.time()
+        with self._lock:
+            self._dir_index[key] = _DirListing(entries=entries, fetched_at=now)
+            self._record_children(key, entries, now)
+            self._persist_sidecar()
+        return list(entries)
+
+    def read_range(self, path: PathArg, offset: int, length: int) -> bytes:
+        """Read a byte window, serving it from the mirror when we already have it.
+
+        A range is never *itself* mirrored: writing a slice of a multi-GB
+        artifact under that path's key would poison the cache with a partial
+        file that later reads would trust as whole.
+        """
+        key = self.resolve(path)
+        mirror_path = self._mirror_for(key)
+        entry = self._pinned_entry(key)
+        if (
+            entry is not None
+            and entry.kind == "file"
+            and entry.mirrored
+            and self._local.exists(mirror_path)
+        ):
+            self._touch_entry(key)
+            return self._local.read_range(mirror_path, offset, length)
+        self._ensure_connected()
+        return self._inner.read_range(key, offset, length)
 
     # ── Read ────────────────────────────────────────────────────────────
 
@@ -468,6 +568,7 @@ class CachedRemoteFileSystem:
         mirror_path = self._mirror_for(key)
         entry = self._pinned_entry(key)
         if entry is not None and entry.kind == "file" and self._local.exists(mirror_path):
+            self._touch_entry(key)
             return self._local.read_bytes(mirror_path)
         if entry is not None and entry.kind == "missing":
             raise FileNotFoundError(key)
@@ -489,11 +590,16 @@ class CachedRemoteFileSystem:
         except FileNotFoundError:
             self._record(key, kind="missing", size=0, mtime=0.0)
             raise
-        stat_value = self._safe_stat(key)
-        size = len(data) if stat_value is None else stat_value.size
-        mtime = time.time() if stat_value is None else stat_value.mtime
-        self._write_mirror(mirror_path, data)
-        self._record(key, kind="file", size=size, mtime=mtime)
+        # A ``scandir`` of the parent already told us size+mtime; re-stating
+        # here would double the round-trips of every cold read.
+        if known is not None and known.kind == "file":
+            size, mtime = known.size, known.mtime
+        else:
+            stat_value = self._safe_stat(key)
+            size = len(data) if stat_value is None else stat_value.size
+            mtime = time.time() if stat_value is None else stat_value.mtime
+        mirrored = self._maybe_write_mirror(key, mirror_path, data)
+        self._record(key, kind="file", size=size, mtime=mtime, mirrored=mirrored)
         return data
 
     def open(self, path: PathArg, mode: str = "r", encoding: str = "utf-8") -> IO[Any]:  # noqa: ARG002 — `mode` kept to mirror RemoteFileSystem.open's signature
@@ -589,6 +695,51 @@ class CachedRemoteFileSystem:
         self._invalidate(key)
         self._inner.atomic_write_text(key, content, encoding=encoding)
 
+    # ── Bulk population (one round-trip in, many entries out) ───────────
+
+    def absorb_listings(self, listings: dict[str, list[DirEntry]]) -> None:
+        """Populate the cache from a bulk directory walk.
+
+        Records every listing **and** every child entry, so the whole
+        navigation tree answers ``listdir`` / ``stat`` / ``is_dir`` / ``exists``
+        with zero remote calls after a single ``walk_entries``.
+        """
+        now = time.time()
+        with self._lock, self.batched():
+            for directory, entries in listings.items():
+                rows = tuple(entries)
+                self._dir_index[directory] = _DirListing(entries=rows, fetched_at=now)
+                self._record_children(directory, rows, now)
+            self._persist_sidecar()
+
+    def absorb_files(self, files: dict[str, bytes]) -> None:
+        """Mirror bytes fetched in bulk, honouring the per-file size cap."""
+        with self.batched():
+            for key, data in files.items():
+                if len(data) > self._mirror_max_file_bytes:
+                    continue
+                mirror_path = self._mirror_for(key)
+                self._write_mirror(mirror_path, data)
+                known = self._index.get(key)
+                mtime = known.mtime if known is not None else time.time()
+                size = known.size if known is not None else len(data)
+                self._record(key, kind="file", size=size, mtime=mtime, mirrored=True)
+
+    def _record_children(self, directory: str, entries: tuple[DirEntry, ...], now: float) -> None:
+        """Record one listing's children. Caller must hold ``_lock``."""
+        for entry in entries:
+            child = self._inner.join(directory, entry.name)
+            known = self._index.get(child)
+            if known is not None and known.kind == "file" and known.mirrored:
+                continue
+            kind = "dir" if entry.is_dir else "file" if entry.is_file else "missing"
+            self._index[child] = _Entry(
+                size=entry.size,
+                mtime=entry.mtime,
+                fetched_at=now,
+                kind=kind,
+            )
+
     # ── Cache control ───────────────────────────────────────────────────
 
     def invalidate(
@@ -626,6 +777,7 @@ class CachedRemoteFileSystem:
             count = len(self._index)
             self._index.clear()
             self._dir_index.clear()
+            self._mirrored_bytes = 0
             if self._files_root.exists():
                 with contextlib.suppress(OSError):
                     shutil.rmtree(self._files_root)
@@ -650,20 +802,37 @@ class CachedRemoteFileSystem:
             return None
         if self._ttl_seconds == 0:
             return None
-        return self._index.get(key)
+        entry = self._index.get(key)
+        if entry is not None and self._is_stale(entry.fetched_at):
+            return None
+        return entry
 
-    def _pinned_dir(self, key: str) -> _DirEntry | None:
+    def _pinned_dir(self, key: str) -> _DirListing | None:
         if getattr(self._tls, "force_fetch", False):
             return None
         if self._ttl_seconds == 0:
             return None
-        return self._dir_index.get(key)
+        listing = self._dir_index.get(key)
+        if listing is not None and self._is_stale(listing.fetched_at):
+            return None
+        return listing
+
+    def _is_stale(self, fetched_at: float) -> bool:
+        """Whether an entry predates ``revalidate_before`` and must be re-read once.
+
+        A CLI invocation passes its own start time, so each run revalidates
+        what it touches exactly once and then serves the rest of its work from
+        the refreshed pin — not the same thing as giving up pinning, which
+        would put an SSH round-trip back on every call.
+        """
+        cutoff = self._revalidate_before
+        return cutoff is not None and fetched_at < cutoff
 
     # Back-compat aliases used by older call sites / tests.
     def _fresh_entry(self, key: str) -> _Entry | None:
         return self._pinned_entry(key)
 
-    def _fresh_dir(self, key: str) -> _DirEntry | None:
+    def _fresh_dir(self, key: str) -> _DirListing | None:
         return self._pinned_dir(key)
 
     def _revalidate_file_entry(self, key: str, entry: _Entry) -> bool:
@@ -685,26 +854,105 @@ class CachedRemoteFileSystem:
         self._record(key, kind="file", size=entry.size, mtime=entry.mtime)
         return True
 
-    def _record(self, key: str, *, kind: str, size: int, mtime: float) -> None:
+    def _record(
+        self, key: str, *, kind: str, size: int, mtime: float, mirrored: bool = False
+    ) -> None:
+        now = time.time()
         with self._lock:
+            previous = self._index.get(key)
+            if previous is not None and previous.mirrored and not mirrored:
+                self._mirrored_bytes -= previous.size
+            if mirrored and (previous is None or not previous.mirrored):
+                self._mirrored_bytes += size
             self._index[key] = _Entry(
                 size=size,
                 mtime=mtime,
-                fetched_at=time.time(),
+                fetched_at=now,
                 kind=kind,
+                mirrored=mirrored,
+                last_used=now,
             )
             self._persist_sidecar()
+
+    def _touch_entry(self, key: str) -> None:
+        """Mark *key* as just-used so LRU eviction spares it.
+
+        Deliberately does **not** persist: recency is a hint, and writing the
+        sidecar on every cache *hit* would reintroduce the write amplification
+        the debounce exists to remove.
+        """
+        with self._lock:
+            entry = self._index.get(key)
+            if entry is not None:
+                self._index[key] = replace(entry, last_used=time.time())
+
+    def _maybe_write_mirror(self, key: str, mirror_path: Path, data: bytes) -> bool:
+        """Mirror *data* unless it is too large; evict LRU files to stay in budget.
+
+        Returns whether the bytes were written. An over-cap file is still
+        returned to the caller — it is just never stored, so previewing one
+        4 GB trajectory cannot evict the whole navigation tree.
+        """
+        if len(data) > self._mirror_max_file_bytes:
+            return False
+        with self._lock:
+            self._evict_to_budget(len(data), keep=key)
+        self._write_mirror(mirror_path, data)
+        return True
+
+    def _evict_to_budget(self, incoming: int, *, keep: str) -> None:
+        """Drop least-recently-used non-navigation mirror files to fit *incoming*.
+
+        Caller must hold ``_lock``. Navigation metadata is never evicted: it is
+        what makes the tree load without SSH, and it is tiny compared to the
+        log/artifact bytes that actually fill the budget.
+        """
+        if self._mirrored_bytes + incoming <= self._mirror_budget_bytes:
+            return
+        candidates = [
+            (entry.last_used, key)
+            for key, entry in self._index.items()
+            if entry.mirrored and key != keep and not _is_navigation(key)
+        ]
+        candidates.sort()
+        for _, key in candidates:
+            if self._mirrored_bytes + incoming <= self._mirror_budget_bytes:
+                return
+            self._drop_mirror(key)
+
+    def _drop_mirror(self, key: str) -> None:
+        """Delete *key*'s mirrored bytes but keep its index entry.
+
+        The entry is what lets ``stat`` / ``exists`` / ``is_dir`` keep
+        answering with zero round-trips; only the bytes are reclaimable.
+        """
+        entry = self._index.get(key)
+        if entry is None or not entry.mirrored:
+            return
+        mirror_path = self._mirror_for(key)
+        with contextlib.suppress(OSError):
+            if mirror_path.exists():
+                mirror_path.unlink()
+        self._index[key] = replace(entry, mirrored=False)
+        self._mirrored_bytes -= entry.size
+        self._persist_sidecar()
+
+    def _forget(self, key: str) -> None:
+        """Drop one index entry, keeping the mirrored-byte total consistent."""
+        entry = self._index.pop(key, None)
+        if entry is not None and entry.mirrored:
+            self._mirrored_bytes -= entry.size
 
     def _invalidate(self, key: str, *, recursive: bool = False) -> int:
         dropped = 0
         if key in self._index:
-            del self._index[key]
+            self._forget(key)
             dropped += 1
         if recursive:
             prefix = key.rstrip("/") + "/"
             for k in list(self._index):
                 if k.startswith(prefix):
-                    del self._index[k]
+                    self._forget(k)
                     dropped += 1
             for k in list(self._dir_index):
                 if k == key or k.startswith(prefix):
@@ -766,18 +1014,37 @@ class CachedRemoteFileSystem:
         dirs = raw.get("dirs", {}) or {}
         for key, payload in dirs.items():
             try:
-                names = tuple(payload.get("names", ()))
+                entries = tuple(DirEntry(**row) for row in payload.get("entries", ()))
                 fetched_at = float(payload.get("fetched_at", 0.0))
-                self._dir_index[key] = _DirEntry(names=names, fetched_at=fetched_at)
+                self._dir_index[key] = _DirListing(entries=entries, fetched_at=fetched_at)
             except (AttributeError, TypeError, ValueError):
                 continue
 
     def _persist_sidecar(self) -> None:
-        """Persist now, or defer to batch exit if inside ``batched()``."""
+        """Mark the sidecar dirty; write now, on batch exit, or after a debounce.
+
+        Inside ``batched()`` the write happens once on exit. Outside it, the
+        sidecar is written at most once per second and a timer catches the
+        trailing edge — without this, a walk that records N entries rewrites
+        the whole index N times, which is O(N²) bytes.
+        """
+        self._sidecar_dirty = True
         if self._defer_persist:
-            self._sidecar_dirty = True
             return
-        self._write_sidecar()
+        now = time.monotonic()
+        if now - self._sidecar_last_write >= _SIDECAR_DEBOUNCE_SECONDS:
+            self._write_sidecar()
+            return
+        self._arm_sidecar_timer()
+
+    def _arm_sidecar_timer(self) -> None:
+        """Schedule one trailing sidecar write; idempotent while armed."""
+        if self._sidecar_timer is not None and self._sidecar_timer.is_alive():
+            return
+        timer = threading.Timer(_SIDECAR_DEBOUNCE_SECONDS, self.flush)
+        timer.daemon = True
+        self._sidecar_timer = timer
+        timer.start()
 
     @contextlib.contextmanager
     def batched(self) -> Iterator[None]:
@@ -799,7 +1066,11 @@ class CachedRemoteFileSystem:
             self.flush()
 
     def flush(self) -> None:
-        """Write the sidecar if it has pending (deferred) changes."""
+        """Write the sidecar if it has pending (deferred/debounced) changes."""
+        timer = self._sidecar_timer
+        if timer is not None:
+            timer.cancel()
+            self._sidecar_timer = None
         if self._sidecar_dirty:
             self._write_sidecar()
 
@@ -815,7 +1086,10 @@ class CachedRemoteFileSystem:
             "ttl_seconds": self._ttl_seconds,
             "entries": {k: asdict(v) for k, v in self._index.items()},
             "dirs": {
-                k: {"names": list(v.names), "fetched_at": v.fetched_at}
+                k: {
+                    "entries": [asdict(e) for e in v.entries],
+                    "fetched_at": v.fetched_at,
+                }
                 for k, v in self._dir_index.items()
             },
         }
@@ -827,6 +1101,7 @@ class CachedRemoteFileSystem:
             tmp.write_text(text, encoding="utf-8")
             os.replace(tmp, self._sidecar)  # noqa: PTH105
 
+        self._sidecar_last_write = time.monotonic()
         try:
             _attempt()
             self._sidecar_dirty = False
@@ -925,6 +1200,9 @@ def prefetch_workspace_indices(
     fs = workspace._fs
     root = str(workspace.root)
     workers = _prefetch_workers(max_workers)
+    # Bulk path: two round-trips for the whole tree, regardless of run count.
+    if isinstance(fs, CachedRemoteFileSystem) and _bulk_prefetch(fs, root):
+        return list(state.warnings)
     # Propagate active-refresh force_fetch into worker threads (TLS is not
     # inherited by ThreadPoolExecutor workers).
     force_fs: CachedRemoteFileSystem | None = None
@@ -1045,6 +1323,66 @@ def prefetch_workspace_indices(
         _parallel_map(_load_run, run_triples, max_workers=workers, force_fetch_fs=force_fs)
 
     return list(state.warnings)
+
+
+#: Depth of ``projects/<p>/experiments/<e>/runs/<r>/_ops`` below the root.
+_WORKSPACE_MAX_DEPTH = 7
+
+#: Per-run navigation metadata the UI asks for immediately after the tree.
+NAVIGATION_FETCH_NAMES: frozenset[str] = frozenset(
+    {"workspace.json", "project.json", "experiment.json", "run.json", "assets.json", "meta.yaml"}
+)
+
+#: Never descended into by the bulk walk — machine output, not navigation.
+_BULK_PRUNE_DIRS: frozenset[str] = frozenset(
+    {"executions", "artifacts", "cache", "logs", "jobs", "source", "metrics", ".ckpt"}
+)
+
+#: Ceiling for a bulk-fetched metadata file; a stray huge one is left to the
+#: lazy path rather than blowing up a single tar stream.
+_BULK_MAX_FILE_BYTES = 1024 * 1024
+
+
+def _bulk_prefetch(fs: CachedRemoteFileSystem, root: str) -> bool:
+    """Warm the whole navigation tree in two round-trips, if the inner FS can.
+
+    One ``walk_entries`` populates every directory listing (and, through
+    ``scandir``'s child recording, the stat of every entity directory); one
+    ``fetch_files`` pulls every navigation file as a single tar stream. The
+    per-level walk below needs at least one round-trip *per run* for the same
+    data, so this is the difference between a remote workspace being usable
+    and not.
+
+    Returns:
+        ``True`` when the bulk path ran and the tree is warm; ``False`` when
+        the inner FS lacks the accelerators (or the host lacks GNU ``find``),
+        so the caller falls back to the per-level walk.
+    """
+    inner = fs.inner
+    walk_entries = getattr(inner, "walk_entries", None)
+    fetch_files = getattr(inner, "fetch_files", None)
+    if walk_entries is None or fetch_files is None:
+        return False
+    try:
+        with fs.batched():
+            listings = walk_entries(root, max_depth=_WORKSPACE_MAX_DEPTH, prune=_BULK_PRUNE_DIRS)
+            if not listings:
+                return False
+            fs.absorb_listings(listings)
+            files = fetch_files(
+                root,
+                names=NAVIGATION_FETCH_NAMES,
+                max_bytes=_BULK_MAX_FILE_BYTES,
+                prune=_BULK_PRUNE_DIRS,
+            )
+            fs.absorb_files(files)
+    except Exception:
+        # Falling back is a normal outcome (no GNU find, an inner FS without
+        # the accelerators), not an error the operator needs to see — the
+        # per-level walk raises its own warnings if anything is really wrong.
+        logger.debug("bulk prefetch unavailable for %s; using per-level walk", root, exc_info=True)
+        return False
+    return True
 
 
 def _safe_read(

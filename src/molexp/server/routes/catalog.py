@@ -8,20 +8,22 @@ groups it, which project owns it, and what other outputs share its task.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
-from molexp.workspace.assets import Asset, scan
+from molexp.services.workspace_read_model import WorkspaceReadModel
+from molexp.workspace.assets import Asset
 
 from ..dependencies import get_workspace
+from ..deps.read_model import get_read_model
 from ..schemas import (
     CatalogByPathResponse,
     CatalogProducerInfo,
     CatalogScopeInfo,
     CatalogSibling,
 )
-from ._scope import resolve_scope_dir
 
 router = APIRouter(prefix="/catalog", tags=["catalog"])
 
@@ -46,15 +48,19 @@ def _producer_info(asset: Asset) -> CatalogProducerInfo | None:
     )
 
 
-def _siblings(workspace, asset: Asset) -> list[CatalogSibling]:  # noqa: ANN001
-    """Return other assets produced by the same task in the same scope."""
+def _siblings(asset: Asset, scope_assets: Sequence[Asset]) -> list[CatalogSibling]:
+    """Return other assets produced by the same task in the same scope.
+
+    *scope_assets* is that scope's slice of the read-model snapshot, so the
+    sibling lookup costs no I/O (it used to be a second full workspace scan).
+    """
     if asset.producer is None or asset.producer.task_id is None:
         return []
-    peers = scan.scan_assets(
-        workspace.root,
-        scope=asset.scope,
-        producer_task=asset.producer.task_id,
-    )
+    peers = [
+        a
+        for a in scope_assets
+        if a.producer is not None and a.producer.task_id == asset.producer.task_id
+    ]
     out: list[CatalogSibling] = []
     for peer in peers:
         if peer.asset_id == asset.asset_id:
@@ -74,6 +80,7 @@ def _siblings(workspace, asset: Asset) -> list[CatalogSibling]:  # noqa: ANN001
 def catalog_by_path(
     path: str = Query(..., description="Workspace-relative or absolute path"),
     workspace=Depends(get_workspace),  # noqa: ANN001
+    read_model: WorkspaceReadModel = Depends(get_read_model),
 ) -> CatalogByPathResponse:
     """Reverse lookup: find the producer for a given workspace path.
 
@@ -94,26 +101,27 @@ def catalog_by_path(
 
     workspace_rel = str(target.relative_to(root))
 
-    # Scan all assets, prefer exact path match (to its scope dir).
-    assets = scan.scan_assets(workspace.root)
-    for asset in assets:
-        scope_dir = resolve_scope_dir(workspace, asset.scope)
-        if scope_dir is None:
-            continue
-        try:
-            asset_abs = (scope_dir / asset.path).resolve()
-        except OSError:
-            continue
-        if asset_abs == target:
-            return CatalogByPathResponse(
-                matched=True,
-                workspaceRelPath=workspace_rel,
-                assetId=asset.asset_id,
-                assetKind=asset.kind,  # type: ignore[attr-defined]
-                producer=_producer_info(asset),
-                scope=_scope_info(asset),
-                siblings=_siblings(workspace, asset),
-            )
+    # Walk the snapshot's per-scope index: the scope directory is already
+    # resolved for every asset, so matching a path is pure string work instead
+    # of one folder-chain resolution per asset.
+    snapshot = read_model.assets()
+    for scope_dir, scope_assets in snapshot.by_scope_dir.items():
+        base = Path(scope_dir)
+        for asset in scope_assets:
+            try:
+                asset_abs = (base / asset.path).resolve()
+            except OSError:
+                continue
+            if asset_abs == target:
+                return CatalogByPathResponse(
+                    matched=True,
+                    workspaceRelPath=workspace_rel,
+                    assetId=asset.asset_id,
+                    assetKind=asset.kind,  # type: ignore[attr-defined]
+                    producer=_producer_info(asset),
+                    scope=_scope_info(asset),
+                    siblings=_siblings(asset, scope_assets),
+                )
 
     # Not a registered asset; still attempt to derive scope from path shape.
     derived = _derive_scope_from_path(workspace_rel)

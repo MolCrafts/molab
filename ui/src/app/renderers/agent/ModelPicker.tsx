@@ -7,9 +7,10 @@
  */
 
 import { Cpu, Loader2 } from "lucide-react";
-import { type JSX, useCallback, useEffect, useMemo, useState } from "react";
+import { type JSX, useEffect, useMemo, useState } from "react";
 
 import { type ApiAgentProvider, type ApiTierModels, agentAdminApi } from "@/app/state/api";
+import { useAgentProviderQuery, useApplyAgentProvider } from "@/app/state/queries";
 import {
   Select,
   SelectContent,
@@ -75,37 +76,28 @@ export const ModelPicker = ({
   disabledReason = "Model switching is unavailable while the agent is responding.",
   onChanged,
 }: ModelPickerProps): JSX.Element | null => {
-  const [options, setOptions] = useState<string[]>([]);
-  const [active, setActive] = useState("");
-  const [tiers, setTiers] = useState<ApiTierModels | null>(null);
-  const [loading, setLoading] = useState(true);
+  // One shared `agent/provider` key: the composer remounts this picker often,
+  // and the agent settings page reads the same document.
+  const providerResult = useAgentProviderQuery();
+  const applyProvider = useApplyAgentProvider();
+  const provider = providerResult.data;
+
   const [saving, setSaving] = useState(false);
-  const [providerError, setProviderError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [lastRequested, setLastRequested] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
-  const hydrate = useCallback(async (): Promise<void> => {
-    setLoading(true);
-    setProviderError(null);
-    try {
-      const p = await agentAdminApi.getProvider();
-      setOptions(collectConfiguredModels(p));
-      setActive(p.model || p.models?.default || "");
-      setTiers(p.models ?? null);
-    } catch (err) {
-      setOptions([]);
-      setActive("");
-      setTiers(null);
-      setProviderError(err instanceof Error ? err.message : "Failed to load configured models.");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void hydrate();
-  }, [hydrate]);
+  const options = useMemo(() => (provider ? collectConfiguredModels(provider) : []), [provider]);
+  // Derived straight from the cache: a switch publishes the server's own
+  // document, so there is no window where local state and cache disagree.
+  const active = provider?.model ?? provider?.models?.default ?? "";
+  const tiers = provider?.models ?? null;
+  const loading = providerResult.isPending;
+  const providerError = providerResult.isError
+    ? providerResult.error instanceof Error
+      ? providerResult.error.message
+      : "Failed to load configured models."
+    : null;
 
   useEffect(() => {
     if (!success) return;
@@ -134,9 +126,8 @@ export const ModelPicker = ({
         heavy: tiers?.heavy || next,
       };
       const updated = await agentAdminApi.updateProvider({ model: next, models });
-      setActive(updated.model || next);
-      setTiers(updated.models ?? models);
-      setOptions(collectConfiguredModels(updated));
+      // The write echoes the full document, so publish it rather than refetch.
+      applyProvider(updated);
       setSuccess(`Model switched to ${modelDisplayName(updated.model || next)}.`);
       onChanged?.(updated);
     } catch (err) {
@@ -166,7 +157,10 @@ export const ModelPicker = ({
         detail={providerError}
         className={className}
         action={
-          <WorkbenchRetryAction className="h-6 px-2 text-micro" onClick={() => void hydrate()} />
+          <WorkbenchRetryAction
+            className="h-6 px-2 text-micro"
+            onClick={() => void providerResult.refetch()}
+          />
         }
       />
     );

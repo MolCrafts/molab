@@ -14,12 +14,16 @@ rebuildable** operational sidecar — never an authoritative entity file.
 
 from __future__ import annotations
 
+import contextlib
 import json
+import os
+import threading
 import uuid
+from collections.abc import Callable
 from datetime import UTC, datetime
 from os import PathLike
 from pathlib import Path
-from typing import Literal
+from typing import ClassVar, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -30,9 +34,13 @@ __all__ = [
     "WORKSPACE_EVENTS_DB",
     "WorkspaceEvent",
     "WorkspaceEventLog",
+    "WorkspaceEventObserver",
     "WorkspaceEventType",
     "emit_workspace_event",
+    "is_remote_root",
+    "mark_remote_root",
     "read_workspace_events",
+    "set_workspace_event_observer",
 ]
 
 WORKSPACE_EVENTS_DB = "workspace.events.sqlite"
@@ -46,12 +54,54 @@ WorkspaceEventType = Literal[
     "run.started",
     "run.failed",
     "run.completed",
+    "run.cancelled",
     "asset.added",
     "knowledge.created",
     "workflow.created",
     "experiment.created",
 ]
 """The cross-object coordination events a workspace records."""
+
+# Roots whose ``FileSystem`` is not local. The event DB is a *local* sqlite
+# file, so emitting for a remote-backed workspace would silently open
+# ``<remote path string>/workspace.events.sqlite`` on *this* machine.
+# ``Workspace.__init__`` registers non-local roots here (no I/O); emit and
+# read short-circuit on them.
+_remote_roots: set[str] = set()
+
+
+def mark_remote_root(root: str | PathLike[str]) -> None:
+    """Register *root* as remote-backed so the event spine ignores it (no I/O)."""
+    _remote_roots.add(str(root))
+
+
+# ── Observer seam (inversion; same pattern as ``knowledge.hooks``) ───────────
+#
+# A host that wants to *react* to spine appends — the server's change stream
+# turning ``run.completed`` into an SSE ping — must not make workspace import
+# it. It registers a callback here instead; a plain CLI run registers nothing
+# and the call site costs one ``is None`` check.
+
+WorkspaceEventObserver = Callable[[str, "WorkspaceEvent"], None]
+"""Called as ``observer(root, event)`` after an event is durably appended."""
+
+_observer: WorkspaceEventObserver | None = None
+
+
+def set_workspace_event_observer(hook: WorkspaceEventObserver | None) -> None:
+    """Install (or clear, with ``None``) the post-append observer.
+
+    Best-effort by construction: the caller of :func:`emit_workspace_event`
+    must never fail because an observer did, so exceptions raised here are
+    swallowed at the call site along with the append's own.
+    """
+    global _observer
+    _observer = hook
+
+
+def is_remote_root(root: str | PathLike[str]) -> bool:
+    """Whether *root* was registered via :func:`mark_remote_root`."""
+    return str(root) in _remote_roots
 
 
 class WorkspaceEvent(BaseModel):
@@ -74,11 +124,29 @@ class WorkspaceEventLog:
     One monotonic ``seq`` across the whole workspace (the "what happened" order).
     Backed by the Layer-0 :class:`~molexp.sqlitelog.SeqEventStore` on
     ``<root>/workspace.events.sqlite``.
+
+    Constructing one opens a connection and runs ``ensure_schema``; the
+    module-level helpers (:func:`emit_workspace_event` /
+    :func:`read_workspace_events`) go through :meth:`open` instead, which
+    hands back **one instance per process and root** so a server answering
+    a thousand polls, or a sweep emitting a thousand milestones, pays the
+    connection + schema cost once.
     """
+
+    # (pid, resolved db path) → instance. Keyed on the pid so a forked child
+    # never reuses the parent's sqlite connection (fork-unsafe).
+    _instances: ClassVar[dict[tuple[int, str], WorkspaceEventLog]] = {}
+    _instances_guard: ClassVar[threading.Lock] = threading.Lock()
 
     def __init__(self, root: str | PathLike[str]) -> None:
         self._path = Path(root) / WORKSPACE_EVENTS_DB
-        conn, lock = open_wal_connection(self._path)
+        # WAL needs a shared-memory ``-shm`` file that NFS and Lustre do not
+        # support safely; on those mounts the rollback journal is the only
+        # correct choice, so the filesystem's own profile picks the mode.
+        from molexp.fs.profile import detect_fs_profile
+
+        journal = detect_fs_profile(self._path.parent).sqlite_journal
+        conn, lock = open_wal_connection(self._path, journal_mode=journal)
         self._store = SeqEventStore(
             conn,
             lock,
@@ -87,6 +155,36 @@ class WorkspaceEventLog:
             refs_column="refs_json",
         )
         self._store.ensure_schema()
+
+    @classmethod
+    def open(cls, root: str | PathLike[str]) -> WorkspaceEventLog:
+        """Return the process-shared log for *root*, creating it on first use.
+
+        Cached per ``(pid, resolved path)``; ``ensure_schema`` therefore runs
+        once per process, not once per emit. A cached instance whose DB file
+        has since been deleted (an operator "resetting" the timeline while the
+        server runs) is dropped and reopened, so writes never land in an
+        unlinked inode — that check is one ``stat``.
+        """
+        path = Path(root) / WORKSPACE_EVENTS_DB
+        key = (os.getpid(), str(path.resolve()))
+        with cls._instances_guard:
+            cached = cls._instances.get(key)
+            if cached is not None and cached._path.exists():
+                return cached
+            log = cls(root)
+            cls._instances[key] = log
+            return log
+
+    @classmethod
+    def _reset_open_registry(cls) -> None:
+        """Drop every cached instance (tests; a new process starts empty anyway)."""
+        with cls._instances_guard:
+            cls._instances.clear()
+
+    def max_seq(self) -> int:
+        """Highest ``seq`` in the timeline (``0`` when empty) — the change cursor."""
+        return self._store.max_seq(_WORKSPACE_SCOPE)
 
     def append(
         self,
@@ -137,30 +235,36 @@ class WorkspaceEventLog:
         ref: str | None = None,
         newest_first: bool = False,
         limit: int | None = None,
+        after_seq: int | None = None,
     ) -> list[WorkspaceEvent]:
         """Return the workspace timeline, optionally filtered.
 
         The no-argument call keeps the original contract (every event, ordered
-        by ``seq`` ascending). Filters run before ordering/limiting:
+        by ``seq`` ascending). Every filter is evaluated **in SQL**
+        (:meth:`~molexp.sqlitelog.SeqEventStore.list_rows`), so only the rows
+        returned are materialized into :class:`WorkspaceEvent` — a
+        ``limit=50`` poll never validates the whole history.
 
         Args:
             type: Keep only events of this coordination type.
             ref: Keep only events whose ``refs`` contain this object id
-                (``run_id`` / ``asset_id`` / content hash / path).
+                (``run_id`` / ``asset_id`` / content hash / path) — exact
+                membership, never a substring match.
             newest_first: Order by ``seq`` descending (most recent first).
-            limit: Truncate to at most this many events *after* ordering, so
+            limit: Return at most this many events *after* ordering, so
                 ``newest_first=True, limit=N`` yields the N most recent.
+            after_seq: Keep only events with ``seq`` greater than this — the
+                cursor a consumer passes to read just what it has not seen.
         """
-        events = [self._row_to_event(row) for row in self._store.list_rows(_WORKSPACE_SCOPE)]
-        if type is not None:
-            events = [e for e in events if e.type == type]
-        if ref is not None:
-            events = [e for e in events if ref in e.refs]
-        if newest_first:
-            events = list(reversed(events))
-        if limit is not None:
-            events = events[:limit]
-        return events
+        rows = self._store.list_rows(
+            _WORKSPACE_SCOPE,
+            type=type,
+            ref=ref,
+            newest_first=newest_first,
+            limit=limit,
+            after_seq=after_seq,
+        )
+        return [self._row_to_event(row) for row in rows]
 
     @staticmethod
     def _row_to_event(row: tuple) -> WorkspaceEvent:
@@ -200,6 +304,12 @@ def emit_workspace_event(
       calls are not creations).
     - **Non-fatal.** Any exception is swallowed and ``None`` is returned; an
       event-log failure must never break the run or asset op that emitted.
+    - **Local roots only.** A root registered via :func:`mark_remote_root`
+      (a remote-backed ``Workspace``) is skipped — the DB is a local file and
+      would otherwise be created under the remote path *string* on this host.
+    - **One connection per process.** Goes through
+      :meth:`WorkspaceEventLog.open`, so repeated emits reuse one connection
+      and never re-run ``ensure_schema``.
 
     Args:
         root: The workspace root directory (callers resolve it from context they hold).
@@ -209,12 +319,21 @@ def emit_workspace_event(
         refs: Related object ids (``run_id`` / ``asset_id`` / ``"sha256:…"`` / path).
 
     Returns:
-        The appended :class:`WorkspaceEvent`, or ``None`` on failure.
+        The appended :class:`WorkspaceEvent`, or ``None`` on failure / remote root.
     """
+    if is_remote_root(root):
+        return None
     try:
-        return WorkspaceEventLog(root).append(type, actor, payload=payload, refs=refs)
+        event = WorkspaceEventLog.open(root).append(type, actor, payload=payload, refs=refs)
     except Exception:
         return None
+    observer = _observer
+    if observer is not None:
+        # An observer is a listener, never a participant: a broken change
+        # stream must not fail the run/asset op that emitted.
+        with contextlib.suppress(Exception):
+            observer(str(root), event)
+    return event
 
 
 def read_workspace_events(
@@ -223,6 +342,7 @@ def read_workspace_events(
     type: WorkspaceEventType | None = None,
     ref: str | None = None,
     limit: int | None = None,
+    after_seq: int | None = None,
 ) -> list[WorkspaceEvent]:
     """Read a workspace's event timeline, most recent first.
 
@@ -231,7 +351,8 @@ def read_workspace_events(
     endpoint both call this, one shared code path). A workspace with no
     timeline yet (no ``workspace.events.sqlite`` at *root* — nothing has
     emitted) has an empty timeline, so ``[]`` is returned without creating
-    the DB: reading is always side-effect free.
+    the DB: reading is always side-effect free. Filters and *limit* run in
+    SQL, so the cost is O(rows returned), not O(timeline).
 
     Args:
         root: The workspace root directory.
@@ -239,10 +360,13 @@ def read_workspace_events(
         ref: Keep only events whose ``refs`` contain this object id
             (typically a ``run_id``).
         limit: Return at most this many (most recent) events.
+        after_seq: Keep only events newer than this ``seq`` (a poll cursor).
 
     Returns:
         Matching :class:`WorkspaceEvent` rows, newest first.
     """
-    if not (Path(root) / WORKSPACE_EVENTS_DB).exists():
+    if is_remote_root(root) or not (Path(root) / WORKSPACE_EVENTS_DB).exists():
         return []
-    return WorkspaceEventLog(root).list_events(type=type, ref=ref, newest_first=True, limit=limit)
+    return WorkspaceEventLog.open(root).list_events(
+        type=type, ref=ref, newest_first=True, limit=limit, after_seq=after_seq
+    )

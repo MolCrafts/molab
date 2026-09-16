@@ -83,4 +83,43 @@ def resolve_concept_type[D: type](
     return cast("D", cls)
 
 
-__all__ = ["concept_type", "register_concept_type", "resolve_concept_type"]
+def non_concept_subdirs(type_str: str | None) -> frozenset[str]:
+    """Subdirectory names a Concept of type *type_str* declares can hold no Concept.
+
+    A registered class may declare a ``NON_CONCEPT_SUBDIRS`` attribute naming the
+    children it *produces* rather than *contains* — for a workspace ``Run``, its
+    ``executions/`` / ``artifacts/`` / ``logs/`` job output. A walk reads each
+    directory's marker anyway, so it knows the **parent's** type and can skip
+    those subtrees without enumerating them.
+
+    This is why pruning is **position-aware**: the same bare name means
+    different things in different places, so a global name denylist would hide
+    a real Concept in a directory that happens to be called ``logs`` somewhere
+    else in the tree. Declaring the set on the *parent* type scopes the skip to
+    exactly where the layout guarantees nothing is mounted.
+
+    The set flows through the registry at runtime, so ``knowledge`` learns a
+    host layer's layout without importing it. An unknown or unregistered type,
+    or one declaring nothing, prunes nothing.
+
+    Args:
+        type_str: The Concept ``type`` of the directory being descended into,
+            or ``None`` when it carries no marker.
+    """
+    if type_str is None:
+        return frozenset()
+    cls = _REGISTRY.get(type_str)
+    if cls is None:
+        return frozenset()
+    declared = getattr(cls, "NON_CONCEPT_SUBDIRS", None)
+    if not declared:
+        return frozenset()
+    return frozenset(declared)
+
+
+__all__ = [
+    "concept_type",
+    "non_concept_subdirs",
+    "register_concept_type",
+    "resolve_concept_type",
+]

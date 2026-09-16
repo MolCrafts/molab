@@ -4,12 +4,17 @@
  */
 
 import { Check, FlaskConical, Plus, Trash2, X } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useState } from "react";
 import { TargetCreateRequest } from "@/api/generated/models/TargetCreateRequest";
-import type { TargetResponse } from "@/api/generated/models/TargetResponse";
 import type { TargetTestResponse } from "@/api/generated/models/TargetTestResponse";
 import { TargetsService } from "@/api/generated/services/TargetsService";
-import { WorkbenchIconAction, WorkbenchTag } from "@/components/workbench";
+import { useInvalidateTargets, useTargetsQuery } from "@/app/state/queries";
+import {
+  WorkbenchIconAction,
+  WorkbenchOperationState,
+  WorkbenchRetryAction,
+  WorkbenchTag,
+} from "@/components/workbench";
 import { AddTargetDialog } from "./AddTargetDialog";
 
 type Scheduler = TargetCreateRequest.scheduler;
@@ -22,30 +27,15 @@ const schedulerLabel: Record<Scheduler, string> = {
 };
 
 export function ComputeTargetsPanel(): JSX.Element {
-  const [targets, setTargets] = useState<TargetResponse[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [listError, setListError] = useState<string | null>(null);
+  // Same key as the run / experiment dialogs, so opening Settings after one of
+  // them has been open costs no request.
+  const targetsResult = useTargetsQuery();
+  const targets = targetsResult.data ?? [];
+  const refresh = useInvalidateTargets();
 
   const [busyTarget, setBusyTarget] = useState<string | null>(null);
   const [testResult, setTestResult] = useState<TargetTestResponse | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    setListError(null);
-    try {
-      const res = await TargetsService.listTargetsEndpointApiTargetsGet();
-      setTargets(res.targets);
-    } catch (err) {
-      setListError(err instanceof Error ? err.message : "Failed to list targets");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
 
   const handleDelete = async (name: string) => {
     setBusyTarget(name);
@@ -97,9 +87,15 @@ export function ComputeTargetsPanel(): JSX.Element {
       </header>
 
       <div className="space-y-3">
-        {listError && <p className="text-body-lg text-status-failed-foreground">{listError}</p>}
-        {loading && targets.length === 0 ? (
-          <p className="text-body-lg text-muted-foreground">Loading…</p>
+        {targetsResult.isPending ? (
+          <WorkbenchOperationState kind="loading" title="Loading targets…" skeletonRows={3} />
+        ) : targetsResult.isError && targets.length === 0 ? (
+          <WorkbenchOperationState
+            kind="error"
+            title="Could not list compute targets"
+            detail={targetsResult.error instanceof Error ? targetsResult.error.message : undefined}
+            action={<WorkbenchRetryAction onClick={() => void targetsResult.refetch()} />}
+          />
         ) : targets.length === 0 ? (
           <p className="bg-surface/60 px-4 py-8 text-center text-body text-muted-foreground">
             No targets registered. Runs use in-process local execution until you add one.

@@ -6,11 +6,10 @@ import { useEffect, useState } from "react";
 import type { CurateTaskResponse } from "@/api/generated/models/CurateTaskResponse";
 import { CurateTasksService } from "@/api/generated/services/CurateTasksService";
 import { ApprovalsInbox } from "@/app/renderers/agent/ApprovalsInbox";
+import { useCurateTaskQuery } from "@/app/state/queries";
 import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/components/ui/toast";
 import { WorkbenchAction, WorkbenchTag } from "@/components/workbench";
-
-const POLL_INTERVAL_MS = 1000;
 
 interface CurateComposerProps {
   projectId: string;
@@ -33,36 +32,23 @@ export function CurateComposer({
   const isWaitingApproval = task?.status === "waiting_approval";
   const inFlight = isRunning || isWaitingApproval;
 
+  // Poll only while the task is actually in flight; the query stops itself at
+  // a terminal status instead of relying on this component to clear a timer.
+  const taskQuery = useCurateTaskQuery(taskId ? { projectId, experimentId, taskId } : null, {
+    enabled: Boolean(taskId) && inFlight,
+  });
+
+  const polled = taskQuery.data ?? null;
   useEffect(() => {
-    if (!taskId || !inFlight) return;
-    let cancelled = false;
-    const handle = window.setInterval(async () => {
-      try {
-        const next =
-          await CurateTasksService.getCurateTaskApiProjectsProjectIdExperimentsExperimentIdCurateTasksTaskIdGet(
-            projectId,
-            experimentId,
-            taskId,
-          );
-        if (cancelled) return;
-        setTask(next);
-        if (next.status === "completed") {
-          toast.success("Curated");
-          onComplete?.(next);
-        } else if (next.status === "failed" || next.status === "cancelled") {
-          setError(next.error ?? `Curate ${next.status}.`);
-        }
-      } catch (err) {
-        if (!cancelled) {
-          setError(err instanceof Error ? err.message : String(err));
-        }
-      }
-    }, POLL_INTERVAL_MS);
-    return () => {
-      cancelled = true;
-      window.clearInterval(handle);
-    };
-  }, [taskId, inFlight, projectId, experimentId, onComplete]);
+    if (!polled) return;
+    setTask(polled);
+    if (polled.status === "completed") {
+      toast.success("Curated");
+      onComplete?.(polled);
+    } else if (polled.status === "failed" || polled.status === "cancelled") {
+      setError(polled.error ?? `Curate ${polled.status}.`);
+    }
+  }, [polled, onComplete]);
 
   const submit = async (): Promise<void> => {
     const text = request.trim();

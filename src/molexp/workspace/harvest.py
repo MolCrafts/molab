@@ -67,9 +67,10 @@ def harvest_run(
     Raises:
         ValueError: The run is not terminal, or *narrative* is empty.
     """
-    if run.status not in _TERMINAL_STATUSES:
+    status = run.read_ops().status.value  # one sidecar read for the whole harvest
+    if status not in _TERMINAL_STATUSES:
         raise ValueError(
-            f"run {run.id} is {run.status!r} — only a terminal run "
+            f"run {run.id} is {status!r} — only a terminal run "
             f"({sorted(_TERMINAL_STATUSES)}) has an outcome to harvest"
         )
     if not narrative.strip():
@@ -89,7 +90,7 @@ def harvest_run(
             SourceRef(kind="experiment", ref=experiment.id),
         ],
         created_by=created_by,
-        body=_render_body(run, kind=kind, narrative=narrative, results=results),
+        body=_render_body(run, status=status, kind=kind, narrative=narrative, results=results),
         cite=[(run, "derived_from")],
     )
 
@@ -97,6 +98,7 @@ def harvest_run(
 def _render_body(
     run: Run,
     *,
+    status: str,
     kind: KnowledgeKind,
     narrative: str,
     results: dict[str, JSONValue] | None,
@@ -108,13 +110,13 @@ def _render_body(
         "",
         "## Run",
         "",
-        f"- status: {run.status}",
+        f"- status: {status}",
     ]
     params = run.metadata.parameters
     if params:
         lines.append(f"- params: {_truncate(repr(params))}")
     error = run.metadata.error
-    if run.status == "failed" and error:
+    if status == "failed" and error:
         lines += ["", "## Error", "", _truncate(str(error))]
     if results:
         lines += ["", "## Results", ""]

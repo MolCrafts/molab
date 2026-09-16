@@ -318,7 +318,7 @@ async def decide_approval(
         task.resume()
     else:
         task.mark_rejected(request.reason or "rejected by operator")
-    notify_approvals_changed()
+    notify_approvals_changed(str(workspace.resolve()))
     return ApprovalDecisionResponse(taskKind=task_kind, taskId=task_id, status=task.status)
 
 

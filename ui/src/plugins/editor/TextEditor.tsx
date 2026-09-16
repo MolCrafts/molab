@@ -3,8 +3,13 @@ import { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { workspaceApi } from "@/app/state/api";
 import type { RendererProps } from "@/app/types";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { WorkbenchIconAction, WorkbenchOperationState } from "@/components/workbench";
+import {
+  WorkbenchAction,
+  WorkbenchIconAction,
+  WorkbenchOperationState,
+} from "@/components/workbench";
 import { filePreviewPluginRegistry } from "@/lib/file-preview-plugins";
+import { fileSizeGate, treeFileSize, windowForDecision } from "@/lib/fileSizeGate";
 
 /**
  * Monaco-backed text editor for workspace files.
@@ -22,10 +27,21 @@ import { filePreviewPluginRegistry } from "@/lib/file-preview-plugins";
  */
 const Editor = lazy(() => import("@monaco-editor/react"));
 
-export const TextEditor = ({ selection }: RendererProps): JSX.Element => {
+export const TextEditor = ({ selection, snapshot }: RendererProps): JSX.Element => {
   const [value, setValue] = useState<string>("");
   const [status, setStatus] = useState<"idle" | "loading" | "saving" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
+  // A file above the size cap is not fetched until the user asks for it, so
+  // opening a multi-gigabyte artifact by accident costs nothing.
+  const [confirmedPath, setConfirmedPath] = useState<string | null>(null);
+  // Set when the server returned only part of the file, so the editor can say
+  // so rather than letting the user believe they are editing the whole thing.
+  const [shownBytes, setShownBytes] = useState<{ shown: number; total: number } | null>(null);
+  const sizeDecision = useMemo(() => {
+    if (selection.objectType !== "workspace-file") return fileSizeGate(null);
+    return fileSizeGate(treeFileSize(snapshot.workspaceRoot, selection.objectId));
+  }, [selection, snapshot.workspaceRoot]);
+  const blockedBySize = sizeDecision.kind === "oversized" && confirmedPath !== selection.objectId;
   const previewPlugin = useMemo(() => {
     if (selection.objectType !== "workspace-file") {
       return null;
@@ -51,7 +67,7 @@ export const TextEditor = ({ selection }: RendererProps): JSX.Element => {
   }, [selection]);
 
   useEffect(() => {
-    if (selection.objectType !== "workspace-file") {
+    if (selection.objectType !== "workspace-file" || blockedBySize) {
       return;
     }
 
@@ -59,10 +75,17 @@ export const TextEditor = ({ selection }: RendererProps): JSX.Element => {
     setStatus("loading");
     setError(null);
     workspaceApi
-      .getWorkspaceFileText(selection.objectId)
-      .then((content) => {
+      // An oversized file the user confirmed is fetched as a bounded head
+      // window, never in full — the gate decided how much is safe to pull.
+      .getWorkspaceFileWindow(selection.objectId, windowForDecision(sizeDecision, "head"))
+      .then((response) => {
         if (isMounted) {
-          setValue(content);
+          setValue(response.content);
+          setShownBytes(
+            response.truncated
+              ? { shown: response.content.length, total: response.totalBytes ?? 0 }
+              : null,
+          );
           setStatus("idle");
         }
       })
@@ -76,7 +99,7 @@ export const TextEditor = ({ selection }: RendererProps): JSX.Element => {
     return () => {
       isMounted = false;
     };
-  }, [selection]);
+  }, [selection, blockedBySize, sizeDecision]);
 
   const handleSave = async () => {
     if (selection.objectType !== "workspace-file") return;
@@ -100,13 +123,34 @@ export const TextEditor = ({ selection }: RendererProps): JSX.Element => {
         <WorkbenchIconAction
           label={status === "saving" ? "Saving file" : "Save file"}
           onClick={handleSave}
-          disabled={status === "loading" || status === "saving"}
+          disabled={status === "loading" || status === "saving" || shownBytes !== null}
         >
           <Save className="h-3.5 w-3.5" />
         </WorkbenchIconAction>
       </header>
+      {shownBytes ? (
+        <p className="flex-none border-b border-border bg-muted px-3 py-1 text-label text-muted-foreground tabular-nums">
+          Showing the first {shownBytes.shown.toLocaleString()} of{" "}
+          {shownBytes.total.toLocaleString()} bytes — read-only while truncated.
+        </p>
+      ) : null}
       <div className="min-h-0 flex-1">
-        {status === "loading" && !value ? (
+        {blockedBySize && sizeDecision.kind === "oversized" ? (
+          <WorkbenchOperationState
+            kind="empty"
+            title="File is too large to open automatically"
+            detail={`${sizeDecision.sizeLabel} — loading it in full would stall the editor.`}
+            action={
+              <WorkbenchAction
+                kind="ghost"
+                size="compact"
+                onClick={() => setConfirmedPath(selection.objectId)}
+              >
+                Load anyway
+              </WorkbenchAction>
+            }
+          />
+        ) : status === "loading" && !value ? (
           <WorkbenchOperationState kind="loading" title="Loading file…" skeletonRows={6} />
         ) : status === "error" ? (
           <WorkbenchOperationState
@@ -145,6 +189,9 @@ export const TextEditor = ({ selection }: RendererProps): JSX.Element => {
                   }}
                   options={{
                     minimap: { enabled: false },
+                    // Read-only for an oversized file, and for a truncated
+                    // window — saving a prefix back would destroy the tail.
+                    readOnly: sizeDecision.kind === "oversized" || shownBytes !== null,
                     wordWrap: "on",
                     scrollBeyondLastLine: false,
                   }}

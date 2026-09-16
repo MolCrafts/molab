@@ -30,7 +30,7 @@ from molexp.services.plan_runtime import (
     PlanRecordOutcome,
     materialize_plan_records,
 )
-from molexp.workspace import Bundle, Workspace
+from molexp.workspace import Bundle, Workspace, knowledge_mount
 from molexp.workspace.knowledge_item import KNOWLEDGE_ITEM_KIND, KnowledgeItem
 
 _DRAFT = "Simulate NEMD ionic mobility"
@@ -151,9 +151,7 @@ class TestPlanRecordOutcome:
         # Siblings were not aborted:
         assert "session_events" in outcome.written
         assert "experiment_record" in outcome.written
-        assert experiment.has_folder(
-            f"experiment-record-{experiment.id}-{run.id}", cls=KnowledgeItem
-        )
+        assert knowledge_mount.has_item(experiment, f"experiment-record-{experiment.id}-{run.id}")
 
 
 # ── mount flip + timestamp (§B) ──────────────────────────────────────────────
@@ -170,7 +168,7 @@ class TestRecordMountAndTimestamp:
         _materialize(run, experiment)
 
         name = f"experiment-record-{experiment.id}-{run.id}"
-        item = experiment.get_folder(name, cls=KnowledgeItem)
+        item = knowledge_mount.get_item(experiment, name)
         item_dir = Path(item.resolve()).resolve()
         assert item_dir.parent == Path(experiment.experiment_dir).resolve()
         parts = item_dir.relative_to(Path(workspace.root).resolve()).parts
@@ -212,9 +210,7 @@ class TestExperimentRecordEventEmit:
         assert len(events) == 1
         event = events[0]
         assert event.actor == "plan-record"
-        item = experiment.get_folder(
-            f"experiment-record-{experiment.id}-{run.id}", cls=KnowledgeItem
-        )
+        item = knowledge_mount.get_item(experiment, f"experiment-record-{experiment.id}-{run.id}")
         rel_path = (
             Path(item.resolve()).resolve().relative_to(Path(workspace.root).resolve()).as_posix()
         )
@@ -236,7 +232,7 @@ class TestFindingRecord:
         outcome = _materialize(run, experiment)
 
         assert "finding" in outcome.written
-        item = experiment.get_folder(f"finding-{experiment.id}-{run.id}", cls=KnowledgeItem)
+        item = knowledge_mount.get_item(experiment, f"finding-{experiment.id}-{run.id}")
         assert item.read_knowledge_meta().kind == "Finding"
         pairs = _source_pairs(item)
         assert ("run", run.id) in pairs
@@ -254,7 +250,7 @@ class TestFindingRecord:
 
         _materialize(run, experiment)
 
-        item = experiment.get_folder(f"finding-{experiment.id}-{run.id}", cls=KnowledgeItem)
+        item = knowledge_mount.get_item(experiment, f"finding-{experiment.id}-{run.id}")
         edges = item.typed_out_edges()
         assert any(
             e.role == "derived_from" and str(e.target).endswith(f"run-{run.id}") for e in edges
@@ -271,7 +267,7 @@ class TestFindingRecord:
         outcome = _materialize(run, experiment)
 
         assert "finding" not in outcome.written
-        assert not experiment.has_folder(f"finding-{experiment.id}-{run.id}", cls=KnowledgeItem)
+        assert not knowledge_mount.has_item(experiment, f"finding-{experiment.id}-{run.id}")
 
 
 # ── FailureAnalysis (terminal plan failure, §B) ──────────────────────────────
@@ -292,7 +288,7 @@ class TestFailureAnalysisRecord:
         )
 
         assert "failure_analysis" in outcome.written
-        item = experiment.get_folder(f"failure-{experiment.id}-{run.id}", cls=KnowledgeItem)
+        item = knowledge_mount.get_item(experiment, f"failure-{experiment.id}-{run.id}")
         meta = item.read_knowledge_meta()
         assert meta.kind == "FailureAnalysis"
         assert meta.timestamp is not None

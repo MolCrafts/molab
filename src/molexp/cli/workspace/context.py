@@ -33,7 +33,7 @@ def context(
     from molexp.workspace import ContextFocus, assemble_workspace_context
 
     try:
-        _target, _transport, _fs, ws = open_workspace(target_spec)
+        _target, _transport, _fs, ws = open_workspace(target_spec, prefetch=True)
     except FileNotFoundError as exc:
         rprint(f"[red]Error:[/red] {exc}")
         rprint("  Run [bold]molexp init[/bold] to create one.")

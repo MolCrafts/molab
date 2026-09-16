@@ -1,18 +1,18 @@
 """Typed edge roles for the OKF markdown-link knowledge graph.
 
-The Open Knowledge Format graph lives as markdown links in each Folder's
-``index.md`` (see :mod:`molexp.workspace.folder`). This module gives every edge a
-typed *role* — a declared relation (``derived_from`` / ``cites`` / ``supersedes``
-/ ``records`` / ``references``) — encoded in the link's ``[label]`` channel, so
-the writer (:func:`molexp.workspace.folder.append_link`) and the reader
-(:meth:`molexp.workspace.folder.Folder.links`) share one format and can never
-drift.
+The Open Knowledge Format graph lives as markdown links in each Concept's
+``index.md`` (see :mod:`molexp.knowledge.concept`). This module gives every edge
+a typed *role* — a declared relation (``derived_from`` / ``cites`` /
+``supersedes`` / ``records`` / ``references``) — encoded in the link's
+``[label]`` channel, so the writer (:func:`molexp.knowledge.concept.append_link`)
+and the reader (:meth:`molexp.knowledge.concept.Concept.links`) share one format
+and can never drift.
 
 Design notes:
 
 - The vocabulary mirrors the *shape* of ``workflow/ir.py``'s ``EdgeKind`` (a
   plain lowercase-snake :data:`typing.Literal`, never an ``Enum``) **without
-  importing it** — the layer DAG forbids ``workspace → workflow``.
+  importing it** — the layer DAG forbids ``knowledge → workflow``.
 - ``EdgeRole`` is a relation *label*, **not** a concept *type*, so it is
   deliberately absent from ``knowledge/types.py``.
 - :data:`DEFAULT_EDGE_ROLE` (``"references"``) is the role assigned to any
@@ -50,7 +50,7 @@ class Edge(NamedTuple):
 
     Attributes:
         target: The absolute in-tree path the edge resolves to (same value the
-            path-only :meth:`Folder.out_edges` reports).
+            path-only :meth:`Concept.out_edges` reports).
         role: The declared :data:`EdgeRole` of the edge.
     """
 

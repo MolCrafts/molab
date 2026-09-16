@@ -678,11 +678,11 @@ class PlanTask:
             run_id=self.run.id,
         )
 
-    @staticmethod
-    def _notify_approvals() -> None:
+    def _notify_approvals(self) -> None:
         from molexp.services.approval_notify import notify_approvals_changed
+        from molexp.services.workspace_notify import workspace_root_of
 
-        notify_approvals_changed()
+        notify_approvals_changed(workspace_root_of(self.run))
 
     @property
     def run_id(self) -> str:

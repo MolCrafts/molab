@@ -7,10 +7,16 @@ agent export and server ``export_run``.
 from __future__ import annotations
 
 import io
+import os
+import shutil
 import zipfile
 from pathlib import Path
 
-from molexp.workspace.archive import archive_folder_zip
+from molexp.workspace.archive import (
+    archive_folder_zip,
+    archive_folder_zip_iter,
+    archive_size,
+)
 from molexp.workspace.folder import Folder
 from molexp.workspace.fs_local import LocalFileSystem
 
@@ -77,3 +83,64 @@ class TestArchiveFolderZip:
         (root / "x.txt").write_text("same")
         folder = _folder_at(root)
         assert archive_folder_zip(folder) == archive_folder_zip(folder)
+
+
+class TestArchiveStreaming:
+    """The streaming form: same archive, bounded memory."""
+
+    def test_stream_and_buffer_produce_the_same_entries(self, tmp_path: Path) -> None:
+        folder = _folder_at(tmp_path / "run-1")
+        (Path(str(folder.resolve())) / "a.txt").write_text("alpha")
+        nested = Path(str(folder.resolve())) / "sub"
+        nested.mkdir()
+        (nested / "b.bin").write_bytes(b"\x00\x01" * 5000)
+
+        streamed = b"".join(archive_folder_zip_iter(folder))
+        buffered = archive_folder_zip(folder)
+
+        assert sorted(zipfile.ZipFile(io.BytesIO(streamed)).namelist()) == sorted(
+            zipfile.ZipFile(io.BytesIO(buffered)).namelist()
+        )
+
+    def test_streamed_archive_is_valid_and_round_trips(self, tmp_path: Path) -> None:
+        folder = _folder_at(tmp_path / "run-2")
+        payload = bytes(range(256)) * 4000
+        (Path(str(folder.resolve())) / "big.bin").write_bytes(payload)
+
+        zf = zipfile.ZipFile(io.BytesIO(b"".join(archive_folder_zip_iter(folder))))
+
+        assert zf.testzip() is None
+        assert zf.read("big.bin") == payload
+
+    def test_yields_multiple_chunks_for_a_large_tree(self, tmp_path: Path) -> None:
+        folder = _folder_at(tmp_path / "run-3")
+        # Incompressible, so the deflated stream really does exceed the chunk.
+        (Path(str(folder.resolve())) / "rand.bin").write_bytes(os.urandom(2_000_000))
+
+        chunks = list(archive_folder_zip_iter(folder, chunk_bytes=64 * 1024))
+
+        assert len(chunks) > 1, "a large archive must not arrive as one blob"
+
+    def test_missing_root_yields_a_valid_empty_zip(self, tmp_path: Path) -> None:
+        folder = _folder_at(tmp_path / "run-4")
+        shutil.rmtree(str(folder.resolve()))
+
+        zf = zipfile.ZipFile(io.BytesIO(b"".join(archive_folder_zip_iter(folder))))
+
+        assert zf.namelist() == []
+
+
+class TestArchiveSize:
+    def test_sums_every_file_under_the_root(self, tmp_path: Path) -> None:
+        folder = _folder_at(tmp_path / "run-5")
+        root = Path(str(folder.resolve()))
+        (root / "a.txt").write_bytes(b"x" * 100)
+        (root / "deep").mkdir()
+        (root / "deep" / "b.txt").write_bytes(b"y" * 250)
+
+        assert archive_size(folder) == 350
+
+    def test_missing_root_is_zero(self, tmp_path: Path) -> None:
+        folder = _folder_at(tmp_path / "run-6")
+        shutil.rmtree(str(folder.resolve()))
+        assert archive_size(folder) == 0

@@ -7,10 +7,10 @@ or an :class:`~molexp.workspace.assets.base.Asset` -- as a typed provenance edge
 This module owns the read-only halves of that verb:
 
 - :func:`resolve_embed_target` -- turn a ``Folder | Asset`` target into the
-  ``dst`` :class:`Folder` handed to :func:`molexp.workspace.folder.append_link`.
-  A ``Folder`` is its own ``dst``; an ``Asset`` is resolved to its in-tree record
-  directory ``<scope_dir>/assets/<asset_id>/`` (pointed at, never copied) and
-  wrapped in a thin path-only ``Folder`` via the injected ``pin`` builder.
+  ``dst`` **path** handed to :func:`molexp.knowledge.concept.append_link`. A
+  ``Folder`` resolves to its own directory; an ``Asset`` resolves to its in-tree
+  record directory ``<scope_dir>/assets/<asset_id>/`` (pointed at, never
+  copied). An edge target is a path, not a class, so no wrapper is needed.
 - :func:`default_role_for` -- the per-kind default :class:`EdgeRole` (all drawn
   from the frozen vocabulary; no new roles): ``workspace.run`` /
   ``workspace.experiment`` -> ``records``, ``reference.reference`` -> ``cites``,
@@ -24,16 +24,17 @@ Missing preconditions (an ``Asset`` with no resolvable record dir, or no
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from os import PathLike
 from pathlib import Path
 
 from pydantic import BaseModel
 
+from molexp.knowledge.bundle_index import extract_title
+from molexp.knowledge.concept import Concept
+from molexp.knowledge.concepts import REFERENCE_KIND
+from molexp.knowledge.edges import DEFAULT_EDGE_ROLE, EdgeRole
+
 from .assets.base import Asset, AssetScope
-from .bundle_index import extract_title
-from .concepts import REFERENCE_KIND
-from .edges import DEFAULT_EDGE_ROLE, EdgeRole
 from .folder import Folder
 
 # Per-kind default edge roles, all members of the frozen ``EdgeRole`` vocabulary
@@ -121,7 +122,7 @@ def asset_record_dir(asset: Asset, root: str | PathLike[str] | None) -> Path:
     return record_dir
 
 
-def default_role_for(target: Folder | Asset) -> EdgeRole:
+def default_role_for(target: Folder | Concept | Asset) -> EdgeRole:
     """Return the per-kind default embed :class:`EdgeRole` for *target*.
 
     All roles come from the frozen vocabulary (no new roles): a ``Run`` or
@@ -140,31 +141,35 @@ def default_role_for(target: Folder | Asset) -> EdgeRole:
     """
     if isinstance(target, Asset):
         return DEFAULT_EDGE_ROLE
+    if isinstance(target, Concept):
+        return _DEFAULT_ROLE_BY_KIND.get(target.type(), DEFAULT_EDGE_ROLE)
     if isinstance(target, Folder):
         return _DEFAULT_ROLE_BY_KIND.get(target.kind, DEFAULT_EDGE_ROLE)
-    raise TypeError(f"embed target must be a Folder or Asset, got {type(target).__name__}")
+    raise TypeError(f"embed target must be a Folder, Concept or Asset, got {type(target).__name__}")
 
 
 def resolve_embed_target(
-    target: Folder | Asset,
+    target: Folder | Concept | Asset,
     *,
     root: str | PathLike[str] | None,
-    pin: Callable[[Path], Folder],
-) -> Folder:
-    """Resolve *target* to the ``dst`` :class:`Folder` for an embed edge.
+) -> Path:
+    """Resolve *target* to the ``dst`` directory path for an embed edge.
 
-    A ``Folder`` target is its own ``dst``. An ``Asset`` target is resolved to
-    its in-tree record dir (:func:`asset_record_dir`) and wrapped in a thin
-    path-only ``Folder`` via *pin* (the bundle's ``_pinned_parent``), so the
-    asset payload is only pointed at.
+    A ``Folder`` target resolves to its own directory. An ``Asset`` target
+    resolves to its in-tree record dir (:func:`asset_record_dir`), so the asset
+    payload is only pointed at.
+
+    Returns a bare :class:`Path` because
+    :func:`molexp.knowledge.concept.append_link` takes a path as its
+    destination: an edge points at a *directory*, and nothing about writing one
+    needs the class that owns it.
 
     Args:
         target: The embed target (a ``Folder`` or an ``Asset``).
         root: The workspace root, needed only to anchor an ``Asset``.
-        pin: Builds a thin ``Folder`` whose ``resolve()`` equals a given path.
 
     Returns:
-        The ``dst`` folder to hand to :func:`~molexp.workspace.folder.append_link`.
+        The directory to hand to ``append_link``.
 
     Raises:
         TypeError: If *target* is neither a ``Folder`` nor an ``Asset``.
@@ -172,14 +177,16 @@ def resolve_embed_target(
         FileNotFoundError: If an ``Asset`` target has no on-disk record dir.
     """
     if isinstance(target, Asset):
-        return pin(asset_record_dir(target, root))
+        return asset_record_dir(target, root)
+    if isinstance(target, Concept):
+        return target.path
     if isinstance(target, Folder):
-        return target
-    raise TypeError(f"embed target must be a Folder or Asset, got {type(target).__name__}")
+        return Path(str(target.resolve()))
+    raise TypeError(f"embed target must be a Folder, Concept or Asset, got {type(target).__name__}")
 
 
 def summarize_entity(
-    target: Folder | Asset, *, root: str | PathLike[str] | None = None
+    target: Folder | Concept | Asset, *, root: str | PathLike[str] | None = None
 ) -> EntitySummary:
     """Project *target* to an :class:`EntitySummary` (a pure read; writes nothing).
 
@@ -211,10 +218,11 @@ def summarize_entity(
         # ...), not the abstract base -- read it the way ``assets.scan`` does.
         kind = str(getattr(target, "kind", ""))
         return EntitySummary(id=target.asset_id, kind=kind, title=target.name)
-    if isinstance(target, Folder):
+    if isinstance(target, Concept | Folder):
         meta = target.read_meta()
         raw_type = meta.get("type")
-        kind = str(raw_type) if raw_type is not None else target.kind
+        default_kind = target.type() if isinstance(target, Concept) else target.kind
+        kind = str(raw_type) if raw_type is not None else default_kind
         title: str | None = None
         if kind == REFERENCE_KIND:
             ref_title = meta.get("title")
@@ -223,7 +231,9 @@ def summarize_entity(
         if title is None:
             title = extract_title(target.read_index()) or target.name
         return EntitySummary(id=target.name, kind=kind, title=title)
-    raise TypeError(f"summary target must be a Folder or Asset, got {type(target).__name__}")
+    raise TypeError(
+        f"summary target must be a Folder, Concept or Asset, got {type(target).__name__}"
+    )
 
 
 __all__ = [

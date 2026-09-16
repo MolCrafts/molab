@@ -1,3 +1,4 @@
+import { useIsFetching } from "@tanstack/react-query";
 import { useCallback, useEffect, useState } from "react";
 import { useLocation } from "react-router-dom";
 import { AppShell } from "@/app/layout/AppShell";
@@ -5,9 +6,25 @@ import { ErrorBoundary } from "@/app/layout/ErrorBoundary";
 import { OAuthCallbackPage } from "@/app/oauth/OAuthCallbackPage";
 import { useWorkspaceRuns } from "@/app/runs/useWorkspaceRuns";
 import { workspaceApi } from "@/app/state/api";
+import { useInvalidate, useWorkspaceChangeStream, viewInvalidations } from "@/app/state/queries";
 import { getLeftPanelViewFromPath, useNavigationState } from "@/app/state/useNavigationState";
 import { useWorkspaceState } from "@/app/state/useWorkspaceState";
-import type { InspectorTarget, Selection } from "@/app/types";
+import type { InspectorTarget, LeftPanelView, Selection } from "@/app/types";
+
+/** True while any query the active view reads is in flight (status-strip only). */
+const useViewIsFetching = (view: LeftPanelView): boolean => {
+  const specs = viewInvalidations(view);
+  const count = useIsFetching({
+    predicate: (query) =>
+      specs.some((spec) =>
+        spec.predicate
+          ? spec.predicate(query)
+          : (spec.queryKey?.every((segment, index) => Object.is(segment, query.queryKey[index])) ??
+            false),
+      ),
+  });
+  return count > 0;
+};
 
 const buildDefaultInspectorTarget = (selection: Selection | null): InspectorTarget => {
   if (!selection) {
@@ -26,11 +43,18 @@ const buildDefaultInspectorTarget = (selection: Selection | null): InspectorTarg
 // skip hooks within the same component (Rules of Hooks).
 const WorkspaceApp = ({ pathname }: { pathname: string }): JSX.Element => {
   const activeView = getLeftPanelViewFromPath(pathname);
+  // One `EventSource` for the whole app: the server pushes `{kind, ref, seq}`
+  // and the cache invalidates exactly the affected keys. While it is connected
+  // every list query's fallback interval collapses to `false` (see
+  // `useFallbackInterval`), so a quiet workspace issues no periodic requests
+  // at all. A disconnect flips the fallbacks back on automatically.
+  useWorkspaceChangeStream();
   const {
     snapshot,
     status,
     error,
     refresh,
+    sliceErrors,
     expandDirectory,
     expandProject,
     expandExperiment,
@@ -41,6 +65,7 @@ const WorkspaceApp = ({ pathname }: { pathname: string }): JSX.Element => {
   // hook still gives us a refresh handle even when disabled so manual refresh
   // works regardless of polling state.
   const runs = useWorkspaceRuns({ enabled: activeView === "runs" });
+  const { afterFsWrite, afterWorkspaceSwitch } = useInvalidate();
   const { leftPanelView, selection, setLeftPanelView, setSelection } = useNavigationState(snapshot);
   const [inspectorTarget, setInspectorTarget] = useState<InspectorTarget>(
     buildDefaultInspectorTarget(selection),
@@ -63,17 +88,20 @@ const WorkspaceApp = ({ pathname }: { pathname: string }): JSX.Element => {
     options?: { createIfMissing?: boolean },
   ): Promise<void> => {
     await workspaceApi.openWorkspace(path, options?.createIfMissing ?? false);
-    refresh();
+    // A different workspace invalidates everything workspace-bound; the
+    // bootstrap queries refetch themselves.
+    await afterWorkspaceSwitch();
   };
 
+  // A new file or directory changes exactly one listing — its parent's.
   const handleCreateDirectory = async (path: string): Promise<void> => {
     await workspaceApi.createDirectory(path);
-    refresh();
+    await afterFsWrite(path);
   };
 
   const handleCreateFile = async (path: string): Promise<void> => {
     await workspaceApi.writeFile(path, "");
-    refresh();
+    await afterFsWrite(path);
   };
 
   // The toolbar refresh button targets only the data the active view actually
@@ -87,7 +115,11 @@ const WorkspaceApp = ({ pathname }: { pathname: string }): JSX.Element => {
     refresh();
   }, [activeView, refresh, runs]);
 
-  const isRefreshing = activeView === "runs" ? runs.loading : status === "loading";
+  // Background revalidation shows in the heartbeat, not as a blocked shell:
+  // the first load is `status === "loading"`, everything after is a fetch count
+  // scoped to the queries this view actually reads.
+  const viewFetching = useViewIsFetching(activeView);
+  const isRefreshing = status === "loading" || viewFetching;
 
   // Sync / mutation tips land only in the bottom status strip (heartbeat +
   // activity region). No floating "Syncing…" cards — aligned with MolVis.
@@ -97,6 +129,7 @@ const WorkspaceApp = ({ pathname }: { pathname: string }): JSX.Element => {
         leftPanelView={leftPanelView}
         selection={selection}
         snapshot={snapshot}
+        sliceErrors={sliceErrors}
         inspectorTarget={inspectorTarget}
         isRefreshing={isRefreshing}
         onLeftPanelViewChange={setLeftPanelView}

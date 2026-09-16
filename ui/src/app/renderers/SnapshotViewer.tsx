@@ -14,11 +14,10 @@ import {
   ListChecks,
   Settings,
 } from "lucide-react";
-import { useEffect, useId, useMemo, useState } from "react";
-import type { RunExecutionResponse } from "@/api/generated/models/RunExecutionResponse";
+import { useId, useMemo, useState } from "react";
 import type { WorkflowSnapshotResponse } from "@/api/generated/models/WorkflowSnapshotResponse";
 import { KeyValueGrid } from "@/app/components/entity";
-import { workspaceApi } from "@/app/state/api";
+import { useRunExecutionQuery } from "@/app/state/queries/runs";
 import type { RunSummary } from "@/app/types";
 import { WorkbenchTag } from "@/components/workbench";
 import { normalizeTaskGraph } from "@/components/workflow/flowgram-document";
@@ -731,40 +730,16 @@ const SnapshotHeader = ({
  * the latest attempt of a single run.
  */
 export const RunSnapshotPanel = ({ run }: RunSnapshotPanelProps): JSX.Element => {
-  const [execution, setExecution] = useState<RunExecutionResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    let cancelled = false;
-    let interval: ReturnType<typeof setInterval> | null = null;
-    setLoading(true);
-    setError(null);
-    const load = (): void => {
-      workspaceApi
-        .getRunExecution(run.projectId, run.experimentId, run.id)
-        .then((data) => {
-          if (cancelled) return;
-          setExecution(data);
-          setError(null);
-        })
-        .catch((err) => {
-          if (cancelled) return;
-          setError(err instanceof Error ? err.message : "Failed to load workflow execution");
-        })
-        .finally(() => {
-          if (!cancelled) setLoading(false);
-        });
-    };
-    load();
-    if (run.status === "running") {
-      interval = setInterval(load, 1000);
-    }
-    return () => {
-      cancelled = true;
-      if (interval) clearInterval(interval);
-    };
-  }, [run.experimentId, run.id, run.projectId, run.status]);
+  // Same self-cancelling poll as the executions panel: 2 s while the run is
+  // running, nothing once it finishes.
+  const executionQuery = useRunExecutionQuery(
+    { projectId: run.projectId, experimentId: run.experimentId, runId: run.id },
+    null,
+    { runIsRunning: run.status === "running" },
+  );
+  const execution = executionQuery.data ?? null;
+  const error = executionQuery.error instanceof Error ? executionQuery.error.message : null;
+  const loading = executionQuery.isPending;
 
   const graph = useMemo<TaskGraphJson | null>(() => {
     return execution?.workflow ? normalizeTaskGraph(execution.workflow) : null;

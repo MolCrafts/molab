@@ -9,8 +9,13 @@ import {
   agentAdminApi,
   agentApi,
   commandsApi,
-  workspaceApi,
 } from "@/app/state/api";
+import {
+  useAgentHealthQuery,
+  useAgentSessionQuery,
+  useInvalidate,
+  usePlanQuery,
+} from "@/app/state/queries";
 import { useNavigationState } from "@/app/state/useNavigationState";
 import type { ApiAgentSession, ApiSessionEvent, RendererProps } from "@/app/types";
 import { Code as InlineCode } from "@/components/ui/code";
@@ -689,41 +694,32 @@ const AgentSessionViewer = ({
   const mountScope =
     selection.objectType === "agent" && selection.objectId === "new" ? selection.scope : undefined;
   const nav = useNavigationState(snapshot);
+  const { afterAgentCreate, afterAgentCancel, afterAgentMessage, afterPlanDecision } =
+    useInvalidate();
   const [session, setSession] = useState<ApiAgentSession | null>(null);
   const [events, setEvents] = useState<ApiSessionEvent[]>([]);
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [health, setHealth] = useState<ApiAgentHealth | null>(null);
   const [composerMode, setComposerMode] = useState<AgentMode>("chat");
   // PlanMode progress rail selection → which document the right panel shows.
   const [selectedStage, setSelectedStage] = useState<string>(DEFAULT_PLAN_STAGE);
   // Bumped after approve / terminal events so Deliverables re-fetch GET /plans.
   const [planRefreshKey, setPlanRefreshKey] = useState(0);
-  // Live artifact kinds from GET /plans — keeps the progress rail honest.
-  const [planArtifactKinds, setPlanArtifactKinds] = useState<string[]>([]);
+  // When the operator last decided a plan gate — keeps the plan poll alive for
+  // a bounded grace window while realization finishes writing artifacts.
+  const [planDecidedAt, setPlanDecidedAt] = useState<number | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const esRef = useRef<EventSource | null>(null);
   // Known-entity link index for conversation prose (vision-loop-10).
   const linkIndex = useMemo(() => buildEntityLinkIndex(snapshot), [snapshot]);
 
-  // Fetch agent health up-front so the new-session view can warn the user
-  // about a missing API key before they spend time typing a goal.
-  useEffect(() => {
-    let cancelled = false;
-    agentApi
-      .getHealth()
-      .then((h) => {
-        if (!cancelled) setHealth(h);
-      })
-      .catch(() => {
-        // Health endpoint may legitimately be unavailable (older server,
-        // network blip); leave health=null and don't render a banner.
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  // Agent health warns about a missing API key before the user types a goal.
+  // Cached and shared: every agent surface reads the same key instead of
+  // re-probing on each mount.
+  const healthQuery = useAgentHealthQuery();
+  const health = healthQuery.data ?? null;
+  const refetchHealth = healthQuery.refetch;
 
   const openSettings = useCallback(() => {
     nav.setSelection({ objectType: "agent", objectId: "settings" });
@@ -732,7 +728,6 @@ const AgentSessionViewer = ({
   // Load session when the selected task changes — not when onRefresh identity
   // changes (that would re-fetch and snap composerMode back to disk activeMode,
   // undoing a Chat↔Plan toggle the user just made).
-  // biome-ignore lint/correctness/useExhaustiveDependencies: only re-load on task switch
   useEffect(() => {
     if (!sessionId) {
       setSession(null);
@@ -748,7 +743,9 @@ const AgentSessionViewer = ({
         setSession(s);
         setEvents(coalesceStreamEvents(s.events ?? []));
         setComposerMode(s.activeMode ?? (s.planMode ? "plan" : "chat"));
-        onRefresh();
+        // Deliberately no workspace refresh here: opening a task reads a task,
+        // it does not change the workspace. The call this replaces tore down
+        // the whole navigator tree on every task open.
       })
       .catch((err) => setError(String(err)))
       .finally(() => setLoading(false));
@@ -854,68 +851,63 @@ const AgentSessionViewer = ({
   // Poll while live so plan events written to disk (and status flips to
   // waiting_approval / completed) land even if SSE blips. Fire once immediately
   // — do not wait a full interval after "foo / bar" kicks off the plan.
+  // Poll while live so plan events written to disk (and status flips to
+  // waiting_approval / completed) land even if SSE blips. The query owns the
+  // interval and stops itself at a terminal status; this effect only merges.
+  const livePollQuery = useAgentSessionQuery(isLiveStatus ? sessionId : null, {
+    enabled: Boolean(sessionId) && isLiveStatus,
+  });
+  const polled = livePollQuery.data;
+
   useEffect(() => {
     if (!sessionId) return;
     if (!isLiveStatus) return;
-    let cancelled = false;
-    const tick = async (): Promise<void> => {
-      try {
-        const fresh = await agentApi.getSession(sessionId);
-        if (cancelled) return;
-        setEvents((current) => {
-          const next = coalesceStreamEvents(fresh.events ?? []);
-          // Prefer coalesced server snapshot when it has at least as many
-          // non-delta facts; length alone is wrong after coalesce (1 vs 1000).
-          if (next.length === 0) return current;
-          if (current.length === 0) return next;
-          // Keep the previous array identity when content is unchanged so
-          // React does not thrash the tree (and restart CSS spinners) every poll.
-          if (
-            current.length === next.length &&
-            current.every((ev, i) => {
-              const other = next[i];
-              return other != null && sameSessionEvent(ev, other);
-            })
-          ) {
-            return current;
-          }
-          return next;
-        });
-        setSession((prev) => {
-          if (!prev) return fresh;
-          const prevId = getAgentTaskId(prev);
-          if (prevId !== sessionId && prev.sessionId !== sessionId) return prev;
-          if (
-            prev.status === fresh.status &&
-            prev.activePlanTaskId === fresh.activePlanTaskId &&
-            JSON.stringify(prev.stats ?? null) === JSON.stringify(fresh.stats ?? null)
-          ) {
-            return prev;
-          }
-          return {
-            ...prev,
-            status: fresh.status,
-            stats: fresh.stats,
-            activeMode: fresh.activeMode,
-            activeTurnId: fresh.activeTurnId,
-            activePlanTaskId: fresh.activePlanTaskId,
-            projectId: fresh.projectId ?? prev.projectId,
-            experimentId: fresh.experimentId ?? prev.experimentId,
-            runId: fresh.runId ?? prev.runId,
-            events: fresh.events,
-          };
-        });
-      } catch {
-        // ignore transient polling errors
+    const fresh = polled;
+    if (!fresh) return;
+    setEvents((current) => {
+      const next = coalesceStreamEvents(fresh.events ?? []);
+      // Prefer coalesced server snapshot when it has at least as many
+      // non-delta facts; length alone is wrong after coalesce (1 vs 1000).
+      if (next.length === 0) return current;
+      if (current.length === 0) return next;
+      // Keep the previous array identity when content is unchanged so
+      // React does not thrash the tree (and restart CSS spinners) every poll.
+      if (
+        current.length === next.length &&
+        current.every((ev, i) => {
+          const other = next[i];
+          return other != null && sameSessionEvent(ev, other);
+        })
+      ) {
+        return current;
       }
-    };
-    void tick();
-    const id = setInterval(tick, 1500);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-  }, [sessionId, isLiveStatus]);
+      return next;
+    });
+    setSession((prev) => {
+      if (!prev) return fresh;
+      const prevId = getAgentTaskId(prev);
+      if (prevId !== sessionId && prev.sessionId !== sessionId) return prev;
+      if (
+        prev.status === fresh.status &&
+        prev.activePlanTaskId === fresh.activePlanTaskId &&
+        JSON.stringify(prev.stats ?? null) === JSON.stringify(fresh.stats ?? null)
+      ) {
+        return prev;
+      }
+      return {
+        ...prev,
+        status: fresh.status,
+        stats: fresh.stats,
+        activeMode: fresh.activeMode,
+        activeTurnId: fresh.activeTurnId,
+        activePlanTaskId: fresh.activePlanTaskId,
+        projectId: fresh.projectId ?? prev.projectId,
+        experimentId: fresh.experimentId ?? prev.experimentId,
+        runId: fresh.runId ?? prev.runId,
+        events: fresh.events,
+      };
+    });
+  }, [sessionId, isLiveStatus, polled]);
 
   const handleLaunchIntent = useCallback(
     async (intent: LaunchIntent) => {
@@ -940,13 +932,13 @@ const AgentSessionViewer = ({
           created.activeMode ?? (created.planMode || intent.mode === "plan" ? "plan" : "chat"),
         );
         nav.setSelection({ objectType: "agent", objectId: getAgentTaskId(created) });
-        onRefresh();
+        // A new task appears in the task list; nothing else in the workspace moved.
+        void afterAgentCreate();
       } catch (err) {
         if (err instanceof AgentNotConfiguredError) {
-          agentApi
-            .getHealth()
-            .then(setHealth)
-            .catch(() => {});
+          // The banner is stale by definition here — re-read it through the
+          // shared key so every agent surface updates at once.
+          void refetchHealth();
           setError(err.message);
           return;
         }
@@ -956,7 +948,7 @@ const AgentSessionViewer = ({
         setSubmitting(false);
       }
     },
-    [nav, onRefresh, mountScope],
+    [nav, afterAgentCreate, refetchHealth, mountScope],
   );
 
   const handleChatSubmit = useCallback(
@@ -981,7 +973,8 @@ const AgentSessionViewer = ({
             setComposerMode(mode);
           }
         } catch {
-          onRefresh();
+          // Transcript reload failed — re-read just this session.
+          void afterAgentMessage(taskId);
         }
       } catch (err) {
         setSession((prev) => (prev ? { ...prev, status: session.status } : prev));
@@ -1003,7 +996,7 @@ const AgentSessionViewer = ({
         }
       }
     },
-    [session, onRefresh],
+    [session, afterAgentMessage],
   );
 
   const handleStop = useCallback(async () => {
@@ -1017,11 +1010,11 @@ const AgentSessionViewer = ({
         if (!prev) return prev;
         return { ...prev, status: "cancelled" };
       });
-      onRefresh();
+      void afterAgentCancel(taskId);
     } catch (err) {
       setError(String(err));
     }
-  }, [session, onRefresh]);
+  }, [session, afterAgentCancel]);
 
   // Detect whether the agent is currently waiting on the user's reply.
   const pendingUserRequest = useMemo(() => derivePendingUserRequest(events), [events]);
@@ -1046,54 +1039,32 @@ const AgentSessionViewer = ({
       })
     : null;
 
-  // Poll plan artifacts while a plan run is live so the rail / deliverables
-  // advance even when the event stream only carries stage_started breadcrumbs.
+  // Plan artifacts feed the progress rail and Deliverables. The query owns the
+  // 2 s poll and stops itself once the session is terminal and the post-decision
+  // grace window has elapsed — the predicate this replaces (`planRefreshKey > 0`)
+  // could never go back to false once bumped, so it polled forever.
+  const planQuery = usePlanQuery(loading ? null : planRef, {
+    sessionStatus: session?.status ?? null,
+    decidedAt: planDecidedAt,
+  });
+
+  const planArtifactKinds = useMemo(
+    () => planQuery.data?.artifactKinds ?? [],
+    [planQuery.data?.artifactKinds],
+  );
+
+  // Prefer the newest completed stage while the user has not clicked away from
+  // the default, so Approve → workflow source is visible.
   // biome-ignore lint/correctness/useExhaustiveDependencies: selectedStage read intentionally not a dep
   useEffect(() => {
-    if (loading || !planRef?.projectId || !planRef.experimentId || !planRef.runId) {
-      setPlanArtifactKinds([]);
-      return;
+    if (planArtifactKinds.length === 0) return;
+    const last = [...planArtifactKinds]
+      .reverse()
+      .find((k) => PLAN_STAGES.some((s) => s.kind === k && !s.executeTail));
+    if (last && selectedStage === DEFAULT_PLAN_STAGE) {
+      setSelectedStage(last);
     }
-    let cancelled = false;
-    const pull = (): void => {
-      void workspaceApi
-        .getPlan(planRef.projectId, planRef.experimentId, planRef.runId)
-        .then((detail) => {
-          if (cancelled) return;
-          const kinds = detail.artifactKinds ?? [];
-          setPlanArtifactKinds(kinds);
-          // Prefer the newest completed stage when the user hasn't clicked away
-          // from the default, so Approve → workflow source is visible.
-          if (kinds.length > 0) {
-            const last = [...kinds]
-              .reverse()
-              .find((k) => PLAN_STAGES.some((s) => s.kind === k && !s.executeTail));
-            if (last && selectedStage === DEFAULT_PLAN_STAGE) {
-              setSelectedStage(last);
-            }
-          }
-        })
-        .catch(() => {
-          /* plan may not be readable yet */
-        });
-    };
-    pull();
-    const live =
-      session?.status === "running" || session?.status === "waiting_approval" || planRefreshKey > 0;
-    if (!live) return;
-    const id = window.setInterval(pull, 2000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(id);
-    };
-  }, [
-    loading,
-    planRef?.projectId,
-    planRef?.experimentId,
-    planRef?.runId,
-    session?.status,
-    planRefreshKey,
-  ]);
+  }, [planArtifactKinds]);
 
   // --- "new" state: quiet empty state with the composer at the bottom ---
   if (!sessionId || (!loading && !session)) {
@@ -1208,23 +1179,26 @@ const AgentSessionViewer = ({
   const turns = groupEventsIntoTurns(events, session.goal);
   const showSplit = hasDeliverables(events) || planRef !== null;
 
+  // A plan decision changes this session, its plan artifacts and the approvals
+  // queue — nothing else. The 12x2s `setTimeout` chain this replaces had no
+  // cleanup, so it kept firing (and calling setState) for 24s after unmount;
+  // the session and plan queries now stay live on their own while the work
+  // continues, and stop by themselves when it ends.
   const refreshAfterPlanDecision = (): void => {
-    onRefresh();
+    const id = getAgentTaskId(session);
     setPlanRefreshKey((k) => k + 1);
     setSelectedStage("bound_workflow");
-    // Realization continues after approve — poll so workflow_source lands.
-    const id = getAgentTaskId(session);
-    let n = 0;
-    const tick = (): void => {
-      void agentApi.getSession(id).then((s) => {
-        setSession(s);
-        setEvents(coalesceStreamEvents(s.events ?? []));
-        setPlanRefreshKey((k) => k + 1);
-      });
-      n += 1;
-      if (n < 12) window.setTimeout(tick, 2000);
-    };
-    tick();
+    setPlanDecidedAt(Date.now());
+    void afterPlanDecision({
+      sessionId: id,
+      plan: planRef?.projectId
+        ? {
+            projectId: planRef.projectId,
+            experimentId: planRef.experimentId as string,
+            runId: planRef.runId as string,
+          }
+        : undefined,
+    });
   };
 
   const errorBanner = error ? (

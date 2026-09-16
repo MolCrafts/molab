@@ -13,6 +13,7 @@ import { EmptyState } from "@/app/components/entity";
 import { workspaceApi } from "@/app/state/api";
 import type { RendererProps } from "@/app/types";
 import { WorkbenchAction } from "@/components/workbench";
+import { fileSizeGate } from "@/lib/fileSizeGate";
 import type { DiscoveredFile } from "@/plugins/types";
 import { MolplotRawChart } from "./MolplotRawChart";
 
@@ -48,6 +49,13 @@ export const MolplotObservablesTab = ({
       setError(
         "This MolRec observable needs a browser reader. Add a Vega-Lite .vl.json artifact to render it directly in MolPlot.",
       );
+      return;
+    }
+
+    // The spec is JSON.parse'd whole; fetching a huge artifact would only
+    // exhaust memory on the way to a parse failure.
+    if (fileSizeGate(file.size).kind === "oversized") {
+      setError("This artifact is too large to load in the browser.");
       return;
     }
 

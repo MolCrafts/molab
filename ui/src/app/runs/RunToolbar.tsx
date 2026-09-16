@@ -23,7 +23,6 @@ import {
 import { type JSX, useCallback, useEffect, useState } from "react";
 import type { TargetResponse } from "@/api/generated/models/TargetResponse";
 import { ExperimentsService } from "@/api/generated/services/ExperimentsService";
-import { TargetsService } from "@/api/generated/services/TargetsService";
 import { HarvestDialog } from "@/app/components/HarvestDialog";
 import { ParametersForm } from "@/app/runs/ParametersForm";
 import {
@@ -41,6 +40,8 @@ import {
   schemaDefaults,
 } from "@/app/runs/SchemaForm";
 import { workspaceApi } from "@/app/state/api";
+import { useTargetsQuery } from "@/app/state/queries";
+import { useInvalidate } from "@/app/state/queries/invalidation";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -108,13 +109,15 @@ export interface RunToolbarProps {
   onHarvested: (path: string) => void;
 }
 
+/** Stable empty list while the targets query is pending. */
+const EMPTY_TARGETS: TargetResponse[] = [];
+
 export function RunToolbar({
   projectId,
   experimentId,
   runId,
   status,
   params,
-  onRefresh,
   onCancel,
   onDispatched,
   onOpenAgent,
@@ -126,7 +129,6 @@ export function RunToolbar({
   const showHarvest = canHarvest(status);
 
   const [startOpen, setStartOpen] = useState(false);
-  const [targets, setTargets] = useState<TargetResponse[]>([]);
   const [target, setTarget] = useState("local");
   const [startParams, setStartParams] = useState<Record<string, unknown>>(params);
   const [inputSchema, setInputSchema] = useState<InputField[] | null>(null);
@@ -134,20 +136,21 @@ export function RunToolbar({
   const [startError, setStartError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [verbError, setVerbError] = useState<string | null>(null);
+  const invalidate = useInvalidate();
+
+  // Targets are cached for five minutes, so reopening the dialog is instant
+  // instead of re-fetching the same list every time.
+  const targetsQuery = useTargetsQuery({ enabled: startOpen });
+  const targets = targetsQuery.data ?? EMPTY_TARGETS;
+  useEffect(() => {
+    if (!startOpen || targets.length === 0) return;
+    const names = targets.map((t) => t.name);
+    setTarget(names.includes("local") ? "local" : (names[0] ?? "local"));
+  }, [startOpen, targets]);
 
   useEffect(() => {
     if (!startOpen) return;
     let cancelled = false;
-    TargetsService.listTargetsEndpointApiTargetsGet()
-      .then((res) => {
-        if (cancelled) return;
-        setTargets(res.targets);
-        const names = res.targets.map((t) => t.name);
-        setTarget(names.includes("local") ? "local" : (names[0] ?? "local"));
-      })
-      .catch(() => {
-        if (!cancelled) setTargets([]);
-      });
     ExperimentsService.getExperimentApiProjectsProjectIdExperimentsExperimentIdGet(
       projectId,
       experimentId,
@@ -167,9 +170,11 @@ export function RunToolbar({
   }, [startOpen, projectId, experimentId, params]);
 
   const afterDispatch = useCallback((): void => {
-    onRefresh();
+    // A run verb touches that run, its experiment's list and the runs index —
+    // not the whole workspace.
+    void invalidate.afterRunVerb({ runId, projectId, experimentId });
     onDispatched?.();
-  }, [onRefresh, onDispatched]);
+  }, [invalidate, runId, projectId, experimentId, onDispatched]);
 
   const handleStart = useCallback(async (): Promise<void> => {
     setStarting(true);

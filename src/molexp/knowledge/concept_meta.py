@@ -1,10 +1,9 @@
 """``ConceptMeta`` — the structured ``meta.yaml`` payload of an OKF Concept.
 
-Workspace-local OKF base for typed ``meta.yaml`` bodies (e.g.
-:class:`molexp.workspace.reference_meta.ReferenceMeta`). The agent layer keeps
-its own ``AgentMeta`` / ``AgentSessionMeta`` shapes; this base serves the
-workspace-owned Concept types. Kept in the workspace layer so nothing here
-depends on ``molexp.knowledge`` (which is now the concept-type registry only).
+The base for every typed ``meta.yaml`` body in the OKF library (e.g.
+:class:`molexp.knowledge.reference_meta.ReferenceMeta`). The agent layer keeps
+its own ``AgentMeta`` / ``AgentSessionMeta`` shapes for its workspace-mounted
+folders; this base serves the Concept types ``molexp.knowledge`` owns.
 """
 
 from __future__ import annotations

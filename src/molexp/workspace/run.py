@@ -8,6 +8,7 @@ checkpoints, and asset access during execution.
 from __future__ import annotations
 
 import contextlib
+import json
 from collections.abc import Callable, Iterator
 from datetime import datetime
 from pathlib import Path  # local-FS path for RunContext (LLM/worker-local I/O)
@@ -25,7 +26,6 @@ from molexp.profile import ProfileConfig
 
 from .assets import AssetScope
 from .base import (
-    _load_metadata,
     _reconstruct,
     _save_metadata,
 )
@@ -39,6 +39,7 @@ from .models import (
     RunStatus,
 )
 from .run_ops import RUN_OPS_NAME, RunOpsState
+from .schema_version import read_versioned_json
 from .utils import generate_id
 
 if TYPE_CHECKING:
@@ -146,6 +147,19 @@ class Run(Folder):
     _exists_error_cls = RunExistsError
     _not_found_error_cls = RunNotFoundError
 
+    #: Subdirectories a Run *produces* rather than *contains* — job output,
+    #: per-attempt state, caches, logs, the metrics stream and the captured
+    #: source tree. Knowledge is mounted *directly* under a Folder
+    #: (``knowledge_mount`` → ``<run_dir>/<slug>/``), never inside these, so an
+    #: OKF walk skips them without enumerating a ten-thousand-run workspace's
+    #: job output. Read through
+    #: :func:`~molexp.knowledge.types.non_concept_subdirs`, which scopes the
+    #: skip to a Run's own children: these names are only meaningless *here*,
+    #: and a directory called ``logs`` elsewhere in the tree may be a Note.
+    NON_CONCEPT_SUBDIRS: frozenset[str] = frozenset(
+        {"executions", "artifacts", "cache", "logs", "jobs", "source", "metrics", ".ckpt"}
+    )
+
     def __init__(
         self,
         *,
@@ -207,8 +221,17 @@ class Run(Folder):
 
     @classmethod
     def from_disk(cls, child_dir: PathArg, parent: Folder) -> Run:
-        """Load ``run.json`` and rebuild entity state. See Folder.from_disk hook docs."""
-        meta = _load_metadata(RunMetadata, parent._fs.join(child_dir, "run.json"), fs=parent._fs)
+        """Load ``run.json`` and rebuild entity state. See Folder.from_disk hook docs.
+
+        The raw document is read **once** and seeded into the run's stat memo
+        (:meth:`entity_document`), so ``context_results`` / ``sync_metadata``
+        on a freshly listed run cost one ``stat``, not a second read.
+        """
+        fs = parent._fs
+        run_json = fs.join(child_dir, "run.json")
+        st = fs.stat(run_json)  # stat BEFORE read — see molexp.fs.memo
+        data = read_versioned_json(run_json, fs=fs)
+        meta = RunMetadata.model_validate(data)
         # Runs have no separate human name — ``RunMetadata`` only carries ``id``.
         folder_meta = FolderMetadata(
             id=meta.id,
@@ -220,7 +243,9 @@ class Run(Folder):
         attrs = cls.base_from_disk_attrs(parent, folder_meta) | {
             "_entity_metadata": meta,
         }
-        return _reconstruct(cls, attrs)
+        run = _reconstruct(cls, attrs)
+        run._memo().put(run_json, data, st)
+        return run
 
     def children(self, kind: str | None = None) -> list[Folder]:  # noqa: ARG002
         """Run has no entity children — executions live under ``executions/``
@@ -284,9 +309,62 @@ class Run(Folder):
 
     # ── OKF _ops/run.json hot-state sidecar (typed; isolated from run.json) ─
 
+    def _load_ops_state(self, fpath: str) -> RunOpsState:
+        with self._fs.open(fpath) as fh:
+            raw: object = json.load(fh)
+        return RunOpsState.model_validate(raw or {})
+
     def read_ops(self) -> RunOpsState:
-        """Load the typed Run ops state from ``_ops/run.json`` (default if none)."""
-        return RunOpsState.model_validate(self.read_ops_json(RUN_OPS_NAME) or {})
+        """Load the typed Run ops state from ``_ops/run.json`` (default if none).
+
+        Memoized as the **typed** (frozen) model under a stat-validated key:
+        ``status`` / ``finished_at`` / ``execution_history`` / ``is_retryable``
+        / ``current_execution_id`` on one instance cost one ``stat`` each after
+        the first parse, not ``exists`` + ``open`` + ``json`` + validate.
+        Writers (:meth:`update_ops` / :meth:`write_ops`) drop the memo.
+        """
+        fpath = self._ops_json_path(RUN_OPS_NAME)
+        state = self._memo().get_or_none(fpath, self._load_ops_state, slot="typed")
+        return state if state is not None else RunOpsState.model_validate({})
+
+    # ── run.json raw document (identity/provenance + driver-side results) ──
+
+    def _run_json_path(self) -> str:
+        return self._fs.join(self.run_dir, "run.json")
+
+    def _load_entity_document(self, fpath: str) -> dict[str, JSONValue]:
+        return cast("dict[str, JSONValue]", read_versioned_json(fpath, fs=self._fs))
+
+    def entity_document(self) -> dict[str, JSONValue]:
+        """The raw ``run.json`` document (``schema_version`` stripped), or ``{}``.
+
+        Stat-validated memo seeded by :meth:`from_disk`; a shallow copy is
+        returned so callers cannot mutate the memoized value. This is the
+        single read path for the ``context.results`` block, which is not a
+        ``RunMetadata`` field (``extra="ignore"``).
+        """
+        doc = self._memo().get_or_none(self._run_json_path(), self._load_entity_document)
+        return dict(doc) if doc is not None else {}
+
+    @property
+    def context_results(self) -> dict[str, JSONValue]:
+        """Driver-side results persisted by ``RunContext.set_result`` (``{}`` if none)."""
+        ctx = self.entity_document().get("context")
+        results = ctx.get("results") if isinstance(ctx, dict) else None
+        return dict(results) if isinstance(results, dict) else {}
+
+    def sync_metadata(self) -> bool:
+        """Reload :attr:`metadata` from ``run.json`` if it changed on disk.
+
+        One ``stat`` when unchanged. Returns ``True`` iff the in-memory
+        ``RunMetadata`` was replaced. A missing file keeps the in-memory copy
+        (a run built in memory before ``materialize()``).
+        """
+        doc, hit = self._memo().fetch_or_none(self._run_json_path(), self._load_entity_document)
+        if hit or doc is None:
+            return False
+        self._entity_metadata = RunMetadata.model_validate(doc)
+        return True
 
     def write_ops(self, state: RunOpsState) -> None:
         """Persist the typed Run ops state to ``_ops/run.json`` (atomic)."""
@@ -317,7 +395,7 @@ class Run(Folder):
         """Scope-filtered asset view (read-only queries) for this run."""
         from .assets import AssetsView
 
-        return AssetsView(self.experiment.project.workspace.root, self.scope)
+        return AssetsView(self.experiment.project.workspace.root, self.scope, fs=self._fs)
 
     def reregister_artifact(  # noqa: ANN201
         self,
@@ -417,10 +495,13 @@ class Run(Folder):
     def materialize(self) -> None:
         d = self.run_dir
         self._fs.mkdir(d, parents=True, exist_ok=True)
-        _save_metadata(self.metadata, self._fs.join(self.run_dir, "run.json"), fs=self._fs)
+        self._dir_known = True
+        self.save()
 
     def save(self) -> None:
-        _save_metadata(self.metadata, self._fs.join(self.run_dir, "run.json"), fs=self._fs)
+        run_json = self._run_json_path()
+        _save_metadata(self.metadata, run_json, fs=self._fs)
+        self._memo().invalidate(run_json)
 
     # ── Execution ───────────────────────────────────────────────────────
 
@@ -524,6 +605,18 @@ class Run(Folder):
                 }
             )
         )
+        # Default-on, non-fatal workspace-timeline milestone — the spine's
+        # ``seq`` is a change cursor, so a status flip with no event would be
+        # invisible to anything polling it.
+        from .events import emit_workspace_event
+
+        emit_workspace_event(
+            self.experiment.project.workspace.resolve(),
+            "run.cancelled",
+            "run-lifecycle",
+            payload={"status": RunStatus.CANCELLED.value},
+            refs=[self.id],
+        )
 
     def delete_execution(self, execution_id: str) -> None:
         """Delete a single execution attempt from this run.
@@ -566,7 +659,7 @@ class Run(Folder):
         """
         from ._file_lock import file_lock
 
-        with file_lock(Path(str(self.run_dir)) / "run.json.lock"):
+        with file_lock(Path(str(self.run_dir)) / "run.json.lock", backend=self._fs_profile().locks):
             yield
 
     def _reload_metadata_from_disk(self) -> None:
@@ -578,11 +671,11 @@ class Run(Folder):
         writes. Missing or unreadable files keep the in-memory copy
         (first write before ``materialize()``, remote filesystems).
         """
-        path = self._fs.join(self.run_dir, "run.json")
         try:
-            if not self._fs.exists(path):
-                return
-            self._entity_metadata = _load_metadata(RunMetadata, path, fs=self._fs)
+            # Memo-backed: one ``stat`` when the file is unchanged; the memo
+            # was dropped by our own last ``save()``, so a foreign write is
+            # never masked. Under the lock no cooperating writer interleaves.
+            self.sync_metadata()
         except Exception:
             _logger.debug(f"run {self.id}: could not reload run.json; keeping in-memory copy")
 

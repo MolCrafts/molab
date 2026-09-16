@@ -7,9 +7,9 @@
 
 import { BookOpen, Check, Server, X } from "lucide-react";
 import type { JSX } from "react";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { AgentUnavailableError, resetAgentProbes } from "@/app/state/agentProbe";
-import { type ApiKnowledgeSources, agentAdminApi } from "@/app/state/api";
+import { useKnowledgeSourcesMutation, useKnowledgeSourcesQuery } from "@/app/state/queries";
 import { Code as InlineCode } from "@/components/ui/code";
 import { ProgressSpinner } from "@/components/ui/progress-spinner";
 import { WorkbenchAction, WorkbenchIconAction, WorkbenchTag } from "@/components/workbench";
@@ -17,52 +17,45 @@ import { cn } from "@/lib/utils";
 import { UnavailableCapability } from "./UnavailableCapability";
 
 export const KnowledgeSourcesPanel = (): JSX.Element => {
-  const [data, setData] = useState<ApiKnowledgeSources | null>(null);
+  const sourcesResult = useKnowledgeSourcesQuery();
+  const saveMutation = useKnowledgeSourcesMutation();
+  const data = sourcesResult.data ?? null;
+  const loading = sourcesResult.isPending;
+  const saving = saveMutation.isPending;
+  const unavailable = sourcesResult.error instanceof AgentUnavailableError;
+  const error =
+    !unavailable && (sourcesResult.error || saveMutation.error)
+      ? String(sourcesResult.error ?? saveMutation.error)
+      : null;
+
+  // `selected` is a draft the user edits; the server value seeds it. Re-seed
+  // only when the server's own value changes, so a background refetch never
+  // discards edits in progress.
   const [selected, setSelected] = useState<string[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [unavailable, setUnavailable] = useState(false);
   const [savedFlash, setSavedFlash] = useState(false);
-
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    setUnavailable(false);
-    try {
-      const res = await agentAdminApi.getKnowledgeSources();
-      setData(res);
-      setSelected([...res.sources]);
-    } catch (err) {
-      if (err instanceof AgentUnavailableError) setUnavailable(true);
-      else setError(String(err));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
+  const seededRef = useRef<string | null>(null);
+  const serverSources = data?.sources;
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
+    if (!serverSources) return;
+    const fingerprint = JSON.stringify(serverSources);
+    if (seededRef.current === fingerprint) return;
+    seededRef.current = fingerprint;
+    setSelected([...serverSources]);
+  }, [serverSources]);
 
   const toggle = (pkg: string): void => {
     setSelected((prev) => (prev.includes(pkg) ? prev.filter((p) => p !== pkg) : [...prev, pkg]));
   };
 
   const save = async (): Promise<void> => {
-    setSaving(true);
-    setError(null);
-    try {
-      const res = await agentAdminApi.updateKnowledgeSources(selected);
-      setData(res);
-      setSelected([...res.sources]);
-      setSavedFlash(true);
-      window.setTimeout(() => setSavedFlash(false), 1500);
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setSaving(false);
-    }
+    const updated = await saveMutation.mutateAsync(selected).catch(() => null);
+    if (!updated) return;
+    setSavedFlash(true);
+    window.setTimeout(() => setSavedFlash(false), 1500);
+  };
+
+  const refresh = async (): Promise<void> => {
+    await sourcesResult.refetch();
   };
 
   if (unavailable) {

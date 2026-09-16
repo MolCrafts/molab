@@ -16,6 +16,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from molexp.server.dependencies import get_workspace
+from molexp.server.executors import run_heavy
 from molexp.workspace.git_projection import (
     checkpoint,
     push,
@@ -28,6 +29,20 @@ if TYPE_CHECKING:
 __all__ = ["router"]
 
 router = APIRouter(prefix="/git", tags=["git"])
+
+
+def _blocking(coro_factory):  # noqa: ANN001, ANN202
+    """Run an async projection verb to completion on a worker thread.
+
+    The projection's own I/O (``iterdir`` / ``read_bytes`` over every run's
+    blobs) is synchronous *inside* its coroutines, so awaiting them directly
+    on the event loop stalls the whole server for the length of a checkpoint.
+    Running them on the heavy pool — each in its own loop — keeps the loop
+    free and bounds concurrent checkpoints at the pool size.
+    """
+    import asyncio as _asyncio
+
+    return _asyncio.run(coro_factory())
 
 
 class GitPushRequest(BaseModel):
@@ -47,7 +62,7 @@ class GitCheckpointResponse(BaseModel):
 async def git_checkpoint_route(
     workspace: Workspace = Depends(get_workspace),
 ) -> GitCheckpointResponse:
-    result = await checkpoint(workspace)
+    result = await run_heavy(_blocking, lambda: checkpoint(workspace))
     return GitCheckpointResponse(runs=len(result.runs), workspace_tree=result.workspace_tree.hex)
 
 
@@ -55,7 +70,7 @@ async def git_checkpoint_route(
 async def git_rebuild_route(
     workspace: Workspace = Depends(get_workspace),
 ) -> GitCheckpointResponse:
-    result = await rebuild(workspace)
+    result = await run_heavy(_blocking, lambda: rebuild(workspace))
     return GitCheckpointResponse(runs=len(result.runs), workspace_tree=result.workspace_tree.hex)
 
 
@@ -64,5 +79,5 @@ async def git_push_route(
     body: GitPushRequest,
     workspace: Workspace = Depends(get_workspace),
 ) -> dict[str, str]:
-    await push(workspace, remote=body.remote)
+    await run_heavy(_blocking, lambda: push(workspace, remote=body.remote))
     return {"pushed": body.remote}

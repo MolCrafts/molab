@@ -1,30 +1,35 @@
-import { useCallback, useEffect, useRef, useState } from "react";
-import {
-  agentApi,
-  buildEmptySnapshot,
-  mapAgentSessions,
-  mapAssets,
-  mapExperiments,
-  mapProjects,
-  mapRuns,
-  mapWorkflows,
-  workspaceApi,
-} from "@/app/state/api";
-import { pulseSync } from "@/app/state/syncPulse";
-import type {
-  LeftPanelView,
-  ProjectSummary,
-  WorkspaceSnapshot,
-  WorkspaceTreeNode,
-} from "@/app/types";
-import {
-  direntsToTreeNodes,
-  getWorkspaceFs,
-  mergeTreeChildren,
-  setWorkspaceFsRoot,
-  treeRootFromListing,
-} from "@/lib/workspace-fs";
+/**
+ * The workspace shell's data hook — a thin binding over the query cache.
+ *
+ * Before (plan P2 §2b): four bootstrap slices fetched **serially** in a
+ * `for await` loop, an `inflightRef` that silently dropped a concurrent
+ * request, and a `refresh()` that emptied `experiments` / `runs` / `workflows`
+ * / `assets` from the snapshot and re-ran the whole loop — called from 27
+ * sites, so cancelling a run (or merely opening an agent task) collapsed the
+ * navigator tree and forced the user to re-expand it one round trip per level.
+ *
+ * Now: the four bootstrap queries mount independently and go out in parallel;
+ * expansion is expressed as membership in a `Set` that drives `useQueries`, so
+ * expanding twice costs one request and an already-expanded node re-renders
+ * from cache; and `refresh()` is a targeted `invalidateQueries` that leaves
+ * both the tree and the data on screen while it revalidates.
+ *
+ * The exported `WorkspaceState` shape is unchanged (plus `sliceErrors`), so
+ * `App` / `AppShell` / the renderers keep compiling against it.
+ */
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+import type { LeftPanelView, WorkspaceSnapshot } from "@/app/types";
+import { setWorkspaceFsRoot } from "@/lib/workspace-fs";
 import type { WorkspacePath } from "@/lib/workspace-path";
+import { useInvalidate } from "./queries/invalidation";
+import {
+  EMPTY_SLICE_ERRORS,
+  expKey,
+  type SliceErrors,
+  useWorkspaceSnapshot,
+} from "./queries/snapshot";
+import { useWorkspaceInfoQuery } from "./queries/workspace";
 
 export type WorkspaceStatus = "idle" | "loading" | "ready" | "error";
 
@@ -32,6 +37,8 @@ export interface WorkspaceState {
   snapshot: WorkspaceSnapshot;
   status: WorkspaceStatus;
   error: Error | null;
+  /** Per-slice failures — a failed slice shows an error + Retry, never `[]`. */
+  sliceErrors: SliceErrors;
   refresh: () => void;
   /** Lazy-expand a workspace file-tree directory via WorkspaceFs.listdir. */
   expandDirectory: (dirPath: WorkspacePath) => Promise<void>;
@@ -45,348 +52,89 @@ export interface WorkspaceState {
   isExperimentExpanded: (projectId: string, experimentId: string) => boolean;
 }
 
-// Slice = an independently fetchable chunk of the snapshot.
-// Entity hierarchy (experiments / runs) is **not** a slice — it loads on expand.
-type SnapshotSlice = "workspaces" | "workspaceTree" | "projectsList" | "assets" | "agentSessions";
-
-// Bootstrap: shallow only. No fan-out over experiments×runs (that was 20+ HTTP
-// calls on every poll and freezes remote workspaces).
-const BOOTSTRAP_SLICES: readonly SnapshotSlice[] = [
-  "workspaces",
-  "projectsList",
-  "agentSessions",
-  "workspaceTree",
-];
-
-// Manual full refresh still avoids the old experimentsTree dump — expand
-// caches stay warm; user re-opens folders if they want a re-fetch.
-const REFRESH_SLICES: readonly SnapshotSlice[] = BOOTSTRAP_SLICES;
-
-// Polling: only cheap / view-local slices. Never re-walk the whole entity tree.
-// projects view: no interval — list is static until user expands or hits refresh.
-// workspace: optional soft tree refresh is still heavy on remote → off.
-// assets: load once when entering the view (see effect), not every 3s.
-const VIEW_POLL_SLICES: Record<LeftPanelView, readonly SnapshotSlice[]> = {
-  workspace: [],
-  projects: [],
-  workflow: [],
-  asset: [],
-  runs: [],
-  agent: [],
-  knowledge: [],
-  settings: [],
-};
-
-const WORKSPACE_TREE_BOOTSTRAP_DEPTH = 2;
-
-const expKey = (projectId: string, experimentId: string): string => `${projectId}/${experimentId}`;
-
-const fetchWorkspaceTree = async (): Promise<WorkspaceSnapshot["workspaceRoot"]> => {
-  try {
-    try {
-      const info = await workspaceApi.getWorkspaceInfo();
-      if (info.root) {
-        setWorkspaceFsRoot(info.root);
-      }
-    } catch {
-      // optional
-    }
-    const fs = getWorkspaceFs();
-    const children = await fs.listdir("", {
-      maxDepth: WORKSPACE_TREE_BOOTSTRAP_DEPTH,
-      includeCatalog: true,
-    });
-    return treeRootFromListing(fs.root ?? "/", children);
-  } catch (err) {
-    console.warn("Workspace tree unavailable:", err);
-    return null;
-  }
-};
-
-const findTreeNode = (root: WorkspaceTreeNode, path: string): WorkspaceTreeNode | null => {
-  if (root.path === path) return root;
-  for (const child of root.children) {
-    if (child.path === path) return child;
-    if (child.kind === "directory" && path.startsWith(`${child.path}/`)) {
-      const hit = findTreeNode(child, path);
-      if (hit) return hit;
-    }
-  }
-  return null;
-};
-
-const fetchWorkspaces = async (): Promise<WorkspaceSnapshot["workspaces"]> => {
-  try {
-    return await workspaceApi.getServedWorkspaces();
-  } catch (err) {
-    console.warn("Served workspaces unavailable:", err);
-    return [];
-  }
-};
-
-const fetchProjectsList = async (
-  workspaces: WorkspaceSnapshot["workspaces"],
-): Promise<ProjectSummary[]> => {
-  if (workspaces.length <= 1) {
-    return mapProjects(await workspaceApi.getProjects());
-  }
-  const perWorkspace = await Promise.all(
-    workspaces.map(async (ws) => {
-      if (ws.unreachable) return [];
-      try {
-        return mapProjects(await workspaceApi.getProjectsForWorkspace(ws.key), ws.key);
-      } catch (err) {
-        console.warn(`Projects unavailable for workspace ${ws.key}:`, err);
-        return [];
-      }
-    }),
-  );
-  return perWorkspace.flat();
-};
-
-const activeWorkspaceProjects = (snapshot: WorkspaceSnapshot): ProjectSummary[] => {
-  if (snapshot.workspaces.length <= 1) return snapshot.projects;
-  const activeKey = snapshot.workspaces.find((ws) => ws.active)?.key;
-  return snapshot.projects.filter((project) => project.workspaceKey === activeKey);
-};
-
-const fetchAllAssets = async (projects: ProjectSummary[]): Promise<WorkspaceSnapshot["assets"]> => {
-  const projectAssets = await Promise.all(
-    projects.map(async (project) => {
-      try {
-        return mapAssets(await workspaceApi.getProjectAssets(project.id), project.id);
-      } catch (err) {
-        console.warn(`Failed to fetch assets for project ${project.id}:`, err);
-        return [];
-      }
-    }),
-  );
-  try {
-    const allAssets = [...mapAssets(await workspaceApi.getAssets()), ...projectAssets.flat()];
-    return Array.from(new Map(allAssets.map((item) => [item.id, item])).values());
-  } catch (err) {
-    console.warn("Workspace assets unavailable:", err);
-    return projectAssets.flat();
-  }
-};
-
-const fetchAgentSessionsList = async (): Promise<WorkspaceSnapshot["agentSessions"]> => {
-  try {
-    return mapAgentSessions(await agentApi.listSessions());
-  } catch (err) {
-    console.warn("Agent sessions unavailable:", err);
-    return [];
-  }
-};
-
-const applySlicePatch = async (
-  current: WorkspaceSnapshot,
-  slice: SnapshotSlice,
-): Promise<Partial<WorkspaceSnapshot>> => {
-  switch (slice) {
-    case "workspaces":
-      return { workspaces: await fetchWorkspaces() };
-    case "workspaceTree":
-      return { workspaceRoot: await fetchWorkspaceTree() };
-    case "projectsList":
-      return { projects: await fetchProjectsList(current.workspaces) };
-    case "assets":
-      return { assets: await fetchAllAssets(activeWorkspaceProjects(current)) };
-    case "agentSessions":
-      return { agentSessions: await fetchAgentSessionsList() };
-  }
-};
-
-const fetchSlices = async (
-  current: WorkspaceSnapshot,
-  slices: readonly SnapshotSlice[],
-  onProgress?: (next: WorkspaceSnapshot) => void,
-): Promise<WorkspaceSnapshot> => {
-  let next = current;
-  for (const slice of slices) {
-    try {
-      const patch = await applySlicePatch(next, slice);
-      next = { ...next, ...patch };
-      onProgress?.(next);
-    } catch (err) {
-      console.warn(`Snapshot slice "${slice}" failed:`, err);
-    }
-  }
-  return next;
-};
+const addTo = (previous: ReadonlySet<string>, value: string): ReadonlySet<string> =>
+  previous.has(value) ? previous : new Set(previous).add(value);
 
 export const useWorkspaceState = (activeView?: LeftPanelView): WorkspaceState => {
-  const [snapshot, setSnapshot] = useState<WorkspaceSnapshot>(buildEmptySnapshot());
-  const [status, setStatus] = useState<WorkspaceStatus>("idle");
-  const [error, setError] = useState<Error | null>(null);
-  const inflightRef = useRef(false);
-  const snapshotRef = useRef(snapshot);
-  snapshotRef.current = snapshot;
+  // Expansion is *state*, not an imperative fetch: adding an id mounts that
+  // node's query. Re-expanding is free, and a manual refresh no longer clears
+  // these (the old `refresh()` did, which is what collapsed the tree).
+  const [expandedProjects, setExpandedProjects] = useState<ReadonlySet<string>>(new Set());
+  const [expandedExperiments, setExpandedExperiments] = useState<ReadonlySet<string>>(new Set());
+  const [expandedDirectories, setExpandedDirectories] = useState<ReadonlySet<string>>(new Set());
 
-  // On-demand load tracking (entity tree). Cleared only on full refresh.
-  const projectsLoadedRef = useRef(new Set<string>());
-  const experimentsLoadedRef = useRef(new Set<string>());
-  const assetsLoadedForViewRef = useRef(false);
-  // Force re-render when expand sets flip without snapshot change shape.
-  const [, bump] = useState(0);
+  const expanded = useMemo(
+    () => ({
+      projects: expandedProjects,
+      experiments: expandedExperiments,
+      directories: expandedDirectories,
+    }),
+    [expandedProjects, expandedExperiments, expandedDirectories],
+  );
 
-  const runFetch = useCallback((slices: readonly SnapshotSlice[], silent: boolean): void => {
-    if (slices.length === 0) return;
-    if (inflightRef.current) return;
-    inflightRef.current = true;
-    if (!silent) setStatus("loading");
+  const {
+    snapshot,
+    isPending,
+    isFatal,
+    fatalError,
+    sliceErrors,
+    loadedProjects,
+    loadedExperiments,
+  } = useWorkspaceSnapshot(expanded);
 
-    fetchSlices(snapshotRef.current, slices, (partial) => {
-      snapshotRef.current = partial;
-      setSnapshot(partial);
-      if (!silent) setStatus("ready");
-    })
-      .then((nextSnapshot: WorkspaceSnapshot) => {
-        snapshotRef.current = nextSnapshot;
-        setSnapshot(nextSnapshot);
-        setStatus("ready");
-        setError(null);
-      })
-      .catch((err: Error) => {
-        setError(err);
-        setStatus((prev) => (prev === "ready" ? "ready" : "error"));
-      })
-      .finally(() => {
-        inflightRef.current = false;
-        pulseSync();
-      });
-  }, []);
+  // Workspace info runs in parallel with the root listing — the old bootstrap
+  // awaited it *before* listing, a pure waterfall (`toApiPath("")` needs no root).
+  const info = useWorkspaceInfoQuery();
+  const infoRoot = info.data?.root;
+  useEffect(() => {
+    if (infoRoot) setWorkspaceFsRoot(infoRoot);
+  }, [infoRoot]);
+
+  const { invalidateView } = useInvalidate();
 
   const refresh = useCallback((): void => {
-    projectsLoadedRef.current.clear();
-    experimentsLoadedRef.current.clear();
-    assetsLoadedForViewRef.current = false;
-    // Drop cached experiments/runs so counts fall back to server-side totals.
-    setSnapshot((prev) => {
-      const next = {
-        ...prev,
-        experiments: [],
-        runs: [],
-        workflows: [],
-        assets: [],
-      };
-      snapshotRef.current = next;
-      return next;
-    });
-    runFetch(REFRESH_SLICES, false);
-  }, [runFetch]);
+    void invalidateView(activeView ?? "workspace");
+  }, [invalidateView, activeView]);
 
   const expandDirectory = useCallback(async (dirPath: WorkspacePath): Promise<void> => {
-    const root = snapshotRef.current.workspaceRoot;
-    if (!root) return;
-    const node = findTreeNode(root, dirPath);
-    if (node?.kind !== "directory") return;
-    if (node.childrenLoaded) return;
-
-    try {
-      const fs = getWorkspaceFs();
-      const children = await fs.listdir(dirPath, { maxDepth: 1, includeCatalog: true });
-      const childNodes = direntsToTreeNodes(children);
-      const nextRoot = mergeTreeChildren(root, dirPath, childNodes);
-      const next = { ...snapshotRef.current, workspaceRoot: nextRoot };
-      snapshotRef.current = next;
-      setSnapshot(next);
-    } catch (err) {
-      console.warn(`expandDirectory(${dirPath}) failed:`, err);
-    }
+    setExpandedDirectories((previous) => addTo(previous, dirPath));
   }, []);
 
   const expandProject = useCallback(async (projectId: string): Promise<void> => {
-    if (projectsLoadedRef.current.has(projectId)) return;
-    projectsLoadedRef.current.add(projectId);
-    try {
-      const raw = await workspaceApi.getExperiments(projectId);
-      const mapped = mapExperiments(projectId, raw);
-      // Workflows for just these experiments (IR if present on the wire).
-      const workflows = mapWorkflows(mapped, raw);
-      setSnapshot((prev) => {
-        const otherExps = prev.experiments.filter((e) => e.projectId !== projectId);
-        const otherWfs = prev.workflows.filter((w) => w.projectId !== projectId);
-        const next: WorkspaceSnapshot = {
-          ...prev,
-          experiments: [...otherExps, ...mapped],
-          workflows: [...otherWfs, ...workflows],
-        };
-        snapshotRef.current = next;
-        return next;
-      });
-      bump((n) => n + 1);
-    } catch (err) {
-      projectsLoadedRef.current.delete(projectId);
-      console.warn(`expandProject(${projectId}) failed:`, err);
-    }
+    setExpandedProjects((previous) => addTo(previous, projectId));
   }, []);
 
   const expandExperiment = useCallback(
     async (projectId: string, experimentId: string): Promise<void> => {
-      const key = expKey(projectId, experimentId);
-      if (experimentsLoadedRef.current.has(key)) return;
-      experimentsLoadedRef.current.add(key);
-      try {
-        const raw = await workspaceApi.getRuns(projectId, experimentId);
-        const mapped = mapRuns(projectId, experimentId, raw);
-        setSnapshot((prev) => {
-          const other = prev.runs.filter(
-            (r) => !(r.projectId === projectId && r.experimentId === experimentId),
-          );
-          const next: WorkspaceSnapshot = {
-            ...prev,
-            runs: [...other, ...mapped],
-          };
-          snapshotRef.current = next;
-          return next;
-        });
-        bump((n) => n + 1);
-      } catch (err) {
-        experimentsLoadedRef.current.delete(key);
-        console.warn(`expandExperiment(${key}) failed:`, err);
-      }
+      setExpandedExperiments((previous) => addTo(previous, expKey(projectId, experimentId)));
     },
     [],
   );
 
   const isProjectExpanded = useCallback(
-    (projectId: string): boolean => projectsLoadedRef.current.has(projectId),
-    // `bump` re-renders consumers; the callback reads the live ref.
-    [],
+    (projectId: string): boolean => loadedProjects.has(projectId),
+    [loadedProjects],
   );
 
   const isExperimentExpanded = useCallback(
     (projectId: string, experimentId: string): boolean =>
-      experimentsLoadedRef.current.has(expKey(projectId, experimentId)),
-    [],
+      loadedExperiments.has(expKey(projectId, experimentId)),
+    [loadedExperiments],
   );
 
-  // Bootstrap once — shallow only.
-  useEffect(() => {
-    runFetch(BOOTSTRAP_SLICES, false);
-  }, [runFetch]);
-
-  // Assets: load once when entering the asset view (not on every poll).
-  useEffect(() => {
-    if (activeView !== "asset") return;
-    if (assetsLoadedForViewRef.current) return;
-    assetsLoadedForViewRef.current = true;
-    runFetch(["assets"], true);
-  }, [activeView, runFetch]);
-
-  // Optional view-scoped polling (currently all empty — on-demand only).
-  useEffect(() => {
-    if (activeView === undefined) return;
-    const slices = VIEW_POLL_SLICES[activeView];
-    if (slices.length === 0) return;
-    // Reserved for future light polls; intentionally no default interval.
-  }, [activeView]);
+  // Only the first load is "loading": a background revalidation keeps the
+  // current data on screen, and the status strip reports it via `useIsFetching`
+  // in `App` (scoped to the active view) rather than blanking the shell.
+  const status: WorkspaceStatus = isFatal ? "error" : isPending ? "loading" : "ready";
 
   return {
     snapshot,
     status,
-    error,
+    // Only a total bootstrap failure is fatal (unreachable backend — `App`
+    // rethrows it into the route boundary). A single failed slice surfaces
+    // through `sliceErrors` with its own retry instead of blanking the app.
+    error: fatalError,
+    sliceErrors: sliceErrors ?? EMPTY_SLICE_ERRORS,
     refresh,
     expandDirectory,
     expandProject,

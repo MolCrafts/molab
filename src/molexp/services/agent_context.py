@@ -203,8 +203,12 @@ def _run_sections(run: Run, experiment_id: str, project_id: str) -> list[str]:
 
     from molexp.workspace.assets import scan
 
+    # A run's products live in its own manifest: scoping the scan to the run
+    # reads one ``assets.json`` instead of walking every scope in the workspace.
     root = run.experiment.project.workspace.root
-    artifacts = scan.scan_assets(root, producer_run=run.id, limit=_MAX_LIST_ROWS + 1)
+    artifacts = scan.scan_assets(
+        root, scope=run.scope, producer_run=run.id, limit=_MAX_LIST_ROWS + 1, fs=run.fs
+    )
     if artifacts:
         rows = [
             # Base ``Asset`` deliberately declares no ``kind`` — concrete

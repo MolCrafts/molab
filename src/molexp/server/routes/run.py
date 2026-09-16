@@ -2,14 +2,15 @@
 
 from __future__ import annotations
 
-import io
 import json
 from datetime import datetime
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
+from molexp.fs.window import MAX_TEXT_WINDOW_BYTES, TextWindow, read_text_window
 from molexp.plugins.submit_molq.cancel import try_cancel
 from molexp.plugins.submit_molq.submit import SubmitHandler
 from molexp.workflow import (
@@ -42,6 +43,8 @@ from molexp.workspace.targets import get_target
 
 from ..dependencies import get_workspace
 from ..exceptions import InvalidStatusError, RunNotFoundError
+from ..executors import run_heavy
+from ..mutations import after_mutation
 from ..schemas import (
     LammpsLogResponse,
     LammpsThermoStage,
@@ -66,6 +69,38 @@ router = APIRouter(
     prefix="/projects/{project_id}/experiments/{experiment_id}/runs",
     tags=["runs"],
 )
+
+DEFAULT_LOG_WINDOW_BYTES = 256_000
+"""Default log tail — a few screenfuls, which is what a viewer actually shows."""
+
+DEFAULT_METRICS_SCAN_BYTES = 8 * 1024 * 1024
+"""How much of ``metrics.jsonl`` one request may scan before reporting truncation."""
+
+LAMMPS_LOG_MAX_BYTES = 32 * 1024 * 1024
+"""Parse ceiling for a LAMMPS log; above this only the tail is parsed."""
+
+EXECUTION_JSON_INLINE_BYTES = 8 * 1024 * 1024
+"""``workflow.json`` up to this size is returned whole."""
+
+EXECUTION_JSON_MAX_BYTES = 64 * 1024 * 1024
+"""``workflow.json`` above this is refused (413) rather than parsed."""
+
+EXPORT_MAX_BYTES = 2 * 1024 * 1024 * 1024
+"""Uncompressed run size above which ``/export`` refuses rather than streams."""
+
+DEFAULT_RUN_FILES_DEPTH = 6
+"""Run-tree walk depth.
+
+Deep enough for every path in the documented run layout — ``executions/<id>/
+jobs/<uuid>/<file>`` is the deepest at 5 — because the UI feeds this tree to
+plugin discovery, and a shallower default would make files silently
+undiscoverable rather than merely unlisted.
+"""
+
+DEFAULT_DIR_ENTRIES = 2000
+"""Children returned per directory before the node reports ``truncated``."""
+
+MAX_DIR_ENTRIES = 10000
 
 
 def _get_experiment(workspace, project_id: str, experiment_id: str):  # noqa: ANN001, ANN202
@@ -231,24 +266,73 @@ def create_run(
     return RunResponse.from_model(run)
 
 
-def _read_execution_logs(run, execution_id: str) -> RunLogsResponse:  # noqa: ANN001
-    exec_dir = Path(run.run_dir) / "executions" / execution_id
-    stdout: str | None = None
-    stderr: str | None = None
-    out_file = exec_dir / "stdout.log"
-    err_file = exec_dir / "stderr.log"
-    if out_file.exists():
-        stdout = out_file.read_text(errors="replace")
-    if err_file.exists():
-        stderr = err_file.read_text(errors="replace")
+def _resolve_under_run(run, rel: str) -> str:  # noqa: ANN001
+    """Resolve *rel* inside the run directory, refusing anything that escapes.
+
+    Goes through ``run.fs`` rather than ``pathlib`` so remote-backed runs
+    resolve on the filesystem that actually holds them. Containment is checked
+    on the resolved paths, so ``..`` and symlinks out of the tree are caught
+    rather than merely discouraged.
+    """
+    fs = run.fs
+    run_dir = str(run.run_dir)
+    target = fs.join(run_dir, rel)
+    try:
+        real_target = fs.resolve(target)
+        real_root = fs.resolve(run_dir)
+    except OSError:
+        real_target, real_root = target, run_dir
+    if real_target != real_root and not real_target.startswith(real_root.rstrip("/") + "/"):
+        raise HTTPException(status_code=400, detail="path escapes run directory")
+    return real_target
+
+
+def _log_window(fs, path: str, *, max_bytes: int, since: int | None) -> TextWindow | None:  # noqa: ANN001
+    """Tail window over a log file, or ``None`` when it does not exist.
+
+    One ``stat`` plus one bounded range read, so a 10 GB stdout costs the same
+    as a 10 KB one.
+    """
+    try:
+        return read_text_window(fs, path, max_bytes=max_bytes, mode="tail", since_offset=since)
+    except (FileNotFoundError, NotADirectoryError, IsADirectoryError, OSError):
+        return None
+
+
+def _read_execution_logs(
+    run,  # noqa: ANN001
+    execution_id: str,
+    *,
+    max_bytes: int = DEFAULT_LOG_WINDOW_BYTES,
+    since_stdout: int | None = None,
+    since_stderr: int | None = None,
+) -> RunLogsResponse:
+    fs = run.fs
+    exec_dir = fs.join(str(run.run_dir), "executions", execution_id)
+    out = _log_window(fs, fs.join(exec_dir, "stdout.log"), max_bytes=max_bytes, since=since_stdout)
+    err = _log_window(fs, fs.join(exec_dir, "stderr.log"), max_bytes=max_bytes, since=since_stderr)
     # Fall back to the workflow runtime log when stdout wasn't captured (e.g. an
     # in-process / non-molq execution writes only ``logs/run.log``), so the Logs
     # panel still shows what the run did rather than "No stdout captured."
-    if not stdout:
-        run_log = exec_dir / "logs" / "run.log"
-        if run_log.exists():
-            stdout = run_log.read_text(errors="replace")
-    return RunLogsResponse(execution_id=execution_id, stdout=stdout, stderr=stderr)
+    if out is None or not out.text:
+        fallback = _log_window(
+            fs, fs.join(exec_dir, "logs", "run.log"), max_bytes=max_bytes, since=since_stdout
+        )
+        if fallback is not None:
+            out = fallback
+    return RunLogsResponse(
+        execution_id=execution_id,
+        stdout=out.text if out is not None else None,
+        stderr=err.text if err is not None else None,
+        stdout_offset=out.start if out is not None else None,
+        stdout_end=out.end if out is not None else None,
+        stdout_total=out.total_bytes if out is not None else None,
+        stdout_truncated=out.truncated if out is not None else False,
+        stderr_offset=err.start if err is not None else None,
+        stderr_end=err.end if err is not None else None,
+        stderr_total=err.total_bytes if err is not None else None,
+        stderr_truncated=err.truncated if err is not None else False,
+    )
 
 
 @router.get("/{run_id}/logs", response_model=RunLogsResponse)
@@ -256,9 +340,16 @@ def get_run_logs(
     project_id: str,
     experiment_id: str,
     run_id: str,
+    max_bytes: int = Query(default=DEFAULT_LOG_WINDOW_BYTES, ge=1, le=MAX_TEXT_WINDOW_BYTES),
+    since_stdout: int | None = Query(default=None, ge=0),
+    since_stderr: int | None = Query(default=None, ge=0),
     workspace=Depends(get_workspace),  # noqa: ANN001
 ) -> RunLogsResponse:
-    """Return stdout/stderr for the most recent execution of a run."""
+    """Return a stdout/stderr tail window for the most recent execution.
+
+    Poll incrementally by passing the previous response's ``stdout_end`` /
+    ``stderr_end`` back as ``since_stdout`` / ``since_stderr``.
+    """
     experiment = _get_experiment(workspace, project_id, experiment_id)
     if not experiment:
         raise RunNotFoundError(project_id, experiment_id, run_id)
@@ -269,7 +360,13 @@ def get_run_logs(
     history = run.execution_history
     if not history:
         return RunLogsResponse()
-    return _read_execution_logs(run, history[-1].execution_id)
+    return _read_execution_logs(
+        run,
+        history[-1].execution_id,
+        max_bytes=max_bytes,
+        since_stdout=since_stdout,
+        since_stderr=since_stderr,
+    )
 
 
 @router.get(
@@ -281,16 +378,25 @@ def get_run_execution_logs(
     experiment_id: str,
     run_id: str,
     execution_id: str,
+    max_bytes: int = Query(default=DEFAULT_LOG_WINDOW_BYTES, ge=1, le=MAX_TEXT_WINDOW_BYTES),
+    since_stdout: int | None = Query(default=None, ge=0),
+    since_stderr: int | None = Query(default=None, ge=0),
     workspace=Depends(get_workspace),  # noqa: ANN001
 ) -> RunLogsResponse:
-    """Return stdout/stderr for a specific execution attempt."""
+    """Return a stdout/stderr tail window for a specific execution attempt."""
     experiment = _get_experiment(workspace, project_id, experiment_id)
     if not experiment:
         raise RunNotFoundError(project_id, experiment_id, run_id)
     run = _get_run_or_none(experiment, run_id)
     if not run:
         raise RunNotFoundError(project_id, experiment_id, run_id)
-    return _read_execution_logs(run, execution_id)
+    return _read_execution_logs(
+        run,
+        execution_id,
+        max_bytes=max_bytes,
+        since_stdout=since_stdout,
+        since_stderr=since_stderr,
+    )
 
 
 @router.get("/{run_id}/metrics", response_model=RunMetricsResponse)
@@ -300,11 +406,20 @@ def get_run_metrics(
     run_id: str,
     metric_type: str | None = Query(default=None, alias="type"),
     key: str | None = None,
-    since_line: int = Query(default=0, ge=0),
+    since_line: int = Query(default=0, ge=0, description="Legacy cursor; prefer since_offset."),
+    since_offset: int | None = Query(
+        default=None, ge=0, description="Byte cursor from a previous nextOffset (O(1) resume)."
+    ),
+    max_scan_bytes: int = Query(default=DEFAULT_METRICS_SCAN_BYTES, ge=1024, le=64 * 1024 * 1024),
     limit: int = Query(default=5000, ge=1, le=50000),
     workspace=Depends(get_workspace),  # noqa: ANN001
 ) -> RunMetricsResponse:
-    """Return run-local metrics from ``metrics/metrics.jsonl``."""
+    """Return run-local metrics from ``metrics/metrics.jsonl``.
+
+    A live chart should follow by passing the previous ``nextOffset`` back as
+    ``since_offset``: that seeks straight to the appended bytes instead of
+    re-reading the stream from line 0 on every poll.
+    """
     experiment = _get_experiment(workspace, project_id, experiment_id)
     if not experiment:
         raise RunNotFoundError(project_id, experiment_id, run_id)
@@ -317,16 +432,20 @@ def get_run_metrics(
         metric_type=metric_type,
         key=key,
         since_line=since_line,
+        since_offset=since_offset,
+        max_scan_bytes=max_scan_bytes,
         limit=limit,
     )
     return RunMetricsResponse(
         nextLine=result.next_line,
+        nextOffset=result.next_offset,
         records=result.records,
         # ``entry`` is ``dict[str, JSONValue]``; ``model_validate`` runs
         # pydantic's per-field coercion / validation rather than the
         # static-typed positional constructor.
         series=[MetricSeriesResponse.model_validate(entry) for entry in result.series],
         parseErrors=result.parse_errors,
+        truncated=result.truncated,
     )
 
 
@@ -336,9 +455,17 @@ def get_run_file_text(
     experiment_id: str,
     run_id: str,
     path: str = Query(..., description="Relative path under run_dir"),
+    mode: Literal["head", "tail"] = Query(default="head"),
+    max_bytes: int = Query(default=MAX_TEXT_WINDOW_BYTES, ge=1, le=MAX_TEXT_WINDOW_BYTES),
+    since_offset: int | None = Query(default=None, ge=0),
     workspace=Depends(get_workspace),  # noqa: ANN001
 ) -> RunFileTextResponse:
-    """Return the raw text content of a file under the run directory."""
+    """Return a bounded text window over a file under the run directory.
+
+    Defaults to the *head* — a source or config viewer reads from the top —
+    and to the largest window the server will emit, so small files come back
+    whole exactly as before.  Page with ``since_offset=end``.
+    """
     experiment = _get_experiment(workspace, project_id, experiment_id)
     if not experiment:
         raise RunNotFoundError(project_id, experiment_id, run_id)
@@ -346,24 +473,38 @@ def get_run_file_text(
     if not run:
         raise RunNotFoundError(project_id, experiment_id, run_id)
 
-    run_dir = Path(run.run_dir)
-    target = (run_dir / path).resolve()
-    try:
-        target.relative_to(run_dir.resolve())
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail="path escapes run directory") from exc
-    if not target.is_file():
+    target = _resolve_under_run(run, path)
+    fs = run.fs
+    if not fs.is_file(target):
         raise HTTPException(status_code=404, detail=f"file not found: {path}")
 
     try:
-        content = target.read_text(encoding="utf-8")
+        window = read_text_window(
+            fs, target, max_bytes=max_bytes, mode=mode, since_offset=since_offset, errors="strict"
+        )
     except UnicodeDecodeError as exc:
-        raise HTTPException(status_code=415, detail="file is not text-decodable as UTF-8") from exc
-    return RunFileTextResponse(path=path, content=content, size=target.stat().st_size)
+        # A *partial* window may legitimately split a multi-byte character at
+        # its edge, so retry leniently; a window covering the whole file that
+        # still fails is genuinely not text, which stays a 415 as before.
+        window = read_text_window(
+            fs, target, max_bytes=max_bytes, mode=mode, since_offset=since_offset
+        )
+        if not window.truncated:
+            raise HTTPException(
+                status_code=415, detail="file is not text-decodable as UTF-8"
+            ) from exc
+    return RunFileTextResponse(
+        path=path,
+        content=window.text,
+        size=window.total_bytes,
+        offset=window.start,
+        end=window.end,
+        truncated=window.truncated,
+    )
 
 
 @router.get("/{run_id}/lammps-log", response_model=LammpsLogResponse)
-def get_run_lammps_log(
+async def get_run_lammps_log(
     project_id: str,
     experiment_id: str,
     run_id: str,
@@ -375,9 +516,13 @@ def get_run_lammps_log(
     Inlined parser — ``molpy.io`` does not export a multi-stage log
     reader, so the route owns this lightweight regex-based parse to
     avoid coupling the API surface to a transient molpy refactor.
-    """
-    import re
 
+    A production MD log can be gigabytes; above
+    :data:`LAMMPS_LOG_MAX_BYTES` only the tail is parsed (the latest stages,
+    which is what a progress view wants) and ``truncated`` is set. Reading
+    and regexing the file is CPU- and IO-bound, so it runs on the heavy pool
+    rather than the shared request threads.
+    """
     experiment = _get_experiment(workspace, project_id, experiment_id)
     if not experiment:
         raise RunNotFoundError(project_id, experiment_id, run_id)
@@ -385,17 +530,24 @@ def get_run_lammps_log(
     if not run:
         raise RunNotFoundError(project_id, experiment_id, run_id)
 
-    run_dir = Path(run.run_dir)
-    target = (run_dir / path).resolve()
-    try:
-        target.relative_to(run_dir.resolve())
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail="path escapes run directory") from exc
-    if not target.is_file():
+    target = _resolve_under_run(run, path)
+    fs = run.fs
+    if not fs.is_file(target):
         raise HTTPException(status_code=404, detail=f"log file not found: {path}")
 
-    text = target.read_text(encoding="utf-8", errors="replace")
-    version = text.split("\n", 1)[0].strip() if text else None
+    return await run_heavy(_parse_lammps_log, fs, target, path)
+
+
+def _parse_lammps_log(fs, target: str, path: str) -> LammpsLogResponse:  # noqa: ANN001
+    """Read (at most the tail of) a LAMMPS log and extract its thermo stages."""
+    import re
+
+    window = read_text_window(
+        fs, target, max_bytes=LAMMPS_LOG_MAX_BYTES, mode="tail", line_aligned=True
+    )
+    text = window.text
+    # Line 1 carries the LAMMPS banner; a tail window never contains it.
+    version = text.split("\n", 1)[0].strip() if text and not window.truncated else None
 
     stages: list[LammpsThermoStage] = []
     for block in re.findall(
@@ -423,7 +575,46 @@ def get_run_lammps_log(
         version=version,
         nStages=len(stages),
         stages=stages,
+        truncated=window.truncated,
+        bytesParsed=window.end - window.start,
     )
+
+
+_NODE_SUMMARY_KEYS = (
+    "task_id",
+    "id",
+    "name",
+    "status",
+    "snapshot_key",
+    "outputs_lossy",
+    "started_at",
+    "finished_at",
+    "error",
+)
+
+
+def _summarize_workflow_doc(data: dict) -> dict:
+    """Drop per-node ``outputs`` while keeping everything a graph view renders.
+
+    What makes a ``workflow.json`` huge is the persisted task outputs, not the
+    graph: status, snapshot key, timestamps and links are all small. Summarised
+    nodes keep those and lose only the payload, so the Executions panel still
+    draws the graph while the response stays bounded.
+    """
+    if not isinstance(data, dict):
+        return data
+    summary = {k: v for k, v in data.items() if k != "task_configs"}
+    nodes: list[dict] = []
+    for task in data.get("task_configs", []) or []:
+        if not isinstance(task, dict):
+            continue
+        node = {k: task[k] for k in _NODE_SUMMARY_KEYS if k in task}
+        if "outputs" in task:
+            # Say the payload existed rather than silently implying it did not.
+            node["outputs_omitted"] = True
+        nodes.append(node)
+    summary["task_configs"] = nodes
+    return summary
 
 
 @router.get("/{run_id}/execution", response_model=RunExecutionResponse)
@@ -451,11 +642,29 @@ def get_run_execution(
     if selected_id not in known_ids:
         raise HTTPException(status_code=404, detail=f"Execution {selected_id!r} not found")
 
-    wf_file = Path(run.run_dir) / "executions" / selected_id / "workflow.json"
-    if not wf_file.exists():
+    fs = run.fs
+    wf_file = fs.join(str(run.run_dir), "executions", selected_id, "workflow.json")
+    try:
+        size = fs.stat(wf_file).size
+    except (FileNotFoundError, NotADirectoryError, OSError):
         return RunExecutionResponse(execution_id=selected_id)
 
-    data = json.loads(wf_file.read_text())
+    if size > EXECUTION_JSON_MAX_BYTES:
+        # Parsing it would cost more memory than the response is worth; say so
+        # rather than melting the worker.
+        raise HTTPException(
+            status_code=413,
+            detail=(
+                f"workflow.json is {size} bytes, above the "
+                f"{EXECUTION_JSON_MAX_BYTES}-byte inspection ceiling"
+            ),
+        )
+
+    data = json.loads(fs.read_text(wf_file))
+    truncated = False
+    if size > EXECUTION_JSON_INLINE_BYTES:
+        data = _summarize_workflow_doc(data)
+        truncated = True
     # Status-vocabulary migration (run-recovery): the workflow-level result
     # status is now "succeeded"; documents persisted before the migration
     # carry the legacy "completed" and are normalized on read.
@@ -464,14 +673,18 @@ def get_run_execution(
         execution_id=data.get("execution_id", selected_id),
         status="succeeded" if raw_status == "completed" else raw_status,
         workflow=data,
+        workflowTruncated=truncated,
+        workflowBytes=size,
     )
 
 
 @router.get("/{run_id}/files", response_model=RunFilesResponse)
-def get_run_files(
+async def get_run_files(
     project_id: str,
     experiment_id: str,
     run_id: str,
+    max_depth: int = Query(default=DEFAULT_RUN_FILES_DEPTH, ge=0, le=8),
+    max_entries: int = Query(default=DEFAULT_DIR_ENTRIES, ge=1, le=MAX_DIR_ENTRIES),
     workspace=Depends(get_workspace),  # noqa: ANN001
 ) -> RunFilesResponse:
     """Return the on-disk file tree for a run, enriched with catalog metadata.
@@ -479,59 +692,99 @@ def get_run_files(
     Files registered in the asset catalog (artifacts, logs, checkpoints,
     error traces) carry ``assetId``, ``assetKind``, and ``taskId`` so the
     UI can render lineage chips inline.
+
+    The walk is bounded in both directions: ``max_depth`` levels down, and
+    ``max_entries`` children per directory. A run that wrote 100k frames into
+    one directory therefore costs a bounded response; the containing folder
+    node reports ``entryCount`` and ``truncated`` so the UI can say so.
     """
-    experiment = _get_experiment(workspace, project_id, experiment_id)
-    if not experiment:
-        raise RunNotFoundError(project_id, experiment_id, run_id)
-    run = _get_run_or_none(experiment, run_id)
-    if not run:
-        raise RunNotFoundError(project_id, experiment_id, run_id)
+    # The run directory can hold a very large tree, so the walk runs on
+    # the bounded heavy pool: it never occupies the shared request
+    # threads that cheap reads and /api/health use.
 
-    run_dir = Path(run.run_dir)
-    from molexp.workspace.assets import AssetScope, scan
+    def _work() -> RunFilesResponse:
+        experiment = _get_experiment(workspace, project_id, experiment_id)
+        if not experiment:
+            raise RunNotFoundError(project_id, experiment_id, run_id)
+        run = _get_run_or_none(experiment, run_id)
+        if not run:
+            raise RunNotFoundError(project_id, experiment_id, run_id)
 
-    run_scope = AssetScope(kind="run", ids=(project_id, experiment_id, run_id))
-    scoped_assets = scan.scan_assets(workspace.root, scope=run_scope)
-    asset_index: dict[str, tuple[str, str, str | None]] = {}
-    for a in scoped_assets:
-        rel = str(a.path)
-        asset_index[rel] = (
-            a.asset_id,
-            a.kind,  # type: ignore[attr-defined]
-            a.producer.task_id if a.producer else None,
+        run_dir = Path(run.run_dir)
+        fs = run.fs
+        from molexp.workspace.assets import AssetScope, scan
+
+        run_scope = AssetScope(kind="run", ids=(project_id, experiment_id, run_id))
+        scoped_assets = scan.scan_assets(workspace.root, scope=run_scope)
+        asset_index: dict[str, tuple[str, str, str | None]] = {}
+        for a in scoped_assets:
+            rel = str(a.path)
+            asset_index[rel] = (
+                a.asset_id,
+                a.kind,  # type: ignore[attr-defined]
+                a.producer.task_id if a.producer else None,
+            )
+
+        def _entries(dir_path: Path) -> list[tuple[str, bool, int, float]]:
+            """``(name, is_dir, size, mtime)`` per child — one scandir, no re-stat."""
+            out: list[tuple[str, bool, int, float]] = []
+            try:
+                for entry in fs.scandir(str(dir_path)):
+                    out.append((entry.name, entry.is_dir, entry.size, entry.mtime))
+            except (FileNotFoundError, NotADirectoryError, OSError):
+                return []
+            # Dirs first, then files; stable by name within each group.
+            out.sort(key=lambda t: (not t[1], t[0]))
+            return out
+
+        def build(
+            node_path: Path, *, is_dir: bool, size: int, mtime: float, depth: int
+        ) -> RunFileNode:
+            rel = node_path.relative_to(run_dir).as_posix() if node_path != run_dir else ""
+            info = asset_index.get(rel)
+            node = RunFileNode(
+                name=node_path.name or run_dir.name,
+                relPath=rel,
+                type="folder" if is_dir else "file",
+                size=None if is_dir else size,
+                modified=mtime,
+                assetId=info[0] if info else None,
+                assetKind=info[1] if info else None,
+                taskId=info[2] if info else None,
+            )
+            if not is_dir:
+                return node
+            children_meta = _entries(node_path)
+            node.entryCount = len(children_meta)
+            if depth >= max_depth:
+                # Stop here, but say the folder has contents so the UI can
+                # offer to go deeper rather than showing it as empty.
+                node.truncated = len(children_meta) > 0
+                return node
+            shown = children_meta[:max_entries]
+            node.truncated = len(shown) < len(children_meta)
+            node.children = [
+                build(
+                    node_path / name, is_dir=child_is_dir, size=csize, mtime=cmtime, depth=depth + 1
+                )
+                for name, child_is_dir, csize, cmtime in shown
+            ]
+            return node
+
+        nodes: list[RunFileNode] = []
+        root_meta = _entries(run_dir)
+        for name, child_is_dir, csize, cmtime in root_meta[:max_entries]:
+            nodes.append(
+                build(run_dir / name, is_dir=child_is_dir, size=csize, mtime=cmtime, depth=1)
+            )
+
+        return RunFilesResponse(
+            runId=run_id,
+            runDir=str(run_dir.relative_to(Path(workspace.root))),
+            nodes=nodes,
         )
 
-    def build(node_path: Path) -> RunFileNode:
-        rel = node_path.relative_to(run_dir).as_posix() if node_path != run_dir else ""
-        is_file = node_path.is_file()
-        info = asset_index.get(rel)
-        node = RunFileNode(
-            name=node_path.name or run_dir.name,
-            relPath=rel,
-            type="file" if is_file else "folder",
-            size=node_path.stat().st_size if is_file else None,
-            modified=node_path.stat().st_mtime,
-            assetId=info[0] if info else None,
-            assetKind=info[1] if info else None,
-            taskId=info[2] if info else None,
-        )
-        if not is_file and node_path.exists():
-            children: list[RunFileNode] = []
-            for child in sorted(node_path.iterdir(), key=lambda p: (p.is_file(), p.name)):
-                children.append(build(child))
-            node.children = children
-        return node
-
-    nodes: list[RunFileNode] = []
-    if run_dir.exists():
-        for child in sorted(run_dir.iterdir(), key=lambda p: (p.is_file(), p.name)):
-            nodes.append(build(child))
-
-    return RunFilesResponse(
-        runId=run_id,
-        runDir=str(run_dir.relative_to(Path(workspace.root))),
-        nodes=nodes,
-    )
+    return await run_heavy(_work)
 
 
 def _resumable_execution_id(run) -> str | None:  # noqa: ANN001
@@ -648,6 +901,14 @@ def start_run(
             run._update_metadata(workflow_snapshot=synthesized)
     execution_id = make_execution_id(run.id, Path(run.run_dir))
     _dispatch_to_molq(target, run, execution_id=execution_id)
+    after_mutation(
+        workspace,
+        "run",
+        ref=run.id,
+        project_id=project_id,
+        experiment_id=experiment_id,
+        run_id=run.id,
+    )
     return RunContinueResponse(
         runId=run.id,
         executionId=execution_id,
@@ -684,6 +945,14 @@ def resume_run(
 
     execution_id = _resumable_execution_id(run) or make_execution_id(run.id, Path(run.run_dir))
     _dispatch_continuation(workspace, run, execution_id)
+    after_mutation(
+        workspace,
+        "run",
+        ref=run.id,
+        project_id=project_id,
+        experiment_id=experiment_id,
+        run_id=run.id,
+    )
     return RunContinueResponse(
         runId=run.id,
         executionId=execution_id,
@@ -732,6 +1001,14 @@ def rerun_run(
     if fresh:
         request_fresh_execution(str(run.run_dir), execution_id)
     _dispatch_continuation(workspace, run, execution_id)
+    after_mutation(
+        workspace,
+        "run",
+        ref=run.id,
+        project_id=project_id,
+        experiment_id=experiment_id,
+        run_id=run.id,
+    )
     return RunContinueResponse(
         runId=run.id,
         executionId=execution_id,
@@ -775,17 +1052,20 @@ def cancel_run(
         raise RunNotFoundError(project_id, experiment_id, run_id)
 
     warning = try_cancel(run)
-    if warning is None:
-        return RunActionResponse(
-            runId=run.id,
-            status=run.status,
-            message="Run cancelled",
-        )
-    run.cancel()
+    if warning is not None:
+        run.cancel()
+    after_mutation(
+        workspace,
+        "run",
+        ref=run.id,
+        project_id=project_id,
+        experiment_id=experiment_id,
+        run_id=run.id,
+    )
     return RunActionResponse(
         runId=run.id,
         status=run.status,
-        message=warning,
+        message="Run cancelled" if warning is None else warning,
     )
 
 
@@ -821,13 +1101,19 @@ def get_run_events(
 
 
 @router.get("/{run_id}/export")
-def export_run(
+async def export_run(
     project_id: str,
     experiment_id: str,
     run_id: str,
     workspace=Depends(get_workspace),  # noqa: ANN001
 ) -> StreamingResponse:
-    """Stream a zip archive of the run directory (artifacts, logs, metadata)."""
+    """Stream a zip archive of the run directory (artifacts, logs, metadata).
+
+    Genuinely streamed: the archive is produced chunk by chunk, so exporting a
+    run with gigabytes of trajectories never sizes the server's memory to the
+    run. Above :data:`EXPORT_MAX_BYTES` the request is refused outright rather
+    than tying up a worker for minutes.
+    """
     experiment = _get_experiment(workspace, project_id, experiment_id)
     if not experiment:
         raise RunNotFoundError(project_id, experiment_id, run_id)
@@ -835,30 +1121,43 @@ def export_run(
     if not run:
         raise RunNotFoundError(project_id, experiment_id, run_id)
 
-    from molexp.workspace.archive import archive_folder_zip
+    from molexp.workspace.archive import archive_folder_zip_iter, archive_size
 
-    # One zip writer for CLI/agent/server (agent-record-export-03/07).
-    payload = archive_folder_zip(run)
-    buffer = io.BytesIO(payload)
-    buffer.seek(0)
+    # Walking for the size check is itself filesystem-bound, so it goes to the
+    # heavy pool; the streaming body then runs outside the request handler.
+    total = await run_heavy(archive_size, run)
+    if total > EXPORT_MAX_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail={
+                "detail": (f"run export is {total} bytes, above the {EXPORT_MAX_BYTES}-byte limit"),
+                "totalBytes": total,
+            },
+        )
 
     filename = f"run-{run.id}.zip"
+    # One zip writer for CLI/agent/server (agent-record-export-03/07).
     return StreamingResponse(
-        buffer,
+        archive_folder_zip_iter(run),
         media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 
 @router.post("/{run_id}/harvest")
-def harvest_run_route(
+async def harvest_run_route(
     project_id: str,
     experiment_id: str,
     run_id: str,
     body: RunHarvestRequest,
     workspace=Depends(get_workspace),  # noqa: ANN001
 ) -> dict[str, str]:
-    """Harvest a terminal run into a sourced KnowledgeItem under its experiment."""
+    """Harvest a terminal run into a sourced KnowledgeItem under its experiment.
+
+    Harvest reads the run's outputs and writes a Concept, so it is
+    filesystem-bound; it runs on the heavy pool to keep the shared request
+    threads free for cheap reads.
+    """
     from molexp.workspace import harvest_run as harvest_run_core
 
     experiment = _get_experiment(workspace, project_id, experiment_id)
@@ -867,23 +1166,27 @@ def harvest_run_route(
     run = _get_run_or_none(experiment, run_id)
     if not run:
         raise RunNotFoundError(project_id, experiment_id, run_id)
-    try:
-        item = harvest_run_core(
-            run,
-            kind=body.kind,
-            narrative=body.narrative,
-            created_by=body.created_by,
-            results=body.results,
-            name=body.name,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=str(exc)) from exc
-    # Bundle-relative path so the UI can open Knowledge without stripping roots.
-    try:
-        rel = item.resolve().relative_to(workspace.resolve()).as_posix()
-    except Exception:
-        rel = item.name
-    return {"name": item.name, "path": rel}
+
+    def _work() -> dict[str, str]:
+        try:
+            item = harvest_run_core(
+                run,
+                kind=body.kind,
+                narrative=body.narrative,
+                created_by=body.created_by,
+                results=body.results,
+                name=body.name,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        # Bundle-relative path so the UI can open Knowledge without stripping roots.
+        try:
+            rel = item.resolve().relative_to(workspace.resolve()).as_posix()
+        except Exception:
+            rel = item.name
+        return {"name": item.name, "path": rel}
+
+    return await run_heavy(_work)
 
 
 @router.patch("/{run_id}/status", response_model=RunStatusResponse)

@@ -11,6 +11,7 @@ import { CheckCircle2, ChevronRight, Pencil, ShieldQuestion, XCircle } from "luc
 import { type JSX, useCallback, useEffect, useMemo, useState } from "react";
 import type { PendingApprovalItem } from "@/api/generated/models/PendingApprovalItem";
 import { ApprovalsService } from "@/api/generated/services/ApprovalsService";
+import { useApprovalsQuery, useApprovalsStream } from "@/app/state/queries";
 import { MarkdownContent } from "@/components/ui/markdown";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -31,41 +32,28 @@ const useApprovalsInbox = (): {
   streamError: boolean;
   refetch: () => Promise<void>;
 } => {
-  const [items, setItems] = useState<PendingApprovalItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [streamError, setStreamError] = useState(false);
+  // One shared key + one ref-counted stream: the bell and this inbox can both
+  // mount and still cost a single request and a single connection.
+  const query = useApprovalsQuery();
+  const { streamError } = useApprovalsStream();
 
   const refetch = useCallback(async () => {
-    setLoading(true);
-    try {
-      const response = await ApprovalsService.listPendingApprovalsApiApprovalsGet();
-      setItems(response.items);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load pending approvals.");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+    await query.refetch();
+  }, [query]);
 
-  useEffect(() => {
-    void refetch();
-    const source = new EventSource("/api/approvals/events");
-    const onChanged = (): void => {
-      setStreamError(false);
-      void refetch();
-    };
-    source.addEventListener("changed", onChanged);
-    source.onopen = () => setStreamError(false);
-    source.onerror = () => setStreamError(true);
-    return () => {
-      source.removeEventListener("changed", onChanged);
-      source.close();
-    };
-  }, [refetch]);
-
-  return { items, loading, error, streamError, refetch };
+  return {
+    items: query.data ?? [],
+    // Never report "loading" once we have rows — a background revalidation
+    // must not collapse the list into a skeleton.
+    loading: query.isPending,
+    error: query.error
+      ? query.error instanceof Error
+        ? query.error.message
+        : "Failed to load pending approvals."
+      : null,
+    streamError,
+    refetch,
+  };
 };
 
 /** Human title for machine intent ids. */

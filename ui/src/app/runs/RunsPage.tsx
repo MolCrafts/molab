@@ -4,6 +4,7 @@ import { Fragment, useCallback, useEffect, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { DashboardCard, EmptyState, EntityHeader } from "@/app/components/entity";
 import { runPath } from "@/app/entities/paths";
+import { useRunsIndexQuery } from "@/app/state/queries/runs";
 import type { WorkspaceSnapshot } from "@/app/types";
 import {
   DropdownMenu,
@@ -18,16 +19,7 @@ import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/componen
 import { WorkbenchIconAction } from "@/components/workbench";
 import { formatRelative } from "@/lib/format-time";
 import { cn } from "@/lib/utils";
-import {
-  applyFilters,
-  computeActivityBuckets,
-  computeAvgWaitSeconds,
-  computeBackendDistribution,
-  computeKpiSparklines,
-  computeKpiStats,
-  computeTopFailingExperiments,
-  type FailingExperimentEntry,
-} from "./aggregates";
+import { computeDashboard, type FailingExperimentEntry } from "./aggregates";
 import { DashboardPanel } from "./DashboardPanel";
 import { parseFilterParams, toggleArrayFilter, writeFilterParams } from "./filterParams";
 import type { RunInspectorRegistration } from "./inspector/RunInspector";
@@ -50,7 +42,6 @@ import { parseRunsTab, type RunsTab, RunsTabBar } from "./RunsTabBar";
 import { type GanttMode, RunsTimelineView } from "./RunsTimelineView";
 import type { WorkspaceExecutionRow, WorkspaceRunRow, WorkspaceRunsFilters } from "./types";
 import { useDashboardLayout } from "./useDashboardLayout";
-import { useWorkspaceRuns } from "./useWorkspaceRuns";
 import { WorkspaceActivityFeed } from "./WorkspaceActivityFeed";
 
 interface RunsPageProps {
@@ -87,6 +78,9 @@ const DASHBOARD_PANEL_DESCRIPTIONS: Partial<Record<DashboardPanelId, string>> = 
 };
 
 const DASHBOARD_LAYOUT_STORAGE_KEY = "molexp.runs.dashboard.layout.v2";
+
+/** Stable empty array so a pending query never re-triggers the memos below. */
+const EMPTY_RUN_ROWS: WorkspaceRunRow[] = [];
 
 const VALID_GANTT_MODES: ReadonlySet<string> = new Set<string>(["runs", "executions"]);
 
@@ -167,18 +161,26 @@ export const RunsPage = ({
     DASHBOARD_PANEL_IDS,
   );
 
-  const { rows, truncated, loading, error, lastSyncedAt, refresh } = useWorkspaceRuns();
+  // One request, filtered in `select`: the navigator's facet counts and this
+  // dashboard share a single runs-index fetch (see `queries/runs.ts`).
+  const runsQuery = useRunsIndexQuery(filters);
+  const rows = runsQuery.data?.allRows ?? EMPTY_RUN_ROWS;
+  const filteredRuns = runsQuery.data?.rows ?? EMPTY_RUN_ROWS;
+  const truncated = runsQuery.data?.truncated ?? false;
+  const loading = runsQuery.isPending;
+  const error = runsQuery.error instanceof Error ? runsQuery.error.message : null;
+  const lastSyncedAt = useMemo(
+    () => (runsQuery.dataUpdatedAt > 0 ? new Date(runsQuery.dataUpdatedAt) : null),
+    [runsQuery.dataUpdatedAt],
+  );
+  const refresh = useCallback((): void => {
+    void runsQuery.refetch();
+  }, [runsQuery.refetch]);
 
-  const filteredRuns = useMemo(() => applyFilters(rows, filters), [rows, filters]);
-  const kpiStats = useMemo(() => computeKpiStats(filteredRuns), [filteredRuns]);
-  const avgWait = useMemo(() => computeAvgWaitSeconds(filteredRuns), [filteredRuns]);
-  const kpiSparklines = useMemo(() => computeKpiSparklines(filteredRuns), [filteredRuns]);
-  const backendDistribution = useMemo(
-    () => computeBackendDistribution(filteredRuns),
+  const { kpiStats, avgWait, kpiSparklines, backendDistribution, topFailing, activity } = useMemo(
+    () => computeDashboard(filteredRuns),
     [filteredRuns],
   );
-  const topFailing = useMemo(() => computeTopFailingExperiments(filteredRuns), [filteredRuns]);
-  const activity = useMemo(() => computeActivityBuckets(filteredRuns), [filteredRuns]);
 
   const selectedRun = useMemo<WorkspaceRunRow | null>(
     () => (selectedRunId ? (rows.find((row) => row.id === selectedRunId) ?? null) : null),

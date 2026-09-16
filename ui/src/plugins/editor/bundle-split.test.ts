@@ -49,17 +49,20 @@ const listJsFilesRecursive = (dir: string): string[] => {
   return out;
 };
 
-// Basenames of every built chunk whose contents reference monaco.
-const findMonacoChunkBasenames = (): string[] => {
+// Basenames of every built chunk whose contents reference `marker`.
+const findChunkBasenames = (marker: string): string[] => {
   if (!hasBuild) {
     return [];
   }
   return listJsFilesRecursive(jsDir)
-    .filter((path) => readFileSync(path, "utf8").includes("monaco"))
+    .filter((path) => readFileSync(path, "utf8").includes(marker))
     .map((path) => path.slice(path.lastIndexOf("/") + 1));
 };
 
-const monacoChunkBasenames = findMonacoChunkBasenames();
+const monacoChunkBasenames = findChunkBasenames("monaco");
+// The flowgram free-layout editor and its inversify container are only needed
+// once a workflow graph is on screen, so they must ride an on-demand chunk too.
+const flowgramChunkBasenames = findChunkBasenames("flowgram");
 
 describe("monaco bundle split", () => {
   // Skip when there is no build, or no chunk carries monaco — nothing to assert.
@@ -71,6 +74,18 @@ describe("monaco bundle split", () => {
       // Every monaco-carrying chunk must be loaded on demand, not wired into
       // the initial <script defer src=...> set of index.html.
       const referencedInitially = monacoChunkBasenames.filter((name) => indexHtml.includes(name));
+      expect(referencedInitially).toEqual([]);
+    },
+  );
+});
+
+describe("flowgram bundle split", () => {
+  it.skipIf(!hasBuild || flowgramChunkBasenames.length === 0)(
+    "does not reference any flowgram chunk as an initial page-load script in index.html",
+    () => {
+      const indexHtml = readFileSync(indexHtmlPath, "utf8");
+
+      const referencedInitially = flowgramChunkBasenames.filter((name) => indexHtml.includes(name));
       expect(referencedInitially).toEqual([]);
     },
   );

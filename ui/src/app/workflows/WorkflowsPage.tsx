@@ -3,26 +3,31 @@ import type { JSX } from "react";
 import { useState } from "react";
 import { CreateWorkflowDialog } from "@/app/components/CreateWorkflowDialog";
 import { EmptyState, EntityHeader } from "@/app/components/entity";
+import { qk, useInvalidate } from "@/app/state/queries";
 import { useNavigationState } from "@/app/state/useNavigationState";
 import type { WorkspaceSnapshot } from "@/app/types";
 import { RunStatusBadge, WorkbenchAction, WorkbenchIconAction } from "@/components/workbench";
 
 interface WorkflowsPageProps {
   snapshot: WorkspaceSnapshot;
-  onRefresh: () => void;
+  /** Retained for the renderer contract; refreshes are targeted invalidations. */
+  onRefresh?: () => void;
 }
 
 /**
  * WorkflowsPage — the landing page for the ``/workflows`` section. Lists every
  * workflow (one per experiment); clicking a row opens the full graph viewer.
  */
-export const WorkflowsPage = ({ snapshot, onRefresh }: WorkflowsPageProps): JSX.Element => {
+export const WorkflowsPage = ({ snapshot }: WorkflowsPageProps): JSX.Element => {
   const { setSelection } = useNavigationState(snapshot);
+  const { apply } = useInvalidate();
   const workflows = snapshot.workflows;
   const [createOpen, setCreateOpen] = useState(false);
 
   const handleCreated = (experimentId: string): void => {
-    onRefresh();
+    // A new workflow means a new experiment under some project: refresh the
+    // project lists (and their experiment children) plus the root listing.
+    void apply([{ queryKey: ["projects"] }, { queryKey: qk.tree("", 2), exact: true }]);
     const workflowId = `workflow:${experimentId}`;
     setSelection({ objectType: "workflow", objectId: workflowId, workflowId });
   };

@@ -223,3 +223,179 @@ class TestKnowledgeCreatedEmit:
         assert event.refs == ["findings"]
         assert event.payload["type"] == NOTE_KIND
         assert event.payload["title"] == "findings"
+
+
+# ── P1-1e: one connection per process, SQL-side filters, remote guard, emits ─
+
+
+class TestWorkspaceEventLogOpen:
+    """``WorkspaceEventLog.open`` — one shared instance per (pid, root)."""
+
+    def test_open_returns_the_same_instance_for_one_root(self, tmp_path: Path) -> None:
+        a = WorkspaceEventLog.open(tmp_path)
+        b = WorkspaceEventLog.open(tmp_path)
+        assert a is b
+        other = tmp_path / "other"
+        other.mkdir()
+        assert WorkspaceEventLog.open(other) is not a
+
+    def test_hundred_emits_open_one_connection(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import molexp.workspace.events as ev
+
+        real_open = ev.open_wal_connection
+        opened: list[str] = []
+
+        def counting_open(path, **kwargs: object):
+            opened.append(str(path))
+            return real_open(path, **kwargs)
+
+        monkeypatch.setattr(ev, "open_wal_connection", counting_open)
+        for i in range(100):
+            assert emit_workspace_event(tmp_path, "run.created", "test", refs=[f"r{i}"])
+        assert len(opened) == 1
+        assert len(read_workspace_events(tmp_path)) == 100
+        assert len(opened) == 1  # reads share the same instance
+
+    def test_deleted_db_is_reopened_not_written_into_an_unlinked_inode(
+        self, tmp_path: Path
+    ) -> None:
+        emit_workspace_event(tmp_path, "run.created", "test", refs=["r1"])
+        first = WorkspaceEventLog.open(tmp_path)
+        db = tmp_path / WORKSPACE_EVENTS_DB
+        for stale in tmp_path.glob(f"{WORKSPACE_EVENTS_DB}*"):
+            stale.unlink()
+        emit_workspace_event(tmp_path, "run.created", "test", refs=["r2"])
+        assert WorkspaceEventLog.open(tmp_path) is not first
+        assert db.exists()
+        assert [e.refs for e in read_workspace_events(tmp_path)] == [["r2"]]
+
+
+class TestListEventsInSql:
+    """Filters and limit are pushed into SQL: only returned rows are materialized."""
+
+    def test_limit_materializes_only_limit_rows(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        log = WorkspaceEventLog.open(tmp_path)
+        for i in range(300):
+            log.append("run.started", "t", refs=[f"r{i % 7}"])
+        real = WorkspaceEventLog._row_to_event
+        seen: list[int] = []
+
+        def counting(row):
+            seen.append(1)
+            return real(row)
+
+        monkeypatch.setattr(WorkspaceEventLog, "_row_to_event", staticmethod(counting))
+        got = read_workspace_events(tmp_path, limit=10)
+        assert len(got) == 10
+        assert len(seen) == 10
+        assert [e.seq for e in got] == list(range(300, 290, -1))
+
+    def test_ref_and_type_filters_are_exact(self, tmp_path: Path) -> None:
+        log = WorkspaceEventLog.open(tmp_path)
+        log.append("run.started", "t", refs=["ab"])
+        log.append("run.failed", "t", refs=["abc"])
+        log.append("run.started", "t", refs=["x", "ab"])
+        assert [e.seq for e in read_workspace_events(tmp_path, ref="ab")] == [3, 1]
+        assert [e.seq for e in read_workspace_events(tmp_path, ref="abc")] == [2]
+        assert read_workspace_events(tmp_path, ref="a") == []
+        assert [e.seq for e in read_workspace_events(tmp_path, type="run.failed")] == [2]
+
+    def test_after_seq_cursor_and_max_seq(self, tmp_path: Path) -> None:
+        log = WorkspaceEventLog.open(tmp_path)
+        for _ in range(4):
+            log.append("run.started", "t")
+        assert log.max_seq() == 4
+        assert [e.seq for e in read_workspace_events(tmp_path, after_seq=2)] == [4, 3]
+        assert [e.seq for e in log.list_events(after_seq=3)] == [4]
+        assert WorkspaceEventLog.open(tmp_path / "missing-but-creatable").max_seq() == 0
+
+
+class TestRemoteRootGuard:
+    """A remote-backed workspace never gets a *local* sqlite sidecar."""
+
+    def test_marked_root_emits_nothing_and_creates_nothing(self, tmp_path: Path) -> None:
+        from molexp.workspace.events import is_remote_root, mark_remote_root
+
+        remote = tmp_path / "pretend-remote"
+        mark_remote_root(remote)
+        assert is_remote_root(remote)
+        assert emit_workspace_event(remote, "run.created", "test") is None
+        assert not (remote / WORKSPACE_EVENTS_DB).exists()
+        assert read_workspace_events(remote) == []
+
+    def test_non_local_workspace_registers_its_root(self, tmp_path: Path) -> None:
+        from typing import cast
+
+        from molexp.workspace.events import is_remote_root
+        from molexp.workspace.fs import FileSystem
+        from molexp.workspace.fs_local import LocalFileSystem
+
+        class _NotLocal:
+            """A stand-in FileSystem that is *not* a LocalFileSystem."""
+
+            def __init__(self) -> None:
+                self._real = LocalFileSystem()
+
+            def __getattr__(self, name: str):
+                return getattr(self._real, name)
+
+        root = tmp_path / "remote-ws"
+        root.mkdir()
+        ws = Workspace(root=str(root), name="R", fs=cast("FileSystem", _NotLocal()))
+        assert is_remote_root(ws.resolve())
+        assert emit_workspace_event(ws.resolve(), "run.created", "test") is None
+        assert not (root / WORKSPACE_EVENTS_DB).exists()
+
+    def test_local_workspace_is_not_marked(self, tmp_path: Path) -> None:
+        from molexp.workspace.events import is_remote_root
+
+        ws = Workspace(root=tmp_path, name="L")
+        assert not is_remote_root(ws.resolve())
+
+
+class TestCancelAndReapEmits:
+    """Status flips outside the run lifecycle still land on the spine."""
+
+    def test_cancel_emits_run_cancelled(self, tmp_path: Path) -> None:
+        ws, run = _lab_run(tmp_path)
+        run.cancel()
+        events = read_workspace_events(ws.resolve(), ref=run.id)
+        assert events[0].type == "run.cancelled"
+        assert events[0].actor == "run-lifecycle"
+        assert events[0].payload == {"status": "cancelled"}
+        assert run.status == "cancelled"
+
+    def test_reap_emits_run_failed_with_reaped_reason(self, tmp_path: Path) -> None:
+        import os
+        import platform
+        from datetime import UTC, datetime
+
+        from molexp.workspace.run_ops import RunOpsState
+        from molexp.workspace.run_reaper import reap_zombie_run
+
+        ws, run = _lab_run(tmp_path)
+        run.materialize()
+        dead_pid = 2**22 - 7
+        with pytest.raises(ProcessLookupError):
+            os.kill(dead_pid, 0)
+        run.write_ops(
+            RunOpsState(
+                status="running",
+                owner_pid=dead_pid,
+                owner_host=platform.node(),
+                heartbeat_at=datetime.now(UTC),
+            )
+        )
+        assert reap_zombie_run(run) is True
+        events = read_workspace_events(ws.resolve(), ref=run.id, type="run.failed")
+        assert len(events) == 1
+        assert events[0].actor == "run-reaper"
+        assert events[0].payload["reason"] == "reaped"
+        assert events[0].payload["owner_pid"] == dead_pid
+        # A no-op reap (already failed) emits nothing more.
+        assert reap_zombie_run(run) is False
+        assert len(read_workspace_events(ws.resolve(), ref=run.id, type="run.failed")) == 1

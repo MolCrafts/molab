@@ -2,6 +2,7 @@ import { Plus, Tag, X } from "lucide-react";
 import { type JSX, type KeyboardEvent, useEffect, useMemo, useState } from "react";
 import { StatusBadge } from "@/app/components/entity";
 import { workspaceApi } from "@/app/state/api";
+import { knowledgeErrorMessage, useInvalidate, useKnowledgeListQuery } from "@/app/state/queries";
 import { Input } from "@/components/ui/input";
 import {
   Select,
@@ -19,43 +20,38 @@ const STATUS_OPTIONS = ["active", "draft", "archived"] as const;
 /**
  * Writable document-level tag + status controls for a Note.
  *
- * Loads the note's 05 metadata (`tags` / `status`) through
- * `workspaceApi.listKnowledge` (the generated client), then persists edits via
- * `workspaceApi.updateNoteMeta` — the thin `PATCH /knowledge/doc/meta` route that
- * delegates to `Note.set_tags` / `Note.set_status` (the same verbs the CLI uses,
- * per the Python==UI invariant). Each save realigns local state with the
- * server-returned summary; a failed save surfaces an inline error and leaves the
- * prior state intact.
+ * Reads the note's 05 metadata (`tags` / `status`) from the one shared
+ * knowledge-list cache entry — the same `GET /api/knowledge` the doc tree, its
+ * facet filter, the command palette and the viewer use, so opening a note costs
+ * no extra request — then persists edits via `workspaceApi.updateNoteMeta`, the
+ * thin `PATCH /knowledge/doc/meta` route that delegates to `Note.set_tags` /
+ * `Note.set_status` (the same verbs the CLI uses, per the Python==UI
+ * invariant). A save realigns local state with the server-returned summary and
+ * invalidates the knowledge keys; a failed save surfaces an inline error and
+ * leaves the prior state intact.
  */
 export const DocumentControls = ({ relPath }: { relPath: string }): JSX.Element | null => {
+  const listQuery = useKnowledgeListQuery();
+  const { afterNoteMutation } = useInvalidate();
   const [tags, setTags] = useState<string[]>([]);
   const [status, setStatus] = useState<string | null>(null);
-  const [loaded, setLoaded] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tagInput, setTagInput] = useState("");
 
+  const summary = useMemo(
+    () => listQuery.data?.notes.find((note) => note.relPath === relPath) ?? null,
+    [listQuery.data, relPath],
+  );
+  const loaded = listQuery.data !== undefined;
+
+  // Seed the editable controls from the server summary whenever it changes
+  // (note switch, or a refetch after someone else's edit).
   useEffect(() => {
-    let cancelled = false;
+    setTags(summary?.tags ?? []);
+    setStatus(summary?.status ?? null);
     setError(null);
-    setLoaded(false);
-    workspaceApi
-      .listKnowledge()
-      .then((response) => {
-        if (cancelled) return;
-        const summary = response.notes.find((note) => note.relPath === relPath) ?? null;
-        setTags(summary?.tags ?? []);
-        setStatus(summary?.status ?? null);
-        setLoaded(true);
-      })
-      .catch((err) => {
-        if (!cancelled)
-          setError(err instanceof Error ? err.message : "Failed to load doc metadata.");
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [relPath]);
+  }, [summary]);
 
   const statusOptions = useMemo(() => {
     const opts = [...STATUS_OPTIONS] as string[];
@@ -70,6 +66,8 @@ export const DocumentControls = ({ relPath }: { relPath: string }): JSX.Element 
       const updated = await workspaceApi.updateNoteMeta(relPath, patch);
       setTags(updated.tags ?? []);
       setStatus(updated.status ?? null);
+      // Tags/status feed the tree's facet filter, so realign the shared list.
+      void afterNoteMutation(relPath);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to save doc metadata.");
     } finally {
@@ -95,10 +93,14 @@ export const DocumentControls = ({ relPath }: { relPath: string }): JSX.Element 
     }
   };
 
-  if (error && !loaded) {
-    return <p className="text-label text-destructive">{error}</p>;
-  }
   if (!loaded) {
+    if (listQuery.error) {
+      return (
+        <p className="text-label text-destructive">
+          {knowledgeErrorMessage(listQuery.error, "Failed to load doc metadata.")}
+        </p>
+      );
+    }
     return <p className="text-micro text-muted-foreground">Loading…</p>;
   }
 

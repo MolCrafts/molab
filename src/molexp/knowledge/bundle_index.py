@@ -64,23 +64,28 @@ class SearchHit(BaseModel, frozen=True):
 
     Attributes:
         entry: The matching Concept's index row.
-        snippet: The first matching body line (trimmed to ≤160 chars) when the
+        snippet: The best-matching body line (trimmed to ≤160 chars) when the
             hit matched on body text; ``None`` for index-only matches.
         matched_fields: Which fields matched, a subset of
             ``("path", "title", "tag", "body")`` — empty for pure filter
             queries (``text=None``).
+        score: The BM25F relevance score. ``0.0`` for a filter-only query, where
+            nothing was ranked and hits keep index order.
     """
 
     entry: ConceptIndexEntry
     snippet: str | None = None
     matched_fields: tuple[str, ...] = ()
+    score: float = 0.0
 
 
 class SearchResult(BaseModel, frozen=True):
     """The structured outcome of one ``Bundle.search`` call.
 
     Attributes:
-        hits: The matches, in deterministic path-ascending index order.
+        hits: The matches. Ranked queries come back score-descending (ties broken
+            by path ascending, so the order is deterministic); a filter-only
+            query keeps path-ascending index order.
         truncated: ``True`` iff ``limit`` cut real matches — a capped result
             always says so (no silent caps).
     """

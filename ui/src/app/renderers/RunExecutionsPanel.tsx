@@ -1,5 +1,5 @@
 import { AlertTriangle, GitBranch, ScrollText, Workflow } from "lucide-react";
-import { type JSX, useEffect, useMemo, useState } from "react";
+import { type JSX, useMemo } from "react";
 import {
   CopyButton,
   DashboardCard,
@@ -10,7 +10,7 @@ import {
   statusKey,
 } from "@/app/components/entity";
 import { formatDuration } from "@/app/renderers/dashboardData";
-import { workspaceApi } from "@/app/state/api";
+import { useRunExecutionQuery } from "@/app/state/queries/runs";
 import type { RunSummary, WorkflowSummary } from "@/app/types";
 import {
   RunStatusBadge,
@@ -57,57 +57,29 @@ export const RunExecutionsPanel = ({
   onViewLogs,
 }: RunExecutionsPanelProps): JSX.Element => {
   const history = run.executionHistory;
-  const [executionGraph, setExecutionGraph] = useState<TaskGraphJson | null>(null);
-  const [executionGraphError, setExecutionGraphError] = useState<string | null>(null);
-
   const effectiveExecutionId =
     selectedExecutionId ?? history[history.length - 1]?.executionId ?? null;
   const effectiveExecution = history.find((rec) => rec.executionId === effectiveExecutionId);
   const effectiveIndex = effectiveExecution
     ? history.findIndex((rec) => rec.executionId === effectiveExecution.executionId)
     : -1;
-  const shouldPoll =
-    run.status === "running" ||
-    effectiveExecution?.status === "running" ||
-    effectiveExecution?.finishedAt === null;
 
-  useEffect(() => {
-    let cancelled = false;
-    let interval: ReturnType<typeof setInterval> | null = null;
-
-    const load = (): void => {
-      if (!effectiveExecutionId) {
-        setExecutionGraph(null);
-        return;
-      }
-      workspaceApi
-        .getRunExecution(run.projectId, run.experimentId, run.id, effectiveExecutionId)
-        .then((response) => {
-          if (cancelled) return;
-          if (response.workflow) {
-            setExecutionGraph(normalizeTaskGraph(response.workflow));
-          } else {
-            setExecutionGraph(null);
-          }
-          setExecutionGraphError(null);
-        })
-        .catch((err) => {
-          if (cancelled) return;
-          setExecutionGraphError(
-            err instanceof Error ? err.message : "Failed to load workflow execution",
-          );
-        });
-    };
-
-    load();
-    if (shouldPoll) {
-      interval = setInterval(load, 1000);
-    }
-    return () => {
-      cancelled = true;
-      if (interval) clearInterval(interval);
-    };
-  }, [effectiveExecutionId, run.experimentId, run.id, run.projectId, shouldPoll]);
+  // The poll is a function of the response: it stops by itself the moment the
+  // attempt reaches a terminal state, so there is no interval to tear down.
+  const executionQuery = useRunExecutionQuery(
+    { projectId: run.projectId, experimentId: run.experimentId, runId: run.id },
+    effectiveExecutionId,
+    {
+      enabled: effectiveExecutionId !== null,
+      runIsRunning: run.status === "running" || effectiveExecution?.finishedAt === null,
+    },
+  );
+  const executionGraph = useMemo<TaskGraphJson | null>(
+    () => (executionQuery.data?.workflow ? normalizeTaskGraph(executionQuery.data.workflow) : null),
+    [executionQuery.data],
+  );
+  const executionGraphError =
+    executionQuery.error instanceof Error ? executionQuery.error.message : null;
 
   const staticWorkflowIr = useMemo(() => parseWorkflowIr(run.workflowSource), [run.workflowSource]);
   const workflowIr = executionGraph ?? staticWorkflowIr;

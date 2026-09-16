@@ -317,7 +317,9 @@ describe("groupEventsIntoTurns", () => {
     expect(turns[0].result?.type).toBe("clarification_required");
     expect(turns[0].inProgress).toBe(false);
     expect(turns[0].steps).toEqual([]);
-    expect((turns[0].result?.payload as { questions?: string }).questions).toContain(
+    // Read through the optional chain rather than casting past it: a missing
+    // result should fail this assertion, not throw a TypeError on `.questions`.
+    expect((turns[0].result?.payload as { questions?: string } | undefined)?.questions).toContain(
       "project and experiment",
     );
   });

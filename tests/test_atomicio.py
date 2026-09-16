@@ -9,8 +9,11 @@ workspace. These tests pin behavior + the layer-independence bar.
 from __future__ import annotations
 
 import ast
+import errno
 import json
+import os
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -122,3 +125,99 @@ def test_source_imports_no_workspace_or_upstream_layer() -> None:
         elif isinstance(node, ast.ImportFrom) and node.module and node.module.startswith(forbidden):
             offenders.append(node.module)
     assert offenders == [], f"molexp.atomicio imports forbidden modules: {offenders}"
+
+
+class TestLockBackends:
+    """Backend selection, and the errno distinction that Lustre depends on."""
+
+    def test_o_excl_backend_acquires_and_releases(self, tmp_path: Path) -> None:
+        with file_lock(tmp_path / "a.lock", backend="o_excl"):
+            assert (tmp_path / "a.lock.excl").exists()
+        assert not (tmp_path / "a.lock.excl").exists()
+
+    def test_none_backend_is_a_noop(self, tmp_path: Path) -> None:
+        with file_lock(tmp_path / "b.lock", backend="none"):
+            pass
+        assert not (tmp_path / "b.lock").exists()
+
+    def test_o_excl_contention_times_out(self, tmp_path: Path) -> None:
+        (tmp_path / "c.lock.excl").touch()
+        with (
+            pytest.raises(FileLockTimeoutError),
+            file_lock(tmp_path / "c.lock", backend="o_excl", timeout=0.1),
+        ):
+            pass
+
+    def test_o_excl_breaks_an_abandoned_lock(self, tmp_path: Path) -> None:
+        marker = tmp_path / "d.lock.excl"
+        marker.touch()
+        old = time.time() - 3600
+        os.utime(marker, (old, old))
+
+        with file_lock(tmp_path / "d.lock", backend="o_excl", timeout=0.1):
+            pass  # A crashed holder must not wedge the workspace forever.
+
+    def test_unsupported_flock_falls_back_without_spinning(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Lustre without -o flock raises ENOSYS. Treating that as contention
+        # (the old behaviour) burned the whole timeout and then reported a
+        # conflict that did not exist.
+        import fcntl
+
+        def unsupported(fd, op):
+            raise OSError(errno.ENOSYS, "function not implemented")
+
+        monkeypatch.setattr(fcntl, "flock", unsupported)
+        monkeypatch.setattr(atomicio, "_warned_unsupported", False)
+
+        started = time.monotonic()
+        with file_lock(tmp_path / "e.lock", timeout=5.0):
+            pass
+        elapsed = time.monotonic() - started
+
+        assert elapsed < 1.0, f"fallback must be immediate, took {elapsed:.2f}s"
+
+    def test_contended_flock_still_times_out(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import fcntl
+
+        def contended(fd, op):
+            raise OSError(errno.EAGAIN, "resource temporarily unavailable")
+
+        monkeypatch.setattr(fcntl, "flock", contended)
+
+        with pytest.raises(FileLockTimeoutError), file_lock(tmp_path / "f.lock", timeout=0.1):
+            pass
+
+    def test_unexpected_errno_propagates(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import fcntl
+
+        def broken(fd, op):
+            raise OSError(errno.EIO, "I/O error")
+
+        monkeypatch.setattr(fcntl, "flock", broken)
+
+        with pytest.raises(OSError, match="I/O error"), file_lock(tmp_path / "g.lock", timeout=0.1):
+            pass
+
+    def test_fallback_still_serializes(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import fcntl
+
+        def unsupported(fd, op):
+            raise OSError(errno.ENOSYS, "no")
+
+        monkeypatch.setattr(fcntl, "flock", unsupported)
+        monkeypatch.setattr(atomicio, "_warned_unsupported", False)
+
+        with (
+            file_lock(tmp_path / "h.lock", timeout=0.2),
+            pytest.raises(FileLockTimeoutError),
+            file_lock(tmp_path / "h.lock", timeout=0.1),
+        ):
+            pass

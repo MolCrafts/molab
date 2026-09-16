@@ -4,8 +4,12 @@
 /* eslint-disable */
 export type WorkspaceInfoResponse = {
     assetCount: number;
+    connected?: (boolean | null);
+    indexed?: (boolean | null);
     projectCount: number;
+    ready?: (boolean | null);
     root: string;
+    versions?: Record<string, number>;
     warnings?: Array<string>;
 };
 

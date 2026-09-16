@@ -1,7 +1,9 @@
 import type { JSX } from "react";
-import { useEffect, useState } from "react";
-
-import { WorkspaceService } from "@/api/generated";
+import {
+  ACTIVITY_FALLBACK_POLL_MS,
+  useFallbackInterval,
+  useWorkspaceEventsQuery,
+} from "@/app/state/queries";
 import {
   WorkbenchAction,
   WorkbenchOperationState,
@@ -9,14 +11,12 @@ import {
 } from "@/components/workbench";
 import { formatRelative, formatTimestamp } from "@/lib/format-time";
 import { cn } from "@/lib/utils";
-
 import {
   eventVisualFor,
   FEED_EMPTY_TEXT,
   resolveEventRef,
   type WorkspaceEventRow,
 } from "./activityFeed";
-import { POLL_INTERVAL_MS } from "./useWorkspaceRuns";
 
 interface WorkspaceActivityFeedProps {
   /** Run ids the snapshot currently knows — resolvable refs become links. */
@@ -37,38 +37,13 @@ export const WorkspaceActivityFeed = ({
   onOpenKnowledge,
   max = 20,
 }: WorkspaceActivityFeedProps): JSX.Element => {
-  const [events, setEvents] = useState<WorkspaceEventRow[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [tick, setTick] = useState(0);
-
-  useEffect(() => {
-    void tick;
-    let cancelled = false;
-    const tickOnce = async (): Promise<void> => {
-      try {
-        const rows = await WorkspaceService.getWorkspaceEventsApiEventsGet(
-          undefined,
-          undefined,
-          max,
-        );
-        if (!cancelled) {
-          setEvents(rows as WorkspaceEventRow[]);
-          setError(null);
-        }
-      } catch (err) {
-        if (!cancelled) setError(String(err));
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    };
-    void tickOnce();
-    const id = setInterval(() => void tickOnce(), POLL_INTERVAL_MS);
-    return () => {
-      cancelled = true;
-      clearInterval(id);
-    };
-  }, [max, tick]);
+  // The spine publishes a change for every append, so the stream invalidates
+  // this key; the interval is only a fallback for when the stream is down.
+  const fallback = useFallbackInterval(ACTIVITY_FALLBACK_POLL_MS);
+  const query = useWorkspaceEventsQuery(max, { refetchInterval: fallback });
+  const events = (query.data ?? []) as WorkspaceEventRow[];
+  const error = query.error ? String(query.error) : null;
+  const loading = query.isPending;
 
   if (loading && events.length === 0 && !error) {
     return <WorkbenchOperationState kind="loading" density="compact" skeletonRows={3} />;
@@ -80,14 +55,7 @@ export const WorkspaceActivityFeed = ({
         density="compact"
         title="Could not load activity"
         detail={error}
-        action={
-          <WorkbenchRetryAction
-            onClick={() => {
-              setLoading(true);
-              setTick((t) => t + 1);
-            }}
-          />
-        }
+        action={<WorkbenchRetryAction onClick={() => void query.refetch()} />}
       />
     );
   }

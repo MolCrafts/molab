@@ -14,6 +14,7 @@ from molexp.workspace import (
     KNOWLEDGE_ITEM_KIND,
     KnowledgeItem,
     SourceRef,
+    knowledge_mount,
     read_workspace_events,
     write_knowledge_item,
 )
@@ -53,7 +54,7 @@ class TestWriteKnowledgeItem:
         write_knowledge_item(experiment, **{**kwargs, "body": "second\n"})
         events = read_workspace_events(experiment.workspace.root, type="knowledge.created")
         assert len(events) == 1
-        assert "second" in experiment.get_folder("finding-demo", cls=KnowledgeItem).body()
+        assert "second" in knowledge_mount.get_item(experiment, "finding-demo").body()
 
     def test_emit_false_suppresses_creation_event(self, experiment: Any) -> None:
         write_knowledge_item(

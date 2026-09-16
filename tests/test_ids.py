@@ -90,3 +90,71 @@ def test_source_imports_no_workspace_or_upstream_layer() -> None:
         elif isinstance(node, ast.ImportFrom) and node.module and node.module.startswith(forbidden):
             offenders.append(node.module)
     assert offenders == [], f"molexp.ids imports forbidden modules: {offenders}"
+
+
+class TestHashChunking:
+    def test_chunk_size_does_not_change_the_digest(self, tmp_path: Path) -> None:
+        # The digest is over the byte stream, so read granularity is free to
+        # change — this pins that, since the chunk size was raised for speed.
+        import hashlib
+
+        target = tmp_path / "f.bin"
+        payload = bytes(range(256)) * 9000
+        target.write_bytes(payload)
+
+        assert compute_content_hash(target) == f"sha256:{hashlib.sha256(payload).hexdigest()}"
+
+    def test_chunk_is_large_enough_to_not_be_syscall_bound(self) -> None:
+        assert ids._HASH_CHUNK >= 1 << 20
+
+
+class TestHashBytes:
+    def test_matches_the_hash_of_the_same_bytes_on_disk(self, tmp_path: Path) -> None:
+        payload = b"molecule" * 1000
+        target = tmp_path / "f.bin"
+        target.write_bytes(payload)
+
+        assert ids.hash_bytes(payload) == compute_content_hash(target)
+
+    def test_carries_the_algorithm_prefix(self) -> None:
+        assert ids.hash_bytes(b"x").startswith("sha256:")
+
+
+class TestHashCopyFusion:
+    def test_digest_equals_a_separate_hash_of_the_copy(self, tmp_path: Path) -> None:
+        src = tmp_path / "src.bin"
+        src.write_bytes(b"payload" * 5000)
+        dst = tmp_path / "dst.bin"
+
+        digest = ids.hash_copy(src, dst)
+
+        ids.clear_hash_memo()
+        assert digest == compute_content_hash(dst) == compute_content_hash(src)
+
+    def test_creates_missing_parent_directories(self, tmp_path: Path) -> None:
+        src = tmp_path / "src.bin"
+        src.write_bytes(b"data")
+        dst = tmp_path / "a" / "b" / "c.bin"
+
+        ids.hash_copy(src, dst)
+
+        assert dst.read_bytes() == b"data"
+
+
+class TestHashMemoBounds:
+    def test_memo_does_not_grow_without_limit(self, tmp_path: Path) -> None:
+        ids.clear_hash_memo()
+        for i in range(ids._HASH_MEMO_MAX + 50):
+            target = tmp_path / f"f{i}.bin"
+            target.write_bytes(str(i).encode())
+            compute_content_hash(target)
+
+        assert len(ids._hash_memo) <= ids._HASH_MEMO_MAX
+        ids.clear_hash_memo()
+
+    def test_clear_empties_the_memo(self, tmp_path: Path) -> None:
+        target = tmp_path / "f.bin"
+        target.write_bytes(b"x")
+        compute_content_hash(target)
+        ids.clear_hash_memo()
+        assert len(ids._hash_memo) == 0

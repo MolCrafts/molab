@@ -7,14 +7,14 @@
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { Search } from "lucide-react";
-import { type JSX, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { type JSX, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { NoteSummary } from "@/api/generated/models/NoteSummary";
 import { StatusBadge } from "@/app/components/entity";
 import { buildCatalog, searchCatalog } from "@/app/entities/catalog";
 import { entityMeta } from "@/app/entities/kinds";
 import { entityPath } from "@/app/entities/paths";
-import { workspaceApi } from "@/app/state/api";
+import { knowledgeErrorMessage, useKnowledgeListQuery } from "@/app/state/queries";
 import type { SemanticStatus, WorkspaceSnapshot } from "@/app/types";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -27,6 +27,9 @@ import {
 interface GlobalCommandPaletteProps {
   snapshot: WorkspaceSnapshot;
 }
+
+/** Stable empty list, so the catalog memo does not rebuild while loading. */
+const NO_NOTES: NoteSummary[] = [];
 
 export const GlobalCommandPalette = ({ snapshot }: GlobalCommandPaletteProps): JSX.Element => {
   const navigate = useNavigate();
@@ -47,30 +50,17 @@ export const GlobalCommandPalette = ({ snapshot }: GlobalCommandPaletteProps): J
     return () => window.removeEventListener("keydown", onKeyDown);
   }, []);
 
-  // Knowledge docs join the jump list (vision-loop-08). Best-effort fetch-once
-  // (the useKnowledgeFacets pattern): the palette still works without them.
-  const [knowledgeDocs, setKnowledgeDocs] = useState<NoteSummary[]>([]);
-  const [knowledgeLoading, setKnowledgeLoading] = useState(true);
-  const [knowledgeError, setKnowledgeError] = useState<string | null>(null);
-
-  const loadKnowledge = useCallback(async (): Promise<void> => {
-    setKnowledgeLoading(true);
-    try {
-      const response = await workspaceApi.listKnowledge();
-      setKnowledgeDocs(response.notes);
-      setKnowledgeError(null);
-    } catch (err) {
-      setKnowledgeError(
-        err instanceof Error ? err.message : "Failed to load knowledge search entries.",
-      );
-    } finally {
-      setKnowledgeLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void loadKnowledge();
-  }, [loadKnowledge]);
+  // Knowledge docs join the jump list (vision-loop-08). This reads the one
+  // shared `GET /api/knowledge` cache entry — the same one the doc tree, its
+  // facet filter and the knowledge viewer use — so the globally-mounted palette
+  // costs no request of its own. The palette still works without them.
+  const knowledgeQuery = useKnowledgeListQuery();
+  const knowledgeDocs = knowledgeQuery.data?.notes ?? NO_NOTES;
+  const knowledgeLoading = knowledgeQuery.isPending;
+  const knowledgeError = knowledgeQuery.error
+    ? knowledgeErrorMessage(knowledgeQuery.error, "Failed to load knowledge search entries.")
+    : null;
+  const loadKnowledge = (): void => void knowledgeQuery.refetch();
 
   const catalog = useMemo(() => buildCatalog(snapshot, knowledgeDocs), [snapshot, knowledgeDocs]);
   const results = useMemo(() => searchCatalog(catalog, query), [catalog, query]);

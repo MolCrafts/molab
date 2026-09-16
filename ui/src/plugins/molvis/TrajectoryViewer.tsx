@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { workspaceApi } from "@/app/state/api";
+import { fileSizeGate } from "@/lib/fileSizeGate";
 import { cn } from "@/lib/utils";
 import type { DiscoveredFile } from "@/plugins/types";
 
@@ -39,6 +40,17 @@ export const TrajectoryViewer = ({
   useEffect(() => {
     const container = containerRef.current;
     if (!container) {
+      return;
+    }
+
+    // Trajectories are the biggest files in a workspace and the content is read
+    // into a string before molvis parses it, so refuse an oversized one rather
+    // than transferring gigabytes to fail in the browser.
+    if (fileSizeGate(file.size).kind === "oversized") {
+      setState({
+        kind: "error",
+        message: "Trajectory is too large to load in the browser.",
+      });
       return;
     }
 
@@ -100,7 +112,7 @@ export const TrajectoryViewer = ({
         }
       }
     };
-  }, [projectId, experimentId, runId, file.relPath, file.name]);
+  }, [projectId, experimentId, runId, file.relPath, file.name, file.size]);
 
   return (
     // ``isolate`` establishes a new stacking context so molvis-core's injected

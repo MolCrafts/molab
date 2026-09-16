@@ -38,9 +38,13 @@ from molexp.fs.local import LocalFileSystem
 
 __all__ = [
     "DEFAULT_IGNORE_LINES",
+    "GITIGNORE_FILENAME",
     "GitIgnoreMatcher",
     "load_gitignore_matcher",
 ]
+
+#: The per-directory ignore file this matcher reads.
+GITIGNORE_FILENAME = ".gitignore"
 
 # Safety floor — always applied, even with no on-disk .gitignore. Keep in
 # sync with the spirit of agent tree skips (ops.structure / interactive
@@ -89,8 +93,8 @@ class GitIgnoreMatcher:
 
     def _gitignore_abs(self, base_rel: str) -> str:
         if base_rel:
-            return self._fs.join(self._root, *base_rel.split("/"), ".gitignore")
-        return self._fs.join(self._root, ".gitignore")
+            return self._fs.join(self._root, *base_rel.split("/"), GITIGNORE_FILENAME)
+        return self._fs.join(self._root, GITIGNORE_FILENAME)
 
     def _try_load(self, base_rel: str) -> None:
         """Load ``base_rel/.gitignore`` once (no-op if missing / unreadable)."""
@@ -108,6 +112,20 @@ class GitIgnoreMatcher:
         lines = text.splitlines()
         if lines:
             self._layers.append((base, GitIgnoreSpec.from_lines(lines)))
+
+    def mark_absent(self, base_rel: str) -> None:
+        """Record that *base_rel* holds no ``.gitignore`` — skip probing for one.
+
+        A walker that just listed *base_rel* already knows whether the marker
+        is there; telling the matcher turns the per-directory ``is_file`` probe
+        into no syscall at all. Marking a directory that *does* have a
+        ``.gitignore`` would silently drop its rules, so callers must pass only
+        what a listing proved absent.
+
+        Args:
+            base_rel: Directory path relative to the matcher root.
+        """
+        self._loaded_bases.add(_norm_rel(base_rel))
 
     def ensure_ancestors(self, rel_path: str) -> None:
         """Load every nested ``.gitignore`` from root down to *rel_path*'s dir."""
@@ -137,11 +155,13 @@ class GitIgnoreMatcher:
 
         parent = str(PurePosixPath(rel).parent)
         self.ensure_ancestors("" if parent == "." else parent)
-        # Also load the dir's own .gitignore when checking a directory so
-        # children evaluated next see nested rules; the dir itself is still
-        # decided by ancestor rules only (see loop below).
-        if is_dir:
-            self._try_load(rel)
+        # A directory's own ``.gitignore`` is deliberately NOT loaded here: it
+        # cannot affect whether the directory itself is ignored (see the loop
+        # below, which skips ``rel == base``), and anything evaluated *inside*
+        # it arrives through ``ensure_ancestors(rel)`` on its own way in. Doing
+        # it here as well cost one ``is_file`` per directory walked, ahead of
+        # the listing that would have answered it for free — see
+        # :meth:`mark_absent`.
 
         ignored = False
         for base, spec in self._layers:

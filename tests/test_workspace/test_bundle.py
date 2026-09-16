@@ -18,7 +18,8 @@ from pathlib import Path
 
 import pytest
 
-from molexp.workspace import Bundle, ConceptNotFoundError, Folder
+from molexp.knowledge.concept import Concept
+from molexp.workspace import Bundle, ConceptNotFoundError, Folder, knowledge_mount
 
 # A concept ``type`` deliberately NOT in the concept-type registry, so it
 # reconstructs as the base workspace ``Folder`` (vs. a knowledge subclass).
@@ -154,11 +155,11 @@ class TestWalk:
 
 
 class TestGet:
-    def test_resolves_known_concept_to_its_folder(self, bundle: Path) -> None:
+    def test_resolves_known_concept_to_its_directory(self, bundle: Path) -> None:
         b = Bundle(bundle)
         f = b.get("alpha/beta")
-        assert isinstance(f, Folder)
-        assert Path(f.resolve()) == bundle / "alpha" / "beta"
+        assert isinstance(f, Concept)
+        assert f.path == bundle / "alpha" / "beta"
         assert b.rel_path(f) == "alpha/beta"
 
     def test_missing_or_non_concept_path_raises_concept_not_found(self, bundle: Path) -> None:
@@ -172,17 +173,16 @@ class TestGet:
 class TestPut:
     def test_materializes_concept_preserving_type(self, bundle: Path) -> None:
         b = Bundle(bundle)
-        epsilon = Folder(name="epsilon", kind=CONCEPT_KIND, root_path=str(bundle))
-        epsilon.materialize()
-        assert not (Path(epsilon.resolve()) / "meta.yaml").is_file()
+        epsilon = Concept(bundle / "epsilon", type=CONCEPT_KIND)
+        (bundle / "epsilon").mkdir()
+        assert not (epsilon.path / "meta.yaml").is_file()
         b.put(epsilon)
-        assert (Path(epsilon.resolve()) / "meta.yaml").is_file()
+        assert (epsilon.path / "meta.yaml").is_file()
         assert b.get("epsilon").read_meta()["type"] == CONCEPT_KIND
 
     def test_is_idempotent(self, bundle: Path) -> None:
         b = Bundle(bundle)
-        epsilon = Folder(name="epsilon", kind=CONCEPT_KIND, root_path=str(bundle))
-        epsilon.materialize()
+        epsilon = Concept(bundle / "epsilon", type=CONCEPT_KIND)
         b.put(epsilon)
         b.put(epsilon)  # second put must not raise nor duplicate
         rels = [b.rel_path(f) for f in b.walk()]
@@ -222,8 +222,14 @@ class TestLink:
 
 
 class TestTypedReconstruction:
-    def test_walk_reconstructs_registered_folder_subclasses(self, tmp_path: Path) -> None:
-        from molexp.workspace import Experiment, Project, Run, Workspace
+    def test_walk_reports_workspace_entities_as_concepts_not_folders(self, tmp_path: Path) -> None:
+        # A workspace entity dir carries a meta.yaml, so a bundle walk sees it —
+        # but it comes back as a Concept carrying the declared type, never as the
+        # workspace Folder subclass. The two families share one open registry and
+        # are kept apart by ``resolve_concept_type(..., base=...)``; handing a
+        # Run to the Concept reconstructor would call a constructor that does not
+        # exist. Reading such a dir still works: type and body are on disk.
+        from molexp.workspace import Run, Workspace
 
         ws = Workspace(root=tmp_path / "lab")
         ws.materialize()
@@ -232,10 +238,13 @@ class TestTypedReconstruction:
         # the bundle root sits ABOVE the workspace concept dir
         by_rel = {Bundle(tmp_path).rel_path(f): f for f in Bundle(tmp_path).walk()}
 
-        assert isinstance(by_rel["lab"], Workspace)
-        assert isinstance(by_rel["lab/projects/p"], Project)
-        assert isinstance(by_rel["lab/projects/p/experiments/e"], Experiment)
-        assert isinstance(by_rel["lab/projects/p/experiments/e/runs/run-r"], Run)
+        assert by_rel["lab"].type() == "workspace.root"
+        assert by_rel["lab/projects/p"].type() == "workspace.project"
+        assert by_rel["lab/projects/p/experiments/e"].type() == "workspace.experiment"
+        run_concept = by_rel["lab/projects/p/experiments/e/runs/run-r"]
+        assert run_concept.type() == "workspace.run"
+        assert all(isinstance(c, Concept) for c in by_rel.values())
+        assert not isinstance(run_concept, Run)
 
 
 # ── nested-mount path-doubling regression ────────────────────────────────────
@@ -253,14 +262,13 @@ _DOUBLED_SEGMENTS = ("projects/projects", "experiments/experiments", "runs/runs"
 class TestNestedMounts:
     def test_note_under_run_resolves_and_links_back_undoubled(self, tmp_path: Path) -> None:
         import os
-        from typing import cast
 
-        from molexp.workspace import Note, Workspace
+        from molexp.workspace import Workspace
 
         ws = Workspace(root=tmp_path / "lab")
         ws.materialize()
         run = ws.add_project("p").add_experiment("e").add_run(id="r")
-        rec = cast("Note", run.add_folder(Note(parent=run, name="rec")))
+        rec = knowledge_mount.mount_note(run, "rec")
         real = os.path.normpath(str(rec.resolve()))
 
         b = Bundle(ws.resolve())
@@ -278,16 +286,15 @@ class TestNestedMounts:
 
     def test_knowledge_item_under_experiment_walks_once_undoubled(self, tmp_path: Path) -> None:
         import os
-        from typing import cast
 
         from molexp.workspace import Workspace
-        from molexp.workspace.knowledge_item import KnowledgeItem, KnowledgeMeta, SourceRef
+        from molexp.workspace.knowledge_item import KnowledgeMeta, SourceRef
 
         ws = Workspace(root=tmp_path / "lab")
         ws.materialize()
         exp = ws.add_project("p").add_experiment("e")
         exp.add_run(id="r")
-        item = cast("KnowledgeItem", exp.add_folder(KnowledgeItem(parent=exp, name="ki")))
+        item, _ = knowledge_mount.mount_knowledge_item(exp, "ki")
         item.write_knowledge_meta(
             KnowledgeMeta(
                 kind="Finding",
@@ -306,3 +313,53 @@ class TestNestedMounts:
         assert resolved == os.path.normpath(str(item.resolve()))
         for doubled in _DOUBLED_SEGMENTS:
             assert doubled not in resolved
+
+
+class TestForeignFamilyArgumentsResolveToDirectories:
+    """A Bundle verb handed a workspace ``Folder`` must resolve it, never str() it.
+
+    ``Concept`` and ``Folder`` are unrelated classes, so every Bundle entry point
+    that takes "something that names a directory" has to funnel through one
+    coercion. Stringifying a Folder instead would not raise — it would silently
+    create a directory called ``<...Experiment object at 0x...>`` or write a link
+    pointing at one, which is far worse than a failure.
+    """
+
+    def test_create_note_under_a_workspace_folder(self, tmp_path: Path) -> None:
+        from molexp.workspace import Workspace
+
+        ws = Workspace(root=tmp_path / "lab")
+        ws.materialize()
+        exp = ws.add_project("p").add_experiment("e")
+
+        note = Bundle(ws.resolve()).create_note("Analysis Notes", parent=exp)
+
+        assert "object at" not in str(note.path)
+        assert note.path == Path(str(exp.resolve())) / "analysis-notes"
+
+    def test_link_to_a_workspace_folder(self, tmp_path: Path) -> None:
+        from molexp.workspace import Workspace
+
+        ws = Workspace(root=tmp_path / "lab")
+        ws.materialize()
+        run = ws.add_project("p").add_experiment("e").add_run(id="r")
+
+        bundle = Bundle(ws.resolve())
+        note = bundle.create_note("rec")
+        bundle.link(note, run, role="records")
+
+        assert note.typed_out_edges() == [(str(run.resolve()), "records")]
+
+    def test_rel_path_and_backlinks_accept_a_folder(self, tmp_path: Path) -> None:
+        from molexp.workspace import Workspace
+
+        ws = Workspace(root=tmp_path / "lab")
+        ws.materialize()
+        run = ws.add_project("p").add_experiment("e").add_run(id="r")
+
+        bundle = Bundle(ws.resolve())
+        note = bundle.create_note("rec")
+        bundle.link(note, run, role="records")
+
+        assert bundle.rel_path(run) == "projects/p/experiments/e/runs/run-r"
+        assert [bundle.rel_path(bl.source) for bl in bundle.backlinks(run)] == ["rec"]

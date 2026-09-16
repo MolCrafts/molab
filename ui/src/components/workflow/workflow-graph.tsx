@@ -9,8 +9,7 @@
  * `inspectedTask` → TaskViewer path).
  */
 
-import { type JSX, useMemo } from "react";
-import { FlowgramCanvas } from "@/components/workflow/flowgram-canvas";
+import { type JSX, lazy, Suspense, useMemo } from "react";
 import {
   buildFlowgramDocument,
   normalizeTaskGraph,
@@ -21,6 +20,19 @@ import type { TaskGraphJson } from "@/components/workflow/task-graph-ir";
 // Back-compat alias: the inline preview historically spoke of a "WorkflowIR".
 // It is now the canonical {@link TaskGraphJson}.
 export type WorkflowIR = TaskGraphJson;
+
+/**
+ * The flowgram canvas, split out of the entry bundle.
+ *
+ * `@flowgram.ai/free-layout-editor` drags in inversify and its own CSS — a
+ * large dependency that only matters once a graph is actually on screen. Every
+ * inline-graph surface reaches the canvas through this module, so deferring the
+ * import here is what keeps flowgram out of the initial download for the many
+ * screens that never draw a workflow.
+ */
+const LazyFlowgramCanvas = lazy(async () => ({
+  default: (await import("@/components/workflow/flowgram-canvas")).FlowgramCanvas,
+}));
 
 /**
  * Parse a serialized workflow IR string into the canonical {@link TaskGraphJson}.
@@ -71,7 +83,11 @@ export const WorkflowGraph = ({
   return (
     <div className={className}>
       <div className="overflow-hidden rounded-control border border-border/60" style={{ height }}>
-        <FlowgramCanvas document={document} onNodeClick={onNodeClick} />
+        <Suspense
+          fallback={<div className="mol-motion-progress-pulse h-full w-full bg-muted/20" />}
+        >
+          <LazyFlowgramCanvas document={document} onNodeClick={onNodeClick} />
+        </Suspense>
       </div>
       {invalidLinks.length > 0 && (
         <p className="mt-1 text-micro text-status-warning-foreground">

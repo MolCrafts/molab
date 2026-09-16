@@ -79,3 +79,113 @@ Side effects worth remembering:
   load (`ExperimentMetadata` carries `extra="ignore"`).
 
 **Status:** stable
+
+## workspace-read-model-memory | 2026-09-16 | impl
+
+The server now keeps state resident that used to be re-read per request: the
+`Workspace` instance caches `Run` entities via `Folder._children_cache`
+(`Experiment.list_runs` reuses them), and `services.workspace_read_model`
+holds the `RunsSnapshot` / `AssetScanSnapshot` / `KnowledgeSnapshot` plus the
+BM25F corpus. Cost is roughly **50–100 MB at 10 000 runs**, in exchange for
+warm list requests doing zero filesystem I/O.
+
+No eviction policy exists. Above ~100 k runs, add one (LRU over
+`_children_cache`, or drop snapshot rows outside the active project) rather
+than reverting the cache — the alternative is ~5 file reads per run per
+request, which is what made the UI unusable on NFS.
+
+**Status:** evolving
+
+## perf-syscall-budgets | 2026-09-16 | impl
+
+`tests/test_perf/` locks filesystem-call counts against a synthetic workspace
+built directly on disk (not via `add_run`, whose index rewrite is O(N²)).
+`tests/test_perf/BASELINE.md` holds the before/after tables measured against
+pristine `HEAD e0ebdec7`.
+
+```bash
+python -m pytest tests/test_perf -m perf          # small: 5x4x10 = 200 runs (default)
+MOLEXP_PERF_SCALE=full python -m pytest tests/test_perf -m perf   # 50x20x10 = 10 000 runs
+MOLEXP_PERF=1 python -m pytest tests/test_perf    # adds the informational wall-clock locks
+```
+
+Keep CI on `small`: the full fixture takes ~134 s to build on NFS (I/O bound;
+the 25 k single-row sqlite event appends dominate). Budgets are asserted with
+`tests/support/counting_fs.py::CountingFileSystem`, which proxies `__class__`
+to the wrapped type so `isinstance(fs, LocalFileSystem)` still holds — without
+that, `Workspace` treats a counted workspace as remote and the event spine
+short-circuits.
+
+**Status:** stable
+
+## local-toolchain-gotchas | 2026-09-16 | impl
+
+Four environment facts that cost time if rediscovered:
+
+- **`ty` needs an explicit interpreter.** `[tool.ty.environment] python = "./.venv"`
+  in `pyproject.toml` points at a directory that does not exist in this
+  checkout, so bare `ty check` fails before analysing anything. Use
+  `ty check --python $(python -c 'import sys;print(sys.prefix)')`.
+- **`ui/` is an npm workspace member.** `node_modules` and the binaries
+  (`rstest`, `tsc`, `biome`, `rsbuild`) hoist to the **repo root**, not
+  `ui/node_modules`. `npm install` / `npm test` still run from `ui/`.
+- **The sibling `@molcrafts/molplot` must be built** or `npm run typecheck`
+  fails with 15 `TS2307` "cannot find module" errors:
+  `cd ../molplot/core && npm install && npm run build`. `package.json`
+  resolves it by `file:` path, and the repo ships no `dist/`.
+- **Two molq test modules fail on a pre-existing config issue** unrelated to
+  any of this: `tests/test_plugins/test_submit_molq/test_dashboard.py` and
+  `tests/test_server/test_molq_routes.py` (molq rejects the `config.toml`).
+  Deselect them when measuring a suite run.
+
+**Status:** evolving
+
+## remote-workspace-cache-cost | 2026-09-16 | impl
+
+What a remote (SSH) workspace actually costs after the cache landed, measured on
+a scripted 5x4x10 tree (200 runs):
+
+- Cold `prefetch_workspace_indices` with the bulk accelerators: **2 SSH
+  round-trips total**, not 2 per run. It needs GNU `find` on the remote host
+  (`-printf`); a BSD/macOS host falls back to the per-level walk (~504 RTT),
+  which is logged at debug, not warned — falling back is normal there.
+- Warm walk of all 200 runs: **0**. A warm `stat` of a child a listing already
+  covered: **0**. `read_bytes` of a mirrored file: **0**; of an evicted one
+  (metadata retained): 1.
+- Sidecar for a 1000-record walk: **2 writes / 0.2 MB**, down from
+  1000 writes / 103 MB — the per-record rewrite was O(N^2) in bytes.
+
+The CLI shares this now (`target_to_filesystem(cached=True)` is the default,
+mirror under `~/.molexp/remote_cache/`), so a CLI verb against a remote target
+no longer pays raw per-call SSH. `revalidate_before` makes each invocation
+revalidate what it touches once, then pin.
+
+## notify-module-globals-need-a-conftest-reset | 2026-09-16 | impl
+
+`services.approval_notify` and `services.workspace_notify` keep their subscriber
+sets **and a `_closed` latch** at module scope. The FastAPI lifespan calls
+`close_approval_subscribers()` on shutdown, so *every* test that exits a
+`TestClient(app)` context set that latch for the rest of the process; a later
+test subscribing without booting the app got a subscription that ended
+immediately. It presented as an order-dependent failure that passed in
+isolation.
+
+`tests/conftest.py` now resets both modules around every test (autouse). Any
+future module-global pub/sub needs the same treatment — a process-wide latch and
+a per-test process are a bad pair.
+
+## approvals-stream-fallback-can-be-deleted | 2026-09-16 | impl
+
+The UI still opens a dedicated `EventSource` to `/api/approvals/events`
+(`useApprovalsStream` in `app/state/queries/agent.ts`) even though approvals now
+also reach the unified workspace stream as `kind="approval"` — every
+`notify_approvals_changed` call site passes a workspace root, so the bridge is
+live and covered at the bus and route level.
+
+It was kept because that coverage stops short of an open stream: both
+`TestClient` and `httpx.ASGITransport` serialize the app against the test, so a
+push arriving *during* an open read is unobservable in-process. Verify the live
+path in a browser (grant an approval, watch the bell update with the dedicated
+stream disabled); once it holds, deleting `useApprovalsStream` is the only
+change — the invalidation path already exists. Until then it is a second
+connection per tab, not a correctness risk.

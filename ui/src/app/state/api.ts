@@ -2,6 +2,7 @@ import type { BacklinksResponse } from "@/api/generated/models/BacklinksResponse
 import { EmbedRequest } from "@/api/generated/models/EmbedRequest";
 import type { EmbedResponse } from "@/api/generated/models/EmbedResponse";
 import type { EntityCard } from "@/api/generated/models/EntityCard";
+import type { FileContentResponse } from "@/api/generated/models/FileContentResponse";
 import type { KnowledgeListResponse } from "@/api/generated/models/KnowledgeListResponse";
 import type { KnowledgeSearchResponse } from "@/api/generated/models/KnowledgeSearchResponse";
 import type { NoteDetailResponse } from "@/api/generated/models/NoteDetailResponse";
@@ -22,6 +23,7 @@ import { RunsService } from "@/api/generated/services/RunsService";
 import { WorkflowService } from "@/api/generated/services/WorkflowService";
 import { WorkspaceService } from "@/api/generated/services/WorkspaceService";
 import { AgentUnavailableError, probeOnce, resetAgentProbes } from "@/app/state/agentProbe";
+import { fetchJsonConditional } from "@/app/state/queries/etagFetch";
 import type {
   AgentSessionSummary,
   ApiAgentSession,
@@ -49,6 +51,7 @@ import {
   parseTaskGraphIr,
 } from "@/components/workflow/flowgram-document";
 import type { TaskGraphJson } from "@/components/workflow/task-graph-ir";
+import type { TextWindowRequest } from "@/lib/fileSizeGate";
 
 // Local types not yet in OpenAPI. The lineage fields (`assetId`,
 // `assetKind`, `producerRunId`, `producerTaskId`) are populated when
@@ -183,9 +186,7 @@ export const workspaceApi = {
   // The served-workspace set (GET /api/workspaces) is outside the generated
   // client; a plain fetch keeps it decoupled from the per-workspace routes.
   getServedWorkspaces: async (): Promise<ServedWorkspaceSummary[]> => {
-    const response = await fetch("/api/workspaces");
-    if (!response.ok) return [];
-    const rows = (await response.json()) as Array<{
+    let rows: Array<{
       key: string;
       label: string;
       isRemote: boolean;
@@ -193,6 +194,11 @@ export const workspaceApi = {
       active?: boolean;
       unreachable?: boolean;
     }>;
+    try {
+      rows = await fetchJsonConditional("/api/workspaces");
+    } catch {
+      return [];
+    }
     return rows.map((row) => ({
       key: row.key,
       label: row.label,
@@ -221,13 +227,10 @@ export const workspaceApi = {
   // Projects of one named workspace via the aggregate route
   // (GET /api/workspaces/{ws}/projects). Used when several workspaces are
   // served so each group lists its own projects without a collision.
-  getProjectsForWorkspace: async (workspaceKey: string): Promise<ApiProjectResponse[]> => {
-    const response = await fetch(`/api/workspaces/${encodeURIComponent(workspaceKey)}/projects`);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch projects for workspace ${workspaceKey}: ${response.status}`);
-    }
-    return (await response.json()) as ApiProjectResponse[];
-  },
+  getProjectsForWorkspace: async (workspaceKey: string): Promise<ApiProjectResponse[]> =>
+    fetchJsonConditional<ApiProjectResponse[]>(
+      `/api/workspaces/${encodeURIComponent(workspaceKey)}/projects`,
+    ),
   createProject: async (data: ProjectCreateRequest): Promise<ApiProjectResponse> => {
     return ProjectsService.createProjectApiProjectsPost(data);
   },
@@ -561,14 +564,12 @@ export const workspaceApi = {
   getAssets: async (): Promise<ApiAssetResponse[]> => {
     return AssetsService.listAssetsApiAssetsGet();
   },
-  getProjectAssets: async (projectId: string): Promise<ApiAssetResponse[]> => {
-    // Manually fetch until client is regenerated
-    const response = await fetch(`/api/projects/${projectId}/assets`);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch project assets: ${response.statusText}`);
-    }
-    return response.json();
-  },
+  // Manually fetched until the client is regenerated; conditional so an
+  // unchanged manifest answers 304 and reuses the cached rows.
+  getProjectAssets: async (projectId: string): Promise<ApiAssetResponse[]> =>
+    fetchJsonConditional<ApiAssetResponse[]>(
+      `/api/projects/${encodeURIComponent(projectId)}/assets`,
+    ),
   getRunAssets: async (runId: string): Promise<ApiAssetResponse[]> => {
     return AssetsService.listAssetsApiAssetsGet(undefined, undefined, runId);
   },
@@ -590,9 +591,27 @@ export const workspaceApi = {
   writeFile: async (path: string, content = ""): Promise<void> => {
     await WorkspaceService.writeFileApiWorkspaceFilesPut({ folder_id: "workspace", path, content });
   },
-  getWorkspaceFileText: async (path: string): Promise<string> => {
-    const response = await WorkspaceService.readWorkspaceFileApiWorkspaceFileGet(path);
+  getWorkspaceFileText: async (path: string, window?: TextWindowRequest): Promise<string> => {
+    const response = await workspaceApi.getWorkspaceFileWindow(path, window);
     return response.content;
+  },
+  /**
+   * Read a workspace file, optionally as a bounded window.
+   *
+   * Without a window the server applies its own cap; with one the viewer gets
+   * exactly the slice it asked for plus `truncated`/`totalBytes`, so it can say
+   * how much of the file it is showing instead of pretending it has all of it.
+   */
+  getWorkspaceFileWindow: async (
+    path: string,
+    window?: TextWindowRequest,
+  ): Promise<FileContentResponse> => {
+    return WorkspaceService.readWorkspaceFileApiWorkspaceFileGet(
+      path,
+      window?.mode ?? "head",
+      window?.maxBytes,
+      window?.sinceOffset,
+    );
   },
   getCacheStats: async (): Promise<ApiCacheStats> => {
     return ExecutionService.getCacheStatsApiCacheStatsGet();
@@ -652,13 +671,10 @@ export const workspaceApi = {
   /**
    * Reverse-lookup: which run/experiment/project produced this file.
    */
-  getCatalogByPath: async (path: string): Promise<CatalogByPathResponse> => {
-    const response = await fetch(`/api/catalog/by-path?path=${encodeURIComponent(path)}`);
-    if (!response.ok) {
-      throw new Error(`Request failed: ${response.status} ${response.statusText}`);
-    }
-    return response.json();
-  },
+  getCatalogByPath: async (path: string): Promise<CatalogByPathResponse> =>
+    fetchJsonConditional<CatalogByPathResponse>(
+      `/api/catalog/by-path?path=${encodeURIComponent(path)}`,
+    ),
 
   /** Fetch the per-run output file tree, enriched with catalog data. */
   getRunFiles: async (

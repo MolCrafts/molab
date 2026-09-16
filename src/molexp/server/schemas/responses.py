@@ -6,8 +6,6 @@ no ``getattr`` guessing.
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import BaseModel, Field
@@ -24,6 +22,7 @@ from molexp.workspace import (
     Project,
     Run,
 )
+from molexp.workspace.read_model import RunRow
 
 
 def _str_or_none(value: object) -> str | None:
@@ -39,28 +38,6 @@ class WorkflowDocumentResponse(BaseModel):
     project_id: str = Field(..., description="Owning project id")
     experiment_id: str = Field(..., description="Owning experiment id")
     document: dict[str, Any] = Field(..., description="Normalized workflow IR document")
-
-
-def _read_context_results(run: Run) -> dict[str, Any]:
-    """Read the ``context.results`` block from run.json on disk.
-
-    The ``Context`` object is owned by the active ``RunContext`` only; once
-    a run has finished, the only place ``results`` survives is the
-    ``context`` sub-object inside ``run.json``. We read it lazily so the
-    REST response can show "what did this run produce" without bringing
-    runtime state into the persisted ``RunMetadata`` model.
-    """
-    run_json = Path(run.run_dir / "run.json")
-    if not run_json.exists():
-        return {}
-    try:
-        with open(run_json) as fh:  # noqa: PTH123
-            data = json.load(fh)
-    except (OSError, json.JSONDecodeError):
-        return {}
-    ctx = data.get("context") or {}
-    results = ctx.get("results") or {}
-    return dict(results) if isinstance(results, dict) else {}
 
 
 # ── Project ─────────────────────────────────────────────────────────────────
@@ -119,17 +96,21 @@ class ExperimentResponse(BaseModel):
     ) -> ExperimentResponse:
         run_list = []
         if runs:
-            run_list = [
-                RunSummary(
-                    id=r.id,
-                    status=r.status,
-                    created=r.metadata.created_at.isoformat(),
-                    finished=(r.finished_at.isoformat() if r.finished_at else None),
-                    parameters=r.parameters,
-                    results=_read_context_results(r),
+            run_list = []
+            for r in runs:
+                # Hot state (status / finished_at) from ONE ``_ops`` sidecar
+                # parse; ``results`` from the memoized run.json document.
+                ops = r.read_ops()
+                run_list.append(
+                    RunSummary(
+                        id=r.id,
+                        status=ops.status.value,
+                        created=r.metadata.created_at.isoformat(),
+                        finished=(ops.finished_at.isoformat() if ops.finished_at else None),
+                        parameters=r.parameters,
+                        results=r.context_results,
+                    )
                 )
-                for r in runs
-            ]
         return cls(
             id=experiment.id,
             projectId=experiment.project.id,
@@ -157,6 +138,18 @@ class RunSummary(BaseModel):
     finished: str | None = None
     parameters: dict[str, Any] = Field(default_factory=dict)
     results: dict[str, Any] = Field(default_factory=dict)
+
+    @classmethod
+    def from_row(cls, row: RunRow) -> RunSummary:
+        """Summary from a read-model row — zero I/O (see :meth:`RunResponse.from_row`)."""
+        return cls(
+            id=row.run_id,
+            status=row.status,
+            created=row.created_at.isoformat(),
+            finished=row.finished_at.isoformat() if row.finished_at else None,
+            parameters=dict(row.parameters),
+            results=dict(row.context_results),
+        )
 
 
 class WorkflowSnapshotResponse(BaseModel):
@@ -201,6 +194,62 @@ class RunResponse(BaseModel):
     target: str | None = None
 
     @classmethod
+    def from_row(cls, row: RunRow) -> RunResponse:
+        """Build the run response from a read-model row — zero I/O.
+
+        Field-for-field equivalent to :meth:`from_model` (a parity test locks
+        that); the row already carries the experiment's ``workflow_source`` /
+        ``git_commit``, which is why no parent lookup is needed here.
+        """
+        wf_snap = None
+        snap = row.workflow_snapshot
+        wf_source = row.workflow_source
+        if isinstance(snap, dict):
+            wf_snap = WorkflowSnapshotResponse(
+                source=str(snap.get("source") or wf_source or ""),
+                gitCommit=_str_or_none(snap.get("git_commit")) or row.git_commit,
+                codeHash=_str_or_none(snap.get("code_hash")),
+                configHash=_str_or_none(snap.get("config_hash")),
+            )
+        elif wf_source:
+            wf_snap = WorkflowSnapshotResponse(
+                source=wf_source, gitCommit=row.git_commit, codeHash=None, configHash=None
+            )
+        error = (
+            {"type": row.error.type, "message": row.error.message}
+            if row.error is not None
+            else None
+        )
+        return cls(
+            id=row.run_id,
+            projectId=row.project_id,
+            experimentId=row.experiment_id,
+            status=row.status,
+            created=row.created_at.isoformat(),
+            finished=row.finished_at.isoformat() if row.finished_at else None,
+            parameters=dict(row.parameters),
+            results=dict(row.context_results),
+            workflow=wf_snap,
+            workflowSource=wf_source,
+            error=error,
+            executorInfo=dict(row.executor_info),
+            profile=row.profile,
+            config=dict(row.config),
+            configHash=row.config_hash,
+            executionHistory=[
+                ExecutionRecordResponse(
+                    executionId=rec.execution_id,
+                    startedAt=rec.started_at.isoformat(),
+                    finishedAt=rec.finished_at.isoformat() if rec.finished_at else None,
+                    status=rec.status,
+                    schedulerJobId=rec.scheduler_job_id,
+                )
+                for rec in row.executions
+            ],
+            target=row.target,
+        )
+
+    @classmethod
     def from_model(cls, run: Run) -> RunResponse:
         # ``workflow_snapshot`` is an opaque JSON dict on disk
         # (rectification 2026-05-09 — the canonical typed shape lives
@@ -234,6 +283,9 @@ class RunResponse(BaseModel):
                 "type": run.metadata.error.type,
                 "message": run.metadata.error.message,
             }
+        # Execution history + status + finished_at come from the OKF ``_ops``
+        # sidecar (wsokf-07), parsed exactly once via ``run.read_ops()``.
+        ops = run.read_ops()
         history = [
             ExecutionRecordResponse(
                 executionId=rec.execution_id,
@@ -242,19 +294,17 @@ class RunResponse(BaseModel):
                 status=rec.status,
                 schedulerJobId=rec.scheduler_job_id,
             )
-            # Execution history + status come from the OKF ``_ops`` sidecar
-            # (wsokf-07), read once via ``run.read_ops()``.
-            for rec in run.read_ops().executions
+            for rec in ops.executions
         ]
         return cls(
             id=run.id,
             projectId=run.experiment.project.id,
             experimentId=run.experiment.id,
-            status=run.status,
+            status=ops.status.value,
             created=run.metadata.created_at.isoformat(),
-            finished=run.finished_at.isoformat() if run.finished_at else None,
+            finished=ops.finished_at.isoformat() if ops.finished_at else None,
             parameters=run.parameters,
-            results=_read_context_results(run),
+            results=run.context_results,
             workflow=wf_snap,
             workflowSource=wf_source,
             error=error,
@@ -345,6 +395,10 @@ class WorkspaceInfoResponse(BaseModel):
     projectCount: int
     assetCount: int
     warnings: list[str] = []
+    # Read-model view versions (``runs`` / ``assets`` / ``knowledge``) — the
+    # same numbers the list ETags are cut from, so a client can seed its
+    # conditional-request state from one bootstrap call.
+    versions: dict[str, int] = {}
     # Remote-cache lifecycle (null for local workspaces).
     # ``ready`` = connected AND navigation index built; missing ``_index.json``
     # on first open is normal — the server creates it.
@@ -373,7 +427,19 @@ class WorkspaceFolderResponse(BaseModel):
 
 
 class FileContentResponse(BaseModel):
+    """A bounded UTF-8 window over a workspace file.
+
+    ``content`` is the ``[offset, end)`` slice of a ``totalBytes`` file.  A
+    file larger than the window used to be refused with 413; it is now served
+    windowed, because a user opening a 500 MB log wants to see *something*
+    and a viewer can page with ``since_offset=end``.
+    """
+
     content: str
+    offset: int = 0
+    end: int = 0
+    totalBytes: int = 0
+    truncated: bool = False
 
 
 # ── Execution ───────────────────────────────────────────────────────────────
@@ -568,18 +634,33 @@ class HealthResponse(BaseModel):
 
 
 class RunLogsResponse(BaseModel):
-    """Per-execution stdout/stderr for a run.
+    """Per-execution stdout/stderr for a run, as a bounded tail window.
 
     ``execution_id`` is the attempt these logs belong to; the server
     defaults to the most recent attempt when no specific execution is
-    requested.  Each value is the full content of
+    requested.  Each value is a window over
     ``executions/<execution_id>/{stdout,stderr}.log`` (or ``None`` if the
     file is absent — e.g. local executions skip stdout capture).
+
+    A run's stdout can be gigabytes, so the server returns at most
+    ``max_bytes`` of it — by default the *tail*, which is what a log viewer
+    wants.  The cursor triple makes incremental follow possible: pass
+    ``stdout_end`` back as ``since_stdout`` and the next poll returns only
+    what was appended.  ``*_truncated`` says the window is not the whole
+    file, so a viewer can offer "load earlier".
     """
 
     execution_id: str | None = None
     stdout: str | None = None
     stderr: str | None = None
+    stdout_offset: int | None = None
+    stdout_end: int | None = None
+    stdout_total: int | None = None
+    stdout_truncated: bool = False
+    stderr_offset: int | None = None
+    stderr_end: int | None = None
+    stderr_total: int | None = None
+    stderr_truncated: bool = False
 
 
 class MetricSeriesResponse(BaseModel):
@@ -594,20 +675,40 @@ class MetricSeriesResponse(BaseModel):
 
 
 class RunMetricsResponse(BaseModel):
-    """Run-local metrics query response."""
+    """Run-local metrics query response.
+
+    ``nextOffset`` is the cheap cursor: a follow-up poll passing it as
+    ``since_offset`` seeks straight to the new bytes, so each poll costs what
+    was appended rather than the whole file so far.  ``nextLine`` is the
+    legacy line cursor, kept for callers that have not migrated; it still
+    forces a re-read from the top.  ``truncated`` means the scan stopped at
+    ``max_scan_bytes`` (or ``limit``) with more data available.
+    """
 
     nextLine: int = 0
+    """Deprecated — prefer ``nextOffset``, which resumes in O(1)."""
+
+    nextOffset: int = 0
     records: list[dict[str, Any]] = Field(default_factory=list)
     series: list[MetricSeriesResponse] = Field(default_factory=list)
     parseErrors: int = 0
+    truncated: bool = False
 
 
 class RunFileTextResponse(BaseModel):
-    """Raw UTF-8 text content of a file under a run directory."""
+    """A bounded UTF-8 window over a file under a run directory.
+
+    ``size`` is the whole file; ``content`` is the ``[offset, end)`` slice of
+    it that was actually read.  ``truncated`` says they differ, so a viewer
+    can page with ``since_offset=end`` rather than pretending it has the file.
+    """
 
     path: str
     content: str
     size: int
+    offset: int = 0
+    end: int = 0
+    truncated: bool = False
 
 
 class LammpsThermoStage(BaseModel):
@@ -618,12 +719,21 @@ class LammpsThermoStage(BaseModel):
 
 
 class LammpsLogResponse(BaseModel):
-    """Parsed LAMMPS log thermo stages, produced by ``molpy.io.LAMMPSLog``."""
+    """Parsed LAMMPS log thermo stages, produced by ``molpy.io.LAMMPSLog``.
+
+    A long MD run's log can be gigabytes.  Above the parse ceiling the server
+    parses only the *tail* — the latest stages, which is what a progress view
+    wants — and sets ``truncated``.  ``bytesParsed`` is how much was actually
+    read, so a caller can tell a whole-file parse from a windowed one (and
+    ``version``, read from line 1, is absent in the windowed case).
+    """
 
     path: str
     version: str | None = None
     nStages: int = 0
     stages: list[LammpsThermoStage] = Field(default_factory=list)
+    truncated: bool = False
+    bytesParsed: int = 0
 
 
 class TensorboardScalarPoint(BaseModel):
@@ -652,11 +762,22 @@ class TensorboardScalarsResponse(BaseModel):
 
 
 class RunExecutionResponse(BaseModel):
-    """Runtime workflow graph state read from ``workflow.json``."""
+    """Runtime workflow graph state read from ``workflow.json``.
+
+    The document grows with node count *and* with the size of each node's
+    persisted outputs, so it is served in three bands: inline below
+    ``EXECUTION_JSON_INLINE_BYTES``; summarised below
+    ``EXECUTION_JSON_MAX_BYTES`` (per-node status/snapshot/timestamps kept,
+    the bulky ``outputs`` dropped) with ``workflowTruncated`` set; and
+    refused with 413 above it.  ``workflowBytes`` is the document's real size
+    either way.
+    """
 
     execution_id: str | None = None
     status: str = "not_started"  # running | completed | failed | not_started
     workflow: dict[str, Any] | None = None
+    workflowTruncated: bool = False
+    workflowBytes: int | None = None
 
 
 # ── Asset lineage (Producer.inputs DAG) ─────────────────────────────────────
@@ -730,7 +851,14 @@ class CatalogByPathResponse(BaseModel):
 
 
 class RunFileNode(BaseModel):
-    """One node in a run's output file tree."""
+    """One node in a run's output file tree.
+
+    On a folder, ``entryCount`` is how many children it really has and
+    ``truncated`` says ``children`` holds fewer — either because the
+    per-directory cap was hit or because the walk stopped at ``max_depth``.
+    A run that wrote 100k frames into one directory therefore costs a bounded
+    response instead of an unbounded one.
+    """
 
     name: str
     relPath: str  # relative to run_dir
@@ -740,6 +868,8 @@ class RunFileNode(BaseModel):
     assetId: str | None = None
     assetKind: str | None = None
     taskId: str | None = None
+    entryCount: int | None = None
+    truncated: bool = False
     children: list[RunFileNode] = Field(default_factory=list)
 
 

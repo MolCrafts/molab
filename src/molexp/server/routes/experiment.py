@@ -4,17 +4,22 @@ from __future__ import annotations
 
 from shutil import rmtree
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request, Response
 
-from molexp.workspace.metrics import read_run_metrics
+from molexp.services.workspace_read_model import WorkspaceReadModel
 
 from ..dependencies import get_workspace
+from ..deps.read_model import get_read_model
+from ..executors import run_heavy
+from ..http_cache import not_modified, weak_etag
+from ..mutations import after_mutation
 from ..schemas import (
     ComparisonRunRow,
     ExperimentComparisonResponse,
     ExperimentCreateRequest,
     ExperimentResponse,
     MessageResponse,
+    RunSummary,
 )
 
 router = APIRouter(prefix="/projects/{project_id}/experiments", tags=["experiments"])
@@ -33,11 +38,35 @@ def list_experiments(
 def get_experiment(
     project_id: str,
     experiment_id: str,
+    request: Request,
+    response: Response,
     workspace=Depends(get_workspace),  # noqa: ANN001
+    read_model: WorkspaceReadModel = Depends(get_read_model),
 ) -> ExperimentResponse:
+    """One experiment plus its run summaries.
+
+    The run rows come from the read-model snapshot (zero I/O once warm) and
+    the validator is this experiment's own version, so activity in a *different*
+    experiment does not invalidate this page.
+    """
     project = workspace.get_project(project_id)
     experiment = project.get_experiment(experiment_id)
-    return ExperimentResponse.from_model(experiment, runs=experiment.list_runs())
+    snapshot = read_model.runs()
+    cached = not_modified(
+        request,
+        response,
+        weak_etag("experiment", snapshot.version_for_experiment(project_id, experiment_id)),
+    )
+    if cached is not None:
+        return cached  # type: ignore[return-value]
+    rows = snapshot.experiment_rows(project_id, experiment_id)
+    detail = ExperimentResponse.from_model(experiment)
+    return detail.model_copy(
+        update={
+            "runCount": len(rows) or None,
+            "runs": [RunSummary.from_row(row) for row in rows],
+        }
+    )
 
 
 @router.post("", response_model=ExperimentResponse, status_code=201)
@@ -61,6 +90,7 @@ def create_experiment(
         params=req.parameter_space,
         default_target=req.default_target,
     )
+    after_mutation(workspace, "experiment", ref=exp.id, project_id=project_id, experiment_id=exp.id)
     return ExperimentResponse.from_model(exp)
 
 
@@ -69,66 +99,67 @@ def _target_exists(workspace, name: str) -> bool:  # noqa: ANN001
 
 
 @router.get("/{experiment_id}/comparison", response_model=ExperimentComparisonResponse)
-def get_experiment_comparison(
+async def get_experiment_comparison(
     project_id: str,
     experiment_id: str,
     workspace=Depends(get_workspace),  # noqa: ANN001
+    read_model: WorkspaceReadModel = Depends(get_read_model),
 ) -> ExperimentComparisonResponse:
-    """Comparison matrix: parameter columns x run rows + final metric values per run."""
+    """Comparison matrix: parameter columns x run rows + final metric values per run.
+
+    Run rows come from the read-model snapshot; the per-run metric fold is
+    memoized against each ``metrics.jsonl``'s ``(size, mtime)`` and read
+    incrementally, so a re-request parses only lines appended since the last
+    one instead of re-scanning up to 50 000 records per run. The whole matrix
+    is assembled on the heavy pool — it is the one endpoint whose cost still
+    scales with the *data* a run wrote, not with the run count.
+    """
     project = workspace.get_project(project_id)
-    experiment = project.get_experiment(experiment_id)
+    project.get_experiment(experiment_id)  # 404s on an unknown experiment
+    snapshot = read_model.runs()
+    rows_in = snapshot.experiment_rows(project_id, experiment_id)
 
-    runs = experiment.list_runs()
-    rows: list[ComparisonRunRow] = []
-    param_keys: set[str] = set()
-    metric_keys: set[str] = set()
-
-    for run in runs:
-        param_keys.update(run.parameters.keys())
-        metrics_summary: dict[str, object] = {}
-        try:
-            result = read_run_metrics(run.run_dir, limit=50000)
-            for series in result.series:
-                key_raw = series.get("key")
-                latest = series.get("latestValue")
-                if isinstance(key_raw, str) and key_raw and latest is not None:
-                    metrics_summary[key_raw] = latest
-                    metric_keys.add(key_raw)
-        except (FileNotFoundError, OSError, ValueError):
-            pass
-
-        duration: float | None = None
-        finished_at = run.finished_at
-        if finished_at and run.metadata.created_at:
-            duration = (finished_at - run.metadata.created_at).total_seconds()
-
-        error_dict: dict[str, str] | None = None
-        if run.metadata.error:
-            error_dict = {
-                "type": run.metadata.error.type,
-                "message": run.metadata.error.message,
-            }
-
-        rows.append(
-            ComparisonRunRow(
-                runId=run.id,
-                status=run.status,
-                parameters=dict(run.parameters),
-                metrics=metrics_summary,
-                durationSec=duration,
-                created=run.metadata.created_at.isoformat(),
-                finished=finished_at.isoformat() if finished_at else None,
-                error=error_dict,
+    def _build() -> ExperimentComparisonResponse:
+        rows: list[ComparisonRunRow] = []
+        param_keys: set[str] = set()
+        metric_keys: set[str] = set()
+        for row in rows_in:
+            param_keys.update(row.parameters.keys())
+            run_dir = (
+                project.resolve() / "experiments" / experiment_id / "runs" / f"run-{row.run_id}"
             )
+            metrics_summary = read_model.metrics_summary(run_dir)
+            metric_keys.update(metrics_summary)
+
+            duration: float | None = None
+            if row.finished_at and row.created_at:
+                duration = (row.finished_at - row.created_at).total_seconds()
+            error_dict = (
+                {"type": row.error.type, "message": row.error.message}
+                if row.error is not None
+                else None
+            )
+            rows.append(
+                ComparisonRunRow(
+                    runId=row.run_id,
+                    status=row.status,
+                    parameters=dict(row.parameters),
+                    metrics=dict(metrics_summary),
+                    durationSec=duration,
+                    created=row.created_at.isoformat(),
+                    finished=row.finished_at.isoformat() if row.finished_at else None,
+                    error=error_dict,
+                )
+            )
+        return ExperimentComparisonResponse(
+            experimentId=experiment_id,
+            projectId=project_id,
+            paramKeys=sorted(param_keys),
+            metricKeys=sorted(metric_keys),
+            runs=rows,
         )
 
-    return ExperimentComparisonResponse(
-        experimentId=experiment_id,
-        projectId=project_id,
-        paramKeys=sorted(param_keys),
-        metricKeys=sorted(metric_keys),
-        runs=rows,
-    )
+    return await run_heavy(_build)
 
 
 @router.delete("/{experiment_id}", response_model=MessageResponse)
@@ -140,4 +171,11 @@ def delete_experiment(
     project = workspace.get_project(project_id)
     experiment = project.get_experiment(experiment_id)
     rmtree(experiment.experiment_dir)
+    after_mutation(
+        workspace,
+        "experiment",
+        ref=experiment_id,
+        project_id=project_id,
+        experiment_id=experiment_id,
+    )
     return MessageResponse(message="Experiment deleted")

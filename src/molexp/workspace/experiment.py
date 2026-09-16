@@ -311,7 +311,7 @@ class Experiment(Folder):
     @property
     def assets(self) -> AssetsView:
         """Scope-filtered asset view (read-only queries)."""
-        return AssetsView(self.project.workspace.root, self.scope)
+        return AssetsView(self.project.workspace.root, self.scope, fs=self._fs)
 
     @property
     def data_assets(self) -> DataAssetLibrary:
@@ -591,18 +591,45 @@ class Experiment(Folder):
 
     # ── Internal helpers ────────────────────────────────────────────────
 
-    def list_runs(self) -> list[Run]:
-        """List all runs by scanning the ``runs/`` directory."""
-        result: list[Run] = []
+    def list_runs(self, *, sync: bool = True) -> list[Run]:
+        """List all runs by scanning the ``runs/`` directory.
+
+        One ``scandir``; a ``run-<id>`` entry already in the children cache is
+        reused (``sync=True`` re-stats its ``run.json`` and reloads the
+        metadata only if it changed), an unknown one is loaded with a
+        try-read (``Run.from_disk`` raising replaces the ``exists`` probe).
+        Runs that vanished from disk are evicted from the cache. Cold:
+        ``1 scandir + N open``; warm: ``1 scandir + N stat``
+        (``sync=False``: ``1 scandir``).
+        """
         runs_dir = self._fs.join(self.experiment_dir, "runs")
-        if not self._fs.is_dir(runs_dir):
-            return result
-        for entry_name in sorted(self._fs.listdir(runs_dir)):
-            entry_path = self._fs.join(runs_dir, entry_name)
-            if self._fs.is_dir(entry_path) and self._fs.exists(
-                self._fs.join(entry_path, "run.json")
-            ):
-                result.append(Run.from_disk(entry_path, self))
+        try:
+            entries = self._fs.scandir(runs_dir, with_stat=False)
+        except (FileNotFoundError, NotADirectoryError, OSError):
+            return []
+        cache = self._children_cache
+        listed: dict[str, Folder] = {}
+        result: list[Run] = []
+        for entry in sorted(entries, key=lambda e: e.name):
+            entry_name = entry.name
+            if not entry.is_dir or not entry_name.startswith("run-"):
+                continue
+            slug = entry_name[len("run-") :]
+            cached = cache.get(slug)
+            if isinstance(cached, Run):
+                if sync:
+                    cached.sync_metadata()
+                run = cached
+            else:
+                try:
+                    run = Run.from_disk(self._fs.join(runs_dir, entry_name), self)
+                except (FileNotFoundError, NotADirectoryError, OSError, ValueError):
+                    continue
+            listed[run._name] = run
+            result.append(run)
+        # Swap the dict (never mutate in place): readers on other threads see
+        # either the old or the new mapping. Non-Run cached children survive.
+        self._children_cache = {k: v for k, v in cache.items() if not isinstance(v, Run)} | listed
         return result
 
     def children(self, kind: str | None = None) -> list[Folder]:

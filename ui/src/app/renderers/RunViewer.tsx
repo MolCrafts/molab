@@ -1,5 +1,5 @@
 import { FileQuestion, PlayCircle } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { CopyButton, EmptyState, EntityMetric, EntityPage } from "@/app/components/entity";
 import { RunExecutionsPanel } from "@/app/renderers/RunExecutionsPanel";
 import { RunLogsPanel } from "@/app/renderers/RunLogsPanel";
@@ -7,9 +7,12 @@ import { RunOutputsPanel } from "@/app/renderers/run/RunOutputsPanel";
 import { RunOverview } from "@/app/renderers/run/RunOverview";
 import { useRunViewer } from "@/app/renderers/useRunViewer";
 import { POST_DISPATCH_TAB, RunToolbar } from "@/app/runs/RunToolbar";
-import { workspaceApi } from "@/app/state/api";
+import { useRunAssetsQuery } from "@/app/state/queries/runs";
 import { useDiscoveredFileTypesForRun } from "@/app/state/useDiscoveredFileTypes";
 import type { ApiAssetResponse, RendererProps } from "@/app/types";
+
+/** Stable empty list so a pending assets query never re-renders the overview. */
+const EMPTY_ASSETS: ApiAssetResponse[] = [];
 
 const openKnowledgePath = (
   path: string,
@@ -34,6 +37,7 @@ export const RunViewer = (props: RendererProps): JSX.Element => {
     setActiveTab,
     logs,
     logsError,
+    hasLogs,
     selectedExecutionId,
     setSelectedExecutionId,
     duration,
@@ -48,34 +52,14 @@ export const RunViewer = (props: RendererProps): JSX.Element => {
     alertDialog,
   } = useRunViewer(props);
 
-  const [runAssets, setRunAssets] = useState<ApiAssetResponse[]>([]);
-
   const runCoords = useMemo(
     () =>
       run ? { projectId: run.projectId, experimentId: run.experimentId, runId: run.id } : null,
     [run],
   );
   const { discovered: discoveredPlugins } = useDiscoveredFileTypesForRun(runCoords, "run");
-
-  useEffect(() => {
-    let cancelled = false;
-    if (!run) {
-      setRunAssets([]);
-      return;
-    }
-    workspaceApi
-      .getRunAssets(run.id)
-      .then((assets) => {
-        if (!cancelled) setRunAssets(assets);
-      })
-      .catch((err) => {
-        console.warn(`Failed to load assets for run ${run.id}:`, err);
-        if (!cancelled) setRunAssets([]);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [run]);
+  const runAssetsQuery = useRunAssetsQuery(run?.id ?? null);
+  const runAssets: ApiAssetResponse[] = runAssetsQuery.data ?? EMPTY_ASSETS;
 
   if (!run) {
     return (
@@ -162,7 +146,6 @@ export const RunViewer = (props: RendererProps): JSX.Element => {
     </div>
   );
 
-  const hasLogs = Boolean(logs?.stdout || logs?.stderr);
   const outputResults = resultEntries.map(([key, value]) => ({ key, value }));
   const outputsContent = <RunOutputsPanel assets={runAssets} results={outputResults} />;
   const tabs = [

@@ -21,6 +21,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 from threading import Lock
+from typing import Literal
 
 from molexp.sqlitelog import open_wal_connection
 
@@ -64,7 +65,9 @@ CREATE INDEX IF NOT EXISTS idx_edges_child ON artifact_edges(child_id);
 """
 
 
-def open_db(path: Path) -> tuple[sqlite3.Connection, Lock]:
+def open_db(
+    path: Path, *, journal_mode: Literal["WAL", "DELETE"] | None = None
+) -> tuple[sqlite3.Connection, Lock]:
     """Open or create the harness's SQLite database at ``path``.
 
     Delegates the WAL connection + path-keyed shared lock to
@@ -74,12 +77,21 @@ def open_db(path: Path) -> tuple[sqlite3.Connection, Lock]:
 
     Args:
         path: The SQLite database file path.
+        journal_mode: Forwarded to :func:`~molexp.sqlitelog.open_wal_connection`.
+            ``None`` (default) detects it from the filesystem holding *path*:
+            WAL's shared-memory file is unsafe on NFS/Lustre, and a harness DB
+            under an experiment directory frequently lives on exactly those
+            mounts, so guessing WAL there risks corruption.
 
     Returns:
         A ``(connection, lock)`` pair; the lock is the shared per-file lock and
         MUST guard every use of the connection (the thread-safety contract).
     """
-    conn, lock = open_wal_connection(path)
+    if journal_mode is None:
+        from molexp.fs.profile import detect_fs_profile
+
+        journal_mode = detect_fs_profile(path.parent).sqlite_journal
+    conn, lock = open_wal_connection(path, journal_mode=journal_mode)
     conn.executescript(_SCHEMA_SQL)
     _migrate_artifact_edges(conn)
     # INSERT OR IGNORE avoids a PRIMARY KEY race when two processes open a fresh

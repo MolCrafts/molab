@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query";
 import {
   Archive,
   Ban,
@@ -43,6 +44,13 @@ import { buildRunListActions } from "@/app/runs/runListActions";
 import type { WorkspaceRunsFilters } from "@/app/runs/types";
 import { useWorkspaceRuns } from "@/app/runs/useWorkspaceRuns";
 import { agentApi, workspaceApi } from "@/app/state/api";
+import {
+  prefetchExperimentRuns,
+  prefetchExperiments,
+  qk,
+  type SliceErrors,
+  useInvalidate,
+} from "@/app/state/queries";
 import type {
   AgentSessionSummary,
   AssetSummary,
@@ -65,7 +73,12 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { toast } from "@/components/ui/toast";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { WorkbenchIconAction, WorkbenchToggleAction } from "@/components/workbench";
+import {
+  WorkbenchIconAction,
+  WorkbenchOperationState,
+  WorkbenchRetryAction,
+  WorkbenchToggleAction,
+} from "@/components/workbench";
 import { agentTaskDisplayTitle } from "@/lib/agent-task-title";
 import { countLabel } from "@/lib/count-label";
 import { join as joinWorkspacePath } from "@/lib/workspace-path";
@@ -90,6 +103,8 @@ interface LeftPanelProps {
   onCreateDirectory: (path: string) => void;
   onCreateFile: (path: string) => void;
   onRefresh: () => void;
+  /** Per-slice bootstrap failures — a failed slice shows an error, not `[]`. */
+  sliceErrors?: SliceErrors;
   /** Lazy-expand a workspace directory via WorkspaceFs (path = node id). */
   onExpandDirectory?: (dirPath: string) => void;
   /** Lazy-load project → experiments (nav expand). */
@@ -900,6 +915,7 @@ export const LeftPanel = ({
   onCreateDirectory,
   onCreateFile,
   onRefresh,
+  sliceErrors,
   onExpandDirectory,
   onExpandProject,
   onExpandExperiment,
@@ -909,6 +925,20 @@ export const LeftPanel = ({
 }: LeftPanelProps): JSX.Element => {
   const listHeader = listHeaderByView[view];
   const hasWorkspace = Boolean(snapshot.workspaceRoot);
+  const queryClient = useQueryClient();
+  const {
+    afterRunVerb,
+    afterRunCreate,
+    afterExperimentCreate,
+    afterExperimentDelete,
+    afterProjectDelete,
+    afterAgentDelete,
+    afterWorkspaceSwitch,
+    apply,
+  } = useInvalidate();
+  // A new project adds a row to every project list and a directory to the tree.
+  const afterProjectCreate = (): Promise<void> =>
+    apply([{ queryKey: ["projects"] }, { queryKey: qk.tree("", 2), exact: true }]);
   const [createExperimentProjectId, setCreateExperimentProjectId] = useState<string | null>(null);
   const [createRunExperimentId, setCreateRunExperimentId] = useState<string | null>(null);
   const { prompt, dialog: promptDialog } = usePrompt();
@@ -1039,7 +1069,11 @@ export const LeftPanel = ({
     try {
       await workspaceApi.killRun(run.projectId, run.experimentId, run.id);
       toast.success("Cancelled");
-      onRefresh();
+      await afterRunVerb({
+        runId: run.id,
+        projectId: run.projectId,
+        experimentId: run.experimentId,
+      });
     } catch (error) {
       console.error("Failed to cancel run:", error);
       void alert({
@@ -1053,7 +1087,11 @@ export const LeftPanel = ({
     try {
       await workspaceApi.resumeRun(run.projectId, run.experimentId, run.id);
       toast.success("Resumed");
-      onRefresh();
+      await afterRunVerb({
+        runId: run.id,
+        projectId: run.projectId,
+        experimentId: run.experimentId,
+      });
       onSelect({ objectType: "run", objectId: run.id, objectView: "executions" });
     } catch (error) {
       void alert({
@@ -1067,7 +1105,11 @@ export const LeftPanel = ({
     try {
       await workspaceApi.rerunRun(run.projectId, run.experimentId, run.id, fresh);
       toast.success(fresh ? "Rerun fresh" : "Rerun");
-      onRefresh();
+      await afterRunVerb({
+        runId: run.id,
+        projectId: run.projectId,
+        experimentId: run.experimentId,
+      });
       onSelect({ objectType: "run", objectId: run.id, objectView: "executions" });
     } catch (error) {
       void alert({
@@ -1094,7 +1136,7 @@ export const LeftPanel = ({
     if (!confirmed) return;
     try {
       await workspaceApi.deleteProject(projectId);
-      onRefresh();
+      await afterProjectDelete({ projectId });
     } catch (error) {
       console.error("Failed to delete project:", error);
       void alert({
@@ -1121,7 +1163,10 @@ export const LeftPanel = ({
     if (!confirmed) return;
     try {
       await workspaceApi.deleteExperiment(experiment.projectId, experiment.id);
-      onRefresh();
+      await afterExperimentDelete({
+        projectId: experiment.projectId,
+        experimentId: experiment.id,
+      });
     } catch (error) {
       console.error("Failed to delete experiment:", error);
       void alert({
@@ -1151,7 +1196,7 @@ export const LeftPanel = ({
       if (selection?.objectType === "agent" && selection.objectId === session.id) {
         onSelect({ objectType: "agent", objectId: "new" });
       }
-      onRefresh();
+      await afterAgentDelete(session.id);
     } catch (error) {
       console.error("Failed to delete agent task:", error);
       void alert({
@@ -1204,7 +1249,7 @@ export const LeftPanel = ({
   const handleActivateWorkspace = (ws: ServedWorkspaceSummary): void => {
     void workspaceApi
       .activateServedWorkspace(ws)
-      .then(() => onRefresh())
+      .then(() => afterWorkspaceSwitch())
       .catch((err) => console.warn(`Failed to switch to workspace ${ws.key}:`, err));
   };
 
@@ -1235,6 +1280,17 @@ export const LeftPanel = ({
     [snapshot.workspaceRoot],
   );
 
+  // A slice that failed must not render as an empty tree (ui-guidelines:
+  // "request failures never collapse to []").
+  const sliceError =
+    view === "projects" || view === "workflow"
+      ? (sliceErrors?.projects ?? null)
+      : view === "workspace"
+        ? (sliceErrors?.tree ?? null)
+        : view === "agent"
+          ? (sliceErrors?.agentSessions ?? null)
+          : null;
+
   const treeByView: Record<LeftPanelView, JSX.Element> = {
     projects: (
       <TreeView
@@ -1252,6 +1308,18 @@ export const LeftPanel = ({
           const experiment = snapshot.experiments.find((e) => e.id === nodeId);
           if (experiment) {
             onExpandExperiment?.(experiment.projectId, experiment.id);
+          }
+        }}
+        onHoverIntent={(nodeId) => {
+          // Warm the row's children before the click; `prefetchQuery` honours
+          // staleTime, so an already-loaded node costs nothing.
+          if (snapshot.projects.some((project) => project.id === nodeId)) {
+            void prefetchExperiments(queryClient, nodeId);
+            return;
+          }
+          const experiment = snapshot.experiments.find((item) => item.id === nodeId);
+          if (experiment) {
+            void prefetchExperimentRuns(queryClient, experiment.projectId, experiment.id);
           }
         }}
       />
@@ -1349,7 +1417,11 @@ export const LeftPanel = ({
 
             {view === "projects" && (
               <div className="flex items-center gap-1">
-                <CreateProjectDialog onProjectCreated={onRefresh} />
+                <CreateProjectDialog
+                  onProjectCreated={() => {
+                    void afterProjectCreate();
+                  }}
+                />
               </div>
             )}
 
@@ -1421,7 +1493,19 @@ export const LeftPanel = ({
           </div>
           <Separator />
         </div>
-        <ScrollArea className="flex-1 px-4 pb-4">{treeByView[view]}</ScrollArea>
+        <ScrollArea className="flex-1 px-4 pb-4">
+          {sliceError ? (
+            <WorkbenchOperationState
+              kind="error"
+              density="compact"
+              title={`Could not load ${listHeader.toLowerCase()}`}
+              detail={sliceError.message}
+              action={<WorkbenchRetryAction onClick={onRefresh} />}
+            />
+          ) : (
+            treeByView[view]
+          )}
+        </ScrollArea>
       </div>
       {createExperimentProjectId && (
         <CreateExperimentDialog
@@ -1431,7 +1515,9 @@ export const LeftPanel = ({
           onOpenChange={(nextOpen) => {
             if (!nextOpen) setCreateExperimentProjectId(null);
           }}
-          onExperimentCreated={onRefresh}
+          onExperimentCreated={() => {
+            void afterExperimentCreate({ projectId: createExperimentProjectId });
+          }}
         />
       )}
       {createRunExperiment && (
@@ -1445,7 +1531,10 @@ export const LeftPanel = ({
             if (!nextOpen) setCreateRunExperimentId(null);
           }}
           onRunCreated={(runId) => {
-            onRefresh();
+            void afterRunCreate({
+              projectId: createRunExperiment.projectId,
+              experimentId: createRunExperiment.id,
+            });
             setCreateRunExperimentId(null);
             onSelect({ objectType: "run", objectId: runId });
           }}

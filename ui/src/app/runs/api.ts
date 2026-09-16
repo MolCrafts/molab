@@ -17,12 +17,21 @@ export interface ListRunsOptions {
   limit?: number;
 }
 
+/**
+ * The runs-index URL for `options`.
+ *
+ * Exported so the query layer can fetch it conditionally (`If-None-Match`)
+ * while this module keeps the plain, spy-able `fetch` used elsewhere.
+ */
+export const runsIndexUrl = (options: ListRunsOptions = {}): string => {
+  const params = new URLSearchParams();
+  if (options.limit !== undefined) params.set("limit", String(options.limit));
+  return params.size > 0 ? `${ENDPOINT}?${params.toString()}` : ENDPOINT;
+};
+
 export const workspaceRunsApi = {
   async listRuns(options: ListRunsOptions = {}): Promise<WorkspaceRunsResponse> {
-    const params = new URLSearchParams();
-    if (options.limit !== undefined) params.set("limit", String(options.limit));
-    const url = params.size > 0 ? `${ENDPOINT}?${params.toString()}` : ENDPOINT;
-    const response = await fetch(url);
+    const response = await fetch(runsIndexUrl(options));
     return handle<WorkspaceRunsResponse>(response, "List workspace runs");
   },
 };

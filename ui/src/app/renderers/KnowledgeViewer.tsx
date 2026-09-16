@@ -9,19 +9,27 @@ import {
   Pencil,
 } from "lucide-react";
 import { type JSX, lazy, Suspense, useEffect, useMemo, useState } from "react";
-import type { KnowledgeListResponse } from "@/api/generated/models/KnowledgeListResponse";
-import type { NoteDetailResponse } from "@/api/generated/models/NoteDetailResponse";
+import type { NoteSummary } from "@/api/generated/models/NoteSummary";
 import type { ReferenceSummary } from "@/api/generated/models/ReferenceSummary";
 import { EmptyState, EntityHeader } from "@/app/components/entity";
 import { DocumentControls } from "@/app/renderers/knowledge/DocumentControls";
 import { EntityRefCard } from "@/app/renderers/knowledge/EntityRefCard";
 import { workspaceApi } from "@/app/state/api";
+import {
+  knowledgeErrorMessage,
+  useInvalidate,
+  useKnowledgeListQuery,
+  useKnowledgeNotePrefetch,
+  useKnowledgeNoteQuery,
+} from "@/app/state/queries";
 import { useNavigationState } from "@/app/state/useNavigationState";
-import type { RendererProps } from "@/app/types";
+import type { RendererProps, Selection } from "@/app/types";
 import { MarkdownContent } from "@/components/ui/markdown";
 import {
   WorkbenchAction,
   WorkbenchIconAction,
+  WorkbenchOperationState,
+  WorkbenchRetryAction,
   WorkbenchToggleAction,
 } from "@/components/workbench";
 
@@ -45,6 +53,34 @@ const formatReference = (ref: ReferenceSummary): string => {
   return bits.join(" · ");
 };
 
+interface NoteRowProps {
+  note: NoteSummary;
+  onSelect: (selection: Selection) => void;
+}
+
+/** One note in the browse list; hover/focus warms its body for the click. */
+const NoteRow = ({ note, onSelect }: NoteRowProps): JSX.Element => {
+  const prefetch = useKnowledgeNotePrefetch(note.relPath);
+  return (
+    <WorkbenchAction
+      kind="ghost"
+      size="content"
+      type="button"
+      onClick={() => onSelect({ objectType: "knowledge", objectId: note.relPath })}
+      className="flex w-full items-start gap-3 px-3 py-3 text-left transition-colors hover:bg-muted/40"
+      {...prefetch}
+    >
+      <NotebookPen className="mt-1 h-4 w-4 flex-none text-muted-foreground" />
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-body-lg font-medium text-foreground">{note.name}</span>
+        <span className="block truncate text-label text-muted-foreground">
+          {note.excerpt.replace(/\n+/g, " ").trim() || "(empty note)"}
+        </span>
+      </span>
+    </WorkbenchAction>
+  );
+};
+
 /**
  * Knowledge browser — the workspace's OKF Concepts (Notes + literature
  * References). With no selection it lists everything; selecting a note's
@@ -53,31 +89,18 @@ const formatReference = (ref: ReferenceSummary): string => {
  */
 export const KnowledgeViewer = ({ selection, snapshot }: RendererProps): JSX.Element => {
   const nav = useNavigationState(snapshot);
-  const [data, setData] = useState<KnowledgeListResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [note, setNote] = useState<NoteDetailResponse | null>(null);
-  const [noteError, setNoteError] = useState<string | null>(null);
+  const { afterNoteMutation } = useInvalidate();
   const [editing, setEditing] = useState<boolean>(false);
-  // Bumped after a save to re-fetch getNote and realign with the server's
-  // normalized body (the write also drops us back to the preview view).
-  const [reloadToken, setReloadToken] = useState<number>(0);
 
   const relPath = selection.objectId;
 
-  useEffect(() => {
-    let cancelled = false;
-    workspaceApi
-      .listKnowledge()
-      .then((r) => {
-        if (!cancelled) setData(r);
-      })
-      .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : "Failed to load knowledge.");
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  // The one shared knowledge list — the doc tree, its facets and the command
+  // palette read this same cache entry, so entering Knowledge costs one request.
+  const listQuery = useKnowledgeListQuery();
+  const data = listQuery.data ?? null;
+  const error = listQuery.error
+    ? knowledgeErrorMessage(listQuery.error, "Failed to load knowledge.")
+    : null;
 
   // The selected reference (if the path names one) comes from the list directly.
   const selectedReference = useMemo(
@@ -89,29 +112,25 @@ export const KnowledgeViewer = ({ selection, snapshot }: RendererProps): JSX.Ele
     [data, relPath],
   );
 
-  // Fetch the note body when a note path is selected. Editing is a note-local
-  // affordance, so any selection change or post-save reload returns to preview.
-  // biome-ignore lint/correctness/useExhaustiveDependencies: reloadToken is a re-fetch trigger
+  // The body shares its key with the inspector panel, so both surfaces are
+  // served by one `getNote` round-trip.
+  const noteQuery = useKnowledgeNoteQuery(relPath, { enabled: isNotePath });
+  const note = noteQuery.data ?? null;
+  const noteError = noteQuery.error
+    ? knowledgeErrorMessage(noteQuery.error, "Failed to load note.")
+    : null;
+
+  // Editing is a note-local affordance: any selection change returns to preview.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: relPath is the reset trigger, not a read
   useEffect(() => {
     setEditing(false);
-    if (!isNotePath || !relPath) {
-      setNote(null);
-      return;
-    }
-    let cancelled = false;
-    setNoteError(null);
-    workspaceApi
-      .getNote(relPath)
-      .then((n) => {
-        if (!cancelled) setNote(n);
-      })
-      .catch((err) => {
-        if (!cancelled) setNoteError(err instanceof Error ? err.message : "Failed to load note.");
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [isNotePath, relPath, reloadToken]);
+  }, [relPath]);
+
+  /** A save/embed realigns the body (and the list's excerpt) with the server. */
+  const afterWrite = (): void => {
+    setEditing(false);
+    void afterNoteMutation(relPath);
+  };
 
   const back = (): void => nav.setSelection({ objectType: "knowledge", objectId: "" });
 
@@ -147,21 +166,37 @@ export const KnowledgeViewer = ({ selection, snapshot }: RendererProps): JSX.Ele
           }
         />
         <div className={`${COLUMN} flex-1 overflow-auto px-4 py-6 md:px-8`}>
-          {noteError ? (
-            <p className="text-body-lg text-destructive">{noteError}</p>
+          {noteError && !note ? (
+            <WorkbenchOperationState
+              kind="error"
+              density="compact"
+              title="Could not load note"
+              detail={noteError}
+              action={<WorkbenchRetryAction onClick={() => void noteQuery.refetch()} />}
+            />
           ) : !note ? (
-            <p className="text-body-lg italic text-muted-foreground">Loading…</p>
+            <WorkbenchOperationState
+              kind="loading"
+              density="compact"
+              title="Loading note…"
+              skeletonRows={6}
+            />
           ) : editing ? (
             <Suspense
               fallback={
-                <p className="text-body-lg italic text-muted-foreground">Loading editor…</p>
+                <WorkbenchOperationState
+                  kind="loading"
+                  density="compact"
+                  title="Loading editor…"
+                  skeletonRows={6}
+                />
               }
             >
               <NoteEditor
                 note={note}
                 snapshot={snapshot}
-                onSaved={() => setReloadToken((token) => token + 1)}
-                onEmbedded={() => setReloadToken((token) => token + 1)}
+                onSaved={afterWrite}
+                onEmbedded={afterWrite}
               />
             </Suspense>
           ) : (
@@ -251,7 +286,23 @@ export const KnowledgeViewer = ({ selection, snapshot }: RendererProps): JSX.Ele
         subtitle="Notes and literature references for this workspace (OKF concepts)."
       />
       <div className={`${COLUMN} flex-1 space-y-6 overflow-auto px-4 py-6 md:px-8`}>
-        {error && <p className="text-body-lg text-destructive">{error}</p>}
+        {error && (
+          <WorkbenchOperationState
+            kind="error"
+            density="compact"
+            title="Could not load knowledge"
+            detail={error}
+            action={<WorkbenchRetryAction onClick={() => void listQuery.refetch()} />}
+          />
+        )}
+        {listQuery.isPending && !data && (
+          <WorkbenchOperationState
+            kind="loading"
+            density="compact"
+            title="Loading knowledge…"
+            skeletonRows={5}
+          />
+        )}
         {empty && (
           <EmptyState
             icon={<BookOpen className="h-6 w-6" />}
@@ -268,25 +319,7 @@ export const KnowledgeViewer = ({ selection, snapshot }: RendererProps): JSX.Ele
             <ul className="divide-y divide-border/50 border-y border-border/60">
               {notes.map((n) => (
                 <li key={n.relPath}>
-                  <WorkbenchAction
-                    kind="ghost"
-                    size="content"
-                    type="button"
-                    onClick={() =>
-                      nav.setSelection({ objectType: "knowledge", objectId: n.relPath })
-                    }
-                    className="flex w-full items-start gap-3 px-3 py-3 text-left transition-colors hover:bg-muted/40"
-                  >
-                    <NotebookPen className="mt-1 h-4 w-4 flex-none text-muted-foreground" />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-body-lg font-medium text-foreground">
-                        {n.name}
-                      </span>
-                      <span className="block truncate text-label text-muted-foreground">
-                        {n.excerpt.replace(/\n+/g, " ").trim() || "(empty note)"}
-                      </span>
-                    </span>
-                  </WorkbenchAction>
+                  <NoteRow note={n} onSelect={nav.setSelection} />
                 </li>
               ))}
             </ul>

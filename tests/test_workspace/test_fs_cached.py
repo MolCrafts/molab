@@ -13,8 +13,10 @@ from typing import IO, Any
 
 import pytest
 
+from molexp.fs import DirEntry
 from molexp.workspace.fs import StatResult
 from molexp.workspace.fs_cached import CachedRemoteFileSystem
+from tests.support.fs_fallbacks import default_read_range, default_scandir
 
 
 class _FakeRemoteFS:
@@ -141,6 +143,14 @@ class _FakeRemoteFS:
 
     def rglob(self, path: str, pattern: str) -> list[str]:
         return []
+
+    def scandir(self, path: str, *, with_stat: bool = True) -> list[DirEntry]:
+        self._hit("scandir")
+        return default_scandir(self, path, with_stat=with_stat)
+
+    def read_range(self, path: str, offset: int, length: int) -> bytes:
+        self._hit("read_range")
+        return default_read_range(self, path, offset, length)
 
     # ── Metadata ──
     def stat(self, path: str) -> StatResult:
@@ -321,6 +331,9 @@ class TestCachedRemoteFileSystem:
         first = CachedRemoteFileSystem(fake, mirror_root=mirror_root, ttl_seconds=300)
         first.connect("/scratch/me")
         first.read_bytes("/scratch/me/log.txt")
+        # Stands in for the first process exiting: sidecar writes are debounced,
+        # and a real "next session" runs the atexit flush before it starts.
+        first.flush()
 
         second = CachedRemoteFileSystem(fake, mirror_root=mirror_root, ttl_seconds=300)
         assert second.indexed is True
@@ -428,6 +441,7 @@ class TestCachedRemoteFileSystem:
         first = CachedRemoteFileSystem(fake, mirror_root=mirror_root, ttl_seconds=10)
         first.connect("/scratch/me")
         first.read_bytes("/scratch/me/log.txt")
+        first.flush()  # simulate process exit (atexit) before the next session
         import json as _json
 
         sidecar = mirror_root / "_index.json"
@@ -492,8 +506,12 @@ class TestCachedRemoteFileSystem:
         assert not mirror_root.exists()
 
         # Next record re-creates dirs + sidecar instead of warning forever.
+        # ``flush`` forces the debounced write that a live process would emit
+        # a second later (or at exit); the point under test is recovery, not
+        # the write cadence.
         fake.files["/scratch/me/other.txt"] = b"yy"
         cached.read_bytes("/scratch/me/other.txt")
+        cached.flush()
         assert mirror_root.is_dir()
         assert (mirror_root / "_index.json").is_file()
 

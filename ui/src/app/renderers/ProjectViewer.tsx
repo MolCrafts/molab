@@ -8,7 +8,7 @@ import {
   Trash2,
   Workflow,
 } from "lucide-react";
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useMemo, useState } from "react";
 
 import { CreateRunDialog } from "@/app/components/CreateRunDialog";
 import type { DataTableColumn, DataTableRowAction } from "@/app/components/entity";
@@ -29,6 +29,7 @@ import {
 import { successRate } from "@/app/renderers/dashboardData";
 import { buildProjectWorkbenchData } from "@/app/renderers/entityWorkbenchData";
 import { workspaceApi } from "@/app/state/api";
+import { useInvalidate, useProjectAssetsRawQuery } from "@/app/state/queries";
 import { useNavigationState } from "@/app/state/useNavigationState";
 import type { ApiAssetResponse, ExperimentSummary, RendererProps } from "@/app/types";
 import {
@@ -58,7 +59,7 @@ const ProjectTabSurface = ({ children }: { children: ReactNode }): JSX.Element =
   </div>
 );
 
-export const ProjectViewer = ({ selection, snapshot, onRefresh }: RendererProps): JSX.Element => {
+export const ProjectViewer = ({ selection, snapshot }: RendererProps): JSX.Element => {
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deletingExperimentId, setDeletingExperimentId] = useState<string | null>(null);
@@ -66,53 +67,23 @@ export const ProjectViewer = ({ selection, snapshot, onRefresh }: RendererProps)
     experiment: ExperimentSummary;
     message: string;
   } | null>(null);
-  const [projectAssets, setProjectAssets] = useState<ApiAssetResponse[]>([]);
-  const [projectAssetsLoading, setProjectAssetsLoading] = useState(true);
-  const [projectAssetsError, setProjectAssetsError] = useState<string | null>(null);
-  const [settledProjectAssetsId, setSettledProjectAssetsId] = useState<string | null>(null);
-  const [projectAssetsRequestVersion, setProjectAssetsRequestVersion] = useState(0);
   const [createRunExperimentId, setCreateRunExperimentId] = useState<string | null>(null);
   const { setSelection } = useNavigationState(snapshot);
+  const { afterProjectDelete, afterExperimentDelete, afterRunCreate } = useInvalidate();
 
   const projectId = selection.objectId;
   const project = snapshot.projects.find((p) => p.id === projectId);
 
-  useEffect(() => {
-    void projectAssetsRequestVersion;
-    if (!projectId) {
-      setProjectAssets([]);
-      setProjectAssetsLoading(false);
-      setProjectAssetsError(null);
-      setSettledProjectAssetsId(null);
-      return;
-    }
-
-    let cancelled = false;
-    setProjectAssets([]);
-    setProjectAssetsLoading(true);
-    setProjectAssetsError(null);
-    workspaceApi
-      .getProjectAssets(projectId)
-      .then((assets) => {
-        if (!cancelled) setProjectAssets(assets);
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          setProjectAssetsError(
-            err instanceof Error ? err.message : "Failed to load project assets",
-          );
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setProjectAssetsLoading(false);
-          setSettledProjectAssetsId(projectId);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [projectId, projectAssetsRequestVersion]);
+  // Cached per project: revisiting a project inside `staleTime` renders its
+  // assets with no request, and a background refetch keeps the table on screen.
+  const projectAssetsQuery = useProjectAssetsRawQuery(projectId);
+  const projectAssets = useMemo(() => projectAssetsQuery.data ?? [], [projectAssetsQuery.data]);
+  const projectAssetsPending = projectAssetsQuery.isPending;
+  const projectAssetsError = projectAssetsQuery.error
+    ? projectAssetsQuery.error instanceof Error
+      ? projectAssetsQuery.error.message
+      : "Failed to load project assets"
+    : null;
 
   const projectExperiments = useMemo(
     () => snapshot.experiments.filter((e) => e.projectId === projectId),
@@ -129,7 +100,6 @@ export const ProjectViewer = ({ selection, snapshot, onRefresh }: RendererProps)
     [projectId, snapshot, projectAssets],
   );
   const projectAssetsByKind = useMemo(() => countAssetsByKind(projectAssets), [projectAssets]);
-  const projectAssetsPending = projectAssetsLoading || settledProjectAssetsId !== projectId;
 
   const handleDelete = async () => {
     if (!confirm(`Are you sure you want to delete project "${projectId}"?`)) {
@@ -139,7 +109,7 @@ export const ProjectViewer = ({ selection, snapshot, onRefresh }: RendererProps)
     setDeleteError(null);
     try {
       await workspaceApi.deleteProject(projectId);
-      onRefresh();
+      await afterProjectDelete({ projectId });
       setSelection(null);
     } catch (error) {
       setDeleteError(error instanceof Error ? error.message : "Failed to delete project");
@@ -163,7 +133,10 @@ export const ProjectViewer = ({ selection, snapshot, onRefresh }: RendererProps)
     setExperimentDeleteError(null);
     try {
       await workspaceApi.deleteExperiment(experiment.projectId, experiment.id);
-      onRefresh();
+      await afterExperimentDelete({
+        projectId: experiment.projectId,
+        experimentId: experiment.id,
+      });
     } catch (error) {
       setExperimentDeleteError({
         experiment,
@@ -508,8 +481,7 @@ export const ProjectViewer = ({ selection, snapshot, onRefresh }: RendererProps)
               action={
                 <WorkbenchRetryAction
                   onClick={() => {
-                    setProjectAssetsLoading(true);
-                    setProjectAssetsRequestVersion((version) => version + 1);
+                    void projectAssetsQuery.refetch();
                   }}
                 />
               }
@@ -668,8 +640,7 @@ export const ProjectViewer = ({ selection, snapshot, onRefresh }: RendererProps)
                       action={
                         <WorkbenchRetryAction
                           onClick={() => {
-                            setProjectAssetsLoading(true);
-                            setProjectAssetsRequestVersion((version) => version + 1);
+                            void projectAssetsQuery.refetch();
                           }}
                         />
                       }
@@ -812,7 +783,10 @@ export const ProjectViewer = ({ selection, snapshot, onRefresh }: RendererProps)
             if (!nextOpen) setCreateRunExperimentId(null);
           }}
           onRunCreated={(runId) => {
-            onRefresh();
+            void afterRunCreate({
+              projectId: createRunExperiment.projectId,
+              experimentId: createRunExperiment.id,
+            });
             setCreateRunExperimentId(null);
             setSelection({ objectType: "run", objectId: runId });
           }}

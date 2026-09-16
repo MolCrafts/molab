@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from molexp.workspace.metrics import read_run_metrics
+from molexp.workspace.metrics import MetricsWriter, read_run_metrics
 
 
 class TestMetricsWriter:
@@ -95,3 +95,84 @@ class TestReadRunMetrics:
         assert result.parse_errors == 1
         assert [record["v"] for record in result.records] == [0.3, 0.2]
         assert result.next_line == 3
+
+
+class TestIncrementalReads:
+    """``since_offset`` follows a growing stream without re-reading it."""
+
+    def _write(self, run_dir: Path, count: int, start: int = 0) -> None:
+        writer = MetricsWriter(run_dir)
+        for i in range(start, start + count):
+            writer.scalar("loss", float(i), step=i)
+
+    def test_offset_cursor_returns_only_new_records(self, tmp_path: Path) -> None:
+        self._write(tmp_path, 50)
+        first = read_run_metrics(tmp_path)
+        self._write(tmp_path, 5, start=50)
+
+        second = read_run_metrics(tmp_path, since_offset=first.next_offset)
+
+        assert [r["v"] for r in second.records] == [50.0, 51.0, 52.0, 53.0, 54.0]
+
+    def test_cursor_advances_past_the_consumed_bytes(self, tmp_path: Path) -> None:
+        self._write(tmp_path, 10)
+        result = read_run_metrics(tmp_path)
+        assert result.next_offset == (tmp_path / "metrics" / "metrics.jsonl").stat().st_size
+
+    def test_offset_seek_skips_reading_earlier_lines(self, tmp_path: Path) -> None:
+        self._write(tmp_path, 200)
+        whole = read_run_metrics(tmp_path)
+        self._write(tmp_path, 1, start=200)
+
+        delta = read_run_metrics(tmp_path, since_offset=whole.next_offset)
+
+        assert len(delta.records) == 1
+        assert delta.next_offset > whole.next_offset
+
+    def test_offset_past_eof_restarts_from_the_top(self, tmp_path: Path) -> None:
+        self._write(tmp_path, 10)
+        result = read_run_metrics(tmp_path, since_offset=10**9)
+        assert len(result.records) == 10
+
+    def test_follow_loop_sees_every_record_exactly_once(self, tmp_path: Path) -> None:
+        self._write(tmp_path, 37)
+        cursor, seen = 0, []
+        for _ in range(100):
+            page = read_run_metrics(tmp_path, since_offset=cursor, limit=5)
+            if page.next_offset == cursor:
+                break
+            seen += [r["v"] for r in page.records]
+            cursor = page.next_offset
+
+        assert seen == [float(i) for i in range(37)]
+
+    def test_since_line_still_works_for_legacy_callers(self, tmp_path: Path) -> None:
+        self._write(tmp_path, 20)
+        assert len(read_run_metrics(tmp_path, since_line=15).records) == 5
+
+
+class TestScanCeiling:
+    def test_stops_at_max_scan_bytes_and_reports_truncated(self, tmp_path: Path) -> None:
+        writer = MetricsWriter(tmp_path)
+        for i in range(500):
+            writer.scalar("loss", float(i), step=i)
+
+        result = read_run_metrics(tmp_path, max_scan_bytes=500)
+
+        assert result.truncated
+        assert len(result.records) < 500
+
+    def test_truncated_result_can_be_resumed(self, tmp_path: Path) -> None:
+        writer = MetricsWriter(tmp_path)
+        for i in range(200):
+            writer.scalar("loss", float(i), step=i)
+
+        first = read_run_metrics(tmp_path, max_scan_bytes=400)
+        second = read_run_metrics(tmp_path, since_offset=first.next_offset)
+
+        values = [r["v"] for r in first.records] + [r["v"] for r in second.records]
+        assert values == [float(i) for i in range(200)]
+
+    def test_untruncated_read_reports_false(self, tmp_path: Path) -> None:
+        MetricsWriter(tmp_path).scalar("loss", 1.0, step=0)
+        assert read_run_metrics(tmp_path).truncated is False

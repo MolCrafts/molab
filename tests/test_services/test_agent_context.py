@@ -21,8 +21,8 @@ from molexp.workspace import (
     ProjectNotFoundError,
     RunNotFoundError,
     Workspace,
+    knowledge_mount,
 )
-from molexp.workspace.concepts import Note
 from molexp.workspace.experiment import Experiment
 from molexp.workspace.models import ErrorInfo, RunStatus
 from molexp.workspace.run import Run
@@ -64,7 +64,7 @@ def _seed(tmp_path: Path) -> tuple[Workspace, Experiment, Run, Run]:
     )
     failed.save()
 
-    note = ws.add_folder(Note(parent=ws, name="idea"))
+    note = knowledge_mount.mount_note(ws, "idea")
     note.write_index(f"# {_NOTE_TITLE}\n\nnarrative body\n")
     return ws, exp, ok, failed
 
@@ -160,7 +160,7 @@ class TestBuildMountContext:
         for i in range(30):
             ws.add_project(f"project-{i:02d}-{'x' * 40}")
         for i in range(10):
-            note = ws.add_folder(Note(parent=ws, name=f"note-{i:02d}"))
+            note = knowledge_mount.mount_note(ws, f"note-{i:02d}")
             note.write_index(f"# Finding {i:02d} {'y' * 40}\n\nbody\n")
 
         out = build_mount_context(ws, max_chars=400)

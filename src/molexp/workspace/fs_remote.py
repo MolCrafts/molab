@@ -2,16 +2,19 @@
 
 from __future__ import annotations
 
+import base64
 import io
 import json
 import os
 import posixpath
-from collections.abc import Iterable
+import shlex
+import tarfile
+from collections.abc import Collection, Iterable
 from typing import IO, Any, cast
 
-from molq.transport import Transport
+from molq.transport import CommandResult, Transport
 
-from .fs import PathArg, StatResult
+from .fs import DirEntry, PathArg, StatResult
 
 
 class RemoteFileSystem:
@@ -20,8 +23,15 @@ class RemoteFileSystem:
     Accepts ``str`` or any :class:`os.PathLike[str]` (incl. :class:`molexp.Path`);
     paths are normalized to ``str`` via :func:`os.fspath` before string ops or
     transport calls.  All path arguments are interpreted on the transport's
-    filesystem.  No raw shell commands — every operation delegates to
-    :class:`molq.transport.Transport` methods.
+    filesystem.
+
+    Every operation goes through a :class:`molq.transport.Transport` method —
+    including the bulk ones (:meth:`scandir`, :meth:`read_range`,
+    :meth:`walk_entries`, :meth:`fetch_files`), which the Transport has no
+    named method for and so express as a single ``run(["sh", "-c", ...])``.
+    That is one round-trip each, which is the whole point: the per-path
+    Protocol turns a 5000-run tree into 10 000 round-trips, while
+    :meth:`fetch_files` fetches the same thing in one.
     """
 
     def __init__(self, transport: Transport) -> None:
@@ -30,6 +40,10 @@ class RemoteFileSystem:
         # transports provide but the Protocol doesn't statically declare. Widen
         # to Any so the dynamic surface resolves without changing runtime behavior.
         self._t: Any = transport
+        # GNU `find -printf` is the fast path for scandir/walk_entries. BSD and
+        # macOS `find` lack it; we discover that from the first failure and
+        # never pay for it again.
+        self._gnu_find: bool = True
 
     # ── Path ops (static — string manipulation only) ────────────────────
 
@@ -136,13 +150,218 @@ class RemoteFileSystem:
                 yield self.join(base, name)
 
     def rglob(self, path: PathArg, pattern: str) -> Iterable[str]:
+        # One scandir per directory. The previous body paid an extra `is_dir`
+        # round-trip per *entry*, so a tree of M entries cost >= 2M round-trips;
+        # the listing already knows which children are directories.
         base = os.fspath(path)
-        for name in self._t.listdir(base):
-            full = self.join(base, name)
-            if _glob_match(name, pattern):
+        try:
+            entries = self.scandir(base, with_stat=False)
+        except (FileNotFoundError, NotADirectoryError):
+            return
+        for entry in entries:
+            full = self.join(base, entry.name)
+            if _glob_match(entry.name, pattern):
                 yield full
-            if self._t.is_dir(full):
+            if entry.is_dir:
                 yield from self.rglob(full, pattern)
+
+    # ── Bulk ops (one round-trip each; see the class docstring) ─────────
+
+    def _run_script(self, script: str) -> CommandResult:
+        """Ship *script* to the transport's shell as a single command."""
+        return self._t.run(["sh", "-c", script])
+
+    def scandir(self, path: PathArg, *, with_stat: bool = True) -> list[DirEntry]:  # noqa: ARG002 — remote listings carry metadata for free
+        """List a directory with per-entry type and metadata in one round-trip.
+
+        ``with_stat`` is accepted for Protocol conformance but ignored: the
+        remote listing carries size and mtime whether or not we ask, so there
+        is nothing to save by declining them.
+        """
+        target = os.fspath(path)
+        if self._gnu_find:
+            entries = self._scandir_find(target)
+            if entries is not None:
+                return entries
+        return self._scandir_fallback(target)
+
+    def _scandir_find(self, target: str) -> list[DirEntry] | None:
+        """GNU ``find -printf`` listing, or ``None`` if this host lacks it.
+
+        Fields are ``%y`` (type of the entry itself, ``l`` for a symlink),
+        ``%Y`` (type after following it, ``L``/``N`` for loop/dangling), size,
+        mtime and name, NUL-separated and base64-wrapped so names that are not
+        valid UTF-8 survive the transport's text capture.
+        """
+        q = shlex.quote(target)
+        script = (
+            f"find {q} -mindepth 1 -maxdepth 1 "
+            r"-printf '%y\t%Y\t%s\t%T@\t%f\0' | base64"
+        )
+        result = self._run_script(script)
+        if result.returncode != 0:
+            stderr = (result.stderr or "").lower()
+            if "no such file" in stderr:
+                raise FileNotFoundError(target)
+            if "not a directory" in stderr:
+                raise NotADirectoryError(target)
+            if "printf" in stderr or "unknown predicate" in stderr or "illegal option" in stderr:
+                self._gnu_find = False  # BSD/macOS find — stop trying.
+                return None
+            raise OSError(f"remote scandir failed: {target}: {result.stderr}")
+        return _parse_find_records(base64.b64decode(result.stdout or ""))
+
+    def _scandir_fallback(self, target: str) -> list[DirEntry]:
+        """Portable listing: one listdir plus one stat per entry."""
+        if not self._t.is_dir(target):
+            if self._t.exists(target):
+                raise NotADirectoryError(target)
+            raise FileNotFoundError(target)
+        entries: list[DirEntry] = []
+        for name in self._t.listdir(target):
+            full = self.join(target, name)
+            try:
+                st = self.stat(full)
+            except (FileNotFoundError, OSError):
+                entries.append(DirEntry(name=name, is_dir=False, is_file=False, is_symlink=True))
+                continue
+            entries.append(
+                DirEntry(
+                    name=name,
+                    is_dir=st.is_dir,
+                    is_file=st.is_file,
+                    is_symlink=False,
+                    size=st.size,
+                    mtime=st.mtime,
+                )
+            )
+        return entries
+
+    def read_range(self, path: PathArg, offset: int, length: int) -> bytes:
+        """Read one bounded byte range — never transfers the whole file."""
+        if offset < 0 or length < 0:
+            raise ValueError(f"read_range needs non-negative offset/length, got {offset}/{length}")
+        if length == 0:
+            return b""
+        target = os.fspath(path)
+        q = shlex.quote(target)
+        # `tail -c +N` is 1-based; head -c bounds the transfer at the source.
+        script = f"tail -c +{offset + 1} -- {q} | head -c {length} | base64"
+        result = self._run_script(script)
+        if result.returncode != 0:
+            stderr = (result.stderr or "").lower()
+            if "is a directory" in stderr:
+                raise IsADirectoryError(target)
+            if "no such file" in stderr or "cannot open" in stderr:
+                raise FileNotFoundError(target)
+            raise OSError(f"remote read_range failed: {target}: {result.stderr}")
+        return base64.b64decode(result.stdout or "")
+
+    def walk_entries(
+        self, root: PathArg, *, max_depth: int, prune: Collection[str] = ()
+    ) -> dict[str, list[DirEntry]]:
+        """Walk *root* to *max_depth* in one round-trip, pruning named dirs.
+
+        Returns ``{directory: [children]}`` for every directory visited. This
+        is what makes a remote workspace's navigation tree loadable at all: the
+        per-path Protocol needs a round-trip per directory, this needs one.
+
+        Args:
+            root: Directory to walk.
+            max_depth: Maximum depth below *root*.
+            prune: Directory names never descended into (``executions``,
+                ``artifacts``, …).
+
+        Returns:
+            Mapping of absolute directory path to its listing. Empty when the
+            host lacks GNU ``find`` (callers fall back to per-level scandir).
+        """
+        target = os.fspath(root)
+        q = shlex.quote(target)
+        prune_expr = ""
+        if prune:
+            names = " -o ".join(f"-name {shlex.quote(n)}" for n in sorted(prune))
+            prune_expr = f"\\( {names} \\) -prune -o "
+        script = (
+            f"find {q} -maxdepth {max_depth} {prune_expr}"
+            r"-printf '%y\t%Y\t%s\t%T@\t%p\0' | base64"
+        )
+        result = self._run_script(script)
+        if result.returncode != 0:
+            return {}
+        out: dict[str, list[DirEntry]] = {}
+        for kind, target_kind, size, mtime, full in _iter_find_fields(
+            base64.b64decode(result.stdout or "")
+        ):
+            if full == target:
+                out.setdefault(target, [])
+                continue
+            parent = full.rsplit("/", 1)[0] if "/" in full else "."
+            name = full.rsplit("/", 1)[-1]
+            entry = _entry_from_fields(name, kind, target_kind, size, mtime)
+            out.setdefault(parent, []).append(entry)
+            if entry.is_dir:
+                out.setdefault(full, [])
+        return out
+
+    def fetch_files(
+        self,
+        root: PathArg,
+        *,
+        names: Collection[str],
+        max_bytes: int,
+        prune: Collection[str] = (),
+    ) -> dict[str, bytes]:
+        """Fetch every small file named in *names* under *root*, in one trip.
+
+        The navigation-metadata bulk load: ``run.json`` / ``_ops/run.json`` /
+        ``assets.json`` / ``meta.yaml`` for a whole workspace arrive as one
+        tar stream instead of one round-trip apiece.
+
+        Args:
+            root: Directory to search.
+            names: Basenames to collect.
+            max_bytes: Per-file size ceiling; larger files are skipped so a
+                stray big file cannot blow up the transfer.
+            prune: Directory names never descended into.
+
+        Returns:
+            Mapping of absolute path to file bytes; empty when the host lacks
+            the required tools.
+        """
+        target = os.fspath(root)
+        if not names:
+            return {}
+        q = shlex.quote(target)
+        name_expr = " -o ".join(f"-name {shlex.quote(n)}" for n in sorted(names))
+        prune_expr = ""
+        if prune:
+            pruned = " -o ".join(f"-name {shlex.quote(n)}" for n in sorted(prune))
+            prune_expr = f"\\( {pruned} \\) -prune -o "
+        script = (
+            f"cd {q} && find . {prune_expr}-type f \\( {name_expr} \\) "
+            f"-size -{max_bytes}c -print0 | tar --null -T - -cf - | base64"
+        )
+        result = self._run_script(script)
+        if result.returncode != 0:
+            return {}
+        raw = base64.b64decode(result.stdout or "")
+        if not raw:
+            return {}
+        out: dict[str, bytes] = {}
+        try:
+            with tarfile.open(fileobj=io.BytesIO(raw), mode="r|") as tf:
+                for member in tf:
+                    if not member.isfile():
+                        continue
+                    fh = tf.extractfile(member)
+                    if fh is None:
+                        continue
+                    rel = member.name.removeprefix("./")
+                    out[self.join(target, rel)] = fh.read()
+        except (tarfile.TarError, OSError):
+            return {}
+        return out
 
     # ── Atomic I/O ──────────────────────────────────────────────────────
 
@@ -159,3 +378,54 @@ def _glob_match(name: str, pattern: str) -> bool:
     import fnmatch
 
     return fnmatch.fnmatch(name, pattern)
+
+
+def _iter_find_fields(raw: bytes) -> Iterable[tuple[str, str, str, str, str]]:
+    """Split a NUL-separated ``find -printf`` stream into its five fields.
+
+    Names are decoded with ``surrogateescape`` so a filename that is not valid
+    UTF-8 round-trips instead of raising. Records with the wrong field count
+    (a name containing a tab would not produce one — ``%f`` is last, so tabs
+    inside it stay in the final split) are skipped.
+    """
+    for record in raw.split(b"\0"):
+        if not record:
+            continue
+        fields = record.decode("utf-8", errors="surrogateescape").split("\t", 4)
+        if len(fields) != 5:
+            continue
+        yield cast("tuple[str, str, str, str, str]", tuple(fields))
+
+
+def _entry_from_fields(name: str, kind: str, target_kind: str, size: str, mtime: str) -> DirEntry:
+    """Build a :class:`DirEntry` from one ``find -printf`` record.
+
+    ``%y`` is the entry's own type (``l`` for a symlink); ``%Y`` is the type
+    after following it, with ``L`` (loop) and ``N`` (dangling) for links that
+    resolve to nothing — both of which report neither dir nor file, matching
+    :meth:`LocalFileSystem.scandir`.
+    """
+    try:
+        size_int = int(size)
+    except ValueError:
+        size_int = 0
+    try:
+        mtime_float = float(mtime)
+    except ValueError:
+        mtime_float = 0.0
+    return DirEntry(
+        name=name,
+        is_dir=target_kind == "d",
+        is_file=target_kind == "f",
+        is_symlink=kind == "l",
+        size=size_int,
+        mtime=mtime_float,
+    )
+
+
+def _parse_find_records(raw: bytes) -> list[DirEntry]:
+    """Parse a one-level ``find -printf`` listing into entries."""
+    return [
+        _entry_from_fields(name, kind, target_kind, size, mtime)
+        for kind, target_kind, size, mtime, name in _iter_find_fields(raw)
+    ]

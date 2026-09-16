@@ -288,10 +288,15 @@ def asset_has_sidecar(workspace, asset) -> bool:  # noqa: ANN001
 
     Existence-only — never imports anything. Used to light up the listing flag
     so the UI can offer a preview without executing code.
-    """
-    from .routes._scope import resolve_scope_dir
 
-    scope_dir = resolve_scope_dir(workspace, asset.scope)
+    The scope directory comes from pure layout math
+    (:func:`~molexp.workspace.assets.scan.scope_dir_for`), so a listing of N
+    assets costs one ``stat`` per asset — not a project → experiment → run
+    folder walk (three entity-JSON reads) per asset.
+    """
+    from molexp.workspace.assets.scan import scope_dir_for
+
+    scope_dir = scope_dir_for(workspace.root, asset.scope)
     if scope_dir is None:
         return False
-    return resolve_sidecar(asset.absolute_path(scope_dir)) is not None
+    return resolve_sidecar(asset.absolute_path(Path(scope_dir))) is not None

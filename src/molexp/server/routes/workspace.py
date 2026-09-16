@@ -2,17 +2,19 @@
 
 from __future__ import annotations
 
-import io
 import mimetypes
+from collections.abc import AsyncIterator, Iterator
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel, ConfigDict, Field
 
 from molexp._typing import JSONValue
+from molexp.fs.window import read_text_window
+from molexp.services.workspace_read_model import WorkspaceReadModel
 from molexp.workspace import ContextFocus, Workspace, assemble_workspace_context
 from molexp.workspace.events import WorkspaceEvent, WorkspaceEventType, read_workspace_events
 from molexp.workspace.fs_cached import CachedRemoteFileSystem, prefetch_workspace_indices
@@ -25,6 +27,10 @@ from ..dependencies import (
     set_active_workspace_descriptor,
     set_workspace_path_override,
 )
+from ..deps.read_model import get_read_model
+from ..executors import run_heavy
+from ..http_cache import not_modified, weak_etag
+from ..mutations import after_mutation
 from ..preview import resolve_sidecar
 from ..schemas import (
     FileContentResponse,
@@ -100,6 +106,8 @@ class WorkspaceEventResponse(BaseModel):
 
 @events_router.get("/events", response_model=list[WorkspaceEventResponse])
 def get_workspace_events(
+    request: Request,
+    response: Response,
     type: WorkspaceEventType | None = Query(default=None, description="Keep only this event type"),
     ref: str | None = Query(default=None, description="Keep only events referencing this id"),
     limit: int = Query(default=50, ge=1, le=500),
@@ -111,12 +119,174 @@ def get_workspace_events(
     :func:`molexp.workspace.events.read_workspace_events` code path the
     per-run route and ``molexp runs info`` use. A workspace with no timeline
     yet answers ``[]`` without creating the DB (reading is side-effect free).
+
+    The timeline is append-only, so its ``max_seq`` is an exact validator: a
+    poll that sees no new events answers 304 without materializing a row.
     """
+    cached = not_modified(
+        request, response, weak_etag("events", _events_seq(workspace), type, ref, limit)
+    )
+    if cached is not None:
+        return cached  # type: ignore[return-value]
     events = read_workspace_events(workspace.root, type=type, ref=ref, limit=limit)
     return [WorkspaceEventResponse.from_event(e) for e in events]
 
 
+def _events_seq(workspace: Workspace) -> int:
+    """The spine's highest ``seq`` (``0`` when the workspace has no timeline)."""
+    from molexp.workspace.events import (
+        WORKSPACE_EVENTS_DB,
+        WorkspaceEventLog,
+        is_remote_root,
+    )
+
+    root = workspace.root
+    if is_remote_root(root) or not (Path(root) / WORKSPACE_EVENTS_DB).exists():
+        return 0
+    try:
+        return WorkspaceEventLog.open(root).max_seq()
+    except Exception:
+        return 0
+
+
+@events_router.get("/workspace/events/stream")
+async def stream_workspace_changes(
+    since: int | None = Query(default=None, description="Resume after this spine ``seq``"),
+    workspace: Workspace = Depends(get_workspace),
+    read_model: WorkspaceReadModel = Depends(get_read_model),
+) -> StreamingResponse:
+    """SSE: one ``change`` frame per workspace change — the UI's invalidation signal.
+
+    Replaces polling. The first frame is ``hello`` carrying the current view
+    versions and spine ``seq``.
+
+    ``replayed`` is the client's caught-up flag and means exactly one thing:
+    **every** change after ``since`` is accounted for — either nothing happened
+    (``since >= seq``) or the whole backlog follows as ``change`` frames. It is
+    ``false`` whenever the client must invalidate its list queries once instead
+    of trusting deltas: no ``since`` was given, or the backlog exceeded
+    :data:`_REPLAY_LIMIT` and is therefore *not* sent at all. A partial replay
+    is never paired with ``replayed: true``, so the client needs no cap of its
+    own to second-guess this.
+
+    A comment line every 15 s keeps proxies from idling the connection out.
+
+    Subscribing marks the read model hot, so its background sweep keeps
+    running while any tab is watching and goes quiet when none is.
+    """
+    import asyncio
+    import json as _json
+
+    from molexp.services.workspace_notify import subscribe_workspace_changes
+
+    from ..shutdown import is_shutting_down
+
+    root = str(workspace.resolve())
+    read_model.touch()
+    current_seq = _events_seq(workspace)
+    replayed: list[WorkspaceEventResponse] = []
+    caught_up = since is not None and since >= current_seq
+    if since is not None and since < current_seq:
+        # Ask for one more than we will send: getting it back is how we learn
+        # the backlog outran the cap. The spine reads newest-first, so a
+        # truncated read drops the *oldest* events after ``since`` — a hole in
+        # the middle of the delta, not a short tail. Sending it anyway is the
+        # bug this guards: the client would apply the surviving deltas, believe
+        # itself current, and serve stale data until the next reconnect.
+        backlog = read_workspace_events(workspace.root, after_seq=since, limit=_REPLAY_LIMIT + 1)
+        if len(backlog) <= _REPLAY_LIMIT:
+            replayed = [WorkspaceEventResponse.from_event(e) for e in backlog]
+            caught_up = True
+        # else: leave ``replayed`` empty and ``caught_up`` False — the client
+        # invalidates its list queries once instead of trusting partial deltas.
+
+    async def _generate() -> AsyncIterator[str]:
+        hello = {
+            "versions": read_model.versions(),
+            "seq": current_seq,
+            "replayed": caught_up,
+        }
+        yield f"event: hello\ndata: {_json.dumps(hello)}\n\n"
+        for event in reversed(replayed):  # spine reads newest-first; replay in order
+            frame = {
+                "kind": _KIND_BY_EVENT.get(event.type, "all"),
+                "ref": event.refs[0] if event.refs else None,
+                "seq": event.seq,
+            }
+            yield f"event: change\ndata: {_json.dumps(frame)}\n\n"
+
+        stream = subscribe_workspace_changes(root)
+        idle = 0.0
+        while True:
+            try:
+                # Poll finely but comment rarely: the wait is what notices a
+                # shutdown or a disconnect, so a 15 s one would keep the
+                # worker (and uvicorn's connection drain) hanging that long.
+                change = await asyncio.wait_for(anext(stream), timeout=_STREAM_POLL_SECONDS)
+            except TimeoutError:
+                if is_shutting_down():
+                    return
+                idle += _STREAM_POLL_SECONDS
+                if idle >= _KEEP_ALIVE_SECONDS:
+                    idle = 0.0
+                    read_model.touch()
+                    yield ": keep-alive\n\n"
+                continue
+            except StopAsyncIteration:
+                return
+            idle = 0.0
+            payload = {
+                "kind": change.kind,
+                "ref": change.ref,
+                "seq": change.seq,
+                "projectId": change.project_id,
+                "experimentId": change.experiment_id,
+                "runId": change.run_id,
+                "versions": change.versions or read_model.versions(),
+            }
+            yield f"event: change\ndata: {_json.dumps(payload)}\n\n"
+
+    return StreamingResponse(
+        _generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+#: How often the change stream wakes to check for shutdown / disconnect.
+_STREAM_POLL_SECONDS = 1.0
+#: How often an idle stream emits a comment so proxies keep it open.
+_KEEP_ALIVE_SECONDS = 15.0
+#: Most backlog events one reconnect will replay. A gap longer than this is
+#: reported as *not* replayed rather than delivered in part — see
+#: :func:`stream_workspace_changes`.
+_REPLAY_LIMIT = 200
+
+_KIND_BY_EVENT: dict[str, str] = {
+    "run.created": "run",
+    "run.started": "run",
+    "run.failed": "run",
+    "run.completed": "run",
+    "run.cancelled": "run",
+    "asset.added": "asset",
+    "knowledge.created": "knowledge",
+    "workflow.created": "experiment",
+    "experiment.created": "experiment",
+}
+
+
 MAX_TEXT_BYTES = 2_000_000
+
+MAX_BLOB_BYTES = 64 * 1024 * 1024
+"""Image preview ceiling — above this the client should download, not preview."""
+
+BLOB_CHUNK_BYTES = 1 << 20
+"""Chunk size when streaming a blob off a remote filesystem."""
+
+DEFAULT_DIR_ENTRIES = 2000
+"""Children returned per directory before the node reports ``truncated``."""
+
+MAX_DIR_ENTRIES = 10000
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg"}
 
 
@@ -161,14 +331,33 @@ def resolve_workspace_path_via_fs(workspace, path_str: str) -> str:  # noqa: ANN
 
 
 @router.get("/info", response_model=WorkspaceInfoResponse)
-def get_workspace_info(workspace=Depends(get_workspace)) -> WorkspaceInfoResponse:  # noqa: ANN001
-    """Get workspace information."""
+def get_workspace_info(
+    request: Request,
+    response: Response,
+    workspace=Depends(get_workspace),  # noqa: ANN001
+    read_model: WorkspaceReadModel = Depends(get_read_model),
+) -> WorkspaceInfoResponse:
+    """Get workspace information.
+
+    Counts come from the read-model snapshots. ``assetCount`` used to trigger
+    a full manifest scan of the workspace — on the bootstrap critical path, for
+    one integer.
+    """
     fs = getattr(workspace, "_fs", None)
     is_cached = isinstance(fs, CachedRemoteFileSystem)
+    runs = read_model.runs()
+    assets = read_model.assets()
+    versions = read_model.versions()
+    cached = not_modified(
+        request, response, weak_etag("info", runs.version, assets.version, versions["knowledge"])
+    )
+    if cached is not None:
+        return cached  # type: ignore[return-value]
     return WorkspaceInfoResponse(
         root=str(workspace.root),
-        projectCount=len(workspace.list_projects()),
-        assetCount=len(workspace.assets.list()),
+        projectCount=len(runs.projects),
+        assetCount=len(assets),
+        versions=versions,
         connected=fs.connected if is_cached else None,
         indexed=fs.indexed if is_cached else None,
         ready=fs.ready if is_cached else None,
@@ -176,11 +365,14 @@ def get_workspace_info(workspace=Depends(get_workspace)) -> WorkspaceInfoRespons
 
 
 @router.get("/context", response_model=WorkspaceContextResponse)
-def get_workspace_context(
+async def get_workspace_context(
+    request: Request,
+    response: Response,
     project_id: str | None = Query(default=None, alias="projectId"),
     experiment_id: str | None = Query(default=None, alias="experimentId"),
     run_id: str | None = Query(default=None, alias="runId"),
     workspace=Depends(get_workspace),  # noqa: ANN001
+    read_model: WorkspaceReadModel = Depends(get_read_model),
 ) -> WorkspaceContextResponse:
     """The canonical structural workspace read-model (integration.md §1).
 
@@ -191,12 +383,45 @@ def get_workspace_context(
     canonical *structure* and stays consistent with it.
     """
     focus = ContextFocus(project_id=project_id, experiment_id=experiment_id, run_id=run_id)
-    context = assemble_workspace_context(workspace, focus=focus)
+    runs, assets, knowledge = _context_snapshots(read_model)
+    cached = not_modified(
+        request,
+        response,
+        weak_etag(
+            "context",
+            runs.version,
+            assets.version,
+            knowledge.version,
+            project_id,
+            experiment_id,
+            run_id,
+        ),
+    )
+    if cached is not None:
+        return cached  # type: ignore[return-value]
+    context = await run_heavy(
+        assemble_workspace_context,
+        workspace,
+        focus=focus,
+        runs=runs,
+        assets=assets,
+        knowledge=knowledge,
+    )
     return WorkspaceContextResponse.from_context(context)
 
 
+def _context_snapshots(read_model: WorkspaceReadModel):  # noqa: ANN202
+    """The three snapshots a context assembly reads from (built on first use)."""
+    return read_model.runs(), read_model.assets(), read_model.knowledge()
+
+
 @router.get("/copilot", response_model=WorkspaceSummaryResponse)
-def get_workspace_copilot(workspace=Depends(get_workspace)) -> WorkspaceSummaryResponse:  # noqa: ANN001
+async def get_workspace_copilot(
+    request: Request,
+    response: Response,
+    workspace=Depends(get_workspace),  # noqa: ANN001
+    read_model: WorkspaceReadModel = Depends(get_read_model),
+) -> WorkspaceSummaryResponse:
     """The read-only Workspace Copilot summary — structured state + ranked next-actions.
 
     A pure projection over the canonical ``WorkspaceContext``; it mutates nothing.
@@ -205,57 +430,83 @@ def get_workspace_copilot(workspace=Depends(get_workspace)) -> WorkspaceSummaryR
     """
     from molexp.harness.copilot import summarize_workspace
 
-    summary = summarize_workspace(assemble_workspace_context(workspace))
-    return WorkspaceSummaryResponse.from_summary(summary)
+    runs, assets, knowledge = _context_snapshots(read_model)
+    cached = not_modified(
+        request,
+        response,
+        weak_etag("copilot", runs.version, assets.version, knowledge.version),
+    )
+    if cached is not None:
+        return cached  # type: ignore[return-value]
+
+    def _summarize():  # noqa: ANN202
+        return summarize_workspace(
+            assemble_workspace_context(workspace, runs=runs, assets=assets, knowledge=knowledge)
+        )
+
+    return WorkspaceSummaryResponse.from_summary(await run_heavy(_summarize))
 
 
 @router.get("/runs", response_model=WorkspaceRunsResponse)
 def list_workspace_runs(
+    request: Request,
+    response: Response,
     project_id: str | None = Query(default=None, alias="projectId"),
     experiment_id: str | None = Query(default=None, alias="experimentId"),
     backend: str | None = Query(default=None, description="Filter by executor backend"),
     status: str | None = Query(default=None, description="Filter by run status"),
     limit: int = Query(default=500, ge=1, le=2000),
-    workspace=Depends(get_workspace),  # noqa: ANN001
+    offset: int = Query(default=0, ge=0, description="Rows to skip (pagination)"),
+    read_model: WorkspaceReadModel = Depends(get_read_model),
 ) -> WorkspaceRunsResponse:
     """Cross-experiment list of runs, each with embedded execution attempts.
 
-    Returns rows ordered by ``created_at`` desc.  Plugins surface
-    backend-specific columns (cluster, scheduler job id, etc.) via the
-    ``backend`` / ``backendMetadata`` fields on each execution row.
+    Served from the read-model snapshot: rows are already ordered
+    ``created_at`` desc and already parsed, so a warm request reads no files
+    at all and an unchanged one answers 304. Plugins surface backend-specific
+    columns via the ``backend`` / ``backendMetadata`` fields on each execution
+    row.
+
+    ``total`` is the number of rows **matching the filters**, not the size of
+    the returned page — which is what makes ``offset`` usable for paging.
     """
+    snapshot = read_model.runs()
+    version = (
+        snapshot.version_for_experiment(project_id, experiment_id)
+        if project_id and experiment_id
+        else snapshot.version
+    )
+    cached = not_modified(
+        request,
+        response,
+        weak_etag("runs", version, project_id, experiment_id, backend, status, limit, offset),
+    )
+    if cached is not None:
+        return cached  # type: ignore[return-value]
 
-    rows: list[WorkspaceRunRow] = []
-    for project in workspace.list_projects():
-        if project_id and project.id != project_id:
-            continue
-        project_name = project.name
-        for experiment in project.list_experiments():
-            if experiment_id and experiment.id != experiment_id:
-                continue
-            experiment_name = experiment.name
-            for run in experiment.list_runs():
-                row = WorkspaceRunRow.from_run(
-                    run,
-                    project_name=project_name,
-                    experiment_name=experiment_name,
-                )
-                if backend and (row.backend or "").lower() != backend.lower():
-                    continue
-                if status and row.status.lower() != status.lower():
-                    continue
-                rows.append(row)
+    if project_id and experiment_id:
+        source = snapshot.experiment_rows(project_id, experiment_id)
+    else:
+        source = snapshot.rows
 
-    rows.sort(key=lambda r: r.createdAt, reverse=True)
-    truncated = len(rows) > limit
-    if truncated:
-        rows = rows[:limit]
+    matched = [
+        row
+        for row in source
+        if (not project_id or row.project_id == project_id)
+        and (not experiment_id or row.experiment_id == experiment_id)
+        and (not status or row.status.lower() == status.lower())
+    ]
+    rows = [WorkspaceRunRow.from_row(row) for row in matched]
+    if backend:
+        rows = [r for r in rows if (r.backend or "").lower() == backend.lower()]
 
+    total = len(rows)
+    page = rows[offset : offset + limit]
     return WorkspaceRunsResponse(
-        runs=rows,
+        runs=page,
         stats=compute_workspace_runs_stats(rows),
-        total=len(rows),
-        truncated=truncated,
+        total=total,
+        truncated=(offset + len(page)) < total,
     )
 
 
@@ -263,6 +514,12 @@ def list_workspace_runs(
 def list_workspace_files(
     path: str = Query("", description="Workspace-relative path to list"),
     max_depth: int = Query(4, ge=0, le=8, description="Maximum recursion depth"),
+    max_entries: int = Query(
+        DEFAULT_DIR_ENTRIES,
+        ge=1,
+        le=MAX_DIR_ENTRIES,
+        description="Maximum children returned per directory",
+    ),
     include: str | None = Query(
         None,
         description="Comma-separated optional enrichments (e.g. 'catalog')",
@@ -391,6 +648,7 @@ def list_workspace_files(
             # One remote RTT per child via build_node→stat only — do NOT
             # pre-probe is_file (that doubled SSH traffic and hung depth-8
             # walks over run trees). Sort by name; type comes from stat.
+            kept: list[str] = []
             for name in sorted(names):
                 child = fs.join(node_path, name)
                 rel = _rel_for(child)
@@ -401,12 +659,25 @@ def list_workspace_files(
                 looks_like_file = "." in name and not name.startswith(".")
                 if ignore.is_ignored(rel, is_dir=not looks_like_file):
                     continue
+                kept.append(child)
+            # A directory holding 100k trajectory frames must not become a
+            # 100k-node response; report the real count and cap what is built.
+            node["entryCount"] = len(kept)
+            node["truncated"] = len(kept) > max_entries
+            for child in kept[:max_entries]:
                 children.append(build_node(child, depth + 1, _visited=visited))
             # Dirs first, then files (stable by name within each group).
             children.sort(key=lambda c: (c.get("type") == "file", c.get("name") or ""))
             node["children"] = children
         else:
             node["children"] = []
+            if not is_file:
+                # Depth-capped. Mark it truncated *without* listing: we know we
+                # stopped early by construction, and probing here would cost one
+                # SSH round-trip per boundary directory — the exact traffic this
+                # walk is shaped to avoid. ``entryCount`` stays unset because we
+                # genuinely do not know it.
+                node["truncated"] = True
         return node
 
     root_node = build_node(requested, 0)
@@ -416,38 +687,48 @@ def list_workspace_files(
 @router.get("/file", response_model=FileContentResponse)
 def read_workspace_file(
     path: str = Query("", description="Workspace-relative path to read"),
+    mode: Literal["head", "tail"] = Query(default="head"),
+    max_bytes: int = Query(default=MAX_TEXT_BYTES, ge=1, le=MAX_TEXT_BYTES),
+    since_offset: int | None = Query(default=None, ge=0),
     workspace=Depends(get_workspace),  # noqa: ANN001
 ) -> FileContentResponse:
-    """Read a text file from the workspace.
+    """Read a bounded text window from a workspace file.
 
     Routes through ``workspace._fs`` so remote workspaces (and the
     :class:`CachedRemoteFileSystem` mirror) take effect.
+
+    A file larger than the window used to be refused with 413. It is now
+    served windowed instead: opening a 500 MB log should show its head (or,
+    with ``mode=tail``, its end) rather than nothing at all. Page with
+    ``since_offset=end``.
     """
     target = resolve_workspace_path_via_fs(workspace, path)
     fs = workspace._fs
     if not fs.exists(target) or not fs.is_file(target):
         raise HTTPException(status_code=404, detail="File not found")
 
-    size = fs.getsize(target)
-    if size > MAX_TEXT_BYTES:
-        raise HTTPException(status_code=413, detail="File too large for text preview")
-
-    try:
-        content = fs.read_text(target, encoding="utf-8")
-    except UnicodeDecodeError:
-        content = fs.read_bytes(target).decode("utf-8", errors="replace")
-    return FileContentResponse(content=content)
+    window = read_text_window(fs, target, max_bytes=max_bytes, mode=mode, since_offset=since_offset)
+    return FileContentResponse(
+        content=window.text,
+        offset=window.start,
+        end=window.end,
+        totalBytes=window.total_bytes,
+        truncated=window.truncated,
+    )
 
 
 @router.get("/file/blob")
 def read_workspace_file_blob(
     path: str = Query("", description="Workspace-relative path to read"),
     workspace=Depends(get_workspace),  # noqa: ANN001
-) -> StreamingResponse:
-    """Read a binary file from the workspace.
+) -> Response:
+    """Stream a binary file from the workspace.
 
     Routes through ``workspace._fs`` so remote workspaces (and the
-    :class:`CachedRemoteFileSystem` mirror) take effect.
+    :class:`CachedRemoteFileSystem` mirror) take effect. Local files are
+    handed to :class:`FileResponse` (the OS streams them); remote files are
+    streamed in bounded chunks. Either way the server never holds the whole
+    image in memory, which it previously did.
     """
     target = resolve_workspace_path_via_fs(workspace, path)
     fs = workspace._fs
@@ -459,9 +740,31 @@ def read_workspace_file_blob(
     if suffix not in IMAGE_EXTENSIONS:
         raise HTTPException(status_code=400, detail="Unsupported binary preview type")
 
+    size = fs.getsize(target)
+    if size > MAX_BLOB_BYTES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"file is {size} bytes, above the {MAX_BLOB_BYTES}-byte preview limit",
+        )
+
     media_type = mimetypes.guess_type(name)[0] or "application/octet-stream"
-    data = fs.read_bytes(target)
-    return StreamingResponse(io.BytesIO(data), media_type=media_type)
+    if isinstance(fs, LocalFileSystem):
+        return FileResponse(target, media_type=media_type)
+
+    def _chunks() -> Iterator[bytes]:
+        offset = 0
+        while True:
+            block = fs.read_range(target, offset, BLOB_CHUNK_BYTES)
+            if not block:
+                break
+            offset += len(block)
+            yield block
+
+    return StreamingResponse(
+        _chunks(),
+        media_type=media_type,
+        headers={"Content-Length": str(size)},
+    )
 
 
 @router.post("/open", response_model=WorkspaceInfoResponse)
@@ -766,6 +1069,9 @@ def invalidate_workspace_cache(
     """
     fs = _require_cached_fs(workspace)
     dropped = fs.invalidate(request.path, scope=request.scope)
+    # The mirror moved under the read model: its pinned snapshots describe the
+    # pre-invalidation tree, so drop them and tell the UI.
+    after_mutation(workspace, "workspace")
     return CacheControlResponse(dropped=dropped, warnings=[])
 
 
@@ -787,6 +1093,7 @@ def refresh_workspace_cache(
     warnings = (
         fs.index(workspace) if request.path is None else prefetch_workspace_indices(workspace)
     )
+    after_mutation(workspace, "workspace")
     return CacheControlResponse(
         dropped=dropped,
         warnings=[f"{w.path}: {w.reason}" for w in warnings],
@@ -900,6 +1207,10 @@ async def curate_workspace(
         proposal, workspace=workspace, run=audit_run, approve=approver
     )
     outcome = result.execution_result
+    if outcome is not None and outcome.status == "succeeded":
+        # Curation moves runs and rehomes assets across the tree: every view
+        # can be affected, so invalidate broadly rather than guess.
+        after_mutation(workspace, "all")
     return CurateResponse(
         proposalId=proposal.id,
         status=outcome.status if outcome is not None else "failed",

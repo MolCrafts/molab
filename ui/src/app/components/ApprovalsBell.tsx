@@ -7,8 +7,8 @@ import { Bell, Loader2 } from "lucide-react";
 import { type JSX, useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { PendingApprovalItem } from "@/api/generated/models/PendingApprovalItem";
-import { ApprovalsService } from "@/api/generated/services/ApprovalsService";
 import { ApprovalsInbox } from "@/app/renderers/agent/ApprovalsInbox";
+import { useApprovalsQuery, useApprovalsStream } from "@/app/state/queries";
 import {
   Sheet,
   SheetContent,
@@ -26,48 +26,33 @@ import { cn } from "@/lib/utils";
 
 export function ApprovalsBell(): JSX.Element {
   const navigate = useNavigate();
-  const [count, setCount] = useState(0);
-  const [countLoading, setCountLoading] = useState(true);
-  const [countError, setCountError] = useState<string | null>(null);
   const [countAnnouncement, setCountAnnouncement] = useState<string | null>(null);
-  const [streamError, setStreamError] = useState(false);
   const [open, setOpen] = useState(false);
   const countRef = useRef(0);
 
-  const refresh = useCallback(async () => {
-    setCountLoading(true);
-    try {
-      const response = await ApprovalsService.listPendingApprovalsApiApprovalsGet();
-      const nextCount = response.items?.length ?? 0;
-      if (nextCount !== countRef.current) {
-        setCountAnnouncement(
-          `Approval count updated: ${nextCount} pending approval${nextCount === 1 ? "" : "s"}.`,
-        );
-        countRef.current = nextCount;
-      }
-      setCount(nextCount);
-      setCountError(null);
-    } catch (err) {
-      setCountError(err instanceof Error ? err.message : "Failed to load approval count.");
-    } finally {
-      setCountLoading(false);
-    }
-  }, []);
+  // Same key and same connection the inbox reads — mounting both costs one
+  // request and one `EventSource`, not two of each.
+  const approvals = useApprovalsQuery();
+  const { streamError } = useApprovalsStream();
 
+  const count = approvals.data?.length ?? 0;
+  const countLoading = approvals.isPending;
+  const countError = approvals.error
+    ? approvals.error instanceof Error
+      ? approvals.error.message
+      : "Failed to load approval count."
+    : null;
+
+  // Announce only real transitions, so a background revalidation that returns
+  // the same count stays silent for screen-reader users.
   useEffect(() => {
-    void refresh();
-    const source = new EventSource("/api/approvals/events");
-    source.onmessage = () => {
-      void refresh();
-    };
-    source.onopen = () => {
-      setStreamError(false);
-    };
-    source.onerror = () => {
-      setStreamError(true);
-    };
-    return () => source.close();
-  }, [refresh]);
+    if (approvals.isPending) return;
+    if (count === countRef.current) return;
+    countRef.current = count;
+    setCountAnnouncement(
+      `Approval count updated: ${count} pending approval${count === 1 ? "" : "s"}.`,
+    );
+  }, [count, approvals.isPending]);
 
   useEffect(() => {
     if (!countAnnouncement) return;
@@ -159,7 +144,7 @@ export function ApprovalsBell(): JSX.Element {
                 density="compact"
                 title="Unavailable"
                 detail={countError}
-                action={<WorkbenchRetryAction onClick={() => void refresh()} />}
+                action={<WorkbenchRetryAction onClick={() => void approvals.refetch()} />}
               />
             )}
             {streamError && (
@@ -170,7 +155,7 @@ export function ApprovalsBell(): JSX.Element {
               showStreamStatus={false}
               onOpenItem={openItem}
               onDecided={() => {
-                void refresh();
+                void approvals.refetch();
               }}
             />
           </div>

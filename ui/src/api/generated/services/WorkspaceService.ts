@@ -32,6 +32,9 @@ export class WorkspaceService {
      * :func:`molexp.workspace.events.read_workspace_events` code path the
      * per-run route and ``molexp runs info`` use. A workspace with no timeline
      * yet answers ``[]`` without creating the DB (reading is side-effect free).
+     *
+     * The timeline is append-only, so its ``max_seq`` is an exact validator: a
+     * poll that sees no new events answers 304 without materializing a row.
      * @param type Keep only this event type
      * @param ref Keep only events referencing this id
      * @param limit
@@ -39,7 +42,7 @@ export class WorkspaceService {
      * @throws ApiError
      */
     public static getWorkspaceEventsApiEventsGet(
-        type?: ('run.created' | 'run.started' | 'run.failed' | 'run.completed' | 'asset.added' | 'knowledge.created' | 'workflow.created' | 'experiment.created' | null),
+        type?: ('run.created' | 'run.started' | 'run.failed' | 'run.completed' | 'run.cancelled' | 'asset.added' | 'knowledge.created' | 'workflow.created' | 'experiment.created' | null),
         ref?: (string | null),
         limit: number = 50,
     ): CancelablePromise<Array<WorkspaceEventResponse>> {
@@ -199,23 +202,75 @@ export class WorkspaceService {
         });
     }
     /**
+     * Stream Workspace Changes
+     * SSE: one ``change`` frame per workspace change — the UI's invalidation signal.
+     *
+     * Replaces polling. The first frame is ``hello`` carrying the current view
+     * versions and spine ``seq``.
+     *
+     * ``replayed`` is the client's caught-up flag and means exactly one thing:
+     * **every** change after ``since`` is accounted for — either nothing happened
+     * (``since >= seq``) or the whole backlog follows as ``change`` frames. It is
+     * ``false`` whenever the client must invalidate its list queries once instead
+     * of trusting deltas: no ``since`` was given, or the backlog exceeded
+     * :data:`_REPLAY_LIMIT` and is therefore *not* sent at all. A partial replay
+     * is never paired with ``replayed: true``, so the client needs no cap of its
+     * own to second-guess this.
+     *
+     * A comment line every 15 s keeps proxies from idling the connection out.
+     *
+     * Subscribing marks the read model hot, so its background sweep keeps
+     * running while any tab is watching and goes quiet when none is.
+     * @param since Resume after this spine ``seq``
+     * @returns any Successful Response
+     * @throws ApiError
+     */
+    public static streamWorkspaceChangesApiWorkspaceEventsStreamGet(
+        since?: (number | null),
+    ): CancelablePromise<any> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/workspace/events/stream',
+            query: {
+                'since': since,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
      * Read Workspace File
-     * Read a text file from the workspace.
+     * Read a bounded text window from a workspace file.
      *
      * Routes through ``workspace._fs`` so remote workspaces (and the
      * :class:`CachedRemoteFileSystem` mirror) take effect.
+     *
+     * A file larger than the window used to be refused with 413. It is now
+     * served windowed instead: opening a 500 MB log should show its head (or,
+     * with ``mode=tail``, its end) rather than nothing at all. Page with
+     * ``since_offset=end``.
      * @param path Workspace-relative path to read
+     * @param mode
+     * @param maxBytes
+     * @param sinceOffset
      * @returns FileContentResponse Successful Response
      * @throws ApiError
      */
     public static readWorkspaceFileApiWorkspaceFileGet(
         path: string = '',
+        mode: 'head' | 'tail' = 'head',
+        maxBytes: number = 2000000,
+        sinceOffset?: (number | null),
     ): CancelablePromise<FileContentResponse> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/workspace/file',
             query: {
                 'path': path,
+                'mode': mode,
+                'max_bytes': maxBytes,
+                'since_offset': sinceOffset,
             },
             errors: {
                 422: `Validation Error`,
@@ -224,10 +279,13 @@ export class WorkspaceService {
     }
     /**
      * Read Workspace File Blob
-     * Read a binary file from the workspace.
+     * Stream a binary file from the workspace.
      *
      * Routes through ``workspace._fs`` so remote workspaces (and the
-     * :class:`CachedRemoteFileSystem` mirror) take effect.
+     * :class:`CachedRemoteFileSystem` mirror) take effect. Local files are
+     * handed to :class:`FileResponse` (the OS streams them); remote files are
+     * streamed in bounded chunks. Either way the server never holds the whole
+     * image in memory, which it previously did.
      * @param path Workspace-relative path to read
      * @returns any Successful Response
      * @throws ApiError
@@ -250,6 +308,9 @@ export class WorkspaceService {
      * List Workspace Files
      * Return a nested file tree rooted at the requested path.
      *
+     * Routes through ``workspace._fs`` so remote workspaces (and the
+     * :class:`CachedRemoteFileSystem` mirror) work the same as local ones.
+     *
      * With ``include=catalog``, file nodes that match a registered asset
      * are enriched with ``assetId``, ``assetKind``, ``producerRunId`` and
      * ``producerTaskId`` so the UI can render lineage chips inline.
@@ -259,6 +320,7 @@ export class WorkspaceService {
      * workspaces do not dump dependency trees into the UI.
      * @param path Workspace-relative path to list
      * @param maxDepth Maximum recursion depth
+     * @param maxEntries Maximum children returned per directory
      * @param include Comma-separated optional enrichments (e.g. 'catalog')
      * @returns any Successful Response
      * @throws ApiError
@@ -266,6 +328,7 @@ export class WorkspaceService {
     public static listWorkspaceFilesApiWorkspaceFilesGet(
         path: string = '',
         maxDepth: number = 4,
+        maxEntries: number = 2000,
         include?: (string | null),
     ): CancelablePromise<Record<string, any>> {
         return __request(OpenAPI, {
@@ -274,6 +337,7 @@ export class WorkspaceService {
             query: {
                 'path': path,
                 'max_depth': maxDepth,
+                'max_entries': maxEntries,
                 'include': include,
             },
             errors: {
@@ -304,6 +368,10 @@ export class WorkspaceService {
     /**
      * Get Workspace Info
      * Get workspace information.
+     *
+     * Counts come from the read-model snapshots. ``assetCount`` used to trigger
+     * a full manifest scan of the workspace — on the bootstrap critical path, for
+     * one integer.
      * @returns WorkspaceInfoResponse Successful Response
      * @throws ApiError
      */
@@ -343,14 +411,20 @@ export class WorkspaceService {
      * List Workspace Runs
      * Cross-experiment list of runs, each with embedded execution attempts.
      *
-     * Returns rows ordered by ``created_at`` desc.  Plugins surface
-     * backend-specific columns (cluster, scheduler job id, etc.) via the
-     * ``backend`` / ``backendMetadata`` fields on each execution row.
+     * Served from the read-model snapshot: rows are already ordered
+     * ``created_at`` desc and already parsed, so a warm request reads no files
+     * at all and an unchanged one answers 304. Plugins surface backend-specific
+     * columns via the ``backend`` / ``backendMetadata`` fields on each execution
+     * row.
+     *
+     * ``total`` is the number of rows **matching the filters**, not the size of
+     * the returned page — which is what makes ``offset`` usable for paging.
      * @param projectId
      * @param experimentId
      * @param backend Filter by executor backend
      * @param status Filter by run status
      * @param limit
+     * @param offset Rows to skip (pagination)
      * @returns WorkspaceRunsResponse Successful Response
      * @throws ApiError
      */
@@ -360,6 +434,7 @@ export class WorkspaceService {
         backend?: (string | null),
         status?: (string | null),
         limit: number = 500,
+        offset?: number,
     ): CancelablePromise<WorkspaceRunsResponse> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -370,6 +445,7 @@ export class WorkspaceService {
                 'backend': backend,
                 'status': status,
                 'limit': limit,
+                'offset': offset,
             },
             errors: {
                 422: `Validation Error`,

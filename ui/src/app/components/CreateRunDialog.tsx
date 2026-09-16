@@ -1,9 +1,7 @@
 import { Plus } from "lucide-react";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useState } from "react";
-import type { TargetResponse } from "@/api/generated/models/TargetResponse";
 import { ExperimentsService } from "@/api/generated/services/ExperimentsService";
-import { TargetsService } from "@/api/generated/services/TargetsService";
 import { ParametersForm } from "@/app/runs/ParametersForm";
 import {
   type InputField,
@@ -13,6 +11,7 @@ import {
 } from "@/app/runs/SchemaForm";
 import { AddTargetDialog } from "@/app/settings/AddTargetDialog";
 import { workspaceApi } from "@/app/state/api";
+import { useTargetsQuery } from "@/app/state/queries";
 import {
   Dialog,
   DialogContent,
@@ -59,24 +58,20 @@ export function CreateRunDialog({
   const [parameters, setParameters] = useState<Record<string, unknown>>({});
   const [inputSchema, setInputSchema] = useState<InputField[] | null>(null);
   const [target, setTarget] = useState<string>(NO_TARGET_VALUE);
-  const [targets, setTargets] = useState<TargetResponse[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const open = controlledOpen ?? uncontrolledOpen;
   const setOpen = onOpenChange ?? setUncontrolledOpen;
+  // Cached for 5 minutes, so reopening the dialog shows the target list with
+  // no request and `AddTargetDialog` refreshes it through the same key.
+  const { data: targets = [], refetch: refetchTargets } = useTargetsQuery({ enabled: open });
 
   const refreshTargets = useCallback(async () => {
-    try {
-      const res = await TargetsService.listTargetsEndpointApiTargetsGet();
-      setTargets(res.targets);
-    } catch {
-      setTargets([]);
-    }
-  }, []);
+    await refetchTargets();
+  }, [refetchTargets]);
 
   useEffect(() => {
     if (!open) return;
-    void refreshTargets();
     void ExperimentsService.getExperimentApiProjectsProjectIdExperimentsExperimentIdGet(
       projectId,
       experimentId,
@@ -90,7 +85,7 @@ export function CreateRunDialog({
       .catch(() => {
         // experiment may not yet be readable; ignore
       });
-  }, [open, projectId, experimentId, refreshTargets]);
+  }, [open, projectId, experimentId]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

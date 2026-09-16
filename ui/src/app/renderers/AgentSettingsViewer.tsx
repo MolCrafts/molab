@@ -30,7 +30,7 @@ import {
   Zap,
 } from "lucide-react";
 import type { JSX, ReactNode } from "react";
-import { useCallback, useEffect, useId, useMemo, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { EmptyState, EntityPage } from "@/app/components/entity";
 import { McpServersTab } from "@/app/renderers/agent_settings/McpServersTab";
 import {
@@ -57,6 +57,12 @@ import {
   type SkillUpsertInput,
   SLASH_NAME_PATTERN,
 } from "@/app/state/api";
+import {
+  useAgentProviderQuery,
+  useAgentSkillsQuery,
+  useApplyAgentProvider,
+  useInvalidateAgentSkills,
+} from "@/app/state/queries";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Code as InlineCode } from "@/components/ui/code";
 import { ConfirmDialog } from "@/components/ui/confirm-dialog";
@@ -269,28 +275,18 @@ const qualifyModel = (provider: string, modelId: string): string => {
 
 const ProviderTab = (): JSX.Element => {
   const registry = DEFAULT_PROVIDER_REGISTRY;
-  const [config, setConfig] = useState<ApiAgentProvider | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [unavailable, setUnavailable] = useState(false);
-
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    setUnavailable(false);
-    try {
-      setConfig(await agentAdminApi.getProvider());
-    } catch (err) {
-      if (err instanceof AgentUnavailableError) setUnavailable(true);
-      else setError(String(err));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
+  // Shared `agent/provider` key — the instructions tab and the composer's model
+  // picker read the same document, so this tab no longer fetches its own copy.
+  const providerResult = useAgentProviderQuery();
+  const applyProvider = useApplyAgentProvider();
+  const config = providerResult.data ?? null;
+  const loading = providerResult.isPending;
+  const unavailable = providerResult.error instanceof AgentUnavailableError;
+  const error = !unavailable && providerResult.error ? String(providerResult.error) : null;
+  const refresh = async (): Promise<void> => {
+    resetAgentProbes();
+    await providerResult.refetch();
+  };
 
   if (loading) {
     return (
@@ -349,7 +345,7 @@ const ProviderTab = (): JSX.Element => {
                     }
                   }
                   registry={registry}
-                  onChanged={setConfig}
+                  onChanged={applyProvider}
                 />
               );
             })}
@@ -362,7 +358,7 @@ const ProviderTab = (): JSX.Element => {
           initial={globalModels}
           fallbackProvider={fallbackProvider}
           registry={registry}
-          onChanged={setConfig}
+          onChanged={applyProvider}
         />
       </div>
     </ScrollArea>
@@ -731,43 +727,34 @@ const ProviderTestResult = ({ result }: { result: ApiAgentProviderTestResult }):
  * every new session via the layered prompt composer.
  */
 const InstructionsTab = (): JSX.Element => {
-  const [config, setConfig] = useState<ApiAgentProvider | null>(null);
+  const providerResult = useAgentProviderQuery();
+  const applyProvider = useApplyAgentProvider();
+  const config = providerResult.data ?? null;
+  const loading = providerResult.isPending;
+  const unavailable = providerResult.error instanceof AgentUnavailableError;
+
   const [draft, setDraft] = useState<string>("");
   const [saving, setSaving] = useState(false);
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [unavailable, setUnavailable] = useState(false);
 
+  // The textarea is a draft; the server value seeds it. Re-seed only when the
+  // server's own text changes so a background refetch never eats an edit.
+  const serverInstructions = config?.instructions;
+  const seededRef = useRef<string | null>(null);
   useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    agentAdminApi
-      .getProvider()
-      .then((next) => {
-        if (cancelled) return;
-        setConfig(next);
-        setDraft(next.instructions);
-      })
-      .catch((err) => {
-        if (cancelled) return;
-        if (err instanceof AgentUnavailableError) setUnavailable(true);
-        else setError(String(err));
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+    if (serverInstructions === undefined) return;
+    if (seededRef.current === serverInstructions) return;
+    seededRef.current = serverInstructions;
+    setDraft(serverInstructions);
+  }, [serverInstructions]);
 
   const handleSave = useCallback(async () => {
     setSaving(true);
     setError(null);
     try {
       const updated = await agentAdminApi.updateProvider({ instructions: draft });
-      setConfig(updated);
+      applyProvider(updated);
       setDraft(updated.instructions);
       setSavedAt(Date.now());
     } catch (err) {
@@ -775,7 +762,7 @@ const InstructionsTab = (): JSX.Element => {
     } finally {
       setSaving(false);
     }
-  }, [draft]);
+  }, [draft, applyProvider]);
 
   const [confirmClear, setConfirmClear] = useState(false);
 
@@ -784,7 +771,7 @@ const InstructionsTab = (): JSX.Element => {
     setError(null);
     try {
       const updated = await agentAdminApi.updateProvider({ instructions: "" });
-      setConfig(updated);
+      applyProvider(updated);
       setDraft("");
       setSavedAt(Date.now());
     } catch (err) {
@@ -792,7 +779,7 @@ const InstructionsTab = (): JSX.Element => {
     } finally {
       setSaving(false);
     }
-  }, []);
+  }, [applyProvider]);
 
   if (loading) {
     return <p className="text-body-lg text-muted-foreground">Loading instructions…</p>;
@@ -805,19 +792,7 @@ const InstructionsTab = (): JSX.Element => {
         description="This server does not expose editable agent instructions. Add instructions through the server configuration, or install the agent administration dependencies."
         onRetry={() => {
           resetAgentProbes();
-          setUnavailable(false);
-          setLoading(true);
-          agentAdminApi
-            .getProvider()
-            .then((next) => {
-              setConfig(next);
-              setDraft(next.instructions);
-            })
-            .catch((err) => {
-              if (err instanceof AgentUnavailableError) setUnavailable(true);
-              else setError(String(err));
-            })
-            .finally(() => setLoading(false));
+          void providerResult.refetch();
         }}
       />
     );
@@ -999,29 +974,16 @@ const SkillsTab = ({
 }: {
   onLaunchSession?: (sessionId: string) => void;
 }): JSX.Element => {
-  const [skills, setSkills] = useState<ApiSkill[]>([]);
-  const [loading, setLoading] = useState(false);
+  const skillsResult = useAgentSkillsQuery();
+  const refresh = useInvalidateAgentSkills();
+  const skills = skillsResult.data ?? [];
+  const loading = skillsResult.isPending;
+
   const [error, setError] = useState<string | null>(null);
   const [editing, setEditing] = useState<ApiSkill | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [deleting, setDeleting] = useState<ApiSkill | null>(null);
   const [launchingSkill, setLaunchingSkill] = useState<ApiSkill | null>(null);
-
-  const refresh = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      setSkills(await agentAdminApi.listSkills());
-    } catch (err) {
-      setError(String(err));
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    void refresh();
-  }, [refresh]);
 
   const handleDelete = useCallback(
     async (skill: ApiSkill) => {

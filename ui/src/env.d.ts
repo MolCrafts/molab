@@ -11,3 +11,5 @@ declare module "*.svg?react" {
   export default ReactComponent;
 }
 declare const __USE_MOCK__: boolean;
+/** Build-time flag from `rsbuild.config.ts`: true only under `rsbuild dev`. */
+declare const __DEV__: boolean;

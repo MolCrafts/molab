@@ -9,6 +9,7 @@ import { LeftPanel } from "@/app/panels/LeftPanel";
 import { RightPanel } from "@/app/panels/RightPanel";
 import { RunInspector, type RunInspectorRegistration } from "@/app/runs/inspector/RunInspector";
 import { type InspectedTask, InspectedTaskContext } from "@/app/state/inspectedTask";
+import type { SliceErrors } from "@/app/state/queries";
 import type { InspectorTarget, LeftPanelView, Selection, WorkspaceSnapshot } from "@/app/types";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import {
@@ -26,6 +27,8 @@ interface AppShellProps {
   leftPanelView: LeftPanelView;
   selection: Selection | null;
   snapshot: WorkspaceSnapshot;
+  /** Per-slice bootstrap failures, forwarded to the navigator. */
+  sliceErrors?: SliceErrors;
   inspectorTarget: InspectorTarget;
   isRefreshing: boolean;
   onLeftPanelViewChange: (view: LeftPanelView) => void;
@@ -51,6 +54,7 @@ export const AppShell = ({
   leftPanelView,
   selection,
   snapshot,
+  sliceErrors,
   inspectorTarget,
   isRefreshing,
   onLeftPanelViewChange,
@@ -144,6 +148,7 @@ export const AppShell = ({
       view={leftPanelView}
       selection={selection}
       snapshot={snapshot}
+      sliceErrors={sliceErrors}
       searchQuery={searchQuery}
       onViewChange={onLeftPanelViewChange}
       onSelect={isMobile ? handleNavSelect : onSelectionChange}

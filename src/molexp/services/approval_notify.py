@@ -35,11 +35,25 @@ _CLOSED = object()
 _closed = False
 
 
-def notify_approvals_changed() -> None:
-    """Ping every live subscriber (never blocks; coalesces backlogged pings)."""
+def notify_approvals_changed(root: str | None = None) -> None:
+    """Ping every live subscriber (never blocks; coalesces backlogged pings).
+
+    Also republished on the workspace change bus as ``kind="approval"``, so a
+    client watches one stream instead of holding a second ``EventSource`` open
+    purely for approvals. Every caller is expected to pass *root* — use
+    :func:`molexp.services.workspace_notify.workspace_root_of` when all you
+    hold is a ``Run``. It stays optional only because a detached run cannot
+    name a workspace; such a call degrades to the approvals-only ping rather
+    than failing a decision that already landed on disk.
+    """
     for queue in list(_subscribers):
         with contextlib.suppress(asyncio.QueueFull):
             queue.put_nowait(None)
+    if root is not None:
+        from .workspace_notify import WorkspaceChange, notify_workspace_changed
+
+        with contextlib.suppress(Exception):
+            notify_workspace_changed(WorkspaceChange(root=str(root), kind="approval"))
 
 
 def close_approval_subscribers() -> None:

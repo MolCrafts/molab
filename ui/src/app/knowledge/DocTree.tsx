@@ -20,7 +20,13 @@ import { StatusBadge } from "@/app/components/entity";
 import { selectionForSearchHit } from "@/app/knowledge/searchHitSelection";
 import type { TreeNode, TreeNodeAction } from "@/app/panels/TreeView";
 import { TreeView } from "@/app/panels/TreeView";
-import { workspaceApi } from "@/app/state/api";
+import {
+  KNOWLEDGE_SEARCH_DEBOUNCE_MS,
+  knowledgeErrorMessage,
+  useDebouncedValue,
+  useKnowledgeNotePrefetch,
+  useKnowledgeSearchQuery,
+} from "@/app/state/queries";
 import type { Selection, WorkspaceSnapshot } from "@/app/types";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { usePrompt } from "@/components/PromptDialog";
@@ -137,6 +143,42 @@ const KnowledgeFilter = ({
   );
 };
 
+interface SearchHitRowProps {
+  hit: KnowledgeSearchRow;
+  active: boolean;
+  onSelect: (selection: Selection) => void;
+}
+
+/**
+ * One knowledge-search hit. Hovering or focusing it warms the note body so the
+ * click paints from cache; reference and workspace-entity hits have no note
+ * body, so their prefetch handlers are inert.
+ */
+const SearchHitRow = ({ hit, active, onSelect }: SearchHitRowProps): JSX.Element => {
+  const prefetch = useKnowledgeNotePrefetch(hit.type === "note" ? hit.path : null);
+  return (
+    <WorkbenchAction
+      kind="ghost"
+      size="content"
+      type="button"
+      onClick={() => onSelect(selectionForSearchHit(hit))}
+      className={cn(
+        "block w-full rounded-control px-2 py-2 text-left hover:bg-muted",
+        active && "bg-muted",
+      )}
+      {...prefetch}
+    >
+      <span className="block truncate text-body-lg text-foreground">{hit.title}</span>
+      <span className="block truncate text-micro text-muted-foreground">{hit.path}</span>
+      {hit.snippet && (
+        <span className="block truncate text-micro italic text-muted-foreground">
+          {hit.snippet}
+        </span>
+      )}
+    </WorkbenchAction>
+  );
+};
+
 interface DocTreeProps {
   snapshot: WorkspaceSnapshot;
   /** The currently-selected Note's bundle-relative path (drives active row). */
@@ -175,61 +217,24 @@ export const DocTree = ({ snapshot, activeId, onSelect }: DocTreeProps): JSX.Ele
   const filtering = tag !== null || status !== null;
   // Body-aware search (vision-loop-08): a non-empty query switches the tree to
   // a flat hit list served by GET /knowledge/search (the ONE Bundle.search verb).
+  // Keystrokes settle for KNOWLEDGE_SEARCH_DEBOUNCE_MS before they reach the
+  // query key; `keepPreviousData` holds the last hits while the next query is
+  // in flight, so the list never blinks empty between keystrokes.
   const [search, setSearch] = useState("");
-  const [searchHits, setSearchHits] = useState<KnowledgeSearchRow[]>([]);
-  const [searchTruncated, setSearchTruncated] = useState(false);
-  const [searchLoading, setSearchLoading] = useState(false);
-  const [searchError, setSearchError] = useState<string | null>(null);
-  const [searchRequestVersion, setSearchRequestVersion] = useState(0);
-  useEffect(() => {
-    void searchRequestVersion;
-    const query = search.trim();
-    if (!query) {
-      setSearchHits([]);
-      setSearchTruncated(false);
-      setSearchLoading(false);
-      setSearchError(null);
-      return;
-    }
-    let cancelled = false;
-    setSearchLoading(true);
-    setSearchError(null);
-    const handle = window.setTimeout(() => {
-      void workspaceApi
-        .searchKnowledge(query)
-        .then((response) => {
-          if (cancelled) return;
-          setSearchHits(response.hits);
-          setSearchTruncated(response.truncated);
-        })
-        .catch((err) => {
-          if (!cancelled) {
-            setSearchError(
-              err instanceof Error ? err.message : "Failed to search knowledge documents",
-            );
-          }
-        })
-        .finally(() => {
-          if (!cancelled) setSearchLoading(false);
-        });
-    }, 300);
-    return () => {
-      cancelled = true;
-      window.clearTimeout(handle);
-    };
-  }, [search, searchRequestVersion]);
+  const debouncedSearch = useDebouncedValue(search, KNOWLEDGE_SEARCH_DEBOUNCE_MS);
+  const searchQuery = useKnowledgeSearchQuery(debouncedSearch);
   const searching = search.trim().length > 0;
-  const handleSearchChange = (value: string): void => {
-    setSearch(value);
-    setSearchError(null);
-    if (value.trim()) {
-      setSearchLoading(true);
-      return;
-    }
-    setSearchLoading(false);
-    setSearchHits([]);
-    setSearchTruncated(false);
-  };
+  const searchHits = searchQuery.data?.hits ?? [];
+  const searchTruncated = searchQuery.data?.truncated ?? false;
+  const searchSettling = search.trim() !== debouncedSearch.trim();
+  const searchFetching = searching && (searchSettling || searchQuery.isFetching);
+  const searchError = searchQuery.error
+    ? knowledgeErrorMessage(searchQuery.error, "Failed to search knowledge documents")
+    : null;
+  // Only the very first query of a session shows a skeleton; later ones keep
+  // the previous hits on screen while they resolve.
+  const searchFirstLoad = searching && searchHits.length === 0 && searchFetching;
+  const handleSearchChange = (value: string): void => setSearch(value);
   const { prompt, dialog: promptDialog } = usePrompt();
   const { confirm, dialog: confirmDialog } = useConfirm();
   const [operationLabel, setOperationLabel] = useState<string | null>(null);
@@ -442,7 +447,7 @@ export const DocTree = ({ snapshot, activeId, onSelect }: DocTreeProps): JSX.Ele
     );
 
   return (
-    <div className="space-y-2" aria-busy={loading || searchLoading || operationLabel !== null}>
+    <div className="space-y-2" aria-busy={loading || searchFetching || operationLabel !== null}>
       <div className="flex items-center justify-between gap-1 px-1">
         <KnowledgeFilter
           tags={tags}
@@ -524,24 +529,20 @@ export const DocTree = ({ snapshot, activeId, onSelect }: DocTreeProps): JSX.Ele
       )}
       {searching ? (
         <div className="space-y-1 px-1">
-          {searchLoading ? (
+          {searchFirstLoad ? (
             <WorkbenchOperationState
               kind="loading"
               density="compact"
               title="Searching knowledge…"
               skeletonRows={3}
             />
-          ) : searchError ? (
+          ) : searchError && searchHits.length === 0 ? (
             <WorkbenchOperationState
               kind="error"
               density="compact"
               title="Knowledge search failed"
               detail={searchError}
-              action={
-                <WorkbenchRetryAction
-                  onClick={() => setSearchRequestVersion((version) => version + 1)}
-                />
-              }
+              action={<WorkbenchRetryAction onClick={() => void searchQuery.refetch()} />}
             />
           ) : searchHits.length === 0 ? (
             <WorkbenchOperationState
@@ -552,6 +553,15 @@ export const DocTree = ({ snapshot, activeId, onSelect }: DocTreeProps): JSX.Ele
             />
           ) : (
             <>
+              {searchError && (
+                <WorkbenchOperationState
+                  kind="error"
+                  density="compact"
+                  title="Could not refresh knowledge search"
+                  detail={searchError}
+                  action={<WorkbenchRetryAction onClick={() => void searchQuery.refetch()} />}
+                />
+              )}
               <WorkbenchOperationState
                 kind="success"
                 density="inline"
@@ -559,27 +569,12 @@ export const DocTree = ({ snapshot, activeId, onSelect }: DocTreeProps): JSX.Ele
                 className="sr-only"
               />
               {searchHits.map((hit) => (
-                <WorkbenchAction
-                  kind="ghost"
-                  size="content"
-                  type="button"
+                <SearchHitRow
                   key={hit.path}
-                  onClick={() => onSelect(selectionForSearchHit(hit))}
-                  className={cn(
-                    "block w-full rounded-control px-2 py-2 text-left hover:bg-muted",
-                    activeId === hit.path && "bg-muted",
-                  )}
-                >
-                  <span className="block truncate text-body-lg text-foreground">{hit.title}</span>
-                  <span className="block truncate text-micro text-muted-foreground">
-                    {hit.path}
-                  </span>
-                  {hit.snippet && (
-                    <span className="block truncate text-micro italic text-muted-foreground">
-                      {hit.snippet}
-                    </span>
-                  )}
-                </WorkbenchAction>
+                  hit={hit}
+                  active={activeId === hit.path}
+                  onSelect={onSelect}
+                />
               ))}
             </>
           )}

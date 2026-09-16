@@ -6,12 +6,13 @@ import contextlib
 import json
 import os
 import shutil
+import stat as stat_module
 import tempfile
 from collections.abc import Iterable
 from pathlib import Path
 from typing import IO, Any
 
-from .base import FileSystem, PathArg, StatResult
+from .base import DirEntry, FileSystem, PathArg, StatResult
 
 
 class LocalFileSystem:
@@ -66,7 +67,47 @@ class LocalFileSystem:
 
     @staticmethod
     def listdir(path: PathArg) -> list[str]:
-        return [p.name for p in Path(path).iterdir()]
+        # os.listdir, not Path.iterdir: iterdir builds a Path per entry and
+        # discards the scandir metadata, which nothing here needs.
+        return os.listdir(path)  # noqa: PTH208
+
+    @staticmethod
+    def scandir(path: PathArg, *, with_stat: bool = True) -> list[DirEntry]:
+        """One ``os.scandir`` pass; ``d_type`` answers is_dir/is_file for free.
+
+        A raced deletion mid-walk yields an entry with every flag False rather
+        than raising — the directory listing as a whole is still valid.
+        """
+        entries: list[DirEntry] = []
+        with os.scandir(path) as it:
+            for e in it:
+                try:
+                    is_symlink = e.is_symlink()
+                    is_dir = e.is_dir()
+                    is_file = e.is_file()
+                    size = 0
+                    mtime = 0.0
+                    if with_stat and (is_dir or is_file):
+                        st = e.stat()
+                        size = st.st_size
+                        mtime = st.st_mtime
+                except OSError:
+                    # Entry vanished, or a broken/looping symlink.
+                    entries.append(
+                        DirEntry(name=e.name, is_dir=False, is_file=False, is_symlink=True)
+                    )
+                    continue
+                entries.append(
+                    DirEntry(
+                        name=e.name,
+                        is_dir=is_dir,
+                        is_file=is_file,
+                        is_symlink=is_symlink,
+                        size=size,
+                        mtime=mtime,
+                    )
+                )
+        return entries
 
     @staticmethod
     def glob(path: PathArg, pattern: str) -> Iterable[str]:
@@ -87,6 +128,16 @@ class LocalFileSystem:
     @staticmethod
     def read_bytes(path: PathArg) -> bytes:
         return Path(path).read_bytes()
+
+    @staticmethod
+    def read_range(path: PathArg, offset: int, length: int) -> bytes:
+        if offset < 0 or length < 0:
+            raise ValueError(f"read_range needs non-negative offset/length, got {offset}/{length}")
+        if length == 0:
+            return b""
+        with open(path, "rb") as fh:  # noqa: PTH123
+            fh.seek(offset)
+            return fh.read(length)
 
     @staticmethod
     def open(path: PathArg, mode: str = "r", encoding: str = "utf-8") -> IO[Any]:
@@ -137,24 +188,27 @@ class LocalFileSystem:
 
     @staticmethod
     def stat(path: PathArg) -> StatResult:
-        p = Path(path)
-        st = os.stat(p)  # noqa: PTH116
+        # One syscall: the mode bits already carry the type, so the former
+        # `p.is_dir()` + `p.is_file()` pair (two more stats) is pure waste —
+        # and on a network mount each of those is a round-trip.
+        st = os.stat(path)  # noqa: PTH116
         return StatResult(
             size=st.st_size,
             mtime=st.st_mtime,
-            is_dir=p.is_dir(),
-            is_file=p.is_file(),
+            is_dir=stat_module.S_ISDIR(st.st_mode),
+            is_file=stat_module.S_ISREG(st.st_mode),
         )
 
     @staticmethod
     def lstat(path: PathArg) -> StatResult:
-        p = Path(path)
-        st = os.lstat(p)
+        # Reports the *link's* own type (S_ISLNK ⇒ neither dir nor file),
+        # which is what "lstat" means; the old body followed the link.
+        st = os.lstat(path)
         return StatResult(
             size=st.st_size,
             mtime=st.st_mtime,
-            is_dir=p.is_dir(),
-            is_file=p.is_file(),
+            is_dir=stat_module.S_ISDIR(st.st_mode),
+            is_file=stat_module.S_ISREG(st.st_mode),
         )
 
     @staticmethod

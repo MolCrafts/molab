@@ -20,6 +20,7 @@ import { RunOutputsPanel } from "@/app/renderers/run/RunOutputsPanel";
 import { useRunViewer } from "@/app/renderers/useRunViewer";
 import { POST_DISPATCH_TAB, RunToolbar } from "@/app/runs/RunToolbar";
 import { workspaceApi } from "@/app/state/api";
+import { useInvalidate } from "@/app/state/queries/invalidation";
 import { useDiscoveredFileTypesForRun } from "@/app/state/useDiscoveredFileTypes";
 import type { ApiAssetResponse, RendererProps } from "@/app/types";
 import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
@@ -66,6 +67,7 @@ export const MolqRunViewer = (props: RendererProps): JSX.Element => {
     confirmDialog,
     alertDialog,
   } = useRunViewer(props);
+  const invalidate = useInvalidate();
 
   const [runAssets, setRunAssets] = useState<ApiAssetResponse[]>([]);
   const runCoords = useMemo(
@@ -169,7 +171,8 @@ export const MolqRunViewer = (props: RendererProps): JSX.Element => {
               })
             }
             onHarvested={(path) => {
-              props.onRefresh();
+              // Harvest writes a note and stamps the run — nothing else moves.
+              void invalidate.afterHarvest({ runId: run.id });
               if (path) {
                 setSelection({ objectType: "knowledge", objectId: path });
               }

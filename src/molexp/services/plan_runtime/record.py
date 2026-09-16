@@ -629,7 +629,8 @@ def write_finding_record(
     ``references`` edge connects the Finding to the Decision record when
     that record exists — plan → outcome stays traversable.
     """
-    from molexp.workspace.knowledge_item import KnowledgeItem, SourceRef
+    from molexp.workspace import knowledge_mount
+    from molexp.workspace.knowledge_item import SourceRef
     from molexp.workspace.knowledge_write import write_knowledge_item
 
     final_report = _read_artifact_json(run, "final_report")
@@ -650,10 +651,10 @@ def write_finding_record(
         block = _render_value(final_report.get(key))
         if block:
             lines += [f"## {label}", "", block, ""]
-    cites: list[tuple[Folder, EdgeRole]] = [(run, "derived_from")]
+    cites: list[tuple[Folder | KnowledgeItem, EdgeRole]] = [(run, "derived_from")]
     try:
-        decision = experiment.get_folder(
-            f"experiment-record-{experiment.id}-{run.id}", cls=KnowledgeItem
+        decision = knowledge_mount.get_item(
+            experiment, f"experiment-record-{experiment.id}-{run.id}"
         )
     except Exception:
         decision = None  # no Decision record (its write raced/failed) — Finding stands alone

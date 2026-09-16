@@ -3,6 +3,7 @@ import type { JSX, ReactNode } from "react";
 import { useEffect, useMemo } from "react";
 import { EmptyState } from "@/app/components/entity";
 import { ROW_PADDING_DEFAULT } from "@/app/components/entity/density";
+import { useRunRowPrefetch } from "@/app/state/queries/runs";
 import {
   Select,
   SelectContent,
@@ -77,6 +78,7 @@ export const RunsJobsTable = ({
   onPageChange,
   onPageSizeChange,
 }: RunsJobsTableProps): JSX.Element => {
+  const rowPrefetch = useRunRowPrefetch();
   const sorted = useMemo(() => sortJobs(rows, sort), [rows, sort]);
   const slice = useMemo(() => paginate(sorted, page, pageSize), [sorted, page, pageSize]);
 
@@ -121,9 +123,17 @@ export const RunsJobsTable = ({
             {slice.items.map((run) => {
               const isSelected = run.id === selectedRunId;
               const duration = computeRunDurationSeconds(run);
+              // Warm the run's files/assets on sustained hover so the click
+              // paints from cache; a mouse sweeping the list fetches nothing.
+              const prefetchHandlers = rowPrefetch({
+                projectId: run.projectId,
+                experimentId: run.experimentId,
+                runId: run.id,
+              });
               return (
                 <TableRow
                   key={run.id}
+                  {...prefetchHandlers}
                   tabIndex={0}
                   aria-label={`Open run ${run.name || run.id}`}
                   aria-selected={isSelected}

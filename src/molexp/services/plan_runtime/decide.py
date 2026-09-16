@@ -134,6 +134,11 @@ def decide_plan_review(
     from molexp.harness.policy.event_log import ApprovalEventRecorder
     from molexp.harness.store.file_artifact_store import FileArtifactStore
     from molexp.services.approval_notify import notify_approvals_changed
+    from molexp.services.workspace_notify import workspace_root_of
+
+    # Resolved once: every exit below pings the same workspace, and the
+    # lookup walks the run's parent chain.
+    bus_root = workspace_root_of(run)
 
     if isinstance(decision, ReviewDecision):
         review = decision
@@ -167,7 +172,7 @@ def decide_plan_review(
                 "edits": review.edits,
             }
             _schedule_resume(resume_scope.propose_plan_patch(run=run, patch=patch))
-            notify_approvals_changed()
+            notify_approvals_changed(bus_root)
             return approval
         if request.target_agent_id is None:
             raise ValueError(
@@ -182,7 +187,7 @@ def decide_plan_review(
         }
         if task is not None:
             task.resume_intervention(target_agent_id=request.target_agent_id, payload=payload)
-        notify_approvals_changed()
+        notify_approvals_changed(bus_root)
         return approval
 
     if review.action == "approve":
@@ -205,7 +210,7 @@ def decide_plan_review(
         )
         if task is not None:
             task.resume()
-        notify_approvals_changed()
+        notify_approvals_changed(bus_root)
         return approval
 
     if review.action == "reject":
@@ -215,7 +220,7 @@ def decide_plan_review(
         )
         if task is not None:
             task.mark_rejected(review.reason or "rejected")
-        notify_approvals_changed()
+        notify_approvals_changed(bus_root)
         return approval
 
     # revise: do NOT record a durable grant/reject that would stick as permanent
@@ -225,5 +230,5 @@ def decide_plan_review(
         _apply_plan_field_values(run, review.field_values)
     if task is not None:
         task.resume()
-    notify_approvals_changed()
+    notify_approvals_changed(bus_root)
     return approval

@@ -2,7 +2,7 @@
 
 Covers the workspace-layer enrichment surface for OKF ``Note`` documents:
 
-- ``Bundle.embed(note, target, *, role=None)`` — write ONE typed provenance
+- ``knowledge_mount.embed(note, target, *, root, role=None)`` — write ONE typed provenance
   edge from a ``Note`` to a live entity (``Run`` / ``Asset`` / ``Experiment`` /
   ``ReferenceConcept``) with a per-kind default role from the frozen
   ``EdgeRole`` vocabulary; the asset payload is pointed at, never copied.
@@ -19,7 +19,6 @@ from __future__ import annotations
 import os
 from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
 
 import pytest
 
@@ -30,6 +29,7 @@ from molexp.workspace import (
     ReferenceConcept,
     ReferenceMeta,
     Workspace,
+    knowledge_mount,
     summarize_entity,
 )
 from molexp.workspace.doc_embed import asset_record_dir
@@ -58,7 +58,8 @@ def scene(tmp_path: Path) -> SimpleNamespace:
 
     # A ReferenceConcept mounted at the bundle root; its title lives in
     # ReferenceMeta (no index.md H1).
-    ref = cast("ReferenceConcept", ws.add_folder(ReferenceConcept(parent=ws, name="smith2024")))
+    ref = ReferenceConcept(Path(str(ws.resolve())) / "smith2024", fs=ws.fs)
+    ref.write_meta()
     ref.write_reference_meta(ReferenceMeta(title="Smith 2024", year=2024))
 
     b = Bundle(ws.resolve())
@@ -70,10 +71,10 @@ def scene(tmp_path: Path) -> SimpleNamespace:
 
 
 class TestBundleEmbed:
-    """``Bundle.embed`` — one typed provenance edge from a Note to a live entity."""
+    """``knowledge_mount.embed`` — one typed provenance edge from a Note to an entity."""
 
     def test_embed_run_writes_a_relative_records_edge(self, scene: SimpleNamespace) -> None:
-        scene.b.embed(scene.doc, scene.run)
+        knowledge_mount.embed(scene.doc, scene.run, root=scene.root)
 
         edges = scene.doc.typed_out_edges()
         matched = [e for e in edges if _norm(e.target) == _norm(scene.run.resolve())]
@@ -88,10 +89,10 @@ class TestBundleEmbed:
         assert not expected_posix.startswith("/")
 
     def test_embed_default_role_per_target_kind(self, scene: SimpleNamespace) -> None:
-        scene.b.embed(scene.doc, scene.run)
-        scene.b.embed(scene.doc, scene.asset)
-        scene.b.embed(scene.doc, scene.exp)
-        scene.b.embed(scene.doc, scene.ref)
+        knowledge_mount.embed(scene.doc, scene.run, root=scene.root)
+        knowledge_mount.embed(scene.doc, scene.asset, root=scene.root)
+        knowledge_mount.embed(scene.doc, scene.exp, root=scene.root)
+        knowledge_mount.embed(scene.doc, scene.ref, root=scene.root)
 
         edges = scene.doc.typed_out_edges()
         by_target = {_norm(e.target): e.role for e in edges}
@@ -108,7 +109,7 @@ class TestBundleEmbed:
         assert len(edges) == 4
 
     def test_explicit_role_overrides_the_per_kind_default(self, scene: SimpleNamespace) -> None:
-        scene.b.embed(scene.doc, scene.run, role="derived_from")
+        knowledge_mount.embed(scene.doc, scene.run, root=scene.root, role="derived_from")
 
         edges = scene.doc.typed_out_edges()
         matched = [e for e in edges if _norm(e.target) == _norm(scene.run.resolve())]
@@ -119,7 +120,7 @@ class TestBundleEmbed:
         record_dir = asset_record_dir(scene.asset, scene.root)
         before = sorted(p.name for p in Path(record_dir).iterdir())
 
-        scene.b.embed(scene.doc, scene.asset)
+        knowledge_mount.embed(scene.doc, scene.asset, root=scene.root)
 
         after = sorted(p.name for p in Path(record_dir).iterdir())
         assert before == after  # the asset record dir gained no doc copy
@@ -148,7 +149,7 @@ class TestSummarizeEntity:
         )
 
         # Bundle.entity_summary is the convenience wrapper passing the bundle root.
-        assert scene.b.entity_summary(scene.asset) == s_asset
+        assert knowledge_mount.entity_summary(scene.asset, root=scene.root) == s_asset
 
     def test_folder_title_prefers_index_h1(self, scene: SimpleNamespace) -> None:
         scene.run.write_index("# Nice Run Title\n\nnotes")

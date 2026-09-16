@@ -153,10 +153,32 @@ class TestTargetToFilesystem:
     def test_local_target_yields_local_filesystem(self, tmp_path: Path) -> None:
         assert isinstance(target_to_filesystem(parse_target(str(tmp_path))), LocalFileSystem)
 
-    def test_remote_target_yields_remote_filesystem(self) -> None:
+    def test_remote_target_is_cached_by_default(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Remote targets go through the mirror cache; uncached is opt-in.
+
+        An uncached remote filesystem costs one SSH round-trip per ``exists`` /
+        ``stat`` / ``listdir``, so every CLI verb that walks the tree would pay
+        hundreds. ``home`` is redirected because constructing the cache creates
+        its mirror directory.
+        """
+        from molexp.workspace.fs_cached import CachedRemoteFileSystem
         from molexp.workspace.fs_remote import RemoteFileSystem
 
+        monkeypatch.setattr(Path, "home", classmethod(lambda _cls: tmp_path))
+
         fs = target_to_filesystem(parse_target("me@host.example:/data"))
+        assert isinstance(fs, CachedRemoteFileSystem)
+        # The cache is a decorator, not a replacement: the SSH-backed
+        # filesystem is still what answers a miss.
+        assert isinstance(fs.inner, RemoteFileSystem)
+        assert fs.mirror_root.is_relative_to(tmp_path)
+
+    def test_remote_target_uncached_yields_remote_filesystem(self) -> None:
+        from molexp.workspace.fs_remote import RemoteFileSystem
+
+        fs = target_to_filesystem(parse_target("me@host.example:/data"), cached=False)
         assert isinstance(fs, RemoteFileSystem)
 
 

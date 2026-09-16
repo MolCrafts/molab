@@ -168,6 +168,53 @@ Stage 5 state conformance:
 - Presentation boundaries normalize wire aliases to the fixed Queued /
   Running / Completed / Failed / Cancelled vocabulary and status ramp.
 
+## Data loading
+
+- **TanStack Query is the only source of server state.** `app/state/queries/`
+  owns the client, the `qk` key factory and the invalidation map. No fetching
+  in `useEffect`, no server payloads parked in `useState`, no second cache.
+- **Mutations invalidate the keys they changed**, via a `useInvalidate()`
+  helper (`afterRunVerb`, `afterNoteMutation`, `afterExperimentDelete`, …).
+  A global refresh is not a refresh strategy: it collapses the navigator tree
+  the user just expanded and re-pays every request to show one changed row.
+- **`placeholderData: keepPreviousData` only within the same entity** —
+  re-filtering a list, paging, growing a log tail. Never across an entity
+  switch: run B's page must not render run A's logs under B's header.
+- **Never early-return a whole viewer behind a spinner** when the chrome can
+  render from cached list data. Title, status and breadcrumb come from the
+  row already in cache; only the detail region shows
+  `WorkbenchOperationState kind="loading"`. Every loading / final-empty /
+  error region is that component — no bespoke "Loading…" text.
+- **Initial loading is not final empty, and a failure is not `[]`.** A read
+  error keeps prior content visible and offers Retry; a slice that fails
+  surfaces its own error row rather than silently becoming an empty list.
+- **Hidden tabs do not poll.** `refetchIntervalInBackground: false` plus
+  TanStack's focus manager; `refetchInterval` is a function of the data, so a
+  terminal run cancels its own interval. Polling at all is the fallback for a
+  disconnected change stream (`useFallbackInterval`), not the default.
+- **Prefetch on intent** (`usePrefetchOnIntent`, 120 ms hover/focus delay) for
+  rows whose detail the user is about to open.
+- **Consult the size before fetching a file.** `lib/fileSizeGate.ts` decides
+  from the `sizeBytes` the tree already carries: full load up to 2 MiB,
+  otherwise a notice with the size and an explicit "load anyway" that pulls a
+  bounded 256 KiB window. A truncated view says so and is read-only — saving a
+  prefix back would destroy the rest of the file. Viewers must not discover a
+  multi-GB file by downloading it.
+- **Long trees are virtualized at 100 or more visible rows** (`flattenVisible` +
+  `@tanstack/react-virtual`, fixed 28 px rows). Below the threshold, and when
+  no scroll ancestor is found, every row renders. **Known trade-off: windowing
+  removes off-screen rows from the DOM, so Tab traversal and browser
+  find-in-page do not reach them.** The threshold keeps that confined to trees
+  where the alternative is thousands of DOM nodes; keep the traversal logic in
+  the pure flattener so it stays testable without a DOM.
+- **Heavy renderers are `React.lazy`** with a `WorkbenchOperationState`
+  fallback, and the workflow canvas is split below its own import so flowgram,
+  inversify and monaco stay out of the entry bundle — `bundle-split.test.ts`
+  fails if they come back.
+- The TanStack devtools launcher is **dev-only** (`__DEV__`, stripped from
+  `npm run build`) and is the one sanctioned floating surface — the no-floating-
+  cards rule under *Operation states* still holds for everything shipped.
+
 ## Motion
 
 Stage 6 motion conformance:
@@ -196,9 +243,12 @@ Stage 6 motion conformance:
 Regenerate with:
 
 ```bash
-.venv/bin/python scripts/dump_openapi.py
-cd ui && npm run generate:api   # includes patch-generated-api.mjs for JSONValue
+python scripts/dump_openapi.py   # writes repo-root openapi.json (gitignored)
+cd ui && npm run generate:api    # includes patch-generated-api.mjs for JSONValue
 ```
+
+Run it after any route/schema change. `ui/` is an npm **workspace** member, so
+the binaries live in the repo-root `node_modules/.bin`.
 
 `PlanDetailResponse` tracks PlanOrchestrator fields from the live FastAPI
 schema. Do not hand-edit `ui/src/api/generated/`.

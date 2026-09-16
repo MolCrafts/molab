@@ -18,17 +18,22 @@ maps :class:`ConceptNotFoundError` (and a non-``Note`` concept) to a 404.
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path as _StdPath
 from typing import TYPE_CHECKING, Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 
 from molexp.server.dependencies import get_workspace
+from molexp.services.workspace_read_model import WorkspaceReadModel
 from molexp.workspace.edges import EdgeRole
 
+from ..deps.read_model import get_read_model
 from ..deps.served import active_served_key, assert_workspace_writable
+from ..http_cache import not_modified, weak_etag
+from ..mutations import after_mutation
 from ..schemas import MessageResponse
 
 if TYPE_CHECKING:
@@ -37,6 +42,7 @@ if TYPE_CHECKING:
     from molexp.workspace.concepts import Note
     from molexp.workspace.experiment import Experiment
     from molexp.workspace.folder import Folder
+    from molexp.workspace.note_meta import NoteMeta
     from molexp.workspace.run import Run
 
 __all__ = ["router"]
@@ -95,9 +101,9 @@ class EmbedRequest(BaseModel):
 
     target_kind: Literal["run", "asset", "experiment", "reference"]
     target: str
-    # ``None`` = defer to ``Bundle.embed``'s per-kind default (run/experiment ->
+    # ``None`` = defer to ``knowledge_mount.embed``'s per-kind default (run/experiment ->
     # records, reference -> cites, asset/other -> references), so an HTTP embed
-    # with no explicit role writes the SAME edge a CLI ``Bundle.embed`` call
+    # with no explicit role writes the SAME edge a CLI ``knowledge_mount.embed`` call
     # would — the Python==UI invariant. An explicit role overrides.
     role: EdgeRole | None = None
     text: str | None = None
@@ -142,6 +148,22 @@ class BacklinksResponse(BaseModel):
     backlinks: list[NoteSummary]
 
 
+class _Partition:
+    """The :class:`~molexp.knowledge.bundle.ConceptPartition` shape, snapshot-backed.
+
+    Lets the list handler stay written against one structure whether it was
+    produced by a live walk or lifted from the read model's cached scan.
+    """
+
+    __slots__ = ("items", "metas", "notes", "references")
+
+    def __init__(self, snapshot) -> None:  # noqa: ANN001
+        self.notes = list(snapshot.notes)
+        self.references = list(snapshot.references)
+        self.items = list(snapshot.items)
+        self.metas = snapshot.metas
+
+
 def _bundle(workspace: Workspace) -> Bundle:
     from molexp.workspace import Bundle
 
@@ -159,19 +181,38 @@ def _require_writable(request: Request) -> None:
     assert_workspace_writable(active_served_key() or "", request.method)
 
 
-def _note_summary(bundle: Bundle, note: Note) -> NoteSummary:
+def _note_meta_of(note: Note, meta: Mapping[str, object] | None) -> NoteMeta:
+    """*note*'s typed :class:`NoteMeta` — parsed from an already-read *meta* when given.
+
+    A bundle walk has just parsed every ``meta.yaml`` to type its Concepts;
+    re-reading it per note to learn ``tags`` / ``status`` would double the
+    file traffic of the list endpoint. A bare legacy marker reads back with
+    the additive defaults exactly as :meth:`Note.read_note_meta` does.
+    """
+    from molexp.workspace.note_meta import NoteMeta
+
+    if meta is None:
+        return note.read_note_meta()
+    return NoteMeta.model_validate(dict(meta) or {"type": note.type(), "id": note.name})
+
+
+def _note_summary(
+    bundle: Bundle, note: Note, *, meta: Mapping[str, object] | None = None
+) -> NoteSummary:
     """Build a :class:`NoteSummary` for *note* (identity + excerpt + tags/status).
 
     ``tags``/``status`` come from the 05 :class:`~molexp.workspace.note_meta.NoteMeta`
-    helpers (an untagged note reads back ``[]`` / ``"active"``).
+    helpers (an untagged note reads back ``[]`` / ``"active"``); *meta* is the
+    ``meta.yaml`` the caller's walk already parsed, so it is not read again.
     """
     body = note.body() or ""
+    note_meta = _note_meta_of(note, meta)
     return NoteSummary(
         name=note.name,
         relPath=bundle.rel_path(note),
         excerpt=body[:_EXCERPT_CHARS],
-        tags=note.tags(),
-        status=note.status(),
+        tags=list(note_meta.tags),
+        status=note_meta.status,
     )
 
 
@@ -198,12 +239,14 @@ def _resolve_cards(bundle: Bundle, workspace: Workspace, note: Note) -> list[Ent
     Each edge target is resolved back to its live entity; an edge that resolves
     to no entity is skipped (it cannot be summarized as a card).
     """
+    from molexp.workspace import knowledge_mount
+
     cards: list[EntityCard] = []
     for edge in note.typed_out_edges():
         entity = _resolve_edge_entity(bundle, workspace, edge.target)
         if entity is None:
             continue
-        summary = bundle.entity_summary(entity)
+        summary = knowledge_mount.entity_summary(entity, root=bundle.root)
         cards.append(
             EntityCard(
                 kind=summary.kind,
@@ -389,48 +432,136 @@ def entity_backlinks(
 
 
 class KnowledgeSearchRow(BaseModel):
-    """One search hit projected from the bundle index entry."""
+    """One ranked search hit projected from the bundle index entry."""
 
     path: str
     title: str
     type: str
     tags: list[str] = []
     snippet: str | None = None
+    score: float = 0.0
+    source: str = ""
+    ref: str = ""
 
 
 class KnowledgeSearchResponse(BaseModel):
-    """``GET /knowledge/search`` — body-aware retrieval over the bundle."""
+    """``GET /knowledge/search`` — ranked retrieval across the knowledge bases."""
 
     hits: list[KnowledgeSearchRow]
     truncated: bool
 
 
+class KnowledgeBaseRow(BaseModel):
+    """One registered OKF knowledge base (a group wiki).
+
+    Named "knowledge base", not "knowledge source": ``agent_admin`` already owns
+    ``KnowledgeSourcesResponse`` for the molmcp *package* allowlist, an unrelated
+    concept. Two schemas with one name collide in the generated OpenAPI client,
+    and the ambiguity was real before it was mechanical.
+    """
+
+    name: str
+    root: str
+    description: str = ""
+    scope: str
+    available: bool
+
+
+class KnowledgeBasesResponse(BaseModel):
+    """``GET /knowledge/sources`` — which knowledge bases this host can search."""
+
+    sources: list[KnowledgeBaseRow]
+
+
+@router.get("/sources", response_model=KnowledgeBasesResponse)
+def list_knowledge_sources(
+    workspace: Workspace = Depends(get_workspace),
+) -> KnowledgeBasesResponse:
+    """List the OKF knowledge bases registered on this host.
+
+    ``available`` reports whether the directory is readable right now — a wiki
+    on an unmounted share stays registered and simply cannot be searched until
+    it is back, which is information the UI should show rather than hide.
+    """
+    from molexp.knowledge.sources import KnowledgeSourceStore
+
+    return KnowledgeBasesResponse(
+        sources=[
+            KnowledgeBaseRow(
+                name=source.name,
+                root=str(source.path()),
+                description=source.description,
+                scope=str(scope),
+                available=source.path().is_dir(),
+            )
+            for source, scope in KnowledgeSourceStore(workspace.resolve()).list()
+        ]
+    )
+
+
 @router.get("/search", response_model=KnowledgeSearchResponse)
 def search_knowledge(
-    q: Annotated[str, Query(description="Case-insensitive needle (path/title/tags/body).")],
+    q: Annotated[str, Query(description="What you want to know, in words.")],
     type: Annotated[str | None, Query(description="Exact Concept type filter.")] = None,
     tag: Annotated[str | None, Query(description="Only concepts carrying this tag.")] = None,
+    source: Annotated[
+        list[str] | None, Query(description="Restrict to these registered sources.")
+    ] = None,
+    limit: Annotated[int, Query(description="Maximum hits to return.", ge=1, le=200)] = 50,
     workspace: Workspace = Depends(get_workspace),
+    read_model: WorkspaceReadModel = Depends(get_read_model),
 ) -> KnowledgeSearchResponse:
-    """Search the workspace bundle — wraps the ONE ``Bundle.search`` verb.
+    """Search this workspace and every registered knowledge base, BM25F-ranked.
 
-    Pure exposure (vision-loop-08): all matching semantics (body reads, caps,
-    snippets, truncation) live in :meth:`molexp.workspace.Bundle.search`; this
-    route only projects its ``SearchResult`` onto the wire.
+    Pure exposure: all matching semantics (tokenization, ranking, body caps,
+    cross-source fusion) live in
+    :func:`molexp.knowledge.sources.search_sources`; this route only projects
+    its hits onto the wire. Each row carries the ``<source>:<path>`` ``ref`` the
+    other knowledge endpoints accept.
     """
-    result = _bundle(workspace).search(q, concept_type=type, tag=tag)
+    from molexp.knowledge.sources import search_sources
+
+    root = workspace.resolve()
+    bundle = _bundle(workspace)
+    snapshot = read_model.knowledge()
+    hits = search_sources(
+        q,
+        sources=source or None,
+        workspace_root=root,
+        limit=limit,
+        concept_type=type,
+        tag=tag,
+        # The workspace is searched against the read model's cached index and
+        # its already-tokenized BM25F corpus, so a keystroke re-ranks in memory
+        # instead of re-walking the tree. A GET still never writes
+        # ``index.json`` / ``INDEX.md``.
+        workspace_searcher=lambda: bundle.search(
+            q,
+            concept_type=type,
+            tag=tag,
+            limit=limit,
+            index=snapshot.index,
+            bodies=snapshot.bodies,
+            corpus=snapshot.corpus,
+        ),
+    )
     return KnowledgeSearchResponse(
         hits=[
             KnowledgeSearchRow(
-                path=hit.entry.path,
-                title=hit.entry.title or hit.entry.path,
-                type=hit.entry.type,
-                tags=list(hit.entry.tags),
-                snippet=hit.snippet,
+                path=sourced.hit.entry.path,
+                title=sourced.hit.entry.title or sourced.hit.entry.path,
+                type=sourced.hit.entry.type,
+                tags=list(sourced.hit.entry.tags),
+                snippet=sourced.hit.snippet,
+                score=sourced.hit.score,
+                source=sourced.source,
+                ref=sourced.ref,
             )
-            for hit in result.hits
+            for sourced in hits
         ],
-        truncated=result.truncated,
+        # Fusion returns at most ``limit`` rows; a full page means there may be
+        # more behind it. Never a silent cap.
+        truncated=len(hits) >= limit,
     )
 
 
@@ -440,26 +571,41 @@ def list_knowledge(
     status: Annotated[
         str | None, Query(description="Only notes with this lifecycle status.")
     ] = None,
+    request: Request = None,  # type: ignore[assignment]
+    response: Response = None,  # type: ignore[assignment]
     workspace: Workspace = Depends(get_workspace),
+    read_model: WorkspaceReadModel = Depends(get_read_model),
 ) -> KnowledgeListResponse:
     """List every Note + ReferenceConcept in the active workspace's bundle.
 
     Optional ``tag`` / ``status`` query params AND-narrow the note list (both
     read from the 05 :class:`~molexp.workspace.note_meta.NoteMeta` fields).
     """
+    from molexp.workspace.reference_meta import ReferenceMeta
+
     bundle = _bundle(workspace)
+    # The read model already walked the bundle once and kept every Concept's
+    # parsed ``meta.yaml``; the list endpoint reads no file at all when warm.
+    snapshot = read_model.knowledge()
+    cached = not_modified(request, response, weak_etag("knowledge", snapshot.version, tag, status))
+    if cached is not None:
+        return cached  # type: ignore[return-value]
+    part = _Partition(snapshot)
 
     notes: list[NoteSummary] = []
-    for note in bundle.notes():
-        if tag is not None and tag not in note.tags():
+    for note in part.notes:
+        raw_meta = part.metas.get(bundle.rel_path(note))
+        note_meta = _note_meta_of(note, raw_meta)
+        if tag is not None and tag not in note_meta.tags:
             continue
-        if status is not None and note.status() != status:
+        if status is not None and note_meta.status != status:
             continue
-        notes.append(_note_summary(bundle, note))
+        notes.append(_note_summary(bundle, note, meta=raw_meta))
 
     references: list[ReferenceSummary] = []
-    for ref in bundle.references():
-        meta = ref.read_ref_meta()
+    for ref in part.references:
+        raw_meta = part.metas.get(bundle.rel_path(ref))
+        meta = ReferenceMeta.model_validate(raw_meta) if raw_meta else ref.read_ref_meta()
         references.append(
             ReferenceSummary(
                 name=ref.name,
@@ -509,6 +655,7 @@ def create_doc(
     bundle = _bundle(workspace)
     parent = _resolve_note(bundle, body.parentPath) if body.parentPath else None
     note = bundle.create_note(body.name, parent=parent, body=body.body)
+    after_mutation(workspace, "knowledge", ref=bundle.rel_path(note))
     return _note_summary(bundle, note)
 
 
@@ -522,22 +669,25 @@ def embed_doc(
     path: str = Query(..., description="The source note Concept's bundle-relative path."),
     workspace: Workspace = Depends(get_workspace),
 ) -> EmbedResponse:
-    """Embed a live entity into a document — delegates to ``Bundle.embed``.
+    """Embed a live entity into a document — delegates to ``knowledge_mount.embed``.
 
     Resolves the source ``Note`` (404 on miss / non-note) and the target entity
     (``run`` / ``experiment`` / ``asset`` / ``reference``; 404 on miss), then
-    writes ONE typed provenance edge via ``Bundle.embed`` — the same verb the CLI
-    uses, so the edge-writing logic is never re-built at the HTTP boundary.
+    writes ONE typed provenance edge via ``knowledge_mount.embed`` — the same
+    verb the CLI uses, so the edge-writing logic is never re-built at the HTTP
+    boundary.
     """
+    from molexp.workspace import knowledge_mount
     from molexp.workspace.doc_embed import default_role_for
 
     bundle = _bundle(workspace)
     note = _resolve_note(bundle, path)
     target = _resolve_embed_target(bundle, workspace, body.target_kind, body.target)
-    # Resolve the effective role the same way ``Bundle.embed`` will, so the
-    # echoed response reports the edge that was actually written.
+    # Resolve the effective role the same way ``knowledge_mount.embed`` will, so
+    # the echoed response reports the edge that was actually written.
     role = body.role if body.role is not None else default_role_for(target)
-    bundle.embed(note, target, role=role)
+    knowledge_mount.embed(note, target, root=bundle.root, role=role)
+    after_mutation(workspace, "knowledge", ref=path)
     return EmbedResponse(srcPath=path, target=body.target, role=role)
 
 
@@ -555,6 +705,7 @@ def edit_doc(
     bundle = _bundle(workspace)
     note = _resolve_note(bundle, path)
     note.set_body(payload.body)
+    after_mutation(workspace, "knowledge", ref=path)
     return _note_detail(bundle, workspace, note, path)
 
 
@@ -575,6 +726,7 @@ def move_doc(
         bundle.rename_note(note, payload.name)
     if payload.parentPath is not None:
         bundle.move_note(note, _resolve_note(bundle, payload.parentPath))
+    after_mutation(workspace, "knowledge", ref=bundle.rel_path(note))
     return _note_summary(bundle, note)
 
 
@@ -600,6 +752,7 @@ def update_doc_meta(
         note.set_tags(payload.tags)
     if payload.status is not None:
         note.set_status(payload.status)
+    after_mutation(workspace, "knowledge", ref=path)
     return _note_summary(bundle, note)
 
 
@@ -616,6 +769,7 @@ def delete_doc(
     bundle = _bundle(workspace)
     note = _resolve_note(bundle, path)
     bundle.delete_note(note)
+    after_mutation(workspace, "knowledge", ref=path)
     return MessageResponse(message=f"note {path!r} deleted")
 
 

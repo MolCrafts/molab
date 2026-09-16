@@ -10,6 +10,7 @@ import type { DocMoveRequest } from '../models/DocMoveRequest';
 import type { EmbedRequest } from '../models/EmbedRequest';
 import type { EmbedResponse } from '../models/EmbedResponse';
 import type { EntityBacklinksResponse } from '../models/EntityBacklinksResponse';
+import type { KnowledgeBasesResponse } from '../models/KnowledgeBasesResponse';
 import type { KnowledgeListResponse } from '../models/KnowledgeListResponse';
 import type { KnowledgeSearchResponse } from '../models/KnowledgeSearchResponse';
 import type { MessageResponse } from '../models/MessageResponse';
@@ -160,12 +161,13 @@ export class KnowledgeService {
     }
     /**
      * Embed Doc
-     * Embed a live entity into a document — delegates to ``Bundle.embed``.
+     * Embed a live entity into a document — delegates to ``knowledge_mount.embed``.
      *
      * Resolves the source ``Note`` (404 on miss / non-note) and the target entity
      * (``run`` / ``experiment`` / ``asset`` / ``reference``; 404 on miss), then
-     * writes ONE typed provenance edge via ``Bundle.embed`` — the same verb the CLI
-     * uses, so the edge-writing logic is never re-built at the HTTP boundary.
+     * writes ONE typed provenance edge via ``knowledge_mount.embed`` — the same
+     * verb the CLI uses, so the edge-writing logic is never re-built at the HTTP
+     * boundary.
      * @param path The source note Concept's bundle-relative path.
      * @param requestBody
      * @returns EmbedResponse Successful Response
@@ -296,14 +298,18 @@ export class KnowledgeService {
     }
     /**
      * Search Knowledge
-     * Search the workspace bundle — wraps the ONE ``Bundle.search`` verb.
+     * Search this workspace and every registered knowledge base, BM25F-ranked.
      *
-     * Pure exposure (vision-loop-08): all matching semantics (body reads, caps,
-     * snippets, truncation) live in :meth:`molexp.workspace.Bundle.search`; this
-     * route only projects its ``SearchResult`` onto the wire.
-     * @param q Case-insensitive needle (path/title/tags/body).
+     * Pure exposure: all matching semantics (tokenization, ranking, body caps,
+     * cross-source fusion) live in
+     * :func:`molexp.knowledge.sources.search_sources`; this route only projects
+     * its hits onto the wire. Each row carries the ``<source>:<path>`` ``ref`` the
+     * other knowledge endpoints accept.
+     * @param q What you want to know, in words.
      * @param type Exact Concept type filter.
      * @param tag Only concepts carrying this tag.
+     * @param source Restrict to these registered sources.
+     * @param limit Maximum hits to return.
      * @returns KnowledgeSearchResponse Successful Response
      * @throws ApiError
      */
@@ -311,6 +317,8 @@ export class KnowledgeService {
         q: string,
         type?: (string | null),
         tag?: (string | null),
+        source?: (Array<string> | null),
+        limit: number = 50,
     ): CancelablePromise<KnowledgeSearchResponse> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -319,10 +327,28 @@ export class KnowledgeService {
                 'q': q,
                 'type': type,
                 'tag': tag,
+                'source': source,
+                'limit': limit,
             },
             errors: {
                 422: `Validation Error`,
             },
+        });
+    }
+    /**
+     * List Knowledge Sources
+     * List the OKF knowledge bases registered on this host.
+     *
+     * ``available`` reports whether the directory is readable right now — a wiki
+     * on an unmounted share stays registered and simply cannot be searched until
+     * it is back, which is information the UI should show rather than hide.
+     * @returns KnowledgeBasesResponse Successful Response
+     * @throws ApiError
+     */
+    public static listKnowledgeSourcesApiKnowledgeSourcesGet(): CancelablePromise<KnowledgeBasesResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/knowledge/sources',
         });
     }
 }

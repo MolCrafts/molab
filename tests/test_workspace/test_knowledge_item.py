@@ -14,8 +14,8 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from molexp.workspace import Workspace
-from molexp.workspace.folder import Folder, concept_from_dir
+from molexp.knowledge.concept import Concept, concept_from_dir
+from molexp.workspace import Workspace, knowledge_mount
 from molexp.workspace.knowledge_item import (
     KnowledgeItem,
     KnowledgeMeta,
@@ -40,7 +40,7 @@ class TestKnowledgeItem:
     def test_typed_head_round_trips(self, tmp_path: Path) -> None:
         """ac-002 — the typed head (kind/status/sources incl. span) round-trips."""
         ws = _ws(tmp_path)
-        item = ws.add_folder(KnowledgeItem(parent=ws, name="obs-1"))
+        item, _ = knowledge_mount.mount_knowledge_item(ws, "obs-1")
         assert isinstance(item, KnowledgeItem)
         item.write_knowledge_meta(
             KnowledgeMeta(
@@ -62,7 +62,7 @@ class TestKnowledgeItem:
         """ac-003 — a run-sourced item writes a typed derived_from edge, reachable from the run."""
         ws = _ws(tmp_path)
         run = ws.add_project("p").add_experiment("e").add_run(id="r")
-        item = ws.add_folder(KnowledgeItem(parent=ws, name="fa-1"))
+        item, _ = knowledge_mount.mount_knowledge_item(ws, "fa-1")
         item.write_knowledge_meta(
             KnowledgeMeta(
                 kind="FailureAnalysis",
@@ -70,7 +70,7 @@ class TestKnowledgeItem:
                 created_by="agent:monitor",
             )
         )
-        item.cite(run, role="derived_from")
+        item.cite(run.resolve(), role="derived_from")
 
         typed = item.typed_out_edges()
         assert len(typed) == 1
@@ -83,7 +83,7 @@ class TestKnowledgeItem:
     def test_content_hash_source_is_meta_only_no_edge(self, tmp_path: Path) -> None:
         """ac-004 — a content-hash source is authoritative in meta.yaml but has no out-edge."""
         ws = _ws(tmp_path)
-        item = ws.add_folder(KnowledgeItem(parent=ws, name="obs-2"))
+        item, _ = knowledge_mount.mount_knowledge_item(ws, "obs-2")
         item.write_knowledge_meta(
             KnowledgeMeta(
                 kind="Observation",
@@ -99,7 +99,7 @@ class TestKnowledgeItem:
     def test_concept_from_dir_reconstructs_via_registry(self, tmp_path: Path) -> None:
         """ac-005 — concept_from_dir rebuilds a KnowledgeItem via the shared registry."""
         ws = _ws(tmp_path)
-        item = ws.add_folder(KnowledgeItem(parent=ws, name="dec-1"))
+        item, _ = knowledge_mount.mount_knowledge_item(ws, "dec-1")
         item.write_knowledge_meta(
             KnowledgeMeta(
                 kind="Decision",
@@ -107,10 +107,10 @@ class TestKnowledgeItem:
                 created_by="user",
             )
         )
-        rebuilt = concept_from_dir(item.resolve(), ws)
+        rebuilt = concept_from_dir(item.path, fs=ws.fs)
         assert isinstance(rebuilt, KnowledgeItem)
         assert rebuilt.name == "dec-1"
-        # sanity: a base Folder is what an unknown type would fall back to
-        assert not isinstance(
-            Folder(name="x", kind="bundle.concept", root_path=str(tmp_path)), KnowledgeItem
-        )
+        # sanity: an unregistered type falls back to the base Concept
+        plain = tmp_path / "plain"
+        Concept(plain, type="bundle.concept").write_meta()
+        assert not isinstance(concept_from_dir(plain, fs=ws.fs), KnowledgeItem)

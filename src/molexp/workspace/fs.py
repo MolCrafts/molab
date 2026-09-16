@@ -6,6 +6,6 @@ shim keeps the ~50 existing ``from .fs import ...`` sites in the workspace layer
 working against the *same* objects.
 """
 
-from molexp.fs.base import FileSystem, PathArg, StatResult
+from molexp.fs.base import DirEntry, FileSystem, PathArg, StatResult, bulk
 
-__all__ = ["FileSystem", "PathArg", "StatResult"]
+__all__ = ["DirEntry", "FileSystem", "PathArg", "StatResult", "bulk"]

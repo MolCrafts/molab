@@ -3,11 +3,14 @@
 /* tslint:disable */
 /* eslint-disable */
 /**
- * One search hit projected from the bundle index entry.
+ * One ranked search hit projected from the bundle index entry.
  */
 export type KnowledgeSearchRow = {
     path: string;
+    ref?: string;
+    score?: number;
     snippet?: (string | null);
+    source?: string;
     tags?: Array<string>;
     title: string;
     type: string;

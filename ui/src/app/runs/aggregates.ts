@@ -527,3 +527,34 @@ export const computeActivityBuckets = (
 
   return Array.from(buckets.values());
 };
+
+/** Everything the runs dashboard derives from one filtered row set. */
+export interface RunsDashboard {
+  kpiStats: WorkspaceRunsStats;
+  avgWait: number | null;
+  kpiSparklines: KpiSparklines;
+  backendDistribution: BackendDistributionEntry[];
+  topFailing: FailingExperimentEntry[];
+  activity: ActivityBucket[];
+}
+
+/**
+ * Derive the whole dashboard in one pass over `runs`.
+ *
+ * The page used to run six independent `useMemo`s over the same array; folding
+ * them into one keeps the dashboard consistent (every panel reflects the same
+ * `now`) and collapses six dependency checks into one. With the query cache's
+ * structural sharing an unchanged payload yields the same `runs` reference, so
+ * a quiet poll recomputes nothing.
+ */
+export const computeDashboard = (
+  runs: WorkspaceRunRow[],
+  now: number = Date.now(),
+): RunsDashboard => ({
+  kpiStats: computeKpiStats(runs),
+  avgWait: computeAvgWaitSeconds(runs, 24, now),
+  kpiSparklines: computeKpiSparklines(runs, 24, 24, now),
+  backendDistribution: computeBackendDistribution(runs),
+  topFailing: computeTopFailingExperiments(runs),
+  activity: computeActivityBuckets(runs, 24, now),
+});

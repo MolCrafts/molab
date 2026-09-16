@@ -114,4 +114,22 @@ def reap_zombie_run(run: Run) -> bool:
             timestamp=naive_now,
         ),
     )
+    # Default-on, non-fatal workspace-timeline milestone: the reap is a status
+    # flip nobody else records, and the spine's ``seq`` doubles as the change
+    # cursor for pollers — a silent flip would never invalidate anything.
+    from .events import emit_workspace_event
+
+    emit_workspace_event(
+        run.experiment.project.workspace.resolve(),
+        "run.failed",
+        "run-reaper",
+        payload={
+            "reason": "reaped",
+            "status": RunStatus.FAILED.value,
+            "owner_host": host,
+            "owner_pid": state.owner_pid,
+            "message": reason,
+        },
+        refs=[run.id],
+    )
     return True

@@ -1,10 +1,9 @@
 import { Plus } from "lucide-react";
 import type { ReactNode } from "react";
-import { useCallback, useEffect, useState } from "react";
-import type { TargetResponse } from "@/api/generated/models/TargetResponse";
-import { TargetsService } from "@/api/generated/services/TargetsService";
+import { useCallback, useState } from "react";
 import { AddTargetDialog } from "@/app/settings/AddTargetDialog";
 import { workspaceApi } from "@/app/state/api";
+import { useTargetsQuery } from "@/app/state/queries";
 import {
   Dialog,
   DialogContent,
@@ -50,25 +49,17 @@ export function CreateExperimentDialog({
   const [description, setDescription] = useState("");
   const [parameterSpace, setParameterSpace] = useState("{}");
   const [defaultTarget, setDefaultTarget] = useState<string>(NO_TARGET_VALUE);
-  const [targets, setTargets] = useState<TargetResponse[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const open = controlledOpen ?? uncontrolledOpen;
   const setOpen = onOpenChange ?? setUncontrolledOpen;
+  // Shared cache entry with CreateRunDialog and the settings panel, so the
+  // target list is already warm the first time this dialog opens.
+  const { data: targets = [], refetch: refetchTargets } = useTargetsQuery({ enabled: open });
 
   const refreshTargets = useCallback(async () => {
-    try {
-      const res = await TargetsService.listTargetsEndpointApiTargetsGet();
-      setTargets(res.targets);
-    } catch {
-      setTargets([]);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (!open) return;
-    void refreshTargets();
-  }, [open, refreshTargets]);
+    await refetchTargets();
+  }, [refetchTargets]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();

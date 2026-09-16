@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from pathlib import Path as _LocalPath
 
+from molexp.fs.profile import REMOTE_SSH_PROFILE, FsProfile, detect_fs_profile
 from molexp.knowledge.types import concept_type
 from molexp.path import Path
 
@@ -139,6 +140,35 @@ class Workspace(Folder):
         self._data_assets: DataAssetLibrary | None = None
         self._cache_folder: CacheFolder | None = None
 
+        # The event spine is a *local* sqlite sidecar; a remote-backed root
+        # must never have one created under its path string on this host.
+        # Registration is an in-memory set insert — no I/O (the ctor law).
+        if not local:
+            from .events import mark_remote_root
+
+            mark_remote_root(self._root_path)
+
+    # ── Filesystem class ─────────────────────────────────────────────────
+
+    @property
+    def fs_profile(self) -> FsProfile:
+        """Policies implied by the filesystem this workspace lives on.
+
+        Selects the lock backend, SQLite journal mode and prefetch strategy —
+        a Lustre mount and a local SSD need different answers to all three.
+        Detected lazily on first use (never in ``__init__``, which does no
+        I/O) and cached for the life of the object.
+        """
+        cached = getattr(self, "_fs_profile_cache", None)
+        if cached is None:
+            cached = (
+                detect_fs_profile(self._root_path)
+                if isinstance(self._fs, LocalFileSystem)
+                else REMOTE_SSH_PROFILE
+            )
+            self._fs_profile_cache = cached
+        return cached
+
     # ── Folder hooks ─────────────────────────────────────────────────────
 
     def resolve(self) -> Path:
@@ -197,7 +227,7 @@ class Workspace(Folder):
     @property
     def assets(self) -> AssetsView:
         """Scope-filtered asset view (read-only queries)."""
-        return AssetsView(self.root, self.scope)
+        return AssetsView(self.root, self.scope, fs=self._fs)
 
     @property
     def data_assets(self) -> DataAssetLibrary:

@@ -44,9 +44,8 @@ def _note(bundle_root: Path, name: str, index_md: str, *, under: str | None = No
     """
     host = bundle_root if under is None else bundle_root / under
     host.mkdir(parents=True, exist_ok=True)
-    note = Note(name=name, root_path=str(host))
-    note.materialize()  # metadata.json — Folder.from_disk reads it
-    note.write_meta()  # meta.yaml — the OKF Concept marker
+    note = Note(host / name)
+    note.write_meta()  # meta.yaml — the OKF Concept marker (a Concept's authority)
     note.write_index(index_md)
     return note
 
@@ -93,17 +92,33 @@ class TestSearch:
         assert len(snippet) <= 160
         assert BODY_NEEDLE in snippet
 
-    def test_title_match_short_circuits_body_read(self, tmp_path: Path) -> None:
+    def test_title_match_is_case_insensitive_and_reports_the_title_field(
+        self, tmp_path: Path
+    ) -> None:
         root = _root(tmp_path)
         _note(root, "milestones", "# Solvation Milestones\n\nbody without the phrase\n")
 
-        # lower-case needle vs H1 case — matching is case-insensitive; the title
-        # match short-circuits, so "body" is NOT reported even though the H1 line
-        # is part of index.md.
+        # lower-case query vs H1 case — matching is case-insensitive.
         result = Bundle(root).search("solvation milestones")
 
         assert [hit.entry.path for hit in result.hits] == ["milestones"]
-        assert result.hits[0].matched_fields == ("title",)
+        assert "title" in result.hits[0].matched_fields
+        # "body" is also reported: ranking scores every field rather than
+        # short-circuiting on the first hit, and the H1 line is part of
+        # index.md. That is the honest answer — the terms really are in both.
+        assert "body" in result.hits[0].matched_fields
+
+    def test_title_match_outranks_a_body_only_match(self, tmp_path: Path) -> None:
+        # Field boosts must actually order results: a document whose *title* is
+        # the query beats one that merely mentions it in passing.
+        root = _root(tmp_path)
+        _note(root, "passing-mention", "# Unrelated\n\nwe also ran a solvation sweep here\n")
+        _note(root, "the-real-one", "# Solvation Sweep\n\nmethodology\n")
+
+        hits = Bundle(root).search("solvation sweep").hits
+
+        assert next(h.entry.path for h in hits) == "the-real-one"
+        assert hits[0].score > hits[1].score
 
     def test_body_needle_not_matched_when_include_body_false(self, tmp_path: Path) -> None:
         root = _root(tmp_path)

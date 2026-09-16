@@ -11,9 +11,13 @@ For importing ``DataAsset`` inputs, use ``{scope}.data_assets`` instead.
 from __future__ import annotations
 
 from os import PathLike
+from typing import TYPE_CHECKING
 
 from . import scan
 from .base import Asset, AssetScope
+
+if TYPE_CHECKING:
+    from ..fs import FileSystem
 
 # Alias avoids the static-checker confusion where the ``list`` method name
 # shadows the ``list`` builtin in return-type expressions.
@@ -21,24 +25,43 @@ type AssetList = list[Asset]
 
 
 class AssetsView:
-    """Read-only, scope-filtered view over the workspace's asset manifests."""
+    """Read-only, scope-filtered view over the workspace's asset manifests.
 
-    def __init__(self, workspace_root: str | PathLike[str], scope: AssetScope) -> None:
+    Every query is answered from this scope's own directory
+    (:func:`~molexp.workspace.assets.scan.scope_dir_for`) — one manifest for
+    an exact-scope query, that subtree for a recursive one — and goes through
+    the owning folder's *fs* so a remote-backed workspace scans over its
+    transport instead of assuming a local path.
+    """
+
+    def __init__(
+        self,
+        workspace_root: str | PathLike[str],
+        scope: AssetScope,
+        *,
+        fs: FileSystem | None = None,
+    ) -> None:
         self._root = workspace_root
         self._scope = scope
+        self._fs = fs
 
     def list(self) -> AssetList:
-        return scan.scan_assets(self._root, scope=self._scope)
+        return scan.scan_assets(self._root, scope=self._scope, fs=self._fs)
 
     # Alias that mirrors the old API surface.
     def list_assets(self) -> AssetList:
         return self.list()
 
     def get(self, asset_id: str) -> Asset | None:
-        asset = scan.get_asset(self._root, asset_id)
-        if asset is None or asset.scope != self._scope:
-            return None
-        return asset
+        """The asset with *asset_id* **in this scope**, else ``None``.
+
+        The scope is known, so this reads one manifest rather than walking
+        the workspace for an id.
+        """
+        for asset in scan.scan_assets(self._root, scope=self._scope, fs=self._fs):
+            if asset.asset_id == asset_id:
+                return asset
+        return None
 
     def query(
         self,
@@ -66,4 +89,5 @@ class AssetsView:
             tag=tag,
             limit=limit,
             recursive=recursive,
+            fs=self._fs,
         )

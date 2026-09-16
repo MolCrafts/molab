@@ -24,6 +24,8 @@ import yaml
 
 from molexp._typing import JSONValue
 from molexp.atomicio import file_lock
+from molexp.fs.memo import StatMemo
+from molexp.fs.profile import LOCAL_FAST_PROFILE, REMOTE_SSH_PROFILE, FsProfile, detect_fs_profile
 from molexp.knowledge.types import resolve_concept_type
 from molexp.path import Path
 
@@ -188,6 +190,17 @@ class Folder:
         return self._kind
 
     @property
+    def fs(self) -> FileSystem:
+        """The filesystem this Folder reads and writes through.
+
+        Public because mounting an OKF Concept under a Folder needs exactly two
+        things — this and :meth:`resolve` — and ``molexp.knowledge`` must be able
+        to get them without reaching into private state. Mirrors ``Bundle.fs``
+        and ``Concept.fs``.
+        """
+        return self._fs
+
+    @property
     def metadata(self) -> FolderMetadata:
         return self._metadata
 
@@ -203,18 +216,39 @@ class Folder:
     # short-circuit to the local filesystem on a remote-backed folder.
     # All I/O must still flow through ``self._fs``.
 
+    # ── Read memo (stat-validated; see molexp.fs.memo) ───────────────────
+    #
+    # Lazily created: ``_reconstruct`` builds Folders without ``__init__``, and
+    # ``__init__`` must stay I/O-free anyway. Bound to ``self._fs`` — reset
+    # whenever the filesystem is swapped (``add_folder`` adoption, ``move_to``).
+
+    def _memo(self) -> StatMemo:
+        memo = getattr(self, "_memo_store", None)
+        if memo is None:
+            memo = StatMemo(self._fs)
+            self._memo_store = memo
+        return memo
+
+    def _reset_memo(self) -> None:
+        self._memo_store = None
+        self._dir_known = False
+
     def path(self) -> Path:
         """Return the on-disk path; create only if missing (lazy, idempotent).
 
         Pure path math is :meth:`resolve`.  This twin only ``mkdir`` when
         the directory is not already present — so remote-backed folders that
         already exist never issue a write (remote ``mkdir`` can fail on
-        permission even when the path is already a directory).
+        permission even when the path is already a directory).  A successful
+        probe is remembered, so a writer pays the ``is_dir`` once per
+        instance, not once per write.  Read paths use :meth:`resolve`.
         """
         target = self.resolve()
-        if self._fs.is_dir(target):
+        if getattr(self, "_dir_known", False):
             return target
-        self._fs.mkdir(target, parents=True, exist_ok=True)
+        if not self._fs.is_dir(target):
+            self._fs.mkdir(target, parents=True, exist_ok=True)
+        self._dir_known = True
         return target
 
     def resolve(self) -> Path:
@@ -228,6 +262,27 @@ class Folder:
             return Path(self._fs.join(self._root_path, self._name))
         return Path(self._fs.join(self._parent.resolve(), self._name))
 
+    def _fs_profile(self) -> FsProfile:
+        """The filesystem policies for this folder's tree.
+
+        Delegates to the root's cached profile by walking the parent chain, so
+        one detection serves a whole workspace; a rooted folder with no parent
+        (a detached Concept, a test fixture) detects on its own path.
+        """
+        cached = getattr(self, "_fs_profile_cache", None)
+        if cached is not None:
+            return cached
+        if self._parent is not None:
+            profile = self._parent._fs_profile()
+        elif not isinstance(self._fs, LocalFileSystem):
+            profile = REMOTE_SSH_PROFILE
+        elif self._root_path is not None:
+            profile = detect_fs_profile(self._root_path)
+        else:
+            profile = LOCAL_FAST_PROFILE
+        self._fs_profile_cache = profile
+        return profile
+
     # ── Index filename ───────────────────────────────────────────────────
 
     @classmethod
@@ -238,7 +293,8 @@ class Folder:
 
     def read_json(self, name: str) -> dict[str, JSONValue]:
         _validate_file_name(name)
-        fpath = self._fs.join(self.path(), name)
+        # resolve(), not path(): a read must never probe/mkdir the directory.
+        fpath = self._fs.join(self.resolve(), name)
         with self._fs.open(fpath) as fh:
             raw: object = json.load(fh)
         if not isinstance(raw, dict):
@@ -249,6 +305,7 @@ class Folder:
         _validate_file_name(name)
         fpath = self._fs.join(self.path(), name)
         self._fs.atomic_write_json(fpath, data)
+        self._memo().invalidate(fpath)
         return fpath
 
     # ── OKF meta.yaml (unified concept marker; type → knowledge registry) ──
@@ -263,26 +320,37 @@ class Folder:
         data: dict[str, JSONValue] = {"type": self._kind, "id": self._name}
         fpath = self._fs.join(self.path(), META_YAML_FILENAME)
         self._fs.atomic_write_text(fpath, yaml.safe_dump(data, sort_keys=False))
+        self._memo().invalidate(fpath)
         return fpath
 
+    def _load_yaml_dict(self, fpath: str) -> dict[str, JSONValue]:
+        loaded = yaml.safe_load(self._fs.read_text(fpath))
+        return cast("dict[str, JSONValue]", loaded) if isinstance(loaded, dict) else {}
+
     def read_meta(self) -> dict[str, JSONValue]:
-        """Read the OKF ``meta.yaml`` marker, or ``{}`` if absent."""
+        """Read the OKF ``meta.yaml`` marker, or ``{}`` if absent.
+
+        Stat-validated memo: a repeat read is one ``stat`` (try-read, no
+        ``exists`` probe). Returns a shallow copy so callers can't mutate the
+        memoized value.
+        """
         fpath = self._fs.join(self.resolve(), META_YAML_FILENAME)
-        if not self._fs.exists(fpath):
-            return {}
-        return cast("dict[str, JSONValue]", yaml.safe_load(self._fs.read_text(fpath)) or {})
+        value = self._memo().get_or_none(fpath, self._load_yaml_dict)
+        return dict(value) if value is not None else {}
 
     # ── OKF narrative + markdown-link knowledge graph ─────────────────────
 
     def read_index(self) -> str:
-        """Return the OKF ``index.md`` narrative, or ``""`` if absent."""
+        """Return the OKF ``index.md`` narrative, or ``""`` if absent (memoized)."""
         fpath = self._fs.join(self.resolve(), INDEX_FILENAME)
-        return self._fs.read_text(fpath) if self._fs.exists(fpath) else ""
+        value = self._memo().get_or_none(fpath, self._fs.read_text)
+        return value if value is not None else ""
 
     def write_index(self, text: str) -> str:
         """Atomically write the OKF ``index.md`` narrative + markdown links."""
         fpath = self._fs.join(self.path(), INDEX_FILENAME)
         self._fs.atomic_write_text(fpath, text)
+        self._memo().invalidate(fpath)
         return fpath
 
     def links(self) -> LinkScan:
@@ -338,17 +406,34 @@ class Folder:
         self._fs.mkdir(d, parents=True, exist_ok=True)
         return d
 
-    def read_ops_json(self, name: str) -> dict[str, JSONValue] | None:
-        """Read ``_ops/<name>.json``, or ``None`` if absent."""
-        fpath = self._fs.join(self.resolve(), OPS_DIR, f"{name}.json")
-        if not self._fs.exists(fpath):
-            return None
+    def _ops_json_path(self, name: str) -> str:
+        return self._fs.join(self.resolve(), OPS_DIR, f"{name}.json")
+
+    def _load_json_dict(self, fpath: str) -> dict[str, JSONValue]:
         with self._fs.open(fpath) as fh:
             return cast("dict[str, JSONValue]", json.load(fh))
 
+    def read_ops_json(self, name: str, *, fresh: bool = False) -> dict[str, JSONValue] | None:
+        """Read ``_ops/<name>.json``, or ``None`` if absent.
+
+        Stat-validated memo (one ``stat`` on a repeat read); ``fresh=True``
+        bypasses it — the read-modify-write path uses that under its lock so a
+        writer never layers onto a memoized value. Returns a shallow copy.
+        """
+        fpath = self._ops_json_path(name)
+        if fresh:
+            try:
+                return self._load_json_dict(fpath)
+            except (FileNotFoundError, NotADirectoryError):
+                return None
+        value = self._memo().get_or_none(fpath, self._load_json_dict)
+        return dict(value) if value is not None else None
+
     def write_ops_json(self, name: str, data: object) -> None:
         """Atomically write ``_ops/<name>.json`` (operational state)."""
-        self._fs.atomic_write_json(self._fs.join(self.ops_dir(), f"{name}.json"), data)
+        fpath = self._fs.join(self.ops_dir(), f"{name}.json")
+        self._fs.atomic_write_json(fpath, data)
+        self._memo().invalidate(fpath)
 
     def update_ops_json(
         self, name: str, fn: Callable[[dict[str, JSONValue]], dict[str, JSONValue]]
@@ -357,12 +442,19 @@ class Folder:
 
         The lock is a local file lock (``molexp.atomicio.file_lock``); concurrent
         same-host RMW is safe. (Remote-backend locking is a future refinement.)
+        The read is ``fresh`` (memo bypassed) and the memo is dropped after
+        the write, so no reader on this instance sees a pre-write value.
         """
         ops = self.ops_dir()
-        with file_lock(_StdPath(self._fs.join(ops, f"{name}.json.lock"))):
-            current = self.read_ops_json(name) or {}
+        fpath = self._fs.join(ops, f"{name}.json")
+        with file_lock(
+            _StdPath(self._fs.join(ops, f"{name}.json.lock")),
+            backend=self._fs_profile().locks,
+        ):
+            current = self.read_ops_json(name, fresh=True) or {}
             updated = fn(current)
-            self._fs.atomic_write_json(self._fs.join(ops, f"{name}.json"), updated)
+            self._fs.atomic_write_json(fpath, updated)
+            self._memo().invalidate(fpath)
         return updated
 
     # ── Lifecycle ────────────────────────────────────────────────────────
@@ -379,21 +471,43 @@ class Folder:
 
     # ── Children ─────────────────────────────────────────────────────────
 
+    def _try_load_folder_meta(self, entry_path: str) -> FolderMetadata | None:
+        """``metadata.json`` of *entry_path* as a model, or ``None`` when it is not a Folder.
+
+        Try-read: one ``open`` replaces the ``is_dir`` + ``exists`` probes — a
+        loose file or a dir without a record raises and is skipped.
+        """
+        try:
+            return _load_metadata(
+                FolderMetadata, self._fs.join(entry_path, _METADATA_FILENAME), fs=self._fs
+            )
+        except (FileNotFoundError, NotADirectoryError, OSError, ValueError):
+            return None
+
+    def _child_dir_names(self, directory: str | Path) -> list[str]:
+        """Sorted names of *directory*'s subdirectories — one ``scandir``.
+
+        Only directories can be Folders, and the listing already says which
+        entries are. Skipping the rest here is what keeps a sibling file
+        (``workspace.json``, ``meta.yaml``, a stray ``.DS_Store``) from costing
+        a doomed ``metadata.json`` open apiece.
+        """
+        return sorted(e.name for e in self._fs.scandir(directory, with_stat=False) if e.is_dir)
+
     def children(self, kind: str | None = None) -> list[Folder]:
         self_path = self.resolve()
-        if not self._fs.is_dir(self_path):
+        try:
+            names = self._child_dir_names(self_path)
+        except (FileNotFoundError, NotADirectoryError, OSError):
             return []
         result: list[Folder] = []
-        for entry_name in sorted(self._fs.listdir(self_path)):
+        for entry_name in names:
             if entry_name in _FORBIDDEN_FILE_NAMES:
                 continue
             entry_path = self._fs.join(self_path, entry_name)
-            if not self._fs.is_dir(entry_path):
+            child_meta = self._try_load_folder_meta(entry_path)
+            if child_meta is None:
                 continue
-            meta_file = self._fs.join(entry_path, _METADATA_FILENAME)
-            if not self._fs.exists(meta_file):
-                continue
-            child_meta = _load_metadata(FolderMetadata, meta_file, fs=self._fs)
             if kind is not None and child_meta.kind != kind:
                 continue
             child = _reconstruct(
@@ -489,23 +603,29 @@ class Folder:
         """
         fs = parent._fs
         meta_file = fs.join(child_dir, _METADATA_FILENAME)
-        if fs.exists(meta_file):
+        # Try-read (no ``exists`` probes): the entity record first, then the
+        # OKF marker; each miss is one failed ``open`` instead of a probe + open.
+        try:
             child_meta = _load_metadata(FolderMetadata, meta_file, fs=fs)
+        except (FileNotFoundError, NotADirectoryError):
+            pass
+        else:
             return _reconstruct(cls, cls.base_from_disk_attrs(parent, child_meta))
         marker_file = fs.join(child_dir, META_YAML_FILENAME)
-        if fs.exists(marker_file):
+        try:
             marker = yaml.safe_load(fs.read_text(marker_file))
-            kind = str(marker.get("type", "")) if isinstance(marker, dict) else ""
-            slug = PurePosixPath(str(child_dir)).name
-            child_meta = FolderMetadata(
-                id=slug,
-                name=slug,
-                kind=kind or "concept",
-                created_at=datetime.now(UTC),
-                updated_at=datetime.now(UTC),
-            )
-            return _reconstruct(cls, cls.base_from_disk_attrs(parent, child_meta))
-        raise FileNotFoundError(meta_file)
+        except (FileNotFoundError, NotADirectoryError):
+            raise FileNotFoundError(meta_file) from None
+        kind = str(marker.get("type", "")) if isinstance(marker, dict) else ""
+        slug = PurePosixPath(str(child_dir)).name
+        child_meta = FolderMetadata(
+            id=slug,
+            name=slug,
+            kind=kind or "concept",
+            created_at=datetime.now(UTC),
+            updated_at=datetime.now(UTC),
+        )
+        return _reconstruct(cls, cls.base_from_disk_attrs(parent, child_meta))
 
     # ── Generic five-verb CRUD ───────────────────────────────────────────
 
@@ -550,6 +670,7 @@ class Folder:
         child._parent = self
         child._root_path = None
         child._fs = self._fs
+        child._reset_memo()  # the memo is bound to the fs the child was built with
         child.materialize()
         child.write_meta()  # OKF marker, additive
         self._children_cache[slug] = child
@@ -582,22 +703,30 @@ class Folder:
                 return True
         return False
 
+    def _load_index_rows(self, fpath: str) -> dict[str, JSONValue]:
+        """Children-index loader for the memo: invalid JSON / non-object → ``{}``."""
+        try:
+            with self._fs.open(fpath) as fh:
+                raw: object = json.load(fh)
+        except json.JSONDecodeError:
+            return {}
+        return cast("dict[str, JSONValue]", raw) if isinstance(raw, dict) else {}
+
     def list_folders(self, *, cls: type[F] | None = None) -> list[F]:
         self_path = self.resolve()
-        if not self._fs.is_dir(self_path):
-            return []
         out: list[F] = []
         if cls is None:
-            for entry_name in sorted(self._fs.listdir(self_path)):
+            try:
+                names = self._child_dir_names(self_path)
+            except (FileNotFoundError, NotADirectoryError, OSError):
+                return []
+            for entry_name in names:
                 if entry_name in _FORBIDDEN_FILE_NAMES:
                     continue
                 entry_path = self._fs.join(self_path, entry_name)
-                if not self._fs.is_dir(entry_path):
+                child_meta = self._try_load_folder_meta(entry_path)
+                if child_meta is None:
                     continue
-                meta_file = self._fs.join(entry_path, _METADATA_FILENAME)
-                if not self._fs.exists(meta_file):
-                    continue
-                child_meta = _load_metadata(FolderMetadata, meta_file, fs=self._fs)
                 child = _reconstruct(
                     Folder,
                     {
@@ -612,29 +741,25 @@ class Folder:
                 )
                 out.append(cast(F, child))
             return out
+        # The children index is read through the stat-validated memo (one
+        # ``stat`` when unchanged); a missing index triggers one rebuild.
         index_path = self._fs.join(self_path, cls._index_filename())
-        if not self._fs.exists(index_path):
+        raw = self._memo().get_or_none(index_path, self._load_index_rows)
+        if raw is None:
             self.sync_folders(cls=cls)
-            if not self._fs.exists(index_path):
+            raw = self._memo().get_or_none(index_path, self._load_index_rows)
+            if raw is None:
                 return []
-        try:
-            with self._fs.open(index_path) as fh:
-                raw: object = json.load(fh)
-        except (OSError, json.JSONDecodeError):
-            return []
-        if not isinstance(raw, dict):
-            return []
         for slug in raw:
             cached = self._children_cache.get(str(slug))
             if isinstance(cached, cls):
                 out.append(cached)
                 continue
             child_dir = cls.child_dir(self, str(slug))
-            if not self._fs.is_dir(child_dir):
-                continue
+            # Try-load: ``from_disk`` raising replaces the ``is_dir`` pre-probe.
             try:
                 loaded = cls.from_disk(child_dir, self)
-            except (FileNotFoundError, OSError):
+            except (FileNotFoundError, NotADirectoryError, OSError, ValueError):
                 continue
             if isinstance(loaded, cls):
                 self._children_cache[loaded._name] = loaded
@@ -644,24 +769,26 @@ class Folder:
     def sync_folders(self, *, cls: type[Folder]) -> None:
         container = cls._container_dir(self)
         index_path = self._fs.join(self.resolve(), cls._index_filename())
-        if not self._fs.is_dir(container):
+        try:
+            names = self._child_dir_names(container)
+        except (FileNotFoundError, NotADirectoryError, OSError):
             if self._fs.exists(index_path):
                 self._fs.remove(index_path)
+                self._memo().invalidate(index_path)
             return
         rows: dict[str, dict[str, JSONValue]] = {}
-        for entry_name in sorted(self._fs.listdir(container)):
+        for entry_name in names:
             if entry_name in _FORBIDDEN_FILE_NAMES:
                 continue
             entry_path = self._fs.join(container, entry_name)
-            if not self._fs.is_dir(entry_path):
-                continue
             try:
                 child = cls.from_disk(entry_path, self)
-            except (FileNotFoundError, OSError):
+            except (FileNotFoundError, NotADirectoryError, OSError, ValueError):
                 continue
             if isinstance(child, cls):
                 rows[child._name] = child._to_index_row()
         self._fs.atomic_write_json(index_path, rows)
+        self._memo().invalidate(index_path)
 
     def remove_folder(self, name: str, *, cls: type[Folder]) -> None:
         for candidate in (name, slugify(name)):
@@ -689,35 +816,25 @@ class Folder:
     def _upsert_index_row(self, child: Folder) -> None:
         fpath = self._fs.join(self.resolve(), type(child)._index_filename())
         rows: dict[str, dict[str, JSONValue]] = {}
-        if self._fs.exists(fpath):
-            try:
-                with self._fs.open(fpath) as fh:
-                    raw: object = json.load(fh)
-            except (OSError, json.JSONDecodeError):
-                raw = None
-            if isinstance(raw, dict):
-                for k, v in raw.items():
-                    if isinstance(v, dict):
-                        rows[str(k)] = cast("dict[str, JSONValue]", v)
+        # Memo-read (one stat when unchanged) instead of exists + open.
+        raw = self._memo().get_or_none(fpath, self._load_index_rows)
+        if raw:
+            for k, v in raw.items():
+                if isinstance(v, dict):
+                    rows[str(k)] = v
         rows[child._name] = child._to_index_row()
         self._fs.atomic_write_json(fpath, rows)
+        self._memo().invalidate(fpath)
 
     def _remove_index_row(self, cls: type[Folder], slug: str) -> None:
         fpath = self._fs.join(self.resolve(), cls._index_filename())
-        if not self._fs.exists(fpath):
+        raw = self._memo().get_or_none(fpath, self._load_index_rows)
+        if not raw or slug not in raw:
             return
-        try:
-            with self._fs.open(fpath) as fh:
-                raw: object = json.load(fh)
-        except (OSError, json.JSONDecodeError):
-            return
-        if not isinstance(raw, dict):
-            return
-        rows = cast("dict[str, JSONValue]", raw)
-        if slug not in rows:
-            return
+        rows = dict(raw)  # never mutate the memoized value
         rows.pop(slug)
         self._fs.atomic_write_json(fpath, rows)
+        self._memo().invalidate(fpath)
 
     def _to_index_row(self) -> dict[str, JSONValue]:
         return cast("dict[str, JSONValue]", self._metadata.model_dump(mode="json"))
@@ -728,6 +845,7 @@ class Folder:
         target = self.resolve()
         if self._fs.exists(target):
             self._fs.remove(target, recursive=True)
+        self._reset_memo()
         if self._parent is not None:
             self._parent._children_cache.pop(self._name, None)
 
@@ -766,6 +884,7 @@ class Folder:
         self._parent = new_parent
         self._root_path = None
         self._fs = new_parent._fs
+        self._reset_memo()  # paths and fs changed under the memo
         self._name = target_id
         self._metadata = self._metadata.model_copy(
             update={
@@ -836,10 +955,12 @@ def concept_from_dir(child_dir: PathArg, parent: Folder) -> Folder:
     fs = parent._fs
     meta_path = fs.join(child_dir, META_YAML_FILENAME)
     type_str = ""
-    if fs.exists(meta_path):
-        meta = yaml.safe_load(fs.read_text(meta_path))
-        if isinstance(meta, dict):
-            type_str = str(meta.get("type", ""))
+    try:
+        meta = yaml.safe_load(fs.read_text(meta_path))  # try-read, no exists probe
+    except (FileNotFoundError, NotADirectoryError):
+        meta = None
+    if isinstance(meta, dict):
+        type_str = str(meta.get("type", ""))
     cls = resolve_concept_type(type_str, Folder, base=Folder)
     return cls.from_disk(child_dir, parent)
 

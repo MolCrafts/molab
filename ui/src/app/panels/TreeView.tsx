@@ -1,7 +1,9 @@
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { ChevronRight } from "lucide-react";
 import type { ComponentType, JSX, ReactNode } from "react";
-import { Fragment, useEffect, useState } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { EMPTY_COPY, EmptyState } from "@/app/components/entity";
+import { type FlatTreeRow, flattenVisible, indexOfNode } from "@/app/panels/treeFlatten";
 import {
   ContextMenu,
   ContextMenuContent,
@@ -48,9 +50,46 @@ interface TreeViewProps {
   emptyIcon?: ReactNode;
   /** Fired when a node is expanded (not collapsed). Used for lazy WorkspaceFs.listdir. */
   onExpand?: (nodeId: string) => void;
+  /**
+   * Fired after a short sustained hover/focus on a row, so the panel can warm
+   * that node's query before the click. Cancelled on leave/blur, so a pointer
+   * sweeping down the tree issues nothing.
+   */
+  onHoverIntent?: (nodeId: string) => void;
 }
 
+/** Delay before a hover counts as intent (matches `usePrefetchOnIntent`). */
+const HOVER_INTENT_MS = 120;
+
 const INDENT = 14;
+
+/** Row height (`h-control-compact`, 28px) — the virtualizer's size estimate. */
+const ROW_PX = 28;
+/** The childless-parent placeholder is a text line, not a control row. */
+const EMPTY_ROW_PX = 20;
+/**
+ * Below this many visible rows the tree renders every row.
+ *
+ * Windowing costs a scroll container, absolute positioning and a measure pass;
+ * it also drops off-screen rows out of the DOM, which breaks Tab traversal and
+ * browser find-in-page. Small trees (most views) are better off without it, so
+ * the cost is paid only where it buys something — an experiment holding
+ * thousands of runs, or a large knowledge base.
+ */
+const VIRTUALIZE_THRESHOLD = 100;
+
+/** Nearest scrollable ancestor — the element the virtualizer must observe. */
+const findScrollParent = (start: HTMLElement | null): HTMLElement | null => {
+  let current = start?.parentElement ?? null;
+  while (current) {
+    const overflowY = getComputedStyle(current).overflowY;
+    if (overflowY === "auto" || overflowY === "scroll" || overflowY === "overlay") {
+      return current;
+    }
+    current = current.parentElement;
+  }
+  return null;
+};
 
 interface RowProps {
   node: TreeNode;
@@ -58,8 +97,9 @@ interface RowProps {
   /** True if any sibling at this level has children. Drives the chevron-column reservation. */
   reserveChevron: boolean;
   activeId?: string;
-  expanded: Set<string>;
+  isExpanded: boolean;
   onToggle: (id: string) => void;
+  onHoverIntent?: (id: string) => void;
 }
 
 const TreeRow = ({
@@ -67,15 +107,37 @@ const TreeRow = ({
   depth,
   reserveChevron,
   activeId,
-  expanded,
+  isExpanded,
   onToggle,
+  onHoverIntent,
 }: RowProps): JSX.Element => {
+  const intentTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const cancelIntent = (): void => {
+    if (intentTimer.current !== null) {
+      clearTimeout(intentTimer.current);
+      intentTimer.current = null;
+    }
+  };
+  const armIntent = (): void => {
+    if (!onHoverIntent || intentTimer.current !== null) return;
+    intentTimer.current = setTimeout(() => {
+      intentTimer.current = null;
+      onHoverIntent(node.id);
+    }, HOVER_INTENT_MS);
+  };
+  // Unmount-only cleanup: reads the ref directly so it needs no dependency
+  // (depending on `cancelIntent` would re-run — and cancel — every render).
+  useEffect(
+    () => () => {
+      if (intentTimer.current !== null) clearTimeout(intentTimer.current);
+    },
+    [],
+  );
+
   const hasChildren = node.children !== undefined;
-  const isExpanded = expanded.has(node.id);
   const isActive = activeId === node.id;
   const Icon = node.icon;
   const actions = node.actions ?? [];
-  const childrenReserveChevron = node.children?.some((c) => c.children !== undefined) ?? false;
 
   const rowButton = (
     <WorkbenchAction
@@ -96,6 +158,10 @@ const TreeRow = ({
       onContextMenu={() => {
         node.onSelect?.();
       }}
+      onMouseEnter={armIntent}
+      onFocus={armIntent}
+      onMouseLeave={cancelIntent}
+      onBlur={cancelIntent}
       title={node.hoverTitle ?? node.label}
     >
       {Icon && (
@@ -146,54 +212,43 @@ const TreeRow = ({
       rowButton
     );
 
+  // One flat row: the subtree is spliced in by `flattenVisible`, not nested
+  // here, so every visible line is a sibling the virtualizer can address.
   return (
-    <div>
-      <div className="flex items-center gap-1" style={{ paddingLeft: `${depth * INDENT}px` }}>
-        {hasChildren ? (
-          <WorkbenchIconAction
-            label={isExpanded ? "Collapse" : "Expand"}
-            className="size-6 flex-none text-muted-foreground"
-            onClick={(event) => {
-              event.stopPropagation();
-              onToggle(node.id);
-            }}
-          >
-            <ChevronRight
-              className={`h-3.5 w-3.5 transition-transform ${isExpanded ? "rotate-90" : ""}`}
-            />
-          </WorkbenchIconAction>
-        ) : reserveChevron ? (
-          <span className="h-6 w-6 flex-none" />
-        ) : null}
-        {wrappedRow}
-      </div>
-      {node.children !== undefined && isExpanded && (
-        <div>
-          {node.children.length === 0 && node.emptyChildLabel ? (
-            <p
-              className="text-label text-muted-foreground"
-              style={{ paddingLeft: `${(depth + 1) * INDENT + 8}px` }}
-            >
-              {node.emptyChildLabel}
-            </p>
-          ) : (
-            node.children.map((child) => (
-              <TreeRow
-                key={child.id}
-                node={child}
-                depth={depth + 1}
-                reserveChevron={childrenReserveChevron}
-                activeId={activeId}
-                expanded={expanded}
-                onToggle={onToggle}
-              />
-            ))
-          )}
-        </div>
-      )}
+    <div
+      className="flex h-control-compact items-center gap-1"
+      style={{ paddingLeft: `${depth * INDENT}px` }}
+    >
+      {hasChildren ? (
+        <WorkbenchIconAction
+          label={isExpanded ? "Collapse" : "Expand"}
+          className="size-6 flex-none text-muted-foreground"
+          onClick={(event) => {
+            event.stopPropagation();
+            onToggle(node.id);
+          }}
+        >
+          <ChevronRight
+            className={`h-3.5 w-3.5 transition-transform ${isExpanded ? "rotate-90" : ""}`}
+          />
+        </WorkbenchIconAction>
+      ) : reserveChevron ? (
+        <span className="h-6 w-6 flex-none" />
+      ) : null}
+      {wrappedRow}
     </div>
   );
 };
+
+/** The "expanded, but nothing inside" placeholder line. */
+const TreeEmptyRow = ({ row }: { row: FlatTreeRow }): JSX.Element => (
+  <p
+    className="text-label text-muted-foreground"
+    style={{ paddingLeft: `${row.depth * INDENT + 8}px` }}
+  >
+    {row.node.emptyChildLabel}
+  </p>
+);
 
 export const TreeView = ({
   nodes,
@@ -203,6 +258,7 @@ export const TreeView = ({
   emptyDescription,
   emptyIcon,
   onExpand,
+  onHoverIntent,
 }: TreeViewProps): JSX.Element => {
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(expandPath ?? []));
 
@@ -228,6 +284,40 @@ export const TreeView = ({
     });
   };
 
+  // The render list: every visible line, in order. Recomputed only when the
+  // forest or the expansion set changes, so scrolling never re-walks the tree.
+  const rows = useMemo(() => flattenVisible(nodes, expanded), [nodes, expanded]);
+
+  // The virtualizer needs the scrolling ancestor, which this component does not
+  // own — callers drop the tree inside their own ScrollArea.
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const [scrollEl, setScrollEl] = useState<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    setScrollEl(findScrollParent(containerRef.current));
+  }, []);
+
+  const virtualizer = useVirtualizer({
+    count: rows.length,
+    getScrollElement: () => scrollEl,
+    estimateSize: (index) => (rows[index]?.kind === "empty" ? EMPTY_ROW_PX : ROW_PX),
+    getItemKey: (index) => rows[index]?.key ?? index,
+    overscan: 12,
+  });
+
+  // Windowing only pays off on a long list, and only once we know what scrolls.
+  const virtualize = scrollEl !== null && rows.length >= VIRTUALIZE_THRESHOLD;
+
+  // Keep the selected row reachable when it is scrolled out of the window.
+  // Guarded by the id so an unrelated refetch never yanks the user's scroll.
+  const scrolledFor = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (!virtualize || activeId === undefined || scrolledFor.current === activeId) return;
+    const index = indexOfNode(rows, activeId);
+    if (index < 0) return;
+    scrolledFor.current = activeId;
+    virtualizer.scrollToIndex(index, { align: "auto" });
+  }, [activeId, rows, virtualize, virtualizer]);
+
   if (nodes.length === 0) {
     return (
       <EmptyState
@@ -239,21 +329,44 @@ export const TreeView = ({
     );
   }
 
-  const reserveChevron = nodes.some((n) => n.children !== undefined);
+  const renderRow = (row: FlatTreeRow): JSX.Element =>
+    row.kind === "empty" ? (
+      <TreeEmptyRow row={row} />
+    ) : (
+      <TreeRow
+        node={row.node}
+        depth={row.depth}
+        reserveChevron={row.reserveChevron}
+        activeId={activeId}
+        isExpanded={expanded.has(row.node.id)}
+        onToggle={toggle}
+        onHoverIntent={onHoverIntent}
+      />
+    );
 
   return (
-    <div className="space-y-1">
-      {nodes.map((node) => (
-        <TreeRow
-          key={node.id}
-          node={node}
-          depth={0}
-          reserveChevron={reserveChevron}
-          activeId={activeId}
-          expanded={expanded}
-          onToggle={toggle}
-        />
-      ))}
+    <div ref={containerRef}>
+      {virtualize ? (
+        <div className="relative w-full" style={{ height: `${virtualizer.getTotalSize()}px` }}>
+          {virtualizer.getVirtualItems().map((item) => {
+            const row = rows[item.index];
+            if (!row) return null;
+            return (
+              <div
+                key={row.key}
+                data-index={item.index}
+                ref={virtualizer.measureElement}
+                className="absolute top-0 left-0 w-full"
+                style={{ transform: `translateY(${item.start}px)` }}
+              >
+                {renderRow(row)}
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        rows.map((row) => <Fragment key={row.key}>{renderRow(row)}</Fragment>)
+      )}
     </div>
   );
 };

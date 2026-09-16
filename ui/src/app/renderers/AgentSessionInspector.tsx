@@ -22,6 +22,7 @@ import { ArtifactBody } from "@/app/renderers/agent/artifacts";
 import { isLegacySession, legacyBadgeMeta } from "@/app/renderers/agent_session/inspectorHelpers";
 import { collectArtifacts } from "@/app/renderers/agentEvents";
 import { type ApiAgentSystemPrompt, agentApi, planApi } from "@/app/state/api";
+import { useVisibleInterval } from "@/app/state/queries";
 import type { ApiAgentSession, RendererProps } from "@/app/types";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { WorkbenchTag } from "@/components/workbench";
@@ -136,11 +137,12 @@ export const AgentSessionInspector = (props: RendererProps): JSX.Element => {
 
   const isRunning = session?.status === "running";
   const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!isRunning || !session?.stats?.startedAt) return;
-    const id = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(id);
-  }, [isRunning, session?.stats?.startedAt]);
+  // Render-only clock for the live duration — paused while the tab is hidden
+  // so a backgrounded task stops re-rendering once a second.
+  useVisibleInterval(
+    () => setNow(Date.now()),
+    isRunning && session?.stats?.startedAt ? 1000 : null,
+  );
 
   const liveDuration = useMemo(() => {
     const stats = session?.stats;

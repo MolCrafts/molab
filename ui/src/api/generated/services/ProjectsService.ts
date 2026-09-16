@@ -84,7 +84,10 @@ export class ProjectsService {
     }
     /**
      * List Project Assets
-     * List every asset (any kind) in the project scope via the catalog.
+     * List every asset (any kind) in the project scope.
+     *
+     * Served from the read-model snapshot's per-scope index, so the project page
+     * no longer re-reads a manifest on every visit.
      * @param projectId
      * @param limit
      * @returns AssetResponse Successful Response
@@ -271,7 +274,10 @@ export class ProjectsService {
     }
     /**
      * List Project Assets
-     * List every asset (any kind) in the project scope via the catalog.
+     * List every asset (any kind) in the project scope.
+     *
+     * Served from the read-model snapshot's per-scope index, so the project page
+     * no longer re-reads a manifest on every visit.
      * @param projectId
      * @param ws
      * @param limit

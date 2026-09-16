@@ -22,7 +22,7 @@ from molexp.harness.stages.assemble_knowledge_context import (
     MAX_ITEMS,
     AssembleKnowledgeContext,
 )
-from molexp.workspace import Workspace
+from molexp.workspace import Workspace, knowledge_mount
 from molexp.workspace.knowledge_item import (
     KnowledgeItem,
     KnowledgeKind,
@@ -58,8 +58,7 @@ def _item(
     status: Literal["active", "stale", "superseded", "conflicting"] = "active",
 ) -> KnowledgeItem:
     run = exp.list_runs()[0]
-    item = KnowledgeItem(name=name)
-    exp.add_folder(item)
+    item, _ = knowledge_mount.mount_knowledge_item(exp, name)
     meta = KnowledgeMeta(
         kind=kind,
         sources=[SourceRef(kind="run", ref=run.id)],
@@ -90,14 +89,11 @@ class TestAssembleKnowledgeContext:
     def test_active_items_kind_ordered_stale_excluded_notes_title_only(
         self, seeded, tmp_path: Path
     ) -> None:
-        from molexp.workspace import Note
-
         ws, exp = seeded
         _item(exp, "finding-ok", "Finding", "established: D = 0.5")
         _item(exp, "failure-grid", "FailureAnalysis", "grid too coarse near r_min")
         _item(exp, "stale-one", "Finding", "OUTDATED-BODY-NEVER-SHOWN", status="stale")
-        note = Note(name="lab-note")
-        ws.add_folder(note)
+        note = knowledge_mount.mount_note(ws, "lab-note")
         note.write_index("# Lab note title\n\nfree-form text")
 
         digest = _digest(_ctx(Path(ws.resolve()), tmp_path / "run"))

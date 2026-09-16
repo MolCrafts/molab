@@ -11,8 +11,9 @@ to ``str`` internally before doing string operations or shelling out.
 
 from __future__ import annotations
 
+import contextlib
 import os
-from collections.abc import Iterable
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass
 from typing import IO, Any, Protocol, runtime_checkable
 
@@ -32,6 +33,29 @@ class StatResult:
     mtime: float
     is_dir: bool
     is_file: bool
+
+
+@dataclass(frozen=True, slots=True)
+class DirEntry:
+    """One child of a directory, as returned by :meth:`FileSystem.scandir`.
+
+    The bulk counterpart to ``listdir`` + per-entry ``is_dir`` / ``stat``.
+    One local ``os.scandir`` pass — or one remote round-trip — answers what
+    the per-path Protocol needs N+1 calls for.
+
+    ``is_dir`` / ``is_file`` follow symlinks (``os.DirEntry`` semantics), so a
+    symlink to a directory reports ``is_dir=True, is_symlink=True``; a broken
+    or looping link reports both False with ``is_symlink=True``. ``size`` and
+    ``mtime`` describe the *target* and are ``0`` / ``0.0`` when the listing
+    was taken with ``with_stat=False``.
+    """
+
+    name: str
+    is_dir: bool
+    is_file: bool
+    is_symlink: bool = False
+    size: int = 0
+    mtime: float = 0.0
 
 
 @runtime_checkable
@@ -62,6 +86,40 @@ class FileSystem(Protocol):
     def listdir(self, path: PathArg) -> list[str]: ...
     def glob(self, path: PathArg, pattern: str) -> Iterable[str]: ...
     def rglob(self, path: PathArg, pattern: str) -> Iterable[str]: ...
+
+    def scandir(self, path: PathArg, *, with_stat: bool = True) -> list[DirEntry]:
+        """List *path*'s children with their type (and size/mtime) in one pass.
+
+        A ``list``, not an iterator: the remote implementation has to fetch the
+        whole listing anyway, and the cached layer pins it. Order is
+        unspecified — callers that need determinism sort by ``name``. ``.`` and
+        ``..`` are never included.
+
+        ``with_stat=False`` lets an implementation skip per-entry metadata
+        (``size``/``mtime`` come back zeroed) while still reporting ``is_dir``
+        and ``is_file`` exactly; implementations for which metadata is free
+        (one remote listing carries it) may ignore the flag.
+
+        Raises:
+            FileNotFoundError: *path* does not exist.
+            NotADirectoryError: *path* exists but is not a directory.
+        """
+        ...
+
+    def read_range(self, path: PathArg, offset: int, length: int) -> bytes:
+        """Read bytes ``[offset, offset + length)`` without loading the file.
+
+        The primitive behind log tails and windowed file views: a multi-GB
+        artifact must never be slurped to show its last screenful. Returns
+        fewer than *length* bytes at EOF, and ``b""`` when *offset* is at or
+        past the end. Never allocates more than *length* bytes.
+
+        Raises:
+            ValueError: *offset* or *length* is negative.
+            FileNotFoundError: *path* does not exist.
+            IsADirectoryError: *path* is a directory.
+        """
+        ...
 
     # ── Read ─────────────────────────────────────────────────────────────
 
@@ -99,3 +157,24 @@ class FileSystem(Protocol):
     def atomic_write_text(
         self, path: PathArg, content: str, *, encoding: str = "utf-8"
     ) -> None: ...
+
+
+@contextlib.contextmanager
+def bulk(fs: FileSystem) -> Iterator[None]:
+    """Group many operations on *fs* into one batch, when it supports batching.
+
+    ``CachedRemoteFileSystem`` re-serializes its whole index sidecar on every
+    recorded entry; a walk that touches N paths therefore writes O(N²) bytes
+    unless it runs inside that class's ``batched()`` context. Wrapping a walker
+    in ``bulk(fs)`` gets that batching where it exists and costs nothing where
+    it does not, so walkers do not have to know which filesystem they are on.
+
+    Args:
+        fs: Any filesystem; one without a ``batched()`` method is a no-op.
+    """
+    batched = getattr(fs, "batched", None)
+    if batched is None:
+        yield
+        return
+    with batched():
+        yield

@@ -29,7 +29,7 @@ _console = Console()
 def _open_ws(target_spec: str):
     """Open a local or remote workspace; exit 1 if missing."""
     try:
-        _target, _transport, _fs, ws = open_workspace(target_spec)
+        _target, _transport, _fs, ws = open_workspace(target_spec, prefetch=True)
     except FileNotFoundError as exc:
         rprint(f"[red]Error:[/red] {exc}")
         rprint("  Run [bold]molexp init[/bold] to create one.")

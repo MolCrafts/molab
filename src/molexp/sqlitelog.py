@@ -26,6 +26,7 @@ import sqlite3
 import threading
 from os import PathLike
 from pathlib import Path
+from typing import Literal
 
 __all__ = ["SeqConflictError", "SeqEventStore", "open_wal_connection"]
 
@@ -51,15 +52,23 @@ class SeqConflictError(RuntimeError):
     """Raised on a duplicate ``(scope, seq)`` insert into a :class:`SeqEventStore`."""
 
 
-def open_wal_connection(path: str | PathLike[str]) -> tuple[sqlite3.Connection, threading.Lock]:
-    """Open (or create) a WAL SQLite database and return it with its shared lock.
+def open_wal_connection(
+    path: str | PathLike[str], *, journal_mode: Literal["WAL", "DELETE"] = "WAL"
+) -> tuple[sqlite3.Connection, threading.Lock]:
+    """Open (or create) a SQLite database and return it with its shared lock.
 
-    Creates the parent directory if needed; enables WAL + ``foreign_keys``;
-    opens with ``check_same_thread=False``. Creates **no tables** — callers own
+    Creates the parent directory if needed; enables ``foreign_keys``; opens
+    with ``check_same_thread=False``. Creates **no tables** — callers own
     their schemas (see :class:`SeqEventStore`).
 
     Args:
         path: The SQLite database file path.
+        journal_mode: ``"WAL"`` (default) or ``"DELETE"``. WAL is faster and
+            allows concurrent readers, but it needs a shared-memory ``-shm``
+            file that NFS and Lustre do not support safely — on those mounts
+            it corrupts or hangs, so the rollback journal (``DELETE``), whose
+            POSIX locking those filesystems do honour, is the right choice.
+            A longer ``busy_timeout`` compensates for the coarser locking.
 
     Returns:
         A ``(connection, lock)`` pair. The lock is the per-file lock from the
@@ -72,9 +81,9 @@ def open_wal_connection(path: str | PathLike[str]) -> tuple[sqlite3.Connection, 
         isolation_level=None,  # autocommit; callers BEGIN explicitly
         check_same_thread=False,  # connection is serialized by the shared lock
     )
-    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute(f"PRAGMA journal_mode={journal_mode}")
     conn.execute("PRAGMA synchronous=NORMAL")
-    conn.execute("PRAGMA busy_timeout=5000")
+    conn.execute("PRAGMA busy_timeout=" + ("15000" if journal_mode == "DELETE" else "5000"))
     conn.execute("PRAGMA foreign_keys=ON")
     return conn, _lock_for(resolved)
 
@@ -120,6 +129,10 @@ class SeqEventStore:
                 ");"
                 f"CREATE UNIQUE INDEX IF NOT EXISTS idx_{self._table}_scope_seq "
                 f"ON {self._table}({self._scope}, seq);"
+                # Covers the ``type=?`` predicate of :meth:`list_rows` (a UI poll
+                # for "the last N events of one type" must not scan the scope).
+                f"CREATE INDEX IF NOT EXISTS idx_{self._table}_scope_type_seq "
+                f"ON {self._table}({self._scope}, type, seq);"
             )
 
     def append(
@@ -178,14 +191,67 @@ class SeqEventStore:
                 ) from exc
         return assigned
 
-    def list_rows(self, scope_id: str) -> list[tuple]:
+    def list_rows(
+        self,
+        scope_id: str,
+        *,
+        type: str | None = None,
+        ref: str | None = None,
+        newest_first: bool = False,
+        limit: int | None = None,
+        after_seq: int | None = None,
+    ) -> list[tuple]:
         """Return a scope's rows ``(id, scope, seq, type, actor, created_at, payload_json, refs)``.
 
-        Ordered by ``seq``.
+        Every filter is pushed into SQL so a ``limit=10`` poll over a 100k-row
+        timeline materializes ten rows, not all of them. The positional
+        no-filter call (``list_rows(scope_id)``) keeps its original contract:
+        every row, ordered by ``seq`` ascending.
+
+        Args:
+            scope_id: The scope whose rows to return.
+            type: Keep only rows of this ``type``.
+            ref: Keep only rows whose refs column (a JSON array of ids)
+                **contains** exactly this id — ``json_each`` membership, so
+                ``"ab"`` never matches ``"abc"``.
+            newest_first: ``ORDER BY seq DESC``.
+            limit: SQL ``LIMIT`` applied after ordering.
+            after_seq: Keep only rows with ``seq > after_seq`` — the change
+                cursor a poller passes to fetch only what it has not seen.
+        """
+        sql = (
+            f"SELECT id, {self._scope}, seq, type, actor, created_at, payload_json, "
+            f"{self._refs} FROM {self._table} WHERE {self._scope} = ?"
+        )
+        params: list[object] = [scope_id]
+        if type is not None:
+            sql += " AND type = ?"
+            params.append(type)
+        if ref is not None:
+            sql += (
+                f" AND EXISTS (SELECT 1 FROM json_each({self._table}.{self._refs}) "
+                "WHERE json_each.value = ?)"
+            )
+            params.append(ref)
+        if after_seq is not None:
+            sql += " AND seq > ?"
+            params.append(after_seq)
+        sql += " ORDER BY seq DESC" if newest_first else " ORDER BY seq"
+        if limit is not None:
+            sql += " LIMIT ?"
+            params.append(limit)
+        with self._lock:
+            return self._conn.execute(sql, params).fetchall()
+
+    def max_seq(self, scope_id: str) -> int:
+        """Return the highest ``seq`` in *scope_id* (``0`` when the scope is empty).
+
+        One indexed ``MAX`` — the cheap change cursor a poller compares
+        against its last-seen value before deciding whether to re-read.
         """
         with self._lock:
-            return self._conn.execute(
-                f"SELECT id, {self._scope}, seq, type, actor, created_at, payload_json, "
-                f"{self._refs} FROM {self._table} WHERE {self._scope} = ? ORDER BY seq",
+            row = self._conn.execute(
+                f"SELECT COALESCE(MAX(seq), 0) FROM {self._table} WHERE {self._scope} = ?",
                 (scope_id,),
-            ).fetchall()
+            ).fetchone()
+        return int(row[0])

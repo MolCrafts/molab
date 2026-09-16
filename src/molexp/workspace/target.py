@@ -264,11 +264,37 @@ def target_to_transport(target: Target) -> Transport:
     return to_transport(target)
 
 
-def target_to_filesystem(target: Target) -> FileSystem:
+def remote_cache_root(target: Target) -> Path:
+    """Local mirror directory for *target*'s cached remote filesystem.
+
+    One directory per ``(host, path)`` so two remote workspaces on the same
+    host never share (and silently corrupt) a mirror.
+    """
+    host = _slug(target.host or "local")
+    path = _slug(str(target.path))
+    return Path.home() / ".molexp" / "remote_cache" / f"{host}__{path}"
+
+
+def _slug(value: str) -> str:
+    """Filesystem-safe fragment of *value* for a cache directory name."""
+    return "".join(c if c.isalnum() or c in "-_." else "-" for c in value).strip("-") or "root"
+
+
+def target_to_filesystem(target: Target, *, cached: bool = True) -> FileSystem:
     """Build the appropriate :class:`FileSystem` for *target*.
 
-    Local targets get a :class:`LocalFileSystem`; remote targets get a
-    :class:`RemoteFileSystem` backed by an SSH transport.
+    Local targets get a :class:`LocalFileSystem`. Remote targets get a
+    :class:`RemoteFileSystem` wrapped (by default) in a
+    :class:`~molexp.workspace.fs_cached.CachedRemoteFileSystem`: without it
+    every ``exists`` / ``stat`` / ``listdir`` on the workspace tree is a
+    separate SSH round-trip, which is why an uncached CLI verb against a
+    remote workspace is unusably slow.
+
+    Args:
+        target: The resolved target.
+        cached: Wrap remote targets in the mirror cache. ``False`` yields the
+            bare transport — for callers that must observe the remote
+            directly (cache maintenance, tests).
     """
     if not target.is_remote:
         return LocalFileSystem()
@@ -284,7 +310,20 @@ def target_to_filesystem(target: Target) -> FileSystem:
         ssh_opts=tuple(target.ssh_opts),
     )
     transport = SshTransport(options=opts)
-    return RemoteFileSystem(transport)
+    inner = RemoteFileSystem(transport)
+    if not cached:
+        return inner
+    from .fs_cached import CachedRemoteFileSystem
+
+    # ``revalidate_before=now``: entries cached by an earlier invocation are
+    # re-read once each, then pinned for the rest of this process. A CLI verb
+    # therefore sees fresh data without paying a round-trip per call.
+    return CachedRemoteFileSystem(
+        inner,
+        mirror_root=remote_cache_root(target),
+        ttl_seconds=300,
+        revalidate_before=time.time(),
+    )
 
 
 # ---------------------------------------------------------------------------

@@ -68,3 +68,29 @@ def _hermetic_operator_config(
             del molexp.config[key]
     for key, value in before.items():
         molexp.config[key] = value
+
+
+@pytest.fixture(autouse=True)
+def _reset_change_broadcasts() -> Iterator[None]:
+    """Clear the SSE broadcast latches between tests (process-global state).
+
+    Both broadcast modules gate every new subscription on a module-level
+    ``_closed`` flag that :func:`close_*_subscribers` sets — the server's
+    lifespan *shutdown* hook. So any test that exits a ``TestClient(app)``
+    context leaves the latch set for the rest of the process, and the next
+    test that subscribes **without booting the app** (driving a route
+    coroutine directly) gets a subscription that ends immediately: its ping
+    never arrives and it times out. That is order-dependent, so it passes in
+    isolation and fails in a full run — which is exactly how it showed up.
+
+    Reset *before* each test, so no predecessor can poison it, and again
+    after, so a test that deliberately closes the bus cannot leak either.
+    """
+    from molexp.services.approval_notify import reset_approval_subscribers
+    from molexp.services.workspace_notify import reset_workspace_subscribers
+
+    reset_approval_subscribers()
+    reset_workspace_subscribers()
+    yield
+    reset_approval_subscribers()
+    reset_workspace_subscribers()

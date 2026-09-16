@@ -39,14 +39,26 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:  # noqa: ARG001
         close_approval_subscribers,
         reset_approval_subscribers,
     )
+    from molexp.services.workspace_notify import (
+        close_workspace_subscribers,
+        install_workspace_event_observer,
+        reset_workspace_subscribers,
+        uninstall_workspace_event_observer,
+    )
 
     from .dependencies import reset_agent_runtime
     from .deps.curate_runtime import reset_curate_runtime
     from .deps.plan_runtime import reset_plan_runtime
+    from .deps.read_model import reset_read_models
+    from .executors import shutdown_heavy_executor
     from .shutdown import mark_shutting_down, reset_shutdown_flag
 
     reset_shutdown_flag()
     reset_approval_subscribers()
+    reset_workspace_subscribers()
+    # Bridge the workspace event spine onto the change bus, so a run verb —
+    # in this process or in a CLI sharing the workspace — reaches open tabs.
+    install_workspace_event_observer()
     logger.info("MolExp server starting up")
     try:
         yield
@@ -56,10 +68,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:  # noqa: ARG001
         # "Waiting for connections to close" until every tab disconnects.
         mark_shutting_down()
         close_approval_subscribers()
+        close_workspace_subscribers()
         # 2) Cancel in-flight background work owned by this process.
         await reset_agent_runtime()
         await reset_plan_runtime()
         await reset_curate_runtime()
+        # 3) Stop the read models' refresh threads and the heavy pool, and
+        # unhook the spine observer so a re-served app starts clean.
+        uninstall_workspace_event_observer()
+        reset_read_models()
+        shutdown_heavy_executor()
         logger.info("MolExp server shutting down")
 
 
@@ -220,8 +238,10 @@ def create_app(
     _mount_plugin_static_dirs(app)
 
     # 4. System Routes (Health Check)
+    # ``async def``: health does no I/O, so it answers on the event loop and
+    # can never queue behind a heavy scan occupying the sync worker pool.
     @app.get("/api/health", response_model=HealthResponse, tags=["system"])
-    def health_check() -> HealthResponse:
+    async def health_check() -> HealthResponse:
         from molexp.plugins import Capability, registry
 
         return HealthResponse(

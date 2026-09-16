@@ -6,11 +6,16 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, UploadFile
+from fastapi import APIRouter, Depends, File, Request, Response, UploadFile
 from fastapi.responses import StreamingResponse
 
+from molexp.services.workspace_read_model import WorkspaceReadModel
+
 from ..dependencies import get_workspace
+from ..deps.read_model import get_read_model
 from ..exceptions import AssetNotFoundError, ProjectNotFoundError
+from ..http_cache import not_modified, weak_etag
+from ..mutations import after_mutation
 from ..schemas import (
     AssetResponse,
     MessageResponse,
@@ -38,6 +43,7 @@ def create_project(
     workspace=Depends(get_workspace),  # noqa: ANN001
 ) -> ProjectResponse:
     new_project = workspace.add_project(project.name)
+    after_mutation(workspace, "project", ref=new_project.id, project_id=new_project.id)
     return ProjectResponse.from_model(new_project)
 
 
@@ -47,6 +53,7 @@ def delete_project(project_id: str, workspace=Depends(get_workspace)) -> Message
         workspace.remove_project(project_id)
     except KeyError:
         raise ProjectNotFoundError(project_id)  # noqa: B904
+    after_mutation(workspace, "project", ref=project_id, project_id=project_id)
     return MessageResponse(message="Project deleted")
 
 
@@ -56,12 +63,27 @@ def delete_project(project_id: str, workspace=Depends(get_workspace)) -> Message
 @router.get("/{project_id}/assets", response_model=list[AssetResponse])
 def list_project_assets(
     project_id: str,
+    request: Request,
+    response: Response,
     limit: int = 100,
     workspace=Depends(get_workspace),  # noqa: ANN001
+    read_model: WorkspaceReadModel = Depends(get_read_model),
 ) -> list[AssetResponse]:
-    """List every asset (any kind) in the project scope via the catalog."""
+    """List every asset (any kind) in the project scope.
+
+    Served from the read-model snapshot's per-scope index, so the project page
+    no longer re-reads a manifest on every visit.
+    """
     project = workspace.get_project(project_id)
-    return [AssetResponse.from_model(a) for a in project.assets.list()[:limit]]
+    snapshot = read_model.assets()
+    cached = not_modified(
+        request, response, weak_etag("project-assets", snapshot.version, project_id, limit)
+    )
+    if cached is not None:
+        return cached  # type: ignore[return-value]
+    scope_dir = str(project.resolve())
+    assets = snapshot.by_scope_dir.get(scope_dir, ())
+    return [AssetResponse.from_model(a) for a in assets[:limit]]
 
 
 @router.get("/{project_id}/assets/{asset_id}", response_model=AssetResponse)
@@ -98,6 +120,7 @@ async def upload_project_asset(
             action="move",
             meta={"original_filename": filename},
         )
+        after_mutation(workspace, "asset", ref=asset.asset_id, project_id=project_id)
         return AssetResponse.from_model(asset)
     except Exception:
         if tmp_path.exists():

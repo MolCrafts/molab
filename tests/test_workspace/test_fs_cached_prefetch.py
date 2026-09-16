@@ -15,6 +15,7 @@ from typing import IO, Any
 
 import pytest
 
+from molexp.fs import DirEntry
 from molexp.workspace import Workspace
 from molexp.workspace.fs import StatResult
 from molexp.workspace.fs_cached import (
@@ -22,6 +23,7 @@ from molexp.workspace.fs_cached import (
     prefetch_workspace_indices,
 )
 from molexp.workspace.fs_local import LocalFileSystem
+from tests.support.fs_fallbacks import default_read_range, default_scandir
 
 
 class _ScriptedFS:
@@ -65,7 +67,16 @@ class _ScriptedFS:
         return str(path) in self.files or str(path) in self.dirs
 
     def is_dir(self, path: str) -> bool:
-        return str(path) in self.dirs
+        # Consistent with ``listdir``, which synthesizes intermediate
+        # directories from file keys: a path with children below it IS a
+        # directory. Without this the fake contradicts itself, and anything
+        # that checks the type before listing (``scandir``) sees a tree that
+        # no real filesystem would report.
+        key = str(path)
+        if key in self.dirs:
+            return True
+        prefix = key.rstrip("/") + "/"
+        return any(k.startswith(prefix) for k in (*self.files, *self.dirs))
 
     def is_file(self, path: str) -> bool:
         return str(path) in self.files
@@ -128,6 +139,14 @@ class _ScriptedFS:
 
     def rglob(self, path: str, pattern: str) -> list[str]:
         return []
+
+    def scandir(self, path: str, *, with_stat: bool = True) -> list[DirEntry]:
+        self.calls["scandir"] += 1
+        return default_scandir(self, path, with_stat=with_stat)
+
+    def read_range(self, path: str, offset: int, length: int) -> bytes:
+        self.calls["read_range"] += 1
+        return default_read_range(self, path, offset, length)
 
     def stat(self, path: str) -> StatResult:
         key = str(path)

@@ -53,9 +53,12 @@ def _string_constants(tree: ast.Module) -> dict[str, str]:
         if not isinstance(node, ast.Assign) or len(node.targets) != 1:
             continue
         target = node.targets[0]
-        if isinstance(target, ast.Name) and isinstance(node.value, ast.Constant):
-            if isinstance(node.value.value, str):
-                out[target.id] = node.value.value
+        if (
+            isinstance(target, ast.Name)
+            and isinstance(node.value, ast.Constant)
+            and isinstance(node.value.value, str)
+        ):
+            out[target.id] = node.value.value
     return out
 
 
@@ -147,8 +150,7 @@ def _claims() -> dict[str, list[str]]:
 def test_each_concept_type_is_claimed_once() -> None:
     duplicates = {t: sites for t, sites in _claims().items() if len(sites) > 1}
     assert duplicates == {}, (
-        "a concept type claimed twice fails molexp's import outright; "
-        f"duplicates: {duplicates}"
+        f"a concept type claimed twice fails molexp's import outright; duplicates: {duplicates}"
     )
 
 

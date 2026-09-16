@@ -11,9 +11,8 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from molexp.workspace import Workspace
+from molexp.workspace import Workspace, knowledge_mount
 from molexp.workspace.assets import ArtifactAsset, AssetManifest, AssetScope, Producer
-from molexp.workspace.concepts import Note
 from molexp.workspace.models import RunStatus
 from molexp.workspace.run_ops import RunOpsState
 from molexp.workspace.workspace_context import (
@@ -44,7 +43,7 @@ class TestAssembleWorkspaceContext:
         r2 = exp.add_run(params={"seed": 2})
         with r2.start() as ctx:
             ctx.artifact.save("m2.json", {"loss": 0.2})
-        note = ws.add_folder(Note(parent=ws, name="idea"))
+        note = knowledge_mount.mount_note(ws, "idea")
         note.set_body("# Idea\n\nnarrative\n")
 
         c = assemble_workspace_context(ws)

@@ -1,8 +1,8 @@
 import { Activity, AlertTriangle, BarChart3, Maximize2, Wrench } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { EmptyState, OverviewSection } from "@/app/components/entity";
 import type { MetricRecord } from "@/app/state/api";
-import { workspaceApi } from "@/app/state/api";
+import { useRunMetricsQuery } from "@/app/state/queries/runs";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Slider } from "@/components/ui/slider";
 import { WorkbenchAction, WorkbenchIconAction } from "@/components/workbench";
@@ -21,7 +21,8 @@ import { MolplotLineChart } from "@/plugins/molplot";
  * The pure builders (`buildScalarSeries`, `groupSeries`, `buildLineChartConfig`)
  * are exported for unit testing under the repo's node test environment.
  */
-const POLL_INTERVAL_MS = 1500;
+/** Stable empty list so a pending metrics query never re-derives the series. */
+const EMPTY_METRIC_RECORDS: MetricRecord[] = [];
 
 type XMode = "step" | "wall";
 type YScale = "linear" | "log";
@@ -408,69 +409,21 @@ export const RunMetricsView = ({
   experimentId,
   runId,
 }: RunMetricsViewProps): JSX.Element => {
-  const [records, setRecords] = useState<MetricRecord[]>([]);
-  const [nextLine, setNextLine] = useState(0);
-  const [parseErrors, setParseErrors] = useState(0);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [smoothing, setSmoothing] = useState(0.6);
   const [xMode, setXMode] = useState<XMode>("step");
   const [yScale, setYScale] = useState<YScale>("linear");
 
+  // Incremental: the query keeps the accumulated records in the cache and asks
+  // only for lines after its own cursor, so a long sweep re-parses nothing and
+  // revisiting the tab paints from cache instead of replaying the file.
+  const metricsQuery = useRunMetricsQuery({ projectId, experimentId, runId }, { isRunning: true });
+  const records = metricsQuery.data?.records ?? EMPTY_METRIC_RECORDS;
+  const parseErrors = metricsQuery.data?.parseErrors ?? 0;
+  const loading = metricsQuery.isPending;
+  const error = metricsQuery.error instanceof Error ? metricsQuery.error.message : null;
+
   const scalarSeries = useMemo(() => buildScalarSeries(records), [records]);
   const grouped = useMemo(() => groupSeries(scalarSeries), [scalarSeries]);
-
-  // Track the latest tail position in a ref so the polling effect doesn't list
-  // it as a dependency — otherwise every successful fetch (which advances
-  // nextLine) tears down the interval and re-fires an immediate fetch,
-  // collapsing POLL_INTERVAL_MS into a tight loop.
-  const nextLineRef = useRef(nextLine);
-  useEffect(() => {
-    nextLineRef.current = nextLine;
-  }, [nextLine]);
-
-  // The fetch effect re-keys on the run coords; callers also mount this view
-  // with `key={runId}` so a run switch remounts it with fresh state (cursor +
-  // accumulator), rather than threading a manual reset effect.
-  useEffect(() => {
-    let cancelled = false;
-
-    const fetchMetrics = async (): Promise<void> => {
-      const sinceLine = nextLineRef.current;
-      try {
-        const response = await workspaceApi.getRunMetrics(projectId, experimentId, runId, {
-          sinceLine,
-        });
-        if (cancelled) {
-          return;
-        }
-        setRecords((current) =>
-          sinceLine === 0 ? response.records : [...current, ...response.records],
-        );
-        setNextLine(response.nextLine);
-        setParseErrors((current) => current + response.parseErrors);
-        setError(null);
-      } catch (metricsError) {
-        if (!cancelled) {
-          setError(metricsError instanceof Error ? metricsError.message : "Failed to load metrics");
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    };
-
-    void fetchMetrics();
-    const intervalId = window.setInterval(() => {
-      void fetchMetrics();
-    }, POLL_INTERVAL_MS);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(intervalId);
-    };
-  }, [projectId, experimentId, runId]);
 
   if (loading && records.length === 0) {
     return (

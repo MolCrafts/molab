@@ -12,7 +12,7 @@ import {
   Workflow as WorkflowIcon,
   X,
 } from "lucide-react";
-import { useCallback, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useMemo, useState } from "react";
 import { CreateRunDialog } from "@/app/components/CreateRunDialog";
 import { CreateSweepDialog } from "@/app/components/CreateSweepDialog";
 import { CurateComposer } from "@/app/components/CurateComposer";
@@ -44,7 +44,6 @@ import {
 } from "@/app/renderers/dashboardData";
 import { ExperimentCompare } from "@/app/renderers/ExperimentCompare";
 import { buildExperimentWorkbenchData } from "@/app/renderers/entityWorkbenchData";
-import { WorkflowGraphViewer } from "@/app/renderers/WorkflowGraphViewer";
 import { canCancel } from "@/app/runs/runLifecycle";
 import {
   buildRunListActions,
@@ -53,6 +52,7 @@ import {
 } from "@/app/runs/runListActions";
 import { useRunMultiSelect } from "@/app/runs/useRunMultiSelect";
 import { workspaceApi } from "@/app/state/api";
+import { useInvalidate } from "@/app/state/queries";
 import { useNavigationState } from "@/app/state/useNavigationState";
 import type { ObjectView, RendererProps, RunSummary } from "@/app/types";
 import { useConfirm } from "@/components/ConfirmDialog";
@@ -68,11 +68,19 @@ import { toast } from "@/components/ui/toast";
 import {
   WorkbenchAction,
   WorkbenchIconAction,
+  WorkbenchOperationState,
   WorkbenchTag,
   WorkbenchToggleAction,
 } from "@/components/workbench";
 import { parseWorkflowIr, WorkflowGraph } from "@/components/workflow/workflow-graph";
 import { formatDateTime } from "@/lib/datetime";
+
+// The graph tab owns the only flowgram canvas on this screen; deferring it keeps
+// the editor and its inversify container out of the entry bundle for the
+// overview and runs tabs, which is where users actually land.
+const WorkflowGraphViewer = lazy(async () => ({
+  default: (await import("@/app/renderers/WorkflowGraphViewer")).WorkflowGraphViewer,
+}));
 
 const formatResultPreview = (results: Record<string, unknown>): string => {
   const entries = Object.entries(results);
@@ -143,6 +151,7 @@ export const ExperimentViewer = ({
   const [activeTab, setActiveTab] = useState("overview");
   const { setSelection } = useNavigationState(snapshot);
   const { confirm, dialog: confirmDialog } = useConfirm();
+  const { afterRunVerb, afterRunCreate, afterExperimentDelete, afterCurate } = useInvalidate();
 
   const experimentId = selection.objectId;
   const experiment = snapshot.experiments.find((e) => e.id === experimentId);
@@ -188,7 +197,7 @@ export const ExperimentViewer = ({
     setIsDeleting(true);
     try {
       await workspaceApi.deleteExperiment(projectId, experimentId);
-      onRefresh();
+      await afterExperimentDelete({ projectId, experimentId });
     } catch (error) {
       console.error("Failed to delete experiment:", error);
     } finally {
@@ -228,12 +237,16 @@ export const ExperimentViewer = ({
       try {
         await workspaceApi.killRun(run.projectId, run.experimentId, run.id);
         toast.success("Cancelled");
-        onRefresh();
+        await afterRunVerb({
+          runId: run.id,
+          projectId: run.projectId,
+          experimentId: run.experimentId,
+        });
       } catch (error) {
         toast.error(error instanceof Error ? error.message : "Cancel failed");
       }
     },
-    [confirm, onRefresh],
+    [confirm, afterRunVerb],
   );
 
   const handleResumeRun = useCallback(
@@ -241,13 +254,17 @@ export const ExperimentViewer = ({
       try {
         await workspaceApi.resumeRun(run.projectId, run.experimentId, run.id);
         toast.success("Resumed");
-        onRefresh();
+        await afterRunVerb({
+          runId: run.id,
+          projectId: run.projectId,
+          experimentId: run.experimentId,
+        });
         navigateToRunView(run, "executions");
       } catch (error) {
         toast.error(error instanceof Error ? error.message : "Resume failed");
       }
     },
-    [navigateToRunView, onRefresh],
+    [navigateToRunView, afterRunVerb],
   );
 
   const handleRerunRun = useCallback(
@@ -255,13 +272,17 @@ export const ExperimentViewer = ({
       try {
         await workspaceApi.rerunRun(run.projectId, run.experimentId, run.id, fresh);
         toast.success(fresh ? "Rerun fresh" : "Rerun");
-        onRefresh();
+        await afterRunVerb({
+          runId: run.id,
+          projectId: run.projectId,
+          experimentId: run.experimentId,
+        });
         navigateToRunView(run, "executions");
       } catch (error) {
         toast.error(error instanceof Error ? error.message : "Rerun failed");
       }
     },
-    [navigateToRunView, onRefresh],
+    [navigateToRunView, afterRunVerb],
   );
 
   const runListHandlers: RunListHandlers = useMemo(
@@ -651,7 +672,9 @@ export const ExperimentViewer = ({
         <CurateComposer
           projectId={projectId}
           experimentId={experimentId}
-          onComplete={() => onRefresh()}
+          onComplete={() => {
+            void afterCurate({ projectId });
+          }}
         />
       </DashboardCard>
     </DashboardGrid>
@@ -661,13 +684,21 @@ export const ExperimentViewer = ({
     ? { objectType: "workflow" as const, objectId: workflow.id, workflowId: workflow.id }
     : null;
   const workflowTabContent = workflowSelection ? (
-    <WorkflowGraphViewer
-      selection={workflowSelection}
-      snapshot={snapshot}
-      inspectorTarget={inspectorTarget}
-      onInspectorTargetChange={onInspectorTargetChange}
-      onRefresh={onRefresh}
-    />
+    <Suspense
+      fallback={
+        <div className="flex h-full items-center justify-center">
+          <WorkbenchOperationState kind="loading" density="compact" title="Loading graph…" />
+        </div>
+      }
+    >
+      <WorkflowGraphViewer
+        selection={workflowSelection}
+        snapshot={snapshot}
+        inspectorTarget={inspectorTarget}
+        onInspectorTargetChange={onInspectorTargetChange}
+        onRefresh={onRefresh}
+      />
+    </Suspense>
   ) : (
     <div className="flex h-full items-center justify-center">
       <EmptyState icon={<WorkflowIcon className="h-6 w-6" />} title="No workflow" />
@@ -688,7 +719,7 @@ export const ExperimentViewer = ({
               experimentId={experimentId}
               workflowFile={experiment.workflowFile || ""}
               onRunCreated={(runId) => {
-                onRefresh();
+                void afterRunCreate({ projectId, experimentId });
                 navigateToRun(runId);
               }}
             />
@@ -696,7 +727,7 @@ export const ExperimentViewer = ({
               projectId={projectId}
               experimentId={experimentId}
               onCreated={() => {
-                onRefresh();
+                void afterRunCreate({ projectId, experimentId });
                 setActiveTab("runs");
               }}
             />

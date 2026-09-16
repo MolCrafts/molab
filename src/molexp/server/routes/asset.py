@@ -12,13 +12,17 @@ import shutil
 import tempfile
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import PlainTextResponse, StreamingResponse
 
+from molexp.services.workspace_read_model import WorkspaceReadModel
 from molexp.workspace.assets import AssetScope, LogAsset, lineage, scan
 
 from ..dependencies import get_workspace
+from ..deps.read_model import get_read_model
 from ..exceptions import AssetNotFoundError, InvalidPathError
+from ..http_cache import not_modified, weak_etag
+from ..mutations import after_mutation
 from ..preview import asset_has_sidecar
 from ..schemas import (
     AssetLineageNode,
@@ -31,8 +35,26 @@ from ._scope import resolve_scope_dir, split_workspace_relpath
 router = APIRouter(prefix="/assets", tags=["assets"])
 
 
-def _require_asset(workspace, asset_id: str):  # noqa: ANN001, ANN202
-    asset = scan.get_asset(workspace.root, asset_id)
+def _require_asset(workspace, asset_id: str, *, assets=None):  # noqa: ANN001, ANN202
+    """Resolve *asset_id* or 404 — from *assets* when the caller already scanned."""
+    asset = scan.get_asset(workspace.root, asset_id, assets=assets)
+    if asset is None:
+        raise AssetNotFoundError(asset_id)
+    return asset
+
+
+def _require_from_snapshot(read_model: WorkspaceReadModel, asset_id: str):  # noqa: ANN202
+    """Resolve *asset_id* against the snapshot, rescanning once on a miss.
+
+    A miss is the interesting case: an id the snapshot has not seen is either
+    brand new (written since the last sweep) or genuinely absent. One forced
+    refresh separates the two, so a just-registered asset is never reported
+    missing and a bogus id still 404s.
+    """
+    asset = read_model.assets().by_id.get(asset_id)
+    if asset is None:
+        read_model.invalidate("assets")
+        asset = read_model.assets().by_id.get(asset_id)
     if asset is None:
         raise AssetNotFoundError(asset_id)
     return asset
@@ -50,6 +72,8 @@ def _resolve_scope_dir(workspace, scope: AssetScope) -> Path:  # noqa: ANN001
 
 @router.get("", response_model=list[AssetResponse])
 def list_assets(
+    request: Request,
+    response: Response,
     kind: str | None = None,
     scope_kind: str | None = None,
     run_id: str | None = None,
@@ -57,15 +81,27 @@ def list_assets(
     content_hash: str | None = None,
     limit: int = 100,
     workspace=Depends(get_workspace),  # noqa: ANN001
+    read_model: WorkspaceReadModel = Depends(get_read_model),
 ) -> list[AssetResponse]:
     """Query assets from the workspace catalog with optional filters.
 
-    ``content_hash`` answers via the ONE existing lookup
-    (:func:`molexp.workspace.assets.scan.find_by_content_hash`) — a 0/1-element
-    list in the uniform response shape, no second query path.
+    Answered from the read-model asset snapshot: the manifests are scanned
+    once and every filter — including the ``content_hash`` lookup, which is a
+    dict hit on the snapshot's hash index — is applied in memory.
     """
+    snapshot = read_model.assets()
+    cached = not_modified(
+        request,
+        response,
+        weak_etag(
+            "assets", snapshot.version, kind, scope_kind, run_id, task_id, content_hash, limit
+        ),
+    )
+    if cached is not None:
+        return cached  # type: ignore[return-value]
+
     if content_hash is not None:
-        found = scan.find_by_content_hash(workspace.root, content_hash)
+        found = snapshot.by_hash.get(content_hash)
         return (
             [
                 AssetResponse.from_model(
@@ -75,50 +111,64 @@ def list_assets(
             if found is not None
             else []
         )
-    scope = None
-    if scope_kind == "workspace":
-        scope = AssetScope(kind="workspace", ids=())
-    # Note: project/experiment/run scoping is better served by the
-    # per-scope routes below (they carry the full ids tuple).
 
-    assets = scan.scan_assets(
-        workspace.root,
-        kind=kind,
-        scope=scope,
-        producer_run=run_id,
-        producer_task=task_id,
-        limit=limit,
-    )
+    assets = list(snapshot.assets)
+    if scope_kind == "workspace":
+        # Note: project/experiment/run scoping is better served by the
+        # per-scope routes below (they carry the full ids tuple).
+        assets = snapshot.in_scope(AssetScope(kind="workspace", ids=()))
+    if kind is not None:
+        assets = [a for a in assets if getattr(a, "kind", None) == kind]
+    if run_id:
+        assets = [a for a in assets if a.producer is not None and a.producer.run_id == run_id]
+    if task_id:
+        assets = [a for a in assets if a.producer is not None and a.producer.task_id == task_id]
     return [
         AssetResponse.from_model(a, has_preview_sidecar=asset_has_sidecar(workspace, a))
-        for a in assets
+        for a in assets[:limit]
     ]
 
 
 @router.get("/{asset_id}", response_model=AssetResponse)
-def get_asset(asset_id: str, workspace=Depends(get_workspace)) -> AssetResponse:  # noqa: ANN001
-    asset = _require_asset(workspace, asset_id)
+def get_asset(
+    asset_id: str,
+    workspace=Depends(get_workspace),  # noqa: ANN001
+    read_model: WorkspaceReadModel = Depends(get_read_model),
+) -> AssetResponse:
+    """One asset by id — a dict hit on the snapshot, not a workspace walk."""
+    asset = _require_from_snapshot(read_model, asset_id)
     return AssetResponse.from_model(asset, has_preview_sidecar=asset_has_sidecar(workspace, asset))
 
 
 @router.get("/{asset_id}/lineage", response_model=AssetLineageResponse)
-def get_asset_lineage(asset_id: str, workspace=Depends(get_workspace)) -> AssetLineageResponse:  # noqa: ANN001
+def get_asset_lineage(
+    asset_id: str,
+    workspace=Depends(get_workspace),  # noqa: ANN001
+    read_model: WorkspaceReadModel = Depends(get_read_model),
+) -> AssetLineageResponse:
     """Return the asset's transitive ancestors and descendants.
 
     Walks the ``Producer.inputs`` DAG built by run-time tasks that
     declare ``consumed=[...]`` on artifact / data registration. The
     starting asset is excluded from both lists.
+
+    Lineage edges may cross scopes, so the manifests are scanned **once**
+    here and that list is threaded through the traversal and the node
+    rendering — never one scan per lineage node.
     """
-    _require_asset(workspace, asset_id)
+    snapshot = read_model.assets()
+    assets = list(snapshot.assets)
+    _require_from_snapshot(read_model, asset_id)
+    by_id = snapshot.by_id
 
     def _node(aid: str) -> AssetLineageNode | None:
-        a = scan.get_asset(workspace.root, aid)
+        a = by_id.get(aid)
         if a is None:
             return None
         return AssetLineageNode(id=a.asset_id, name=a.name, kind=a.kind, scope_kind=a.scope.kind)
 
-    ancestor_ids = sorted(lineage.ancestors(workspace, asset_id))
-    descendant_ids = sorted(lineage.descendants(workspace, asset_id))
+    ancestor_ids = sorted(lineage.ancestors(workspace, asset_id, assets=assets))
+    descendant_ids = sorted(lineage.descendants(workspace, asset_id, assets=assets))
     return AssetLineageResponse(
         asset_id=asset_id,
         ancestors=[n for n in (_node(i) for i in ancestor_ids) if n is not None],
@@ -184,6 +234,7 @@ async def import_data_asset(
             action="move",
             meta={"original_filename": filename},
         )
+        after_mutation(workspace, "asset", ref=asset.asset_id)
         return AssetResponse.from_model(asset)
     finally:
         if tmp_path.exists():
@@ -212,4 +263,5 @@ def register_data_asset(
         src=target,
         meta=body.metadata,
     )
+    after_mutation(workspace, "asset", ref=asset.asset_id)
     return AssetResponse.from_model(asset, has_preview_sidecar=asset_has_sidecar(workspace, asset))

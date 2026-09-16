@@ -79,6 +79,11 @@ export class ExperimentsService {
     }
     /**
      * Get Experiment
+     * One experiment plus its run summaries.
+     *
+     * The run rows come from the read-model snapshot (zero I/O once warm) and
+     * the validator is this experiment's own version, so activity in a *different*
+     * experiment does not invalidate this page.
      * @param projectId
      * @param experimentId
      * @returns ExperimentResponse Successful Response
@@ -103,6 +108,13 @@ export class ExperimentsService {
     /**
      * Get Experiment Comparison
      * Comparison matrix: parameter columns x run rows + final metric values per run.
+     *
+     * Run rows come from the read-model snapshot; the per-run metric fold is
+     * memoized against each ``metrics.jsonl``'s ``(size, mtime)`` and read
+     * incrementally, so a re-request parses only lines appended since the last
+     * one instead of re-scanning up to 50 000 records per run. The whole matrix
+     * is assembled on the heavy pool — it is the one endpoint whose cost still
+     * scales with the *data* a run wrote, not with the run count.
      * @param projectId
      * @param experimentId
      * @returns ExperimentComparisonResponse Successful Response
@@ -202,6 +214,11 @@ export class ExperimentsService {
     }
     /**
      * Get Experiment
+     * One experiment plus its run summaries.
+     *
+     * The run rows come from the read-model snapshot (zero I/O once warm) and
+     * the validator is this experiment's own version, so activity in a *different*
+     * experiment does not invalidate this page.
      * @param projectId
      * @param experimentId
      * @param ws
@@ -229,6 +246,13 @@ export class ExperimentsService {
     /**
      * Get Experiment Comparison
      * Comparison matrix: parameter columns x run rows + final metric values per run.
+     *
+     * Run rows come from the read-model snapshot; the per-run metric fold is
+     * memoized against each ``metrics.jsonl``'s ``(size, mtime)`` and read
+     * incrementally, so a re-request parses only lines appended since the last
+     * one instead of re-scanning up to 50 000 records per run. The whole matrix
+     * is assembled on the heavy pool — it is the one endpoint whose cost still
+     * scales with the *data* a run wrote, not with the run count.
      * @param projectId
      * @param experimentId
      * @param ws

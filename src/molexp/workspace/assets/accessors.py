@@ -10,7 +10,6 @@ that task-scoped producer info can be set when running inside a task.
 
 from __future__ import annotations
 
-import contextlib
 import json
 from collections.abc import Callable, Sequence
 from datetime import datetime
@@ -18,7 +17,7 @@ from pathlib import Path
 
 from molexp._typing import TaskOutput
 
-from ..utils import compute_content_hash, generate_asset_id
+from ..utils import compute_content_hash, generate_asset_id, hash_bytes, hash_copy
 from .artifact import ArtifactAsset
 from .base import Asset, AssetScope, Producer
 from .checkpoint import CheckpointAsset
@@ -76,8 +75,15 @@ class ArtifactAccessor(_AccessorBase):
         target = self._scope_dir / "artifacts" / name
         target.parent.mkdir(parents=True, exist_ok=True)
 
+        # Hash while writing wherever the bytes are already in hand, so a
+        # multi-gigabyte artifact is read once rather than copied and then
+        # re-read to be addressed. ``None`` means "hash the file afterwards".
+        content_hash: str | None = None
+
         if isinstance(data, (bytes, bytearray)):
-            target.write_bytes(bytes(data))
+            payload = bytes(data)
+            target.write_bytes(payload)
+            content_hash = hash_bytes(payload)
         elif isinstance(data, Path):
             import shutil
 
@@ -89,13 +95,18 @@ class ArtifactAccessor(_AccessorBase):
             except OSError:
                 already = False
             if not already:
-                with contextlib.suppress(shutil.SameFileError):
-                    shutil.copy2(src, target)
+                try:
+                    content_hash = hash_copy(src, target)
+                except shutil.SameFileError:  # pragma: no cover - guarded above
+                    content_hash = None
         elif isinstance(data, (dict, list)):
-            with open(target, "w") as f:  # noqa: PTH123
-                json.dump(data, f, indent=2, default=str)
+            encoded = json.dumps(data, indent=2, default=str)
+            target.write_text(encoded)
+            content_hash = hash_bytes(encoded.encode())
         else:
-            target.write_text(str(data))
+            encoded = str(data)
+            target.write_text(encoded)
+            content_hash = hash_bytes(encoded.encode())
 
         now = datetime.now()
         producer = self._producer_provider()
@@ -113,7 +124,7 @@ class ArtifactAccessor(_AccessorBase):
             tags=tags or {},
             mime=mime,
             size=target.stat().st_size,
-            content_hash=compute_content_hash(target),
+            content_hash=content_hash if content_hash is not None else compute_content_hash(target),
         )
         self._register(asset)
         if self._event_root is not None:

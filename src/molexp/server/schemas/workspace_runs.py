@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 from molexp._typing import JSONValue
 from molexp.workspace import Run
 from molexp.workspace.models import ExecutionRecord
+from molexp.workspace.read_model import RunRow
 
 from .molq import MolqJobSummary  # noqa: F401  (preserve import surface)
 
@@ -52,6 +53,44 @@ class WorkspaceRunRow(BaseModel):
     executions: list[WorkspaceExecutionRow] = Field(default_factory=list)
 
     @classmethod
+    def from_row(cls, row: RunRow) -> WorkspaceRunRow:
+        """Build the wire row from a read-model :class:`RunRow` — zero I/O.
+
+        The snapshot already holds everything this response carries, so a warm
+        list request never touches a file. Kept field-for-field identical to
+        :meth:`from_run` (a parity test locks that).
+        """
+        executor: dict[str, str | None] = {
+            k: v if isinstance(v, str) else None for k, v in (row.executor_info or {}).items()
+        }
+        executions = [_build_execution_row(row.run_id, rec, executor) for rec in row.executions]
+        latest_sched_id: str | None = None
+        for rec in reversed(executions):
+            if rec.schedulerJobId:
+                latest_sched_id = rec.schedulerJobId
+                break
+        return cls(
+            id=row.run_id,
+            name=row.run_id,
+            projectId=row.project_id,
+            projectName=row.project_name,
+            experimentId=row.experiment_id,
+            experimentName=row.experiment_name,
+            status=row.status,
+            backend=executor.get("backend"),
+            cluster=executor.get("cluster_name"),
+            scheduler=executor.get("scheduler"),
+            target=row.target,
+            profile=row.profile,
+            parameters=dict(row.parameters),
+            createdAt=row.created_at.isoformat(),
+            finishedAt=(row.finished_at.isoformat() if row.finished_at else None),
+            executionCount=len(executions),
+            latestSchedulerJobId=latest_sched_id,
+            executions=executions,
+        )
+
+    @classmethod
     def from_run(
         cls,
         run: Run,
@@ -87,7 +126,7 @@ class WorkspaceRunRow(BaseModel):
             projectName=project_name,
             experimentId=run.experiment.id,
             experimentName=experiment_name,
-            status=run.status,
+            status=ops.status.value,  # same parse as ``executions`` above
             backend=backend,
             cluster=cluster,
             scheduler=scheduler,

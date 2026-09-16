@@ -30,8 +30,16 @@ _workspace_descriptor_override: str | None = None
 
 
 def reset_workspace_cache() -> None:
-    """Clear the workspace cache (for testing or workspace switching)."""
+    """Clear the workspace cache (for testing or workspace switching).
+
+    Also drops the per-workspace read models: their snapshots describe the
+    tree that is being switched away from, and their refresh threads must not
+    outlive it.
+    """
     _workspace_cache.clear()
+    from molexp.server.deps.read_model import reset_read_models
+
+    reset_read_models()
 
 
 def set_workspace_path_override(path: Path | None) -> None:

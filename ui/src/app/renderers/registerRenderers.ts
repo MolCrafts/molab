@@ -1,18 +1,30 @@
 import { KnowledgeDocPanel } from "@/app/knowledge/KnowledgeDocPanel";
 import { registerRenderer } from "@/app/registry";
 import { AgentSessionInspector } from "@/app/renderers/AgentSessionInspector";
-import { AgentViewer } from "@/app/renderers/AgentViewer";
 import { AssetViewer } from "@/app/renderers/AssetViewer";
 import { ExperimentViewer } from "@/app/renderers/ExperimentViewer";
 import { ImageViewer } from "@/app/renderers/ImageViewer";
 import { KnowledgeViewer } from "@/app/renderers/KnowledgeViewer";
+import { lazyRenderer } from "@/app/renderers/lazyRenderer";
 import { MetadataInspector } from "@/app/renderers/MetadataInspector";
 import { ProjectViewer } from "@/app/renderers/ProjectViewer";
 import { RunViewer } from "@/app/renderers/RunViewer";
 import { TaskViewer } from "@/app/renderers/TaskViewer";
-import { WorkflowFileViewer } from "@/app/renderers/WorkflowFileViewer";
 import { WorkflowInspector } from "@/app/renderers/WorkflowInspector";
-import { WorkflowViewer } from "@/app/renderers/WorkflowViewer";
+
+// Centre renderers that are large and not on the first-paint path. Each is a
+// separate chunk fetched the first time its object type is opened; until then
+// none of their dependencies (the agent stack, the flowgram canvas, Monaco)
+// sit in the entry bundle.
+const AgentViewer = lazyRenderer(
+  async () => (await import("@/app/renderers/AgentViewer")).AgentViewer,
+);
+const WorkflowViewer = lazyRenderer(
+  async () => (await import("@/app/renderers/WorkflowViewer")).WorkflowViewer,
+);
+const WorkflowFileViewer = lazyRenderer(
+  async () => (await import("@/app/renderers/WorkflowFileViewer")).WorkflowFileViewer,
+);
 
 export const registerDefaultRenderers = (): void => {
   registerRenderer({

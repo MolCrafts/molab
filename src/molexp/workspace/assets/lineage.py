@@ -16,30 +16,34 @@ Example::
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from typing import TYPE_CHECKING
 
 from . import scan
 
 if TYPE_CHECKING:
-    from ..fs import FileSystem
     from ..workspace import Workspace
+    from .base import Asset
 
 
-def _workspace_fs(workspace: Workspace) -> FileSystem | None:
-    """Return the workspace FileSystem when it is not the local default.
+def _asset_index(workspace: Workspace, assets: Sequence[Asset] | None) -> dict[str, Asset]:
+    """``{asset_id: Asset}`` over the whole workspace — **one** scan.
 
-    Local workspaces keep the historical Path-based scan; remote workspaces
-    pass their RemoteFileSystem so asset walks go over the transport.
+    Lineage edges can cross any scope, so the walk is workspace-wide; but it
+    happens exactly once per traversal (never once per frontier node), and
+    not at all when the caller already holds the assets.
     """
-    from ..fs_local import LocalFileSystem
-
-    fs = getattr(workspace, "_fs", None)
-    if fs is None or isinstance(fs, LocalFileSystem):
-        return None
-    return fs
+    if assets is None:
+        assets = scan.scan_assets(workspace.root, fs=workspace.fs)
+    return {a.asset_id: a for a in assets}
 
 
-def ancestors(workspace: Workspace, asset_id: str) -> set[str]:
+def ancestors(
+    workspace: Workspace,
+    asset_id: str,
+    *,
+    assets: Sequence[Asset] | None = None,
+) -> set[str]:
     """Return every ``asset_id`` reachable upstream of *asset_id*.
 
     Walks :attr:`Producer.inputs` edges in reverse breadth-first order.
@@ -50,17 +54,19 @@ def ancestors(workspace: Workspace, asset_id: str) -> set[str]:
     Args:
         workspace: Workspace whose catalog hosts the asset graph.
         asset_id: Leaf to walk back from.
+        assets: Already-scanned workspace assets; when given, no disk I/O
+            happens.
 
     Returns:
         Set of upstream ``asset_id``s. Empty when the leaf has no
         producer or no inputs.
     """
-    fs = _workspace_fs(workspace)
+    by_id = _asset_index(workspace, assets)
     visited: set[str] = set()
     frontier: list[str] = [asset_id]
     while frontier:
         cur = frontier.pop()
-        asset = scan.get_asset(workspace.root, cur, fs=fs)
+        asset = by_id.get(cur)
         if asset is None or asset.producer is None:
             continue
         for upstream in asset.producer.inputs:
@@ -71,7 +77,12 @@ def ancestors(workspace: Workspace, asset_id: str) -> set[str]:
     return visited
 
 
-def descendants(workspace: Workspace, asset_id: str) -> set[str]:
+def descendants(
+    workspace: Workspace,
+    asset_id: str,
+    *,
+    assets: Sequence[Asset] | None = None,
+) -> set[str]:
     """Return every ``asset_id`` reachable downstream of *asset_id*.
 
     Inverts the :attr:`Producer.inputs` index across the workspace
@@ -81,14 +92,15 @@ def descendants(workspace: Workspace, asset_id: str) -> set[str]:
     Args:
         workspace: Workspace whose catalog hosts the asset graph.
         asset_id: Source to walk forward from.
+        assets: Already-scanned workspace assets; when given, no disk I/O
+            happens.
 
     Returns:
         Set of downstream ``asset_id``s. Empty when no asset records
         *asset_id* in its inputs.
     """
-    fs = _workspace_fs(workspace)
     children_of: dict[str, list[str]] = {}
-    for asset in scan.scan_assets(workspace.root, fs=fs):
+    for asset in _asset_index(workspace, assets).values():
         if asset.producer is None:
             continue
         for inp in asset.producer.inputs:

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { workspaceApi } from "@/app/state/api";
 import type { RendererProps } from "@/app/types";
 import { DELTA_F_GROUP_COLORS } from "@/lib/chart-tokens";
+import { fileSizeGate } from "@/lib/fileSizeGate";
 import { MolplotBarChart } from "@/plugins/molplot";
 import type { DiscoveredFile } from "@/plugins/types";
 
@@ -88,8 +89,12 @@ export const DeltaFChart = ({
   const [report, setReport] = useState<DeltaFReport | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // The report is parsed whole, so an oversized file would be pulled into memory
+  // only to blow up in JSON.parse. Refuse it up front instead.
+  const oversized = fileSizeGate(discoveredFiles?.[0]?.size).kind === "oversized";
+
   useEffect(() => {
-    if (!projectId || !experimentId || !runId) {
+    if (!projectId || !experimentId || !runId || oversized) {
       return;
     }
     let cancelled = false;
@@ -110,7 +115,7 @@ export const DeltaFChart = ({
     return () => {
       cancelled = true;
     };
-  }, [projectId, experimentId, runId, relPath]);
+  }, [projectId, experimentId, runId, relPath, oversized]);
 
   const config = useMemo<BarChartConfig | null>(() => {
     if (!report?.deltaF) {
@@ -152,6 +157,13 @@ export const DeltaFChart = ({
   }
   if (error) {
     return <div className="p-4 text-body-lg text-status-failed-foreground">ΔF report: {error}</div>;
+  }
+  if (oversized) {
+    return (
+      <div className="p-4 text-body-lg text-muted-foreground">
+        ΔF report is too large to chart in the browser.
+      </div>
+    );
   }
   if (!config) {
     return <div className="p-4 text-body-lg text-muted-foreground">Loading ΔF report…</div>;

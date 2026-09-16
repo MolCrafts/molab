@@ -15,10 +15,10 @@ from typing import IO
 
 import pytest
 
+from molexp.knowledge.concept import Concept
 from molexp.workspace import (
     Bundle,
     ConceptNotFoundError,
-    Folder,
     Note,
 )
 from molexp.workspace.fs import PathArg
@@ -156,7 +156,7 @@ class TestBundleDocs:
 
         got = {(b.rel_path(bl.source), bl.role) for bl in b.backlinks(dst)}
         assert got == {("src-one", "cites"), ("src-two", "references")}
-        assert all(isinstance(bl.source, Folder) for bl in b.backlinks(dst))
+        assert all(isinstance(bl.source, Concept) for bl in b.backlinks(dst))
 
     def test_backlinks_persists_no_reverse_index_file(self, bundle_root: Path) -> None:
         # One-source-of-truth: backlinks is a derived recompute; no reverse index

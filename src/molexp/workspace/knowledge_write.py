@@ -8,10 +8,13 @@ workspace.
 
 **Lifecycle order is load-bearing** (do not reorder):
 
-1. Evaluate ``newly_created`` via ``has_folder`` **before** ``add_folder``.
-2. ``add_folder`` → ``write_knowledge_meta`` → ``set_body``.
+1. Evaluate ``newly_created`` **before** the Concept directory is materialized.
+2. mount → ``write_knowledge_meta`` → ``set_body``.
 3. Emit ``knowledge.created`` only when ``newly_created and emit`` (after meta+body).
 4. ``cite`` each source non-fatally (warn, never raise after disk is written).
+
+The mount itself goes through :mod:`molexp.workspace.knowledge_mount`, the one
+adapter that knows how to place an OKF Concept inside the workspace tree.
 """
 
 from __future__ import annotations
@@ -21,18 +24,20 @@ from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from molexp.path import Path
-
-from .edges import EdgeRole
-from .events import emit_workspace_event
-from .folder import Folder
-from .knowledge_item import (
+from molexp.knowledge.concept import Concept
+from molexp.knowledge.edges import EdgeRole
+from molexp.knowledge.knowledge_item import (
     KNOWLEDGE_ITEM_KIND,
     KnowledgeItem,
     KnowledgeKind,
     KnowledgeMeta,
     SourceRef,
 )
+from molexp.path import Path
+
+from .events import emit_workspace_event
+from .folder import Folder
+from .knowledge_mount import mount_knowledge_item
 
 if TYPE_CHECKING:
     pass
@@ -63,7 +68,7 @@ def write_knowledge_item(
     sources: list[SourceRef],
     created_by: str,
     body: str,
-    cite: Sequence[tuple[Folder, EdgeRole]] = (),
+    cite: Sequence[tuple[Folder | Concept, EdgeRole]] = (),
     title: str = "",
     actor: str | None = None,
     emit: bool = True,
@@ -77,7 +82,9 @@ def write_knowledge_item(
         sources: Non-empty source list (enforced by :class:`KnowledgeMeta`).
         created_by: Author string (person or ``agent:…`` / ``PlanMode/…``).
         body: Markdown body for ``index.md``.
-        cite: Optional ``(Folder, EdgeRole)`` pairs for typed out-edges.
+        cite: Optional ``(source, EdgeRole)`` pairs for typed out-edges; a
+            source is any workspace ``Folder`` or OKF ``Concept`` (only its
+            directory is used — an edge target is a path).
         title: Optional title for the event payload (defaults to *name*).
         actor: Event actor; defaults to *created_by* when omitted.
         emit: When False, skip ``knowledge.created`` even on first create.
@@ -87,10 +94,9 @@ def write_knowledge_item(
 
     Raises:
         ValidationError: Empty *sources* (meta validator).
-        Exception: Host not mounted / ``add_folder`` failures propagate.
+        Exception: Host not mounted / mount failures propagate.
     """
-    newly_created = not host.has_folder(name, cls=KnowledgeItem)
-    item = host.add_folder(KnowledgeItem(name=name))
+    item, newly_created = mount_knowledge_item(host, name)
     item.write_knowledge_meta(
         KnowledgeMeta(
             kind=kind,
@@ -105,7 +111,7 @@ def write_knowledge_item(
         root = _workspace_root(host)
         if root is not None:
             try:
-                rel = item.resolve().relative_to(root).as_posix()
+                rel = Path(str(item.path)).relative_to(root).as_posix()
             except Exception:
                 _LOG.debug(
                     "write_knowledge_item: skip knowledge.created (path relative_to failed)",
@@ -132,7 +138,9 @@ def write_knowledge_item(
 
     for source, role in cite:
         try:
-            item.cite(source, role=role)
+            # An edge target is a path: hand the Folder's directory to the OKF
+            # writer rather than the Folder itself.
+            item.cite(source.resolve(), role=role)
         except Exception:
             _LOG.warning(
                 "write_knowledge_item: cite failed for %s role=%s",

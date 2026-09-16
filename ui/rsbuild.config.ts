@@ -66,6 +66,8 @@ export default defineConfig(({ command }) => {
     source: {
       define: {
         __USE_MOCK__: useMock,
+        // Gates dev-only tooling (React Query devtools); false in production bundles.
+        __DEV__: command === 'dev',
       },
     },
     server: {

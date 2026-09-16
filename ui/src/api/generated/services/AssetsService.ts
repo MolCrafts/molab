@@ -15,9 +15,9 @@ export class AssetsService {
      * List Assets
      * Query assets from the workspace catalog with optional filters.
      *
-     * ``content_hash`` answers via the ONE existing lookup
-     * (:func:`molexp.workspace.assets.scan.find_by_content_hash`) — a 0/1-element
-     * list in the uniform response shape, no second query path.
+     * Answered from the read-model asset snapshot: the manifests are scanned
+     * once and every filter — including the ``content_hash`` lookup, which is a
+     * dict hit on the snapshot's hash index — is applied in memory.
      * @param kind
      * @param scopeKind
      * @param runId
@@ -96,6 +96,7 @@ export class AssetsService {
     }
     /**
      * Get Asset
+     * One asset by id — a dict hit on the snapshot, not a workspace walk.
      * @param assetId
      * @returns AssetResponse Successful Response
      * @throws ApiError
@@ -142,6 +143,10 @@ export class AssetsService {
      * Walks the ``Producer.inputs`` DAG built by run-time tasks that
      * declare ``consumed=[...]`` on artifact / data registration. The
      * starting asset is excluded from both lists.
+     *
+     * Lineage edges may cross scopes, so the manifests are scanned **once**
+     * here and that list is threaded through the traversal and the node
+     * rendering — never one scan per lineage node.
      * @param assetId
      * @returns AssetLineageResponse Successful Response
      * @throws ApiError
@@ -235,9 +240,9 @@ export class AssetsService {
      * List Assets
      * Query assets from the workspace catalog with optional filters.
      *
-     * ``content_hash`` answers via the ONE existing lookup
-     * (:func:`molexp.workspace.assets.scan.find_by_content_hash`) — a 0/1-element
-     * list in the uniform response shape, no second query path.
+     * Answered from the read-model asset snapshot: the manifests are scanned
+     * once and every filter — including the ``content_hash`` lookup, which is a
+     * dict hit on the snapshot's hash index — is applied in memory.
      * @param ws
      * @param kind
      * @param scopeKind
@@ -331,6 +336,7 @@ export class AssetsService {
     }
     /**
      * Get Asset
+     * One asset by id — a dict hit on the snapshot, not a workspace walk.
      * @param assetId
      * @param ws
      * @returns AssetResponse Successful Response
@@ -383,6 +389,10 @@ export class AssetsService {
      * Walks the ``Producer.inputs`` DAG built by run-time tasks that
      * declare ``consumed=[...]`` on artifact / data registration. The
      * starting asset is excluded from both lists.
+     *
+     * Lineage edges may cross scopes, so the manifests are scanned **once**
+     * here and that list is threaded through the traversal and the node
+     * rendering — never one scan per lineage node.
      * @param assetId
      * @param ws
      * @returns AssetLineageResponse Successful Response

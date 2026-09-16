@@ -37,6 +37,8 @@
     "@radix-ui/react-separator": "^1.1.8",
     "@radix-ui/react-slot": "^1.2.4",
     "@radix-ui/react-tooltip": "^1.2.8",
+    "@tanstack/react-query": "^5.103.0",
+    "@tanstack/react-virtual": "^3.14.13",
     "ajv": "^8.20.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
@@ -57,8 +59,7 @@
     "tailwind-merge": "^3.6.0",
     "vega": "^5.30.0",
     "vega-embed": "^6.29.0",
-    "vega-lite": "^5.21.0",
-    "zustand": "^5.0.14"
+    "vega-lite": "^5.21.0"
   },
   "devDependencies": {
     "@biomejs/biome": "^2.4.16",
@@ -67,9 +68,12 @@
     "@rstest/adapter-rsbuild": "^0.10.3",
     "@rstest/core": "^0.10.3",
     "@tailwindcss/postcss": "^4.3.0",
+    "@tanstack/react-query-devtools": "^5.103.0",
+    "@testing-library/react": "^16.3.3",
     "@types/react": "^19.2.15",
     "@types/react-dom": "^19.2.3",
     "autoprefixer": "^10.5.0",
+    "happy-dom": "^20.14.5",
     "msw": "^2.14.6",
     "openapi-typescript-codegen": "^0.30.0",
     "postcss": "^8.5.15",

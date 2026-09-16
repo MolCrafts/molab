@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback } from "react";
 import type { RunFilesResponse } from "@/app/state/api";
-import { workspaceApi } from "@/app/state/api";
+import { useRunFilesQuery } from "@/app/state/queries/runs";
 import type { SemanticObjectType } from "@/app/types";
 import type { DiscoveredPlugin } from "@/lib/file-type-discovery";
 import { discoverPluginsForObject, flattenFileNodes } from "@/lib/file-type-discovery";
@@ -10,6 +10,8 @@ interface RunCoords {
   experimentId: string;
   runId: string;
 }
+
+const EMPTY_DISCOVERED: DiscoveredPlugin[] = [];
 
 interface UseDiscoveredFileTypesResult {
   discovered: DiscoveredPlugin[];
@@ -21,49 +23,18 @@ export const useDiscoveredFileTypesForRun = (
   coords: RunCoords | null,
   objectType: SemanticObjectType = "run",
 ): UseDiscoveredFileTypesResult => {
-  const [response, setResponse] = useState<RunFilesResponse | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // Discovery is a pure projection of the file tree, so it rides on the shared
+  // `runFiles` cache entry via `select` — opening a run twice discovers once.
+  const select = useCallback(
+    (response: RunFilesResponse): DiscoveredPlugin[] =>
+      discoverPluginsForObject(objectType, flattenFileNodes(response.nodes)),
+    [objectType],
+  );
+  const query = useRunFilesQuery<DiscoveredPlugin[]>(coords, { select });
 
-  useEffect(() => {
-    if (!coords) {
-      setResponse(null);
-      return;
-    }
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-
-    workspaceApi
-      .getRunFiles(coords.projectId, coords.experimentId, coords.runId)
-      .then((value) => {
-        if (!cancelled) {
-          setResponse(value);
-        }
-      })
-      .catch((reason) => {
-        if (!cancelled) {
-          setError(reason instanceof Error ? reason.message : "Failed to load run files");
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [coords]);
-
-  const discovered = useMemo(() => {
-    if (!response) {
-      return [];
-    }
-    const files = flattenFileNodes(response.nodes);
-    return discoverPluginsForObject(objectType, files);
-  }, [response, objectType]);
-
-  return { discovered, loading, error };
+  return {
+    discovered: query.data ?? EMPTY_DISCOVERED,
+    loading: query.isPending && coords !== null,
+    error: query.error instanceof Error ? query.error.message : null,
+  };
 };

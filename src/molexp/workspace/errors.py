@@ -24,6 +24,10 @@ intentionally not exported from ``molexp.workspace``.
 
 from __future__ import annotations
 
+from molexp.knowledge.errors import (
+    ConceptNotFoundError as _KnowledgeConceptNotFoundError,
+)
+
 
 class _WorkspaceLookupError(LookupError):
     """Base for ``*NotFoundError`` — strict getter miss."""
@@ -81,16 +85,11 @@ class RunExistsError(_WorkspaceConflictError):
     _entity_kind = "run"
 
 
-class ConceptNotFoundError(_WorkspaceLookupError):
-    """Raised by ``Bundle.get(rel_path)`` when no Concept lives at that path.
-
-    A *Concept* is a directory that directly holds ``meta.yaml`` (the OKF
-    marker). A path that does not exist, or that exists but lacks ``meta.yaml``,
-    is not a Concept and raises this error. The bundle-relative path is carried
-    in the message so callers need not re-resolve it.
-    """
-
-    _entity_kind = "concept"
+#: Re-exported from the OKF library, where ``Bundle`` now lives. The *same class
+#: object*, so every ``except ConceptNotFoundError`` site catches it whichever
+#: module it was imported from; it subclasses ``LookupError`` like the workspace
+#: ``*NotFoundError`` family, so the server's 404 mapping is unchanged.
+ConceptNotFoundError = _KnowledgeConceptNotFoundError
 
 
 class FolderMoveCollisionError(ValueError):

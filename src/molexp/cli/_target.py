@@ -89,13 +89,23 @@ def open_workspace(
     target_str: str = ".",
     *,
     require_existing: bool = True,
+    prefetch: bool = False,
 ) -> tuple[Target, Transport, FileSystem, Workspace]:
     """Resolve *target_str* and open the Workspace on the matching FileSystem.
 
-    Local and remote targets share this path: remote roots use
-    :class:`~molexp.workspace.fs_remote.RemoteFileSystem` so every Folder/Run
-    I/O goes over SSH.  ``require_existing=True`` (default) fails when
-    ``workspace.json`` is missing; pass ``False`` for ``init``-style create.
+    Local and remote targets share this path; remote roots go through a
+    :class:`~molexp.workspace.fs_cached.CachedRemoteFileSystem` so repeated
+    Folder/Run metadata reads hit a local mirror instead of SSH.
+    ``require_existing=True`` (default) fails when ``workspace.json`` is
+    missing; pass ``False`` for ``init``-style create.
+
+    Args:
+        target_str: Target spec (path, ``user@host:path`` or ``@name``).
+        require_existing: Fail when the workspace marker is absent.
+        prefetch: Warm the whole navigation tree up front. Commands that are
+            about to walk projects/experiments/runs should pass ``True``: on a
+            remote workspace that turns a round-trip per node into two for the
+            entire tree. Commands that touch one known path should not.
 
     Raises:
         FileNotFoundError: when *require_existing* and no workspace marker.
@@ -113,4 +123,23 @@ def open_workspace(
                 f"No workspace found at {root} — run molexp init {root} to create one"
             )
     ws = Workspace(root, fs=fs)
+    if prefetch:
+        _prefetch_tree(fs, ws)
     return target, transport, fs, ws
+
+
+def _prefetch_tree(fs: FileSystem, ws: Workspace) -> None:
+    """Warm a cached remote filesystem's navigation tree; no-op otherwise.
+
+    Best-effort: a prefetch failure must not stop a command that would work
+    (more slowly) without it.
+    """
+    prepare = getattr(fs, "prepare", None)
+    if prepare is None:
+        return
+    try:
+        prepare(ws, block_index=True, refresh_on_open=True)
+    except Exception:  # warming is an optimisation, never a gate
+        import logging
+
+        logging.getLogger(__name__).debug("remote prefetch failed; continuing", exc_info=True)
