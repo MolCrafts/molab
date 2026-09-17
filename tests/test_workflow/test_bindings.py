@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from molexp.workflow import (
+from molab.workflow import (
     CompiledWorkflow,
     Workflow,
     WorkflowBindingRegistry,

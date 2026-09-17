@@ -1,4 +1,4 @@
-import type { MolexpPluginModule, PluginAPI } from "@molcrafts/molexp-plugin";
+import type { MolabPluginModule, PluginAPI } from "@molcrafts/molab-plugin";
 import { ServerCog } from "lucide-react";
 import { lazy } from "react";
 
@@ -28,7 +28,7 @@ const isMolqRun = (
   return run?.executionHistory.some((execution) => execution.executor.backend === "molq") ?? false;
 };
 
-const molqPlugin: MolexpPluginModule = {
+const molqPlugin: MolabPluginModule = {
   id: "molq",
   name: "Molq",
   version: "1.0.0",

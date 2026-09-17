@@ -124,7 +124,7 @@ export const RunsFacetPanel = ({
           onClick={() => onFiltersChange({})}
           className="text-muted-foreground"
         >
-          <RotateCcw className="size-3.5" />
+          <RotateCcw className="size-icon-sm" />
         </WorkbenchIconAction>
       )}
     </div>

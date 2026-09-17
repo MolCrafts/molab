@@ -1,14 +1,14 @@
-# `@molcrafts/molexp-plugin`
+# `@molcrafts/molab-plugin`
 
-Authoring SDK for MolExp workbench plugins. Copy of the MolVis plugin
+Authoring SDK for Molab workbench plugins. Copy of the MolVis plugin
 **pattern** (domain `PluginAPI`, namespaced ids, host-injected externals) —
 not a shared UI package.
 
 ```ts
-import { MolexpPlugin, type PluginAPI } from "@molcrafts/molexp-plugin";
-import { pluginExternals } from "@molcrafts/molexp-plugin/externals";
+import { MolabPlugin, type PluginAPI } from "@molcrafts/molab-plugin";
+import { pluginExternals } from "@molcrafts/molab-plugin/externals";
 
-export default class Greeter extends MolexpPlugin {
+export default class Greeter extends MolabPlugin {
   readonly id = "greeter";
   readonly name = "Greeter";
   readonly version = "0.1.0";

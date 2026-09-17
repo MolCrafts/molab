@@ -33,5 +33,5 @@ export interface LegacyBadgeMeta {
 export const legacyBadgeMeta = (): LegacyBadgeMeta => ({
   label: "legacy · read-only",
   tooltip:
-    "Pre-migration session — message history unavailable. Read-only since the .molexp-agent/ migration.",
+    "Pre-migration session — message history unavailable. Read-only since the .molab-agent/ migration.",
 });

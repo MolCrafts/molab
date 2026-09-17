@@ -1,4 +1,4 @@
-"""Unit tests for ``read_node_outputs`` (``molexp.workflow._engine.persistence``).
+"""Unit tests for ``read_node_outputs`` (``molab.workflow._engine.persistence``).
 
 ``read_node_outputs(run_dir, execution_id)`` reads
 ``<run_dir>/executions/<execution_id>/workflow.json`` and returns
@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from molexp.workflow._engine.persistence import read_node_outputs
+from molab.workflow._engine.persistence import read_node_outputs
 
 
 def _write_workflow_json(run_dir: Path, execution_id: str, document: object) -> None:

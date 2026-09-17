@@ -1,13 +1,13 @@
 # Control Flow
 
-MolExp's workflow engine handles control flow through the **shape of the DAG**, not through special task types. There is no `IfTask`, `ForLoopTask`, or `MapTask` — parallelism, fan-out, and fan-in are expressed by how you wire `depends_on` edges, plus three compiler declarations: `wf.parallel` (fan out over a runtime-produced list), `wf.branch` (label-routed edges) and `wf.loop` (repeat a body until a condition task exits).
+Molab's workflow engine handles control flow through the **shape of the DAG**, not through special task types. There is no `IfTask`, `ForLoopTask`, or `MapTask` — parallelism, fan-out, and fan-in are expressed by how you wire `depends_on` edges, plus three compiler declarations: `wf.parallel` (fan out over a runtime-produced list), `wf.branch` (label-routed edges) and `wf.loop` (repeat a body until a condition task exits).
 
 ## Automatic Parallelism
 
 Tasks whose dependencies are all satisfied run in parallel automatically. You don't mark anything as "parallel"; you just make sure they share the same set of upstream dependencies.
 
 ```python
-from molexp.workflow import Workflow, WorkflowCompiler
+from molab.workflow import Workflow, WorkflowCompiler
 
 wf = Workflow(name="pipeline")
 
@@ -52,7 +52,7 @@ For larger branch-specific pipelines, route between whole tasks with `wf.branch`
 When a decision selects between **whole downstream tasks**, declare label-routed edges with `wf.branch` and return `Next` from the deciding task:
 
 ```python
-from molexp.workflow import Next, Workflow, WorkflowCompiler, WorkflowRuntime
+from molab.workflow import Next, Workflow, WorkflowCompiler, WorkflowRuntime
 
 wf = Workflow(name="triage", entry="classify")
 
@@ -95,7 +95,7 @@ async def iterate(xs: list[float], iters: int = 10) -> list[float]:
 When each iteration is itself a (multi-task) piece of the graph, declare a workflow-level loop with `wf.loop`:
 
 ```python
-from molexp.workflow import Next, Workflow, WorkflowCompiler, WorkflowRuntime
+from molab.workflow import Next, Workflow, WorkflowCompiler, WorkflowRuntime
 
 wf = Workflow(name="refine", entry="step")
 
@@ -134,7 +134,7 @@ wf.loop(body=["step"], until="check", max_iters=10, on_exit="report")
 Use `wf.parallel` when you need to fan out over a list produced by an upstream task:
 
 ```python
-from molexp.workflow import Workflow, WorkflowCompiler
+from molab.workflow import Workflow, WorkflowCompiler
 
 wf = Workflow(name="fan-out", entry="scatter")
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
-import { experimentPath, projectPath, runPath } from "@/app/entities/paths";
+import { experimentPath, legacyCompareRedirect, projectPath, runPath } from "@/app/entities/paths";
 import {
   buildSelectionFromLocation,
   getSelectionPath,
@@ -60,13 +60,19 @@ describe("experiment navigation", () => {
     );
   });
 
+  it("redirects legacy compare URLs to /compare", () => {
+    expect(legacyCompareRedirect("/runs", "tab=compare")).toBe("/compare");
+    expect(legacyCompareRedirect("/projects/p/experiments/e/compare", "")).toBe("/compare");
+    expect(legacyCompareRedirect("/runs", "")).toBeNull();
+  });
+
   it("parses route-backed experiment tabs", () => {
     expect(
       buildSelectionFromLocation(
-        "/projects/p%201/experiments/e%2F1/compare",
+        "/projects/p%201/experiments/e%2F1/workflow",
         new URLSearchParams(),
       ),
-    ).toEqual({ objectType: "experiment", objectId: "e/1", experimentView: "compare" });
+    ).toEqual({ objectType: "experiment", objectId: "e/1", experimentView: "workflow" });
   });
 
   it("routes workflow selections into their owning experiment", () => {

@@ -1,10 +1,10 @@
 """Guarded workspace curation — relocate a run through the ChangeProposal gate.
 
-molexp treats a destructive housekeeping action (moving a run, deleting a folder,
+molab treats a destructive housekeeping action (moving a run, deleting a folder,
 re-homing an asset) as a **high-risk mutation**: it never happens silently.
 Instead it becomes a first-class, reviewable ``ChangeProposal`` that passes an
 approval gate before anything on disk changes, and the proposal is preserved as
-an audit record either way. This is the same backend the ``molexp curate`` CLI
+an audit record either way. This is the same backend the ``molab curate`` CLI
 and the ``POST /api/workspace/curate`` route use, so Python == UI.
 
 This example, entirely offline (no LLM, no network):
@@ -31,14 +31,15 @@ import json
 import tempfile
 from pathlib import Path
 
-import molexp as me
-from molexp.harness.stages import auto_grant_approver
-from molexp.harness.store.file_artifact_store import FileArtifactStore
-from molexp.services.curate_runtime import build_curation_proposal, run_curation_proposal
+from molab.services.curate_runtime import build_curation_proposal, run_curation_proposal
+
+import molab as me
+from molab.harness.stages import auto_grant_approver
+from molab.harness.store.file_artifact_store import FileArtifactStore
 
 
 async def main() -> None:
-    root = Path(tempfile.mkdtemp(prefix="molexp-curate-"))
+    root = Path(tempfile.mkdtemp(prefix="molab-curate-"))
     print(f"workspace root: {root}\n")
 
     # 1. A workspace with two experiments; the run 'expt-042' lives under 'run-a'.

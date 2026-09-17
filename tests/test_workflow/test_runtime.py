@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from molexp.workflow import TaskContext, Workflow, WorkflowCompiler, WorkflowRuntime
+from molab.workflow import TaskContext, Workflow, WorkflowCompiler, WorkflowRuntime
 
 
 class _RunContextStub:

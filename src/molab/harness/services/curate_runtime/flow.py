@@ -1,0 +1,354 @@
+"""The single shared curation flow: natural language -> in-process mutation.
+
+``run_curation_flow`` is the ONE backend code path both ``molab curate`` (CLI)
+and the ``curate-tasks`` route delegate to, mirroring the ``materialize_plan_records``
+precedent (a ``server/`` function the CLI imports). It turns a natural-language
+request into a discover -> plan -> invoke sequence:
+
+1. resolve the merged registry (science built-ins + curation/lifecycle built-ins) and
+   persist the rendered catalog as a ``capability_catalog`` artifact;
+2. **plan** with one ``curation_planner`` agent call whose structured output is a
+   :class:`CurationInvocation` (a JSON-reference handle, never live objects);
+3. branch on the chosen capability's ``side_effects``:
+   - **destructive** (``side_effects`` non-empty) → map the invocation onto a §8
+     :class:`~molab.harness.schemas.change_proposal.ChangeProposal`
+     (:func:`curation_invocation_to_proposal`) and drive it through the P2.1 gate
+     (:func:`run_curation_proposal`) — a single approval both records the proposal
+     and, on a grant, dispatches the in-process mutation. A denial is *recorded*
+     (``status="rejected"``), never raised (§8.3). A destructive capability the
+     mapping cannot express fails loud (``CurationArgumentError``).
+   - **read-only** (``side_effects == []``) → reconstruct the live-object
+     arguments (:func:`resolve_curation_arguments`), invoke the function
+     **in-process**, and persist a ``capability_invocation_result`` artifact.
+
+In-process invocation is correct here: built-in curation is trusted molab code
+operating on the live in-memory workspace. The subprocess isolation of the
+link-02 path exists for the untrusted/heavy external science toolchain and
+cannot carry live-object arguments. The destructive path is unified onto the
+ChangeProposal gate — it never re-runs ``enforce_side_effect_approvals``.
+"""
+
+from __future__ import annotations
+
+import inspect
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from molab.harness.capabilities import curation_capabilities
+from molab.harness.capability import resolve_callable
+from molab.harness.mcp_capabilities import aresolve_curation_capability_registry
+from molab.harness.prompts.capability_catalog import render_capability_catalog
+from molab.harness.schemas import AgentCallSpec
+from molab.harness.services.curate_runtime.proposal_flow import (
+    curation_invocation_to_proposal,
+    run_curation_proposal,
+)
+
+if TYPE_CHECKING:
+    from molab.harness.gateways import AgentGateway
+    from molab.harness.host.host import Host
+    from molab.harness.registry.capability_registry import CapabilityRegistry
+    from molab.harness.stages.approval_gate import Approver
+    from molab.workspace import Experiment, Run, Workspace
+
+__all__ = [
+    "CurationArgumentError",
+    "CurationInvocation",
+    "CurationResult",
+    "resolve_curate_run",
+    "resolve_curation_arguments",
+    "run_curation_flow",
+]
+
+
+def resolve_curate_run(experiment: Experiment, request_text: str) -> Run:
+    """Content-addressed curate Run bootstrap — same request ⇒ same Run.
+
+    The ONE bootstrap shared by ``molab curate ask`` and ``POST
+    /curate-tasks`` ("Python 操作 = UI 操作"); twin of
+    :meth:`molab.harness.Plan.open`.
+    """
+    from molab._typing import JSONValue
+    from molab.workspace.utils import derive_run_id
+
+    params: dict[str, JSONValue] = {"mode": "curate", "request": request_text}
+    return experiment.add_run(params, id=derive_run_id(params))
+
+
+class CurationArgumentError(ValueError):
+    """Raised when a ``CurationInvocation``'s references cannot be reconstructed
+    into the chosen curation function's live-object arguments."""
+
+
+class CurationInvocation(BaseModel):
+    """Structured output of the ``curation_planner`` agent.
+
+    ``references`` are JSON-able handles (ids / slugs / names / scalars) that
+    :func:`resolve_curation_arguments` turns into live workspace objects — the
+    agent never emits live objects.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    capability_id: str
+    references: dict[str, str] = Field(default_factory=dict)
+    reason: str = ""
+
+
+class CurationResult(BaseModel):
+    """Outcome of one ``run_curation_flow`` invocation."""
+
+    model_config = ConfigDict(frozen=True)
+
+    capability_id: str
+    mutation_summary: str
+    granted: bool
+    artifact_ids: list[str] = Field(default_factory=list)
+
+
+def _curation_callable_path(capability_id: str) -> str:
+    """Look up a curation capability's ``callable_path`` from the link-04 catalog."""
+    for cap in curation_capabilities():
+        if cap.id == capability_id and cap.callable_path is not None:
+            return cap.callable_path
+    raise CurationArgumentError(
+        f"{capability_id!r} is not a known curation capability with a callable_path"
+    )
+
+
+def _reconstruct_reference(
+    name: str,
+    ref: str,
+    *,
+    workspace: Workspace,
+    experiment: Experiment,
+) -> object:
+    """Reconstruct one live-object argument from its JSON reference handle."""
+    if name == "run":
+        return experiment.get_run(ref)
+    if name == "target_experiment":
+        return experiment.parent.get_experiment(ref)  # ty: ignore[unresolved-attribute]
+    if name == "runs":
+        return [experiment.get_run(rid) for rid in ref.split(",") if rid]
+    if name == "folder":
+        # Common case: a run folder under the current experiment.
+        return experiment.get_run(ref)
+    if name == "scope":
+        return workspace if ref == "workspace" else experiment.get_run(ref)
+    if name == "recursive":
+        return ref.lower() == "true"
+    if name in ("content_hash", "action"):
+        return ref
+    raise CurationArgumentError(
+        f"reference {name!r} is not reconstructible by run_curation_flow "
+        "(destructive capabilities carry complex refs through the ChangeProposal "
+        "path — e.g. rehome_asset's colon-encoded scope refs — not this map)"
+    )
+
+
+def resolve_curation_arguments(
+    capability_id: str,
+    references: dict[str, str],
+    *,
+    workspace: Workspace,
+    experiment: Experiment,
+) -> dict[str, object]:
+    """Reconstruct a curation function's live-object keyword arguments.
+
+    Introspects the function's signature (via the link-04 catalog's
+    ``callable_path``) and builds one argument per parameter: ``workspace`` is
+    injected as the live workspace; every other parameter is reconstructed from
+    its JSON ``references`` handle (see :func:`_reconstruct_reference`). A
+    parameter with a default that is absent from ``references`` is omitted (the
+    function's default applies); a required parameter that is absent raises
+    :class:`CurationArgumentError`.
+
+    Args:
+        capability_id: A ``molab.curation.*`` capability id.
+        references: JSON-able handles produced by the ``curation_planner``.
+        workspace: The live workspace (injected for the ``workspace`` parameter).
+        experiment: The experiment context for id lookups.
+
+    Returns:
+        A ``{param_name: live_object}`` mapping ready to splat into the callable.
+    """
+    fn = resolve_callable(_curation_callable_path(capability_id))
+    signature = inspect.signature(fn)
+    args: dict[str, object] = {}
+    for param_name, param in signature.parameters.items():
+        if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
+            continue
+        if param_name == "workspace":
+            args[param_name] = workspace
+            continue
+        if param_name not in references:
+            if param.default is inspect.Parameter.empty:
+                raise CurationArgumentError(
+                    f"reference {param_name!r} is required for {capability_id!r}"
+                )
+            continue
+        args[param_name] = _reconstruct_reference(
+            param_name, references[param_name], workspace=workspace, experiment=experiment
+        )
+    return args
+
+
+def _mount_curate(
+    *,
+    workspace: Workspace,
+    run: Run,
+    gateway: AgentGateway,
+    registry: CapabilityRegistry,
+) -> Host:
+    """Mount the ``curate`` profile. Caller must ``unload``."""
+    from molab.harness.host.compose import compose_curate
+
+    return compose_curate(
+        run_id=run.id,
+        run_dir=Path(str(run.run_dir)),
+        workspace_root=Path(workspace.resolve()),
+        gateway=gateway,
+        capability_registry=registry,
+    )
+
+
+async def run_curation_flow(
+    request: str,
+    *,
+    workspace: Workspace,
+    experiment: Experiment,
+    run: Run,
+    gateway: AgentGateway,
+    approve: Approver | None = None,
+) -> CurationResult:
+    """Plan + (gate +) invoke a curation capability in-process for *request*.
+
+    The single shared code path for both the CLI and the route. See the module
+    docstring for the discover -> plan -> invoke contract. A destructive
+    capability denied by *approve* raises ``StageExecutionError`` before any
+    mutation; a granted (or read-only) capability is invoked in-process.
+
+    Args:
+        request: The natural-language curation request.
+        workspace: The live workspace to curate.
+        experiment: The experiment context (id lookups + the run's home).
+        run: The content-addressed curate Run whose dir hosts the artifacts.
+        gateway: The agent gateway driving the ``curation_planner`` call.
+        approve: The approver for destructive ops (defaults to the gate's
+            auto-grant).
+
+    Returns:
+        A :class:`CurationResult` with the selected capability id, a mutation
+        summary, the grant flag, and the produced artifact ids.
+    """
+    registry = await aresolve_curation_capability_registry(str(workspace.root))
+    host = _mount_curate(workspace=workspace, run=run, gateway=gateway, registry=registry)
+    try:
+        return await _run_curation_on_host(
+            host,
+            request=request,
+            workspace=workspace,
+            experiment=experiment,
+            run=run,
+            approve=approve,
+            registry=registry,
+        )
+    finally:
+        host.unload()
+
+
+async def _run_curation_on_host(
+    host: object,
+    *,
+    request: str,
+    workspace: Workspace,
+    experiment: Experiment,
+    run: Run,
+    approve: Approver | None,
+    registry: CapabilityRegistry,
+) -> CurationResult:
+    from molab.harness.host.host import Host
+
+    if not isinstance(host, Host):
+        raise TypeError("curate flow requires a Host")
+    ctx = host.as_run_context()
+    if ctx.agent_gateway is None:
+        raise RuntimeError("curate host did not publish AgentCall")
+
+    request_ref = ctx.artifact_store.put_text(
+        kind="prompt", text=request, created_by="run_curation_flow", parent_ids=[]
+    )
+    catalog_text = render_capability_catalog(registry.list_capabilities())
+    catalog_ref = ctx.artifact_store.put_text(
+        kind="capability_catalog",
+        text=catalog_text,
+        created_by="run_curation_flow",
+        parent_ids=[request_ref.id],
+    )
+
+    call = await ctx.agent_gateway.call(
+        AgentCallSpec(
+            agent_name="curation_planner",
+            input_artifact_ids=[request_ref.id],
+            prompt_artifact_id=catalog_ref.id,
+            output_schema=CurationInvocation.model_json_schema(),
+        )
+    )
+    invocation = CurationInvocation.model_validate_json(
+        ctx.artifact_store.get(call.output_artifact.id)
+    )
+
+    cap = registry.get(invocation.capability_id)
+
+    if cap.side_effects:
+        # Destructive → route through the §8 ChangeProposal gate (the single
+        # execution stack). ``curation_invocation_to_proposal`` builds the proposal
+        # from the planner's flat references; ``run_curation_proposal`` gates once
+        # and, on a grant, dispatches the in-process mutation. A denial is
+        # *recorded* (status="rejected"), never raised (§8.3).
+        proposal = curation_invocation_to_proposal(invocation.capability_id, invocation.references)
+        if proposal is None:
+            raise CurationArgumentError(
+                f"destructive capability {invocation.capability_id!r} has no "
+                "ChangeProposal mapping — add one in proposal_flow before cataloging it"
+            )
+        result_proposal = await run_curation_proposal(
+            proposal, workspace=workspace, run=run, approve=approve, ctx=ctx
+        )
+        outcome = result_proposal.execution_result
+        status = outcome.status if outcome is not None else "failed"
+        result_ids = list(outcome.result_artifact_ids) if outcome is not None else []
+        return CurationResult(
+            capability_id=invocation.capability_id,
+            mutation_summary=f"{invocation.capability_id}: {status}",
+            granted=status == "executed",
+            artifact_ids=[catalog_ref.id, *result_ids],
+        )
+
+    # Read-only → unchanged: reconstruct live args + invoke in-process, persist a
+    # ``capability_invocation_result``. No proposal, no gate.
+    live_args = resolve_curation_arguments(
+        invocation.capability_id, invocation.references, workspace=workspace, experiment=experiment
+    )
+    fn = resolve_callable(cap.callable_path)
+    fn(**live_args)
+    mutation_summary = f"queried {invocation.capability_id} (read-only)"
+    result_ref = ctx.artifact_store.put_json(
+        kind="capability_invocation_result",
+        obj={
+            "capability_id": invocation.capability_id,
+            "references": invocation.references,
+            "side_effects": cap.side_effects,
+            "summary": mutation_summary,
+        },
+        created_by="run_curation_flow",
+        parent_ids=[catalog_ref.id],
+    )
+    return CurationResult(
+        capability_id=invocation.capability_id,
+        mutation_summary=mutation_summary,
+        granted=True,
+        artifact_ids=[catalog_ref.id, result_ref.id],
+    )

@@ -1,11 +1,17 @@
-import type { MolexpPluginModule, PluginAPI } from "@molcrafts/molexp-plugin";
+import type { MolabPluginModule, PluginAPI } from "@molcrafts/molab-plugin";
 import { registerDefaultRenderers } from "@/app/renderers/registerRenderers";
-import { MarkdownPreview } from "@/components/previews/MarkdownPreview";
 import { WorkflowPreview } from "@/components/previews/WorkflowPreview";
+import { lazyWithPrefetch } from "@/lib/lazy-with-prefetch";
 import { getHostActions } from "@/plugins/host_actions";
 import { registerCoreNavigation } from "./navigation";
 
-const corePlugin: MolexpPluginModule = {
+const MarkdownPreview = lazyWithPrefetch(() =>
+  import("@/components/previews/MarkdownPreview").then((module) => ({
+    default: module.MarkdownPreview,
+  })),
+);
+
+const corePlugin: MolabPluginModule = {
   id: "core",
   name: "Core",
   version: "1.0.0",

@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import asyncio
 
-from molexp.workflow import Next, Workflow, WorkflowCompiler, WorkflowRuntime
+from molab.workflow import Next, Workflow, WorkflowCompiler, WorkflowRuntime
 
 
 # ── 1. Branch — route a value to one downstream task ───────────────────────

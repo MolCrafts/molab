@@ -17,18 +17,18 @@ import { request as __request } from '../core/request';
 export class AuthService {
     /**
      * Auth Status
-     * @param molexpSession
+     * @param molabSession
      * @returns AuthStatusResponse Successful Response
      * @throws ApiError
      */
     public static authStatus(
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<AuthStatusResponse> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/auth/status',
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -56,18 +56,18 @@ export class AuthService {
     }
     /**
      * Auth Logout
-     * @param molexpSession
+     * @param molabSession
      * @returns void
      * @throws ApiError
      */
     public static authLogout(
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<void> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/auth/logout',
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -76,18 +76,18 @@ export class AuthService {
     }
     /**
      * Auth Me
-     * @param molexpSession
+     * @param molabSession
      * @returns AuthUserPublic Successful Response
      * @throws ApiError
      */
     public static authMe(
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<AuthUserPublic> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/auth/me',
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -96,18 +96,18 @@ export class AuthService {
     }
     /**
      * Auth Token
-     * @param molexpSession
+     * @param molabSession
      * @returns AuthTokenResponse Successful Response
      * @throws ApiError
      */
     public static authToken(
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<AuthTokenResponse> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/auth/token',
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -116,18 +116,18 @@ export class AuthService {
     }
     /**
      * Auth Refresh
-     * @param molexpSession
+     * @param molabSession
      * @returns AuthUserPublic Successful Response
      * @throws ApiError
      */
     public static authRefresh(
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<AuthUserPublic> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/auth/refresh',
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -137,19 +137,19 @@ export class AuthService {
     /**
      * Auth Switch
      * @param requestBody
-     * @param molexpSession
+     * @param molabSession
      * @returns AuthUserPublic Successful Response
      * @throws ApiError
      */
     public static authSwitch(
         requestBody: SwitchRequest,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<AuthUserPublic> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/auth/switch',
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -160,18 +160,18 @@ export class AuthService {
     }
     /**
      * List Users
-     * @param molexpSession
+     * @param molabSession
      * @returns AuthUserListResponse Successful Response
      * @throws ApiError
      */
     public static listUsers(
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<AuthUserListResponse> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/auth/users',
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -181,19 +181,19 @@ export class AuthService {
     /**
      * Create User
      * @param requestBody
-     * @param molexpSession
+     * @param molabSession
      * @returns AuthUserPublic Successful Response
      * @throws ApiError
      */
     public static createUser(
         requestBody: CreateUserRequest,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<AuthUserPublic> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/auth/users',
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -206,14 +206,14 @@ export class AuthService {
      * Patch User
      * @param username
      * @param requestBody
-     * @param molexpSession
+     * @param molabSession
      * @returns AuthUserPublic Successful Response
      * @throws ApiError
      */
     public static patchUser(
         username: string,
         requestBody: PatchUserRequest,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<AuthUserPublic> {
         return __request(OpenAPI, {
             method: 'PATCH',
@@ -222,7 +222,7 @@ export class AuthService {
                 'username': username,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -234,13 +234,13 @@ export class AuthService {
     /**
      * Delete User
      * @param username
-     * @param molexpSession
+     * @param molabSession
      * @returns void
      * @throws ApiError
      */
     public static deleteUser(
         username: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<void> {
         return __request(OpenAPI, {
             method: 'DELETE',
@@ -249,7 +249,7 @@ export class AuthService {
                 'username': username,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -260,14 +260,14 @@ export class AuthService {
      * Set User Password
      * @param username
      * @param requestBody
-     * @param molexpSession
+     * @param molabSession
      * @returns AuthUserPublic Successful Response
      * @throws ApiError
      */
     public static setUserPassword(
         username: string,
         requestBody: PasswordRequest,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<AuthUserPublic> {
         return __request(OpenAPI, {
             method: 'POST',
@@ -276,7 +276,7 @@ export class AuthService {
                 'username': username,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             body: requestBody,
             mediaType: 'application/json',

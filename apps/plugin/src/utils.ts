@@ -1,5 +1,5 @@
 /**
- * Constitution-aware `cn` — copied from molexp web (not imported from molvis).
+ * Constitution-aware `cn` — copied from molab web (not imported from molvis).
  */
 import { type ClassValue, clsx } from "clsx";
 import { extendTailwindMerge } from "tailwind-merge";

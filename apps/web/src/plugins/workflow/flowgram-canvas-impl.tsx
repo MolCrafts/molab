@@ -4,7 +4,7 @@
  *
  * Every workflow surface (the run "what ran" preview, the workflow Graph tab,
  * the workspace `workflow.json` viewer) renders through this one component.
- * Nodes are drawn with molexp's own shadcn/ui + Tailwind chrome (NO FlowGram
+ * Nodes are drawn with molab's own shadcn/ui + Tailwind chrome (NO FlowGram
  * form-materials / Semi Design / Ant Design). The canvas is read-only by
  * default; pass `editable` to enable drag / connect / add / remove with
  * undo-redo history, and `onChange` to receive the edited document for
@@ -112,7 +112,7 @@ const NodeCard = ({ onNodeClick }: { onNodeClick?: (taskId: string) => void }): 
       {subworkflow && expandSubworkflow && (
         <WorkbenchIconAction
           label={`Open inner workflow of ${taskId}`}
-          className="absolute -right-2 -bottom-2 size-5 rounded-full border border-border bg-card"
+          className="absolute -right-2 -bottom-2 size-4-lg rounded-full border border-border bg-card"
           onClick={(event) => {
             event.stopPropagation();
             expandSubworkflow(taskId, subworkflow);
@@ -243,16 +243,16 @@ const FlowgramCanvasControls = ({ editable }: { editable: boolean }): JSX.Elemen
       {editable && (
         <>
           <WorkbenchIconAction label="Undo" onClick={() => ctx.history.undo()}>
-            <Undo2 className="h-3.5 w-3.5" />
+            <Undo2 className="size-3.5" />
           </WorkbenchIconAction>
           <WorkbenchIconAction label="Redo" onClick={() => ctx.history.redo()}>
-            <Redo2 className="h-3.5 w-3.5" />
+            <Redo2 className="size-3.5" />
           </WorkbenchIconAction>
           <span aria-hidden="true" className="mx-1 h-4 w-px bg-border" />
         </>
       )}
       <WorkbenchIconAction label="Zoom out" onClick={() => tools.zoomout(easing)}>
-        <Minus className="h-3.5 w-3.5" />
+        <Minus className="size-3.5" />
       </WorkbenchIconAction>
       <span
         aria-live="polite"
@@ -261,10 +261,10 @@ const FlowgramCanvasControls = ({ editable }: { editable: boolean }): JSX.Elemen
         {zoomPct}%
       </span>
       <WorkbenchIconAction label="Zoom in" onClick={() => tools.zoomin(easing)}>
-        <Plus className="h-3.5 w-3.5" />
+        <Plus className="size-3.5" />
       </WorkbenchIconAction>
       <WorkbenchIconAction label="Fit to view" onClick={() => tools.fitView(easing)}>
-        <Maximize2 className="h-3.5 w-3.5" />
+        <Maximize2 className="size-3.5" />
       </WorkbenchIconAction>
     </div>
   );
@@ -326,15 +326,15 @@ export const FlowgramCanvas = ({
       // to recolour the gradient stops (success green, skipped grey).
       lineColor: {
         hidden: "transparent",
-        default: "var(--molexp-muted-foreground)",
-        drawing: "var(--molexp-accent)",
-        hovered: "var(--molexp-accent)",
-        selected: "var(--molexp-accent)",
+        default: "var(--molab-muted-foreground)",
+        drawing: "var(--molab-accent)",
+        hovered: "var(--molab-accent)",
+        selected: "var(--molab-accent)",
         error: "var(--status-failed)",
         flowing: "var(--status-running)",
       },
       isFlowingLine: (_ctx, line) => lineStatus(line) === "running",
-      setLineClassName: (_ctx, line) => `molexp-edge-${lineStatus(line)}`,
+      setLineClassName: (_ctx, line) => `molab-edge-${lineStatus(line)}`,
       // Generic nodes: flowgram auto-assigns a default input + output port
       // (see free-layout-core) so links connect without a custom registry.
       getNodeDefaultRegistry(type) {
@@ -434,7 +434,7 @@ export const FlowgramCanvas = ({
         <DialogContent className="flex h-dialog-scroll max-w-5xl flex-col">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2 font-mono text-body-lg">
-              <Layers className="h-4 w-4 text-muted-foreground" />
+              <Layers className="size-icon text-muted-foreground" />
               {expanded?.taskId}
               <span className="text-muted-foreground">· inner workflow</span>
               {expanded?.inner.name && (

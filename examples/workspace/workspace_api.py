@@ -19,8 +19,8 @@ import asyncio
 import tempfile
 from pathlib import Path
 
-import molexp as me
-from molexp.workflow import Workflow, WorkflowCompiler, WorkflowRuntime
+import molab as me
+from molab.workflow import Workflow, WorkflowCompiler, WorkflowRuntime
 
 wf = Workflow(name="step")
 
@@ -35,7 +35,7 @@ compiled = WorkflowCompiler().compile(wf)
 
 
 async def main() -> None:
-    root = Path(tempfile.mkdtemp(prefix="molexp-ws-api-"))
+    root = Path(tempfile.mkdtemp(prefix="molab-ws-api-"))
     print(f"workspace root: {root}\n")
 
     ws = me.Workspace(root, name="ws-api-demo")

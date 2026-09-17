@@ -89,7 +89,7 @@ const DEFAULT_VIEW: ViewSettings = {
 };
 
 const Field = ({ label, children }: { label: string; children: JSX.Element }): JSX.Element => (
-  <div className="flex flex-col gap-2">
+  <div className="flex flex-col gap-1">
     <span className="font-medium text-foreground text-label">{label}</span>
     {children}
   </div>
@@ -166,8 +166,8 @@ export const MetricDetailDialog = ({
       })),
       orientation: "h" as const,
       xAxis: { label: metricKey },
-      // The legend is drawn in HTML beneath the plot, where a run's full
-      // ancestry is one hover away instead of clipped into the canvas.
+      // The legend is drawn in HTML beneath the plot, so a run name that
+      // does not fit the canvas is still readable on hover.
       showLegend: false,
       theme: "auto" as const,
     };
@@ -204,7 +204,7 @@ export const MetricDetailDialog = ({
           value={colorByToValue(colorBy)}
           onValueChange={(value) => patch({ colorBy: colorByFromValue(value) })}
         >
-          <SelectTrigger>
+          <SelectTrigger className="w-full">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -226,7 +226,7 @@ export const MetricDetailDialog = ({
         <>
           <Field label="Combine">
             <Select value={op} onValueChange={(value) => patch({ op: value as AggregateOp })}>
-              <SelectTrigger>
+              <SelectTrigger className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -242,7 +242,7 @@ export const MetricDetailDialog = ({
           </Field>
           <Field label="X axis">
             <Select value={xMode} onValueChange={(value) => patch({ xMode: value as XMode })}>
-              <SelectTrigger>
+              <SelectTrigger className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -254,7 +254,7 @@ export const MetricDetailDialog = ({
           </Field>
           <Field label="Y axis">
             <Select value={yScale} onValueChange={(value) => patch({ yScale: value as YScale })}>
-              <SelectTrigger>
+              <SelectTrigger className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -268,7 +268,7 @@ export const MetricDetailDialog = ({
               value={normalize}
               onValueChange={(value) => patch({ normalize: value as YNormalize })}
             >
-              <SelectTrigger>
+              <SelectTrigger className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -301,15 +301,13 @@ export const MetricDetailDialog = ({
 
   return (
     <Dialog open onOpenChange={(next) => !next && onClose()}>
-      {/* Same fraction of each viewport dimension, so the dialog keeps the
-          screen's aspect ratio instead of forcing a fixed 4xl box — a wide
-          monitor gets a wide chart. `max-w-none` overrides the base
-          `sm:max-w-lg`. */}
+      {/* Named viewport caps, not a fixed 4xl box — a wide monitor gets a
+          wide chart. `max-w-none` overrides the base `sm:max-w-lg`. */}
       <DialogContent
         showCloseButton={false}
-        className="flex h-[85vh] w-[85vw] max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none"
+        className="flex h-viewport-tall w-drawer max-w-none flex-col gap-0 overflow-hidden p-0 sm:max-w-none"
       >
-        <header className="flex h-[35px] shrink-0 items-center gap-1 border-b border-border px-2">
+        <header className="flex h-toolbar-compact shrink-0 items-center gap-2 border-b border-border px-3">
           <DialogTitle className="min-w-0 flex-1 truncate font-mono text-body-lg font-medium">
             {metricKey}
           </DialogTitle>
@@ -321,21 +319,26 @@ export const MetricDetailDialog = ({
               title={warnings.join(" ")}
               className="flex size-control-compact items-center justify-center text-status-warning-foreground"
             >
-              <AlertTriangle className="h-3.5 w-3.5" aria-hidden />
+              <AlertTriangle className="size-icon-sm" aria-hidden />
               <span className="sr-only">{warnings.join(" ")}</span>
             </span>
           )}
           <WorkbenchIconAction label="Reset the view" onClick={reset}>
-            <RotateCcw className="h-3.5 w-3.5" />
+            <RotateCcw className="size-3.5" />
           </WorkbenchIconAction>
           <WorkbenchIconAction label="Close" onClick={onClose}>
-            <X className="h-3.5 w-3.5" />
+            <X className="size-3.5" />
           </WorkbenchIconAction>
         </header>
 
-        <ChartWorkbench settings={controls} defaultOpen>
+        <ChartWorkbench
+          key={metricKey}
+          settings={controls}
+          defaultOpen={!isScalarOnly}
+          className="min-h-0 flex-1"
+        >
           {picked.length === 0 ? (
-            <div className="flex h-full items-center justify-center">
+            <div className="flex h-full items-center justify-center px-4">
               <EmptyState
                 density="compact"
                 title="Not recorded"
@@ -343,19 +346,17 @@ export const MetricDetailDialog = ({
               />
             </div>
           ) : (
-            <div className="flex min-h-0 flex-1">
-              <div className="min-h-0 min-w-0 flex-1">
-                {bars ? (
-                  <MolplotBarChart config={bars} style={{ width: "100%", height: "100%" }} />
-                ) : lineConfig ? (
-                  <MolplotLineChart
-                    ref={chartRef}
-                    config={lineConfig}
-                    style={{ width: "100%", height: "100%" }}
-                  />
-                ) : null}
-              </div>
-              <ChartLegend series={bars?.series ?? lineConfig?.series ?? []} />
+            <div className="relative min-h-0 min-w-0 flex-1 overflow-hidden">
+              {bars ? (
+                <MolplotBarChart config={bars} style={{ width: "100%", height: "100%" }} />
+              ) : lineConfig ? (
+                <MolplotLineChart
+                  ref={chartRef}
+                  config={lineConfig}
+                  style={{ width: "100%", height: "100%" }}
+                />
+              ) : null}
+              <ChartLegend placement="overlay" series={bars?.series ?? lineConfig?.series ?? []} />
             </div>
           )}
         </ChartWorkbench>

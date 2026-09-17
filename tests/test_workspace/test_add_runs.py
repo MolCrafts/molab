@@ -15,8 +15,8 @@ this file only pins that ``add_runs`` does **not** fold params into identity.
 
 from __future__ import annotations
 
-from molexp.workspace import GridSpace, Workspace
-from molexp.workspace.utils import derive_run_id
+from molab.workspace import GridSpace, Workspace
+from molab.workspace.utils import derive_run_id
 
 
 def _grid() -> GridSpace:

@@ -1,6 +1,6 @@
 # MSW Mock Layer
 
-This directory contains the MSW (Mock Service Worker) API mocking layer for the molexp frontend.
+This directory contains the MSW (Mock Service Worker) API mocking layer for the molab frontend.
 
 ## Architecture Overview
 
@@ -56,7 +56,7 @@ ui/mocks/
 npm run dev:web
 ```
 
-Console logs are prefixed with `[MSW]`. To hit a real backend, use `npm run dev:api` (or `molexp serve --dev`) instead.
+Console logs are prefixed with `[MSW]`. To hit a real backend, use `npm run dev:api` (or `molab serve --dev`) instead.
 
 ## Test Usage
 

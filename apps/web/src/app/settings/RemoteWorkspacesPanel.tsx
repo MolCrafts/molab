@@ -191,7 +191,7 @@ export function RemoteWorkspacesPanel(): JSX.Element {
                     deniedReason={writeDeniedReason}
                     onClick={() => void handleTest(t.name)}
                   >
-                    <FlaskConical className="size-4" />
+                    <FlaskConical className="size-icon" />
                   </WorkbenchIconAction>
                   <WorkbenchIconAction
                     label={isActive ? `${t.name} is active` : `Set ${t.name} active`}
@@ -199,7 +199,7 @@ export function RemoteWorkspacesPanel(): JSX.Element {
                     deniedReason={writeDeniedReason}
                     onClick={() => void handleSetActive(t.name)}
                   >
-                    {isActive ? <Check className="size-4" /> : <Power className="size-4" />}
+                    {isActive ? <Check className="size-icon" /> : <Power className="size-icon" />}
                   </WorkbenchIconAction>
                   {isActive && (
                     <WorkbenchIconAction
@@ -208,7 +208,7 @@ export function RemoteWorkspacesPanel(): JSX.Element {
                       deniedReason={writeDeniedReason}
                       onClick={() => void handleRefreshCache(t.name)}
                     >
-                      <RefreshCw className="h-4 w-4" />
+                      <RefreshCw className="size-icon" />
                     </WorkbenchIconAction>
                   )}
                   <WorkbenchIconAction
@@ -219,7 +219,7 @@ export function RemoteWorkspacesPanel(): JSX.Element {
                     deniedReason={writeDeniedReason}
                     onClick={() => void handleDelete(t.name)}
                   >
-                    <Trash2 className="h-4 w-4" />
+                    <Trash2 className="size-icon" />
                   </WorkbenchIconAction>
                 </div>
               </li>
@@ -237,7 +237,7 @@ export function RemoteWorkspacesPanel(): JSX.Element {
       {openWarnings.length > 0 && (
         <div className="bg-status-warning-soft px-3 py-3 text-body-lg">
           <div className="mb-1 flex items-center gap-2 text-status-warning-foreground">
-            <AlertTriangle className="h-4 w-4" />
+            <AlertTriangle className="size-icon" />
             <span className="font-medium">
               {openWarnings.length} {openWarnings.length === 1 ? "warning" : "warnings"} while
               fetching the navigation tree
@@ -256,9 +256,9 @@ export function RemoteWorkspacesPanel(): JSX.Element {
         <div className="space-y-1 bg-surface/70 px-3 py-3 text-body-lg">
           <div className="flex items-center gap-2 font-medium">
             {testResult.ok ? (
-              <Check className="h-4 w-4 text-status-completed-foreground" />
+              <Check className="size-icon text-status-completed-foreground" />
             ) : (
-              <X className="h-4 w-4 text-status-failed-foreground" />
+              <X className="size-icon text-status-failed-foreground" />
             )}
             <span>{testResult.name}</span>
             <span className="text-muted-foreground">

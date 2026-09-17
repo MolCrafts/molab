@@ -79,7 +79,7 @@ export const MetaField = ({
     <dt className="font-mono text-micro uppercase tracking-wider text-muted-foreground">{label}</dt>
     <dd
       className={cn(
-        "mt-0.5 flex min-w-0 items-center gap-1 text-body text-foreground",
+        "mt-1 flex min-w-0 items-center gap-1 text-body text-foreground",
         mono && "font-mono text-label",
       )}
       title={title}
@@ -110,7 +110,7 @@ export const OverviewSurface = ({
 }: OverviewSurfaceProps): JSX.Element => (
   <div
     className={cn(
-      "molexp-dashboard flex min-h-0 flex-1 flex-col overflow-auto bg-background",
+      "molab-dashboard flex min-h-0 flex-1 flex-col overflow-auto bg-background",
       className,
     )}
   >
@@ -128,7 +128,7 @@ export const DashboardCanvas = ({
   children: ReactNode;
   className?: string;
 }): JSX.Element => (
-  <div className={cn("mx-auto w-full max-w-5xl space-y-10 px-6 py-8 md:px-10 md:py-10", className)}>
+  <div className={cn("mx-auto w-full max-w-5xl space-y-8 px-6 py-8 md:px-8 md:py-8", className)}>
     {children}
   </div>
 );
@@ -150,8 +150,8 @@ export const InventoryCanvas = ({
   <div
     className={cn(
       fill
-        ? "flex h-full min-h-0 w-full flex-col px-4 pt-4 md:px-6 md:pt-5"
-        : "mx-auto w-full max-w-6xl space-y-6 px-6 py-6 md:px-10 md:py-8",
+        ? "flex h-full min-h-0 w-full flex-col px-4 pt-4 md:px-6 md:pt-4"
+        : "mx-auto w-full max-w-6xl space-y-6 px-6 py-6 md:px-8 md:py-8",
       className,
     )}
   >
@@ -217,7 +217,7 @@ export const DashboardCard = ({
           {Icon != null && (
             <Icon
               className={cn(
-                "size-3.5 shrink-0 text-muted-foreground",
+                "size-icon-sm shrink-0 text-muted-foreground",
                 variant === "destructive" && "text-status-failed",
               )}
               aria-hidden
@@ -247,7 +247,7 @@ export const DashboardCard = ({
               <CopyButton
                 value={copyText}
                 label={copyLabel ?? String(title ?? "section")}
-                className="size-5"
+                className="size-4-lg"
               />
             )}
             {action}
@@ -277,7 +277,7 @@ export const StatusDistribution = ({
   const empty = counts.total === 0;
 
   return (
-    <div className={cn("space-y-2.5", className)}>
+    <div className={cn("space-y-2", className)}>
       <div
         className="flex h-1.5 overflow-hidden rounded-control bg-muted"
         role="img"
@@ -291,7 +291,7 @@ export const StatusDistribution = ({
               <div
                 key={group.id}
                 title={`${group.label}: ${value}`}
-                className="h-full min-w-0.5 transition-[width]"
+                className="h-full min-w-hairline transition-[width]"
                 style={{
                   width: `${(value / counts.total) * 100}%`,
                   backgroundColor: group.color,
@@ -301,7 +301,7 @@ export const StatusDistribution = ({
           })}
       </div>
       {legend && (
-        <ul className="grid grid-cols-2 gap-x-4 gap-y-1.5 sm:grid-cols-3">
+        <ul className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3">
           {STATUS_GROUPS.map((group) => {
             const value = counts[group.id];
             return (

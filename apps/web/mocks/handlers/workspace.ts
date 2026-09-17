@@ -19,7 +19,7 @@ import type { FileNode } from "../db";
 const API_BASE = "/api";
 
 // Local-path opens mirror the server's create_if_missing semantics
-// (src/molexp/server/routes/workspace.py): unknown path + no flag → 404;
+// (src/molab/server/routes/workspace.py): unknown path + no flag → 404;
 // flag → "create" the path by adding it to the known set.
 const knownWorkspacePaths = new Set<string>(["/mock-workspace"]);
 

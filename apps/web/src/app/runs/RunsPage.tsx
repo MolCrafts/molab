@@ -1,8 +1,8 @@
 import { ListChecks, RefreshCw } from "lucide-react";
 import { type JSX, lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { ComparePane, useCompareSet } from "@/app/compare";
-import { entryFromWorkspaceRunRow } from "@/app/compare/entries";
+import { useCompareSet } from "@/app/compare";
+import { itemFromWorkspaceRunRow } from "@/app/compare/entries";
 import { EntityHeader } from "@/app/components/entity";
 import { runPath } from "@/app/entities/paths";
 import { SurfaceErrorBoundary } from "@/app/layout/SurfaceErrorBoundary";
@@ -17,7 +17,7 @@ import {
 import { formatRelative } from "@/lib/format-time";
 import { cn } from "@/lib/utils";
 import { applyFilters } from "./aggregates";
-import { parseFilterParams } from "./filterParams";
+import { parseFilterParams, toggleArrayFilter, writeFilterParams } from "./filterParams";
 import {
   DEFAULT_JOBS_SORT,
   DEFAULT_PAGE_SIZE,
@@ -28,7 +28,8 @@ import {
   parsePageSize,
 } from "./jobsTable";
 import { RunsJobsTable } from "./RunsJobsTable";
-import { parseRunsTab, type RunsTab, RunsTabBar } from "./RunsTabBar";
+import { RunsStatusProgress } from "./RunsStatusProgress";
+
 import type { WorkspaceRunRow, WorkspaceRunsFilters } from "./types";
 import { type MultiSelectState, nextSelection } from "./useRunMultiSelect";
 import { useWorkspaceRuns } from "./useWorkspaceRuns";
@@ -45,7 +46,6 @@ interface RunsPageProps {
 const writeRunsParams = (
   prev: URLSearchParams,
   patch: {
-    tab?: RunsTab;
     runId?: string | null;
     executionId?: string | null;
     sort?: JobsSort | null;
@@ -54,10 +54,6 @@ const writeRunsParams = (
   },
 ): URLSearchParams => {
   const next = new URLSearchParams(prev);
-  if (patch.tab !== undefined) {
-    if (patch.tab === "jobs") next.delete("tab");
-    else next.set("tab", patch.tab);
-  }
   if (patch.runId !== undefined) {
     if (patch.runId === null || patch.runId === "") next.delete("runId");
     else next.set("runId", patch.runId);
@@ -95,7 +91,6 @@ export const RunsPage = ({ snapshot, onInspectorChange }: RunsPageProps): JSX.El
     [searchParams],
   );
 
-  const tab = parseRunsTab(searchParams.get("tab"));
   const selectedRunId = searchParams.get("runId");
   const selectedExecutionId = searchParams.get("executionId");
   const jobsSort = useMemo(() => parseJobsSort(searchParams.get("sort")), [searchParams]);
@@ -131,7 +126,7 @@ export const RunsPage = ({ snapshot, onInspectorChange }: RunsPageProps): JSX.El
     const picked = filteredRuns.filter((run) => compareSelection.selected.has(run.id));
     compare.addMany(
       picked.map((run) =>
-        entryFromWorkspaceRunRow(run, {
+        itemFromWorkspaceRunRow(run, {
           key: run.workspaceKey,
           label: workspaceLabels.get(run.workspaceKey) ?? run.workspaceKey,
         }),
@@ -145,9 +140,15 @@ export const RunsPage = ({ snapshot, onInspectorChange }: RunsPageProps): JSX.El
     [rows, selectedRunId],
   );
 
-  const setTab = useCallback(
-    (next: RunsTab): void => {
-      setSearchParams((prev) => writeRunsParams(prev, { tab: next }), { replace: true });
+  // Posture before inventory: the status mix of everything the current filters
+  // admit, and each segment is the filter that narrows to it.
+  const toggleStatusFilter = useCallback(
+    (status: string): void => {
+      setSearchParams(
+        (prev) =>
+          writeFilterParams(prev, toggleArrayFilter(parseFilterParams(prev), "status", status)),
+        { replace: true },
+      );
     },
     [setSearchParams],
   );
@@ -304,20 +305,16 @@ export const RunsPage = ({ snapshot, onInspectorChange }: RunsPageProps): JSX.El
             size="default"
             className="text-muted-foreground hover:text-foreground"
           >
-            <RefreshCw className={cn("h-3.5 w-3.5", loading && "mol-motion-progress-spin")} />
+            <RefreshCw className={cn("size-icon-sm", loading && "mol-motion-progress-spin")} />
           </WorkbenchIconAction>
         }
       />
-      <div className="border-b border-border/60 px-3 pb-2 text-micro text-muted-foreground">
+      <div className="border-b border-border/60 px-4 py-2 text-micro text-muted-foreground">
         {headerSummary}
         {lastSyncedAt ? ` · synced ${formatRelative(lastSyncedAt.toISOString())}` : ""}
         {unreachableNote}
       </div>
-      <div className="shrink-0 border-b border-border/60 bg-background px-4">
-        <RunsTabBar value={tab} onChange={setTab} />
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-y-auto px-3 py-2">
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
         {error ? (
           <WorkbenchOperationState
             kind="error"
@@ -328,13 +325,17 @@ export const RunsPage = ({ snapshot, onInspectorChange }: RunsPageProps): JSX.El
           />
         ) : null}
 
-        {tab === "jobs" && compareSelection.selected.size > 0 && (
+        <div className="mb-3 border-b border-border/60 pb-3">
+          <RunsStatusProgress runs={filteredRuns} onSelectStatus={toggleStatusFilter} />
+        </div>
+
+        {compareSelection.selected.size > 0 && (
           <div className="mb-2 flex items-center gap-2">
             <span className="text-label text-muted-foreground">
               {compareSelection.selected.size} selected
             </span>
             <WorkbenchAction kind="secondary" size="compact" onClick={addSelectedToCompare}>
-              Add to comparison
+              Add to selection
             </WorkbenchAction>
             <WorkbenchAction
               kind="ghost"
@@ -346,29 +347,21 @@ export const RunsPage = ({ snapshot, onInspectorChange }: RunsPageProps): JSX.El
           </div>
         )}
 
-        {tab === "jobs" && (
-          <RunsJobsTable
-            rows={filteredRuns}
-            selectedRunId={selectedRunId}
-            onSelectRun={selectRun}
-            selection={{
-              selected: compareSelection.selected,
-              selectAt: selectCompareAt,
-            }}
-            sort={jobsSort}
-            onSortChange={setJobsSort}
-            page={jobsPage}
-            pageSize={jobsPageSize}
-            onPageChange={setJobsPage}
-            onPageSizeChange={setJobsPageSize}
-          />
-        )}
-
-        {tab === "compare" && (
-          <div className="h-full min-h-0">
-            <ComparePane />
-          </div>
-        )}
+        <RunsJobsTable
+          rows={filteredRuns}
+          selectedRunId={selectedRunId}
+          onSelectRun={selectRun}
+          selection={{
+            selected: compareSelection.selected,
+            selectAt: selectCompareAt,
+          }}
+          sort={jobsSort}
+          onSortChange={setJobsSort}
+          page={jobsPage}
+          pageSize={jobsPageSize}
+          onPageChange={setJobsPage}
+          onPageSizeChange={setJobsPageSize}
+        />
       </div>
     </div>
   );

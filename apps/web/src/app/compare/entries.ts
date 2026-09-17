@@ -1,26 +1,21 @@
 /**
- * Building a `CompareEntry` from the row shapes the UI already has.
+ * Building a bag item from the row shapes the UI already has.
  *
- * Runs reach the comparison set from three surfaces with three different row
- * types, and only one of them (`WorkspaceRunRow`) carries its project and
- * experiment names. The adapters here take the names explicitly rather than
- * looking them up, so a caller that already has the snapshot does one pass and
- * a caller that does not is forced to say what it means.
- *
- * `workspaceKey` is the one level no row type carries: the backend answers for
- * whichever workspace the request selected, so only the caller knows which one
- * it asked. Everything downstream depends on it being right.
+ * `workspaceKey` is the one level no row type always carries: the backend
+ * answers for whichever workspace the request selected, so only the caller
+ * knows which one it asked.
  */
 
 import type { WorkspaceRunRow } from "@/app/runs/types";
-import type { RunSummary, ServedWorkspaceSummary } from "@/app/types";
+import type {
+  ExperimentSummary,
+  ProjectSummary,
+  RunSummary,
+  ServedWorkspaceSummary,
+} from "@/app/types";
 
-import type { CompareEntry } from "./types";
+import type { CompareItem } from "./types";
 
-/**
- * The workspace whose deep tree is loaded — the one an experiment or run page
- * is showing. Falls back to the only served workspace, then to null.
- */
 export const activeWorkspace = (
   workspaces: readonly ServedWorkspaceSummary[],
 ): ServedWorkspaceSummary | null => workspaces.find((ws) => ws.active) ?? workspaces[0] ?? null;
@@ -32,45 +27,89 @@ interface Scope {
   experimentName: string;
 }
 
-/** From an experiment page's run list, where the scope is the page itself. */
-export const entryFromRunSummary = (run: RunSummary, scope: Scope): CompareEntry => ({
+const nowIso = (): string => new Date().toISOString();
+
+export const itemFromProject = (
+  project: ProjectSummary,
+  workspace: { key: string; label: string },
+): CompareItem => ({
   ref: {
+    kind: "project",
+    workspaceKey: workspace.key,
+    projectId: project.id,
+  },
+  executionId: null,
+  workspaceLabel: workspace.label,
+  projectName: project.name,
+  experimentName: "",
+  runName: "",
+  parameters: {},
+  category: null,
+  addedAt: nowIso(),
+});
+
+export const itemFromExperiment = (
+  experiment: ExperimentSummary,
+  workspace: { key: string; label: string },
+  projectName: string,
+): CompareItem => ({
+  ref: {
+    kind: "experiment",
+    workspaceKey: workspace.key,
+    projectId: experiment.projectId,
+    experimentId: experiment.id,
+  },
+  executionId: null,
+  workspaceLabel: workspace.label,
+  projectName,
+  experimentName: experiment.name,
+  runName: "",
+  parameters: {},
+  category: null,
+  addedAt: nowIso(),
+});
+
+export const itemFromRunSummary = (run: RunSummary, scope: Scope): CompareItem => ({
+  ref: {
+    kind: "run",
     workspaceKey: scope.workspaceKey,
     projectId: run.projectId,
     experimentId: run.experimentId,
     runId: run.id,
   },
-  selected: true,
   executionId: null,
   workspaceLabel: scope.workspaceLabel,
   projectName: scope.projectName,
   experimentName: scope.experimentName,
   runName: run.name,
   parameters: run.parameters ?? {},
-  addedAt: new Date().toISOString(),
+  category: null,
+  addedAt: nowIso(),
 });
 
-/**
- * From the workspace-wide runs table, which already carries its own project
- * and experiment names — the row spans experiments, so the page cannot supply
- * them.
- */
-export const entryFromWorkspaceRunRow = (
+export const itemFromWorkspaceRunRow = (
   row: WorkspaceRunRow,
   workspace: { key: string; label: string },
-): CompareEntry => ({
+): CompareItem => ({
   ref: {
+    kind: "run",
     workspaceKey: workspace.key,
     projectId: row.projectId,
     experimentId: row.experimentId,
     runId: row.id,
   },
-  selected: true,
   executionId: null,
   workspaceLabel: workspace.label,
   projectName: row.projectName,
   experimentName: row.experimentName,
   runName: row.name,
   parameters: row.parameters ?? {},
-  addedAt: new Date().toISOString(),
+  category: null,
+  addedAt: nowIso(),
 });
+
+/** @deprecated Use itemFromRunSummary — kept for callers that still say "entry". */
+export const entryFromRunSummary = itemFromRunSummary;
+
+/** @deprecated Use itemFromWorkspaceRunRow. */
+export const entryFromWorkspaceRunRow = itemFromWorkspaceRunRow;

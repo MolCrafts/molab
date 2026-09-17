@@ -13,7 +13,7 @@ from pathlib import Path
 
 import pytest
 
-from molexp.workflow import (
+from molab.workflow import (
     Caching,
     Task,
     TaskContext,
@@ -21,7 +21,7 @@ from molexp.workflow import (
     WorkflowCompiler,
     WorkflowRuntime,
 )
-from molexp.workspace import Workspace
+from molab.workspace import Workspace
 
 # ── module-level per-task execution counters (bodies increment these) ───────
 _COUNTERS: dict[str, int] = {}
@@ -113,7 +113,7 @@ class TestRuntimeCaching:
         assert r2.outputs["step"] == 42
         assert _COUNTERS["step"] == 1
 
-    async def test_auto_cache_from_run_context_writes_under_molexp_cache(
+    async def test_auto_cache_from_run_context_writes_under_molab_cache(
         self, workspace: Workspace
     ) -> None:
         wf = Workflow(name="auto-cache")
@@ -128,8 +128,8 @@ class TestRuntimeCaching:
         with run.start() as ctx:
             result = await WorkflowRuntime().execute(compiled, run_context=ctx)
         assert result.outputs["step"] == 7
-        # Machine state lives under .molexp/, never inside a scientific dir.
-        cache_root = Path(workspace.root) / ".molexp" / "cache"
+        # Machine state lives under .molab/, never inside a scientific dir.
+        cache_root = Path(workspace.root) / ".molab" / "cache"
         assert cache_root.is_dir()
         assert list(cache_root.glob("*/*.json"))
         assert not (Path(run.run_dir) / "cache").exists()
@@ -247,7 +247,7 @@ class TestRuntimeCaching:
         """A permanently failing cache backend must be VISIBLE: the first put
         failure per (execution, task) logs a WARNING (not debug), while the run
         itself degrades gracefully and completes uncached."""
-        from molexp.workflow._engine import node_cache
+        from molab.workflow._engine import node_cache
 
         warned: list[str] = []
         monkeypatch.setattr(node_cache.logger, "warning", lambda msg: warned.append(str(msg)))

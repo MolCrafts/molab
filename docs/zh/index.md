@@ -1,12 +1,12 @@
 ---
-title: MolExp
+title: Molab
 description: 面向 FAIR 研究的智能体辅助科学工作流平台
 hide:
   - navigation
   - toc
 hero:
   kicker: 手册
-  title: MolExp
+  title: Molab
   description: 用 Python 构建可复现的科学工作流。将任务定义为普通函数，让引擎处理依赖图，并将每次运行持久化到磁盘——可选配 LLM 智能体来规划、生成和驱动实验。
   actions:
     - label: 快速开始
@@ -19,15 +19,15 @@ hero:
   install:
     label: 安装（PyPI 发布筹备中）
     methods:
-      - { label: pip, command: pip install git+https://github.com/MolCrafts/molexp }
-      - { label: uv, command: uv pip install git+https://github.com/MolCrafts/molexp }
+      - { label: pip, command: pip install git+https://github.com/MolCrafts/molab }
+      - { label: uv, command: uv pip install git+https://github.com/MolCrafts/molab }
   badges:
     - img: https://img.shields.io/badge/python-3.12%2B-blue
-      href: https://github.com/MolCrafts/molexp
+      href: https://github.com/MolCrafts/molab
       alt: Python 3.12+
 ---
 
-<h1 class="molcrafts-sr-only">MolExp</h1>
+<h1 class="molcrafts-sr-only">Molab</h1>
 
 <div class="molcrafts-manual-home" markdown>
 
@@ -62,7 +62,7 @@ hero:
   <a href="getting-started/cli-and-profiles/">
     <span>04</span>
     <strong>使用 CLI 与配置文件</strong>
-    <em>用 molexp run 替代 asyncio.run()。用 molcfg.yaml 管理运行变体。</em>
+    <em>用 molab run 替代 asyncio.run()。用 molcfg.yaml 管理运行变体。</em>
   </a>
   <a href="getting-started/start-from-ui/">
     <span>05</span>
@@ -96,8 +96,8 @@ hero:
 用装饰器定义工作流，创建工作区，执行运行。引擎处理依赖顺序、线程隔离和持久化。
 
 ```python
-import molexp as me
-from molexp.workflow import Workflow, WorkflowCompiler
+import molab as me
+from molab.workflow import Workflow, WorkflowCompiler
 
 wf = Workflow(name="sum")
 
@@ -145,7 +145,7 @@ best = summary.min_by("summarize")
 
 ### 注册实验，从终端运行
 
-将编译好的工作流绑定到实验，让 `molexp run` 负责发现、配置文件、恢复标志和调度器执行。
+将编译好的工作流绑定到实验，让 `molab run` 负责发现、配置文件、恢复标志和调度器执行。
 
 ```python
 (
@@ -157,10 +157,10 @@ best = summary.min_by("summarize")
 ```
 
 ```bash
-molexp run train.py --profile smoke
-molexp run train.py --profile smoke --override scale=4.0
-molexp run train.py --resume            # 继续失败的运行
-molexp run train.py --rerun --fresh     # 从头重新执行
+molab run train.py --profile smoke
+molab run train.py --profile smoke --override scale=4.0
+molab run train.py --resume            # 继续失败的运行
+molab run train.py --rerun --fresh     # 从头重新执行
 ```
 
 </article>
@@ -218,8 +218,8 @@ molexp run train.py --rerun --fresh     # 从头重新执行
 
 ## 向外扩展，保持轻量
 
-`import molexp` 保持轻量——重依赖只在真正用到时加载。核心通过可选 extras
-（`molexp[agent]`、`molexp[tensorboard]`）连接 molcrafts 栈，并通过两条独立
+`import molab` 保持轻量——重依赖只在真正用到时加载。核心通过可选 extras
+（`molab[agent]`、`molab[tensorboard]`）连接 molcrafts 栈，并通过两条独立
 插件通道接入你自己的代码。
 
 </div>
@@ -227,7 +227,7 @@ molexp run train.py --rerun --fresh     # 从头重新执行
 <div class="molcrafts-manual-grid molcrafts-manual-grid--cols-3">
   <a href="guide/molq/">
     <strong>molq · 调度桥</strong>
-    <em>让 <code>molexp run</code> 上集群：同一运行可提交到 Slurm、PBS 或 LSF。换的是传输，工作流与记录不变。</em>
+    <em>让 <code>molab run</code> 上集群：同一运行可提交到 Slurm、PBS 或 LSF。换的是传输，工作流与记录不变。</em>
   </a>
   <a href="getting-started/cli-and-profiles/">
     <strong>molcfg · 运行配置</strong>
@@ -243,11 +243,11 @@ molexp run train.py --rerun --fresh     # 从头重新执行
   </a>
   <a href="plugins/">
     <strong>CLI 插件</strong>
-    <em>任意 pip 包通过 <code>molexp.cli_plugins</code> 入口点注册 <code>molexp &lt;yourcmd&gt;</code> 子命令。</em>
+    <em>任意 pip 包通过 <code>molab.cli_plugins</code> 入口点注册 <code>molab &lt;yourcmd&gt;</code> 子命令。</em>
   </a>
   <a href="plugins/">
     <strong>UI 插件</strong>
-    <em>通过独立的 <code>molexp.ui_plugins</code> 通道向 SPA 注入动态加载的 React 包。</em>
+    <em>通过独立的 <code>molab.ui_plugins</code> 通道向 SPA 注入动态加载的 React 包。</em>
   </a>
 </div>
 
@@ -294,7 +294,7 @@ molexp run train.py --rerun --fresh     # 从头重新执行
 
 ## 三大支柱
 
-MolExp 不是功能的大杂烩。每个子系统服务于以下目标之一。
+Molab 不是功能的大杂烩。每个子系统服务于以下目标之一。
 
 </div>
 

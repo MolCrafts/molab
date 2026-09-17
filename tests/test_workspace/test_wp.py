@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from molexp.workspace import Workspace
+from molab.workspace import Workspace
 
 
 def _ws(tmp_path: Path) -> Workspace:

@@ -19,7 +19,7 @@ export class CurateTasksService {
      * @param projectId
      * @param experimentId
      * @param requestBody
-     * @param molexpSession
+     * @param molabSession
      * @returns CurateTaskResponse Successful Response
      * @throws ApiError
      */
@@ -27,7 +27,7 @@ export class CurateTasksService {
         projectId: string,
         experimentId: string,
         requestBody: CurateTaskCreateRequest,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<CurateTaskResponse> {
         return __request(OpenAPI, {
             method: 'POST',
@@ -37,7 +37,7 @@ export class CurateTasksService {
                 'experiment_id': experimentId,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -51,14 +51,14 @@ export class CurateTasksService {
      * List the live curate tasks in this workspace (in-memory; MVP).
      * @param projectId
      * @param experimentId
-     * @param molexpSession
+     * @param molabSession
      * @returns CurateTaskListResponse Successful Response
      * @throws ApiError
      */
     public static listCurateTasks(
         projectId: string,
         experimentId: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<CurateTaskListResponse> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -68,7 +68,7 @@ export class CurateTasksService {
                 'experiment_id': experimentId,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -81,7 +81,7 @@ export class CurateTasksService {
      * @param projectId
      * @param experimentId
      * @param taskId
-     * @param molexpSession
+     * @param molabSession
      * @returns CurateTaskResponse Successful Response
      * @throws ApiError
      */
@@ -89,7 +89,7 @@ export class CurateTasksService {
         projectId: string,
         experimentId: string,
         taskId: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<CurateTaskResponse> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -100,7 +100,7 @@ export class CurateTasksService {
                 'task_id': taskId,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,

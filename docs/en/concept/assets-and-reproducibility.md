@@ -1,6 +1,6 @@
 # Assets and Reproducibility
 
-Reproducibility in MolExp is not only about rerunning code. It's about recovering the workflow definition, the configuration, the execution record, and the data the workflow depended on. The asset layer gives those resources first-class names and scopes.
+Reproducibility in Molab is not only about rerunning code. It's about recovering the workflow definition, the configuration, the execution record, and the data the workflow depended on. The asset layer gives those resources first-class names and scopes.
 
 ## Assets as named resources
 
@@ -26,7 +26,7 @@ data = ctx.find_asset("training_data")
 
 ## Reproducibility records
 
-Beyond outputs, MolExp persists the metadata that makes a run interpretable later:
+Beyond outputs, Molab persists the metadata that makes a run interpretable later:
 
 | Record | Where | What it captures |
 |---|---|---|
@@ -39,15 +39,15 @@ Together, these turn a run directory into a scientific record — not just a pil
 
 ## FAIR boundaries
 
-MolExp supports FAIR-oriented practice inside a managed workspace:
+Molab supports FAIR-oriented practice inside a managed workspace:
 
 - **Findable** — stable names, scoped manifests, queryable
 - **Accessible** — Python API, server, and UI all read the same records
 - **Interoperable** — teams can adopt consistent metadata conventions
 - **Reusable** — workflows recover assets by name and scope, not ephemeral paths
 
-What MolExp does **not** do automatically: publish external identifiers, enforce a community schema, or turn local records into a repository-grade FAIR archive. It gives you a strong internal record. That is a substantial improvement over ad hoc folders.
+What Molab does **not** do automatically: publish external identifiers, enforce a community schema, or turn local records into a repository-grade FAIR archive. It gives you a strong internal record. That is a substantial improvement over ad hoc folders.
 
 ## Why this matters
 
-Most workflow systems fail gradually. The script still exists, but nobody remembers which dataset directory was the real one, which profile was used for the paper figure, or whether the checkpoint was generated before or after the last code change. MolExp keeps the workflow, the run metadata, and the reusable assets in one persistent structure — so those questions have answers.
+Most workflow systems fail gradually. The script still exists, but nobody remembers which dataset directory was the real one, which profile was used for the paper figure, or whether the checkpoint was generated before or after the last code change. Molab keeps the workflow, the run metadata, and the reusable assets in one persistent structure — so those questions have answers.

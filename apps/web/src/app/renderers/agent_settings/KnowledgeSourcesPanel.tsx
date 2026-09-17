@@ -94,7 +94,7 @@ export const KnowledgeSourcesPanel = (): JSX.Element => {
   return (
     <section className="space-y-3 bg-surface/60 px-3 py-3">
       <header className="flex items-start gap-2">
-        <BookOpen className="mt-0.5 size-4 text-muted-foreground" />
+        <BookOpen className="mt-1 size-icon text-muted-foreground" />
         <div className="min-w-0 flex-1">
           <h3 className="text-body-lg font-semibold text-foreground">
             molmcp · knowledge packages
@@ -122,7 +122,7 @@ export const KnowledgeSourcesPanel = (): JSX.Element => {
       </header>
 
       {data && (
-        <p className="flex items-center gap-1.5 text-micro text-muted-foreground">
+        <p className="flex items-center gap-2 text-micro text-muted-foreground">
           <Server className="size-3" />
           <span className="font-mono">{data.serverName}</span>
           <span>· {data.scope} scope</span>
@@ -151,7 +151,7 @@ export const KnowledgeSourcesPanel = (): JSX.Element => {
                 disabled={!data?.configured}
                 onClick={() => toggle(pkg)}
                 className={cn(
-                  "rounded-control px-2.5 py-1 font-mono text-label transition-colors disabled:opacity-40",
+                  "rounded-control px-2 py-1 font-mono text-label transition-colors disabled:opacity-40",
                   on
                     ? "bg-info-soft/60 text-info-foreground"
                     : "bg-muted/40 text-muted-foreground hover:bg-muted",
@@ -173,7 +173,7 @@ export const KnowledgeSourcesPanel = (): JSX.Element => {
           disabled={loading || !data?.configured || selected.length === 0}
           onClick={() => setSelected([])}
         >
-          <X className="size-4" />
+          <X className="size-icon" />
         </WorkbenchIconAction>
         <WorkbenchAction
           kind="primary"
@@ -184,7 +184,7 @@ export const KnowledgeSourcesPanel = (): JSX.Element => {
           {saving ? (
             <ProgressSpinner className="mr-1" label="Saving" />
           ) : savedFlash ? (
-            <Check className="mr-1 size-3.5" />
+            <Check className="mr-1 size-icon-sm" />
           ) : null}
           {savedFlash ? "Saved" : "Save on molmcp"}
         </WorkbenchAction>

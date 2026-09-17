@@ -18,6 +18,8 @@ export interface LeftIconRailItem {
   icon: ComponentType<SVGProps<SVGSVGElement>>;
   /** Add a quiet visual group boundary before this item. */
   separatorBefore?: boolean;
+  /** Hover / focus intent: start loading this section before click. */
+  onIntent?: () => void;
 }
 
 export interface LeftIconRailProps {
@@ -57,8 +59,10 @@ export const LeftIconRail = ({
                 "bg-background text-foreground after:bg-accent hover:bg-background",
             )}
             onClick={() => onSelect(item.id)}
+            onPointerEnter={() => item.onIntent?.()}
+            onFocus={() => item.onIntent?.()}
           >
-            <Icon className="h-4 w-4" />
+            <Icon className="size-icon" />
           </Button>
         </TooltipTrigger>
         <TooltipContent side="right">{item.label}</TooltipContent>
@@ -118,18 +122,20 @@ export const LeftExplorer = ({
         className,
       )}
     >
-      <header className="flex h-[35px] shrink-0 items-center border-b border-border px-2">
+      <header className="flex h-toolbar-compact shrink-0 items-center border-b border-border px-2">
         <div className="flex min-w-0 flex-1 items-center justify-between gap-2">
           <h2 className="min-w-0 truncate text-label font-semibold uppercase tracking-wide text-muted-foreground">
             {title}
           </h2>
-          {actions ? <div className="flex shrink-0 items-center gap-0.5">{actions}</div> : null}
+          {actions ? (
+            <div className="flex shrink-0 items-center gap-hairline">{actions}</div>
+          ) : null}
         </div>
-        {toolbar ? <div className="space-y-1.5">{toolbar}</div> : null}
+        {toolbar ? <div className="space-y-2">{toolbar}</div> : null}
       </header>
 
       <ScrollArea className="min-h-0 flex-1">
-        <div className={cn("min-h-full px-2 py-1.5", bodyClassName)}>{children}</div>
+        <div className={cn("min-h-full px-2 py-row-pad", bodyClassName)}>{children}</div>
       </ScrollArea>
     </div>
   );
@@ -152,14 +158,22 @@ export const LeftExplorer = ({
 const HORIZONTAL_HANDLE =
   "h-px w-full after:inset-x-0 after:left-0 after:top-1/2 after:bottom-auto after:h-1 after:w-full after:translate-x-0 after:-translate-y-1/2 hover:bg-accent/60";
 
-/** Dock height when nothing is persisted — about six rows plus its header. */
-const DOCK_SIZE = { default: "200px", min: "60px", max: "70%" };
+/** Dock height when nothing is persisted — about six rows plus its header.
+ *  Min is header + one two-line item; 60px clips the bag under overflow-hidden. */
+const DOCK_SIZE = { default: "200px", min: "88px", max: "70%" };
 
 export interface ExplorerDockProps {
   /** The explorer column; takes whatever height the dock leaves it. */
   children: ReactNode;
   /** The surface pinned below it, resizable and persisted across sessions. */
   dock: ReactNode;
+  /**
+   * Panel-group id. Products namespace it so two docks in one app — or two
+   * apps in one browser origin — do not share a persisted height.
+   */
+  id?: string;
+  /** Storage key for the persisted split. Defaults to `${id}.size`. */
+  autoSaveId?: string;
 }
 
 /**
@@ -170,11 +184,16 @@ export interface ExplorerDockProps {
  * is the user's: how much of the panel a staging area deserves depends on
  * what they are staging, so the split is draggable and remembered.
  */
-export const ExplorerDock = ({ children, dock }: ExplorerDockProps): JSX.Element => (
+export const ExplorerDock = ({
+  children,
+  dock,
+  id = "explorer-dock",
+  autoSaveId,
+}: ExplorerDockProps): JSX.Element => (
   <ResizablePanelGroup
-    id="molexp-explorer-dock"
+    id={id}
     direction="vertical"
-    autoSaveId="molexp.explorerDock"
+    autoSaveId={autoSaveId ?? `${id}.size`}
     autoSavePanelIds={["explorer", "dock"]}
     className="min-h-0 min-w-0 flex-1"
   >

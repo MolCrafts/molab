@@ -1,28 +1,28 @@
-"""Guard test — molexp-owned engine, zero pydantic_graph dependency.
+"""Guard test — molab-owned engine, zero pydantic_graph dependency.
 
 Historically ``workflow/_engine/`` was named ``_pydantic_graph/`` and the
 repo's one surviving pydantic_graph surface was the ``End`` sentinel
 re-export. Both are gone: the engine package carries an honest name, the
-``End`` sentinel is molexp-owned (``molexp.workflow.types.End``), and
+``End`` sentinel is molab-owned (``molab.workflow.types.End``), and
 ``pydantic_graph`` was removed from ``pyproject.toml``.
 
 Assertions:
 
 1. **Zero pydantic_graph anywhere in src/** — AST scan of every module
-   under ``src/molexp/`` rejects any ``import pydantic_graph`` /
+   under ``src/molab/`` rejects any ``import pydantic_graph`` /
    ``from pydantic_graph import ...`` (including lazy in-function
    imports; the AST walk sees them all).
-2. ``End`` is molexp-owned: defined in ``molexp.workflow.types``, generic
+2. ``End`` is molab-owned: defined in ``molab.workflow.types``, generic
    frozen dataclass, ``End()`` / ``End(None)`` / ``End(x).data`` behave
    like the retired ``pydantic_graph.End`` (with the ergonomic
    ``data=None`` default).
-3. Exactly one ``class End`` definition under ``src/molexp/workflow/``,
+3. Exactly one ``class End`` definition under ``src/molab/workflow/``,
    and it lives in ``types.py`` — no duplicate sentinel.
-4. ``Next`` is public (``"Next" in molexp.workflow.__all__``) and the
+4. ``Next`` is public (``"Next" in molab.workflow.__all__``) and the
    public re-export is the same class as ``workflow.types.Next``.
 5. AST scan rejects new ``*Scheduler`` / ``*Runner`` / ``*Frontier`` /
    ``*GraphRunner`` class names and any ``BaseNode`` subclass under
-   ``src/molexp/workflow/``.
+   ``src/molab/workflow/``.
 6. ``workflow/_engine/compiler.py`` never constructs a pg ``Graph``.
 """
 
@@ -31,7 +31,7 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-SRC_ROOT = Path(__file__).resolve().parents[2] / "src" / "molexp"
+SRC_ROOT = Path(__file__).resolve().parents[2] / "src" / "molab"
 WORKFLOW_ROOT = SRC_ROOT / "workflow"
 
 
@@ -48,7 +48,7 @@ def _classes_in(path: Path) -> list[ast.ClassDef]:
 
 
 def test_no_pydantic_graph_import_anywhere_in_src():
-    """molexp has no pydantic_graph dependency; no module under src/ may
+    """molab has no pydantic_graph dependency; no module under src/ may
     import it — top-level, lazy, or TYPE_CHECKING alike."""
     offenders: list[str] = []
     for path in _iter_py_files(SRC_ROOT):
@@ -64,23 +64,23 @@ def test_no_pydantic_graph_import_anywhere_in_src():
                     offenders.append(f"{path.relative_to(SRC_ROOT)}:{node.lineno}")
     assert not offenders, (
         "pydantic_graph must never be imported under src/ — the dependency "
-        "was removed and the workflow engine is molexp-owned "
+        "was removed and the workflow engine is molab-owned "
         f"(workflow/_engine/). Offenders: {offenders}"
     )
 
 
-# ── 2. End is molexp-owned and behaviorally equivalent ───────────────────────
+# ── 2. End is molab-owned and behaviorally equivalent ───────────────────────
 
 
-def test_end_is_molexp_owned():
+def test_end_is_molab_owned():
     import dataclasses
 
-    from molexp.workflow import End
-    from molexp.workflow.types import End as TypesEnd
+    from molab.workflow import End
+    from molab.workflow.types import End as TypesEnd
 
-    assert End is TypesEnd, "molexp.workflow.End must be workflow.types.End."
-    assert End.__module__ == "molexp.workflow.types", (
-        "End must be defined by molexp, not re-exported from a third-party "
+    assert End is TypesEnd, "molab.workflow.End must be workflow.types.End."
+    assert End.__module__ == "molab.workflow.types", (
+        "End must be defined by molab, not re-exported from a third-party "
         f"package (got {End.__module__})."
     )
     assert dataclasses.is_dataclass(End), "End stays a dataclass sentinel."
@@ -91,7 +91,7 @@ def test_end_sentinel_behavior():
 
     import pytest
 
-    from molexp.workflow import End
+    from molab.workflow import End
 
     # Bare End() — documented in task-body error messages — is valid.
     assert End().data is None
@@ -112,7 +112,7 @@ def test_end_sentinel_behavior():
 
 
 def test_single_end_definition_in_types():
-    """Exactly one ``class End`` under src/molexp/workflow/ — in types.py."""
+    """Exactly one ``class End`` under src/molab/workflow/ — in types.py."""
     definitions: list[str] = []
     for path in _iter_py_files(WORKFLOW_ROOT):
         for cls in _classes_in(path):
@@ -129,15 +129,15 @@ def test_single_end_definition_in_types():
 def test_next_is_public_and_single_class():
     """``Next`` is blessed public API: in ``__all__``, and the public name is
     the one class defined in ``workflow.types`` (no duplicate token)."""
-    import molexp.workflow as W
-    from molexp.workflow.types import Next as InternalNext
+    import molab.workflow as W
+    from molab.workflow.types import Next as InternalNext
 
     assert "Next" in W.__all__, (
         "Next is the public wf.branch / wf.loop routing return value; "
-        "it must be in molexp.workflow.__all__."
+        "it must be in molab.workflow.__all__."
     )
     assert W.Next is InternalNext, (
-        "molexp.workflow.Next must be the same class as workflow.types.Next."
+        "molab.workflow.Next must be the same class as workflow.types.Next."
     )
 
 
@@ -160,7 +160,7 @@ def test_no_new_scheduler_runner_frontier_classes():
 
 
 def test_no_basenode_subclasses():
-    """AST scan: NO class anywhere under src/molexp/workflow/ inherits from
+    """AST scan: NO class anywhere under src/molab/workflow/ inherits from
     a ``BaseNode``. Task / Actor remain plain abstractions (see
     ``test_single_track_compile``); the engine invokes bodies directly."""
     basenode_subclasses: list[str] = []
@@ -181,7 +181,7 @@ def test_no_basenode_subclasses():
 
     unique = sorted(set(basenode_subclasses))
     assert unique == [], (
-        f"No BaseNode subclass expected in the molexp-owned engine; found: {unique}."
+        f"No BaseNode subclass expected in the molab-owned engine; found: {unique}."
     )
 
 
@@ -189,7 +189,7 @@ def test_no_basenode_subclasses():
 
 
 def test_compiler_does_not_use_pg_primitives():
-    """The lowering compiler is pg-free: the DAG lowers to a molexp-owned
+    """The lowering compiler is pg-free: the DAG lowers to a molab-owned
     ``ExecutionPlan`` executed by the structural engine; pg's GraphBuilder /
     Join reducers / Decision / Graph never appear."""
     compiler_src = (WORKFLOW_ROOT / "_engine" / "compiler.py").read_text()

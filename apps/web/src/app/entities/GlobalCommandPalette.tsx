@@ -191,9 +191,9 @@ export const GlobalCommandPalette = ({
       >
         <div className="flex items-center gap-2 border-b border-border px-3">
           {mode === "commands" ? (
-            <Terminal className="h-4 w-4 flex-none text-muted-foreground" />
+            <Terminal className="size-icon flex-none text-muted-foreground" />
           ) : (
-            <Search className="h-4 w-4 flex-none text-muted-foreground" />
+            <Search className="size-icon flex-none text-muted-foreground" />
           )}
           <Input
             ref={inputRef}
@@ -211,7 +211,7 @@ export const GlobalCommandPalette = ({
             placeholder={placeholder}
             className="h-control-comfortable w-full rounded-none border-0 bg-transparent px-0 text-body focus-visible:ring-0"
           />
-          <kbd className="hidden flex-none rounded-control border border-border bg-muted px-1.5 py-0.5 font-mono text-micro text-muted-foreground sm:inline">
+          <kbd className="hidden flex-none rounded-control border border-border bg-muted px-1 py-1 font-mono text-micro text-muted-foreground sm:inline">
             {mode === "commands" ? "⌘⇧P" : "⌘K"}
           </kbd>
         </div>
@@ -267,7 +267,7 @@ export const GlobalCommandPalette = ({
                       isActive ? "bg-muted" : ""
                     }`}
                   >
-                    <Terminal className="h-4 w-4 flex-none text-muted-foreground" />
+                    <Terminal className="size-icon flex-none text-muted-foreground" />
                     <span className="min-w-0 flex-1 truncate text-body-lg text-foreground">
                       {cmd.label}
                     </span>
@@ -320,7 +320,7 @@ export const GlobalCommandPalette = ({
                     isActive ? "bg-muted" : ""
                   }`}
                 >
-                  <Icon className={`h-4 w-4 flex-none ${meta.iconClassName}`} />
+                  <Icon className={`size-icon flex-none ${meta.iconClassName}`} />
                   <span className="min-w-0 flex-1 truncate text-body-lg text-foreground">
                     {entry.ref.label ?? entry.ref.id}
                   </span>

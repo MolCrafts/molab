@@ -1,14 +1,14 @@
 """Operator-config **writer** — ``save_operator_config`` / ``set_operator_values``.
 
 Spec ``vision-loop-03-settings-operator-config``: the services layer gains the
-one write path for ``~/.molexp/config.json`` (atomic tmp+rename, the idiom
+one write path for ``~/.molab/config.json`` (atomic tmp+rename, the idiom
 ``cli/config_cmd.py`` already uses), and the CLI's private ``_save_config``
 is deleted in favour of delegation — CLI and server share loader **and**
 writer. Loader/bridge coverage stays in
 ``tests/test_server/test_operator_config_bridge.py`` (untouched).
 
 Every test points the writer at a tmp path — the operator's real
-``~/.molexp/config.json`` is never read or written.
+``~/.molab/config.json`` is never read or written.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from pathlib import Path
 
 import pytest
 
-from molexp.services.operator_config import (
+from molab.services.operator_config import (
     load_operator_config,
     save_operator_config,
     set_operator_values,

@@ -1,6 +1,12 @@
 import { ChevronRight } from "lucide-react";
-import type { ComponentType, JSX, ReactNode } from "react";
+import type { ComponentType, JSX, MouseEvent, ReactNode } from "react";
 import { Fragment, useEffect, useRef, useState } from "react";
+
+export interface TreeClickModifiers {
+  shift: boolean;
+  meta: boolean;
+}
+
 import { EMPTY_COPY, EmptyState } from "@/app/components/entity";
 import {
   ContextMenu,
@@ -37,6 +43,16 @@ export interface TreeNode {
   emptyChildLabel?: string;
   actions?: TreeNodeAction[];
   onSelect?: () => void;
+  /**
+   * Intent (hover / keyboard focus): start async work the click will need
+   * so the row does not stall after activation.
+   */
+  onPrefetch?: () => void;
+  /**
+   * Workspace-qualified bag key. Nodes without it are not modifier-selectable.
+   * Distinct from `id`, which is the expand/active row identity.
+   */
+  selectionKey?: string;
 }
 
 interface TreeViewProps {
@@ -53,7 +69,33 @@ interface TreeViewProps {
    * empty rows re-fire onExpand even when childCount was already 0.
    */
   dataEpoch?: number;
+  /** Bag keys currently in the comparison set. Highlight only; does not navigate. */
+  selectedIds?: ReadonlySet<string>;
+  /**
+   * Modifier click on bag-eligible rows. `ids` are `selectionKey`s in visible
+   * preorder (shift range already applied). TreeView does not import the bag.
+   */
+  onModifierSelect?: (ids: readonly string[], modifiers: TreeClickModifiers) => void;
 }
+
+/** Visible bag keys in display order — collapsed subtrees and keyless nodes omitted. */
+export const visiblePreorder = (
+  nodes: readonly TreeNode[],
+  expanded: ReadonlySet<string>,
+): string[] => {
+  const out: string[] = [];
+  const walk = (list: readonly TreeNode[]): void => {
+    for (const node of list) {
+      if (node.selectionKey) out.push(node.selectionKey);
+      if (node.children !== undefined && expanded.has(node.id)) walk(node.children);
+    }
+  };
+  walk(nodes);
+  return out;
+};
+
+/** @deprecated Prefer visiblePreorder. */
+export const flattenVisibleIds = visiblePreorder;
 
 /** Shared action renderer for tree row menus and panel blank-area menus. */
 export const TreeMenuItems = ({ actions }: { actions: TreeNodeAction[] }): JSX.Element => (
@@ -102,6 +144,8 @@ interface RowProps {
   /** Lazy-load hook — also re-fired when an open node is empty after a refresh. */
   onExpand?: (nodeId: string) => void;
   dataEpoch?: number;
+  selectedIds?: ReadonlySet<string>;
+  onRowClick?: (node: TreeNode, event: MouseEvent<HTMLButtonElement>) => void;
 }
 
 const TreeRow = ({
@@ -112,10 +156,13 @@ const TreeRow = ({
   onToggle,
   onExpand,
   dataEpoch = 0,
+  selectedIds,
+  onRowClick,
 }: RowProps): JSX.Element => {
   const hasChildren = node.children !== undefined;
   const isExpanded = expanded.has(node.id);
   const isActive = activeId === node.id;
+  const isBagSelected = Boolean(node.selectionKey && selectedIds?.has(node.selectionKey));
   const Icon = node.icon;
   const actions = node.actions ?? [];
   const childCount = node.children?.length ?? 0;
@@ -140,11 +187,19 @@ const TreeRow = ({
       kind="ghost"
       size="content"
       type="button"
-      className={`group flex h-control-compact min-w-0 flex-1 items-center gap-2 overflow-hidden rounded-[2px] px-2 text-left text-body-lg transition-colors ${
+      className={`group flex h-control-compact min-w-0 flex-1 items-center gap-2 overflow-hidden rounded-hairline px-2 text-left text-body-lg transition-colors ${
         // Soft lavender wash — solid bg-accent is for buttons, too dark on day mode rows.
-        isActive ? "bg-accent-muted text-accent-muted-foreground" : "hover:bg-muted/40"
+        isActive
+          ? "bg-accent-muted text-accent-muted-foreground"
+          : isBagSelected
+            ? "bg-muted/60"
+            : "hover:bg-muted/40"
       }`}
-      onClick={() => {
+      onClick={(event) => {
+        if (onRowClick) {
+          onRowClick(node, event);
+          return;
+        }
         if (node.onSelect) {
           node.onSelect();
         } else if (hasChildren) {
@@ -154,11 +209,13 @@ const TreeRow = ({
       onContextMenu={() => {
         node.onSelect?.();
       }}
+      onPointerEnter={() => node.onPrefetch?.()}
+      onFocus={() => node.onPrefetch?.()}
       title={node.hoverTitle ?? node.label}
     >
       {Icon && (
         <Icon
-          className={`h-3.5 w-3.5 flex-none ${node.iconClassName ?? "text-muted-foreground"}`}
+          className={`size-icon-sm flex-none ${node.iconClassName ?? "text-muted-foreground"}`}
         />
       )}
       {node.leadingAccessory && <span className="flex-none">{node.leadingAccessory}</span>}
@@ -207,7 +264,7 @@ const TreeRow = ({
             }}
           >
             <ChevronRight
-              className={`h-3.5 w-3.5 transition-transform ${isExpanded ? "rotate-90" : ""}`}
+              className={`size-icon-sm transition-transform ${isExpanded ? "rotate-90" : ""}`}
             />
           </WorkbenchIconAction>
         ) : (
@@ -235,6 +292,8 @@ const TreeRow = ({
                 onToggle={onToggle}
                 onExpand={onExpand}
                 dataEpoch={dataEpoch}
+                selectedIds={selectedIds}
+                onRowClick={onRowClick}
               />
             ))
           )}
@@ -253,10 +312,13 @@ export const TreeView = ({
   emptyIcon,
   onExpand,
   dataEpoch = 0,
+  selectedIds,
+  onModifierSelect,
 }: TreeViewProps): JSX.Element => {
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(expandPath ?? []));
   const onExpandRef = useRef(onExpand);
   onExpandRef.current = onExpand;
+  const shiftAnchor = useRef<number | null>(null);
   // Stable key so expandPath array identity churn does not re-fire loads.
   const expandPathKey = expandPath?.join("\0") ?? "";
 
@@ -287,6 +349,39 @@ export const TreeView = ({
     });
   };
 
+  const handleRowClick = (node: TreeNode, event: MouseEvent<HTMLButtonElement>): void => {
+    const modifiers: TreeClickModifiers = {
+      shift: event.shiftKey,
+      meta: event.metaKey || event.ctrlKey,
+    };
+    if (onModifierSelect && node.selectionKey && (modifiers.shift || modifiers.meta)) {
+      event.preventDefault();
+      const ordered = visiblePreorder(nodes, expanded);
+      const index = ordered.indexOf(node.selectionKey);
+      if (index < 0) return;
+      if (modifiers.shift && shiftAnchor.current !== null) {
+        const [lo, hi] =
+          shiftAnchor.current <= index
+            ? [shiftAnchor.current, index]
+            : [index, shiftAnchor.current];
+        onModifierSelect(ordered.slice(lo, hi + 1), modifiers);
+        return;
+      }
+      shiftAnchor.current = index;
+      onModifierSelect([node.selectionKey], modifiers);
+      return;
+    }
+    if (node.selectionKey) {
+      const ordered = visiblePreorder(nodes, expanded);
+      shiftAnchor.current = ordered.indexOf(node.selectionKey);
+    }
+    if (node.onSelect) {
+      node.onSelect();
+    } else if (node.children !== undefined) {
+      toggle(node.id);
+    }
+  };
+
   if (nodes.length === 0) {
     return (
       <EmptyState
@@ -299,7 +394,7 @@ export const TreeView = ({
   }
 
   return (
-    <div className="space-y-0.5">
+    <div className="space-y-1">
       {nodes.map((node) => (
         <TreeRow
           key={node.id}
@@ -310,6 +405,8 @@ export const TreeView = ({
           onToggle={toggle}
           onExpand={onExpand}
           dataEpoch={dataEpoch}
+          selectedIds={selectedIds}
+          onRowClick={onModifierSelect ? handleRowClick : undefined}
         />
       ))}
     </div>

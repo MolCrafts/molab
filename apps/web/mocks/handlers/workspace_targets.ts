@@ -24,7 +24,7 @@ const seed = (t: WorkspaceTargetResponse): void => {
 seed({
   name: "lab",
   host: "me@lab.example.org",
-  rootPath: "/scratch/me/molexp-lab",
+  rootPath: "/scratch/me/molab-lab",
   port: null,
   identityFile: null,
   sshOpts: [],

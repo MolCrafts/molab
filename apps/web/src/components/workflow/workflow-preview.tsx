@@ -8,7 +8,7 @@
  *
  * It depends on nothing from the app shell (no store / router / API), so it is
  * the single mount point every reuse site shares: the in-app file viewer and the
- * molexp VSCode extension webview both render `<WorkflowPreview source={...} />`.
+ * molab VSCode extension webview both render `<WorkflowPreview source={...} />`.
  */
 
 import { type JSX, useMemo, useState } from "react";

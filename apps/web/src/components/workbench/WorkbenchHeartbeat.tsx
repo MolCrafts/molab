@@ -86,7 +86,7 @@ export const WorkbenchHeartbeat = forwardRef<HTMLButtonElement, WorkbenchHeartbe
         <span
           className={cn(
             // Idle: readable (not near-invisible muted). Running: status blue.
-            "inline-flex h-4 w-4 flex-none items-center justify-center text-foreground/55",
+            "inline-flex size-4 flex-none items-center justify-center text-foreground/55",
             running && "text-status-running-foreground",
             // Ambient idle pulse so the lamp is always "alive"; stronger on ack.
             !running && "mol-heartbeat-idle",
@@ -94,7 +94,7 @@ export const WorkbenchHeartbeat = forwardRef<HTMLButtonElement, WorkbenchHeartbe
             running && "mol-motion-progress-pulse",
           )}
         >
-          <HeartPulse className="h-3.5 w-3.5" aria-hidden strokeWidth={1.75} />
+          <HeartPulse className="size-icon-sm" aria-hidden strokeWidth={1.75} />
         </span>
       </Button>
     );

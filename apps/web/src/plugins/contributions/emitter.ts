@@ -17,7 +17,7 @@ export class Emitter {
       try {
         listener();
       } catch (err) {
-        console.error(`[molexp-plugin] ${this.label} listener failed`, err);
+        console.error(`[molab-plugin] ${this.label} listener failed`, err);
       }
     }
   }

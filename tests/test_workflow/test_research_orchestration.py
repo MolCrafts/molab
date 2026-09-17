@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from molexp.workflow import TaskContext, Workflow, WorkflowCompiler, WorkflowRuntime
+from molab.workflow import TaskContext, Workflow, WorkflowCompiler, WorkflowRuntime
 
 # ── ac-001 ── dependent_params ───────────────────────────────────────────────
 

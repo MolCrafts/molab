@@ -171,6 +171,8 @@ export interface ExperimentSummary {
   planRunId: string | null;
   /** Server-reported count when list is shallow (runs not loaded yet). */
   runCount?: number | null;
+  /** Served-workspace key, stamped at expand time. */
+  workspaceKey?: string;
 }
 
 export interface ExecutionRecordSummary {
@@ -208,6 +210,8 @@ export interface RunSummary {
   finishedAt: string | null;
   executionHistory: ExecutionRecordSummary[];
   errorMessage: string | null;
+  /** Served-workspace key, stamped at expand time. */
+  workspaceKey?: string;
 }
 
 export interface AssetSummary {
@@ -277,7 +281,7 @@ export interface ConsoleEntry {
   timestamp: string;
 }
 
-/** One workspace `molexp serve` is hosting (mirrors GET /api/workspaces). */
+/** One workspace `molab serve` is hosting (mirrors GET /api/workspaces). */
 export interface ServedWorkspaceSummary {
   key: string;
   label: string;
@@ -314,7 +318,7 @@ export type CoreObjectView = "overview" | "executions" | "logs" | "metrics" | "s
 /** Core views plus stable tab values contributed by independently loaded plugins. */
 export type ObjectView = CoreObjectView | (string & {});
 
-export type ExperimentView = "overview" | "workflow" | "runs" | "compare";
+export type ExperimentView = "overview" | "workflow" | "runs";
 export type ProjectView = "overview" | "experiments" | "assets" | "settings";
 
 export interface ObjectSelection {

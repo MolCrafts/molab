@@ -1,6 +1,6 @@
 """Appending inside a hard-linked archive must not reach back into its source.
 
-``molexp migrate`` builds an archive by hard-linking bulk payload, which makes
+``molab migrate`` builds an archive by hard-linking bulk payload, which makes
 it cheap but means a migrated file and its original are the *same* file. An
 appender that does not break the link first writes through into the source
 tree — which is how an ingest run silently grew a 242-byte file in the archive
@@ -12,7 +12,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from molexp.workspace.file_store import FileStore
+from molab.workspace.file_store import FileStore
 
 
 class TestAppendUnsharesHardLinks:

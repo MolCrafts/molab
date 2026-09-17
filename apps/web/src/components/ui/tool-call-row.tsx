@@ -35,7 +35,7 @@ export const ToolCallRow = ({ call }: { call: ToolCallState }): JSX.Element => {
   return (
     <div className="group/tool flex min-w-0 items-center gap-2 rounded-control px-2 py-1 text-label transition-colors hover:bg-muted/40">
       <Icon
-        className={`h-3.5 w-3.5 flex-none ${failed ? "text-destructive" : "text-success"}`}
+        className={`size-icon-sm flex-none ${failed ? "text-destructive" : "text-success"}`}
         aria-label={failed ? "Tool call failed" : "Tool call succeeded"}
       />
       <span className={`truncate font-mono ${failed ? "text-destructive" : "text-foreground"}`}>

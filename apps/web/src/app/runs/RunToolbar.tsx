@@ -163,9 +163,9 @@ export function RunToolbar({
         <DialogTrigger asChild>
           <WorkbenchIconAction label="Create execution" deniedReason={writeDeniedReason}>
             {run.executionHistory.length === 0 ? (
-              <Play className="h-3.5 w-3.5" />
+              <Play className="size-3.5" />
             ) : (
-              <Plus className="h-3.5 w-3.5" />
+              <Plus className="size-icon-sm" />
             )}
           </WorkbenchIconAction>
         </DialogTrigger>
@@ -254,28 +254,28 @@ export function RunToolbar({
           className="text-destructive hover:bg-destructive/10 hover:text-destructive"
           onClick={() => void onCancel()}
         >
-          <Ban className="h-3.5 w-3.5" />
+          <Ban className="size-icon-sm" />
         </WorkbenchIconAction>
       )}
 
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <WorkbenchIconAction label="More">
-            <MoreHorizontal className="h-4 w-4" />
+            <MoreHorizontal className="size-4" />
           </WorkbenchIconAction>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-44">
           <DropdownMenuItem asChild>
             <a href={runsApi.exportUrl(run.projectId, run.experimentId, run.id)} download>
-              <Download className="h-3.5 w-3.5" /> Export run
+              <Download className="size-icon-sm" /> Export run
             </a>
           </DropdownMenuItem>
           <DropdownMenuItem onClick={() => void navigator.clipboard.writeText(run.id)}>
-            <Copy className="h-3.5 w-3.5" /> Copy run ID
+            <Copy className="size-icon-sm" /> Copy run ID
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={onOpenAgent}>
-            <Bot className="h-3.5 w-3.5" /> Open agent
+            <Bot className="size-icon-sm" /> Open agent
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

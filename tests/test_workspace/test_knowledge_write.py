@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from molexp.workspace import Finding, Knowledge, SourceRef
+from molab.workspace import Finding, Knowledge, SourceRef
 
 
 class TestWriteKnowledge:

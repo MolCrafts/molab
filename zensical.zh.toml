@@ -1,5 +1,5 @@
 [project]
-site_name = "MolExp 文档"
+site_name = "Molab 文档"
 site_description = "面向 FAIR 研究的智能体辅助科学工作流平台"
 docs_dir = "docs/zh"
 site_dir = "site/zh"
@@ -67,7 +67,7 @@ name = "molcrafts"
 language = "zh"
 
 [project.extra.molcrafts]
-product = "molexp"
+product = "molab"
 # Indigo product accent (主) + soft companion (副) for hover/selection chips.
 accent = "#4f46e5"
 accent_soft = "rgba(79, 70, 229, 0.14)"

@@ -6,7 +6,7 @@ export type NextActionResponse = {
     kind: string;
     target: string;
     rationale: string;
-    requiresProposal: boolean;
+    op: (string | null);
     advisory: boolean;
 };
 

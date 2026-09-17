@@ -10,6 +10,8 @@ import { describe, expect, it } from "@rstest/core";
 
 import { type MultiSelectState, nextSelection } from "./useRunMultiSelect";
 
+// Re-export wrapper: the reducer lives in app/compare/nextSelection.ts.
+
 const IDS = ["r0", "r1", "r2", "r3", "r4"];
 const empty = (): MultiSelectState => ({ selected: new Set<string>(), anchor: null });
 

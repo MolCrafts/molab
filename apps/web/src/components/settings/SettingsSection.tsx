@@ -39,7 +39,7 @@ export function SettingsSection({
         </div>
         {description ? <p className="text-micro text-muted-foreground">{description}</p> : null}
       </header>
-      <div className="space-y-2.5">{children}</div>
+      <div className="space-y-2">{children}</div>
     </section>
   );
 }
@@ -61,7 +61,7 @@ export function SettingsRow({
   const row = (
     <div
       className={cn(
-        "flex min-h-control-compact items-center justify-between gap-3 rounded-control px-0.5",
+        "flex min-h-control-compact items-center justify-between gap-3 rounded-control px-1",
         className,
       )}
     >

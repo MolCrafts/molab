@@ -39,7 +39,7 @@ export const WorkspaceActivityFeed = ({
             <span
               aria-hidden="true"
               className={cn(
-                "mt-1 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full",
+                "mt-1 inline-flex size-4-lg shrink-0 items-center justify-center rounded-full",
                 visual.dotClass,
               )}
             >

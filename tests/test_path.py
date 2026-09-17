@@ -1,4 +1,4 @@
-"""Tests for :class:`molexp.Path` — cross-host POSIX path primitive."""
+"""Tests for :class:`molab.Path` — cross-host POSIX path primitive."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import pickle
 
 import pytest
 
-from molexp import Path
+from molab import Path
 
 
 class TestPathArithmetic:

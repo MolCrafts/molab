@@ -37,19 +37,19 @@ export class AgentTasksService {
      * The task is the stable conversation container. Each turn is dispatched to
      * either the interactive agent or the nine-stage Planning Agent.
      * @param requestBody
-     * @param molexpSession
+     * @param molabSession
      * @returns AgentTaskResponse Successful Response
      * @throws ApiError
      */
     public static createAgentTask(
         requestBody: GoalCreateRequest,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<AgentTaskResponse> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/agent-tasks',
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -61,18 +61,18 @@ export class AgentTasksService {
     /**
      * List Agent Tasks
      * List active and historical agent tasks.
-     * @param molexpSession
+     * @param molabSession
      * @returns AgentTaskListResponse Successful Response
      * @throws ApiError
      */
     public static listAgentTasks(
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<AgentTaskListResponse> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/agent-tasks',
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -87,13 +87,13 @@ export class AgentTasksService {
      * for the retired ``GET /api/agent/sessions/{id}/system-prompt`` (which
      * 503s via the legacy agent catch-all).
      * @param taskId
-     * @param molexpSession
+     * @param molabSession
      * @returns AgentSystemPromptResponse Successful Response
      * @throws ApiError
      */
     public static getAgentTaskSystemPrompt(
         taskId: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<AgentSystemPromptResponse> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -102,7 +102,7 @@ export class AgentTasksService {
                 'task_id': taskId,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -113,13 +113,13 @@ export class AgentTasksService {
      * Get Agent Task
      * Get a single agent task by task id.
      * @param taskId
-     * @param molexpSession
+     * @param molabSession
      * @returns AgentTaskResponse Successful Response
      * @throws ApiError
      */
     public static getAgentTask(
         taskId: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<AgentTaskResponse> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -128,7 +128,7 @@ export class AgentTasksService {
                 'task_id': taskId,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -139,13 +139,13 @@ export class AgentTasksService {
      * Delete Agent Task Route
      * Cancel any live turn, drop the runtime, and remove task metadata.
      * @param taskId
-     * @param molexpSession
+     * @param molabSession
      * @returns MessageResponse Successful Response
      * @throws ApiError
      */
     public static deleteAgentTaskRoute(
         taskId: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<MessageResponse> {
         return __request(OpenAPI, {
             method: 'DELETE',
@@ -154,7 +154,7 @@ export class AgentTasksService {
                 'task_id': taskId,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -168,13 +168,13 @@ export class AgentTasksService {
      * Delegates to the existing session event stream until task events are
      * persisted independently.
      * @param taskId
-     * @param molexpSession
+     * @param molabSession
      * @returns any Server-Sent Events stream; each `data:` frame is one AgentEvent (discriminated on `kind`), terminated by a `done` control frame.
      * @throws ApiError
      */
     public static streamAgentTaskEvents(
         taskId: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<(LoopStartedEvent | StageStartedEvent | StageCompletedEvent | ArtifactWrittenEvent | ApprovalRequestedEvent | ApprovalDecidedEvent | PlanEmittedEvent | PreflightFailedEvent | RepairProposedEvent | ClarificationRequiredEvent | CompactionPerformedEvent | LoopCompletedEvent | LoopSuspendedEvent | ErrorEvent | ThinkingDeltaEvent | TokenDeltaEvent | ToolCallStartedEvent | ToolCallCompletedEvent)> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -183,7 +183,7 @@ export class AgentTasksService {
                 'task_id': taskId,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -200,14 +200,14 @@ export class AgentTasksService {
      * refresh or server restart cannot trap the task forever.
      * @param taskId
      * @param requestBody
-     * @param molexpSession
+     * @param molabSession
      * @returns MessageResponse Successful Response
      * @throws ApiError
      */
     public static postAgentTaskMessage(
         taskId: string,
         requestBody: UserMessageCreateRequest,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<MessageResponse> {
         return __request(OpenAPI, {
             method: 'POST',
@@ -216,7 +216,7 @@ export class AgentTasksService {
                 'task_id': taskId,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -234,13 +234,13 @@ export class AgentTasksService {
      * plan or chat runtime). Previously the chat cancel path 404'd when the
      * session registry was empty, leaving the UI without a Stop recovery.
      * @param taskId
-     * @param molexpSession
+     * @param molabSession
      * @returns MessageResponse Successful Response
      * @throws ApiError
      */
     public static cancelAgentTask(
         taskId: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<MessageResponse> {
         return __request(OpenAPI, {
             method: 'POST',
@@ -249,7 +249,7 @@ export class AgentTasksService {
                 'task_id': taskId,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,

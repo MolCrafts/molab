@@ -3,7 +3,7 @@
 ``CacheFolder`` is rooted at ``<workspace_root>/cache/`` and exposes a
 schema-agnostic file API (``read_entry`` / ``write_entry`` / ``keys`` /
 ``total_bytes`` / ``clear``) plus an ``as_cache_store()`` adapter satisfying the
-workflow-layer :class:`molexp.workflow.cache_store.CacheStore` Protocol —
+workflow-layer :class:`molab.workflow.cache_store.CacheStore` Protocol —
 without importing workflow at module load (the layer charter).
 """
 
@@ -15,9 +15,9 @@ from pathlib import Path
 
 import pytest
 
-from molexp.workflow import Caching, TaskSnapshot
-from molexp.workspace import Workspace
-from molexp.workspace.cache import CacheFolder
+from molab.workflow import Caching, TaskSnapshot
+from molab.workspace import Workspace
+from molab.workspace.cache import CacheFolder
 
 
 @pytest.fixture
@@ -91,8 +91,8 @@ class TestCacheFolder:
 
 
 def test_cache_folder_import_does_not_load_workflow() -> None:
-    """Layer-charter guard: ``import molexp.workspace.cache.folder`` must not pull
-    ``molexp.workflow`` into ``sys.modules`` at module-load time. Only a caller
+    """Layer-charter guard: ``import molab.workspace.cache.folder`` must not pull
+    ``molab.workflow`` into ``sys.modules`` at module-load time. Only a caller
     asking for ``as_cache_store()`` makes the workflow Protocol (typing-only)
     relevant."""
     import subprocess
@@ -100,9 +100,9 @@ def test_cache_folder_import_does_not_load_workflow() -> None:
 
     code = (
         "import sys\n"
-        "import molexp.workspace.cache.folder  # noqa: F401\n"
-        "assert 'molexp.workflow' not in sys.modules, "
-        "    'molexp.workspace.cache.folder eagerly imported molexp.workflow'\n"
+        "import molab.workspace.cache.folder  # noqa: F401\n"
+        "assert 'molab.workflow' not in sys.modules, "
+        "    'molab.workspace.cache.folder eagerly imported molab.workflow'\n"
     )
     result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr or result.stdout

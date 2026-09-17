@@ -107,7 +107,7 @@ export function AddRemoteWorkspaceForm({
             id="add-remote-ws-root"
             value={form.rootPath}
             onChange={(e) => setForm({ ...form, rootPath: e.target.value })}
-            placeholder="/scratch/me/molexp-lab"
+            placeholder="/scratch/me/molab-lab"
             required
           />
         </div>
@@ -178,7 +178,7 @@ export function AddRemoteWorkspaceForm({
                 onChange={(e) =>
                   setForm({ ...form, cacheDir: e.target.value === "" ? null : e.target.value })
                 }
-                placeholder="~/.molexp/remote_cache/<name>"
+                placeholder="~/.molab/remote_cache/<name>"
               />
             </div>
           </CollapsibleContent>

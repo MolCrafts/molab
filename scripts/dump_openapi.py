@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from molexp.server.app import create_app
+from molab.server.app import create_app
 
 
 def dump_openapi(target: str | Path) -> Path:

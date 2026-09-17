@@ -1,4 +1,4 @@
-import type { MolexpPluginModule, PluginAPI } from "@molcrafts/molexp-plugin";
+import type { MolabPluginModule, PluginAPI } from "@molcrafts/molab-plugin";
 import { ChartNoAxesCombined } from "lucide-react";
 import { MolplotRunTab } from "./MolplotRunTab";
 import { isMetricSurface } from "./metric-formats";
@@ -10,7 +10,7 @@ const isMlpPlotSurface = (file: { name: string; relPath: string }): boolean => {
   return name.endsWith(".mlp.vl.json") || path.endsWith(".mlp.vl.json");
 };
 
-const molplotPlugin: MolexpPluginModule = {
+const molplotPlugin: MolabPluginModule = {
   id: "molplot",
   name: "MolPlot",
   version: "1.0.0",

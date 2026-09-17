@@ -1,6 +1,6 @@
 # Harness Layer
 
-`molexp.harness` is the experiment orchestrator: the layer that turns an
+`molab.harness` is the experiment orchestrator: the layer that turns an
 intent into an audited, reproducible artifact trail. It sits **above** agent,
 workflow and workspace and is imported by none of them.
 
@@ -30,8 +30,9 @@ and stamps every edge with its stage plus the workspace `run_id`.
 
 ## Public surface
 
-`molexp.harness.__all__` is deliberately small — **22 symbols**, locked by
-`tests/test_harness/test_public_surface.py`. Stages, schemas and validators are
+`molab.harness.__all__` is deliberately small — **22 symbols**, locked by
+the rewritten harness suite (owed — see
+`.claude/notes/harness-invariants-to-restore.md`). Stages, schemas and validators are
 imported from their subpackages (`harness.stages.*`, `harness.schemas.*`),
 never from the top level. Plan-owned schema names carry a `Plan` prefix
 (`PlanTaskIR`, `PlanWorkflowIR`, `PlanValidationReport`, `PlanArtifactRef`) so
@@ -45,7 +46,7 @@ allowed to write.
 
 ### `PlanOrchestrator` — authoritative, two-phase
 
-The production pipeline behind `molexp plan` and `POST /plan-tasks` (both
+The production pipeline behind `molab plan` and `POST /plan-tasks` (both
 through the one shared `services.plan_runtime.drive_plan_mode`).
 
 **Phase 1 — plan workflow.** A `draft_board` ReAct mutates a task board through
@@ -78,7 +79,7 @@ and the preamble tells the agent to say so.
 
 - **One agent edge.** Harness imports `agent.router.Router` and nothing else
   from the agent layer, reaching it through `RouterBackedAgentGateway`.
-  `pydantic_ai` must never load when `import molexp.harness` runs.
+  `pydantic_ai` must never load when `import molab.harness` runs.
 - **The workflow engine is out of process.** It loads only inside executor
   subprocesses, never in the harness process.
 - **Suspend/resume is durable and scope-tagged.** `ApprovalScope` separates
@@ -87,4 +88,4 @@ and the preamble tells the agent to say so.
   Resume correctness rides on store-first replay, not on a stage ledger —
   there is no `Mode` ABC and no completion ledger.
 - **No services/server/cli imports.** Application wiring lives one layer up in
-  `molexp.services`, which both the CLI and the server call.
+  `molab.services`, which both the CLI and the server call.

@@ -14,8 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from molexp.workspace import GridSpace, Workspace
-from molexp.workspace.runset import RunRecord, RunSet, RunSetResult
+from molab.workspace import GridSpace, Workspace
+from molab.workspace.runset import RunRecord, RunSet, RunSetResult
 
 
 @pytest.fixture
@@ -42,13 +42,13 @@ class TestRunSetContainer:
         assert all(rec["status"] == "pending" for rec in summary.to_records())
 
     def test_execute_without_workflow_layer_fails_fast(self, tmp_path: Path) -> None:
-        """Without ``import molexp.workflow`` the executor seam is unwired;
+        """Without ``import molab.workflow`` the executor seam is unwired;
         ``RunSet.execute`` must fail fast with guidance, never fall back."""
         code = (
             "import sys\n"
-            "from molexp.workspace import GridSpace, Workspace\n"
-            "from molexp.workspace.runset import RunSet\n"
-            "assert 'molexp.workflow' not in sys.modules\n"
+            "from molab.workspace import GridSpace, Workspace\n"
+            "from molab.workspace.runset import RunSet\n"
+            "assert 'molab.workflow' not in sys.modules\n"
             f"ws = Workspace(root={str(tmp_path / 'ws2')!r}, name='lab')\n"
             "exp = ws.add_project('p').add_experiment('e')\n"
             "rs = RunSet(exp.add_runs(GridSpace({'x': [1]})))\n"
@@ -127,6 +127,6 @@ class TestRunSetResult:
             _result_fixture().min_by("nope")
 
     def test_no_dataframe_bridge(self) -> None:
-        """molexp deliberately ships NO pandas bridge — ``to_records()`` rows
+        """molab deliberately ships NO pandas bridge — ``to_records()`` rows
         are plain dicts for whatever analysis stack the operator uses."""
         assert not hasattr(_result_fixture(), "to_dataframe")

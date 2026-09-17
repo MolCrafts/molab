@@ -13,9 +13,9 @@ from typing import Any
 import pytest
 from molq.transport import CommandResult, TransportError
 
-from molexp.plugins.submit_molq import staging as staging_mod
-from molexp.plugins.submit_molq.staging import stage_in, stage_out
-from molexp.workspace import ComputeTarget, Workspace
+from molab.plugins.submit_molq import staging as staging_mod
+from molab.plugins.submit_molq.staging import stage_in, stage_out
+from molab.workspace import ComputeTarget, Workspace
 
 
 @dataclass

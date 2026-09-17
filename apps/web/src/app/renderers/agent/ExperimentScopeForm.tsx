@@ -109,7 +109,7 @@ export const ExperimentScopeForm = ({
       )}
 
       {mode === "existing" && options.length > 0 ? (
-        <div className="space-y-1.5">
+        <div className="space-y-2">
           <Label htmlFor="scope-existing" className="text-label">
             Scope
           </Label>
@@ -128,7 +128,7 @@ export const ExperimentScopeForm = ({
         </div>
       ) : (
         <div className="grid gap-2 sm:grid-cols-2">
-          <div className="space-y-1.5">
+          <div className="space-y-2">
             <Label htmlFor="scope-project" className="text-label">
               Project
             </Label>
@@ -141,7 +141,7 @@ export const ExperimentScopeForm = ({
               className="border-0 bg-card shadow-none"
             />
           </div>
-          <div className="space-y-1.5">
+          <div className="space-y-2">
             <Label htmlFor="scope-experiment" className="text-label">
               Experiment
             </Label>

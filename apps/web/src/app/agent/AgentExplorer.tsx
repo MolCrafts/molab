@@ -3,6 +3,7 @@ import { usePermissions, withWriteGate } from "@/app/auth";
 import { EMPTY_COPY, StatusBadge } from "@/app/components/entity";
 import type { NavigationExplorerProps } from "@/app/navigation/sections";
 import { type TreeNode, type TreeNodeAction, TreeView } from "@/app/panels/TreeView";
+import { prefetchRenderer } from "@/app/renderers/lazyRenderers";
 import { agentApi } from "@/app/state/api";
 import type { AgentSessionSummary, Selection } from "@/app/types";
 import { useAlert, useConfirm } from "@/components/ConfirmDialog";
@@ -30,11 +31,13 @@ export const buildAgentExplorerNodes = ({
   sessions,
   onSelect,
   onDelete,
+  onPrefetchSession,
   writeDeniedReason,
 }: {
   sessions: AgentSessionSummary[];
   onSelect: (selection: Selection) => void;
   onDelete: (session: AgentSessionSummary) => void;
+  onPrefetchSession?: (session: AgentSessionSummary) => void;
   writeDeniedReason: string | null;
 }): TreeNode[] =>
   sessions.map((session) => ({
@@ -44,6 +47,7 @@ export const buildAgentExplorerNodes = ({
     icon: Bot,
     iconClassName: "text-muted-foreground",
     right: <StatusBadge status={session.status} size="sm" dot showLabel={false} />,
+    onPrefetch: () => onPrefetchSession?.(session),
     onSelect: () => onSelect({ objectType: "agent", objectId: session.id }),
     actions: [
       {
@@ -122,6 +126,7 @@ export const AgentExplorer = ({
     sessions: snapshot.agentSessions,
     onSelect,
     onDelete: (session) => void deleteTask(session),
+    onPrefetchSession: () => prefetchRenderer("agent"),
     writeDeniedReason,
   });
   const actions = (
@@ -132,7 +137,7 @@ export const AgentExplorer = ({
         onClick={() => onSelect({ objectType: "agent", objectId: "settings" })}
         title="Agents, model, skills, tools, and MCP"
       >
-        <Settings className="h-4 w-4" />
+        <Settings className="size-icon" />
       </WorkbenchIconAction>
       <WorkbenchIconAction
         label="New agent task"
@@ -140,7 +145,7 @@ export const AgentExplorer = ({
         deniedReason={writeDeniedReason}
         onClick={() => onSelect({ objectType: "agent", objectId: "new" })}
       >
-        <Plus className="h-4 w-4" />
+        <Plus className="size-icon" />
       </WorkbenchIconAction>
     </>
   );

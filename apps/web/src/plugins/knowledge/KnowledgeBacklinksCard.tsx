@@ -72,7 +72,7 @@ export const KnowledgeBacklinksCard = ({
               className="flex w-full items-center gap-2 truncate rounded-control px-2 py-2 text-left text-body-lg transition-colors hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
               title={row.path}
             >
-              <BookOpen className="h-3.5 w-3.5 flex-none text-muted-foreground" />
+              <BookOpen className="size-icon-sm flex-none text-muted-foreground" />
               <span className="min-w-0 flex-1 truncate text-foreground">{row.title}</span>
               <span className="inline-flex items-center gap-1 font-mono text-micro text-muted-foreground">
                 <Link2 className="h-3 w-3" />

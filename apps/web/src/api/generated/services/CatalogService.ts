@@ -15,19 +15,19 @@ export class CatalogService {
      * workspace-relative path. Rejects absolute paths outside the workspace
      * root with HTTP 400.
      * @param path Workspace-relative or absolute path
-     * @param molexpSession
+     * @param molabSession
      * @returns CatalogByPathResponse Successful Response
      * @throws ApiError
      */
     public static catalogByPath(
         path: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<CatalogByPathResponse> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/catalog/by-path',
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             query: {
                 'path': path,
@@ -46,14 +46,14 @@ export class CatalogService {
      * root with HTTP 400.
      * @param ws
      * @param path Workspace-relative or absolute path
-     * @param molexpSession
+     * @param molabSession
      * @returns CatalogByPathResponse Successful Response
      * @throws ApiError
      */
     public static catalogByPathWs(
         ws: string,
         path: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<CatalogByPathResponse> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -62,7 +62,7 @@ export class CatalogService {
                 'ws': ws,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             query: {
                 'path': path,

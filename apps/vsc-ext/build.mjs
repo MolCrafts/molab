@@ -1,5 +1,5 @@
 /**
- * Build the MolExp Workflow Preview extension.
+ * Build the Molab Workflow Preview extension.
  *
  *   - extension host:  src/extension.ts  -> dist/extension.js   (node / cjs)
  *   - webview bundle:  webview/main.tsx  -> dist/webview.js      (browser / iife)
@@ -8,9 +8,9 @@
  *   - webview theme:   webview/index.css -> dist/theme.css       (Tailwind v4
  *                       + shadcn tokens, via @tailwindcss/postcss)
  *
- * The webview reuses the molexp UI components directly: the `@/` alias points at
+ * The webview reuses the molab UI components directly: the `@/` alias points at
  * `../web/src`, so `import { WorkflowPreview } from "@/components/workflow"`
- * resolves to the very files `molexp serve` ships. All third-party packages
+ * resolves to the very files `molab serve` ships. All third-party packages
  * (react, @flowgram.ai, radix, …) resolve from the hoisted repo-root
  * `node_modules`.
  */
@@ -28,7 +28,7 @@ const dist = resolve(here, "dist");
 const watch = process.argv.includes("--watch");
 
 if (!existsSync(uiSrc)) {
-  console.error(`[build] cannot find molexp UI src at ${uiSrc}`);
+  console.error(`[build] cannot find molab UI src at ${uiSrc}`);
   process.exit(1);
 }
 mkdirSync(dist, { recursive: true });

@@ -124,11 +124,11 @@ export function ApprovalsBell(): JSX.Element {
             >
               {countLoading ? (
                 <Loader2
-                  className="mol-motion-progress-spin h-4 w-4 text-status-running"
+                  className="mol-motion-progress-spin size-icon text-status-running"
                   aria-hidden
                 />
               ) : (
-                <Bell className="h-4 w-4" />
+                <Bell className="size-icon" />
               )}
               {count > 0 && (
                 <span className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-info px-1 text-micro font-medium text-info-foreground">

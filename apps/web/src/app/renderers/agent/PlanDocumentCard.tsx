@@ -215,7 +215,7 @@ export const PlanDocumentCard = ({
       )}
     >
       <div className="flex items-start gap-2">
-        <ClipboardList className="mt-0.5 h-4 w-4 flex-none text-info" />
+        <ClipboardList className="mt-1 size-icon flex-none text-info" />
         <div className="min-w-0 flex-1">
           <p className="text-body-lg font-semibold text-foreground">{title}</p>
           <p className="font-mono text-micro text-muted-foreground">

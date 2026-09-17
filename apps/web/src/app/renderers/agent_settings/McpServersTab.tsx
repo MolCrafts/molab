@@ -163,7 +163,7 @@ const IconButton = ({
         onClick={onClick}
         className={tone === "destructive" ? "text-destructive hover:text-destructive" : ""}
       >
-        <Icon className="size-4" />
+        <Icon className="size-icon" />
       </WorkbenchIconAction>
     </TooltipTrigger>
     <TooltipContent>{label}</TooltipContent>
@@ -263,7 +263,7 @@ export const McpServersTab = (): JSX.Element => {
   }, []);
 
   return (
-    <div className="mx-auto flex h-full w-full max-w-5xl flex-col gap-4 px-4 py-5 sm:px-6 sm:py-6">
+    <div className="mx-auto flex h-full w-full max-w-5xl flex-col gap-4 px-4 py-4 sm:px-6 sm:py-6">
       <p className="text-label text-muted-foreground">
         MCP servers expose external tools to the agent. Configuration is layered:{" "}
         <strong>Workspace</strong> entries override <strong>User</strong> entries with the same name
@@ -293,7 +293,7 @@ export const McpServersTab = (): JSX.Element => {
             })
           }
         >
-          <Plus className="size-3.5" />
+          <Plus className="size-icon-sm" />
         </WorkbenchIconAction>
       </div>
 
@@ -342,7 +342,7 @@ export const McpServersTab = (): JSX.Element => {
                   })
                 }
               >
-                <Plus className="size-3.5" />
+                <Plus className="size-icon-sm" />
               </WorkbenchIconAction>
             </div>
           )}
@@ -458,10 +458,10 @@ const ServerCard = ({
             onClick={() => setExpanded((value) => !value)}
           >
             <ChevronRight
-              className={`size-4 transition-transform ${expanded ? "rotate-90" : ""}`}
+              className={`size-icon transition-transform ${expanded ? "rotate-90" : ""}`}
             />
           </WorkbenchIconAction>
-          <Server className="size-4 text-muted-foreground" />
+          <Server className="size-icon text-muted-foreground" />
           <h3 className="font-mono text-body-lg font-medium text-foreground">{server.name}</h3>
           <WorkbenchTag meaning="metadata" className="text-label">
             {server.transport || "?"}
@@ -949,7 +949,7 @@ const ServerEditor = ({
 
   return (
     <Dialog open onOpenChange={(open) => !open && !saving && onCancel()}>
-      <DialogContent className="max-h-dialog-viewport-tall max-w-2xl overflow-hidden">
+      <DialogContent className="max-h-viewport-tall max-w-2xl overflow-hidden">
         <DialogHeader>
           <DialogTitle>
             {state.mode === "create" ? (
@@ -961,7 +961,7 @@ const ServerEditor = ({
             )}
           </DialogTitle>
         </DialogHeader>
-        <ScrollArea className="max-h-dialog-scroll-compact pr-2">
+        <ScrollArea className="max-h-scroll-compact pr-2">
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
               <div>
@@ -1054,7 +1054,7 @@ const ServerEditor = ({
                 {(name === "molmcp" || name.includes("molmcp")) && (
                   <div className="rounded-control border border-info/30 bg-info-soft/20 px-3 py-2">
                     <Label className="text-label font-medium">MOLMCP_SOURCES (package pin)</Label>
-                    <p className="mb-1.5 text-micro text-muted-foreground">
+                    <p className="mb-1 text-micro text-muted-foreground">
                       Comma-separated packages molmcp may expose. Leave empty for all. Prefer the
                       Knowledge sources panel above for a default pin applied to every plan.
                     </p>
@@ -1161,7 +1161,7 @@ const ServerEditor = ({
                             disabled={!secretDrafts[key]}
                             onClick={() => void handleSecretSave(key)}
                           >
-                            <Save className="size-4" />
+                            <Save className="size-icon" />
                           </WorkbenchIconAction>
                         </div>
                       </div>
@@ -1378,7 +1378,7 @@ const HttpAuthSection = ({
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2">
-        <Lock className="size-3.5 text-muted-foreground" />
+        <Lock className="size-icon-sm text-muted-foreground" />
         <Label htmlFor={id("mode")} className="text-label">
           Authentication
         </Label>
@@ -1566,7 +1566,7 @@ const HeaderRows = ({
 //  server-side; this UI only shows status + lets the user disconnect.
 //
 //  The /oauth-callback SPA route is expected to emit a window.postMessage
-//  payload of shape ``{type: "molexp:oauth-callback", code, state}`` to its
+//  payload of shape ``{type: "molab:oauth-callback", code, state}`` to its
 //  opener. If the SPA isn't yet wired (e.g. running pre-callback-route
 //  build), the user can paste the redirected URL into a text field instead.
 
@@ -1608,7 +1608,7 @@ const OAuthConnectPanel = ({
     setBusy(true);
     try {
       const start = await agentAdminApi.startMcpOauth(serverName, scope);
-      const popup = window.open(start.authorizeUrl, "molexp-oauth", OAUTH_POPUP_FEATURES);
+      const popup = window.open(start.authorizeUrl, "molab-oauth", OAUTH_POPUP_FEATURES);
       if (!popup) {
         throw new Error(
           "Popup blocked. Allow popups for this site, or copy the authorize URL into a new tab.",
@@ -1703,7 +1703,7 @@ const OAuthConnectPanel = ({
             disabled={busy}
             onClick={() => void disconnect()}
           >
-            <Unplug className="size-4" />
+            <Unplug className="size-icon" />
           </WorkbenchIconAction>
         )}
         {progress && <span className="text-label text-muted-foreground">{progress}</span>}
@@ -1739,7 +1739,7 @@ const waitForOAuthCallback = (popup: Window): Promise<OAuthCallbackPayload> => {
       if (
         data &&
         typeof data === "object" &&
-        data.type === "molexp:oauth-callback" &&
+        data.type === "molab:oauth-callback" &&
         typeof data.code === "string"
       ) {
         cleanup();

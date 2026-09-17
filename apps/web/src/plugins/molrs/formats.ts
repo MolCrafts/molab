@@ -84,7 +84,7 @@ export const thermoRecords = (
 };
 
 /**
- * Read molexp's own metrics WAL.
+ * Read molab's own metrics WAL.
  *
  * It is already in record form, so there is nothing to map — but it gets no
  * special treatment for that: it arrives through the same contribution as

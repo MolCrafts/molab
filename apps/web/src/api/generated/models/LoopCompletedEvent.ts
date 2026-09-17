@@ -6,7 +6,7 @@
  * Terminal event — carries the run's final text + optional result.
  *
  * ``result`` is the JSON-mode dump of the terminal
- * :class:`~molexp.agent.loop.AgentRunResult` (minus ``events`` to
+ * :class:`~molab.harness.agent.loop.AgentRunResult` (minus ``events`` to
  * avoid recursion); the harness reconstructs the typed result from
  * the accumulated stream.
  */

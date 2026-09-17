@@ -94,6 +94,7 @@ export const splitExperimentWorkflowField = (
 export const mapExperiments = (
   projectId: string,
   experiments: ApiExperimentResponse[],
+  workspaceKey?: string,
 ): ExperimentSummary[] => {
   return experiments.map((experiment) => {
     const { workflowFile, workflowSource } = splitExperimentWorkflowField(
@@ -112,6 +113,7 @@ export const mapExperiments = (
       workflowSource,
       planRunId: experiment.planRunId ?? null,
       runCount: experiment.runCount ?? null,
+      ...(workspaceKey ? { workspaceKey } : {}),
     };
   });
 };
@@ -120,6 +122,7 @@ export const mapRuns = (
   projectId: string,
   experimentId: string,
   runs: ApiRunResponse[],
+  workspaceKey?: string,
 ): RunSummary[] => {
   const mapStatus = (run: ApiRunResponse): RunSummary["status"] => {
     if (!run.statusSummary) {
@@ -212,6 +215,7 @@ export const mapRuns = (
         lastError && typeof lastError.message === "string"
           ? lastError.message
           : (run.error?.message ?? null),
+      ...(workspaceKey ? { workspaceKey } : {}),
     };
   });
 };
@@ -365,7 +369,7 @@ export class AgentNotConfiguredError extends Error {
 
 /**
  * Optional overrides accepted by ``POST /api/agent/sessions``. Keep aligned
- * with :class:`molexp.server.schemas.requests.GoalCreateRequest`.
+ * with :class:`molab.server.schemas.requests.GoalCreateRequest`.
  */
 export interface SessionLaunchOptions {
   /** Canonical agent for the first turn — only ``mode``, never plan_mode. */

@@ -47,7 +47,7 @@ export const FlowgramCanvasToolbar = ({
     <AlertDialog>
       <AlertDialogTrigger asChild>
         <WorkbenchIconAction label="Discard changes" disabled={saving || !dirty}>
-          <RotateCcw className="h-4 w-4" />
+          <RotateCcw className="size-4" />
         </WorkbenchIconAction>
       </AlertDialogTrigger>
       <AlertDialogContent>
@@ -67,7 +67,7 @@ export const FlowgramCanvasToolbar = ({
     </AlertDialog>
 
     <WorkbenchIconAction label="Save workflow" disabled={saving || !dirty} onClick={onSave}>
-      <Save className="h-4 w-4" />
+      <Save className="size-4" />
     </WorkbenchIconAction>
   </div>
 );

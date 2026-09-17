@@ -1,4 +1,4 @@
-"""Tests for ``molexp.plugins.ui.discover_ui_plugin_dirs`` — the slim,
+"""Tests for ``molab.plugins.ui.discover_ui_plugin_dirs`` — the slim,
 Python-side directory-pointer discovery for UI plugins.
 
 The Python side has zero UI semantics: discovery only resolves a directory
@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from molexp.plugins.ui import _discover_ui_uncached, discover_ui_plugin_dirs
+from molab.plugins.ui import _discover_ui_uncached, discover_ui_plugin_dirs
 
 # ── fakes / fixtures ──────────────────────────────────────────────────────
 
@@ -27,7 +27,7 @@ class _FakeEntryPoint:
         name: str,
         loader,
         *,
-        group: str = "molexp.ui_plugins",
+        group: str = "molab.ui_plugins",
     ) -> None:
         self.name = name
         self.group = group
@@ -48,7 +48,7 @@ def _install_fake_eps(
             return tuple(ep for ep in eps_tuple if ep.group == group)
 
     monkeypatch.setattr(
-        "molexp.plugins.ui.importlib_metadata.entry_points",
+        "molab.plugins.ui.importlib_metadata.entry_points",
         lambda: _FakeEntryPoints(),
     )
     # Cached state must be cleared so the test sees the patched eps.
@@ -57,13 +57,13 @@ def _install_fake_eps(
 
 @pytest.fixture
 def warnings(monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    """Spy on ``molexp.plugins.ui.logger.warning`` calls.
+    """Spy on ``molab.plugins.ui.logger.warning`` calls.
 
     mollog bypasses stdlib ``logging`` so pytest's ``caplog`` / ``capfd``
     do not see its output; we capture the messages directly.
     """
     captured: list[str] = []
-    import molexp.plugins.ui as ui_mod
+    import molab.plugins.ui as ui_mod
 
     monkeypatch.setattr(
         ui_mod.logger,

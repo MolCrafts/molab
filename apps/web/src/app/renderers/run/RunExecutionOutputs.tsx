@@ -126,7 +126,7 @@ export const RunExecutionOutputs = ({
 
   if (!selectedExecutionId) {
     return (
-      <div className="flex h-[420px] items-center justify-center rounded-md border border-border bg-canvas">
+      <div className="flex h-chart-lg items-center justify-center rounded-md border border-border bg-canvas">
         <EmptyState title="Select an execution" description="Outputs belong to one execution." />
       </div>
     );
@@ -203,7 +203,7 @@ export const RunExecutionOutputs = ({
     : undefined;
 
   return (
-    <div className="grid h-[420px] min-h-0 grid-cols-[minmax(240px,34%)_1fr] overflow-hidden rounded-md border border-border bg-canvas">
+    <div className="grid h-chart-lg min-h-0 grid-cols-[minmax(240px,34%)_1fr] overflow-hidden rounded-md border border-border bg-canvas">
       <div className="min-h-0 overflow-auto border-r border-border p-2">
         <TreeView
           nodes={nodes}
@@ -230,7 +230,7 @@ export const RunExecutionOutputs = ({
                   .then(() => onPromoted?.());
               }}
             >
-              <Archive className="h-3.5 w-3.5" />
+              <Archive className="size-icon-sm" />
             </WorkbenchIconAction>
           </div>
         )}
@@ -253,7 +253,7 @@ const Preview = ({
   if (value === null) {
     return (
       <div className="flex h-full items-center justify-center text-label text-muted-foreground">
-        <FileOutput className="mr-2 h-4 w-4" />
+        <FileOutput className="mr-2 size-icon" />
         {empty}
       </div>
     );

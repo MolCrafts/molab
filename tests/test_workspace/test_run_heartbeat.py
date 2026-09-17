@@ -1,4 +1,4 @@
-"""Per-Execution alive-file heartbeat (``molexp.workspace.run_heartbeat``).
+"""Per-Execution alive-file heartbeat (``molab.workspace.run_heartbeat``).
 
 Ownership heartbeat is the mtime of an empty ``alive`` file inside one
 physical Execution directory, not a JSON field. ``touch_alive`` /
@@ -12,10 +12,10 @@ import os
 import time
 from pathlib import Path
 
-from molexp.workspace.domain import ExecutionMode
-from molexp.workspace.execution_repository import ExecutionRepository
-from molexp.workspace.history import AgentRef
-from molexp.workspace.run_heartbeat import (
+from molab.workspace.domain import ExecutionMode
+from molab.workspace.execution_repository import ExecutionRepository
+from molab.workspace.history import AgentRef
+from molab.workspace.run_heartbeat import (
     ALIVE_NAME,
     HEARTBEAT_INTERVAL_SECONDS,
     HEARTBEAT_STALE_SECONDS,

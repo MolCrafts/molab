@@ -1,6 +1,6 @@
 """Data-graph DAG invariant — ``depends_on`` must always be acyclic.
 
-Spec: .claude/specs/03-molexp-workflow-cycles.md §1. A ``depends_on`` cycle is
+Spec: .claude/specs/03-molab-workflow-cycles.md §1. A ``depends_on`` cycle is
 rejected at compile even when control edges (``wf.control`` / ``wf.branch``)
 legitimately form a loop — the data graph and the control graph are distinct.
 """
@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from molexp.workflow import CycleError, Workflow, WorkflowCompiler
+from molab.workflow import CycleError, Workflow, WorkflowCompiler
 
 
 class TestWorkflowCompiler:

@@ -15,7 +15,7 @@ from uuid import UUID
 
 import pytest
 
-from molexp.workspace import Workspace
+from molab.workspace import Workspace
 
 
 class TestLegacyLibraryRemoved:
@@ -23,7 +23,7 @@ class TestLegacyLibraryRemoved:
 
     def test_library_subpackage_gone(self):
         with pytest.raises(ModuleNotFoundError):
-            import molexp.workspace.library  # noqa: F401
+            import molab.workspace.library  # noqa: F401
 
 
 class TestWorkspace:
@@ -96,7 +96,7 @@ class TestExperiment:
     def test_ir_workflow_source_externalized_to_workflow_json(self, project):
         """A compiled-IR ``workflow_source`` lands as a standalone ``workflow.ir.json``.
 
-        The IR is the contract the molexp VSCode preview reads directly, so it
+        The IR is the contract the molab VSCode preview reads directly, so it
         must be a clean, pretty-printed file (no ``schema_version`` envelope) and
         must have a single on-disk home — stripped from the embedded
         ``experiment.json`` field, rehydrated from the file on reload.

@@ -2,7 +2,7 @@
 
 This is the **recipe** an agent should reimplement by consulting molmcp
 (for API discovery / scaffold tools), then writing a script and executing
-it. The molexp agent loop does not own create/sweep/plot verbs; it writes
+it. The molab agent loop does not own create/sweep/plot verbs; it writes
 code that calls these public APIs.
 
 Behavior contract (Chat ReAct): see ``DEFAULT_OPS_PREAMBLE`` —
@@ -28,9 +28,9 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-import molexp as me
-from molexp.workflow import Workflow
-from molexp.workspace.param import GridSpace
+import molab as me
+from molab.workflow import Workflow
+from molab.workspace.param import GridSpace
 
 # Fixed names so tests can assert the on-disk layout contract.
 PROJECT_NAME = "demo"
@@ -127,7 +127,7 @@ def maybe_plot_records(
 
 
 def main() -> None:
-    workspace_root = Path(tempfile.mkdtemp(prefix="molexp-code-loop-golden-"))
+    workspace_root = Path(tempfile.mkdtemp(prefix="molab-code-loop-golden-"))
     print(f"workspace root: {workspace_root}")
     records = run_code_loop_golden_path(workspace_root)
     print(f"sweep cells: {len(records)}")

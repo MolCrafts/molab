@@ -11,9 +11,9 @@ export interface RouteProfileSample {
 
 declare global {
   interface Window {
-    __MOLEXP_REACT_PROFILE__?: RouteProfileSample[];
-    __MOLEXP_ROUTE_RESOURCES__?: string[];
-    __MOLEXP_ROUTE_REQUESTS__?: Record<string, number>;
+    __MOLAB_REACT_PROFILE__?: RouteProfileSample[];
+    __MOLAB_ROUTE_RESOURCES__?: string[];
+    __MOLAB_ROUTE_REQUESTS__?: Record<string, number>;
   }
 }
 
@@ -25,9 +25,9 @@ const recordCommit: ProfilerOnRenderCallback = (
   startTime,
   commitTime,
 ) => {
-  const samples = window.__MOLEXP_REACT_PROFILE__ ?? [];
+  const samples = window.__MOLAB_REACT_PROFILE__ ?? [];
   samples.push({ id, phase, actualDuration, baseDuration, startTime, commitTime });
-  window.__MOLEXP_REACT_PROFILE__ = samples.slice(-200);
+  window.__MOLAB_REACT_PROFILE__ = samples.slice(-200);
   const requestPaths = performance
     .getEntriesByType("resource")
     .map((entry) => entry.name)
@@ -41,15 +41,15 @@ const recordCommit: ProfilerOnRenderCallback = (
     counts[path] = (counts[path] ?? 0) + 1;
     return counts;
   }, {});
-  window.__MOLEXP_ROUTE_RESOURCES__ = resources;
-  window.__MOLEXP_ROUTE_REQUESTS__ = requests;
+  window.__MOLAB_ROUTE_RESOURCES__ = resources;
+  window.__MOLAB_ROUTE_REQUESTS__ = requests;
   try {
     window.localStorage.setItem(
-      "molexp.react-profile",
-      JSON.stringify(window.__MOLEXP_REACT_PROFILE__),
+      "molab.react-profile",
+      JSON.stringify(window.__MOLAB_REACT_PROFILE__),
     );
-    window.localStorage.setItem("molexp.route-resources", JSON.stringify(resources));
-    window.localStorage.setItem("molexp.route-requests", JSON.stringify(requests));
+    window.localStorage.setItem("molab.route-resources", JSON.stringify(resources));
+    window.localStorage.setItem("molab.route-requests", JSON.stringify(requests));
   } catch {
     // Private browsing / quota failures must not affect the profiled surface.
   }
@@ -57,7 +57,7 @@ const recordCommit: ProfilerOnRenderCallback = (
 
 /**
  * Opt-in React Profiler harness. Add `?profile=1` and read
- * `window.__MOLEXP_REACT_PROFILE__`; normal paths add no Profiler subtree.
+ * `window.__MOLAB_REACT_PROFILE__`; normal paths add no Profiler subtree.
  */
 export const RouteProfiler = ({ id, children }: { id: string; children: ReactNode }): ReactNode => {
   const enabled = new URLSearchParams(window.location.search).has("profile");

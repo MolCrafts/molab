@@ -113,7 +113,7 @@ export function UsersSection({ sectionId = "users" }: { sectionId?: string }): J
     <SettingsSection
       id={sectionId}
       title="Users"
-      description="Filesystem accounts under ~/.molexp/auth/ (CLI: molexp auth users …)."
+      description="Filesystem accounts under ~/.molab/auth/ (CLI: molab auth users …)."
       trailing={
         <DeniedHint reason={usersDeniedReason}>
           <Button
@@ -121,7 +121,7 @@ export function UsersSection({ sectionId = "users" }: { sectionId?: string }): J
             onClick={() => setCreateOpen(true)}
             disabled={Boolean(usersDeniedReason)}
           >
-            <Plus className="h-4 w-4" />
+            <Plus className="size-icon" />
             Add user
           </Button>
         </DeniedHint>
@@ -144,7 +144,7 @@ export function UsersSection({ sectionId = "users" }: { sectionId?: string }): J
                 <TableHead>Role</TableHead>
                 <TableHead>Workspaces</TableHead>
                 <TableHead>Status</TableHead>
-                <TableHead className="w-[4rem]" />
+                <TableHead className="w-16" />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -162,7 +162,7 @@ export function UsersSection({ sectionId = "users" }: { sectionId?: string }): J
                       }}
                       disabled={patchMutation.isPending}
                     >
-                      <SelectTrigger className="h-control-compact w-[8rem]">
+                      <SelectTrigger className="h-control-compact w-32">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -174,7 +174,7 @@ export function UsersSection({ sectionId = "users" }: { sectionId?: string }): J
                       </SelectContent>
                     </Select>
                   </TableCell>
-                  <TableCell className="max-w-[12rem] truncate font-mono text-micro">
+                  <TableCell className="max-w-48 truncate font-mono text-micro">
                     {u.workspaces.join(", ")}
                   </TableCell>
                   <TableCell>
@@ -196,7 +196,7 @@ export function UsersSection({ sectionId = "users" }: { sectionId?: string }): J
                         }
                       }}
                     >
-                      <Trash2 className="h-4 w-4" />
+                      <Trash2 className="size-icon" />
                     </Button>
                   </TableCell>
                 </TableRow>
@@ -212,7 +212,7 @@ export function UsersSection({ sectionId = "users" }: { sectionId?: string }): J
             <DialogTitle>Add user</DialogTitle>
           </DialogHeader>
           <div className="flex flex-col gap-3 py-2">
-            <div className="flex flex-col gap-1.5">
+            <div className="flex flex-col gap-2">
               <Label htmlFor="new-username">Username</Label>
               <Input
                 id="new-username"
@@ -221,7 +221,7 @@ export function UsersSection({ sectionId = "users" }: { sectionId?: string }): J
                 autoComplete="off"
               />
             </div>
-            <div className="flex flex-col gap-1.5">
+            <div className="flex flex-col gap-2">
               <Label htmlFor="new-password">Password</Label>
               <Input
                 id="new-password"
@@ -231,7 +231,7 @@ export function UsersSection({ sectionId = "users" }: { sectionId?: string }): J
                 autoComplete="new-password"
               />
             </div>
-            <div className="flex flex-col gap-1.5">
+            <div className="flex flex-col gap-2">
               <Label>Role</Label>
               <Select value={formRole} onValueChange={(v) => setFormRole(v as AuthRole)}>
                 <SelectTrigger>
@@ -246,7 +246,7 @@ export function UsersSection({ sectionId = "users" }: { sectionId?: string }): J
                 </SelectContent>
               </Select>
             </div>
-            <div className="flex flex-col gap-1.5">
+            <div className="flex flex-col gap-2">
               <Label htmlFor="new-ws">Workspaces</Label>
               <Input
                 id="new-ws"

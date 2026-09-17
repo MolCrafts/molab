@@ -1,4 +1,4 @@
-"""Entrypoint resolvers in ``molexp.workflow.promote``.
+"""Entrypoint resolvers in ``molab.workflow.promote``.
 
 ``resolve_callable_entrypoint`` / ``resolve_spec_entrypoint`` return
 ``"<file>:<qualname|varname>"`` refs so a cluster worker can re-import a
@@ -13,14 +13,14 @@ from __future__ import annotations
 
 import pytest
 
-from molexp.workflow import (
+from molab.workflow import (
     CompiledWorkflow,
     Task,
     TaskContext,
     Workflow,
     WorkflowCompiler,
 )
-from molexp.workflow.promote import (
+from molab.workflow.promote import (
     promote_callable,
     resolve_callable_entrypoint,
     resolve_spec_entrypoint,

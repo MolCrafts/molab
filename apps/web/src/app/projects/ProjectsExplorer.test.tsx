@@ -19,6 +19,8 @@ const projectActions = (onSelect: (selection: Selection) => void): ProjectTreeAc
   onRefresh: () => undefined,
   writeDeniedReason: "Viewer role cannot modify projects.",
   isProjectExpanded: () => false,
+  workspaceKey: "lab-v3",
+  workspaceLabel: "lab-v3",
 });
 
 describe("Projects explorer", () => {
@@ -44,11 +46,13 @@ describe("Projects explorer", () => {
       "",
     );
 
+    expect(node?.selectionKey).toBe("lab-v3/project-1");
     expect(node?.emptyChildLabel).toBe("Loading…");
     expect(node?.actions?.find((action) => action.id === "delete")).toMatchObject({
       disabled: true,
       title: "Viewer role cannot modify projects.",
     });
+    expect(typeof node?.onPrefetch).toBe("function");
     node?.onSelect?.();
     expect(selected).toEqual({ objectType: "project", objectId: "project-1" });
   });

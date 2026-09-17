@@ -1,3 +1,4 @@
+import { useQuery } from "@tanstack/react-query";
 import {
   Archive,
   Copy,
@@ -7,7 +8,7 @@ import {
   Play,
   Workflow,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { experimentsApi, projectsApi } from "@/api";
 import { CreateRunDialog } from "@/app/components/CreateRunDialog";
 import type { DataTableColumn, DataTableRowAction } from "@/app/components/entity";
@@ -19,10 +20,11 @@ import {
   EmptyState,
   EntityPage,
   InventoryCanvas,
-  OverviewHighlight,
   OverviewSurface,
+  StatusBreakdown,
   StatusDistribution,
   StatusDonut,
+  StatusLegend,
 } from "@/app/components/entity";
 import { statusDonutSegments, successRate } from "@/app/renderers/dashboardData";
 import {
@@ -30,6 +32,7 @@ import {
   experimentRunCompleteness,
   projectSnapshotCompleteness,
 } from "@/app/renderers/entityWorkbenchData";
+import { projectAssetsQueryOptions } from "@/app/state/entityQueries";
 import { useNavigationState } from "@/app/state/useNavigationState";
 import type {
   ApiAssetResponse,
@@ -62,16 +65,22 @@ export const ProjectViewer = ({
     experiment: ExperimentSummary;
     message: string;
   } | null>(null);
-  const [projectAssets, setProjectAssets] = useState<ApiAssetResponse[]>([]);
-  const [projectAssetsLoading, setProjectAssetsLoading] = useState(true);
-  const [projectAssetsError, setProjectAssetsError] = useState<string | null>(null);
-  const [settledProjectAssetsId, setSettledProjectAssetsId] = useState<string | null>(null);
-  const [projectAssetsRequestVersion, setProjectAssetsRequestVersion] = useState(0);
   const [createRunExperimentId, setCreateRunExperimentId] = useState<string | null>(null);
   const { setSelection } = useNavigationState(snapshot);
 
   const projectId = selection.objectId;
   const project = snapshot.projects.find((p) => p.id === projectId);
+  const assetsQuery = useQuery({
+    ...projectAssetsQueryOptions(projectId),
+    enabled: Boolean(projectId),
+  });
+  const projectAssets = assetsQuery.data ?? [];
+  const projectAssetsPending = assetsQuery.isPending;
+  const projectAssetsError = assetsQuery.error
+    ? assetsQuery.error instanceof Error
+      ? assetsQuery.error.message
+      : "Failed to load project assets"
+    : null;
   const activeTab: ProjectView =
     selection.objectType === "project" ? (selection.projectView ?? "overview") : "overview";
   const setProjectTab = useCallback(
@@ -82,43 +91,6 @@ export const ProjectViewer = ({
     },
     [projectId, setSelection],
   );
-
-  useEffect(() => {
-    void projectAssetsRequestVersion;
-    if (!projectId) {
-      setProjectAssets([]);
-      setProjectAssetsLoading(false);
-      setProjectAssetsError(null);
-      setSettledProjectAssetsId(null);
-      return;
-    }
-
-    let cancelled = false;
-    setProjectAssets([]);
-    setProjectAssetsLoading(true);
-    setProjectAssetsError(null);
-    projectsApi
-      .listProjectAssets(projectId)
-      .then((assets) => {
-        if (!cancelled) setProjectAssets(assets);
-      })
-      .catch((err) => {
-        if (!cancelled) {
-          setProjectAssetsError(
-            err instanceof Error ? err.message : "Failed to load project assets",
-          );
-        }
-      })
-      .finally(() => {
-        if (!cancelled) {
-          setProjectAssetsLoading(false);
-          setSettledProjectAssetsId(projectId);
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [projectId, projectAssetsRequestVersion]);
 
   const projectExperiments = useMemo(
     () => snapshot.experiments.filter((e) => e.projectId === projectId),
@@ -134,7 +106,6 @@ export const ProjectViewer = ({
     () => buildProjectWorkbenchData(projectId, snapshot, projectAssets),
     [projectId, snapshot, projectAssets],
   );
-  const projectAssetsPending = projectAssetsLoading || settledProjectAssetsId !== projectId;
 
   const handleDelete = async () => {
     if (!confirm(`Are you sure you want to delete project "${projectId}"?`)) {
@@ -270,13 +241,13 @@ export const ProjectViewer = ({
       cell: (exp) => (
         <div className="flex items-center gap-3">
           <div className="flex h-control-compact w-control-compact items-center justify-center text-muted-foreground">
-            <FlaskConical className="h-3.5 w-3.5" />
+            <FlaskConical className="size-icon-sm" />
           </div>
           <div className="min-w-0">
             <div className="truncate text-body-lg font-medium text-foreground">{exp.name}</div>
-            <div className="flex items-center gap-0.5 font-mono text-micro text-muted-foreground">
+            <div className="flex items-center gap-hairline font-mono text-micro text-muted-foreground">
               <span className="truncate">{exp.id.substring(0, 12)}</span>
-              <CopyButton value={exp.id} label="experiment ID" className="size-5" />
+              <CopyButton value={exp.id} label="experiment ID" className="size-4-lg" />
             </div>
           </div>
         </div>
@@ -325,7 +296,7 @@ export const ProjectViewer = ({
         const rollup = workbench.experiments.find((item) => item.experiment.id === exp.id);
         return (
           <span className="inline-flex items-center gap-2 text-label tabular-nums text-muted-foreground">
-            <Workflow className="h-3.5 w-3.5" />
+            <Workflow className="size-icon-sm" />
             {rollup?.workflowSummary.exists ? rollup.workflowSummary.taskCount : "—"}
           </span>
         );
@@ -357,7 +328,7 @@ export const ProjectViewer = ({
             setCreateRunExperimentId(exp.id);
           }}
         >
-          <Play className="h-4 w-4 text-muted-foreground hover:text-foreground" />
+          <Play className="size-icon text-muted-foreground hover:text-foreground" />
         </WorkbenchIconAction>
       ),
     },
@@ -369,7 +340,7 @@ export const ProjectViewer = ({
       header: "Name",
       cell: (asset) => (
         <div className="flex items-center gap-2 text-body-lg font-medium text-foreground">
-          <Archive className="h-4 w-4 text-muted-foreground" />
+          <Archive className="size-icon text-muted-foreground" />
           {asset.name}
         </div>
       ),
@@ -427,65 +398,85 @@ export const ProjectViewer = ({
   const runCountValue =
     completeness.runCount ?? (projectRuns.length > 0 ? `≥${projectRuns.length}` : "—");
 
-  // Overview only claims status posture when every child run is loaded. Shallow
-  // list counts remain useful, but partial snapshots must never look complete.
+  // The fold answers "which experiment needs me": one status mix per experiment,
+  // read as shape. The Experiments tab keeps the full inventory and row actions.
+  // Status posture is only claimed once every child run is loaded — a partial
+  // snapshot must never look complete.
+  const experimentGroups = workbench.experiments.map((rollup) => ({
+    id: rollup.experiment.id,
+    label: rollup.experiment.name,
+    detail: [
+      rollup.workflowSummary.exists ? `${rollup.workflowSummary.taskCount} tasks` : "no workflow",
+      rollup.experiment.updatedAt ? formatDateTime(rollup.experiment.updatedAt) : null,
+    ]
+      .filter(Boolean)
+      .join(" · "),
+    counts: rollup.counts,
+    onSelect: () => navigateToExperiment(rollup.experiment.id),
+  }));
+
   const overviewWithNav = (
     <OverviewSurface>
-      <DashboardCanvas>
+      <DashboardCanvas className="max-w-6xl space-y-8">
         {completeness.experimentsComplete && completeness.experimentCount === 0 ? (
           <EmptyState
             title={EMPTY_COPY.experiments.title}
             description={EMPTY_COPY.experiments.description}
-            icon={<FlaskConical className="size-5" aria-hidden />}
+            icon={<FlaskConical className="size-icon-lg" aria-hidden />}
           />
         ) : (
-          <section className="grid gap-10 lg:grid-cols-[auto_minmax(0,1fr)] lg:items-center">
-            {completeness.runsComplete && workbench.counts.total > 0 ? (
-              <StatusDonut
-                segments={donutSegments}
-                size={148}
-                thickness={16}
-                centerValue={workbench.counts.total}
-                centerLabel="runs"
-              />
-            ) : completeness.runsComplete ? (
-              <div className="flex size-36 items-center justify-center rounded-full border border-dashed border-border text-micro text-muted-foreground">
-                no runs
+          <>
+            <section className="grid gap-8 lg:grid-cols-[auto_minmax(0,1fr)] lg:items-start">
+              {completeness.runsComplete && workbench.counts.total > 0 ? (
+                <StatusDonut
+                  segments={donutSegments}
+                  size={148}
+                  thickness={16}
+                  centerValue={workbench.counts.total}
+                  centerLabel="runs"
+                />
+              ) : (
+                <div className="flex size-36 items-center justify-center rounded-full border border-dashed border-border px-4 text-center text-micro leading-relaxed text-muted-foreground">
+                  {completeness.runsComplete
+                    ? "no runs"
+                    : "Run status appears after all experiment runs load"}
+                </div>
+              )}
+              <div className="min-w-0 space-y-3">
+                <div className="flex flex-wrap items-baseline justify-between gap-3">
+                  <h2 className="text-body-lg font-medium text-foreground">Experiments</h2>
+                  <StatusLegend />
+                </div>
+                {experimentGroups.length > 0 ? (
+                  <StatusBreakdown groups={experimentGroups} />
+                ) : (
+                  <p className="text-micro text-muted-foreground">Loading experiments…</p>
+                )}
+                {completeness.runsComplete && projectSuccessRate !== null && (
+                  <p className="font-mono text-micro tabular-nums text-muted-foreground">
+                    {projectSuccessRate.toFixed(0)}% of terminal runs succeeded
+                  </p>
+                )}
               </div>
-            ) : (
-              <div className="flex size-36 items-center justify-center rounded-full border border-dashed border-border px-5 text-center text-micro leading-relaxed text-muted-foreground">
-                Run status appears after all experiment runs load
-              </div>
-            )}
-            <div className="grid gap-6 sm:grid-cols-3">
-              <OverviewHighlight
-                label="Experiments"
-                value={experimentCountValue}
-                detail={
-                  completeness.experimentCount === null
-                    ? "loaded so far"
-                    : completeness.experimentsComplete
-                      ? undefined
-                      : `${projectExperiments.length} loaded`
-                }
-              />
-              <OverviewHighlight
-                label="Runs"
-                value={runCountValue}
-                detail={
-                  completeness.runsComplete && projectSuccessRate !== null
-                    ? `${projectSuccessRate.toFixed(0)}% succeeded`
-                    : completeness.runCount === null
-                      ? "loaded so far"
-                      : `${projectRuns.length} loaded; status incomplete`
-                }
-              />
-              <OverviewHighlight
-                label="Assets"
-                value={projectAssetsPending ? "…" : projectAssetsError ? "!" : projectAssets.length}
-              />
-            </div>
-          </section>
+            </section>
+
+            <section className="space-y-2 border-t border-border pt-6">
+              <h2 className="text-label font-medium text-foreground">Assets</h2>
+              {projectAssetsError ? (
+                <WorkbenchOperationState
+                  kind="error"
+                  density="compact"
+                  title="Could not load project assets"
+                  detail={projectAssetsError}
+                  action={<WorkbenchRetryAction onClick={() => void assetsQuery.refetch()} />}
+                />
+              ) : (
+                <p className="font-mono text-micro tabular-nums text-muted-foreground">
+                  {projectAssetsPending ? "loading…" : `${projectAssets.length} registered`}
+                </p>
+              )}
+            </section>
+          </>
         )}
       </DashboardCanvas>
     </OverviewSurface>
@@ -580,14 +571,7 @@ export const ProjectViewer = ({
                         kind="error"
                         title="Could not load project assets"
                         detail={projectAssetsError}
-                        action={
-                          <WorkbenchRetryAction
-                            onClick={() => {
-                              setProjectAssetsLoading(true);
-                              setProjectAssetsRequestVersion((version) => version + 1);
-                            }}
-                          />
-                        }
+                        action={<WorkbenchRetryAction onClick={() => void assetsQuery.refetch()} />}
                       />
                     ) : (
                       <div className="min-h-0 flex-1 overflow-auto">
@@ -650,7 +634,7 @@ export const ProjectViewer = ({
                     <div className="flex flex-wrap items-center justify-between gap-4 rounded-panel border border-border px-4 py-3">
                       <div className="min-w-0">
                         <p className="text-body text-foreground">Delete project</p>
-                        <p className="mt-0.5 text-micro text-muted-foreground">
+                        <p className="mt-1 text-micro text-muted-foreground">
                           Removes project, experiments, and runs. Cannot be undone from the UI.
                         </p>
                       </div>

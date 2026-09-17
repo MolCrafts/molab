@@ -1,8 +1,8 @@
-"""The seam: molexp reaches a format it does not own, and never privileges one.
+"""The seam: molab reaches a format it does not own, and never privileges one.
 
-molexp ships no reader. molplot ships no reader. A format belongs to whatever
+molab ships no reader. molplot ships no reader. A format belongs to whatever
 package can parse it, which declares a reader in the
-``molcrafts.metric_readers`` entry-point group — a name with no molexp in it,
+``molcrafts.metric_readers`` entry-point group — a name with no molab in it,
 matched structurally, so the provider imports nothing from here.
 """
 
@@ -11,8 +11,8 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from molexp.plugins.metrics_ingest import detect_log_formats
-from molexp.plugins.metrics_ingest.readers import (
+from molab.plugins.metrics_ingest import detect_log_formats
+from molab.plugins.metrics_ingest.readers import (
     ENTRY_POINT_GROUP,
     MetricReader,
     ReadRequest,
@@ -24,14 +24,14 @@ from molexp.plugins.metrics_ingest.readers import (
 
 
 class TestTheGroupIsNeutral:
-    def test_the_entry_point_group_names_molcrafts_not_molexp(self):
+    def test_the_entry_point_group_names_molcrafts_not_molab(self):
         assert ENTRY_POINT_GROUP == "molcrafts.metric_readers"
-        assert "molexp" not in ENTRY_POINT_GROUP
+        assert "molab" not in ENTRY_POINT_GROUP
 
-    def test_molexp_ships_no_reader_of_its_own(self):
+    def test_molab_ships_no_reader_of_its_own(self):
         """Every reader arrives from the package that owns its format.
 
-        molexp may define the *contract* (a Protocol) but never an
+        molab may define the *contract* (a Protocol) but never an
         implementation — shipping one would make that format the privileged
         default and put a parser back inside the platform.
         """
@@ -46,14 +46,14 @@ class TestTheGroupIsNeutral:
                 if "Protocol" in bases:  # the contract, not an implementation
                     continue
                 offenders.append(f"{source.name}:{node.lineno} {node.name}")
-        assert not offenders, f"molexp defines readers: {offenders}"
+        assert not offenders, f"molab defines readers: {offenders}"
 
 
 class TestRegisteredFormats:
     def test_a_registered_reader_satisfies_the_protocol(self):
         assert all(isinstance(reader, MetricReader) for reader in readers())
 
-    def test_a_format_molexp_never_heard_of_is_discovered(self, fake_run):
+    def test_a_format_molab_never_heard_of_is_discovered(self, fake_run):
         hits = detect_log_formats(fake_run)
         assert [hit.format for hit in hits] == ["fake_sim_log"]
 

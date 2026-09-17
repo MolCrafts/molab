@@ -9,12 +9,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import molexp as me
-from molexp.workflow._engine.persistence import (
+import molab as me
+from molab.workflow._engine.persistence import (
     last_resumable_execution_id,
     seed_from_execution,
 )
-from molexp.workspace.domain import ExecutionMode
+from molab.workspace.domain import ExecutionMode
 
 
 def _make_run(tmp_path: Path):

@@ -1,4 +1,4 @@
-"""Unit tests for molexp.services.auth (filesystem users + sessions)."""
+"""Unit tests for molab.services.auth (filesystem users + sessions)."""
 
 from __future__ import annotations
 
@@ -6,15 +6,15 @@ from pathlib import Path
 
 import pytest
 
-from molexp.services.auth import (
+from molab.services.auth import (
     AuthError,
     AuthService,
     reset_auth_service,
     set_auth_enabled,
     set_auth_root,
 )
-from molexp.services.auth.passwords import hash_password, verify_password
-from molexp.services.auth.policy import can_write, workspace_allowed
+from molab.services.auth.passwords import hash_password, verify_password
+from molab.services.auth.policy import can_write, workspace_allowed
 
 
 @pytest.fixture(autouse=True)
@@ -108,7 +108,7 @@ class TestPolicy:
 
 class TestRateLimit:
     def test_lockout_after_failures(self) -> None:
-        from molexp.services.auth.rate_limit import LoginRateLimiter
+        from molab.services.auth.rate_limit import LoginRateLimiter
 
         limiter = LoginRateLimiter(max_failures=3, window_seconds=60, lockout_seconds=60)
         svc = AuthService(rate_limiter=limiter)

@@ -1,15 +1,24 @@
-import { Activity, Gauge, LayoutDashboard, Play, TriangleAlert } from "lucide-react";
+import { Gauge, LayoutDashboard, Play, TriangleAlert } from "lucide-react";
 import { type JSX, type ReactNode, useMemo } from "react";
 import { Link } from "react-router-dom";
 
+import {
+  Histogram,
+  Schedule,
+  type ScheduleItem,
+  StatusBreakdown,
+  StatusDistribution,
+  StatusLegend,
+} from "@/app/components/entity";
 import { runPath } from "@/app/entities/paths";
 import {
   runActivityAt,
   runExecutorFacet,
   runFinishedAt,
   runPresentationStatus,
+  runStartedAt,
 } from "@/app/runs/projections";
-import { groupForStatus, STATUS_GROUPS } from "@/app/runs/statusGroups";
+import { groupForStatus, type StatusGroupId } from "@/app/runs/statusGroups";
 import type { WorkspaceRunRow } from "@/app/runs/types";
 import { useWorkspaceRuns } from "@/app/runs/useWorkspaceRuns";
 import type { WorkspaceSnapshot } from "@/app/types";
@@ -26,35 +35,48 @@ interface DashboardPageProps {
   snapshot: WorkspaceSnapshot;
 }
 
-const timestamp = (value: string | null | undefined): number => {
+interface ExecutionRollup {
+  total: number;
+  running: number;
+  pending: number;
+  succeeded: number;
+  failed: number;
+  cancelled: number;
+}
+
+const emptyRollup = (): ExecutionRollup => ({
+  total: 0,
+  running: 0,
+  pending: 0,
+  succeeded: 0,
+  failed: 0,
+  cancelled: 0,
+});
+
+/** Every count on this page is an *execution* count — a run has N attempts. */
+const rollupExecutions = (rows: WorkspaceRunRow[]): ExecutionRollup => {
+  const counts = emptyRollup();
+  for (const run of rows) {
+    for (const execution of run.executions) {
+      const group = groupForStatus(execution.status);
+      counts.total += 1;
+      if (group) counts[group] += 1;
+    }
+  }
+  return counts;
+};
+
+const timestamp = (value: string | null | undefined): number | null => {
   const parsed = value ? Date.parse(value) : Number.NaN;
-  return Number.isFinite(parsed) ? parsed : Number.NaN;
+  return Number.isFinite(parsed) ? parsed : null;
 };
 
-const startedAt = (run: WorkspaceRunRow): number => {
-  const starts = run.executions
-    .map((execution) => timestamp(execution.startedAt))
-    .filter(Number.isFinite);
-  return starts.length > 0 ? Math.min(...starts) : timestamp(run.createdAt);
-};
-
-const activityAt = (run: WorkspaceRunRow): number => {
-  return timestamp(runActivityAt(run));
-};
-
-const averageWaitSeconds = (rows: WorkspaceRunRow[]): number | null => {
-  const waits = rows
-    .flatMap((run) =>
-      run.executions.map((execution) => {
-        const created = timestamp(execution.createdAt);
-        const started = timestamp(execution.startedAt);
-        return Number.isFinite(created) && Number.isFinite(started) && started >= created
-          ? (started - created) / 1000
-          : null;
-      }),
-    )
-    .filter((value): value is number => value !== null);
-  return waits.length > 0 ? waits.reduce((sum, value) => sum + value, 0) / waits.length : null;
+/** Wall-clock seconds a run occupied, for finished runs only. */
+const runDurationSeconds = (run: WorkspaceRunRow): number | null => {
+  const start = timestamp(runStartedAt(run));
+  const end = timestamp(runFinishedAt(run));
+  if (start === null || end === null || end < start) return null;
+  return (end - start) / 1000;
 };
 
 const Panel = ({
@@ -69,112 +91,59 @@ const Panel = ({
   className?: string;
 }): JSX.Element => (
   <section className={cn("min-w-0 border-t border-border", className)}>
-    <header className="flex h-9 items-center justify-between gap-3 border-b border-border/70 px-3">
+    <header className="flex h-control-comfortable items-center justify-between gap-3 border-b border-border/70 px-4">
       <h2 className="text-label font-medium text-foreground">{title}</h2>
       {meta ? <div className="text-micro text-muted-foreground">{meta}</div> : null}
     </header>
-    <div className="min-w-0 p-3">{children}</div>
+    <div className="min-w-0 p-4">{children}</div>
   </section>
 );
 
-const Summary = ({ rows }: { rows: WorkspaceRunRow[] }): JSX.Element => {
-  const counts = useMemo(() => {
-    const next = { running: 0, pending: 0, failed: 0, succeeded: 0 };
-    for (const run of rows) {
-      for (const execution of run.executions) {
-        const group = groupForStatus(execution.status);
-        if (group && group !== "cancelled") next[group] += 1;
-      }
-    }
-    return next;
-  }, [rows]);
-  const items = [
-    { label: "Running", value: counts.running, tone: "text-status-running-foreground" },
-    { label: "Queued", value: counts.pending, tone: "text-muted-foreground" },
-    { label: "Failed", value: counts.failed, tone: "text-status-failed-foreground" },
-    { label: "Succeeded", value: counts.succeeded, tone: "text-status-completed-foreground" },
-    {
-      label: "Average wait",
-      value: formatDuration(averageWaitSeconds(rows)),
-      tone: "text-foreground",
-    },
-  ];
-
-  return (
-    <section aria-labelledby="dashboard-summary" className="border-y border-border">
-      <header className="flex h-9 items-center justify-between px-3">
-        <div>
-          <h2 id="dashboard-summary" className="text-label font-medium text-foreground">
-            Execution summary
-          </h2>
-          <p className="text-micro text-muted-foreground">Current workspace</p>
-        </div>
-        <span className="text-micro text-muted-foreground">{rows.length} runs</span>
-      </header>
-      <dl className="grid grid-cols-2 border-t border-border/70 sm:grid-cols-5">
-        {items.map((item) => (
-          <div
-            key={item.label}
-            className="border-b border-border/70 px-3 py-2 last:border-b-0 sm:border-b-0 sm:border-r sm:last:border-r-0"
-          >
-            <dd className={cn("font-mono text-body-lg font-semibold tabular-nums", item.tone)}>
-              {item.value}
-            </dd>
-            <dt className="mt-0.5 text-micro text-muted-foreground">{item.label}</dt>
-          </div>
-        ))}
-      </dl>
-    </section>
-  );
-};
-
-const StatusMix = ({ rows }: { rows: WorkspaceRunRow[] }): JSX.Element => (
-  <div className="space-y-2">
-    {STATUS_GROUPS.map((spec) => {
-      const executions = rows.flatMap((run) => run.executions);
-      const count = executions.filter(
-        (execution) => groupForStatus(execution.status) === spec.id,
-      ).length;
-      const ratio = executions.length > 0 ? count / executions.length : 0;
-      return (
-        <div
-          key={spec.id}
-          className="grid grid-cols-[5rem_minmax(0,1fr)_2.25rem] items-center gap-2"
-        >
-          <span className="flex items-center gap-2 text-micro text-muted-foreground">
-            <span className="size-1.5 rounded-full" style={{ backgroundColor: spec.color }} />
-            {spec.label}
-          </span>
-          <span className="h-1 overflow-hidden rounded-full bg-muted">
-            <span
-              className="block h-full rounded-full"
-              style={{ width: `${Math.max(2, ratio * 100)}%`, backgroundColor: spec.color }}
-            />
-          </span>
-          <span className="text-right font-mono text-micro tabular-nums text-foreground">
-            {count}
-          </span>
-        </div>
-      );
-    })}
+/**
+ * Workspace posture: the status mix of every attempt, once. The counts used to
+ * be printed twice in this fold — as hero tiles and again as a bar — and the
+ * tiles labelled execution counts as runs.
+ */
+const ExecutionStatus = ({ counts }: { counts: ExecutionRollup }): JSX.Element => (
+  <div className="space-y-3">
+    <StatusDistribution counts={counts} />
+    <p className="font-mono text-micro tabular-nums text-muted-foreground">
+      {counts.total} executions
+    </p>
   </div>
 );
 
+const ACTIVITY_BUCKETS = 12;
+const ACTIVITY_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Executions *touched* per two-hour bucket over the last day. The previous
+ * version plotted run creation, which says nothing about whether the workspace
+ * is busy — a swept experiment creates 200 runs in one second.
+ */
 const ActivityPlot = ({ rows }: { rows: WorkspaceRunRow[] }): JSX.Element => {
-  const points = useMemo(() => {
+  const { points, peak } = useMemo(() => {
     const now = Date.now();
-    const values = new Array<number>(9).fill(0);
+    const width = ACTIVITY_WINDOW_MS / ACTIVITY_BUCKETS;
+    const values = new Array<number>(ACTIVITY_BUCKETS).fill(0);
     for (const run of rows) {
-      const created = timestamp(run.createdAt);
-      if (!Number.isFinite(created)) continue;
-      const index = 8 - Math.floor((now - created) / (3 * 60 * 60 * 1000));
-      if (index >= 0 && index < values.length) values[index] += 1;
+      for (const execution of run.executions) {
+        for (const instant of [execution.startedAt, execution.finishedAt]) {
+          const at = timestamp(instant);
+          if (at === null) continue;
+          const index = ACTIVITY_BUCKETS - 1 - Math.floor((now - at) / width);
+          if (index >= 0 && index < values.length) values[index] += 1;
+        }
+      }
     }
     const max = Math.max(1, ...values);
-    return values.map((value, index) => ({
-      x: (index / (values.length - 1)) * 100,
-      y: 34 - (value / max) * 28,
-    }));
+    return {
+      peak: Math.max(...values),
+      points: values.map((value, index) => ({
+        x: (index / (values.length - 1)) * 100,
+        y: 34 - (value / max) * 28,
+      })),
+    };
   }, [rows]);
   const line = points.map((point) => `${point.x},${point.y}`).join(" ");
 
@@ -183,20 +152,11 @@ const ActivityPlot = ({ rows }: { rows: WorkspaceRunRow[] }): JSX.Element => {
       <svg
         viewBox="0 0 100 36"
         role="img"
-        aria-label="Runs created during the last 24 hours"
+        aria-label={`Execution starts and finishes per 2 hours over the last day; busiest bucket ${peak}`}
         className="h-24 w-full"
       >
-        <polygon points={`0,36 ${line} 100,36`} className="fill-muted" />
-        <polyline points={line} fill="none" className="stroke-muted-foreground" strokeWidth="1" />
-        {points.map((point) => (
-          <circle
-            key={`${point.x}-${point.y}`}
-            cx={point.x}
-            cy={point.y}
-            r="0.8"
-            className="fill-status-completed"
-          />
-        ))}
+        <polygon points={`0,36 ${line} 100,36`} className="fill-accent/15" />
+        <polyline points={line} fill="none" className="stroke-accent/70" strokeWidth="1" />
       </svg>
       <div className="flex justify-between font-mono text-micro text-muted-foreground">
         <span>−24h</span>
@@ -207,176 +167,111 @@ const ActivityPlot = ({ rows }: { rows: WorkspaceRunRow[] }): JSX.Element => {
   );
 };
 
-const BackendsAndFailures = ({ rows }: { rows: WorkspaceRunRow[] }): JSX.Element => {
-  const backends = useMemo(() => {
-    const counts = new Map<string, number>();
+/** Which backend is producing the failures — a mix per backend, not a bar of totals. */
+const Backends = ({ rows }: { rows: WorkspaceRunRow[] }): JSX.Element => {
+  const groups = useMemo(() => {
+    const byBackend = new Map<string, WorkspaceRunRow[]>();
     for (const run of rows) {
-      for (const backend of runExecutorFacet(run, "backend")) {
-        counts.set(backend, (counts.get(backend) ?? 0) + 1);
+      const backends = runExecutorFacet(run, "backend");
+      for (const backend of backends.length > 0 ? backends : ["unassigned"]) {
+        const bucket = byBackend.get(backend) ?? [];
+        bucket.push(run);
+        byBackend.set(backend, bucket);
       }
     }
-    if (counts.size === 0) counts.set("Unassigned", 0);
-    return [...counts.entries()].sort((left, right) => right[1] - left[1]).slice(0, 4);
+    return [...byBackend.entries()]
+      .map(([backend, backendRuns]) => ({
+        id: backend,
+        label: backend,
+        counts: rollupExecutions(backendRuns),
+      }))
+      .sort((left, right) => right.counts.total - left.counts.total)
+      .slice(0, 6);
   }, [rows]);
+
+  if (groups.length === 0) {
+    return <p className="text-micro text-muted-foreground">No executor recorded yet</p>;
+  }
+  return <StatusBreakdown groups={groups} />;
+};
+
+/** The one list on this page the reader is meant to click, not scan. */
+const NeedsAttention = ({ rows }: { rows: WorkspaceRunRow[] }): JSX.Element => {
   const failures = rows
     .filter((run) => groupForStatus(runPresentationStatus(run)) === "failed")
-    .slice(0, 3);
-  const maxBackend = Math.max(1, ...backends.map(([, count]) => count));
+    .sort(
+      (left, right) =>
+        (timestamp(runActivityAt(right)) ?? 0) - (timestamp(runActivityAt(left)) ?? 0),
+    )
+    .slice(0, 6);
 
+  if (failures.length === 0) {
+    return <p className="text-micro text-muted-foreground">No failed runs</p>;
+  }
   return (
-    <div className="grid gap-5 sm:grid-cols-2">
-      <div className="space-y-2">
-        <h3 className="text-micro font-medium uppercase tracking-wide text-muted-foreground">
-          Backends
-        </h3>
-        {backends.map(([backend, count]) => (
-          <div
-            key={backend}
-            className="grid grid-cols-[4.5rem_minmax(0,1fr)_2rem] items-center gap-2 text-micro"
-          >
-            <span className="truncate text-muted-foreground">{backend}</span>
-            <span className="h-1 rounded-full bg-muted">
-              <span
-                className="block h-full rounded-full bg-status-completed"
-                style={{ width: `${(count / maxBackend) * 100}%` }}
-              />
-            </span>
-            <span className="text-right font-mono tabular-nums">{count}</span>
-          </div>
-        ))}
-      </div>
-      <div className="space-y-2">
-        <h3 className="text-micro font-medium uppercase tracking-wide text-muted-foreground">
-          Failures
-        </h3>
-        {failures.length > 0 ? (
-          failures.map((run) => (
-            <Link
-              key={run.id}
-              to={runPath(run.projectId, run.experimentId, run.id)}
-              className="block truncate text-micro text-status-failed-foreground hover:underline"
-            >
-              {run.name || run.id}
-            </Link>
-          ))
-        ) : (
-          <p className="text-micro text-muted-foreground">No recent failures</p>
-        )}
-      </div>
-    </div>
-  );
-};
-
-const RecentActivity = ({ rows }: { rows: WorkspaceRunRow[] }): JSX.Element => {
-  const recent = [...rows].sort((left, right) => activityAt(right) - activityAt(left)).slice(0, 5);
-  return (
-    <ol className="divide-y divide-border/60">
-      {recent.map((run) => {
-        const group = groupForStatus(runPresentationStatus(run));
-        return (
-          <li key={run.id}>
-            <Link
-              to={runPath(run.projectId, run.experimentId, run.id)}
-              className="flex min-w-0 items-center gap-2 py-2 hover:bg-interactive"
-            >
-              <span
-                className={cn(
-                  "size-1.5 shrink-0 rounded-full",
-                  group === "failed"
-                    ? "bg-status-failed"
-                    : group === "running"
-                      ? "bg-status-running"
-                      : "bg-status-completed",
-                )}
-              />
-              <span className="min-w-0 flex-1 truncate text-micro text-foreground">
-                {run.name || run.id}
-              </span>
-              <span className="shrink-0 text-micro text-muted-foreground">
-                {formatRelative(runActivityAt(run))}
-              </span>
-            </Link>
-          </li>
-        );
-      })}
-    </ol>
-  );
-};
-
-const Timeline = ({ rows }: { rows: WorkspaceRunRow[] }): JSX.Element => {
-  const visible = rows.slice(0, 7);
-  const starts = visible.map(startedAt).filter(Number.isFinite);
-  const ends = visible
-    .map((run) => {
-      const finished = timestamp(runFinishedAt(run));
-      return Number.isFinite(finished) ? finished : Date.now();
-    })
-    .filter(Number.isFinite);
-  const min = starts.length > 0 ? Math.min(...starts) : 0;
-  const max = ends.length > 0 ? Math.max(...ends) : min + 1;
-  const span = Math.max(1, max - min);
-
-  return (
-    <div className="divide-y divide-border/60 border-y border-border/70">
-      {visible.map((run) => {
-        const start = startedAt(run);
-        const finished = timestamp(runFinishedAt(run));
-        const end = Number.isFinite(finished) ? finished : Date.now();
-        const left = Number.isFinite(start) ? ((start - min) / span) * 100 : 0;
-        const width = Number.isFinite(start)
-          ? Math.max(1.5, ((Math.max(start, end) - start) / span) * 100)
-          : 1.5;
-        const group = groupForStatus(runPresentationStatus(run));
-        return (
+    <ul className="divide-y divide-border/50">
+      {failures.map((run) => (
+        <li key={run.id}>
           <Link
-            key={run.id}
             to={runPath(run.projectId, run.experimentId, run.id)}
-            className="grid min-w-0 grid-cols-[10rem_minmax(0,1fr)] items-center gap-3 px-2 py-2 hover:bg-interactive"
+            className="flex min-w-0 items-center gap-2 py-row-pad hover:bg-interactive"
           >
-            <span className="min-w-0">
-              <span className="block truncate text-micro font-medium text-foreground">
-                {run.name || run.id}
-              </span>
-              <span className="block truncate text-micro text-muted-foreground">
-                {run.experimentName}
-              </span>
+            <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-status-failed" />
+            <span className="min-w-0 flex-1 truncate text-micro text-status-failed-foreground">
+              {run.name || run.id}
             </span>
-            <span className="relative h-4 border-x border-border/60">
-              <span
-                className={cn(
-                  "absolute top-1/2 h-1.5 -translate-y-1/2 rounded-full",
-                  group === "failed"
-                    ? "bg-status-failed"
-                    : group === "running"
-                      ? "bg-status-running"
-                      : group === "pending"
-                        ? "bg-status-queued"
-                        : "bg-status-completed",
-                )}
-                style={{ left: `${left}%`, width: `${Math.min(100 - left, width)}%` }}
-              />
+            <span className="shrink-0 font-mono text-micro text-muted-foreground">
+              {formatRelative(runActivityAt(run))}
             </span>
           </Link>
-        );
-      })}
-    </div>
+        </li>
+      ))}
+    </ul>
   );
 };
+
+const scheduleItems = (rows: WorkspaceRunRow[]): ScheduleItem[] =>
+  [...rows]
+    .sort(
+      (left, right) =>
+        (timestamp(runActivityAt(right)) ?? 0) - (timestamp(runActivityAt(left)) ?? 0),
+    )
+    .slice(0, 8)
+    .map((run) => ({
+      id: run.id,
+      label: run.name || run.id,
+      detail: run.experimentName,
+      start: timestamp(runStartedAt(run)),
+      end: timestamp(runFinishedAt(run)),
+      status: groupForStatus(runPresentationStatus(run)) as StatusGroupId | null,
+      render: (children: ReactNode) => (
+        <Link
+          to={runPath(run.projectId, run.experimentId, run.id)}
+          className="block min-w-0 hover:bg-interactive"
+        >
+          {children}
+        </Link>
+      ),
+    }));
 
 export const DashboardPage = ({ snapshot }: DashboardPageProps): JSX.Element => {
   const { rows, loading, error, lastSyncedAt, refresh, truncated } = useWorkspaceRuns();
   const activeWorkspace =
     snapshot.workspaces.find((workspace) => workspace.active) ?? snapshot.workspaces[0];
-  const subtitle = `${rows.length} runs${activeWorkspace ? ` · ${activeWorkspace.label}` : ""}${
-    lastSyncedAt ? ` · synced ${formatRelative(lastSyncedAt.toISOString())}` : ""
-  }`;
+  const counts = useMemo(() => rollupExecutions(rows), [rows]);
+  const durations = useMemo(
+    () => rows.map(runDurationSeconds).filter((value): value is number => value !== null),
+    [rows],
+  );
+  const subtitle = `${rows.length} runs · ${counts.total} executions${
+    activeWorkspace ? ` · ${activeWorkspace.label}` : ""
+  }${lastSyncedAt ? ` · synced ${formatRelative(lastSyncedAt.toISOString())}` : ""}`;
 
   return (
     <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-background">
       <PageHeader
         icon={LayoutDashboard}
         title="Dashboard"
-        titleTooltip={subtitle}
         actions={
           <WorkbenchIconAction label="Open runs" kind="primary" size="default" asChild>
             <Link to="/runs">
@@ -385,11 +280,11 @@ export const DashboardPage = ({ snapshot }: DashboardPageProps): JSX.Element => 
           </WorkbenchIconAction>
         }
       />
-      <div className="border-b border-border px-3 pb-2 text-micro text-muted-foreground">
+      <div className="border-b border-border px-4 py-2 text-micro text-muted-foreground">
         {subtitle}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto p-3">
+      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
         {loading && rows.length === 0 ? (
           <WorkbenchOperationState
             kind="loading"
@@ -407,35 +302,55 @@ export const DashboardPage = ({ snapshot }: DashboardPageProps): JSX.Element => 
           />
         ) : null}
         {truncated ? (
-          <div className="mb-3 flex items-center gap-2 border-y border-status-warning/30 bg-status-warning-soft px-3 py-2 text-micro text-status-warning-foreground">
-            <TriangleAlert className="size-3.5" />
+          <div className="mb-4 flex items-center gap-2 border-y border-status-warning/30 bg-status-warning-soft px-4 py-2 text-micro text-status-warning-foreground">
+            <TriangleAlert className="size-icon-sm" />
             <span>Run inventory is truncated; open Runs to narrow the dataset.</span>
           </div>
         ) : null}
 
         {rows.length > 0 ? (
           <div className="min-w-0">
-            <Summary rows={rows} />
             <div className="grid min-w-0 lg:grid-cols-2">
               <Panel
-                title="Status mix"
-                meta={<Gauge className="size-3.5" />}
+                title="Execution status"
+                meta={<Gauge className="size-icon-sm" />}
                 className="lg:border-r"
               >
-                <StatusMix rows={rows} />
+                <ExecutionStatus counts={counts} />
               </Panel>
-              <Panel title="Run activity" meta="Last 24 hours">
+              <Panel title="Activity" meta="Last 24 hours">
                 <ActivityPlot rows={rows} />
               </Panel>
-              <Panel title="Backends & failures" className="lg:border-r">
-                <BackendsAndFailures rows={rows} />
+              <Panel title="Backends" className="lg:border-r">
+                <div className="space-y-3">
+                  <Backends rows={rows} />
+                  <StatusLegend />
+                </div>
               </Panel>
-              <Panel title="Recent activity" meta={<Activity className="size-3.5" />}>
-                <RecentActivity rows={rows} />
+              <Panel title="Run duration" meta="Finished runs">
+                <Histogram
+                  values={durations}
+                  format={formatDuration}
+                  unit="runs"
+                  ariaLabel="Distribution of wall-clock duration across finished runs"
+                />
+                {durations.length === 0 ? (
+                  <p className="text-micro text-muted-foreground">No finished runs yet</p>
+                ) : null}
               </Panel>
             </div>
-            <Panel title="Timeline" meta="Recent runs">
-              <Timeline rows={rows} />
+            <Panel title="Schedule" meta="Most recently active">
+              <Schedule
+                items={scheduleItems(rows)}
+                empty={
+                  <p className="text-micro text-muted-foreground">
+                    No run has started yet — nothing to place on a timeline.
+                  </p>
+                }
+              />
+            </Panel>
+            <Panel title="Needs attention" meta="Failed runs">
+              <NeedsAttention rows={rows} />
             </Panel>
           </div>
         ) : !loading && !error ? (

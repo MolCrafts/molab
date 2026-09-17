@@ -71,7 +71,7 @@ export function CreateProjectDialog({
             className="h-control-compact w-control-compact"
             aria-label="New project"
           >
-            <Plus className="h-4 w-4" />
+            <Plus className="size-icon" />
           </WorkbenchIconAction>
         </DialogTrigger>
       ) : null}
@@ -83,7 +83,7 @@ export function CreateProjectDialog({
           aria-label="New project"
           deniedReason={writeDeniedReason}
         >
-          <Plus className="h-4 w-4" />
+          <Plus className="size-icon" />
         </WorkbenchIconAction>
       ) : null}
       <DialogContent className="sm:max-w-md">

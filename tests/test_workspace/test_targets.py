@@ -7,8 +7,8 @@ from pathlib import Path
 import pytest
 from molq.transport import LocalTransport, SshTransport
 
-from molexp.workspace import ComputeTarget, Workspace
-from molexp.workspace.targets import to_transport
+from molab.workspace import ComputeTarget, Workspace
+from molab.workspace.targets import to_transport
 
 
 class TestComputeTargetValidation:

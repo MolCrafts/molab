@@ -1,21 +1,21 @@
 """Workflow layering invariant guard (rectification spec — Phase 0 / P0-05).
 
-After rectification, ``src/molexp/workflow/`` may import from
-``molexp.workspace.*`` (workspace is the storage primitive workflow
+After rectification, ``src/molab/workflow/`` may import from
+``molab.workspace.*`` (workspace is the storage primitive workflow
 sits on top of) but must NOT import from any other upstream-or-sibling
 layer:
 
-- ``molexp.agent`` (agent depends on workflow, not the other way)
-- ``molexp.plugins`` (optional capabilities)
-- ``molexp.server``, ``molexp.cli``, ``molexp.sweep`` (application shell)
+- ``molab.harness`` (harness depends on workflow, not the other way)
+- ``molab.plugins`` (optional capabilities)
+- ``molab.server``, ``molab.cli``, ``molab.sweep`` (application shell)
 
 Additionally, ``pydantic_graph`` must not be imported anywhere —
-molexp dropped the dependency; the engine under ``workflow/_engine/``
-is molexp-owned (see also ``test_engine_boundary.py`` for the
+molab dropped the dependency; the engine under ``workflow/_engine/``
+is molab-owned (see also ``test_engine_boundary.py`` for the
 src/-wide scan).
 
 History: until 2026-05-09 this guard *also* forbade
-``molexp.workspace`` imports. The rectification spec inverts that
+``molab.workspace`` imports. The rectification spec inverts that
 direction; workflow now uses workspace for caching + persistence.
 """
 
@@ -25,15 +25,15 @@ import ast
 import re
 from pathlib import Path
 
-WORKFLOW_ROOT = Path(__file__).resolve().parents[2] / "src" / "molexp" / "workflow"
+WORKFLOW_ROOT = Path(__file__).resolve().parents[2] / "src" / "molab" / "workflow"
 
 FORBIDDEN_PREFIXES: tuple[str, ...] = (
-    "molexp.agent",
-    "molexp.plugins",
-    "molexp.server",
-    "molexp.cli",
-    "molexp.services",
-    "molexp.sweep",
+    "molab.harness",
+    "molab.plugins",
+    "molab.server",
+    "molab.cli",
+    "molab.services",
+    "molab.sweep",
 )
 
 
@@ -76,8 +76,8 @@ def test_workflow_forbids_upstream_and_application_layers() -> None:
         if hits:
             offenders[prefix] = _format(hits)
     assert not offenders, (
-        "molexp.workflow must not import upstream / sibling layers.\n"
-        "Allowed downward: molexp.workspace.*, molexp._typing, molexp.profile.\n"
+        "molab.workflow must not import upstream / sibling layers.\n"
+        "Allowed downward: molab.workspace.*, molab._typing, molab.profile.\n"
         "Offenders:\n  "
         + "\n  ".join(f"[{prefix}] {hit}" for prefix, lines in offenders.items() for hit in lines)
     )
@@ -92,7 +92,7 @@ def test_compiled_graph_is_layer_private() -> None:
     guards the architect's N1 note on the build+compile merge (spec
     workflow-refactor-02).
     """
-    src_root = Path(__file__).resolve().parents[2] / "src" / "molexp"
+    src_root = Path(__file__).resolve().parents[2] / "src" / "molab"
     upper_layers = ("server", "cli", "harness", "agent", "sweep", "plugins")
     offenders: list[str] = []
     for layer in upper_layers:

@@ -1,9 +1,9 @@
 ---
-title: Molexp 前端与 Dashboard 重设计规范
-description: Molexp Web 前端的产品定位、信息架构、功能边界、Dashboard 目标形态与分阶段整改要求。
+title: Molab 前端与 Dashboard 重设计规范
+description: Molab Web 前端的产品定位、信息架构、功能边界、Dashboard 目标形态与分阶段整改要求。
 ---
 
-# Molexp 前端与 Dashboard 重设计规范
+# Molab 前端与 Dashboard 重设计规范
 
 | 字段 | 值 |
 | --- | --- |
@@ -14,7 +14,7 @@ description: Molexp Web 前端的产品定位、信息架构、功能边界、Da
 
 ## 1. 摘要
 
-Molexp 的 Web UI 应当是计算科学家和研究工程师的实验操作台，而不是展示系统能力的通用指标看板。
+Molab 的 Web UI 应当是计算科学家和研究工程师的实验操作台，而不是展示系统能力的通用指标看板。
 
 当前界面最主要的问题不是视觉样式，而是信息架构：Runs Overview 同时承担状态汇总、运行分析、活动流、时间线和 Dashboard 布局管理等职责；顶级导航又同时暴露 Project、Run、Activity、Workflow、Workspace、Asset、Agent 和 Knowledge 等不同抽象层级的对象。用户需要先理解系统内部模块划分，才能决定下一步去哪里。
 
@@ -41,7 +41,7 @@ Molexp 的 Web UI 应当是计算科学家和研究工程师的实验操作台�
 - Dashboard 使用 rail-only shell，不显示无职责的 explorer。
 - Right Inspector 不再永久挂载 Copilot。
 - 顶栏局部搜索已明确为 `Filter explorer`，Dashboard 不显示无效 filter。
-- 通用 `ContentSection` 与 `PageHeader` 已进入 `molcrafts-ui` registry，并以同源文件接入 Molexp。
+- 通用 `ContentSection` 与 `PageHeader` 已进入 `molcrafts-ui` registry，并以同源文件接入 Molab。
 - Experiment 的 Overview、Workflow、Runs、Compare 已成为 route-backed tabs；Workflow 的规范路径为
   `/projects/:projectId/experiments/:experimentId/workflow`。
 - Experiment Overview 只保留 Workflow 摘要与入口；完整 graph 和 expand modal 已删除，Workflow tab 是唯一主要 graph surface。
@@ -50,7 +50,7 @@ Molexp 的 Web UI 应当是计算科学家和研究工程师的实验操作台�
 - Project Experiment 列表不再把未加载的 runs 显示成 `No runs`。
 - Project 的 Overview、Experiments、Assets、Settings 已成为 route-backed tabs；Runs 的 List/Timeline 继续使用既有 URL query state。
 - 已删除断开渲染树的 Dashboard panel/layout、KPI strip/card、Activity chart、aggregate row 和专用 Sparkline，并移除其孤立派生计算。
-- 通用 `ExplorerShell`（icon rail + explorer column）已进入 `molcrafts-ui` registry；Molexp 使用同源文件，领域 explorer 内容仍留在产品内。
+- 通用 `ExplorerShell`（icon rail + explorer column）已进入 `molcrafts-ui` registry；Molab 使用同源文件，领域 explorer 内容仍留在产品内。
 - Dashboard Attention 已接入权威 pending approvals，并按可行动优先级与更新时间排序；每项提供 `Review`、`Inspect`、`Open settings` 或正确数据源的 `Retry`。
 - Attention 首屏最多显示 5 项；只有被折叠事项共享同一目标页面时才显示可点击 overflow，避免伪造一个不存在的统一 `View all` 页面。
 - Continue work 已覆盖 Agent task/session，不再只展示 Project、Experiment 与 Run。
@@ -62,7 +62,7 @@ Molexp 的 Web UI 应当是计算科学家和研究工程师的实验操作台�
 - legacy Activity 与 Workflows explorer 也已封装为 hidden compatibility contributions，旧 URL 可用但不会返回一级 rail 或重新污染 `LeftPanel`。
 - Files、Agent 与 Projects 的 destructive/create actions 已在 feature 内统一 permission gate；shell 不再持有领域 CRUD 或提前订阅 Runs query。
 - Settings 使用 rail-only full-surface shell；Files 的 rail、explorer 与 breadcrumb 文案已统一，Assets/Files 通过 shared rail separator 与 primary workflow 分组。
-- `molcrafts-ui` 的 `LeftIconRailItem` 已增加通用 `separatorBefore` 能力，registry 已重新构建；Molexp vendored source 与 registry source 保持一致。
+- `molcrafts-ui` 的 `LeftIconRailItem` 已增加通用 `separatorBefore` 能力，registry 已重新构建；Molab vendored source 与 registry source 保持一致。
 - Dashboard、Runs、Settings 及 legacy compatibility 页面的 landing surface 已作为 lazy navigation contribution 挂载；`CenterPanel` 不再 import 页面或按 section id 分支。
 - Runs 现在由 feature 自己注册 contextual inspector surface；`AppShell` 只管理通用 surface 的 identity、显隐与布局，不再 import `RunInspector` 或理解 Runs 数据结构。
 - Center 与 Right panel 已共用 renderer slot resolver；`RightPanel` 只负责当前 entity renderer 与 lineage，不包含 feature-specific inspector branching。
@@ -74,7 +74,7 @@ Molexp 的 Web UI 应当是计算科学家和研究工程师的实验操作台�
 - Workspace Runs API 已支持 offset/limit，并在分页前提供真实 total/aggregate；前端 2000 rows pipeline p95 约 2 ms，暂不引入 virtualization。
 - Canonical Project/Experiment/Run deep link 会按 URL 层级补载 lazy entity chain，不再把未加载数据误显示为 not found。
 - 页面标题由 `PageHeader` 单点拥有，breadcrumb 只显示可导航 ancestors；landing surface 不再重复渲染空 breadcrumb header。
-- 通用 `WorkbenchOperationState` 与增强后的 `EmptyState` 已进入 `molcrafts-ui` registry，Molexp vendored source 与 registry source 可机械比对。
+- 通用 `WorkbenchOperationState` 与增强后的 `EmptyState` 已进入 `molcrafts-ui` registry，Molab vendored source 与 registry source 可机械比对。
 - request count、React Profiler、bundle 和 Runs 数据规模基线已落盘到 `frontend-performance-baseline.md`。
 
 最终校验命令和结果记录在本规范的完成定义下方；`molcrafts-ui` registry 当前包含 39 items。
@@ -89,7 +89,7 @@ Molexp 的 Web UI 应当是计算科学家和研究工程师的实验操作台�
 
 ### 2.1 产品事实
 
-Molexp 的核心对象层级是：
+Molab 的核心对象层级是：
 
 ```text
 Workspace
@@ -151,7 +151,7 @@ Workspace
 
 本阶段不以管理层、只读报表用户或通用 BI 用户为主要设计对象。
 
-### 3.2 用户打开 Molexp 时的首要问题
+### 3.2 用户打开 Molab 时的首要问题
 
 按优先级排序：
 
@@ -220,7 +220,7 @@ Dashboard MUST NOT 成为：
 ## 6. 目标信息架构
 
 ```text
-Molexp
+Molab
 ├── Dashboard
 │   ├── Attention
 │   ├── Active runs
@@ -411,7 +411,7 @@ Dashboard 的 primary action MUST 根据 workspace 状态决定：
 ### 9.1 首次使用
 
 ```text
-Open Molexp
+Open Molab
 → Dashboard empty/onboarding state
 → Create project
 → Create experiment
@@ -425,7 +425,7 @@ Empty state MUST 包含可执行 action，不能只提示用户“创建一个�
 ### 9.2 日常返回
 
 ```text
-Open Molexp
+Open Molab
 → Review Attention
 → Open active or failed run
 → Inspect execution/logs
@@ -635,13 +635,13 @@ Right inspector MUST 只展示当前 selection 的：
 
 ### 11.8 Shared UI ownership
 
-跨 Molcrafts 产品通用、无 Molexp 领域语义的 UI MUST 以
+跨 Molcrafts 产品通用、无 Molab 领域语义的 UI MUST 以
 `/home/jicli594/work/molcrafts/molcrafts-ui` 为 source of truth：
 
 - Page header、content section、empty/loading/error shell、layout primitive 等稳定通用模式，应先进入 `molcrafts-ui` registry，再同步到产品。
-- Project、Experiment、Run、Workflow 等领域 view model、状态聚合、路由与业务 action MUST 留在 Molexp。
+- Project、Experiment、Run、Workflow 等领域 view model、状态聚合、路由与业务 action MUST 留在 Molab。
 - 不得为了减少单个 import 就把 feature-specific composite 抽成“通用组件”。
-- Molexp 中 vendored 的共享组件源文件 MUST 与 registry source 保持可机械校验的一致性。
+- Molab 中 vendored 的共享组件源文件 MUST 与 registry source 保持可机械校验的一致性。
 - 新抽象必须至少有两个明确使用场景，或属于跨产品必须统一的 foundation；否则先保持局部实现。
 
 ## 12. Loading、Error 与 Empty State
@@ -815,7 +815,7 @@ P3 开始前 MUST 建立：
 
 ### 17.1 产品与 IA
 
-- [x] 用户进入 Molexp 后，第一屏能识别 workspace 状态、待处理事项和下一步动作。
+- [x] 用户进入 Molab 后，第一屏能识别 workspace 状态、待处理事项和下一步动作。
 - [x] Dashboard 只包含 Attention、Active runs、Continue work 和 contextual onboarding/action。
 - [x] Dashboard 不包含默认 Gantt、历史 chart、panel manager 或重复 status cards。
 - [x] Workflows 不再作为 primary navigation。
@@ -879,6 +879,6 @@ P3 开始前 MUST 建立：
 - Biome：467 files 通过，0 diagnostics。
 - Production Rsbuild：通过；entry 254.2 kB raw / 65.5 kB gzip。
 - Runs scale profile：100/1000/2000 rows 均完成，2000 rows p95 2.021 ms。
-- `molcrafts-ui` registry：构建通过，39 items；5 个共享 source 与 Molexp vendored source 零差异。
-- `git diff --check`：Molexp 本轮范围与 `molcrafts-ui` 均通过。
+- `molcrafts-ui` registry：构建通过，39 items；5 个共享 source 与 Molab vendored source 零差异。
+- `git diff --check`：Molab 本轮范围与 `molcrafts-ui` 均通过。
 - Workspace Runs pagination 的 2 个 Python tests 在实现检查点通过；最终复跑在 test collection 前被本轮范围外的未提交 `workspace/plan.py` 与缺失 `PlanExistsError`/`PlanNotFoundError` 阻断，并非 pagination assertion failure。本轮未改写该并行中的 workspace domain 工作。

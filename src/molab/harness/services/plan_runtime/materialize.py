@@ -1,0 +1,201 @@
+"""The single shared step that makes a PlanOrchestrator run UI-visible — honestly.
+
+Both entry points that run a plan — the server's ``POST /plan-tasks`` background
+task and the CLI's ``molab plan`` — call :func:`materialize_plan_records` after
+``PlanOrchestrator`` finishes (success **or** terminal failure), so a plan produced from
+Python and one produced from the UI converge on the *exact same* on-disk
+workspace state. Keeping this in one function is the invariant that makes
+"Python operation ≡ UI operation" hold: neither path can drift from the other.
+
+Honesty contract (vision-loop-06): each record writer raises; this function
+catches **per record**, collecting failures into a structured
+:class:`PlanRecordOutcome` — one broken record never aborts its siblings, and
+nothing is warning-swallowed. Record errors never flip the plan's own exit
+code (the science and its artifacts are already safely on disk; the record
+layer is a projection) — but the caller always sees them.
+
+Approval suspensions are **not** failures: callers carve
+``ApprovalPendingError`` out before invoking the ``failure=`` path, so a plan
+that later resumes and succeeds never leaves a phantom FailureAnalysis.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+from pydantic import BaseModel, ConfigDict
+
+from molab.harness import Plan
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from molab.workspace.experiment import Experiment
+    from molab.workspace.run import Run
+
+__all__ = ["PlanFailure", "PlanRecordError", "PlanRecordOutcome", "materialize_plan_records"]
+
+
+class PlanRecordError(BaseModel):
+    """One record writer's failure, named."""
+
+    model_config = ConfigDict(frozen=True)
+
+    record: str
+    error: str
+
+
+class PlanRecordOutcome(BaseModel):
+    """What :func:`materialize_plan_records` actually landed."""
+
+    model_config = ConfigDict(frozen=True)
+
+    workflow_persisted: bool
+    written: tuple[str, ...] = ()
+    errors: tuple[PlanRecordError, ...] = ()
+
+
+class PlanFailure(BaseModel):
+    """What the caller knows about a terminally-failed plan."""
+
+    model_config = ConfigDict(frozen=True)
+
+    stage: str | None = None
+    error: str
+
+
+def materialize_plan_records(
+    *,
+    run: Run,
+    experiment: Experiment,
+    workspace_root: str,
+    task_id: str,
+    draft: str,
+    model: str,
+    execution_id: str,
+    failure: PlanFailure | None = None,
+    turn_id: str | None = None,
+) -> PlanRecordOutcome:
+    """Write the UI-facing records a finished (or failed) plan run produces.
+
+    Success path: workflow IR onto the experiment, the Agents-tab session
+    (entry + transcript), the Decision experiment record, and — when the
+    execute tail ran — the Finding harvested from the ``final_report``.
+
+    Failure path (``failure`` given): the Agents-tab entry lands with status
+    ``failed`` (a failed plan is finally visible) and a ``FailureAnalysis``
+    KnowledgeItem records the failed stage, the error, what completed, and
+    how to resume. **Partial products still surface**: when a
+    ``workflow_source`` artifact already exists (the plan died later — e.g.
+    dry-run tests), its IR is still compiled onto the experiment so the UI
+    graph is not blank. Decision / Finding remain success-only.
+
+    Returns:
+        A :class:`PlanRecordOutcome` naming every record written and every
+        record that failed (per-record collection — no silent swallowing).
+    """
+    from molab.harness.services.plan_runtime import record as rec
+
+    written: list[str] = []
+    errors: list[PlanRecordError] = []
+
+    def _attempt(label: str, write: Callable[[], object]) -> None:
+        try:
+            write()
+        except Exception as exc:  # collected per record — never swallowed
+            errors.append(PlanRecordError(record=label, error=repr(exc)))
+        else:
+            written.append(label)
+
+    # Always attempt when a workflow_source artifact exists — including the
+    # failure path. A plan that generated tasks then died at compile/tests
+    # must still bind the graph onto the experiment (UI reads experiment.workflow).
+    # Missing artifact → not an error on failure (nothing to show); on success
+    # it is an error (the pipeline claimed to finish without a workflow).
+    workflow_persisted = Plan().save(run=run, execution_id=execution_id)
+    if workflow_persisted:
+        written.append("workflow_ir")
+    elif failure is None:
+        errors.append(
+            PlanRecordError(
+                record="workflow_ir",
+                error="workflow IR could not be compiled/persisted onto the experiment",
+            )
+        )
+
+    failed = failure is not None
+    _attempt(
+        "agent_task",
+        lambda: rec.write_agent_task_record(
+            run=run,
+            workspace_root=workspace_root,
+            task_id=task_id,
+            draft=draft,
+            execution_id=execution_id,
+            failed=failed,
+        ),
+    )
+    _attempt(
+        "session_events",
+        lambda: rec.write_session_events_record(
+            run=run,
+            experiment=experiment,
+            workspace_root=workspace_root,
+            task_id=task_id,
+            draft=draft,
+            execution_id=execution_id,
+            turn_id=turn_id,
+            failure_stage=failure.stage if failure is not None else None,
+            failure_error=failure.error if failure is not None else None,
+        ),
+    )
+    if failure is None:
+        if rec.has_artifact(run, execution_id, "plan_report") or rec.has_artifact(
+            run, execution_id, "experiment_plan"
+        ):
+            _attempt(
+                "plan_book",
+                lambda: rec.write_plan_book(
+                    run=run, experiment=experiment, model=model, execution_id=execution_id
+                ),
+            )
+        if rec.has_artifact(run, execution_id, "experiment_report"):
+            _attempt(
+                "experiment_record",
+                lambda: rec.write_experiment_record(
+                    run=run,
+                    experiment=experiment,
+                    draft=draft,
+                    model=model,
+                    execution_id=execution_id,
+                ),
+            )
+        if rec.has_artifact(run, execution_id, "final_report"):
+            _attempt(
+                "finding",
+                lambda: rec.write_finding_record(
+                    run=run,
+                    experiment=experiment,
+                    draft=draft,
+                    model=model,
+                    execution_id=execution_id,
+                ),
+            )
+    else:
+        _attempt(
+            "failure_analysis",
+            lambda: rec.write_failure_analysis_record(
+                run=run,
+                experiment=experiment,
+                model=model,
+                failure_stage=failure.stage,
+                failure_error=failure.error,
+                execution_id=execution_id,
+            ),
+        )
+
+    return PlanRecordOutcome(
+        workflow_persisted=workflow_persisted,
+        written=tuple(written),
+        errors=tuple(errors),
+    )

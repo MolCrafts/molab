@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from molexp.workspace import Workspace
+from molab.workspace import Workspace
 
 
 @pytest.fixture

@@ -2,7 +2,7 @@
 
 This guide is for the user who wants to create and manage experiments
 from the browser, without writing Python first. You will bring up the
-MolExp server, open the bundled web UI, create a project and an
+Molab server, open the bundled web UI, create a project and an
 experiment through dialogs, launch a run, and then monitor and manage
 that run from the same screens.
 
@@ -17,7 +17,7 @@ The UI presents the same hierarchy the workspace stores on disk:
 
 | Level | What it is |
 |---|---|
-| **Workspace** | A directory MolExp owns. One server can serve several. |
+| **Workspace** | A directory Molab owns. One server can serve several. |
 | **Project** | A container that groups related experiments. |
 | **Experiment** | A workflow plus a parameter space plus an optional default compute target. |
 | **Run** | One immutable execution request: concrete parameters, a status (`pending → running → succeeded / failed / cancelled`). |
@@ -26,8 +26,8 @@ The UI presents the same hierarchy the workspace stores on disk:
 ## 1. Start the server
 
 ```bash
-pip install git+https://github.com/MolCrafts/molexp   # PyPI release pending
-molexp serve -ws ./lab --port 8000
+pip install git+https://github.com/MolCrafts/molab   # PyPI release pending
+molab serve -ws ./lab --port 8000
 ```
 
 Open <http://localhost:8000>. The wheel ships the production UI build,
@@ -38,7 +38,7 @@ Node.js required. If `./lab` does not exist or has no `workspace.json`,
 > **Checkout / live UI:** from a source tree, one command for API + HMR:
 >
 > ```bash
-> molexp serve --dev -ws ./lab --port 8000
+> molab serve --dev -ws ./lab --port 8000
 > ```
 >
 > Open the printed **Dev UI** URL (default <http://localhost:5173>), not
@@ -56,11 +56,11 @@ its tree.
 ### Optional: require login
 
 Loopback serves stay open by default. To protect the UI and API with
-filesystem users (under `~/.molexp/auth/`):
+filesystem users (under `~/.molab/auth/`):
 
 ```bash
-molexp auth login -u admin          # first user becomes admin
-molexp serve -ws ./lab --auth
+molab auth login -u admin          # first user becomes admin
+molab serve -ws ./lab --auth
 ```
 
 The browser shows a sign-in page (default username `admin`). Admins can
@@ -74,11 +74,11 @@ On a login node, or when a colleague needs the UI, punch a hole while
 the API stays on loopback:
 
 ```bash
-molexp serve -ws ./lab --tunnel
+molab serve -ws ./lab --tunnel
 ```
 
 The public URL is printed on the start banner. Provider, token, and
-binary path come from `--via` / `--tunnel-token` or `molexp config`
+binary path come from `--via` / `--tunnel-token` or `molab config`
 (`tunnel.*`) — never from the environment. Details:
 [Server Lifecycle](../guide/server-lifecycle.md#share-ui-with-a-colleague-tunnel).
 
@@ -157,7 +157,7 @@ takes the run's **Parameters (JSON)**, and lets you pick a **Target**:
   or the CLI:
 
   ```bash
-  molexp run
+  molab run
   ```
 
   Resume / Rerun / **Rerun fresh** (bypass cache) are also on the run
@@ -195,7 +195,7 @@ Deletes ask for confirmation and remove the object and its children
 from the workspace. Runs themselves cannot be deleted — a run is the
 immutable record of an execution request; you **cancel** a live
 `running` run instead (`POST …/cancel`, same verb as
-`molexp runs cancel`).
+`molab runs cancel`).
 
 A `failed` or `cancelled` run can be continued — two distinct verbs,
 both keeping the same run id:
@@ -220,8 +220,8 @@ existing Compare / Aggregate views.
 
 **Settings** has two tabs:
 
-- **Remote workspaces** — register another MolExp server's workspace so
-  it appears in your tree (descriptors live in `~/.molexp/`).
+- **Remote workspaces** — register another Molab server's workspace so
+  it appears in your tree (descriptors live in `~/.molab/`).
 - **Compute targets** — register molq execution targets (stored in the
   workspace's `workspace.json`). Targets registered here are what the
   Create Experiment and Launch Run dialogs offer, and the **+ Add new
@@ -249,7 +249,7 @@ See the [Agent concept](../concept/agent.md) and
 | Draft a workflow on the canvas | ✅ | Editable graph, ⌘S saves — true science still usually needs Python or Plan |
 | Monitor runs (overview, attempts, logs) | ✅ | Plus the Runs dashboard |
 | Delete project / experiment | ✅ | With confirmation |
-| Cancel a running run | ✅ | `POST …/cancel` — same verb as CLI `molexp runs cancel` |
+| Cancel a running run | ✅ | `POST …/cancel` — same verb as CLI `molab runs cancel` |
 | Start / Resume / Rerun (incl. Rerun fresh) | ✅ | Run header actions; `fresh` bypasses cache reads |
 | Register compute targets / remote workspaces | ✅ | Settings, or inline from dialogs |
 | Assets and lineage browsing | ✅ | Asset panel |

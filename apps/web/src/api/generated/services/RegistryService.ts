@@ -12,18 +12,18 @@ export class RegistryService {
     /**
      * List Task Types
      * Return every task-type slug the agent / UI can compose into IR.
-     * @param molexpSession
+     * @param molabSession
      * @returns TaskTypeListResponse Successful Response
      * @throws ApiError
      */
     public static listTaskTypes(
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<TaskTypeListResponse> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/tasks',
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -34,13 +34,13 @@ export class RegistryService {
      * Get Task Type
      * Return one task type by slug, or 404 if not registered.
      * @param slug
-     * @param molexpSession
+     * @param molabSession
      * @returns TaskTypeResponse Successful Response
      * @throws ApiError
      */
     public static getTaskType(
         slug: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<TaskTypeResponse> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -49,7 +49,7 @@ export class RegistryService {
                 'slug': slug,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -65,18 +65,18 @@ export class RegistryService {
      * is no metrics product plugin — plots are molplot only. The response
      * carries no UI semantics — those live in each bundle's own
      * ``manifest.json``, fetched by the browser-side loader.
-     * @param molexpSession
+     * @param molabSession
      * @returns UiPluginListResponse Successful Response
      * @throws ApiError
      */
     public static listPlugins(
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<UiPluginListResponse> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/plugins',
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,

@@ -7,8 +7,8 @@ This page gets you from zero to a tracked run in under a minute. You will define
 Copy this into a file named `demo.py`:
 
 ```python
-import molexp as me
-from molexp.workflow import Workflow, WorkflowCompiler
+import molab as me
+from molab.workflow import Workflow, WorkflowCompiler
 
 # 1. Define the workflow
 wf = Workflow(name="sum")
@@ -82,7 +82,7 @@ print(same_run.get_result("summarize", execution_id=same_run.executions[-1].id))
 
 - If the workflow definition was the unfamiliar part, continue with [Your First Workflow](first-workflow.md).
 - If the workspace hierarchy is new to you, read [Track a Run](tracked-runs.md).
-- If you want `molexp run` to drive this instead of calling `run.execute` yourself, go to [CLI and Profiles](cli-and-profiles.md).
+- If you want `molab run` to drive this instead of calling `run.execute` yourself, go to [CLI and Profiles](cli-and-profiles.md).
 - If you prefer clicking to scripting, try [Start from the UI](start-from-ui.md).
 
 ## Runnable Example

@@ -43,7 +43,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
         >
           <div className="flex items-center gap-3">
             <div className="flex size-9 items-center justify-center rounded-control bg-status-failed-soft text-status-failed-foreground">
-              <AlertTriangle className="h-4 w-4" />
+              <AlertTriangle className="size-icon" />
             </div>
             <h1 className="text-title font-semibold text-status-failed-foreground">
               Execution halted

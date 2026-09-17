@@ -11,7 +11,13 @@ describe("workbench layout contract", () => {
   it("keeps the global bar compact and free of persistent search", () => {
     const contextBar = readWebSource("app/layout/ContextBar.tsx");
 
-    expect(contextBar).toContain("h-[35px]");
+    // The band is the constitution's own 40px region band, not a literal and
+    // not a product-invented token. It was 35px until 2026-09-07, below § 2.
+    expect(contextBar).toContain("h-toolbar-compact");
+    expect(readWebSource("styles/constitution-theme.css")).toContain(
+      "--spacing-toolbar-compact: 2.5rem",
+    );
+    expect(contextBar).not.toMatch(/h-\[\d/);
     expect(contextBar).not.toContain("Filter explorer");
     expect(contextBar).not.toContain("<Input");
     expect(contextBar).not.toContain("<Search");
@@ -28,7 +34,9 @@ describe("workbench layout contract", () => {
     expect(shell).toContain("Boolean(inspectorSurface || inspectorSelection)");
     expect(shell).not.toContain("inspectorSurface || inspectorSelection || selection");
     expect(explorer).toContain('"flex w-12');
-    expect(theme).toContain("--spacing-statusbar: 1.375rem");
+    // Vendored from molcrafts-ui; the 22px this once pinned was local drift
+    // below the constitution's 28–32px status-bar band.
+    expect(theme).toContain("--spacing-statusbar: 1.75rem");
   });
 
   it("keeps Dashboard exploratory and Settings rail-only", () => {
@@ -38,15 +46,47 @@ describe("workbench layout contract", () => {
     expect(coreNav).toContain("explorer: DashboardExplorer");
     expect(coreNav).toMatch(/id: "dashboard"[\s\S]*?shellMode: "explorer"/);
     expect(coreNav).toMatch(/id: "settings"[\s\S]*?shellMode: "rail-only"/);
+    // Posture first, one list to click, and no count printed twice: the fold is
+    // encodings, not a KPI wall plus the same numbers as a bar.
     for (const panel of [
-      "Execution summary",
-      "Status mix",
-      "Run activity",
-      "Backends & failures",
-      "Recent activity",
-      "Timeline",
+      "Execution status",
+      "Activity",
+      "Backends",
+      "Run duration",
+      "Schedule",
+      "Needs attention",
     ]) {
       expect(dashboard).toContain(panel);
     }
+  });
+
+  it("gives Compare a page frame and a single matrix scrollport", () => {
+    const pane = readWebSource("app/compare/ComparePane.tsx");
+    const table = readWebSource("app/compare/CompareTable.tsx");
+    const dock = readWebSource("app/compare/SelectionPanel.tsx");
+    const dialog = readWebSource("app/compare/MetricDetailDialog.tsx");
+
+    expect(pane).toContain("EntityHeader");
+    expect(pane).toContain('title="Compare"');
+    expect(pane).toContain("flex flex-col overflow-hidden");
+    expect(pane).not.toContain("runs from");
+    expect(pane).toContain("scanMetrics(selected");
+    expect(table).not.toMatch(/import \{[^}]*\bTable\b[^}]*\} from "@\/components\/ui\/table"/);
+    expect(table).toContain("visibleRows");
+    expect(table).toContain("rowGroups");
+    expect(table).toContain("compileRunFilter");
+    expect(table).toContain("cursor-col-resize");
+    expect(table).toContain("openMetric");
+    expect(table).toContain("nextRunSort");
+    expect(table).not.toContain("workspaceLabel} /");
+    expect(dock).toContain("overflow-hidden");
+    expect(dock).toContain("hydrateComparisonTree");
+    expect(dock).not.toContain("setCategory");
+    expect(dock).not.toContain("workspaceLabel} /");
+    expect(dialog).toContain("h-viewport-tall");
+    expect(dialog).toContain("w-drawer");
+    expect(dialog).toContain('placement="overlay"');
+    expect(dialog).not.toContain("h-[85vh]");
+    expect(readWebSource("components/layout/ExplorerShell.tsx")).toContain('min: "88px"');
   });
 });

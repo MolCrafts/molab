@@ -28,7 +28,7 @@ export function PageHeader({
       <div className="flex h-toolbar min-w-0 items-center gap-2 px-2">
         {Icon ? (
           <div className="hidden size-7 flex-none items-center justify-center text-accent sm:flex">
-            <Icon className="size-4" aria-hidden />
+            <Icon className="size-icon" aria-hidden />
           </div>
         ) : null}
         <div className="flex min-w-0 flex-1 items-center gap-2">
@@ -39,7 +39,7 @@ export function PageHeader({
             {title}
           </h1>
         </div>
-        {actions ? <div className="flex flex-none items-center gap-0.5">{actions}</div> : null}
+        {actions ? <div className="flex flex-none items-center gap-hairline">{actions}</div> : null}
       </div>
     </header>
   );

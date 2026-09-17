@@ -26,12 +26,12 @@ import asyncio
 import tempfile
 from pathlib import Path
 
-import molexp as me
-from molexp.workspace import Bundle, NoteMeta, ReferenceConcept, ReferenceMeta
+import molab as me
+from molab.workspace import Bundle, NoteMeta, ReferenceConcept, ReferenceMeta
 
 
 async def main() -> None:
-    root = Path(tempfile.mkdtemp(prefix="molexp-knowledge-"))
+    root = Path(tempfile.mkdtemp(prefix="molab-knowledge-"))
     ws = me.Workspace(root, name="knowledge-demo")
 
     # ── 1. Bundle wraps the workspace root ─────────────────────────────

@@ -188,7 +188,7 @@ export const TensorBoardTab = ({ selection, snapshot }: TensorBoardTabProps): JS
       <div className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-4 md:px-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-2">
-            <BarChart3 className="h-4 w-4 text-muted-foreground" />
+            <BarChart3 className="size-icon text-muted-foreground" />
             <div className="text-body-lg font-medium text-foreground">TensorBoard</div>
           </div>
           <div className="flex flex-wrap items-center gap-3 text-label text-muted-foreground">

@@ -7,7 +7,7 @@
  *
  * PlanOrchestrator's ``ClarifyIntent`` stage yields this when the intent spec
  * carries unresolved ``MissingInfoItem``\ s with ``blocking=True``;
- * a registered :class:`~molexp.agent.repair.RepairPolicy`
+ * a registered :class:`~molab.harness.agent.repair.RepairPolicy`
  * routes the pipeline to the ``needs_clarification`` terminal state.
  *
  * Attributes:

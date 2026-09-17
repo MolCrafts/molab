@@ -1,0 +1,30 @@
+"""Stage execution core for ``molab.harness``.
+
+Plain-Python runtime pieces:
+
+- :class:`HarnessRunContext` — frozen container handing services to stages.
+- :class:`Stage` — ABC with ``async run(ctx) -> PlanArtifactRef``.
+- :func:`run_stage_bracketed` — the audit bracket (``stage_started`` /
+  ``artifact_created`` / ``stage_completed`` / ``stage_failed`` events +
+  ``derived_from`` lineage edges) every stage execution goes through.
+- :class:`StageRunner` — thin single-stage wrapper over the bracket.
+- :func:`stage_fingerprint` — code identity for the Mode completion ledger.
+
+The harness ``Stage`` returns one ``PlanArtifactRef``; the agent layer's loops
+stream ``AgentEvent`` instead — the two abstractions stay distinct.
+"""
+
+from __future__ import annotations
+
+from molab.harness.core.fingerprint import stage_fingerprint
+from molab.harness.core.run_context import HarnessRunContext
+from molab.harness.core.stage import Stage
+from molab.harness.core.stage_runner import StageRunner, run_stage_bracketed
+
+__all__ = [
+    "HarnessRunContext",
+    "Stage",
+    "StageRunner",
+    "run_stage_bracketed",
+    "stage_fingerprint",
+]

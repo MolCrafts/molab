@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from molexp.workflow import Task, Workflow, WorkflowCompiler
+from molab.workflow import Task, Workflow, WorkflowCompiler
 
 
 class TestWorkflowCompiler:

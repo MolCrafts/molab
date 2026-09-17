@@ -9,7 +9,7 @@ import pytest
 from molq.models import Command, JobSpec
 from molq.status import JobState
 
-from molexp.plugins.submit_molq import dashboard
+from molab.plugins.submit_molq import dashboard
 
 # ── compute_stats ──────────────────────────────────────────────────────────
 

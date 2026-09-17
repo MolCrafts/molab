@@ -2,7 +2,7 @@
 
 Verifies the unify-folder-abstraction sub-spec 03 contract — workflow's
 cache sits inside the workspace it serves (via the singleton ``CacheFolder``
-exposed at ``ws.cache``), not in ``~/.molexp/cache/``. Also pins the
+exposed at ``ws.cache``), not in ``~/.molab/cache/``. Also pins the
 ``Caching`` constructor's store/store_dir XOR validation. Touches the public
 surface only (``Caching``, the ``CacheStore`` adapter returned by
 ``ws.cache.as_cache_store()``).
@@ -15,11 +15,11 @@ from pathlib import Path
 
 import pytest
 
-from molexp.workflow import (
+from molab.workflow import (
     Caching,
     TaskSnapshot,
 )
-from molexp.workspace import Workspace
+from molab.workspace import Workspace
 
 
 @pytest.fixture

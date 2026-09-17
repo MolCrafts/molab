@@ -12,9 +12,9 @@ from __future__ import annotations
 
 import pytest
 
-from molexp.workspace import Workspace
-from molexp.workspace.models import ComputeTarget
-from molexp.workspace.targets import add_target
+from molab.workspace import Workspace
+from molab.workspace.models import ComputeTarget
+from molab.workspace.targets import add_target
 
 
 @pytest.fixture
@@ -24,7 +24,7 @@ def ws(tmp_path):
 
 class TestTargetReferenceValidation:
     def test_add_run_accepts_registered_and_rejects_unregistered_target(self, ws):
-        add_target(ws, ComputeTarget(name="laptop", scratch_root="/tmp/molexp"))
+        add_target(ws, ComputeTarget(name="laptop", scratch_root="/tmp/molab"))
         exp = ws.add_project("p").add_experiment("e")
 
         # Registered target is accepted.
@@ -36,7 +36,7 @@ class TestTargetReferenceValidation:
             exp.add_run(target="cluster")
 
     def test_add_experiment_rejects_unregistered_default_target(self, ws):
-        add_target(ws, ComputeTarget(name="laptop", scratch_root="/tmp/molexp"))
+        add_target(ws, ComputeTarget(name="laptop", scratch_root="/tmp/molab"))
         proj = ws.add_project("p")
         with pytest.raises(ValueError, match="compute target"):
             proj.add_experiment("bad", default_target="ghost")

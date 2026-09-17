@@ -1,7 +1,7 @@
-"""Tests for ``molexp.plugins.cli`` — the CLI-only plugin layer.
+"""Tests for ``molab.plugins.cli`` — the CLI-only plugin layer.
 
 Covers ``discover_cli_plugins()``'s entry-point walk over the
-``molexp.cli_plugins`` group (cache + failure isolation + api-version
+``molab.cli_plugins`` group (cache + failure isolation + api-version
 gating + first-wins de-duplication).
 """
 
@@ -11,7 +11,7 @@ from collections.abc import Iterable
 
 import pytest
 
-from molexp.plugins.cli import (
+from molab.plugins.cli import (
     CLI_PLUGIN_API_VERSION,
     CliPlugin,
     _discover_cli_uncached,
@@ -29,7 +29,7 @@ class _FakeEntryPoint:
         name: str,
         loader,
         *,
-        group: str = "molexp.cli_plugins",
+        group: str = "molab.cli_plugins",
     ) -> None:
         self.name = name
         self.group = group
@@ -61,7 +61,7 @@ def _install_fake_eps(
         return _FakeEntryPoints()
 
     monkeypatch.setattr(
-        "molexp.plugins.cli.importlib_metadata.entry_points",
+        "molab.plugins.cli.importlib_metadata.entry_points",
         _entry_points,
     )
     # Cached state must be cleared so the test sees the patched eps
@@ -71,13 +71,13 @@ def _install_fake_eps(
 
 @pytest.fixture
 def warnings(monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    """Spy on ``molexp.plugins.cli.logger.warning`` calls.
+    """Spy on ``molab.plugins.cli.logger.warning`` calls.
 
     mollog bypasses stdlib ``logging`` so pytest's ``caplog`` / ``capfd``
     do not see its output; we capture the messages directly.
     """
     captured: list[str] = []
-    from molexp.plugins import cli as cli_mod  # type: ignore[import-not-found]
+    from molab.plugins import cli as cli_mod  # type: ignore[import-not-found]
 
     monkeypatch.setattr(
         cli_mod.logger,

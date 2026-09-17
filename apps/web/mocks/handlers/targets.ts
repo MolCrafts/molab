@@ -23,7 +23,7 @@ const seed = (t: Omit<TargetResponse, "isRemote" | "defaultResources" | "default
 
 seed({
   name: "laptop",
-  scratchRoot: "/tmp/molexp",
+  scratchRoot: "/tmp/molab",
   scheduler: TargetResponse.scheduler.LOCAL,
   host: null,
   port: null,
@@ -32,7 +32,7 @@ seed({
 });
 seed({
   name: "hpc-slurm",
-  scratchRoot: "/scratch/me/molexp",
+  scratchRoot: "/scratch/me/molab",
   scheduler: TargetResponse.scheduler.SLURM,
   host: "me@hpc.example.org",
   port: null,

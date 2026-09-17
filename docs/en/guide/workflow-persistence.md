@@ -1,6 +1,6 @@
 # Workflow Persistence
 
-MolExp **does not serialize workflow topology** to JSON. Workflows are authored in Python and re-imported on every execution. This page documents what *is* persisted — the reproducibility data needed to recreate a run — and how to use it.
+Molab **does not serialize workflow topology** to JSON. Workflows are authored in Python and re-imported on every execution. This page documents what *is* persisted — the reproducibility data needed to recreate a run — and how to use it.
 
 ## Persistent Metadata
 
@@ -23,7 +23,7 @@ A string pointing to the Python file that defines the workflow (typically the sa
 
 ### 2. `RunMetadata.workflow_snapshot`
 
-An opaque JSON dict captured at run-creation time. The canonical shape is `molexp.workflow.snapshot_ref.WorkflowSnapshotRef` — but workspace stores the value as a plain dict to keep the dependency direction one-way (workspace ← workflow). Workflow-layer code dumps the model into JSON before handing it to workspace; workspace just round-trips it:
+An opaque JSON dict captured at run-creation time. The canonical shape is `molab.workflow.snapshot_ref.WorkflowSnapshotRef` — but workspace stores the value as a plain dict to keep the dependency direction one-way (workspace ← workflow). Workflow-layer code dumps the model into JSON before handing it to workspace; workspace just round-trips it:
 
 ```json
 {
@@ -40,7 +40,7 @@ An opaque JSON dict captured at run-creation time. The canonical shape is `molex
 
 ### 3. `RunMetadata.config` / `config_hash`
 
-The fully merged molcfg profile data the run executed against, plus a `sha256` digest for fast querying. Profiles are opaque to molexp — it stores them verbatim.
+The fully merged molcfg profile data the run executed against, plus a `sha256` digest for fast querying. Profiles are opaque to molab — it stores them verbatim.
 
 ```json
 {
@@ -62,13 +62,13 @@ This is deliberate: a serialized DAG can drift from the live code base. Re-impor
 
 ```bash
 # Re-execute from the CLI
-molexp run train.py --profile smoke
+molab run train.py --profile smoke
 
 # Or execute a worker from an existing run directory
-molexp execute path/to/run-<id>/
+molab execute path/to/run-<id>/
 ```
 
-`molexp execute` is the worker entry point used by cluster backends. It reads `run.json` for the `script` field, re-imports the script, matches the project + experiment IDs via `find_workflow_for_run(...)`, and drives the bound `Workflow` against the existing run directory — appending a new `ExecutionRecord` to `execution_history`.
+`molab execute` is the worker entry point used by cluster backends. It reads `run.json` for the `script` field, re-imports the script, matches the project + experiment IDs via `find_workflow_for_run(...)`, and drives the bound `Workflow` against the existing run directory — appending a new `ExecutionRecord` to `execution_history`.
 
 ## Identity and Correlation
 

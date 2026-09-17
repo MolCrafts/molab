@@ -1,9 +1,9 @@
-import type { PluginAPI } from "@molcrafts/molexp-plugin";
+import type { PluginAPI } from "@molcrafts/molab-plugin";
 import { BookOpen } from "lucide-react";
-import { lazy } from "react";
 import type { NavigationContribution } from "@/app/navigation/sections";
+import { lazyWithPrefetch } from "@/lib/lazy-with-prefetch";
 
-const KnowledgeExplorer = lazy(() =>
+const KnowledgeExplorer = lazyWithPrefetch(() =>
   import("./KnowledgeExplorer").then((module) => ({
     default: module.KnowledgeExplorer,
   })),

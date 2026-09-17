@@ -7,8 +7,8 @@ from typing import cast
 
 import pytest
 
-from molexp.workspace.file_store import FileStore
-from molexp.workspace.fs import FileSystem
+from molab.workspace.file_store import FileStore
+from molab.workspace.fs import FileSystem
 
 
 class TestFileStore:
@@ -50,7 +50,7 @@ class TestFileStore:
             Path(path).parent.mkdir(parents=True, exist_ok=True)
             Path(path).write_text('{"ok": true}')
 
-        monkeypatch.setattr("molexp.workspace.file_store.atomic_write_json", spy)
+        monkeypatch.setattr("molab.workspace.file_store.atomic_write_json", spy)
         FileStore(tmp_path).put("run.json", {"a": 1})
         assert seen == [tmp_path / "run.json"]
 

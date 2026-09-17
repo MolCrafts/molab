@@ -2,7 +2,7 @@
 
 An attempt is identified by its position in its Run: ``e01``, ``e02``, …
 allocated by
-:meth:`~molexp.workspace.execution_repository.ExecutionRepository.create`.
+:meth:`~molab.workspace.execution_repository.ExecutionRepository.create`.
 The id *is* the directory name, so a path leads to an attempt and an attempt
 leads back to its path with no lookup. Global uniqueness comes from the pair
 ``(run_id, execution_id)`` — a Run's id is the UUIDv7.
@@ -10,9 +10,9 @@ leads back to its path with no lookup. Global uniqueness comes from the pair
 
 from __future__ import annotations
 
-from molexp.workspace.domain import ExecutionMode
-from molexp.workspace.execution_repository import ExecutionRepository
-from molexp.workspace.history import AgentRef
+from molab.workspace.domain import ExecutionMode
+from molab.workspace.execution_repository import ExecutionRepository
+from molab.workspace.history import AgentRef
 
 _TEST_AGENT = AgentRef(id="test", type="person", name="test")
 
@@ -55,7 +55,7 @@ def test_two_execution_repository_creates_get_distinct_ids(run) -> None:
 class TestTimestampsStayComparable:
     """A record read back must be orderable against every other record.
 
-    Attempts written by different molexp generations disagreed about whether
+    Attempts written by different molab generations disagreed about whether
     a timestamp carries a zone. Comparing a naive one with an aware one
     raises, which took out anything that sorts attempts or asks a Run when it
     finished — so the model normalizes naive timestamps to UTC on read.
@@ -67,7 +67,7 @@ class TestTimestampsStayComparable:
         repo.create(mode=ExecutionMode.INITIAL, created_by=_TEST_AGENT)
         repo.create(mode=ExecutionMode.RERUN, created_by=_TEST_AGENT)
 
-        # Rewrite one attempt the way an older molexp wrote it: no zone.
+        # Rewrite one attempt the way an older molab wrote it: no zone.
         import json
         from pathlib import Path
 

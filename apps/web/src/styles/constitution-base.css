@@ -40,26 +40,14 @@
    surface is not --card / --background. */
 :where(:root, :host) {
   --constitution-surface: var(--card, var(--background, oklch(1 0 0)));
-  --status-running-soft: color-mix(
-    in oklab,
-    var(--status-running) 14%,
-    var(--constitution-surface)
-  );
+  --status-running-soft: color-mix(in oklab, var(--status-running) 14%, var(--constitution-surface));
   --status-completed-soft: color-mix(
     in oklab,
     var(--status-completed) 14%,
     var(--constitution-surface)
   );
-  --status-failed-soft: color-mix(
-    in oklab,
-    var(--status-failed) 12%,
-    var(--constitution-surface)
-  );
-  --status-warning-soft: color-mix(
-    in oklab,
-    var(--status-warning) 16%,
-    var(--constitution-surface)
-  );
+  --status-failed-soft: color-mix(in oklab, var(--status-failed) 12%, var(--constitution-surface));
+  --status-warning-soft: color-mix(in oklab, var(--status-warning) 16%, var(--constitution-surface));
 }
 
 @keyframes mol-progress-spin {

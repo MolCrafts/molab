@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import asyncio
 
-from molexp.workflow import Workflow, WorkflowCompiler, WorkflowRuntime
+from molab.workflow import Workflow, WorkflowCompiler, WorkflowRuntime
 
 
 async def main() -> None:

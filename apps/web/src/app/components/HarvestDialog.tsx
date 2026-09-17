@@ -98,7 +98,7 @@ export function HarvestDialog({
       <DialogTrigger asChild>
         {trigger ?? (
           <WorkbenchIconAction label="Harvest to knowledge">
-            <BookMarked className="h-3.5 w-3.5" />
+            <BookMarked className="size-3.5" />
           </WorkbenchIconAction>
         )}
       </DialogTrigger>

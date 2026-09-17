@@ -116,7 +116,7 @@ export function CreateRunDialog({
       {trigger === undefined ? (
         <DialogTrigger asChild>
           <WorkbenchIconAction label="New run">
-            <Plus className="h-3.5 w-3.5" />
+            <Plus className="size-3.5" />
           </WorkbenchIconAction>
         </DialogTrigger>
       ) : (

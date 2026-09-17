@@ -1,6 +1,6 @@
 """Control-flow routing: control edges, ``Next``/``End`` sentinels, loops.
 
-Graph-execution behaviors owned by ``molexp.workflow`` — the ``wf.control`` /
+Graph-execution behaviors owned by ``molab.workflow`` — the ``wf.control`` /
 ``routes=`` / ``wf.loop`` primitives lowered onto the engine and dispatched at
 run time. Branch/loop happy-paths built from the *public* import surface live
 in ``test_control_flow_public_api``; here we pin the engine-level routing
@@ -8,14 +8,14 @@ semantics (bare ``Next`` records no output, ``End`` termination/frame-scoping,
 route validation errors), plus the ``make_execution_id`` id function and the
 plugins→``_engine`` boundary lock.
 
-Spec: .claude/specs/03-molexp-workflow-cycles.md
+Spec: .claude/specs/03-molab-workflow-cycles.md
 """
 
 from __future__ import annotations
 
 import pytest
 
-from molexp.workflow import (
+from molab.workflow import (
     End,
     LoopMaxItersExceeded,
     MissingRouteError,
@@ -260,11 +260,11 @@ class TestControlFlowRouting:
 
 def test_submit_molq_plugins_do_not_reach_into_engine() -> None:
     """ac-009 — plugins must use the public ``make_execution_id``, never
-    reach into ``molexp.workflow._engine`` (architectural boundary lock)."""
+    reach into ``molab.workflow._engine`` (architectural boundary lock)."""
     import re
     from pathlib import Path
 
-    plugin_dir = Path(__file__).resolve().parents[2] / "src" / "molexp" / "plugins"
+    plugin_dir = Path(__file__).resolve().parents[2] / "src" / "molab" / "plugins"
     pattern = re.compile(r"workflow[./]_engine")
     violations: list[str] = []
     for path in plugin_dir.rglob("*.py"):
@@ -278,7 +278,7 @@ def test_submit_molq_plugins_do_not_reach_into_engine() -> None:
                     f"{path.relative_to(plugin_dir.parent.parent.parent)}:{lineno}: {line.strip()}"
                 )
     assert not violations, (
-        "Plugins must not reach into molexp.workflow._engine; "
-        "use the public `from molexp.workflow import make_execution_id` instead.\n"
+        "Plugins must not reach into molab.workflow._engine; "
+        "use the public `from molab.workflow import make_execution_id` instead.\n"
         "Violations:\n  " + "\n  ".join(violations)
     )

@@ -1,14 +1,14 @@
 # CLI and Profiles
 
-Once your script can create a workspace and bind experiments, replace `asyncio.run(...)` with `molexp run`. This is also where profiles become useful — one script, many execution shapes.
+Once your script can create a workspace and bind experiments, replace `asyncio.run(...)` with `molab run`. This is also where profiles become useful — one script, many execution shapes.
 
 ## Register for CLI Discovery
 
-`molexp run` discovers workspaces through the fluent declaration chain. The key line is `Experiment.run(workflow, params=...)` — it seeds the runs, binds the workflow, and registers the workspace:
+`molab run` discovers workspaces through the fluent declaration chain. The key line is `Experiment.run(workflow, params=...)` — it seeds the runs, binds the workflow, and registers the workspace:
 
 ```python
-import molexp as me
-from molexp.workflow import Workflow, WorkflowCompiler
+import molab as me
+from molab.workflow import Workflow, WorkflowCompiler
 
 wf = Workflow(name="sum")
 
@@ -27,7 +27,7 @@ def fetch(scale: float) -> list[float]:
 Now the CLI can drive it:
 
 ```bash
-molexp run train.py
+molab run train.py
 ```
 
 The CLI resolves the script, scans the workspace hierarchy, finds eligible (`pending`) runs, and executes them. You no longer create runs manually in Python just to execute them.
@@ -38,13 +38,13 @@ The experiment script is **science + declaration only**. These are platform resp
 
 | Anti-pattern | Use instead |
 |---|---|
-| `argparse` / Typer for `--workspace` / `--seed` / … | `molexp run`, task params, `molcfg.yaml` profiles, `--override KEY=VAL` |
-| `sys.path.insert` to a package tree | Install the package (`pip install -e …`); sibling modules work because `molexp run` adds the script directory |
-| `exp.add_run(..., id=f"…{time.time()}")` + `execute_run` | `exp.run(WorkflowCompiler().compile(wf), params=…)` then `molexp run`; re-execute with `--rerun [--fresh]` |
+| `argparse` / Typer for `--workspace` / `--seed` / … | `molab run`, task params, `molcfg.yaml` profiles, `--override KEY=VAL` |
+| `sys.path.insert` to a package tree | Install the package (`pip install -e …`); sibling modules work because `molab run` adds the script directory |
+| `exp.add_run(..., id=f"…{time.time()}")` + `execute_run` | `exp.run(WorkflowCompiler().compile(wf), params=…)` then `molab run`; re-execute with `--rerun [--fresh]` |
 | Second `run.start()` after execute to register products | In the task: write under `ctx.workdir`, then `ctx.register_artifact` / `ctx.register_metric` |
 | Nested CLIs for optional trajectory / cutoff | Typed task parameters (or a second task), set via profile / `--override` |
 
-molmcp scaffold tools create workspace nodes and can `validate_workflow`; they **never** drive the runtime. Agents should write the declaration-style script, then invoke `molexp run`.
+molmcp scaffold tools create workspace nodes and can `validate_workflow`; they **never** drive the runtime. Agents should write the declaration-style script, then invoke `molab run`.
 
 ## Profiles: Execution Variants in YAML
 
@@ -80,7 +80,7 @@ def compute(fetch: list[float], optimizer: dict | None = None, skip_heavy_comput
 
 `fetch` binds from the upstream task (graph edge). `optimizer` and `skip_heavy_compute` bind from the resolved profile. Each falls back to its default when the active profile omits the field.
 
-The important design choice: MolExp stores the profile and injects it, but **your task code decides what the keys mean**. There is no built-in meaning for `epochs` or `skip_heavy_compute`.
+The important design choice: Molab stores the profile and injects it, but **your task code decides what the keys mean**. There is no built-in meaning for `epochs` or `skip_heavy_compute`.
 
 ## CLI Verbs
 
@@ -88,7 +88,7 @@ Each verb owns a **disjoint** job. Nothing overlaps, nothing falls back silently
 
 | Verb | Domain | What it does |
 |---|---|---|
-| `molexp run` | `pending` only | Creates missing runs, executes pending ones |
+| `molab run` | `pending` only | Creates missing runs, executes pending ones |
 | `--resume` | `failed` / `cancelled` | Reopens the existing execution, seeds completed tasks |
 | `--rerun` | `failed` / `cancelled` | Opens a fresh execution from the top |
 | `--rerun --fresh` | `failed` / `cancelled` | Like `--rerun` but also bypasses the cache read |
@@ -96,17 +96,17 @@ Each verb owns a **disjoint** job. Nothing overlaps, nothing falls back silently
 `succeeded` and `running` runs are always skipped — that's by design. Retrying is always explicit.
 
 ```bash
-molexp run train.py --profile smoke
-molexp run train.py --profile smoke --override optimizer.lr=0.0005
-molexp run train.py --profile smoke --resume
-molexp run train.py --profile smoke --rerun --fresh
+molab run train.py --profile smoke
+molab run train.py --profile smoke --override optimizer.lr=0.0005
+molab run train.py --profile smoke --resume
+molab run train.py --profile smoke --rerun --fresh
 ```
 
 `--resume` and `--rerun` are mutually exclusive. Both are profile-aware: the resolved profile is part of the run's identity, so a different profile addresses a different run.
 
 ## Why Content-Addressed IDs Matter
 
-The CLI folds parameters, profile, and replica index into the run id. Running `molexp run train.py` twice with the same params discovers the *same* run — the second invocation sees it's already `succeeded` and skips it. That idempotence means CI scripts can call `molexp run` without guards.
+The CLI folds parameters, profile, and replica index into the run id. Running `molab run train.py` twice with the same params discovers the *same* run — the second invocation sees it's already `succeeded` and skips it. That idempotence means CI scripts can call `molab run` without guards.
 
 ## Next Steps
 

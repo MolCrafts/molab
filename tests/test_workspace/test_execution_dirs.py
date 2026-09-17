@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from molexp.workspace.execution_dirs import (
+from molab.workspace.execution_dirs import (
     ARTIFACTS,
     OUT,
     WORK,
@@ -85,7 +85,7 @@ class TestRegistrationIsOpen:
             assert resolve_execution_dir("test-plugin-dir").products is True
             assert "test-plugin-dir" in {d.name for d in product_dirs()}
         finally:
-            from molexp.workspace import execution_dirs as mod
+            from molab.workspace import execution_dirs as mod
 
             mod._REGISTRY.pop("test-plugin-dir")
             mod._ORDER.remove("test-plugin-dir")

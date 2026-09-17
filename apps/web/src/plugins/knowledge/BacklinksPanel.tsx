@@ -18,7 +18,7 @@ export const BacklinksPanel = ({ backlinks, onNavigate }: BacklinksPanelProps): 
   return (
     <section className="space-y-2">
       <h3 className="flex items-center gap-2 text-label font-semibold uppercase tracking-wide text-muted-foreground">
-        <Link2 className="h-3.5 w-3.5" /> Backlinks ({backlinks.length})
+        <Link2 className="size-icon-sm" /> Backlinks ({backlinks.length})
       </h3>
       {backlinks.length === 0 ? (
         <p className="text-label italic text-muted-foreground">No documents link here yet.</p>

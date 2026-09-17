@@ -1,7 +1,4 @@
-import { PanelRightClose, PanelRightOpen } from "lucide-react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { Breadcrumb } from "@/app/entities/Breadcrumb";
-import { buildTrail } from "@/app/entities/breadcrumbTrail";
 import { GlobalCommandPalette } from "@/app/entities/GlobalCommandPalette";
 import { ContextBar } from "@/app/layout/ContextBar";
 import { RemoteConnectDialog } from "@/app/layout/RemoteConnectDialog";
@@ -21,8 +18,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { WorkbenchStatusStrip, WorkbenchToggleAction } from "@/components/workbench";
+import { WorkbenchStatusStrip } from "@/components/workbench";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { useContributionGeneration } from "@/lib/contribution-runtime";
 import { listStatusBarItems, useWorkbenchGeneration } from "@/plugins/contributions/workbench";
@@ -162,17 +158,9 @@ export const AppShell = ({
   // a workflow task has been pinned, or a plugin owns a contextual run inspector.
   const hasInspectorContent = Boolean(inspectorSurface || inspectorSelection);
   const inspectorVisible = inspectorOpen && hasInspectorContent;
-  const toggleDisabled = !hasInspectorContent;
-  const toggleLabel = inspectorVisible ? "Hide details" : "Show details";
   const inspectorPanelIds = useMemo(
     () => (inspectorVisible ? ["work-surface", "inspector"] : ["work-surface"]),
     [inspectorVisible],
-  );
-  const showWorkSurfaceHeader = !railOnlyNavigation;
-
-  const trail = useMemo(
-    () => buildTrail(selection, leftPanelView, snapshot),
-    [selection, leftPanelView, snapshot],
   );
 
   const activeWorkspace = useMemo(
@@ -248,43 +236,8 @@ export const AppShell = ({
     />
   );
 
-  const inspectorToggle = (
-    <TooltipProvider>
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <WorkbenchToggleAction
-            label={toggleLabel}
-            pressed={inspectorVisible}
-            disabled={toggleDisabled}
-            onClick={() => setInspectorOpen((current) => !current)}
-          >
-            {inspectorVisible ? (
-              <PanelRightClose className="h-4 w-4" />
-            ) : (
-              <PanelRightOpen className="h-4 w-4" />
-            )}
-          </WorkbenchToggleAction>
-        </TooltipTrigger>
-        <TooltipContent side="left">{toggleLabel}</TooltipContent>
-      </Tooltip>
-    </TooltipProvider>
-  );
-
   const centerContent = (
     <div className="flex h-full min-h-0 flex-col">
-      {/* Editor context row: breadcrumb left, contextual inspector affordance right. */}
-      {showWorkSurfaceHeader ? (
-        <div className="flex h-[35px] flex-none items-center justify-between gap-2 border-b border-border bg-surface-subtle px-3">
-          {selection ? (
-            <Breadcrumb items={trail} omitCurrent />
-          ) : (
-            <span className="truncate text-micro text-muted-foreground">
-              {activeWorkspace?.label ?? "Workspace"}
-            </span>
-          )}
-          {hasInspectorContent ? inspectorToggle : null}
-        </div>
-      ) : null}
       <div className="min-h-0 flex-1 overflow-hidden bg-canvas">
         <CenterPanel
           selection={selection}
@@ -317,7 +270,7 @@ export const AppShell = ({
       <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
         <SheetContent
           side="left"
-          className={railOnlyNavigation ? "w-12 p-0" : "w-dialog-viewport max-w-sm p-0"}
+          className={railOnlyNavigation ? "w-12 p-0" : "w-drawer max-w-sm p-0"}
         >
           <SheetHeader className="sr-only">
             <SheetTitle>Navigation</SheetTitle>
@@ -327,7 +280,7 @@ export const AppShell = ({
         </SheetContent>
       </Sheet>
       <Sheet open={inspectorVisible} onOpenChange={setInspectorOpen}>
-        <SheetContent side="right" className="w-dialog-viewport max-w-md p-0">
+        <SheetContent side="right" className="w-drawer max-w-md p-0">
           <SheetHeader className="sr-only">
             <SheetTitle>Inspector</SheetTitle>
             <SheetDescription>Details for the selected object</SheetDescription>
@@ -345,9 +298,9 @@ export const AppShell = ({
     </div>
   ) : (
     <ResizablePanelGroup
-      id="molexp-workbench-shell"
+      id="molab-workbench-shell"
       direction="horizontal"
-      autoSaveId="molexp.workbench.shell"
+      autoSaveId="molab.workbench.shell"
       autoSavePanelIds={SHELL_PANEL_IDS}
       className="min-h-0 flex-1"
     >
@@ -362,9 +315,9 @@ export const AppShell = ({
       <ResizableHandle />
       <ResizablePanel id="workspace" defaultSize="calc(100% - 272px)">
         <ResizablePanelGroup
-          id="molexp-workbench-detail"
+          id="molab-workbench-detail"
           direction="horizontal"
-          autoSaveId="molexp.workbench.detail"
+          autoSaveId="molab.workbench.detail"
           autoSavePanelIds={inspectorPanelIds}
           className="h-full"
         >

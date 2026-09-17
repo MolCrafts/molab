@@ -1,6 +1,6 @@
 # Notes and Literature
 
-A workspace does not only record what a computation produced — it also records why you ran it, what you concluded, and which papers you built on. In MolExp that knowledge lives in the same directory tree as your projects, experiments, and runs, encoded in the **Open Knowledge Format (OKF)**: plain directories, plain YAML, plain Markdown. There is no separate notes database to keep in sync with the filesystem, because the filesystem *is* the database.
+A workspace does not only record what a computation produced — it also records why you ran it, what you concluded, and which papers you built on. In Molab that knowledge lives in the same directory tree as your projects, experiments, and runs, encoded in the **Open Knowledge Format (OKF)**: plain directories, plain YAML, plain Markdown. There is no separate notes database to keep in sync with the filesystem, because the filesystem *is* the database.
 
 ## The mental model
 
@@ -11,14 +11,14 @@ Because every workspace entity (`Workspace`, `Project`, `Experiment`, `Run`) is 
 The management entry point is the `Bundle` façade. A bundle wraps a root directory (typically the workspace root) and exposes the Concept tree beneath it: `create_note`, `link`, `walk`, `backlinks`, `search`, `import_zotero`.
 
 !!! note "Opening the workspace in Obsidian (or any Markdown editor)"
-    Because notes are plain directories of Markdown, you can open the workspace root as an Obsidian vault and every `index.md` renders and cross-links normally. Two caveats: MolExp's knowledge graph is built from **standard Markdown links** (`[text](../other-concept)`) — Obsidian-style `[[wikilinks]]` are *not* parsed as edges, so write links in standard form (or configure Obsidian to prefer Markdown links) if you want them to count as citations/backlinks. And each Concept's narrative lives in `index.md` inside its own directory — the "folder note" convention — which reads best in Obsidian with a folder-note plugin enabled.
+    Because notes are plain directories of Markdown, you can open the workspace root as an Obsidian vault and every `index.md` renders and cross-links normally. Two caveats: Molab's knowledge graph is built from **standard Markdown links** (`[text](../other-concept)`) — Obsidian-style `[[wikilinks]]` are *not* parsed as edges, so write links in standard form (or configure Obsidian to prefer Markdown links) if you want them to count as citations/backlinks. And each Concept's narrative lives in `index.md` inside its own directory — the "folder note" convention — which reads best in Obsidian with a folder-note plugin enabled.
 
 ## Write a note on an experiment
 
 Create a note under an experiment by passing the experiment as the note's `parent`. Names are slugified into directory names, and `create_note` is idempotent — calling it again with the same name returns the existing note instead of duplicating it.
 
 ```python
-from molexp.workspace import Bundle, Workspace
+from molab.workspace import Bundle, Workspace
 
 ws = Workspace("./lab", name="Lab")
 exp = ws.add_project("polymer-cg").add_experiment("solvation-sweep")
@@ -37,7 +37,7 @@ print(bundle.rel_path(note))
 The `body` is the note's `index.md`; read it back with `note.body()` and replace it with `note.set_body(...)`. Structured document metadata — categorical tags and a lifecycle status — lives in the note's `meta.json` as a typed `NoteMeta` payload, written with `write_note_meta`:
 
 ```python
-from molexp.workspace import NoteMeta
+from molab.workspace import NoteMeta
 
 note.write_note_meta(NoteMeta(tags=["analysis", "rdf"], status="draft"))
 
@@ -59,7 +59,7 @@ lab/projects/polymer-cg/experiments/solvation-sweep/
 A reference is its own Concept type, `ReferenceConcept`: one directory per work, with the structured bibliographic record (`ReferenceMeta`) in `meta.json` and the human-readable citation text in `index.md`. Mount it wherever it belongs — here, next to the note under the same experiment — using the generic `add_folder` verb every `Folder` supports:
 
 ```python
-from molexp.workspace import ReferenceConcept, ReferenceMeta
+from molab.workspace import ReferenceConcept, ReferenceMeta
 
 ref = exp.add_folder(ReferenceConcept(parent=exp, name="frenkel-smit-2002"))
 ref.write_reference_meta(
@@ -116,10 +116,10 @@ print([bundle.rel_path(r) for r in bundle.references()])
 
 ## Import a Zotero library
 
-If your papers already live in Zotero, you do not have to retype them. `molexp knowledge import-zotero` links a local Zotero library into a workspace: it opens Zotero's own `zotero.sqlite` **strictly read-only** and materializes each item as a `ReferenceConcept` under `<workspace>/references/` — bibliographic fields into `meta.json`, and each item's PDF pointed at inside Zotero's own `storage/` tree. No bytes are copied, and your Zotero library is never modified.
+If your papers already live in Zotero, you do not have to retype them. `molab knowledge import-zotero` links a local Zotero library into a workspace: it opens Zotero's own `zotero.sqlite` **strictly read-only** and materializes each item as a `ReferenceConcept` under `<workspace>/references/` — bibliographic fields into `meta.json`, and each item's PDF pointed at inside Zotero's own `storage/` tree. No bytes are copied, and your Zotero library is never modified.
 
 ```console
-$ molexp knowledge import-zotero ~/Zotero/zotero.sqlite --dest ./lab
+$ molab knowledge import-zotero ~/Zotero/zotero.sqlite --dest ./lab
 OK Imported 2 reference(s) into /home/me/lab
   references/frnkl2002  Understanding Molecular Simulation (2002)
   references/krmr1990  Dynamics of entangled linear polymer melts (1990)
@@ -130,9 +130,9 @@ The argument is the `zotero.sqlite` file in your Zotero data directory (passing 
 If something is wrong, the command says so in plain language and exits non-zero:
 
 ```console
-$ molexp knowledge import-zotero ~/Zotero/zotero.sqlite --dest /tmp/scratch
-Error: Destination is not a molexp workspace: /tmp/scratch
-Initialise one first with molexp init /tmp/scratch.
+$ molab knowledge import-zotero ~/Zotero/zotero.sqlite --dest /tmp/scratch
+Error: Destination is not a molab workspace: /tmp/scratch
+Initialise one first with molab init /tmp/scratch.
 ```
 
 The same import is one call in Python — `Bundle.import_zotero` — so scripts and the CLI share a single code path:

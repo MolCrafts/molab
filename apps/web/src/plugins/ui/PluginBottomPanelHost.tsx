@@ -39,7 +39,7 @@ export const PluginBottomPanelHost = (): JSX.Element | null => {
 
   return (
     <div className="flex shrink-0 flex-col border-t border-border bg-surface">
-      <div className="flex h-[28px] items-center gap-1 overflow-x-auto px-1">
+      <div className="flex h-control-compact items-center gap-1 overflow-x-auto px-1">
         {panels.map((panel) => {
           const selected = panel.id === openId;
           return (
@@ -47,7 +47,7 @@ export const PluginBottomPanelHost = (): JSX.Element | null => {
               key={panel.id}
               type="button"
               className={cn(
-                "h-[22px] shrink-0 rounded-control px-2 text-micro",
+                "h-6 shrink-0 rounded-control px-2 text-micro",
                 selected
                   ? "bg-interactive text-interactive-foreground"
                   : "text-muted-foreground hover:bg-interactive/60 hover:text-foreground",

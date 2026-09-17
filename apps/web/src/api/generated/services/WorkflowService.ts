@@ -14,7 +14,7 @@ export class WorkflowService {
      * @param projectId
      * @param experimentId
      * @param requestBody
-     * @param molexpSession
+     * @param molabSession
      * @returns WorkflowDocumentResponse Successful Response
      * @throws ApiError
      */
@@ -22,7 +22,7 @@ export class WorkflowService {
         projectId: string,
         experimentId: string,
         requestBody: WorkflowDocumentRequest,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<WorkflowDocumentResponse> {
         return __request(OpenAPI, {
             method: 'PUT',
@@ -32,7 +32,7 @@ export class WorkflowService {
                 'experiment_id': experimentId,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -46,14 +46,14 @@ export class WorkflowService {
      * Return the persisted workflow IR document, or 404 if none stored.
      * @param projectId
      * @param experimentId
-     * @param molexpSession
+     * @param molabSession
      * @returns WorkflowDocumentResponse Successful Response
      * @throws ApiError
      */
     public static getWorkflowDocument(
         projectId: string,
         experimentId: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<WorkflowDocumentResponse> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -63,7 +63,7 @@ export class WorkflowService {
                 'experiment_id': experimentId,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -77,7 +77,7 @@ export class WorkflowService {
      * @param experimentId
      * @param ws
      * @param requestBody
-     * @param molexpSession
+     * @param molabSession
      * @returns WorkflowDocumentResponse Successful Response
      * @throws ApiError
      */
@@ -86,7 +86,7 @@ export class WorkflowService {
         experimentId: string,
         ws: string,
         requestBody: WorkflowDocumentRequest,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<WorkflowDocumentResponse> {
         return __request(OpenAPI, {
             method: 'PUT',
@@ -97,7 +97,7 @@ export class WorkflowService {
                 'ws': ws,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -112,7 +112,7 @@ export class WorkflowService {
      * @param projectId
      * @param experimentId
      * @param ws
-     * @param molexpSession
+     * @param molabSession
      * @returns WorkflowDocumentResponse Successful Response
      * @throws ApiError
      */
@@ -120,7 +120,7 @@ export class WorkflowService {
         projectId: string,
         experimentId: string,
         ws: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<WorkflowDocumentResponse> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -131,7 +131,7 @@ export class WorkflowService {
                 'ws': ws,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,

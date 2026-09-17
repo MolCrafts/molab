@@ -1,10 +1,12 @@
-import { ComparisonPanel } from "@/app/compare";
+import { SelectionPanel } from "@/app/compare";
 import { NavigationExplorerHost } from "@/app/navigation/NavigationExplorerHost";
 import { NavigationRail } from "@/app/navigation/NavigationRail";
 import { getNavigationContribution } from "@/app/navigation/sections";
 import type { LeftPanelView, Selection, WorkspaceSnapshot } from "@/app/types";
 import { ExplorerDock } from "@/components/layout/ExplorerShell";
 import { useWorkbenchGeneration } from "@/plugins/contributions/workbench";
+
+const DOCK = { id: "molab-explorer-dock", autoSaveId: "molab.explorerDock" } as const;
 
 interface LeftPanelProps {
   view: LeftPanelView;
@@ -83,9 +85,11 @@ export const LeftPanel = ({
           from Projects and Files as readily as from the Runs table, and a
           staging area that disappears when you leave the section it was born
           in cannot span the walk between two projects. Rail-only sections have
-          no column to dock it in. */}
+          no column to dock it in. DOCK keeps the pre-extraction storage key. */}
       {contribution.shellMode === "explorer" ? (
-        <ExplorerDock dock={<ComparisonPanel />}>{explorerHost}</ExplorerDock>
+        <ExplorerDock {...DOCK} dock={<SelectionPanel snapshot={snapshot} />}>
+          {explorerHost}
+        </ExplorerDock>
       ) : (
         explorerHost
       )}

@@ -15,7 +15,7 @@ from typing import Any
 import pytest
 from molq.transport import CommandResult
 
-from molexp.workspace import ComputeTarget, Workspace
+from molab.workspace import ComputeTarget, Workspace
 
 
 @dataclass
@@ -80,11 +80,11 @@ class TestSubmitHandler:
             name="hpc",
             host="me@cluster",
             scheduler="slurm",
-            scratch_root="/scratch/me/molexp",
+            scratch_root="/scratch/me/molab",
         )
 
         transport = RecordingTransport()
-        monkeypatch.setattr("molexp.workspace.targets.to_transport", lambda _t: transport)
+        monkeypatch.setattr("molab.workspace.targets.to_transport", lambda _t: transport)
 
         captured_submitor: dict[str, Any] = {}
 
@@ -115,7 +115,7 @@ class TestSubmitHandler:
         # Submitor is imported lazily from ``molq`` inside __call__.
         monkeypatch.setattr("molq.Submitor", FakeSubmitor)
 
-        from molexp.plugins.submit_molq.submit import make_submit_handler
+        from molab.plugins.submit_molq.submit import make_submit_handler
 
         handler = make_submit_handler(
             scheduler="ignored-when-target-set",
@@ -131,18 +131,18 @@ class TestSubmitHandler:
         assert len(uploads) == 1
         src, dst = uploads[0][1]
         assert src == str(Path(run.run_dir).resolve())
-        assert dst.startswith("/scratch/me/molexp/")
+        assert dst.startswith("/scratch/me/molab/")
 
         # Submitor was constructed with the target's scheduler + transport.
         assert captured_submitor["scheduler"] == "slurm"
         assert captured_submitor["transport"] is transport
         # The worker is told to chdir into the remote exec dir.
-        assert captured_submitor["submit_cwd"].startswith("/scratch/me/molexp/")
+        assert captured_submitor["submit_cwd"].startswith("/scratch/me/molab/")
         assert "executions/" in captured_submitor["submit_cwd"]
         # Argv points at the remote run dir, not the local one.
         argv = captured_submitor["submit_argv"]
-        assert "molexp.cli" in argv and "execute" in argv
-        assert any(a.startswith("/scratch/me/molexp/") for a in argv)
+        assert "molab.cli" in argv and "execute" in argv
+        assert any(a.startswith("/scratch/me/molab/") for a in argv)
 
     def test_without_target_falls_back_to_local_transport(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -175,7 +175,7 @@ class TestSubmitHandler:
 
         monkeypatch.setattr("molq.Submitor", FakeSubmitor)
 
-        from molexp.plugins.submit_molq.submit import make_submit_handler
+        from molab.plugins.submit_molq.submit import make_submit_handler
 
         handler = make_submit_handler(
             scheduler="local",

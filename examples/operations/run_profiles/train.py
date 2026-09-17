@@ -5,26 +5,26 @@ Matches ``docs/en/guide/run-profiles.md``.
 Execute with the CLI, picking one of the profiles defined in
 ``molcfg.yaml``::
 
-    molexp run examples/operations/run_profiles/train.py --profile dry-run
-    molexp run examples/operations/run_profiles/train.py --profile smoke
-    molexp run examples/operations/run_profiles/train.py --profile large-batch
+    molab run examples/operations/run_profiles/train.py --profile dry-run
+    molab run examples/operations/run_profiles/train.py --profile smoke
+    molab run examples/operations/run_profiles/train.py --profile large-batch
 
 Override a single field without editing the config file::
 
-    molexp run examples/operations/run_profiles/train.py \\
+    molab run examples/operations/run_profiles/train.py \\
         --profile smoke --override optimizer.lr=0.0005
 
 Resume a failed or cancelled run under the same profile::
 
-    molexp run examples/operations/run_profiles/train.py --profile smoke --resume
+    molab run examples/operations/run_profiles/train.py --profile smoke --resume
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-import molexp as me
-from molexp.workflow import Workflow, WorkflowCompiler
+import molab as me
+from molab.workflow import Workflow, WorkflowCompiler
 
 WORKSPACE_ROOT = Path(__file__).resolve().parent / "_workspace"
 

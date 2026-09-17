@@ -1,9 +1,9 @@
 ---
-title: Molexp 前端性能基线
+title: Molab 前端性能基线
 description: Dashboard 重设计 P3 的请求、React 渲染、bundle 与 Runs 数据规模基线。
 ---
 
-# Molexp 前端性能基线
+# Molab 前端性能基线
 
 | 字段 | 值 |
 | --- | --- |
@@ -34,7 +34,7 @@ description: Dashboard 重设计 P3 的请求、React 渲染、bundle 与 Runs �
 
 - 最近 200 个 React commit 的 `actualDuration`、`baseDuration` 和 `commitTime`。
 - Resource Timing 中每条 `/api/` 路径的唯一集合和实际出现次数。
-- 数据同时写入 `window.__MOLEXP_REACT_PROFILE__`、`window.__MOLEXP_ROUTE_REQUESTS__` 和 localStorage，便于无头浏览器读取。
+- 数据同时写入 `window.__MOLAB_REACT_PROFILE__`、`window.__MOLAB_ROUTE_REQUESTS__` 和 localStorage，便于无头浏览器读取。
 
 本报告把 `commitTime < 6000 ms` 记为 cold window，把其余 commit 记为 steady window。这里的 cold/warm 是应用路由生命周期划分，不等同于生产网络、浏览器 HTTP cache 或真实用户 paint 指标。
 

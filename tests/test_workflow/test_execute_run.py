@@ -1,9 +1,9 @@
 """One-step tracked execution — ``execute_run`` / ``Run.execute`` (runset-api sub-task 1).
 
-``molexp.workflow.run.execute(workflow)`` folds the seven-touchpoint
+``molab.workflow.run.execute(workflow)`` folds the seven-touchpoint
 driver dance (``run.start()`` + ``WorkflowRuntime().execute(run_context=...)``
 + asyncio plumbing) into one call that reuses the exact same execution path
-as ``molexp run``: RunContext lifecycle (status machine, ``ops`` sidecar,
+as ``molab run``: RunContext lifecycle (status machine, ``ops`` sidecar,
 heartbeat) + the workflow engine. ``Run.execute`` is the workspace-side sugar
 reached through the ``set_run_executor`` inversion seam (workspace never
 imports workflow).
@@ -16,8 +16,8 @@ from pathlib import Path
 
 import pytest
 
-import molexp as me
-from molexp.workflow import (
+import molab as me
+from molab.workflow import (
     RunFailedError,
     RunNotExecutableError,
     Workflow,

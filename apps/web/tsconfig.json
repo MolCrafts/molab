@@ -26,18 +26,18 @@
         "./src/*"
       ],
       "@schemas/*": [
-        "../src/molexp/workflow/schema/*"
+        "../src/molab/workflow/schema/*"
       ],
-      "@molcrafts/molexp-plugin": [
+      "@molcrafts/molab-plugin": [
         "../plugin/src/index.ts"
       ],
-      "@molcrafts/molexp-plugin/ui": [
+      "@molcrafts/molab-plugin/ui": [
         "../plugin/src/ui/index.ts"
       ],
-      "@molcrafts/molexp-plugin/testing": [
+      "@molcrafts/molab-plugin/testing": [
         "../plugin/src/testing.ts"
       ],
-      "@molcrafts/molexp-plugin/externals": [
+      "@molcrafts/molab-plugin/externals": [
         "../plugin/src/externals.ts"
       ]
     }

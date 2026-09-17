@@ -17,13 +17,13 @@ from pathlib import Path
 
 import pytest
 
-from molexp.workflow import (
+from molab.workflow import (
     TaskContext,
     Workflow,
     WorkflowCompiler,
     WorkflowRuntime,
 )
-from molexp.workflow._engine.persistence import filter_resume_seeds, read_node_outputs
+from molab.workflow._engine.persistence import filter_resume_seeds, read_node_outputs
 
 # ── module-level per-task execution counters ─────────────────────────────────
 _COUNTERS: dict[str, int] = {}

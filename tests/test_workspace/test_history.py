@@ -1,11 +1,11 @@
-"""Workspace history is git (``molexp.workspace.history``).
+"""Workspace history is git (``molab.workspace.history``).
 
 Two properties matter and are locked here:
 
 1. **It is real git.** A fact is a commit over the files it describes, with
-   the typed fields in the message trailers, so ``git log`` — not a molexp
+   the typed fields in the message trailers, so ``git log`` — not a molab
    reader — is the provenance query, and ``git push`` is the backup.
-2. **It is a soft dependency.** Nothing in molexp reads history to answer an
+2. **It is a soft dependency.** Nothing in molab reads history to answer an
    operational question, so a workspace with no git still runs science and
    simply records less.
 """
@@ -17,8 +17,8 @@ import subprocess
 
 import pytest
 
-from molexp.workspace import Workspace
-from molexp.workspace.history import (
+from molab.workspace import Workspace
+from molab.workspace.history import (
     SYSTEM_AGENT,
     EntityRef,
     GitHistory,
@@ -44,7 +44,7 @@ class TestInit:
         assert history.init()
         assert history.init()
         assert history.enabled()
-        assert ".molexp/" in (tmp_path / ".gitignore").read_text()
+        assert ".molab/" in (tmp_path / ".gitignore").read_text()
 
     def test_a_workspace_without_git_still_records_nothing_rather_than_failing(self, tmp_path):
         history = GitHistory(tmp_path)

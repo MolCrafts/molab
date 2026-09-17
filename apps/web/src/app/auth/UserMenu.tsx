@@ -41,7 +41,7 @@ export function UserMenu(): JSX.Element | null {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-48">
         <DropdownMenuLabel className="font-normal">
-          <div className="flex flex-col gap-0.5">
+          <div className="flex flex-col gap-hairline">
             <span className="text-body font-medium">{user.username}</span>
             <span className="text-micro text-muted-foreground">{user.role}</span>
           </div>
@@ -52,7 +52,7 @@ export function UserMenu(): JSX.Element | null {
             void logout();
           }}
         >
-          <LogOut className="h-4 w-4" />
+          <LogOut className="size-icon" />
           Sign out
         </DropdownMenuItem>
       </DropdownMenuContent>

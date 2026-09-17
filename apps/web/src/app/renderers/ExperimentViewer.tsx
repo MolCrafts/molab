@@ -11,7 +11,7 @@ import {
 import { lazy, Suspense, useCallback, useMemo, useState } from "react";
 import { experimentsApi } from "@/api";
 import { useCompareSet } from "@/app/compare";
-import { activeWorkspace, entryFromRunSummary } from "@/app/compare/entries";
+import { activeWorkspace, itemFromRunSummary } from "@/app/compare/entries";
 import { CreateRunDialog } from "@/app/components/CreateRunDialog";
 import { CreateSweepDialog } from "@/app/components/CreateSweepDialog";
 import type { DataTableColumn, DataTableRowAction } from "@/app/components/entity";
@@ -22,12 +22,15 @@ import {
   EMPTY_COPY,
   EmptyState,
   EntityPage,
+  Histogram,
   InventoryCanvas,
-  OverviewHighlight,
+  MagnitudeBar,
   OverviewSurface,
   ParamChip,
+  StatusBreakdown,
   StatusDonut,
   StatusIcon,
+  StatusLegend,
 } from "@/app/components/entity";
 import {
   countRunStatuses,
@@ -36,8 +39,11 @@ import {
   statusDonutSegments,
   successRate,
 } from "@/app/renderers/dashboardData";
-import { ExperimentCompare } from "@/app/renderers/ExperimentCompare";
-import { buildExperimentWorkbenchData } from "@/app/renderers/entityWorkbenchData";
+
+import {
+  buildExperimentWorkbenchData,
+  experimentRunCompleteness,
+} from "@/app/renderers/entityWorkbenchData";
 import { buildRunListActions, type RunListHandlers } from "@/app/runs/runListActions";
 import { useRunMultiSelect } from "@/app/runs/useRunMultiSelect";
 import { useNavigationState } from "@/app/state/useNavigationState";
@@ -50,19 +56,12 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { toast } from "@/components/ui/toast";
 import { WorkbenchAction, WorkbenchIconAction } from "@/components/workbench";
 import { parseWorkflowIr } from "@/components/workflow/workflow-graph";
 import { useContributionGeneration } from "@/lib/contribution-runtime";
 import { formatDateTime } from "@/lib/datetime";
+import { formatDuration as formatDurationSeconds } from "@/lib/format-time";
 import { getWorkspaceFs } from "@/lib/workspace-fs";
 import { formatQualifiedPath, runWorkspaceRelativePath } from "@/lib/workspace-path";
 import { isPluginEnabled, usePluginPreferencesGeneration } from "@/plugins/preferences";
@@ -111,7 +110,7 @@ const ParametersCell = ({ run, keys }: { run: RunSummary; keys: string[] }): JSX
       <CopyButton
         value={JSON.stringify(run.parameters ?? {}, null, 2)}
         label={`${run.name || run.id} parameters`}
-        className="size-5"
+        className="size-4-lg"
       />
     </div>
   );
@@ -143,7 +142,7 @@ export const ExperimentViewer = ({
   const setEntityTab = useCallback(
     (value: string) => {
       const experimentView: ExperimentView =
-        value === "workflow" || value === "runs" || value === "compare" ? value : "overview";
+        value === "workflow" || value === "runs" ? value : "overview";
       setSelection({ objectType: "experiment", objectId: experimentId, experimentView });
     },
     [experimentId, setSelection],
@@ -155,6 +154,16 @@ export const ExperimentViewer = ({
   );
 
   const counts = useMemo(() => countRunStatuses(runs), [runs]);
+  // Domain for the in-row duration bars: the slowest run in this experiment.
+  const maxRunDurationMs = useMemo(
+    () =>
+      runs.reduce((longest, run) => {
+        if (!run.startedAt || !run.finishedAt) return longest;
+        const ms = Date.parse(run.finishedAt) - Date.parse(run.startedAt);
+        return Number.isFinite(ms) && ms > longest ? ms : longest;
+      }, 0),
+    [runs],
+  );
 
   // Union of parameter keys across all runs — stable first-seen order. Declared
   // before any early return so the hook order is unconditional.
@@ -202,7 +211,7 @@ export const ExperimentViewer = ({
 
   const addSelectedToCompare = useCallback(() => {
     if (!compareScope) return;
-    compare.addMany(selectedRuns.map((run) => entryFromRunSummary(run, compareScope)));
+    compare.addMany(selectedRuns.map((run) => itemFromRunSummary(run, compareScope)));
   }, [compare, compareScope, selectedRuns]);
 
   const handleDelete = async () => {
@@ -272,9 +281,9 @@ export const ExperimentViewer = ({
           <div className="truncate text-body-lg font-medium text-foreground">
             {run.name || run.id}
           </div>
-          <div className="flex items-center gap-0.5 font-mono text-micro text-muted-foreground">
+          <div className="flex items-center gap-hairline font-mono text-micro text-muted-foreground">
             <span className="truncate">{run.id.substring(0, 12)}</span>
-            <CopyButton value={run.id} label="run ID" className="size-5" />
+            <CopyButton value={run.id} label="run ID" className="size-4-lg" />
           </div>
         </div>
       ),
@@ -312,13 +321,20 @@ export const ExperimentViewer = ({
     {
       key: "duration",
       header: "Duration",
-      width: "w-24",
+      width: "w-32",
       cell: (run) => {
-        const d = formatDuration(run.startedAt, run.finishedAt);
+        const label = formatDuration(run.startedAt, run.finishedAt);
+        const ms =
+          run.startedAt && run.finishedAt
+            ? Date.parse(run.finishedAt) - Date.parse(run.startedAt)
+            : null;
         return (
-          <span className="font-mono text-label text-muted-foreground">
-            {d ?? <span className="text-muted-foreground">—</span>}
-          </span>
+          <MagnitudeBar
+            value={Number.isFinite(ms) ? ms : null}
+            max={maxRunDurationMs}
+            label={label ?? "—"}
+            title={label ? `${label} wall clock` : "Not finished"}
+          />
         );
       },
     },
@@ -357,7 +373,7 @@ export const ExperimentViewer = ({
               meta: event.metaKey || event.ctrlKey,
             });
           }}
-          className={`flex h-4 w-4 items-center justify-center rounded-control border transition-colors ${
+          className={`flex size-4 items-center justify-center rounded-control border transition-colors ${
             checked
               ? "border-accent bg-accent text-accent-foreground"
               : "border-border hover:border-accent"
@@ -384,32 +400,11 @@ export const ExperimentViewer = ({
   const experimentSuccessRate = successRate(counts);
   const donutSegments = statusDonutSegments(counts);
 
-  const paramAxes = [...workbench.varyingAxes, ...workbench.fixedAxes];
-  const latestRun =
-    runs.length === 0
-      ? null
-      : [...runs].sort(
-          (a, b) =>
-            Date.parse(b.updatedAt || b.finishedAt || b.startedAt || "0") -
-            Date.parse(a.updatedAt || a.finishedAt || a.startedAt || "0"),
-        )[0];
   const completedDurationMs = runs.flatMap((run) => {
     if (!run.startedAt || !run.finishedAt) return [];
     const ms = Date.parse(run.finishedAt) - Date.parse(run.startedAt);
     return Number.isFinite(ms) && ms >= 0 ? [ms] : [];
   });
-  const medianDurationLabel = (() => {
-    if (completedDurationMs.length === 0) return null;
-    const sorted = [...completedDurationMs].sort((a, b) => a - b);
-    const mid = Math.floor(sorted.length / 2);
-    const left = sorted[mid - 1];
-    const right = sorted[mid];
-    if (right === undefined) return null;
-    const ms = sorted.length % 2 === 0 && left !== undefined ? (left + right) / 2 : right;
-    // formatDuration expects two ISO instants — anchor at epoch for a pure delta.
-    return formatDuration(new Date(0).toISOString(), new Date(ms).toISOString());
-  })();
-
   const workflowPluginEnabled = isPluginEnabled("workflow");
   const hasWorkflowData = Boolean(
     workflowPluginEnabled && workflow && workbench.workflowSummary.exists,
@@ -443,12 +438,15 @@ export const ExperimentViewer = ({
       : null) ||
     "Workflow";
 
+  const runsComplete = experimentRunCompleteness(experiment, runs.length).runsComplete;
+  const durationSeconds = completedDurationMs.map((ms) => ms / 1000);
+
   // Always pass full tab bodies (EntityTabContent hides inactive with CSS).
   // Conditional `activeTab === … ? content : null` remounted Flowgram on every switch.
   const overviewContent = (
     <OverviewSurface>
-      <DashboardCanvas className="max-w-6xl space-y-10">
-        <section className="grid gap-10 lg:grid-cols-[auto_minmax(0,1fr)] lg:items-center">
+      <DashboardCanvas className="max-w-6xl space-y-8">
+        <section className="grid gap-8 lg:grid-cols-[auto_minmax(0,1fr)] lg:items-start">
           {counts.total > 0 ? (
             <StatusDonut
               segments={donutSegments}
@@ -458,87 +456,73 @@ export const ExperimentViewer = ({
               centerLabel="runs"
             />
           ) : (
-            <div className="flex size-36 items-center justify-center rounded-full border border-dashed border-border text-micro text-muted-foreground">
-              no runs
+            <div className="flex size-36 items-center justify-center rounded-full border border-dashed border-border px-4 text-center text-micro leading-relaxed text-muted-foreground">
+              {runsComplete ? "no runs" : "loading runs…"}
             </div>
           )}
-          <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-3">
-            <OverviewHighlight
-              label="Succeeded"
-              value={counts.succeeded}
-              detail={
-                experimentSuccessRate === null
-                  ? undefined
-                  : `${experimentSuccessRate.toFixed(0)}% of terminal`
-              }
-            />
-            <OverviewHighlight label="Failed" value={counts.failed} />
-            <OverviewHighlight
-              label="In flight"
-              value={counts.running + counts.pending}
-              detail={
-                counts.running + counts.pending > 0
-                  ? `${counts.running} running · ${counts.pending} queued`
-                  : undefined
-              }
-            />
-            <OverviewHighlight
-              label="Median duration"
-              value={medianDurationLabel ?? "—"}
-              detail={
-                completedDurationMs.length > 0
-                  ? `${completedDurationMs.length} finished runs`
-                  : undefined
-              }
-            />
-            <OverviewHighlight
-              label="Latest run"
-              value={latestRun ? latestRun.name || latestRun.id.slice(0, 10) : "—"}
-              detail={
-                latestRun
-                  ? `${latestRun.status} · ${formatDateTime(latestRun.updatedAt)}`
-                  : undefined
-              }
-            />
+          <div className="min-w-0 space-y-2">
+            <h2 className="text-label font-medium text-foreground">Run duration</h2>
+            {durationSeconds.length > 0 ? (
+              <Histogram
+                values={durationSeconds}
+                format={formatDurationSeconds}
+                unit="runs"
+                ariaLabel="Distribution of wall-clock duration across finished runs"
+              />
+            ) : (
+              <p className="text-micro text-muted-foreground">
+                {runsComplete ? "No run has finished yet." : "Loading runs…"}
+              </p>
+            )}
+            {experimentSuccessRate !== null && (
+              <p className="font-mono text-micro tabular-nums text-muted-foreground">
+                {experimentSuccessRate.toFixed(0)}% of terminal runs succeeded
+              </p>
+            )}
           </div>
         </section>
 
-        {paramAxes.length > 0 && (
-          <section className="space-y-3">
-            <h3 className="text-body-lg font-medium text-foreground">Parameters</h3>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="w-40">Name</TableHead>
-                  <TableHead>Values</TableHead>
-                  <TableHead className="w-24">Role</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {paramAxes.map((axis) => {
-                  const varying = axis.count > 1;
-                  return (
-                    <TableRow key={axis.key}>
-                      <TableCell className="font-mono text-label">{axis.key}</TableCell>
-                      <TableCell className="font-mono text-label text-muted-foreground">
-                        {axis.values.slice(0, 12).join(", ")}
-                        {axis.values.length > 12 ? ` +${axis.values.length - 12}` : ""}
-                      </TableCell>
-                      <TableCell className="text-micro text-muted-foreground">
-                        {varying ? "varying" : "fixed"}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
+        {workbench.axisBreakdowns.length > 0 && (
+          <section className="space-y-4">
+            <div className="flex flex-wrap items-baseline justify-between gap-3">
+              <h2 className="text-body-lg font-medium text-foreground">Sweep outcome</h2>
+              <StatusLegend />
+            </div>
+            <p className="text-micro text-muted-foreground">
+              Status mix along each varying parameter — where the sweep failed, not which runs
+              exist. Open the Runs tab for the inventory.
+            </p>
+            <div className="grid gap-6 lg:grid-cols-2">
+              {workbench.axisBreakdowns.map((axis) => (
+                <StatusBreakdown
+                  key={axis.key}
+                  caption={axis.key}
+                  groups={axis.buckets.map((bucket) => ({
+                    id: `${axis.key}=${bucket.value}`,
+                    label: bucket.value,
+                    counts: bucket.counts,
+                  }))}
+                />
+              ))}
+            </div>
+          </section>
+        )}
+
+        {workbench.fixedAxes.length > 0 && (
+          <section className="space-y-2 border-t border-border pt-6">
+            <h2 className="text-label font-medium text-foreground">Constants</h2>
+            <div className="flex flex-wrap gap-2">
+              {workbench.fixedAxes.map((axis) => (
+                <ParamChip key={axis.key} name={axis.key} value={axis.values[0] ?? "—"} />
+              ))}
+            </div>
           </section>
         )}
 
         {hasWorkflowData && (
           <section className="flex flex-wrap items-center justify-between gap-4 border-t border-border pt-6">
             <div className="min-w-0">
-              <h3 className="text-body-lg font-medium text-foreground">Workflow</h3>
+              <h2 className="text-body-lg font-medium text-foreground">Workflow</h2>
               <p className="mt-1 truncate font-mono text-micro text-muted-foreground">
                 {workflowLabel}
               </p>
@@ -561,216 +545,189 @@ export const ExperimentViewer = ({
   );
 
   return (
-    <>
-      <EntityPage
-        icon={FlaskConical}
-        title={experiment.name}
-        actions={
-          <>
-            <CreateRunDialog
-              projectId={projectId}
-              experimentId={experimentId}
-              workflowFile={experiment.workflowFile || ""}
-              onRunCreated={(runId) => {
-                onRefresh();
-                navigateToRun(runId);
-              }}
-            />
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <WorkbenchIconAction label="More">
-                  <MoreHorizontal className="h-4 w-4" />
-                </WorkbenchIconAction>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-44">
-                <DropdownMenuItem onClick={() => setSweepOpen(true)}>
-                  <Grid3x3 className="h-3.5 w-3.5" />
-                  Sweep
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() =>
-                    setSelection({
-                      objectType: "agent",
-                      objectId: "new",
-                      scope: { projectId, experimentId },
-                    })
-                  }
-                >
-                  <Bot className="h-3.5 w-3.5" />
-                  Agent
-                </DropdownMenuItem>
-                <DropdownMenuItem
-                  onClick={() => {
-                    void navigator.clipboard.writeText(experiment.id);
-                    toast.success("Copied");
-                  }}
-                >
-                  <Copy className="h-3.5 w-3.5" />
-                  Copy ID
-                </DropdownMenuItem>
-                <DropdownMenuSeparator />
-                <DropdownMenuItem
-                  disabled={isDeleting}
-                  className="text-destructive focus:text-destructive"
-                  onClick={() => void handleDelete()}
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                  Delete
-                </DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-            <CreateSweepDialog
-              projectId={projectId}
-              experimentId={experimentId}
-              open={sweepOpen}
-              onOpenChange={setSweepOpen}
-              onCreated={() => {
-                onRefresh();
-                setEntityTab("runs");
-              }}
-            />
-          </>
-        }
-        activeTab={activeTab}
-        onActiveTabChange={setEntityTab}
-        tabs={[
-          {
-            value: "overview",
-            label: "Overview",
-            content: overviewContent,
-          },
-          {
-            value: "workflow",
-            label: "Workflow",
-            content: (
-              <OverviewSurface surfaceClassName="flex min-h-0 flex-col overflow-hidden">
-                <InventoryCanvas fill className="min-h-0 flex-1 gap-0 space-y-0">
-                  {hasWorkflowData && workflowViewer ? (
-                    <div className="min-h-0 flex-1 overflow-hidden bg-canvas">{workflowViewer}</div>
-                  ) : (
-                    <EmptyState
-                      title={
-                        workflowPluginEnabled ? "No workflow available" : "Workflow viewer disabled"
+    <EntityPage
+      icon={FlaskConical}
+      title={experiment.name}
+      actions={
+        <>
+          <CreateRunDialog
+            projectId={projectId}
+            experimentId={experimentId}
+            workflowFile={experiment.workflowFile || ""}
+            onRunCreated={(runId) => {
+              onRefresh();
+              navigateToRun(runId);
+            }}
+          />
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <WorkbenchIconAction label="More">
+                <MoreHorizontal className="size-4" />
+              </WorkbenchIconAction>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-44">
+              <DropdownMenuItem onClick={() => setSweepOpen(true)}>
+                <Grid3x3 className="size-icon-sm" />
+                Sweep
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() =>
+                  setSelection({
+                    objectType: "agent",
+                    objectId: "new",
+                    scope: { projectId, experimentId },
+                  })
+                }
+              >
+                <Bot className="size-icon-sm" />
+                Agent
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => {
+                  void navigator.clipboard.writeText(experiment.id);
+                  toast.success("Copied");
+                }}
+              >
+                <Copy className="size-icon-sm" />
+                Copy ID
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                disabled={isDeleting}
+                className="text-destructive focus:text-destructive"
+                onClick={() => void handleDelete()}
+              >
+                <Trash2 className="size-icon-sm" />
+                Delete
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+          <CreateSweepDialog
+            projectId={projectId}
+            experimentId={experimentId}
+            open={sweepOpen}
+            onOpenChange={setSweepOpen}
+            onCreated={() => {
+              onRefresh();
+              setEntityTab("runs");
+            }}
+          />
+        </>
+      }
+      activeTab={activeTab}
+      onActiveTabChange={setEntityTab}
+      tabs={[
+        {
+          value: "overview",
+          label: "Overview",
+          content: overviewContent,
+        },
+        {
+          value: "workflow",
+          label: "Workflow",
+          content: (
+            <OverviewSurface surfaceClassName="flex min-h-0 flex-col overflow-hidden">
+              <InventoryCanvas fill className="min-h-0 flex-1 gap-0 space-y-0">
+                {hasWorkflowData && workflowViewer ? (
+                  <div className="min-h-0 flex-1 overflow-hidden bg-canvas">{workflowViewer}</div>
+                ) : (
+                  <EmptyState
+                    title={
+                      workflowPluginEnabled ? "No workflow available" : "Workflow viewer disabled"
+                    }
+                    description={
+                      workflowPluginEnabled
+                        ? "This experiment does not have a workflow graph to display."
+                        : "Enable the Workflow plugin in Settings to inspect the graph."
+                    }
+                  />
+                )}
+              </InventoryCanvas>
+            </OverviewSurface>
+          ),
+        },
+        {
+          value: "runs",
+          label: counts.total > 0 ? `Runs (${counts.total})` : "Runs",
+          content: (
+            <OverviewSurface surfaceClassName="flex min-h-0 flex-col overflow-hidden">
+              <InventoryCanvas fill className="min-h-0 flex-1 gap-0 space-y-0">
+                <div className="flex min-h-0 flex-1 flex-col">
+                  <div className="mb-3 flex flex-wrap items-center gap-2">
+                    <WorkbenchAction
+                      kind={multi.enabled ? "secondary" : "ghost"}
+                      size="compact"
+                      type="button"
+                      onClick={multi.toggleMode}
+                    >
+                      {multi.enabled ? "Done selecting" : "Select"}
+                    </WorkbenchAction>
+                    {multi.enabled && (
+                      <>
+                        <span className="text-label text-muted-foreground">
+                          {multi.selected.size} selected
+                        </span>
+                        <WorkbenchAction
+                          kind="secondary"
+                          size="compact"
+                          type="button"
+                          disabled={multi.selected.size === 0 || !compareScope}
+                          deniedReason={
+                            compareScope ? null : "No served workspace to attribute these runs to."
+                          }
+                          onClick={addSelectedToCompare}
+                        >
+                          Add to selection
+                        </WorkbenchAction>
+                        <WorkbenchAction
+                          kind="ghost"
+                          size="compact"
+                          type="button"
+                          disabled={multi.selected.size === 0}
+                          onClick={multi.clear}
+                        >
+                          Clear
+                        </WorkbenchAction>
+                      </>
+                    )}
+                  </div>
+                  <div className="min-h-0 flex-1 overflow-auto">
+                    <DataTable
+                      columns={tableColumns}
+                      data={runs}
+                      getRowKey={(run) => run.id}
+                      getRowLabel={(run) =>
+                        multi.enabled
+                          ? `${multi.selected.has(run.id) ? "Deselect" : "Select"} run ${run.name || run.id}`
+                          : `Open run ${run.name || run.id}`
                       }
-                      description={
-                        workflowPluginEnabled
-                          ? "This experiment does not have a workflow graph to display."
-                          : "Enable the Workflow plugin in Settings to inspect the graph."
+                      onRowActivate={
+                        multi.enabled
+                          ? (run) =>
+                              multi.selectAt(runIndex.get(run.id) ?? 0, {
+                                shift: false,
+                                meta: true,
+                              })
+                          : (run) => navigateToRun(run.id)
+                      }
+                      rowActions={runRowActions}
+                      rowClassName={(run) =>
+                        multi.enabled && multi.selected.has(run.id) ? "bg-accent/5" : ""
+                      }
+                      empty={
+                        <EmptyState
+                          title={EMPTY_COPY.runs.title}
+                          description={EMPTY_COPY.runs.description}
+                        />
                       }
                     />
-                  )}
-                </InventoryCanvas>
-              </OverviewSurface>
-            ),
-          },
-          {
-            value: "runs",
-            label: counts.total > 0 ? `Runs (${counts.total})` : "Runs",
-            content: (
-              <OverviewSurface surfaceClassName="flex min-h-0 flex-col overflow-hidden">
-                <InventoryCanvas fill className="min-h-0 flex-1 gap-0 space-y-0">
-                  <div className="flex min-h-0 flex-1 flex-col">
-                    <div className="mb-3 flex flex-wrap items-center gap-2">
-                      <WorkbenchAction
-                        kind={multi.enabled ? "secondary" : "ghost"}
-                        size="compact"
-                        type="button"
-                        onClick={multi.toggleMode}
-                      >
-                        {multi.enabled ? "Done selecting" : "Select"}
-                      </WorkbenchAction>
-                      {multi.enabled && (
-                        <>
-                          <span className="text-label text-muted-foreground">
-                            {multi.selected.size} selected
-                          </span>
-                          <WorkbenchAction
-                            kind="ghost"
-                            size="compact"
-                            type="button"
-                            disabled={multi.selected.size === 0}
-                            onClick={() => setEntityTab("compare")}
-                          >
-                            Compare
-                          </WorkbenchAction>
-                          <WorkbenchAction
-                            kind="secondary"
-                            size="compact"
-                            type="button"
-                            disabled={multi.selected.size === 0 || !compareScope}
-                            deniedReason={
-                              compareScope
-                                ? null
-                                : "No served workspace to attribute these runs to."
-                            }
-                            onClick={addSelectedToCompare}
-                          >
-                            Add to comparison
-                          </WorkbenchAction>
-                          <WorkbenchAction
-                            kind="ghost"
-                            size="compact"
-                            type="button"
-                            disabled={multi.selected.size === 0}
-                            onClick={multi.clear}
-                          >
-                            Clear
-                          </WorkbenchAction>
-                        </>
-                      )}
-                    </div>
-                    <div className="min-h-0 flex-1 overflow-auto">
-                      <DataTable
-                        columns={tableColumns}
-                        data={runs}
-                        getRowKey={(run) => run.id}
-                        getRowLabel={(run) =>
-                          multi.enabled
-                            ? `${multi.selected.has(run.id) ? "Deselect" : "Select"} run ${run.name || run.id}`
-                            : `Open run ${run.name || run.id}`
-                        }
-                        onRowActivate={
-                          multi.enabled
-                            ? (run) =>
-                                multi.selectAt(runIndex.get(run.id) ?? 0, {
-                                  shift: false,
-                                  meta: true,
-                                })
-                            : (run) => navigateToRun(run.id)
-                        }
-                        rowActions={runRowActions}
-                        rowClassName={(run) =>
-                          multi.enabled && multi.selected.has(run.id) ? "bg-accent/5" : ""
-                        }
-                        empty={
-                          <EmptyState
-                            title={EMPTY_COPY.runs.title}
-                            description={EMPTY_COPY.runs.description}
-                          />
-                        }
-                      />
-                    </div>
                   </div>
-                </InventoryCanvas>
-              </OverviewSurface>
-            ),
-          },
-          {
-            value: "compare",
-            label: "Compare",
-            content: (
-              <OverviewSurface>
-                <InventoryCanvas>
-                  <ExperimentCompare
-                    runs={selectedRuns.length > 0 ? selectedRuns : runs}
-                    onOpenRun={navigateToRun}
-                  />
-                </InventoryCanvas>
-              </OverviewSurface>
-            ),
-          },
-        ]}
-      />
-    </>
+                </div>
+              </InventoryCanvas>
+            </OverviewSurface>
+          ),
+        },
+      ]}
+    />
   );
 };

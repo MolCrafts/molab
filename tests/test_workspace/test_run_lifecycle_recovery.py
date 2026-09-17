@@ -24,8 +24,8 @@ from pathlib import Path
 
 import pytest
 
-from molexp.workspace import Workspace
-from molexp.workspace.domain import ExecutionMode, ExecutionStatus
+from molab.workspace import Workspace
+from molab.workspace.domain import ExecutionMode, ExecutionStatus
 
 
 @pytest.fixture

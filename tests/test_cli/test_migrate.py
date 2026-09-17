@@ -1,4 +1,4 @@
-"""``molexp migrate`` — an old workspace becomes a readable one.
+"""``molab migrate`` — an old workspace becomes a readable one.
 
 The migration is judged by what the new tree looks like to a person and to
 the reader: legible paths, one file per attempt, nothing that merely copies
@@ -13,9 +13,9 @@ from pathlib import Path
 
 import pytest
 
-from molexp.cli.migrate_cmd import migrate_workspace
-from molexp.workspace import Workspace
-from molexp.workspace.validate import validate_workspace
+from molab.cli.migrate_cmd import migrate_workspace
+from molab.workspace import Workspace
+from molab.workspace.validate import validate_workspace
 
 PROJECT_ID = "01a06e0a-0000-7000-8000-000000000001"
 EXPERIMENT_ID = "01a06e0a-0000-7000-8000-000000000002"
@@ -82,7 +82,7 @@ def legacy(tmp_path: Path) -> Path:
             "status": "failed",
             "created_at": "2026-09-04T22:09:31.925482Z",
             "finished_at": "2026-09-04T22:10:21.113655Z",
-            "created_by": {"id": "molexp", "type": "system", "name": "MolExp"},
+            "created_by": {"id": "molab", "type": "system", "name": "Molab"},
         },
     )
     _write(attempt / "environment.json", {"schema_version": 2, "environment": {"host": "n226"}})
@@ -105,7 +105,7 @@ def legacy(tmp_path: Path) -> Path:
             "name": "metrics.jsonl",
             "content": {"digest": f"sha256:{digest}", "size": len(payload), "kind": "file"},
             "created_at": "2026-09-04T22:10:20.775525Z",
-            "created_by": {"id": "molexp", "type": "system", "name": "MolExp"},
+            "created_by": {"id": "molab", "type": "system", "name": "Molab"},
             "source_path": "work/metrics.jsonl",
         },
     )
@@ -296,3 +296,44 @@ class TestSafety:
         (target / "keep.txt").write_text("mine", encoding="utf-8")
         with pytest.raises(Exception, match="not empty"):
             migrate_workspace(legacy, target)
+
+
+class TestMigrateBrand:
+    def test_renames_workspace_machine_dir_and_gitignore(self, tmp_path: Path) -> None:
+        from molab.cli.migrate_cmd import migrate_brand
+
+        ws = tmp_path / "lab"
+        (ws / ".molexp" / "locks").mkdir(parents=True)
+        (ws / ".molexp" / "locks" / "x.lock").write_text("", encoding="utf-8")
+        (ws / ".gitignore").write_text("# head\n.molexp/\n*.pyc\n", encoding="utf-8")
+
+        report = migrate_brand(ws, migrate_home=False)
+        assert report.workspace_dir_renamed is True
+        assert report.gitignore_updated is True
+        assert not (ws / ".molexp").exists()
+        assert (ws / ".molab" / "locks" / "x.lock").is_file()
+        assert ".molab/" in (ws / ".gitignore").read_text(encoding="utf-8")
+        assert ".molexp/" not in (ws / ".gitignore").read_text(encoding="utf-8")
+
+    def test_renames_home_config_dir(self, tmp_path: Path) -> None:
+        from molab.cli.migrate_cmd import migrate_brand
+
+        ws = tmp_path / "lab"
+        ws.mkdir()
+        fake_home = tmp_path / "home"
+        (fake_home / ".molexp" / "config.json").parent.mkdir(parents=True)
+        (fake_home / ".molexp" / "config.json").write_text("{}", encoding="utf-8")
+
+        report = migrate_brand(ws, home=fake_home, migrate_home=True)
+        assert report.home_renamed is True
+        assert not (fake_home / ".molexp").exists()
+        assert (fake_home / ".molab" / "config.json").is_file()
+
+    def test_refuses_when_both_machine_dirs_exist(self, tmp_path: Path) -> None:
+        from molab.cli.migrate_cmd import migrate_brand
+
+        ws = tmp_path / "lab"
+        (ws / ".molexp").mkdir(parents=True)
+        (ws / ".molab").mkdir(parents=True)
+        with pytest.raises(Exception, match="both"):
+            migrate_brand(ws, migrate_home=False)

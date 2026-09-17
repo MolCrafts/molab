@@ -4,9 +4,9 @@ build-backend = "setup"
 backend-path = ["."]
 
 [project]
-name = "molexp"
-# Keep in sync with src/molexp/__init__.py::__version__ (one bump, two sites).
-version = "0.3.0"
+name = "molcrafts-molab"
+# Keep in sync with src/molab/__init__.py::__version__ (one bump, two sites).
+version = "0.1.0"
 description = "Agent-assisted scientific-workflow platform for FAIR research"
 authors = [{name = "molcrafts"}]
 license = {text = "BSD-3-Clause"}
@@ -24,7 +24,7 @@ dependencies = [
     "molcrafts-mollog>=1.0.0",
     "molcrafts-molcfg>=1.2.0",
     "molcrafts-molq>=0.2.0",
-    # Science plugins (molexp.plugins.molpy / molvis / submit_molq) import
+    # Science plugins (molab.plugins.molpy / molvis / submit_molq) import
     # these products directly. molrs is reached only through molpy.
     "molcrafts-molpy>=0.13.1",
     "zarr>=3",
@@ -35,20 +35,20 @@ dependencies = [
 [project.optional-dependencies]
 # pydantic-ai >=1.105: first line verified with the shared retries={"output": N}
 # spelling (the legacy output_retries= kwarg is removed in 2.0). No upper cap —
-# molexp tracks latest; the router's preflight() catches a constructor-level
+# molab tracks latest; the router's preflight() catches a constructor-level
 # incompatibility BEFORE any workspace write if a future major breaks Agent(...).
-# pytest + pytest-asyncio are RUNTIME dependencies of `molexp plan`: step 7
+# pytest + pytest-asyncio are RUNTIME dependencies of `molab plan`: step 7
 # (ExecuteTests) runs the generated per-task tests as a subprocess of the same
-# interpreter, and molexp task bodies are async-first, so the generated tests
+# interpreter, and molab task bodies are async-first, so the generated tests
 # routinely carry @pytest.mark.asyncio.
 agent = ["pydantic-ai>=1.105", "pytest>=7.0", "pytest-asyncio>=0.21"]
 tensorboard = ["tensorboard>=2.15"]
-all = ["molexp[agent,tensorboard]"]
+all = ["molcrafts-molab[agent,tensorboard]"]
 # Protocol suite only — never imported from src/. Sibling path in
 # [tool.uv.sources]; CI UV_NO_SOURCES=1 skips this extra.
 conformance = ["molrec"]
 dev = [
-    "molexp[all]",
+    "molcrafts-molab[all]",
     "pytest>=7.0",
     "pytest-asyncio>=0.21",
     "pytest-cov>=4.0",
@@ -60,8 +60,8 @@ dev = [
     "ruff==0.16.2",
     "ty==0.0.69",
     "tox>=4.23",
-    # Build binding only. molrs is molpy's dependency, not molexp's API — no
-    # molexp module may `import molrs` (Frame/Block come from molpy). It is
+    # Build binding only. molrs is molpy's dependency, not molab's API — no
+    # molab module may `import molrs` (Frame/Block come from molpy). It is
     # named here solely because `[tool.uv.sources]` path overrides apply to a
     # project's OWN requirements, not to transitive ones: without this line the
     # local editable molpy resolves against the published molrs instead of the
@@ -83,7 +83,17 @@ molcrafts-molrs = { path = "../molrs/molrs-python", editable = true }
 molrec = { path = "../molrec", editable = true }
 
 [project.scripts]
-molexp = "molexp.cli:app"
+molab = "molab.cli:app"
+
+# The harness ships inside this wheel today, but it attaches through the same
+# public seams a separate distribution would use — nothing in molab core
+# imports it by name. Extracting it later is a file move plus a dependency,
+# not an architecture change.
+[project.entry-points."molab.cli_plugins"]
+harness = "molab.harness.cli:CLI_PLUGIN"
+
+[project.entry-points."molab.server_plugins"]
+harness = "molab.harness.server:SERVER_PLUGIN"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
@@ -99,7 +109,7 @@ line-length = 100
 # (3.12) cannot parse — PEP 758 `except A, B:` slipped in exactly this way.
 target-version = "py312"
 extend-exclude = [
-    "src/molexp/dist",
+    "src/molab/dist",
     "apps",
     "build",
     "dist",
@@ -109,7 +119,7 @@ extend-exclude = [
 ]
 
 [tool.ruff.lint]
-# Strict ruleset for the molexp Python codebase.
+# Strict ruleset for the molab Python codebase.
 #   E, W, F, I  — pycodestyle / pyflakes / isort baseline
 #   B           — flake8-bugbear
 #   UP          — pyupgrade (modern py312+ syntax)
@@ -144,7 +154,8 @@ ignore = [
 # `__init__.py` re-export modules don't need annotations on `__all__` etc.
 "**/__init__.py" = ["F401"]
 # CLI entry-points use typer-style decorators with implicit return types.
-"src/molexp/cli/**" = ["ANN201", "ANN202"]
+"src/molab/cli/**" = ["ANN201", "ANN202"]
+"src/molab/harness/cli/**" = ["ANN201", "ANN202"]
 
 [tool.ruff.lint.flake8-annotations]
 # ANN401 (`Any` is not allowed) is in the default `ANN` selection.
@@ -167,7 +178,7 @@ python = "./.venv"
 [tool.ty.src]
 include = ["src", "tests", "examples"]
 exclude = [
-    "src/molexp/dist",
+    "src/molab/dist",
     "apps",
     "build",
     "dist",
@@ -192,7 +203,7 @@ include-package-data = true
 where = ["src"]
 
 [tool.setuptools.package-data]
-molexp = [
+molab = [
     "openapi.json",
     "dist/**",
     "harness/prompts/contracts/*.yaml",
@@ -236,5 +247,5 @@ commands_pre = [
   ],
 ]
 commands = [
-  ["{envpython}", "-m", "pytest", "tests/", "-q", "--cov=src/molexp", "--cov-report=xml"],
+  ["{envpython}", "-m", "pytest", "tests/", "-q", "--cov=src/molab", "--cov-report=xml"],
 ]

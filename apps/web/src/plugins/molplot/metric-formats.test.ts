@@ -34,7 +34,7 @@ describe("molplot's surface gate", () => {
     expect(isMetricSurface(file("jobs/lammps-0.out"))).toBe(true);
   });
 
-  it("treats molexp's own WAL as one format among others", () => {
+  it("treats molab's own WAL as one format among others", () => {
     expect(isMetricSurface(file("out/metrics.mlp.jsonl"))).toBe(true);
   });
 

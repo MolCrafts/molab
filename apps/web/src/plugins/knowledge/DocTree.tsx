@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query";
 import {
   Blocks,
   BookOpen,
@@ -46,6 +47,7 @@ import {
 import { cn } from "@/lib/utils";
 import { selectionForSearchHit } from "@/plugins/knowledge/searchHitSelection";
 import { buildDocTree, type DocEntityKind, type DocTreeNode } from "./knowledgeDocTree";
+import { knowledgeNoteQueryOptions } from "./queries";
 import { useKnowledgeDocs, useKnowledgeFacets } from "./useKnowledgeDocs";
 
 interface KnowledgeFilterProps {
@@ -78,7 +80,7 @@ const KnowledgeFilter = ({
     <Popover>
       <PopoverTrigger asChild>
         <WorkbenchIconAction label="Filter knowledge" disabled={disabled}>
-          <Filter className="h-3.5 w-3.5" />
+          <Filter className="size-3.5" />
           {active && <span className="h-1.5 w-1.5 rounded-full bg-info" />}
         </WorkbenchIconAction>
       </PopoverTrigger>
@@ -95,7 +97,9 @@ const KnowledgeFilter = ({
                     value={`status ${s}`}
                     onSelect={() => onStatusChange(status === s ? null : s)}
                   >
-                    <Check className={cn("h-4 w-4", status === s ? "opacity-100" : "opacity-0")} />
+                    <Check
+                      className={cn("size-icon", status === s ? "opacity-100" : "opacity-0")}
+                    />
                     <StatusBadge status={s} size="sm" />
                   </CommandItem>
                 ))}
@@ -109,7 +113,7 @@ const KnowledgeFilter = ({
                     value={`tag ${t}`}
                     onSelect={() => onTagChange(tag === t ? null : t)}
                   >
-                    <Check className={cn("h-4 w-4", tag === t ? "opacity-100" : "opacity-0")} />
+                    <Check className={cn("size-icon", tag === t ? "opacity-100" : "opacity-0")} />
                     <span className="truncate">{t}</span>
                   </CommandItem>
                 ))}
@@ -126,7 +130,7 @@ const KnowledgeFilter = ({
                       onStatusChange(null);
                     }}
                   >
-                    <X className="h-4 w-4" /> Clear filters
+                    <X className="size-icon" /> Clear filters
                   </CommandItem>
                 </CommandGroup>
               </>
@@ -162,6 +166,7 @@ const collectExpandIds = (nodes: DocTreeNode[], acc: string[]): string[] => {
 };
 
 export const DocTree = ({ snapshot, activeId, onSelect }: DocTreeProps): JSX.Element => {
+  const queryClient = useQueryClient();
   const [tag, setTag] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const { notes, loading, error, reload, createDoc, renameDoc, moveDoc, deleteDoc } =
@@ -394,6 +399,10 @@ export const DocTree = ({ snapshot, activeId, onSelect }: DocTreeProps): JSX.Ele
         label: node.name,
         icon: NotebookPen,
         iconClassName: "text-muted-foreground",
+        onPrefetch: () => {
+          void import("./KnowledgeViewer");
+          void queryClient.prefetchQuery(knowledgeNoteQueryOptions(path));
+        },
         onSelect: () => onSelect({ objectType: "knowledge", objectId: path }),
         actions: docActions(node),
         children: node.children.length > 0 ? node.children.map(toTreeNode) : undefined,
@@ -453,9 +462,9 @@ export const DocTree = ({ snapshot, activeId, onSelect }: DocTreeProps): JSX.Ele
 
   return (
     <div className="space-y-2" aria-busy={loading || searchLoading || operationLabel !== null}>
-      {/* Same action density as LeftExplorer title actions (gap-0.5, compact icons). */}
-      <div className="flex items-center justify-between gap-0.5">
-        <div className="flex items-center gap-0.5">
+      {/* Same action density as LeftExplorer title actions (gap-hairline, compact icons). */}
+      <div className="flex items-center justify-between gap-hairline">
+        <div className="flex items-center gap-hairline">
           <KnowledgeFilter
             tags={tags}
             statuses={statuses}
@@ -468,7 +477,7 @@ export const DocTree = ({ snapshot, activeId, onSelect }: DocTreeProps): JSX.Ele
           <Popover>
             <PopoverTrigger asChild>
               <WorkbenchIconAction label="Search knowledge" disabled={operationLabel !== null}>
-                <Search className="h-3.5 w-3.5" />
+                <Search className="size-3.5" />
                 {searching ? <span className="size-1.5 rounded-full bg-info" /> : null}
               </WorkbenchIconAction>
             </PopoverTrigger>
@@ -490,7 +499,7 @@ export const DocTree = ({ snapshot, activeId, onSelect }: DocTreeProps): JSX.Ele
           disabled={operationLabel !== null}
           onClick={() => void handleCreateRoot()}
         >
-          <Plus className="h-4 w-4" />
+          <Plus className="size-icon" />
         </WorkbenchIconAction>
       </div>
       {facetsLoading && tags.length === 0 && statuses.length === 0 && (

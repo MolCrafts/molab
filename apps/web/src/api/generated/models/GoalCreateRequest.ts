@@ -17,7 +17,7 @@ export type GoalCreateRequest = {
      */
     mode?: GoalCreateRequest.mode;
     /**
-     * Replace the layered system prompt for this single session. Workspace and skill addenda are bypassed; the molexp built-in preamble is also dropped.
+     * Replace the layered system prompt for this single session. Workspace and skill addenda are bypassed; the molab built-in preamble is also dropped.
      */
     instructionsOverride?: (string | null);
     /**

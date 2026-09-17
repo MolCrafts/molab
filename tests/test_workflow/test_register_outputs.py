@@ -11,16 +11,16 @@ from pathlib import Path
 
 import pytest
 
-from molexp.workflow import (
+from molab.workflow import (
     RegisterArtifact,
     TaskContext,
     Workflow,
     WorkflowCompiler,
     WorkflowRuntime,
 )
-from molexp.workflow.cache import Caching
-from molexp.workspace import Workspace
-from molexp.workspace.execution_dirs import ARTIFACTS, OUT
+from molab.workflow.cache import Caching
+from molab.workspace import Workspace
+from molab.workspace.execution_dirs import ARTIFACTS, OUT
 
 
 def _new_run(tmp_path: Path, params: dict | None = None):

@@ -1,4 +1,4 @@
-"""``molexp.plugins.metrics.mlp_names`` — filename gate for host metrics / plots.
+"""``molab.plugins.metrics.mlp_names`` — filename gate for host metrics / plots.
 
 ``is_mlp_metrics_surface`` matches ``*.mlp.jsonl`` only. Leftover zarr / index
 names do not activate the metrics tab. ``*.mlp.vl.json`` still activates plots.
@@ -6,7 +6,7 @@ names do not activate the metrics tab. ``*.mlp.vl.json`` still activates plots.
 
 from __future__ import annotations
 
-from molexp.plugins.metrics.mlp_names import is_mlp_metrics_surface, is_mlp_plot_surface
+from molab.plugins.metrics.mlp_names import is_mlp_metrics_surface, is_mlp_plot_surface
 
 
 class TestIsMlpMetricsSurface:

@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from molexp.workspace import Workspace
+from molab.workspace import Workspace
 
 
 def _read_run_json(run) -> dict:

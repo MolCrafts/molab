@@ -75,7 +75,7 @@ export const KnowledgeDocPanel = ({ selection, snapshot }: RendererProps): JSX.E
     <div className="space-y-4 border-b border-border/60 p-4">
       <section className="space-y-2">
         <h3 className="flex items-center gap-2 text-label font-semibold uppercase tracking-wide text-muted-foreground">
-          <List className="h-3.5 w-3.5" /> Outline
+          <List className="size-icon-sm" /> Outline
         </h3>
         {outline.length === 0 ? (
           <WorkbenchOperationState

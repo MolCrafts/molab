@@ -13,18 +13,18 @@ import { request as __request } from '../core/request';
 export class ProjectsService {
     /**
      * List Projects
-     * @param molexpSession
+     * @param molabSession
      * @returns ProjectResponse Successful Response
      * @throws ApiError
      */
     public static listProjects(
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<Array<ProjectResponse>> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/projects',
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -34,19 +34,19 @@ export class ProjectsService {
     /**
      * Create Project
      * @param requestBody
-     * @param molexpSession
+     * @param molabSession
      * @returns ProjectResponse Successful Response
      * @throws ApiError
      */
     public static createProject(
         requestBody: ProjectCreateRequest,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<ProjectResponse> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/projects',
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -58,13 +58,13 @@ export class ProjectsService {
     /**
      * Get Project
      * @param projectId
-     * @param molexpSession
+     * @param molabSession
      * @returns ProjectResponse Successful Response
      * @throws ApiError
      */
     public static getProject(
         projectId: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<ProjectResponse> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -73,7 +73,7 @@ export class ProjectsService {
                 'project_id': projectId,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -83,13 +83,13 @@ export class ProjectsService {
     /**
      * Delete Project
      * @param projectId
-     * @param molexpSession
+     * @param molabSession
      * @returns MessageResponse Successful Response
      * @throws ApiError
      */
     public static deleteProject(
         projectId: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<MessageResponse> {
         return __request(OpenAPI, {
             method: 'DELETE',
@@ -98,7 +98,7 @@ export class ProjectsService {
                 'project_id': projectId,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -110,14 +110,14 @@ export class ProjectsService {
      * List long-lived Project data identities.
      * @param projectId
      * @param limit
-     * @param molexpSession
+     * @param molabSession
      * @returns ManagedAssetResponse Successful Response
      * @throws ApiError
      */
     public static listProjectAssets(
         projectId: string,
         limit: number = 100,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<Array<ManagedAssetResponse>> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -126,7 +126,7 @@ export class ProjectsService {
                 'project_id': projectId,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             query: {
                 'limit': limit,
@@ -140,14 +140,14 @@ export class ProjectsService {
      * Get Project Asset
      * @param projectId
      * @param assetId
-     * @param molexpSession
+     * @param molabSession
      * @returns ManagedAssetResponse Successful Response
      * @throws ApiError
      */
     public static getProjectAsset(
         projectId: string,
         assetId: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<ManagedAssetResponse> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -157,7 +157,7 @@ export class ProjectsService {
                 'asset_id': assetId,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -169,14 +169,14 @@ export class ProjectsService {
      * List immutable versions of a Project Asset.
      * @param projectId
      * @param assetId
-     * @param molexpSession
+     * @param molabSession
      * @returns AssetVersionResponse Successful Response
      * @throws ApiError
      */
     public static listProjectAssetVersions(
         projectId: string,
         assetId: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<Array<AssetVersionResponse>> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -186,7 +186,7 @@ export class ProjectsService {
                 'asset_id': assetId,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -197,14 +197,14 @@ export class ProjectsService {
      * Download Project Asset
      * @param projectId
      * @param assetId
-     * @param molexpSession
+     * @param molabSession
      * @returns any Successful Response
      * @throws ApiError
      */
     public static downloadProjectAsset(
         projectId: string,
         assetId: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<any> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -214,7 +214,7 @@ export class ProjectsService {
                 'asset_id': assetId,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -224,13 +224,13 @@ export class ProjectsService {
     /**
      * List Projects
      * @param ws
-     * @param molexpSession
+     * @param molabSession
      * @returns ProjectResponse Successful Response
      * @throws ApiError
      */
     public static listProjectsWs(
         ws: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<Array<ProjectResponse>> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -239,7 +239,7 @@ export class ProjectsService {
                 'ws': ws,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -250,14 +250,14 @@ export class ProjectsService {
      * Create Project
      * @param ws
      * @param requestBody
-     * @param molexpSession
+     * @param molabSession
      * @returns ProjectResponse Successful Response
      * @throws ApiError
      */
     public static createProjectWs(
         ws: string,
         requestBody: ProjectCreateRequest,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<ProjectResponse> {
         return __request(OpenAPI, {
             method: 'POST',
@@ -266,7 +266,7 @@ export class ProjectsService {
                 'ws': ws,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -279,14 +279,14 @@ export class ProjectsService {
      * Get Project
      * @param projectId
      * @param ws
-     * @param molexpSession
+     * @param molabSession
      * @returns ProjectResponse Successful Response
      * @throws ApiError
      */
     public static getProjectWs(
         projectId: string,
         ws: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<ProjectResponse> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -296,7 +296,7 @@ export class ProjectsService {
                 'ws': ws,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -307,14 +307,14 @@ export class ProjectsService {
      * Delete Project
      * @param projectId
      * @param ws
-     * @param molexpSession
+     * @param molabSession
      * @returns MessageResponse Successful Response
      * @throws ApiError
      */
     public static deleteProjectWs(
         projectId: string,
         ws: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<MessageResponse> {
         return __request(OpenAPI, {
             method: 'DELETE',
@@ -324,7 +324,7 @@ export class ProjectsService {
                 'ws': ws,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -337,7 +337,7 @@ export class ProjectsService {
      * @param projectId
      * @param ws
      * @param limit
-     * @param molexpSession
+     * @param molabSession
      * @returns ManagedAssetResponse Successful Response
      * @throws ApiError
      */
@@ -345,7 +345,7 @@ export class ProjectsService {
         projectId: string,
         ws: string,
         limit: number = 100,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<Array<ManagedAssetResponse>> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -355,7 +355,7 @@ export class ProjectsService {
                 'ws': ws,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             query: {
                 'limit': limit,
@@ -370,7 +370,7 @@ export class ProjectsService {
      * @param projectId
      * @param assetId
      * @param ws
-     * @param molexpSession
+     * @param molabSession
      * @returns ManagedAssetResponse Successful Response
      * @throws ApiError
      */
@@ -378,7 +378,7 @@ export class ProjectsService {
         projectId: string,
         assetId: string,
         ws: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<ManagedAssetResponse> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -389,7 +389,7 @@ export class ProjectsService {
                 'ws': ws,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -402,7 +402,7 @@ export class ProjectsService {
      * @param projectId
      * @param assetId
      * @param ws
-     * @param molexpSession
+     * @param molabSession
      * @returns AssetVersionResponse Successful Response
      * @throws ApiError
      */
@@ -410,7 +410,7 @@ export class ProjectsService {
         projectId: string,
         assetId: string,
         ws: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<Array<AssetVersionResponse>> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -421,7 +421,7 @@ export class ProjectsService {
                 'ws': ws,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -433,7 +433,7 @@ export class ProjectsService {
      * @param projectId
      * @param assetId
      * @param ws
-     * @param molexpSession
+     * @param molabSession
      * @returns any Successful Response
      * @throws ApiError
      */
@@ -441,7 +441,7 @@ export class ProjectsService {
         projectId: string,
         assetId: string,
         ws: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<any> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -452,7 +452,7 @@ export class ProjectsService {
                 'ws': ws,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,

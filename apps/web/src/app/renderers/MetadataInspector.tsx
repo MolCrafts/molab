@@ -29,13 +29,17 @@ export const MetadataInspector = ({ selection, snapshot }: RendererProps): JSX.E
           return (
             <div
               key={field.label}
-              className="grid grid-cols-(--inspector-grid-columns) items-start gap-2 px-3 py-1.5"
+              className="grid grid-cols-(--inspector-grid-columns) items-start gap-2 px-3 py-row-pad"
             >
               <dt className="text-micro text-muted-foreground">{field.label}</dt>
-              <dd className="flex min-w-0 items-start justify-end gap-0.5 break-words text-right font-mono text-label text-foreground">
+              <dd className="flex min-w-0 items-start justify-end gap-hairline break-words text-right font-mono text-label text-foreground">
                 <span className="min-w-0">{field.value || "—"}</span>
                 {copyable && field.value ? (
-                  <CopyButton value={field.value} label={field.label} className="size-5 shrink-0" />
+                  <CopyButton
+                    value={field.value}
+                    label={field.label}
+                    className="size-4-lg shrink-0"
+                  />
                 ) : null}
               </dd>
             </div>

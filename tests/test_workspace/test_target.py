@@ -1,4 +1,4 @@
-"""Behavior locks for ``molexp.workspace.target`` — the Target address family.
+"""Behavior locks for ``molab.workspace.target`` — the Target address family.
 
 One ``ComputeTarget``-rooted family: ``parse_target`` / ``resolve_target``
 produce ``LocalTarget`` / ``RemoteTarget`` address views that ARE
@@ -14,9 +14,9 @@ from pathlib import Path
 import pytest
 from molq.transport import LocalTransport, SshTransport
 
-from molexp.workspace import ComputeTarget, SSHSession, Workspace
-from molexp.workspace.fs_local import LocalFileSystem
-from molexp.workspace.target import (
+from molab.workspace import ComputeTarget, SSHSession, Workspace
+from molab.workspace.fs_local import LocalFileSystem
+from molab.workspace.target import (
     LocalTarget,
     RemoteTarget,
     SessionManager,
@@ -26,7 +26,7 @@ from molexp.workspace.target import (
     resolve_target,
     target_to_filesystem,
 )
-from molexp.workspace.targets import resolve_compute_target
+from molab.workspace.targets import resolve_compute_target
 
 
 @pytest.fixture
@@ -132,8 +132,8 @@ class TestResolveComputeTarget:
     def test_named_lookup_local_fallback_and_missing_raises(self, ws: Workspace) -> None:
         """The single named-target resolution path: named lookup, the built-in
         ``local`` fallback, and a raw ``KeyError`` on an unknown name."""
-        ws.add_target(ComputeTarget(name="laptop", scratch_root="/tmp/molexp"))
-        assert resolve_compute_target(ws, "laptop").scratch_root == "/tmp/molexp"
+        ws.add_target(ComputeTarget(name="laptop", scratch_root="/tmp/molab"))
+        assert resolve_compute_target(ws, "laptop").scratch_root == "/tmp/molab"
         assert resolve_compute_target(ws, "local").scratch_root == str(ws.root)
         with pytest.raises(KeyError):
             resolve_compute_target(ws, "ghost")
@@ -144,7 +144,7 @@ class TestTargetToFilesystem:
         assert isinstance(target_to_filesystem(parse_target(str(tmp_path))), LocalFileSystem)
 
     def test_remote_target_yields_remote_filesystem(self) -> None:
-        from molexp.workspace.fs_remote import RemoteFileSystem
+        from molab.workspace.fs_remote import RemoteFileSystem
 
         fs = target_to_filesystem(parse_target("me@host.example:/data"))
         assert isinstance(fs, RemoteFileSystem)
@@ -188,4 +188,4 @@ class TestSessionManager:
         belongs exclusively to the agent layer's LLM conversation session."""
         session = SessionManager.get_or_create(self._remote())
         assert isinstance(session, SSHSession)
-        assert not hasattr(__import__("molexp.workspace", fromlist=["x"]), "Session")
+        assert not hasattr(__import__("molab.workspace", fromlist=["x"]), "Session")

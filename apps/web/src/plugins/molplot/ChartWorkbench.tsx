@@ -66,7 +66,7 @@ export const ChartWorkbench = ({
               {settingsTitle}
             </span>
             <WorkbenchIconAction label="Hide display settings" onClick={() => setOpen(false)}>
-              <PanelLeftClose className="h-4 w-4" />
+              <PanelLeftClose className="size-4" />
             </WorkbenchIconAction>
           </div>
           {settings}
@@ -79,11 +79,11 @@ export const ChartWorkbench = ({
       ) : (
         <div className="flex w-10 shrink-0 flex-col items-center border-r border-border bg-muted/20 pt-3">
           <WorkbenchIconAction label="Show display settings" onClick={() => setOpen(true)}>
-            <PanelLeftOpen className="h-4 w-4" />
+            <PanelLeftOpen className="size-4" />
           </WorkbenchIconAction>
         </div>
       )}
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">{children}</div>
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">{children}</div>
     </div>
   );
 };

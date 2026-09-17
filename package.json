@@ -1,5 +1,5 @@
 {
-  "name": "molexp",
+  "name": "molab",
   "version": "0.0.1",
   "description": "Workflow and agent platform for research experiment management",
   "private": true,
@@ -8,29 +8,34 @@
   ],
   "scripts": {
     "prepare": "node -e \"process.exit(process.env.CI ? 0 : 1)\" || pre-commit install --hook-type pre-commit --hook-type pre-push",
-    "dev:web": "npm run dev -w molexp-web --",
-    "dev:api": "npm run dev:api -w molexp-web --",
-    "dev:vsc-ext": "npm run dev -w molexp-workflow-preview --",
-    "build:web": "npm run build -w molexp-web --",
-    "build:vsc-ext": "npm run build -w molexp-workflow-preview --",
+    "dev:web": "npm run dev -w molab-web --",
+    "dev:api": "npm run dev:api -w molab-web --",
+    "dev:vsc-ext": "npm run dev -w molab-workflow-preview --",
+    "build:web": "npm run build -w molab-web --",
+    "build:molrs": "npm run build:molrs -w molab-web --",
+    "build:rsdoctor": "npm run build:rsdoctor -w molab-web --",
+    "build:vsc-ext": "npm run build -w molab-workflow-preview --",
     "build:all": "npm run build:web && npm run build:vsc-ext",
-    "preview:web": "npm run preview -w molexp-web --",
-    "typecheck:web": "npm run typecheck -w molexp-web --",
-    "typecheck:vsc-ext": "npm run typecheck -w molexp-workflow-preview --",
+    "preview:web": "npm run preview -w molab-web --",
+    "typecheck:web": "npm run typecheck -w molab-web --",
+    "typecheck:vsc-ext": "npm run typecheck -w molab-workflow-preview --",
     "typecheck": "npm run typecheck:web && npm run typecheck:vsc-ext",
-    "test:web": "npm run test -w molexp-web --",
-    "test:watch": "npm run test:watch -w molexp-web --",
+    "test:web": "npm run test -w molab-web --",
+    "test:watch": "npm run test:watch -w molab-web --",
     "test": "npm run test:web",
-    "lint": "npm run lint -w molexp-web --",
-    "lint:fix": "npm run lint:fix -w molexp-web --",
-    "format": "npm run format -w molexp-web --",
-    "generate:api": "npm run generate:api -w molexp-web --"
+    "lint": "npm run lint -w molab-web --",
+    "lint:fix": "npm run lint:fix -w molab-web --",
+    "format": "npm run format -w molab-web --",
+    "generate:api": "npm run generate:api -w molab-web --"
   },
   "devDependencies": {
-    "@rsbuild/core": "^2.1.10",
-    "shadcn": "^4.5.0"
+    "@rsbuild/core": "^2.2.5",
+    "shadcn": "^4.21.0"
   },
   "packageManager": "npm@11.11.0+sha512.f36811c4aae1fde639527368ae44c571d050006a608d67a191f195a801a52637a312d259186254aa3a3799b05335b7390539cf28656d18f0591a1125ba35f973",
+  "overrides": {
+    "@molcrafts/molrs": "^0.13.2"
+  },
   "allowScripts": {
     "esbuild@0.28.2": true,
     "msw@2.15.0": true

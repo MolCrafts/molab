@@ -42,7 +42,7 @@ export function AddRemoteWorkspaceDialog({
           <DialogTitle>Add remote workspace</DialogTitle>
           <DialogDescription>
             Register a remote workspace root reachable over SSH. The remote directory must already
-            exist — this descriptor only tells molexp how to reach it.
+            exist — this descriptor only tells molab how to reach it.
           </DialogDescription>
         </DialogHeader>
         <AddRemoteWorkspaceForm

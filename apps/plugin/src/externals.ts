@@ -15,8 +15,8 @@ export const PLUGIN_HOST_MODULE_IDS = [
   "react-dom/client",
   "react/jsx-runtime",
   "react/jsx-dev-runtime",
-  "@molcrafts/molexp-plugin",
-  "@molcrafts/molexp-plugin/ui",
+  "@molcrafts/molab-plugin",
+  "@molcrafts/molab-plugin/ui",
 ] as const;
 
 export type PluginHostModuleId = (typeof PLUGIN_HOST_MODULE_IDS)[number];

@@ -1,4 +1,4 @@
-"""Tests for ``molexp.workspace.curation.inventory`` tree scanning.
+"""Tests for ``molab.workspace.curation.inventory`` tree scanning.
 
 Pins ``scan_workspace``: counts are totals across the whole ``Workspace ->
 Project -> Experiment -> Run`` tree; ``asset_count`` counts both imported data
@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from molexp.workspace import Workspace
-from molexp.workspace.curation import scan_workspace
+from molab.workspace import Workspace
+from molab.workspace.curation import scan_workspace
 
 
 def _seed_two_run_tree(root: Path) -> Workspace:

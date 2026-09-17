@@ -1,0 +1,69 @@
+"""Scope-bound asset view — ``{scope}.assets``.
+
+Returned by ``Workspace.assets`` / ``Project.assets`` /
+``Experiment.assets`` / ``Run.assets``.  Presents the scope as a
+read-only filtered view over the authoritative per-scope ``assets.json``
+manifests, scanned on demand (see :mod:`molab.workspace.assets.scan`).
+
+For importing ``DataAsset`` inputs, use ``{scope}.data_assets`` instead.
+"""
+
+from __future__ import annotations
+
+from os import PathLike
+
+from . import scan
+from .base import Asset, AssetScope
+
+# Alias avoids the static-checker confusion where the ``list`` method name
+# shadows the ``list`` builtin in return-type expressions.
+type AssetList = list[Asset]
+
+
+class AssetsView:
+    """Read-only, scope-filtered view over the workspace's asset manifests."""
+
+    def __init__(self, workspace_root: str | PathLike[str], scope: AssetScope) -> None:
+        self._root = workspace_root
+        self._scope = scope
+
+    def list(self) -> AssetList:
+        return scan.scan_assets(self._root, scope=self._scope)
+
+    # Alias that mirrors the old API surface.
+    def list_assets(self) -> AssetList:
+        return self.list()
+
+    def get(self, asset_id: str) -> Asset | None:
+        asset = scan.get_asset(self._root, asset_id)
+        if asset is None or asset.scope != self._scope:
+            return None
+        return asset
+
+    def query(
+        self,
+        *,
+        kind: str | type[Asset] | None = None,
+        producer_run: str | None = None,
+        producer_task: str | None = None,
+        tag: tuple[str, str] | None = None,
+        limit: int | None = None,
+        recursive: bool = False,
+    ) -> AssetList:
+        """Filtered asset query at this scope, scanned from the manifests.
+
+        When ``recursive`` is ``True``, matches assets in any sub-scope
+        underneath this view's scope — for instance an
+        ``experiment.assets.query(recursive=True)`` returns assets
+        produced by every run in the experiment.
+        """
+        return scan.scan_assets(
+            self._root,
+            kind=kind,
+            scope=self._scope,
+            producer_run=producer_run,
+            producer_task=producer_task,
+            tag=tag,
+            limit=limit,
+            recursive=recursive,
+        )

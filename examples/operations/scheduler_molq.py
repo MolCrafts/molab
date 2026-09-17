@@ -4,7 +4,7 @@ Matches ``docs/en/guide/molq.md``.
 
 This example is explanatory rather than executable on its own: actual
 submission requires a live scheduler. The code here builds the same
-``SubmitHandler`` object that ``molexp run --scheduler slurm`` would
+``SubmitHandler`` object that ``molab run --scheduler slurm`` would
 build, prints the worker command it would submit for a given run, and
 prints the normalised executor metadata that would be written back to
 ``run.json``.
@@ -15,7 +15,7 @@ Run directly::
 
 For a real cluster submission, use the CLI::
 
-    molexp run train.py --scheduler slurm \\
+    molab run train.py --scheduler slurm \\
         --partition gpu --gpus 1 --cpus 8 --time 4h
 """
 
@@ -25,18 +25,18 @@ import sys
 import tempfile
 from pathlib import Path
 
-import molexp as me
-from molexp.plugins.submit_molq.metadata import (
+import molab as me
+from molab.plugins.submit_molq.metadata import (
     build_executor_info,
     supported_schedulers,
 )
-from molexp.plugins.submit_molq.submit import SubmitHandler
+from molab.plugins.submit_molq.submit import SubmitHandler
 
 
 def main() -> None:
     print(f"installed molq backends: {supported_schedulers()}\n")
 
-    root = Path(tempfile.mkdtemp(prefix="molexp-molq-"))
+    root = Path(tempfile.mkdtemp(prefix="molab-molq-"))
     ws = me.Workspace(root, name="molq-demo")
     project = ws.add_project("demo")
     exp = project.add_experiment("train")
@@ -52,7 +52,7 @@ def main() -> None:
     )
 
     # The worker command the plugin would submit for this run.
-    cmd = [sys.executable, "-m", "molexp.cli", "execute", str(run.run_dir)]
+    cmd = [sys.executable, "-m", "molab.cli", "execute", str(run.run_dir)]
     print("the plugin would submit:")
     print(f"  argv = {cmd}")
 

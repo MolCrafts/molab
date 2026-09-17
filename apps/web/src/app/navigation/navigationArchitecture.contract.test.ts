@@ -24,6 +24,7 @@ describe("navigation contribution boundary", () => {
     expect(coreNav).toContain("explorer: WorkflowExplorer");
     expect(coreNav).toContain("landing: DashboardPage");
     expect(coreNav).toContain("landing: RunsPage");
+    expect(coreNav).toContain("landing: ComparePane");
     expect(coreNav).toContain("landing: SettingsPage");
     expect(knowledgeNav).toContain("explorer: KnowledgeExplorer");
   });
@@ -37,7 +38,7 @@ describe("navigation contribution boundary", () => {
     expect(leftPanel).toContain("<NavigationExplorerHost");
     expect(leftPanel).not.toContain("<LeftIconRail");
     expect(leftPanel).not.toContain("<LeftExplorer ");
-    // The panel splits its own column (explorer over the docked Comparison)
+    // The panel splits its own column (explorer over the docked Selection)
     // through domain-free chrome; it still builds neither rail nor explorer.
     expect(leftPanel).toContain("<ExplorerDock");
     expect(rail).toContain("LeftIconRail");

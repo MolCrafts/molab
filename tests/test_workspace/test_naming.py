@@ -1,4 +1,4 @@
-"""Directory names are for people (``molexp.workspace.naming``).
+"""Directory names are for people (``molab.workspace.naming``).
 
 The naming law: a path segment says *what* something is, an entity's ``id``
 says *which* one it is, and the two never swap roles. These tests pin the
@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from molexp.workspace.naming import (
+from molab.workspace.naming import (
     MAX_RUN_SLUG,
     disambiguate,
     entity_slug,
@@ -133,9 +133,9 @@ class TestSectionNamesComeFromTheDeclaration:
         }
 
     def test_no_writer_retypes_a_declared_directory_name(self):
-        from molexp.plugins.metrics import wal
-        from molexp.workspace import artifact_repository, execution_context, run_assets
-        from molexp.workspace.execution_dirs import execution_dir_names
+        from molab.plugins.metrics import wal
+        from molab.workspace import artifact_repository, execution_context, run_assets
+        from molab.workspace.execution_dirs import execution_dir_names
 
         names = execution_dir_names()
         for module in (artifact_repository, run_assets, execution_context, wal):

@@ -12,7 +12,7 @@ Artifacts are queried through an `ArtifactRepository`; DataAssets through a scop
 A task (or the driver-side `RunContext`) emits an artifact with `ctx.emit_artifact(data, *, name=...)`:
 
 ```python
-import molexp as me
+import molab as me
 
 ws = me.Workspace("./lab", name="lab")
 run = ws.add_project("demo").add_experiment("baseline").add_run({"lr": 1e-3})
@@ -36,7 +36,7 @@ with run.start() as ctx:
 Emitted artifacts are queried through an `ArtifactRepository`, which reads the content-addressed provenance index the execution wrote to:
 
 ```python
-from molexp.workspace.artifact_repository import ArtifactRepository
+from molab.workspace.artifact_repository import ArtifactRepository
 
 repo = ArtifactRepository(ws.root)
 run_artifacts = repo.list_for_execution(run.executions[-1].id)
@@ -59,7 +59,7 @@ project_dataset = ws.project("demo").data_assets.import_asset("lig-subset", "lig
 The import stores the payload under `<scope>/assets/<asset_id>/payload/` and registers a `DataAsset` that remembers the action used (`copy` / `move` / `symlink` / `hardlink`) and the source path. Look up imported data by name (`ws.data_assets.get("lig-library")`) or scan the workspace with the module-level manifest scanner:
 
 ```python
-from molexp.workspace.assets import scan
+from molab.workspace.assets import scan
 
 everything = scan.scan_assets(ws.root)
 ```

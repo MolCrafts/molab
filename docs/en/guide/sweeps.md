@@ -7,8 +7,8 @@ A sweep fans one workflow out over a grid of parameter cells — one content-add
 `Experiment.sweep(workflow, params)` expands `params` and materializes one run per cell. A plain `{axis: [values]}` dict is auto-upgraded to a `GridSpace` (Cartesian product); every axis must map to a *list* — a scalar axis fails fast rather than being guessed at. The workflow may be an uncompiled `WorkflowCompiler`; it is compiled automatically and bound to the experiment, so the CLI and server discover the same declaration.
 
 ```python
-import molexp as me
-from molexp.workflow import Workflow, WorkflowCompiler
+import molab as me
+from molab.workflow import Workflow, WorkflowCompiler
 
 wf = Workflow(name="scan")
 
@@ -33,7 +33,7 @@ Each run's id derives from its parameters, so seeding is idempotent: re-declarin
 
 ## Executing the Batch
 
-`RunSet.execute()` drives every **pending** run through the same tracked execution path as `molexp run` (run lifecycle, status machine, persisted per-task outputs). `parallel=` bounds how many runs execute concurrently:
+`RunSet.execute()` drives every **pending** run through the same tracked execution path as `molab run` (run lifecycle, status machine, persisted per-task outputs). `parallel=` bounds how many runs execute concurrently:
 
 ```python
 summary = runset.execute(parallel=2)
@@ -52,7 +52,7 @@ best = summary.max_by("score")
 print(best["lr"], best["batch"], best["run_id"])
 ```
 
-The records are plain dicts — molexp deliberately ships no analysis-stack bridge. Feed `to_records()` to whatever you already use.
+The records are plain dicts — molab deliberately ships no analysis-stack bridge. Feed `to_records()` to whatever you already use.
 
 ## Failures Are Recorded, Not Propagated
 
@@ -98,7 +98,7 @@ print(len(records))
 Any `ParamSpace` drops in where the grid dict goes. `UniformSpace` samples cells instead of enumerating the full product:
 
 ```python
-from molexp import UniformSpace
+from molab import UniformSpace
 
 space = UniformSpace({"lr": [0.1, 0.2, 0.3], "batch": [16, 32]}, n_samples=3, seed=42)
 sampled = exp.sweep(wf, space)
@@ -109,4 +109,4 @@ Identical sampled cells collapse onto the same content-addressed run, so the `Ru
 
 ## Scaling Past One Machine
 
-`RunSet.execute` runs in-process. The same seeded runs are equally drivable by the CLI — `molexp run train.py` with `--scheduler`/`--compute-target` submits them to a cluster, and `--resume`/`--rerun` retry the failed subset — because both fronts share one execution path per run. See [CLI and Profiles](../getting-started/cli-and-profiles.md) and [molq Integration](molq.md).
+`RunSet.execute` runs in-process. The same seeded runs are equally drivable by the CLI — `molab run train.py` with `--scheduler`/`--compute-target` submits them to a cluster, and `--resume`/`--rerun` retry the failed subset — because both fronts share one execution path per run. See [CLI and Profiles](../getting-started/cli-and-profiles.md) and [molq Integration](molq.md).

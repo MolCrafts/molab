@@ -33,7 +33,7 @@ export const MolplotRunTab = (props: Props): JSX.Element => {
   if (plotFiles.length === 0) return <RunMetricsTab {...props} discoveredFiles={scalarFiles} />;
   return (
     <Tabs defaultValue="scalars" className="flex h-full min-h-0 flex-col">
-      <div className="flex h-[35px] items-center border-b border-border bg-surface-subtle px-3">
+      <div className="flex h-toolbar-compact items-center border-b border-border bg-surface-subtle px-3">
         <TabsList variant="line" className="h-full gap-4 rounded-none bg-transparent p-0">
           <TabsTrigger value="scalars" className="h-full rounded-none px-0">
             Scalars

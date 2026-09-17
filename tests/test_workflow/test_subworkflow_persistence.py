@@ -16,14 +16,14 @@ import pathlib
 
 import pytest
 
-from molexp.workflow import (
+from molab.workflow import (
     SubWorkflow,
     Workflow,
     WorkflowCompiler,
     WorkflowRuntime,
 )
-from molexp.workflow._engine.persistence import read_node_outputs
-from molexp.workspace import Workspace
+from molab.workflow._engine.persistence import read_node_outputs
+from molab.workspace import Workspace
 
 INNER_TASKS = {"load", "normalize", "scale"}
 

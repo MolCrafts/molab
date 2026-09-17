@@ -117,7 +117,7 @@ export const DocumentControls = ({ relPath }: { relPath: string }): JSX.Element 
           </SelectContent>
         </Select>
         <span className="text-border">·</span>
-        <Tag className="h-3.5 w-3.5 text-muted-foreground" />
+        <Tag className="size-icon-sm text-muted-foreground" />
         {tags.length > 0 ? (
           tags.map((tag) => (
             <WorkbenchTag
@@ -155,7 +155,7 @@ export const DocumentControls = ({ relPath }: { relPath: string }): JSX.Element 
           onClick={() => addTag(tagInput)}
           disabled={saving || tagInput.trim().length === 0}
         >
-          <Plus className="size-3.5" />
+          <Plus className="size-icon-sm" />
         </WorkbenchIconAction>
       </div>
       {error ? <p className="text-micro text-destructive">{error}</p> : null}

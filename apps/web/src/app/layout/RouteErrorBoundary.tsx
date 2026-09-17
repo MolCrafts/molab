@@ -61,7 +61,7 @@ function classify(error: unknown): ErrorShape {
       Icon: WifiOff,
       title: "Can't reach the server",
       description:
-        "The molexp backend didn't respond. Check that the server is running and reachable, then try again.",
+        "The molab backend didn't respond. Check that the server is running and reachable, then try again.",
       detail: error instanceof Error ? `${error.name}: ${error.message}` : message,
       retryable: true,
     };
@@ -103,7 +103,7 @@ export function RouteErrorBoundary(): ReactNode {
               onClick={() => window.location.reload()}
               className="w-full sm:w-auto"
             >
-              <RefreshCw className="h-4 w-4" />
+              <RefreshCw className="size-icon" />
               Try again
             </WorkbenchAction>
           )}
@@ -115,7 +115,7 @@ export function RouteErrorBoundary(): ReactNode {
             }}
             className="w-full sm:w-auto"
           >
-            <ArrowLeft className="h-4 w-4" />
+            <ArrowLeft className="size-icon" />
             Back to workspace
           </WorkbenchAction>
         </div>

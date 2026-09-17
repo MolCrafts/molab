@@ -13,9 +13,9 @@ import pathlib
 
 import pytest
 
-from molexp.workflow import SubWorkflow, Workflow, WorkflowCompiler, WorkflowRuntime
-from molexp.workflow.context import TaskContext
-from molexp.workspace import Workspace
+from molab.workflow import SubWorkflow, Workflow, WorkflowCompiler, WorkflowRuntime
+from molab.workflow.context import TaskContext
+from molab.workspace import Workspace
 
 
 def _new_run(tmp_path: pathlib.Path, params: dict):

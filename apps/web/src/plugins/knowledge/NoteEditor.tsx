@@ -138,14 +138,14 @@ export const NoteEditor = ({
               onClick={enterWysiwyg}
               pressed={mode === "wysiwyg"}
             >
-              <Eye className="h-4 w-4" />
+              <Eye className="size-icon" />
             </WorkbenchToggleAction>
             <WorkbenchToggleAction
               label="Markdown source"
               onClick={enterSource}
               pressed={mode === "source"}
             >
-              <Code2 className="h-4 w-4" />
+              <Code2 className="size-icon" />
             </WorkbenchToggleAction>
           </div>
           {snapshot && (
@@ -164,7 +164,7 @@ export const NoteEditor = ({
             onClick={handleSave}
             disabled={!dirty || saving}
           >
-            <Save className="h-4 w-4" />
+            <Save className="size-icon" />
           </WorkbenchIconAction>
         </div>
       </div>

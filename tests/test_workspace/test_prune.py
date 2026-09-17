@@ -1,6 +1,6 @@
-"""Two-phase execution pruning — ``molexp.workspace.prune`` (v2).
+"""Two-phase execution pruning — ``molab.workspace.prune`` (v2).
 
-The ONE prune core the CLI (``molexp runs prune``) and the harness lifecycle
+The ONE prune core the CLI (``molab runs prune``) and the harness lifecycle
 capability share: ``plan_execution_prune`` turns a selection (explicit ids /
 statuses / everything) into a frozen, reviewable ``ExecutionPrunePlan``;
 ``apply_execution_prune`` removes exactly the retained workspace bytes the
@@ -24,17 +24,17 @@ from pathlib import Path
 
 import pytest
 
-from molexp.workspace import Workspace
-from molexp.workspace.domain import ExecutionMode, ExecutionStatus
-from molexp.workspace.execution_repository import ExecutionRepository
-from molexp.workspace.history import AgentRef
-from molexp.workspace.prune import (
+from molab.workspace import Workspace
+from molab.workspace.domain import ExecutionMode, ExecutionStatus
+from molab.workspace.execution_repository import ExecutionRepository
+from molab.workspace.history import AgentRef
+from molab.workspace.prune import (
     ExecutionPrunePlan,
     LivePruneRefusedError,
     apply_execution_prune,
     plan_execution_prune,
 )
-from molexp.workspace.run import Run
+from molab.workspace.run import Run
 
 _TEST_AGENT = AgentRef(id="test", type="person", name="test")
 

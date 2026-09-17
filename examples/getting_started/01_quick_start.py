@@ -13,8 +13,8 @@ import asyncio
 import tempfile
 from pathlib import Path
 
-import molexp as me
-from molexp.workflow import Workflow, WorkflowCompiler, WorkflowRuntime
+import molab as me
+from molab.workflow import Workflow, WorkflowCompiler, WorkflowRuntime
 
 wf = Workflow(name="train")
 
@@ -36,7 +36,7 @@ compiled = WorkflowCompiler().compile(wf)
 
 
 async def main() -> None:
-    workspace_root = Path(tempfile.mkdtemp(prefix="molexp-quickstart-"))
+    workspace_root = Path(tempfile.mkdtemp(prefix="molab-quickstart-"))
     print(f"workspace root: {workspace_root}")
 
     # Declare: one experiment running `compiled` over a one-cell sweep.
@@ -45,7 +45,7 @@ async def main() -> None:
         ws.add_project("demo").add_experiment("train").define(compiled, params={"lr": [1e-3]})
     )
 
-    # Drive the seeded run in-process (`molexp run` does this for you).
+    # Drive the seeded run in-process (`molab run` does this for you).
     run = experiment.list_runs()[0]
     with run.start() as ctx:
         execution_id = ctx.id

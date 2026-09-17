@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import pytest
 
-from molexp.workspace import (
+from molab.workspace import (
     ExperimentNotFoundError,
     ProjectNotFoundError,
     Workspace,
 )
-from molexp.workspace.run import Run
+from molab.workspace.run import Run
 
 
 class TestWorkspaceCreateLoad:
@@ -84,7 +84,7 @@ class TestProjectExperimentRunCrud:
 
 class TestKnowledgeCrud:
     def test_add_get_set_knowledge_on_project(self, tmp_path) -> None:
-        from molexp.workspace.knowledge import ProtocolNote
+        from molab.workspace.knowledge import ProtocolNote
 
         ws = Workspace.create(tmp_path / "lab", name="lab")
         p = ws.add_project("p")

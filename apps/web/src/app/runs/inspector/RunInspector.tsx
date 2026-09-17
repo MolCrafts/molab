@@ -56,7 +56,7 @@ export const RunInspector = ({
         <div className="flex flex-1 items-center justify-center px-4">
           <EmptyState
             density="compact"
-            icon={<Inbox className="h-5 w-5" />}
+            icon={<Inbox className="size-icon-lg" />}
             title="No run selected"
             description="Pick a row in Jobs to inspect its definition and executions."
           />
@@ -72,7 +72,7 @@ export const RunInspector = ({
         className,
       )}
     >
-      <header className="flex h-[35px] items-center justify-between gap-2 border-b border-border px-3">
+      <header className="flex h-toolbar-compact items-center justify-between gap-2 border-b border-border px-3">
         <h2 className="text-micro font-medium uppercase tracking-wide text-muted-foreground">
           Run details
         </h2>
@@ -83,7 +83,7 @@ export const RunInspector = ({
           onClick={onClear}
           className="size-6 shrink-0 text-muted-foreground"
         >
-          <X className="h-3.5 w-3.5" />
+          <X className="size-icon-sm" />
         </WorkbenchIconAction>
       </header>
 
@@ -176,7 +176,7 @@ export const RunInspector = ({
           onOpenTab={(view) => onOpenRun(run, view)}
         />
         <WorkbenchIconAction label="Open run detail" onClick={() => onOpenRun(run)}>
-          <ExternalLink className="h-3.5 w-3.5" />
+          <ExternalLink className="size-3.5" />
         </WorkbenchIconAction>
       </footer>
     </aside>

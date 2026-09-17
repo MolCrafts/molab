@@ -1,9 +1,9 @@
 """Tests for read-only Zotero import → Reference concepts on the workspace.
 
-Covers ``molexp.workspace.zotero_concepts`` (``ZoteroItem`` / ``read_zotero_items``)
+Covers ``molab.workspace.zotero_concepts`` (``ZoteroItem`` / ``read_zotero_items``)
 and its concept-producing consumer ``Bundle.import_zotero``. A minimal
 ``zotero.sqlite`` is built in-place (the real schema subset the reader touches),
-then imported via the OKF :class:`molexp.workspace.Bundle`. PDFs are *pointed at*
+then imported via the OKF :class:`molab.workspace.Bundle`. PDFs are *pointed at*
 via ``pdf_path`` — no bytes are copied into the bundle.
 """
 
@@ -14,8 +14,8 @@ import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
-from molexp.workspace import Bundle, ReferenceConcept, ZoteroItem
-from molexp.workspace.zotero_concepts import read_zotero_items
+from molab.workspace import Bundle, ReferenceConcept, ZoteroItem
+from molab.workspace.zotero_concepts import read_zotero_items
 
 FIXED = datetime(2026, 6, 21, 12, 0, 0, tzinfo=UTC)
 

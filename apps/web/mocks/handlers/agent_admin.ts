@@ -119,7 +119,7 @@ const _defaultTools: MockCustomTool[] = [
     parametersSchema: {},
     invoker: {
       kind: "python",
-      target: "molexp.plugins.agent_pydanticai._pydantic_ai.workspace_tools:submit_run",
+      target: "molab.plugins.agent_pydanticai._pydantic_ai.workspace_tools:submit_run",
     },
     scope: "user",
     shadowed: false,
@@ -197,11 +197,11 @@ const SECRET_REF_RE = /\$\{SECRET:([A-Za-z_]\w*)\}/g;
 
 const _mcpServers: McpStoredEntry[] = [
   {
-    name: "molexp-data",
+    name: "molab-data",
     scope: "workspace",
     spec: {
       type: "stdio",
-      command: "molexp",
+      command: "molab",
       args: ["mcp-serve", "${workspaceRoot}"],
       env: {},
     },
@@ -570,7 +570,7 @@ export const agentAdminHandlers = [
   http.get("/api/agent/mcp/servers", () =>
     HttpResponse.json({
       workspacePath: "/mock/workspace/.mcp.json",
-      userPath: "/mock/home/.molexp/mcp.json",
+      userPath: "/mock/home/.molab/mcp.json",
       servers: _listMcpServers(),
     }),
   ),
@@ -747,7 +747,7 @@ export const agentAdminHandlers = [
     const allKeys = Array.from(new Set([...setKeys, ...refs.keys()])).sort();
     return HttpResponse.json({
       scope,
-      path: scope === "workspace" ? "/mock/workspace/.mcp_secrets.json" : "/mock/home/.molexp/mcp_secrets.json",
+      path: scope === "workspace" ? "/mock/workspace/.mcp_secrets.json" : "/mock/home/.molab/mcp_secrets.json",
       secrets: allKeys.map((key) => ({
         key,
         isSet: setKeys.has(key),

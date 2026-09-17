@@ -1,30 +1,30 @@
 # 用 Agent Harness 做规划
 
-`molexp plan` 把自然语言实验草案变成：
+`molab plan` 把自然语言实验草案变成：
 
 1. **任务板**（有序步骤 + 验收标准），
 2. **人工审查**（审批收件箱 / TTY / `--yes`），
 3. **冻结计划** + 可读 **计划报告**，
 4. 默认再 **实现** 工作流（codegen + 仅编译 dry-run）。
 
-生产入口是 `molexp.harness.Plan`。内部细节见
+生产入口是 `molab.harness.Plan`。内部细节见
 [Plan Mode 架构](../architecture/plan-mode.md)。
 
 ## 前置条件
 
 ```bash
-pip install "molexp[agent]"
-molexp config set agent.model anthropic:claude-sonnet-4-5
+pip install "molab[agent]"
+molab config set agent.model anthropic:claude-sonnet-4-5
 ```
 
-模型来自 `~/.molexp/config.json` 的 `agent.model`（CLI 与服务端同一加载器）。
+模型来自 `~/.molab/config.json` 的 `agent.model`（CLI 与服务端同一加载器）。
 可用 `--model` 覆盖。
 
 ## 规划（并实现）
 
 ```bash
-molexp plan "筛选三种溶剂比例并报告电导率"
-molexp plan --file draft.md
+molab plan "筛选三种溶剂比例并报告电导率"
+molab plan --file draft.md
 ```
 
 | 阶段 | 你会看到 |
@@ -37,7 +37,7 @@ molexp plan --file draft.md
 store-first 恢复。默认项目/实验为 `plans` / `plan`。
 
 ```bash
-molexp plan --file draft.md --yes   # 自动过审查门禁，仍会跑实现阶段
+molab plan --file draft.md --yes   # 自动过审查门禁，仍会跑实现阶段
 ```
 
 ## UI

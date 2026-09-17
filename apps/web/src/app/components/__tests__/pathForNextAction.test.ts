@@ -21,7 +21,7 @@ describe("pathForNextAction", () => {
       target: "run1",
       rationale: "failed",
       advisory: true,
-      requiresProposal: false,
+      op: null,
     };
     expect(pathForNextAction(action, snapshot)).toBe("/projects/p1/experiments/e1/runs/run1");
   });
@@ -32,7 +32,7 @@ describe("pathForNextAction", () => {
       target: "run1",
       rationale: "retry",
       advisory: true,
-      requiresProposal: true,
+      op: "run_lifecycle",
     };
     const path = pathForNextAction(action, snapshot);
     expect(path).toContain("/runs/run1");
@@ -44,7 +44,7 @@ describe("pathForNextAction", () => {
       target: "notes/q1",
       rationale: "q",
       advisory: true,
-      requiresProposal: false,
+      op: null,
     };
     expect(pathForNextAction(action, snapshot)).toContain("/knowledge/");
   });

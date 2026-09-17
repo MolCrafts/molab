@@ -11,8 +11,8 @@ from pathlib import Path
 
 import pytest
 
-from molexp.workflow import Workflow, WorkflowCompiler, WorkflowRuntime
-from molexp.workspace import Workspace
+from molab.workflow import Workflow, WorkflowCompiler, WorkflowRuntime
+from molab.workspace import Workspace
 
 
 @pytest.mark.asyncio

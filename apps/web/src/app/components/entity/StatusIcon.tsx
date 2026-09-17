@@ -91,7 +91,7 @@ export const StatusIcon = ({ status, className, label }: StatusIconProps): JSX.E
       aria-label={text}
       role="img"
       className={cn(
-        "h-3.5 w-3.5 flex-none",
+        "size-icon-sm flex-none",
         TONE_CLASS[meta.tone],
         meta.spin && "mol-motion-progress-spin",
         className,

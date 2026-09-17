@@ -124,7 +124,7 @@ export function AddTargetForm({
             id="add-target-scratch"
             value={form.scratchRoot}
             onChange={(e) => setForm({ ...form, scratchRoot: e.target.value })}
-            placeholder="/scratch/me/molexp"
+            placeholder="/scratch/me/molab"
             required
           />
         </div>

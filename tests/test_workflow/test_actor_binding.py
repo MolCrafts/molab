@@ -11,7 +11,7 @@ like a task's, and the async-generator drain (last yield → output) is unchange
 
 from __future__ import annotations
 
-from molexp.workflow import TaskContext, Workflow, WorkflowCompiler, WorkflowRuntime
+from molab.workflow import TaskContext, Workflow, WorkflowCompiler, WorkflowRuntime
 
 
 class TestActorBinding:

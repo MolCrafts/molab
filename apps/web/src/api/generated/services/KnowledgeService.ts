@@ -31,7 +31,7 @@ export class KnowledgeService {
      * @param projectId
      * @param experimentId
      * @param runId
-     * @param molexpSession
+     * @param molabSession
      * @returns EntityBacklinksResponse Successful Response
      * @throws ApiError
      */
@@ -40,13 +40,13 @@ export class KnowledgeService {
         projectId: string,
         experimentId: string,
         runId?: (string | null),
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<EntityBacklinksResponse> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/knowledge/entity-backlinks',
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             query: {
                 'kind': kind,
@@ -64,12 +64,12 @@ export class KnowledgeService {
      * Search the workspace bundle — wraps the ONE ``Bundle.search`` verb.
      *
      * Pure exposure (vision-loop-08): all matching semantics (body reads, caps,
-     * snippets, truncation) live in :meth:`molexp.workspace.Bundle.search`; this
+     * snippets, truncation) live in :meth:`molab.workspace.Bundle.search`; this
      * route only projects its ``SearchResult`` onto the wire.
      * @param q Case-insensitive needle (path/title/tags/body).
      * @param type Exact Concept type filter.
      * @param tag Only concepts carrying this tag.
-     * @param molexpSession
+     * @param molabSession
      * @returns KnowledgeSearchResponse Successful Response
      * @throws ApiError
      */
@@ -77,13 +77,13 @@ export class KnowledgeService {
         q: string,
         type?: (string | null),
         tag?: (string | null),
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<KnowledgeSearchResponse> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/knowledge/search',
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             query: {
                 'q': q,
@@ -100,23 +100,23 @@ export class KnowledgeService {
      * List every Note + ReferenceConcept in the active workspace's bundle.
      *
      * Optional ``tag`` / ``status`` query params AND-narrow the note list (both
-     * read from the 05 :class:`~molexp.workspace.note_meta.NoteMeta` fields).
+     * read from the 05 :class:`~molab.workspace.note_meta.NoteMeta` fields).
      * @param tag Only notes carrying this tag.
      * @param status Only notes with this lifecycle status.
-     * @param molexpSession
+     * @param molabSession
      * @returns KnowledgeListResponse Successful Response
      * @throws ApiError
      */
     public static listKnowledge(
         tag?: (string | null),
         status?: (string | null),
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<KnowledgeListResponse> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/knowledge',
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             query: {
                 'tag': tag,
@@ -131,19 +131,19 @@ export class KnowledgeService {
      * Get Note
      * Return one note's full body (its ``index.md``) + its outgoing links + cards.
      * @param path The note Concept's bundle-relative path (its identity).
-     * @param molexpSession
+     * @param molabSession
      * @returns NoteDetailResponse Successful Response
      * @throws ApiError
      */
     public static getNote(
         path: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<NoteDetailResponse> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/knowledge/note',
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             query: {
                 'path': path,
@@ -157,19 +157,19 @@ export class KnowledgeService {
      * Create Doc
      * Create a :class:`Note` document — delegates to ``Bundle.create_note``.
      * @param requestBody
-     * @param molexpSession
+     * @param molabSession
      * @returns NoteSummary Successful Response
      * @throws ApiError
      */
     public static createDoc(
         requestBody: DocCreateRequest,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<NoteSummary> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/knowledge/doc',
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -183,20 +183,20 @@ export class KnowledgeService {
      * Rewrite a note's body (its ``index.md``) — delegates to ``Note.set_body``.
      * @param path The note Concept's bundle-relative path (its identity).
      * @param requestBody
-     * @param molexpSession
+     * @param molabSession
      * @returns NoteDetailResponse Successful Response
      * @throws ApiError
      */
     public static editDoc(
         path: string,
         requestBody: DocBodyUpdate,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<NoteDetailResponse> {
         return __request(OpenAPI, {
             method: 'PUT',
             url: '/api/knowledge/doc',
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             query: {
                 'path': path,
@@ -213,20 +213,20 @@ export class KnowledgeService {
      * Rename and/or reparent a note — delegates to ``Bundle.rename_note`` / ``move_note``.
      * @param path The note Concept's bundle-relative path (its identity).
      * @param requestBody
-     * @param molexpSession
+     * @param molabSession
      * @returns NoteSummary Successful Response
      * @throws ApiError
      */
     public static moveDoc(
         path: string,
         requestBody: DocMoveRequest,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<NoteSummary> {
         return __request(OpenAPI, {
             method: 'PATCH',
             url: '/api/knowledge/doc',
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             query: {
                 'path': path,
@@ -242,19 +242,19 @@ export class KnowledgeService {
      * Delete Doc
      * Delete a note (its directory subtree) — delegates to ``Bundle.delete_note``.
      * @param path The note Concept's bundle-relative path (its identity).
-     * @param molexpSession
+     * @param molabSession
      * @returns MessageResponse Successful Response
      * @throws ApiError
      */
     public static deleteDoc(
         path: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<MessageResponse> {
         return __request(OpenAPI, {
             method: 'DELETE',
             url: '/api/knowledge/doc',
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             query: {
                 'path': path,
@@ -274,20 +274,20 @@ export class KnowledgeService {
      * uses, so the edge-writing logic is never re-built at the HTTP boundary.
      * @param path The source note Concept's bundle-relative path.
      * @param requestBody
-     * @param molexpSession
+     * @param molabSession
      * @returns EmbedResponse Successful Response
      * @throws ApiError
      */
     public static embedDoc(
         path: string,
         requestBody: EmbedRequest,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<EmbedResponse> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/knowledge/doc/embed',
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             query: {
                 'path': path,
@@ -308,20 +308,20 @@ export class KnowledgeService {
      * here: the same ``Note`` verbs the CLI uses own it (the Python==UI invariant).
      * @param path The note Concept's bundle-relative path (its identity).
      * @param requestBody
-     * @param molexpSession
+     * @param molabSession
      * @returns NoteSummary Successful Response
      * @throws ApiError
      */
     public static updateDocMeta(
         path: string,
         requestBody: DocMetaUpdate,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<NoteSummary> {
         return __request(OpenAPI, {
             method: 'PATCH',
             url: '/api/knowledge/doc/meta',
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             query: {
                 'path': path,
@@ -337,19 +337,19 @@ export class KnowledgeService {
      * Get Backlinks
      * Return every Concept linking at *path* — delegates to ``Bundle.backlinks``.
      * @param path The target Concept's bundle-relative path (its identity).
-     * @param molexpSession
+     * @param molabSession
      * @returns BacklinksResponse Successful Response
      * @throws ApiError
      */
     public static getBacklinks(
         path: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<BacklinksResponse> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/knowledge/backlinks',
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             query: {
                 'path': path,
@@ -363,19 +363,19 @@ export class KnowledgeService {
      * Export Doc
      * Export a note as portable Markdown — delegates to ``Bundle.export_markdown``.
      * @param path The note Concept's bundle-relative path (its identity).
-     * @param molexpSession
+     * @param molabSession
      * @returns any Successful Response
      * @throws ApiError
      */
     public static exportDoc(
         path: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<any> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/knowledge/doc/export',
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             query: {
                 'path': path,

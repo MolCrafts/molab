@@ -188,7 +188,7 @@ export const buildRendererRegistryKey = (key: RendererKey): string => {
 /**
  * One sample of one series, in the shape a chart consumes.
  *
- * Deliberately the same shape molexp's own WAL already uses, so a reader for
+ * Deliberately the same shape molab's own WAL already uses, so a reader for
  * a foreign format and a reader for the WAL produce interchangeable output
  * and neither is the privileged one.
  */

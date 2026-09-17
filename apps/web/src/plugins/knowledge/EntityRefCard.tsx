@@ -86,7 +86,7 @@ export const EntityRefCard = ({
       )}
     >
       <Icon
-        className={cn("h-4 w-4 flex-none", KIND_ICON_CLASS[card.kind] ?? "text-muted-foreground")}
+        className={cn("size-icon flex-none", KIND_ICON_CLASS[card.kind] ?? "text-muted-foreground")}
       />
       <span className="min-w-0 flex-1">
         <span className="block truncate text-body-lg font-medium text-foreground">
@@ -98,7 +98,7 @@ export const EntityRefCard = ({
       </span>
       {card.status && <StatusBadge status={card.status} size="sm" />}
       {selection && (
-        <ArrowUpRight className="h-3.5 w-3.5 flex-none text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+        <ArrowUpRight className="size-icon-sm flex-none text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
       )}
     </WorkbenchAction>
   );

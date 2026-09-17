@@ -1,18 +1,18 @@
-import type { MolexpPluginModule, PluginAPI } from "@molcrafts/molexp-plugin";
+import type { MolabPluginModule, PluginAPI } from "@molcrafts/molab-plugin";
 import { Atom } from "lucide-react";
-import { lazy } from "react";
+import { lazyWithPrefetch } from "@/lib/lazy-with-prefetch";
 import { isMolvisOpenable } from "./openable";
 
-const MolvisDatasetPreview = lazy(() =>
+const MolvisDatasetPreview = lazyWithPrefetch(() =>
   import("./MolvisDatasetPreview").then((module) => ({
     default: module.MolvisDatasetPreview,
   })),
 );
-const MolvisTab = lazy(() =>
+const MolvisTab = lazyWithPrefetch(() =>
   import("./MolvisTab").then((module) => ({ default: module.MolvisTab })),
 );
 
-const molvisPlugin: MolexpPluginModule = {
+const molvisPlugin: MolabPluginModule = {
   id: "molvis",
   name: "MolVis",
   version: "1.0.0",

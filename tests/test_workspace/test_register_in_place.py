@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from molexp.workspace import Workspace
+from molab.workspace import Workspace
 
 
 class TestDataAssetLibraryRegisterInPlace:
@@ -29,7 +29,7 @@ class TestDataAssetLibraryRegisterInPlace:
         # Resolves back to the in-place file — nothing was copied.
         assert asset.absolute_path(tmp_path) == dataset
         # Recorded authoritatively as assets/<id>/asset.json.
-        from molexp.workspace.assets import scan
+        from molab.workspace.assets import scan
 
         assert scan.get_asset(ws.root, asset.asset_id) is not None
         # The sidecar is a real sibling of the resolved dataset path.

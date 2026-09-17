@@ -125,7 +125,7 @@ export const AddWorkspaceDialog = ({
           Enter a local path, Host:/path, or @registry-name
         </DialogDescription>
 
-        <div className="border-b border-border/80 bg-muted/40 px-3 py-1.5">
+        <div className="border-b border-border/80 bg-muted/40 px-3 py-row-pad">
           <p className="truncate font-mono text-micro text-muted-foreground">
             Add Folder to Workspace
             <span className="text-foreground/50"> · path or Host:/path</span>
@@ -150,23 +150,23 @@ export const AddWorkspaceDialog = ({
             autoComplete="off"
             spellCheck={false}
             placeholder="/path/to/workspace  or  Host:/abs/path"
-            className="h-11 rounded-none border-0 bg-transparent px-3 font-mono text-body shadow-none focus-visible:ring-0"
+            className="h-control-comfortable rounded-none border-0 bg-transparent px-3 font-mono text-body shadow-none focus-visible:ring-0"
             onChange={(e) => {
               setValue(e.target.value);
               if (hint) setHint(null);
             }}
           />
           {busy ? (
-            <Loader2 className="mol-motion-progress-spin mr-3 h-4 w-4 flex-none text-muted-foreground" />
+            <Loader2 className="mol-motion-progress-spin mr-3 size-icon flex-none text-muted-foreground" />
           ) : null}
         </form>
 
         {hint ? (
-          <p className="border-t border-border/60 px-3 py-1.5 text-micro text-destructive">
+          <p className="border-t border-border/60 px-3 py-row-pad text-micro text-destructive">
             {hint}
           </p>
         ) : (
-          <p className="border-t border-border/40 px-3 py-1.5 text-micro text-muted-foreground">
+          <p className="border-t border-border/40 px-3 py-row-pad text-micro text-muted-foreground">
             Enter ↵ · Esc cancel · remote: Host:/path or @name
           </p>
         )}

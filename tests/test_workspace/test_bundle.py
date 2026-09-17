@@ -1,4 +1,4 @@
-"""Tests for :class:`molexp.workspace.Bundle` — the OKF bundle façade.
+"""Tests for :class:`molab.workspace.Bundle` — the OKF bundle façade.
 
 ``Bundle`` wraps a bundle root and exposes the whole Concept-directory tree as a
 single management entry point: ``walk`` (depth-first Concept enumeration),
@@ -18,7 +18,7 @@ from pathlib import Path
 
 import pytest
 
-from molexp.workspace import Bundle, ConceptNotFoundError, Folder
+from molab.workspace import Bundle, ConceptNotFoundError, Folder
 
 # A concept ``type`` deliberately NOT in the concept-type registry, so it
 # reconstructs as the base workspace ``Folder`` (vs. a knowledge subclass).
@@ -231,7 +231,7 @@ class TestLink:
 
 class TestTypedReconstruction:
     def test_walk_reconstructs_registered_folder_subclasses(self, tmp_path: Path) -> None:
-        from molexp.workspace import Experiment, Project, Run, Workspace
+        from molab.workspace import Experiment, Project, Run, Workspace
 
         ws = Workspace(root=tmp_path / "lab")
         ws.materialize()
@@ -267,7 +267,7 @@ class TestNestedMounts:
         import os
         from typing import cast
 
-        from molexp.workspace import Note, Workspace
+        from molab.workspace import Note, Workspace
 
         ws = Workspace(root=tmp_path / "lab")
         ws.materialize()
@@ -293,8 +293,8 @@ class TestNestedMounts:
     def test_knowledge_item_under_experiment_walks_once_undoubled(self, tmp_path: Path) -> None:
         import os
 
-        from molexp.workspace import Workspace
-        from molexp.workspace.knowledge import Finding, SourceRef
+        from molab.workspace import Workspace
+        from molab.workspace.knowledge import Finding, SourceRef
 
         ws = Workspace(root=tmp_path / "lab")
         ws.materialize()

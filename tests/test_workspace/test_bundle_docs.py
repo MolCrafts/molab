@@ -1,6 +1,6 @@
 """Tests for the ``Bundle`` docs/notes CRUD surface (knowledge-docs-01).
 
-Covers the workspace-owned document verbs on :class:`molexp.workspace.Bundle`
+Covers the workspace-owned document verbs on :class:`molab.workspace.Bundle`
 (``create_note`` / ``rename_note`` / ``move_note`` / ``delete_note`` /
 ``backlinks`` / ``export_markdown``) plus the :class:`Backlink` reverse-edge
 wrapper. These are the shared CRUD path CLI and server both call (the
@@ -15,14 +15,14 @@ from typing import IO
 
 import pytest
 
-from molexp.workspace import (
+from molab.workspace import (
     Bundle,
     ConceptNotFoundError,
     Folder,
     Note,
 )
-from molexp.workspace.fs import PathArg
-from molexp.workspace.fs_local import LocalFileSystem
+from molab.workspace.fs import PathArg
+from molab.workspace.fs_local import LocalFileSystem
 
 
 @pytest.fixture

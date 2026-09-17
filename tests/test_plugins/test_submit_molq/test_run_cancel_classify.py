@@ -1,4 +1,4 @@
-"""Unit tests for ``molexp.plugins.submit_molq.cancel.classify``.
+"""Unit tests for ``molab.plugins.submit_molq.cancel.classify``.
 
 ``classify`` is pure inspection: it maps a run's active Execution to a
 :class:`CancelPlan` without executing anything. One test per branch of the
@@ -11,11 +11,11 @@ import platform
 
 import pytest
 
-from molexp.plugins.submit_molq.cancel import classify
-from molexp.workspace import Workspace
-from molexp.workspace.domain import ACTIVE_EXECUTION_STATUSES, ExecutionMode, ExecutionStatus
-from molexp.workspace.execution_repository import ExecutionRepository
-from molexp.workspace.scientific_repository import SYSTEM_AGENT
+from molab.plugins.submit_molq.cancel import classify
+from molab.workspace import Workspace
+from molab.workspace.domain import ACTIVE_EXECUTION_STATUSES, ExecutionMode, ExecutionStatus
+from molab.workspace.execution_repository import ExecutionRepository
+from molab.workspace.scientific_repository import SYSTEM_AGENT
 
 
 def _repo(run) -> ExecutionRepository:

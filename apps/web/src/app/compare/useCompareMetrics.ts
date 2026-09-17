@@ -1,12 +1,10 @@
 /**
- * Loading metrics for the comparison set — on request, never on mount.
+ * Loading metrics for the comparison set.
  *
  * Reading a set of runs costs two round-trips each (list the attempt's files,
  * then fetch whichever ones a reader claims) and the parsing happens in the
- * browser. Doing that automatically every time the set changes would make
- * gathering runs expensive and would decide, on the user's behalf, that they
- * wanted all of it aggregated. So the set is cheap and this is explicit: the
- * page asks, the scan runs, and only then is there anything to choose between.
+ * browser. Gathering in the dock stays cheap; the Compare page is the ask, and
+ * it scans when it has a set. Cached (run, attempt) reads are not repeated.
  *
  * Results are cached per (run, attempt) for the life of the session, so
  * revisiting the page — or changing which metric is plotted — re-reads nothing.

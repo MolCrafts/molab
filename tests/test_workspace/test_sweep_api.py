@@ -3,7 +3,7 @@
 ``sweep`` reuses the exact seeding path of ``Experiment.run`` (idempotent
 ``_seed_missing_runs`` over ``definition_hash``) and the same cross-layer
 ``WorkflowExecutor`` seam for the workflow association; the only new behaviour
-is the returned :class:`~molexp.workspace.runset.RunSet` and the
+is the returned :class:`~molab.workspace.runset.RunSet` and the
 dict→GridSpace upgrade.
 """
 
@@ -13,9 +13,9 @@ from pathlib import Path
 
 import pytest
 
-import molexp as me
-from molexp.workflow import Workflow, WorkflowCompiler, default_binding_registry
-from molexp.workspace.runset import RunSet
+import molab as me
+from molab.workflow import Workflow, WorkflowCompiler, default_binding_registry
+from molab.workspace.runset import RunSet
 
 
 @pytest.fixture

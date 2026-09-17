@@ -137,8 +137,8 @@ const ExecutionRow = ({ execution, selected, onSelect }: ExecutionRowProps): JSX
   <li
     className={
       selected
-        ? "flex items-center gap-2 border-l-2 border-accent bg-accent-muted px-2 py-1.5 text-label"
-        : "flex items-center gap-2 border-l-2 border-transparent px-2 py-1.5 text-label"
+        ? "flex items-center gap-2 border-l-2 border-accent bg-accent-muted px-2 py-row-pad text-label"
+        : "flex items-center gap-2 border-l-2 border-transparent px-2 py-row-pad text-label"
     }
   >
     <div className="min-w-0 flex-1">
@@ -158,7 +158,7 @@ const ExecutionRow = ({ execution, selected, onSelect }: ExecutionRowProps): JSX
       aria-pressed={selected}
       className={selected ? "bg-interactive" : undefined}
     >
-      <Eye className="size-3.5" />
+      <Eye className="size-icon-sm" />
     </WorkbenchIconAction>
   </li>
 );

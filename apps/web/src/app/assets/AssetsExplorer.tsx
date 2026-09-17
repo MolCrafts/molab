@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query";
 import {
   Archive,
   Blocks,
@@ -12,6 +13,8 @@ import type { ReactNode } from "react";
 import { EMPTY_COPY, StatusBadge } from "@/app/components/entity";
 import type { NavigationExplorerProps } from "@/app/navigation/sections";
 import { type TreeNode, TreeView } from "@/app/panels/TreeView";
+import { prefetchRenderer } from "@/app/renderers/lazyRenderers";
+import { assetDetailQueryOptions, assetVersionsQueryOptions } from "@/app/state/entityQueries";
 import type { AssetSummary } from "@/app/types";
 import { LeftExplorer } from "@/components/layout/ExplorerShell";
 import { WorkbenchIconAction } from "@/components/workbench";
@@ -41,7 +44,10 @@ export const buildAssetExplorerNodes = ({
   snapshot,
   searchQuery,
   onSelect,
-}: Pick<NavigationExplorerProps, "snapshot" | "searchQuery" | "onSelect">): TreeNode[] => {
+  onPrefetchAsset,
+}: Pick<NavigationExplorerProps, "snapshot" | "searchQuery" | "onSelect"> & {
+  onPrefetchAsset?: (asset: AssetSummary) => void;
+}): TreeNode[] => {
   // Catalog and scoped loads can overlap; one asset must still produce one row.
   const byId = new Map<string, AssetSummary>();
   for (const asset of filterAssets(snapshot.assets, searchQuery)) {
@@ -61,6 +67,7 @@ export const buildAssetExplorerNodes = ({
     icon: Archive,
     iconClassName: "text-muted-foreground",
     right: <StatusBadge status={asset.status} size="sm" />,
+    onPrefetch: () => onPrefetchAsset?.(asset),
     onSelect: () => onSelect({ objectType: "asset", objectId: asset.id }),
     actions: [
       {
@@ -165,10 +172,19 @@ export const AssetsExplorer = (
     "snapshot" | "selection" | "searchQuery" | "onSelect" | "onRefresh"
   >,
 ): JSX.Element => {
-  const nodes = buildAssetExplorerNodes(props);
+  const queryClient = useQueryClient();
+  const nodes = buildAssetExplorerNodes({
+    ...props,
+    onPrefetchAsset: (asset) => {
+      prefetchRenderer("asset");
+      if (!asset.projectId) return;
+      void queryClient.prefetchQuery(assetDetailQueryOptions(asset.projectId, asset.id));
+      void queryClient.prefetchQuery(assetVersionsQueryOptions(asset.projectId, asset.id));
+    },
+  });
   const actions = (
     <WorkbenchIconAction label="Refresh assets" kind="ghost" onClick={props.onRefresh}>
-      <RefreshCw className="h-4 w-4" />
+      <RefreshCw className="size-4" />
     </WorkbenchIconAction>
   );
 

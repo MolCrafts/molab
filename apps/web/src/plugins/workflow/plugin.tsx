@@ -1,4 +1,4 @@
-import type { MolexpPluginModule, PluginAPI } from "@molcrafts/molexp-plugin";
+import type { MolabPluginModule, PluginAPI } from "@molcrafts/molab-plugin";
 import { lazy } from "react";
 import { buildRendererRegistryKey } from "@/lib/contribution-types";
 
@@ -12,7 +12,7 @@ const WorkflowViewer = lazy(() =>
   import("./WorkflowViewer").then((module) => ({ default: module.WorkflowViewer })),
 );
 
-const workflowPlugin: MolexpPluginModule = {
+const workflowPlugin: MolabPluginModule = {
   id: "workflow",
   name: "Workflow",
   version: "1.0.0",

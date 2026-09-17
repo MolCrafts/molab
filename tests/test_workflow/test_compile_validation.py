@@ -2,14 +2,14 @@
 
 Each test locks one distinct ``WorkflowCompiler().compile(WorkflowCompiler)`` rejection rule
 (a distinct error type + trigger); structural deadlock lives in
-``test_deadlock_guard``. Spec: .claude/specs/03-molexp-workflow-cycles.md.
+``test_deadlock_guard``. Spec: .claude/specs/03-molab-workflow-cycles.md.
 """
 
 from __future__ import annotations
 
 import pytest
 
-from molexp.workflow import (
+from molab.workflow import (
     EdgeShapeError,
     EntryAmbiguousError,
     UnknownTaskError,

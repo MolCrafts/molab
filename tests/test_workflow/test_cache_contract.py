@@ -1,6 +1,6 @@
 """Cache-identity contract: code_hash + config_hash + inputs_hash.
 
-Architectural lock for ``molexp.workflow.cache`` — the cache key is
+Architectural lock for ``molab.workflow.cache`` — the cache key is
 ``f(snapshot.key, inputs_hash)`` and nothing else. Six pins:
 
 1. ``inputs`` participate in ``cache_key`` — differing inputs ⇒ different key.
@@ -22,10 +22,10 @@ from pathlib import Path
 
 import pytest
 
-from molexp.workflow import Task, TaskContext, Workflow, WorkflowCompiler, WorkflowRuntime
-from molexp.workflow.cache import Caching
-from molexp.workflow.snapshot import TaskSnapshot
-from molexp.workspace import Workspace
+from molab.workflow import Task, TaskContext, Workflow, WorkflowCompiler, WorkflowRuntime
+from molab.workflow.cache import Caching
+from molab.workflow.snapshot import TaskSnapshot
+from molab.workspace import Workspace
 
 
 class _Body(Task):

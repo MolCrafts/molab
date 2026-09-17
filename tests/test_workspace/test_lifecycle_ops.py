@@ -1,6 +1,6 @@
-"""``molexp.workspace.lifecycle_ops.cancel_run`` — the canonical intervene verb.
+"""``molab.workspace.lifecycle_ops.cancel_run`` — the canonical intervene verb.
 
-vision-loop-07 §2: the workspace-layer core the ``molexp.lifecycle.run_cancel``
+vision-loop-07 §2: the workspace-layer core the ``molab.lifecycle.run_cancel``
 capability (and any future CLI/server rewiring) shares. Its own contract, tested
 once here:
 
@@ -12,7 +12,7 @@ once here:
 * a genuine cancel seals every active Execution ``cancelled``.
 
 Schema v2: a Run is immutable intent, so "cancel" acts on the physical
-:class:`~molexp.workspace.domain.ExecutionState` objects.
+:class:`~molab.workspace.domain.ExecutionState` objects.
 """
 
 from __future__ import annotations
@@ -23,12 +23,12 @@ from pathlib import Path
 
 import pytest
 
-from molexp.workspace import Workspace
-from molexp.workspace.domain import ExecutionMode, ExecutionStatus
-from molexp.workspace.execution_repository import ExecutionRepository
-from molexp.workspace.history import AgentRef
-from molexp.workspace.lifecycle_ops import cancel_run
-from molexp.workspace.run import Run
+from molab.workspace import Workspace
+from molab.workspace.domain import ExecutionMode, ExecutionStatus
+from molab.workspace.execution_repository import ExecutionRepository
+from molab.workspace.history import AgentRef
+from molab.workspace.lifecycle_ops import cancel_run
+from molab.workspace.run import Run
 
 _TEST_AGENT = AgentRef(id="test", type="person", name="test")
 

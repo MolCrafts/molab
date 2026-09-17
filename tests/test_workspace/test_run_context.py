@@ -15,8 +15,8 @@ from pathlib import Path
 
 import pytest
 
-from molexp.workspace import Workspace
-from molexp.workspace.domain import ExecutionStatus
+from molab.workspace import Workspace
+from molab.workspace.domain import ExecutionStatus
 
 
 class TestRunContextLifecycle:
@@ -207,7 +207,7 @@ class TestExecutionDirectories:
             assert d.parent.name == "out"
 
     def test_an_undeclared_directory_is_refused(self, run):
-        from molexp.workspace.execution_dirs import UnknownExecutionDirError
+        from molab.workspace.execution_dirs import UnknownExecutionDirError
 
         # Silently creating it would make a directory nothing validates,
         # nothing versions, and no reader looks in.
@@ -236,7 +236,7 @@ class TestExecutionDirectories:
             assert not hasattr(ctx, "register_asset")
 
     def test_platform_json_writes_go_through_filestore(self, run, monkeypatch):
-        from molexp.workspace.file_store import FileStore
+        from molab.workspace.file_store import FileStore
 
         seen: list[str] = []
         orig = FileStore.put

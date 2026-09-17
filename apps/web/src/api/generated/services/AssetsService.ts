@@ -28,7 +28,7 @@ export class AssetsService {
      * @param assetId
      * @param format
      * @param limit
-     * @param molexpSession
+     * @param molabSession
      * @returns any Successful Response
      * @throws ApiError
      */
@@ -36,7 +36,7 @@ export class AssetsService {
         assetId: string,
         format: 'frames' | 'png' = 'frames',
         limit: number = 200,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<any> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -45,7 +45,7 @@ export class AssetsService {
                 'asset_id': assetId,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             query: {
                 'format': format,
@@ -79,7 +79,7 @@ export class AssetsService {
      * @param ws
      * @param format
      * @param limit
-     * @param molexpSession
+     * @param molabSession
      * @returns any Successful Response
      * @throws ApiError
      */
@@ -88,7 +88,7 @@ export class AssetsService {
         ws: string,
         format: 'frames' | 'png' = 'frames',
         limit: number = 200,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<any> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -98,7 +98,7 @@ export class AssetsService {
                 'ws': ws,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             query: {
                 'format': format,

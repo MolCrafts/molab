@@ -12,18 +12,18 @@ export class MolqService {
     /**
      * List Targets
      * List configured molq targets (one per profile in ``~/.molq/config.yaml``).
-     * @param molexpSession
+     * @param molabSession
      * @returns MolqTargetListResponse Successful Response
      * @throws ApiError
      */
     public static listTargets(
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<MolqTargetListResponse> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/plugins/molq/targets',
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -36,7 +36,7 @@ export class MolqService {
      * @param target Profile name to filter by.
      * @param includeTerminal
      * @param limit
-     * @param molexpSession
+     * @param molabSession
      * @returns MolqJobsResponse Successful Response
      * @throws ApiError
      */
@@ -44,13 +44,13 @@ export class MolqService {
         target?: (string | null),
         includeTerminal: boolean = true,
         limit: number = 200,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<MolqJobsResponse> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/plugins/molq/jobs',
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             query: {
                 'target': target,
@@ -67,14 +67,14 @@ export class MolqService {
      * Return a single job's detail including transitions and dependency state.
      * @param jobId
      * @param target Profile name owning the job.
-     * @param molexpSession
+     * @param molabSession
      * @returns MolqJobDetailResponse Successful Response
      * @throws ApiError
      */
     public static getJob(
         jobId: string,
         target: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<MolqJobDetailResponse> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -83,7 +83,7 @@ export class MolqService {
                 'job_id': jobId,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             query: {
                 'target': target,
@@ -102,7 +102,7 @@ export class MolqService {
      * @param jobId
      * @param target Profile name owning the job.
      * @param stream
-     * @param molexpSession
+     * @param molabSession
      * @returns any Successful Response
      * @throws ApiError
      */
@@ -110,7 +110,7 @@ export class MolqService {
         jobId: string,
         target: string,
         stream: string = 'stdout',
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<any> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -119,7 +119,7 @@ export class MolqService {
                 'job_id': jobId,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             query: {
                 'target': target,

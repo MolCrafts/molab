@@ -6,7 +6,7 @@ import textwrap
 from datetime import datetime
 from pathlib import Path
 
-from molexp.workspace.source_snapshot import snapshot_sources
+from molab.workspace.source_snapshot import snapshot_sources
 
 
 def _write(path: Path, body: str) -> None:

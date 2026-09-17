@@ -21,8 +21,8 @@ from typing import Any
 
 import pytest
 
-from molexp.workspace import Bundle
-from molexp.workspace.knowledge import FailureAnalysis, Knowledge, Observation
+from molab.workspace import Bundle
+from molab.workspace.knowledge import FailureAnalysis, Knowledge, Observation
 
 _NARRATIVE = "Mobility rises monotonically with temperature."
 

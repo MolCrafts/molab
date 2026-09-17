@@ -80,9 +80,9 @@ export const legendEntries = (
 export type ChartLegendPlacement = "right" | "overlay";
 
 const PLACEMENT_CLASS: Record<ChartLegendPlacement, string> = {
-  right: "w-48 shrink-0 border-l border-border px-3 py-2",
+  right: "min-h-0 w-48 shrink-0 border-l border-border px-3 py-3",
   overlay:
-    "absolute top-2 right-2 z-10 max-h-[calc(100%-1rem)] max-w-[45%] rounded-control border border-border bg-background/90 px-2 py-1.5",
+    "absolute top-2 right-2 z-10 max-h-[calc(100%-1rem)] max-w-[45%] rounded-control border border-border bg-background/90 px-2 py-row-pad",
 };
 
 export interface ChartLegendProps {
@@ -115,7 +115,7 @@ export const ChartLegend = ({
       )}
     >
       {entries.map((entry) => (
-        <li key={entry.label} className="flex min-w-0 items-center gap-1.5">
+        <li key={entry.label} className="flex min-w-0 items-center gap-2">
           {/* A stroke, not a dot: the mark it stands for is a line. */}
           <span
             aria-hidden

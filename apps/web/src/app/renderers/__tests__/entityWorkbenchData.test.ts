@@ -197,7 +197,7 @@ describe("buildExperimentWorkbenchData", () => {
     expect(data.fixedAxes[0]?.values).toEqual(["300"]);
   });
 
-  it("summarizes workflow graph and groups runs by the primary parameter axis", () => {
+  it("summarizes workflow graph and breaks the status mix down per varying axis", () => {
     const data = buildExperimentWorkbenchData(snapshot.experiments[0], snapshot.runs, workflow);
     expect(data.workflowSummary).toMatchObject({
       exists: true,
@@ -205,6 +205,34 @@ describe("buildExperimentWorkbenchData", () => {
       linkCount: 1,
       parallelGroupCount: 1,
     });
-    expect(data.runGroups.map((group) => group.label)).toEqual(["mode: block", "mode: random"]);
+    const mode = data.axisBreakdowns.find((axis) => axis.key === "mode");
+    expect(mode?.buckets.map((bucket) => bucket.value)).toEqual(["block", "random"]);
+  });
+
+  it("keeps a declared sweep value that has produced no runs yet", () => {
+    const data = buildExperimentWorkbenchData(
+      experiment("partial", { mode: ["block", "random", "spiral"] }),
+      [run("run-a", "succeeded", { mode: "block" })],
+      workflow,
+    );
+    const buckets = data.axisBreakdowns[0]?.buckets ?? [];
+    expect(buckets.map((bucket) => bucket.value)).toEqual(["block", "random", "spiral"]);
+    expect(buckets.map((bucket) => bucket.counts.total)).toEqual([1, 0, 0]);
+  });
+
+  it("leaves fixed axes out of the sweep breakdown", () => {
+    const data = buildExperimentWorkbenchData(
+      experiment("mixed", { mode: ["block", "random"], temperature: 300 }),
+      [
+        run("run-a", "succeeded", { mode: "block", temperature: 300 }),
+        run("run-b", "failed", { mode: "random", temperature: 300 }),
+      ],
+      workflow,
+    );
+    expect(data.axisBreakdowns.map((axis) => axis.key)).toEqual(["mode"]);
+    expect(data.axisBreakdowns[0]?.buckets).toEqual([
+      { value: "block", counts: expect.objectContaining({ total: 1, succeeded: 1 }) },
+      { value: "random", counts: expect.objectContaining({ total: 1, failed: 1 }) },
+    ]);
   });
 });

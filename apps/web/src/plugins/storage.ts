@@ -1,7 +1,7 @@
-import type { PluginStorage } from "@molcrafts/molexp-plugin";
+import type { PluginStorage } from "@molcrafts/molab-plugin";
 
 export function pluginStorageNamespace(pluginId: string): PluginStorage {
-  const prefix = `molexp.plugin.${pluginId}.`;
+  const prefix = `molab.plugin.${pluginId}.`;
   return {
     getItem(key: string): string | null {
       if (typeof localStorage === "undefined") return null;

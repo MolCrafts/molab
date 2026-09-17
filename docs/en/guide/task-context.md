@@ -7,7 +7,7 @@
 A task body declares the runtime values it consumes as **named parameters**. The engine binds each parameter *by name*; a task no longer reads its inputs or its configuration off `ctx` at all. The leading `ctx` parameter is optional: include it only when the body needs the per-task scratch directory (below).
 
 ```python
-from molexp.workflow import Task, TaskContext
+from molab.workflow import Task, TaskContext
 
 class Record(Task):
     async def execute(self, ctx: TaskContext, value: int, scale: int = 1) -> int:
@@ -46,15 +46,15 @@ class Train(Task):
         return {"lr": lr, "batch": batch}
 ```
 
-Running `execute(compiled, config={"lr": 5e-4})` fills `lr`; `batch` falls back to its default. That design keeps profile semantics in user code: MolExp resolves and preserves the selected profile, but it does not attach special meaning to arbitrary keys.
+Running `execute(compiled, config={"lr": 5e-4})` fills `lr`; `batch` falls back to its default. That design keeps profile semantics in user code: Molab resolves and preserves the selected profile, but it does not attach special meaning to arbitrary keys.
 
 ## Working Under a Run
 
 When execution happens under a persistent run, the workspace helpers live on the `RunContext` the **driver** opened via `run.start()` — outside the task bodies:
 
 ```python
-import molexp as me
-from molexp.workflow import Workflow, WorkflowCompiler, WorkflowRuntime
+import molab as me
+from molab.workflow import Workflow, WorkflowCompiler, WorkflowRuntime
 
 compiled = WorkflowCompiler().compile(Workflow(name="train").add(Train()))
 
@@ -81,7 +81,7 @@ Inside the task, the run shows up only as data: a root task's sweep `params` bin
 Streaming `Actor` bodies receive the **same** `TaskContext` as batch tasks — there is no separate context type — and bind their non-`ctx` parameters by name from the same merged map (`{config} | {upstream outputs | run params}`). The only streaming-specific behaviour is that the engine drives the async generator to exhaustion and records the **last yielded value** as the task's output:
 
 ```python
-from molexp.workflow import Actor
+from molab.workflow import Actor
 
 
 class Monitor(Actor):

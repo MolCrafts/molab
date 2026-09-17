@@ -1,11 +1,11 @@
 /**
- * @molexp workflow components — a self-contained, shadcn-style module for
+ * @molab workflow components — a self-contained, shadcn-style module for
  * rendering the canonical task-graph IR.
  *
  * Every export here is decoupled from the app shell (no store / router / API):
  * it depends only on React, `@flowgram.ai/free-layout-editor`, the shared
  * shadcn-ui primitives under `@/components/ui`, and props. That makes this the
- * single reuse boundary shared by the in-app workflow viewers and the molexp
+ * single reuse boundary shared by the in-app workflow viewers and the molab
  * VSCode extension webview.
  *
  * - {@link WorkflowPreview} — the composable graph + node-details surface.

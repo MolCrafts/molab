@@ -1,4 +1,4 @@
-import type { MolexpPluginModule, PluginAPI } from "@molcrafts/molexp-plugin";
+import type { MolabPluginModule, PluginAPI } from "@molcrafts/molab-plugin";
 import { registerMetricReaderContribution } from "@/lib/contribution-runtime";
 import type {
   MetricReaderContribution,
@@ -16,7 +16,7 @@ import { thermoRecords, walRecords } from "./formats";
  * solver formats and reads them **in the browser via WASM**, so a chart comes
  * straight from `log.lammps` with no server-side conversion and no
  * intermediate file. Any other package contributes a format the same way, and
- * molplot treats it identically — molexp's own WAL included.
+ * molplot treats it identically — molab's own WAL included.
  *
  * The LAMMPS reader is registered only when the installed WASM build actually
  * exports it: offering a format that then fails on click is worse than not
@@ -52,14 +52,14 @@ const readLammpsLog = async (
 };
 
 /**
- * molexp's own WAL: plain JSONL, no WASM needed, and no privilege for being
- * molexp's — contributed like any other format.
+ * molab's own WAL: plain JSONL, no WASM needed, and no privilege for being
+ * molab's — contributed like any other format.
  */
 export const MLP_JSONL_READER: MetricReaderContribution = {
   id: "molrs:mlp-jsonl",
   pluginId: "molrs",
   format: "mlp_jsonl",
-  label: "MolExp metrics",
+  label: "Molab metrics",
   patterns: ["**/*.mlp.jsonl"],
   tailable: true,
   claims: (text) => text.trimStart().startsWith("{"),
@@ -81,7 +81,7 @@ export const LAMMPS_LOG_READER: MetricReaderContribution = {
   read: readLammpsLog,
 };
 
-const molrsPlugin: MolexpPluginModule = {
+const molrsPlugin: MolabPluginModule = {
   id: "molrs",
   name: "MolRS formats",
   version: "1.0.0",

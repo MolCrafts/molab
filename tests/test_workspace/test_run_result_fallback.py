@@ -2,7 +2,7 @@
 
 Driver-side results (``ctx.set_result`` → ``executions/<id>/results.json``)
 always win. When the key is absent there — the normal situation for
-CLI-executed runs (``molexp run`` never calls ``set_result``) —
+CLI-executed runs (``molab run`` never calls ``set_result``) —
 ``Run.get_result(key, execution_id=…)`` falls back to the completed node
 outputs persisted in that execution's ``workflow.json``.
 
@@ -22,11 +22,11 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from molexp.workspace.domain import ExecutionMode, ExecutionStatus
-from molexp.workspace.run import Run
+from molab.workspace.domain import ExecutionMode, ExecutionStatus
+from molab.workspace.run import Run
 
 if TYPE_CHECKING:
-    from molexp._typing import JSONValue
+    from molab._typing import JSONValue
 
 # ── helpers ─────────────────────────────────────────────────────────────────
 
@@ -164,7 +164,7 @@ class TestLossyOutputs:
             def handle(self, record) -> None:
                 collected.append(getattr(record, "message", str(record)))
 
-        logger = get_logger("molexp.workspace.run")
+        logger = get_logger("molab.workspace.run")
         handler = _CollectingHandler()
         logger.add_handler(handler)
         try:
@@ -183,7 +183,7 @@ class TestWorkflowWriterContract:
 
     @staticmethod
     def _seed_pending_task(run: Run, execution_id: str, name: str) -> Path:
-        from molexp.workflow._engine.persistence import write_initial_workflow_json
+        from molab.workflow._engine.persistence import write_initial_workflow_json
 
         run_dir = Path(str(run.run_dir))
         write_initial_workflow_json(run_dir, execution_id)
@@ -194,7 +194,7 @@ class TestWorkflowWriterContract:
         return run_dir
 
     def test_fallback_reads_output_written_by_mark_task_status(self, run):
-        from molexp.workflow._engine.persistence import mark_task_status
+        from molab.workflow._engine.persistence import mark_task_status
 
         with run.start() as ctx:
             execution_id = ctx.id
@@ -205,7 +205,7 @@ class TestWorkflowWriterContract:
         assert run.get_result("train", execution_id=execution_id) == {"loss": 0.5}
 
     def test_lossy_flag_written_by_mark_task_status_is_respected(self, run):
-        from molexp.workflow._engine.persistence import mark_task_status
+        from molab.workflow._engine.persistence import mark_task_status
 
         with run.start() as ctx:
             execution_id = ctx.id

@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query";
 import {
   Blocks,
   CloudOff,
@@ -18,6 +19,14 @@ import { useMemo, useState } from "react";
 import { experimentsApi, projectsApi, workspaceApi, workspacesApi } from "@/api";
 import { ApiError } from "@/api/generated";
 import { usePermissions } from "@/app/auth";
+import {
+  itemFromExperiment,
+  itemFromProject,
+  itemFromRunSummary,
+  useCompareSet,
+} from "@/app/compare";
+import { isSubtreeLoaded, siblingRunItems } from "@/app/compare/expandToRuns";
+import { itemKey, parseItemKey } from "@/app/compare/types";
 import { AddWorkspaceDialog } from "@/app/components/AddWorkspaceDialog";
 import { CreateExperimentDialog } from "@/app/components/CreateExperimentDialog";
 import { CreateProjectDialog } from "@/app/components/CreateProjectDialog";
@@ -25,7 +34,10 @@ import { CreateRunDialog } from "@/app/components/CreateRunDialog";
 import { EMPTY_COPY } from "@/app/components/entity";
 import type { NavigationExplorerProps } from "@/app/navigation/sections";
 import { TreeMenuItems, type TreeNode, type TreeNodeAction, TreeView } from "@/app/panels/TreeView";
+import { prefetchRenderer } from "@/app/renderers/lazyRenderers";
+import { defaultExecutionId } from "@/app/renderers/useRunViewer";
 import { buildRunListActions } from "@/app/runs/runListActions";
+import { executionOutputsQueryOptions, projectAssetsQueryOptions } from "@/app/state/entityQueries";
 import type {
   ExperimentSummary,
   ObjectView,
@@ -90,6 +102,47 @@ const copyText = async (text: string): Promise<void> => {
   }
 };
 
+const itemFromSelectionKey = (
+  snapshot: WorkspaceSnapshot,
+  key: string,
+  fallbackKey: string,
+  fallbackLabel: string,
+) => {
+  const ref = parseItemKey(key);
+  if (!ref) return null;
+  const workspace =
+    snapshot.workspaces.find((ws) => ws.key === ref.workspaceKey) ??
+    snapshot.workspaces.find((ws) => ws.active) ??
+    snapshot.workspaces[0];
+  const workspaceLabel = workspace?.label ?? fallbackLabel;
+  const workspaceKey = ref.workspaceKey || fallbackKey;
+  if (ref.kind === "project") {
+    const project = snapshot.projects.find((row) => row.id === ref.projectId);
+    if (!project) return null;
+    return itemFromProject(project, { key: workspaceKey, label: workspaceLabel });
+  }
+  if (ref.kind === "experiment") {
+    const experiment = snapshot.experiments.find((row) => row.id === ref.experimentId);
+    const project = snapshot.projects.find((row) => row.id === ref.projectId);
+    if (!experiment || !project) return null;
+    return itemFromExperiment(
+      experiment,
+      { key: workspaceKey, label: workspaceLabel },
+      project.name,
+    );
+  }
+  const run = snapshot.runs.find((row) => row.id === ref.runId);
+  const experiment = snapshot.experiments.find((row) => row.id === ref.experimentId);
+  const project = snapshot.projects.find((row) => row.id === ref.projectId);
+  if (!run || !experiment || !project) return null;
+  return itemFromRunSummary(run, {
+    workspaceKey,
+    workspaceLabel,
+    projectName: project.name,
+    experimentName: experiment.name,
+  });
+};
+
 export interface ProjectTreeActions {
   onSelect: (selection: Selection) => void;
   onCreateExperiment: (projectId: string) => void;
@@ -109,10 +162,17 @@ export interface ProjectTreeActions {
   onExpandProject?: (projectId: string) => void;
   /** Lazy-load runs when an experiment row expands. */
   onExpandExperiment?: (projectId: string, experimentId: string) => void;
+  /** Hover/focus: warm the viewer chunk and any extra queries. */
+  onIntentProject?: (projectId: string) => void;
+  onIntentExperiment?: (projectId: string, experimentId: string) => void;
+  onIntentRun?: (run: RunSummary) => void;
   isProjectExpanded?: (projectId: string) => boolean;
   isExperimentExpanded?: (projectId: string, experimentId: string) => boolean;
   /** Role denial tip for mutating tree actions (null = allowed). */
   writeDeniedReason?: string | null;
+  /** Served-workspace key stamped onto bag identities. */
+  workspaceKey: string;
+  workspaceLabel: string;
 }
 
 const gateTreeWrite = (
@@ -186,8 +246,10 @@ export const buildProjectNodes = (
     const expCount = projectExpanded
       ? project.experiments.length
       : (project.experimentCount ?? project.experiments.length);
+    const workspaceKey = project.workspaceKey ?? actions.workspaceKey;
     return {
       id: project.id,
+      selectionKey: itemKey({ kind: "project", workspaceKey, projectId: project.id }),
       label: project.name,
       labelClassName: statusTextClass(project.status),
       icon: Blocks,
@@ -197,6 +259,10 @@ export const buildProjectNodes = (
           {projectExpanded || project.experimentCount != null ? countLabel(expCount, "exp") : "…"}
         </CompactCount>
       ),
+      onPrefetch: () => {
+        actions.onExpandProject?.(project.id);
+        actions.onIntentProject?.(project.id);
+      },
       onSelect: () => {
         actions.onExpandProject?.(project.id);
         actions.onSelect({ objectType: "project", objectId: project.id });
@@ -259,11 +325,22 @@ export const buildProjectNodes = (
         const hasRunCount = dataLoaded || experiment.runCount != null;
         return {
           id: experiment.id,
+          selectionKey: itemKey({
+            kind: "experiment",
+            workspaceKey,
+            projectId: project.id,
+            experimentId: experiment.id,
+          }),
           label: experiment.name,
           labelClassName: statusTextClass(experiment.status),
           icon: FlaskConical,
           iconClassName: "text-muted-foreground",
           right: <CompactCount>{hasRunCount ? countLabel(runCount, "run") : "…"}</CompactCount>,
+          onPrefetch: () => {
+            actions.onExpandProject?.(project.id);
+            actions.onExpandExperiment?.(project.id, experiment.id);
+            actions.onIntentExperiment?.(project.id, experiment.id);
+          },
           onSelect: () => {
             actions.onExpandProject?.(project.id);
             actions.onExpandExperiment?.(project.id, experiment.id);
@@ -329,10 +406,18 @@ export const buildProjectNodes = (
           emptyChildLabel: dataLoaded ? EMPTY_COPY.runs.title : "Loading…",
           children: experiment.runs.map((run) => ({
             id: run.id,
+            selectionKey: itemKey({
+              kind: "run",
+              workspaceKey,
+              projectId: project.id,
+              experimentId: experiment.id,
+              runId: run.id,
+            }),
             label: run.name || run.id,
             labelClassName: statusTextClass(run.status),
             icon: PlayCircle,
             iconClassName: "text-muted-foreground",
+            onPrefetch: () => actions.onIntentRun?.(run),
             onSelect: () => actions.onOpenRunView(run),
             actions: buildRunActions(run, actions),
           })),
@@ -494,6 +579,8 @@ const buildWorkspaceGroupedNodes = (
     if (ws.active) {
       const scopedActions: ProjectTreeActions = {
         ...actions,
+        workspaceKey: ws.key,
+        workspaceLabel: ws.label,
         pathContext: {
           root: ws.path ?? actions.pathContext.root,
           workspace: { label: ws.label, isRemote: ws.isRemote, path: ws.path },
@@ -574,7 +661,12 @@ export const ProjectsExplorer = ({
   const { confirm, dialog: confirmDialog } = useConfirm();
   const { alert, dialog: alertDialog } = useAlert();
   const { writeDeniedReason } = usePermissions();
+  const queryClient = useQueryClient();
+  const compare = useCompareSet();
   const activeId = selection?.objectId;
+  const fallbackWorkspace = snapshot.workspaces.find((ws) => ws.active) ?? snapshot.workspaces[0];
+  const fallbackWorkspaceKey = fallbackWorkspace?.key ?? "local";
+  const fallbackWorkspaceLabel = fallbackWorkspace?.label ?? fallbackWorkspaceKey;
 
   const pathContext: PathDisplayContext = useMemo(() => {
     const active =
@@ -658,9 +750,26 @@ export const ProjectsExplorer = ({
     onAddWorkspace: () => setAddWorkspaceOpen(true),
     onExpandProject,
     onExpandExperiment,
+    onIntentProject: (projectId) => {
+      prefetchRenderer("project");
+      void queryClient.prefetchQuery(projectAssetsQueryOptions(projectId));
+    },
+    onIntentExperiment: () => {
+      prefetchRenderer("experiment");
+    },
+    onIntentRun: (run) => {
+      prefetchRenderer("run");
+      const executionId = defaultExecutionId(run.executionHistory);
+      if (!executionId) return;
+      void queryClient.prefetchQuery(
+        executionOutputsQueryOptions(run.projectId, run.experimentId, run.id, executionId),
+      );
+    },
     isProjectExpanded,
     isExperimentExpanded,
     writeDeniedReason,
+    workspaceKey: fallbackWorkspaceKey,
+    workspaceLabel: fallbackWorkspaceLabel,
   };
 
   const activateWorkspace = (workspace: ServedWorkspaceSummary): void => {
@@ -740,10 +849,10 @@ export const ProjectsExplorer = ({
         onClick={() => setAddWorkspaceOpen(true)}
         title="Add Folder to Workspace"
       >
-        <FolderPlus className="h-4 w-4" />
+        <FolderPlus className="size-icon" />
       </WorkbenchIconAction>
       <WorkbenchIconAction label="Refresh projects" kind="ghost" onClick={onRefresh}>
-        <RefreshCw className="h-4 w-4" />
+        <RefreshCw className="size-4" />
       </WorkbenchIconAction>
       <CreateProjectDialog
         onProjectCreated={onRefresh}
@@ -774,6 +883,32 @@ export const ProjectsExplorer = ({
           activeId={activeId}
           expandPath={expandPath}
           dataEpoch={dataEpoch}
+          selectedIds={compare.keys}
+          onModifierSelect={(ids, modifiers) => {
+            const items = ids
+              .map((key) =>
+                itemFromSelectionKey(snapshot, key, fallbackWorkspaceKey, fallbackWorkspaceLabel),
+              )
+              .filter((item): item is NonNullable<typeof item> => item !== null);
+            if (items.length === 0) return;
+            const ctx = {
+              isSubtreeLoaded: (ref: Parameters<typeof isSubtreeLoaded>[1]) =>
+                isSubtreeLoaded(snapshot, ref),
+              siblingRuns: siblingRunItems.bind(null, snapshot),
+            };
+            if (modifiers.meta && ids.length === 1) {
+              const key = ids[0];
+              if (key && compare.has(key)) {
+                compare.remove(key);
+                return;
+              }
+            }
+            try {
+              compare.addMany(items, ctx);
+            } catch {
+              // Subtree not loaded: leave the bag unchanged (mergeIntoBag throws).
+            }
+          }}
           emptyTitle={searchQuery ? EMPTY_COPY.projectsFilter.title : EMPTY_COPY.entries.title}
           emptyDescription={
             searchQuery ? undefined : "Right-click empty space to add a folder to the workspace."

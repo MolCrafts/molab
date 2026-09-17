@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import asyncio
 
-from molexp.workflow import Task, TaskContext, Workflow, WorkflowCompiler, WorkflowRuntime
+from molab.workflow import Task, TaskContext, Workflow, WorkflowCompiler, WorkflowRuntime
 
 
 # ── 1. Decorator style ─────────────────────────────────────────────────────
@@ -59,9 +59,9 @@ async def oop_demo() -> None:
     print(f"oop:        {result.outputs}")
 
 
-# ── 3. Protocol form — third-party object, no molexp import needed ─────────
+# ── 3. Protocol form — third-party object, no molab import needed ─────────
 class ExternalDoubler:
-    """Matches :class:`~molexp.workflow.protocols.Runnable` structurally."""
+    """Matches :class:`~molab.workflow.protocols.Runnable` structurally."""
 
     async def execute(self, ctx, load: list[int]) -> int:
         return sum(load) * 2

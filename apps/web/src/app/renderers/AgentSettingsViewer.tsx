@@ -185,7 +185,7 @@ export const AgentSettingsViewer = ({ onLaunchSession }: AgentSettingsViewerProp
       value: def.value,
       label: (
         <span className="flex items-center">
-          <Icon className="mr-2 h-4 w-4" /> {def.label}
+          <Icon className="mr-2 size-icon" /> {def.label}
         </span>
       ),
       content: renderTabContent(def.contentKey, onLaunchSession),
@@ -202,7 +202,7 @@ const SettingsScroll = ({
   wide?: boolean;
 }) => (
   <ScrollArea className="flex-1">
-    <div className={`mx-auto w-full ${wide ? "max-w-5xl" : "max-w-4xl"} px-4 py-5 sm:px-6 sm:py-6`}>
+    <div className={`mx-auto w-full ${wide ? "max-w-5xl" : "max-w-4xl"} px-4 py-4 sm:px-6 sm:py-6`}>
       {children}
     </div>
   </ScrollArea>
@@ -315,7 +315,7 @@ const ProviderTab = (): JSX.Element => {
 
   return (
     <ScrollArea className="h-full">
-      <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-4 py-5 sm:px-6 sm:py-6">
+      <div className="mx-auto flex w-full max-w-5xl flex-col gap-8 px-4 py-4 sm:px-6 sm:py-6">
         {error && <p className="text-label text-destructive">{error}</p>}
 
         {/* 1. Vendors first */}
@@ -483,17 +483,17 @@ const AgentModelTable = ({
     <section className="space-y-3">
       <h2 className="text-base font-semibold">Agents</h2>
 
-      <div className="space-y-0.5 bg-surface/60 px-3 py-2">
-        <div className="flex items-center gap-2 py-1.5">
-          <Bot className="size-3.5 text-muted-foreground" aria-hidden />
+      <div className="space-y-1 bg-surface/60 px-3 py-2">
+        <div className="flex items-center gap-2 py-row-pad">
+          <Bot className="size-icon-sm text-muted-foreground" aria-hidden />
           <h3 className="text-body-lg font-medium">Chat</h3>
         </div>
         {chatRows.map(renderRow)}
       </div>
 
-      <div className="space-y-0.5 bg-info-soft/20 px-3 py-2">
-        <div className="flex items-center gap-2 py-1.5">
-          <BrainCircuit className="size-3.5 text-info" aria-hidden />
+      <div className="space-y-1 bg-info-soft/20 px-3 py-2">
+        <div className="flex items-center gap-2 py-row-pad">
+          <BrainCircuit className="size-icon-sm text-info" aria-hidden />
           <h3 className="text-body-lg font-medium">Plan</h3>
         </div>
         {planRows.map(renderRow)}
@@ -502,7 +502,7 @@ const AgentModelTable = ({
       {error && <p className="text-label text-destructive">{error}</p>}
       {saved && (
         <p className="flex items-center gap-1 text-label text-success-foreground">
-          <CheckCircle2 className="size-3.5" /> Saved.
+          <CheckCircle2 className="size-icon-sm" /> Saved.
         </p>
       )}
       {testResult && <ProviderTestResult result={testResult} />}
@@ -512,7 +512,7 @@ const AgentModelTable = ({
           disabled={busy || !complete}
           onClick={() => void submit("test")}
         >
-          <Zap className="size-4" />
+          <Zap className="size-icon" />
         </WorkbenchIconAction>
         <WorkbenchAction
           kind="primary"
@@ -582,7 +582,7 @@ const CredentialCard = ({
 
   return (
     <section className="bg-surface/60">
-      <header className="px-3 py-2.5">
+      <header className="px-3 py-2">
         <WorkbenchAction
           kind="ghost"
           size="content"
@@ -591,18 +591,20 @@ const CredentialCard = ({
           aria-expanded={expanded}
           onClick={() => setExpanded((value) => !value)}
         >
-          <Cpu className="size-4 text-muted-foreground" />
+          <Cpu className="size-icon text-muted-foreground" />
           <div className="min-w-0 flex-1">
             <h3 className="text-body-lg font-medium text-foreground">
               {providerLabel(registry, provider)}
             </h3>
-            <p className="mt-0.5 truncate text-label text-muted-foreground">
+            <p className="mt-1 truncate text-label text-muted-foreground">
               {initial.apiKeySet ? `Key ${initial.apiKeyPreview}` : "No stored key"}
               {usedByTiers.length > 0 ? ` · ${usedByTiers.join(" · ")}` : ""}
             </p>
           </div>
           {usedByTiers.length > 0 && <WorkbenchTag className="text-micro">In use</WorkbenchTag>}
-          <ChevronRight className={`size-4 transition-transform ${expanded ? "rotate-90" : ""}`} />
+          <ChevronRight
+            className={`size-icon transition-transform ${expanded ? "rotate-90" : ""}`}
+          />
         </WorkbenchAction>
       </header>
       {expanded && (
@@ -643,14 +645,14 @@ const CredentialCard = ({
                 type="button"
                 onClick={() => setRevealKey((value) => !value)}
               >
-                {revealKey ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
+                {revealKey ? <EyeOff className="size-icon" /> : <Eye className="size-icon" />}
               </WorkbenchIconAction>
             </div>
           </div>
           {error && <p className="text-label text-destructive">{error}</p>}
           {saved && (
             <p className="flex items-center gap-1 text-label text-success-foreground">
-              <CheckCircle2 className="size-3.5" /> Credentials saved.
+              <CheckCircle2 className="size-icon-sm" /> Credentials saved.
             </p>
           )}
           <ConfirmDialog
@@ -669,7 +671,7 @@ const CredentialCard = ({
               disabled={busy || !initial.apiKeySet}
               onClick={() => setConfirmClearKey(true)}
             >
-              <Trash2 className="size-4" />
+              <Trash2 className="size-icon" />
             </WorkbenchIconAction>
             <WorkbenchAction
               kind="primary"
@@ -698,7 +700,7 @@ const ProviderTestResult = ({ result }: { result: ApiAgentProviderTestResult }):
       }
     >
       <div className="flex items-center gap-2 font-medium">
-        {ok ? <CheckCircle2 className="h-4 w-4" /> : <AlertCircle className="h-4 w-4" />}
+        {ok ? <CheckCircle2 className="size-icon" /> : <AlertCircle className="size-icon" />}
         {ok ? "Connection OK" : "Connection failed"}
         <span className="ml-auto font-mono text-micro opacity-80">
           {result.provider}:{result.model} · {result.latencyMs} ms
@@ -821,7 +823,7 @@ const InstructionsTab = (): JSX.Element => {
   return (
     <div className="flex flex-col gap-3">
       <p className="text-body-lg text-muted-foreground">
-        Workspace-default system prompt addendum. Appended to the molexp built-in preamble for every
+        Workspace-default system prompt addendum. Appended to the molab built-in preamble for every
         new session. Skills can layer additional instructions on top, and individual sessions may
         override the whole stack from the chat input.
       </p>
@@ -848,7 +850,7 @@ const InstructionsTab = (): JSX.Element => {
           {error && <p className="text-label text-destructive">{error}</p>}
           {savedAt && !error && (
             <p className="flex items-center gap-1 text-label text-success-foreground">
-              <CheckCircle2 className="h-3.5 w-3.5 text-success" />
+              <CheckCircle2 className="size-icon-sm text-success" />
               Saved. New sessions will use these instructions.
             </p>
           )}
@@ -856,7 +858,7 @@ const InstructionsTab = (): JSX.Element => {
             open={confirmClear}
             onOpenChange={setConfirmClear}
             title="Clear the workspace instructions?"
-            description="New sessions will start from the molexp built-in preamble only."
+            description="New sessions will start from the molab built-in preamble only."
             confirmLabel="Clear instructions"
             destructive
             onConfirm={() => void handleClear()}
@@ -868,7 +870,7 @@ const InstructionsTab = (): JSX.Element => {
               disabled={saving || (config?.instructions ?? "") === ""}
               onClick={() => setConfirmClear(true)}
             >
-              <Trash2 className="size-4" />
+              <Trash2 className="size-icon" />
             </WorkbenchIconAction>
             <WorkbenchAction
               kind="primary"
@@ -955,7 +957,7 @@ const SkillLaunchDialog = ({
             disabled={launching}
             onClick={() => void handleLaunch()}
           >
-            <PlayCircle className="mr-1 h-4 w-4" />
+            <PlayCircle className="mr-1 size-icon" />
             {launching ? "Launching…" : "Launch session"}
           </WorkbenchAction>
         </DialogFooter>
@@ -1071,7 +1073,7 @@ const SkillsTab = ({
               setShowForm(true);
             }}
           >
-            <Plus className="h-4 w-4" />
+            <Plus className="size-icon" />
           </WorkbenchIconAction>
         }
       />
@@ -1118,7 +1120,7 @@ const SkillsTab = ({
         {!loading && skills.length === 0 && (
           <EmptyState
             density="compact"
-            icon={<Slash className="h-5 w-5" />}
+            icon={<Slash className="size-icon-lg" />}
             title="No skills yet"
             description="Create a reusable workflow to launch it here or invoke it as /name from chat."
           />
@@ -1153,7 +1155,7 @@ const SkillsTab = ({
                     label={`Launch ${skill.name}`}
                     onClick={() => handleLaunch(skill)}
                   >
-                    <PlayCircle className="h-4 w-4" />
+                    <PlayCircle className="size-icon" />
                   </WorkbenchIconAction>
                   <WorkbenchIconAction
                     label={`Edit ${skill.name}`}
@@ -1162,13 +1164,13 @@ const SkillsTab = ({
                       setShowForm(true);
                     }}
                   >
-                    <Pencil className="h-4 w-4" />
+                    <Pencil className="size-icon" />
                   </WorkbenchIconAction>
                   <WorkbenchIconAction
                     label={`Delete ${skill.name}`}
                     onClick={() => setDeleting(skill)}
                   >
-                    <Trash2 className="h-4 w-4" />
+                    <Trash2 className="size-icon" />
                   </WorkbenchIconAction>
                 </div>
               </div>

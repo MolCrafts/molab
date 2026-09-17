@@ -2,8 +2,8 @@
 
 ``Run.status`` (scalar) is removed in schema v2 — it raises
 ``AttributeError``. The query surface is ``run.status_summary`` (a
-:class:`~molexp.workspace.domain.RunStatusSummary`) and ``run.executions``
-(a list of :class:`~molexp.workspace.domain.ExecutionState`).
+:class:`~molab.workspace.domain.RunStatusSummary`) and ``run.executions``
+(a list of :class:`~molab.workspace.domain.ExecutionState`).
 ``Run.is_retryable`` and ``Run.execution_history`` (deprecated read alias)
 both read ``run.executions``. There is no ``ops/run.json`` sidecar.
 """
@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from molexp.workspace.domain import ExecutionStatus
+from molab.workspace.domain import ExecutionStatus
 
 
 class TestStatusReadsFromExecutions:

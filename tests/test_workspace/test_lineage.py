@@ -1,4 +1,4 @@
-"""``molexp.workspace.assets.lineage`` — ancestors/descendants over the asset DAG.
+"""``molab.workspace.assets.lineage`` — ancestors/descendants over the asset DAG.
 
 Owns lineage traversal (``ancestors`` / ``descendants``) over the upstream edge
 data — ``Producer.inputs`` for legacy ``DataAsset`` imports and
@@ -13,8 +13,8 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from molexp.workspace import Workspace
-from molexp.workspace.assets import ArtifactAsset, AssetManifest, AssetScope, Producer, lineage
+from molab.workspace import Workspace
+from molab.workspace.assets import ArtifactAsset, AssetManifest, AssetScope, Producer, lineage
 
 
 class TestConsumedInputs:

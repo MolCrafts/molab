@@ -9,7 +9,7 @@ stale/wrong results.
 
 from __future__ import annotations
 
-from molexp.workflow.snapshot import _normalize_ast
+from molab.workflow.snapshot import _normalize_ast
 
 
 class TestNormalizeAst:

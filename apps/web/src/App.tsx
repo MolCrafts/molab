@@ -5,7 +5,9 @@ import { AuthGate, AuthProvider, LoginPage } from "@/app/auth";
 import { AppShell } from "@/app/layout/AppShell";
 import { ErrorBoundary } from "@/app/layout/ErrorBoundary";
 import { RouteProfiler } from "@/app/layout/RouteProfiler";
+import { prefetchPrimaryNavigationOnIdle } from "@/app/navigation/prefetch";
 import { OAuthCallbackPage } from "@/app/oauth/OAuthCallbackPage";
+import { prefetchRenderer } from "@/app/renderers/lazyRenderers";
 import { useWorkspaceRuns } from "@/app/runs/useWorkspaceRuns";
 import {
   getLeftPanelViewFromPath,
@@ -14,6 +16,8 @@ import {
 } from "@/app/state/useNavigationState";
 import { useWorkspaceState } from "@/app/state/useWorkspaceState";
 import type { InspectorTarget, Selection } from "@/app/types";
+import { prefetchMarkdown } from "@/components/ui/markdown";
+import { prefetchOnIdle } from "@/lib/lazy-with-prefetch";
 
 const buildDefaultInspectorTarget = (selection: Selection | null): InspectorTarget => {
   if (!selection) {
@@ -55,6 +59,16 @@ const WorkspaceApp = ({ pathname }: { pathname: string }): JSX.Element => {
   const [inspectorTarget, setInspectorTarget] = useState<InspectorTarget>(
     buildDefaultInspectorTarget(selection),
   );
+
+  useEffect(() => {
+    prefetchPrimaryNavigationOnIdle();
+    prefetchOnIdle(() => {
+      prefetchRenderer("project");
+      prefetchRenderer("experiment");
+      prefetchRenderer("run");
+      prefetchMarkdown();
+    });
+  }, []);
 
   // A canonical deep link contains its parent ids even before the shallow
   // workspace catalog does. Hydrate that chain in dependency order so opening

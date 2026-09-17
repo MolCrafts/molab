@@ -1,4 +1,4 @@
-"""Tests for the ``molexp.knowledge`` concept-type registry.
+"""Tests for the ``molab.knowledge`` concept-type registry.
 
 The registry maps a Concept's ``meta.json`` ``type`` string to its Python
 class so a storage layer reconstructs typed Concepts (not bare bases). It is
@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import pytest
 
-from molexp.knowledge.types import (
+from molab.knowledge.types import (
     register_concept_type,
     resolve_concept_type,
 )

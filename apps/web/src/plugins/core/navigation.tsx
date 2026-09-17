@@ -1,61 +1,65 @@
-import type { PluginAPI } from "@molcrafts/molexp-plugin";
+import type { PluginAPI } from "@molcrafts/molab-plugin";
 import {
   Activity,
   Archive,
   Blocks,
   Bot,
   FolderTree,
+  GitCompare,
   LayoutDashboard,
   PlayCircle,
   Settings,
   Workflow,
 } from "lucide-react";
-import { lazy } from "react";
 import type { NavigationContribution } from "@/app/navigation/sections";
+import { lazyWithPrefetch } from "@/lib/lazy-with-prefetch";
 
-const DashboardPage = lazy(() =>
+const DashboardPage = lazyWithPrefetch(() =>
   import("@/app/dashboard/DashboardPage").then((module) => ({ default: module.DashboardPage })),
 );
-const RunsPage = lazy(() =>
+const RunsPage = lazyWithPrefetch(() =>
   import("@/app/runs/RunsPage").then((module) => ({ default: module.RunsPage })),
 );
-const SettingsPage = lazy(() =>
+const ComparePane = lazyWithPrefetch(() =>
+  import("@/app/compare/ComparePane").then((module) => ({ default: module.ComparePane })),
+);
+const SettingsPage = lazyWithPrefetch(() =>
   import("@/app/settings/SettingsPage").then((module) => ({ default: module.SettingsPage })),
 );
-const ActivityPage = lazy(() =>
+const ActivityPage = lazyWithPrefetch(() =>
   import("@/app/runs/ActivityPage").then((module) => ({ default: module.ActivityPage })),
 );
-const WorkflowsPage = lazy(() =>
+const WorkflowsPage = lazyWithPrefetch(() =>
   import("@/app/workflows/WorkflowsPage").then((module) => ({ default: module.WorkflowsPage })),
 );
-const RunsExplorer = lazy(() =>
+const RunsExplorer = lazyWithPrefetch(() =>
   import("@/app/runs/RunsExplorer").then((module) => ({ default: module.RunsExplorer })),
 );
-const DashboardExplorer = lazy(() =>
+const DashboardExplorer = lazyWithPrefetch(() =>
   import("@/app/dashboard/DashboardExplorer").then((module) => ({
     default: module.DashboardExplorer,
   })),
 );
-const AssetsExplorer = lazy(() =>
+const AssetsExplorer = lazyWithPrefetch(() =>
   import("@/app/assets/AssetsExplorer").then((module) => ({ default: module.AssetsExplorer })),
 );
-const AgentExplorer = lazy(() =>
+const AgentExplorer = lazyWithPrefetch(() =>
   import("@/app/agent/AgentExplorer").then((module) => ({ default: module.AgentExplorer })),
 );
-const FilesExplorer = lazy(() =>
+const FilesExplorer = lazyWithPrefetch(() =>
   import("@/app/files/FilesExplorer").then((module) => ({ default: module.FilesExplorer })),
 );
-const ProjectsExplorer = lazy(() =>
+const ProjectsExplorer = lazyWithPrefetch(() =>
   import("@/app/projects/ProjectsExplorer").then((module) => ({
     default: module.ProjectsExplorer,
   })),
 );
-const WorkflowExplorer = lazy(() =>
+const WorkflowExplorer = lazyWithPrefetch(() =>
   import("@/app/workflows/WorkflowExplorer").then((module) => ({
     default: module.WorkflowExplorer,
   })),
 );
-const ActivityExplorer = lazy(() =>
+const ActivityExplorer = lazyWithPrefetch(() =>
   import("@/app/runs/ActivityExplorer").then((module) => ({
     default: module.ActivityExplorer,
   })),
@@ -109,6 +113,21 @@ export const CORE_NAVIGATION: readonly NavigationContribution[] = [
     landing: RunsPage,
     retainSelectionFor: [],
     matches: (pathname) => pathname.startsWith("/runs"),
+  },
+  {
+    id: "compare",
+    label: "Compare",
+    explorerTitle: "Projects",
+    breadcrumbLabel: "Compare",
+    icon: GitCompare,
+    route: "/compare",
+    placement: "legacy",
+    order: 35,
+    shellMode: "explorer",
+    explorer: ProjectsExplorer,
+    landing: ComparePane,
+    retainSelectionFor: [],
+    matches: (pathname) => pathname === "/compare" || pathname.startsWith("/compare/"),
   },
   {
     id: "agent",

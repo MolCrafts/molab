@@ -109,12 +109,12 @@ export function ParametersForm({ value, onChange }: ParametersFormProps): JSX.El
             className="flex-none text-muted-foreground hover:text-destructive"
             onClick={() => removeRow(row.id)}
           >
-            <X className="h-3.5 w-3.5" />
+            <X className="size-icon-sm" />
           </WorkbenchIconAction>
         </div>
       ))}
       <WorkbenchIconAction label="Add parameter" onClick={addRow}>
-        <Plus className="h-3.5 w-3.5" />
+        <Plus className="size-3.5" />
       </WorkbenchIconAction>
     </div>
   );

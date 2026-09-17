@@ -5,11 +5,11 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-from molexp.harness.host import Keys, compose_plan, compose_run
-from molexp.plugins.extras import default_science_extras
-from molexp.plugins.metrics.host import MetricsPlugin
-from molexp.plugins.submit_molq.host import MolqJobs, MolqPlugin
-from molexp.workspace.metrics_seam import (
+from molab.harness.host import Keys, compose_plan, compose_run
+from molab.plugins.extras import default_science_extras
+from molab.plugins.metrics.host import MetricsPlugin
+from molab.plugins.submit_molq.host import MolqJobs, MolqPlugin
+from molab.workspace.metrics_seam import (
     MetricsAppend,
     MetricsSink,
     create_metrics_writer,
@@ -17,7 +17,7 @@ from molexp.workspace.metrics_seam import (
     set_metrics_writer_factory,
 )
 
-PLUGINS_ROOT = Path(__file__).resolve().parents[2] / "src" / "molexp" / "plugins"
+PLUGINS_ROOT = Path(__file__).resolve().parents[2] / "src" / "molab" / "plugins"
 _HOST_FILES = (
     PLUGINS_ROOT / "metrics" / "host.py",
     PLUGINS_ROOT / "submit_molq" / "host.py",
@@ -40,7 +40,7 @@ class TestDuckTypedNoHarnessImport:
         for path in _HOST_FILES:
             imported = _imported_modules(path)
             assert not any(
-                name == "molexp.harness" or name.startswith("molexp.harness.") for name in imported
+                name == "molab.harness" or name.startswith("molab.harness.") for name in imported
             ), path
 
 
@@ -67,7 +67,7 @@ class TestMolqPlugin:
             resources={},
             scheduling={},
         )
-        from molexp.plugins.submit_molq.submit import SubmitHandler
+        from molab.plugins.submit_molq.submit import SubmitHandler
 
         assert isinstance(handler, SubmitHandler)
 
@@ -132,8 +132,8 @@ class TestDefaultScienceExtras:
         host.unload()
 
     def test_plan_profile_dump_lists_jobs(self, tmp_path: Path) -> None:
-        from molexp.harness.gateways.stub import StubAgentGateway
-        from molexp.harness.store.file_artifact_store import FileArtifactStore
+        from molab.harness.gateways.stub import StubAgentGateway
+        from molab.harness.store.file_artifact_store import FileArtifactStore
 
         host = compose_plan(
             run_id="dump",

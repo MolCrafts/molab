@@ -17,7 +17,7 @@ function buildModuleBlob(spec: string, exports: Record<string, unknown>): string
   const existing = moduleBlobUrls.get(spec);
   if (existing) return existing;
 
-  const hostKey = "__MOLEXP_PLUGIN_HOST_MODULES__";
+  const hostKey = "__MOLAB_PLUGIN_HOST_MODULES__";
   const g = globalThis as typeof globalThis & {
     [key: string]: Record<string, Record<string, unknown>>;
   };
@@ -135,7 +135,7 @@ export async function rewriteModuleGraph(
       },
     );
 
-    rewritten = `globalThis.__MOLEXP_PLUGIN_ENTRY__=${JSON.stringify(absolute)};\n${rewritten}`;
+    rewritten = `globalThis.__MOLAB_PLUGIN_ENTRY__=${JSON.stringify(absolute)};\n${rewritten}`;
 
     const blob = new Blob([rewritten], { type: "text/javascript" });
     const blobUrl = URL.createObjectURL(blob);

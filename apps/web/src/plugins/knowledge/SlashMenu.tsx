@@ -152,7 +152,7 @@ export const SlashMenu = ({
       <PopoverTrigger asChild>
         {trigger ?? (
           <WorkbenchIconAction label="Insert block">
-            <Slash className="h-3.5 w-3.5" />
+            <Slash className="size-3.5" />
           </WorkbenchIconAction>
         )}
       </PopoverTrigger>
@@ -176,7 +176,7 @@ export const SlashMenu = ({
                         value={`${command.label} ${command.keywords.join(" ")}`}
                         onSelect={() => insertBlock(command.id)}
                       >
-                        <Icon className="h-4 w-4 text-muted-foreground" />
+                        <Icon className="size-icon text-muted-foreground" />
                         <span className="flex-1">{command.label}</span>
                         <span className="text-micro text-muted-foreground">
                           {command.description}
@@ -194,7 +194,7 @@ export const SlashMenu = ({
                       setSearch("");
                     }}
                   >
-                    <Link2 className="h-4 w-4 text-muted-foreground" />
+                    <Link2 className="size-icon text-muted-foreground" />
                     <span className="flex-1">Embed entity…</span>
                   </CommandItem>
                 </CommandGroup>
@@ -208,13 +208,13 @@ export const SlashMenu = ({
                     setSearch("");
                   }}
                 >
-                  <ChevronLeft className="h-4 w-4 text-muted-foreground" />
+                  <ChevronLeft className="size-icon text-muted-foreground" />
                   <span>Back to blocks</span>
                 </CommandItem>
                 {error && <p className="px-3 py-2 text-label text-destructive">{error}</p>}
                 {embedding && (
                   <p className="flex items-center gap-2 px-3 py-2 text-label text-muted-foreground">
-                    <Loader2 className="mol-motion-progress-spin h-3.5 w-3.5" /> Embedding…
+                    <Loader2 className="mol-motion-progress-spin size-icon-sm" /> Embedding…
                   </p>
                 )}
                 <CommandEmpty>No entities to embed.</CommandEmpty>
@@ -227,7 +227,7 @@ export const SlashMenu = ({
                         disabled={embedding}
                         onSelect={() => void embed(group.kind, item.id)}
                       >
-                        <group.icon className={cn("h-4 w-4 text-muted-foreground")} />
+                        <group.icon className={cn("size-icon text-muted-foreground")} />
                         <span className="flex-1 truncate">{item.label}</span>
                       </CommandItem>
                     ))}

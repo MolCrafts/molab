@@ -2,7 +2,7 @@
  * Client-side projection of experiment_plan (spec + board) into the
  * canonical 12-section experiment plan book (markdown).
  *
- * Mirrors `molexp.harness.plan.document.render_experiment_plan_document`.
+ * Mirrors `molab.harness.plan.document.render_experiment_plan_document`.
  */
 
 export type PlanDocTask = {

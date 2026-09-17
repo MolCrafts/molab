@@ -42,9 +42,9 @@ const RelatedRow = ({
       onClick={() => {
         if (path) navigate(path);
       }}
-      className="group flex w-full items-center gap-2 rounded-control px-2 py-1.5 text-left transition-colors hover:bg-interactive/60 disabled:opacity-40"
+      className="group flex w-full items-center gap-2 rounded-control px-2 py-row-pad text-left transition-colors hover:bg-interactive/60 disabled:opacity-40"
     >
-      <Icon className={`size-3.5 flex-none ${meta.iconClassName}`} aria-hidden />
+      <Icon className={`size-icon-sm flex-none ${meta.iconClassName}`} aria-hidden />
       <span className="flex min-w-0 flex-1 flex-col">
         {roleLabel && <span className="text-micro text-muted-foreground">{roleLabel}</span>}
         <span className="min-w-0 truncate text-label text-foreground">
@@ -60,7 +60,7 @@ const RelatedRow = ({
 
 const Section = ({ title, children }: { title: string; children: ReactNode }): JSX.Element => (
   <section className="border-t border-border px-2 py-2">
-    <h3 className="px-2 pb-1.5 text-micro font-medium uppercase tracking-wide text-muted-foreground">
+    <h3 className="px-2 pb-1 text-micro font-medium uppercase tracking-wide text-muted-foreground">
       {title}
     </h3>
     {children}
@@ -87,7 +87,7 @@ export const RelatedPanel = ({ entity, snapshot }: RelatedPanelProps): JSX.Eleme
     <div className="flex flex-col">
       {lineageGroups.length > 0 && (
         <Section title="Lineage">
-          <div className="space-y-0.5">
+          <div className="space-y-1">
             {lineageGroups.flatMap((g) =>
               g.refs.map((refItem) => (
                 <RelatedRow
@@ -104,7 +104,7 @@ export const RelatedPanel = ({ entity, snapshot }: RelatedPanelProps): JSX.Eleme
 
       {relatedGroups.map((g) => (
         <Section key={g.relation} title={g.label}>
-          <div className="space-y-0.5">
+          <div className="space-y-1">
             {g.refs.map((refItem) => (
               <RelatedRow
                 key={`${refItem.kind}:${refItem.id}`}

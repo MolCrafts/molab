@@ -22,9 +22,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 
-from molexp.workspace import Workspace
-from molexp.workspace.artifact_repository import ArtifactRepository, content_ref, scan_artifacts
-from molexp.workspace.assets import (
+from molab.workspace import Workspace
+from molab.workspace.artifact_repository import ArtifactRepository, content_ref, scan_artifacts
+from molab.workspace.assets import (
     ArtifactAsset,
     AssetScope,
     CheckpointAsset,
@@ -34,8 +34,8 @@ from molexp.workspace.assets import (
     parse_asset,
     scan,
 )
-from molexp.workspace.domain import Artifact
-from molexp.workspace.execution_dirs import execution_dir_names
+from molab.workspace.domain import Artifact
+from molab.workspace.execution_dirs import execution_dir_names
 
 ARTIFACTS_PER_RUN = 2
 

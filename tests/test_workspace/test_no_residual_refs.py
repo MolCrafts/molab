@@ -2,7 +2,7 @@
 
 Asserts the deleted unwired subsystems leave zero trace in the shipped
 source tree: no symbol definitions, no imports, no ``__all__`` entries,
-and no orphaned module files. Scans ``src/molexp/`` only — test files
+and no orphaned module files. Scans ``src/molab/`` only — test files
 referencing removed symbols are deleted separately.
 """
 
@@ -13,16 +13,16 @@ from pathlib import Path
 
 import pytest
 
-import molexp
+import molab
 
-SRC = Path(molexp.__file__).resolve().parent  # .../src/molexp
+SRC = Path(molab.__file__).resolve().parent  # .../src/molab
 
 
 def _py_files() -> list[Path]:
     return [p for p in SRC.rglob("*.py") if "__pycache__" not in p.parts]
 
 
-# Distinctive symbols that must not appear anywhere under src/molexp/ after the cut.
+# Distinctive symbols that must not appear anywhere under src/molab/ after the cut.
 DELETED_SYMBOLS = [
     "RunFingerprint",
     "_hash_payload",
@@ -85,6 +85,6 @@ def test_deleted_module_absent(path: Path) -> None:
 
 @pytest.mark.parametrize("name", ["RunFingerprint", "OutputAsset", "ExecutionStateAsset"])
 def test_public_export_removed(name: str) -> None:
-    mod = importlib.import_module("molexp.workspace")
-    assert not hasattr(mod, name), f"molexp.workspace still exports {name}"
-    assert name not in getattr(mod, "__all__", []), f"{name} still in molexp.workspace.__all__"
+    mod = importlib.import_module("molab.workspace")
+    assert not hasattr(mod, name), f"molab.workspace still exports {name}"
+    assert name not in getattr(mod, "__all__", []), f"{name} still in molab.workspace.__all__"

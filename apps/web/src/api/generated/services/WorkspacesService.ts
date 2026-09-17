@@ -12,7 +12,7 @@ import { request as __request } from '../core/request';
 export class WorkspacesService {
     /**
      * List Workspaces
-     * List the workspaces ``molexp serve`` was started with.
+     * List the workspaces ``molab serve`` was started with.
      *
      * A remote workspace whose transport is currently unreachable is still
      * listed, flagged ``unreachable`` so the UI can degrade gracefully rather
@@ -20,18 +20,18 @@ export class WorkspacesService {
      * remotes so the UI can open a verification-code dialog.
      *
      * When auth is enabled, the list is filtered by the user's workspace allowlist.
-     * @param molexpSession
+     * @param molabSession
      * @returns ServedWorkspaceResponse Successful Response
      * @throws ApiError
      */
     public static listWorkspaces(
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<Array<ServedWorkspaceResponse>> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/workspaces',
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -46,19 +46,19 @@ export class WorkspacesService {
      * (``kind=remote`` with registry ``name`` / ``@name`` / ``Host:/abs`` path).
      * Optional ``activate`` switches the active workspace to the new root.
      * @param requestBody
-     * @param molexpSession
+     * @param molabSession
      * @returns ServedWorkspaceResponse Successful Response
      * @throws ApiError
      */
     public static addWorkspace(
         requestBody: WorkspaceAddRequest,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<ServedWorkspaceResponse> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/workspaces/add',
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -74,13 +74,13 @@ export class WorkspacesService {
      * Does not delete files on disk. When the removed root was active, the first
      * remaining served workspace becomes active (if any).
      * @param key
-     * @param molexpSession
+     * @param molabSession
      * @returns ServedWorkspaceResponse Successful Response
      * @throws ApiError
      */
     public static removeWorkspace(
         key: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<Array<ServedWorkspaceResponse>> {
         return __request(OpenAPI, {
             method: 'DELETE',
@@ -89,7 +89,7 @@ export class WorkspacesService {
                 'key': key,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -108,14 +108,14 @@ export class WorkspacesService {
      * the remote root with the live master.
      * @param key
      * @param requestBody
-     * @param molexpSession
+     * @param molabSession
      * @returns WorkspaceConnectResponse Successful Response
      * @throws ApiError
      */
     public static connectWorkspace(
         key: string,
         requestBody: WorkspaceConnectRequest,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<WorkspaceConnectResponse> {
         return __request(OpenAPI, {
             method: 'POST',
@@ -124,7 +124,7 @@ export class WorkspacesService {
                 'key': key,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             body: requestBody,
             mediaType: 'application/json',

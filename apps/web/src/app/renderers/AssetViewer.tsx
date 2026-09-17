@@ -1,9 +1,9 @@
+import { useQuery } from "@tanstack/react-query";
 import { Archive, Download } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
 import { assetsApi } from "@/api";
-import type { AssetVersionResponse } from "@/api/generated/models/AssetVersionResponse";
 import { DashboardCanvas, EntityPage, OverviewSurface } from "@/app/components/entity";
-import type { ApiAssetResponse, ScopedRendererProps } from "@/app/types";
+import { assetDetailQueryOptions, assetVersionsQueryOptions } from "@/app/state/entityQueries";
+import type { ScopedRendererProps } from "@/app/types";
 import {
   Table,
   TableBody,
@@ -25,48 +25,29 @@ export const AssetViewer = ({
   snapshot,
 }: ScopedRendererProps<"assets">): JSX.Element => {
   const summary = snapshot.assets.find((item) => item.id === selection.objectId) ?? null;
-  const projectId = summary?.projectId ?? null;
-  const [asset, setAsset] = useState<ApiAssetResponse | null>(null);
-  const [versions, setVersions] = useState<AssetVersionResponse[]>([]);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-
-  // One loader, called by the mount effect and by Retry alike — so a retry
-  // repeats exactly what failed rather than a second copy of it.
-  const load = useCallback(
-    (signal: { cancelled: boolean }) => {
-      setAsset(null);
-      setVersions([]);
-      setError(null);
-      if (!projectId) return;
-      setLoading(true);
-      Promise.all([
-        assetsApi.getProjectAsset(projectId, selection.objectId),
-        assetsApi.listVersions(projectId, selection.objectId),
-      ])
-        .then(([nextAsset, nextVersions]) => {
-          if (signal.cancelled) return;
-          setAsset(nextAsset);
-          setVersions(nextVersions);
-        })
-        .catch((reason: unknown) => {
-          if (signal.cancelled) return;
-          setError(reason instanceof Error ? reason.message : "Failed to load asset");
-        })
-        .finally(() => {
-          if (!signal.cancelled) setLoading(false);
-        });
-    },
-    [projectId, selection.objectId],
-  );
-
-  useEffect(() => {
-    const signal = { cancelled: false };
-    load(signal);
-    return () => {
-      signal.cancelled = true;
-    };
-  }, [load]);
+  const projectId = summary?.projectId ?? "";
+  const assetQuery = useQuery({
+    ...assetDetailQueryOptions(projectId, selection.objectId),
+    enabled: Boolean(summary?.projectId),
+  });
+  const versionsQuery = useQuery({
+    ...assetVersionsQueryOptions(projectId, selection.objectId),
+    enabled: Boolean(summary?.projectId),
+  });
+  const asset = assetQuery.data ?? null;
+  const versions = versionsQuery.data ?? [];
+  const error =
+    assetQuery.error instanceof Error
+      ? assetQuery.error.message
+      : versionsQuery.error instanceof Error
+        ? versionsQuery.error.message
+        : assetQuery.error || versionsQuery.error
+          ? "Failed to load asset"
+          : null;
+  const retry = (): void => {
+    void assetQuery.refetch();
+    void versionsQuery.refetch();
+  };
 
   if (!summary || !projectId) {
     return (
@@ -83,11 +64,11 @@ export const AssetViewer = ({
         kind="error"
         title="Cannot load asset"
         detail={error}
-        action={<WorkbenchRetryAction onClick={() => load({ cancelled: false })} />}
+        action={<WorkbenchRetryAction onClick={retry} />}
       />
     );
   }
-  if (loading && !asset) {
+  if ((assetQuery.isPending || versionsQuery.isPending) && !asset) {
     return <WorkbenchOperationState kind="loading" title="Loading asset" />;
   }
 
@@ -99,7 +80,7 @@ export const AssetViewer = ({
       actions={
         <WorkbenchIconAction label="Download latest asset version" asChild>
           <a href={assetsApi.downloadUrl(projectId, selection.objectId)} download>
-            <Download className="h-3.5 w-3.5" />
+            <Download className="size-3.5" />
           </a>
         </WorkbenchIconAction>
       }

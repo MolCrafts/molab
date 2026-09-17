@@ -6,9 +6,9 @@
  * Emitted for one reasoning-token increment from the emergent loop.
  *
  * The orchestration-level projection of a
- * :class:`~molexp.agent.router.ThinkingDeltaChunk`: a reasoning model's
+ * :class:`~molab.harness.agent.router.ThinkingDeltaChunk`: a reasoning model's
  * private chain-of-thought, streamed *before* the answer.
- * :class:`~molexp.agent.react` yields one per
+ * :class:`~molab.harness.agent.react` yields one per
  * reasoning delta so a CLI / SSE consumer can surface "thinking…" in a
  * collapsed / dimmed treatment, kept distinct from the answer's
  * :class:`TokenDeltaEvent`\ s. A model that does not reason emits none.

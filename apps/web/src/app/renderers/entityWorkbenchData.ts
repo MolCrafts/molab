@@ -1,4 +1,3 @@
-import { STATUS_GROUPS } from "@/app/runs/statusGroups";
 import type {
   AssetSummary,
   ExperimentSummary,
@@ -60,11 +59,16 @@ export interface ParameterAxisSummary {
   count: number;
 }
 
-export interface RunGroupSummary {
-  key: string;
-  label: string;
-  runs: RunSummary[];
+/** One value of a swept parameter, with the status mix of the runs that used it. */
+export interface AxisBucketSummary {
+  value: string;
   counts: RunStatusCounts;
+}
+
+/** A varying parameter and the outcome of the sweep along it. */
+export interface AxisBreakdownSummary {
+  key: string;
+  buckets: AxisBucketSummary[];
 }
 
 export interface ExperimentWorkbenchData {
@@ -77,7 +81,7 @@ export interface ExperimentWorkbenchData {
    */
   varyingAxes: ParameterAxisSummary[];
   fixedAxes: ParameterAxisSummary[];
-  runGroups: RunGroupSummary[];
+  axisBreakdowns: AxisBreakdownSummary[];
   workflowSummary: WorkflowRollup;
 }
 
@@ -248,37 +252,42 @@ export const buildParameterAxes = (
   }));
 };
 
-const chooseGroupingAxis = (axes: ParameterAxisSummary[]): string | null => {
-  const usable = axes.find((axis) => axis.count > 1 && axis.count <= 12);
-  return usable?.key ?? null;
+/** Sweep axes worth drawing: more than one value, few enough to read at a glance. */
+const MAX_AXIS_BUCKETS = 12;
+
+const compareAxisValues = (left: string, right: string): number => {
+  const leftNumber = Number(left);
+  const rightNumber = Number(right);
+  if (Number.isFinite(leftNumber) && Number.isFinite(rightNumber)) return leftNumber - rightNumber;
+  return left.localeCompare(right);
 };
 
-export const buildRunGroups = (
+/**
+ * Status mix per value of each varying parameter — "which corner of the sweep
+ * failed", which is the decision an experiment overview exists to serve. A
+ * declared value with no runs keeps its (empty) bucket: not-yet-run is a fact.
+ */
+export const buildAxisBreakdowns = (
   runs: RunSummary[],
   axes: ParameterAxisSummary[],
-): RunGroupSummary[] => {
-  const axis = chooseGroupingAxis(axes);
-  const groups = new Map<string, RunSummary[]>();
-
-  for (const run of runs) {
-    const value = axis ? stringifyAxisValue(run.parameters?.[axis]) : run.status;
-    const label = axis
-      ? `${axis}: ${value}`
-      : (STATUS_GROUPS.find((g) => g.aliases.includes(run.status))?.label ?? run.status);
-    const list = groups.get(label) ?? [];
-    list.push(run);
-    groups.set(label, list);
-  }
-
-  return [...groups.entries()]
-    .map(([label, groupedRuns]) => ({
-      key: label,
-      label,
-      runs: groupedRuns,
-      counts: countRunStatuses(groupedRuns),
-    }))
-    .sort((a, b) => b.runs.length - a.runs.length || a.label.localeCompare(b.label));
-};
+): AxisBreakdownSummary[] =>
+  axes
+    .filter((axis) => axis.count > 1 && axis.count <= MAX_AXIS_BUCKETS)
+    .map((axis) => {
+      const byValue = new Map<string, RunSummary[]>(axis.values.map((value) => [value, []]));
+      for (const run of runs) {
+        const value = stringifyAxisValue(run.parameters?.[axis.key]);
+        const bucket = byValue.get(value);
+        if (bucket) bucket.push(run);
+        else byValue.set(value, [run]);
+      }
+      return {
+        key: axis.key,
+        buckets: [...byValue.entries()]
+          .sort(([left], [right]) => compareAxisValues(left, right))
+          .map(([value, bucketRuns]) => ({ value, counts: countRunStatuses(bucketRuns) })),
+      };
+    });
 
 export const buildExperimentWorkbenchData = (
   experiment: ExperimentSummary,
@@ -292,7 +301,7 @@ export const buildExperimentWorkbenchData = (
     parameterAxes,
     varyingAxes,
     fixedAxes,
-    runGroups: buildRunGroups(runs, parameterAxes),
+    axisBreakdowns: buildAxisBreakdowns(runs, varyingAxes),
     workflowSummary: summarizeWorkflowGraph(workflow),
   };
 };

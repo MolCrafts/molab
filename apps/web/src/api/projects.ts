@@ -1,6 +1,6 @@
+import { projectAssetView } from "@/api/assets";
 import { ProjectsService } from "@/api/generated/services/ProjectsService";
 import type { ProjectCreateRequest } from "@/app/types";
-import { projectAssetView } from "@/api/assets";
 
 /** Active-workspace projects (`GET/POST /api/projects`). */
 export const projectsApi = {

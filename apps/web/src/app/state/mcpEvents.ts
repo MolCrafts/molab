@@ -11,7 +11,7 @@
  * change that matters is initiated from this window.
  */
 
-export const MCP_CONFIG_CHANGED_EVENT = "molexp:mcp-config-changed";
+export const MCP_CONFIG_CHANGED_EVENT = "molab:mcp-config-changed";
 
 export const emitMcpConfigChanged = (): void => {
   window.dispatchEvent(new CustomEvent(MCP_CONFIG_CHANGED_EVENT));

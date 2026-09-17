@@ -16,8 +16,8 @@ import type {
   StatusBarItemSpec,
   ViewContainerSpec,
   ViewSpec,
-} from "@molcrafts/molexp-plugin";
-import { namespacePluginId } from "@molcrafts/molexp-plugin";
+} from "@molcrafts/molab-plugin";
+import { namespacePluginId } from "@molcrafts/molab-plugin";
 import type { RendererKey } from "@/app/types";
 import {
   registerEntityTabContribution,

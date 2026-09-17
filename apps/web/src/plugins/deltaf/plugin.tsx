@@ -1,11 +1,11 @@
-import type { MolexpPluginModule, PluginAPI } from "@molcrafts/molexp-plugin";
+import type { MolabPluginModule, PluginAPI } from "@molcrafts/molab-plugin";
 import { lazy } from "react";
 
 const DeltaFChart = lazy(() =>
   import("./DeltaFChart").then((module) => ({ default: module.DeltaFChart })),
 );
 
-const deltafPlugin: MolexpPluginModule = {
+const deltafPlugin: MolabPluginModule = {
   id: "deltaf",
   name: "ΔF",
   version: "1.0.0",

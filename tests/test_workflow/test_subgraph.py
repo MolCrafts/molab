@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import pytest
 
-from molexp.workflow import (
+from molab.workflow import (
     CompiledWorkflow,
     Task,
     TaskContext,
@@ -23,7 +23,7 @@ from molexp.workflow import (
     WorkflowCompiler,
     WorkflowRuntime,
 )
-from molexp.workflow._graph_decl import _BoundaryStubTask
+from molab.workflow._graph_decl import _BoundaryStubTask
 
 
 class _RecordTask(Task):

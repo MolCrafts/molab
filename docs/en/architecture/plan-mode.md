@@ -1,11 +1,11 @@
 # Plan Mode 架构
 
-`molexp.harness.Plan` 把自然语言实验草案变成：**任务板（task board）**、经人审
+`molab.harness.Plan` 把自然语言实验草案变成：**任务板（task board）**、经人审
 批的计划报告，以及（默认）**实现（realize）** 后的工作流——绑定任务 → 按任务
-代码生成与自修复 → 仅编译的 dry-run。这是 `molexp.harness` 里**唯一**交付的
+代码生成与自修复 → 仅编译的 dry-run。这是 `molab.harness` 里**唯一**交付的
 规划流水线。
 
-CLI（`molexp plan`）与服务端（`POST /plan-tasks`）都经
+CLI（`molab plan`）与服务端（`POST /plan-tasks`）都经
 `services.plan_runtime.drive_plan_mode` 驱动同一路径，彼此不互调。
 
 Harness 只通过 agent 的 `Router` 协议（`RouterBackedAgentGateway`）访问 LLM；
@@ -76,7 +76,7 @@ runs/run-<id>/
 ## 入口
 
 ```bash
-molexp plan "为电解液 X 筛选溶剂条件"
+molab plan "为电解液 X 筛选溶剂条件"
 ```
 
 UI 与 CLI 同一 `drive_plan_mode(Plan(...), ...)`。会话进度条阶段

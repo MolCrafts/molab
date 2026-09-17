@@ -6,8 +6,8 @@
  * Terminal event — the emergent outer loop parked itself durably.
  *
  * The dual of :class:`LoopCompletedEvent` for the suspend branch: a
- * :class:`~molexp.agent.loops.hooks.ShouldStopGuard` returned
- * :meth:`~molexp.agent.loops.hooks.HookOutcome.suspend`, so
+ * :class:`~molab.harness.agent.loops.hooks.ShouldStopGuard` returned
+ * :meth:`~molab.harness.agent.loops.hooks.HookOutcome.suspend`, so
  * the ReAct turn stops without a completion. No pending record is written —
  * the session entry tree and its
  * ``leaf`` pointer (identified by :attr:`leaf_id`) are already durably

@@ -6,11 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from molexp.workspace import (
+from molab.workspace import (
     RunNotFoundError,
     Workspace,
 )
-from molexp.workspace.domain import ExecutionMode
+from molab.workspace.domain import ExecutionMode
 
 
 def _build(tmp_path):

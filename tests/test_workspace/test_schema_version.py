@@ -11,8 +11,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from molexp.workspace import Workspace
-from molexp.workspace.schema_version import MOLEXP_SCHEMA_VERSION
+from molab.workspace import Workspace
+from molab.workspace.schema_version import MOLAB_SCHEMA_VERSION
 
 
 def _seed_workspace(root) -> Workspace:
@@ -53,7 +53,7 @@ class TestSchemaVersionEmitted:
             with open(path) as fh:  # noqa: PTH123
                 data = json.load(fh)
             assert "schema_version" in data, f"missing schema_version: {path}"
-            assert data["schema_version"] == MOLEXP_SCHEMA_VERSION
+            assert data["schema_version"] == MOLAB_SCHEMA_VERSION
 
 
 class TestMissingSchemaAccepted:
@@ -81,7 +81,7 @@ class TestOtherSchemaAccepted:
         (root / "workspace.json").write_text(
             json.dumps(
                 {
-                    "schema_version": MOLEXP_SCHEMA_VERSION + 99,
+                    "schema_version": MOLAB_SCHEMA_VERSION + 99,
                     "id": "ws_future",
                     "name": "From Tomorrow",
                     "created_at": "2099-01-01T00:00:00",
@@ -98,7 +98,7 @@ class TestOtherSchemaAccepted:
         (root / "workspace.json").write_text(
             json.dumps(
                 {
-                    "schema_version": MOLEXP_SCHEMA_VERSION - 1,
+                    "schema_version": MOLAB_SCHEMA_VERSION - 1,
                     "id": "ws_old",
                     "name": "Yesterday",
                     "created_at": "2020-01-01T00:00:00",

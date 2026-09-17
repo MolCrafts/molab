@@ -1,8 +1,8 @@
 /**
- * `@molcrafts/molexp-plugin` — authoring SDK for MolExp workbench plugins.
+ * `@molcrafts/molab-plugin` — authoring SDK for Molab workbench plugins.
  *
- *   import { MolexpPlugin, pluginExternals } from "@molcrafts/molexp-plugin";
- *   import { Button } from "@molcrafts/molexp-plugin/ui";
+ *   import { MolabPlugin, pluginExternals } from "@molcrafts/molab-plugin";
+ *   import { Button } from "@molcrafts/molab-plugin/ui";
  */
 
 export type * from "./contract";
@@ -12,5 +12,5 @@ export {
   type PluginHostModuleId,
   pluginExternals,
 } from "./externals";
-export { MolexpPlugin } from "./MolexpPlugin";
+export { MolabPlugin } from "./MolabPlugin";
 export { cn } from "./utils";

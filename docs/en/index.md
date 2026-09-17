@@ -1,12 +1,12 @@
 ---
-title: MolExp
+title: Molab
 description: Agent-assisted scientific-workflow platform for FAIR research
 hide:
   - navigation
   - toc
 hero:
   kicker: Manual
-  title: MolExp
+  title: Molab
   description: Build reproducible scientific workflows in Python. Define tasks as plain functions, let the engine handle the graph, and keep every run tracked on disk — with an optional LLM agent that plans, generates, and drives experiments.
   actions:
     - label: Get started
@@ -19,15 +19,15 @@ hero:
   install:
     label: Install (PyPI release pending)
     methods:
-      - { label: pip, command: pip install git+https://github.com/MolCrafts/molexp }
-      - { label: uv, command: uv pip install git+https://github.com/MolCrafts/molexp }
+      - { label: pip, command: pip install git+https://github.com/MolCrafts/molab }
+      - { label: uv, command: uv pip install git+https://github.com/MolCrafts/molab }
   badges:
     - img: https://img.shields.io/badge/python-3.12%2B-blue
-      href: https://github.com/MolCrafts/molexp
+      href: https://github.com/MolCrafts/molab
       alt: Python 3.12+
 ---
 
-<h1 class="molcrafts-sr-only">MolExp</h1>
+<h1 class="molcrafts-sr-only">Molab</h1>
 
 <div class="molcrafts-manual-home" markdown>
 
@@ -62,7 +62,7 @@ Use this page as an index into the manual, not a marketing overview.
   <a href="getting-started/cli-and-profiles/">
     <span>04</span>
     <strong>Use the CLI and profiles</strong>
-    <em>Replace asyncio.run() with molexp run. Add molcfg.yaml for execution variants.</em>
+    <em>Replace asyncio.run() with molab run. Add molcfg.yaml for execution variants.</em>
   </a>
   <a href="getting-started/start-from-ui/">
     <span>05</span>
@@ -103,7 +103,7 @@ runs independent tasks in parallel, and caches by content.
 </div>
 
 ```python
-from molexp.workflow import Workflow, WorkflowCompiler
+from molab.workflow import Workflow, WorkflowCompiler
 
 wf = Workflow(name="sum")
 
@@ -132,7 +132,7 @@ parameters, status, and outputs — nothing lives only in memory.
 </div>
 
 ```python
-import molexp as me
+import molab as me
 
 ws = me.Workspace("./lab", name="lab")
 exp = ws.add_project("demo").add_experiment("sum")
@@ -177,7 +177,7 @@ best = summary.min_by("summarize")
 
 ## Run from the terminal
 
-Register the experiment once, then let `molexp run` own discovery, profiles, resume /
+Register the experiment once, then let `molab run` own discovery, profiles, resume /
 rerun, and scheduler-backed execution.
 
 </div>
@@ -190,9 +190,9 @@ ws.add_project("demo").add_experiment("sum").define(
 ```
 
 ```bash
-molexp run train.py --profile smoke
-molexp run train.py --resume          # continue a failed run
-molexp run train.py --rerun --fresh   # re-execute from scratch
+molab run train.py --profile smoke
+molab run train.py --resume          # continue a failed run
+molab run train.py --rerun --fresh   # re-execute from scratch
 ```
 
 </section>
@@ -246,9 +246,9 @@ Four layers, each with a single job. They compose without coupling.
 
 ## Extends outward, stays light
 
-`import molexp` stays lightweight — heavy integrations load only when you reach for
+`import molab` stays lightweight — heavy integrations load only when you reach for
 them. The core features connect to the wider molcrafts stack through optional extras
-(`molexp[agent]`, `molexp[tensorboard]`) and to your own code through two independent
+(`molab[agent]`, `molab[tensorboard]`) and to your own code through two independent
 plugin channels.
 
 </div>
@@ -256,7 +256,7 @@ plugin channels.
 <div class="molcrafts-manual-grid molcrafts-manual-grid--cols-3">
   <a href="guide/molq/">
     <strong>molq · scheduler bridge</strong>
-    <em>Powers <code>molexp run</code> on the cluster: the same run submits to Slurm, PBS, or LSF. Only the transport changes — workflow and record stay identical.</em>
+    <em>Powers <code>molab run</code> on the cluster: the same run submits to Slurm, PBS, or LSF. Only the transport changes — workflow and record stay identical.</em>
   </a>
   <a href="getting-started/cli-and-profiles/">
     <strong>molcfg · run profiles</strong>
@@ -272,11 +272,11 @@ plugin channels.
   </a>
   <a href="plugins/">
     <strong>CLI plugins</strong>
-    <em>Ship <code>molexp &lt;yourcmd&gt;</code> subcommands from any pip package via the <code>molexp.cli_plugins</code> entry point.</em>
+    <em>Ship <code>molab &lt;yourcmd&gt;</code> subcommands from any pip package via the <code>molab.cli_plugins</code> entry point.</em>
   </a>
   <a href="plugins/">
     <strong>UI plugins</strong>
-    <em>Contribute a dynamically-imported React bundle to the SPA via the independent <code>molexp.ui_plugins</code> channel.</em>
+    <em>Contribute a dynamically-imported React bundle to the SPA via the independent <code>molab.ui_plugins</code> channel.</em>
   </a>
 </div>
 
@@ -324,7 +324,7 @@ compact table of contents for returning users.
 
 ## Three pillars
 
-MolExp is not a grab-bag of features. Every subsystem serves one of these goals.
+Molab is not a grab-bag of features. Every subsystem serves one of these goals.
 
 </div>
 

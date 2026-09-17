@@ -22,9 +22,9 @@ import asyncio
 import tempfile
 from pathlib import Path
 
-import molexp as me
-from molexp.workflow import Workflow, WorkflowCompiler, WorkflowRuntime
-from molexp.workspace.assets import scan
+import molab as me
+from molab.workflow import Workflow, WorkflowCompiler, WorkflowRuntime
+from molab.workspace.assets import scan
 
 # ── Workflow with both success and failure paths ─────────────────────────────
 wf = Workflow(name="extended")
@@ -48,7 +48,7 @@ compiled = WorkflowCompiler().compile(wf)
 
 
 async def main() -> None:
-    root = Path(tempfile.mkdtemp(prefix="molexp-assets-ext-"))
+    root = Path(tempfile.mkdtemp(prefix="molab-assets-ext-"))
     ws = me.Workspace(root, name="assets-ext-demo")
 
     # ── 1. Import data assets with different actions ─────────────────────
@@ -77,7 +77,7 @@ async def main() -> None:
         log.append("training complete")
 
     # ── 5. Content-hash lookup ───────────────────────────────────────────
-    from molexp.ids import compute_content_hash
+    from molab.ids import compute_content_hash
 
     test_file = root / "query-me.txt"
     test_file.write_text("hello reproducibility")

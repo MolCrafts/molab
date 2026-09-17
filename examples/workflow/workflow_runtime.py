@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import asyncio
 
-from molexp.workflow import CompiledWorkflow, Workflow, WorkflowCompiler, WorkflowRuntime
+from molab.workflow import CompiledWorkflow, Workflow, WorkflowCompiler, WorkflowRuntime
 
 
 def build_slow_workflow() -> CompiledWorkflow:

@@ -1,5 +1,5 @@
 import { AlertTriangle, Network } from "lucide-react";
-import { type JSX, useEffect, useMemo, useState } from "react";
+import { type JSX, type ReactNode, useEffect, useMemo, useState } from "react";
 import { runsApi } from "@/api";
 import type { ExecutionOutputsResponse } from "@/api/generated/models/ExecutionOutputsResponse";
 import {
@@ -13,6 +13,7 @@ import {
 import { listExecutionColumns, listExecutionDetails } from "@/app/registry";
 import { formatDuration } from "@/app/renderers/dashboardData";
 import { RunExecutionOutputs } from "@/app/renderers/run/RunExecutionOutputs";
+import { groupForStatus } from "@/app/runs/statusGroups";
 import type { ExecutionRecordSummary, RunSummary, WorkflowSummary } from "@/app/types";
 import {
   Table,
@@ -22,7 +23,12 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { RunStatusBadge, WorkbenchAction, WorkbenchIconAction } from "@/components/workbench";
+import {
+  RunStatusBadge,
+  WorkbenchAction,
+  WorkbenchIconAction,
+  WorkbenchOperationState,
+} from "@/components/workbench";
 import { normalizeTaskGraph } from "@/components/workflow/flowgram-document";
 import type { TaskGraphJson } from "@/components/workflow/task-graph-ir";
 import { WorkflowGraph } from "@/components/workflow/workflow-graph";
@@ -32,6 +38,90 @@ import { cn } from "@/lib/utils";
 
 const stringValue = (value: unknown): string | null =>
   typeof value === "string" && value.length > 0 ? value : null;
+
+const instant = (value: string | null | undefined): number | null => {
+  const parsed = value ? Date.parse(value) : Number.NaN;
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+/** Shared time domain for the attempt bars — every attempt of one Run. */
+interface AttemptWindow {
+  from: number;
+  span: number;
+}
+
+const attemptWindow = (history: ExecutionRecordSummary[]): AttemptWindow | null => {
+  const now = Date.now();
+  const starts = history
+    .map((execution) => instant(execution.startedAt ?? execution.createdAt))
+    .filter((value): value is number => value !== null);
+  if (starts.length === 0) return null;
+  const from = Math.min(...starts);
+  const to = Math.max(
+    ...history.map((execution) => instant(execution.finishedAt) ?? now),
+    from + 1,
+  );
+  return { from, span: Math.max(1, to - from) };
+};
+
+const STATUS_FILL: Record<string, string> = {
+  running: "bg-status-running",
+  pending: "bg-status-queued",
+  succeeded: "bg-status-completed",
+  failed: "bg-status-failed",
+  cancelled: "bg-status-cancelled",
+};
+
+/**
+ * When this attempt ran, on the axis shared by every attempt of the Run — so
+ * "did the retry get further, and was it slower" is read, not computed.
+ */
+const AttemptBar = ({
+  execution,
+  window,
+}: {
+  execution: ExecutionRecordSummary;
+  window: AttemptWindow | null;
+}): JSX.Element => {
+  const duration = formatDuration(execution.startedAt, execution.finishedAt);
+  const start = instant(execution.startedAt ?? execution.createdAt);
+  const end = instant(execution.finishedAt) ?? Date.now();
+  const group = groupForStatus(execution.status);
+  const fill = (group && STATUS_FILL[group]) || "bg-muted-foreground/40";
+  const left = window && start !== null ? ((start - window.from) / window.span) * 100 : 0;
+  const width = window && start !== null ? Math.max(2, ((end - start) / window.span) * 100) : 0;
+  return (
+    <span className="flex min-w-0 items-center gap-2">
+      <span aria-hidden className="relative h-3 min-w-8 flex-1 border-x border-border/60">
+        {window && start !== null && (
+          <span
+            className={cn("absolute top-1/2 h-1.5 -translate-y-1/2 rounded-control", fill)}
+            style={{ left: `${left}%`, width: `${Math.min(100 - left, width)}%` }}
+          />
+        )}
+      </span>
+      <span className="shrink-0 font-mono text-label tabular-nums text-muted-foreground">
+        {duration ?? "—"}
+      </span>
+    </span>
+  );
+};
+
+/** One attempt's fields. A two-column `<Table>` here is chrome around a `<dl>`. */
+const PropertyRows = ({
+  entries,
+}: {
+  entries: Array<{ label: string; value: ReactNode }>;
+}): JSX.Element => (
+  <dl className="grid gap-x-6 gap-y-2 border-y border-border py-3 sm:grid-cols-[minmax(0,10rem)_minmax(0,1fr)]">
+    {entries.map((entry) => (
+      <div key={entry.label} className="contents">
+        <dt className="min-w-0 truncate text-label text-muted-foreground">{entry.label}</dt>
+        <dd className="min-w-0 break-all font-mono text-label text-foreground">{entry.value}</dd>
+      </div>
+    ))}
+  </dl>
+);
 
 const backendOf = (execution: ExecutionRecordSummary): string =>
   stringValue(execution.executor.backend) ?? stringValue(execution.executor.target) ?? "local";
@@ -84,6 +174,8 @@ export const RunExecutionsPanel = ({
     : -1;
   const [graph, setGraph] = useState<TaskGraphJson | null>(null);
   const [graphError, setGraphError] = useState<string | null>(null);
+  // A fetch in flight is not "no snapshot" — the two used to render identically.
+  const [graphLoading, setGraphLoading] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -91,6 +183,7 @@ export const RunExecutionsPanel = ({
     if (!selectedExecutionId) {
       setGraph(null);
       setGraphError(null);
+      setGraphLoading(false);
       return;
     }
     const load = (): void => {
@@ -106,8 +199,12 @@ export const RunExecutionsPanel = ({
             setGraphError(
               reason instanceof Error ? reason.message : "Failed to load execution workflow",
             );
+        })
+        .finally(() => {
+          if (!cancelled) setGraphLoading(false);
         });
     };
+    setGraphLoading(true);
     load();
     if (selected?.status === "queued" || selected?.status === "running")
       interval = setInterval(load, 1500);
@@ -119,6 +216,7 @@ export const RunExecutionsPanel = ({
 
   const failedTasks =
     graph?.task_configs.filter((task) => statusKey(task.status) === "failed") ?? [];
+  const attemptSpan = attemptWindow(history);
   const row = selected ? executionRow(selected, run.id) : null;
   const columns = useMemo(() => listExecutionColumns(row?.backend), [row?.backend]);
   const details = useMemo(() => listExecutionDetails(row?.backend), [row?.backend]);
@@ -140,12 +238,12 @@ export const RunExecutionsPanel = ({
     <OverviewSurface>
       <InventoryCanvas className="max-w-6xl space-y-8">
         <section className="space-y-3">
-          <h3 className="text-body-lg font-medium text-foreground">
+          <h2 className="text-body-lg font-medium text-foreground">
             Executions
             <span className="ml-2 font-mono text-micro font-normal text-muted-foreground">
               {history.length}
             </span>
-          </h3>
+          </h2>
           <Table>
             <TableHeader>
               <TableRow>
@@ -154,18 +252,36 @@ export const RunExecutionsPanel = ({
                 <TableHead>Execution</TableHead>
                 <TableHead className="w-24">Mode</TableHead>
                 <TableHead className="w-40">Started</TableHead>
-                <TableHead className="w-28">Duration</TableHead>
+                <TableHead className="w-52">Timeline</TableHead>
                 <TableHead className="w-32">Backend</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {history.map((execution, index) => {
                 const active = execution.executionId === selectedExecutionId;
+                const select = (): void => onSelectExecution(execution.executionId);
                 return (
                   <TableRow
                     key={execution.executionId}
-                    className={cn("cursor-pointer", active && "bg-muted/40")}
-                    onClick={() => onSelectExecution(execution.executionId)}
+                    tabIndex={0}
+                    aria-label={`Select execution ${execution.executionId}`}
+                    aria-current={active ? "true" : undefined}
+                    className={cn(
+                      "cursor-pointer transition-colors hover:bg-interactive/50",
+                      "focus-visible:bg-interactive/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring",
+                      active && "bg-muted/40",
+                    )}
+                    onClick={select}
+                    onKeyDown={(event) => {
+                      if (
+                        event.target !== event.currentTarget ||
+                        (event.key !== "Enter" && event.key !== " ")
+                      ) {
+                        return;
+                      }
+                      event.preventDefault();
+                      select();
+                    }}
                     data-state={active ? "selected" : undefined}
                   >
                     <TableCell className="font-mono text-label text-muted-foreground">
@@ -184,8 +300,8 @@ export const RunExecutionsPanel = ({
                     <TableCell className="text-label text-muted-foreground">
                       {formatDateTime(execution.startedAt ?? execution.createdAt)}
                     </TableCell>
-                    <TableCell className="font-mono text-label text-muted-foreground">
-                      {formatDuration(execution.startedAt, execution.finishedAt) ?? "—"}
+                    <TableCell>
+                      <AttemptBar execution={execution} window={attemptSpan} />
                     </TableCell>
                     <TableCell className="font-mono text-label text-muted-foreground">
                       {backendOf(execution)}
@@ -198,7 +314,7 @@ export const RunExecutionsPanel = ({
         </section>
 
         {!selected ? (
-          <section className="border-t border-border py-10">
+          <section className="border-t border-border py-8">
             <EmptyState
               title="Select an execution"
               description="Execution details, outputs, environment, and plugin tools require an explicit physical attempt."
@@ -208,96 +324,51 @@ export const RunExecutionsPanel = ({
           <>
             <section className="space-y-3">
               <div className="flex items-baseline justify-between gap-2">
-                <h3 className="text-body-lg font-medium text-foreground">
+                <h2 className="text-body-lg font-medium text-foreground">
                   Execution #{selectedIndex + 1}
-                </h3>
+                </h2>
                 <div className="flex items-center gap-1">
                   <CopyButton value={selected.executionId} label="execution ID" />
                   {workflow && onOpenWorkflow && (
                     <WorkbenchIconAction label="Open workflow definition" onClick={onOpenWorkflow}>
-                      <Network className="h-3.5 w-3.5" />
+                      <Network className="size-3.5" />
                     </WorkbenchIconAction>
                   )}
                 </div>
               </div>
-              <Table>
-                <TableBody>
-                  <TableRow>
-                    <TableCell className="w-40 text-label text-muted-foreground">State</TableCell>
-                    <TableCell>
-                      <RunStatusBadge status={selected.status} size="sm" />
-                    </TableCell>
-                  </TableRow>
-                  <TableRow>
-                    <TableCell className="text-label text-muted-foreground">Mode</TableCell>
-                    <TableCell className="font-mono text-label">{selected.mode}</TableCell>
-                  </TableRow>
-                  <TableRow>
-                    <TableCell className="text-label text-muted-foreground">Created</TableCell>
-                    <TableCell className="font-mono text-label">
-                      {formatDateTime(selected.createdAt)}
-                    </TableCell>
-                  </TableRow>
-                  <TableRow>
-                    <TableCell className="text-label text-muted-foreground">Start</TableCell>
-                    <TableCell className="font-mono text-label">
-                      {selected.startedAt ? formatDateTime(selected.startedAt) : "—"}
-                    </TableCell>
-                  </TableRow>
-                  <TableRow>
-                    <TableCell className="text-label text-muted-foreground">End</TableCell>
-                    <TableCell className="font-mono text-label">
-                      {selected.finishedAt ? formatDateTime(selected.finishedAt) : "—"}
-                    </TableCell>
-                  </TableRow>
-                  <TableRow>
-                    <TableCell className="text-label text-muted-foreground">Backend</TableCell>
-                    <TableCell className="font-mono text-label">{backendOf(selected)}</TableCell>
-                  </TableRow>
-                  {selected.basedOnExecutionId && (
-                    <TableRow>
-                      <TableCell className="text-label text-muted-foreground">Based on</TableCell>
-                      <TableCell className="font-mono text-label">
-                        {selected.basedOnExecutionId}
-                      </TableCell>
-                    </TableRow>
-                  )}
-                  {selected.checkpointArtifactId && (
-                    <TableRow>
-                      <TableCell className="text-label text-muted-foreground">Checkpoint</TableCell>
-                      <TableCell className="font-mono text-label">
-                        {selected.checkpointArtifactId}
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </TableBody>
-              </Table>
+              <PropertyRows
+                entries={[
+                  { label: "State", value: <RunStatusBadge status={selected.status} size="sm" /> },
+                  { label: "Mode", value: selected.mode },
+                  { label: "Created", value: formatDateTime(selected.createdAt) },
+                  {
+                    label: "Start",
+                    value: selected.startedAt ? formatDateTime(selected.startedAt) : "—",
+                  },
+                  {
+                    label: "End",
+                    value: selected.finishedAt ? formatDateTime(selected.finishedAt) : "—",
+                  },
+                  { label: "Backend", value: backendOf(selected) },
+                  ...(selected.basedOnExecutionId
+                    ? [{ label: "Based on", value: selected.basedOnExecutionId }]
+                    : []),
+                  ...(selected.checkpointArtifactId
+                    ? [{ label: "Checkpoint", value: selected.checkpointArtifactId }]
+                    : []),
+                ]}
+              />
             </section>
 
             {row && columns.length > 0 && (
               <section className="space-y-3">
-                <h3 className="text-body-lg font-medium text-foreground">Executor</h3>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      {columns.map((column) => (
-                        <TableHead key={column.id}>{column.header}</TableHead>
-                      ))}
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    <TableRow>
-                      {columns.map((column) => {
-                        const Cell = column.Cell;
-                        return (
-                          <TableCell key={column.id}>
-                            <Cell execution={row} />
-                          </TableCell>
-                        );
-                      })}
-                    </TableRow>
-                  </TableBody>
-                </Table>
+                <h2 className="text-body-lg font-medium text-foreground">Executor</h2>
+                <PropertyRows
+                  entries={columns.map((column) => {
+                    const Cell = column.Cell;
+                    return { label: column.header, value: <Cell execution={row} /> };
+                  })}
+                />
               </section>
             )}
 
@@ -306,14 +377,14 @@ export const RunExecutionsPanel = ({
                 const Detail = detail.Component;
                 return (
                   <section key={detail.id} className="space-y-3">
-                    <h3 className="text-body-lg font-medium text-foreground">{detail.title}</h3>
+                    <h2 className="text-body-lg font-medium text-foreground">{detail.title}</h2>
                     <Detail execution={row} runId={run.id} />
                   </section>
                 );
               })}
 
             <section className="space-y-3">
-              <h3 className="text-body-lg font-medium text-foreground">Outputs</h3>
+              <h2 className="text-body-lg font-medium text-foreground">Outputs</h2>
               <RunExecutionOutputs
                 outputs={outputs}
                 error={logsError}
@@ -326,11 +397,11 @@ export const RunExecutionsPanel = ({
             </section>
 
             <section className="space-y-3">
-              <h3 className="text-body-lg font-medium text-foreground">Observed workflow</h3>
+              <h2 className="text-body-lg font-medium text-foreground">Observed workflow</h2>
               {failedTasks.length > 0 && (
                 <div className="border-y border-status-failed/25 bg-status-failed-soft px-3 py-3 text-label text-status-failed-foreground">
                   <div className="flex flex-wrap items-center gap-2">
-                    <AlertTriangle className="h-3.5 w-3.5" />
+                    <AlertTriangle className="size-icon-sm" />
                     Failed at
                     {failedTasks.map((task) => (
                       <WorkbenchAction
@@ -354,12 +425,25 @@ export const RunExecutionsPanel = ({
                     onNodeClick={(taskId) => onInspectTask(taskId, run.id)}
                   />
                 </div>
+              ) : graphError ? (
+                <WorkbenchOperationState
+                  kind="error"
+                  density="compact"
+                  title="Could not load the observed workflow"
+                  detail={graphError}
+                />
+              ) : graphLoading ? (
+                <WorkbenchOperationState
+                  kind="loading"
+                  density="compact"
+                  title="Loading observed workflow…"
+                  skeletonRows={3}
+                />
               ) : (
                 <p className="py-6 text-label text-muted-foreground">
                   No observed workflow snapshot for this execution.
                 </p>
               )}
-              {graphError && <p className="text-label text-destructive">{graphError}</p>}
             </section>
           </>
         )}

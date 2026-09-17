@@ -29,12 +29,12 @@ export const WorkflowsPage = ({ snapshot, onRefresh }: WorkflowsPageProps): JSX.
 
   const newWorkflowButton = (
     <WorkbenchIconAction label="New workflow" onClick={() => setCreateOpen(true)}>
-      <Plus className="h-3.5 w-3.5" />
+      <Plus className="size-3.5" />
     </WorkbenchIconAction>
   );
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
       <EntityHeader icon={WorkflowIcon} title="Workflows" actions={newWorkflowButton} />
       <CreateWorkflowDialog
         projects={snapshot.projects}
@@ -70,7 +70,7 @@ export const WorkflowsPage = ({ snapshot, onRefresh }: WorkflowsPageProps): JSX.
                       })
                     }
                   >
-                    <WorkflowIcon className="mt-1 h-4 w-4 flex-none text-muted-foreground" />
+                    <WorkflowIcon className="mt-1 size-icon flex-none text-muted-foreground" />
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
                         <span className="truncate text-body font-medium text-foreground">

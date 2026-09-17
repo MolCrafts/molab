@@ -11,7 +11,7 @@ export const ActivityExplorer = ({
     title="Activity"
     actions={
       <WorkbenchIconAction label="Refresh activity" kind="ghost" onClick={onRefresh}>
-        <RefreshCw className="h-4 w-4" />
+        <RefreshCw className="size-4" />
       </WorkbenchIconAction>
     }
   >

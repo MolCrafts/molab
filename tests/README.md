@@ -8,12 +8,19 @@ obey this contract; a PR that violates it gets the test deleted, not merged.
 **A behavior is tested exactly once, in the layer that owns it.**
 
 The layer DAG (`CLAUDE.md`) decides ownership: run semantics → `test_workspace`,
-graph execution → `test_workflow`, LLM loops/sessions → `test_agent`, pipeline
-orchestration → `test_harness`, shared application verbs → `test_services`.
+graph execution → `test_workflow`, shared application verbs → `test_services`.
 `test_server` and `test_cli` test **shells only**: route registration, status-code
 domains, request validation/aliases, wire shapes, flag parsing, exit codes —
 never domain outcomes (those are already owned below; CLI and server share one
 services code path by law, so re-asserting the outcome twice tests nothing).
+
+**The harness is not tested here.** It is a consumer of molab, not a layer
+inside it, and owns its own suite; the boundary between them is guarded by
+`test_import_direction.py`, which fails the build if molab imports the harness
+or loses a capability when the harness is absent. The former `test_agent` and
+`test_harness` suites were deleted for rewrite — the invariants they were the
+only holders of are listed in
+`.claude/notes/harness-invariants-to-restore.md`.
 
 ## Always keep
 

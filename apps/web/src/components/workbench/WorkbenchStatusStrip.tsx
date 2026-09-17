@@ -115,7 +115,7 @@ function ProgressTrack({
 
   return (
     <div
-      className="relative h-1 min-w-[5.5rem] max-w-[12rem] flex-1 overflow-hidden rounded-full bg-statusbar-foreground/25 sm:min-w-[8rem]"
+      className="relative h-1 min-w-22 max-w-48 flex-1 overflow-hidden rounded-full bg-statusbar-foreground/25 sm:min-w-32"
       role="progressbar"
       aria-valuenow={clamped !== undefined ? Math.round(clamped) : undefined}
       aria-valuemin={0}
@@ -393,7 +393,7 @@ export const WorkbenchStatusStrip = ({
             <div className="flex min-w-0 items-center gap-2">
               <WorkspaceIcon
                 className={cn(
-                  "h-3.5 w-3.5 flex-none",
+                  "size-icon-sm flex-none",
                   unreachable
                     ? "text-status-failed-foreground"
                     : activeWorkspace?.isRemote
@@ -419,7 +419,7 @@ export const WorkbenchStatusStrip = ({
                     onReconnect();
                   }}
                 >
-                  <RefreshCw className="h-3.5 w-3.5" aria-hidden />
+                  <RefreshCw className="size-icon-sm" aria-hidden />
                 </WorkbenchIconAction>
               ) : null}
             </div>
@@ -440,7 +440,7 @@ export const WorkbenchStatusStrip = ({
             key={activity.pulse}
             className="flex min-w-0 max-w-[55%] items-center gap-1 overflow-hidden sm:max-w-[60%]"
           >
-            <div className="flex min-w-0 items-center gap-1.5 overflow-hidden" title={lineText}>
+            <div className="flex min-w-0 items-center gap-2 overflow-hidden" title={lineText}>
               <ActivityIcon type={lineType} progress={lineProgress} />
               <span className={cn("min-w-0 truncate leading-none", activityTextClass(lineType))}>
                 {lineText}
@@ -464,7 +464,7 @@ export const WorkbenchStatusStrip = ({
                   ? `remote-${cacheStatus?.phase}`
                   : "syncing"
             }
-            className="flex min-w-0 max-w-[55%] items-center gap-1.5 overflow-hidden sm:max-w-[60%]"
+            className="flex min-w-0 max-w-[55%] items-center gap-2 overflow-hidden sm:max-w-[60%]"
             title={lineText}
           >
             <ActivityIcon type={lineType} progress={lineProgress} running={loading} />

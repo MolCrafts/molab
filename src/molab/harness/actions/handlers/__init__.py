@@ -1,0 +1,26 @@
+"""Concrete :class:`ChangeActionHandler`s for guarded execution.
+
+Slice 02 ships the curation handlers (``asset_move`` / ``artifact_delete``) over
+:mod:`molab.workspace.curation`. Later slices register more handlers (run
+lifecycle, workflow/param change) onto the same slice-01 registry.
+"""
+
+from __future__ import annotations
+
+from molab.harness.actions.handlers.curation import (
+    ArtifactDeleteHandler,
+    AssetMoveHandler,
+    register_curation_handlers,
+)
+from molab.harness.actions.handlers.lifecycle import (
+    RunLifecycleHandler,
+    register_lifecycle_handlers,
+)
+
+__all__ = [
+    "ArtifactDeleteHandler",
+    "AssetMoveHandler",
+    "RunLifecycleHandler",
+    "register_curation_handlers",
+    "register_lifecycle_handlers",
+]

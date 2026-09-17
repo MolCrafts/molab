@@ -86,7 +86,7 @@ export const RemoteConnectDialog = ({
         </DialogDescription>
 
         {/* VS Code quick-input: muted prompt line + single field */}
-        <div className="border-b border-border/80 bg-muted/40 px-3 py-1.5">
+        <div className="border-b border-border/80 bg-muted/40 px-3 py-row-pad">
           <p className="truncate font-mono text-micro text-muted-foreground">
             {host}
             <span className="text-foreground/50"> · code</span>
@@ -127,7 +127,7 @@ export const RemoteConnectDialog = ({
           />
           {busy ? (
             <Loader2
-              className="mol-motion-progress-spin pointer-events-none absolute right-3 h-3.5 w-3.5 text-muted-foreground"
+              className="mol-motion-progress-spin pointer-events-none absolute right-3 size-icon-sm text-muted-foreground"
               aria-hidden
             />
           ) : null}
@@ -136,7 +136,7 @@ export const RemoteConnectDialog = ({
         {hint ? (
           <p
             id={`${inputId}-hint`}
-            className="border-t border-border/60 px-3 py-1.5 font-mono text-micro text-muted-foreground"
+            className="border-t border-border/60 px-3 py-row-pad font-mono text-micro text-muted-foreground"
           >
             {hint}
           </p>

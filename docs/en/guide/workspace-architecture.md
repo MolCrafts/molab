@@ -1,6 +1,6 @@
 # Workspace Architecture
 
-MolExp organizes experiments in a four-tier hierarchy:
+Molab organizes experiments in a four-tier hierarchy:
 
 ```
 Workspace
@@ -11,7 +11,7 @@ Workspace
 
 Every persistent byproduct — imported data, task artifacts, logs, checkpoints, error traces, workflow execution state — is a typed `Asset` subclass recorded in a per-scope `assets.json` manifest. Those manifests are authoritative and are what asset queries scan directly — there is no derived asset index beside them. Every metadata write is atomic (temp-file + `os.rename`), so a crash never leaves a half-written JSON file.
 
-Workspace is the bottom of the molexp dependency DAG. It owns filesystem layout, atomic JSON, content-addressed assets, and generic per-kind subsystem storage — and **does not know about workflows, sessions, agents, or LLMs**. Upstream layers (workflow, agent) reach *down* into workspace's public surface; the inverse is forbidden by the import-guard test.
+Workspace is the bottom of the molab dependency DAG. It owns filesystem layout, atomic JSON, content-addressed assets, and generic per-kind subsystem storage — and **does not know about workflows, sessions, agents, or LLMs**. Upstream layers (workflow, agent) reach *down* into workspace's public surface; the inverse is forbidden by the import-guard test.
 
 ## Hierarchy Levels
 
@@ -31,14 +31,14 @@ Scientific workflows tend to run the same pipeline many times with different par
 - **Experiment** is the *definition* — parameters, replica count, seeds, optional advisory `workflow_source` / `workflow_type` strings used by the UI for grouping.
 - **Run** is a *realization* — one execution, one set of concrete parameter values, one outcome.
 
-Each `Run` captures reproducibility metadata: an opaque `workflow_snapshot` payload (the canonical typed shape lives in `molexp.workflow.WorkflowSnapshotRef`; workspace stores it as a JSON `dict`), the resolved molcfg profile, a `config_hash`, execution history, error info, and produced artifacts.
+Each `Run` captures reproducibility metadata: an opaque `workflow_snapshot` payload (the canonical typed shape lives in `molab.workflow.WorkflowSnapshotRef`; workspace stores it as a JSON `dict`), the resolved molcfg profile, a `config_hash`, execution history, error info, and produced artifacts.
 
 ## Creating a Hierarchy
 
 The hierarchy is created from the top down, but not every step has identical identity rules. `ws.add_project(...)` and `project.add_experiment(...)` are create-or-get operations keyed by slug or explicit id, so repeated calls can load existing objects from disk (the bare-noun spellings `ws.project(...)` / `project.experiment(...)` are strict getters that raise when the node is absent). `exp.add_run(...)` is different: it creates a fresh run unless you provide an explicit `id`, in which case it becomes a get-or-load operation for that concrete run directory. Runs seeded by `exp.define(workflow, params=...)` derive their ids from their parameters, so the sweep declaration is idempotent.
 
 ```python
-import molexp as me
+import molab as me
 
 ws = me.Workspace("./lab", name="lab")                    # lightweight object; no files yet
 project = ws.add_project("MD Simulations")                # materializes workspace.json and project.json
@@ -61,7 +61,7 @@ Re-calling `add_project` / `add_experiment` with the same name or id returns the
 Workspace itself stores no workflow-shaped types. The association is declared through `Experiment.define(workflow, params=...)`, which records the workflow's graph IR on the experiment and binds the live `CompiledWorkflow` in the workflow layer's `default_binding_registry`:
 
 ```python
-from molexp.workflow import Task, TaskContext, Workflow, WorkflowCompiler, WorkflowRuntime
+from molab.workflow import Task, TaskContext, Workflow, WorkflowCompiler, WorkflowRuntime
 
 
 class TrainTask(Task):
@@ -78,14 +78,14 @@ with run.start() as ctx:
     result = await WorkflowRuntime().execute(compiled, run_context=ctx)
 ```
 
-This decoupling came out of the 2026-05-09 rectification: workspace stays a storage primitive, workflow stays a graph engine, and the cross-layer seam (`molexp.entry`) wires `Experiment.define` to the binding registry without workspace ever importing the workflow layer.
+This decoupling came out of the 2026-05-09 rectification: workspace stays a storage primitive, workflow stays a graph engine, and the cross-layer seam (`molab.entry`) wires `Experiment.define` to the binding registry without workspace ever importing the workflow layer.
 
 ## Parameter Combinations
 
 `GridSpace` and `UniformSpace` generate parameter combinations. `Experiment.define(workflow, params=...)` accepts a space (or a plain `{axis: [values]}` grid mapping) directly and materializes one content-addressed `Run` per cell:
 
 ```python
-from molexp import GridSpace
+from molab import GridSpace
 
 grid = GridSpace({"T": [300, 310, 320], "force_field": ["amber", "charmm"]})
 
@@ -98,7 +98,7 @@ print(len(sweep.list_runs()))  # 6 — one per grid cell
 ## Executing a Run
 
 ```python
-from molexp.workspace.domain import ExecutionMode
+from molab.workspace.domain import ExecutionMode
 
 with run.start(mode=ExecutionMode.RERUN) as ctx:
     result = await WorkflowRuntime().execute(compiled, run_context=ctx)
@@ -141,14 +141,14 @@ with run.start(mode=ExecutionMode.RERUN) as ctx:
 The same hierarchy is exposed through the CLI:
 
 ```bash
-molexp project   create|list|info
-molexp experiment create|list
-molexp runs      create|list|info|cancel|prune
-molexp asset     list
-molexp info      # show workspace summary
+molab project   create|list|info
+molab experiment create|list
+molab runs      create|list|info|cancel|prune
+molab asset     list
+molab info      # show workspace summary
 ```
 
-`molexp runs prune` interactively walks the project → experiment → run → execution tree and lets you delete per-execution records (removes `executions/<exec_id>/` and rewrites `run.execution_history`).
+`molab runs prune` interactively walks the project → experiment → run → execution tree and lets you delete per-execution records (removes `executions/<exec_id>/` and rewrites `run.execution_history`).
 
 ## Directory Layout
 

@@ -1,6 +1,6 @@
 # Run Profiles and Reproducible CLI Execution
 
-One `molexp` script usually needs more than one execution shape. You may want a fast smoke run for local iteration, a conservative default for everyday work, and a heavier configuration for production or cluster submission. `molcfg` exists so those variants stay in data instead of leaking into ad-hoc flags or duplicated scripts.
+One `molab` script usually needs more than one execution shape. You may want a fast smoke run for local iteration, a conservative default for everyday work, and a heavier configuration for production or cluster submission. `molcfg` exists so those variants stay in data instead of leaking into ad-hoc flags or duplicated scripts.
 
 The framework treats a profile as opaque user data. It loads a config file, resolves one named profile, injects the merged mapping as the run's build-time config, and records the chosen profile on the run. The framework does not assign special meaning to keys like `epochs`, `dataset`, or `skip_heavy_compute`; task code reads those fields explicitly, by declaring them as parameters.
 
@@ -39,7 +39,7 @@ This arrangement keeps one script responsible for workflow structure while the c
 Once a profile has been selected, its merged mapping becomes the run's build-time config. A task declares the fields it needs as named parameters; the engine binds each one by name (dynamic inputs — upstream outputs and run params — win over config), and any field a task does not declare is simply left unbound.
 
 ```python
-from molexp.workflow import Task, TaskContext
+from molab.workflow import Task, TaskContext
 
 
 class Train(Task):
@@ -60,47 +60,47 @@ class Train(Task):
         return train_model(data, epochs=epochs, lr=lr)
 ```
 
-The important design choice is that the task decides what those fields mean. `molexp` does not translate `dry-run` into special runtime behavior, and it does not reserve names for particular semantics. If your workflow wants `skip_heavy_compute`, you add it to the profile and declare a matching parameter to read it.
+The important design choice is that the task decides what those fields mean. `molab` does not translate `dry-run` into special runtime behavior, and it does not reserve names for particular semantics. If your workflow wants `skip_heavy_compute`, you add it to the profile and declare a matching parameter to read it.
 
 Even when no profile is selected, the run still carries a config — in that case just the defaults, possibly empty. Any field the config does not provide falls back to its parameter's declared default, which is why every optional field should declare one.
 
 ## The CLI Selects, Refines, and Replays a Profile
 
-The usual entry point is `molexp run SCRIPT`. If you do not pass `--config`, the command looks in the current working directory for `molcfg.yaml`, `molcfg.yml`, or `molcfg.json`. If no config file is found and no profile is requested, execution still works with an empty config. If you ask for `--profile` without a config file, the command aborts.
+The usual entry point is `molab run SCRIPT`. If you do not pass `--config`, the command looks in the current working directory for `molcfg.yaml`, `molcfg.yml`, or `molcfg.json`. If no config file is found and no profile is requested, execution still works with an empty config. If you ask for `--profile` without a config file, the command aborts.
 
 ```bash
 # Defaults only
-molexp run train.py
+molab run train.py
 
 # Explicit config file + named profile
-molexp run train.py --config molcfg.yaml --profile smoke
+molab run train.py --config molcfg.yaml --profile smoke
 
 # Use the implicit config in the current working directory
-molexp run train.py --profile dry-run
+molab run train.py --profile dry-run
 ```
 
-Profile names normalize dashes to underscores when `molexp` stores them. That means `--profile dry-run` and a YAML key named `dry_run` resolve to the same stored profile name, `dry_run`.
+Profile names normalize dashes to underscores when `molab` stores them. That means `--profile dry-run` and a YAML key named `dry_run` resolve to the same stored profile name, `dry_run`.
 
 Once a profile has been resolved, `--override` lets you patch individual values without editing the file. Overrides are applied after profile resolution, they accept `KEY=VALUE`, and dot notation works for nested mappings.
 
 ```bash
-molexp run train.py --profile smoke --override optimizer.lr=0.0005
-molexp run train.py --profile smoke --override epochs=5 --override batch_size=16
+molab run train.py --profile smoke --override optimizer.lr=0.0005
+molab run train.py --profile smoke --override epochs=5 --override batch_size=16
 ```
 
 Values are coerced from strings into `bool`, `int`, `float`, or `str`, in that order. This makes one-off exploratory runs cheap while keeping the canonical configuration in versioned files.
 
-`--resume` is scoped to the selected profile. A resumed run is eligible only when its persisted profile matches the one requested on the CLI and its status is `failed` or `cancelled` — `pending` runs belong to plain `molexp run`, `succeeded` runs are done, and a live `running` run must be cancelled first.
+`--resume` is scoped to the selected profile. A resumed run is eligible only when its persisted profile matches the one requested on the CLI and its status is `failed` or `cancelled` — `pending` runs belong to plain `molab run`, `succeeded` runs are done, and a live `running` run must be cancelled first.
 
 ```bash
-molexp run train.py --profile smoke --resume
+molab run train.py --profile smoke --resume
 ```
 
 That behavior is deliberate. Resume is meant to continue one execution stream, not to reinterpret an old run under a new profile. The sibling verb `--rerun` (same `failed`/`cancelled` domain, fresh execution from the top, optionally `--fresh` to bypass cache reads) is covered in [Workflow Persistence](workflow-persistence.md#rerun-resume-and-the-cache).
 
 ## Run Metadata Preserves the Chosen Profile
 
-Before execution begins, `molexp run` writes profile information into the run metadata. The run stores the normalized profile name, the fully merged config payload, and a deterministic content hash of that payload.
+Before execution begins, `molab run` writes profile information into the run metadata. The run stores the normalized profile name, the fully merged config payload, and a deterministic content hash of that payload.
 
 ```json
 {
@@ -117,18 +117,18 @@ Before execution begins, `molexp run` writes profile information into the run me
 
 This matters for two reasons. First, different profiles of the same experiment become distinct run identities instead of colliding in the same run directory. Second, replay and debugging stay grounded in real metadata: you can inspect `run.json`, recover the exact merged config, and understand which execution slice produced the artifacts on disk.
 
-That same persisted metadata feeds other user-visible behaviors. The run monitor can distinguish profiles, replay tooling can reconstruct the chosen config, and task code running under `molexp execute RUN_DIR` binds its parameters from the same config payload the original run used.
+That same persisted metadata feeds other user-visible behaviors. The run monitor can distinguish profiles, replay tooling can reconstruct the chosen config, and task code running under `molab execute RUN_DIR` binds its parameters from the same config payload the original run used.
 
 ## One Script Can Cover Local Iteration and Cluster Submission
 
-Profiles become more valuable when the same script moves across environments. A local smoke run and a cluster run usually differ in batch size, epoch count, or other task-level settings, but the workflow topology often stays identical. `molexp` lets the config file hold that distinction while the backend flags stay focused on transport.
+Profiles become more valuable when the same script moves across environments. A local smoke run and a cluster run usually differ in batch size, epoch count, or other task-level settings, but the workflow topology often stays identical. `molab` lets the config file hold that distinction while the backend flags stay focused on transport.
 
 ```bash
 # Quick local iteration
-molexp run train.py --profile smoke
+molab run train.py --profile smoke
 
 # Production-like cluster submission
-molexp run train.py --profile production --scheduler slurm --partition gpu --gpus 1 --cpus 8
+molab run train.py --profile production --scheduler slurm --partition gpu --gpus 1 --cpus 8
 ```
 
 The workflow remains one source file, the profile remains one named config slice, and the scheduler flags remain a separate concern. That separation keeps the authoring model stable even as the execution target changes.
@@ -139,4 +139,4 @@ If you want the end-to-end authoring path, continue with the [Quick Start](../ge
 
 ## Runnable Example
 
-`examples/operations/run_profiles/` ships a `train.py` and a matching `molcfg.yaml` defining `smoke`, `dry-run`, and `large-batch`. Invoke it through the CLI, e.g. `molexp run examples/operations/run_profiles/train.py --profile smoke`.
+`examples/operations/run_profiles/` ships a `train.py` and a matching `molcfg.yaml` defining `smoke`, `dry-run`, and `large-batch`. Invoke it through the CLI, e.g. `molab run examples/operations/run_profiles/train.py --profile smoke`.

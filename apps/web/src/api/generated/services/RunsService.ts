@@ -24,14 +24,14 @@ export class RunsService {
      * List Runs
      * @param projectId
      * @param experimentId
-     * @param molexpSession
+     * @param molabSession
      * @returns RunResponse Successful Response
      * @throws ApiError
      */
     public static listRuns(
         projectId: string,
         experimentId: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<Array<RunResponse>> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -41,7 +41,7 @@ export class RunsService {
                 'experiment_id': experimentId,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -53,7 +53,7 @@ export class RunsService {
      * @param projectId
      * @param experimentId
      * @param requestBody
-     * @param molexpSession
+     * @param molabSession
      * @returns RunResponse Successful Response
      * @throws ApiError
      */
@@ -61,7 +61,7 @@ export class RunsService {
         projectId: string,
         experimentId: string,
         requestBody: RunCreateRequest,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<RunResponse> {
         return __request(OpenAPI, {
             method: 'POST',
@@ -71,7 +71,7 @@ export class RunsService {
                 'experiment_id': experimentId,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -85,7 +85,7 @@ export class RunsService {
      * @param projectId
      * @param experimentId
      * @param runId
-     * @param molexpSession
+     * @param molabSession
      * @returns RunResponse Successful Response
      * @throws ApiError
      */
@@ -93,7 +93,7 @@ export class RunsService {
         projectId: string,
         experimentId: string,
         runId: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<RunResponse> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -104,7 +104,7 @@ export class RunsService {
                 'run_id': runId,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -118,7 +118,7 @@ export class RunsService {
      * @param experimentId
      * @param runId
      * @param requestBody
-     * @param molexpSession
+     * @param molabSession
      * @returns ExecutionResponse Successful Response
      * @throws ApiError
      */
@@ -127,7 +127,7 @@ export class RunsService {
         experimentId: string,
         runId: string,
         requestBody: ExecutionAttemptCreateRequest,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<ExecutionResponse> {
         return __request(OpenAPI, {
             method: 'POST',
@@ -138,7 +138,7 @@ export class RunsService {
                 'run_id': runId,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -157,7 +157,7 @@ export class RunsService {
      * @param projectId
      * @param experimentId
      * @param runId
-     * @param molexpSession
+     * @param molabSession
      * @returns ExecutionResponse Successful Response
      * @throws ApiError
      */
@@ -165,7 +165,7 @@ export class RunsService {
         projectId: string,
         experimentId: string,
         runId: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<Array<ExecutionResponse>> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -176,7 +176,7 @@ export class RunsService {
                 'run_id': runId,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -189,7 +189,7 @@ export class RunsService {
      * @param experimentId
      * @param runId
      * @param executionId
-     * @param molexpSession
+     * @param molabSession
      * @returns ExecutionResponse Successful Response
      * @throws ApiError
      */
@@ -198,7 +198,7 @@ export class RunsService {
         experimentId: string,
         runId: string,
         executionId: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<ExecutionResponse> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -210,7 +210,7 @@ export class RunsService {
                 'execution_id': executionId,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -224,7 +224,7 @@ export class RunsService {
      * @param experimentId
      * @param runId
      * @param executionId
-     * @param molexpSession
+     * @param molabSession
      * @returns ExecutionOutputsResponse Successful Response
      * @throws ApiError
      */
@@ -233,7 +233,7 @@ export class RunsService {
         experimentId: string,
         runId: string,
         executionId: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<ExecutionOutputsResponse> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -245,7 +245,7 @@ export class RunsService {
                 'execution_id': executionId,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -260,7 +260,7 @@ export class RunsService {
      * @param executionId
      * @param artifactId
      * @param requestBody
-     * @param molexpSession
+     * @param molabSession
      * @returns ArtifactPromotionResponse Successful Response
      * @throws ApiError
      */
@@ -271,7 +271,7 @@ export class RunsService {
         executionId: string,
         artifactId: string,
         requestBody: ArtifactPromoteRequest,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<ArtifactPromotionResponse> {
         return __request(OpenAPI, {
             method: 'POST',
@@ -284,7 +284,7 @@ export class RunsService {
                 'artifact_id': artifactId,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -301,7 +301,7 @@ export class RunsService {
      * @param runId
      * @param executionId
      * @param artifactId
-     * @param molexpSession
+     * @param molabSession
      * @returns any Successful Response
      * @throws ApiError
      */
@@ -311,7 +311,7 @@ export class RunsService {
         runId: string,
         executionId: string,
         artifactId: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<any> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -324,7 +324,7 @@ export class RunsService {
                 'artifact_id': artifactId,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -338,7 +338,7 @@ export class RunsService {
      * @param experimentId
      * @param runId
      * @param executionId
-     * @param molexpSession
+     * @param molabSession
      * @returns RunLogsResponse Successful Response
      * @throws ApiError
      */
@@ -347,7 +347,7 @@ export class RunsService {
         experimentId: string,
         runId: string,
         executionId: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<RunLogsResponse> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -359,7 +359,7 @@ export class RunsService {
                 'execution_id': executionId,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -377,7 +377,7 @@ export class RunsService {
      * @param runId
      * @param executionId
      * @param path Relative path under the Execution directory
-     * @param molexpSession
+     * @param molabSession
      * @returns RunFileTextResponse Successful Response
      * @throws ApiError
      */
@@ -387,7 +387,7 @@ export class RunsService {
         runId: string,
         executionId: string,
         path: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<RunFileTextResponse> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -399,7 +399,7 @@ export class RunsService {
                 'execution_id': executionId,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             query: {
                 'path': path,
@@ -416,7 +416,7 @@ export class RunsService {
      * @param experimentId
      * @param runId
      * @param executionId
-     * @param molexpSession
+     * @param molabSession
      * @returns RunExecutionResponse Successful Response
      * @throws ApiError
      */
@@ -425,7 +425,7 @@ export class RunsService {
         experimentId: string,
         runId: string,
         executionId: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<RunExecutionResponse> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -437,7 +437,7 @@ export class RunsService {
                 'execution_id': executionId,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -448,7 +448,7 @@ export class RunsService {
      * Get Run Files
      * Return the on-disk file tree for a run, enriched with catalog metadata.
      *
-     * Uses the **same** :func:`~molexp.workspace.fs_tree.list_tree_children` walk
+     * Uses the **same** :func:`~molab.workspace.fs_tree.list_tree_children` walk
      * as workspace file listing (via ``workspace.fs``) so remote workspaces
      * activate plugins the same way as local ones. Catalog enrichment is
      * best-effort for local asset scans only.
@@ -456,7 +456,7 @@ export class RunsService {
      * @param experimentId
      * @param runId
      * @param executionId
-     * @param molexpSession
+     * @param molabSession
      * @returns RunFilesResponse Successful Response
      * @throws ApiError
      */
@@ -465,7 +465,7 @@ export class RunsService {
         experimentId: string,
         runId: string,
         executionId: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<RunFilesResponse> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -477,7 +477,7 @@ export class RunsService {
                 'execution_id': executionId,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -491,7 +491,7 @@ export class RunsService {
      * @param experimentId
      * @param runId
      * @param executionId
-     * @param molexpSession
+     * @param molabSession
      * @returns ExecutionResponse Successful Response
      * @throws ApiError
      */
@@ -500,7 +500,7 @@ export class RunsService {
         experimentId: string,
         runId: string,
         executionId: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<ExecutionResponse> {
         return __request(OpenAPI, {
             method: 'POST',
@@ -512,7 +512,7 @@ export class RunsService {
                 'execution_id': executionId,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -525,7 +525,7 @@ export class RunsService {
      * @param projectId
      * @param experimentId
      * @param runId
-     * @param molexpSession
+     * @param molabSession
      * @returns any Successful Response
      * @throws ApiError
      */
@@ -533,7 +533,7 @@ export class RunsService {
         projectId: string,
         experimentId: string,
         runId: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<any> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -544,7 +544,7 @@ export class RunsService {
                 'run_id': runId,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -558,7 +558,7 @@ export class RunsService {
      * @param experimentId
      * @param runId
      * @param requestBody
-     * @param molexpSession
+     * @param molabSession
      * @returns string Successful Response
      * @throws ApiError
      */
@@ -567,7 +567,7 @@ export class RunsService {
         experimentId: string,
         runId: string,
         requestBody: RunHarvestRequest,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<Record<string, string>> {
         return __request(OpenAPI, {
             method: 'POST',
@@ -578,7 +578,7 @@ export class RunsService {
                 'run_id': runId,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -591,14 +591,14 @@ export class RunsService {
      * Ingest Run Metrics
      * Ingest foreign logs into the run host metrics surface (additive).
      *
-     * Shares :func:`molexp.plugins.metrics_ingest.ingest_run` with the CLI.
+     * Shares :func:`molab.plugins.metrics_ingest.ingest_run` with the CLI.
      * Skips are returned; the route does not fail the whole call when one
      * converter cannot run.
      * @param projectId
      * @param experimentId
      * @param runId
      * @param executionId
-     * @param molexpSession
+     * @param molabSession
      * @returns any Successful Response
      * @throws ApiError
      */
@@ -607,7 +607,7 @@ export class RunsService {
         experimentId: string,
         runId: string,
         executionId: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<Record<string, any>> {
         return __request(OpenAPI, {
             method: 'POST',
@@ -619,7 +619,7 @@ export class RunsService {
                 'execution_id': executionId,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -630,13 +630,13 @@ export class RunsService {
      * Analyze Run Failure Route
      * Analyze a failed run into a sourced FailureAnalysis KnowledgeItem.
      *
-     * Shares :func:`molexp.services.run_failure.analyze_run_failure` with the CLI
+     * Shares :func:`molab.services.run_failure.analyze_run_failure` with the CLI
      * (close-loop-02). Deterministic narrative when ``narrative`` is omitted.
      * @param projectId
      * @param experimentId
      * @param runId
      * @param requestBody
-     * @param molexpSession
+     * @param molabSession
      * @returns string Successful Response
      * @throws ApiError
      */
@@ -645,7 +645,7 @@ export class RunsService {
         experimentId: string,
         runId: string,
         requestBody: RunAnalyzeFailureRequest,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<Record<string, string>> {
         return __request(OpenAPI, {
             method: 'POST',
@@ -656,7 +656,7 @@ export class RunsService {
                 'run_id': runId,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -673,19 +673,19 @@ export class RunsService {
      * workflow bound, compile and persist the IR before the run is
      * materialized so worker processes can pick it up off disk.
      * @param requestBody
-     * @param molexpSession
+     * @param molabSession
      * @returns RunResponse Successful Response
      * @throws ApiError
      */
     public static createRun(
         requestBody: ExecutionCreateRequest,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<RunResponse> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/runs',
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -699,7 +699,7 @@ export class RunsService {
      * @param projectId
      * @param experimentId
      * @param ws
-     * @param molexpSession
+     * @param molabSession
      * @returns RunResponse Successful Response
      * @throws ApiError
      */
@@ -707,7 +707,7 @@ export class RunsService {
         projectId: string,
         experimentId: string,
         ws: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<Array<RunResponse>> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -718,7 +718,7 @@ export class RunsService {
                 'ws': ws,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -731,7 +731,7 @@ export class RunsService {
      * @param experimentId
      * @param ws
      * @param requestBody
-     * @param molexpSession
+     * @param molabSession
      * @returns RunResponse Successful Response
      * @throws ApiError
      */
@@ -740,7 +740,7 @@ export class RunsService {
         experimentId: string,
         ws: string,
         requestBody: RunCreateRequest,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<RunResponse> {
         return __request(OpenAPI, {
             method: 'POST',
@@ -751,7 +751,7 @@ export class RunsService {
                 'ws': ws,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -766,7 +766,7 @@ export class RunsService {
      * @param experimentId
      * @param runId
      * @param ws
-     * @param molexpSession
+     * @param molabSession
      * @returns RunResponse Successful Response
      * @throws ApiError
      */
@@ -775,7 +775,7 @@ export class RunsService {
         experimentId: string,
         runId: string,
         ws: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<RunResponse> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -787,7 +787,7 @@ export class RunsService {
                 'ws': ws,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -802,7 +802,7 @@ export class RunsService {
      * @param runId
      * @param ws
      * @param requestBody
-     * @param molexpSession
+     * @param molabSession
      * @returns ExecutionResponse Successful Response
      * @throws ApiError
      */
@@ -812,7 +812,7 @@ export class RunsService {
         runId: string,
         ws: string,
         requestBody: ExecutionAttemptCreateRequest,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<ExecutionResponse> {
         return __request(OpenAPI, {
             method: 'POST',
@@ -824,7 +824,7 @@ export class RunsService {
                 'ws': ws,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -844,7 +844,7 @@ export class RunsService {
      * @param experimentId
      * @param runId
      * @param ws
-     * @param molexpSession
+     * @param molabSession
      * @returns ExecutionResponse Successful Response
      * @throws ApiError
      */
@@ -853,7 +853,7 @@ export class RunsService {
         experimentId: string,
         runId: string,
         ws: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<Array<ExecutionResponse>> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -865,7 +865,7 @@ export class RunsService {
                 'ws': ws,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -879,7 +879,7 @@ export class RunsService {
      * @param runId
      * @param executionId
      * @param ws
-     * @param molexpSession
+     * @param molabSession
      * @returns ExecutionResponse Successful Response
      * @throws ApiError
      */
@@ -889,7 +889,7 @@ export class RunsService {
         runId: string,
         executionId: string,
         ws: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<ExecutionResponse> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -902,7 +902,7 @@ export class RunsService {
                 'ws': ws,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -917,7 +917,7 @@ export class RunsService {
      * @param runId
      * @param executionId
      * @param ws
-     * @param molexpSession
+     * @param molabSession
      * @returns ExecutionOutputsResponse Successful Response
      * @throws ApiError
      */
@@ -927,7 +927,7 @@ export class RunsService {
         runId: string,
         executionId: string,
         ws: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<ExecutionOutputsResponse> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -940,7 +940,7 @@ export class RunsService {
                 'ws': ws,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -956,7 +956,7 @@ export class RunsService {
      * @param artifactId
      * @param ws
      * @param requestBody
-     * @param molexpSession
+     * @param molabSession
      * @returns ArtifactPromotionResponse Successful Response
      * @throws ApiError
      */
@@ -968,7 +968,7 @@ export class RunsService {
         artifactId: string,
         ws: string,
         requestBody: ArtifactPromoteRequest,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<ArtifactPromotionResponse> {
         return __request(OpenAPI, {
             method: 'POST',
@@ -982,7 +982,7 @@ export class RunsService {
                 'ws': ws,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -1000,7 +1000,7 @@ export class RunsService {
      * @param executionId
      * @param artifactId
      * @param ws
-     * @param molexpSession
+     * @param molabSession
      * @returns any Successful Response
      * @throws ApiError
      */
@@ -1011,7 +1011,7 @@ export class RunsService {
         executionId: string,
         artifactId: string,
         ws: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<any> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -1025,7 +1025,7 @@ export class RunsService {
                 'ws': ws,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -1040,7 +1040,7 @@ export class RunsService {
      * @param runId
      * @param executionId
      * @param ws
-     * @param molexpSession
+     * @param molabSession
      * @returns RunLogsResponse Successful Response
      * @throws ApiError
      */
@@ -1050,7 +1050,7 @@ export class RunsService {
         runId: string,
         executionId: string,
         ws: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<RunLogsResponse> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -1063,7 +1063,7 @@ export class RunsService {
                 'ws': ws,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -1082,7 +1082,7 @@ export class RunsService {
      * @param executionId
      * @param ws
      * @param path Relative path under the Execution directory
-     * @param molexpSession
+     * @param molabSession
      * @returns RunFileTextResponse Successful Response
      * @throws ApiError
      */
@@ -1093,7 +1093,7 @@ export class RunsService {
         executionId: string,
         ws: string,
         path: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<RunFileTextResponse> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -1106,7 +1106,7 @@ export class RunsService {
                 'ws': ws,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             query: {
                 'path': path,
@@ -1124,7 +1124,7 @@ export class RunsService {
      * @param runId
      * @param executionId
      * @param ws
-     * @param molexpSession
+     * @param molabSession
      * @returns RunExecutionResponse Successful Response
      * @throws ApiError
      */
@@ -1134,7 +1134,7 @@ export class RunsService {
         runId: string,
         executionId: string,
         ws: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<RunExecutionResponse> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -1147,7 +1147,7 @@ export class RunsService {
                 'ws': ws,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -1158,7 +1158,7 @@ export class RunsService {
      * Get Run Files
      * Return the on-disk file tree for a run, enriched with catalog metadata.
      *
-     * Uses the **same** :func:`~molexp.workspace.fs_tree.list_tree_children` walk
+     * Uses the **same** :func:`~molab.workspace.fs_tree.list_tree_children` walk
      * as workspace file listing (via ``workspace.fs``) so remote workspaces
      * activate plugins the same way as local ones. Catalog enrichment is
      * best-effort for local asset scans only.
@@ -1167,7 +1167,7 @@ export class RunsService {
      * @param runId
      * @param executionId
      * @param ws
-     * @param molexpSession
+     * @param molabSession
      * @returns RunFilesResponse Successful Response
      * @throws ApiError
      */
@@ -1177,7 +1177,7 @@ export class RunsService {
         runId: string,
         executionId: string,
         ws: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<RunFilesResponse> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -1190,7 +1190,7 @@ export class RunsService {
                 'ws': ws,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -1205,7 +1205,7 @@ export class RunsService {
      * @param runId
      * @param executionId
      * @param ws
-     * @param molexpSession
+     * @param molabSession
      * @returns ExecutionResponse Successful Response
      * @throws ApiError
      */
@@ -1215,7 +1215,7 @@ export class RunsService {
         runId: string,
         executionId: string,
         ws: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<ExecutionResponse> {
         return __request(OpenAPI, {
             method: 'POST',
@@ -1228,7 +1228,7 @@ export class RunsService {
                 'ws': ws,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -1242,7 +1242,7 @@ export class RunsService {
      * @param experimentId
      * @param runId
      * @param ws
-     * @param molexpSession
+     * @param molabSession
      * @returns any Successful Response
      * @throws ApiError
      */
@@ -1251,7 +1251,7 @@ export class RunsService {
         experimentId: string,
         runId: string,
         ws: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<any> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -1263,7 +1263,7 @@ export class RunsService {
                 'ws': ws,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -1278,7 +1278,7 @@ export class RunsService {
      * @param runId
      * @param ws
      * @param requestBody
-     * @param molexpSession
+     * @param molabSession
      * @returns string Successful Response
      * @throws ApiError
      */
@@ -1288,7 +1288,7 @@ export class RunsService {
         runId: string,
         ws: string,
         requestBody: RunHarvestRequest,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<Record<string, string>> {
         return __request(OpenAPI, {
             method: 'POST',
@@ -1300,7 +1300,7 @@ export class RunsService {
                 'ws': ws,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -1313,7 +1313,7 @@ export class RunsService {
      * Ingest Run Metrics
      * Ingest foreign logs into the run host metrics surface (additive).
      *
-     * Shares :func:`molexp.plugins.metrics_ingest.ingest_run` with the CLI.
+     * Shares :func:`molab.plugins.metrics_ingest.ingest_run` with the CLI.
      * Skips are returned; the route does not fail the whole call when one
      * converter cannot run.
      * @param projectId
@@ -1321,7 +1321,7 @@ export class RunsService {
      * @param runId
      * @param executionId
      * @param ws
-     * @param molexpSession
+     * @param molabSession
      * @returns any Successful Response
      * @throws ApiError
      */
@@ -1331,7 +1331,7 @@ export class RunsService {
         runId: string,
         executionId: string,
         ws: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<Record<string, any>> {
         return __request(OpenAPI, {
             method: 'POST',
@@ -1344,7 +1344,7 @@ export class RunsService {
                 'ws': ws,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -1355,14 +1355,14 @@ export class RunsService {
      * Analyze Run Failure Route
      * Analyze a failed run into a sourced FailureAnalysis KnowledgeItem.
      *
-     * Shares :func:`molexp.services.run_failure.analyze_run_failure` with the CLI
+     * Shares :func:`molab.services.run_failure.analyze_run_failure` with the CLI
      * (close-loop-02). Deterministic narrative when ``narrative`` is omitted.
      * @param projectId
      * @param experimentId
      * @param runId
      * @param ws
      * @param requestBody
-     * @param molexpSession
+     * @param molabSession
      * @returns string Successful Response
      * @throws ApiError
      */
@@ -1372,7 +1372,7 @@ export class RunsService {
         runId: string,
         ws: string,
         requestBody: RunAnalyzeFailureRequest,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<Record<string, string>> {
         return __request(OpenAPI, {
             method: 'POST',
@@ -1384,7 +1384,7 @@ export class RunsService {
                 'ws': ws,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -1402,14 +1402,14 @@ export class RunsService {
      * materialized so worker processes can pick it up off disk.
      * @param ws
      * @param requestBody
-     * @param molexpSession
+     * @param molabSession
      * @returns RunResponse Successful Response
      * @throws ApiError
      */
     public static createRunWs(
         ws: string,
         requestBody: ExecutionCreateRequest,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<RunResponse> {
         return __request(OpenAPI, {
             method: 'POST',
@@ -1418,7 +1418,7 @@ export class RunsService {
                 'ws': ws,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             body: requestBody,
             mediaType: 'application/json',

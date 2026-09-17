@@ -1,5 +1,5 @@
 """Round-trip + safety tests for the YAML / contract surface of
-:class:`molexp.workflow.codec.WorkflowCodec`.
+:class:`molab.workflow.codec.WorkflowCodec`.
 
 The plain IR↔Python↔spec surfaces live in ``test_codec.py``; this file owns the
 YAML surface and the contract sidecar it carries:
@@ -16,8 +16,8 @@ from __future__ import annotations
 import pytest
 import yaml
 
-from molexp.workflow.codec import default_codec
-from molexp.workflow.contract import (
+from molab.workflow.codec import default_codec
+from molab.workflow.contract import (
     ArtifactDecl,
     TaskInputSpec,
     TaskIO,
@@ -66,9 +66,9 @@ class TestWorkflowCodecYamlRoundTrip:
 
     def test_spec_survives_yaml_round_trip_through_ir(self) -> None:
         """``spec_to_yaml`` ⇄ ``yaml_to_spec`` is IR-stable (slugged tasks only)."""
-        from molexp.workflow.compiler import Workflow, WorkflowCompiler
-        from molexp.workflow.registry import default_registry
-        from molexp.workflow.task import Task
+        from molab.workflow.compiler import Workflow, WorkflowCompiler
+        from molab.workflow.registry import default_registry
+        from molab.workflow.task import Task
 
         class Inert(Task):
             async def execute(self, ctx):  # type: ignore[no-untyped-def, override]
@@ -87,8 +87,8 @@ class TestWorkflowCodecYamlRoundTrip:
     def test_old_ir_without_contract_stays_contract_free(self) -> None:
         """An IR JSON with no ``workflow_contract`` key must not gain one
         across ``ir_to_spec`` → ``spec_to_ir``."""
-        from molexp.workflow.registry import default_registry
-        from molexp.workflow.task import Task
+        from molab.workflow.registry import default_registry
+        from molab.workflow.task import Task
 
         class Echo(Task):
             async def execute(self, ctx):  # type: ignore[no-untyped-def, override]

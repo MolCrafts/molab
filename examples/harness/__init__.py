@@ -1,1 +1,1 @@
-"""End-to-end demos for the ``molexp.harness`` orchestrator layer."""
+"""End-to-end demos for the ``molab.harness`` orchestrator layer."""

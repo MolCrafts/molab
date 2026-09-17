@@ -72,8 +72,8 @@ const plugin = {
   register() {
     if (typeof globalThis !== "undefined") {
       const w = globalThis;
-      w.__molexpMockPluginRegistered ??= [];
-      w.__molexpMockPluginRegistered.push(${JSON.stringify(bundle.id)});
+      w.__molabMockPluginRegistered ??= [];
+      w.__molabMockPluginRegistered.push(${JSON.stringify(bundle.id)});
     }
   },
 };

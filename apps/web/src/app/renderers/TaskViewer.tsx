@@ -74,7 +74,7 @@ export const TaskViewer = ({
               label={`Inspect task ${id}`}
               onClick={() => inspectTask(id, runId)}
             >
-              <ArrowRight className="size-3.5" />
+              <ArrowRight className="size-icon-sm" />
             </WorkbenchIconAction>
           </div>
         ))}
@@ -106,7 +106,7 @@ export const TaskViewer = ({
                 label={`Back to ${run.name ?? run.id}`}
                 onClick={clearInspectedTask}
               >
-                <ArrowLeft className="size-3.5" />
+                <ArrowLeft className="size-icon-sm" />
               </WorkbenchIconAction>
               <span className="truncate">{run.name ?? run.id}</span>
             </div>

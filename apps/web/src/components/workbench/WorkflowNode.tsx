@@ -92,7 +92,7 @@ export const WorkflowNode = ({
         <RoleIcon
           aria-hidden
           strokeWidth={1.5}
-          className="h-4 w-4 flex-none text-muted-foreground"
+          className="size-icon flex-none text-muted-foreground"
         />
         <span className="min-w-0 flex-1 truncate text-body font-medium text-foreground">
           {title}
@@ -108,13 +108,13 @@ export const WorkflowNode = ({
         <div className="mt-2 flex flex-wrap items-center gap-2 pl-6 text-micro text-muted-foreground">
           {parallel && (
             <span className="inline-flex items-center gap-1">
-              <Layers3 aria-hidden strokeWidth={1.5} className="h-3.5 w-3.5" />
+              <Layers3 aria-hidden strokeWidth={1.5} className="size-icon-sm" />
               parallel
             </span>
           )}
           {subworkflow && (
             <span className="inline-flex items-center gap-1">
-              <Workflow aria-hidden strokeWidth={1.5} className="h-3.5 w-3.5" />
+              <Workflow aria-hidden strokeWidth={1.5} className="size-icon-sm" />
               subflow
             </span>
           )}

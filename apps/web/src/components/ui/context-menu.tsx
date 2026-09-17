@@ -25,9 +25,9 @@ const ContextMenuSubTrigger = React.forwardRef<
   <ContextMenuPrimitive.SubTrigger
     ref={ref}
     className={cn(
-      "flex cursor-default select-none items-center gap-2 rounded-control px-2 py-1.5 text-body outline-none focus:bg-interactive data-[state=open]:bg-interactive",
-      "[&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
-      inset && "pl-8",
+      "flex cursor-default select-none items-center gap-2 rounded-control px-2 py-row-pad text-body outline-none focus:bg-interactive data-[state=open]:bg-interactive",
+      "[&_svg]:pointer-events-none [&_svg]:size-icon [&_svg]:shrink-0",
+      inset && "pl-marker-gutter",
       className,
     )}
     {...props}
@@ -76,13 +76,13 @@ const ContextMenuItem = React.forwardRef<
   <ContextMenuPrimitive.Item
     ref={ref}
     className={cn(
-      "relative flex cursor-default select-none items-center gap-2 rounded-control px-2 py-1.5 text-body outline-none",
+      "relative flex cursor-default select-none items-center gap-2 rounded-control px-2 py-row-pad text-body outline-none",
       "transition-colors duration-(--motion-fast) ease-standard",
       "focus:bg-interactive focus:text-interactive-foreground",
       "data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
-      "[&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0 [&_svg]:text-muted-foreground",
+      "[&_svg]:pointer-events-none [&_svg]:size-icon [&_svg]:shrink-0 [&_svg]:text-muted-foreground",
       "data-[highlighted]:[&_svg]:text-foreground",
-      inset && "pl-8",
+      inset && "pl-marker-gutter",
       className,
     )}
     {...props}
@@ -97,7 +97,7 @@ const ContextMenuCheckboxItem = React.forwardRef<
   <ContextMenuPrimitive.CheckboxItem
     ref={ref}
     className={cn(
-      "relative flex cursor-default select-none items-center gap-2 rounded-control py-1.5 pl-8 pr-2 text-body outline-none",
+      "relative flex cursor-default select-none items-center gap-2 rounded-control py-row-pad pl-marker-gutter pr-2 text-body outline-none",
       "transition-colors duration-(--motion-fast) ease-standard",
       "focus:bg-interactive focus:text-interactive-foreground",
       "data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
@@ -106,9 +106,9 @@ const ContextMenuCheckboxItem = React.forwardRef<
     checked={checked}
     {...props}
   >
-    <span className="absolute left-2 flex h-3.5 w-3.5 items-center justify-center">
+    <span className="absolute left-2 flex size-3.5 items-center justify-center">
       <ContextMenuPrimitive.ItemIndicator>
-        <Check className="h-4 w-4" />
+        <Check className="size-icon" />
       </ContextMenuPrimitive.ItemIndicator>
     </span>
     {children}
@@ -123,7 +123,7 @@ const ContextMenuRadioItem = React.forwardRef<
   <ContextMenuPrimitive.RadioItem
     ref={ref}
     className={cn(
-      "relative flex cursor-default select-none items-center gap-2 rounded-control py-1.5 pl-8 pr-2 text-body outline-none",
+      "relative flex cursor-default select-none items-center gap-2 rounded-control py-row-pad pl-marker-gutter pr-2 text-body outline-none",
       "transition-colors duration-(--motion-fast) ease-standard",
       "focus:bg-interactive focus:text-interactive-foreground",
       "data-[disabled]:pointer-events-none data-[disabled]:opacity-50",
@@ -131,7 +131,7 @@ const ContextMenuRadioItem = React.forwardRef<
     )}
     {...props}
   >
-    <span className="absolute left-2 flex h-3.5 w-3.5 items-center justify-center">
+    <span className="absolute left-2 flex size-3.5 items-center justify-center">
       <ContextMenuPrimitive.ItemIndicator>
         <Circle className="h-2 w-2 fill-current" />
       </ContextMenuPrimitive.ItemIndicator>
@@ -150,8 +150,8 @@ const ContextMenuLabel = React.forwardRef<
   <ContextMenuPrimitive.Label
     ref={ref}
     className={cn(
-      "px-2 py-1.5 text-label font-medium text-muted-foreground",
-      inset && "pl-8",
+      "px-2 py-row-pad text-label font-medium text-muted-foreground",
+      inset && "pl-marker-gutter",
       className,
     )}
     {...props}

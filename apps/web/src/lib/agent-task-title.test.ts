@@ -27,7 +27,7 @@ describe("stripMarkdownLine", () => {
 
   it("strips emphasis, inline code, and keeps link labels", () => {
     expect(stripMarkdownLine("**bold** and _em_ and `code`")).toBe("bold and em and code");
-    expect(stripMarkdownLine("[molexp docs](https://example.com)")).toBe("molexp docs");
+    expect(stripMarkdownLine("[molab docs](https://example.com)")).toBe("molab docs");
   });
 
   it("collapses internal whitespace", () => {

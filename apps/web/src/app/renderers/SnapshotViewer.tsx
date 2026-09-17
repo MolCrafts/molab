@@ -491,7 +491,7 @@ const DiffCard = ({ diff }: { diff: TaskDiff }): JSX.Element => {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Hash className="h-4 w-4 text-muted-foreground" />
+          <Hash className="size-icon text-muted-foreground" />
           <span className="font-mono text-body-lg font-medium">{diff.taskId}</span>
           <WorkbenchTag meaning="metadata" className="text-label">
             {diff.taskType}
@@ -508,7 +508,7 @@ const DiffCard = ({ diff }: { diff: TaskDiff }): JSX.Element => {
               diff.codeChanged ? "text-diff-modified-foreground" : "text-muted-foreground"
             }`}
           >
-            <Code className="h-3.5 w-3.5" />
+            <Code className="size-icon-sm" />
             code {diff.codeChanged ? "changed" : "same"}
           </span>
           <span
@@ -516,7 +516,7 @@ const DiffCard = ({ diff }: { diff: TaskDiff }): JSX.Element => {
               diff.configChanged ? "text-diff-modified-foreground" : "text-muted-foreground"
             }`}
           >
-            <Settings className="h-3.5 w-3.5" />
+            <Settings className="size-icon-sm" />
             config {diff.configChanged ? "changed" : "same"}
           </span>
         </div>
@@ -655,7 +655,7 @@ const DiffSummaryBar = ({ diffs }: { diffs: TaskDiff[] }): JSX.Element => {
     <div className="flex items-center gap-4 text-label">
       {counts.modified > 0 && (
         <span className="flex items-center gap-1 text-diff-modified-foreground">
-          <AlertCircle className="h-3.5 w-3.5" />
+          <AlertCircle className="size-icon-sm" />
           {counts.modified} modified
         </span>
       )}
@@ -671,7 +671,7 @@ const DiffSummaryBar = ({ diffs }: { diffs: TaskDiff[] }): JSX.Element => {
       )}
       {counts.unchanged > 0 && (
         <span className="flex items-center gap-1 text-diff-unchanged-foreground">
-          <CheckCircle2 className="h-3.5 w-3.5" />
+          <CheckCircle2 className="size-icon-sm" />
           {counts.unchanged} unchanged
         </span>
       )}
@@ -707,7 +707,7 @@ const SnapshotHeader = ({
   return (
     <section className="border-y border-border/60 py-3" aria-labelledby={headingId}>
       <h3 id={headingId} className="mb-3 flex items-center gap-2 text-body-lg font-medium">
-        <Hash className="h-4 w-4 text-muted-foreground" />
+        <Hash className="size-icon text-muted-foreground" />
         Workflow snapshot
       </h3>
       {snapshot ? (
@@ -778,7 +778,7 @@ export const RunSnapshotPanel = ({ run, executionId }: RunSnapshotPanelProps): J
     <div className="flex h-full flex-col overflow-y-auto">
       <div className="flex items-center justify-between border-b bg-background px-6 py-4">
         <div className="flex items-center gap-2">
-          <ListChecks className="h-4 w-4 text-muted-foreground" />
+          <ListChecks className="size-icon text-muted-foreground" />
           <span className="text-body-lg font-medium">
             Workflow graph
             <span className="ml-1 font-normal text-muted-foreground">
@@ -801,7 +801,7 @@ export const RunSnapshotPanel = ({ run, executionId }: RunSnapshotPanelProps): J
           <p className="text-label italic text-muted-foreground">Loading workflow execution…</p>
         ) : error ? (
           <div className="flex items-center gap-2 border-y border-status-failed/30 bg-status-failed-soft px-3 py-3 text-label text-status-failed-foreground">
-            <AlertCircle className="h-4 w-4" />
+            <AlertCircle className="size-icon" />
             {error}
           </div>
         ) : graph === null ? (
@@ -858,7 +858,7 @@ export const SnapshotDiffPanel = ({
       <div className="px-6 py-4 border-b bg-background">
         <div className="flex items-center gap-3 flex-wrap">
           <div className="flex items-center gap-2">
-            <GitCompareArrows className="h-4 w-4 text-muted-foreground" />
+            <GitCompareArrows className="size-icon text-muted-foreground" />
             <span className="text-body-lg font-medium">Compare</span>
           </div>
 

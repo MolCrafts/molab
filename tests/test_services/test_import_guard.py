@@ -1,21 +1,22 @@
-"""Layer firewall for ``molexp.services`` — the application-service layer.
+"""Layer firewall for ``molab.services`` — the application-service layer.
 
-``molexp.services`` is the shared backend the CLI and the server both
+``molab.services`` is the shared backend the CLI and the server both
 delegate to (one code path per user-facing operation). Dependency direction:
 
     cli ──┐
-          ├──> services ──> harness / agent / workflow / workspace
+          ├──> services ──> workflow / workspace
  server ──┘
 
-Services may import the domain layers below it (``harness`` / ``agent`` /
-``workflow`` / ``workspace`` / ``knowledge`` and cross-layer primitives);
-it MUST NOT import the application shells that sit above it —
-``molexp.server``, ``molexp.cli``, ``molexp.plugins`` — statically,
-anywhere (top level, function bodies, TYPE_CHECKING blocks alike).
+Services may import the domain layers below it (``workflow`` / ``workspace``
+/ ``knowledge`` and cross-layer primitives); it MUST NOT import the
+application shells that sit above it — ``molab.server``, ``molab.cli``,
+``molab.plugins`` — nor ``molab.harness``, which is a *consumer* of molab
+and owns its own services under ``molab.harness.services``. The rule holds
+statically, anywhere (top level, function bodies, TYPE_CHECKING blocks).
 
-AST source scan (mirrors ``tests/test_harness/test_import_guard.py``): a
-runtime ``sys.modules`` probe cannot catch an import hidden inside a
-function body, the scan catches it regardless of where it hides.
+AST source scan: a runtime ``sys.modules`` probe cannot catch an import
+hidden inside a function body; the scan catches it regardless of where it
+hides.
 """
 
 from __future__ import annotations
@@ -23,14 +24,15 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-SERVICES_ROOT = Path(__file__).resolve().parents[2] / "src" / "molexp" / "services"
+SERVICES_ROOT = Path(__file__).resolve().parents[2] / "src" / "molab" / "services"
 
-# Application shells above the services layer — never importable from it.
+# Everything above the services layer — never importable from it.
 FORBIDDEN_PREFIXES: tuple[str, ...] = (
-    "molexp.server",
-    "molexp.cli",
-    "molexp.plugins",
-    "molexp.sweep",
+    "molab.harness",
+    "molab.server",
+    "molab.cli",
+    "molab.plugins",
+    "molab.sweep",
 )
 
 
@@ -39,7 +41,7 @@ class TestServicesImportGuard:
         assert SERVICES_ROOT.is_dir(), SERVICES_ROOT
 
     def test_services_forbids_application_shells_statically(self) -> None:
-        """No server / cli / plugins import statements anywhere in services/."""
+        """No harness / server / cli / plugins imports anywhere in services/."""
         offenders: dict[str, list[str]] = {}
         for prefix in FORBIDDEN_PREFIXES:
             hits = _imports_with_prefix(prefix, SERVICES_ROOT)
@@ -49,8 +51,8 @@ class TestServicesImportGuard:
                     for path, lineno, module in hits
                 ]
         assert not offenders, (
-            "molexp.services must not import the application shells "
-            "(server / cli / plugins).\nOffenders:\n  "
+            "molab.services must not import harness or the application "
+            "shells (server / cli / plugins).\nOffenders:\n  "
             + "\n  ".join(
                 f"[{prefix}] {hit}" for prefix, lines in offenders.items() for hit in lines
             )
@@ -61,13 +63,13 @@ class TestServicesImportGuard:
         fake = tmp_path / "tainted.py"
         fake.write_text(
             "def sneaky():\n"
-            "    from molexp.server.app import create_app\n"
-            "    import molexp.cli\n"
-            "    return create_app, molexp\n"
+            "    from molab.server.app import create_app\n"
+            "    import molab.cli\n"
+            "    return create_app, molab\n"
         )
-        server_hits = _imports_with_prefix("molexp.server", tmp_path)
-        cli_hits = _imports_with_prefix("molexp.cli", tmp_path)
-        assert any(p == fake and m == "molexp.server.app" for p, _, m in server_hits)
+        server_hits = _imports_with_prefix("molab.server", tmp_path)
+        cli_hits = _imports_with_prefix("molab.cli", tmp_path)
+        assert any(p == fake and m == "molab.server.app" for p, _, m in server_hits)
         assert any(p == fake for p, _, _ in cli_hits)
 
 

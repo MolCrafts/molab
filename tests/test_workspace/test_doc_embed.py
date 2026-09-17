@@ -23,7 +23,7 @@ from typing import cast
 
 import pytest
 
-from molexp.workspace import (
+from molab.workspace import (
     Bundle,
     EntitySummary,
     NoteMeta,
@@ -31,7 +31,7 @@ from molexp.workspace import (
     ReferenceMeta,
     Workspace,
 )
-from molexp.workspace.doc_embed import asset_record_dir, summarize_entity
+from molab.workspace.doc_embed import asset_record_dir, summarize_entity
 
 _VALID_ROLES = {"derived_from", "cites", "supersedes", "records", "references"}
 

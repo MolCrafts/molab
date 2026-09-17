@@ -39,8 +39,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from molexp.workspace.execution_dirs import ARTIFACTS, OUT, WORK
-from molexp.workspace.history import default_gitignore
+from molab.workspace.execution_dirs import ARTIFACTS, OUT, WORK
+from molab.workspace.history import default_gitignore
 
 #: Old directory -> new directory, applied in this order. ``out`` must move
 #: first or renaming ``work`` would collide with it.
@@ -175,7 +175,7 @@ def main() -> int:
 
     root = args.workspace.expanduser().resolve()
     if not (root / "workspace.json").is_file():
-        print(f"not a molexp workspace: {root}", file=sys.stderr)
+        print(f"not a molab workspace: {root}", file=sys.stderr)
         return 2
 
     report = migrate(root, apply=args.apply)

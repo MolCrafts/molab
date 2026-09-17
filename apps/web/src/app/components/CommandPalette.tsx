@@ -265,7 +265,7 @@ export const CommandPalette = ({
                 }`}
               >
                 <Icon
-                  className={`mt-1 h-3.5 w-3.5 shrink-0 ${active ? "text-accent" : "opacity-70"}`}
+                  className={`mt-1 size-icon-sm shrink-0 ${active ? "text-accent" : "opacity-70"}`}
                 />
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">

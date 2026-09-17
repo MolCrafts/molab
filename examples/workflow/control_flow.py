@@ -2,7 +2,7 @@
 
 Matches ``docs/en/guide/control-flow.md``.
 
-MolExp has no ``IfTask`` / ``ForTask``; control flow is expressed by the
+Molab has no ``IfTask`` / ``ForTask``; control flow is expressed by the
 shape of ``depends_on``, by Python inside tasks, and by ``wf.parallel`` for
 runtime-sized fan-out. Every task body reads its inputs through named
 parameters — the engine binds {upstream outputs} | {run params} | {build-time
@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import asyncio
 
-from molexp.workflow import Workflow, WorkflowCompiler, WorkflowRuntime
+from molab.workflow import Workflow, WorkflowCompiler, WorkflowRuntime
 
 
 # ── 1. Diamond fan-out ─────────────────────────────────────────────────────

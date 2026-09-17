@@ -350,7 +350,10 @@ export const useWorkspaceState = (activeView?: LeftPanelView): WorkspaceState =>
       projectsLoadingRef.current.add(projectId);
       try {
         const raw = await experimentsApi.listExperiments(projectId);
-        const mapped = mapExperiments(projectId, raw);
+        const workspaceKey = snapshotRef.current.projects.find(
+          (p) => p.id === projectId,
+        )?.workspaceKey;
+        const mapped = mapExperiments(projectId, raw, workspaceKey);
         // Workflows for just these experiments (IR if present on the wire).
         const workflows = mapWorkflows(mapped, raw);
         projectsLoadedRef.current.add(projectId);
@@ -395,7 +398,12 @@ export const useWorkspaceState = (activeView?: LeftPanelView): WorkspaceState =>
       experimentsLoadingRef.current.add(key);
       try {
         const raw = await runsApi.listRuns(projectId, experimentId);
-        const mapped = mapRuns(projectId, experimentId, raw);
+        const workspaceKey =
+          snapshotRef.current.experiments.find(
+            (experiment) => experiment.id === experimentId && experiment.projectId === projectId,
+          )?.workspaceKey ??
+          snapshotRef.current.projects.find((p) => p.id === projectId)?.workspaceKey;
+        const mapped = mapRuns(projectId, experimentId, raw, workspaceKey);
         // Mark loaded only after success — so emptyChildLabel stays "Loading…"
         // rather than "No runs" while the remote fetch is in flight (first open).
         experimentsLoadedRef.current.add(key);

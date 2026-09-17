@@ -16,8 +16,8 @@ import asyncio
 
 import pytest
 
-from molexp.workflow import Workflow, WorkflowCompiler, WorkflowRuntime
-from molexp.workflow.types import Next, WorkflowDeadlockError
+from molab.workflow import Workflow, WorkflowCompiler, WorkflowRuntime
+from molab.workflow.types import Next, WorkflowDeadlockError
 
 
 class TestStructuralDeadlockDetection:

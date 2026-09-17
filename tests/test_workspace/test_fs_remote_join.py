@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from molexp.workspace.fs_remote import RemoteFileSystem
+from molab.workspace.fs_remote import RemoteFileSystem
 
 
 class TestRemoteFileSystemJoin:

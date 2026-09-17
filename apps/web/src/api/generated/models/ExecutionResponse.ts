@@ -5,7 +5,7 @@
 /**
  * One execution attempt of a Run.
  *
- * Mirrors :class:`molexp.workspace.models.ExecutionRecord` with
+ * Mirrors :class:`molab.workspace.models.ExecutionRecord` with
  * JSON-friendly field names so the UI can render a per-attempt
  * timeline.
  */

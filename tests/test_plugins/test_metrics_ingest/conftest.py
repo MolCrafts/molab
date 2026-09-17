@@ -1,8 +1,8 @@
-"""A format molexp has never heard of, so these tests cannot lean on a real one.
+"""A format molab has never heard of, so these tests cannot lean on a real one.
 
-molexp ships no reader: every format arrives from the package that owns it.
+molab ships no reader: every format arrives from the package that owns it.
 Testing with a fake registered reader is therefore not a shortcut — it is the
-only honest way to exercise molexp's half of the seam.
+only honest way to exercise molab's half of the seam.
 """
 
 from __future__ import annotations
@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from molexp.plugins.metrics_ingest.readers import (
+from molab.plugins.metrics_ingest.readers import (
     ReadRequest,
     apply,
     register_reader,
@@ -106,7 +106,7 @@ def fake_run(tmp_path: Path) -> Path:
 
 
 def read_wal(run_dir: Path) -> list[dict[str, Any]]:
-    from molexp.workspace.execution_dirs import ARTIFACTS
+    from molab.workspace.execution_dirs import ARTIFACTS
 
     path = run_dir / ARTIFACTS.name / "metrics.mlp.jsonl"
     return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]

@@ -11,11 +11,11 @@ from __future__ import annotations
 
 import pytest
 
-from molexp.workflow import Workflow, WorkflowCompiler, WorkflowRuntime
-from molexp.workflow._engine.node import _collect_upstream_outputs
-from molexp.workflow._engine.state import WorkflowState
-from molexp.workflow._graph_decl import TaskRegistration
-from molexp.workflow.types import MissingUpstreamResultError
+from molab.workflow import Workflow, WorkflowCompiler, WorkflowRuntime
+from molab.workflow._engine.node import _collect_upstream_outputs
+from molab.workflow._engine.state import WorkflowState
+from molab.workflow._graph_decl import TaskRegistration
+from molab.workflow.types import MissingUpstreamResultError
 
 
 @pytest.mark.asyncio

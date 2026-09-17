@@ -26,7 +26,7 @@ export function SettingsPage(): JSX.Element {
       label: "Remote workspaces",
       group: "workspace",
       groupLabel: "Workspace",
-      icon: <Wifi className="size-3.5" aria-hidden />,
+      icon: <Wifi className="size-icon-sm" aria-hidden />,
       content: (
         <SettingsSection
           id="remote-workspaces"
@@ -42,7 +42,7 @@ export function SettingsPage(): JSX.Element {
       label: "Compute targets",
       group: "workspace",
       groupLabel: "Workspace",
-      icon: <Cpu className="size-3.5" aria-hidden />,
+      icon: <Cpu className="size-icon-sm" aria-hidden />,
       content: (
         <SettingsSection
           id="compute-targets"
@@ -58,7 +58,7 @@ export function SettingsPage(): JSX.Element {
       label: "UI plugins",
       group: "workspace",
       groupLabel: "Workspace",
-      icon: <Puzzle className="size-3.5" aria-hidden />,
+      icon: <Puzzle className="size-icon-sm" aria-hidden />,
       content: (
         <SettingsSection
           id="ui-plugins"
@@ -74,7 +74,7 @@ export function SettingsPage(): JSX.Element {
       label: "Users",
       group: "access",
       groupLabel: "Access",
-      icon: <Users className="size-3.5" aria-hidden />,
+      icon: <Users className="size-icon-sm" aria-hidden />,
       hidden: !showUsers,
       content: <UsersSection sectionId="users" />,
     },
@@ -85,7 +85,7 @@ export function SettingsPage(): JSX.Element {
         label: section.title,
         group: section.group ?? "plugins",
         groupLabel: section.group ?? "Plugins",
-        icon: <Puzzle className="size-3.5" aria-hidden />,
+        icon: <Puzzle className="size-icon-sm" aria-hidden />,
         content: (
           <SettingsSection id={section.id} title={section.title}>
             <Render />

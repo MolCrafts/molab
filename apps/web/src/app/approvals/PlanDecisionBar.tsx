@@ -132,7 +132,7 @@ export const PlanDecisionBar = ({
               disabled={busy !== null}
               onClick={() => void decide("reject")}
             >
-              <XCircle className="h-3.5 w-3.5" />
+              <XCircle className="size-icon-sm" />
               Confirm reject
             </WorkbenchAction>
           </>
@@ -152,7 +152,7 @@ export const PlanDecisionBar = ({
               disabled={busy !== null}
               onClick={() => void decide("revise")}
             >
-              <Pencil className="h-3.5 w-3.5" />
+              <Pencil className="size-icon-sm" />
               Revise
             </WorkbenchAction>
             <WorkbenchAction
@@ -161,7 +161,7 @@ export const PlanDecisionBar = ({
               disabled={busy !== null}
               onClick={() => void decide("approve")}
             >
-              <CheckCircle2 className="h-3.5 w-3.5" />
+              <CheckCircle2 className="size-icon-sm" />
               Approve & generate workflow
             </WorkbenchAction>
           </>

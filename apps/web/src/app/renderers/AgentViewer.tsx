@@ -68,7 +68,7 @@ const TEXTAREA_CLASS =
   "placeholder:text-muted-foreground focus-visible:ring-0 disabled:opacity-60";
 
 const getAgentTaskId = (session: ApiAgentSession): string => session.taskId ?? session.sessionId;
-const MESSAGE_HISTORY_KEY = "molexp.agent.messageHistory";
+const MESSAGE_HISTORY_KEY = "molab.agent.messageHistory";
 const MESSAGE_HISTORY_LIMIT = 80;
 
 const readMessageHistory = (): string[] => {
@@ -153,7 +153,7 @@ const ModeToggle = ({
     type="button"
     onClick={() => onChange(nextAgentMode(mode))}
     className={cn(
-      "rounded-control px-2.5 py-1 text-micro font-medium transition-colors",
+      "rounded-control px-2 py-1 text-micro font-medium transition-colors",
       mode === "plan"
         ? "bg-info-soft/40 text-info-foreground hover:bg-info-soft/55"
         : "bg-muted/60 text-foreground hover:bg-muted",
@@ -308,7 +308,7 @@ const ChatBox = ({
             size="default"
             className="flex-none"
           >
-            {sending ? <ProgressSpinner label="Sending" /> : <Send className="h-3.5 w-3.5" />}
+            {sending ? <ProgressSpinner label="Sending" /> : <Send className="size-icon-sm" />}
           </WorkbenchIconAction>
         )}
       </div>
@@ -550,7 +550,7 @@ const GoalInput = ({
             className="h-control w-control flex-none rounded-control"
             aria-label="Start agent task"
           >
-            {disabled ? <ProgressSpinner label="Starting" /> : <Send className="h-3.5 w-3.5" />}
+            {disabled ? <ProgressSpinner label="Starting" /> : <Send className="size-icon-sm" />}
           </WorkbenchIconAction>
         </div>
         <CommandPalette state={palette} anchorRef={anchorRef} onPick={handlePaletteSelect} />
@@ -566,7 +566,7 @@ const GoalInput = ({
             onClick={onOpenSettings}
             title="Provider, models, API keys, MCP"
           >
-            <Settings className="h-3.5 w-3.5" />
+            <Settings className="size-icon-sm" />
           </WorkbenchIconAction>
         ) : null}
         <span className="ml-auto hidden sm:inline">Shift+Tab · ⌘+Enter · / commands</span>
@@ -587,7 +587,7 @@ const AgentHealthBanner = ({
   onOpenSettings: () => void;
 }): JSX.Element => (
   <div className="flex items-start gap-3 border-y border-warning/30 bg-warning-soft px-4 py-3 text-body-lg">
-    <ShieldAlert className="mt-1 h-5 w-5 flex-none text-warning" />
+    <ShieldAlert className="mt-1 size-icon-lg flex-none text-warning" />
     <div className="flex-1 text-warning-foreground">
       <p className="font-medium">Agent not ready</p>
       <p className="mt-1 text-label opacity-90">{health.reason}</p>
@@ -611,7 +611,7 @@ const HeaderSettingsAction = ({ onOpenSettings }: { onOpenSettings: () => void }
     title="Agent settings"
     aria-label="Agent settings"
   >
-    <Settings className="h-4 w-4" />
+    <Settings className="size-icon" />
   </WorkbenchIconAction>
 );
 
@@ -1122,7 +1122,7 @@ const AgentSessionViewer = ({
             />
 
             <div className="flex flex-col items-center gap-2 pt-4 text-center">
-              <Bot className="h-5 w-5 text-muted-foreground" />
+              <Bot className="size-icon-lg text-muted-foreground" />
               <h2 className="text-base font-semibold text-foreground">Start an agent task</h2>
               <p className="max-w-md text-body-lg text-muted-foreground">
                 <strong className="font-medium text-foreground">Chat</strong> explores and runs
@@ -1158,7 +1158,7 @@ const AgentSessionViewer = ({
                       onClick={() => nav.setSelection({ objectType: "agent", objectId: s.id })}
                       className="flex w-full items-center gap-3 px-3 py-2 text-left transition-colors hover:bg-muted/40"
                     >
-                      <Bot className="h-4 w-4 flex-none text-muted-foreground" />
+                      <Bot className="size-icon flex-none text-muted-foreground" />
                       <p className="flex-1 truncate text-body-lg">{s.goal}</p>
                       <StatusBadge status={s.status} size="sm" />
                     </WorkbenchAction>
@@ -1227,7 +1227,7 @@ const AgentSessionViewer = ({
       className={`${COLUMN} mx-4 mt-3 flex items-start gap-2 border border-destructive/40 bg-destructive/10 px-3 py-2 text-body-lg text-destructive md:mx-6`}
       role="alert"
     >
-      <XCircle className="mt-0.5 h-4 w-4 flex-none" />
+      <XCircle className="mt-1 size-icon flex-none" />
       <p className="min-w-0 flex-1 whitespace-pre-wrap [overflow-wrap:anywhere]">{error}</p>
       <WorkbenchDismissAction onClick={() => setError(null)} />
     </div>

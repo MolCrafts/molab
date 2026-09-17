@@ -6,13 +6,24 @@
 import { describe, expect, it } from "@rstest/core";
 import type { RunAllSeries } from "@/plugins/molplot";
 import type { ScalarSeries } from "@/plugins/molplot/RunMetricsView";
-import { metricRows, parameterRows } from "./CompareTable";
+import {
+  clampWidth,
+  compileRunFilter,
+  groupedEntries,
+  metricRows,
+  nextRunSort,
+  parameterRows,
+  rowExtrema,
+  rowGroups,
+  sliceMeasure,
+  sortEntries,
+  visibleRows,
+} from "./CompareTable";
 import type { CompareEntry } from "./types";
 import { refKey } from "./types";
 
 const entry = (run: string, parameters: Record<string, unknown> = {}): CompareEntry => ({
   ref: { workspaceKey: "w", projectId: "p", experimentId: "e", runId: run },
-  selected: true,
   executionId: null,
   workspaceLabel: "w",
   projectName: "p",
@@ -111,5 +122,135 @@ describe("metricRows", () => {
 
   it("is empty when nothing has been scanned yet", () => {
     expect(metricRows([], columns)).toEqual([]);
+  });
+});
+
+describe("visibleRows", () => {
+  const rows = [
+    { key: "same", values: ["1", "1"], varies: false, counts: [1, 1] },
+    { key: "diff", values: ["1", "2"], varies: true, counts: [1, 1] },
+  ];
+
+  it("keeps only rows that differ", () => {
+    expect(visibleRows(rows, false).map((row) => row.key)).toEqual(["diff"]);
+  });
+
+  it("shows every row when asked", () => {
+    expect(visibleRows(rows, true).map((row) => row.key)).toEqual(["same", "diff"]);
+  });
+
+  it("falls back to every row when nothing differs", () => {
+    expect(visibleRows([rows[0]], false)).toEqual([rows[0]]);
+  });
+});
+
+describe("groupedEntries", () => {
+  it("pulls runs of one experiment together without losing within-experiment order", () => {
+    const a = entry("a");
+    const b = {
+      ...entry("b"),
+      experimentName: "other",
+      ref: { ...entry("b").ref, experimentId: "other" },
+    };
+    const c = entry("c");
+    expect(groupedEntries([a, b, c]).map((item) => item.runName)).toEqual(["a", "c", "b"]);
+  });
+});
+
+describe("rowGroups", () => {
+  it("is one group when every run shares an experiment", () => {
+    expect(rowGroups([entry("a"), entry("b")])).toEqual([
+      { key: expect.any(String), label: "e", count: 2 },
+    ]);
+  });
+
+  it("names the project when more than one project is present", () => {
+    const other = {
+      ...entry("b"),
+      projectName: "q",
+      experimentName: "f",
+      ref: { ...entry("b").ref, projectId: "q", experimentId: "f" },
+    };
+    const groups = rowGroups([entry("a"), other]);
+    expect(groups.map((group) => [group.label, group.count])).toEqual([
+      ["p · e", 1],
+      ["q · f", 1],
+    ]);
+  });
+});
+
+describe("compileRunFilter", () => {
+  it("matches all names when empty", () => {
+    const match = compileRunFilter("  ");
+    expect(match("n=8")).toBe(true);
+  });
+
+  it("applies a regular expression to the run name", () => {
+    const match = compileRunFilter("^n=");
+    expect(match("n=8")).toBe(true);
+    expect(match("seed=1")).toBe(false);
+  });
+
+  it("falls back to substring when the pattern is invalid", () => {
+    const match = compileRunFilter("(");
+    expect(match("a(b")).toBe(true);
+    expect(match("ab")).toBe(false);
+  });
+});
+
+describe("sliceMeasure", () => {
+  it("keeps values in the caller index order and recomputes varies", () => {
+    const sliced = sliceMeasure(
+      {
+        key: "n",
+        kind: "parameter",
+        values: ["1", "2", "1"],
+        numeric: [1, 2, 1],
+        varies: true,
+        counts: [1, 1, 1],
+      },
+      [0, 2],
+    );
+    expect(sliced.values).toEqual(["1", "1"]);
+    expect(sliced.varies).toBe(false);
+  });
+});
+
+describe("rowExtrema", () => {
+  it("returns min and max when they differ", () => {
+    expect(rowExtrema([1, 3, 2])).toEqual({ min: 1, max: 3 });
+  });
+
+  it("is null when every number is the same or there are not enough", () => {
+    expect(rowExtrema([2, 2, 2])).toBeNull();
+    expect(rowExtrema([1, null])).toBeNull();
+  });
+});
+
+describe("clampWidth", () => {
+  it("stays inside the inclusive bounds", () => {
+    expect(clampWidth(10, 48, 360)).toBe(48);
+    expect(clampWidth(400, 48, 360)).toBe(360);
+    expect(clampWidth(72.8, 48, 360)).toBe(73);
+  });
+});
+
+describe("sortEntries", () => {
+  it("cycles run → experiment → project", () => {
+    expect(nextRunSort("run")).toBe("experiment");
+    expect(nextRunSort("experiment")).toBe("project");
+    expect(nextRunSort("project")).toBe("run");
+  });
+
+  it("orders by the chosen name first", () => {
+    const a = { ...entry("z"), experimentName: "e1", projectName: "p2" };
+    const b = {
+      ...entry("a"),
+      experimentName: "e2",
+      projectName: "p1",
+      ref: { ...entry("a").ref, runId: "a" },
+    };
+    expect(sortEntries([a, b], "run").map((row) => row.runName)).toEqual(["a", "z"]);
+    expect(sortEntries([a, b], "project").map((row) => row.projectName)).toEqual(["p1", "p2"]);
   });
 });

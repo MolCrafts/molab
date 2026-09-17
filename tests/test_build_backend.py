@@ -10,7 +10,7 @@ import pytest
 
 def load_backend() -> ModuleType:
     path = Path(__file__).resolve().parents[1] / "setup.py"
-    spec = importlib.util.spec_from_file_location("molexp_setup_backend", path)
+    spec = importlib.util.spec_from_file_location("molab_setup_backend", path)
     assert spec is not None
     assert spec.loader is not None
     module = importlib.util.module_from_spec(spec)

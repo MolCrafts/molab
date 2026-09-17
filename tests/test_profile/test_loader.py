@@ -1,11 +1,11 @@
-"""Tests for molexp.profile.loader (load_molcfg, find_default_config)."""
+"""Tests for molab.profile.loader (load_molcfg, find_default_config)."""
 
 from __future__ import annotations
 
 import pytest
 
-from molexp.profile import load_molcfg
-from molexp.profile.loader import find_default_config
+from molab.profile import load_molcfg
+from molab.profile.loader import find_default_config
 
 YAML_SAMPLE = """\
 version: 1

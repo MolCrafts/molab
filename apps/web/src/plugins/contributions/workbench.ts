@@ -12,7 +12,7 @@ import type {
   StatusBarItemSpec,
   ViewContainerSpec,
   ViewSpec,
-} from "@molcrafts/molexp-plugin";
+} from "@molcrafts/molab-plugin";
 import { useSyncExternalStore } from "react";
 import { isPluginEnabled } from "@/lib/plugin-preferences";
 import { ContributionStore } from "./store";

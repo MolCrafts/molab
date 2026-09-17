@@ -1,10 +1,10 @@
 /**
- * MolExp Workflow Preview — VSCode extension entry.
+ * Molab Workflow Preview — VSCode extension entry.
  *
  * Registers a read-only custom editor for `*workflow.json` files. The editor
- * hosts a webview that mounts the molexp UI's `<WorkflowPreview>` component
+ * hosts a webview that mounts the molab UI's `<WorkflowPreview>` component
  * (bundled from `apps/web/src/components/workflow`), so the DAG renders with
- * the exact same flowgram canvas + shadcn chrome as `molexp serve`.
+ * the exact same flowgram canvas + shadcn chrome as `molab serve`.
  *
  * Data flow: the extension owns the file text and pushes it to the webview on
  * open and on every edit; the webview is a pure renderer and never writes back.
@@ -12,7 +12,7 @@
 
 import * as vscode from "vscode";
 
-const VIEW_TYPE = "molexp.workflowPreview";
+const VIEW_TYPE = "molab.workflowPreview";
 
 export function activate(context: vscode.ExtensionContext): void {
   const provider = new WorkflowPreviewProvider(context);
@@ -24,7 +24,7 @@ export function activate(context: vscode.ExtensionContext): void {
   );
 
   context.subscriptions.push(
-    vscode.commands.registerCommand("molexp.openWorkflowPreview", () => {
+    vscode.commands.registerCommand("molab.openWorkflowPreview", () => {
       const uri = vscode.window.activeTextEditor?.document.uri;
       if (!uri) {
         void vscode.window.showInformationMessage("Open a workflow.json file first.");
@@ -90,7 +90,7 @@ class WorkflowPreviewProvider implements vscode.CustomTextEditorProvider {
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link href="${themeUri}" rel="stylesheet" />
     <link href="${canvasCssUri}" rel="stylesheet" />
-    <title>MolExp Workflow Preview</title>
+    <title>Molab Workflow Preview</title>
   </head>
   <body>
     <div id="root"></div>

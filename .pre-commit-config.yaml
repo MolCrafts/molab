@@ -34,7 +34,7 @@ repos:
       # git molrs currently conflict in the python>=3.14 lock split.
       - id: ty
         name: "ty check src/"
-        entry: uv run --frozen ty check src/
+        entry: ty check src/
         language: system
         pass_filenames: false
         files: '\.py$'
@@ -45,7 +45,7 @@ repos:
       # sibling checkouts (molpy / molrs) a dev is working against.
       - id: ci-test
         name: "CI test (uv sync + pytest, UV_NO_SOURCES=1)"
-        entry: bash -c 'export UV_NO_SOURCES=1 UV_PROJECT_ENVIRONMENT=.venv-ci; uv sync --extra dev && uv run pytest tests/ -q --cov=src/molexp --cov-report=xml'
+        entry: bash -c 'export UV_NO_SOURCES=1 UV_PROJECT_ENVIRONMENT=.venv-ci; uv sync --extra dev && uv run pytest tests/ -q --cov=src/molab --cov-report=xml'
         language: system
         pass_filenames: false
         always_run: true

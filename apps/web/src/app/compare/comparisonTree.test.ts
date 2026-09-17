@@ -1,18 +1,20 @@
 /**
- * Pure-logic tests for the comparison's project → experiment → run grouping. Node
- * environment: no React, no DOM.
+ * Pure-logic tests for category grouping and project → experiment → run nesting.
  */
 
 import { describe, expect, it } from "@rstest/core";
 
+import type { WorkspaceSnapshot } from "@/app/types";
+
 import {
+  buildCategoryGroups,
   buildComparisonTree,
-  type ComparisonRunNode,
   comparisonSpansWorkspaces,
-  groupCheckState,
-  runsOfProject,
+  hydrateComparisonTree,
+  keysUnderExperiment,
+  keysUnderProject,
 } from "./comparisonTree";
-import type { CompareEntry, RunRef } from "./types";
+import type { CompareItem, RunRef } from "./types";
 
 const ref = (
   workspaceKey: string,
@@ -24,16 +26,16 @@ const ref = (
 const entry = (
   r: RunRef,
   names: { ws?: string; project?: string; experiment?: string; run?: string } = {},
-  selected = true,
-): CompareEntry => ({
-  ref: r,
-  selected,
+  category: string | null = null,
+): CompareItem => ({
+  ref: { kind: "run", ...r },
   executionId: null,
   workspaceLabel: names.ws ?? r.workspaceKey,
   projectName: names.project ?? r.projectId,
   experimentName: names.experiment ?? r.experimentId,
   runName: names.run ?? r.runId,
   parameters: {},
+  category,
   addedAt: "2026-09-06T00:00:00.000Z",
 });
 
@@ -57,15 +59,11 @@ describe("buildComparisonTree", () => {
       entry(ref("lab", "zeta", "e3", "r3")),
     ]);
 
-    // Second-staged project stays second, and a project already present is not
-    // pulled to the end when another of its runs arrives.
     expect(tree.map((p) => p.name)).toEqual(["zeta", "alpha"]);
     expect(tree[0].experiments.map((e) => e.name)).toEqual(["e1", "e3"]);
   });
 
   it("separates same-named projects served from different workspaces", () => {
-    // Display names collide constantly across machines; the ref is what
-    // decides, so these must not merge into one node.
     const tree = buildComparisonTree([
       entry(ref("lab-v3", "peo", "e", "r"), { ws: "lab-v3" }),
       entry(ref("hpc", "peo", "e", "r"), { ws: "hpc" }),
@@ -84,9 +82,54 @@ describe("buildComparisonTree", () => {
     expect(tree).toHaveLength(2);
   });
 
-  it("addresses each run by its refKey", () => {
+  it("addresses each run by its itemKey", () => {
     const tree = buildComparisonTree([entry(ref("lab", "p", "e", "r"))]);
     expect(tree[0].experiments[0].runs[0].key).toBe("lab/p/e/r");
+  });
+
+  it("collects bag keys under a project and under an experiment", () => {
+    const items = [
+      entry(ref("lab", "peo", "n-series", "n=8")),
+      entry(ref("lab", "peo", "n-series", "n=16")),
+      entry(ref("lab", "peo", "tg-fit", "dp=5")),
+    ];
+    const tree = buildComparisonTree(items);
+    expect(keysUnderProject(items, tree[0])).toHaveLength(3);
+    expect(keysUnderExperiment(items, tree[0], tree[0].experiments[0])).toHaveLength(2);
+  });
+});
+
+describe("hydrateComparisonTree", () => {
+  it("expands a selected project into snapshot experiments and runs", () => {
+    const projectItem: CompareItem = {
+      ref: { kind: "project", workspaceKey: "lab", projectId: "peo" },
+      executionId: null,
+      workspaceLabel: "lab",
+      projectName: "peo",
+      experimentName: "",
+      runName: "",
+      parameters: {},
+      category: null,
+      addedAt: "2026-09-06T00:00:00.000Z",
+    };
+    const snapshot = {
+      experiments: [{ id: "n-series", name: "n-series", projectId: "peo", workspaceKey: "lab" }],
+      runs: [
+        {
+          id: "n=8",
+          name: "n=8",
+          projectId: "peo",
+          experimentId: "n-series",
+          workspaceKey: "lab",
+          parameters: {},
+        },
+      ],
+    } as unknown as WorkspaceSnapshot;
+    const tree = hydrateComparisonTree([projectItem], snapshot);
+    expect(tree[0].experiments).toHaveLength(1);
+    expect(tree[0].experiments[0].name).toBe("n-series");
+    expect(tree[0].experiments[0].runs.map((run) => run.entry.runName)).toEqual(["n=8"]);
+    expect(tree[0].experiments[0].runs[0].virtual).toBe(true);
   });
 });
 
@@ -102,30 +145,18 @@ describe("comparisonSpansWorkspaces", () => {
   });
 });
 
-describe("groupCheckState", () => {
-  const node = (selected: boolean): ComparisonRunNode => ({
-    key: `k${selected}`,
-    entry: entry(ref("w", "p", "e", `r${selected}`), {}, selected),
-  });
-
-  it("reads checked, unchecked and indeterminate off its runs", () => {
-    expect(groupCheckState([node(true), node(true)])).toBe("checked");
-    expect(groupCheckState([node(false), node(false)])).toBe("unchecked");
-    expect(groupCheckState([node(true), node(false)])).toBe("indeterminate");
-  });
-
-  it("treats an empty group as unticked rather than fully ticked", () => {
-    expect(groupCheckState([])).toBe("unchecked");
-  });
-});
-
-describe("runsOfProject", () => {
-  it("flattens every experiment's runs in order", () => {
-    const [project] = buildComparisonTree([
-      entry(ref("lab", "p", "e1", "r1")),
-      entry(ref("lab", "p", "e2", "r2")),
-      entry(ref("lab", "p", "e1", "r3")),
-    ]);
-    expect(runsOfProject(project).map((r) => r.entry.runName)).toEqual(["r1", "r3", "r2"]);
+describe("buildCategoryGroups", () => {
+  it("puts ungrouped items first and preserves bag order inside a bucket", () => {
+    const items = [
+      entry(ref("w", "p", "e", "a"), {}, null),
+      entry(ref("w", "p", "e", "b"), {}, "seed"),
+      entry(ref("w", "p", "e", "c"), {}, null),
+      entry(ref("w", "p", "e", "d"), {}, "seed"),
+    ];
+    const groups = buildCategoryGroups(items);
+    expect(groups[0].category).toBeNull();
+    expect(groups[0].items.map((item) => item.runName)).toEqual(["a", "c"]);
+    expect(groups[1].category).toBe("seed");
+    expect(groups[1].items.map((item) => item.runName)).toEqual(["b", "d"]);
   });
 });

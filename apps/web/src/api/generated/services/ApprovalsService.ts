@@ -15,18 +15,18 @@ export class ApprovalsService {
      *
      * Empty ``items`` is normal — the inbox only fills when a plan/curate task
      * is suspended waiting for an operator decision. Not a 404.
-     * @param molexpSession
+     * @param molabSession
      * @returns PendingApprovalsResponse Successful Response
      * @throws ApiError
      */
     public static listPendingApprovals(
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<PendingApprovalsResponse> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/approvals',
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -37,12 +37,12 @@ export class ApprovalsService {
      * Decide Approval
      * Record a ReviewDecision-shaped answer and resume/reject the task.
      *
-     * Plan tasks delegate to :func:`molexp.services.plan_runtime.decide_plan_review`.
+     * Plan tasks delegate to :func:`molab.harness.services.plan_runtime.decide_plan_review`.
      * Curate tasks keep the binary store path (no ReviewPack yet).
      * @param taskKind
      * @param taskId
      * @param requestBody
-     * @param molexpSession
+     * @param molabSession
      * @returns ApprovalDecisionResponse Successful Response
      * @throws ApiError
      */
@@ -50,7 +50,7 @@ export class ApprovalsService {
         taskKind: 'plan' | 'curate',
         taskId: string,
         requestBody: ApprovalDecisionRequest,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<ApprovalDecisionResponse> {
         return __request(OpenAPI, {
             method: 'POST',
@@ -60,7 +60,7 @@ export class ApprovalsService {
                 'task_id': taskId,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -72,18 +72,18 @@ export class ApprovalsService {
     /**
      * Stream Approval Events
      * SSE: one ``changed`` event per suspend/decision — the UI refetch signal.
-     * @param molexpSession
+     * @param molabSession
      * @returns any Successful Response
      * @throws ApiError
      */
     public static streamApprovalEvents(
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<any> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/approvals/events',
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,

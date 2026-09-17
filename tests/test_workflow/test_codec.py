@@ -1,4 +1,4 @@
-"""Tests for :class:`molexp.workflow.codec.WorkflowCodec`.
+"""Tests for :class:`molab.workflow.codec.WorkflowCodec`.
 
 The codec converts between four equivalent surfaces: IR (dict, the wire
 format), a runnable Python script (IR-as-literal), a :class:`CompiledWorkflow`
@@ -17,7 +17,7 @@ from pathlib import Path
 import jsonschema
 import pytest
 
-from molexp.workflow.codec import default_codec
+from molab.workflow.codec import default_codec
 
 _GOLDEN = Path(__file__).parent / "golden"
 
@@ -35,7 +35,7 @@ def _sample_ir() -> dict:
 
 
 def _register_golden_task_types() -> None:
-    from molexp.workflow.registry import default_registry
+    from molab.workflow.registry import default_registry
 
     class _Noop:
         async def execute(self, ctx):
@@ -123,7 +123,7 @@ class TestWorkflowCodec:
 class TestLinkSchema:
     """Strict typed-edge ``link.json`` schema (flowgram-workflow-canvas-01)."""
 
-    _SCHEMA_DIR = Path(__file__).resolve().parents[2] / "src" / "molexp" / "workflow" / "schema"
+    _SCHEMA_DIR = Path(__file__).resolve().parents[2] / "src" / "molab" / "workflow" / "schema"
 
     @pytest.mark.unit
     def test_link_requires_a_valid_kind(self) -> None:

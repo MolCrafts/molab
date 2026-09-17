@@ -4,7 +4,7 @@ The workflow layer describes computation. The workspace layer preserves the reco
 
 ## The Persistent Hierarchy
 
-MolExp stores state as four nested levels:
+Molab stores state as four nested levels:
 
 | Level | Role | Example |
 |---|---|---|
@@ -16,8 +16,8 @@ MolExp stores state as four nested levels:
 An experiment says *what should be repeatable*. A run records *what actually happened*. That separation is the heart of the model.
 
 ```python
-import molexp as me
-from molexp.workflow import Workflow, WorkflowCompiler
+import molab as me
+from molab.workflow import Workflow, WorkflowCompiler
 
 wf = Workflow(name="baseline")
 
@@ -53,7 +53,7 @@ print(same_run.executions[-1].status.value, same_run.get_result("report", execut
 
 ## Failure, Resume, Rerun
 
-A failing task raises `RunFailedError` and the run is persisted as `failed`. MolExp **never falls back silently** — each state either executes, resumes, or raises with instructions:
+A failing task raises `RunFailedError` and the run is persisted as `failed`. Molab **never falls back silently** — each state either executes, resumes, or raises with instructions:
 
 | Run status | `run.execute(wf)` behavior |
 |---|---|
@@ -97,13 +97,13 @@ print(best["lr"], best["run_id"])
 
 ## CLI Registration
 
-Bind the compiled workflow to the experiment so `molexp run` can discover it:
+Bind the compiled workflow to the experiment so `molab run` can discover it:
 
 ```python
 exp.define(WorkflowCompiler().compile(wf), params={"lr": [1e-3, 5e-4]})
 ```
 
-Now `molexp run` owns run selection, profiles, resume flags, and scheduler-backed execution over the exact same runs. See [CLI and Profiles](cli-and-profiles.md).
+Now `molab run` owns run selection, profiles, resume flags, and scheduler-backed execution over the exact same runs. See [CLI and Profiles](cli-and-profiles.md).
 
 ## Add a Run with a Fixed ID
 

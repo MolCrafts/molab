@@ -37,10 +37,10 @@ export function UiPluginsPanel(): JSX.Element {
         const switchId = `ui-plugin-${plugin.id}`;
         return (
           <li key={plugin.id} className="flex items-start gap-3 px-3 py-3 sm:items-center sm:px-4">
-            <div className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-control bg-surface-subtle text-muted-foreground">
-              <Puzzle className="size-3.5" aria-hidden />
+            <div className="mt-1 flex size-8 shrink-0 items-center justify-center rounded-control bg-surface-subtle text-muted-foreground">
+              <Puzzle className="size-icon-sm" aria-hidden />
             </div>
-            <div className="min-w-0 flex-1 space-y-0.5">
+            <div className="min-w-0 flex-1 space-y-1">
               <Label
                 htmlFor={switchId}
                 className="cursor-pointer text-body font-medium text-foreground"

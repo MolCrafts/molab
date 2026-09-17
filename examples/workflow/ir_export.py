@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import asyncio
 
-from molexp.workflow import (
+from molab.workflow import (
     Task,
     TaskContext,
     Workflow,

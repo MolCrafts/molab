@@ -34,8 +34,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from molexp.ids import compute_definition_hash
-from molexp.workspace.naming import disambiguate, execution_slug, run_slug
+from molab.ids import compute_definition_hash
+from molab.workspace.naming import disambiguate, execution_slug, run_slug
 
 #: What ``protocol=gudla2024`` actually stood for (Gudla & Zhang, JPCB 2024).
 GUDLA2024 = {"end_group": "ethoxy", "force_field": "gaff", "coul_14": 0.8333}

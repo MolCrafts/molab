@@ -1,6 +1,6 @@
 /**
  * Pure POSIX path arithmetic for workspace paths — the frontend twin of
- * ``molexp.path.Path`` (PurePosixPath). No I/O, no network, no host binding.
+ * ``molab.path.Path`` (PurePosixPath). No I/O, no network, no host binding.
  *
  * Pair with {@link WorkspaceFs} (the HTTP view of ``Workspace.fs``, the disk)
  * for I/O. Never call browser/Node fs APIs here.
@@ -180,7 +180,7 @@ export const shortWorkspaceLabel = (label: string): string => {
  *
  * - **Local** → POSIX absolute (``/Users/…/projects/…``).
  * - **Remote** → host-qualified (``Arrhenius:/home/jicli594/work/mace-nve/…``),
- *   same form as ``molexp serve`` workspace labels.
+ *   same form as ``molab serve`` workspace labels.
  *
  * *path* may be workspace-relative or already absolute under the workspace root.
  */

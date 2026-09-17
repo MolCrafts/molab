@@ -1,4 +1,4 @@
-"""Tests for ``molexp.workspace.curation.reorg`` reorganization helpers.
+"""Tests for ``molab.workspace.curation.reorg`` reorganization helpers.
 
 Pins ``move_run`` (relocate a Run to another Experiment, plus the
 destination-collision guard that propagates ``FolderMoveCollisionError``
@@ -13,8 +13,8 @@ from pathlib import Path
 
 import pytest
 
-from molexp.workspace import FolderMoveCollisionError, Workspace
-from molexp.workspace.curation import (
+from molab.workspace import FolderMoveCollisionError, Workspace
+from molab.workspace.curation import (
     delete_folder,
     move_experiment,
     move_run,

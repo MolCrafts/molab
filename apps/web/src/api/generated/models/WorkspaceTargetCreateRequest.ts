@@ -31,7 +31,7 @@ export type WorkspaceTargetCreateRequest = {
      */
     sshOpts?: Array<string>;
     /**
-     * Override local mirror root (defaults to ~/.molexp/remote_cache/<name>)
+     * Override local mirror root (defaults to ~/.molab/remote_cache/<name>)
      */
     cacheDir?: (string | null);
     /**

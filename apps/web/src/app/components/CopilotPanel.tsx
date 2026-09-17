@@ -82,9 +82,9 @@ const ActionRow = ({
         <span className="min-w-0 flex-1 truncate text-label font-medium text-foreground">
           {action.kind.replace(/_/g, " ")}
         </span>
-        {action.requiresProposal ? (
+        {action.op ? (
           <Badge variant="outline" className="text-micro shrink-0">
-            needs approval
+            {action.op.replace(/_/g, " ")}
           </Badge>
         ) : null}
       </div>

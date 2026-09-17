@@ -104,7 +104,7 @@ export const TextEditor = ({ selection }: RendererProps): JSX.Element => {
           onClick={handleSave}
           disabled={status === "loading" || status === "saving"}
         >
-          <Save className="h-3.5 w-3.5" />
+          <Save className="size-icon-sm" />
         </WorkbenchIconAction>
       </header>
       <div className="min-h-0 flex-1">

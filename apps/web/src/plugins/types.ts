@@ -1,4 +1,4 @@
-import type { MolexpPluginModule, PluginAPI } from "@molcrafts/molexp-plugin";
+import type { MolabPluginModule, PluginAPI } from "@molcrafts/molab-plugin";
 
 export type {
   DiscoveredFile,
@@ -22,7 +22,7 @@ export type {
 } from "@/lib/contribution-types";
 export { buildRendererRegistryKey } from "@/lib/contribution-types";
 
-export type { MolexpPluginModule, PluginAPI };
+export type { MolabPluginModule, PluginAPI };
 
 /**
  * One entry returned by ``GET /api/plugins`` — a discovered third-party
@@ -54,7 +54,7 @@ export interface UiBundleManifest {
   capabilities?: string[];
 }
 
-export interface UiPluginModule extends Partial<MolexpPluginModule> {
+export interface UiPluginModule extends Partial<MolabPluginModule> {
   id: string;
   /** Human-readable name for Settings / catalog. Defaults to `id`. */
   name?: string;

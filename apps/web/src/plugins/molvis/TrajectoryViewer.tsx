@@ -133,7 +133,7 @@ export const TrajectoryViewer = ({
   return (
     // ``isolate`` establishes a new stacking context so molvis-core's injected
     // overlays (``.molvis-ui-overlay`` z-index:1000, context menu z-index:10000)
-    // stay scoped to the canvas and never paint above the molexp UI chrome.
+    // stay scoped to the canvas and never paint above the molab UI chrome.
     <div
       className={cn(
         "relative isolate w-full overflow-hidden bg-surface/65",

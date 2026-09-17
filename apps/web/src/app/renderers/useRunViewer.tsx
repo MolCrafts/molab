@@ -12,12 +12,14 @@
  * callers can still early-return their own "run not found" chrome afterwards.
  */
 
+import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { runsApi } from "@/api";
 import type { ExecutionOutputsResponse } from "@/api/generated/models/ExecutionOutputsResponse";
 import { listEntityTabs } from "@/app/registry";
 import { formatDuration } from "@/app/renderers/dashboardData";
 import { canCancel, canHarvest, isTerminalStatus } from "@/app/runs/runLifecycle";
+import { executionOutputsQueryOptions } from "@/app/state/entityQueries";
 import { useInspectedTask } from "@/app/state/inspectedTask";
 import { useNavigationState } from "@/app/state/useNavigationState";
 import type { RendererSnapshot, ScopedRendererProps, WorkspaceSnapshot } from "@/app/types";
@@ -79,9 +81,6 @@ export const useRunViewer = (props: RunRendererProps): UseRunViewer => {
   const { selection, snapshot, onRefresh } = props;
   const { setSelection } = useNavigationState(snapshot);
   const { inspectTask } = useInspectedTask();
-  const [logs, setLogs] = useState<RunLogs>(null);
-  const [logsError, setLogsError] = useState<string | null>(null);
-  const [outputs, setOutputs] = useState<ExecutionOutputsResponse | null>(null);
   const [selectedExecutionId, setSelectedExecutionId] = useState<string | null>(null);
   // User-disabled plugins drop their entity tabs without a page reload.
   const pluginPrefsGeneration = usePluginPreferencesGeneration();
@@ -117,37 +116,22 @@ export const useRunViewer = (props: RunRendererProps): UseRunViewer => {
   const runProjectId = run?.projectId;
   const runExperimentId = run?.experimentId;
   const runId = run?.id;
-
-  useEffect(() => {
-    let cancelled = false;
-    setLogsError(null);
-
-    if (!runId || !runProjectId || !runExperimentId || !selectedExecutionId) {
-      setLogs(null);
-      setOutputs(null);
-      return;
-    }
-
-    setLogs(null);
-    setOutputs(null);
-    runsApi
-      .getExecutionOutputs(runProjectId, runExperimentId, runId, selectedExecutionId)
-      .then((response) => {
-        if (!cancelled) {
-          setOutputs(response);
-          setLogs({ stdout: response.stdout, stderr: response.stderr });
-        }
-      })
-      .catch((error) => {
-        if (!cancelled) {
-          setLogsError(error instanceof Error ? error.message : "Failed to load logs");
-        }
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [runProjectId, runExperimentId, runId, selectedExecutionId]);
+  const outputsQuery = useQuery({
+    ...executionOutputsQueryOptions(
+      runProjectId ?? "",
+      runExperimentId ?? "",
+      runId ?? "",
+      selectedExecutionId ?? "",
+    ),
+    enabled: Boolean(runId && runProjectId && runExperimentId && selectedExecutionId),
+  });
+  const outputs = outputsQuery.data ?? null;
+  const logs: RunLogs = outputs ? { stdout: outputs.stdout, stderr: outputs.stderr } : null;
+  const logsError = outputsQuery.error
+    ? outputsQuery.error instanceof Error
+      ? outputsQuery.error.message
+      : "Failed to load logs"
+    : null;
 
   const latestExecutionId = defaultExecutionId(run?.executionHistory);
   useEffect(() => {

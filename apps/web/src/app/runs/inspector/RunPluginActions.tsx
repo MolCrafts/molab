@@ -137,7 +137,7 @@ export const RunPluginActions = ({
             size="compact"
             onClick={() => onOpenTab(action.value)}
           >
-            <Icon className="size-3.5" aria-hidden />
+            <Icon className="size-icon-sm" aria-hidden />
           </WorkbenchIconAction>
         );
       })}

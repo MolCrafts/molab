@@ -39,7 +39,7 @@ def strip_ansi(text: str) -> str:
 def _hermetic_operator_config(
     monkeypatch: pytest.MonkeyPatch, tmp_path_factory: pytest.TempPathFactory
 ) -> Iterator[None]:
-    """Isolate every test from the developer's ``~/.molexp/config.json``.
+    """Isolate every test from the developer's ``~/.molab/config.json``.
 
     Two leaks, one fixture:
 
@@ -47,24 +47,24 @@ def _hermetic_operator_config(
       the operator config from ``OPERATOR_CONFIG_PATH``; pointed at an empty
       tmp file so a laptop with a real key/model does not silently satisfy
       tests that assert a *missing* key or an unknown model.
-    * **write** — the bridge's destination, ``molexp.config``, is a
+    * **write** — the bridge's destination, ``molab.config``, is a
       **process-global** singleton that no monkeypatch unwinds. One test that
       bridges a configured ``agent.models`` map used to re-tier every later
       test in the same process (an unknown-model preflight quietly resolved to
       the laptop's DeepSeek models and stopped raising). Snapshot + restore.
     """
-    import molexp
-    from molexp.services import operator_config
+    import molab
+    from molab.services import operator_config
 
     monkeypatch.setattr(
         operator_config,
         "OPERATOR_CONFIG_PATH",
         tmp_path_factory.mktemp("operator-config") / "config.json",
     )
-    before = dict(molexp.config)
+    before = dict(molab.config)
     yield
-    for key in list(molexp.config.keys()):
+    for key in list(molab.config.keys()):
         if key not in before:
-            del molexp.config[key]
+            del molab.config[key]
     for key, value in before.items():
-        molexp.config[key] = value
+        molab.config[key] = value

@@ -1,0 +1,69 @@
+"""Helpers for resolving on-disk scope directories from ``AssetScope``.
+
+Navigates the workspace via its public API so the path returned always
+matches what's actually on disk (e.g. ``Run.run_dir`` prefixes ``run-``
+to the id, which raw path concatenation would miss).
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from molab.workspace import (
+    ExperimentNotFoundError,
+    ProjectNotFoundError,
+    RunNotFoundError,
+)
+from molab.workspace.assets import AssetScope
+
+
+def resolve_scope_dir(workspace, scope: AssetScope) -> Path | None:  # noqa: ANN001
+    """Return the on-disk directory for ``scope`` using the public workspace API.
+
+    The workspace abstraction returns :class:`molab.Path`; the server routes
+    are local-FS only (FastAPI serves a workspace mounted on this host), so
+    we coerce to :class:`pathlib.Path` at this boundary for ``.resolve()`` /
+    ``.exists()`` ergonomics.  Returns ``None`` if any segment cannot be
+    resolved.
+    """
+    if scope.kind == "workspace":
+        return Path(workspace.root)
+
+    if not scope.ids:
+        return None
+
+    try:
+        project = workspace.get_project(scope.ids[0])
+    except ProjectNotFoundError:
+        return None
+    if scope.kind == "project":
+        return Path(project.project_dir)
+
+    if len(scope.ids) < 2:
+        return None
+    try:
+        experiment = project.get_experiment(scope.ids[1])
+    except ExperimentNotFoundError:
+        return None
+    if scope.kind == "experiment":
+        return Path(experiment.experiment_dir)
+
+    if scope.kind == "run":
+        if len(scope.ids) < 3:
+            return None
+        try:
+            run = experiment.get_run(scope.ids[2])
+        except RunNotFoundError:
+            return None
+        return Path(run.run_dir)
+
+    return None
+
+
+def split_workspace_relpath(workspace, abs_or_rel_path: str) -> Path:  # noqa: ANN001
+    """Resolve a workspace-relative or absolute path against ``workspace.root``."""
+    p = Path(abs_or_rel_path).expanduser()
+    root = Path(workspace.root).resolve()
+    target = p.resolve() if p.is_absolute() else (root / abs_or_rel_path).resolve()
+    target.relative_to(root)  # raises ValueError if outside
+    return target

@@ -39,7 +39,7 @@ describe("workbench motion contract", () => {
     expect(css).toContain(":not(.mol-status-progress-indeterminate)");
     expect(css).toContain(":not(.mol-heartbeat-idle)");
     expect(css).toMatch(/:not\(\s*\.mol-heartbeat-pulse\s*\)/);
-    expect(css).toContain("animation: molexp-progress-spin 0.85s linear infinite !important");
+    expect(css).toContain("animation: molab-progress-spin 0.85s linear infinite !important");
     expect(css).toContain(".workflow-port-render .bg-circle");
     expect(readSource("plugins/workflow/flowgram-canvas-impl.tsx")).toContain("useReducedMotion()");
   });
@@ -96,7 +96,7 @@ describe("workbench motion contract", () => {
       if (
         body.includes("animation: none !important") &&
         body.includes(".mol-motion-progress-spin") &&
-        !body.includes("molexp-progress-spin")
+        !body.includes("molab-progress-spin")
       ) {
         throw new Error("reduced-motion kill targets progress spin without restoring it");
       }

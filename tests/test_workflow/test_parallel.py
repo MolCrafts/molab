@@ -10,7 +10,7 @@ The primitive's contract:
 * The static graph stays static — exactly one task entry per registered task (no
   per-element growth); the runtime multiplexes call coroutines.
 * Per-element failures are captured into
-  :class:`molexp.workflow.ParallelExecutionError`; siblings still complete and
+  :class:`molab.workflow.ParallelExecutionError`; siblings still complete and
   their outputs are recorded.
 """
 
@@ -20,7 +20,7 @@ import asyncio
 
 import pytest
 
-from molexp.workflow import (
+from molab.workflow import (
     EdgeShapeError,
     ParallelExecutionError,
     UnknownTaskError,
@@ -28,7 +28,7 @@ from molexp.workflow import (
     WorkflowCompiler,
     WorkflowRuntime,
 )
-from molexp.workflow.types import Next
+from molab.workflow.types import Next
 
 
 class TestParallel:

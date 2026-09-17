@@ -18,11 +18,11 @@ import { PLAN_STAGES } from "./planStages";
 type StageState = "done" | "current" | "failed" | "pending";
 
 const StepNode = ({ state }: { state: StageState }): JSX.Element => {
-  if (state === "done") return <CheckCircle2 className="h-4 w-4 text-success" />;
+  if (state === "done") return <CheckCircle2 className="size-icon text-success" />;
   if (state === "current")
-    return <Loader2 className="h-4 w-4 mol-motion-progress-spin text-info" />;
-  if (state === "failed") return <XCircle className="h-4 w-4 text-destructive" />;
-  return <Circle className="h-4 w-4 text-muted-foreground/40" />;
+    return <Loader2 className="size-icon mol-motion-progress-spin text-info" />;
+  if (state === "failed") return <XCircle className="size-icon text-destructive" />;
+  return <Circle className="size-icon text-muted-foreground/40" />;
 };
 
 export const PlanProgressRail = ({
@@ -80,16 +80,16 @@ export const PlanProgressRail = ({
                   onClick={() => onSelectStage(stage.kind)}
                   aria-current={selected}
                   className={cn(
-                    "flex w-full items-start gap-2.5 rounded-control px-1 py-1 text-left transition-colors",
+                    "flex w-full items-start gap-2 rounded-control px-1 py-1 text-left transition-colors",
                     selected ? "bg-accent/10" : "hover:bg-muted/60",
                   )}
                 >
-                  <span className="relative z-10 flex h-5 w-5 flex-none items-center justify-center rounded-full bg-background">
+                  <span className="relative z-10 flex size-4-lg flex-none items-center justify-center rounded-full bg-background">
                     <StepNode state={state} />
                   </span>
                   <span
                     className={cn(
-                      "pt-0.5 text-label leading-tight",
+                      "pt-1 text-label leading-tight",
                       selected
                         ? "font-semibold text-accent"
                         : state === "pending"

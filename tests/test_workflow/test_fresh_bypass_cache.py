@@ -15,15 +15,15 @@ from pathlib import Path
 
 import pytest
 
-from molexp.workflow import (
+from molab.workflow import (
     Caching,
     TaskContext,
     Workflow,
     WorkflowCompiler,
     WorkflowRuntime,
 )
-from molexp.workflow._engine.runtime import fresh_requested, request_fresh_execution
-from molexp.workspace import Workspace
+from molab.workflow._engine.runtime import fresh_requested, request_fresh_execution
+from molab.workspace import Workspace
 
 _COUNTERS: dict[str, int] = {}
 

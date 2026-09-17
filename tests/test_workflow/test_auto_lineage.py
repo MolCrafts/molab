@@ -11,9 +11,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from molexp.workflow import TaskContext, Workflow
-from molexp.workspace import Workspace
-from molexp.workspace.assets import lineage
+from molab.workflow import TaskContext, Workflow
+from molab.workspace import Workspace
+from molab.workspace.assets import lineage
 
 
 def _workspace(tmp_path: Path) -> Workspace:
@@ -127,7 +127,7 @@ class TestEngineAutomaticLineage:
         """Fail-soft: lineage rides the persistence bonus channel — a raising
         upstream-id computation degrades (persist skipped, debug log) and the
         run still succeeds with its results intact."""
-        from molexp.workflow._engine import node_cache
+        from molab.workflow._engine import node_cache
 
         def _boom(deps, registration):
             raise RuntimeError("lineage computation broken")

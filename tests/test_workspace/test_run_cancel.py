@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from molexp.workspace.domain import ExecutionStatus
+from molab.workspace.domain import ExecutionStatus
 
 
 class TestRunCancel:

@@ -2,7 +2,7 @@
 
 ``import_asset(..., action="reference")`` records an ``external_uri`` in the
 asset index. The bytes stay where they already live (e.g. a training
-``runs/`` tree outside the molexp workspace).
+``runs/`` tree outside the molab workspace).
 
 Run-produced outputs no longer support external pointers: schema v2 snapshots
 them through :meth:`ExecutionContext.emit_artifact`, which requires the source
@@ -16,8 +16,8 @@ from pathlib import Path
 
 import pytest
 
-from molexp.workspace import Workspace
-from molexp.workspace.artifact_repository import content_ref
+from molab.workspace import Workspace
+from molab.workspace.artifact_repository import content_ref
 
 
 def _outside_file(tmp_path: Path, name: str = "payload.bin", data: bytes = b"hello") -> Path:

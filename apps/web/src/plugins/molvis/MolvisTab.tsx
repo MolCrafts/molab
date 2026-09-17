@@ -25,8 +25,8 @@ interface FileListProps {
 const FileList = ({ files, active, onSelect }: FileListProps): JSX.Element => {
   return (
     <aside className="flex w-56 flex-none flex-col border-r border-border bg-surface-subtle">
-      <div className="flex h-[35px] items-center gap-2 border-b border-border px-3">
-        <Atom className="h-4 w-4 text-accent" />
+      <div className="flex h-toolbar-compact items-center gap-2 border-b border-border px-3">
+        <Atom className="size-icon text-accent" />
         <span className="text-label font-medium text-foreground">MolVis</span>
         <span className="ml-auto font-mono text-micro text-muted-foreground">{files.length}</span>
       </div>
@@ -38,13 +38,13 @@ const FileList = ({ files, active, onSelect }: FileListProps): JSX.Element => {
             key={file.relPath}
             type="button"
             onClick={() => onSelect(file.relPath)}
-            className={`flex w-full items-center gap-2 rounded-none px-2 py-1.5 text-left font-mono text-micro transition-colors ${
+            className={`flex w-full items-center gap-2 rounded-none px-2 py-row-pad text-left font-mono text-micro transition-colors ${
               file.relPath === active
                 ? "bg-accent-muted text-accent-muted-foreground"
                 : "text-muted-foreground hover:bg-interactive hover:text-foreground"
             }`}
           >
-            <FileText className="size-3.5 flex-none" aria-hidden />
+            <FileText className="size-icon-sm flex-none" aria-hidden />
             <span className="truncate" title={file.relPath}>
               {file.name}
             </span>

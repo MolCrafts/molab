@@ -3,7 +3,7 @@
 Execution lives on `WorkflowRuntime`, not on the compiled artifact. You instantiate the runtime (it is cheap and stateless apart from an optional cache) and hand it a `CompiledWorkflow`:
 
 ```python
-from molexp.workflow import Workflow, WorkflowCompiler, WorkflowRuntime
+from molab.workflow import Workflow, WorkflowCompiler, WorkflowRuntime
 
 wf = Workflow(name="demo")
 
@@ -21,11 +21,11 @@ handle = await runtime.start(compiled)        # background handle
 result = await handle.wait()
 ```
 
-The compiled artifact carries a frozen, molexp-owned `ExecutionPlan` that a structural engine executes with values-on-edges semantics (task inputs are delivered from upstream outputs; `End` is molexp's own sentinel in `molexp.workflow.types`) — but most user code should treat that as an implementation detail rather than as a direct API surface.
+The compiled artifact carries a frozen, molab-owned `ExecutionPlan` that a structural engine executes with values-on-edges semantics (task inputs are delivered from upstream outputs; `End` is molab's own sentinel in `molab.workflow.types`) — but most user code should treat that as an implementation detail rather than as a direct API surface.
 
 ## What the Runtime Actually Does
 
-When execution begins, the runtime builds the initial workflow state (optionally seeded with already-known task outputs), injects root-task inputs, and drives the lowered graph to completion. Tasks whose dependencies are all satisfied run concurrently. That is why most workflow parallelism in MolExp is implicit: you declare the dependency structure, and the runtime extracts the available concurrency from that structure.
+When execution begins, the runtime builds the initial workflow state (optionally seeded with already-known task outputs), injects root-task inputs, and drives the lowered graph to completion. Tasks whose dependencies are all satisfied run concurrently. That is why most workflow parallelism in Molab is implicit: you declare the dependency structure, and the runtime extracts the available concurrency from that structure.
 
 If a `RunContext` is attached (`execute(..., run_context=ctx)`), the runtime binds the run's profile config into every task **by name**, binds the run's sweep parameters into root tasks **by name** (with a content-addressed `workdir` exposed as `ctx.workdir`), persists per-node outputs under the run's execution directory, and back-propagates task failures so the run's final status is correct.
 
@@ -33,7 +33,7 @@ The runtime also relies on the compiled workflow identity rather than on ad hoc 
 
 ## Where Persistent State Lives
 
-Workflow execution state — the `workflow.json` snapshot under `<run_dir>/executions/<exec_id>/` — is written through workspace's public `atomic_write_json` helper, not raw filesystem calls. The atomicity guarantee is workspace's, not a runtime-layer reinvention. This is the runtime side of the *workflow → workspace* dependency direction documented in CLAUDE.md. Resume is caller-driven: a failed run preserves completed node outputs on disk, and the caller (e.g. `molexp run --resume`) re-seeds them via `execute(..., seed_outputs=...)`.
+Workflow execution state — the `workflow.json` snapshot under `<run_dir>/executions/<exec_id>/` — is written through workspace's public `atomic_write_json` helper, not raw filesystem calls. The atomicity guarantee is workspace's, not a runtime-layer reinvention. This is the runtime side of the *workflow → workspace* dependency direction documented in CLAUDE.md. Resume is caller-driven: a failed run preserves completed node outputs on disk, and the caller (e.g. `molab run --resume`) re-seeds them via `execute(..., seed_outputs=...)`.
 
 ## Caching
 
@@ -43,7 +43,7 @@ Cache persistence is pluggable. `Caching` orchestrates the cache policy (key der
 - `ws.cache.as_cache_store()` — an explicit workspace-wide cache folder. Execution does not auto-create it.
 - `FileCacheStore(path)` — any other directory. Useful when the caller has no run (e.g. ad-hoc scripts; the FastAPI server's process-local cache).
 
-The user-home `~/.molexp/cache/` shortcut from earlier MolExp versions is gone — caching is always either run-local or explicitly opted into via `FileCacheStore` / `ws.cache`.
+The user-home `~/.molab/cache/` shortcut from earlier Molab versions is gone — caching is always either run-local or explicitly opted into via `FileCacheStore` / `ws.cache`.
 
 ## Blocking Execution and Background Execution
 
@@ -54,7 +54,7 @@ The user-home `~/.molexp/cache/` shortcut from earlier MolExp versions is gone �
 There are two practical execution modes. The first is pure in-memory execution with no workspace attached. The second is execution under an opened `RunContext`:
 
 ```python
-import molexp as me
+import molab as me
 
 await runtime.execute(compiled)
 await runtime.execute(compiled, config={"scale": 2.0})

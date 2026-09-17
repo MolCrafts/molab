@@ -1,9 +1,9 @@
-/* MolExp product stylesheet.
+/* Molab product stylesheet.
  *
  * Constitution (type scale, radius, control geometry, motion, status roles):
  *   ./constitution-theme.css + ./constitution-base.css
  *   source of truth: molcrafts-ui (npm run sync:products)
- * This file owns the molexp brand palette, product @theme color mapping,
+ * This file owns the molab brand palette, product @theme color mapping,
  * workbench geometry extras, and domain motion/chrome.
  */
 @import "tailwindcss";
@@ -12,40 +12,40 @@
 
 @theme inline {
   /* Workbench surfaces */
-  --color-background: var(--molexp-background);
-  --color-surface: var(--molexp-surface);
-  --color-surface-subtle: var(--molexp-surface-subtle);
-  --color-canvas: var(--molexp-canvas);
-  --color-foreground: var(--molexp-foreground);
-  --color-muted-foreground: var(--molexp-muted-foreground);
-  --color-subtle-foreground: var(--molexp-subtle-foreground);
-  --color-border: var(--molexp-border);
-  --color-input: var(--molexp-input);
-  --color-ring: var(--molexp-accent);
-  --color-overlay-scrim: var(--molexp-overlay-scrim);
-  --color-statusbar: var(--molexp-statusbar);
-  --color-statusbar-foreground: var(--molexp-statusbar-foreground);
+  --color-background: var(--molab-background);
+  --color-surface: var(--molab-surface);
+  --color-surface-subtle: var(--molab-surface-subtle);
+  --color-canvas: var(--molab-canvas);
+  --color-foreground: var(--molab-foreground);
+  --color-muted-foreground: var(--molab-muted-foreground);
+  --color-subtle-foreground: var(--molab-subtle-foreground);
+  --color-border: var(--molab-border);
+  --color-input: var(--molab-input);
+  --color-ring: var(--molab-accent);
+  --color-overlay-scrim: var(--molab-overlay-scrim);
+  --color-statusbar: var(--molab-statusbar);
+  --color-statusbar-foreground: var(--molab-statusbar-foreground);
 
   /* Product accent — shadcn blue. VS Code informs layout, not the palette. */
-  --color-accent: var(--molexp-accent);
-  --color-accent-hover: var(--molexp-accent-hover);
-  --color-accent-foreground: var(--molexp-accent-foreground);
+  --color-accent: var(--molab-accent);
+  --color-accent-hover: var(--molab-accent-hover);
+  --color-accent-foreground: var(--molab-accent-foreground);
   /* Soft accent wash for list/row selection (light lavender in day mode) */
-  --color-accent-muted: var(--molexp-accent-muted);
-  --color-accent-muted-foreground: var(--molexp-accent-muted-foreground);
-  --color-interactive: var(--molexp-interactive);
-  --color-interactive-foreground: var(--molexp-interactive-foreground);
+  --color-accent-muted: var(--molab-accent-muted);
+  --color-accent-muted-foreground: var(--molab-accent-muted-foreground);
+  --color-interactive: var(--molab-interactive);
+  --color-interactive-foreground: var(--molab-interactive-foreground);
 
   /* shadcn compatibility aliases */
-  --color-primary: var(--molexp-accent);
-  --color-primary-foreground: var(--molexp-accent-foreground);
-  --color-secondary: var(--molexp-surface-subtle);
-  --color-secondary-foreground: var(--molexp-foreground);
-  --color-muted: var(--molexp-muted);
-  --color-card: var(--molexp-surface);
-  --color-card-foreground: var(--molexp-foreground);
-  --color-popover: var(--molexp-surface);
-  --color-popover-foreground: var(--molexp-foreground);
+  --color-primary: var(--molab-accent);
+  --color-primary-foreground: var(--molab-accent-foreground);
+  --color-secondary: var(--molab-surface-subtle);
+  --color-secondary-foreground: var(--molab-foreground);
+  --color-muted: var(--molab-muted);
+  --color-card: var(--molab-surface);
+  --color-card-foreground: var(--molab-foreground);
+  --color-popover: var(--molab-surface);
+  --color-popover-foreground: var(--molab-foreground);
 
   /* Fixed MolCrafts status vocabulary */
   --color-status-draft: var(--status-draft);
@@ -71,7 +71,7 @@
 
   /* Legacy semantic aliases used across feature code */
   --color-destructive: var(--status-failed);
-  --color-destructive-foreground: var(--molexp-on-fill);
+  --color-destructive-foreground: var(--molab-on-fill);
   --color-success: var(--status-completed);
   --color-success-foreground: var(--status-completed-foreground);
   --color-success-soft: var(--status-completed-soft);
@@ -84,35 +84,34 @@
   --color-info-soft: var(--status-running-soft);
 
   /* Diff semantics are domain data, not run status. */
-  --color-diff-added: var(--molexp-diff-added);
-  --color-diff-added-foreground: var(--molexp-diff-added-foreground);
-  --color-diff-added-soft: var(--molexp-diff-added-soft);
-  --color-diff-removed: var(--molexp-diff-removed);
-  --color-diff-removed-foreground: var(--molexp-diff-removed-foreground);
-  --color-diff-removed-soft: var(--molexp-diff-removed-soft);
-  --color-diff-modified: var(--molexp-diff-modified);
-  --color-diff-modified-foreground: var(--molexp-diff-modified-foreground);
-  --color-diff-modified-soft: var(--molexp-diff-modified-soft);
-  --color-diff-unchanged: var(--molexp-diff-unchanged);
-  --color-diff-unchanged-foreground: var(--molexp-diff-unchanged-foreground);
-  --color-diff-unchanged-soft: var(--molexp-diff-unchanged-soft);
+  --color-diff-added: var(--molab-diff-added);
+  --color-diff-added-foreground: var(--molab-diff-added-foreground);
+  --color-diff-added-soft: var(--molab-diff-added-soft);
+  --color-diff-removed: var(--molab-diff-removed);
+  --color-diff-removed-foreground: var(--molab-diff-removed-foreground);
+  --color-diff-removed-soft: var(--molab-diff-removed-soft);
+  --color-diff-modified: var(--molab-diff-modified);
+  --color-diff-modified-foreground: var(--molab-diff-modified-foreground);
+  --color-diff-modified-soft: var(--molab-diff-modified-soft);
+  --color-diff-unchanged: var(--molab-diff-unchanged);
+  --color-diff-unchanged-foreground: var(--molab-diff-unchanged-foreground);
+  --color-diff-unchanged-soft: var(--molab-diff-unchanged-soft);
 
-  --shadow-overlay: var(--molexp-shadow-overlay);
+  --shadow-overlay: var(--molab-shadow-overlay);
 
   /* Product workbench geometry (constitution owns control/toolbar/dialog-sm…). */
+
   --spacing-field-label: 7.5rem;
   --spacing-inspector: 19rem;
   --spacing-panel-sm: 12rem;
   --spacing-panel-md: 17.5rem;
   --spacing-panel-lg: 20rem;
-  --spacing-dialog-sm: 24rem;
-  --spacing-dialog-md: 30rem;
-  --spacing-dialog-lg: 34rem;
-  --spacing-dialog-scroll: 80vh;
-  --spacing-dialog-scroll-compact: 65vh;
-  --spacing-dialog-viewport-tall: 90vh;
-  --spacing-dialog-viewport: 85vw;
-  --spacing-overlay-viewport: calc(100% - 2rem);
+  /* Viewport caps for oversized product surfaces. Not the constitution's
+     `dialog` size role (content widths) — these are how far a surface may
+     grow against the window. */
+  --spacing-drawer: 85vw;
+  --spacing-viewport-tall: 90vh;
+  --spacing-scroll-compact: 65vh;
   --spacing-command-offset: 20%;
   --spacing-canvas-min: 30rem;
   --spacing-chart-xs: 10rem;
@@ -121,8 +120,6 @@
   --spacing-chart-lg: 26.25rem;
   --spacing-chart-xl: 28.75rem;
   --spacing-structure-preview: 18rem;
-
-  --ease-standard: var(--motion-ease);
 
   --animate-accordion-down: accordion-down var(--motion-base) var(--motion-ease);
   --animate-accordion-up: accordion-up var(--motion-base) var(--motion-ease);
@@ -151,83 +148,83 @@
     color-scheme: light;
 
     /* Surfaces — light default (workbench) */
-    --molexp-background: #ffffff;
-    --molexp-surface: #ffffff;
-    --molexp-surface-subtle: #f8fafc;
-    --molexp-canvas: #ffffff;
-    --molexp-muted: #f1f5f9;
-    --molexp-foreground: #0f172a;
-    --molexp-muted-foreground: #64748b;
-    --molexp-subtle-foreground: #94a3b8;
-    --molexp-border: #e2e8f0;
-    --molexp-input: #e2e8f0;
-    --molexp-overlay-scrim: oklch(0.12 0.01 255 / 50%);
+    --molab-background: #ffffff;
+    --molab-surface: #ffffff;
+    --molab-surface-subtle: #f8fafc;
+    --molab-canvas: #ffffff;
+    --molab-muted: #f1f5f9;
+    --molab-foreground: #0f172a;
+    --molab-muted-foreground: #64748b;
+    --molab-subtle-foreground: #94a3b8;
+    --molab-border: #e2e8f0;
+    --molab-input: #e2e8f0;
+    --molab-overlay-scrim: oklch(0.12 0.01 255 / 50%);
 
-    --molexp-accent: #2563eb;
-    --molexp-accent-hover: #1d4ed8;
-    --molexp-accent-foreground: #ffffff;
-    --molexp-accent-muted: #eff6ff;
-    --molexp-accent-muted-foreground: #1e40af;
-    --molexp-interactive: #f1f5f9;
-    --molexp-interactive-foreground: var(--molexp-foreground);
-    --molexp-on-fill: #ffffff;
-    --molexp-statusbar: #007acc;
-    --molexp-statusbar-foreground: #ffffff;
+    --molab-accent: #2563eb;
+    --molab-accent-hover: #1d4ed8;
+    --molab-accent-foreground: #ffffff;
+    --molab-accent-muted: #eff6ff;
+    --molab-accent-muted-foreground: #1e40af;
+    --molab-interactive: #f1f5f9;
+    --molab-interactive-foreground: var(--molab-foreground);
+    --molab-on-fill: #ffffff;
+    --molab-statusbar: #007acc;
+    --molab-statusbar-foreground: #ffffff;
 
     /* Soft status washes on product surface (base roles from constitution). */
-    --constitution-surface: var(--molexp-surface);
+    --constitution-surface: var(--molab-surface);
     --status-running-soft: color-mix(
       in oklab,
       var(--status-running) 14%,
-      var(--molexp-surface)
+      var(--molab-surface)
     );
     --status-completed-soft: color-mix(
       in oklab,
       var(--status-completed) 14%,
-      var(--molexp-surface)
+      var(--molab-surface)
     );
     --status-failed-soft: color-mix(
       in oklab,
       var(--status-failed) 12%,
-      var(--molexp-surface)
+      var(--molab-surface)
     );
     --status-warning-soft: color-mix(
       in oklab,
       var(--status-warning) 16%,
-      var(--molexp-surface)
+      var(--molab-surface)
     );
 
     /* Version/config diffs follow familiar scientific-editor conventions. */
-    --molexp-diff-added: oklch(0.6 0.13 150);
-    --molexp-diff-added-foreground: oklch(0.42 0.11 150);
-    --molexp-diff-added-soft: color-mix(
+    --molab-diff-added: oklch(0.6 0.13 150);
+    --molab-diff-added-foreground: oklch(0.42 0.11 150);
+    --molab-diff-added-soft: color-mix(
       in oklab,
-      var(--molexp-diff-added) 14%,
-      var(--molexp-surface)
+      var(--molab-diff-added) 14%,
+      var(--molab-surface)
     );
-    --molexp-diff-removed: oklch(0.58 0.19 25);
-    --molexp-diff-removed-foreground: oklch(0.52 0.18 25);
-    --molexp-diff-removed-soft: color-mix(
+    --molab-diff-removed: oklch(0.58 0.19 25);
+    --molab-diff-removed-foreground: oklch(0.52 0.18 25);
+    --molab-diff-removed-soft: color-mix(
       in oklab,
-      var(--molexp-diff-removed) 12%,
-      var(--molexp-surface)
+      var(--molab-diff-removed) 12%,
+      var(--molab-surface)
     );
-    --molexp-diff-modified: oklch(0.72 0.14 85);
-    --molexp-diff-modified-foreground: oklch(0.43 0.11 85);
-    --molexp-diff-modified-soft: color-mix(
+    --molab-diff-modified: oklch(0.72 0.14 85);
+    --molab-diff-modified-foreground: oklch(0.43 0.11 85);
+    --molab-diff-modified-soft: color-mix(
       in oklab,
-      var(--molexp-diff-modified) 16%,
-      var(--molexp-surface)
+      var(--molab-diff-modified) 16%,
+      var(--molab-surface)
     );
-    --molexp-diff-unchanged: oklch(0.58 0.02 255);
-    --molexp-diff-unchanged-foreground: oklch(0.4 0.02 255);
-    --molexp-diff-unchanged-soft: color-mix(
+    --molab-diff-unchanged: oklch(0.58 0.02 255);
+    --molab-diff-unchanged-foreground: oklch(0.4 0.02 255);
+    --molab-diff-unchanged-soft: color-mix(
       in oklab,
-      var(--molexp-diff-unchanged) 12%,
-      var(--molexp-surface)
+      var(--molab-diff-unchanged) 12%,
+      var(--molab-surface)
     );
 
-    --molexp-shadow-overlay: 0 0.75rem 2rem oklch(0.12 0.01 255 / 18%);
+    --molab-shadow-overlay: 0 0.75rem 2rem oklch(0.12 0.01 255 / 18%);
 
     /* motion-* from constitution-base.css */
     --border-width-ui: 1px;
@@ -251,28 +248,28 @@
   :where(.dark, :host(.dark)) {
     color-scheme: dark;
 
-    --molexp-background: oklch(0.16 0.008 255);
-    --molexp-surface: oklch(0.2 0.01 255);
-    --molexp-surface-subtle: oklch(0.23 0.01 255);
-    --molexp-canvas: oklch(0.14 0.008 255);
-    --molexp-muted: oklch(0.24 0.01 255);
-    --molexp-foreground: oklch(0.93 0.01 255);
-    --molexp-muted-foreground: oklch(0.68 0.015 255);
-    --molexp-subtle-foreground: oklch(0.6 0.014 255);
-    --molexp-border: oklch(1 0 0 / 10%);
-    --molexp-input: oklch(1 0 0 / 12%);
-    --molexp-overlay-scrim: oklch(0.04 0.01 255 / 66%);
+    --molab-background: oklch(0.16 0.008 255);
+    --molab-surface: oklch(0.2 0.01 255);
+    --molab-surface-subtle: oklch(0.23 0.01 255);
+    --molab-canvas: oklch(0.14 0.008 255);
+    --molab-muted: oklch(0.24 0.01 255);
+    --molab-foreground: oklch(0.93 0.01 255);
+    --molab-muted-foreground: oklch(0.68 0.015 255);
+    --molab-subtle-foreground: oklch(0.6 0.014 255);
+    --molab-border: oklch(1 0 0 / 10%);
+    --molab-input: oklch(1 0 0 / 12%);
+    --molab-overlay-scrim: oklch(0.04 0.01 255 / 66%);
 
-    --molexp-accent: #60a5fa;
-    --molexp-accent-hover: #93c5fd;
-    --molexp-accent-foreground: #0f172a;
-    --molexp-accent-muted: #172554;
-    --molexp-accent-muted-foreground: #dbeafe;
-    --molexp-interactive: oklch(0.26 0.012 255);
-    --molexp-interactive-foreground: var(--molexp-foreground);
-    --molexp-on-fill: oklch(0.985 0.003 255);
-    --molexp-statusbar: #0e639c;
-    --molexp-statusbar-foreground: #ffffff;
+    --molab-accent: #60a5fa;
+    --molab-accent-hover: #93c5fd;
+    --molab-accent-foreground: #0f172a;
+    --molab-accent-muted: #172554;
+    --molab-accent-muted-foreground: #dbeafe;
+    --molab-interactive: oklch(0.26 0.012 255);
+    --molab-interactive-foreground: var(--molab-foreground);
+    --molab-on-fill: oklch(0.985 0.003 255);
+    --molab-statusbar: #0e639c;
+    --molab-statusbar-foreground: #ffffff;
 
     --status-ready-foreground: oklch(0.78 0.02 255);
     --status-running-foreground: oklch(0.76 0.13 250);
@@ -280,12 +277,12 @@
     --status-failed-foreground: oklch(0.73 0.16 25);
     --status-failed-hover: oklch(0.64 0.18 25);
     --status-warning-foreground: oklch(0.8 0.12 85);
-    --molexp-diff-added-foreground: oklch(0.74 0.12 150);
-    --molexp-diff-removed-foreground: oklch(0.73 0.16 25);
-    --molexp-diff-modified-foreground: oklch(0.8 0.12 85);
-    --molexp-diff-unchanged-foreground: oklch(0.78 0.02 255);
+    --molab-diff-added-foreground: oklch(0.74 0.12 150);
+    --molab-diff-removed-foreground: oklch(0.73 0.16 25);
+    --molab-diff-modified-foreground: oklch(0.8 0.12 85);
+    --molab-diff-unchanged-foreground: oklch(0.78 0.02 255);
 
-    --molexp-shadow-overlay: 0 0.75rem 2rem oklch(0.04 0.01 255 / 46%);
+    --molab-shadow-overlay: 0 0.75rem 2rem oklch(0.04 0.01 255 / 46%);
   }
 
   * {
@@ -351,12 +348,12 @@
     /* Restore after the kill (same media query, higher-specificity class). */
     :where(:root, :host) .mol-motion-progress-spin,
     :where(:root, :host) .mol-progress-spinner {
-      animation: molexp-progress-spin 0.85s linear infinite !important;
+      animation: molab-progress-spin 0.85s linear infinite !important;
       animation-play-state: running !important;
     }
 
     :where(:root, :host) .mol-motion-progress-pulse {
-      animation: molexp-progress-pulse 1.2s linear infinite !important;
+      animation: molab-progress-pulse 1.2s linear infinite !important;
       animation-play-state: running !important;
     }
 
@@ -366,7 +363,7 @@
     }
 
     :where(:root, :host) .mol-heartbeat-idle {
-      animation: molexp-heartbeat-idle 3.6s ease-in-out infinite !important;
+      animation: molab-heartbeat-idle 3.6s ease-in-out infinite !important;
       animation-play-state: running !important;
     }
   }
@@ -377,7 +374,7 @@
  * (An earlier instrumentation grid read as unfinished SaaS canvas when empty.)
  * Workflow canvas keeps its own surface tokens; do not reintroduce a page grid here.
  */
-.molexp-dashboard {
+.molab-dashboard {
   background-color: var(--color-background);
   background-image: none;
 }
@@ -386,23 +383,23 @@
  * Workflow-canvas edges (flowgram free-layout). Shape carries node type;
  * colour carries STATUS only — never product accent.
  */
-.molexp-edge-success stop {
+.molab-edge-success stop {
   stop-color: var(--status-completed) !important;
 }
-.molexp-edge-failed stop {
+.molab-edge-failed stop {
   stop-color: var(--status-failed) !important;
 }
-.molexp-edge-pending stop {
+.molab-edge-pending stop {
   stop-color: var(--status-draft) !important;
 }
-.molexp-edge-skipped stop {
+.molab-edge-skipped stop {
   stop-color: var(--status-cancelled) !important;
 }
-.molexp-edge-running stop {
+.molab-edge-running stop {
   stop-color: var(--status-running) !important;
 }
 
-.molexp-edge-running .flowing-line {
+.molab-edge-running .flowing-line {
   stroke-dasharray: 5 26 !important;
   stroke-linecap: round;
 }
@@ -429,7 +426,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .molexp-edge-running .flowing-line {
+  .molab-edge-running .flowing-line {
     animation: none !important;
     stroke-dasharray: none !important;
     filter: none;
@@ -469,22 +466,22 @@
 }
 
 .mol-motion-enter-from-bottom {
-  animation: molexp-enter-y var(--motion-base) var(--motion-ease) both;
+  animation: molab-enter-y var(--motion-base) var(--motion-ease) both;
   --motion-offset-y: 8px;
 }
 
 .mol-motion-enter-from-right {
-  animation: molexp-enter-x var(--motion-base) var(--motion-ease) both;
+  animation: molab-enter-x var(--motion-base) var(--motion-ease) both;
   --motion-offset-x: 8px;
 }
 
 .mol-motion-enter-from-left {
-  animation: molexp-enter-x var(--motion-base) var(--motion-ease) both;
+  animation: molab-enter-x var(--motion-base) var(--motion-ease) both;
   --motion-offset-x: -8px;
 }
 
 .mol-motion-enter-fade {
-  animation: molexp-enter-fade var(--motion-base) var(--motion-ease) both;
+  animation: molab-enter-fade var(--motion-base) var(--motion-ease) both;
 }
 
 /*
@@ -492,19 +489,19 @@
  * state changes real without depending on an uninstalled animation plugin.
  */
 .mol-motion-overlay[data-state="open"] {
-  animation: molexp-fade-in var(--motion-base) var(--motion-ease) both;
+  animation: molab-fade-in var(--motion-base) var(--motion-ease) both;
 }
 
 .mol-motion-overlay[data-state="closed"] {
-  animation: molexp-fade-out var(--motion-fast) var(--motion-ease) both;
+  animation: molab-fade-out var(--motion-fast) var(--motion-ease) both;
 }
 
 .mol-motion-dialog[data-state="open"] {
-  animation: molexp-dialog-in var(--motion-base) var(--motion-ease) both;
+  animation: molab-dialog-in var(--motion-base) var(--motion-ease) both;
 }
 
 .mol-motion-dialog[data-state="closed"] {
-  animation: molexp-dialog-out var(--motion-fast) var(--motion-ease) both;
+  animation: molab-dialog-out var(--motion-fast) var(--motion-ease) both;
 }
 
 .mol-motion-popup {
@@ -533,11 +530,11 @@
   [data-state="instant-open"],
   [data-state="delayed-open"]
 ) {
-  animation: molexp-popup-in var(--motion-fast) var(--motion-ease) both;
+  animation: molab-popup-in var(--motion-fast) var(--motion-ease) both;
 }
 
 .mol-motion-popup[data-state="closed"] {
-  animation: molexp-popup-out var(--motion-fast) var(--motion-ease) both;
+  animation: molab-popup-out var(--motion-fast) var(--motion-ease) both;
 }
 
 .mol-motion-sheet {
@@ -562,11 +559,11 @@
 }
 
 .mol-motion-sheet[data-state="open"] {
-  animation: molexp-sheet-in var(--motion-slow) var(--motion-ease) both;
+  animation: molab-sheet-in var(--motion-slow) var(--motion-ease) both;
 }
 
 .mol-motion-sheet[data-state="closed"] {
-  animation: molexp-sheet-out var(--motion-base) var(--motion-ease) both;
+  animation: molab-sheet-out var(--motion-base) var(--motion-ease) both;
 }
 
 /*
@@ -575,7 +572,7 @@
  * cannot freeze the indicator.
  */
 .mol-motion-progress-spin {
-  animation: molexp-progress-spin 0.85s linear infinite !important;
+  animation: molab-progress-spin 0.85s linear infinite !important;
   transform-origin: center center !important;
   /* SVG icons: force the transform box so rotate actually spins the glyph. */
   transform-box: fill-box;
@@ -583,7 +580,7 @@
 }
 
 .mol-motion-progress-pulse {
-  animation: molexp-progress-pulse 1.2s linear infinite !important;
+  animation: molab-progress-pulse 1.2s linear infinite !important;
   will-change: opacity;
 }
 
@@ -598,7 +595,7 @@
   border: 2px solid currentColor;
   border-right-color: transparent;
   border-radius: 9999px;
-  animation: molexp-progress-spin 0.7s linear infinite !important;
+  animation: molab-progress-spin 0.7s linear infinite !important;
   will-change: transform;
 }
 
@@ -613,53 +610,53 @@
   height: 1rem;
 }
 
-@keyframes molexp-enter-fade {
+@keyframes molab-enter-fade {
   from {
     opacity: 0;
   }
 }
 
-@keyframes molexp-enter-y {
+@keyframes molab-enter-y {
   from {
     opacity: 0;
     transform: translateY(var(--motion-offset-y, 8px));
   }
 }
 
-@keyframes molexp-enter-x {
+@keyframes molab-enter-x {
   from {
     opacity: 0;
     transform: translateX(var(--motion-offset-x, 8px));
   }
 }
 
-@keyframes molexp-fade-in {
+@keyframes molab-fade-in {
   from {
     opacity: 0;
   }
 }
 
-@keyframes molexp-fade-out {
+@keyframes molab-fade-out {
   to {
     opacity: 0;
   }
 }
 
-@keyframes molexp-dialog-in {
+@keyframes molab-dialog-in {
   from {
     opacity: 0;
     scale: 0.98;
   }
 }
 
-@keyframes molexp-dialog-out {
+@keyframes molab-dialog-out {
   to {
     opacity: 0;
     scale: 0.98;
   }
 }
 
-@keyframes molexp-popup-in {
+@keyframes molab-popup-in {
   from {
     opacity: 0;
     translate: var(--motion-popup-x) var(--motion-popup-y);
@@ -667,7 +664,7 @@
   }
 }
 
-@keyframes molexp-popup-out {
+@keyframes molab-popup-out {
   to {
     opacity: 0;
     translate: var(--motion-popup-x) var(--motion-popup-y);
@@ -675,25 +672,25 @@
   }
 }
 
-@keyframes molexp-sheet-in {
+@keyframes molab-sheet-in {
   from {
     translate: var(--motion-sheet-x) var(--motion-sheet-y);
   }
 }
 
-@keyframes molexp-sheet-out {
+@keyframes molab-sheet-out {
   to {
     translate: var(--motion-sheet-x) var(--motion-sheet-y);
   }
 }
 
-@keyframes molexp-progress-spin {
+@keyframes molab-progress-spin {
   to {
     transform: rotate(1turn);
   }
 }
 
-@keyframes molexp-progress-pulse {
+@keyframes molab-progress-pulse {
   0%,
   100% {
     opacity: 0.5;
@@ -704,7 +701,7 @@
 }
 
 /* One-shot acknowledgement flash after a completed poll / click. */
-@keyframes molexp-heartbeat-pulse {
+@keyframes molab-heartbeat-pulse {
   0% {
     opacity: 0.45;
     transform: scale(1);
@@ -720,7 +717,7 @@
 }
 
 /* Soft ambient pulse so the idle lamp is never "missing" on a quiet status bar. */
-@keyframes molexp-heartbeat-idle {
+@keyframes molab-heartbeat-idle {
   0%,
   100% {
     opacity: 0.5;
@@ -732,13 +729,13 @@
 
 .mol-heartbeat-pulse {
   display: inline-flex;
-  animation: molexp-heartbeat-pulse 280ms var(--motion-ease) both;
+  animation: molab-heartbeat-pulse 280ms var(--motion-ease) both;
   will-change: opacity, transform;
 }
 
 .mol-heartbeat-idle {
   display: inline-flex;
-  animation: molexp-heartbeat-idle 2.4s var(--motion-ease) infinite;
+  animation: molab-heartbeat-idle 2.4s var(--motion-ease) infinite;
   will-change: opacity;
 }
 
@@ -778,12 +775,12 @@
   /* Slower but still continuous — "running" must remain visible as motion. */
   .mol-motion-progress-spin,
   .mol-progress-spinner {
-    animation: molexp-progress-spin 1.2s linear infinite !important;
+    animation: molab-progress-spin 1.2s linear infinite !important;
     animation-play-state: running !important;
   }
 
   .mol-motion-progress-pulse {
-    animation: molexp-progress-pulse 1.6s linear infinite !important;
+    animation: molab-progress-pulse 1.6s linear infinite !important;
     animation-play-state: running !important;
   }
 
@@ -793,7 +790,7 @@
   }
 
   .mol-heartbeat-idle {
-    animation: molexp-heartbeat-idle 3.6s ease-in-out infinite !important;
+    animation: molab-heartbeat-idle 3.6s ease-in-out infinite !important;
   }
 
   .mol-status-progress-indeterminate {

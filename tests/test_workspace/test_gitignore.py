@@ -1,10 +1,10 @@
-"""Tests for :class:`molexp.workspace.gitignore.GitIgnoreMatcher`."""
+"""Tests for :class:`molab.workspace.gitignore.GitIgnoreMatcher`."""
 
 from __future__ import annotations
 
 from pathlib import Path
 
-from molexp.workspace.gitignore import GitIgnoreMatcher, load_gitignore_matcher
+from molab.workspace.gitignore import GitIgnoreMatcher, load_gitignore_matcher
 
 
 class TestGitIgnoreMatcher:

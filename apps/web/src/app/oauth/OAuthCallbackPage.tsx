@@ -1,7 +1,7 @@
 /**
  * OAuthCallbackPage — destination of the IdP redirect after the user logs in.
  *
- * Lives at ``/oauth-callback`` (matching ``MOLEXP_OAUTH_REDIRECT_URI`` /
+ * Lives at ``/oauth-callback`` (matching ``MOLAB_OAUTH_REDIRECT_URI`` /
  * the redirect URI registered with the IdP via Dynamic Client Registration).
  * On mount, it pulls ``code`` and ``state`` from ``window.location.search``,
  * postMessages them to the opener (the McpServersTab popup launcher),
@@ -46,7 +46,7 @@ export const OAuthCallbackPage = (): JSX.Element => {
     }
     window.opener.postMessage(
       {
-        type: "molexp:oauth-callback",
+        type: "molab:oauth-callback",
         code: params.code,
         state: params.state,
       },
@@ -90,8 +90,8 @@ export const OAuthCallbackPage = (): JSX.Element => {
       <Center>
         <Title>Authorization received</Title>
         <Body>
-          This window was not opened from molexp's settings UI. Copy the code below and paste it
-          into the Connect dialog manually.
+          This window was not opened from molab's settings UI. Copy the code below and paste it into
+          the Connect dialog manually.
           <pre className="mt-3 max-w-full overflow-auto rounded-control border bg-muted/40 p-2 text-label">
             {params.code}
           </pre>
@@ -105,8 +105,8 @@ export const OAuthCallbackPage = (): JSX.Element => {
       <Title>Authorization received</Title>
       <Body>
         {posted
-          ? "You can close this window. molexp is finishing the connection."
-          : "Forwarding code to molexp…"}
+          ? "You can close this window. molab is finishing the connection."
+          : "Forwarding code to molab…"}
       </Body>
     </Center>
   );

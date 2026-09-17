@@ -1,4 +1,4 @@
-"""Tests for ``molexp.workspace.curation.consolidate`` source dedup.
+"""Tests for ``molab.workspace.curation.consolidate`` source dedup.
 
 Pins ``dedupe_workflow_source`` (group run ids by the content hash of their
 ``run_dir/source`` snapshot; runs lacking a ``source/`` dir are skipped) and
@@ -12,10 +12,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from molexp.ids import compute_content_hash
-from molexp.workspace import Workspace
-from molexp.workspace.curation import consolidate_workflow_source, dedupe_workflow_source
-from molexp.workspace.run import Run
+from molab.ids import compute_content_hash
+from molab.workspace import Workspace
+from molab.workspace.curation import consolidate_workflow_source, dedupe_workflow_source
+from molab.workspace.run import Run
 
 
 def _write_source(run: Run, files: dict[str, str]) -> None:

@@ -18,6 +18,14 @@ export {
 } from "./Dashboard";
 export type { DataTableColumn, DataTableProps, DataTableRowAction } from "./DataTable";
 export { DataTable } from "./DataTable";
+export type { BreakdownGroup, ScheduleItem } from "./Encodings";
+export {
+  Histogram,
+  MagnitudeBar,
+  Schedule,
+  StatusBreakdown,
+  StatusLegend,
+} from "./Encodings";
 export type { EntityPageTab } from "./EntityPage";
 export { EntityHeader, EntityMetric, EntityPage, KeyValueGrid } from "./EntityPage";
 export type { EntityTabItem } from "./EntityTabs";

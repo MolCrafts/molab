@@ -24,7 +24,7 @@ export const RunsExplorer = ({
 
   const actions = (
     <WorkbenchIconAction label="Refresh runs" kind="ghost" onClick={onRefresh}>
-      <RefreshCw className="h-4 w-4" />
+      <RefreshCw className="size-4" />
     </WorkbenchIconAction>
   );
 

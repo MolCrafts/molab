@@ -1,4 +1,4 @@
-"""Unit tests for :mod:`molexp.services.run_failure` (close-loop-02)."""
+"""Unit tests for :mod:`molab.services.run_failure` (close-loop-02)."""
 
 from __future__ import annotations
 
@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from molexp.services.run_failure import analyze_run_failure, build_failure_narrative
-from molexp.workspace import Workspace
+from molab.services.run_failure import analyze_run_failure, build_failure_narrative
+from molab.workspace import Workspace
 
 
 def _run(tmp_path: Path, *, run_id: str = "aabbccdd"):

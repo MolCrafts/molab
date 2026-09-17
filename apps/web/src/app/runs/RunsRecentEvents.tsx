@@ -75,7 +75,7 @@ export const RunsRecentEvents = ({ run, max = 8 }: RunsRecentEventsProps): JSX.E
             <span
               aria-hidden="true"
               className={cn(
-                "mt-1 inline-flex h-4 w-4 shrink-0 items-center justify-center rounded-full",
+                "mt-1 inline-flex size-4 shrink-0 items-center justify-center rounded-full",
                 dotClassFor(event),
               )}
             >

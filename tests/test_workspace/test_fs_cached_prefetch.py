@@ -15,13 +15,13 @@ from typing import IO, Any
 
 import pytest
 
-from molexp.workspace import Workspace
-from molexp.workspace.fs import StatResult
-from molexp.workspace.fs_cached import (
+from molab.workspace import Workspace
+from molab.workspace.fs import StatResult
+from molab.workspace.fs_cached import (
     CachedRemoteFileSystem,
     prefetch_workspace_indices,
 )
-from molexp.workspace.fs_local import LocalFileSystem
+from molab.workspace.fs_local import LocalFileSystem
 
 
 class _ScriptedFS:

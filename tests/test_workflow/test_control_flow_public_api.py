@@ -1,7 +1,7 @@
 """Public control-flow API — ``wf.branch`` / ``wf.loop`` / ``Next`` are blessed.
 
 ``Next`` graduated from IR-internal token to public routing return value
-(``molexp.workflow.Next``, in ``__all__`` — locked by
+(``molab.workflow.Next``, in ``__all__`` — locked by
 ``test_engine_boundary``). Here we pin the *runtime* control-flow semantics a
 branch or loop workflow must obey, built end-to-end from public imports alone:
 
@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import pytest
 
-from molexp.workflow import (
+from molab.workflow import (
     Next,
     TaskContext,
     Workflow,

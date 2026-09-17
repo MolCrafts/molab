@@ -115,7 +115,7 @@ describe("parseTaskGraphIr — full-graph IR + subworkflow", () => {
       { name: "items", task_type: "lister", depends_on: [], subworkflow: null },
       {
         name: "sub",
-        task_type: "molexp.SubWorkflow",
+        task_type: "molab.SubWorkflow",
         depends_on: [],
         subworkflow: {
           name: "inner",

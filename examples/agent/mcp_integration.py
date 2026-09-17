@@ -6,7 +6,7 @@ Demonstrates:
 
 1. Offline-first ``ScriptedRouter`` simulating MCP tool-call responses.
 2. ``MCPServerStdio`` construction pattern (commented — for real LLM runs).
-3. Live mode: configure ``mcp.json`` (or user ``~/.molexp/mcp.json``);
+3. Live mode: configure ``mcp.json`` (or user ``~/.molab/mcp.json``);
    a ReAct turn opens entries via ``McpCatalog`` and passes
    them as ``stream_agentic(toolsets=...)``.
 4. ReAct emitting ``ToolCallStartedEvent`` / ``ToolCallCompletedEvent``.
@@ -29,10 +29,9 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
-import molexp
-from molexp.agent import AgentRunner
-from molexp.agent.events import ToolCallCompletedEvent, ToolCallStartedEvent
-from molexp.agent.router import (
+from molab.agent import AgentRunner
+from molab.agent.events import ToolCallCompletedEvent, ToolCallStartedEvent
+from molab.agent.router import (
     AgenticChunk,
     FinalChunk,
     ModelTier,
@@ -41,7 +40,9 @@ from molexp.agent.router import (
     ToolCallChunk,
     ToolResultChunk,
 )
-from molexp.agent.types import UsageBreakdown
+from molab.agent.types import UsageBreakdown
+
+import molab
 
 MODEL = "deepseek:deepseek-v4-flash"
 API_KEY = ""  # ← paste your key here for live mode
@@ -83,7 +84,7 @@ class ScriptedRouter:
 
 
 def _build_runner(workspace: Path) -> AgentRunner:
-    # Live MCP: write workspace/mcp.json (or ~/.molexp/mcp.json); the ReAct turn
+    # Live MCP: write workspace/mcp.json (or ~/.molab/mcp.json); the ReAct turn
     # opens valid entries automatically via McpCatalog + stream_agentic.
     kwargs = {
         "workspace": workspace,
@@ -91,7 +92,7 @@ def _build_runner(workspace: Path) -> AgentRunner:
         "system_prompt": "you are a data-analysis assistant with database tool access",
     }
     if API_KEY:
-        molexp.config["deepseek_api_key"] = API_KEY
+        molab.config["deepseek_api_key"] = API_KEY
         return AgentRunner(model=MODEL, **kwargs)
     return AgentRunner(router=ScriptedRouter(), **kwargs)
 

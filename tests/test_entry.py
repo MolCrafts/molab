@@ -4,9 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from molexp.entry import _registry, clear_registry, entry, load_workspaces
-from molexp.workspace import Workspace
-from molexp.workspace.workspace import set_cli_root_override
+from molab.entry import _registry, clear_registry, entry, load_workspaces
+from molab.workspace import Workspace
+from molab.workspace.workspace import set_cli_root_override
 
 
 @pytest.fixture(autouse=True)
@@ -29,8 +29,8 @@ class TestLoadWorkspaces:
         ws_path = tmp_path / "ws"
         script = tmp_path / "test_script.py"
         script.write_text(
-            "from molexp.workspace import Workspace\n"
-            "from molexp.entry import entry\n"
+            "from molab.workspace import Workspace\n"
+            "from molab.entry import entry\n"
             f"ws = Workspace({str(ws_path)!r}, name='from-script')\n"
             "entry(ws)\n"
         )
@@ -43,7 +43,7 @@ class TestLoadWorkspaces:
 def restore_cli_root_override():
     """Guarantee the module-global override is cleared after the test.
 
-    The override is process-global state in ``molexp.workspace.workspace``;
+    The override is process-global state in ``molab.workspace.workspace``;
     leaking a non-``None`` value would silently rewrite the root of every
     ``Workspace(...)`` constructed in later tests.
     """
@@ -59,7 +59,7 @@ class TestInferWorkspaceRoot:
 
     def test_empty_path_raises_value_error(self):
         # ac-002: fail fast on a falsy / unresolvable path, no silent default.
-        from molexp.entry import infer_workspace_root
+        from molab.entry import infer_workspace_root
 
         with pytest.raises(ValueError):
             infer_workspace_root(Path())
@@ -95,13 +95,13 @@ class TestWorkspaceRootInference:
 class TestFluentExperimentChain:
     """``add_project → add_experiment → define(workflow, params=...)``.
 
-    Importing :mod:`molexp.entry` registers the cross-layer ``WorkflowExecutor``
+    Importing :mod:`molab.entry` registers the cross-layer ``WorkflowExecutor``
     seam, so ``Experiment.define`` works without workspace importing workflow.
     """
 
     @staticmethod
     def _workflow() -> object:
-        from molexp.workflow import Task, TaskContext, Workflow, WorkflowCompiler
+        from molab.workflow import Task, TaskContext, Workflow, WorkflowCompiler
 
         class Step(Task):
             async def execute(self, ctx: TaskContext) -> int:
@@ -110,7 +110,7 @@ class TestFluentExperimentChain:
         return WorkflowCompiler().compile(Workflow(name="wf").add(Step(), name="step"))
 
     def test_execute_binds_workflow_and_registers_entry(self, tmp_path):
-        from molexp.workflow import default_binding_registry
+        from molab.workflow import default_binding_registry
 
         exp = (
             Workspace(tmp_path / "ws", name="ws")
@@ -125,7 +125,7 @@ class TestFluentExperimentChain:
 
     def test_execute_without_registered_executor_fails_fast(self, tmp_path, monkeypatch):
         # The seam is required; without it execute() must not silently no-op.
-        import molexp.workspace.experiment as exp_mod
+        import molab.workspace.experiment as exp_mod
 
         monkeypatch.setattr(exp_mod, "_workflow_executor", None)
         exp = Workspace(tmp_path / "ws", name="ws").add_project("p").add_experiment("e")

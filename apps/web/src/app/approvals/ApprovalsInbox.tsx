@@ -64,9 +64,9 @@ const ApprovalListRow = ({
       )}
     >
       <ShieldQuestion
-        className={cn("mt-0.5 h-4 w-4 flex-none", isPlan ? "text-info" : "text-warning")}
+        className={cn("mt-1 size-icon flex-none", isPlan ? "text-info" : "text-warning")}
       />
-      <div className="min-w-0 flex-1 space-y-0.5">
+      <div className="min-w-0 flex-1 space-y-1">
         <p className="text-body-lg font-medium text-foreground">{title}</p>
         <p className="truncate text-label text-muted-foreground">
           {item.projectId}/{item.experimentId}
@@ -76,7 +76,7 @@ const ApprovalListRow = ({
           <p className="line-clamp-2 text-label text-muted-foreground">{item.reason}</p>
         ) : null}
       </div>
-      <ChevronRight className="mt-1 h-4 w-4 flex-none text-muted-foreground" />
+      <ChevronRight className="mt-1 size-icon flex-none text-muted-foreground" />
     </WorkbenchAction>
   );
 };
@@ -154,7 +154,7 @@ const ApprovalCard = ({
       <header className="space-y-1">
         <div className="flex items-start gap-2">
           <ShieldQuestion
-            className={cn("mt-0.5 h-4 w-4 flex-none", isPlanReview ? "text-info" : "text-warning")}
+            className={cn("mt-1 size-icon flex-none", isPlanReview ? "text-info" : "text-warning")}
           />
           <div className="min-w-0 flex-1">
             <h3 className="text-body-lg font-semibold text-foreground">{title}</h3>
@@ -243,7 +243,7 @@ const ApprovalCard = ({
               disabled={busy}
               onClick={() => void decide("reject")}
             >
-              <XCircle className="h-3.5 w-3.5" />
+              <XCircle className="size-icon-sm" />
               Confirm reject
             </WorkbenchAction>
           </>
@@ -264,7 +264,7 @@ const ApprovalCard = ({
                 disabled={busy}
                 onClick={() => void decide("revise")}
               >
-                <Pencil className="h-3.5 w-3.5" />
+                <Pencil className="size-icon-sm" />
                 Revise
               </WorkbenchAction>
             ) : null}
@@ -274,7 +274,7 @@ const ApprovalCard = ({
               disabled={busy}
               onClick={() => void decide("approve")}
             >
-              <CheckCircle2 className="h-3.5 w-3.5" />
+              <CheckCircle2 className="size-icon-sm" />
               Approve
             </WorkbenchAction>
           </>

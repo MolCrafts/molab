@@ -69,7 +69,7 @@ export const RunInspectorLogs = ({
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="flex flex-wrap items-center gap-2 border-b border-border/60 px-3 py-2">
-        <Terminal className="h-3.5 w-3.5 text-muted-foreground" />
+        <Terminal className="size-icon-sm text-muted-foreground" />
         <span className="text-label text-muted-foreground">
           stdout / stderr · <span className="text-foreground">{attemptLabel}</span>
         </span>
@@ -101,7 +101,7 @@ export const RunInspectorLogs = ({
             aria-label="Refresh logs"
             title="Refresh logs"
           >
-            <RefreshCw className={cn("h-3.5 w-3.5", loading && "mol-motion-progress-spin")} />
+            <RefreshCw className={cn("size-icon-sm", loading && "mol-motion-progress-spin")} />
           </WorkbenchIconAction>
         </div>
       </div>

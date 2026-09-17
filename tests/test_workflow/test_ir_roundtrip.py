@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from molexp.workflow import (
+from molab.workflow import (
     CompiledWorkflow,
     TaskTypeRegistry,
     Workflow,
@@ -98,7 +98,7 @@ class TestToIR:
     def test_python_built_spec_serializes_with_registry_slugs(
         self, registry: TaskTypeRegistry
     ) -> None:
-        from molexp.workflow.registry import _Add, _Constant
+        from molab.workflow.registry import _Add, _Constant
 
         wf = Workflow(name="py_built")
         wf.add(_Constant(value=4), name="four")
@@ -113,7 +113,7 @@ class TestToIR:
         assert sources_for_sum == ["four", "six"]
 
     def test_to_ir_rejects_unslugged_tasks(self) -> None:
-        from molexp.workflow import Task
+        from molab.workflow import Task
 
         class _Unregistered(Task):
             """A task whose type was never registered → no resolvable slug."""
@@ -158,7 +158,7 @@ class TestTypedEdgeRoundtrip:
         deps: list[str] | None = None,
         **kw: object,
     ) -> None:
-        from molexp.workflow.registry import _Constant
+        from molab.workflow.registry import _Constant
 
         wf.add(_Constant(value=value), name=name, depends_on=deps, **kw)
 

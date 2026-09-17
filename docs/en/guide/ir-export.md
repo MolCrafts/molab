@@ -21,7 +21,7 @@ edges missing, that is by design — switch to `to_graph_ir()`; you do not need 
 hand-patch the IR to inject them.
 
 ```python
-from molexp.workflow import (
+from molab.workflow import (
     CompiledWorkflow,
     Task,
     TaskContext,

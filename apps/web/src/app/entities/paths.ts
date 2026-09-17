@@ -102,6 +102,7 @@ export const SECTION_PATH = {
   projects: "/projects",
   workspace: "/workspace",
   runs: "/runs",
+  compare: "/compare",
   activity: "/activity",
   workflows: "/workflows",
   assets: "/assets",
@@ -109,5 +110,15 @@ export const SECTION_PATH = {
   knowledge: "/knowledge",
   settings: "/settings",
 } as const;
+
+/** Old compare URLs that now land on the standalone `/compare` page. */
+export const legacyCompareRedirect = (pathname: string, search: string): string | null => {
+  const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
+  if (pathname === "/runs" || pathname.startsWith("/runs/")) {
+    if (params.get("tab") === "compare") return "/compare";
+  }
+  if (/^\/projects\/[^/]+\/experiments\/[^/]+\/compare$/.test(pathname)) return "/compare";
+  return null;
+};
 
 export { leftPanelViewFromPath };

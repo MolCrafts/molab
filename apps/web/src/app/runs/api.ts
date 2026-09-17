@@ -18,7 +18,7 @@ export interface ListRunsOptions {
   limit?: number;
   /**
    * Served-workspace key. The flat route resolves it through `get_workspace`
-   * (`{ws}` path segment → `?ws=` → `X-Molexp-Workspace`), so the same
+   * (`{ws}` path segment → `?ws=` → `X-Molab-Workspace`), so the same
    * endpoint answers for any served workspace; omitting it means "active".
    *
    * There is no `/api/workspaces/{ws}/workspace/runs` — the cross-project runs

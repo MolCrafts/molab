@@ -1,6 +1,6 @@
 # Concepts
 
-MolExp is easier to learn when you see it as a few connected models, not one large framework.
+Molab is easier to learn when you see it as a few connected models, not one large framework.
 
 ## The four layers
 
@@ -15,7 +15,7 @@ These boundaries are not academic. They let the same workflow run locally during
 
 ## The split that matters
 
-Research code becomes untrustworthy for a boring reason: the script, the parameters, the logs, the outputs, and the "real" dataset path all drift apart. MolExp prevents that drift by making each kind of state live in an explicit place. A workflow stays a reusable graph. An experiment stays a repeatable definition. A run stays one concrete attempt. An asset stays a named resource at a defined scope.
+Research code becomes untrustworthy for a boring reason: the script, the parameters, the logs, the outputs, and the "real" dataset path all drift apart. Molab prevents that drift by making each kind of state live in an explicit place. A workflow stays a reusable graph. An experiment stays a repeatable definition. A run stays one concrete attempt. An asset stays a named resource at a defined scope.
 
 ## Reading this section
 

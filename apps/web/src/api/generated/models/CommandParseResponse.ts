@@ -5,7 +5,7 @@
 /**
  * Parsed slash-command shape returned by the server.
  *
- * The agent-side slash-command parser (formerly ``molexp.agent.skills.commands``)
+ * The agent-side slash-command parser (formerly ``molab.agent.skills.commands``)
  * was deleted by the ``agent-pydanticai-rectification`` spec; this response
  * schema is now the canonical shape and any future parser must produce it.
  */

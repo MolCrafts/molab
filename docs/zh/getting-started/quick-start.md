@@ -7,8 +7,8 @@
 将以下内容复制到 `demo.py`：
 
 ```python
-import molexp as me
-from molexp.workflow import Workflow, WorkflowCompiler
+import molab as me
+from molab.workflow import Workflow, WorkflowCompiler
 
 # 1. 定义工作流
 wf = Workflow(name="sum")
@@ -69,7 +69,7 @@ params={"scale": 2.0}
 脚本退出后，运行仍在。打开新的 Python 会话读回：
 
 ```python
-import molexp as me
+import molab as me
 
 ws = me.Workspace("./lab", name="lab")
 same_run = ws.project("demo").experiment("sum").get_run(run.id)
@@ -81,7 +81,7 @@ print(same_run.get_result("summarize", execution_id=same_run.executions[-1].id))
 
 - 如果工作流定义是陌生部分，继续读 [第一个工作流](first-workflow.md)。
 - 如果工作区层级是新的，读 [追踪运行](tracked-runs.md)。
-- 如果想用 `molexp run` 来驱动而不是手动调用 `run.execute`，去 [CLI 与配置文件](cli-and-profiles.md)。
+- 如果想用 `molab run` 来驱动而不是手动调用 `run.execute`，去 [CLI 与配置文件](cli-and-profiles.md)。
 - 如果更喜欢点击而非脚本，试试 [从浏览器开始](start-from-ui.md)。
 
 ## 可运行示例

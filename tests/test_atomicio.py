@@ -1,8 +1,8 @@
-"""Unit tests for the cross-layer ``molexp.atomicio`` primitive module.
+"""Unit tests for the cross-layer ``molab.atomicio`` primitive module.
 
-``molexp.atomicio`` holds the atomic write helpers and the advisory
-file lock — promoted out of ``molexp.workspace`` (okf-01-01) so the
-``molexp.knowledge`` bottom layer can cite them without importing
+``molab.atomicio`` holds the atomic write helpers and the advisory
+file lock — promoted out of ``molab.workspace`` (okf-01-01) so the
+``molab.knowledge`` bottom layer can cite them without importing
 workspace. These tests pin behavior + the layer-independence bar.
 """
 
@@ -15,8 +15,8 @@ from pathlib import Path
 
 import pytest
 
-import molexp.atomicio as atomicio
-from molexp.atomicio import (
+import molab.atomicio as atomicio
+from molab.atomicio import (
     FileLockTimeoutError,
     atomic_write_json,
     file_lock,
@@ -85,19 +85,18 @@ def test_source_imports_no_workspace_or_upstream_layer() -> None:
 
     Asserted at the AST level on the module's own source — the
     enforceable layer-independence invariant. (A runtime ``sys.modules``
-    probe is confounded because importing any ``molexp.X`` submodule runs
-    the eager ``molexp/__init__.py``, which loads workspace.) This mirrors
+    probe is confounded because importing any ``molab.X`` submodule runs
+    the eager ``molab/__init__.py``, which loads workspace.) This mirrors
     ``tests/test_workspace/test_import_guard.py``.
     """
     forbidden = (
-        "molexp.workspace",
-        "molexp.workflow",
-        "molexp.agent",
-        "molexp.harness",
-        "molexp.server",
-        "molexp.cli",
-        "molexp.plugins",
-        "molexp.sweep",
+        "molab.workspace",
+        "molab.workflow",
+        "molab.harness",
+        "molab.server",
+        "molab.cli",
+        "molab.plugins",
+        "molab.sweep",
     )
     source = Path(atomicio.__file__).read_text(encoding="utf-8")
     tree = ast.parse(source)
@@ -107,4 +106,4 @@ def test_source_imports_no_workspace_or_upstream_layer() -> None:
             offenders += [a.name for a in node.names if a.name.startswith(forbidden)]
         elif isinstance(node, ast.ImportFrom) and node.module and node.module.startswith(forbidden):
             offenders.append(node.module)
-    assert offenders == [], f"molexp.atomicio imports forbidden modules: {offenders}"
+    assert offenders == [], f"molab.atomicio imports forbidden modules: {offenders}"

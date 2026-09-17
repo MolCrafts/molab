@@ -1,8 +1,8 @@
 import { FileQuestion, PlayCircle } from "lucide-react";
 import { useMemo } from "react";
 import { useCompareSet } from "@/app/compare";
-import { activeWorkspace, entryFromRunSummary } from "@/app/compare/entries";
-import { refKey } from "@/app/compare/types";
+import { activeWorkspace, itemFromRunSummary } from "@/app/compare/entries";
+import { itemKey } from "@/app/compare/types";
 import { EmptyState, EntityPage } from "@/app/components/entity";
 import { LazySurface } from "@/app/layout/LazySurface";
 import { RunExecutionsPanel } from "@/app/renderers/RunExecutionsPanel";
@@ -46,7 +46,7 @@ export const RunViewer = (props: RunRendererProps): JSX.Element => {
   const compareEntry = useMemo(() => {
     if (!run || !compareWorkspace) return null;
     return {
-      ...entryFromRunSummary(run, {
+      ...itemFromRunSummary(run, {
         workspaceKey: compareWorkspace.key,
         workspaceLabel: compareWorkspace.label,
         projectName: project?.name ?? run.projectId,
@@ -56,7 +56,7 @@ export const RunViewer = (props: RunRendererProps): JSX.Element => {
     };
   }, [run, compareWorkspace, project?.name, experiment?.name, selectedExecutionId]);
 
-  const inCompareSet = compareEntry ? compare.keys.has(refKey(compareEntry.ref)) : false;
+  const inCompareSet = compareEntry ? compare.keys.has(itemKey(compareEntry.ref)) : false;
 
   const runCoords = useMemo(
     () =>
@@ -79,7 +79,7 @@ export const RunViewer = (props: RunRendererProps): JSX.Element => {
   if (!run) {
     return (
       <div className="flex h-full items-center justify-center bg-background">
-        <EmptyState icon={<FileQuestion className="h-5 w-5" />} title="Run not found" />
+        <EmptyState icon={<FileQuestion className="size-icon-lg" />} title="Run not found" />
       </div>
     );
   }
@@ -177,11 +177,11 @@ export const RunViewer = (props: RunRendererProps): JSX.Element => {
                 type="button"
                 onClick={() =>
                   inCompareSet
-                    ? compare.remove(refKey(compareEntry.ref))
+                    ? compare.remove(itemKey(compareEntry.ref))
                     : compare.add(compareEntry)
                 }
               >
-                {inCompareSet ? "In comparison" : "Add to comparison"}
+                {inCompareSet ? "In selection" : "Add to selection"}
               </WorkbenchAction>
             )}
             <RunToolbar

@@ -1,4 +1,4 @@
-"""Zombie-Execution reaping (``molexp.workspace.run_reaper.reap_zombie_run``).
+"""Zombie-Execution reaping (``molab.workspace.run_reaper.reap_zombie_run``).
 
 Same-host owners are pid-probed. Cross-host owners are reaped only when the
 per-Execution ``alive`` file exists and its mtime is older than 600.0 s; a
@@ -15,11 +15,11 @@ from pathlib import Path
 
 import pytest
 
-from molexp.workspace.domain import ExecutionMode, ExecutionStatus
-from molexp.workspace.execution_repository import ExecutionRepository
-from molexp.workspace.history import AgentRef
-from molexp.workspace.run_heartbeat import ALIVE_NAME, HEARTBEAT_STALE_SECONDS, touch_alive
-from molexp.workspace.run_reaper import reap_zombie_run
+from molab.workspace.domain import ExecutionMode, ExecutionStatus
+from molab.workspace.execution_repository import ExecutionRepository
+from molab.workspace.history import AgentRef
+from molab.workspace.run_heartbeat import ALIVE_NAME, HEARTBEAT_STALE_SECONDS, touch_alive
+from molab.workspace.run_reaper import reap_zombie_run
 
 _TEST_AGENT = AgentRef(id="test", type="person", name="test")
 

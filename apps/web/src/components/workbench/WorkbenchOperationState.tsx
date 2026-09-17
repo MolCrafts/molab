@@ -197,7 +197,7 @@ export const WorkbenchOperationState = ({
           aria-atomic="true"
           data-operation-state={kind}
         >
-          <AlertCircle className="size-3.5 shrink-0" aria-hidden />
+          <AlertCircle className="size-icon-sm shrink-0" aria-hidden />
           <span>{title ?? "Something failed"}</span>
           {detail && <span className="truncate text-muted-foreground">· {detail}</span>}
           {action}
@@ -217,7 +217,7 @@ export const WorkbenchOperationState = ({
       >
         <div className="flex items-start gap-2">
           <AlertCircle
-            className="mt-1 size-3.5 shrink-0 text-status-failed-foreground"
+            className="mt-1 size-icon-sm shrink-0 text-status-failed-foreground"
             aria-hidden
           />
           <div className="min-w-0 space-y-1">
@@ -253,7 +253,7 @@ export const WorkbenchOperationState = ({
         aria-atomic="true"
         data-operation-state={kind}
       >
-        <CheckCircle2 className="size-3.5 shrink-0" aria-hidden />
+        <CheckCircle2 className="size-icon-sm shrink-0" aria-hidden />
         <span>{title ?? "Done"}</span>
         {detail && <span className="text-muted-foreground">· {detail}</span>}
         {children}

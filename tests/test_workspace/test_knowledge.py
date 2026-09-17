@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from molexp.workspace import (
+from molab.workspace import (
     PLAN_BOOK_NAME,
     Finding,
     Knowledge,
@@ -15,9 +15,9 @@ from molexp.workspace import (
     Plan,
     Workspace,
 )
-from molexp.workspace.folder import META_JSON_FILENAME, concept_from_dir, entity_filename
-from molexp.workspace.knowledge import parse_knowledge_class
-from molexp.workspace.validate import validate_workspace
+from molab.workspace.folder import META_JSON_FILENAME, concept_from_dir, entity_filename
+from molab.workspace.knowledge import parse_knowledge_class
+from molab.workspace.validate import validate_workspace
 
 
 def _ws(tmp_path: Path) -> Workspace:
@@ -81,7 +81,7 @@ class TestKnowledgeRegistry:
         assert rebuilt.body() == "# Hi\n"
 
     def test_bundle_walk_finds_both_hosts(self, tmp_path: Path) -> None:
-        from molexp.workspace import Bundle
+        from molab.workspace import Bundle
 
         ws = _ws(tmp_path)
         project = ws.add_project("p")

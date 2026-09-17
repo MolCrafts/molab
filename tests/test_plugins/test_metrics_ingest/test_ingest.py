@@ -1,6 +1,6 @@
-"""Discovery and persistence, with no format knowledge in molexp.
+"""Discovery and persistence, with no format knowledge in molab.
 
-These exercise molexp's half of the seam — walking a run, dispatching to
+These exercise molab's half of the seam — walking a run, dispatching to
 whatever reader claimed a file, and writing the WAL. What a LAMMPS thermo
 table maps to is molpy's business and is tested there.
 """
@@ -9,8 +9,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from molexp.plugins.metrics_ingest import detect_log_formats, ingest_run
-from molexp.workspace.execution_dirs import ARTIFACTS
+from molab.plugins.metrics_ingest import detect_log_formats, ingest_run
+from molab.workspace.execution_dirs import ARTIFACTS
 
 FAKE_SUFFIX = ".fakelog"
 

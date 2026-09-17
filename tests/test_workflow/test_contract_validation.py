@@ -1,4 +1,4 @@
-"""Tests for :func:`molexp.workflow.contract.validate_workflow_contract`.
+"""Tests for :func:`molab.workflow.contract.validate_workflow_contract`.
 
 Each :class:`ValidationCheckId` member owns a positive (passes) and a negative
 (fails with the expected ``check_id`` / target / severity) case — one class per
@@ -8,7 +8,7 @@ the per-check severity override.
 
 from __future__ import annotations
 
-from molexp.workflow.contract import (
+from molab.workflow.contract import (
     ArtifactDecl,
     TaskInputSpec,
     TaskIO,
@@ -224,8 +224,8 @@ class TestNoOrphanTasks:
         assert ValidationCheckId.no_orphan_tasks not in _emitted_check_ids(rep)
 
     def test_passes_when_spec_set_matches_contract(self) -> None:
-        from molexp.workflow.compiler import Workflow, WorkflowCompiler
-        from molexp.workflow.task import Task
+        from molab.workflow.compiler import Workflow, WorkflowCompiler
+        from molab.workflow.task import Task
 
         class Inert(Task):
             async def execute(self, ctx):  # type: ignore[no-untyped-def, override]
@@ -248,8 +248,8 @@ class TestNoOrphanTasks:
         assert ValidationCheckId.no_orphan_tasks not in _emitted_check_ids(rep)
 
     def test_fails_when_spec_has_task_absent_from_contract(self) -> None:
-        from molexp.workflow.compiler import Workflow, WorkflowCompiler
-        from molexp.workflow.task import Task
+        from molab.workflow.compiler import Workflow, WorkflowCompiler
+        from molab.workflow.task import Task
 
         class Inert(Task):
             async def execute(self, ctx):  # type: ignore[no-untyped-def, override]

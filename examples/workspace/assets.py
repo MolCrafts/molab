@@ -27,8 +27,8 @@ import asyncio
 import tempfile
 from pathlib import Path
 
-import molexp as me
-from molexp.workflow import TaskContext, Workflow, WorkflowCompiler, WorkflowRuntime
+import molab as me
+from molab.workflow import TaskContext, Workflow, WorkflowCompiler, WorkflowRuntime
 
 wf = Workflow(name="train")
 
@@ -42,7 +42,7 @@ compiled = WorkflowCompiler().compile(wf)
 
 
 async def main() -> None:
-    root = Path(tempfile.mkdtemp(prefix="molexp-assets-"))
+    root = Path(tempfile.mkdtemp(prefix="molab-assets-"))
     ws = me.Workspace(root, name="assets-demo")
 
     # 4. Import a workspace-scoped dataset from outside.
@@ -77,7 +77,7 @@ async def main() -> None:
 
     # 6. Asset queries — flat view over the whole workspace, scanned from the
     #    authoritative on-disk manifests.
-    from molexp.workspace.assets import scan
+    from molab.workspace.assets import scan
 
     all_assets = scan.scan_assets(ws.root)
     print(f"workspace root: {root}")

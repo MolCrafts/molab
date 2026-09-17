@@ -57,7 +57,7 @@ export const projectHandlers = [
             name: body.name || "New Project",
             path: `projects/${slugify(body.name || "New Project")}`,
             description: body.description || "",
-            owner: body.owner || "molexp",
+            owner: body.owner || "molab",
             tags: body.tags || [],
             config: {},
             created: new Date().toISOString(),

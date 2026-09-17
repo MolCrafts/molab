@@ -23,7 +23,6 @@ const entry = (
   };
   return {
     ref,
-    selected: true,
     executionId: null,
     workspaceLabel: ws,
     projectName: project,

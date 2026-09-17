@@ -24,7 +24,7 @@ def main() -> None:
     # ── 1. SubmitHandler is a typed Protocol (from workspace layer) ─────
     # In a real plugin, you'd import and implement:
     #
-    #   from molexp.workspace.handler import SubmitHandler
+    #   from molab.workspace.handler import SubmitHandler
     #
     #   class CustomSubmitHandler(SubmitHandler):
     #       def submit(self, *, execution: Execution, target: ComputeTarget) -> JobRef:
@@ -36,10 +36,10 @@ def main() -> None:
     print()
 
     # ── 2. CliPlugin construction pattern ────────────────────────────────
-    # A real plugin registers through the ``molexp.cli_plugins`` entry point:
+    # A real plugin registers through the ``molab.cli_plugins`` entry point:
     #
-    #   [project.entry-points."molexp.cli_plugins"]
-    #   custom = "molexp_custom_scheduler.plugin:CliPlugin"
+    #   [project.entry-points."molab.cli_plugins"]
+    #   custom = "molab_custom_scheduler.plugin:CliPlugin"
     #
     # The plugin's CliPlugin instance exposes:
     #   - name: str          — plugin identifier
@@ -49,16 +49,16 @@ def main() -> None:
     print("CliPlugin registration pattern:")
     print("  1. Define a SubmitHandler subclass")
     print("  2. Create a CliPlugin instance wrapping it")
-    print("  3. Register via pyproject.toml entry point: molexp.cli_plugins")
-    print("  4. CLI discovers it: molexp run --scheduler custom")
+    print("  3. Register via pyproject.toml entry point: molab.cli_plugins")
+    print("  4. CLI discovers it: molab run --scheduler custom")
     print()
 
     # ── 3. Example: minimal CliPlugin ────────────────────────────────────
     print("Example minimal plugin skeleton:")
     print()
     print("  # my_scheduler/plugin.py")
-    print("  from molexp.plugins.cli import CliPlugin")
-    print("  from molexp.workspace.handler import SubmitHandler")
+    print("  from molab.plugins.cli import CliPlugin")
+    print("  from molab.workspace.handler import SubmitHandler")
     print()
     print("  class MySubmitHandler(SubmitHandler):")
     print("      def submit(self, execution, target):")

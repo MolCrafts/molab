@@ -1,8 +1,8 @@
 """Workspace conformance validation (``validate_workspace`` / ``Workspace.validate``).
 
 The layout law is enforced by the writers; this checker holds a tree that was
-assembled some *other* way — by hand, by an adoption tool, by an older molexp —
-to the same standard. The load-bearing property is that a workspace molexp
+assembled some *other* way — by hand, by an adoption tool, by an older molab —
+to the same standard. The load-bearing property is that a workspace molab
 itself just wrote must validate clean: a checker that flags its own writer is
 worthless.
 """
@@ -14,8 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from molexp.workspace import Workspace
-from molexp.workspace.validate import validate_workspace
+from molab.workspace import Workspace
+from molab.workspace.validate import validate_workspace
 
 
 def _workspace(tmp_path: Path) -> Workspace:
@@ -28,7 +28,7 @@ def _workspace(tmp_path: Path) -> Workspace:
 
 
 class TestValidateWorkspace:
-    def test_a_workspace_molexp_wrote_conforms(self, tmp_path: Path) -> None:
+    def test_a_workspace_molab_wrote_conforms(self, tmp_path: Path) -> None:
         ws = _workspace(tmp_path)
         report = ws.validate()
         assert report.ok, report.violations
@@ -88,7 +88,7 @@ class TestValidateWorkspace:
     def test_a_concept_mounted_anywhere_is_not_a_stray(self, tmp_path: Path) -> None:
         # Any Folder subclass may mount at any Folder; meta.json is what makes
         # a directory legitimate, not its name.
-        from molexp.workspace import Note
+        from molab.workspace import Note
 
         ws = _workspace(tmp_path)
         ws.get_project("alpha").add_folder(Note(name="reading"))
@@ -113,7 +113,7 @@ class TestValidateWorkspace:
         assert "conforms" in report.summary() or "warning" in report.summary()
 
     def test_report_to_dict_is_agent_tool_shaped(self, tmp_path: Path) -> None:
-        # MCP validate_workspace / molexp validate --json share this wire shape.
+        # MCP validate_workspace / molab validate --json share this wire shape.
         report = _workspace(tmp_path).validate()
         payload = report.to_dict()
         assert payload["ok"] is True

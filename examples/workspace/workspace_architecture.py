@@ -2,7 +2,7 @@
 
 Matches ``docs/en/guide/workspace-architecture.md``.
 
-MolExp persists every entity as a small JSON file alongside the payloads
+Molab persists every entity as a small JSON file alongside the payloads
 it produces. This example seeds a realistic workspace and then prints
 the on-disk tree with per-file sizes so you can see exactly where
 catalog, manifest, artifact, log, and checkpoint bytes live.
@@ -18,8 +18,8 @@ import asyncio
 import tempfile
 from pathlib import Path
 
-import molexp as me
-from molexp.workflow import TaskContext, Workflow, WorkflowCompiler, WorkflowRuntime
+import molab as me
+from molab.workflow import TaskContext, Workflow, WorkflowCompiler, WorkflowRuntime
 
 wf = Workflow(name="baseline")
 
@@ -33,7 +33,7 @@ compiled = WorkflowCompiler().compile(wf)
 
 
 async def main() -> None:
-    root = Path(tempfile.mkdtemp(prefix="molexp-arch-"))
+    root = Path(tempfile.mkdtemp(prefix="molab-arch-"))
     ws = me.Workspace(root, name="arch-demo")
     exp = ws.add_project("demo").add_experiment("baseline").define(compiled, params=None)
     run = exp.list_runs()[0]

@@ -1,13 +1,13 @@
 # Your First Workflow
 
-Before MolExp becomes a workspace or a CLI tool, it is a workflow system. A workflow is just a compiled graph of computation steps. You can build and run that graph without creating a workspace at all.
+Before Molab becomes a workspace or a CLI tool, it is a workflow system. A workflow is just a compiled graph of computation steps. You can build and run that graph without creating a workspace at all.
 
 ## Define Tasks
 
 A task is an ordinary function. It declares the data it needs as named parameters. The engine binds values by name from upstream outputs.
 
 ```python
-from molexp.workflow import Workflow, WorkflowCompiler
+from molab.workflow import Workflow, WorkflowCompiler
 
 wf = Workflow(name="pipeline")
 
@@ -40,7 +40,7 @@ The two styles mix freely in one graph.
 
 ```python
 import asyncio
-from molexp.workflow import WorkflowRuntime
+from molab.workflow import WorkflowRuntime
 
 compiled = WorkflowCompiler().compile(wf)
 result = asyncio.run(WorkflowRuntime().execute(compiled))
@@ -54,7 +54,7 @@ This is useful during early iteration — iterate on task boundaries and data fl
 If you prefer reusable classes over decorators, subclass `Task`:
 
 ```python
-from molexp.workflow import Task, TaskContext
+from molab.workflow import Task, TaskContext
 
 class Fetch(Task):
     def execute(self, ctx: TaskContext) -> dict:

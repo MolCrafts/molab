@@ -1,0 +1,920 @@
+"""``molab workspace {project,experiment,runs,target,asset}`` — resource CRUD.
+
+The ``mcp`` config group lives in the sibling :mod:`.mcp_config` module.
+"""
+
+from __future__ import annotations
+
+import json
+import sys
+from pathlib import Path
+from typing import Annotated, Any
+
+import typer
+from rich.console import Console
+from rich.table import Table
+
+from molab.cli._common import (
+    rprint,
+    run_executor_info,
+    status_color,
+)
+from molab.cli._target import TargetOption, open_workspace
+from molab.workspace.run import (
+    RETRYABLE_STATUSES,
+    Run,
+)
+from molab.workspace.run import (
+    TERMINAL_STATUSES as _TERMINAL_STATUSES,
+)
+
+_console = Console()
+
+
+def _open_ws(target_spec: str):
+    """Open a local or remote workspace; exit 1 if missing."""
+    try:
+        _target, _transport, _fs, ws = open_workspace(target_spec)
+    except FileNotFoundError as exc:
+        rprint(f"[red]Error:[/red] {exc}")
+        rprint("  Run [bold]molab init[/bold] to create one.")
+        raise typer.Exit(1) from exc
+    return ws
+
+
+# ---------------------------------------------------------------------------
+# project
+# ---------------------------------------------------------------------------
+
+project_app = typer.Typer(help="Project management commands", no_args_is_help=True)
+
+
+@project_app.command("create")
+def project_create(
+    name: Annotated[str, typer.Argument(help="Project name")],
+    target_spec: TargetOption = ".",
+) -> None:
+    """Create a new project."""
+    ws = _open_ws(target_spec)
+    try:
+        project = ws.add_project(name)
+        rprint(f"[green]OK[/green] Created project: {project.id}")
+        rprint(f"  Name: {project.name}")
+    except Exception as e:
+        rprint(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)  # noqa: B904
+
+
+@project_app.command("list")
+def project_list(target_spec: TargetOption = ".") -> None:
+    """List all projects."""
+    ws = _open_ws(target_spec)
+    projects = ws.list_projects()
+    if not projects:
+        rprint("[yellow]No projects found[/yellow]")
+        return
+    table = Table(title="Projects")
+    table.add_column("ID", style="cyan")
+    table.add_column("Name", style="green")
+    table.add_column("Owner")
+    table.add_column("Tags")
+    table.add_column("Created")
+    for project in projects:
+        table.add_row(
+            project.id,
+            project.name,
+            project.owner,
+            ", ".join(project.tags),
+            project.created_at.strftime("%Y-%m-%d %H:%M"),
+        )
+    _console.print(table)
+
+
+@project_app.command("info")
+def project_info(
+    project_id: Annotated[str, typer.Argument(help="Project ID")],
+    target_spec: TargetOption = ".",
+) -> None:
+    """Show project information."""
+    from molab.workspace import ProjectNotFoundError
+
+    ws = _open_ws(target_spec)
+    try:
+        project = ws.get_project(project_id)
+    except ProjectNotFoundError:
+        rprint(f"[red]Error:[/red] Project not found: {project_id}")
+        raise typer.Exit(1) from None
+    rprint(f"[bold]Project:[/bold] {project.id}")
+    rprint(f"  Name: {project.name}")
+    rprint(f"  Description: {project.description}")
+    rprint(f"  Owner: {project.owner}")
+    rprint(f"  Tags: {', '.join(project.tags)}")
+    rprint(f"  Created: {project.created_at}")
+    experiments = project.list_experiments()
+    rprint(f"  Experiments: {len(experiments)}")
+
+
+# ---------------------------------------------------------------------------
+# experiment
+# ---------------------------------------------------------------------------
+
+experiment_app = typer.Typer(help="Experiment management commands", no_args_is_help=True)
+
+
+@experiment_app.command("create")
+def experiment_create(
+    project_id: Annotated[str, typer.Argument(help="Project ID")],
+    name: Annotated[str, typer.Option("--name", "-n", help="Experiment name")],
+    target_spec: TargetOption = ".",
+) -> None:
+    """Create a new experiment."""
+    from molab.workspace import ProjectNotFoundError
+
+    ws = _open_ws(target_spec)
+    try:
+        try:
+            project = ws.get_project(project_id)
+        except ProjectNotFoundError:
+            rprint(f"[red]Error:[/red] Project not found: {project_id}")
+            raise typer.Exit(1) from None
+        experiment = project.add_experiment(name)
+        rprint(f"[green]OK[/green] Created experiment: {experiment.id}")
+        rprint(f"  Name: {experiment.name}")
+        rprint(f"  Project: {project_id}")
+    except typer.Exit:
+        raise
+    except Exception as e:
+        rprint(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)  # noqa: B904
+
+
+@experiment_app.command("list")
+def experiment_list(
+    project_id: Annotated[str, typer.Argument(help="Project ID")],
+    target_spec: TargetOption = ".",
+) -> None:
+    """List all experiments in a project."""
+    from molab.workspace import ProjectNotFoundError
+
+    ws = _open_ws(target_spec)
+    try:
+        project = ws.get_project(project_id)
+    except ProjectNotFoundError:
+        rprint(f"[red]Error:[/red] Project not found: {project_id}")
+        raise typer.Exit(1) from None
+    experiments = project.list_experiments()
+    if not experiments:
+        rprint(f"[yellow]No experiments found in project: {project_id}[/yellow]")
+        return
+    table = Table(title=f"Experiments in {project_id}")
+    table.add_column("ID", style="cyan")
+    table.add_column("Name", style="green")
+    table.add_column("Created")
+    for exp in experiments:
+        table.add_row(exp.id, exp.name, exp.created_at.strftime("%Y-%m-%d %H:%M"))
+    _console.print(table)
+
+
+# ---------------------------------------------------------------------------
+# runs
+# ---------------------------------------------------------------------------
+
+run_app = typer.Typer(help="Run management commands", no_args_is_help=True)
+
+
+def _stdin_is_interactive() -> bool:
+    """Whether stdin is a real terminal (a seam so tests can fake a TTY)."""
+    return sys.stdin.isatty()
+
+
+def _classify_container_id(ws, candidate: str) -> str | None:  # noqa: ANN001
+    """Return ``"project"`` / ``"experiment"`` when *candidate* names one.
+
+    Used by ``runs cancel`` to catch the classic mix-up: ``runs list`` takes
+    ``PROJECT EXPERIMENT`` positionals while ``runs cancel`` takes bare
+    ``RUN_IDS`` — a container name passed as a run id must error with the
+    correct usage instead of a silent warn-and-skip.
+    """
+    from molab.workspace import ExperimentNotFoundError, ProjectNotFoundError
+
+    try:
+        ws.get_project(candidate)
+    except ProjectNotFoundError:
+        pass
+    else:
+        return "project"
+    for proj in ws.list_projects():
+        try:
+            proj.get_experiment(candidate)
+        except ExperimentNotFoundError:
+            continue
+        else:
+            return "experiment"
+    return None
+
+
+@run_app.command("create")
+def run_create(
+    project_id: Annotated[str, typer.Argument(help="Project ID")],
+    experiment_id: Annotated[str, typer.Argument(help="Experiment ID")],
+    params: Annotated[
+        str | None, typer.Option("--params", help="Parameters JSON string or file path")
+    ] = None,
+    target_spec: TargetOption = ".",
+) -> None:
+    """Create a new run."""
+    ws = _open_ws(target_spec)
+    parameters: dict = {}
+    if params:
+        params_path = Path(params)
+        if params_path.exists():
+            parameters = json.loads(params_path.read_text())
+        else:
+            try:
+                parameters = json.loads(params)
+            except json.JSONDecodeError:
+                rprint(f"[red]Error:[/red] Invalid JSON in parameters: {params}")
+                raise typer.Exit(1)  # noqa: B904
+
+    from molab.workspace import ExperimentNotFoundError as _ExpNotFound
+    from molab.workspace import ProjectNotFoundError as _ProjNotFound
+
+    try:
+        try:
+            project = ws.get_project(project_id)
+        except _ProjNotFound:
+            rprint(f"[red]Error:[/red] Project not found: {project_id}")
+            raise typer.Exit(1) from None
+        try:
+            experiment = project.get_experiment(experiment_id)
+        except _ExpNotFound:
+            rprint(f"[red]Error:[/red] Experiment not found: {experiment_id}")
+            raise typer.Exit(1) from None
+        r = experiment.add_run(params=parameters)
+        rprint(f"[green]OK[/green] Created run: {r.id}")
+        rprint(f"  Project: {project_id}")
+        rprint(f"  Experiment: {experiment_id}")
+        rprint(f"  Status: {r.status}")
+        if parameters:
+            rprint(f"  Parameters: {json.dumps(parameters, indent=2)}")
+    except typer.Exit:
+        raise
+    except Exception as e:
+        rprint(f"[red]Error:[/red] {e}")
+        raise typer.Exit(1)  # noqa: B904
+
+
+@run_app.command("list")
+def run_list(
+    project_id: Annotated[str, typer.Argument(help="Project ID")],
+    experiment_id: Annotated[str, typer.Argument(help="Experiment ID")],
+    target_spec: TargetOption = ".",
+) -> None:
+    """List all runs in an experiment."""
+    ws = _open_ws(target_spec)
+    from molab.workspace import ExperimentNotFoundError as _ExpNotFound
+    from molab.workspace import ProjectNotFoundError as _ProjNotFound
+
+    try:
+        project = ws.get_project(project_id)
+    except _ProjNotFound:
+        rprint(f"[red]Error:[/red] Project not found: {project_id}")
+        raise typer.Exit(1) from None
+    try:
+        experiment = project.get_experiment(experiment_id)
+    except _ExpNotFound:
+        rprint(f"[red]Error:[/red] Experiment not found: {experiment_id}")
+        raise typer.Exit(1) from None
+    runs = experiment.list_runs()
+    if not runs:
+        rprint(f"[yellow]No runs found in {project_id}/{experiment_id}[/yellow]")
+        return
+    from molab._run_display import elapsed
+
+    table = Table(title=f"Runs in {project_id}/{experiment_id}")
+    table.add_column("Run ID", style="cyan")
+    table.add_column("Status", style="green")
+    table.add_column("Profile", style="cyan")
+    table.add_column("Created")
+    table.add_column("Duration")
+    for r in runs:
+        status = str(r.status).lower()
+        color = status_color(status)
+        profile_display = r.metadata.profile or "—"
+        finished = r.finished_at.isoformat() if r.finished_at else None
+        duration = elapsed(r.metadata.created_at.isoformat(), finished)
+        table.add_row(
+            r.id,
+            f"[{color}]{status}[/{color}]",
+            profile_display,
+            r.metadata.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+            duration or "—",
+        )
+    _console.print(table)
+
+
+@run_app.command("cancel")
+def run_cancel(
+    run_ids: Annotated[
+        list[str] | None,
+        typer.Argument(
+            help="Run IDs to cancel. Omit to use --project/--experiment with --all or --status."
+        ),
+    ] = None,
+    project_id: Annotated[
+        str | None,
+        typer.Option("--project", "-p", help="Project ID (required in experiment-scope mode)"),
+    ] = None,
+    experiment_id: Annotated[
+        str | None,
+        typer.Option(
+            "--experiment", "-e", help="Experiment ID (required in experiment-scope mode)"
+        ),
+    ] = None,
+    all_runs: Annotated[
+        bool, typer.Option("--all", help="Cancel all non-terminal runs in the experiment.")
+    ] = False,
+    status_filter: Annotated[
+        str | None,
+        typer.Option(
+            "--status", help="Comma-separated statuses to filter (e.g. 'pending,running')."
+        ),
+    ] = None,
+    scheduler: Annotated[
+        str, typer.Option("--scheduler", help="Fallback molq scheduler backend.")
+    ] = "slurm",
+    cluster: Annotated[
+        str | None, typer.Option("--cluster", help="molq cluster name (default: 'default').")
+    ] = None,
+    yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation prompt.")] = False,
+    target_spec: TargetOption = ".",
+) -> None:
+    """Cancel one or more scheduled runs."""
+    ws = _open_ws(target_spec)
+    target_runs: list[Any] = []
+
+    from molab.workspace import ExperimentNotFoundError as _ExpNotFound
+    from molab.workspace import ProjectNotFoundError as _ProjNotFound
+    from molab.workspace import RunNotFoundError as _RunNotFound
+
+    if run_ids:
+        misclassified: list[tuple[str, str]] = []
+        for rid in run_ids:
+            found = None
+            for proj in ws.list_projects():
+                for exp in proj.list_experiments():
+                    try:
+                        found = exp.get_run(rid)
+                    except _RunNotFound:
+                        continue
+                    break
+                if found:
+                    break
+            if found is not None:
+                target_runs.append(found)
+                continue
+            kind = _classify_container_id(ws, rid)
+            if kind is not None:
+                misclassified.append((rid, kind))
+            else:
+                rprint(f"[yellow]Warning:[/yellow] Run {rid!r} not found — skipping.")
+        if misclassified:
+            for rid, kind in misclassified:
+                article = "an" if kind == "experiment" else "a"
+                rprint(
+                    f"[red]Error:[/red] {rid!r} looks like {article} {kind} id — "
+                    "`molab runs cancel` takes RUN_IDS."
+                )
+            proj_hint = next((rid for rid, kind in misclassified if kind == "project"), None)
+            exp_hint = next((rid for rid, kind in misclassified if kind == "experiment"), None)
+            list_cmd = f"molab runs list {proj_hint or '<project>'} {exp_hint or '<experiment>'}"
+            rprint(f"To target a run, use its id from: [bold]{list_cmd}[/bold]")
+            raise typer.Exit(1)
+    else:
+        if not project_id or not experiment_id:
+            rprint("[red]Error:[/red] Provide run IDs, or both --project and --experiment.")
+            raise typer.Exit(1)
+        try:
+            project = ws.get_project(project_id)
+        except _ProjNotFound:
+            rprint(f"[red]Error:[/red] Project not found: {project_id}")
+            raise typer.Exit(1) from None
+        try:
+            experiment = project.get_experiment(experiment_id)
+        except _ExpNotFound:
+            rprint(f"[red]Error:[/red] Experiment not found: {experiment_id}")
+            raise typer.Exit(1) from None
+        candidates = experiment.list_runs()
+        if all_runs:
+            target_runs = [r for r in candidates if r.status not in _TERMINAL_STATUSES]
+        elif status_filter:
+            allowed = {s.strip().lower() for s in status_filter.split(",")}
+            target_runs = [r for r in candidates if r.status in allowed]
+        else:
+            rprint(
+                "[red]Error:[/red] Specify --all or --status when using --project/--experiment mode."
+            )
+            raise typer.Exit(1)
+
+    if not target_runs:
+        rprint("[yellow]No runs matched the criteria — nothing to cancel.[/yellow]")
+        raise typer.Exit(0)
+
+    already_terminal = [r for r in target_runs if r.status in _TERMINAL_STATUSES]
+    target_runs = [r for r in target_runs if r.status not in _TERMINAL_STATUSES]
+    for r in already_terminal:
+        rprint(f"[yellow]Skipping[/yellow] {r.id} — already terminal: {r.status}")
+    if not target_runs:
+        rprint("[yellow]All matched runs are already in a terminal state.[/yellow]")
+        raise typer.Exit(0)
+
+    table = Table(title=f"Runs to cancel ({len(target_runs)})")
+    table.add_column("Run ID", style="cyan")
+    table.add_column("Status", style="yellow")
+    table.add_column("Scheduler", style="magenta")
+    table.add_column("job_id", style="dim")
+    table.add_column("scheduler_job_id", style="dim")
+    for r in target_runs:
+        executor_info = run_executor_info(r)
+        table.add_row(
+            r.id,
+            r.status,
+            executor_info.get("scheduler") or scheduler,
+            executor_info.get("job_id") or "—",
+            executor_info.get("scheduler_job_id") or "—",
+        )
+    _console.print(table)
+
+    if not yes:
+        if not _stdin_is_interactive():
+            # Never block a pipe/CI invocation on the y/N prompt.
+            rprint(
+                "[red]Error:[/red] non-interactive session: pass --yes to confirm "
+                f"cancelling {len(target_runs)} run(s)."
+            )
+            raise typer.Exit(1)
+        confirm = typer.prompt(f"\nCancel {len(target_runs)} job(s)? [y/N]", default="N")
+        if confirm.strip().lower() not in ("y", "yes"):
+            rprint("[dim]Aborted.[/dim]")
+            raise typer.Exit(0)
+
+    # One shared cancel body with the server route and the harness capability
+    # (reap → domain check → executor signal → status flip): the workspace
+    # core with the molq signal hook injected.
+    from molab.plugins.submit_molq.cancel import try_cancel
+    from molab.workspace.lifecycle_ops import cancel_run as cancel_core
+
+    def _signal(run: Run) -> str | None:
+        return try_cancel(run, fallback_scheduler=scheduler, fallback_cluster=cluster or "default")
+
+    cancelled = 0
+    errors = 0
+    for r in target_runs:
+        try:
+            warning = cancel_core(r, signal_executor=_signal, allow_pending=True)
+        except ValueError as exc:
+            rprint(f"  [yellow]Skipping[/yellow] {r.id} — {exc}")
+            continue
+        if warning is not None:
+            rprint(f"  [yellow]Warning:[/yellow] {warning} (workspace state updated)")
+            errors += 1
+        rprint(f"  [green]OK[/green] Cancelled {r.id}")
+        cancelled += 1
+
+    rprint(f"\n[green]Done.[/green] {cancelled} run(s) cancelled", end="")
+    if errors:
+        rprint(f", [yellow]{errors} scheduler error(s)[/yellow] (workspace state updated).")
+    else:
+        rprint(".")
+
+
+def _retry_run(
+    project_id: str,
+    experiment_id: str,
+    run_id: str,
+    target_spec: str,
+    *,
+    resume: bool = False,
+    rerun: bool = False,
+    fresh: bool = False,
+) -> None:
+    """Shared body of ``runs resume`` / ``runs rerun`` — the CLI twins of
+    ``POST .../{run_id}/resume|rerun``, executing in-process on this host
+    (same path as ``molab run --resume/--rerun``)."""
+    ws = _open_ws(target_spec)
+    from molab.workspace import ExperimentNotFoundError as _ExpNotFound
+    from molab.workspace import ProjectNotFoundError as _ProjNotFound
+    from molab.workspace import RunNotFoundError as _RunNotFound
+    from molab.workspace.run_reaper import reap_zombie_run
+    from molab.workspace.targets import LOCAL_TARGET_NAME
+
+    try:
+        project = ws.get_project(project_id)
+        experiment = project.get_experiment(experiment_id)
+        run = experiment.get_run(run_id)
+    except (_ProjNotFound, _ExpNotFound, _RunNotFound) as exc:
+        rprint(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(1) from None
+
+    target = getattr(run.metadata, "target", None)
+    if target and target != LOCAL_TARGET_NAME:
+        rprint(
+            f"[red]Error:[/red] run {run.id} targets {target!r} — this command "
+            "executes in-process on this host only. Use the server's "
+            "POST /runs/{id}/resume|rerun (or `molab run` on that host)."
+        )
+        raise typer.Exit(1)
+
+    reap_zombie_run(run)
+    from molab.workflow import (
+        RunFailedError,
+        RunNotExecutableError,
+        compiled_workflow_for_run,
+    )
+
+    try:
+        workflow = compiled_workflow_for_run(run)
+    except Exception as exc:
+        rprint(f"[red]Error:[/red] cannot reconstruct the run's workflow: {exc}")
+        raise typer.Exit(1) from None
+    verb = "Resumed" if resume else "Reran"
+    try:
+        run.execute(workflow, resume=resume, rerun=rerun, fresh=fresh)
+    except RunNotExecutableError as exc:
+        rprint(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(1) from None
+    except RunFailedError as exc:
+        rprint(f"[red]FAILED[/red] {exc}")
+        raise typer.Exit(1) from None
+    rprint(f"[green]OK[/green] {verb} run {run.id} — status: {run.status}")
+
+
+@run_app.command("resume")
+def run_resume(
+    project_id: Annotated[str, typer.Argument(help="Project ID")],
+    experiment_id: Annotated[str, typer.Argument(help="Experiment ID")],
+    run_id: Annotated[str, typer.Argument(help="Run ID")],
+    target_spec: TargetOption = ".",
+) -> None:
+    """Resume a failed/cancelled run (reopen last execution, seed completed nodes).
+
+    CLI twin of ``POST .../{run_id}/resume`` and ``molab run --resume``.
+    """
+    _retry_run(project_id, experiment_id, run_id, target_spec, resume=True)
+
+
+@run_app.command("rerun")
+def run_rerun(
+    project_id: Annotated[str, typer.Argument(help="Project ID")],
+    experiment_id: Annotated[str, typer.Argument(help="Experiment ID")],
+    run_id: Annotated[str, typer.Argument(help="Run ID")],
+    fresh: Annotated[
+        bool,
+        typer.Option(
+            "--fresh",
+            help="Also bypass content-addressed cache reads (results are still written back).",
+        ),
+    ] = False,
+    target_spec: TargetOption = ".",
+) -> None:
+    """Rerun a failed/cancelled run from the top in a fresh execution.
+
+    CLI twin of ``POST .../{run_id}/rerun`` and ``molab run --rerun``.
+    """
+    _retry_run(project_id, experiment_id, run_id, target_spec, rerun=True, fresh=fresh)
+
+
+@run_app.command("harvest")
+def run_harvest(
+    project_id: Annotated[str, typer.Argument(help="Project ID")],
+    experiment_id: Annotated[str, typer.Argument(help="Experiment ID")],
+    run_id: Annotated[str, typer.Argument(help="Run ID")],
+    narrative: Annotated[str, typer.Argument(help="Interpretation of the run outcome")],
+    kind: Annotated[str, typer.Option("--kind", help="Knowledge kind")] = "Finding",
+    created_by: Annotated[str, typer.Option("--created-by")] = "cli",
+    target_spec: TargetOption = ".",
+) -> None:
+    """Harvest a terminal run into a KnowledgeItem (workspace.harvest_run)."""
+    ws = _open_ws(target_spec)
+    from molab.workspace import ExperimentNotFoundError as _ExpNotFound
+    from molab.workspace import ProjectNotFoundError as _ProjNotFound
+    from molab.workspace import RunNotFoundError as _RunNotFound
+    from molab.workspace.knowledge import parse_knowledge_class
+
+    try:
+        project = ws.get_project(project_id)
+        experiment = project.get_experiment(experiment_id)
+        run = experiment.get_run(run_id)
+    except (_ProjNotFound, _ExpNotFound, _RunNotFound) as exc:
+        rprint(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(1) from None
+    try:
+        item = run.harvest(
+            cls=parse_knowledge_class(kind),
+            narrative=narrative,
+            created_by=created_by,
+        )
+    except ValueError as exc:
+        rprint(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(1) from None
+    rprint(f"[green]OK[/green] Harvested KnowledgeItem: {item.name}")
+
+
+@run_app.command("ingest-metrics")
+def run_ingest_metrics(
+    project_id: Annotated[str, typer.Argument(help="Project ID")],
+    experiment_id: Annotated[str, typer.Argument(help="Experiment ID")],
+    run_id: Annotated[str, typer.Argument(help="Run ID")],
+    target_spec: TargetOption = ".",
+) -> None:
+    """Ingest foreign logs into the run host metrics surface (additive).
+
+    A molab Run is a host, not a MolRec record — appends to the
+    ``*.mlp.jsonl`` WAL, the only metrics persist surface (leftover
+    ``*.mlp.zarr/`` / ``*.mlp.index.json`` are ignored). Source logs are
+    untouched.
+    """
+    ws = _open_ws(target_spec)
+    from molab.plugins.metrics_ingest import detect_log_formats, ingest_run
+    from molab.workspace import ExperimentNotFoundError as _ExpNotFound
+    from molab.workspace import ProjectNotFoundError as _ProjNotFound
+    from molab.workspace import RunNotFoundError as _RunNotFound
+
+    try:
+        project = ws.get_project(project_id)
+        experiment = project.get_experiment(experiment_id)
+        run = experiment.get_run(run_id)
+    except (_ProjNotFound, _ExpNotFound, _RunNotFound) as exc:
+        rprint(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(1) from None
+
+    hits = detect_log_formats(run.run_dir)
+    result = ingest_run(run.run_dir)
+    rprint(
+        f"[green]OK[/green] ingest-metrics run={run.id} "
+        f"records={result.records} hits={len(hits)} skips={len(result.skipped)}"
+    )
+    for skip in result.skipped:
+        rprint(f"  [dim]skip[/dim] {skip.format}: {skip.path.name} — {skip.reason}")
+
+
+@run_app.command("analyze-failure")
+def run_analyze_failure(
+    project_id: Annotated[str, typer.Argument(help="Project ID")],
+    experiment_id: Annotated[str, typer.Argument(help="Experiment ID")],
+    run_id: Annotated[str, typer.Argument(help="Run ID")],
+    narrative: Annotated[
+        str | None,
+        typer.Option("--narrative", help="Optional interpretation (else deterministic)"),
+    ] = None,
+    force: Annotated[
+        bool,
+        typer.Option("--force", help="Also accept cancelled runs (default: failed only)"),
+    ] = False,
+    created_by: Annotated[str, typer.Option("--created-by")] = "cli",
+    target_spec: TargetOption = ".",
+) -> None:
+    """Analyze a failed run into a FailureAnalysis KnowledgeItem (shared service)."""
+    ws = _open_ws(target_spec)
+    from molab.services.run_failure import analyze_run_failure
+    from molab.workspace import ExperimentNotFoundError as _ExpNotFound
+    from molab.workspace import ProjectNotFoundError as _ProjNotFound
+    from molab.workspace import RunNotFoundError as _RunNotFound
+
+    try:
+        project = ws.get_project(project_id)
+        experiment = project.get_experiment(experiment_id)
+        run = experiment.get_run(run_id)
+    except (_ProjNotFound, _ExpNotFound, _RunNotFound) as exc:
+        rprint(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(1) from None
+    try:
+        item = analyze_run_failure(
+            run,
+            created_by=created_by,
+            narrative=narrative,
+            force=force,
+        )
+    except ValueError as exc:
+        rprint(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(1) from None
+    rprint(f"[green]OK[/green] FailureAnalysis: {item.name}")
+
+
+@run_app.command("info")
+def run_info(
+    project_id: Annotated[str, typer.Argument(help="Project ID")],
+    experiment_id: Annotated[str, typer.Argument(help="Experiment ID")],
+    run_id: Annotated[str, typer.Argument(help="Run ID")],
+    target_spec: TargetOption = ".",
+) -> None:
+    """Show run information."""
+    ws = _open_ws(target_spec)
+    from molab.workspace import ExperimentNotFoundError as _ExpNotFound
+    from molab.workspace import ProjectNotFoundError as _ProjNotFound
+    from molab.workspace import RunNotFoundError as _RunNotFound
+
+    try:
+        project = ws.get_project(project_id)
+    except _ProjNotFound:
+        rprint(f"[red]Error:[/red] Project not found: {project_id}")
+        raise typer.Exit(1) from None
+    try:
+        experiment = project.get_experiment(experiment_id)
+    except _ExpNotFound:
+        rprint(f"[red]Error:[/red] Experiment not found: {experiment_id}")
+        raise typer.Exit(1) from None
+    try:
+        r = experiment.get_run(run_id)
+    except _RunNotFound:
+        rprint(f"[red]Error:[/red] Run not found: {run_id}")
+        raise typer.Exit(1) from None
+
+    rprint(f"[bold]Run:[/bold] {r.id}")
+    rprint(f"  Status: {r.status}")
+    # A failed run must say WHY, right under the status, with the one command to
+    # retry — the reason is captured in the canonical record (run.json). The
+    # error block is status-gated (run-recovery bug 2): a run that has since
+    # succeeded must not keep advertising a stale error + retry hint (the
+    # lifecycle also clears metadata.error on success; this is the display-side
+    # defense for records written before that fix).
+    err = r.metadata.error
+    if err is not None and r.status in RETRYABLE_STATUSES:
+        rprint(f"  [red]Error:[/red] {err.type}: {err.message}")
+        script = r.metadata.script if hasattr(r.metadata, "script") else None
+        hint = f"molab run {script} --resume" if script else "molab run <script> --resume"
+        rprint(f"  [dim]Retry with:[/dim] {hint}")
+    rprint(f"  Created: {r.metadata.created_at}")
+    if r.finished_at:
+        rprint(f"  Finished: {r.finished_at}")
+    if r.metadata.profile:
+        rprint(f"  Profile: [cyan]{r.metadata.profile}[/cyan]")
+        if r.metadata.config_hash:
+            rprint(f"  Config hash: {r.metadata.config_hash[:12]}…")
+        if r.metadata.config:
+            rprint(f"  Config: {json.dumps(r.metadata.config, indent=2, default=str)}")
+    rprint(f"  Parameters: {json.dumps(r.parameters, indent=2, default=str)}")
+    history = r.executions
+    if history:
+        rprint("  Executions:")
+        for rec in history[-5:]:
+            rprint(f"    {rec.started_at}  {rec.status}  {rec.execution_id}")
+
+
+# Attach prune subcommand from the prune module.
+from molab.cli import prune as _prune  # noqa: E402
+
+_prune.register(run_app)
+
+
+# ---------------------------------------------------------------------------
+# target
+# ---------------------------------------------------------------------------
+
+asset_app = typer.Typer(help="Asset management commands", no_args_is_help=True)
+
+
+_ASSET_SCOPE_KINDS = ("workspace", "project", "experiment", "run")
+
+
+def _format_asset_scope(scope) -> str:  # noqa: ANN001
+    """Render an ``AssetScope`` as ``kind:id/id/…`` (bare kind at workspace)."""
+    if not scope.ids:
+        return scope.kind
+    return f"{scope.kind}:{'/'.join(scope.ids)}"
+
+
+@asset_app.command("list")
+def asset_list(
+    scope: Annotated[
+        str | None,
+        typer.Option(
+            "--scope",
+            help="Filter by scope kind: workspace | project | experiment | run.",
+        ),
+    ] = None,
+    limit: Annotated[int, typer.Option("--limit", "-l", help="Limit results")] = 50,
+    target_spec: TargetOption = ".",
+) -> None:
+    """List assets across ALL scopes (workspace, project, experiment, run).
+
+    The default view scans every scope's authoritative ``assets.json`` manifest
+    — the same count ``molab context`` reports — with a Scope column locating
+    each asset. Use ``--scope`` to restrict to one scope kind.
+    """
+    ws = _open_ws(target_spec)
+
+    if scope is not None and scope not in _ASSET_SCOPE_KINDS:
+        rprint(
+            f"[red]Error:[/red] unknown scope {scope!r} — "
+            f"choose one of: {', '.join(_ASSET_SCOPE_KINDS)}."
+        )
+        raise typer.Exit(1)
+
+    from molab.workspace.assets import scan
+
+    assets = scan.scan_assets(ws.root, fs=ws.fs)
+    total = len(assets)
+    if scope is not None:
+        assets = [a for a in assets if a.scope.kind == scope]
+    shown = assets[:limit]
+
+    if not shown:
+        if scope is not None and total:
+            rprint(
+                f"[yellow]No {scope}-scope assets found[/yellow] "
+                f"— {total} asset(s) exist in other scopes (drop --scope to see them)."
+            )
+        else:
+            rprint("[yellow]No assets found[/yellow]")
+        return
+    title = "Assets (all scopes)" if scope is None else f"Assets ({scope} scope)"
+    table = Table(title=title)
+    table.add_column("Asset ID", style="cyan")
+    table.add_column("Name", style="green")
+    table.add_column("Kind")
+    table.add_column("Scope", style="magenta")
+    table.add_column("Created")
+    for a in shown:
+        table.add_row(
+            a.asset_id[:12] + "...",
+            a.name,
+            a.kind if hasattr(a, "kind") else "-",
+            _format_asset_scope(a.scope),
+            a.created_at.strftime("%Y-%m-%d %H:%M"),
+        )
+    _console.print(table)
+    if len(assets) > len(shown):
+        rprint(f"[dim]Showing {len(shown)} of {len(assets)} — raise --limit to see more.[/dim]")
+
+
+@asset_app.command("info")
+def asset_info(
+    asset_id: Annotated[str, typer.Argument(help="The asset id to inspect.")],
+    target_spec: TargetOption = ".",
+) -> None:
+    """Show one asset's full record — wraps ``assets.scan.get_asset``."""
+    from molab.workspace.assets import scan as asset_scan
+
+    ws = _open_ws(target_spec)
+
+    asset = asset_scan.get_asset(ws.root, asset_id, fs=ws.fs)
+    if asset is None:
+        rprint(f"[red]Error:[/red] no asset with id {asset_id!r} in this workspace.")
+        raise typer.Exit(1)
+    rprint(f"[bold]{asset.name}[/bold]  ({asset.asset_id})")
+    # ``kind`` is the subclass-declared discriminator (base Asset omits it).
+    rprint(f"  kind         : {asset.kind if hasattr(asset, 'kind') else type(asset).__name__}")
+    rprint(f"  scope        : {_format_asset_scope(asset.scope)}")
+    rprint(f"  content_hash : {asset.content_hash or '(none)'}")
+    producer = asset.producer
+    if producer is not None:
+        rprint(f"  producer     : run={producer.run_id or '-'} task={producer.task_id or '-'}")
+        if producer.inputs:
+            rprint(f"  inputs       : {', '.join(producer.inputs)}")
+    rprint(f"  path         : {asset.path}")
+    rprint(f"  created      : {asset.created_at.isoformat()}")
+
+
+@asset_app.command("lineage")
+def asset_lineage(
+    asset_id: Annotated[str, typer.Argument(help="The asset id to trace.")],
+    direction: Annotated[
+        str,
+        typer.Option("--direction", help="ancestors | descendants | both."),
+    ] = "both",
+    target_spec: TargetOption = ".",
+) -> None:
+    """Trace an asset's provenance — wraps ``assets.lineage.ancestors/descendants``."""
+    from molab.workspace.assets import lineage as asset_lineage_mod
+    from molab.workspace.assets import scan as asset_scan
+
+    if direction not in ("ancestors", "descendants", "both"):
+        rprint(
+            f"[red]Error:[/red] --direction must be ancestors|descendants|both, got {direction!r}."
+        )
+        raise typer.Exit(1)
+    ws = _open_ws(target_spec)
+
+    if asset_scan.get_asset(ws.root, asset_id, fs=ws.fs) is None:
+        rprint(f"[red]Error:[/red] no asset with id {asset_id!r} in this workspace.")
+        raise typer.Exit(1)
+
+    def _render(label: str, arrow: str, ids: set[str]) -> None:
+        rprint(f"[bold]{label}[/bold] ({len(ids)}):")
+        if not ids:
+            rprint("  (none)")
+            return
+        for related_id in sorted(ids):
+            related = asset_scan.get_asset(ws.root, related_id, fs=ws.fs)
+            suffix = (
+                f"  {related.name} ({related.kind if hasattr(related, 'kind') else '?'})"
+                if related is not None
+                else ""
+            )
+            rprint(f"  {arrow} {related_id}{suffix}")
+
+    if direction in ("ancestors", "both"):
+        _render("ancestors", "<-", asset_lineage_mod.ancestors(ws, asset_id))
+    if direction in ("descendants", "both"):
+        _render("descendants", "->", asset_lineage_mod.descendants(ws, asset_id))

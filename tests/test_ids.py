@@ -1,7 +1,7 @@
-"""Unit tests for the cross-layer ``molexp.ids`` primitive module.
+"""Unit tests for the cross-layer ``molab.ids`` primitive module.
 
-``molexp.ids`` holds the pure id / slug / content-hash helpers promoted
-out of ``molexp.workspace.utils`` (okf-01-01) so the ``molexp.knowledge``
+``molab.ids`` holds the pure id / slug / content-hash helpers promoted
+out of ``molab.workspace.utils`` (okf-01-01) so the ``molab.knowledge``
 bottom layer can cite them without importing workspace.
 """
 
@@ -10,8 +10,8 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
-import molexp.ids as ids
-from molexp.ids import (
+import molab.ids as ids
+from molab.ids import (
     compute_content_hash,
     slugify,
 )
@@ -39,18 +39,17 @@ def test_source_imports_no_workspace_or_upstream_layer() -> None:
 
     Asserted at the AST level on the module's own source — the
     enforceable layer-independence invariant (a runtime ``sys.modules``
-    probe is confounded by the eager ``molexp/__init__.py``). Mirrors
+    probe is confounded by the eager ``molab/__init__.py``). Mirrors
     ``tests/test_workspace/test_import_guard.py``.
     """
     forbidden = (
-        "molexp.workspace",
-        "molexp.workflow",
-        "molexp.agent",
-        "molexp.harness",
-        "molexp.server",
-        "molexp.cli",
-        "molexp.plugins",
-        "molexp.sweep",
+        "molab.workspace",
+        "molab.workflow",
+        "molab.harness",
+        "molab.server",
+        "molab.cli",
+        "molab.plugins",
+        "molab.sweep",
     )
     source = Path(ids.__file__).read_text(encoding="utf-8")
     tree = ast.parse(source)
@@ -60,4 +59,4 @@ def test_source_imports_no_workspace_or_upstream_layer() -> None:
             offenders += [a.name for a in node.names if a.name.startswith(forbidden)]
         elif isinstance(node, ast.ImportFrom) and node.module and node.module.startswith(forbidden):
             offenders.append(node.module)
-    assert offenders == [], f"molexp.ids imports forbidden modules: {offenders}"
+    assert offenders == [], f"molab.ids imports forbidden modules: {offenders}"

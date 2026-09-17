@@ -18,6 +18,7 @@ import { usePermissions, withWriteGate } from "@/app/auth";
 import { EMPTY_COPY } from "@/app/components/entity";
 import type { NavigationExplorerProps } from "@/app/navigation/sections";
 import { type TreeNode, type TreeNodeAction, TreeView } from "@/app/panels/TreeView";
+import { prefetchRenderer } from "@/app/renderers/lazyRenderers";
 import type { FileKind, Selection, WorkspaceSnapshot, WorkspaceTreeNode } from "@/app/types";
 import { useAlert, useConfirm } from "@/components/ConfirmDialog";
 import { LeftExplorer } from "@/components/layout/ExplorerShell";
@@ -76,6 +77,8 @@ interface WorkspaceSemantic {
 
 interface WorkspaceTreeActions {
   onSelect: (selection: Selection) => void;
+  onIntentEntity?: (type: WorkspaceSemantic["type"], id: string) => void;
+  onIntentDirectory?: (dirPath: string) => void;
   onCreateDirectory: (path: string) => void;
   onCreateFile: (path: string) => void;
   pathContext: PathDisplayContext;
@@ -160,6 +163,25 @@ export const buildFilesExplorerNodes = (
           {semantic.type.substring(0, 3)}
         </span>
       ) : undefined,
+      onPrefetch: () => {
+        if (isFile) {
+          void import("@/plugins/editor/TextEditor");
+          void import("@monaco-editor/react");
+          if (fileSelection.fileKind === "image") {
+            void import("@/app/renderers/ImageViewer");
+          }
+          if (fileSelection.hasPreviewSidecar) {
+            void import("@/plugins/molvis/MolvisDatasetPreview");
+          }
+          return;
+        }
+        if (semantic) {
+          prefetchRenderer(semantic.type);
+          actions.onIntentEntity?.(semantic.type, semantic.id);
+          return;
+        }
+        actions.onIntentDirectory?.(node.path);
+      },
       onSelect: () => {
         if (isFile) actions.onSelect(fileSelection);
         else if (semantic) actions.onSelect({ objectType: semantic.type, objectId: semantic.id });
@@ -316,6 +338,7 @@ export const FilesExplorer = (props: FilesExplorerProps): JSX.Element => {
 
   const nodes = buildFilesExplorerNodes(props.snapshot, {
     onSelect: props.onSelect,
+    onIntentDirectory: fileSystem.onExpandDirectory,
     onCreateDirectory: (path) => void createDirectory(path),
     onCreateFile: (path) => void createFile(path),
     pathContext,
@@ -329,7 +352,7 @@ export const FilesExplorer = (props: FilesExplorerProps): JSX.Element => {
       deniedReason={writeDeniedReason}
       onClick={() => void openWorkspace()}
     >
-      <FolderOpen className="h-4 w-4" />
+      <FolderOpen className="size-icon" />
     </WorkbenchIconAction>
   ) : (
     <>
@@ -339,7 +362,7 @@ export const FilesExplorer = (props: FilesExplorerProps): JSX.Element => {
         deniedReason={writeDeniedReason}
         onClick={() => void createFile()}
       >
-        <FilePlus className="h-4 w-4" />
+        <FilePlus className="size-icon" />
       </WorkbenchIconAction>
       <WorkbenchIconAction
         label="New folder"
@@ -347,10 +370,10 @@ export const FilesExplorer = (props: FilesExplorerProps): JSX.Element => {
         deniedReason={writeDeniedReason}
         onClick={() => void createDirectory()}
       >
-        <FolderPlus className="h-4 w-4" />
+        <FolderPlus className="size-icon" />
       </WorkbenchIconAction>
       <WorkbenchIconAction label="Refresh files" kind="ghost" onClick={props.onRefresh}>
-        <RefreshCw className="h-4 w-4" />
+        <RefreshCw className="size-4" />
       </WorkbenchIconAction>
     </>
   );

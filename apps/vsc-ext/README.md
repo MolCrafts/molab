@@ -1,6 +1,6 @@
-# MolExp Workflow Preview (VS Code)
+# Molab Workflow Preview (VS Code)
 
-Preview a molexp `workflow.json` IR as an interactive DAG, reusing the same
+Preview a molab `workflow.json` IR as an interactive DAG, reusing the same
 workflow canvas the web UI ships.
 
 ## Layout
@@ -12,7 +12,7 @@ apps/
 ```
 
 The build aliases `@/` to `../web/src`, so the webview imports the *exact* UI
-components that `molexp serve` uses.
+components that `molab serve` uses.
 
 ## Scripts (repo root)
 

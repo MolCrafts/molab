@@ -14,16 +14,16 @@ each falls back to its declared default when the active profile omits it.
 
 Run with::
 
-    molexp run examples/operations/run_profiles_advanced/train.py --profile smoke
-    molexp run examples/operations/run_profiles_advanced/train.py --profile production --override optimizer.lr=0.0005
+    molab run examples/operations/run_profiles_advanced/train.py --profile smoke
+    molab run examples/operations/run_profiles_advanced/train.py --profile production --override optimizer.lr=0.0005
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-import molexp as me
-from molexp.workflow import Workflow, WorkflowCompiler
+import molab as me
+from molab.workflow import Workflow, WorkflowCompiler
 
 WORKSPACE_ROOT = Path(__file__).resolve().parent / "_workspace"
 

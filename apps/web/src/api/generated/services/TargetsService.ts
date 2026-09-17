@@ -13,18 +13,18 @@ export class TargetsService {
     /**
      * List Targets Endpoint
      * List compute targets — the registered ones plus the built-in ``local``.
-     * @param molexpSession
+     * @param molabSession
      * @returns TargetListResponse Successful Response
      * @throws ApiError
      */
     public static listTargetsEndpoint(
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<TargetListResponse> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/targets',
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -35,21 +35,21 @@ export class TargetsService {
      * Create Target Endpoint
      * Register a new compute target.
      *
-     * Mirrors ``molexp target add NAME --scratch ... [--host ...] [--scheduler ...]``.
+     * Mirrors ``molab target add NAME --scratch ... [--host ...] [--scheduler ...]``.
      * @param requestBody
-     * @param molexpSession
+     * @param molabSession
      * @returns TargetResponse Successful Response
      * @throws ApiError
      */
     public static createTargetEndpoint(
         requestBody: TargetCreateRequest,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<TargetResponse> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/targets',
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -62,13 +62,13 @@ export class TargetsService {
      * Delete Target Endpoint
      * Remove the named compute target from the workspace registry.
      * @param name
-     * @param molexpSession
+     * @param molabSession
      * @returns void
      * @throws ApiError
      */
     public static deleteTargetEndpoint(
         name: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<void> {
         return __request(OpenAPI, {
             method: 'DELETE',
@@ -77,7 +77,7 @@ export class TargetsService {
                 'name': name,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -87,18 +87,18 @@ export class TargetsService {
     /**
      * Test Target Endpoint
      * Verify connectivity to a target — runs the same round-trip probe as
-     * ``molexp target test`` (true / mkdir scratch / 1-byte file round-trip).
+     * ``molab target test`` (true / mkdir scratch / 1-byte file round-trip).
      *
      * Returns ``ok=False`` with the failing step's detail rather than raising,
      * so the UI can render the failure inline.
      * @param name
-     * @param molexpSession
+     * @param molabSession
      * @returns TargetTestResponse Successful Response
      * @throws ApiError
      */
     public static testTargetEndpoint(
         name: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<TargetTestResponse> {
         return __request(OpenAPI, {
             method: 'POST',
@@ -107,7 +107,7 @@ export class TargetsService {
                 'name': name,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,

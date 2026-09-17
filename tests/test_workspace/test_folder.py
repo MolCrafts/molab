@@ -1,4 +1,4 @@
-"""Tests for ``molexp.workspace.folder`` — the abstract ``Folder`` base class.
+"""Tests for ``molab.workspace.folder`` — the abstract ``Folder`` base class.
 
 Covers the ``Folder`` lifecycle (lazy mkdir, atomic ``write_json``, id/kind
 validation, ``children`` filtering, metadata round-trip, ``delete`` / ``move_to``)
@@ -17,7 +17,7 @@ from pathlib import Path
 
 import pytest
 
-from molexp.workspace.folder import Folder, FolderMoveCollisionError, append_link
+from molab.workspace.folder import Folder, FolderMoveCollisionError, append_link
 
 
 # ``Folder`` has no business subclasses at this level; this private subclass
@@ -216,7 +216,7 @@ class TestFolderEdges:
     def test_legacy_untyped_link_defaults_role_and_is_kept(self, tmp_path: Path) -> None:
         """A plain pre-role markdown link parses to ``DEFAULT_EDGE_ROLE`` and is
         never dropped; ``meta.json`` is never consulted for the edge."""
-        from molexp.workspace.edges import DEFAULT_EDGE_ROLE
+        from molab.workspace.edges import DEFAULT_EDGE_ROLE
 
         src = _concept_folder("src", tmp_path)
         dst = _concept_folder("dst", tmp_path)
@@ -239,15 +239,15 @@ class TestFolderEdges:
 
 
 def test_import_guard_folder_pulls_no_upstream_layer() -> None:
-    """``import molexp.workspace.folder`` pulls no upstream layer (workflow /
+    """``import molab.workspace.folder`` pulls no upstream layer (workflow /
     agent) nor ``pydantic_ai`` / ``pydantic_graph`` into ``sys.modules``.
     Subprocess-isolated because the in-process interpreter has those loaded."""
     code = (
         "import sys\n"
-        "import molexp.workspace.folder  # noqa: F401\n"
-        "for mod in ('molexp.workflow', 'molexp.agent', 'pydantic_ai', 'pydantic_graph'):\n"
+        "import molab.workspace.folder  # noqa: F401\n"
+        "for mod in ('molab.workflow', 'molab.harness.agent', 'pydantic_ai', 'pydantic_graph'):\n"
         "    assert mod not in sys.modules, "
-        "        f'molexp.workspace.folder eagerly imported {mod}'\n"
+        "        f'molab.workspace.folder eagerly imported {mod}'\n"
     )
     result = subprocess.run([sys.executable, "-c", code], capture_output=True, check=False)
     if result.returncode != 0:

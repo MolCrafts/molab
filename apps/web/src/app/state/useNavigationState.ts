@@ -1,6 +1,6 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { experimentPath, projectPath } from "@/app/entities/paths";
+import { experimentPath, legacyCompareRedirect, projectPath } from "@/app/entities/paths";
 import { getNavigationContribution, leftPanelViewFromPath } from "@/app/navigation/sections";
 import type {
   ExperimentView,
@@ -48,7 +48,7 @@ const parseObjectView = (raw: string | null): ObjectView | undefined => {
 };
 
 const parseExperimentView = (raw: string | undefined): ExperimentView | undefined => {
-  if (raw === "workflow" || raw === "runs" || raw === "compare") return raw;
+  if (raw === "workflow" || raw === "runs") return raw;
   return undefined;
 };
 
@@ -87,7 +87,7 @@ export const buildSelectionFromLocation = (
   }
 
   const experimentViewMatch = pathname.match(
-    /^\/projects\/([^/]+)\/experiments\/([^/]+)\/(workflow|runs|compare)$/,
+    /^\/projects\/([^/]+)\/experiments\/([^/]+)\/(workflow|runs)$/,
   );
   if (experimentViewMatch) {
     return {
@@ -299,6 +299,11 @@ export const useNavigationState = (snapshot: NavigationSnapshot): NavigationStat
     () => leftPanelViewFromPath(location.pathname),
     [location.pathname],
   );
+
+  useEffect(() => {
+    const redirect = legacyCompareRedirect(location.pathname, location.search);
+    if (redirect) navigate(redirect, { replace: true });
+  }, [location.pathname, location.search, navigate]);
 
   const selection = useMemo(
     () => buildSelectionFromLocation(location.pathname, searchParams),

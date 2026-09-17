@@ -1,6 +1,6 @@
 # Workflow Composition
 
-`SubWorkflow` is the **sanctioned composition node** in MolExp. It wraps a
+`SubWorkflow` is the **sanctioned composition node** in Molab. It wraps a
 reusable inner workflow and runs it end-to-end through the engine as a single
 node of an outer workflow — including as the per-element `body` of
 `builder.parallel`.
@@ -15,7 +15,7 @@ helpers keep working against the same workspace / run.
 ## Pattern 1: `SubWorkflow` as one node of a chain
 
 ```python
-from molexp.workflow import (
+from molab.workflow import (
     SubWorkflow,
     Task,
     TaskContext,
@@ -103,7 +103,7 @@ class can appear in multiple workflows — the lightest form of reuse when you d
 not need a whole sub-pipeline as one node:
 
 ```python
-from molexp.workflow import Task, TaskContext, Workflow, WorkflowCompiler
+from molab.workflow import Task, TaskContext, Workflow, WorkflowCompiler
 
 
 class Fetch(Task):

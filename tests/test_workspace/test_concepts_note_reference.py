@@ -12,12 +12,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import cast
 
-from molexp.workspace import (
+from molab.workspace import (
     Note,
     ReferenceConcept,
     ReferenceMeta,
 )
-from molexp.workspace.folder import Folder, concept_from_dir
+from molab.workspace.folder import Folder, concept_from_dir
 
 
 def _mount[F: Folder](parent: Folder, child: F) -> F:

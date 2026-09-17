@@ -1,14 +1,14 @@
 # Workflow Layer Architecture
 
-`molexp.workflow` is the only workflow abstraction in molexp. Every
+`molab.workflow` is the only workflow abstraction in molab. Every
 graph-shaped scientific workflow — planning, executable, repair,
 dry-run, etc. — must be represented through this layer.
 
-The execution engine is molexp-owned: compilation lowers the workflow
+The execution engine is molab-owned: compilation lowers the workflow
 to a frozen `ExecutionPlan` walked by a structural values-on-edges
-engine. molexp has **no** `pydantic-graph` dependency — the `End`
-sentinel is molexp's own (`molexp.workflow.types.End`), the private
-engine package is `src/molexp/workflow/_engine/`, and nothing under
+engine. molab has **no** `pydantic-graph` dependency — the `End`
+sentinel is molab's own (`molab.workflow.types.End`), the private
+engine package is `src/molab/workflow/_engine/`, and nothing under
 `src/` may import `pydantic_graph`. No class under `workflow/`
 subclasses any third-party engine base class — user-side `Task` and
 `Actor` included.
@@ -29,7 +29,7 @@ Concretely the workflow layer reaches downward for:
 
 - `FileCacheStore(run_dir / "cache")` — the run-local content-addressed
   result cache (auto-derived from `run_context`). The user-home
-  `~/.molexp/cache/` shortcut is gone; execute does not create a
+  `~/.molab/cache/` shortcut is gone; execute does not create a
   workspace-root `cache/`.
 - `workspace.atomic_write_json` — used by the execution-document
   writer (`_engine/persistence.py`) to write `workflow.json`
@@ -39,8 +39,8 @@ Concretely the workflow layer reaches downward for:
   execution unit by `WorkflowRuntime.execute(..., run_context=ctx)` /
   `WorkflowRuntime.run_on(...)`.
 
-The workflow layer does **not** import from `molexp.agent`,
-`molexp.plugins`, `molexp.server`, or `molexp.cli`.
+The workflow layer does **not** import from `molab.harness.agent`,
+`molab.plugins`, `molab.server`, or `molab.cli`.
 Cross-layer payloads coming *down* from the agent (e.g. opaque
 RunContext-shaped objects, `Mapping[str, JSONValue]` config) flow
 through duck-typed parameters that the workflow scheduler treats as
@@ -48,7 +48,7 @@ opaque.
 
 ## Responsibilities
 
-`molexp.workflow` owns:
+`molab.workflow` owns:
 
 - workflow declaration (`WorkflowCompiler` builder → frozen
   `CompiledWorkflow`)
@@ -73,7 +73,7 @@ opaque.
   scheduling (data deps, branching, loops, parallel fan-out,
   `max_concurrency`) and structural deadlock detection
   (`WorkflowDeadlockError`, zero timing constants)
-- the `End` sentinel — molexp-owned, defined in `molexp.workflow.types`
+- the `End` sentinel — molab-owned, defined in `molab.workflow.types`
 
 It does **not** own scheduler dispatch (Slurm, PBS, …), job
 monitoring, backend-specific transport, or session orchestration.
@@ -101,10 +101,10 @@ capabilities are required.
 
 ## Public boundary
 
-Allowed outside `molexp.workflow`:
+Allowed outside `molab.workflow`:
 
 ```python
-from molexp.workflow import (
+from molab.workflow import (
     WorkflowCompiler,
     CompiledWorkflow,
     WorkflowRuntime,
@@ -117,19 +117,19 @@ from molexp.workflow import (
 )
 ```
 
-Forbidden outside `molexp.workflow`:
+Forbidden outside `molab.workflow`:
 
 ```python
 # docs: skip — illustrates imports forbidden at the boundary (not runnable)
 import pydantic_graph                 # dependency removed — forbidden everywhere in src/
-import molexp.workflow._engine        # private subtree
+import molab.workflow._engine        # private subtree
 ```
 
 The import-boundary firewall is enforced by
 `tests/test_workflow/test_import_guard.py` (forbids upstream layers,
 zero `pydantic_graph` imports under `workflow/`) and
 `tests/test_workflow/test_engine_boundary.py` (zero `pydantic_graph`
-imports anywhere under `src/`, `End` is molexp-owned in
+imports anywhere under `src/`, `End` is molab-owned in
 `workflow/types.py` with no duplicate sentinel, no `BaseNode`
 subclasses or new scheduler-shaped classes under `workflow/`, the
 lowering compiler never builds a pg `Graph`).

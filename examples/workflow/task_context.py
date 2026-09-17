@@ -33,9 +33,9 @@ import asyncio
 import tempfile
 from pathlib import Path
 
-import molexp as me
-from molexp.profile import ProfileConfig
-from molexp.workflow import Task, TaskContext, Workflow, WorkflowCompiler, WorkflowRuntime
+import molab as me
+from molab.profile import ProfileConfig
+from molab.workflow import Task, TaskContext, Workflow, WorkflowCompiler, WorkflowRuntime
 
 
 class Seed(Task):
@@ -61,7 +61,7 @@ compiled = WorkflowCompiler().compile(
 
 
 async def main() -> None:
-    root = Path(tempfile.mkdtemp(prefix="molexp-ctx-"))
+    root = Path(tempfile.mkdtemp(prefix="molab-ctx-"))
     ws = me.Workspace(root, name="ctx-demo")
     exp = ws.add_project("demo").add_experiment("counter").define(compiled, params={"base": [1]})
 

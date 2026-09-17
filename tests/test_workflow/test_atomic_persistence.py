@@ -1,7 +1,7 @@
 """Invariant lock: workflow persistence routes through ``FileStore.put``.
 
-The run-scoped byte exit is :class:`~molexp.workspace.file_store.FileStore`
-(atomic via :mod:`molexp.atomicio`). This source scan pins that wiring in
+The run-scoped byte exit is :class:`~molab.workspace.file_store.FileStore`
+(atomic via :mod:`molab.atomicio`). This source scan pins that wiring in
 ``_engine.persistence.write_initial_workflow_json``.
 """
 
@@ -13,7 +13,7 @@ from pathlib import Path
 PERSISTENCE_FILE = (
     Path(__file__).resolve().parents[2]
     / "src"
-    / "molexp"
+    / "molab"
     / "workflow"
     / "_engine"
     / "persistence.py"

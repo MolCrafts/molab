@@ -1,15 +1,15 @@
-import type { MolexpPluginModule, PluginAPI } from "@molcrafts/molexp-plugin";
-import { lazy } from "react";
+import type { MolabPluginModule, PluginAPI } from "@molcrafts/molab-plugin";
+import { lazyWithPrefetch } from "@/lib/lazy-with-prefetch";
 import { registerKnowledgeNavigation } from "./navigation";
 
-const KnowledgeDocPanel = lazy(() =>
+const KnowledgeDocPanel = lazyWithPrefetch(() =>
   import("./KnowledgeDocPanel").then((module) => ({ default: module.KnowledgeDocPanel })),
 );
-const KnowledgeViewer = lazy(() =>
+const KnowledgeViewer = lazyWithPrefetch(() =>
   import("./KnowledgeViewer").then((module) => ({ default: module.KnowledgeViewer })),
 );
 
-const knowledgePlugin: MolexpPluginModule = {
+const knowledgePlugin: MolabPluginModule = {
   id: "knowledge",
   name: "Knowledge",
   version: "1.0.0",

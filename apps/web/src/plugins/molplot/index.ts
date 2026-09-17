@@ -28,7 +28,7 @@ export { filterSpikes, smoothEma } from "./smoothing";
 /**
  * molplot UI plugin — activates purely by filename suffixes (no heuristics).
  *
- * Contract (see molexp.workspace.mlp_names):
+ * Contract (see molab.workspace.mlp_names):
  * - ``*.mlp.jsonl`` — live metrics WAL → Metrics tab
  * - leftover ``*.mlp.zarr`` is not a metrics surface
  * - ``*.mlp.vl.json`` — Vega-Lite plot artifact → MolPlot tab

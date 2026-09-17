@@ -1,9 +1,9 @@
-import type { MolexpPluginModule, PluginAPI } from "@molcrafts/molexp-plugin";
-import { lazy } from "react";
+import type { MolabPluginModule, PluginAPI } from "@molcrafts/molab-plugin";
 import type { FileKind } from "@/app/types";
 import { buildRendererRegistryKey } from "@/lib/contribution-types";
+import { lazyWithPrefetch } from "@/lib/lazy-with-prefetch";
 
-const TextEditor = lazy(() =>
+const TextEditor = lazyWithPrefetch(() =>
   import("./TextEditor").then((module) => ({ default: module.TextEditor })),
 );
 
@@ -16,7 +16,7 @@ const EDITOR_FILE_KINDS: readonly FileKind[] = [
   "unknown",
 ];
 
-const editorPlugin: MolexpPluginModule = {
+const editorPlugin: MolabPluginModule = {
   id: "editor",
   name: "Editor",
   version: "1.0.0",

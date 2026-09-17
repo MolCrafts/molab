@@ -150,6 +150,10 @@ const PRODUCT_ROUTE_FALLBACK: ReadonlyArray<{
   { id: "dashboard", matches: (pathname) => pathname === "/" || pathname.startsWith("/dashboard") },
   { id: "projects", matches: (pathname) => pathname.startsWith("/projects") },
   { id: "runs", matches: (pathname) => pathname.startsWith("/runs") },
+  {
+    id: "compare",
+    matches: (pathname) => pathname === "/compare" || pathname.startsWith("/compare/"),
+  },
   { id: "agent", matches: (pathname) => pathname.startsWith("/agent-tasks") },
   { id: "knowledge", matches: (pathname) => pathname.startsWith("/knowledge") },
   { id: "asset", matches: (pathname) => pathname.startsWith("/assets") },

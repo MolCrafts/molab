@@ -139,7 +139,7 @@ export function ComputeTargetsPanel(): JSX.Element {
                     deniedReason={writeDeniedReason}
                     onClick={() => void handleTest(t.name)}
                   >
-                    <FlaskConical className="size-4" />
+                    <FlaskConical className="size-icon" />
                   </WorkbenchIconAction>
                   <WorkbenchIconAction
                     label={`Remove ${t.name}`}
@@ -148,7 +148,7 @@ export function ComputeTargetsPanel(): JSX.Element {
                     deniedReason={writeDeniedReason}
                     onClick={() => void handleDelete(t.name)}
                   >
-                    <Trash2 className="h-4 w-4" />
+                    <Trash2 className="size-icon" />
                   </WorkbenchIconAction>
                 </div>
               </li>
@@ -160,9 +160,9 @@ export function ComputeTargetsPanel(): JSX.Element {
           <div className="space-y-1 bg-surface/70 px-3 py-3 text-body-lg">
             <div className="flex items-center gap-2 font-medium">
               {testResult.ok ? (
-                <Check className="h-4 w-4 text-status-completed-foreground" />
+                <Check className="size-icon text-status-completed-foreground" />
               ) : (
-                <X className="h-4 w-4 text-status-failed-foreground" />
+                <X className="size-icon text-status-failed-foreground" />
               )}
               <span>{testResult.name}</span>
               <span className="text-muted-foreground">

@@ -1,10 +1,10 @@
 /**
- * Webview entry — mounts the reused molexp `<WorkflowPreview>` and feeds it the
+ * Webview entry — mounts the reused molab `<WorkflowPreview>` and feeds it the
  * file text pushed from the extension host.
  *
- * The component is imported straight from the molexp UI's shadcn-style workflow
+ * The component is imported straight from the molab UI's shadcn-style workflow
  * module (`@/components/workflow`, aliased to `apps/web/src` at build time), so
- * there is no duplicated renderer: the extension and `molexp serve` share one.
+ * there is no duplicated renderer: the extension and `molab serve` share one.
  */
 
 import { StrictMode, useEffect, useState } from "react";

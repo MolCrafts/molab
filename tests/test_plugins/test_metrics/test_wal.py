@@ -1,4 +1,4 @@
-"""``molexp.plugins.metrics.wal`` — JSONL-only host metrics under a run.
+"""``molab.plugins.metrics.wal`` — JSONL-only host metrics under a run.
 
 ``MetricsWriter`` (``ctx.metrics``) appends to
 ``executions/eNN/out/metrics.mlp.jsonl``. ``flush()`` does not densify.
@@ -13,11 +13,11 @@ from pathlib import Path
 
 import pytest
 
-from molexp.plugins.metrics import (
+from molab.plugins.metrics import (
     MetricsWriter,
     read_run_metrics,
 )
-from molexp.workspace.execution_dirs import ARTIFACTS
+from molab.workspace.execution_dirs import ARTIFACTS
 
 
 def _exec_dir(run) -> Path:
@@ -61,7 +61,7 @@ class TestMetricsWriter:
         with run.start() as ctx:
             ctx.metrics.scalar("train/loss", 0.25, step=1)
 
-        from molexp.workspace.assets import scan
+        from molab.workspace.assets import scan
 
         root = run.experiment.project.workspace.root
         assert scan.scan_assets(root, kind="metrics", producer_run=run.id) == []

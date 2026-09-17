@@ -2,10 +2,10 @@
 
 There is no artifact index. An Execution records its own products in its
 ``execution.json``, so "which artifacts exist" is a walk of the run tree
-(:func:`molexp.workspace.artifact_repository.scan_artifacts`) and "which
+(:func:`molab.workspace.artifact_repository.scan_artifacts`) and "which
 artifacts did this attempt emit" is one file read. Emitted artifacts are
 created by
-:meth:`molexp.workspace.execution_context.ExecutionContext.emit_artifact`.
+:meth:`molab.workspace.execution_context.ExecutionContext.emit_artifact`.
 """
 
 from __future__ import annotations
@@ -14,9 +14,9 @@ from pathlib import Path
 
 import pytest
 
-from molexp.workspace import Workspace
-from molexp.workspace.artifact_repository import scan_artifacts
-from molexp.workspace.domain import Artifact
+from molab.workspace import Workspace
+from molab.workspace.artifact_repository import scan_artifacts
+from molab.workspace.domain import Artifact
 
 # Each started run persists two artifacts: the user's "artifact" + a checkpoint.
 ARTIFACTS_PER_RUN = 2

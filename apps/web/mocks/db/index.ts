@@ -224,7 +224,7 @@ export function seed(): void {
             name: "Protein Folding",
             path: "projects/protein-folding",
             description: "Benchmarking folding pipelines",
-            owner: "molexp",
+            owner: "molab",
             tags: ["biology", "gpu"],
             config: { priority: "high" },
             created: isoAt(-1440),
@@ -235,7 +235,7 @@ export function seed(): void {
             name: "Catalyst Search",
             path: "projects/catalyst-search",
             description: "Screening catalysts for CO2 reduction",
-            owner: "molexp",
+            owner: "molab",
             tags: ["chemistry"],
             config: { priority: "medium" },
             created: isoAt(-2880),
@@ -762,7 +762,7 @@ outputs:
             type: "file",
             size: 2048,
             modified: isoAt(-3000),
-            content: "# Molexp Workspace\n\nThis is a mock workspace for development and testing.",
+            content: "# Molab Workspace\n\nThis is a mock workspace for development and testing.",
         },
     ];
 
@@ -933,7 +933,7 @@ outputs:
                                 metadata: {},
                             },
                             python_script: [
-                                'from molexp.workflow.spec import WorkflowSpec',
+                                'from molab.workflow.spec import WorkflowSpec',
                                 '',
                                 'WORKFLOW_IR = {',
                                 '    "name": "dataset-survey-benchmark",',
@@ -1031,7 +1031,7 @@ outputs:
                                 metadata: {},
                             },
                             python_script: [
-                                'from molexp.workflow.spec import WorkflowSpec',
+                                'from molab.workflow.spec import WorkflowSpec',
                                 '',
                                 'WORKFLOW_IR = {',
                                 '    "name": "qm9-gnn-baseline",',

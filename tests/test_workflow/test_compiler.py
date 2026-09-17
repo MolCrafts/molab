@@ -1,4 +1,4 @@
-"""Tests for :meth:`molexp.workflow.compiler.WorkflowCompiler.compile`.
+"""Tests for :meth:`molab.workflow.compiler.WorkflowCompiler.compile`.
 
 ``compile()`` lowers the registrations exactly once and emits a single frozen
 :class:`CompiledWorkflow` carrying the executable graph, per-task snapshots, the
@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import pytest
 
-from molexp.workflow import CompiledWorkflow, Workflow, WorkflowCompiler
-from molexp.workflow.version import WorkflowVersion
+from molab.workflow import CompiledWorkflow, Workflow, WorkflowCompiler
+from molab.workflow.version import WorkflowVersion
 
 
 class _Exp:
@@ -46,7 +46,7 @@ class TestWorkflowCompilerCompile:
             assert entry.code_hash == compiled.snapshots[entry.name].code_hash
         # a non-None executable graph — the engine's structural ExecutionPlan
         # (one node per task; values-on-edges execution, no pg lowering).
-        from molexp.workflow._engine.plan import ExecutionPlan
+        from molab.workflow._engine.plan import ExecutionPlan
 
         assert isinstance(compiled.graph, ExecutionPlan)
         assert set(compiled.graph.task_names) == {"fetch", "train"}
@@ -61,7 +61,7 @@ class TestWorkflowCompilerCompile:
         async def t(ctx):
             return 1
 
-        from molexp.workflow import WorkflowBindingRegistry
+        from molab.workflow import WorkflowBindingRegistry
 
         reg = WorkflowBindingRegistry()
         exp = _Exp("exp-001")

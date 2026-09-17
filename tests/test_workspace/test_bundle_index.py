@@ -13,8 +13,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
-from molexp.workspace import Bundle, Folder, Workspace
-from molexp.workspace.bundle_index import INDEX_JSON_FILENAME, INDEX_MD_FILENAME
+from molab.workspace import Bundle, Folder, Workspace
+from molab.workspace.bundle_index import INDEX_JSON_FILENAME, INDEX_MD_FILENAME
 
 FIXED = datetime(2026, 6, 21, 12, 0, 0, tzinfo=UTC)
 

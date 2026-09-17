@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from molexp.workspace.assets.scan import get_asset, scan_assets
-from molexp.workspace.fs_local import LocalFileSystem
+from molab.workspace.assets.scan import get_asset, scan_assets
+from molab.workspace.fs_local import LocalFileSystem
 
 
 def _write_manifest(scope: Path, assets: dict) -> None:

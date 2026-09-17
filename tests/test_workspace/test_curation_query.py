@@ -1,4 +1,4 @@
-"""Tests for ``molexp.workspace.curation.query`` asset queries.
+"""Tests for ``molab.workspace.curation.query`` asset queries.
 
 Pins ``find_asset_by_hash`` (content-addressed lookup over the authoritative
 manifests) and ``aggregate_assets_by_kind`` (counts a scope's assets by
@@ -11,8 +11,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from molexp.workspace import Workspace
-from molexp.workspace.curation import aggregate_assets_by_kind, find_asset_by_hash
+from molab.workspace import Workspace
+from molab.workspace.curation import aggregate_assets_by_kind, find_asset_by_hash
 
 
 class TestFindAssetByHash:

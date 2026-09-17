@@ -87,7 +87,7 @@ const TreeItem = React.forwardRef<HTMLButtonElement, TreeItemProps>(
             variant="ghost"
             size="content"
             className={cn(
-              "mr-1 size-5 flex-shrink-0 p-0 text-muted-foreground transition-colors hover:bg-transparent hover:text-foreground",
+              "mr-1 size-icon-lg flex-shrink-0 p-0 text-muted-foreground transition-colors hover:bg-transparent hover:text-foreground",
               hasChildren ? "cursor-pointer" : "cursor-default opacity-0",
             )}
             onClick={handleToggle}
@@ -95,7 +95,7 @@ const TreeItem = React.forwardRef<HTMLButtonElement, TreeItemProps>(
             disabled={!hasChildren}
           >
             <ChevronRight
-              className={cn("h-4 w-4 transition-transform", isExpanded && "rotate-90")}
+              className={cn("size-icon transition-transform", isExpanded && "rotate-90")}
             />
           </Button>
         )}
@@ -111,17 +111,17 @@ const TreeItem = React.forwardRef<HTMLButtonElement, TreeItemProps>(
           onClick={handleSelect}
           onContextMenu={handleContextMenu}
         >
-          <span className="mr-2 flex size-5 flex-shrink-0 items-center justify-center text-muted-foreground">
+          <span className="mr-2 flex size-4-lg flex-shrink-0 items-center justify-center text-muted-foreground">
             {node.icon ? (
               node.icon
             ) : isFolder ? (
               isExpanded ? (
-                <FolderOpen className="h-4 w-4" />
+                <FolderOpen className="size-icon" />
               ) : (
-                <Folder className="h-4 w-4" />
+                <Folder className="size-icon" />
               )
             ) : (
-              <File className="h-4 w-4" />
+              <File className="size-icon" />
             )}
           </span>
           <span className="flex-1 truncate text-body-lg text-foreground">{node.name}</span>

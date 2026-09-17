@@ -13,7 +13,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-/** Default username matches CLI ``molexp auth login`` bootstrap. */
+/** Default username matches CLI ``molab auth login`` bootstrap. */
 const DEFAULT_USERNAME = "admin";
 
 export function LoginPage(): JSX.Element {
@@ -53,7 +53,7 @@ export function LoginPage(): JSX.Element {
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle>Sign in to MolExp</CardTitle>
+          <CardTitle>Sign in to Molab</CardTitle>
           <CardDescription>
             Server authentication is enabled. Default account is{" "}
             <span className="font-medium text-foreground">{DEFAULT_USERNAME}</span>.

@@ -1,6 +1,6 @@
 # Guide
 
-The guide section is for topics that are easier to read after the first-run path already makes sense. The pages here assume you know what a workflow is, why `Project`, `Experiment`, and `Run` are separate, and how `molexp run` discovers a registered workspace.
+The guide section is for topics that are easier to read after the first-run path already makes sense. The pages here assume you know what a workflow is, why `Project`, `Experiment`, and `Run` are separate, and how `molab run` discovers a registered workspace.
 
 ## Workflow Authoring
 

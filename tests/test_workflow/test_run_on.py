@@ -13,17 +13,17 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from molexp.workflow import (
+from molab.workflow import (
     CompiledWorkflow,
     Workflow,
     WorkflowCompiler,
     WorkflowRuntime,
     default_binding_registry,
 )
-from molexp.workspace import Workspace
+from molab.workspace import Workspace
 
 if TYPE_CHECKING:
-    from molexp.workflow.context import TaskContext
+    from molab.workflow.context import TaskContext
 
 
 @pytest.fixture(autouse=True)

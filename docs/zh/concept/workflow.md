@@ -4,7 +4,7 @@
 
 ## 编写、编译、执行
 
-MolExp 将工作流的生命周期分为三个阶段：
+Molab 将工作流的生命周期分为三个阶段：
 
 | 阶段 | 工具 | 做什么 |
 |---|---|---|
@@ -15,7 +15,7 @@ MolExp 将工作流的生命周期分为三个阶段：
 可以用装饰器编写：
 
 ```python
-from molexp.workflow import Workflow, WorkflowCompiler
+from molab.workflow import Workflow, WorkflowCompiler
 
 wf = Workflow(name="demo")
 
@@ -38,7 +38,7 @@ compiled = WorkflowCompiler().compile(wf)
 
 ```python
 import asyncio
-from molexp.workflow import WorkflowRuntime
+from molab.workflow import WorkflowRuntime
 
 result = asyncio.run(WorkflowRuntime().execute(compiled))
 ```
@@ -46,7 +46,7 @@ result = asyncio.run(WorkflowRuntime().execute(compiled))
 或者在追踪运行下以完整持久化运行：
 
 ```python
-import molexp as me
+import molab as me
 
 ws = me.Workspace("./lab", name="lab")
 run = ws.add_project("demo").add_experiment("baseline").add_run(params={})
@@ -64,7 +64,7 @@ result = run.execute(wf)
 - 调度器传输（插件）
 - 共享数据集和派生资源（资产）
 
-这个窄边界保持工作流可复用——同一个编译图可以在本地、在 `molexp run` 下、或从远程工作节点运行。
+这个窄边界保持工作流可复用——同一个编译图可以在本地、在 `molab run` 下、或从远程工作节点运行。
 
 ## 数据流：名字绑定
 

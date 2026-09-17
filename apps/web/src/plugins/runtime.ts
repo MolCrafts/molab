@@ -15,7 +15,7 @@
  * concurrently afterwards, and disabled capabilities never enter the startup
  * execution path. They do NOT appear in `/api/plugins`.
  * Third-party bundles discovered through Python's
- * `molexp.ui_plugins` entry-point group are the only consumers of
+ * `molab.ui_plugins` entry-point group are the only consumers of
  * the dynamic-import loader path.
  *
  * Pure logic lives in `./loader.ts` so unit tests can exercise it

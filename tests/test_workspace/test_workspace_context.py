@@ -13,10 +13,10 @@ import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from molexp.workspace import Workspace
-from molexp.workspace.assets import ArtifactAsset, AssetManifest, AssetScope, Producer
-from molexp.workspace.concepts import Note
-from molexp.workspace.workspace_context import (
+from molab.workspace import Workspace
+from molab.workspace.assets import ArtifactAsset, AssetManifest, AssetScope, Producer
+from molab.workspace.concepts import Note
+from molab.workspace.workspace_context import (
     ContextFocus,
     assemble_workspace_context,
 )

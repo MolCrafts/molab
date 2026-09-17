@@ -64,7 +64,7 @@ export const LandDecisionBar = ({
           disabled={Boolean(busy) || disabled}
           onClick={() => void run("yes")}
         >
-          <HardDrive className="h-3.5 w-3.5" />
+          <HardDrive className="size-icon-sm" />
           {busy === "yes" ? "Sending…" : "Yes · archive"}
         </WorkbenchAction>
         <WorkbenchAction
@@ -73,7 +73,7 @@ export const LandDecisionBar = ({
           disabled={Boolean(busy) || disabled}
           onClick={() => void run("no")}
         >
-          <Trash2 className="h-3.5 w-3.5" />
+          <Trash2 className="size-icon-sm" />
           {busy === "no" ? "Sending…" : "No · keep scratch"}
         </WorkbenchAction>
       </div>

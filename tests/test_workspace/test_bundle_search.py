@@ -15,8 +15,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from molexp.workspace import Bundle, Note, Workspace
-from molexp.workspace.folder import Folder
+from molab.workspace import Bundle, Note, Workspace
+from molab.workspace.folder import Folder
 
 # The spec's body-read cap (mirrors agent ops tools).
 MAX_BODY_SEARCH_BYTES = 512 * 1024

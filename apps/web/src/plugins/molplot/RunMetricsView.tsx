@@ -337,7 +337,7 @@ const MetricPanel = ({
             label="Enlarge chart"
             className="size-6 text-muted-foreground"
           >
-            <Maximize2 className="h-3.5 w-3.5" />
+            <Maximize2 className="size-icon-sm" />
           </WorkbenchIconAction>
         </div>
       </div>

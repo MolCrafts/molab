@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import pytest
 
-from molexp.workflow import (
+from molab.workflow import (
     SubWorkflow,
     Task,
     TaskContext,
@@ -162,7 +162,7 @@ class TestSubWorkflow:
 
     @pytest.mark.asyncio
     async def test_parallel_inner_failure_surfaces_via_parallel_execution_error(self) -> None:
-        from molexp.workflow import ParallelExecutionError
+        from molab.workflow import ParallelExecutionError
 
         state = {"n": 0}
 
@@ -238,7 +238,7 @@ class TestSubWorkflow:
 
 class TestResolveSingleRoot:
     def test_multi_root_forwarding_target_raises(self) -> None:
-        from molexp.workflow._engine.runtime import _resolve_single_root
+        from molab.workflow._engine.runtime import _resolve_single_root
 
         inner = Workflow(name="inner-ambiguous-roots")
 
@@ -254,7 +254,7 @@ class TestResolveSingleRoot:
             _resolve_single_root(WorkflowCompiler().compile(inner))
 
     def test_honors_explicit_entry(self) -> None:
-        from molexp.workflow._engine.runtime import _resolve_single_root
+        from molab.workflow._engine.runtime import _resolve_single_root
 
         inner = Workflow(name="inner-explicit-entry", entry="head")
 

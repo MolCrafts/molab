@@ -1,0 +1,358 @@
+"""Submission logic using molq types directly."""
+
+from __future__ import annotations
+
+import shlex
+import sys
+from collections.abc import Sequence
+from pathlib import Path
+from typing import TYPE_CHECKING, TypedDict
+
+from molab._typing import JSONValue
+
+from .metadata import build_executor_info
+
+# molq dispatches event callbacks with ``StatusChange | JobRecord | None``
+# payloads. The exact dataclass is internal to molq and not re-exported on
+# its public surface, so we accept the cross-package boundary as opaque.
+type MolqEventPayload = "object"
+
+if TYPE_CHECKING:
+    from molq import Duration, JobExecution, Memory, Script, Submitor
+
+    class _CmdKwargs(TypedDict, total=False):
+        """The mutually-exclusive command channel passed to ``submit_job``.
+
+        Matches molq's ``argv: list[str] | None`` / ``script: Script | None``
+        parameter types so the ``**`` spread type-checks against the exact
+        keyword each branch fills (a plain ``dict`` would widen every keyword).
+        """
+
+        argv: list[str]
+        script: Script
+
+    from molab.workspace import ComputeTarget
+    from molab.workspace.experiment import Experiment
+    from molab.workspace.project import Project
+    from molab.workspace.run import Run
+
+
+def _strip_none(d: dict[str, JSONValue]) -> dict[str, JSONValue]:
+    """Return a copy with ``None`` values removed."""
+    return {k: v for k, v in d.items() if v is not None}
+
+
+def _as_int(value: JSONValue) -> int | None:
+    """Read a ``JSONValue`` cell as ``int | None`` for molq resource fields."""
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    return None
+
+
+def _as_str(value: JSONValue) -> str | None:
+    """Read a ``JSONValue`` cell as ``str | None`` for molq scheduling fields."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    return None
+
+
+def _parse_memory(value: JSONValue) -> Memory | None:
+    """Parse a ``JSONValue`` cell as a molq ``Memory`` literal (e.g. ``'8GB'``)."""
+    text = _as_str(value)
+    if text is None:
+        return None
+    from molq import Memory as _Memory
+
+    return _Memory.parse(text)
+
+
+def _parse_duration(value: JSONValue) -> Duration | None:
+    """Parse a ``JSONValue`` cell as a molq ``Duration`` literal (e.g. ``'1h'``)."""
+    text = _as_str(value)
+    if text is None:
+        return None
+    from molq import Duration as _Duration
+
+    return _Duration.parse(text)
+
+
+class SubmitHandler:
+    """Stateful run handler that submits jobs via molq.
+
+    Accumulates all submitted :class:`~molab.workspace.run.Run` objects in
+    :attr:`submitted_runs` so the caller can pass them to a monitor after
+    dispatch completes.
+
+    Args:
+        scheduler: molq scheduler backend name. Ignored when *target* is set
+            (the target carries its own scheduler choice).
+        cluster: molq cluster name (``None`` → ``"default"``).
+        resources: Sparse dict of resource overrides (``None`` values stripped).
+        scheduling: Sparse dict of scheduling overrides (``None`` values stripped).
+        target: When provided, jobs are routed through the target's transport
+            and scheduler; the run dir is staged in before submit and staged
+            out on terminal events.  When ``None`` the handler dispatches
+            via molq's default ``LocalTransport`` against the workspace's
+            local filesystem (the ``--scheduler X`` CLI path with no target).
+        env: Environment variables exported into the batch script before the
+            worker runs (e.g. ``LD_LIBRARY_PATH``). ``None`` values stripped.
+        preamble: Shell lines run *before* the worker, for environments that
+            need setup the scheduler cannot express as resources — ``module
+            load``, ``source venv/bin/activate``, etc. A ``str`` is treated as
+            one line; a sequence is joined with newlines. When set, the job is
+            submitted as an inline script (preamble + ``exec <worker>``) instead
+            of a bare ``argv``.
+    """
+
+    def __init__(
+        self,
+        *,
+        scheduler: str,
+        cluster: str | None,
+        resources: dict[str, JSONValue],
+        scheduling: dict[str, JSONValue],
+        block: bool = False,
+        target: ComputeTarget | None = None,
+        env: dict[str, str] | None = None,
+        preamble: str | Sequence[str] | None = None,
+    ) -> None:
+        self._scheduler = scheduler
+        self._cluster = cluster or "default"
+        self._res = _strip_none(resources)
+        self._sched = _strip_none(scheduling)
+        self._block = block
+        self._target = target
+        self._env = {k: v for k, v in (env or {}).items() if v is not None}
+        if isinstance(preamble, str):
+            self._preamble: list[str] = [preamble]
+        else:
+            self._preamble = list(preamble or [])
+        # ``_handles`` stores molq ``JobExecution`` handles; ``_submitor`` is the
+        # active molq ``Submitor`` context. Typed via TYPE_CHECKING string refs
+        # so import order stays clean.
+        self._handles: list[JobExecution] = []
+        self._submitor: Submitor | None = None
+        self.submitted_runs: list[Run] = []
+
+    # ------------------------------------------------------------------
+    # Callable protocol
+
+    def __call__(
+        self,
+        _script: str | Path | None,
+        mol_run: Run,
+        experiment: Experiment,  # noqa: ARG002
+        project: Project,
+        *,
+        execution_id: str | None = None,
+    ) -> None:
+        from molq import (
+            Cluster,
+            JobExecution,
+            JobResources,
+            JobScheduling,
+            Script,
+            Submitor,
+        )
+
+        from molab.workflow import WorkflowRuntime
+
+        res = self._res
+        sched = self._sched
+        target = self._target
+
+        job_name = f"{project.name[:20]}-{mol_run.id[:8]}"
+        run_dir = Path(mol_run.run_dir)
+
+        # The execution_id the worker will use. ``resume`` passes the existing
+        # one to reopen (the worker seeds from its persisted node outputs);
+        # ``rerun`` and first-submit derive a fresh ``exec-{run_id}-N``. When
+        # running locally the per-attempt directory is created here so molq's
+        # stdout/stderr/jobs paths land alongside the workflow.json the worker
+        # writes; a remote target mirror-creates it during staging.
+        execution_id = execution_id or WorkflowRuntime.make_execution_id(mol_run.id, run_dir)
+        local_exec_dir = run_dir / "executions" / execution_id
+        local_exec_dir.mkdir(parents=True, exist_ok=True)
+
+        if target is None:
+            # No-target path: rely on molq's default LocalTransport.
+            transport = None
+            scheduler_name = self._scheduler
+            target_run_dir_ = str(run_dir)
+            target_exec_dir = str(local_exec_dir)
+            stage_out_cb = None
+        else:
+            from molab.workspace.targets import target_run_dir, to_transport
+
+            from .staging import stage_in, stage_out
+
+            transport = to_transport(target)
+            scheduler_name = target.scheduler
+            target_run_dir_ = target_run_dir(target, project.workspace, mol_run)
+            target_exec_dir = f"{target_run_dir_}/executions/{execution_id}"
+            transport.mkdir(target_exec_dir, parents=True, exist_ok=True)
+            stage_in(transport, mol_run, target)
+
+            def stage_out_cb(_event: MolqEventPayload) -> None:
+                stage_out(transport, mol_run, target, execution_id)  # type: ignore[arg-type]
+
+        jobs_dir = f"{target_exec_dir}/jobs"
+        # mkdir for the local case is implicit in Submitor; for remote case
+        # we already created target_exec_dir, but we still need the jobs
+        # subdir to exist before molq writes its manifest.
+        if transport is not None:
+            transport.mkdir(jobs_dir, parents=True, exist_ok=True)
+        else:
+            Path(jobs_dir).mkdir(parents=True, exist_ok=True)
+
+        with Submitor(
+            Cluster(
+                name=self._cluster,
+                scheduler=scheduler_name,
+                transport=transport,
+            ),
+            jobs_dir=jobs_dir,
+        ) as submitor:
+            if stage_out_cb is not None:
+                from molq.callbacks import EventType
+
+                for evt in (
+                    EventType.JOB_COMPLETED,
+                    EventType.JOB_FAILED,
+                    EventType.JOB_CANCELLED,
+                ):
+                    submitor._event_bus.on(evt, stage_out_cb)
+
+            worker_argv = [
+                sys.executable,
+                "-m",
+                "molab.cli",
+                "execute",
+                target_run_dir_,
+                "--execution-id",
+                execution_id,
+            ]
+            # With a preamble (module load / source venv / …) the worker can't
+            # be a bare argv: wrap it in an inline script so the setup lines run
+            # first, then ``exec`` the worker so it inherits the job's PID.
+            # A TypedDict (not a plain dict) so the ``**cmd_kwargs`` spread maps
+            # each key to molq's exact parameter type (``argv`` / ``script``).
+            cmd_kwargs: _CmdKwargs
+            if self._preamble:
+                worker_cmd = " ".join(shlex.quote(a) for a in worker_argv)
+                script_text = "\n".join([*self._preamble, f"exec {worker_cmd}"])
+                cmd_kwargs = {"script": Script.inline(script_text)}
+            else:
+                cmd_kwargs = {"argv": worker_argv}
+
+            job = submitor.submit_job(
+                **cmd_kwargs,
+                resources=JobResources(
+                    cpu_count=_as_int(res.get("cpus")),
+                    memory=_parse_memory(res.get("mem")),
+                    gpu_count=_as_int(res.get("gpus")),
+                    gpu_type=_as_str(res.get("gpu_type")),
+                    time_limit=_parse_duration(res.get("time")),
+                ),
+                scheduling=JobScheduling(
+                    partition=_as_str(sched.get("queue")),
+                    account=_as_str(sched.get("account")),
+                    qos=_as_str(sched.get("qos")),
+                ),
+                execution=JobExecution(
+                    job_name=job_name,
+                    cwd=target_exec_dir,
+                    env=self._env or None,
+                ),
+                metadata={
+                    "run_id": mol_run.id,
+                    "run_dir": target_run_dir_,
+                    "execution_id": execution_id,
+                },
+            )
+
+        executor_info = build_executor_info(
+            scheduler=scheduler_name,
+            cluster_name=self._cluster,
+            job_id=job.job_id,
+            scheduler_job_id=job.scheduler_job_id,
+        )
+        from molab.workspace.execution_repository import ExecutionRepository
+
+        repo = ExecutionRepository(
+            project.workspace.root,
+            mol_run.run_dir,
+            run_id=mol_run.id,
+            project_id=project.id,
+            fs=project.workspace.fs,
+        )
+        try:
+            current = repo.get(execution_id)
+        except KeyError:
+            # Direct plugin callers still receive a real queued Execution.
+            from molab.workspace.domain import ExecutionMode
+            from molab.workspace.scientific_repository import SYSTEM_AGENT
+
+            current = repo.create(
+                mode=ExecutionMode.INITIAL if not repo.list() else ExecutionMode.RERUN,
+                created_by=SYSTEM_AGENT,
+                execution_id=execution_id,
+                based_on_execution_id=repo.list()[-1].id if repo.list() else None,
+            )
+        repo.update_operational(
+            current.id,
+            executor={**current.executor, **executor_info},
+        )
+        project.workspace.fs.atomic_write_json(
+            project.workspace.fs.join(mol_run.run_dir, "executions", execution_id, "job.json"),
+            {"schema_version": 2, **executor_info},
+        )
+        self.submitted_runs.append(mol_run)
+
+
+def make_submit_handler(
+    *,
+    scheduler: str,
+    cluster: str | None,
+    resources: dict[str, JSONValue],
+    scheduling: dict[str, JSONValue],
+    target: ComputeTarget | None = None,
+) -> SubmitHandler:
+    """Return a :class:`SubmitHandler` configured for the given scheduler.
+
+    The handler is callable with the standard ``(script, mol_run, experiment,
+    project)`` signature used by :func:`~molab.cli._dispatch_runs`.  The
+    leading ``script`` is accepted for uniformity with the dispatcher
+    and intentionally ignored; the worker rebuilds the run from ``run_dir``.
+
+    All ``None`` values in *resources* and *scheduling* are stripped so that
+    molq passes them through as unset, letting each scheduler use its own
+    defaults.
+
+    Args:
+        scheduler: molq scheduler backend name.
+        cluster: molq cluster name; ``None`` defaults to ``"default"``.
+        resources: Resource options dict (``None`` values are stripped).
+        scheduling: Scheduling options dict (``None`` values are stripped).
+        target: Optional :class:`~molab.workspace.ComputeTarget` — when set,
+            jobs route through the target's transport + scheduler and the run
+            dir is staged in/out across the transport.
+
+    Returns:
+        Configured :class:`SubmitHandler` instance.
+    """
+    return SubmitHandler(
+        scheduler=scheduler,
+        cluster=cluster,
+        resources=resources,
+        scheduling=scheduling,
+        target=target,
+    )

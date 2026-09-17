@@ -164,7 +164,7 @@ export const AgentSessionInspector = (props: RendererProps): JSX.Element => {
     <div className="flex h-full flex-col bg-background">
       <div className="flex items-center justify-between border-b border-border/70 bg-muted/20 px-3 py-2">
         <h2 className="flex items-center gap-2 text-micro font-medium uppercase tracking-wide text-muted-foreground">
-          <Bot className="h-3.5 w-3.5" /> Task details
+          <Bot className="size-icon-sm" /> Task details
         </h2>
         {legacyMeta ? (
           <WorkbenchTag
@@ -193,7 +193,7 @@ export const AgentSessionInspector = (props: RendererProps): JSX.Element => {
             <TabsTrigger value="details" className="text-label">
               Details
             </TabsTrigger>
-            <TabsTrigger value="artifacts" className="gap-1.5 text-label">
+            <TabsTrigger value="artifacts" className="gap-2 text-label">
               Artifacts
               {artifacts.length > 0 ? (
                 <WorkbenchTag className="h-4 min-w-4 px-1 text-micro tabular-nums">
@@ -222,7 +222,7 @@ const ArtifactsTab = ({ artifacts }: { artifacts: Record<string, unknown>[] }): 
   if (artifacts.length === 0) {
     return (
       <div className="flex flex-col items-center gap-2 px-4 py-8 text-center">
-        <Package className="h-5 w-5 text-muted-foreground" />
+        <Package className="size-icon-lg text-muted-foreground" />
         <p className="text-label text-muted-foreground">
           No chat artifacts yet. Plots and structures from{" "}
           <InlineCode className="text-micro">embed_plot</InlineCode> /{" "}

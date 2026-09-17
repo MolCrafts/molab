@@ -17,10 +17,10 @@ import asyncio
 import tempfile
 from pathlib import Path
 
-import molexp as me
-from molexp.profile import ProfileConfig
-from molexp.workflow import Workflow, WorkflowCompiler, WorkflowRuntime
-from molexp.workspace.domain import ExecutionMode
+import molab as me
+from molab.profile import ProfileConfig
+from molab.workflow import Workflow, WorkflowCompiler, WorkflowRuntime
+from molab.workspace.domain import ExecutionMode
 
 # Module-level marker so the first attempt fails and the second succeeds.
 _FAIL_ONCE_MARKER: Path | None = None
@@ -44,7 +44,7 @@ compiled = WorkflowCompiler().compile(wf)
 async def main() -> None:
     global _FAIL_ONCE_MARKER
 
-    root = Path(tempfile.mkdtemp(prefix="molexp-persist-"))
+    root = Path(tempfile.mkdtemp(prefix="molab-persist-"))
     _FAIL_ONCE_MARKER = root / "fail-once"
 
     ws = me.Workspace(root, name="persist-demo")

@@ -64,7 +64,7 @@ export const RunsStatusProgress = ({
               onClick={onSelectStatus ? () => onSelectStatus(segment.spec.filterValue) : undefined}
               title={`${segment.spec.label}: ${segment.count} (${(segment.ratio * 100).toFixed(1)}%)`}
               className={cn(
-                "h-full min-w-0.5 transition-opacity hover:opacity-80",
+                "h-full min-w-hairline transition-opacity hover:opacity-80",
                 onSelectStatus ? "cursor-pointer" : "cursor-default",
               )}
               style={{ width: `${widthPct}%`, backgroundColor: segment.spec.color }}

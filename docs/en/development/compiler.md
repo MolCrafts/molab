@@ -2,7 +2,7 @@
 
 This page is for contributors who need to understand — or modify — how a `WorkflowCompiler` produces a `CompiledWorkflow` and how that artifact becomes an executable graph. End-users should read the [Quick Start](../getting-started/quick-start.md) first.
 
-There is **no intermediate JSON representation on the execution path**. Compilation happens in memory, in one pass, when `WorkflowCompiler().compile(wf)` is called. The lowering lives in `molexp.workflow._engine.*`, which is private to the workflow package. The plan and engine are molexp-owned plain Python — the former `pydantic_graph` dependency is gone entirely (no import anywhere in the repo; the `End` sentinel is molexp's own, in `molexp.workflow.types`).
+There is **no intermediate JSON representation on the execution path**. Compilation happens in memory, in one pass, when `WorkflowCompiler().compile(wf)` is called. The lowering lives in `molab.workflow._engine.*`, which is private to the workflow package. The plan and engine are molab-owned plain Python — the former `pydantic_graph` dependency is gone entirely (no import anywhere in the repo; the `End` sentinel is molab's own, in `molab.workflow.types`).
 
 ## Compilation Flow
 
@@ -22,12 +22,12 @@ wf.control / wf.branch / wf.loop / wf.parallel    →  control-flow declarations
         WorkflowRuntime().execute(compiled, ...)   →  WorkflowResult
 ```
 
-One compilation boundary: `WorkflowCompiler().compile(wf)` validates the declarations, computes the `workflow_id`, snapshots every task, and lowers the whole thing to a frozen, molexp-owned `ExecutionPlan` stored on the artifact as `.graph`. The runtime never recompiles — it builds fresh per-execution state/deps and drives the prebuilt plan through the structural engine (`engine.run_plan`).
+One compilation boundary: `WorkflowCompiler().compile(wf)` validates the declarations, computes the `workflow_id`, snapshots every task, and lowers the whole thing to a frozen, molab-owned `ExecutionPlan` stored on the artifact as `.graph`. The runtime never recompiles — it builds fresh per-execution state/deps and drives the prebuilt plan through the structural engine (`engine.run_plan`).
 
 ## Source Layout
 
 ```
-src/molexp/workflow/
+src/molab/workflow/
 ├── compiler.py            # Workflow (decorator + OOP registration) + WorkflowCompiler.compile + compile_registrations
 ├── compiled.py            # CompiledWorkflow — frozen artifact (graph + snapshots + IR exports)
 ├── binding.py             # WorkflowBindingRegistry / default_binding_registry
@@ -40,7 +40,7 @@ src/molexp/workflow/
 ├── cache_store.py         # CacheStore / FileCacheStore storage primitives
 ├── snapshot.py            # TaskSnapshot (AST-normalized code hash + config hash)
 ├── ir.py                  # WorkflowGraphIR (to_graph_ir export for UI / server)
-└── _engine/               # PRIVATE — molexp-owned lowering + engine (zero pydantic_graph)
+└── _engine/               # PRIVATE — molab-owned lowering + engine (zero pydantic_graph)
     ├── compiler.py        # WorkflowGraphCompiler — stages 1–5: validation + structural lowering
     ├── plan.py            # ExecutionPlan — frozen lowering artifact (plain data, no pg import)
     ├── engine.py          # run_plan — values-on-edges structural engine
@@ -53,14 +53,14 @@ src/molexp/workflow/
     └── persistence.py     # coalescing workflow.json writer + read_node_outputs (resume seed source)
 ```
 
-The outer API (`molexp.workflow.__init__`) is the public boundary. Anything under `_engine/` is an implementation detail and can break between releases.
+The outer API (`molab.workflow.__init__`) is the public boundary. Anything under `_engine/` is an implementation detail and can break between releases.
 
 ## Deterministic Workflow ID
 
 `workflow_id` is a 16-hex-character `sha256` over the workflow `name` plus, for each task, `name + type(fn_or_class).__qualname__ + sorted(depends_on)` (see `_helpers._stable_workflow_id`):
 
 ```python
-from molexp.workflow import Workflow, WorkflowCompiler
+from molab.workflow import Workflow, WorkflowCompiler
 
 wf = Workflow(name="demo")
 
@@ -142,8 +142,8 @@ The **code hash** uses AST normalization — comments, whitespace, and decorator
 The combined identity key is `f"{code_hash}:{config_hash}"`; the full cache key adds the input hash. `Caching` (`cache.py`) is orthogonal to the lowering — the engine's per-task cache hook (`node_cache.run_task_body_cached`, batch `Task` bodies only, never `Actor`s) consults it when a cache is supplied:
 
 ```python
-import molexp as me
-from molexp.workflow import Caching, FileCacheStore, WorkflowRuntime
+import molab as me
+from molab.workflow import Caching, FileCacheStore, WorkflowRuntime
 
 ws = me.Workspace("./lab", name="lab")
 
@@ -154,7 +154,7 @@ cache = Caching(store=FileCacheStore("./cache"), max_entries=1000)
 result = await WorkflowRuntime().execute(compiled, cache=cache)
 ```
 
-For callers with no run, use `FileCacheStore(path)` or a plain `store_dir=...` argument. The user-home `~/.molexp/cache/` shortcut from earlier MolExp versions is gone — execute writes `run_dir/cache`, never a workspace-root `cache/`.
+For callers with no run, use `FileCacheStore(path)` or a plain `store_dir=...` argument. The user-home `~/.molab/cache/` shortcut from earlier Molab versions is gone — execute writes `run_dir/cache`, never a workspace-root `cache/`.
 
 ## What the Compiler Does Not Do
 
@@ -171,14 +171,14 @@ Keep the boundaries:
 - **New cache strategy** → implement a `CacheStore`, or compose `Caching` with a different storage backend; don't teach the lowering about caching directly.
 - **New snapshot semantics** → change `TaskSnapshot`; bump `CACHE_FORMAT_VERSION` in `cache.py` so stale cache entries are invalidated.
 
-All other public behaviour should route through `molexp.workflow`'s re-exports.
+All other public behaviour should route through `molab.workflow`'s re-exports.
 
 ## Pointer to the Implementation
 
-- `molexp.workflow._helpers._stable_workflow_id` — workflow ID hash
-- `molexp.workflow.compiler.compile_registrations` — validation + snapshotting + lowering entry
-- `molexp.workflow._engine.compiler.WorkflowGraphCompiler` — topology → `ExecutionPlan`
-- `molexp.workflow._engine.plan.ExecutionPlan` — the frozen lowering artifact
-- `molexp.workflow._engine.engine.run_plan` — the values-on-edges structural engine
-- `molexp.workflow.snapshot.TaskSnapshot` — code/config identity
-- `molexp.workflow.cache.Caching` — LRU cache keyed by snapshot + inputs
+- `molab.workflow._helpers._stable_workflow_id` — workflow ID hash
+- `molab.workflow.compiler.compile_registrations` — validation + snapshotting + lowering entry
+- `molab.workflow._engine.compiler.WorkflowGraphCompiler` — topology → `ExecutionPlan`
+- `molab.workflow._engine.plan.ExecutionPlan` — the frozen lowering artifact
+- `molab.workflow._engine.engine.run_plan` — the values-on-edges structural engine
+- `molab.workflow.snapshot.TaskSnapshot` — code/config identity
+- `molab.workflow.cache.Caching` — LRU cache keyed by snapshot + inputs

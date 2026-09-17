@@ -193,7 +193,7 @@ export interface HttpWorkspaceFsOptions {
 }
 
 /**
- * WorkspaceFs over the molexp server HTTP surface.
+ * WorkspaceFs over the molab server HTTP surface.
  *
  * ``listdir`` → ``GET /api/workspace/files``
  * ``readText`` → ``GET /api/workspace/file``

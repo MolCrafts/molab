@@ -1,5 +1,5 @@
-import type { ManagedAssetResponse } from "@/api/generated/models/ManagedAssetResponse";
 import type { AssetVersionResponse } from "@/api/generated/models/AssetVersionResponse";
+import type { ManagedAssetResponse } from "@/api/generated/models/ManagedAssetResponse";
 import { ProjectsService } from "@/api/generated/services/ProjectsService";
 import type { ApiAssetResponse } from "@/app/types";
 

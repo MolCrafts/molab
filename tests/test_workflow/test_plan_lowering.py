@@ -1,8 +1,8 @@
 """ExecutionPlan lowering — values-on-edges plan over the validated topology.
 
-The workflow DAG is lowered to a frozen, molexp-owned
-:class:`~molexp.workflow._engine.plan.ExecutionPlan`; the engine
-(:mod:`molexp.workflow._engine.engine`) executes it with values-on-edges
+The workflow DAG is lowered to a frozen, molab-owned
+:class:`~molab.workflow._engine.plan.ExecutionPlan`; the engine
+(:mod:`molab.workflow._engine.engine`) executes it with values-on-edges
 semantics. These tests pin the *structure* the compiler lowers to (the plan
 fields the engine reads), and the invariant that coordination carries zero
 timing constants:
@@ -24,11 +24,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from molexp.workflow import TaskContext, Workflow, WorkflowCompiler
-from molexp.workflow._engine.plan import START, ExecutionPlan
-from molexp.workflow.types import BranchEdges, Next
+from molab.workflow import TaskContext, Workflow, WorkflowCompiler
+from molab.workflow._engine.plan import START, ExecutionPlan
+from molab.workflow.types import BranchEdges, Next
 
-ENGINE_ROOT = Path(__file__).resolve().parents[2] / "src" / "molexp" / "workflow" / "_engine"
+ENGINE_ROOT = Path(__file__).resolve().parents[2] / "src" / "molab" / "workflow" / "_engine"
 
 
 def _engine_sources() -> str:

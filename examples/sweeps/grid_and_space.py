@@ -23,9 +23,9 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-import molexp as me
-from molexp.workflow import Workflow, WorkflowCompiler
-from molexp.workspace.param import GridSpace, UniformSpace
+import molab as me
+from molab.workflow import Workflow, WorkflowCompiler
+from molab.workspace.param import GridSpace, UniformSpace
 
 wf = Workflow(name="train")
 
@@ -45,7 +45,7 @@ compiled = WorkflowCompiler().compile(wf)
 
 
 def main() -> None:
-    root = Path(tempfile.mkdtemp(prefix="molexp-sweeps-"))
+    root = Path(tempfile.mkdtemp(prefix="molab-sweeps-"))
     ws = me.Workspace(root, name="sweeps-demo")
 
     # ── 1. GridSpace — exhaustive Cartesian product ─────────────────────

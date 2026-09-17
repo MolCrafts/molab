@@ -15,7 +15,7 @@ export class HistoryService {
      * @param entity
      * @param event
      * @param limit
-     * @param molexpSession
+     * @param molabSession
      * @returns HistoryFact Successful Response
      * @throws ApiError
      */
@@ -23,13 +23,13 @@ export class HistoryService {
         entity?: (string | null),
         event?: (string | null),
         limit: number = 50,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<Array<HistoryFact>> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/history',
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             query: {
                 'entity': entity,
@@ -44,18 +44,18 @@ export class HistoryService {
     /**
      * Sync History
      * Commit anything a worker left uncommitted.
-     * @param molexpSession
+     * @param molabSession
      * @returns HistorySyncResponse Successful Response
      * @throws ApiError
      */
     public static syncHistory(
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<HistorySyncResponse> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/history/sync',
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -66,19 +66,19 @@ export class HistoryService {
      * Push History
      * Push the workspace history to a remote — this is the backup.
      * @param requestBody
-     * @param molexpSession
+     * @param molabSession
      * @returns HistorySyncResponse Successful Response
      * @throws ApiError
      */
     public static pushHistory(
         requestBody: HistoryPushRequest,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<HistorySyncResponse> {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/history/push',
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             body: requestBody,
             mediaType: 'application/json',
@@ -94,7 +94,7 @@ export class HistoryService {
      * @param entity
      * @param event
      * @param limit
-     * @param molexpSession
+     * @param molabSession
      * @returns HistoryFact Successful Response
      * @throws ApiError
      */
@@ -103,7 +103,7 @@ export class HistoryService {
         entity?: (string | null),
         event?: (string | null),
         limit: number = 50,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<Array<HistoryFact>> {
         return __request(OpenAPI, {
             method: 'GET',
@@ -112,7 +112,7 @@ export class HistoryService {
                 'ws': ws,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             query: {
                 'entity': entity,
@@ -128,13 +128,13 @@ export class HistoryService {
      * Sync History
      * Commit anything a worker left uncommitted.
      * @param ws
-     * @param molexpSession
+     * @param molabSession
      * @returns HistorySyncResponse Successful Response
      * @throws ApiError
      */
     public static syncHistoryWs(
         ws: string,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<HistorySyncResponse> {
         return __request(OpenAPI, {
             method: 'POST',
@@ -143,7 +143,7 @@ export class HistoryService {
                 'ws': ws,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,
@@ -155,14 +155,14 @@ export class HistoryService {
      * Push the workspace history to a remote — this is the backup.
      * @param ws
      * @param requestBody
-     * @param molexpSession
+     * @param molabSession
      * @returns HistorySyncResponse Successful Response
      * @throws ApiError
      */
     public static pushHistoryWs(
         ws: string,
         requestBody: HistoryPushRequest,
-        molexpSession?: (string | null),
+        molabSession?: (string | null),
     ): CancelablePromise<HistorySyncResponse> {
         return __request(OpenAPI, {
             method: 'POST',
@@ -171,7 +171,7 @@ export class HistoryService {
                 'ws': ws,
             },
             cookies: {
-                'molexp_session': molexpSession,
+                'molab_session': molabSession,
             },
             body: requestBody,
             mediaType: 'application/json',

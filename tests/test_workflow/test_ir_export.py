@@ -1,5 +1,5 @@
 """Full-graph IR + Mermaid export — ``CompiledWorkflow.to_graph_ir`` /
-``to_graph_mermaid`` (``molexp.workflow.ir``).
+``to_graph_mermaid`` (``molab.workflow.ir``).
 
 Unlike the DAG-only wire IR (``Workflow.to_ir``, covered by
 ``test_ir_roundtrip`` / ``test_codec``), this surface captures the complete
@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import pytest
 
-from molexp.workflow import (
+from molab.workflow import (
     GraphLoopIR,
     GraphParallelIR,
     Workflow,
@@ -188,7 +188,7 @@ class TestToGraphIR:
     def test_carries_node_position_from_wire_ir(self):
         """A position set on the wire IR survives into the full graph IR's nodes
         (exposed as a GraphNodePosition)."""
-        from molexp.workflow import CompiledWorkflow, GraphNodePosition
+        from molab.workflow import CompiledWorkflow, GraphNodePosition
 
         ir = {
             "workflow_id": "workflow_00000000",
@@ -211,8 +211,8 @@ class TestToGraphIR:
 
     @pytest.mark.unit
     def test_carries_config_for_registered_oop_task(self):
-        from molexp.workflow import Task
-        from molexp.workflow.registry import default_registry
+        from molab.workflow import Task
+        from molab.workflow.registry import default_registry
 
         class Adder(Task):
             def __init__(self, value: int = 0) -> None:
@@ -237,7 +237,7 @@ class TestToGraphIR:
         """A SubWorkflow node exposes the full inner WorkflowGraphIR under
         ``GraphTaskIR.subworkflow`` (UI drill-down); ordinary nodes carry
         ``subworkflow=None``. The embedding round-trips through JSON."""
-        from molexp.workflow import SubWorkflow
+        from molab.workflow import SubWorkflow
 
         inner = Workflow(name="inner")
 

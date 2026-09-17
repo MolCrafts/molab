@@ -13,8 +13,8 @@ from typing import IO, Any
 
 import pytest
 
-from molexp.workspace.fs import StatResult
-from molexp.workspace.fs_cached import CachedRemoteFileSystem
+from molab.workspace.fs import StatResult
+from molab.workspace.fs_cached import CachedRemoteFileSystem
 
 
 class _FakeRemoteFS:
@@ -295,13 +295,13 @@ class TestCachedRemoteFileSystem:
         """Positive ttl = pin-until-refresh: age does not force remote I/O."""
         cached = CachedRemoteFileSystem(fake, mirror_root=tmp_path / "mirror", ttl_seconds=10)
         base = time.time()
-        monkeypatch.setattr("molexp.workspace.fs_cached.time.time", lambda: base)
+        monkeypatch.setattr("molab.workspace.fs_cached.time.time", lambda: base)
         cached.connect("/scratch/me")
         cached.read_bytes("/scratch/me/log.txt")
         assert fake.calls["read_bytes"] == 1
 
         # Far past any historical TTL window — still local-only.
-        monkeypatch.setattr("molexp.workspace.fs_cached.time.time", lambda: base + 10_000)
+        monkeypatch.setattr("molab.workspace.fs_cached.time.time", lambda: base + 10_000)
         fake.files["/scratch/me/log.txt"] = b"remote-changed"  # would be visible if revalidated
         fake.calls.clear()
         assert cached.read_bytes("/scratch/me/log.txt") == b"hello"
@@ -403,7 +403,7 @@ class TestCachedRemoteFileSystem:
     @pytest.mark.unit
     def test_force_fetch_propagates_to_parallel_workers(self, fake: _FakeRemoteFS, tmp_path: Path):
         """ThreadPool workers must inherit force_fetch (TLS is not shared)."""
-        from molexp.workspace.fs_cached import _parallel_map
+        from molab.workspace.fs_cached import _parallel_map
 
         cached = CachedRemoteFileSystem(fake, mirror_root=tmp_path / "mirror", ttl_seconds=300)
         cached.connect("/scratch/me")

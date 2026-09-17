@@ -1,7 +1,7 @@
 """NL experiment goal → task board → review gate → frozen plan → realization.
 
 The flagship harness demo: one natural-language goal flows through the
-two-phase :class:`molexp.harness.Plan` pipeline on one ``workspace.Run``:
+two-phase :class:`molab.harness.Plan` pipeline on one ``workspace.Run``:
 
 - **Phase 1 — interactive planning**: a board draft places tasks with
   acceptance criteria on a task board; a form guard blocks a malformed
@@ -14,7 +14,7 @@ two-phase :class:`molexp.harness.Plan` pipeline on one ``workspace.Run``:
   through the injected executor (``DryRunExecutor`` offline — the real
   pytest/compile subprocesses are skipped), the greens are reduced into one
   ``workflow_source``, and the assembled workflow is compiled by the real
-  ``molexp.workflow`` engine (``run_workflow.py --compile-only`` — no real
+  ``molab.workflow`` engine (``run_workflow.py --compile-only`` — no real
   science) via ``CompileWorkflow``.
 
 OFFLINE BY DEFAULT — zero network, zero API keys, deterministic: the
@@ -25,8 +25,8 @@ is canned: the form guard, the review gate, and the plan workflow all run
 for real — the canned experiment is a 1D random walk whose diffusion
 coefficient follows Einstein's relation D = MSD/(2·d·t) ≈ 0.5.
 
-LIVE MODE — paste a DeepSeek key into ``API_KEY`` below (molexp reads LLM
-keys from ``molexp.config``, registered in code, never from the
+LIVE MODE — paste a DeepSeek key into ``API_KEY`` below (molab reads LLM
+keys from ``molab.config``, registered in code, never from the
 environment) and the same pipeline runs against the real model through
 ``RouterBackedAgentGateway`` with the production planning loop.
 
@@ -43,10 +43,10 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from molexp.harness import DryRunExecutor, FileArtifactStore, ModeResult
-from molexp.harness.gateways.stub import StubAgentGateway
-from molexp.harness.modes.plan import Plan
-from molexp.harness.plan import (
+from molab.harness import DryRunExecutor, FileArtifactStore, ModeResult
+from molab.harness.gateways.stub import StubAgentGateway
+from molab.harness.modes.plan import Plan
+from molab.harness.plan import (
     FROZEN_PLAN_KIND,
     BoardTask,
     Difficulty,
@@ -56,10 +56,10 @@ from molexp.harness.plan import (
     read_board,
     write_board,
 )
-from molexp.harness.schemas import WorkflowSource
-from molexp.harness.stages import auto_grant_approver
-from molexp.harness.store.paths import harness_artifact_root
-from molexp.workspace import Workspace
+from molab.harness.schemas import WorkflowSource
+from molab.harness.stages import auto_grant_approver
+from molab.harness.store.paths import harness_artifact_root
+from molab.workspace import Workspace
 
 MODEL = "deepseek:deepseek-v4-flash"
 API_KEY = ""  # ← paste your DeepSeek key here for live mode (in-code key law)
@@ -187,17 +187,18 @@ def _offline_gateway(run) -> StubAgentGateway:
 
 def _live_gateway(run) -> object:
     """The same pipeline against a real LLM (paste API_KEY above)."""
-    import molexp
-    from molexp.agent import PydanticAIRouter  # public lazy re-export, never _pydanticai
-    from molexp.agent.router import ModelTier
-    from molexp.harness import RouterBackedAgentGateway
-    from molexp.harness.gateways import (
+    from molab.agent import PydanticAIRouter  # public lazy re-export, never _pydanticai
+    from molab.agent.router import ModelTier
+
+    import molab
+    from molab.harness import RouterBackedAgentGateway
+    from molab.harness.gateways import (
         plan_agent_responses,
         plan_output_kinds,
         plan_system_prompts,
     )
 
-    molexp.config["deepseek_api_key"] = API_KEY
+    molab.config["deepseek_api_key"] = API_KEY
     return RouterBackedAgentGateway(
         router=PydanticAIRouter(models=dict.fromkeys(ModelTier, MODEL)),
         artifact_store=FileArtifactStore(root=harness_artifact_root(run.run_dir)),

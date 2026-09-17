@@ -1,6 +1,6 @@
 # Task and Actor
 
-`Task` and `Actor` are the atomic units of a MolExp workflow. `Task` runs once and returns a value; `Actor` runs continuously and yields a stream of values. Both have a **protocol** form (zero-import third-party integration) and a **convenience base class** form (`molexp.workflow.Task` / `Actor`).
+`Task` and `Actor` are the atomic units of a Molab workflow. `Task` runs once and returns a value; `Actor` runs continuously and yields a stream of values. Both have a **protocol** form (zero-import third-party integration) and a **convenience base class** form (`molab.workflow.Task` / `Actor`).
 
 ## Task Semantics
 
@@ -10,7 +10,7 @@ Three equivalent ways to define a task, all on the same `Workflow`:
 
 ```python
 # 1. Function decorated with @wf.task
-from molexp.workflow import TaskContext, Workflow, WorkflowCompiler
+from molab.workflow import TaskContext, Workflow, WorkflowCompiler
 
 wf = Workflow(name="pipeline")
 
@@ -21,7 +21,7 @@ async def fetch(ctx: TaskContext) -> dict:
 
 ```python
 # 2. Subclass the convenience base class
-from molexp.workflow import Task, TaskContext
+from molab.workflow import Task, TaskContext
 
 class Fetch(Task):
     async def execute(self, ctx: TaskContext) -> dict:
@@ -35,7 +35,7 @@ class ExternalFetch:
         return {"n": 42}
 ```
 
-All three are interchangeable — the last form **requires no `molexp` import**, which is what lets you drop in third-party components unchanged.
+All three are interchangeable — the last form **requires no `molab` import**, which is what lets you drop in third-party components unchanged.
 
 ## Declaring Dependencies
 
@@ -55,7 +55,7 @@ async def add_bias(square: float) -> float:
 For instance registration, chain `.add(...)` calls and compile with `WorkflowCompiler().compile(workflow)`:
 
 ```python
-from molexp.workflow import WorkflowCompiler
+from molab.workflow import WorkflowCompiler
 
 
 class Process(Task):
@@ -95,7 +95,7 @@ Plain `Task` (no generics) defaults to `Any` everywhere. Build-time configuratio
 
 ```python
 # Decorator style
-from molexp.workflow import TaskContext, Workflow, WorkflowCompiler
+from molab.workflow import TaskContext, Workflow, WorkflowCompiler
 
 wf = Workflow(name="stream")
 
@@ -107,7 +107,7 @@ async def monitor(ctx: TaskContext):
 
 ```python
 # Subclass Actor
-from molexp.workflow import Actor, TaskContext
+from molab.workflow import Actor, TaskContext
 
 class Monitor(Actor):
     async def run(self, ctx: TaskContext):
@@ -115,7 +115,7 @@ class Monitor(Actor):
             yield {"seen": item}
 ```
 
-Any object with `async def run(self, ctx)` returning an async iterator satisfies the `Streamable` protocol and can be added via `Workflow.add(obj)` — no molexp import required.
+Any object with `async def run(self, ctx)` returning an async iterator satisfies the `Streamable` protocol and can be added via `Workflow.add(obj)` — no molab import required.
 
 ### Context and output
 
@@ -132,7 +132,7 @@ Not implemented:
 
 - Inter-task message-passing channels (`receive` / `send` / `emit`). An earlier, never-wired channel surface was removed — every path raised `NotImplementedError`. If you need streaming *between* concurrently-running tasks, open an issue; today an actor yields outputs, it does not exchange messages mid-run with peers.
 
-Relevant code: `molexp.workflow.task.Actor`, `molexp.workflow.context.TaskContext`, `molexp.workflow.protocols.Streamable`, and the drain loop in `molexp.workflow._engine.node`.
+Relevant code: `molab.workflow.task.Actor`, `molab.workflow.context.TaskContext`, `molab.workflow.protocols.Streamable`, and the drain loop in `molab.workflow._engine.node`.
 
 ## Task Name Resolution
 
@@ -150,7 +150,7 @@ Relevant code: `molexp.workflow.task.Actor`, `molexp.workflow.context.TaskContex
 Fan-out over a runtime-produced list is declared with `wf.parallel`:
 
 ```python
-from molexp.workflow import WorkflowCompiler
+from molab.workflow import WorkflowCompiler
 
 wf = Workflow(name="fan-out", entry="scatter")
 

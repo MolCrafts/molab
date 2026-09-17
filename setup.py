@@ -1,7 +1,7 @@
-"""Setuptools entry point and PEP 517 wrapper for MolExp.
+"""Setuptools entry point and PEP 517 wrapper for Molab.
 
 Passing ``-C build-web=true`` to a PEP 517 frontend builds the React web app
-before setuptools packages ``src/molexp/dist`` as package data. Without that
+before setuptools packages ``src/molab/dist`` as package data. Without that
 config setting this stays a plain Python install and does not require Node.js.
 """
 

@@ -112,18 +112,18 @@ export const KnowledgeViewer = ({ selection, snapshot }: RendererProps): JSX.Ele
                   onClick={() => setEditingRelPath(editing ? null : relPath)}
                   pressed={editing}
                 >
-                  {editing ? <Eye className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
+                  {editing ? <Eye className="size-icon" /> : <Pencil className="size-icon" />}
                 </WorkbenchToggleAction>
               )}
               {/* Portable-Markdown download: a plain <a href> so the server's
                   Content-Disposition attachment header drives the browser save. */}
               <WorkbenchIconAction label="Export document" asChild>
                 <a href={knowledgeApi.docExportUrl(relPath)} download>
-                  <Download className="h-4 w-4" />
+                  <Download className="size-4" />
                 </a>
               </WorkbenchIconAction>
               <WorkbenchIconAction label="Back to knowledge" onClick={back}>
-                <ArrowLeft className="h-4 w-4" />
+                <ArrowLeft className="size-4" />
               </WorkbenchIconAction>
             </>
           }
@@ -183,7 +183,7 @@ export const KnowledgeViewer = ({ selection, snapshot }: RendererProps): JSX.Ele
           title={ref.title ?? ref.name}
           actions={
             <WorkbenchIconAction label="Back to knowledge" onClick={back}>
-              <ArrowLeft className="h-4 w-4" />
+              <ArrowLeft className="size-4" />
             </WorkbenchIconAction>
           }
         />
@@ -210,7 +210,7 @@ export const KnowledgeViewer = ({ selection, snapshot }: RendererProps): JSX.Ele
                 target="_blank"
                 rel="noreferrer"
               >
-                <ExternalLink className="h-3.5 w-3.5" /> {ref.url}
+                <ExternalLink className="size-icon-sm" /> {ref.url}
               </a>
             </p>
           )}
@@ -267,7 +267,7 @@ export const KnowledgeViewer = ({ selection, snapshot }: RendererProps): JSX.Ele
                     }
                     className="flex w-full items-start gap-3 px-3 py-3 text-left transition-colors hover:bg-muted/40"
                   >
-                    <NotebookPen className="mt-1 h-4 w-4 flex-none text-muted-foreground" />
+                    <NotebookPen className="mt-1 size-icon flex-none text-muted-foreground" />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-body-lg font-medium text-foreground">
                         {n.name}
@@ -300,7 +300,7 @@ export const KnowledgeViewer = ({ selection, snapshot }: RendererProps): JSX.Ele
                     }
                     className="flex w-full items-start gap-3 px-3 py-3 text-left transition-colors hover:bg-muted/40"
                   >
-                    <FileText className="mt-1 h-4 w-4 flex-none text-muted-foreground" />
+                    <FileText className="mt-1 size-icon flex-none text-muted-foreground" />
                     <span className="min-w-0 flex-1">
                       <span className="block truncate text-body-lg font-medium text-foreground">
                         {r.title ?? r.name}

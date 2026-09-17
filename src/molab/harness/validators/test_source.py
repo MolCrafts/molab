@@ -1,0 +1,239 @@
+"""``validate_test_source`` — pure structural pre-checks for generated pytest source.
+
+Side-effect-free checks; the source is **never executed** (no ``exec``, no
+pytest run — a module-level ``raise`` in the source cannot fire here):
+
+1. **Syntax** — ``ast.parse``; a ``SyntaxError`` becomes a violation.
+2. **Public-surface imports only** — an AST walk rejects any import of a
+   private ``molab.workflow`` submodule (anything under
+   ``molab.workflow._...``).
+3. **At least one test** — a module-level ``def test_*`` / ``async def
+   test_*`` function must exist, or pytest would collect nothing.
+4. **Byte-compile** — ``compile(source, "<test_source>", "exec")``; catches
+   what parsing alone cannot (e.g. ``break`` outside a loop).
+
+Returns a :class:`PlanValidationReport` (``target_kind="test_source"``) and
+**never raises** — malformed input yields a failing report, not an exception.
+This is the gate :class:`ValidateTestSource` runs; actually executing the
+tests is :class:`ExecuteTests`'s job, through a harness executor.
+"""
+
+from __future__ import annotations
+
+import ast
+import re
+from collections.abc import Iterable
+
+from molab.harness.schemas.validation import PlanValidationReport, ValidationViolation
+
+__all__ = ["TestSourceValidator"]
+
+_PRIVATE_PREFIX = "molab.workflow._"
+
+
+def _is_private_workflow(module: str | None) -> bool:
+    """True if ``module`` names a private ``molab.workflow`` submodule."""
+    if not module:
+        return False
+    return module == "molab.workflow._" or module.startswith(_PRIVATE_PREFIX)
+
+
+def _test_function_names(tree: ast.Module) -> list[str]:
+    """Names of the module's top-level ``test_*`` (async) functions."""
+    return [
+        node.name
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name.startswith("test_")
+    ]
+
+
+def _normalize_task_id(task_id: str) -> str:
+    """Map a task id to the identifier-safe token a test name must contain."""
+    return re.sub(r"\W", "_", task_id)
+
+
+class TestSourceValidator:
+    """Pure structural pre-checks for generated pytest source."""
+
+    @staticmethod
+    def validate(
+        source: str,
+        *,
+        target_id: str = "",
+        required_task_ids: Iterable[str] | None = None,
+    ) -> PlanValidationReport:
+        """Run syntax + import + test-presence + byte-compile pre-checks.
+
+        Args:
+            source: The generated pytest program text.
+            target_id: The artifact id this source came from (for the report).
+            required_task_ids: When given, every task id must be covered by a
+                ``test_*`` function whose name contains the id's identifier-safe
+                token (``test_<task_id>`` or any ``test_*`` containing it); a
+                missing one yields a ``missing_task_test`` error. When ``None``
+                the legacy "at least one test" check stands alone.
+
+        Returns:
+            A :class:`PlanValidationReport` with ``target_kind="test_source"``;
+            ``passed`` is False if any error-severity violation is present.
+        """
+        try:
+            tree = ast.parse(source)
+        except SyntaxError as exc:
+            return PlanValidationReport.from_violations(
+                target_kind="test_source",
+                target_id=target_id,
+                violations=[
+                    ValidationViolation(
+                        code="syntax_error",
+                        message=f"generated test source failed to parse: {exc!r}",
+                        severity="error",
+                    )
+                ],
+            )
+
+        violations: list[ValidationViolation] = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if _is_private_workflow(alias.name):
+                        violations.append(
+                            ValidationViolation(
+                                code="private_import",
+                                message=f"generated test source imports private module {alias.name!r}",
+                                severity="error",
+                            )
+                        )
+            elif isinstance(node, ast.ImportFrom) and _is_private_workflow(node.module):
+                violations.append(
+                    ValidationViolation(
+                        code="private_import",
+                        message=f"generated test source imports from private module {node.module!r}",
+                        severity="error",
+                    )
+                )
+
+        test_names = _test_function_names(tree)
+        if not test_names:
+            violations.append(
+                ValidationViolation(
+                    code="no_test_functions",
+                    message="generated test source defines no module-level test_* function",
+                    severity="error",
+                )
+            )
+
+        for task_id in required_task_ids or ():
+            token = _normalize_task_id(task_id)
+            if not any(token in name for name in test_names):
+                violations.append(
+                    ValidationViolation(
+                        code="missing_task_test",
+                        message=f"generated test source has no test_* function covering "
+                        f"task {task_id!r} (expected a test name containing {token!r})",
+                        severity="error",
+                    )
+                )
+
+        violations.extend(_contract_violations(tree, source))
+
+        try:
+            compile(source, "<test_source>", "exec")
+        except (SyntaxError, ValueError) as exc:
+            violations.append(
+                ValidationViolation(
+                    code="compile_error",
+                    message=f"generated test source failed to byte-compile: {exc!r}",
+                    severity="error",
+                )
+            )
+
+        return PlanValidationReport.from_violations(
+            target_kind="test_source",
+            target_id=target_id,
+            violations=violations,
+        )
+
+
+def _contract_violations(tree: ast.Module, source: str) -> list[ValidationViolation]:
+    """Catch frozen molab API mistakes that always fail at pytest time.
+
+    These are design-level invariants of generated tests — fixing them in the
+    static gate stops the plan from burning an ExecuteTests cycle on a
+    guaranteed red run.
+    """
+    violations: list[ValidationViolation] = []
+
+    # Bare ANY without an import from unittest.mock → NameError at collect/run.
+    imported_names = _imported_names(tree)
+    if "ANY" not in imported_names:
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name) and node.id == "ANY":
+                violations.append(
+                    ValidationViolation(
+                        code="undefined_any",
+                        message=(
+                            "test source uses bare ANY without importing it — "
+                            "add `from unittest.mock import ANY` (or drop ANY)"
+                        ),
+                        severity="error",
+                    )
+                )
+                break
+
+    # RegisterMetric has .key / .value — never .name (frozen public surface).
+    if "RegisterMetric" in source or "register_metric" in source.lower():
+        for node in ast.walk(tree):
+            # Heuristic: attribute access on a local named *metric*
+            if (
+                isinstance(node, ast.Attribute)
+                and node.attr == "name"
+                and isinstance(node.value, ast.Name)
+                and "metric" in node.value.id.lower()
+            ):
+                violations.append(
+                    ValidationViolation(
+                        code="register_metric_name_attr",
+                        message=(
+                            "RegisterMetric has no `.name` field — use `.key` "
+                            f"(found `{node.value.id}.name`)"
+                        ),
+                        severity="error",
+                    )
+                )
+            if (
+                isinstance(node, ast.Call)
+                and isinstance(node.func, ast.Name)
+                and node.func.id == "hasattr"
+                and len(node.args) >= 2
+                and isinstance(node.args[1], ast.Constant)
+                and node.args[1].value == "name"
+            ):
+                violations.append(
+                    ValidationViolation(
+                        code="register_metric_name_attr",
+                        message=(
+                            'do not assert hasattr(..., "name") on RegisterMetric — '
+                            "the field is `.key`"
+                        ),
+                        severity="error",
+                    )
+                )
+
+    return violations
+
+
+def _imported_names(tree: ast.Module) -> set[str]:
+    """Names bound by top-level import statements (including aliases)."""
+    names: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                names.add(alias.asname or alias.name.split(".", 1)[0])
+        elif isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                if alias.name == "*":
+                    continue
+                names.add(alias.asname or alias.name)
+    return names

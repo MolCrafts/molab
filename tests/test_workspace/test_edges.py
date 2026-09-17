@@ -1,6 +1,6 @@
 """EdgeRole vocabulary + label-channel encode/parse/validate (typed-provenance-edge P0.1).
 
-RED-first: ``molexp.workspace.edges`` does not exist yet, so this module fails at
+RED-first: ``molab.workspace.edges`` does not exist yet, so this module fails at
 collection until the slice is implemented.
 
 References:
@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from molexp.workspace.edges import (
+from molab.workspace.edges import (
     DEFAULT_EDGE_ROLE,
     encode_label,
     parse_role,

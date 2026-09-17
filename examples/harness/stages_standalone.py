@@ -21,15 +21,15 @@ import asyncio
 import tempfile
 from pathlib import Path
 
-import molexp as me
+import molab as me
 
 
 async def main() -> None:
-    root = Path(tempfile.mkdtemp(prefix="molexp-harness-"))
+    root = Path(tempfile.mkdtemp(prefix="molab-harness-"))
     me.Workspace(root, name="harness-demo")
 
     # ── 1. ToolCapability — the schema for one harness-invokable capability ──
-    from molexp.harness.schemas.capability import ToolCapability
+    from molab.harness.schemas.capability import ToolCapability
 
     caps = [
         ToolCapability(
@@ -53,7 +53,7 @@ async def main() -> None:
     ]
 
     # ── 2. In-memory capability registry ───────────────────────────────────
-    from molexp.harness.registry.in_memory import InMemoryCapabilityRegistry
+    from molab.harness.registry.in_memory import InMemoryCapabilityRegistry
 
     registry = InMemoryCapabilityRegistry(capabilities=caps)
     print(f"\nRegistry entries: {len(registry.list_capabilities())}")

@@ -418,7 +418,7 @@ export const agentHandlers = [
                 metadata: {},
             };
             const pythonScript = [
-                "from molexp.workflow.spec import WorkflowSpec",
+                "from molab.workflow.spec import WorkflowSpec",
                 "",
                 `WORKFLOW_IR = ${JSON.stringify(workflowIr, null, 4)}`,
                 "",
@@ -544,7 +544,7 @@ export const agentHandlers = [
         const taskId = params.taskId as string;
         const session = getAgentSession(taskId);
         const base =
-            "You are molexp's interactive research agent.";
+            "You are molab's interactive research agent.";
         const planMode = Boolean(session?.planMode);
         const planAddendum = planMode
             ? "You are in PLAN MODE.\nPrefer the plan tool surface (task board) over ad-hoc mutation."

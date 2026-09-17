@@ -1,4 +1,4 @@
-"""Tests for molexp's Logger subclass and get_logger factory."""
+"""Tests for molab's Logger subclass and get_logger factory."""
 
 from __future__ import annotations
 
@@ -7,13 +7,13 @@ from typing import Any
 import mollog
 import pytest
 
-import molexp
-from molexp._logger import _reset_cache
+import molab
+from molab._logger import _reset_cache
 
 
 @pytest.fixture(autouse=True)
 def _isolate_logger_cache() -> Any:
-    """Each test gets a fresh molexp logger cache."""
+    """Each test gets a fresh molab logger cache."""
     _reset_cache()
     yield
     _reset_cache()
@@ -32,7 +32,7 @@ class _CapturingHandler(mollog.Handler):
 
 def test_ice_emits_tagged_record() -> None:
     handler = _CapturingHandler()
-    log = molexp.get_logger("molexp.test.ice")
+    log = molab.get_logger("molab.test.ice")
     log.add_handler(handler)
 
     log.ice("agent step", agent_id="a-1", step=3)

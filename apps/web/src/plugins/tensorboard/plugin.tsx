@@ -1,11 +1,11 @@
-import type { MolexpPluginModule, PluginAPI } from "@molcrafts/molexp-plugin";
+import type { MolabPluginModule, PluginAPI } from "@molcrafts/molab-plugin";
 import { lazy } from "react";
 
 const TensorBoardTab = lazy(() =>
   import("./TensorBoardTab").then((module) => ({ default: module.TensorBoardTab })),
 );
 
-const tensorboardPlugin: MolexpPluginModule = {
+const tensorboardPlugin: MolabPluginModule = {
   id: "tensorboard",
   name: "TensorBoard",
   version: "1.0.0",

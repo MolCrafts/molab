@@ -30,7 +30,7 @@ const ExplorerLink = ({
 }): JSX.Element => (
   <Link
     to={to}
-    className="group flex min-w-0 items-start gap-2 rounded-control px-1.5 py-1.5 outline-none hover:bg-interactive focus-visible:ring-1 focus-visible:ring-ring"
+    className="group flex min-w-0 items-start gap-2 rounded-control px-1 py-row-pad outline-none hover:bg-interactive focus-visible:ring-1 focus-visible:ring-ring"
   >
     <Circle
       aria-hidden
@@ -47,7 +47,7 @@ const ExplorerLink = ({
       <span className="block truncate text-label font-medium text-foreground">{title}</span>
       <span className="block truncate text-micro text-muted-foreground">{detail}</span>
     </span>
-    <ArrowUpRight className="mt-0.5 size-3 shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100" />
+    <ArrowUpRight className="mt-1 size-3 shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100" />
   </Link>
 );
 
@@ -72,12 +72,12 @@ export const DashboardExplorer = ({ snapshot }: NavigationExplorerProps): JSX.El
 
   return (
     <LeftExplorer title="Workspace" actions={actions}>
-      <div className="space-y-0.5">
+      <div className="space-y-1">
         <div className="border-b border-border/70 px-1 pb-2">
           <p className="truncate text-label font-medium text-foreground">{activeWorkspace.label}</p>
           <p
             className={cn(
-              "mt-1 flex items-center gap-1.5 text-micro",
+              "mt-1 flex items-center gap-2 text-micro",
               activeWorkspace.unreachable
                 ? "text-status-failed-foreground"
                 : "text-status-completed-foreground",

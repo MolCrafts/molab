@@ -121,7 +121,7 @@ export const RunsJobsTable = ({
     return (
       <div className="flex h-full min-h-60 items-center justify-center border-y border-dashed border-border/70">
         <EmptyState
-          icon={<Table2 className="h-5 w-5" />}
+          icon={<Table2 className="size-icon-lg" />}
           title="No matching runs"
           description="Adjust filters in the sidebar, or clear them to see the full workspace."
         />
@@ -134,7 +134,7 @@ export const RunsJobsTable = ({
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="overflow-x-auto border-y border-border/70">
+      <div className="border-y border-border/70">
         <Table className="w-full text-body">
           <TableHeader className="sticky top-0 z-10 border-b border-border/60 bg-background">
             <TableRow className="text-label text-muted-foreground">
@@ -273,7 +273,7 @@ export const RunsJobsTable = ({
               disabled={slice.page <= 1}
               onClick={() => onPageChange(slice.page - 1)}
             >
-              <ChevronLeft className="h-3.5 w-3.5" />
+              <ChevronLeft className="size-icon-sm" />
             </WorkbenchIconAction>
             <span className="min-w-18 text-center tabular-nums">
               {slice.page} / {slice.totalPages}
@@ -284,7 +284,7 @@ export const RunsJobsTable = ({
               disabled={slice.page >= slice.totalPages}
               onClick={() => onPageChange(slice.page + 1)}
             >
-              <ChevronRight className="h-3.5 w-3.5" />
+              <ChevronRight className="size-icon-sm" />
             </WorkbenchIconAction>
           </div>
         </div>
@@ -325,7 +325,7 @@ const SortableTh = ({
           label={`Sort by ${column.label}${active ? `, currently ${dir}` : ""}`}
           size="compact"
           onClick={onClick}
-          className="size-5 text-current"
+          className="size-icon-lg text-current"
         >
           <Icon className="size-3 opacity-70" aria-hidden="true" />
         </WorkbenchIconAction>

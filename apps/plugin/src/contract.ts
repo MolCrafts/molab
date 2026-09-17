@@ -1,10 +1,10 @@
 /**
- * Stable contracts for MolExp workbench plugins.
+ * Stable contracts for Molab workbench plugins.
  *
- * Public surface: import from `@molcrafts/molexp-plugin`.
+ * Public surface: import from `@molcrafts/molab-plugin`.
  *
  * Contribution surface is **domain-oriented** — there is no free-floating
- * `api.ui` bag. VS Code `contributes.*` names map onto molexp host slots.
+ * `api.ui` bag. VS Code `contributes.*` names map onto molab host slots.
  *
  * New workbench surfaces (commands, panels, statusBar, settings) are
  * namespaced by the host as `plugin.<pluginId>.<id>`. Existing contribution
@@ -46,7 +46,7 @@ export interface PluginManifest {
 }
 
 /** Default export shape of a plugin entry module. */
-export interface MolexpPluginModule {
+export interface MolabPluginModule {
   id: string;
   name?: string;
   version?: string;

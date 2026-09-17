@@ -1,10 +1,10 @@
 # Development
 
-Contributor-facing docs for working on `molexp` internals.
+Contributor-facing docs for working on `molab` internals.
 
 ## UI
 
-- [Serve and rebuild the UI](ui-serve.md) — daily `molexp serve --dev`; bundled preview with `npm run build:web`; wheel only with `-C build-web=true`
+- [Serve and rebuild the UI](ui-serve.md) — daily `molab serve --dev`; bundled preview with `npm run build:web`; wheel only with `-C build-web=true`
 
 ## Internals
 

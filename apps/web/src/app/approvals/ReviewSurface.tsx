@@ -207,7 +207,7 @@ export const ReviewSurface = ({
           const selected = Array.isArray(value) ? (value as string[]) : [];
           return (
             <FieldShell key={field.id} field={field} helpId={helpId} hideHelp={compact}>
-              <ul className="space-y-1.5">
+              <ul className="space-y-2">
                 {(field.options ?? []).map((opt, index) => {
                   const on = selected.includes(opt.value);
                   const optionId = `${controlId}-${index}`;
@@ -215,11 +215,11 @@ export const ReviewSurface = ({
                     <li key={opt.value}>
                       <label
                         htmlFor={optionId}
-                        className="flex cursor-pointer items-start gap-2 rounded-control px-2 py-1.5 text-body-lg hover:bg-muted/50"
+                        className="flex cursor-pointer items-start gap-2 rounded-control px-2 py-row-pad text-body-lg hover:bg-muted/50"
                       >
                         <Checkbox
                           id={optionId}
-                          className="mt-0.5"
+                          className="mt-1"
                           checked={on}
                           disabled={ro}
                           aria-describedby={describedBy}

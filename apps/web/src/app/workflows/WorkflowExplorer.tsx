@@ -69,7 +69,7 @@ export const WorkflowExplorer = (
     title="Workflows"
     actions={
       <WorkbenchIconAction label="Refresh workflows" kind="ghost" onClick={props.onRefresh}>
-        <RefreshCw className="h-4 w-4" />
+        <RefreshCw className="size-4" />
       </WorkbenchIconAction>
     }
   >

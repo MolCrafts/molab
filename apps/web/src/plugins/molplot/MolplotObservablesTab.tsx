@@ -80,8 +80,8 @@ export const MolplotObservablesTab = ({
   return (
     <div className="flex min-h-0 flex-1">
       <aside className="flex w-56 flex-none flex-col border-r border-border bg-surface-subtle">
-        <div className="flex h-[35px] items-center gap-2 border-b border-border px-3">
-          <BarChart3 className="size-4 text-accent" aria-hidden />
+        <div className="flex h-toolbar-compact items-center gap-2 border-b border-border px-3">
+          <BarChart3 className="size-icon text-accent" aria-hidden />
           <span className="text-label font-medium text-foreground">MolPlot</span>
           <span className="ml-auto font-mono text-micro text-muted-foreground">
             {discoveredFiles.length}
@@ -95,13 +95,13 @@ export const MolplotObservablesTab = ({
               key={candidate.relPath}
               type="button"
               onClick={() => setSelected(candidate.relPath)}
-              className={`flex w-full items-center gap-2 rounded-none px-2 py-1.5 text-left font-mono text-micro transition-colors ${
+              className={`flex w-full items-center gap-2 rounded-none px-2 py-row-pad text-left font-mono text-micro transition-colors ${
                 file?.relPath === candidate.relPath
                   ? "bg-accent-muted text-accent-muted-foreground"
                   : "text-muted-foreground hover:bg-interactive hover:text-foreground"
               }`}
             >
-              <FileText className="size-3.5 flex-none" aria-hidden />
+              <FileText className="size-icon-sm flex-none" aria-hidden />
               <span className="truncate" title={candidate.name}>
                 {molplotDisplayName(candidate.name)}
               </span>
@@ -122,7 +122,7 @@ export const MolplotObservablesTab = ({
         {error && (
           <EmptyState
             density="compact"
-            icon={<BarChart3 className="size-5" />}
+            icon={<BarChart3 className="size-icon-lg" />}
             title="Cannot render this plot"
             description="This file could not be opened as a chart."
           />

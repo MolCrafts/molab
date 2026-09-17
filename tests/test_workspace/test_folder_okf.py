@@ -12,7 +12,7 @@ import json
 import os
 from pathlib import Path
 
-from molexp.workspace import Workspace
+from molab.workspace import Workspace
 
 
 class TestFolderOKF:

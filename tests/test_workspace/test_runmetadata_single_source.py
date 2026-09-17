@@ -10,8 +10,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from molexp.workspace.domain import ExecutionStatus
-from molexp.workspace.models import RunMetadata, RunStatus
+from molab.workspace.domain import ExecutionStatus
+from molab.workspace.models import RunMetadata, RunStatus
 
 
 def _read_run_json(run) -> dict:

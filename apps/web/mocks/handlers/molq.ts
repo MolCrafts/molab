@@ -129,7 +129,7 @@ export const molqHandlers = [
       ...job,
       failureReason: job.state === "failed" ? "Exit code 1" : null,
       metadata: { run_id: `run-${job.jobId}`, project: "demo" },
-      commandDisplay: `python -m molexp.cli execute /scratch/${job.jobId}`,
+      commandDisplay: `python -m molab.cli execute /scratch/${job.jobId}`,
       transitions: [
         {
           timestamp: job.submittedAt ?? now(),

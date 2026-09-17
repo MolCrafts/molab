@@ -1,7 +1,7 @@
 {
-  "name": "molexp-workflow-preview",
-  "displayName": "MolExp Workflow Preview",
-  "description": "Preview a molexp workflow.json IR as an interactive DAG, reusing the molexp UI workflow components.",
+  "name": "molab-workflow-preview",
+  "displayName": "Molab Workflow Preview",
+  "description": "Preview a molab workflow.json IR as an interactive DAG, reusing the molab UI workflow components.",
   "version": "0.1.0",
   "publisher": "molcrafts",
   "engines": {
@@ -13,8 +13,8 @@
   "contributes": {
     "customEditors": [
       {
-        "viewType": "molexp.workflowPreview",
-        "displayName": "MolExp Workflow Preview",
+        "viewType": "molab.workflowPreview",
+        "displayName": "Molab Workflow Preview",
         "selector": [
           { "filenamePattern": "*workflow.json" }
         ],
@@ -23,8 +23,8 @@
     ],
     "commands": [
       {
-        "command": "molexp.openWorkflowPreview",
-        "title": "MolExp: Open Workflow Preview"
+        "command": "molab.openWorkflowPreview",
+        "title": "Molab: Open Workflow Preview"
       }
     ]
   },
@@ -34,7 +34,7 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "@types/vscode": "^1.90.0",
+    "@types/vscode": "^1.137.0",
     "typescript": "^7.0.2"
   }
 }

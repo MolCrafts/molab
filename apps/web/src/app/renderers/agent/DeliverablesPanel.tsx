@@ -70,7 +70,7 @@ const PanelSection = ({
   title: string;
   children: React.ReactNode;
 }): JSX.Element => (
-  <section className="space-y-1.5">
+  <section className="space-y-2">
     <h3 className="text-label font-semibold uppercase tracking-wide text-muted-foreground">
       {title}
     </h3>
@@ -159,13 +159,13 @@ const PlanView = ({ plan }: { plan: PlanDetailResponse }): JSX.Element => (
           No workflow tasks were generated.
         </p>
       ) : (
-        <ol className="space-y-1.5">
+        <ol className="space-y-2">
           {plan.tasks.map((task, idx) => (
             <li
               key={task.id}
-              className="flex items-start gap-2.5 rounded-control border border-border/50 bg-card px-3 py-2"
+              className="flex items-start gap-2 rounded-control border border-border/50 bg-card px-3 py-2"
             >
-              <span className="mt-0.5 flex h-5 w-5 flex-none items-center justify-center rounded-control bg-muted text-micro font-medium tabular-nums text-muted-foreground">
+              <span className="mt-1 flex size-4-lg flex-none items-center justify-center rounded-control bg-muted text-micro font-medium tabular-nums text-muted-foreground">
                 {idx + 1}
               </span>
               <div className="min-w-0 flex-1">
@@ -178,7 +178,7 @@ const PlanView = ({ plan }: { plan: PlanDetailResponse }): JSX.Element => (
                   )}
                 </div>
                 {task.source && (
-                  <p className="mt-0.5 truncate font-mono text-micro text-muted-foreground">
+                  <p className="mt-1 truncate font-mono text-micro text-muted-foreground">
                     {task.source}
                   </p>
                 )}
@@ -259,7 +259,7 @@ const CodeBlock = ({
         <span className="min-w-0 truncate font-mono text-micro text-muted-foreground">
           {filename}
         </span>
-        <div className="flex flex-none items-center gap-1.5">
+        <div className="flex flex-none items-center gap-2">
           <WorkbenchToggleAction
             label={wrap ? "Disable line wrapping" : "Enable line wrapping"}
             onClick={() => setWrap((prev) => !prev)}
@@ -274,7 +274,7 @@ const CodeBlock = ({
       <pre
         data-language={language}
         className={cn(
-          "rounded-control border border-border/60 bg-muted/50 px-3 py-2.5 font-mono text-label leading-relaxed text-foreground",
+          "rounded-control border border-border/60 bg-muted/50 px-3 py-2 font-mono text-label leading-relaxed text-foreground",
           wrap
             ? "whitespace-pre-wrap break-words"
             : "overflow-x-auto [scrollbar-width:thin] [&::-webkit-scrollbar]:h-1.5 [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-track]:bg-transparent",
@@ -375,7 +375,7 @@ const CapabilitiesView = ({ plan }: { plan: PlanDetailResponse }): JSX.Element =
             }
           />
         ) : (
-          <ul className="space-y-1.5">
+          <ul className="space-y-2">
             {selected.map((cap) => (
               <li
                 key={cap.id}
@@ -383,7 +383,7 @@ const CapabilitiesView = ({ plan }: { plan: PlanDetailResponse }): JSX.Element =
               >
                 <span className="break-all font-mono text-body-lg text-foreground">{cap.id}</span>
                 {cap.detail && (
-                  <p className="mt-0.5 text-label text-muted-foreground">{cap.detail}</p>
+                  <p className="mt-1 text-label text-muted-foreground">{cap.detail}</p>
                 )}
               </li>
             ))}
@@ -437,7 +437,7 @@ const InputSetView = ({ inputSet }: { inputSet: Record<string, unknown> | null }
             No swept axes — a single fixed-parameter run.
           </p>
         ) : (
-          <ul className="space-y-1.5">
+          <ul className="space-y-2">
             {axes.map((axis, idx) => (
               <li
                 key={String(axis.name ?? idx)}
@@ -453,7 +453,7 @@ const InputSetView = ({ inputSet }: { inputSet: Record<string, unknown> | null }
                     </WorkbenchTag>
                   )}
                 </div>
-                <p className="mt-0.5 font-mono text-micro text-muted-foreground">
+                <p className="mt-1 font-mono text-micro text-muted-foreground">
                   {Array.isArray(axis.values) ? axis.values.map(String).join(", ") : ""}
                 </p>
               </li>
@@ -553,7 +553,7 @@ const ExecutionReportView = ({
       </PanelSection>
       {Array.isArray(report.notes) && report.notes.length > 0 && (
         <PanelSection title="Notes">
-          <ul className="list-disc space-y-0.5 pl-4 text-body-lg text-muted-foreground">
+          <ul className="list-disc space-y-1 pl-4 text-body-lg text-muted-foreground">
             {(report.notes as unknown[]).map((n) => (
               <li key={String(n)}>{String(n)}</li>
             ))}
@@ -561,7 +561,7 @@ const ExecutionReportView = ({
         </PanelSection>
       )}
       <p className="text-label text-muted-foreground/70">
-        Descriptive only — molexp never submits a job from this report.
+        Descriptive only — molab never submits a job from this report.
       </p>
     </div>
   );
@@ -586,7 +586,7 @@ const FinalReportView = ({ plan }: { plan: PlanDetailResponse }): JSX.Element =>
     return (
       <p className="text-body-lg italic text-muted-foreground">
         The workflow has not been executed — run{" "}
-        <InlineCode className="font-mono">molexp plan --execute</InlineCode> to produce the final
+        <InlineCode className="font-mono">molab plan --execute</InlineCode> to produce the final
         report.
       </p>
     );
@@ -726,7 +726,7 @@ const ReviewView = ({ plan }: { plan: PlanDetailResponse }): JSX.Element => {
       </PanelSection>
       {findings.length > 0 && (
         <PanelSection title={`Findings (${findings.length})`}>
-          <ul className="space-y-1.5">
+          <ul className="space-y-2">
             {findings.map((f, i) => {
               const rec = f as Record<string, unknown>;
               return (
@@ -736,7 +736,7 @@ const ReviewView = ({ plan }: { plan: PlanDetailResponse }): JSX.Element => {
                 >
                   <span className="font-medium">{String(rec.requirement ?? "requirement")}</span>
                   {rec.deviation != null && (
-                    <p className="mt-0.5 text-muted-foreground">{String(rec.deviation)}</p>
+                    <p className="mt-1 text-muted-foreground">{String(rec.deviation)}</p>
                   )}
                 </li>
               );
@@ -753,7 +753,7 @@ const ReviewView = ({ plan }: { plan: PlanDetailResponse }): JSX.Element => {
 };
 
 const EmptyStage = ({ label }: { label: string }): JSX.Element => (
-  <div className="flex flex-1 flex-col items-center justify-center gap-1.5 px-6 text-center">
+  <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6 text-center">
     <FileQuestion className="h-6 w-6 text-muted-foreground/40" />
     <p className="text-body-lg text-muted-foreground">{label}</p>
     <p className="text-label text-muted-foreground/70">
@@ -782,7 +782,7 @@ const BoardTasksView = ({ plan }: { plan: PlanDetailResponse }): JSX.Element => 
   return (
     <div className="space-y-3">
       <PanelSection title={`Task board (${boardTasks.length})`}>
-        <ol className="space-y-1.5">
+        <ol className="space-y-2">
           {boardTasks.map((raw, idx) => {
             const t = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
             const id = String(t.id ?? `task-${idx}`);
@@ -791,7 +791,7 @@ const BoardTasksView = ({ plan }: { plan: PlanDetailResponse }): JSX.Element => 
             return (
               <li key={id} className="rounded-control border border-border/50 bg-card px-3 py-2">
                 <div className="flex items-start gap-2">
-                  <span className="mt-0.5 flex h-5 w-5 flex-none items-center justify-center rounded-control bg-muted text-micro font-medium tabular-nums text-muted-foreground">
+                  <span className="mt-1 flex size-4-lg flex-none items-center justify-center rounded-control bg-muted text-micro font-medium tabular-nums text-muted-foreground">
                     {idx + 1}
                   </span>
                   <div className="min-w-0 flex-1">
@@ -827,7 +827,7 @@ const BoundWorkflowView = ({ plan }: { plan: PlanDetailResponse }): JSX.Element 
   }
   return (
     <PanelSection title={`Bound tasks (${tasks.length})`}>
-      <ol className="space-y-1.5">
+      <ol className="space-y-2">
         {tasks.map((raw, idx) => {
           const t = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
           const id = String(t.id ?? `bound-${idx}`);
@@ -846,9 +846,7 @@ const BoundWorkflowView = ({ plan }: { plan: PlanDetailResponse }): JSX.Element 
                   </WorkbenchTag>
                 ) : null}
               </div>
-              {name !== id ? (
-                <p className="mt-0.5 text-label text-muted-foreground">{name}</p>
-              ) : null}
+              {name !== id ? <p className="mt-1 text-label text-muted-foreground">{name}</p> : null}
             </li>
           );
         })}
@@ -900,7 +898,7 @@ const PlanDeliverables = ({
     if (loading)
       return (
         <div className="flex flex-1 items-center justify-center gap-2 text-body-lg text-muted-foreground">
-          <Loader2 className="h-4 w-4 mol-motion-progress-spin text-info" />
+          <Loader2 className="size-icon mol-motion-progress-spin text-info" />
           Loading deliverables…
         </div>
       );
@@ -982,8 +980,8 @@ const PlanDeliverables = ({
 
   return (
     <div className="flex h-full flex-col">
-      <div className="flex items-start gap-2 border-b border-border/60 bg-muted/20 px-4 py-2.5">
-        <Package className="mt-0.5 h-4 w-4 flex-none text-muted-foreground" />
+      <div className="flex items-start gap-2 border-b border-border/60 bg-muted/20 px-4 py-2">
+        <Package className="mt-1 size-icon flex-none text-muted-foreground" />
         <div className="min-w-0 flex-1">
           <p className="truncate text-body-lg font-semibold text-foreground" title={title}>
             {title}
@@ -1001,7 +999,7 @@ const PlanDeliverables = ({
             >
               run {planRef.runId}
             </WorkbenchAction>
-            {stage && <span className="ml-1.5 text-muted-foreground/70">· {stage.label}</span>}
+            {stage && <span className="ml-1 text-muted-foreground/70">· {stage.label}</span>}
           </p>
         </div>
         <StatusBadge status={status} size="sm" />
@@ -1013,8 +1011,8 @@ const PlanDeliverables = ({
 
 const ChatArtifacts = ({ artifacts }: { artifacts: Record<string, unknown>[] }): JSX.Element => (
   <div className="flex h-full flex-col">
-    <div className="flex items-center gap-2 border-b border-border/60 bg-muted/20 px-4 py-2.5">
-      <Package className="h-4 w-4 flex-none text-muted-foreground" />
+    <div className="flex items-center gap-2 border-b border-border/60 bg-muted/20 px-4 py-2">
+      <Package className="size-icon flex-none text-muted-foreground" />
       <p className="text-body-lg font-semibold text-foreground">
         Artifacts <span className="font-normal text-muted-foreground">· {artifacts.length}</span>
       </p>

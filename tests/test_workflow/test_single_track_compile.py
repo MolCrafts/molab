@@ -9,7 +9,7 @@ against the compiled registration is the contract.
 
 from __future__ import annotations
 
-from molexp.workflow import Task, TaskContext, Workflow, WorkflowCompiler
+from molab.workflow import Task, TaskContext, Workflow, WorkflowCompiler
 
 
 class TestCompiledWorkflow:

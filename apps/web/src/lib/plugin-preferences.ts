@@ -10,7 +10,7 @@
 
 import { useSyncExternalStore } from "react";
 
-const STORAGE_KEY = "molexp.ui-plugins.enabled";
+const STORAGE_KEY = "molab.ui-plugins.enabled";
 
 export type PluginEnabledMap = Record<string, boolean>;
 

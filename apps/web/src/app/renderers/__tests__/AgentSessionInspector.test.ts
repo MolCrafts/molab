@@ -19,7 +19,7 @@ const baseSession = (overrides: Partial<ApiAgentSession> = {}): ApiAgentSession 
   }) as unknown as ApiAgentSession;
 
 describe("isLegacySession", () => {
-  // ac-006 — inspector reads .molexp-agent/ paths and badges legacy.
+  // ac-006 — inspector reads .molab-agent/ paths and badges legacy.
   it("returns false for null / undefined sessions", () => {
     expect(isLegacySession(null)).toBe(false);
     expect(isLegacySession(undefined)).toBe(false);
@@ -37,6 +37,6 @@ describe("legacyBadgeMeta", () => {
     const meta = legacyBadgeMeta();
     expect(meta.label).toContain("read-only");
     expect(meta.label).toContain("legacy");
-    expect(meta.tooltip).toContain(".molexp-agent");
+    expect(meta.tooltip).toContain(".molab-agent");
   });
 });

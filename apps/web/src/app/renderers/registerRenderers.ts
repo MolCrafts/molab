@@ -1,13 +1,15 @@
-import type { PluginAPI, PluginComponent } from "@molcrafts/molexp-plugin";
-import { AgentSessionInspector } from "@/app/renderers/AgentSessionInspector";
-import { AgentViewer } from "@/app/renderers/AgentViewer";
-import { AssetViewer } from "@/app/renderers/AssetViewer";
-import { ExperimentViewer } from "@/app/renderers/ExperimentViewer";
-import { ImageViewer } from "@/app/renderers/ImageViewer";
-import { MetadataInspector } from "@/app/renderers/MetadataInspector";
-import { ProjectViewer } from "@/app/renderers/ProjectViewer";
-import { RunViewer } from "@/app/renderers/RunViewer";
-import { TaskViewer } from "@/app/renderers/TaskViewer";
+import type { PluginAPI, PluginComponent } from "@molcrafts/molab-plugin";
+import {
+  AgentSessionInspectorLazy,
+  AgentViewerLazy,
+  AssetViewerLazy,
+  ExperimentViewerLazy,
+  ImageViewerLazy,
+  MetadataInspectorLazy,
+  ProjectViewerLazy,
+  RunViewerLazy,
+  TaskViewerLazy,
+} from "@/app/renderers/lazyRenderers";
 import type { FileKind } from "@/app/types";
 
 const rendererId = (
@@ -52,34 +54,34 @@ export const registerDefaultRenderers = (api: PluginAPI): void => {
     });
   };
 
-  editor("project", "json", "metadata", "viewer", "Project Overview", ProjectViewer);
-  editor("experiment", "json", "metadata", "viewer", "Experiment Overview", ExperimentViewer);
-  editor("run", "json", "metadata", "viewer", "Run Overview", RunViewer);
-  editor("asset", "json", "metadata", "viewer", "Asset Overview", AssetViewer);
-  editor("workspace-file", "image", "image", "viewer", "Image Preview", ImageViewer);
-  editor("agent", "json", "metadata", "viewer", "Agent Task", AgentViewer);
-  editor("task", "json", "metadata", "viewer", "Task Overview", TaskViewer);
+  editor("project", "json", "metadata", "viewer", "Project Overview", ProjectViewerLazy);
+  editor("experiment", "json", "metadata", "viewer", "Experiment Overview", ExperimentViewerLazy);
+  editor("run", "json", "metadata", "viewer", "Run Overview", RunViewerLazy);
+  editor("asset", "json", "metadata", "viewer", "Asset Overview", AssetViewerLazy);
+  editor("workspace-file", "image", "image", "viewer", "Image Preview", ImageViewerLazy);
+  editor("agent", "json", "metadata", "viewer", "Agent Task", AgentViewerLazy);
+  editor("task", "json", "metadata", "viewer", "Task Overview", TaskViewerLazy);
 
-  inspector("project", "json", "metadata", "inspector", "Project Inspector", MetadataInspector);
+  inspector("project", "json", "metadata", "inspector", "Project Inspector", MetadataInspectorLazy);
   inspector(
     "experiment",
     "json",
     "metadata",
     "inspector",
     "Experiment Inspector",
-    MetadataInspector,
+    MetadataInspectorLazy,
   );
-  inspector("run", "json", "metadata", "inspector", "Run Inspector", MetadataInspector);
-  inspector("asset", "json", "metadata", "inspector", "Asset Inspector", MetadataInspector);
+  inspector("run", "json", "metadata", "inspector", "Run Inspector", MetadataInspectorLazy);
+  inspector("asset", "json", "metadata", "inspector", "Asset Inspector", MetadataInspectorLazy);
   inspector(
     "agent",
     "json",
     "metadata",
     "inspector",
     "Agent Task Inspector",
-    AgentSessionInspector,
+    AgentSessionInspectorLazy,
   );
-  inspector("task", "json", "metadata", "inspector", "Task Inspector", TaskViewer);
+  inspector("task", "json", "metadata", "inspector", "Task Inspector", TaskViewerLazy);
 
   const workspaceFileKinds: readonly FileKind[] = [
     "yaml",
@@ -97,7 +99,7 @@ export const registerDefaultRenderers = (api: PluginAPI): void => {
       "metadata",
       "inspector",
       "File Inspector",
-      MetadataInspector,
+      MetadataInspectorLazy,
     );
   }
 };
