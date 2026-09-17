@@ -10,7 +10,7 @@ import contextlib
 from collections.abc import Iterator, Mapping
 from datetime import datetime
 from pathlib import Path  # local-FS path for RunContext (LLM/worker-local I/O)
-from typing import TYPE_CHECKING, Protocol, cast
+from typing import TYPE_CHECKING, ClassVar, Protocol, cast
 
 from mollog import get_logger
 
@@ -28,6 +28,7 @@ from .base import (
     _reconstruct,
 )
 from .errors import RunExistsError, RunNotFoundError
+from .execution_dirs import execution_dir_names
 from .folder import WORKSPACE_RUN_KIND, Folder
 from .fs import PathArg
 from .models import FolderMetadata, RunMetadata, RunStatus
@@ -207,6 +208,16 @@ class Run(Folder):
 
     _exists_error_cls = RunExistsError
     _not_found_error_cls = RunNotFoundError
+
+    #: Run-internal subtrees that never hold a Concept: the directories a run
+    #: *produces* (per-attempt state, job output, caches, logs), as opposed to
+    #: the knowledge mounted beside them. Read by
+    #: :func:`molab.knowledge.types.non_concept_subdirs` when a bundle walk is
+    #: standing in a run, so pruning is scoped by position, not by bare name —
+    #: a Note in a directory called ``logs`` elsewhere stays visible.
+    NON_CONCEPT_SUBDIRS: ClassVar[frozenset[str]] = execution_dir_names() | frozenset(
+        {"executions", "assets", "cache", "logs", "source", "harness", "alive"}
+    )
 
     def __init__(
         self,

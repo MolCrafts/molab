@@ -21,6 +21,8 @@ from molab.ids import (
     compute_content_hash,
     generate_asset_id,
     generate_id,
+    hash_bytes,
+    hash_copy,
     slugify,
 )
 
@@ -33,6 +35,8 @@ __all__ = [
     "derive_run_id",
     "generate_asset_id",
     "generate_id",
+    "hash_bytes",
+    "hash_copy",
     "slugify",
 ]
 

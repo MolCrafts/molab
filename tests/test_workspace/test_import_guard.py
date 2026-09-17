@@ -3,7 +3,10 @@
 Workspace is the bottom of the dependency DAG. The only ``molab.*``
 imports allowed under ``src/molab/workspace/`` are ``molab._typing``,
 ``molab.profile``, ``molab.path`` (the cross-host POSIX path primitive),
-and the root-level helpers (``mollog``, ``molcfg``).
+the layer-0 filesystem seam (``molab.fs`` / ``molab.gitignore``, shared with
+the ``molab.knowledge`` peer layer), ``molab.knowledge`` itself (the OKF
+library workspace reconstructs typed Concepts through), and the root-level
+helpers (``mollog``, ``molcfg``).
 Every other ``molab.*`` subpackage — ``workflow``, ``agent``,
 ``plugins``, ``server``, ``cli``, ``sweep`` — is forbidden.
 

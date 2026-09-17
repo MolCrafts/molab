@@ -8,7 +8,9 @@ One paragraph carries the whole design. A note is a directory: its path is its i
 
 Because every workspace entity (`Workspace`, `Project`, `Experiment`, `Run`) is itself a `Folder` with a `meta.json`, notes and references mount anywhere in the hierarchy and can link to anything in it: a note under an experiment can cite a paper, reference a run, or point at a sibling note, all with the same Markdown-link edge.
 
-The management entry point is the `Bundle` façade. A bundle wraps a root directory (typically the workspace root) and exposes the Concept tree beneath it: `create_note`, `link`, `walk`, `backlinks`, `search`, `import_zotero`.
+The management entry point is the `Bundle` façade. A bundle wraps a root directory and exposes the Concept tree beneath it: `create_note`, `link`, `walk`, `backlinks`, `search`, `import_zotero`.
+
+**A bundle is just a directory, so it does not need a workspace.** The Open Knowledge Format lives in `molab.knowledge`, a self-contained library: your group's wiki can be its own git repository, and Molab can search it exactly as it searches a workspace. That is the subject of the last two sections.
 
 !!! note "Opening the workspace in Obsidian (or any Markdown editor)"
     Because notes are plain directories of Markdown, you can open the workspace root as an Obsidian vault and every `index.md` renders and cross-links normally. Two caveats: Molab's knowledge graph is built from **standard Markdown links** (`[text](../other-concept)`) — Obsidian-style `[[wikilinks]]` are *not* parsed as edges, so write links in standard form (or configure Obsidian to prefer Markdown links) if you want them to count as citations/backlinks. And each Concept's narrative lives in `index.md` inside its own directory — the "folder note" convention — which reads best in Obsidian with a folder-note plugin enabled.
@@ -61,7 +63,8 @@ A reference is its own Concept type, `ReferenceConcept`: one directory per work,
 ```python
 from molab.workspace import ReferenceConcept, ReferenceMeta
 
-ref = exp.add_folder(ReferenceConcept(parent=exp, name="frenkel-smit-2002"))
+ref = ReferenceConcept(exp.resolve() / "frenkel-smit-2002")
+ref.write_meta()
 ref.write_reference_meta(
     ReferenceMeta(
         title="Understanding Molecular Simulation",
@@ -107,12 +110,75 @@ for backlink in bundle.backlinks(ref):
 # projects/polymer-cg/experiments/solvation-sweep/analysis-notes links here (role=cites)
 ```
 
-Typed views over the whole bundle come from the same walk, and `bundle.search(text, concept_type=..., tag=...)` filters a derived index when the tree grows large:
+Typed views over the whole bundle come from the same walk:
 
 ```python
 print([bundle.rel_path(n) for n in bundle.notes()])
 print([bundle.rel_path(r) for r in bundle.references()])
 ```
+
+## Search: ask a question, not a filename
+
+`bundle.search(text, concept_type=..., tag=...)` ranks Concepts by keyword relevance (BM25F over title, tags, path and body). Ranking rather than substring matching is what lets you ask a real question:
+
+```python
+for hit in bundle.search("how do we choose the cooling rate for Tg?").hits:
+    print(f"{hit.score:.2f}  {hit.entry.path}  {hit.snippet}")
+```
+
+This matters most in Chinese, which is written without spaces: the question 「计算 Tg 的时候升降温怎么选择」 shares no substring with a note titled 「降温速率的选择」, yet shares the term 降温. CJK text is split into single characters **and** adjacent character pairs, and the ranking's own IDF weighting decides which of those carry signal — so there is no segmenter to install and no dictionary to maintain.
+
+This is deliberately not RAG. There are no embeddings, no chunking and no re-ranking model; retrieval's job ends at putting the right document first and handing you the whole thing.
+
+## Search a group wiki
+
+Research groups usually keep methodology in a shared wiki rather than in any one workspace. Point Molab at it once and every search reaches it:
+
+```console
+$ molab knowledge init /data/group/wiki          # only if it is not an OKF bundle yet
+$ molab knowledge sources add lab-wiki /data/group/wiki --description "group wiki"
+$ molab knowledge sources list
+```
+
+Registration is a name bound to a directory, recorded in `~/.molab/knowledge.json` — or, with `--workspace`, in `<workspace>/.molab/knowledge.json`, where an entry of the same name fully replaces the user-level one. Searching then spans every registered wiki plus the workspace you are standing in, and each hit says where it came from:
+
+```console
+$ molab knowledge search "计算Tg的时候升降温怎么选择"
+                     knowledge search: '计算Tg的时候升降温怎么选择'
+┏━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━━━━━━━━┓
+┃ Ref                  ┃ Title                        ┃ Source   ┃ Score ┃ Match             ┃
+┡━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━━━━━━━━┩
+│ lab-wiki:tg-protocol │ 玻璃化转变温度 Tg 的模拟流程 │ lab-wiki │  3.15 │ ## 降温速率的选择 │
+└──────────────────────┴──────────────────────────────┴──────────┴───────┴───────────────────┘
+
+$ molab knowledge read lab-wiki:tg-protocol      # the whole markdown
+```
+
+The `<source>:<path>` ref is the portable address of a document: it is what `read` takes, what the API returns, and what an agent passes back to you. The same calls in Python:
+
+```python
+# docs: skip — needs a registered wiki on the executing machine
+from molab.knowledge.sources import search_sources
+
+for hit in search_sources("cooling rate for Tg", limit=5):
+    print(hit.ref, hit.abs_path)     # abs_path is the index.md itself
+```
+
+Nothing about a wiki is Molab-specific: it is markdown in directories, so it lives in git, reviews in pull requests, and reads fine in any editor.
+
+## Let an agent search it
+
+An agent that can reach the group's wiki answers from the group's own practice instead of from generic priors. Two surfaces expose the same search:
+
+- The **interactive agent** (`molab agent`) ships `search_knowledge`, `read_knowledge` and `list_knowledge_sources`, covering the workspace and every registered wiki.
+- **molmcp** — the MCP server the wider MolCrafts ecosystem talks to — exposes the same three tools through its `molab` provider, so any MCP client (Claude Code, Cursor, …) can use them:
+
+```console
+$ pip install molcrafts-molmcp
+$ molmcp config add providers molab
+```
+
+Both read the registry you populated above; there is no second place to register a wiki. Asked "how do we pick the cooling rate for Tg?", the agent searches, gets `lab-wiki:tg-protocol`, reads it, and answers with your group's three-stage protocol — citing the file.
 
 ## Import a Zotero library
 

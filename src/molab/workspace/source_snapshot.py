@@ -22,10 +22,11 @@ consumer scripts (e.g. ``phase1.py`` importing ``eval_df`` / ``experiment``).
 from __future__ import annotations
 
 import ast
-import hashlib
 import shutil
 from datetime import datetime
 from pathlib import Path
+
+from molab.ids import compute_content_hash
 
 
 def _local_import_closure(entrypoint: Path) -> list[Path]:
@@ -64,7 +65,10 @@ def _local_import_closure(entrypoint: Path) -> list[Path]:
 
 
 def _sha256(path: Path) -> str:
-    return f"sha256:{hashlib.sha256(path.read_bytes()).hexdigest()}"
+    # Streams (and memoizes) rather than holding the whole file in memory —
+    # a snapshotted source tree can contain generated data files, not just
+    # the few-KB scripts this was written for.
+    return compute_content_hash(path)
 
 
 def snapshot_sources(

@@ -368,7 +368,9 @@ def agent_export(
     except FileNotFoundError as exc:
         rprint(f"[red]{exc}[/red]")
         raise typer.Exit(1) from exc
-    data = export_session_zip(sess)
     out = output or Path(f"session-{session}.zip")
-    out.write_bytes(data)
-    rprint(f"[green]Wrote[/green] {out} ({len(data)} bytes)")
+    payload = export_session_zip(sess)
+    with out.open("wb") as fh:
+        fh.write(payload)
+    written = len(payload)
+    rprint(f"[green]Wrote[/green] {out} ({written} bytes)")

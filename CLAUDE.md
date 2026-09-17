@@ -194,6 +194,8 @@ apps/web/src/  →  npm run build:web  →  src/molab/dist/  →  setuptools  �
 
 **UI component library:** prefer **shadcn/ui** when building UI features; if a shadcn component doesn't fit, document the reason in the PR description.
 
+**UI server state:** **TanStack Query v5 is the only server-state cache** — `ui/src/app/state/queries/` owns the client, the `qk` key factory, and the invalidation map. A component does not fetch in a `useEffect` and does not keep server data in `useState`; a mutation calls a `useInvalidate()` helper for the keys it actually changed, never a global refresh. Polling is a fallback for when the SSE change stream is down, gated on data (a terminal run stops its own interval) and never runs on a hidden tab. `zustand` is installed but unused — do not reach for it for server state.
+
 ## Data type ownership
 
 Each conceptual data category lives in exactly **one** layer. Cross-layer references flow downward through the public surface of the lower layer — `workflow` imports `workspace.Run` is fine; `workspace` importing `workflow.Workflow` is forbidden. For the full ownership table (concept → owning module) see `.claude/notes/architecture.md`.

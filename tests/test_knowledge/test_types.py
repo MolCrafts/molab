@@ -12,8 +12,6 @@ placeholder class to prove the registry works for any caller-supplied type.
 
 from __future__ import annotations
 
-import pytest
-
 from molab.knowledge.types import (
     register_concept_type,
     resolve_concept_type,
@@ -45,13 +43,38 @@ class TestConceptTypeRegistry:
         register_concept_type("test-same", Same)  # idempotent — must not raise
         assert resolve_concept_type("test-same", _Concept) is Same
 
-    def test_reregister_different_class_raises(self) -> None:
-        class First(_Concept):
+    def test_two_families_can_claim_one_type_and_each_resolves_its_own(self) -> None:
+        """One type string, two storage families — the ``base`` filter separates them.
+
+        ``workspace`` models a note as a ``Folder`` and ``knowledge`` models it
+        as a ``Concept``; both answer ``note.note``. Registration therefore
+        records both classes, and each family asks for its own by passing its
+        base. Without the filter a walk would receive the other family's class
+        and fail to construct it.
+        """
+
+        class OtherBase:
             pass
 
-        class Second(_Concept):
+        class FromKnowledge(_Concept):
             pass
 
-        register_concept_type("test-collide", First)
-        with pytest.raises(ValueError):
-            register_concept_type("test-collide", Second)
+        class FromOtherFamily(OtherBase):
+            pass
+
+        register_concept_type("test-two-families", FromKnowledge)
+        register_concept_type("test-two-families", FromOtherFamily)
+
+        assert resolve_concept_type("test-two-families", _Concept, base=_Concept) is FromKnowledge
+        assert (
+            resolve_concept_type("test-two-families", OtherBase, base=OtherBase) is FromOtherFamily
+        )
+
+    def test_reregistering_the_same_class_is_a_noop(self) -> None:
+        class Only(_Concept):
+            pass
+
+        register_concept_type("test-idempotent", Only)
+        register_concept_type("test-idempotent", Only)
+
+        assert resolve_concept_type("test-idempotent", _Concept, base=_Concept) is Only

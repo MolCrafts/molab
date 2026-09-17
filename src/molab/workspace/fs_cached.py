@@ -44,7 +44,7 @@ from pathlib import Path
 from typing import IO, TYPE_CHECKING, Any
 
 from .execution_dirs import execution_dir_names
-from .fs import FileSystem, PathArg, StatResult
+from .fs import DirEntry, FileSystem, PathArg, StatResult
 from .fs_local import LocalFileSystem
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -628,6 +628,23 @@ class CachedRemoteFileSystem:
             self._persist_sidecar()
         return names
 
+    def scandir(self, path: PathArg, *, with_stat: bool = True) -> list[DirEntry]:
+        """List a directory with per-entry type and metadata in one round-trip.
+
+        Forwarded to the inner filesystem, whose listing already carries type,
+        size and mtime; the names are recorded in the directory index so a
+        following ``listdir`` is served locally.
+        """
+        key = self.resolve(path)
+        self._ensure_connected()
+        entries = self._inner.scandir(key, with_stat=with_stat)
+        with self._lock:
+            self._dir_index[key] = _DirEntry(
+                names=tuple(e.name for e in entries), fetched_at=time.time()
+            )
+            self._persist_sidecar()
+        return entries
+
     def glob(self, path: PathArg, pattern: str) -> Iterable[str]:
         # Glob is intentionally uncached — patterns are open-ended and
         # caching them risks staleness on every directory change.
@@ -640,6 +657,28 @@ class CachedRemoteFileSystem:
 
     def read_text(self, path: PathArg, encoding: str = "utf-8") -> str:
         return self.read_bytes(path).decode(encoding)
+
+    def read_range(self, path: PathArg, offset: int, length: int) -> bytes:
+        """Read one bounded byte range, from the mirror when the file is pinned.
+
+        A window read must not cost a whole-file transfer, so a miss forwards to
+        the inner filesystem's ranged read instead of mirroring the file: a slice
+        of a multi-gigabyte artifact would otherwise land under the whole file's
+        mirror key.
+        """
+        if offset < 0 or length < 0:
+            raise ValueError(f"read_range needs non-negative offset/length, got {offset}/{length}")
+        if length == 0:
+            return b""
+        key = self.resolve(path)
+        mirror_path = self._mirror_for(key)
+        entry = self._pinned_entry(key)
+        if entry is not None and entry.kind == "missing":
+            raise FileNotFoundError(key)
+        if entry is not None and entry.kind == "file" and self._local.exists(mirror_path):
+            return self._local.read_range(mirror_path, offset, length)
+        self._ensure_connected()
+        return self._inner.read_range(key, offset, length)
 
     def read_bytes(self, path: PathArg) -> bytes:
         key = self.resolve(path)

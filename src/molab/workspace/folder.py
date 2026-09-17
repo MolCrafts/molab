@@ -858,7 +858,7 @@ def concept_from_dir(child_dir: PathArg, parent: Folder) -> Folder:
             return mapped.from_disk(child_dir, parent)
     marker = _load_concept_marker_dict(fs, child_dir) or {}
     type_str = str(marker.get("type", ""))
-    cls = resolve_concept_type(type_str, Folder)
+    cls = resolve_concept_type(type_str, Folder, base=Folder)
     return cls.from_disk(child_dir, parent)
 
 

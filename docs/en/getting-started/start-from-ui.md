@@ -256,7 +256,7 @@ See the [Agent concept](../concept/agent.md) and
 | Plan Mode + approvals | ✅ | Agent hub; ApprovalsInbox + SSE |
 | Interactive chat (read-only tools) | ✅ | Knowledge + file tools only — not workspace mutation |
 | Agent model / provider settings | ✅ | Agent settings (not Workspace Settings remote/targets tabs) |
-| Export run as ZIP from the run page | ✅ | Uses `archive_folder_zip` |
+| Export run as ZIP from the run page | ✅ | Uses `archive_folder_zip_iter` (streamed) |
 | Harvest run → Knowledge from UI | ✅ | Terminal runs; `POST …/harvest` → `harvest_run` |
 | Curation (NL reorg) from UI | ✅ | Experiment overview CurateComposer + Approvals |
 | Create parameter sweep from UI | ✅ | Single-axis Sweep dialog (full DOE still Python/CLI) |

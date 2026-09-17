@@ -33,7 +33,7 @@ def context(
     from molab.workspace import ContextFocus
 
     try:
-        _target, _transport, _fs, ws = open_workspace(target_spec)
+        _target, _transport, _fs, ws = open_workspace(target_spec, prefetch=True)
     except FileNotFoundError as exc:
         rprint(f"[red]Error:[/red] {exc}")
         rprint("  Run [bold]molab init[/bold] to create one.")
