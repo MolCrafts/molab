@@ -15,10 +15,10 @@ from typing import IO
 
 import pytest
 
+from molab.knowledge.concept import Concept
 from molab.workspace import (
     Bundle,
     ConceptNotFoundError,
-    Folder,
     Note,
 )
 from molab.workspace.fs import PathArg
@@ -105,7 +105,7 @@ class TestBundleDocs:
 
         assert note.body() == "hello world"
         assert any(p.endswith("design-doc/index.md") for p in rec.atomic_text_writes)
-        assert any(p.endswith("design-doc/meta.json") for p in rec.atomic_json_writes)
+        assert any(p.endswith("design-doc/meta.json") for p in rec.atomic_text_writes)
 
     def test_rename_note_preserves_body_and_resolves_at_new_identity(
         self, bundle_root: Path
@@ -156,7 +156,7 @@ class TestBundleDocs:
 
         got = {(b.rel_path(bl.source), bl.role) for bl in b.backlinks(dst)}
         assert got == {("src-one", "cites"), ("src-two", "references")}
-        assert all(isinstance(bl.source, Folder) for bl in b.backlinks(dst))
+        assert all(isinstance(bl.source, Concept) for bl in b.backlinks(dst))
 
     def test_backlinks_persists_no_reverse_index_file(self, bundle_root: Path) -> None:
         # One-source-of-truth: backlinks is a derived recompute; no reverse index

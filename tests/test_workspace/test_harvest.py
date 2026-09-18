@@ -21,8 +21,16 @@ from typing import Any
 
 import pytest
 
+from molab.knowledge.concept import Concept
 from molab.workspace import Bundle
-from molab.workspace.knowledge import FailureAnalysis, Knowledge, Observation
+from molab.workspace.folder import entity_filename
+from molab.workspace.knowledge import (
+    Decision,
+    FailureAnalysis,
+    Finding,
+    Knowledge,
+    Observation,
+)
 
 _NARRATIVE = "Mobility rises monotonically with temperature."
 
@@ -49,8 +57,19 @@ def _harvest(run: Any, **overrides: Any) -> Knowledge:
     return run.harvest(**kwargs)
 
 
-def _knowledge_items(workspace: Any) -> list[Knowledge]:
-    return [c for c in Bundle(workspace.root).walk() if isinstance(c, Knowledge)]
+#: The knowledge family, as the harvest writes it.
+_KNOWLEDGE_CLASSES = (Observation, Decision, Finding, FailureAnalysis)
+
+
+def _knowledge_items(workspace: Any) -> list[Concept]:
+    r"""Every harvested knowledge Concept in the tree, through the bundle.
+
+    The bundle is the OKF view: it yields ``Concept``\ s, typed by the marker
+    each directory carries, so a knowledge item is recognised by its ``type()``
+    rather than by the workspace ``Folder`` subclass that wrote it.
+    """
+    kinds = {entity_filename(cls).removesuffix(".json") for cls in _KNOWLEDGE_CLASSES}
+    return [c for c in Bundle(workspace.root).walk() if c.type() in kinds]
 
 
 class TestHarvestSucceededRun:

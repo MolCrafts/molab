@@ -29,7 +29,7 @@ from collections.abc import Iterator, Mapping
 from datetime import UTC, datetime
 from pathlib import Path as _StdPath
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING, NamedTuple
+from typing import TYPE_CHECKING, NamedTuple, Protocol, runtime_checkable
 
 from molab._typing import JSONValue
 from molab.fs import FileSystem, LocalFileSystem, PathArg
@@ -99,7 +99,24 @@ class Backlink(NamedTuple):
     role: EdgeRole
 
 
-def _dir_of(target: Concept | PathArg) -> str:
+@runtime_checkable
+class NamesDirectory(Protocol):
+    """Anything that names a directory by answering ``resolve()``.
+
+    The structural half of the workspace ``Folder`` contract, declared here so
+    the path-only bundle verbs can *say* they accept one without the OKF library
+    importing the storage family above it. Duck-typing was already the runtime
+    behaviour (see :func:`_dir_of`); this makes it checkable.
+    """
+
+    def resolve(self) -> object: ...
+
+
+#: What the path-only verbs address: a Concept, a bare path, or a Folder-like.
+DirTarget = Concept | PathArg | NamesDirectory
+
+
+def _dir_of(target: DirTarget) -> str:
     """The directory *target* addresses, for the path-only bundle verbs.
 
     Some verbs (:meth:`Bundle.rel_path`, :meth:`Bundle.backlinks`) need nothing
@@ -229,7 +246,7 @@ class Bundle:
 
     # ── identity helpers ─────────────────────────────────────────────────
 
-    def rel_path(self, concept: Concept | PathArg) -> str:
+    def rel_path(self, concept: DirTarget) -> str:
         """Return *concept*'s identity: its POSIX path relative to the root.
 
         Accepts anything that names a directory (see :func:`_dir_of`), so a
@@ -566,7 +583,7 @@ class Bundle:
         """
         self._fs.remove(str(concept.path), recursive=True)
 
-    def backlinks(self, concept: Concept | PathArg) -> list[Backlink]:
+    def backlinks(self, concept: DirTarget) -> list[Backlink]:
         """Return the :class:`Backlink` rows whose edge points at *concept*.
 
         Each result is a ``Backlink(source, role)`` wrapper — not the bare

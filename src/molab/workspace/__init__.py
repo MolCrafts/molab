@@ -51,7 +51,7 @@ from .bundle_index import BundleIndex, ConceptIndexEntry, SearchHit, SearchResul
 from .cache import WORKSPACE_CACHE_KIND, CacheFolder
 from .concepts import Note, ReferenceConcept
 from .context import Context
-from .doc_embed import EntitySummary
+from .doc_embed import EntitySummary, summarize_entity
 
 # ``Asset`` / ``AssetVersion`` deliberately stay unexported here: the names
 # belong to the manifest family above. Reach the Project data identities as

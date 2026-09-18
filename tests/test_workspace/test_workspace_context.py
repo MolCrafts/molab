@@ -13,9 +13,8 @@ import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from molab.workspace import Workspace
+from molab.workspace import Workspace, knowledge_mount
 from molab.workspace.assets import ArtifactAsset, AssetManifest, AssetScope, Producer
-from molab.workspace.concepts import Note
 from molab.workspace.workspace_context import (
     ContextFocus,
     assemble_workspace_context,
@@ -44,7 +43,7 @@ class TestAssembleWorkspaceContext:
         r2 = exp.add_run(params={"seed": 2})
         with r2.start() as ctx:
             ctx.emit_artifact({"loss": 0.2}, name="m2.json")
-        note = ws.add_folder(Note(parent=ws, name="idea"))
+        note = knowledge_mount.mount_note(ws, "idea")
         note.set_body("# Idea\n\nnarrative\n")
 
         c = assemble_workspace_context(ws)

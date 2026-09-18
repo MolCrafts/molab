@@ -359,15 +359,57 @@ def parse_meta_text(text: str) -> dict[str, JSONValue]:
     return loaded if isinstance(loaded, dict) else {}
 
 
+#: Extra filenames a host layer has declared to be Concept markers, tried in
+#: registration order after ``meta.json``. See :func:`register_marker_filenames`.
+_EXTRA_MARKER_FILENAMES: tuple[str, ...] = ()
+
+
+def register_marker_filenames(*names: str) -> None:
+    """Declare that *names* also mark a directory as a Concept.
+
+    A host layer may already write a typed record per directory and have no
+    reason to write a second one: a molab workspace's ``run.json`` /
+    ``project.json`` *is* that run's or project's identity, and it carries the
+    same ``type`` key ``meta.json`` would. Registering those filenames lets a
+    bundle walk the workspace tree without either layer importing the other, and
+    without duplicating the record — the one-source-of-truth law applies across
+    this seam too.
+
+    Idempotent, and order-preserving: ``meta.json`` is always tried first, so a
+    directory that carries both reads as its own Concept head.
+    """
+    global _EXTRA_MARKER_FILENAMES
+    _EXTRA_MARKER_FILENAMES += tuple(n for n in names if n not in _EXTRA_MARKER_FILENAMES)
+
+
+def marker_filenames() -> tuple[str, ...]:
+    """Every filename that marks a Concept directory, in read order."""
+    return (META_JSON_FILENAME, *_EXTRA_MARKER_FILENAMES)
+
+
 def read_meta_dict(directory: PathArg, *, fs: FileSystem) -> dict[str, JSONValue] | None:
-    """The parsed ``meta.json`` at *directory*, or ``None`` when there is none.
+    """The parsed Concept head at *directory*, or ``None`` when there is none.
 
     ``None`` means "not a Concept directory" (no marker file at all); an empty
-    or non-mapping marker parses to ``{}``. One read, no probe — the single
-    primitive the bundle walk uses to decide concept-ness *and* type together.
+    or non-mapping marker parses to ``{}``. One read per candidate, no probe —
+    the single primitive the bundle walk uses to decide concept-ness *and* type
+    together. Candidates are ``meta.json`` then whatever the host registered
+    (:func:`register_marker_filenames`), first hit wins.
     """
-    text = read_text_or_none(fs.join(directory, META_JSON_FILENAME), fs=fs)
-    return None if text is None else parse_meta_text(text)
+    for name in marker_filenames():
+        text = read_text_or_none(fs.join(directory, name), fs=fs)
+        if text is None:
+            continue
+        meta = parse_meta_text(text)
+        # A host's record may name the type by its *filename* instead of a
+        # ``type`` key — a molab workspace reconstructs its knowledge family
+        # that way (``observation.json`` → ``observation``). Fill it in so every
+        # reader downstream sees one typed head, without the record growing a
+        # second spelling of what its own name already says.
+        if name != META_JSON_FILENAME and "type" not in meta:
+            meta["type"] = name.removesuffix(".json")
+        return meta
+    return None
 
 
 def meta_type(meta: Mapping[str, object] | None) -> str:
@@ -421,8 +463,10 @@ __all__ = [
     "append_link",
     "concept_from_dir",
     "concept_type_of",
+    "marker_filenames",
     "meta_type",
     "parse_meta_text",
     "read_meta_dict",
     "read_text_or_none",
+    "register_marker_filenames",
 ]

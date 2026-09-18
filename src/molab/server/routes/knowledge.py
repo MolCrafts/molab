@@ -26,13 +26,14 @@ from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 
 from molab.server.dependencies import get_workspace
+from molab.workspace import Bundle, Workspace
 from molab.workspace.edges import EdgeRole
 
 from ..deps.served import active_served_key, assert_workspace_writable
 from ..schemas import MessageResponse
 
 if TYPE_CHECKING:
-    from molab.workspace import Bundle, Workspace
+    from molab.knowledge.concept import Concept
     from molab.workspace.assets.base import Asset
     from molab.workspace.concepts import Note
     from molab.workspace.experiment import Experiment
@@ -217,10 +218,10 @@ def _resolve_cards(bundle: Bundle, workspace: Workspace, note: Note) -> list[Ent
 
 def _resolve_edge_entity(
     bundle: Bundle, workspace: Workspace, target: str
-) -> Folder | Asset | None:
+) -> Concept | Folder | Asset | None:
     """Resolve a typed out-edge *target* path back to its live entity, or ``None``.
 
-    A Concept dir (``meta.json`` present) resolves to its typed ``Folder`` via
+    A Concept dir (``meta.json`` present) resolves to its typed ``Concept`` via
     the bundle; an asset record dir (``<scope>/assets/<asset_id>/``) resolves to
     its :class:`~molab.workspace.assets.base.Asset` via the manifest scanner.
     """
@@ -241,7 +242,7 @@ def _resolve_edge_entity(
     return None
 
 
-def _entity_rel_path(bundle: Bundle, entity: Folder | Asset) -> str | None:
+def _entity_rel_path(bundle: Bundle, entity: Concept | Folder | Asset) -> str | None:
     """A ``Folder`` entity's bundle-relative identity path; ``None`` for an ``Asset``."""
     from molab.workspace.assets.base import Asset
 
@@ -250,7 +251,7 @@ def _entity_rel_path(bundle: Bundle, entity: Folder | Asset) -> str | None:
     return bundle.rel_path(entity)
 
 
-def _entity_status(entity: Folder | Asset) -> str | None:
+def _entity_status(entity: Concept | Folder | Asset) -> str | None:
     """A ``Note`` entity's lifecycle status; ``None`` for anything else."""
     from molab.workspace.concepts import Note
 
@@ -259,7 +260,7 @@ def _entity_status(entity: Folder | Asset) -> str | None:
 
 def _resolve_embed_target(
     bundle: Bundle, workspace: Workspace, target_kind: str, target: str
-) -> Folder | Asset:
+) -> Concept | Folder | Asset:
     """Resolve an embed ``(target_kind, target)`` to a live ``Folder`` / ``Asset``.
 
     Mirrors :func:`_resolve_note`'s not-found → 404 policy: an unknown run /
@@ -276,7 +277,7 @@ def _resolve_embed_target(
                 status.HTTP_404_NOT_FOUND, f"reference {target!r} not found"
             ) from exc
 
-    entity: Folder | Asset | None
+    entity: Concept | Folder | Asset | None
     if target_kind == "run":
         entity = _find_run(workspace, target)
     elif target_kind == "experiment":

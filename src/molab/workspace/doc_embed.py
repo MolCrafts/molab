@@ -24,11 +24,12 @@ Missing preconditions (an ``Asset`` with no resolvable record dir, or no
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from os import PathLike
 from pathlib import Path
 
 from pydantic import BaseModel
+
+from molab.knowledge.concept import Concept
 
 from .assets.base import Asset, AssetScope
 from .bundle_index import extract_title
@@ -122,7 +123,7 @@ def asset_record_dir(asset: Asset, root: str | PathLike[str] | None) -> Path:
     return record_dir
 
 
-def default_role_for(target: Folder | Asset) -> EdgeRole:
+def default_role_for(target: Concept | Folder | Asset) -> EdgeRole:
     """Return the per-kind default embed :class:`EdgeRole` for *target*.
 
     All roles come from the frozen vocabulary (no new roles): a ``Run`` or
@@ -141,46 +142,52 @@ def default_role_for(target: Folder | Asset) -> EdgeRole:
     """
     if isinstance(target, Asset):
         return DEFAULT_EDGE_ROLE
+    if isinstance(target, Concept):
+        return _DEFAULT_ROLE_BY_KIND.get(target.type(), DEFAULT_EDGE_ROLE)
     if isinstance(target, Folder):
         return _DEFAULT_ROLE_BY_KIND.get(target.kind, DEFAULT_EDGE_ROLE)
-    raise TypeError(f"embed target must be a Folder or Asset, got {type(target).__name__}")
+    raise TypeError(f"embed target must be a Concept, Folder or Asset, got {type(target).__name__}")
 
 
 def resolve_embed_target(
-    target: Folder | Asset,
+    target: Concept | Folder | Asset,
     *,
     root: str | PathLike[str] | None,
-    pin: Callable[[Path], Folder],
-) -> Folder:
-    """Resolve *target* to the ``dst`` :class:`Folder` for an embed edge.
+) -> Path:
+    """Resolve *target* to the directory an embed edge points at.
 
-    A ``Folder`` target is its own ``dst``. An ``Asset`` target is resolved to
-    its in-tree record dir (:func:`asset_record_dir`) and wrapped in a thin
-    path-only ``Folder`` via *pin* (the bundle's ``_pinned_parent``), so the
-    asset payload is only pointed at.
+    A ``Concept`` or ``Folder`` target is its own directory. An ``Asset`` is
+    resolved to its in-tree record dir (:func:`asset_record_dir`), so the asset
+    payload is only ever *pointed at*, never copied or linked into the note.
+
+    It answers a path rather than a live object on purpose: an edge target is a
+    path (:func:`~molab.knowledge.concept.append_link` takes a Concept or a bare
+    path), so nothing here has to reconstruct the target's class — which is what
+    let this seam work across two storage families at once.
 
     Args:
-        target: The embed target (a ``Folder`` or an ``Asset``).
+        target: The embed target (a ``Concept``, ``Folder`` or ``Asset``).
         root: The workspace root, needed only to anchor an ``Asset``.
-        pin: Builds a thin ``Folder`` whose ``resolve()`` equals a given path.
 
     Returns:
-        The ``dst`` folder to hand to :func:`~molab.workspace.folder.append_link`.
+        The absolute directory the edge points at.
 
     Raises:
-        TypeError: If *target* is neither a ``Folder`` nor an ``Asset``.
+        TypeError: If *target* is none of the three.
         ValueError: If an ``Asset`` target has no *root* to anchor it.
         FileNotFoundError: If an ``Asset`` target has no on-disk record dir.
     """
     if isinstance(target, Asset):
-        return pin(asset_record_dir(target, root))
+        return asset_record_dir(target, root)
+    if isinstance(target, Concept):
+        return Path(str(target.path))
     if isinstance(target, Folder):
-        return target
-    raise TypeError(f"embed target must be a Folder or Asset, got {type(target).__name__}")
+        return Path(str(target.resolve()))
+    raise TypeError(f"embed target must be a Concept, Folder or Asset, got {type(target).__name__}")
 
 
 def summarize_entity(
-    target: Folder | Asset, *, root: str | PathLike[str] | None = None
+    target: Concept | Folder | Asset, *, root: str | PathLike[str] | None = None
 ) -> EntitySummary:
     """Project *target* to an :class:`EntitySummary` (a pure read; writes nothing).
 
@@ -214,10 +221,11 @@ def summarize_entity(
         # ...), not the abstract base -- read it the way ``assets.scan`` does.
         kind = str(getattr(target, "kind", ""))
         return EntitySummary(id=target.asset_id, kind=kind, title=target.name)
-    if isinstance(target, Folder):
+    if isinstance(target, (Concept, Folder)):
         meta = target.read_meta()
         raw_type = meta.get("type")
-        kind = str(raw_type) if raw_type is not None else target.kind
+        default_kind = target.type() if isinstance(target, Concept) else target.kind
+        kind = str(raw_type) if raw_type is not None else default_kind
         title: str | None = None
         if kind == REFERENCE_KIND:
             ref_title = meta.get("title")
@@ -225,8 +233,14 @@ def summarize_entity(
                 title = ref_title
         if title is None:
             title = extract_title(target.read_index()) or target.name
-        return EntitySummary(id=target.metadata.id, kind=kind, title=title)
-    raise TypeError(f"summary target must be a Folder or Asset, got {type(target).__name__}")
+        # A Concept *is* its path, so its directory name is its id; a Folder
+        # carries an id in its entity record that is deliberately not the
+        # directory name (a run dir is ``run-<id>``).
+        entity_id = target.name if isinstance(target, Concept) else target.metadata.id
+        return EntitySummary(id=entity_id, kind=kind, title=title)
+    raise TypeError(
+        f"summary target must be a Concept, Folder or Asset, got {type(target).__name__}"
+    )
 
 
 __all__ = [

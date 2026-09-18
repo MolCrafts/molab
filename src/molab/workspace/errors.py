@@ -24,6 +24,8 @@ intentionally not exported from ``molab.workspace``.
 
 from __future__ import annotations
 
+from molab.knowledge.errors import ConceptNotFoundError as _KnowledgeConceptNotFoundError
+
 
 class _WorkspaceLookupError(LookupError):
     """Base for ``*NotFoundError`` — strict getter miss."""
@@ -93,16 +95,13 @@ class KnowledgeExistsError(_WorkspaceConflictError):
     _entity_kind = "knowledge"
 
 
-class ConceptNotFoundError(_WorkspaceLookupError):
-    """Raised by ``Bundle.get(rel_path)`` when no Concept lives at that path.
-
-    A *Concept* is a directory that directly holds ``meta.json`` (the OKF
-    marker). A path that does not exist, or that exists but lacks ``meta.json``,
-    is not a Concept and raises this error. The bundle-relative path is carried
-    in the message so callers need not re-resolve it.
-    """
-
-    _entity_kind = "concept"
+#: Re-exported from the OKF library, where ``Bundle`` lives. The **same class
+#: object**, so every ``except ConceptNotFoundError`` site catches what the
+#: bundle actually raises no matter which module it imported from — two classes
+#: for one failure is how a 404 silently becomes a 500. It subclasses
+#: ``LookupError`` like the workspace ``*NotFoundError`` family, so the server's
+#: not-found mapping is unchanged.
+ConceptNotFoundError = _KnowledgeConceptNotFoundError
 
 
 class FolderMoveCollisionError(ValueError):

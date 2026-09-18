@@ -88,9 +88,17 @@ class TestKnowledgeRegistry:
         exp = project.add_experiment("e")
         project.add_knowledge("overview", cls=Plan, body="p\n")
         exp.add_knowledge("plan-book", cls=Plan, body="e\n")
-        found = [c for c in Bundle(ws.root).walk() if isinstance(c, Knowledge)]
+        # The bundle is the OKF view: it yields ``Concept``\ s typed by each
+        # directory's marker (``plan.json`` → ``plan``), not the workspace
+        # ``Folder`` subclass that wrote them.
+        found = [c for c in Bundle(ws.root).walk() if c.type() == "plan"]
         assert {c.name for c in found} == {"overview", "plan-book"}
-        assert {type(c).__name__ for c in found} == {"Plan"}
+        # Two views of one directory: the bundle hands back the OKF ``Concept``
+        # (the knowledge library owns no ``Folder``), while the workspace hands
+        # back the typed ``Plan``. Each family resolves its own class, which is
+        # what keeps a walk total over a tree that holds both.
+        assert {type(c).__name__ for c in found} == {"Concept"}
+        assert type(project.knowledge("overview")).__name__ == "Plan"
 
 
 class TestKnowledgeValidate:

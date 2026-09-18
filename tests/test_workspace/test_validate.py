@@ -88,10 +88,10 @@ class TestValidateWorkspace:
     def test_a_concept_mounted_anywhere_is_not_a_stray(self, tmp_path: Path) -> None:
         # Any Folder subclass may mount at any Folder; meta.json is what makes
         # a directory legitimate, not its name.
-        from molab.workspace import Note
+        from molab.workspace import knowledge_mount
 
         ws = _workspace(tmp_path)
-        ws.get_project("alpha").add_folder(Note(name="reading"))
+        knowledge_mount.mount_note(ws.get_project("alpha"), "reading")
 
         report = ws.validate()
         assert "layout.stray" not in {v.rule for v in report.errors}

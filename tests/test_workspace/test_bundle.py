@@ -18,7 +18,8 @@ from pathlib import Path
 
 import pytest
 
-from molab.workspace import Bundle, ConceptNotFoundError, Folder
+from molab.knowledge.concept import Concept
+from molab.workspace import Bundle, ConceptNotFoundError, Folder, knowledge_mount
 
 # A concept ``type`` deliberately NOT in the concept-type registry, so it
 # reconstructs as the base workspace ``Folder`` (vs. a knowledge subclass).
@@ -26,9 +27,10 @@ CONCEPT_KIND = "bundle.concept"
 
 
 def _concept(name: str, root_path: Path) -> Folder:
-    """Materialize a generic Concept dir (``meta.json`` only) on disk."""
+    """Materialize a generic Concept dir (metadata.json + meta.json) on disk."""
     folder = Folder(name=name, kind=CONCEPT_KIND, root_path=str(root_path))
-    folder.materialize()
+    folder.materialize()  # metadata.json — base Folder.from_disk reads it
+    folder.write_meta()  # meta.json — the OKF Concept marker
     return folder
 
 
@@ -41,9 +43,8 @@ def bundle(tmp_path: Path) -> Path:
         <root>/alpha/            (concept)
         <root>/alpha/beta/       (concept, nested)
         <root>/delta/            (concept)
-        <root>/delta/ops/        (sidecar — never a concept)
-        <root>/delta/ops/nested_fake/meta.json   (planted; must be skipped)
-        <root>/delta/_ops/       (legacy sidecar — also skipped)
+        <root>/delta/_ops/       (sidecar — never a concept)
+        <root>/delta/_ops/nested_fake/meta.json   (planted; must be skipped)
         <root>/group/            (plain org dir — NOT a concept)
         <root>/group/gamma/      (concept, under a non-concept dir)
         <root>/loose.txt         (loose file — never a concept)
@@ -55,13 +56,10 @@ def bundle(tmp_path: Path) -> Path:
     _concept("beta", root / "alpha")
     _concept("delta", root)
 
-    # ops sidecar (and the pre-rename _ops location) must never resurrect a concept.
-    for ops_name in ("ops", "_ops"):
-        ops_fake = root / "delta" / ops_name / "nested_fake"
-        ops_fake.mkdir(parents=True)
-        (ops_fake / "meta.json").write_text(
-            '{\n  "type": "bundle.concept",\n  "id": "nested_fake"\n}\n'
-        )
+    # _ops sidecar with a planted meta.json that must never resurrect a concept.
+    ops_fake = root / "delta" / "_ops" / "nested_fake"
+    ops_fake.mkdir(parents=True)
+    (ops_fake / "meta.json").write_text("type: bundle.concept\nid: nested_fake\n")
 
     # plain organizational dir (no meta.json) with a concept nested beneath it.
     (root / "group").mkdir()
@@ -79,8 +77,8 @@ class TestWalk:
 
     def test_skips_ops_sidecars_and_non_concept_dirs(self, bundle: Path) -> None:
         rels = {Bundle(bundle).rel_path(f) for f in Bundle(bundle).walk()}
-        # the ops sidecar (and legacy _ops) plus a planted meta.json never surface
-        assert "delta/ops/nested_fake" not in rels
+        # the _ops sidecar and a meta.json planted under it never surface …
+        assert not any(r.startswith("delta/_ops") for r in rels)
         assert "delta/_ops/nested_fake" not in rels
         # … a non-concept organizational dir is not itself a concept …
         assert "group" not in rels
@@ -96,11 +94,11 @@ class TestWalk:
 
         junk = root / "node_modules" / "pkg"
         junk.mkdir(parents=True)
-        (junk / "meta.json").write_text('{\n  "type": "bundle.concept",\n  "id": "pkg"\n}\n')
+        (junk / "meta.json").write_text("type: bundle.concept\nid: pkg\n")
 
         git_fake = root / ".git" / "objects"
         git_fake.mkdir(parents=True)
-        (git_fake / "meta.json").write_text('{\n  "type": "bundle.concept",\n  "id": "gitobj"\n}\n')
+        (git_fake / "meta.json").write_text("type: bundle.concept\nid: gitobj\n")
 
         rels = {Bundle(root).rel_path(f) for f in Bundle(root).walk()}
         assert rels == {"alpha"}
@@ -148,12 +146,8 @@ class TestWalk:
 
         stray = tmp_path / "some-agent" / "some-session"
         stray.mkdir(parents=True)
-        (stray / "meta.json").write_text(
-            '{\n  "type": "agent.session",\n  "id": "some-session"\n}\n'
-        )
-        (stray.parent / "meta.json").write_text(
-            '{\n  "type": "agent.agent",\n  "id": "some-agent"\n}\n'
-        )
+        (stray / "meta.json").write_text("type: agent.session\nid: some-session\n")
+        (stray.parent / "meta.json").write_text("type: agent.agent\nid: some-agent\n")
 
         names = [c.name for c in b.walk()]
         assert "findings" in names
@@ -161,11 +155,11 @@ class TestWalk:
 
 
 class TestGet:
-    def test_resolves_known_concept_to_its_folder(self, bundle: Path) -> None:
+    def test_resolves_known_concept_to_its_directory(self, bundle: Path) -> None:
         b = Bundle(bundle)
         f = b.get("alpha/beta")
-        assert isinstance(f, Folder)
-        assert Path(f.resolve()) == bundle / "alpha" / "beta"
+        assert isinstance(f, Concept)
+        assert f.path == bundle / "alpha" / "beta"
         assert b.rel_path(f) == "alpha/beta"
 
     def test_missing_or_non_concept_path_raises_concept_not_found(self, bundle: Path) -> None:
@@ -179,18 +173,16 @@ class TestGet:
 class TestPut:
     def test_materializes_concept_preserving_type(self, bundle: Path) -> None:
         b = Bundle(bundle)
-        # Unmounted concept: dir may exist without meta until put/materialize.
-        epsilon = Folder(name="epsilon", kind=CONCEPT_KIND, root_path=str(bundle))
-        Path(epsilon.path).mkdir(parents=True, exist_ok=True)
-        assert not (Path(epsilon.resolve()) / "meta.json").is_file()
+        epsilon = Concept(bundle / "epsilon", type=CONCEPT_KIND)
+        (bundle / "epsilon").mkdir()
+        assert not (epsilon.path / "meta.json").is_file()
         b.put(epsilon)
-        assert (Path(epsilon.resolve()) / "meta.json").is_file()
+        assert (epsilon.path / "meta.json").is_file()
         assert b.get("epsilon").read_meta()["type"] == CONCEPT_KIND
 
     def test_is_idempotent(self, bundle: Path) -> None:
         b = Bundle(bundle)
-        epsilon = Folder(name="epsilon", kind=CONCEPT_KIND, root_path=str(bundle))
-        epsilon.materialize()
+        epsilon = Concept(bundle / "epsilon", type=CONCEPT_KIND)
         b.put(epsilon)
         b.put(epsilon)  # second put must not raise nor duplicate
         rels = [b.rel_path(f) for f in b.walk()]
@@ -230,25 +222,29 @@ class TestLink:
 
 
 class TestTypedReconstruction:
-    def test_walk_reconstructs_registered_folder_subclasses(self, tmp_path: Path) -> None:
-        from molab.workspace import Experiment, Project, Run, Workspace
+    def test_walk_reports_workspace_entities_as_concepts_not_folders(self, tmp_path: Path) -> None:
+        # A workspace entity dir carries a meta.json, so a bundle walk sees it —
+        # but it comes back as a Concept carrying the declared type, never as the
+        # workspace Folder subclass. The two families share one open registry and
+        # are kept apart by ``resolve_concept_type(..., base=...)``; handing a
+        # Run to the Concept reconstructor would call a constructor that does not
+        # exist. Reading such a dir still works: type and body are on disk.
+        from molab.workspace import Run, Workspace
 
         ws = Workspace(root=tmp_path / "lab")
         ws.materialize()
-        proj = ws.add_project("p")
-        exp = proj.add_experiment("e")
-        run = exp.add_run(id="r")
+        run = ws.add_project("p").add_experiment("e").add_run(id="r")
 
         # the bundle root sits ABOVE the workspace concept dir
         by_rel = {Bundle(tmp_path).rel_path(f): f for f in Bundle(tmp_path).walk()}
 
-        proj_rel = f"lab/projects/{proj._name}"
-        exp_rel = f"{proj_rel}/experiments/{exp._name}"
-        run_rel = f"{exp_rel}/runs/{run._name}"
-        assert isinstance(by_rel["lab"], Workspace)
-        assert isinstance(by_rel[proj_rel], Project)
-        assert isinstance(by_rel[exp_rel], Experiment)
-        assert isinstance(by_rel[run_rel], Run)
+        assert by_rel["lab"].type() == "workspace.root"
+        assert by_rel["lab/projects/p"].type() == "workspace.project"
+        assert by_rel["lab/projects/p/experiments/e"].type() == "workspace.experiment"
+        run_concept = by_rel[f"lab/{Bundle(ws.root).rel_path(run)}"]
+        assert run_concept.type() == "workspace.run"
+        assert all(isinstance(c, Concept) for c in by_rel.values())
+        assert not isinstance(run_concept, Run)
 
 
 # ── nested-mount path-doubling regression ────────────────────────────────────
@@ -259,26 +255,24 @@ class TestTypedReconstruction:
 # that reanchor — get/link (resolution) and walk (enumeration) — are covered.
 
 KI_BODY_NEEDLE = "zwitterion-retrieval-needle"
+KI_REL = "projects/p/experiments/e/ki"
 _DOUBLED_SEGMENTS = ("projects/projects", "experiments/experiments", "runs/runs")
 
 
 class TestNestedMounts:
     def test_note_under_run_resolves_and_links_back_undoubled(self, tmp_path: Path) -> None:
         import os
-        from typing import cast
 
-        from molab.workspace import Note, Workspace
+        from molab.workspace import Workspace
 
         ws = Workspace(root=tmp_path / "lab")
         ws.materialize()
-        proj = ws.add_project("p")
-        exp = proj.add_experiment("e")
-        run = exp.add_run(id="r")
-        rec = cast("Note", run.add_folder(Note(parent=run, name="rec")))
+        run = ws.add_project("p").add_experiment("e").add_run(id="r")
+        rec = knowledge_mount.mount_note(run, "rec")
         real = os.path.normpath(str(rec.resolve()))
 
         b = Bundle(ws.resolve())
-        rel = f"projects/{proj._name}/experiments/{exp._name}/runs/{run._name}/rec"
+        rel = f"{b.rel_path(run)}/rec"
         got = b.get(rel)
 
         assert os.path.normpath(str(got.resolve())) == real
@@ -293,29 +287,79 @@ class TestNestedMounts:
     def test_knowledge_item_under_experiment_walks_once_undoubled(self, tmp_path: Path) -> None:
         import os
 
+        from molab.knowledge.knowledge_item import KnowledgeMeta, SourceRef
         from molab.workspace import Workspace
-        from molab.workspace.knowledge import Finding, SourceRef
 
         ws = Workspace(root=tmp_path / "lab")
         ws.materialize()
-        proj = ws.add_project("p")
-        exp = proj.add_experiment("e")
+        exp = ws.add_project("p").add_experiment("e")
         exp.add_run(id="r")
-        item = exp.add_knowledge(
-            "ki",
-            cls=Finding,
-            body=f"# Zwitterion finding\n\nthe {KI_BODY_NEEDLE} appears only in this body\n",
-            sources=[SourceRef(kind="run", ref="r")],
-            created_by="tests",
+        item, _ = knowledge_mount.mount_knowledge_item(exp, "ki")
+        item.write_knowledge_meta(
+            KnowledgeMeta(
+                kind="Finding",
+                sources=[SourceRef(kind="run", ref="r")],
+                created_by="tests",
+            )
         )
+        item.set_body(f"# Zwitterion finding\n\nthe {KI_BODY_NEEDLE} appears only in this body\n")
 
-        ki_rel = f"projects/{proj._name}/experiments/{exp._name}/knowledges/ki"
         b = Bundle(ws.resolve())
         rels = [b.rel_path(f) for f in b.walk()]
-        assert rels.count(ki_rel) == 1
+        assert rels.count(KI_REL) == 1
 
-        walked = next(f for f in b.walk() if b.rel_path(f) == ki_rel)
+        walked = next(f for f in b.walk() if b.rel_path(f) == KI_REL)
         resolved = os.path.normpath(str(walked.resolve()))
         assert resolved == os.path.normpath(str(item.resolve()))
         for doubled in _DOUBLED_SEGMENTS:
             assert doubled not in resolved
+
+
+class TestForeignFamilyArgumentsResolveToDirectories:
+    """A Bundle verb handed a workspace ``Folder`` must resolve it, never str() it.
+
+    ``Concept`` and ``Folder`` are unrelated classes, so every Bundle entry point
+    that takes "something that names a directory" has to funnel through one
+    coercion. Stringifying a Folder instead would not raise — it would silently
+    create a directory called ``<...Experiment object at 0x...>`` or write a link
+    pointing at one, which is far worse than a failure.
+    """
+
+    def test_create_note_under_a_workspace_folder(self, tmp_path: Path) -> None:
+        from molab.workspace import Workspace
+
+        ws = Workspace(root=tmp_path / "lab")
+        ws.materialize()
+        exp = ws.add_project("p").add_experiment("e")
+
+        note = Bundle(ws.resolve()).create_note("Analysis Notes", parent=exp)
+
+        assert "object at" not in str(note.path)
+        assert note.path == Path(str(exp.resolve())) / "analysis-notes"
+
+    def test_link_to_a_workspace_folder(self, tmp_path: Path) -> None:
+        from molab.workspace import Workspace
+
+        ws = Workspace(root=tmp_path / "lab")
+        ws.materialize()
+        run = ws.add_project("p").add_experiment("e").add_run(id="r")
+
+        bundle = Bundle(ws.resolve())
+        note = bundle.create_note("rec")
+        bundle.link(note, run, role="records")
+
+        assert note.typed_out_edges() == [(str(run.resolve()), "records")]
+
+    def test_rel_path_and_backlinks_accept_a_folder(self, tmp_path: Path) -> None:
+        from molab.workspace import Workspace
+
+        ws = Workspace(root=tmp_path / "lab")
+        ws.materialize()
+        run = ws.add_project("p").add_experiment("e").add_run(id="r")
+
+        bundle = Bundle(ws.resolve())
+        note = bundle.create_note("rec")
+        bundle.link(note, run, role="records")
+
+        assert bundle.rel_path(run) == f"projects/p/experiments/e/runs/{run.name}"
+        assert [bundle.rel_path(bl.source) for bl in bundle.backlinks(run)] == ["rec"]

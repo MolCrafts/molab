@@ -13,12 +13,13 @@ owned by ``test_bundle_index.py``.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from molab.workspace import Bundle, Note, Workspace
 from molab.workspace.folder import Folder
 
-# The spec's body-read cap (mirrors agent ops tools).
+# The spec's body-read cap (mirrors agent/loops/interactive/tools.py).
 MAX_BODY_SEARCH_BYTES = 512 * 1024
 
 # Needles chosen to never collide with a concept dir name or H1 title unless a
@@ -44,8 +45,8 @@ def _note(bundle_root: Path, name: str, index_md: str, *, under: str | None = No
     """
     host = bundle_root if under is None else bundle_root / under
     host.mkdir(parents=True, exist_ok=True)
-    note = Note(name=name, root_path=str(host))
-    note.materialize()  # meta.json concept identity
+    note = Note(host / name)
+    note.write_meta()  # meta.json — the OKF Concept marker (a Concept's authority)
     note.write_index(index_md)
     return note
 
@@ -92,17 +93,33 @@ class TestSearch:
         assert len(snippet) <= 160
         assert BODY_NEEDLE in snippet
 
-    def test_title_match_short_circuits_body_read(self, tmp_path: Path) -> None:
+    def test_title_match_is_case_insensitive_and_reports_the_title_field(
+        self, tmp_path: Path
+    ) -> None:
         root = _root(tmp_path)
         _note(root, "milestones", "# Solvation Milestones\n\nbody without the phrase\n")
 
-        # lower-case needle vs H1 case — matching is case-insensitive; the title
-        # match short-circuits, so "body" is NOT reported even though the H1 line
-        # is part of index.md.
+        # lower-case query vs H1 case — matching is case-insensitive.
         result = Bundle(root).search("solvation milestones")
 
         assert [hit.entry.path for hit in result.hits] == ["milestones"]
-        assert result.hits[0].matched_fields == ("title",)
+        assert "title" in result.hits[0].matched_fields
+        # "body" is also reported: ranking scores every field rather than
+        # short-circuiting on the first hit, and the H1 line is part of
+        # index.md. That is the honest answer — the terms really are in both.
+        assert "body" in result.hits[0].matched_fields
+
+    def test_title_match_outranks_a_body_only_match(self, tmp_path: Path) -> None:
+        # Field boosts must actually order results: a document whose *title* is
+        # the query beats one that merely mentions it in passing.
+        root = _root(tmp_path)
+        _note(root, "passing-mention", "# Unrelated\n\nwe also ran a solvation sweep here\n")
+        _note(root, "the-real-one", "# Solvation Sweep\n\nmethodology\n")
+
+        hits = Bundle(root).search("solvation sweep").hits
+
+        assert next(h.entry.path for h in hits) == "the-real-one"
+        assert hits[0].score > hits[1].score
 
     def test_body_needle_not_matched_when_include_body_false(self, tmp_path: Path) -> None:
         root = _root(tmp_path)
@@ -120,18 +137,8 @@ class TestSearch:
         folder.materialize()
         folder.write_meta()
         # tags live in meta.json (idiom of test_bundle_index.test_filter_by_tag)
-        import json
-
         (Path(folder.resolve()) / "meta.json").write_text(
-            json.dumps(
-                {
-                    "type": "bundle.concept",
-                    "id": "untitled-doc",
-                    "tags": ["zwitterion"],
-                },
-                indent=2,
-            )
-            + "\n"
+            json.dumps({"type": "bundle.concept", "id": "untitled-doc", "tags": ["zwitterion"]})
         )
         (Path(folder.resolve()) / "index.md").write_text("nothing relevant here\n")
 
@@ -152,11 +159,11 @@ class TestSearch:
     def test_scope_trailing_slash_matches_scope_root_itself(self, tmp_path: Path) -> None:
         ws = Workspace(tmp_path / "lab", name="lab")
         ws.materialize()
-        proj = ws.add_project("p")
+        ws.add_project("p")
 
-        result = Bundle(ws.resolve()).search(scope=f"projects/{proj._name}/")
+        result = Bundle(ws.resolve()).search(scope="projects/p/")
 
-        assert any(h.entry.path == f"projects/{proj._name}" for h in result.hits)
+        assert any(h.entry.path == "projects/p" for h in result.hits)
 
     def test_limit_undercount_sets_truncated(self, tmp_path: Path) -> None:
         root = _root(tmp_path)

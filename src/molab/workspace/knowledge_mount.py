@@ -120,13 +120,17 @@ def get_item(host: Folder, name: str) -> KnowledgeItem:
 
 
 def embed(
-    note: Note,
-    target: Folder | Concept | Asset,
+    note: Concept,
+    target: Concept | Folder | Asset,
     *,
     root: str | Path,
     role: EdgeRole | None = None,
 ) -> None:
     """Embed a live workspace entity into document *note* as one typed edge.
+
+    Any Concept can carry an edge (a ``Note`` narrating a run, a
+    ``KnowledgeItem`` citing its source), so *note* is typed at the family,
+    not at ``Note``.
 
     Writes a single typed markdown link through the sole edge-writer
     :func:`~molab.knowledge.concept.append_link` -- never a hand-built markdown
@@ -158,34 +162,8 @@ def embed(
     """
     from .doc_embed import default_role_for, resolve_embed_target
 
-    dst = resolve_embed_target(target, root=root, pin=_pinned_folder)  # ty: ignore[invalid-argument-type]
-    append_link(
-        note,
-        str(dst.resolve()),
-        role=role if role is not None else default_role_for(target),  # ty: ignore[invalid-argument-type]
-    )
-
-
-def _pinned_folder(directory: Path) -> Folder:
-    """A path-only ``Folder`` whose ``resolve()`` is *directory* exactly.
-
-    Built without ``__init__`` to bypass name/kind validation: its only job is
-    to name a directory for :func:`~molab.workspace.doc_embed.resolve_embed_target`,
-    which wraps an ``Asset``'s in-tree record dir this way so the payload is
-    only ever pointed at.
-    """
-    from molab.path import Path as MolPath
-
-    from .fs_local import LocalFileSystem
-
-    parent = Folder.__new__(Folder)
-    parent._parent = None
-    parent._name = directory.name
-    parent._kind = "bundle.parent"
-    parent._root_path = MolPath(str(directory.parent))  # type: ignore[assignment]
-    parent._disk_backend = LocalFileSystem()
-    parent._children_cache = {}
-    return parent
+    dst = resolve_embed_target(target, root=root)
+    append_link(note, dst, role=role if role is not None else default_role_for(target))
 
 
 def entity_summary(target: Folder | Concept | Asset, *, root: str | Path) -> EntitySummary:
@@ -197,4 +175,4 @@ def entity_summary(target: Folder | Concept | Asset, *, root: str | Path) -> Ent
     """
     from .doc_embed import summarize_entity
 
-    return summarize_entity(target, root=root)  # ty: ignore[invalid-argument-type]
+    return summarize_entity(target, root=root)

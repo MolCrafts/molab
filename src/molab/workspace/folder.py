@@ -20,6 +20,7 @@ from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, ClassVar, NamedTuple, TypeVar, cast
 
 from molab._typing import JSONValue
+from molab.knowledge.concept import register_marker_filenames
 from molab.knowledge.types import resolve_concept_type
 from molab.path import Path
 
@@ -95,6 +96,10 @@ def _folder_metadata_from_marker(
 
 
 _CORE_ENTITY_JSON = ("workspace.json", "project.json", "experiment.json", "run.json")
+# The four levels of the tree mark their own directories: each carries a
+# ``type`` and is the level's authoritative record, so ``molab.knowledge``
+# reads them as Concept heads instead of demanding a second ``meta.json``.
+register_marker_filenames(*_CORE_ENTITY_JSON)
 #: Entity filename → Folder subclass, filled by :func:`register_entity_class`.
 #: Knowledge reconstructs from the filename (no ``type`` field on disk).
 _ENTITY_FILE_TO_CLS: dict[str, type[Folder]] = {}
@@ -111,8 +116,16 @@ def entity_filename(cls: type) -> str:
 
 
 def register_entity_class(cls: type[F]) -> type[F]:  # noqa: UP047
-    """Register *cls* for reconstruction from its entity filename."""
-    _ENTITY_FILE_TO_CLS[entity_filename(cls)] = cls
+    """Register *cls* for reconstruction from its entity filename.
+
+    The same call declares that filename a Concept marker to
+    ``molab.knowledge``: a workspace entity carries its ``type`` in its own
+    entity record and writes no second ``meta.json``, so this is what lets a
+    bundle walk the entity tree without duplicating the record.
+    """
+    name = entity_filename(cls)
+    _ENTITY_FILE_TO_CLS[name] = cls
+    register_marker_filenames(name)
     return cls
 
 
