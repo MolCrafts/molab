@@ -10,7 +10,6 @@ _Approved 2026-09-23 — knowledge depends on workspace (one way); `.ref(knowled
 
 | # | Spec | Commit theme |
 |---|---|---|
-| 03 | [knowledge-crossref-03-verbs](knowledge-crossref-03-verbs.md) | knowledge takes over the write verbs; `PLAN_BOOK_NAME` |
 | 04 | [knowledge-crossref-04-services](knowledge-crossref-04-services.md) | services owns the projection seam; run_failure redirect |
 | 05 | [knowledge-crossref-05-harness](knowledge-crossref-05-harness.md) | harness redirects; the one Folder type table |
 | 06 | [knowledge-crossref-06-server](knowledge-crossref-06-server.md) | server redirects; consumes the projection |
