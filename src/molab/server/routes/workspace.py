@@ -161,9 +161,15 @@ def get_workspace_context(
     caller via optional query params and is never persisted. ``/runs`` remains the
     specialized detailed run view (richer per-execution rows); this endpoint is the
     canonical *structure* and stays consistent with it.
+
+    The ``knowledge`` field comes from the single projection producer
+    (:mod:`molab.services.knowledge_context`) — the server assembles no producer
+    of its own, so this route and the CLI report the same rows.
     """
+    from molab.services.knowledge_context import context_with_knowledge
+
     focus = ContextFocus(project_id=project_id, experiment_id=experiment_id, run_id=run_id)
-    context = workspace.context(focus=focus)
+    context = context_with_knowledge(workspace, focus=focus)
     return WorkspaceContextResponse.from_context(context)
 
 
@@ -176,9 +182,10 @@ def get_workspace_copilot(workspace=Depends(get_workspace)) -> WorkspaceSummaryR
     names the operation it would perform in ``op``, and whoever executes it owns
     the policy for what that operation requires.
     """
+    from molab.services.knowledge_context import context_with_knowledge
     from molab.workspace.copilot import summarize_workspace
 
-    summary = summarize_workspace(workspace.context())
+    summary = summarize_workspace(context_with_knowledge(workspace))
     return WorkspaceSummaryResponse.from_summary(summary)
 
 

@@ -2,12 +2,12 @@
 
 Notes (``Note``) and literature (``Literature``) are knowledge
 Concept ``Folder``s mounted anywhere under the workspace, reached through the
-:class:`~molab.workspace.bundle.Bundle` façade. These routes expose them over
+:class:`~molab.knowledge.bundle.Bundle` façade. These routes expose them over
 HTTP for the UI's Knowledge tab; the legacy per-scope ``/api/library`` surface
 was removed in wsokf-11, so this is the greenfield read API for OKF knowledge.
 
 The mutating document endpoints (create / edit-body / rename-move / delete /
-backlinks / export) are **thin delegators** to the workspace-owned ``Bundle``
+backlinks / export) are **thin delegators** to the knowledge-owned ``Bundle``
 verbs (``create_note`` / ``rename_note`` / ``move_note`` / ``delete_note`` /
 ``backlinks`` / ``export_markdown``) — CLI and server call the same verbs, so
 the CRUD logic lives in one place (the Python==UI invariant), never re-built at
@@ -25,10 +25,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 
+from molab.knowledge.bundle import Bundle
+from molab.knowledge.concepts import Note
+from molab.knowledge.edges import EdgeRole
 from molab.server.dependencies import get_workspace
 from molab.workspace import Workspace
-from molab.workspace.bundle import Bundle
-from molab.workspace.edges import EdgeRole
 
 from ..deps.served import active_served_key, assert_workspace_writable
 from ..schemas import MessageResponse
@@ -36,7 +37,6 @@ from ..schemas import MessageResponse
 if TYPE_CHECKING:
     from molab.knowledge.concept import Concept
     from molab.workspace.assets.base import Asset
-    from molab.workspace.concepts import Note
     from molab.workspace.experiment import Experiment
     from molab.workspace.folder import Folder
     from molab.workspace.run import Run
@@ -164,7 +164,7 @@ def _require_writable(request: Request) -> None:
 def _note_summary(bundle: Bundle, note: Concept) -> NoteSummary:
     """Build a :class:`NoteSummary` for *note* (identity + excerpt + tags/status).
 
-    ``tags``/``status`` come from the 05 :class:`~molab.workspace.note_meta.NoteMeta`
+    ``tags``/``status`` come from the 05 :class:`~molab.knowledge.note_meta.NoteMeta`
     helpers (an untagged note reads back ``[]`` / ``"active"``).
     """
     body = note.read() or ""
@@ -187,7 +187,7 @@ def _note_detail(
     Enriches the response with ``cards`` — one :class:`EntityCard` per typed
     out-edge that resolves to a live entity (Run / Experiment / Reference / Note
     / Asset), each projected by the 05 entity-summary resolver
-    (:meth:`~molab.workspace.bundle.Bundle.entity_summary`).
+    (:func:`~molab.knowledge.embed.summarize_entity`).
     """
     return NoteDetailResponse(
         name=note.name,
@@ -204,12 +204,14 @@ def _resolve_cards(bundle: Bundle, workspace: Workspace, note: Concept) -> list[
     Each edge target is resolved back to its live entity; an edge that resolves
     to no entity is skipped (it cannot be summarized as a card).
     """
+    from molab.knowledge.embed import summarize_entity
+
     cards: list[EntityCard] = []
     for edge in note.links():
         entity = _resolve_edge_entity(bundle, workspace, edge.target)
         if entity is None:
             continue
-        summary = bundle.entity_summary(entity)
+        summary = summarize_entity(entity, root=workspace.root)
         cards.append(
             EntityCard(
                 kind=summary.kind,
@@ -231,8 +233,8 @@ def _resolve_edge_entity(
     the bundle; an asset record dir (``<scope>/assets/<asset_id>/``) resolves to
     its :class:`~molab.workspace.assets.base.Asset` via the manifest scanner.
     """
+    from molab.knowledge.errors import ConceptNotFoundError
     from molab.workspace.assets.scan import get_asset
-    from molab.workspace.errors import ConceptNotFoundError
 
     abs_path = _StdPath(str(target))
     try:
@@ -259,12 +261,10 @@ def _entity_rel_path(bundle: Bundle, entity: Concept | Folder | Asset) -> str | 
 
 def _entity_status(entity: Concept | Folder | Asset) -> str | None:
     """A ``Note`` entity's lifecycle status; ``None`` for anything else."""
-    from molab.workspace.concepts import Note
-
     return entity.status() if isinstance(entity, Note) else None
 
 
-def _resolve_embed_target(
+def _resolve_embed_entity(
     bundle: Bundle, workspace: Workspace, target_kind: str, target: str
 ) -> Concept | Folder | Asset:
     """Resolve an embed ``(target_kind, target)`` to a live ``Folder`` / ``Asset``.
@@ -273,7 +273,7 @@ def _resolve_embed_target(
     experiment / asset / reference (or a target that resolves to no entity) is a
     404, never a silent miss.
     """
-    from molab.workspace.errors import ConceptNotFoundError
+    from molab.knowledge.errors import ConceptNotFoundError
 
     if target_kind == "reference":
         try:
@@ -316,8 +316,7 @@ def _find_experiment(workspace: Workspace, experiment_id: str) -> Experiment | N
 
 def _resolve_note(bundle: Bundle, path: str) -> Note:
     """Resolve *path* to a :class:`Note`, mapping miss / non-note to a 404."""
-    from molab.workspace.concepts import Note
-    from molab.workspace.errors import ConceptNotFoundError
+    from molab.knowledge.errors import ConceptNotFoundError
 
     try:
         concept = bundle.get(path)
@@ -369,7 +368,7 @@ def entity_backlinks(
     it. 404 on an unresolvable entity — never an empty-list fallback for a
     bad ref (no-fallback law).
     """
-    from molab.workspace.bundle_index import extract_title
+    from molab.knowledge.bundle_index import extract_title
     from molab.workspace.errors import (
         ExperimentNotFoundError,
         ProjectNotFoundError,
@@ -430,7 +429,7 @@ def search_knowledge(
 ) -> KnowledgeSearchResponse:
     """Search the workspace knowledge tree — wraps ``Knowledge.search``."""
     from molab.knowledge import Knowledge
-    from molab.workspace.knowledge import parse_knowledge_class
+    from molab.knowledge.concepts import parse_knowledge_class
 
     cls = parse_knowledge_class(type) if type else None
     result = Knowledge(workspace.root).search(q, of=cls, tag=tag)
@@ -559,22 +558,23 @@ def embed_doc(
     path: str = Query(..., description="The source note Concept's bundle-relative path."),
     workspace: Workspace = Depends(get_workspace),
 ) -> EmbedResponse:
-    """Embed a live entity into a document — delegates to ``Bundle.embed``.
+    """Embed a live entity into a document — delegates to the knowledge edge writer.
 
     Resolves the source ``Note`` (404 on miss / non-note) and the target entity
     (``run`` / ``experiment`` / ``asset`` / ``reference``; 404 on miss), then
-    writes ONE typed provenance edge via ``Bundle.embed`` — the same verb the CLI
+    writes ONE typed provenance edge via ``Bundle.link`` at the target resolved
+    by :func:`~molab.knowledge.embed.resolve_embed_target` — the same verb the CLI
     uses, so the edge-writing logic is never re-built at the HTTP boundary.
     """
-    from molab.workspace.doc_embed import default_role_for
+    from molab.knowledge.embed import default_role_for, resolve_embed_target
 
     bundle = _bundle(workspace)
     note = _resolve_note(bundle, path)
-    target = _resolve_embed_target(bundle, workspace, body.target_kind, body.target)
-    # Resolve the effective role the same way ``Bundle.embed`` will, so the
+    target = _resolve_embed_entity(bundle, workspace, body.target_kind, body.target)
+    # Resolve the effective role the same way the edge writer will, so the
     # echoed response reports the edge that was actually written.
     role = body.role if body.role is not None else default_role_for(target)
-    bundle.embed(note, target, role=role)
+    bundle.link(note, resolve_embed_target(target, root=workspace.root), role=role)
     return EmbedResponse(srcPath=path, target=body.target, role=role)
 
 
@@ -655,7 +655,7 @@ def get_backlinks(
     workspace: Workspace = Depends(get_workspace),
 ) -> BacklinksResponse:
     """Return every Concept linking at *path* — delegates to ``Bundle.backlinks``."""
-    from molab.workspace.errors import ConceptNotFoundError
+    from molab.knowledge.errors import ConceptNotFoundError
 
     bundle = _bundle(workspace)
     try:

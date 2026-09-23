@@ -818,7 +818,8 @@ def harvest_run_route(
 ) -> dict[str, str]:
     """Harvest a terminal run into sourced Knowledge under its experiment."""
     from molab.knowledge import Finding, Observation, Report
-    from molab.workspace.knowledge import parse_knowledge_class
+    from molab.knowledge.concepts import parse_knowledge_class
+    from molab.knowledge.harvest import harvest_run
 
     harvest_ok = {"Finding": Finding, "Observation": Observation, "Report": Report}
     experiment = _get_experiment(workspace, project_id, experiment_id)
@@ -833,7 +834,8 @@ def harvest_run_route(
             detail=f"{body.cls} is not a harvest target",
         )
     try:
-        item = run.harvest(
+        item = harvest_run(
+            run,
             parse_knowledge_class(body.cls),
             narrative=body.narrative,
             created_by=body.created_by,

@@ -77,6 +77,17 @@ class TestHarvestRunRoute:
         assert response.json()["name"]
 
 
+class TestHarvestRunRouteRedirect:
+    """The harvest route parses + writes through ``molab.knowledge``."""
+
+    def test_harvest_imports_knowledge_parse(self) -> None:
+        src = inspect.getsource(run_routes.harvest_run_route)
+        assert "molab.knowledge" in src
+        assert "harvest_run(" in src
+        assert "molab.workspace.knowledge" not in src
+        assert "run.harvest(" not in src
+
+
 class TestAnalyzeRunFailureRoute:
     def test_no_failure_analysis_identifier(self) -> None:
         src = inspect.getsource(run_routes.analyze_run_failure_route)
@@ -102,4 +113,8 @@ class TestAnalyzeRunFailureRoute:
             for i in __import__("molab.knowledge", fromlist=["Knowledge"]).Knowledge(ws.root).walk()
             if type(i) is Report
         )
-        assert (item.path / "report.json").is_file()
+        # A Knowledge document is a file (``knowledges/<name>.md``), never a
+        # directory carrying a ``report.json`` head.
+        assert item.path.is_file()
+        assert item.path.name == f"{item.name}.md"
+        assert item.name.startswith("failure-analysis-")
