@@ -6,11 +6,22 @@ One line per **live** spec. `/mol:spec` adds entries; `/mol:impl` ticks the spec
 
 ## knowledge-crossref (chain)
 
-_Approved 2026-09-23 — knowledge depends on workspace (one way); `.ref(knowledge)` cross-reference; workspace stops knowing knowledge. Design-gated by `architect` design-mode (two passes); orchestrator decisions recorded in the chain's Designs._
+_Closed 01–12 on `feat/knowledge-crossref` (2026-09-23) — knowledge depends on workspace (one way); `.ref(knowledge)` cross-reference; workspace stops knowing knowledge. Design-gated by `architect` design-mode (two passes)._
 
 | # | Spec | Commit theme |
 |---|---|---|
-| 12 | [knowledge-crossref-12-docs](knowledge-crossref-12-docs.md) | public docs rewritten |
+| 01 | knowledge-crossref-01-ref | `Concept.ref` cross-reference |
+| 02 | knowledge-crossref-02-owner | `folder(host, name, of)` + host construction |
+| 03 | knowledge-crossref-03-verbs | write verbs move into `molab.knowledge` |
+| 04 | knowledge-crossref-04-services | services own the knowledge projection |
+| 05 | knowledge-crossref-05-harness | harness redirect + Folder type table |
+| 06 | knowledge-crossref-06-server | server redirect |
+| 07 | knowledge-crossref-07-cli | CLI harvest redirect |
+| 08 | knowledge-crossref-08-sever-writes | sever the workspace write verbs |
+| 09 | knowledge-crossref-09-sever-types | keep only the workspace Folder type table |
+| 10 | knowledge-crossref-10-sever-reads | shed the knowledge-shaped reads |
+| 11 | knowledge-crossref-11-guards | guards + CLAUDE.md law flip |
+| 12 | knowledge-crossref-12-docs | public docs rewritten |
 
 ## knowledge-unify (chain)
 

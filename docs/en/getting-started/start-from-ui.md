@@ -207,8 +207,8 @@ both keeping the same run id:
   reads (`?fresh=true` / CLI `--rerun --fresh`).
 
 **Export** downloads the run directory as a zip. **Harvest** (terminal
-runs only) writes a sourced KnowledgeItem under the experiment from a
-short narrative. Experiment **Sweep** creates one pending run per value
+runs only) writes a sourced knowledge document — a `Finding`, `Report`,
+`Plan` or `Observation` — under the experiment from a short narrative. Experiment **Sweep** creates one pending run per value
 on a single parameter axis; **Curate** starts an NL curation task
 (approvals via the top-bar bell when suspended).
 

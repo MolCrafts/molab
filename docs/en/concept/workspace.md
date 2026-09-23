@@ -34,15 +34,13 @@ Profiles (`molcfg.yaml`) live at the boundary between workflow execution and wor
 workspace_root/
 ├── workspace.json                ← entity metadata (UUIDv7 `id`)
 ├── index.md                      ← workspace narrative; markdown links are the graph
-├── knowledges/<slug>/            ← optional workspace-level notes / literature
-│   ├── note.json                 ← class-named head (no meta.json, no type/kind)
-│   └── index.md
+├── knowledges/<name>.md          ← optional workspace-level knowledge (one markdown file)
 └── projects/<project-slug>/
     ├── project.json
-    ├── knowledges/<slug>/        ← Finding / Plan / Note / …
+    ├── knowledges/<name>.md      ← Finding / Plan / Note / …
     └── experiments/<experiment-slug>/
         ├── experiment.json
-        ├── knowledges/<slug>/
+        ├── knowledges/<name>.md
         └── runs/<key=value_…>/   ← directory name is the parameters
             ├── run.json          ← logical definition only
             └── executions/e01/   ← one attempt; `e01` is its id
@@ -54,7 +52,7 @@ workspace_root/
                 └── jobs/
 ```
 
-There is no children-index file. `ls` is the index. Knowledge is class-named json + `index.md`.
+There is no children-index file. `ls` is the index. Built-in knowledge lands as one markdown file per document — `knowledges/<name>.md`, with the Knowledge class named in the file's `class:` frontmatter. `.md` is the form that is written; `.mdx` is accepted on read only. The format belongs to `molab.knowledge`, which owns every knowledge document; the workspace treats it as a file in its tree and never names knowledge itself.
 
 ## Next
 

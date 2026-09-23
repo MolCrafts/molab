@@ -37,7 +37,7 @@ nav = [
             { "参数扫描" = "guide/sweeps.md" },
             { "工作区架构" = "guide/workspace-architecture.md" },
             { "资产" = "guide/assets.md" },
-            { "笔记与文献" = "guide/knowledge.md" },
+            { "知识与交叉引用" = "guide/knowledge.md" },
             { "工作流持久化" = "guide/workflow-persistence.md" },
             { "运行配置" = "guide/run-profiles.md" }
         ]},

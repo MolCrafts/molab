@@ -38,7 +38,7 @@ nav = [
             { "Parameter Sweeps" = "guide/sweeps.md" },
             { "Workspace Architecture" = "guide/workspace-architecture.md" },
             { "Assets" = "guide/assets.md" },
-            { "Notes and Literature" = "guide/knowledge.md" },
+            { "Knowledge and Cross-References" = "guide/knowledge.md" },
             { "Workflow Persistence" = "guide/workflow-persistence.md" },
             { "Run Profiles" = "guide/run-profiles.md" }
         ]},

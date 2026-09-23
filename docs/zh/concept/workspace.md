@@ -34,15 +34,13 @@
 workspace_root/
 ├── workspace.json                ← 实体元数据（UUIDv7 `id`）
 ├── index.md                      ← 工作区叙述；markdown 链接就是图
-├── knowledges/<slug>/            ← 可选的工作区级笔记 / 文献
-│   ├── note.json                 ← 类名头文件（没有 meta.json，没有 type/kind）
-│   └── index.md
+├── knowledges/<name>.md          ← 可选的工作区级知识（一个 markdown 文件）
 └── projects/<project-slug>/
     ├── project.json
-    ├── knowledges/<slug>/        ← Finding / Plan / Note / …
+    ├── knowledges/<name>.md      ← Finding / Plan / Note / …
     └── experiments/<experiment-slug>/
         ├── experiment.json
-        ├── knowledges/<slug>/
+        ├── knowledges/<name>.md
         └── runs/<key=value_…>/   ← 目录名就是参数
             ├── run.json          ← 只有逻辑定义
             └── executions/e01/   ← 一次尝试；`e01` 就是它的 id
@@ -54,7 +52,7 @@ workspace_root/
                 └── jobs/
 ```
 
-没有 children-index 文件。`ls` 就是索引。知识是类名 json + `index.md`。
+没有 children-index 文件。`ls` 就是索引。内置知识每份文档落成一个 markdown 文件 —— `knowledges/<name>.md`，知识类名写在文件的 `class:` frontmatter 里。`.md` 是落盘形态；`.mdx` 只在读取时被接受。格式归 `molab.knowledge` 所有，它拥有每一份知识文档；工作区只把它当作树里的一个文件，自身从不提及 knowledge。
 
 ## 下一步
 

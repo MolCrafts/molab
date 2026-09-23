@@ -1,48 +1,44 @@
-# 知识
+# Knowledge and Cross-References
 
-工作区不只记录计算产出了什么，也记录为什么跑、结论是什么、依据哪些文献。知识就是目录树：路径即身份，类名 json 是头，`index.md` 是叙事。没有第二套笔记数据库，文件系统就是数据库。
+A project's knowledge is not a bag of independent documents. It is the **index
+of the experiment knowledge beneath it** — the findings, reports, observations
+and notes written under the project's experiments — held together by the
+**plans** (`Plan`) and **summaries** (`Report` / `Finding`) that belong to those
+experiments. The workspace records what was computed and why; knowledge records
+what it *means*.
 
-## 心智模型
+There is no second notes database and no central index: the filesystem is the
+database. A document is a markdown file, and its path is its identity.
 
-按路径构造文档：
+## Where a document lives
 
-```python
-from molab.knowledge import Note
+Built-in knowledge lands as **one markdown file** under a `knowledges/`
+container. A project's index sits beside its experiments; each experiment's
+conclusions sit under the experiment:
 
-note = Note("/data/group/wiki/cooling-rate")
-note.write("# Cooling rate\n\nQuench at 10 K/ns.\n")
+```text
+lab/projects/polymer-cg/
+├── knowledges/tg-index.md                   ← a project's index of its experiments
+└── experiments/solvation-sweep/
+    └── knowledges/tg-result.md              ← one experiment's finding
 ```
 
-磁盘上是 `note.json` + `index.md`。知识目录没有 `meta.json`，头里也没有 `type` / `kind`。读回用 `Knowledge.open(path)`，由文件名还原子类。
+`.md` is the form molab writes; a `.mdx` file is accepted on read only.
 
-`Knowledge` 的六个子类：
+Everything that is not narrative lives in the file's YAML frontmatter, above all
+the **`class`** that says which Knowledge class the document is:
 
-| 类 | 头文件 | 用途 |
-|---|---|---|
-| `Note` | `note.json` | 自由笔记 |
-| `Literature` | `literature.json` | 文献；书目字段在头里；PDF 只记路径，从不拷贝 |
-| `Report` | `report.json` | 成文分析，包括失败 Run 的分析 |
-| `Finding` | `finding.json` | 收获的科学结论 |
-| `Plan` | `plan.json` | 实验 / 项目计划书 |
-| `Observation` | `observation.json` | 观察或既定选择 |
-
-打开任意目录树的方式相同——组 wiki、git 仓库、工作区：
-
-```python
-from molab.knowledge import Knowledge, Note
-
-tree = Knowledge("/data/group/wiki")
-for item in tree.walk():
-    print(type(item).__name__, item.path)
-for hit in tree.search("cooling", of=Note).hits:
-    print(hit.entry.title)
+```yaml
+---
+class: Finding
+tags: [thermal]
+---
 ```
 
-`index.md` 里的 Markdown 链接**就是**知识图。六个类都用 `cite` 写下这条边：`finding.cite(literature)`。谁引用了某篇，从树上的 `links()` 重算，没有单独的 Backlink 类型。
+## Constructing and finding a document
 
-## 写到实验下
-
-工作区通过 `write_knowledge` / `add_knowledge` 把文档挂在 `<host>/knowledges/<slug>/`。身份仍是路径；Folder 父级只决定目录。
+Construction names a **host** and a **name**; the host is a workspace `Folder`,
+and the class derives its own path from them:
 
 ```python
 from molab.knowledge import Note
@@ -50,52 +46,169 @@ from molab.workspace import Workspace
 
 ws = Workspace("./lab", name="Lab")
 ws.materialize()
-exp = ws.add_project("polymer-cg").add_experiment("solvation-sweep")
-note = exp.add_knowledge("analysis-notes", Note, "# Analysis Notes\n")
+experiment = ws.add_project("polymer-cg").add_experiment("solvation-sweep")
+
+note = Note(experiment, "Analysis Notes")   # binds the path; touches no disk
+note.write("# Analysis Notes\n\nQuench at 10 K/ns.\n")
 ```
 
-```text
-lab/projects/polymer-cg/experiments/solvation-sweep/knowledges/analysis-notes/
-├── note.json
-└── index.md
-```
+`Note(experiment, "Analysis Notes").path` is
+`<experiment>/knowledges/analysis-notes.md`, and that is where `write` puts the
+bytes. Bind a name and nothing touches disk until the first write.
 
-## 文献
+Always construct a **concrete** class. The `Knowledge` base is a directory-form
+Concept, so `Knowledge(host, name)` would land a directory rather than a markdown
+file.
+
+**A path is only how you find a document.** To open one you already have — from
+a search, from `ls`, from a link in another document — use `Knowledge.open`,
+which reads the class back from the frontmatter:
 
 ```python
-from molab.knowledge import Literature, ReferenceMeta
+from molab.knowledge import Knowledge, Note
 
-lit = Literature(exp.resolve() / "knowledges" / "frenkel-smit-2002")
-lit.write(
-    "Frenkel & Smit, *Understanding Molecular Simulation* (2002).\n",
-    ReferenceMeta(
-        title="Understanding Molecular Simulation",
-        authors=("Daan Frenkel", "Berend Smit"),
-        year=2002,
-        pdf_path="/home/me/Zotero/storage/ABCD1234/frenkel-smit.pdf",
-    ),
+doc = Knowledge.open(experiment.resolve() / "knowledges" / "analysis-notes.md")
+assert type(doc) is Note                      # the `class:` frontmatter is honoured
+assert doc.read().startswith("# Analysis Notes")
+```
+
+`molab.knowledge.location.folder(host, name, of)` is that same derivation on its
+own — `of` is the class, and the return is the **landed path**:
+
+```python
+from molab.knowledge.location import folder
+
+assert Note(experiment, "Analysis Notes").path == folder(experiment, "Analysis Notes", Note)
+```
+
+## The six classes
+
+Every class lands one markdown file; the `class:` frontmatter names which one:
+
+| Class | `class:` frontmatter | Purpose |
+|---|---|---|
+| `Note` | `class: Note` | A free note |
+| `Literature` | `class: Literature` | A reference; bib fields in frontmatter, PDFs pointed at, never copied |
+| `Report` | `class: Report` | A written-up analysis, including a failed run's |
+| `Finding` | `class: Finding` | A harvested scientific outcome |
+| `Plan` | `class: Plan` | An experiment's or project's plan book |
+| `Observation` | `class: Observation` | A recorded observation or standing choice |
+
+`Report`, `Finding`, `Plan` and `Observation` require at least one `SourceRef`
+at construction — they are sourced documents; `Note` and `Literature` do not.
+
+## Cross-reference is what ties knowledge together
+
+The body of a document is its narrative, and the markdown links in that body
+**are** the knowledge graph. They are written with `.ref`, which takes another
+**Knowledge** — a document object, or the on-disk path that locates one:
+
+```python
+from molab.knowledge import Finding, SourceRef
+
+finding = Finding(experiment, "Tg Result", sources=[SourceRef(kind="run", ref="run-0001")])
+finding.write("# Tg Result\n\nTg rose with cooling rate.\n")
+
+note.ref(finding)          # by object…
+note.ref(finding.path)     # …or by path — the same edge either way
+```
+
+`.ref` **never** takes a project / experiment / run coordinate: not a `Folder`,
+not a run id, not params. Those are not knowledge, and `.ref` rejects them with
+`TypeError`. To point at a run or an experiment, first find the document that
+records it, then `.ref` that document:
+
+```python
+run_record = Knowledge.open(experiment.resolve() / "knowledges" / "run-0001.md")
+note.ref(run_record)
+```
+
+The edges are recomputable from the tree — nothing is stored twice, and there is
+no separate backlink type:
+
+```python
+for edge in note.links():
+    print(edge.role, edge.target)     # e.g. references …/knowledges/tg-result.md
+```
+
+`.cite` is the looser sibling: it delegates a Knowledge target to `.ref`, and
+otherwise links the path it is handed as given.
+
+## Writing into a workspace
+
+Two module-level verbs write knowledge into a workspace tree, both hosted by a
+`Folder`:
+
+- `mount_note(host, name, *, body="")` — idempotently mount a `Note`; a repeat
+  call never truncates an existing body.
+- `write_knowledge(host, *, name, of, sources, created_by, text, cite=(), title="")`
+  — write a sourced document, idempotent on `name`.
+
+`harvest_run` turns a finished run's outcome into knowledge under the run's
+experiment:
+
+```python
+from molab.knowledge import Finding, harvest_run
+
+finding = harvest_run(
+    run, of=Finding,
+    narrative="Tg rose with cooling rate.",
+    created_by="lin",
 )
 ```
 
-`molab knowledge import-zotero` 从本地 Zotero 库写成同样的 `Literature` 目录（只读；PDF 只记路径）。
+Only a **terminal** run (`succeeded` / `failed` / `cancelled`) can be harvested,
+and `narrative` must be non-empty — a harvest is an interpretation, not an
+archive; the raw record already lives in `run.json` and the run's artifacts.
+`created_by` is a required keyword argument. `of` is typically `Finding`,
+`Observation` or `Report`.
 
-## 收获与失败分析
+## Layering
 
-对终态 Run 的收获写成 `Finding`（或 `Observation` / `Report`）。Plan 和 Note 是产品类，但不是收获目标。
+`molab.knowledge` depends on `molab.workspace` — a document needs a host folder
+to know where to land — and that dependency is one-way: `molab.workspace` never
+names knowledge.
 
-```console
-$ molab runs harvest PROJECT EXP RUN "Tg rose with cooling rate." --of Finding
-$ molab runs analyze-failure PROJECT EXP RUN
-OK Report: failure-analysis-<run-id>
-```
+## Searching a group wiki
 
-## 搜组 wiki
+Knowledge need not live in a workspace. A lab wiki is a directory of documents;
+register it as a named source and search it by keyword:
 
 ```console
 $ molab knowledge init /data/group/wiki --title "Lab notes"
 $ molab knowledge sources add lab-wiki /data/group/wiki
 $ molab knowledge search "cooling rate for Tg"
-$ molab knowledge read lab-wiki:lab-notes
+$ molab knowledge read lab-wiki:tg-index
 ```
 
-`Knowledge(root).search` 是对 title/path/body 的 BM25F。中文同时切 unigram 和相邻 bigram，没有分词器。这不是 RAG。
+Retrieval is **BM25F** over title, tags, path and body, and hits from several
+sources are fused by reciprocal rank fusion. Chinese text is tokenized into
+unigrams *and* adjacent bigrams — no segmenter, no dictionary, no embeddings.
+This is keyword ranking, not RAG.
+
+In Python a registered source opens as a tree handle, whose `walk()` yields its
+documents and whose `search(...)` ranks them:
+
+```python
+from molab.knowledge.sources import open_source
+
+wiki = open_source("lab-wiki")
+for doc in wiki.walk():
+    print(type(doc).__name__, doc.path)
+for hit in wiki.search("cooling").hits:
+    print(hit.entry.title)
+```
+
+**Known gap.** A markdown document is walked when it sits under a `knowledges/`
+container — the layout a host workspace gives it. The cross-source search behind
+`molab knowledge search` (`search_sources`, built on `Bundle`) is older than the
+file-document form: it descends directories only and does not see a
+`knowledges/<name>.md` file, so today a wiki of loose `.md` files is best read
+document-by-document with `Knowledge.open(path)` rather than by cross-source
+search.
+
+## Next
+
+- For the workspace the knowledge lands in, see [Workspace Model](../concept/workspace.md).
+- For the concrete Python API around records and assets, see [Workspace API](workspace-api.md).
+- For reusable data and provenance, see [Assets and Reproducibility](../concept/assets-and-reproducibility.md).
