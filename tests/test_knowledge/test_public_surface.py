@@ -37,6 +37,14 @@ REQUIRED_PUBLIC: tuple[str, ...] = (
     "SourceRef",
     "KnowledgeNotFoundError",
     "folder",
+    # The write verbs a workspace host needs, plus the layout name and the
+    # class-name entry point the redirects (04-07) import from here.
+    "write_knowledge",
+    "mount_note",
+    "normalize_sources",
+    "harvest_run",
+    "parse_knowledge_class",
+    "PLAN_BOOK_NAME",
 )
 
 SHIM_NOT_PUBLIC: tuple[str, ...] = (

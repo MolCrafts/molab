@@ -179,6 +179,44 @@ class Observation(_SourcedKnowledge):
     """A recorded observation or standing choice."""
 
 
+#: The one class-name → Knowledge subclass table on the knowledge side. The
+#: keys are the names callers already spell in a config, a CLI flag or an agent
+#: tool payload.
+_PRODUCTS: dict[str, type[Concept]] = {
+    "Note": Note,
+    "Literature": Literature,
+    "Report": Report,
+    "Finding": Finding,
+    "Plan": Plan,
+    "Observation": Observation,
+}
+
+
+def parse_knowledge_class(name: str) -> type[Concept]:
+    """Map a class name onto a Knowledge subclass (including condemned aliases).
+
+    The single class-name entry point on the knowledge side: a config file, a
+    CLI flag or an agent-tool payload spells a Knowledge class by name, and this
+    turns that name into the class object it denotes.
+
+    Args:
+        name: A class name — ``"Note"`` / ``"Literature"`` / ``"Report"`` /
+            ``"Finding"`` / ``"Plan"`` / ``"Observation"``.
+
+    Returns:
+        The Knowledge subclass *name* denotes.
+
+    Raises:
+        ValueError: If *name* matches none of the six classes; the message lists
+            the candidates.
+    """
+    if name in _PRODUCTS:
+        return _PRODUCTS[name]
+    raise ValueError(
+        f"unknown knowledge class {name!r}; expected one of: {', '.join(sorted(_PRODUCTS))}"
+    )
+
+
 register_marker_filenames(*sorted(KNOWLEDGE_HEAD_FILES))
 
 __all__ = [
@@ -190,4 +228,5 @@ __all__ = [
     "Observation",
     "Plan",
     "Report",
+    "parse_knowledge_class",
 ]

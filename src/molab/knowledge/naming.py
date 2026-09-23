@@ -20,6 +20,11 @@ KNOWLEDGE_HEAD_FILES: frozenset[str] = frozenset(
 KNOWLEDGE_MD_SUFFIXES: tuple[str, ...] = (".md", ".mdx")
 KNOWLEDGE_CONTAINER = "knowledges"
 
+#: Slug of the OKF ``Plan`` Concept that carries an experiment's plan book.
+#: A layout name belongs to the layer that owns the layout, so it lives here and
+#: not in the workspace that mounts it.
+PLAN_BOOK_NAME = "plan-book"
+
 
 def is_knowledge_file(path: str) -> bool:
     """Whether *path* is a Knowledge markdown file."""

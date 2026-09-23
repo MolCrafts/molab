@@ -104,8 +104,9 @@ class NamesDirectory(Protocol):
     """Anything that names a directory by answering ``resolve()``.
 
     The structural half of the workspace ``Folder`` contract, declared here so
-    the path-only bundle verbs can *say* they accept one without the OKF library
-    importing the storage family above it. Duck-typing was already the runtime
+    the path-only bundle verbs can *say* they accept one without a module-level
+    import of the storage family above it (``molab.workspace`` is reachable only
+    lazily, from inside a function body). Duck-typing was already the runtime
     behaviour (see :func:`_dir_of`); this makes it checkable.
     """
 
@@ -121,9 +122,10 @@ def _dir_of(target: DirTarget) -> str:
 
     Some verbs (:meth:`Bundle.rel_path`, :meth:`Bundle.backlinks`) need nothing
     but a directory, and are legitimately called with a workspace ``Folder`` — a
-    different storage family the OKF library must not import. Rather than force
-    callers to unwrap, accept anything that *names* a directory: a ``Concept``, a
-    path, or an object exposing ``resolve()`` (the ``Folder`` contract).
+    different storage family this layer imports only lazily, inside a function
+    body. Rather than force callers to unwrap, accept anything that *names* a
+    directory: a ``Concept``, a path, or an object exposing ``resolve()`` (the
+    ``Folder`` contract).
 
     A ``str`` / ``PathLike`` is taken as-is **before** the duck-typed branch, so
     a ``pathlib.Path`` is never silently symlink-resolved by its own

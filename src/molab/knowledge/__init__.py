@@ -1,4 +1,4 @@
-"""``molab.knowledge`` — path-identity knowledge, usable with no workspace.
+"""``molab.knowledge`` — path-identity knowledge, and the verbs that write it.
 
 A document is a markdown file under ``knowledges/``: YAML frontmatter names
 the class (``class: Finding``), the rest is the narrative. Path is identity::
@@ -25,25 +25,44 @@ and the bare ``<slug>/`` directory otherwise.
 
 What lives here: the concept-type registry, the Knowledge handle, the six
 classes, ``SourceRef``, typed edges, the single ``folder(host, name, of)``
-location derivation, BM25F retrieval, named wiki sources, and the read-only
-Zotero importer.
+location derivation, BM25F retrieval, named wiki sources, the read-only Zotero
+importer, and the write verbs a workspace host needs — ``write_knowledge`` /
+``mount_note`` / ``normalize_sources`` (the sourced writer and the note mount),
+``harvest_run`` (a terminal Run's outcome as knowledge), ``parse_knowledge_class``
+and ``PLAN_BOOK_NAME``. Importing this package also imports
+:mod:`molab.knowledge.hooks`, so the ``knowledge.created`` history emitter is
+live from the first import.
 
-What does not: anything that knows about runs, experiments or assets. Mounting a
-document *into* a molab workspace is the workspace layer's job
-(``write_knowledge``), and creation events reach that layer through the
-inversion seam in :mod:`molab.knowledge.hooks`.
+**Dependency direction.** ``molab.knowledge`` depends on ``molab.workspace`` —
+the write verbs take a workspace ``Folder`` host and ``harvest_run`` takes a
+``Run`` — and that dependency is one-way. Every ``molab.workspace`` import lives
+**inside a function body** or in an ``if TYPE_CHECKING:`` block (which never
+executes), because ``molab/__init__.py`` eagerly loads ``molab.workspace``: a
+module-level back-import would make this package import a cycle. A host that
+cannot supply a git history or an id simply observes nothing.
 """
 
+from . import hooks as _hooks
 from .bundle_index import (
     SearchHit,
     SearchResult,
 )
 from .concept import Knowledge
-from .concepts import Finding, Literature, Note, Observation, Plan, Report
+from .concepts import (
+    Finding,
+    Literature,
+    Note,
+    Observation,
+    Plan,
+    Report,
+    parse_knowledge_class,
+)
 from .edges import Edge, EdgeRole
 from .errors import KnowledgeNotFoundError
+from .harvest import harvest_run
 from .knowledge_item import SourceKind, SourceRef
 from .location import folder
+from .naming import PLAN_BOOK_NAME
 from .reference_meta import ReferenceMeta
 from .sources import (
     KnowledgeScope,
@@ -54,9 +73,11 @@ from .sources import (
     resolve_source,
     search_sources,
 )
+from .write import mount_note, normalize_sources, write_knowledge
 from .zotero import ZoteroItem, read_zotero_items
 
 __all__ = [
+    "PLAN_BOOK_NAME",
     "Edge",
     "EdgeRole",
     "Finding",
@@ -79,7 +100,12 @@ __all__ = [
     "WikiSource",
     "ZoteroItem",
     "folder",
+    "harvest_run",
+    "mount_note",
+    "normalize_sources",
+    "parse_knowledge_class",
     "read_zotero_items",
     "resolve_source",
     "search_sources",
+    "write_knowledge",
 ]
