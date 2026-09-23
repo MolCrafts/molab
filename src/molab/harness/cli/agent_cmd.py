@@ -320,13 +320,11 @@ def agent_harvest(
         str, typer.Option("--agent-name", help="Agent folder name (loop name).")
     ] = "agent",
     workspace: Annotated[Path | None, typer.Option("--workspace")] = None,
-    kind: Annotated[str, typer.Option("--kind")] = "Observation",
     created_by: Annotated[str, typer.Option("--created-by")] = "cli",
 ) -> None:
-    """Harvest an on-disk agent session into a KnowledgeItem on the workspace."""
+    """Harvest an on-disk agent session into a Finding on the workspace."""
     from molab.cli._common import rprint
     from molab.harness.agent.harvest import harvest_session
-    from molab.workspace.knowledge import parse_knowledge_class
 
     root = (workspace or Path.cwd()).resolve()
     try:
@@ -337,7 +335,6 @@ def agent_harvest(
     try:
         item = harvest_session(
             sess,
-            cls=parse_knowledge_class(kind),
             narrative=narrative,
             created_by=created_by,
             host=ws,

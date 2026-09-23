@@ -32,9 +32,9 @@ from molab.ids import slugify
 from molab.knowledge.concept import Concept, append_link
 from molab.knowledge.concepts import Note
 from molab.knowledge.edges import EdgeRole
-from molab.knowledge.knowledge_item import KnowledgeItem
 
 from .folder import Folder
+from .knowledge import KNOWLEDGE_CONTAINER
 
 if TYPE_CHECKING:
     from .assets.base import Asset
@@ -44,9 +44,6 @@ __all__ = [
     "concept_dir",
     "embed",
     "entity_summary",
-    "get_item",
-    "has_item",
-    "mount_knowledge_item",
     "mount_note",
 ]
 
@@ -54,10 +51,9 @@ __all__ = [
 def concept_dir(host: Folder, name: str) -> Path:
     """The absolute directory a Concept named *name* occupies under *host*.
 
-    *name* is slugified at this boundary (as the ``Bundle`` create verbs do), so
-    callers may pass a human name.
+    Knowledge lives at ``<host>/knowledges/<slug>/``.
     """
-    return Path(str(host.resolve())) / (slugify(name) or name)
+    return Path(str(host.resolve())) / KNOWLEDGE_CONTAINER / (slugify(name) or name)
 
 
 def _mount(host: Folder, name: str, cls: type[Concept]) -> tuple[Concept, bool]:
@@ -70,7 +66,10 @@ def _mount(host: Folder, name: str, cls: type[Concept]) -> tuple[Concept, bool]:
     fs = host._disk()
     created = not fs.is_dir(str(directory))
     concept = cls(directory, fs=fs)
-    concept.write_meta()
+    if hasattr(concept, "write"):
+        concept.write()
+    else:
+        concept.write_meta()
     return concept, created
 
 
@@ -87,36 +86,8 @@ def mount_note(host: Folder, name: str, *, body: str = "") -> Note:
     """
     note, _created = _mount(host, name, Note)
     if body:
-        note.set_body(body)
+        note.write(body)
     return cast("Note", note)
-
-
-def mount_knowledge_item(host: Folder, name: str) -> tuple[KnowledgeItem, bool]:
-    """Idempotently mount a :class:`KnowledgeItem` under *host*.
-
-    Returns:
-        ``(item, newly_created)`` — the flag drives one-shot event emission at
-        the caller, so it must be read before any write (it is).
-    """
-    item, created = _mount(host, name, KnowledgeItem)
-    return cast("KnowledgeItem", item), created
-
-
-def has_item(host: Folder, name: str) -> bool:
-    """Whether a :class:`KnowledgeItem` named *name* is already mounted under *host*."""
-    return host._disk().is_dir(str(concept_dir(host, name)))
-
-
-def get_item(host: Folder, name: str) -> KnowledgeItem:
-    """The :class:`KnowledgeItem` named *name* under *host*.
-
-    Raises:
-        FileNotFoundError: If no Concept directory is mounted at that name.
-    """
-    directory = concept_dir(host, name)
-    if not host._disk().is_dir(str(directory)):
-        raise FileNotFoundError(f"no knowledge item {name!r} under {host.resolve()}")
-    return KnowledgeItem(directory, fs=host._disk())
 
 
 def embed(
@@ -135,13 +106,13 @@ def embed(
     Writes a single typed markdown link through the sole edge-writer
     :func:`~molab.knowledge.concept.append_link` -- never a hand-built markdown
     string. *target* is a :class:`Folder` (a ``Run`` / ``Experiment`` /
-    ``ReferenceConcept`` / ``Note``) or an
+    ``Literature`` / ``Note``) or an
     :class:`~molab.workspace.assets.base.Asset` (resolved to its in-tree record
     dir ``<scope_dir>/assets/<asset_id>/`` and pointed at, never copied).
 
     With *role* ``None`` the per-kind default is used
     (:func:`~molab.workspace.doc_embed.default_role_for`): a ``Run`` /
-    ``Experiment`` -> ``records``, a ``ReferenceConcept`` -> ``cites``, any
+    ``Experiment`` -> ``records``, a ``Literature`` -> ``cites``, any
     ``Asset`` (or other) -> ``references``; all from the frozen
     :class:`~molab.knowledge.edges.EdgeRole` vocabulary.
 

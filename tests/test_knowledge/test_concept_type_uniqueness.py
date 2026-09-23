@@ -156,10 +156,6 @@ def _claims() -> dict[str, list[str]]:
 #: scan exists to catch.
 _TWO_FAMILY_CLAIMS = {
     "note.note": {"molab.knowledge.concepts::Note", "molab.workspace.concepts::Note"},
-    "reference.reference": {
-        "molab.knowledge.concepts::ReferenceConcept",
-        "molab.workspace.concepts::ReferenceConcept",
-    },
 }
 
 

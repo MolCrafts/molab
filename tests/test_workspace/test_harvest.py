@@ -21,15 +21,13 @@ from typing import Any
 
 import pytest
 
+from molab.knowledge import Knowledge as KnowledgeHandle
 from molab.knowledge.concept import Concept
-from molab.workspace import Bundle
-from molab.workspace.folder import entity_filename
 from molab.workspace.knowledge import (
-    Decision,
-    FailureAnalysis,
     Finding,
     Knowledge,
     Observation,
+    Report,
 )
 
 _NARRATIVE = "Mobility rises monotonically with temperature."
@@ -48,28 +46,22 @@ def _fail(run: Any, message: str) -> None:
 
 
 def _harvest(run: Any, **overrides: Any) -> Knowledge:
+    of = overrides.pop("of", Observation)
     kwargs: dict[str, Any] = {
-        "cls": Observation,
         "narrative": _NARRATIVE,
         "created_by": "roykid",
     }
     kwargs.update(overrides)
-    return run.harvest(**kwargs)
+    return run.harvest(of, **kwargs)
 
 
 #: The knowledge family, as the harvest writes it.
-_KNOWLEDGE_CLASSES = (Observation, Decision, Finding, FailureAnalysis)
+_KNOWLEDGE_CLASSES = (Observation, Finding, Report)
 
 
 def _knowledge_items(workspace: Any) -> list[Concept]:
-    r"""Every harvested knowledge Concept in the tree, through the bundle.
-
-    The bundle is the OKF view: it yields ``Concept``\ s, typed by the marker
-    each directory carries, so a knowledge item is recognised by its ``type()``
-    rather than by the workspace ``Folder`` subclass that wrote it.
-    """
-    kinds = {entity_filename(cls).removesuffix(".json") for cls in _KNOWLEDGE_CLASSES}
-    return [c for c in Bundle(workspace.root).walk() if c.type() in kinds]
+    """Every harvested knowledge document under the workspace root."""
+    return [c for c in KnowledgeHandle(workspace.root).walk() if type(c) in _KNOWLEDGE_CLASSES]
 
 
 class TestHarvestSucceededRun:
@@ -93,13 +85,14 @@ class TestHarvestSucceededRun:
         _succeed(run)
 
         item = _harvest(run)
-        meta = item.metadata
+        import json
 
+        payload = json.loads((item.path / "observation.json").read_text())
         assert type(item) is Observation
-        pairs = {(s.kind, s.ref) for s in meta.sources}
+        pairs = {(s["kind"], s["ref"]) for s in payload["sources"]}
         assert ("run", run.id) in pairs
         assert ("experiment", experiment.id) in pairs
-        assert meta.created_by == "roykid"
+        assert payload["created_by"] == "roykid"
 
     def test_body_renders_narrative_params_status_and_results(self, experiment: Any) -> None:
         """The body renders the caller's interpretation plus the run's params,
@@ -108,7 +101,7 @@ class TestHarvestSucceededRun:
         run = experiment.add_run(params={"temperature": 350})
         _succeed(run)
 
-        body = _harvest(run, results={"mobility": 0.42}).body()
+        body = _harvest(run, results={"mobility": 0.42}).read()
 
         assert _NARRATIVE in body
         assert "temperature" in body
@@ -123,7 +116,7 @@ class TestHarvestSucceededRun:
         run = experiment.add_run(params={"temperature": 350})
         _succeed(run)
 
-        body = _harvest(run, results={"trace": "x" * 1000}).body()
+        body = _harvest(run, results={"trace": "x" * 1000}).read()
 
         assert "x" * 500 not in body, "a 1000-char value must not land verbatim"
         assert "x" * 100 in body, "a truncated prefix of the value must survive"
@@ -134,7 +127,7 @@ class TestHarvestSucceededRun:
         run = experiment.add_run(params={"temperature": 350})
         _succeed(run)
 
-        edges = _harvest(run).typed_out_edges()
+        edges = _harvest(run).links()
 
         assert any(e.role == "derived_from" and str(e.target).endswith(run._name) for e in edges), (
             edges
@@ -180,8 +173,8 @@ class TestHarvestIdempotency:
         assert second.name == first.name
         items = _knowledge_items(workspace)
         assert len(items) == 1, [i.name for i in items]
-        assert "Second take" in items[0].body()
-        assert "First take." not in items[0].body()
+        assert "Second take" in items[0].read()
+        assert "First take." not in items[0].read()
 
     def test_explicit_name_allows_a_second_harvest(self, workspace: Any, experiment: Any) -> None:
         run = experiment.add_run(params={"temperature": 350})
@@ -203,9 +196,9 @@ class TestHarvestFailedRun:
 
         body = _harvest(
             run,
-            cls=FailureAnalysis,
+            of=Report,
             narrative="Timestep too large for this thermostat.",
-        ).body()
+        ).read()
 
         assert "failed" in body
         assert "thermostat diverged" in body

@@ -102,20 +102,18 @@ class RunCreateRequest(ApiModel):
 
 
 class RunHarvestRequest(ApiModel):
-    """Harvest a terminal run into a sourced KnowledgeItem under its experiment."""
+    """Harvest a terminal run into sourced Knowledge under its experiment."""
 
-    kind: Literal[
-        "Observation",
-        "Decision",
-        "Assumption",
-        "Constraint",
+    model_config = ConfigDict(extra="forbid")
+
+    cls: Literal[
+        "Note",
+        "Literature",
+        "Report",
         "Finding",
-        "FailureAnalysis",
-        "ProtocolNote",
-        "ParameterRationale",
-        "OpenQuestion",
         "Plan",
-    ] = Field(..., description="Knowledge class name")
+        "Observation",
+    ] = Field(default="Finding", description="Knowledge class name")
     narrative: str = Field(..., description="Non-empty interpretation")
     created_by: str = Field(default="ui", description="Author string")
     name: str | None = Field(default=None, description="Optional KnowledgeItem name")
@@ -125,7 +123,7 @@ class RunHarvestRequest(ApiModel):
 
 
 class RunAnalyzeFailureRequest(ApiModel):
-    """Analyze a failed run into a sourced FailureAnalysis KnowledgeItem."""
+    """Analyze a failed run into a sourced Report."""
 
     narrative: str | None = Field(
         default=None,

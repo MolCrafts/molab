@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
 import { buildEmptySnapshot } from "@/app/state/api";
-import { fetchSlices, type SnapshotSlice } from "@/app/state/useWorkspaceState";
+import { fetchSlices, type SnapshotSlice, slicesForView } from "@/app/state/useWorkspaceState";
 import type { WorkspaceSnapshot } from "@/app/types";
 
 interface Deferred<T> {
@@ -15,6 +15,29 @@ const deferred = <T>(): Deferred<T> => {
   });
   return { promise, resolve };
 };
+
+describe("slicesForView", () => {
+  it("does not fetch the file tree or agent sessions on knowledge", () => {
+    expect(slicesForView("knowledge")).toEqual(["workspaces"]);
+  });
+
+  it("loads the file tree only on Files", () => {
+    expect(slicesForView("workspace")).toEqual(["workspaces", "workspaceTree"]);
+  });
+
+  it("loads projects for the projects explorer", () => {
+    expect(slicesForView("projects")).toEqual(["workspaces", "projectsList"]);
+    expect(slicesForView("compare")).toEqual(["workspaces", "projectsList"]);
+  });
+
+  it("loads agent sessions only on Agent", () => {
+    expect(slicesForView("agent")).toEqual(["workspaces", "agentSessions"]);
+  });
+
+  it("keeps dashboard off the file tree", () => {
+    expect(slicesForView("dashboard")).toEqual(["workspaces"]);
+  });
+});
 
 describe("workspace bootstrap slice plan", () => {
   it("starts independent slices together and waits before loading projects", async () => {

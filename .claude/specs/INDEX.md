@@ -4,6 +4,40 @@ One line per **live** spec. `/mol:spec` adds entries; `/mol:impl` ticks the spec
 
 ## Open
 
+## knowledge-crossref (chain)
+
+_Approved 2026-09-23 — knowledge depends on workspace (one way); `.ref(knowledge)` cross-reference; workspace stops knowing knowledge. Design-gated by `architect` design-mode (two passes); orchestrator decisions recorded in the chain's Designs._
+
+| # | Spec | Commit theme |
+|---|---|---|
+| 01 | [knowledge-crossref-01-ref](knowledge-crossref-01-ref.md) | `.ref(knowledge)` + `cite` delegation |
+| 02 | [knowledge-crossref-02-owner](knowledge-crossref-02-owner.md) | `folder(host, name, of)` + `Knowledge(host, name)` |
+| 03 | [knowledge-crossref-03-verbs](knowledge-crossref-03-verbs.md) | knowledge takes over the write verbs; `PLAN_BOOK_NAME` |
+| 04 | [knowledge-crossref-04-services](knowledge-crossref-04-services.md) | services owns the projection seam; run_failure redirect |
+| 05 | [knowledge-crossref-05-harness](knowledge-crossref-05-harness.md) | harness redirects; the one Folder type table |
+| 06 | [knowledge-crossref-06-server](knowledge-crossref-06-server.md) | server redirects; consumes the projection |
+| 07 | [knowledge-crossref-07-cli](knowledge-crossref-07-cli.md) | CLI redirects; consumes the projection |
+| 08 | [knowledge-crossref-08-sever-writes](knowledge-crossref-08-sever-writes.md) | workspace sheds the knowledge write verbs |
+| 09 | [knowledge-crossref-09-sever-types](knowledge-crossref-09-sever-types.md) | workspace keeps only its own type table |
+| 10 | [knowledge-crossref-10-sever-reads](knowledge-crossref-10-sever-reads.md) | workspace sheds the knowledge-shaped reads |
+| 11 | [knowledge-crossref-11-guards](knowledge-crossref-11-guards.md) | guards + CLAUDE.md law flip |
+| 12 | [knowledge-crossref-12-docs](knowledge-crossref-12-docs.md) | public docs rewritten |
+
+## knowledge-unify (chain)
+
+_Closed 01–08 on `feat/knowledge-unify` (2026-09-20) — Knowledge + six classes; class-named json; no Bundle / meta.json as product._
+
+| # | Spec | Commit theme |
+|---|---|---|
+| 01 | knowledge-unify-01-core | Knowledge + six types; class-named json |
+| 02 | knowledge-unify-02-workspace | workspace consumes 01 |
+| 03 | knowledge-unify-03-services | analyze_run_failure writes Report |
+| 04 | knowledge-unify-04-cli | CLI Knowledge(root); harvest Finding/Observation/Report |
+| 05 | knowledge-unify-05-server | server walk/search/open; harvest of= |
+| 06 | knowledge-unify-06-harness | harness digest + records on six classes |
+| 07 | knowledge-unify-07-ui | web plugin six classes + generate:api |
+| 08 | knowledge-unify-08-cutover | delete shims, docs, grep-clean |
+
 ## persist-one (chain)
 
 _One persist format: JSONL metrics in artifacts/, no ops/ sidecar, no harness.sqlite._

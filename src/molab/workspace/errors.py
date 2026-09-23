@@ -25,6 +25,7 @@ intentionally not exported from ``molab.workspace``.
 from __future__ import annotations
 
 from molab.knowledge.errors import ConceptNotFoundError as _KnowledgeConceptNotFoundError
+from molab.knowledge.errors import KnowledgeNotFoundError as _KnowledgeNotFoundError
 
 
 class _WorkspaceLookupError(LookupError):
@@ -83,16 +84,8 @@ class RunExistsError(_WorkspaceConflictError):
     _entity_kind = "run"
 
 
-class KnowledgeNotFoundError(_WorkspaceLookupError):
-    """Raised by ``Project.knowledge`` / ``Experiment.knowledge`` when missing."""
-
-    _entity_kind = "knowledge"
-
-
-class KnowledgeExistsError(_WorkspaceConflictError):
-    """Raised by a strict-create knowledge factory when the item exists."""
-
-    _entity_kind = "knowledge"
+#: Same object as ``molab.knowledge.errors.KnowledgeNotFoundError``.
+KnowledgeNotFoundError = _KnowledgeNotFoundError
 
 
 #: Re-exported from the OKF library, where ``Bundle`` lives. The **same class
@@ -124,7 +117,6 @@ __all__ = [
     "ExperimentExistsError",
     "ExperimentNotFoundError",
     "FolderMoveCollisionError",
-    "KnowledgeExistsError",
     "KnowledgeNotFoundError",
     "ProjectExistsError",
     "ProjectNotFoundError",

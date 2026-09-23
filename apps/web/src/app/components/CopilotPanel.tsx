@@ -46,7 +46,7 @@ const ActionRow = ({
         return;
       }
       const ok = window.confirm(
-        `Analyze failure for run ${run.id}? Writes a FailureAnalysis knowledge item.`,
+        `Analyze failure for run ${run.id}? Writes a Report knowledge item.`,
       );
       if (!ok) return;
       setBusy(true);

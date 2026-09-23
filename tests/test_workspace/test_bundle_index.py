@@ -14,7 +14,8 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
-from molab.workspace import Bundle, Folder, Workspace
+from molab.workspace import Folder, Workspace
+from molab.workspace.bundle import Bundle
 from molab.workspace.bundle_index import INDEX_JSON_FILENAME, INDEX_MD_FILENAME
 
 FIXED = datetime(2026, 6, 21, 12, 0, 0, tzinfo=UTC)

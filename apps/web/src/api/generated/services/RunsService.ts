@@ -553,7 +553,7 @@ export class RunsService {
     }
     /**
      * Harvest Run Route
-     * Harvest a terminal run into a sourced KnowledgeItem under its experiment.
+     * Harvest a terminal run into sourced Knowledge under its experiment.
      * @param projectId
      * @param experimentId
      * @param runId
@@ -628,7 +628,7 @@ export class RunsService {
     }
     /**
      * Analyze Run Failure Route
-     * Analyze a failed run into a sourced FailureAnalysis KnowledgeItem.
+     * Analyze a failed run into a sourced Report.
      *
      * Shares :func:`molab.services.run_failure.analyze_run_failure` with the CLI
      * (close-loop-02). Deterministic narrative when ``narrative`` is omitted.
@@ -1272,7 +1272,7 @@ export class RunsService {
     }
     /**
      * Harvest Run Route
-     * Harvest a terminal run into a sourced KnowledgeItem under its experiment.
+     * Harvest a terminal run into sourced Knowledge under its experiment.
      * @param projectId
      * @param experimentId
      * @param runId
@@ -1353,7 +1353,7 @@ export class RunsService {
     }
     /**
      * Analyze Run Failure Route
-     * Analyze a failed run into a sourced FailureAnalysis KnowledgeItem.
+     * Analyze a failed run into a sourced Report.
      *
      * Shares :func:`molab.services.run_failure.analyze_run_failure` with the CLI
      * (close-loop-02). Deterministic narrative when ``narrative`` is omitted.

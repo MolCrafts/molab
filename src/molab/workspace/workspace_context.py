@@ -25,16 +25,16 @@ Design invariants:
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel
 
 from molab._typing import JSONValue
+from molab.knowledge import Finding, Literature, Note, Observation, Plan, Report
 
 from .assets.scan import scan_assets
 from .bundle_index import extract_title
-from .concepts import Note, ReferenceConcept
-from .knowledge import Knowledge
 from .models import RunStatus
 from .run_heartbeat import is_alive_stale
 
@@ -316,25 +316,17 @@ def assemble_workspace_context(
             )
 
     knowledge: list[KnowledgeRef] = []
-    # Same filesystem as the workspace (remote pin / local) — never bare Bundle(root).
-    bundle = workspace.as_bundle()
-    for concept in bundle.walk():
-        # Knowledge is the free-form Note, the literature ReferenceConcept, and the
-        # typed source-attributed KnowledgeItem (P0.4) — the canonical home for
-        # auto-derived knowledge. Entity folders (Project/Experiment/Run) are excluded.
-        if isinstance(concept, Note | ReferenceConcept | Knowledge):
-            if isinstance(concept, Knowledge):
-                type_name = type(concept).__name__
-                raw_id = concept.metadata.id
-            else:
-                meta = concept.read_meta()
-                type_name = str(meta.get("type", ""))
-                raw_id = meta.get("id")
+    from molab.knowledge import Knowledge as KnowledgeHandle
+
+    for concept in KnowledgeHandle(workspace.root).walk():
+        if isinstance(concept, Note | Literature | Report | Finding | Plan | Observation):
+            type_name = type(concept).__name__
+            raw_id = concept.name
             knowledge.append(
                 KnowledgeRef(
-                    path=bundle.rel_path(concept),
+                    path=Path(concept.path).relative_to(workspace.root).as_posix(),
                     type=type_name,
-                    title=extract_title(concept.read_index()) or concept.name,
+                    title=extract_title(concept.read()) or concept.name,
                     id=str(raw_id) if raw_id is not None else None,
                 )
             )

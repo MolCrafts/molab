@@ -31,6 +31,8 @@ interface EntityHeaderProps {
   title: string;
   /** Hover tooltip on the title, e.g. the untruncated source text. */
   titleTooltip?: string;
+  /** Sits immediately after the title (tags, a badge). */
+  afterTitle?: ReactNode;
   /** Primary / secondary controls — prefer one primary icon + a More menu. */
   actions?: ReactNode;
 }
@@ -39,9 +41,18 @@ export const EntityHeader = ({
   icon: Icon,
   title,
   titleTooltip,
+  afterTitle,
   actions,
 }: EntityHeaderProps): JSX.Element => {
-  return <PageHeader icon={Icon} title={title} titleTooltip={titleTooltip} actions={actions} />;
+  return (
+    <PageHeader
+      icon={Icon}
+      title={title}
+      titleTooltip={titleTooltip}
+      afterTitle={afterTitle}
+      actions={actions}
+    />
+  );
 };
 
 interface KeyValueItem {

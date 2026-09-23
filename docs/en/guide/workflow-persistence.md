@@ -92,23 +92,19 @@ Use these to group, compare, and replay runs.
     ├── project.json
     └── experiments/<exp_id>/
         ├── experiment.json
-        └── runs/run-<run_id>/
-            ├── run.json                  ← RunMetadata: identity/provenance only
-            │                                (params, config_hash, profile, target —
-            │                                 NO status / execution history)
-            ├── run.json (hot state) + alive             ← hot state: status, ownership,
-            │                                heartbeat, execution records
-            ├── assets.json               ← run-scoped asset manifest
-            ├── artifacts/                ← final products
-            ├── cache/                    ← per-run execution cache
-            └── executions/<exec_id>/     ← one dir per attempt
-                ├── execution.json
-                ├── workflow.json         ← per-node status + outputs (resume seed source)
-                ├── logs/<name>.log
-                └── error.txt             ← on failure: why, with traceback
+        └── runs/<key=value_…>/
+            ├── run.json                  ← logical definition only
+            │                                (params, definition_hash, revision links)
+            └── executions/e01/           ← one attempt; `e01` is its id
+                ├── execution.json        ← status, ownership, evidence, error, seal
+                ├── alive                 ← owner heartbeat is mtime
+                ├── workflow.json         ← per-node status + outputs (resume seed)
+                ├── artifacts/
+                ├── out/<task>/
+                └── run.log               ← the attempt's one log
 ```
 
-A run's `run.json` entity file is pure identity and provenance; the hot operational state — status, ownership stamps, heartbeat, the `ExecutionRecord` list — lives in the `run.json (hot state) + alive` sidecar, which is what `run.status` and `run.execution_history` read. Per-attempt files live under `executions/<exec_id>/` (the exec id is `exec-<run_id>` plus an optional `-N` suffix for reruns); when an attempt fails, `executions/<exec_id>/error.txt` records what went wrong. Run-lifecycle milestones (created / started / completed / failed) are the run's own `run.json` + `run.json (hot state) + alive`. There is no workspace-level event log.
+A run's `run.json` is the logical definition. Status lives on each attempt's `execution.json`; the owner heartbeat is the mtime of that attempt's `alive` file. Resume seeds from `executions/eNN/workflow.json`. There is no sidecar of hot state next to `run.json`.
 
 All JSON files are written atomically (temp file + `os.rename`); structure is discovered by scanning directories, so you can move, inspect, or archive experiments independently without rewriting parent metadata.
 

@@ -3,13 +3,13 @@
 /* tslint:disable */
 /* eslint-disable */
 /**
- * Harvest a terminal run into a sourced KnowledgeItem under its experiment.
+ * Harvest a terminal run into sourced Knowledge under its experiment.
  */
 export type RunHarvestRequest = {
     /**
      * Knowledge class name
      */
-    kind: RunHarvestRequest.kind;
+    cls?: RunHarvestRequest.cls;
     /**
      * Non-empty interpretation
      */
@@ -31,17 +31,13 @@ export namespace RunHarvestRequest {
     /**
      * Knowledge class name
      */
-    export enum kind {
-        OBSERVATION = 'Observation',
-        DECISION = 'Decision',
-        ASSUMPTION = 'Assumption',
-        CONSTRAINT = 'Constraint',
+    export enum cls {
+        NOTE = 'Note',
+        LITERATURE = 'Literature',
+        REPORT = 'Report',
         FINDING = 'Finding',
-        FAILURE_ANALYSIS = 'FailureAnalysis',
-        PROTOCOL_NOTE = 'ProtocolNote',
-        PARAMETER_RATIONALE = 'ParameterRationale',
-        OPEN_QUESTION = 'OpenQuestion',
         PLAN = 'Plan',
+        OBSERVATION = 'Observation',
     }
 }
 

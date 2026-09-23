@@ -29,7 +29,14 @@ const STATUS_OPTIONS = ["active", "draft", "archived"] as const;
  * server-returned summary; a failed save surfaces an inline error and leaves the
  * prior state intact.
  */
-export const DocumentControls = ({ relPath }: { relPath: string }): JSX.Element | null => {
+export const DocumentControls = ({
+  relPath,
+  placement = "block",
+}: {
+  relPath: string;
+  /** ``title`` sits after the page heading; ``block`` is the standalone row. */
+  placement?: "block" | "title";
+}): JSX.Element | null => {
   const queryClient = useQueryClient();
   const listQuery = useKnowledgeListQuery();
   const [tags, setTags] = useState<string[]>([]);
@@ -93,6 +100,51 @@ export const DocumentControls = ({ relPath }: { relPath: string }): JSX.Element 
     return <p className="text-micro text-muted-foreground">Loading…</p>;
   }
 
+  const tagChips = tags.map((tag) => (
+    <WorkbenchTag key={tag} meaning="metadata" className="gap-1 px-2 py-0 text-micro font-medium">
+      {tag}
+      <WorkbenchIconAction
+        label={`Remove tag ${tag}`}
+        className="size-4 text-muted-foreground hover:text-destructive disabled:opacity-50"
+        onClick={() => removeTag(tag)}
+        disabled={saving}
+      >
+        <X className="h-2.5 w-2.5" />
+      </WorkbenchIconAction>
+    </WorkbenchTag>
+  ));
+  const addTagField = (
+    <>
+      <Input
+        value={tagInput}
+        onChange={(event) => setTagInput(event.target.value)}
+        onKeyDown={onTagKeyDown}
+        placeholder="Add tag…"
+        aria-label="Add tag"
+        className="h-control-compact w-28 text-label"
+        disabled={saving}
+      />
+      <WorkbenchIconAction
+        label="Add tag"
+        onClick={() => addTag(tagInput)}
+        disabled={saving || tagInput.trim().length === 0}
+      >
+        <Plus className="size-icon-sm" />
+      </WorkbenchIconAction>
+    </>
+  );
+
+  if (placement === "title") {
+    return (
+      <div className="flex min-w-0 flex-wrap items-center gap-1">
+        {status ? <StatusBadge status={status} size="sm" /> : null}
+        {tagChips}
+        {addTagField}
+        {error ? <span className="text-micro text-destructive">{error}</span> : null}
+      </div>
+    );
+  }
+
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">
@@ -118,45 +170,8 @@ export const DocumentControls = ({ relPath }: { relPath: string }): JSX.Element 
         </Select>
         <span className="text-border">·</span>
         <Tag className="size-icon-sm text-muted-foreground" />
-        {tags.length > 0 ? (
-          tags.map((tag) => (
-            <WorkbenchTag
-              key={tag}
-              meaning="metadata"
-              className="gap-1 px-2 py-0 text-micro font-medium"
-            >
-              {tag}
-              <WorkbenchIconAction
-                label={`Remove tag ${tag}`}
-                className="size-4 text-muted-foreground hover:text-destructive disabled:opacity-50"
-                onClick={() => removeTag(tag)}
-                disabled={saving}
-              >
-                <X className="h-2.5 w-2.5" />
-              </WorkbenchIconAction>
-            </WorkbenchTag>
-          ))
-        ) : (
-          <span className="text-micro text-muted-foreground">No tags</span>
-        )}
-      </div>
-      <div className="flex items-center gap-2">
-        <Input
-          value={tagInput}
-          onChange={(event) => setTagInput(event.target.value)}
-          onKeyDown={onTagKeyDown}
-          placeholder="Add tag…"
-          aria-label="Add tag"
-          className="h-control-compact w-40 text-label"
-          disabled={saving}
-        />
-        <WorkbenchIconAction
-          label="Add tag"
-          onClick={() => addTag(tagInput)}
-          disabled={saving || tagInput.trim().length === 0}
-        >
-          <Plus className="size-icon-sm" />
-        </WorkbenchIconAction>
+        {tagChips}
+        {addTagField}
       </div>
       {error ? <p className="text-micro text-destructive">{error}</p> : null}
     </div>

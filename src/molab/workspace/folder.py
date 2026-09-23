@@ -106,7 +106,7 @@ _ENTITY_FILE_TO_CLS: dict[str, type[Folder]] = {}
 
 
 def _snake_name(cls: type) -> str:
-    """``FailureAnalysis`` → ``failure_analysis``."""
+    """``CamelCase`` → ``camel_case``."""
     return _CAMEL_TO_SNAKE.sub("_", cls.__name__).lower()
 
 
@@ -860,11 +860,15 @@ def concept_from_dir(child_dir: PathArg, parent: Folder) -> Folder:
     still resolve ``meta.json`` ``type`` through the concept-type registry.
     WPER entity JSON with a ``type`` key uses the registry as well.
     """
+    from molab.knowledge.naming import KNOWLEDGE_HEAD_FILES
+
     fs = parent._disk()
     try:
         names = fs.listdir(child_dir)
     except OSError:
         names = []
+    if any(name in KNOWLEDGE_HEAD_FILES for name in names):
+        raise TypeError(f"{child_dir} is a Knowledge directory, not a Folder")
     for name in names:
         mapped = class_for_entity_file(name)
         if mapped is not None:

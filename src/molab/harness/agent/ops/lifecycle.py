@@ -71,27 +71,26 @@ def lifecycle_tools(*, workspace_root: Path) -> tuple[Any, ...]:
         experiment_id: str,
         run_id: str,
         narrative: str,
-        kind: str = "Finding",
         created_by: str = "agent",
     ) -> str:
-        """Harvest a *terminal* run (succeeded/failed/cancelled) into a KnowledgeItem.
+        """Harvest a *terminal* run into a Finding.
 
         Only terminal runs have an outcome to interpret. Pending/running runs
         return ``error: …`` so the model can run/wait first instead of crashing
         the turn.
         """
+        from molab.knowledge import Finding
         from molab.workspace import Workspace
-        from molab.workspace.knowledge import parse_knowledge_class
 
         try:
             ws = Workspace(root)
             run = ws.get_project(project_id).get_experiment(experiment_id).get_run(run_id)
             item = run.harvest(
-                cls=parse_knowledge_class(kind),
+                Finding,
                 narrative=narrative,
                 created_by=created_by,
             )
-            return f"harvested KnowledgeItem {item.name}"
+            return f"harvested Finding {item.name}"
         except Exception as exc:
             return _as_tool_error(exc)
 

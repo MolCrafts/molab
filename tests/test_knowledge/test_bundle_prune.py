@@ -19,9 +19,11 @@ from pathlib import Path
 import pytest
 
 from molab.fs import LocalFileSystem
-from molab.knowledge import Bundle, Note, ReferenceConcept, ReferenceMeta
+from molab.knowledge import Note, ReferenceMeta
+from molab.knowledge.bundle import Bundle
 from molab.knowledge.bundle_index import INDEX_JSON_FILENAME, INDEX_MD_FILENAME
 from molab.knowledge.concept import META_JSON_FILENAME, Concept
+from molab.knowledge.concepts import Literature
 from molab.knowledge.knowledge_item import KnowledgeItem, KnowledgeMeta, SourceRef
 from tests.support.counting_fs import CountingFileSystem
 
@@ -29,7 +31,7 @@ from tests.support.counting_fs import CountingFileSystem
 def _note(root: Path, rel: str, body: str = "") -> Note:
     note = Note(root / rel)
     note.write_meta()
-    note.set_body(body or f"# {rel}\n\nbody of {rel}\n")
+    note.write(body or f"# {rel}\n\nbody of {rel}\n")
     return note
 
 
@@ -72,8 +74,8 @@ def tree(tmp_path: Path) -> Path:
     _note(root, "alpha")
     (root / "group").mkdir()
     _note(root, "group/beta")
-    ref = ReferenceConcept(root / "group" / "ref")
-    ref.write_reference_meta(ReferenceMeta(title="A paper", authors=["Someone"], year=2020))
+    ref = Literature(root / "group" / "ref")
+    ref.write(ReferenceMeta(title="A paper", authors=["Someone"], year=2020))
     item = KnowledgeItem(root / "group" / "finding")
     item.write_knowledge_meta(
         KnowledgeMeta(
@@ -82,7 +84,7 @@ def tree(tmp_path: Path) -> Path:
             created_by="tester",
         )
     )
-    item.set_body("# Finding\n\nsomething learned\n")
+    item.write("# Finding\n\nsomething learned\n")
     _note(root, "run")
     _plant_marker(root / "run" / "executions" / "e1")
     _plant_marker(root / "run" / "artifacts" / "a1")
@@ -136,7 +138,7 @@ class TestOneReadPerConcept:
     def test_walk_reconstructs_typed_subclasses_from_that_one_read(self, tree: Path) -> None:
         by_rel = {Bundle(tree).rel_path(c): c for c in Bundle(tree, prune_dirs=PRUNE).walk()}
         assert isinstance(by_rel["alpha"], Note)
-        assert isinstance(by_rel["group/ref"], ReferenceConcept)
+        assert isinstance(by_rel["group/ref"], Literature)
         assert isinstance(by_rel["group/finding"], KnowledgeItem)
 
     def test_walk_with_meta_hands_back_the_parsed_marker(self, tree: Path) -> None:
@@ -149,7 +151,7 @@ class TestOneReadPerConcept:
     def test_get_reads_meta_once_without_probing(self, tree: Path) -> None:
         fs = CountingFileSystem(LocalFileSystem())
         concept = Bundle(tree, fs=fs).get("group/ref")
-        assert isinstance(concept, ReferenceConcept)
+        assert isinstance(concept, Literature)
         assert fs.for_basename(META_JSON_FILENAME, "read_text") == 1
         assert fs.calls["exists"] == 0
 

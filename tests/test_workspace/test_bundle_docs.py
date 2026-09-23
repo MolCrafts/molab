@@ -15,12 +15,9 @@ from typing import IO
 
 import pytest
 
+from molab.knowledge import KnowledgeNotFoundError, Note
 from molab.knowledge.concept import Concept
-from molab.workspace import (
-    Bundle,
-    ConceptNotFoundError,
-    Note,
-)
+from molab.workspace.bundle import Bundle
 from molab.workspace.fs import PathArg
 from molab.workspace.fs_local import LocalFileSystem
 
@@ -71,7 +68,7 @@ class TestBundleDocs:
         assert b.rel_path(note) == "design-doc"
         assert (bundle_root / "design-doc").is_dir()
         assert note.read_meta()["type"] == "note.note"
-        assert note.body() == "hi"
+        assert note.read() == "hi"
 
     def test_create_note_is_idempotent_on_slug(self, bundle_root: Path) -> None:
         b = Bundle(bundle_root)
@@ -103,7 +100,7 @@ class TestBundleDocs:
 
         note = b.create_note("Design Doc", body="hello world")
 
-        assert note.body() == "hello world"
+        assert note.read() == "hello world"
         assert any(p.endswith("design-doc/index.md") for p in rec.atomic_text_writes)
         assert any(p.endswith("design-doc/meta.json") for p in rec.atomic_text_writes)
 
@@ -118,7 +115,7 @@ class TestBundleDocs:
         renamed = b.get("renamed")
         assert renamed.read_meta()["type"] == "note.note"
         assert renamed.read_index() == "ORIGINAL BODY"
-        with pytest.raises(ConceptNotFoundError):
+        with pytest.raises(KnowledgeNotFoundError):
             b.get("design-doc")
 
     def test_move_note_resolves_under_new_parent(self, bundle_root: Path) -> None:
@@ -129,7 +126,7 @@ class TestBundleDocs:
         b.move_note(note, home)
 
         assert b.get("home/roamer").read_index() == "R"
-        with pytest.raises(ConceptNotFoundError):
+        with pytest.raises(KnowledgeNotFoundError):
             b.get("roamer")
 
     def test_delete_note_removes_dir_and_walk_drops_it(self, bundle_root: Path) -> None:

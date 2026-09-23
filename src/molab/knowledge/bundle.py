@@ -56,7 +56,7 @@ from .concept import (
     read_meta_dict,
     read_text_or_none,
 )
-from .concepts import Note, ReferenceConcept
+from .concepts import Literature, Note
 from .edges import DEFAULT_EDGE_ROLE, EdgeRole
 from .errors import ConceptNotFoundError
 from .hooks import notify_concept_created
@@ -166,7 +166,7 @@ class ConceptPartition(NamedTuple):
 
     Attributes:
         notes: Every :class:`Note`, in walk (depth-first preorder) order.
-        references: Every :class:`ReferenceConcept`.
+        references: Every :class:`Literature`.
         items: Every :class:`KnowledgeItem`.
         metas: Each yielded Concept's parsed ``meta.json``, keyed by
             bundle-relative path — read once during the walk, so a caller
@@ -174,7 +174,7 @@ class ConceptPartition(NamedTuple):
     """
 
     notes: list[Note]
-    references: list[ReferenceConcept]
+    references: list[Literature]
     items: list[KnowledgeItem]
     metas: dict[str, ConceptMetaDict]
 
@@ -193,7 +193,7 @@ class BundleScan(NamedTuple):
     bodies: dict[str, str]
     metas: dict[str, ConceptMetaDict]
     notes: list[Note]
-    references: list[ReferenceConcept]
+    references: list[Literature]
     items: list[KnowledgeItem]
 
 
@@ -526,7 +526,7 @@ class Bundle:
         note = Note(directory, fs=self._fs)
         note.write_meta()
         if body:
-            note.set_body(body)
+            note.write(body)
         if created:
             self._emit_created(note, title=name)
         return note
@@ -606,7 +606,7 @@ class Bundle:
         for source in self.walk():
             if self._norm(source.path) == target:
                 continue  # a self-edge is not a backlink
-            for edge in source.typed_out_edges():
+            for edge in source.links():
                 if self._norm(edge.target) == target:
                     result.append(Backlink(source=source, role=edge.role))
         return result
@@ -645,13 +645,13 @@ class Bundle:
         ``meta.json`` alongside (see :class:`ConceptPartition`).
         """
         notes: list[Note] = []
-        references: list[ReferenceConcept] = []
+        references: list[Literature] = []
         items: list[KnowledgeItem] = []
         metas: dict[str, ConceptMetaDict] = {}
         for concept, meta in self.walk_with_meta():
             if isinstance(concept, Note):
                 notes.append(concept)
-            elif isinstance(concept, ReferenceConcept):
+            elif isinstance(concept, Literature):
                 references.append(concept)
             elif isinstance(concept, KnowledgeItem):
                 items.append(concept)
@@ -678,7 +678,7 @@ class Bundle:
         bodies: dict[str, str] = {}
         metas: dict[str, ConceptMetaDict] = {}
         notes: list[Note] = []
-        references: list[ReferenceConcept] = []
+        references: list[Literature] = []
         items: list[KnowledgeItem] = []
         for concept, meta in self.walk_with_meta():
             entry, body = self._entry_and_body(concept, meta=meta)
@@ -687,7 +687,7 @@ class Bundle:
             metas[entry.path] = meta
             if isinstance(concept, Note):
                 notes.append(concept)
-            elif isinstance(concept, ReferenceConcept):
+            elif isinstance(concept, Literature):
                 references.append(concept)
             elif isinstance(concept, KnowledgeItem):
                 items.append(concept)
@@ -712,7 +712,7 @@ class Bundle:
             grouped.setdefault(meta_type(meta), []).append(concept)
         return grouped
 
-    def references(self) -> list[ReferenceConcept]:
+    def references(self) -> list[Literature]:
         """Every OKF ``Reference`` Concept in the bundle (typed view of walk)."""
         return self.partition().references
 
@@ -730,10 +730,10 @@ class Bundle:
         *,
         under: Concept | PathArg | None = None,
         now: datetime | None = None,
-    ) -> list[ReferenceConcept]:
+    ) -> list[Literature]:
         """Link a local Zotero library (read-only) as ``Reference`` Concepts.
 
-        Each Zotero item becomes a :class:`ReferenceConcept` under *under*
+        Each Zotero item becomes a :class:`Literature` under *under*
         (default: a ``references/`` group at the bundle root); its PDF is
         *pointed at* via ``ReferenceMeta.pdf_path`` — no bytes are copied.
         Idempotent on ``source_key``: re-importing an item updates its
@@ -747,17 +747,17 @@ class Bundle:
             now: Import timestamp; defaults to aware-UTC ``datetime.now``.
 
         Returns:
-            The :class:`ReferenceConcept` records created or updated.
+            The :class:`Literature` records created or updated.
         """
         host = under if under is not None else self._references_group()
         items = read_zotero_items(path)
-        refs: list[ReferenceConcept] = []
+        refs: list[Literature] = []
         for item in items:
             slug = slugify(item.key) or item.key
             directory = self._child_dir(slug, host)
             created = not _is_concept_dir(directory, self._fs)
-            ref = ReferenceConcept(directory, fs=self._fs)
-            ref.write_reference_meta(
+            ref = Literature(directory, fs=self._fs)
+            ref.write(
                 ReferenceMeta(
                     title=item.title,
                     authors=item.authors,
@@ -770,8 +770,7 @@ class Bundle:
                 )
             )
             if created:
-                # After write_reference_meta — the Concept is bib-complete
-                # when the event lands.
+                # After write — the document is bib-complete when the event lands.
                 self._emit_created(ref, title=item.title or slug)
             refs.append(ref)
         self._record_source("zotero", str(path), len(items), now=now)

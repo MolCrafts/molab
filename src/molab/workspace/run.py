@@ -685,8 +685,8 @@ class Run(Folder):
 
     def harvest(
         self,
+        of: type[Knowledge],
         *,
-        cls: type[Knowledge],
         narrative: str,
         created_by: str,
         results: dict[str, JSONValue] | None = None,
@@ -697,7 +697,7 @@ class Run(Folder):
 
         return harvest_run(
             self,
-            cls=cls,
+            of,
             narrative=narrative,
             created_by=created_by,
             results=results,

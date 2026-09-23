@@ -590,17 +590,21 @@ def run_harvest(
     experiment_id: Annotated[str, typer.Argument(help="Experiment ID")],
     run_id: Annotated[str, typer.Argument(help="Run ID")],
     narrative: Annotated[str, typer.Argument(help="Interpretation of the run outcome")],
-    kind: Annotated[str, typer.Option("--kind", help="Knowledge kind")] = "Finding",
+    of: Annotated[
+        str,
+        typer.Option("--of", help="Finding, Observation, or Report"),
+    ] = "Finding",
     created_by: Annotated[str, typer.Option("--created-by")] = "cli",
     target_spec: TargetOption = ".",
 ) -> None:
-    """Harvest a terminal run into a KnowledgeItem (workspace.harvest_run)."""
+    """Harvest a terminal run into Finding, Observation, or Report."""
     ws = _open_ws(target_spec)
+    from molab.knowledge import Finding, Observation, Report
     from molab.workspace import ExperimentNotFoundError as _ExpNotFound
     from molab.workspace import ProjectNotFoundError as _ProjNotFound
     from molab.workspace import RunNotFoundError as _RunNotFound
-    from molab.workspace.knowledge import parse_knowledge_class
 
+    harvest_targets = {"Finding": Finding, "Observation": Observation, "Report": Report}
     try:
         project = ws.get_project(project_id)
         experiment = project.get_experiment(experiment_id)
@@ -608,16 +612,23 @@ def run_harvest(
     except (_ProjNotFound, _ExpNotFound, _RunNotFound) as exc:
         rprint(f"[red]Error:[/red] {exc}")
         raise typer.Exit(1) from None
+    cls = harvest_targets.get(of)
+    if cls is None:
+        rprint(
+            "[red]Error:[/red] harvest --of must be Finding, Observation, or Report "
+            f"(got {of!r}). Failed runs: molab runs analyze-failure (writes Report)."
+        )
+        raise typer.Exit(1)
     try:
         item = run.harvest(
-            cls=parse_knowledge_class(kind),
+            cls,
             narrative=narrative,
             created_by=created_by,
         )
     except ValueError as exc:
         rprint(f"[red]Error:[/red] {exc}")
         raise typer.Exit(1) from None
-    rprint(f"[green]OK[/green] Harvested KnowledgeItem: {item.name}")
+    rprint(f"[green]OK[/green] Harvested {type(item).__name__}: {item.name}")
 
 
 @run_app.command("ingest-metrics")
@@ -674,7 +685,7 @@ def run_analyze_failure(
     created_by: Annotated[str, typer.Option("--created-by")] = "cli",
     target_spec: TargetOption = ".",
 ) -> None:
-    """Analyze a failed run into a FailureAnalysis KnowledgeItem (shared service)."""
+    """Analyze a failed run into a Report (shared service)."""
     ws = _open_ws(target_spec)
     from molab.services.run_failure import analyze_run_failure
     from molab.workspace import ExperimentNotFoundError as _ExpNotFound
@@ -698,7 +709,7 @@ def run_analyze_failure(
     except ValueError as exc:
         rprint(f"[red]Error:[/red] {exc}")
         raise typer.Exit(1) from None
-    rprint(f"[green]OK[/green] FailureAnalysis: {item.name}")
+    rprint(f"[green]OK[/green] Report: {item.name}")
 
 
 @run_app.command("info")

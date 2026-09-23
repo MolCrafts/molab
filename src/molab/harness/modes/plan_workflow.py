@@ -69,7 +69,7 @@ _PLAN_LOOP_PREAMBLE = (
 _KNOWLEDGE_DIGEST_GUIDANCE = (
     "\n\n## Prior knowledge (workspace digest)\n"
     "A deterministic digest of this workspace's prior knowledge may follow. "
-    "Ground the board in it: treat FailureAnalysis items as known pitfalls to avoid, "
+    "Ground the board in it: treat Report items as known pitfalls to avoid, "
     "Findings as established results not to re-derive, and Decisions/Constraints as "
     "standing choices to respect. When a prior item shapes a task, cite its path in "
     "the task description or acceptance criteria.\n\n"

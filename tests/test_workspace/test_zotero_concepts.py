@@ -14,7 +14,8 @@ import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
-from molab.workspace import Bundle, ReferenceConcept, ZoteroItem
+from molab.workspace import Literature, ZoteroItem
+from molab.workspace.bundle import Bundle
 from molab.workspace.zotero_concepts import read_zotero_items
 
 FIXED = datetime(2026, 6, 21, 12, 0, 0, tzinfo=UTC)
@@ -125,11 +126,11 @@ class TestBundleImportZotero:
         b = Bundle(bundle_root)
 
         refs = b.import_zotero(db, now=FIXED)
-        assert all(isinstance(r, ReferenceConcept) for r in refs)
-        by_key = {r.read_reference_meta().source_key: r for r in b.references()}
+        assert all(isinstance(r, Literature) for r in refs)
+        by_key = {r.record.source_key: r for r in b.references()}
         assert set(by_key) == {"AAAA", "BBBB"}
 
-        a_meta = by_key["AAAA"].read_reference_meta()
+        a_meta = by_key["AAAA"].record
         assert a_meta.source == "zotero"
         assert a_meta.title == "Deep Learning"
         assert a_meta.pdf_path is not None

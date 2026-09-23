@@ -11,7 +11,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from molab.knowledge import Bundle, Note
+from molab.knowledge import Note
+from molab.knowledge.bundle import Bundle
 from molab.knowledge.retrieval import bm25f_rank, tokenize
 
 
@@ -104,7 +105,7 @@ class TestBm25fRank:
 def _note(root: Path, name: str, body: str, tags: list[str] | None = None) -> Note:
     note = Note(root / name)
     note.write_meta({"tags": tags or []})
-    note.set_body(body)
+    note.write(body)
     return note
 
 
@@ -163,7 +164,7 @@ class TestChineseGoldenCase:
         wiki = self._wiki(tmp_path)
         hit = wiki.search(self.QUESTION).hits[0]
         concept = wiki.get(hit.entry.path)
-        assert "1 K/ns 降温至 200 K" in concept.body()
+        assert "1 K/ns 降温至 200 K" in concept.read()
         assert (concept.path / "index.md").is_file()
 
 
@@ -180,7 +181,7 @@ class TestSearchReadsEachBodyOnce:
         from collections import Counter
 
         from molab.fs.local import LocalFileSystem
-        from molab.knowledge import Bundle
+        from molab.knowledge.bundle import Bundle
 
         reads: list[str] = []
 
@@ -194,7 +195,7 @@ class TestSearchReadsEachBodyOnce:
         for i in range(4):
             note = Note(tmp_path / f"n{i}", fs=fs)
             note.write_meta()
-            note.set_body(f"# Note {i}\n\nbody about diffusion {i}\n")
+            note.write(f"# Note {i}\n\nbody about diffusion {i}\n")
 
         reads.clear()
         Bundle(tmp_path, fs=fs).search("diffusion")

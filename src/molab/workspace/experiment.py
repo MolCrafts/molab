@@ -57,7 +57,14 @@ from .folder import (
     _validate_target_registered,
 )
 from .fs import PathArg
-from .knowledge import HasKnowledge
+from .knowledge import (
+    add_knowledge,
+    del_knowledge,
+    has_knowledge,
+    knowledge,
+    knowledges,
+    set_knowledge,
+)
 from .models import ExperimentMetadata, FolderMetadata, RunStatus
 from .naming import disambiguate, entity_slug, run_slug
 from .run import Run, compute_run_definition_hash
@@ -118,7 +125,7 @@ def _parse_ir_document(source: str | None) -> dict | None:
 
 
 @concept_type(WORKSPACE_EXPERIMENT_KIND)
-class Experiment(Folder, HasKnowledge):
+class Experiment(Folder):
     """Repeatable experiment — a parameter-space container.
 
     Knowledge (including the plan book) lives at ``knowledges/<id>/``.
@@ -138,6 +145,12 @@ class Experiment(Folder, HasKnowledge):
 
     _exists_error_cls = ExperimentExistsError
     _not_found_error_cls = ExperimentNotFoundError
+    add_knowledge = add_knowledge
+    knowledge = knowledge
+    set_knowledge = set_knowledge
+    del_knowledge = del_knowledge
+    has_knowledge = has_knowledge
+    knowledges = knowledges
 
     def __init__(
         self,

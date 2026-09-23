@@ -11,6 +11,11 @@ here would hit ``register_concept_type``'s collision check and fail ``import
 molab`` outright.
 """
 
-from molab.knowledge.concepts import NOTE_KIND, REFERENCE_KIND, Note, ReferenceConcept
+from molab.knowledge.concepts import (
+    NOTE_KIND,
+    REFERENCE_KIND,
+    Literature,
+    Note,
+)
 
-__all__ = ["NOTE_KIND", "REFERENCE_KIND", "Note", "ReferenceConcept"]
+__all__ = ["NOTE_KIND", "REFERENCE_KIND", "Literature", "Note"]

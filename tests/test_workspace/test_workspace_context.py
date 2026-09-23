@@ -44,7 +44,7 @@ class TestAssembleWorkspaceContext:
         with r2.start() as ctx:
             ctx.emit_artifact({"loss": 0.2}, name="m2.json")
         note = knowledge_mount.mount_note(ws, "idea")
-        note.set_body("# Idea\n\nnarrative\n")
+        note.write("# Idea\n\nnarrative\n")
 
         c = assemble_workspace_context(ws)
 

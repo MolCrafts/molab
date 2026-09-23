@@ -1,4 +1,4 @@
-"""The OKF ``Note`` + ``ReferenceConcept`` concept types.
+"""The OKF ``Note`` + ``Literature`` concept types.
 
 Notes and references are ``Concept`` subclasses — directories whose path is
 their identity, mountable anywhere and usable with no workspace at all. A note's
@@ -10,11 +10,12 @@ body lives in ``index.md`` and its citations are markdown links (resolved by
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from molab.fs import LocalFileSystem
 from molab.knowledge.concept import Concept, concept_from_dir
-from molab.knowledge.concepts import Note, ReferenceConcept
+from molab.knowledge.concepts import Literature, Note
 from molab.knowledge.reference_meta import ReferenceMeta
 
 
@@ -47,16 +48,16 @@ class TestConceptRegistry:
 
     def test_mount_writes_the_registered_type_marker(self, tmp_path: Path) -> None:
         note = _mount(Note, tmp_path, "idea")
-        ref = _mount(ReferenceConcept, tmp_path, "smith2024")
+        ref = _mount(Literature, tmp_path, "smith2024")
         assert note.read_meta()["type"] == "note.note"
         assert ref.read_meta()["type"] == "reference.reference"
 
     def test_concept_from_dir_rebuilds_typed_subclass(self, tmp_path: Path) -> None:
         note = _mount(Note, tmp_path, "idea")
-        ref = _mount(ReferenceConcept, tmp_path, "smith2024")
+        ref = _mount(Literature, tmp_path, "smith2024")
         fs = LocalFileSystem()
         assert isinstance(concept_from_dir(note.path, fs=fs), Note)
-        assert isinstance(concept_from_dir(ref.path, fs=fs), ReferenceConcept)
+        assert isinstance(concept_from_dir(ref.path, fs=fs), Literature)
 
     def test_a_concept_needs_no_workspace(self, tmp_path: Path) -> None:
         # The whole point of the OKF library: a plain directory is a Concept.
@@ -71,10 +72,10 @@ class TestNote:
 
     def test_body_and_cite_round_trip(self, tmp_path: Path) -> None:
         note = _mount(Note, tmp_path, "idea")
-        ref = _mount(ReferenceConcept, tmp_path, "smith2024")
+        ref = _mount(Literature, tmp_path, "smith2024")
 
-        note.set_body("# Idea\n\nbuilds on prior work\n")
-        assert "builds on prior work" in note.body()
+        note.write("# Idea\n\nbuilds on prior work\n")
+        assert "builds on prior work" in note.read()
 
         note.cite(ref)
         assert "smith2024" in note.read_index()  # citation is a markdown link
@@ -82,11 +83,11 @@ class TestNote:
 
     def test_cite_threads_role_into_typed_edge(self, tmp_path: Path) -> None:
         note = _mount(Note, tmp_path, "idea")
-        ref = _mount(ReferenceConcept, tmp_path, "smith2024")
+        ref = _mount(Literature, tmp_path, "smith2024")
 
         note.cite(ref, role="derived_from")
 
-        typed = note.typed_out_edges()
+        typed = note.links()
         assert len(typed) == 1
         assert typed[0].role == "derived_from"
         assert Path(typed[0].target) == ref.path
@@ -97,19 +98,19 @@ class TestNote:
         run_dir.mkdir(parents=True)
         note = _mount(Note, tmp_path, "idea")
         note.cite(run_dir, role="records")
-        assert note.typed_out_edges() == [(str(run_dir), "records")]
+        assert note.links() == [(str(run_dir), "records")]
 
     def test_tags_and_status_round_trip(self, tmp_path: Path) -> None:
         note = _mount(Note, tmp_path, "idea")
-        note.set_tags(["analysis", "rdf"])
-        note.set_status("draft")
+        note.write(tags=["analysis", "rdf"])
+        note.write(status="draft")
         assert note.tags() == ["analysis", "rdf"]
         assert note.status() == "draft"
 
     def test_set_tags_preserves_status(self, tmp_path: Path) -> None:
         note = _mount(Note, tmp_path, "idea")
-        note.set_status("draft")
-        note.set_tags(["x"])
+        note.write(status="draft")
+        note.write(tags=["x"])
         assert note.status() == "draft"
 
     def test_bare_marker_reads_back_with_additive_defaults(self, tmp_path: Path) -> None:
@@ -119,31 +120,46 @@ class TestNote:
         assert note.status() == "active"
 
 
-class TestReferenceConcept:
-    """``ReferenceConcept`` typed meta + citation text."""
+class TestLiterature:
+    """``Literature`` typed meta + citation text."""
 
     def test_typed_meta_and_citation_round_trip(self, tmp_path: Path) -> None:
-        ref = _mount(ReferenceConcept, tmp_path, "smith2024")
+        ref = _mount(Literature, tmp_path, "smith2024")
 
-        ref.write_reference_meta(ReferenceMeta(title="T", doi="10.1/x", year=2024))
-        got = ref.read_reference_meta()
+        ref.write(ReferenceMeta(title="T", doi="10.1/x", year=2024))
+        got = ref.record
         assert isinstance(got, ReferenceMeta)
         assert got.title == "T"
         assert got.doi == "10.1/x"
         assert got.year == 2024
 
-        ref.set_citation("Smith et al. 2024")
+        ref.write("Smith et al. 2024")
         assert ref.citation() == "Smith et al. 2024"
 
     def test_written_meta_keeps_the_registered_dotted_type(self, tmp_path: Path) -> None:
         # ReferenceMeta.type defaults to the bare "reference" bib payload, but the
         # on-disk marker must stay the registered dotted type so reconstruction works.
-        ref = _mount(ReferenceConcept, tmp_path, "smith2024")
-        ref.write_reference_meta(ReferenceMeta(title="T", year=2024))
+        ref = _mount(Literature, tmp_path, "smith2024")
+        ref.write(ReferenceMeta(title="T", year=2024))
         assert ref.read_meta()["type"] == "reference.reference"
-        assert isinstance(concept_from_dir(ref.path, fs=LocalFileSystem()), ReferenceConcept)
+        assert isinstance(concept_from_dir(ref.path, fs=LocalFileSystem()), Literature)
 
     def test_write_ref_meta_alias_is_gone(self, tmp_path: Path) -> None:
-        # The short spelling was removed; only write_reference_meta remains.
-        ref = _mount(ReferenceConcept, tmp_path, "smith2024")
+        # The short spelling was removed; only write remains.
+        ref = _mount(Literature, tmp_path, "smith2024")
         assert not hasattr(ref, "write_ref_meta")
+
+
+class TestLiteratureJson:
+    """``Literature`` writes ``literature.json``, not ``meta.json``."""
+
+    def test_write_writes_literature_json_without_type(self, tmp_path: Path) -> None:
+        from molab.knowledge.concepts import Literature
+
+        lit = Literature(tmp_path / "lecun2015")
+        lit.write(ReferenceMeta(title="Deep Learning", year=2015))
+        payload = json.loads((lit.path / "literature.json").read_text())
+        assert payload["title"] == "Deep Learning"
+        assert payload["year"] == 2015
+        assert "type" not in payload
+        assert not (lit.path / "meta.json").exists()

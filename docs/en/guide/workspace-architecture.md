@@ -168,14 +168,14 @@ molab info      # show workspace summary
                 ├── assets.json     # experiment-scoped asset manifest
                 ├── data_assets/    # experiment-scoped DataAssets
                 └── runs/
-                    └── run-<run_id>/
-                        ├── run.json        # identity/provenance (no status)
-                        ├── run.json (hot state) + alive   # hot state: status, ownership, executions
-                        ├── assets.json     # run-scoped asset manifest
-                        ├── artifacts/
-                        ├── cache/          # per-run execution cache
-                        ├── .ckpt/          # checkpoint payloads (when written)
-                        └── executions/<exec_id>/  # per-attempt workflow.json, logs/, error.txt
+                    └── <key=value_…>/
+                        ├── run.json        # logical definition only
+                        └── executions/e01/ # one attempt
+                            ├── execution.json
+                            ├── alive       # owner heartbeat is mtime
+                            ├── workflow.json
+                            ├── artifacts/
+                            └── out/<task>/
 ```
 
 ## Runnable Example

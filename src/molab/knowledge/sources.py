@@ -13,7 +13,7 @@ that rule in step with the MCP store if it ever changes; two settings models
 that look identical but behave differently are worse than either.
 
 Deliberately import-cheap — stdlib + pydantic (+ the light ``bundle_index``
-models). ``Bundle`` is imported inside :func:`open_bundle` and
+models). ``Knowledge`` is imported inside :func:`open_source` and
 :func:`search_sources`, so a caller that merely *lists* registered wikis (an MCP
 tool building its catalog, a CLI printing a table) never loads yaml, pathspec or
 the OKF substrate.
@@ -29,11 +29,13 @@ from enum import StrEnum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 # ``bundle_index`` is re + pydantic only, so importing it eagerly costs nothing;
 # ``SourcedHit`` needs ``SearchHit`` at runtime for pydantic to build its schema.
 # ``bundle`` — which pulls yaml + pathspec — stays lazy.
+from molab._typing import JSONValue
+
 from .bundle_index import SearchHit
 
 if TYPE_CHECKING:
@@ -41,10 +43,11 @@ if TYPE_CHECKING:
 
     from molab.fs import PathArg
 
-    from .bundle import Bundle
     from .bundle_index import SearchResult
+    from .concept import Knowledge
 
 __all__ = [
+    "KIND_PATTERN",
     "KNOWLEDGE_CONFIG_FILENAME",
     "MOLAB_DIR",
     "KnowledgeScope",
@@ -52,7 +55,7 @@ __all__ = [
     "SourceNotFoundError",
     "SourcedHit",
     "WikiSource",
-    "open_bundle",
+    "open_source",
     "resolve_source",
     "search_sources",
 ]
@@ -71,6 +74,12 @@ USER_DIR = Path.home() / ".molab"
 #: Source names become JSON keys, CLI arguments and ``<source>:<path>`` ref
 #: prefixes. Same path-safe alphabet as MCP server names.
 SOURCE_NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
+"""A source name is a JSON key, a CLI argument and a ref prefix, so it is
+restricted to what all three carry safely — notably no ``:``, which is what lets
+``"<source>:<ref>"`` be split on its first colon."""
+
+KIND_PATTERN = re.compile(r"^[a-z][a-z0-9_]{0,31}$")
+"""A backend kind is an identifier: it names a registered reader, nothing more."""
 
 
 class SourceNotFoundError(LookupError):
@@ -89,20 +98,46 @@ class KnowledgeScope(StrEnum):
 
 
 class WikiSource(BaseModel, frozen=True):
-    """One registered OKF bundle.
+    """One registered knowledge source.
 
     Attributes:
         name: The handle used to address it (``--source lab-wiki``, and the
-            prefix of a ``<source>:<rel_path>`` ref).
-        root: The bundle directory. ``~`` is expanded on read, so a config file
-            stays portable between machines.
+            prefix of a ``<source>:<ref>`` ref).
+        root: Where the source lives — a bundle directory, a vault, a ``docs/``
+            tree, or a ``zotero.sqlite`` file. ``~`` is expanded on read, so a
+            config file stays portable between machines.
         description: Optional human note — shown in listings and handed to
-            agents so they can tell two wikis apart.
+            agents so they can tell two sources apart.
+        kind: Which backend reads it. Declared **now**, while ``"okf"`` is the
+            only value, because this model ignores unknown keys: a config
+            written by a later molab carrying ``kind: obsidian`` would otherwise
+            be silently dropped, the vault would open as OKF, and the user would
+            get zero results with no error. Resolved once at registration and
+            stored — never sniffed from the filesystem per query.
+        options: Backend-specific settings (which config file supplies a docs
+            nav, which folder holds a vault's attachments). Opaque here; the
+            backend that declares *kind* is the only thing that reads them.
     """
 
     name: str
     root: str
     description: str = ""
+    kind: str = "okf"
+    options: dict[str, JSONValue] = Field(default_factory=dict)
+
+    @field_validator("kind")
+    @classmethod
+    def _validate_kind(cls, value: str) -> str:
+        # Shape only. Whether a *registered* backend answers to this name is
+        # ``open_store``'s question, and it must raise there rather than here —
+        # listing sources has to keep working on a machine that lacks the
+        # optional dependency one of them needs.
+        if not KIND_PATTERN.match(value):
+            raise ValueError(
+                f"invalid knowledge source kind {value!r}: expected lowercase "
+                "letters, digits or '_'"
+            )
+        return value
 
     @field_validator("name")
     @classmethod
@@ -259,20 +294,20 @@ def resolve_source(
     return (store or KnowledgeSourceStore(workspace_root)).get(name).path()
 
 
-def open_bundle(
+def open_source(
     name: str,
     *,
     workspace_root: PathArg | None = None,
     store: KnowledgeSourceStore | None = None,
-) -> Bundle:
-    """Open the registered source *name* as a :class:`Bundle`.
+) -> Knowledge:
+    """Open the registered source *name* as a :class:`Knowledge` tree.
 
     Raises:
         SourceNotFoundError: If the name is not registered.
     """
-    from .bundle import Bundle
+    from .concept import Knowledge
 
-    return Bundle(resolve_source(name, workspace_root=workspace_root, store=store))
+    return Knowledge(resolve_source(name, workspace_root=workspace_root, store=store))
 
 
 class SourcedHit(BaseModel, frozen=True):
@@ -281,14 +316,17 @@ class SourcedHit(BaseModel, frozen=True):
     Attributes:
         source: The registered source name (``""`` for the active workspace).
         hit: The underlying :class:`~molab.knowledge.bundle_index.SearchHit`.
-        abs_path: Absolute path of the Concept's ``index.md`` — the file itself,
-            so a caller can hand over or open the whole document.
+        abs_path: Absolute path of the document's own file, so a caller can hand
+            it over or open it — and ``None`` when the source has no such file
+            to offer. A bibliographic record with no attached PDF is the honest
+            case: fabricating a path here hands a model something to open that
+            is not there. The ``ref`` always works; this is a convenience.
         rank: 1-based position in the fused ordering.
     """
 
     source: str
     hit: SearchHit
-    abs_path: str
+    abs_path: str | None
     rank: int
 
     @property

@@ -18,8 +18,10 @@ from pathlib import Path
 
 import pytest
 
+from molab.knowledge import KnowledgeNotFoundError
 from molab.knowledge.concept import Concept
-from molab.workspace import Bundle, ConceptNotFoundError, Folder, knowledge_mount
+from molab.workspace import Folder, knowledge_mount
+from molab.workspace.bundle import Bundle
 
 # A concept ``type`` deliberately NOT in the concept-type registry, so it
 # reconstructs as the base workspace ``Folder`` (vs. a knowledge subclass).
@@ -164,9 +166,9 @@ class TestGet:
 
     def test_missing_or_non_concept_path_raises_concept_not_found(self, bundle: Path) -> None:
         b = Bundle(bundle)
-        with pytest.raises(ConceptNotFoundError):
+        with pytest.raises(KnowledgeNotFoundError):
             b.get("does/not/exist")  # path absent
-        with pytest.raises(ConceptNotFoundError):
+        with pytest.raises(KnowledgeNotFoundError):
             b.get("group")  # exists on disk but has no meta.json → not a Concept
 
 
@@ -215,7 +217,7 @@ class TestLink:
 
         b.link(src, dst, role="supersedes")
 
-        typed = b.get("alpha").typed_out_edges()
+        typed = b.get("alpha").links()
         assert len(typed) == 1
         assert typed[0].role == "supersedes"
         assert Path(typed[0].target) == Path(dst.resolve())
@@ -255,7 +257,7 @@ class TestTypedReconstruction:
 # that reanchor — get/link (resolution) and walk (enumeration) — are covered.
 
 KI_BODY_NEEDLE = "zwitterion-retrieval-needle"
-KI_REL = "projects/p/experiments/e/ki"
+KI_REL = "projects/p/experiments/e/knowledges/ki"
 _DOUBLED_SEGMENTS = ("projects/projects", "experiments/experiments", "runs/runs")
 
 
@@ -272,7 +274,7 @@ class TestNestedMounts:
         real = os.path.normpath(str(rec.resolve()))
 
         b = Bundle(ws.resolve())
-        rel = f"{b.rel_path(run)}/rec"
+        rel = f"{b.rel_path(run)}/knowledges/rec"
         got = b.get(rel)
 
         assert os.path.normpath(str(got.resolve())) == real
@@ -287,22 +289,24 @@ class TestNestedMounts:
     def test_knowledge_item_under_experiment_walks_once_undoubled(self, tmp_path: Path) -> None:
         import os
 
-        from molab.knowledge.knowledge_item import KnowledgeMeta, SourceRef
+        from molab.knowledge import Finding, SourceRef
         from molab.workspace import Workspace
+        from molab.workspace.knowledge_write import write_knowledge
 
         ws = Workspace(root=tmp_path / "lab")
         ws.materialize()
         exp = ws.add_project("p").add_experiment("e")
         exp.add_run(id="r")
-        item, _ = knowledge_mount.mount_knowledge_item(exp, "ki")
-        item.write_knowledge_meta(
-            KnowledgeMeta(
-                kind="Finding",
-                sources=[SourceRef(kind="run", ref="r")],
-                created_by="tests",
-            )
+
+        item = write_knowledge(
+            exp,
+            name="ki",
+            of=Finding,
+            sources=[SourceRef(kind="run", ref="r")],
+            created_by="tests",
+            text=f"# Zwitterion finding\n\nthe {KI_BODY_NEEDLE} appears only in this body\n",
         )
-        item.set_body(f"# Zwitterion finding\n\nthe {KI_BODY_NEEDLE} appears only in this body\n")
+        _ = item
 
         b = Bundle(ws.resolve())
         rels = [b.rel_path(f) for f in b.walk()]
@@ -348,7 +352,7 @@ class TestForeignFamilyArgumentsResolveToDirectories:
         note = bundle.create_note("rec")
         bundle.link(note, run, role="records")
 
-        assert note.typed_out_edges() == [(str(run.resolve()), "records")]
+        assert note.links() == [(str(run.resolve()), "records")]
 
     def test_rel_path_and_backlinks_accept_a_folder(self, tmp_path: Path) -> None:
         from molab.workspace import Workspace

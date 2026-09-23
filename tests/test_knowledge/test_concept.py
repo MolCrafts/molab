@@ -21,7 +21,7 @@ def _write(directory: Path, *, type_str: str = "note.note", body: str = "") -> C
     concept = Concept(directory, type=type_str)
     concept.write_meta()
     if body:
-        concept.set_body(body)
+        concept.write(body)
     return concept
 
 
@@ -97,14 +97,14 @@ class TestConceptBody:
 
     def test_body_round_trip(self, tmp_path: Path) -> None:
         concept = _write(tmp_path / "doc", body="# Title\n\ntext\n")
-        assert concept.body() == "# Title\n\ntext\n"
+        assert concept.read() == "# Title\n\ntext\n"
 
     def test_absent_body_reads_as_empty_string(self, tmp_path: Path) -> None:
         (tmp_path / "bare").mkdir()
-        assert Concept(tmp_path / "bare").body() == ""
+        assert Concept(tmp_path / "bare").read() == ""
 
-    def test_set_body_creates_the_directory(self, tmp_path: Path) -> None:
-        Concept(tmp_path / "fresh").set_body("hi\n")
+    def test_write_creates_the_directory(self, tmp_path: Path) -> None:
+        Concept(tmp_path / "fresh").write("hi\n")
         assert (tmp_path / "fresh" / "index.md").read_text() == "hi\n"
 
 
@@ -121,19 +121,19 @@ class TestConceptEdges:
         src = _write(tmp_path / "src")
         dst = _write(tmp_path / "dst")
         append_link(src, dst, role="derived_from")
-        edge = src.typed_out_edges()[0]
+        edge = src.links()[0]
         assert (edge.target, edge.role) == (str(dst.path), "derived_from")
 
     def test_default_role_writes_a_bare_label(self, tmp_path: Path) -> None:
         src = _write(tmp_path / "src")
         _write(tmp_path / "dst")
         append_link(src, tmp_path / "dst")
-        assert "- [dst](../dst)\n" in src.body()
+        assert "- [dst](../dst)\n" in src.read()
 
     def test_untyped_legacy_link_defaults_never_drops(self, tmp_path: Path) -> None:
         _write(tmp_path / "dst")
         src = _write(tmp_path / "src", body="- [dst](../dst)\n")
-        assert src.typed_out_edges() == [(str(tmp_path / "dst"), "references")]
+        assert src.links() == [(str(tmp_path / "dst"), "references")]
 
     def test_link_to_a_bare_path_needs_no_concept(self, tmp_path: Path) -> None:
         # A Concept cites an out-of-family directory (a workspace Run) by path.
@@ -141,17 +141,17 @@ class TestConceptEdges:
         run_dir.mkdir(parents=True)
         src = _write(tmp_path / "finding")
         append_link(src, run_dir, role="derived_from")
-        assert src.typed_out_edges() == [(str(run_dir), "derived_from")]
+        assert src.links() == [(str(run_dir), "derived_from")]
 
     def test_external_links_are_not_edges(self, tmp_path: Path) -> None:
         src = _write(tmp_path / "src", body="[paper](https://example.org/x)\n")
-        scan = src.links()
+        scan = src.scan_links(src.read())
         assert scan.concepts == []
         assert scan.external == ["https://example.org/x"]
 
     def test_link_to_a_nonexistent_dir_is_not_an_edge(self, tmp_path: Path) -> None:
         src = _write(tmp_path / "src", body="[gone](../gone)\n")
-        scan = src.links()
+        scan = src.scan_links(src.read())
         assert scan.concepts == []
         assert scan.other == ["../gone"]
 
@@ -164,7 +164,7 @@ class TestConceptEdges:
         dst = _write(tmp_path / "dst")
         src = _write(tmp_path / "src", body="# Notes\n\nprose")
         append_link(src, dst)
-        assert src.body().startswith("# Notes\n\nprose\n")
+        assert src.read().startswith("# Notes\n\nprose\n")
         assert src.out_edges() == [str(dst.path)]
 
     def test_invalid_role_leaves_index_untouched(self, tmp_path: Path) -> None:
@@ -172,7 +172,7 @@ class TestConceptEdges:
         src = _write(tmp_path / "src", body="original\n")
         with pytest.raises(ValueError, match="invalid edge role"):
             append_link(src, dst, role="bogus")  # type: ignore[arg-type]
-        assert src.body() == "original\n"
+        assert src.read() == "original\n"
 
 
 class TestConceptFromDir:
@@ -208,3 +208,17 @@ class TestConceptFromDir:
     def test_directory_without_meta_json_reports_no_type(self, tmp_path: Path) -> None:
         (tmp_path / "plain").mkdir()
         assert concept_type_of(tmp_path / "plain", fs=Concept(tmp_path).fs) == ""
+
+
+class TestKnowledgeAlias:
+    """``Concept`` is ``Knowledge``; the not-found error is the same object."""
+
+    def test_concept_is_knowledge(self) -> None:
+        from molab.knowledge.concept import Knowledge
+
+        assert Concept is Knowledge
+
+    def test_concept_not_found_error_is_knowledge_not_found_error(self) -> None:
+        from molab.knowledge.errors import ConceptNotFoundError, KnowledgeNotFoundError
+
+        assert ConceptNotFoundError is KnowledgeNotFoundError

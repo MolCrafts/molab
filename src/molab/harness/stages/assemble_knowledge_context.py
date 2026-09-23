@@ -1,18 +1,15 @@
 """``AssembleKnowledgeContext`` — the plan pipeline's prior-knowledge digest.
 
-Persists the workspace's accumulated knowledge (typed ``KnowledgeItem``s,
-free-form ``Note``s, literature ``ReferenceConcept``s) as a first-class
-``knowledge_context`` artifact the proposal/spec writers consume — so "which
-prior knowledge shaped this plan" is an auditable lineage edge through the
-gateway's ``parent_ids`` path, never a prompt-side side-channel.
+Persists the workspace's accumulated knowledge (the six product classes)
+as a first-class ``knowledge_context`` artifact the proposal/spec writers
+consume — so "which prior knowledge shaped this plan" is an auditable
+lineage edge through the gateway's ``parent_ids`` path, never a prompt-side
+side-channel.
 
-Selection is **deterministic, no LLM**: only ``status == "active"``
-KnowledgeItems contribute bodies, ordered by kind priority
-(``FailureAnalysis`` first — pitfalls outrank results) then recency;
-Note/Reference entries appear as title-only lines. Every cap states what it
-omitted (no silent caps), and an empty workspace still persists a digest
-saying so — the pipeline shape is uniform, so ``require_latest`` consumers
-never go conditional.
+Selection is **deterministic, no LLM**: ``Knowledge(root).walk()`` yields
+the six classes, ordered Report → Finding → Plan → Observation → Note →
+Literature then path. Every cap states what it omitted (no silent caps),
+and an empty workspace still persists a digest saying so.
 
 The stage locates the owning workspace by walking up from
 ``ctx.workspace_root`` (a plan run's ctx roots at the *run dir*) to the
@@ -30,14 +27,15 @@ from typing import TYPE_CHECKING, ClassVar
 from molab.harness.core.run_context import HarnessRunContext
 from molab.harness.core.stage import Stage
 from molab.harness.schemas import PlanArtifactRef
+from molab.knowledge import Finding, Knowledge, Literature, Note, Observation, Plan, Report
 
 if TYPE_CHECKING:
-    from molab.workspace.folder import Folder
+    pass
 
 __all__ = ["AssembleKnowledgeContext"]
 
 MAX_ITEMS = 12
-"""KnowledgeItem bodies included in one digest."""
+"""Knowledge bodies included in one digest."""
 
 MAX_BODY_CHARS = 1200
 """Per-item body excerpt length."""
@@ -45,19 +43,7 @@ MAX_BODY_CHARS = 1200
 MAX_TOTAL_CHARS = 16_000
 """Whole-digest hard cap."""
 
-#: Kind priority — pitfalls first, observations last.
-_KIND_ORDER = (
-    "FailureAnalysis",
-    "Finding",
-    "Decision",
-    "Plan",
-    "Constraint",
-    "Assumption",
-    "ParameterRationale",
-    "ProtocolNote",
-    "OpenQuestion",
-    "Observation",
-)
+_CLASS_ORDER: tuple[type, ...] = (Report, Finding, Plan, Observation, Note, Literature)
 
 _TS_FLOOR = datetime(1970, 1, 1, tzinfo=UTC)
 
@@ -88,62 +74,35 @@ class AssembleKnowledgeContext(Stage):
         )
 
     def _render_digest(self, start: Path) -> str:
-        from molab.workspace import Workspace
-        from molab.workspace.knowledge import Knowledge
+        from molab.knowledge import Knowledge
+        from molab.knowledge.bundle_index import extract_title
 
         root = _find_workspace_root(start)
         if root is None:
             return _NO_WORKSPACE_DIGEST
-        ws = Workspace(root)
-        refs = ws.context().knowledge
-        if not refs:
+        walked = list(Knowledge(root).walk())
+        if not walked:
             return _EMPTY_DIGEST
 
-        from molab.workspace.errors import ConceptNotFoundError
-
-        bundle = ws.as_bundle()
-        items: list[tuple[int, datetime, str, str, Mapping[str, object], Folder]] = []
-        titles: list[str] = []
-        for ref in refs:
+        def _prio(item: object) -> int:
             try:
-                concept = bundle.get(ref.path)
-            except (ConceptNotFoundError, FileNotFoundError):
-                titles.append(f"- (vanished during digest) · {ref.path}")
-                continue
-            if not isinstance(concept, Knowledge):
-                titles.append(f"- {ref.title} ({ref.type}) · {ref.path}")
-                continue
-            if concept.metadata.status != "active":
-                continue
-            kind_name = type(concept).__name__
-            priority = (
-                _KIND_ORDER.index(kind_name) if kind_name in _KIND_ORDER else len(_KIND_ORDER)
-            )
-            meta = {
-                "kind": kind_name,
-                "status": concept.metadata.status,
-                "created_at": concept.metadata.created_at,
-            }
-            items.append((priority, self._timestamp(meta), ref.path, ref.title, meta, concept))
+                return _CLASS_ORDER.index(type(item))  # type: ignore[arg-type]
+            except ValueError:
+                return len(_CLASS_ORDER)
 
-        # kind priority asc, then recency desc (missing timestamps sort oldest).
-        items.sort(key=lambda row: (row[0], -row[1].timestamp(), row[2]))
-
+        walked.sort(key=lambda item: (_prio(item), str(item.path)))
         lines = ["# Prior knowledge (workspace digest)", ""]
-        for _, _, path, title, meta, concept in items[:MAX_ITEMS]:
+        for concept in walked[:MAX_ITEMS]:
+            title = extract_title(concept.read()) or concept.name
+            rel = str(Path(concept.path).relative_to(root))
             body = self._body(concept)
-            lines.append(f"## [{meta.get('kind')}] {title}")
-            lines.append(f"path: {path} · status: {meta.get('status', 'active')}")
+            lines.append(f"## [{type(concept).__name__}] {title}")
+            lines.append(f"path: {rel}")
             if body:
                 lines.append(body)
             lines.append("")
-        if len(items) > MAX_ITEMS:
-            lines.append(f"(+{len(items) - MAX_ITEMS} more knowledge items not shown)")
-        if titles:
-            lines.append("")
-            lines.append("## Other knowledge (titles only)")
-            lines.extend(titles)
-
+        if len(walked) > MAX_ITEMS:
+            lines.append(f"(+{len(walked) - MAX_ITEMS} more knowledge items not shown)")
         digest = "\n".join(lines).strip()
         if len(digest) > MAX_TOTAL_CHARS:
             digest = digest[:MAX_TOTAL_CHARS] + "\n... (digest truncated at the total cap)"
@@ -163,8 +122,8 @@ class AssembleKnowledgeContext(Stage):
         return _TS_FLOOR
 
     @staticmethod
-    def _body(concept: Folder) -> str:
-        body = (concept.read_index() or "").strip()
+    def _body(concept: Knowledge) -> str:
+        body = (concept.read() or "").strip()
         if len(body) > MAX_BODY_CHARS:
             return body[:MAX_BODY_CHARS] + f"\n... (+{len(body) - MAX_BODY_CHARS} chars omitted)"
         return body

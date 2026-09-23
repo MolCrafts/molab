@@ -16,7 +16,7 @@ layer is a projection) — but the caller always sees them.
 
 Approval suspensions are **not** failures: callers carve
 ``ApprovalPendingError`` out before invoking the ``failure=`` path, so a plan
-that later resumes and succeeds never leaves a phantom FailureAnalysis.
+that later resumes and succeeds never leaves a phantom Report.
 """
 
 from __future__ import annotations
@@ -83,7 +83,7 @@ def materialize_plan_records(
     execute tail ran — the Finding harvested from the ``final_report``.
 
     Failure path (``failure`` given): the Agents-tab entry lands with status
-    ``failed`` (a failed plan is finally visible) and a ``FailureAnalysis``
+    ``failed`` (a failed plan is finally visible) and a ``Report``
     KnowledgeItem records the failed stage, the error, what completed, and
     how to resume. **Partial products still surface**: when a
     ``workflow_source`` artifact already exists (the plan died later — e.g.
@@ -184,7 +184,7 @@ def materialize_plan_records(
     else:
         _attempt(
             "failure_analysis",
-            lambda: rec.write_failure_analysis_record(
+            lambda: rec.write_report_record(
                 run=run,
                 experiment=experiment,
                 model=model,

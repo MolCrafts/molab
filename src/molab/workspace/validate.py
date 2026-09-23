@@ -37,6 +37,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
     from .fs import FileSystem, PathArg
+    from .workspace import Workspace
 
 Severity = Literal["error", "warning"]
 
@@ -304,16 +305,14 @@ class _Checker:
 
     def _check_knowledge_container(self, path: str) -> None:
         """Every child of ``knowledges/`` must have a class-named entity JSON."""
-        from . import knowledge as _knowledge  # noqa: F401
-        from .folder import _ENTITY_FILE_TO_CLS
+        from molab.knowledge.naming import KNOWLEDGE_HEAD_FILES
 
         knowledges = self._fs.join(path, "knowledges")
         if not self._fs.is_dir(knowledges):
             return
-        entity_names = set(_ENTITY_FILE_TO_CLS) | {"knowledge.json"}
         for name in self._subdirs(knowledges):
             child = self._fs.join(knowledges, name)
-            if any(self._fs.is_file(self._fs.join(child, ent)) for ent in entity_names):
+            if any(self._fs.is_file(self._fs.join(child, ent)) for ent in KNOWLEDGE_HEAD_FILES):
                 continue
             self._add(
                 child,
@@ -395,11 +394,13 @@ class _Checker:
         return self._found
 
 
-def validate_workspace(root: PathArg | Path, *, fs: FileSystem | None = None) -> ValidationReport:
+def validate_workspace(
+    root: PathArg | Path | Workspace, *, fs: FileSystem | None = None
+) -> ValidationReport:
     """Check *root* against the workspace layout + OKF laws. Writes nothing.
 
     Args:
-        root: The workspace root directory.
+        root: The workspace root directory, or a loaded ``Workspace``.
         fs: Filesystem to read through; defaults to the local one, so a remote
             workspace validates over its own transport.
 
@@ -407,6 +408,11 @@ def validate_workspace(root: PathArg | Path, *, fs: FileSystem | None = None) ->
         A :class:`ValidationReport`. ``report.ok`` is True when no ``error``
         was found; warnings never make a tree non-conforming.
     """
+    from .workspace import Workspace
+
+    if isinstance(root, Workspace):
+        disk = fs or getattr(root, "fs", None)
+        return validate_workspace(root.resolve(), fs=disk)
     filesystem = fs or LocalFileSystem()
     resolved = filesystem.resolve(root)
     violations = _Checker(resolved, filesystem).run()

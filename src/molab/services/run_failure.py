@@ -1,4 +1,4 @@
-"""``analyze_run_failure`` — ordinary Run → sourced FailureAnalysis.
+"""``analyze_run_failure`` — ordinary Run → sourced Report.
 
 Shared by CLI, server, and (optionally) lifecycle tools so Python ≡ UI.
 Deterministic narrative path needs **no** LLM: error.txt / metadata.error /
@@ -12,10 +12,10 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from molab.workspace.knowledge import FailureAnalysis
+from molab.knowledge import Report
 
 if TYPE_CHECKING:
-    from molab.workspace.knowledge import Knowledge
+    from molab.knowledge import Knowledge
     from molab.workspace.run import Run
 
 __all__ = ["analyze_run_failure", "build_failure_narrative"]
@@ -26,7 +26,7 @@ _MAX_TAIL_LINES = 80
 
 
 def build_failure_narrative(run: Run) -> str:
-    """Build a non-empty deterministic FailureAnalysis narrative for *run*.
+    """Build a non-empty deterministic Report narrative for *run*.
 
     Prefers ``executions/<last>/error.txt``, then run metadata error, then a
     status-only summary. Never returns empty string.
@@ -78,7 +78,7 @@ def analyze_run_failure(
     force: bool = False,
     name: str | None = None,
 ) -> Knowledge:
-    """Write/update a FailureAnalysis for a failed *run*.
+    """Write/update a Report for a failed *run*.
 
     Args:
         run: Workspace Run to interpret.
@@ -105,7 +105,7 @@ def analyze_run_failure(
     text = (narrative or "").strip() or build_failure_narrative(run)
     item_name = name or f"{_DEFAULT_NAME_PREFIX}-{run.id}"
     return run.harvest(
-        cls=FailureAnalysis,
+        Report,
         narrative=text,
         created_by=created_by,
         name=item_name,

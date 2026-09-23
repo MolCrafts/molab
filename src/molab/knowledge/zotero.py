@@ -3,11 +3,11 @@
 Reads a local ``zotero.sqlite`` (opened read-only) and yields :class:`ZoteroItem`
 records. Each item's first PDF is *resolved to a path* under Zotero's own
 ``storage/`` tree — no bytes are read or copied. :meth:`Bundle.import_zotero`
-turns these into :class:`molab.workspace.concepts.ReferenceConcept` Concepts
+turns these into :class:`~molab.knowledge.concepts.Literature` documents
 whose ``ReferenceMeta.pdf_path`` points at (never copies) the original file.
 
 This is a port of ``molab.knowledge.zotero`` onto the workspace surface; it is
-the *concept-producing* importer that yields ``ReferenceConcept`` directories.
+the importer that yields ``Literature`` directories.
 """
 
 from __future__ import annotations

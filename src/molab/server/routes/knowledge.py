@@ -1,6 +1,6 @@
 """Knowledge routes — browse + author the workspace's OKF Concepts.
 
-Notes (``Note``) and literature references (``ReferenceConcept``) are OKF
+Notes (``Note``) and literature (``Literature``) are knowledge
 Concept ``Folder``s mounted anywhere under the workspace, reached through the
 :class:`~molab.workspace.bundle.Bundle` façade. These routes expose them over
 HTTP for the UI's Knowledge tab; the legacy per-scope ``/api/library`` surface
@@ -26,7 +26,8 @@ from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 
 from molab.server.dependencies import get_workspace
-from molab.workspace import Bundle, Workspace
+from molab.workspace import Workspace
+from molab.workspace.bundle import Bundle
 from molab.workspace.edges import EdgeRole
 
 from ..deps.served import active_served_key, assert_workspace_writable
@@ -53,6 +54,7 @@ class NoteSummary(BaseModel):
     excerpt: str
     tags: list[str] = []
     status: str | None = None
+    cls: str = "Note"
 
 
 class ReferenceSummary(BaseModel):
@@ -144,8 +146,8 @@ class BacklinksResponse(BaseModel):
 
 
 def _bundle(workspace: Workspace) -> Bundle:
-    """Bundle on the workspace's own filesystem (remote pin cache / local)."""
-    return workspace.as_bundle()
+    """Document tree on the workspace's own filesystem (remote pin cache / local)."""
+    return Bundle(workspace.root, fs=workspace.fs)
 
 
 def _require_writable(request: Request) -> None:
@@ -159,23 +161,27 @@ def _require_writable(request: Request) -> None:
     assert_workspace_writable(active_served_key() or "", request.method)
 
 
-def _note_summary(bundle: Bundle, note: Note) -> NoteSummary:
+def _note_summary(bundle: Bundle, note: Concept) -> NoteSummary:
     """Build a :class:`NoteSummary` for *note* (identity + excerpt + tags/status).
 
     ``tags``/``status`` come from the 05 :class:`~molab.workspace.note_meta.NoteMeta`
     helpers (an untagged note reads back ``[]`` / ``"active"``).
     """
-    body = note.body() or ""
+    body = note.read() or ""
+    status_val = note.status() if isinstance(note, Note) else None
     return NoteSummary(
         name=note.name,
         relPath=bundle.rel_path(note),
         excerpt=body[:_EXCERPT_CHARS],
         tags=note.tags(),
-        status=note.status(),
+        status=status_val,
+        cls=type(note).__name__,
     )
 
 
-def _note_detail(bundle: Bundle, workspace: Workspace, note: Note, path: str) -> NoteDetailResponse:
+def _note_detail(
+    bundle: Bundle, workspace: Workspace, note: Concept, path: str
+) -> NoteDetailResponse:
     """Build a :class:`NoteDetailResponse` for *note* at its identity *path*.
 
     Enriches the response with ``cards`` — one :class:`EntityCard` per typed
@@ -186,20 +192,20 @@ def _note_detail(bundle: Bundle, workspace: Workspace, note: Note, path: str) ->
     return NoteDetailResponse(
         name=note.name,
         relPath=path,
-        body=note.body(),
+        body=note.read(),
         links=list(note.out_edges()),
         cards=_resolve_cards(bundle, workspace, note),
     )
 
 
-def _resolve_cards(bundle: Bundle, workspace: Workspace, note: Note) -> list[EntityCard]:
+def _resolve_cards(bundle: Bundle, workspace: Workspace, note: Concept) -> list[EntityCard]:
     """Resolve *note*'s typed out-edges to :class:`EntityCard` summary cards.
 
     Each edge target is resolved back to its live entity; an edge that resolves
     to no entity is skipped (it cannot be summarized as a card).
     """
     cards: list[EntityCard] = []
-    for edge in note.typed_out_edges():
+    for edge in note.links():
         entity = _resolve_edge_entity(bundle, workspace, edge.target)
         if entity is None:
             continue
@@ -322,6 +328,16 @@ def _resolve_note(bundle: Bundle, path: str) -> Note:
     return concept
 
 
+def _open_doc(workspace: Workspace, path: str) -> Concept:
+    """Open any of the six Knowledge classes at *path* (404 on miss)."""
+    from molab.knowledge import Knowledge, KnowledgeNotFoundError
+
+    try:
+        return Knowledge.open(_StdPath(str(workspace.root)) / path)
+    except (KnowledgeNotFoundError, FileNotFoundError, OSError) as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"note {path!r} not found") from exc
+
+
 class EntityBacklinkRow(BaseModel):
     """One knowledge document citing the queried entity."""
 
@@ -408,17 +424,16 @@ class KnowledgeSearchResponse(BaseModel):
 @router.get("/search", response_model=KnowledgeSearchResponse)
 def search_knowledge(
     q: Annotated[str, Query(description="Case-insensitive needle (path/title/tags/body).")],
-    type: Annotated[str | None, Query(description="Exact Concept type filter.")] = None,
-    tag: Annotated[str | None, Query(description="Only concepts carrying this tag.")] = None,
+    type: Annotated[str | None, Query(description="Exact Knowledge class name.")] = None,
+    tag: Annotated[str | None, Query(description="Only documents carrying this tag.")] = None,
     workspace: Workspace = Depends(get_workspace),
 ) -> KnowledgeSearchResponse:
-    """Search the workspace bundle — wraps the ONE ``Bundle.search`` verb.
+    """Search the workspace knowledge tree — wraps ``Knowledge.search``."""
+    from molab.knowledge import Knowledge
+    from molab.workspace.knowledge import parse_knowledge_class
 
-    Pure exposure (vision-loop-08): all matching semantics (body reads, caps,
-    snippets, truncation) live in :meth:`molab.workspace.Bundle.search`; this
-    route only projects its ``SearchResult`` onto the wire.
-    """
-    result = _bundle(workspace).search(q, concept_type=type, tag=tag)
+    cls = parse_knowledge_class(type) if type else None
+    result = Knowledge(workspace.root).search(q, of=cls, tag=tag)
     return KnowledgeSearchResponse(
         hits=[
             KnowledgeSearchRow(
@@ -442,37 +457,46 @@ def list_knowledge(
     ] = None,
     workspace: Workspace = Depends(get_workspace),
 ) -> KnowledgeListResponse:
-    """List every Note + ReferenceConcept in the active workspace's bundle.
+    """List every Knowledge document under the workspace via ``Knowledge.walk``."""
+    from molab.knowledge import Knowledge, Literature
 
-    Optional ``tag`` / ``status`` query params AND-narrow the note list (both
-    read from the 05 :class:`~molab.workspace.note_meta.NoteMeta` fields).
-    """
-    bundle = _bundle(workspace)
-
+    root = Knowledge(workspace.root)
     notes: list[NoteSummary] = []
-    for note in bundle.notes():
-        if tag is not None and tag not in note.tags():
-            continue
-        if status is not None and note.status() != status:
-            continue
-        notes.append(_note_summary(bundle, note))
-
     references: list[ReferenceSummary] = []
-    for ref in bundle.references():
-        meta = ref.read_reference_meta()
-        references.append(
-            ReferenceSummary(
-                name=ref.name,
-                relPath=bundle.rel_path(ref),
-                title=meta.title,
-                authors=list(meta.authors),
-                year=meta.year,
-                doi=meta.doi,
-                venue=meta.venue,
-                url=meta.url,
-                source=meta.source,
+    for item in root.walk():
+        rel = _StdPath(item.path).relative_to(workspace.root).as_posix()
+        tags = item.tags()
+        if tag is not None and tag not in tags:
+            continue
+        status_val = item.status() if isinstance(item, Note) else None
+        if status is not None and status_val != status:
+            continue
+        body = item.read() or ""
+        notes.append(
+            NoteSummary(
+                name=item.name,
+                relPath=rel,
+                excerpt=body[:_EXCERPT_CHARS],
+                tags=tags,
+                status=status_val,
+                cls=type(item).__name__,
             )
         )
+        if isinstance(item, Literature):
+            meta = item.record
+            references.append(
+                ReferenceSummary(
+                    name=item.name,
+                    relPath=rel,
+                    title=meta.title,
+                    authors=list(meta.authors),
+                    year=meta.year,
+                    doi=meta.doi,
+                    venue=meta.venue,
+                    url=meta.url,
+                    source=meta.source,
+                )
+            )
 
     notes.sort(key=lambda n: n.name)
     references.sort(key=lambda r: (r.year or 0, r.name), reverse=True)
@@ -483,13 +507,26 @@ def list_knowledge(
 
 @router.get("/note", response_model=NoteDetailResponse)
 def get_note(
-    path: str = Query(..., description="The note Concept's bundle-relative path (its identity)."),
+    path: str = Query(..., description="The document's workspace-relative path (its identity)."),
     workspace: Workspace = Depends(get_workspace),
 ) -> NoteDetailResponse:
-    """Return one note's full body (its ``index.md``) + its outgoing links + cards."""
+    """Return one document's full body via ``Knowledge.open``."""
+    from molab.knowledge import Knowledge, KnowledgeNotFoundError, Note
+
+    try:
+        concept = Knowledge.open(_StdPath(str(workspace.root)) / path)
+    except (KnowledgeNotFoundError, FileNotFoundError, OSError) as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"note {path!r} not found") from exc
     bundle = _bundle(workspace)
-    concept = _resolve_note(bundle, path)
-    return _note_detail(bundle, workspace, concept, path)
+    if isinstance(concept, Note):
+        return _note_detail(bundle, workspace, concept, path)
+    return NoteDetailResponse(
+        name=concept.name,
+        relPath=path,
+        body=concept.read(),
+        links=list(concept.out_edges()),
+        cards=_resolve_cards(bundle, workspace, concept),
+    )
 
 
 # ── Document authoring — thin delegators to workspace ``Bundle`` verbs ────────
@@ -551,11 +588,11 @@ def edit_doc(
     path: str = Query(..., description="The note Concept's bundle-relative path (its identity)."),
     workspace: Workspace = Depends(get_workspace),
 ) -> NoteDetailResponse:
-    """Rewrite a note's body (its ``index.md``) — delegates to ``Note.set_body``."""
+    """Rewrite a document's narrative — ``Knowledge.write`` for all six classes."""
     bundle = _bundle(workspace)
-    note = _resolve_note(bundle, path)
-    note.set_body(payload.body)
-    return _note_detail(bundle, workspace, note, path)
+    doc = _open_doc(workspace, path)
+    doc.write(payload.body)
+    return _note_detail(bundle, workspace, doc, path)
 
 
 @router.patch(
@@ -588,19 +625,12 @@ def update_doc_meta(
     path: str = Query(..., description="The note Concept's bundle-relative path (its identity)."),
     workspace: Workspace = Depends(get_workspace),
 ) -> NoteSummary:
-    """Update a note's tags/status — delegates to ``Note.set_tags`` / ``Note.set_status``.
-
-    Each field is applied only when present (``None`` = leave untouched), so a
-    partial update preserves the sibling field. The write logic is never re-built
-    here: the same ``Note`` verbs the CLI uses own it (the Python==UI invariant).
-    """
+    """Update a document's tags/status — ``Knowledge.write`` for all six classes."""
     bundle = _bundle(workspace)
-    note = _resolve_note(bundle, path)
-    if payload.tags is not None:
-        note.set_tags(payload.tags)
-    if payload.status is not None:
-        note.set_status(payload.status)
-    return _note_summary(bundle, note)
+    doc = _open_doc(workspace, path)
+    if payload.tags is not None or payload.status is not None:
+        doc.write(tags=payload.tags, status=payload.status)
+    return _note_summary(bundle, doc)
 
 
 @router.delete(

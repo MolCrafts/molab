@@ -38,7 +38,7 @@ class TestMountNote:
 
         for host in (workspace, project, experiment, run):
             note = knowledge_mount.mount_note(host, "notes")
-            assert Path(str(note.path)).parent == Path(str(host.resolve()))
+            assert Path(str(note.path)).parent == Path(str(host.resolve())) / "knowledges"
             assert Path(str(note.path)).is_dir()
 
     def test_is_idempotent_on_the_slug_and_keeps_the_body(self, workspace: Workspace) -> None:
@@ -46,34 +46,23 @@ class TestMountNote:
         second = knowledge_mount.mount_note(workspace, "my-idea")
 
         assert str(first.path) == str(second.path)
-        assert second.body() == "# Kept\n"
+        assert second.read() == "# Kept\n"
 
     def test_a_mounted_note_is_found_by_a_bundle_walk(self, workspace: Workspace) -> None:
         run = workspace.add_project("p").add_experiment("e").add_run(params={"seed": 1})
         knowledge_mount.mount_note(run, "log-notes")
 
-        bundle = workspace.as_bundle()
-        mounted = {bundle.rel_path(c) for c in bundle.walk() if c.type() == "note.note"}
+        from molab.knowledge import Knowledge
 
-        assert mounted == {f"{bundle.rel_path(run)}/log-notes"}
+        root = Knowledge(workspace.root)
+        mounted = {
+            Path(c.path).relative_to(workspace.root).as_posix()
+            for c in root.walk()
+            if type(c).__name__ == "Note"
+        }
 
-
-class TestKnowledgeItem:
-    def test_mount_reports_creation_then_reuse(self, workspace: Workspace) -> None:
-        item, created = knowledge_mount.mount_knowledge_item(workspace, "finding")
-        assert created is True
-        again, created_again = knowledge_mount.mount_knowledge_item(workspace, "finding")
-        assert created_again is False
-        assert str(again.path) == str(item.path)
-
-    def test_has_and_get_agree(self, workspace: Workspace) -> None:
-        assert knowledge_mount.has_item(workspace, "absent") is False
-        with pytest.raises(FileNotFoundError):
-            knowledge_mount.get_item(workspace, "absent")
-
-        knowledge_mount.mount_knowledge_item(workspace, "present")
-        assert knowledge_mount.has_item(workspace, "present") is True
-        assert knowledge_mount.get_item(workspace, "present").name == "present"
+        run_rel = Path(str(run.resolve())).relative_to(workspace.root).as_posix()
+        assert mounted == {f"{run_rel}/knowledges/log-notes"}
 
 
 class TestEmbed:
@@ -83,7 +72,7 @@ class TestEmbed:
 
         knowledge_mount.embed(note, run, root=workspace.root)
 
-        edges = note.typed_out_edges()
+        edges = note.links()
         assert len(edges) == 1
         # A run is the thing a note *records* — the default role per target kind.
         assert edges[0].role == "records"
@@ -97,7 +86,7 @@ class TestEmbed:
 
         knowledge_mount.embed(note, other, root=workspace.root, role="cites")
 
-        edges = note.typed_out_edges()
+        edges = note.links()
         assert [(e.role, Path(e.target).name) for e in edges] == [("cites", "background")]
 
 
@@ -111,7 +100,7 @@ class TestEntitySummary:
 
         assert (folder_summary.id, folder_summary.kind) == (project.id, "workspace.project")
         # A Concept *is* its path, so its directory name is its id.
-        assert (concept_summary.id, concept_summary.kind) == ("idea", "note.note")
+        assert (concept_summary.id, concept_summary.kind) == ("idea", "note")
         assert concept_summary.title == "Titled"
 
     def test_rejects_something_that_is_neither(self, workspace: Workspace) -> None:

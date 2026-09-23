@@ -61,14 +61,10 @@ export class KnowledgeService {
     }
     /**
      * Search Knowledge
-     * Search the workspace bundle — wraps the ONE ``Bundle.search`` verb.
-     *
-     * Pure exposure (vision-loop-08): all matching semantics (body reads, caps,
-     * snippets, truncation) live in :meth:`molab.workspace.Bundle.search`; this
-     * route only projects its ``SearchResult`` onto the wire.
+     * Search the workspace knowledge tree — wraps ``Knowledge.search``.
      * @param q Case-insensitive needle (path/title/tags/body).
-     * @param type Exact Concept type filter.
-     * @param tag Only concepts carrying this tag.
+     * @param type Exact Knowledge class name.
+     * @param tag Only documents carrying this tag.
      * @param molabSession
      * @returns KnowledgeSearchResponse Successful Response
      * @throws ApiError
@@ -97,10 +93,7 @@ export class KnowledgeService {
     }
     /**
      * List Knowledge
-     * List every Note + ReferenceConcept in the active workspace's bundle.
-     *
-     * Optional ``tag`` / ``status`` query params AND-narrow the note list (both
-     * read from the 05 :class:`~molab.workspace.note_meta.NoteMeta` fields).
+     * List every Note + Literature under the workspace via ``Knowledge.walk``.
      * @param tag Only notes carrying this tag.
      * @param status Only notes with this lifecycle status.
      * @param molabSession
@@ -129,8 +122,8 @@ export class KnowledgeService {
     }
     /**
      * Get Note
-     * Return one note's full body (its ``index.md``) + its outgoing links + cards.
-     * @param path The note Concept's bundle-relative path (its identity).
+     * Return one document's full body via ``Knowledge.from_dir``.
+     * @param path The document's workspace-relative path (its identity).
      * @param molabSession
      * @returns NoteDetailResponse Successful Response
      * @throws ApiError

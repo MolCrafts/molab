@@ -1,214 +1,101 @@
-# Notes and Literature
+# 知识
 
-A workspace does not only record what a computation produced — it also records why you ran it, what you concluded, and which papers you built on. In Molab that knowledge lives in the same directory tree as your projects, experiments, and runs, encoded in the **Open Knowledge Format (OKF)**: plain directories, plain YAML, plain Markdown. There is no separate notes database to keep in sync with the filesystem, because the filesystem *is* the database.
+工作区不只记录计算产出了什么，也记录为什么跑、结论是什么、依据哪些文献。知识就是目录树：路径即身份，类名 json 是头，`index.md` 是叙事。没有第二套笔记数据库，文件系统就是数据库。
 
-## The mental model
+## 心智模型
 
-One paragraph carries the whole design. A note is a directory: its path is its identity, a small `meta.json` marks what kind of Concept the directory is (`note.note`, `reference.reference`, ...), and `index.md` holds the narrative. The Markdown links inside `index.md` are not decoration — they **are** the knowledge graph. Every link is a typed edge to another Concept, and reverse lookups (backlinks) are recomputed from those links rather than stored in a second index. Heavy payloads such as PDFs are *pointed at* through a path recorded in metadata — never copied into the workspace.
-
-Because every workspace entity (`Workspace`, `Project`, `Experiment`, `Run`) is itself a `Folder` with a `meta.json`, notes and references mount anywhere in the hierarchy and can link to anything in it: a note under an experiment can cite a paper, reference a run, or point at a sibling note, all with the same Markdown-link edge.
-
-The management entry point is the `Bundle` façade. A bundle wraps a root directory and exposes the Concept tree beneath it: `create_note`, `link`, `walk`, `backlinks`, `search`, `import_zotero`.
-
-**A bundle is just a directory, so it does not need a workspace.** The Open Knowledge Format lives in `molab.knowledge`, a self-contained library: your group's wiki can be its own git repository, and Molab can search it exactly as it searches a workspace. That is the subject of the last two sections.
-
-!!! note "Opening the workspace in Obsidian (or any Markdown editor)"
-    Because notes are plain directories of Markdown, you can open the workspace root as an Obsidian vault and every `index.md` renders and cross-links normally. Two caveats: Molab's knowledge graph is built from **standard Markdown links** (`[text](../other-concept)`) — Obsidian-style `[[wikilinks]]` are *not* parsed as edges, so write links in standard form (or configure Obsidian to prefer Markdown links) if you want them to count as citations/backlinks. And each Concept's narrative lives in `index.md` inside its own directory — the "folder note" convention — which reads best in Obsidian with a folder-note plugin enabled.
-
-## Write a note on an experiment
-
-Create a note under an experiment by passing the experiment as the note's `parent`. Names are slugified into directory names, and `create_note` is idempotent — calling it again with the same name returns the existing note instead of duplicating it.
+按路径构造文档：
 
 ```python
-from molab.workspace import Bundle, Workspace
+from molab.knowledge import Note
+
+note = Note("/data/group/wiki/cooling-rate")
+note.write("# Cooling rate\n\nQuench at 10 K/ns.\n")
+```
+
+磁盘上是 `note.json` + `index.md`。知识目录没有 `meta.json`，头里也没有 `type` / `kind`。读回用 `Knowledge.open(path)`，由文件名还原子类。
+
+`Knowledge` 的六个子类：
+
+| 类 | 头文件 | 用途 |
+|---|---|---|
+| `Note` | `note.json` | 自由笔记 |
+| `Literature` | `literature.json` | 文献；书目字段在头里；PDF 只记路径，从不拷贝 |
+| `Report` | `report.json` | 成文分析，包括失败 Run 的分析 |
+| `Finding` | `finding.json` | 收获的科学结论 |
+| `Plan` | `plan.json` | 实验 / 项目计划书 |
+| `Observation` | `observation.json` | 观察或既定选择 |
+
+打开任意目录树的方式相同——组 wiki、git 仓库、工作区：
+
+```python
+from molab.knowledge import Knowledge, Note
+
+tree = Knowledge("/data/group/wiki")
+for item in tree.walk():
+    print(type(item).__name__, item.path)
+for hit in tree.search("cooling", of=Note).hits:
+    print(hit.entry.title)
+```
+
+`index.md` 里的 Markdown 链接**就是**知识图。六个类都用 `cite` 写下这条边：`finding.cite(literature)`。谁引用了某篇，从树上的 `links()` 重算，没有单独的 Backlink 类型。
+
+## 写到实验下
+
+工作区通过 `write_knowledge` / `add_knowledge` 把文档挂在 `<host>/knowledges/<slug>/`。身份仍是路径；Folder 父级只决定目录。
+
+```python
+from molab.knowledge import Note
+from molab.workspace import Workspace
 
 ws = Workspace("./lab", name="Lab")
+ws.materialize()
 exp = ws.add_project("polymer-cg").add_experiment("solvation-sweep")
-
-bundle = Bundle(ws.root)
-note = bundle.create_note(
-    "Analysis Notes",
-    parent=exp,
-    body="# Analysis Notes\n\nThe RDF is converged after 5 ns.\n",
-)
-
-print(bundle.rel_path(note))
-# projects/polymer-cg/experiments/solvation-sweep/analysis-notes
+note = exp.add_knowledge("analysis-notes", Note, "# Analysis Notes\n")
 ```
-
-The `body` is the note's `index.md`; read it back with `note.body()` and replace it with `note.set_body(...)`. Structured document metadata — categorical tags and a lifecycle status — lives in the note's `meta.json` as a typed `NoteMeta` payload, written with `write_note_meta`:
-
-```python
-from molab.workspace import NoteMeta
-
-note.write_note_meta(NoteMeta(tags=["analysis", "rdf"], status="draft"))
-
-print(note.tags())    # ['analysis', 'rdf']
-print(note.status())  # draft
-```
-
-On disk the note is an ordinary directory next to the experiment's other contents:
 
 ```text
-lab/projects/polymer-cg/experiments/solvation-sweep/
-└── analysis-notes/
-    ├── meta.json       # sole concept identity: type (+ tags/status)
-    └── index.md        # the narrative; its links are the graph edges
+lab/projects/polymer-cg/experiments/solvation-sweep/knowledges/analysis-notes/
+├── note.json
+└── index.md
 ```
 
-## Attach a literature reference
-
-A reference is its own Concept type, `ReferenceConcept`: one directory per work, with the structured bibliographic record (`ReferenceMeta`) in `meta.json` and the human-readable citation text in `index.md`. Mount it wherever it belongs — here, next to the note under the same experiment — using the generic `add_folder` verb every `Folder` supports:
+## 文献
 
 ```python
-from molab.workspace import ReferenceConcept, ReferenceMeta
+from molab.knowledge import Literature, ReferenceMeta
 
-ref = ReferenceConcept(exp.resolve() / "frenkel-smit-2002")
-ref.write_meta()
-ref.write_reference_meta(
+lit = Literature(exp.resolve() / "knowledges" / "frenkel-smit-2002")
+lit.write(
+    "Frenkel & Smit, *Understanding Molecular Simulation* (2002).\n",
     ReferenceMeta(
         title="Understanding Molecular Simulation",
         authors=("Daan Frenkel", "Berend Smit"),
         year=2002,
         pdf_path="/home/me/Zotero/storage/ABCD1234/frenkel-smit.pdf",
-    )
+    ),
 )
-ref.set_citation("Frenkel & Smit, *Understanding Molecular Simulation* (2002).\n")
 ```
 
-`ReferenceMeta` also carries `doi`, `venue`, `url`, and provenance fields (`source`, `source_key`); `pdf_path` records where the PDF already lives — the bytes stay in place.
+`molab knowledge import-zotero` 从本地 Zotero 库写成同样的 `Literature` 目录（只读；PDF 只记路径）。
 
-Citing the reference from the note writes one typed Markdown link into the note's `index.md`:
+## 收获与失败分析
 
-```python
-note.cite(ref, role="cites")
-
-print(note.body())
-# # Analysis Notes
-#
-# The RDF is converged after 5 ns.
-# - [@cites frenkel-smit-2002](../frenkel-smit-2002)
-```
-
-The last line is the whole persistence story: a relative Markdown link, with the edge's role riding in the link label (`@cites ...`). The role vocabulary is fixed — `derived_from`, `cites`, `supersedes`, `records`, `references` — and `references` is the default, so a plain unlabeled link still reads back as a valid edge. `Bundle.link(src, dst, role=...)` writes the same edge between any two Concepts when the source is not a `Note`.
-
-## Query the graph: typed edges and backlinks
-
-Outgoing edges are read straight from a Concept's `index.md`. `typed_out_edges()` returns `Edge` rows pairing the resolved target path with the declared role:
-
-```python
-for edge in note.typed_out_edges():
-    print(edge.role, "->", edge.target)
-# cites -> /.../experiments/solvation-sweep/frenkel-smit-2002
-```
-
-The reverse direction is a derived view. `Bundle.backlinks(concept)` walks the bundle and returns a list of `Backlink` objects — each one a `NamedTuple` wrapper `Backlink(source, role)`, not a bare Concept: `source` is the `Folder` whose `index.md` holds the link, and `role` is that edge's declared role. No reverse index is written to disk; the answer is always recomputed from the Markdown source of truth.
-
-```python
-for backlink in bundle.backlinks(ref):
-    print(f"{bundle.rel_path(backlink.source)} links here (role={backlink.role})")
-# projects/polymer-cg/experiments/solvation-sweep/analysis-notes links here (role=cites)
-```
-
-Typed views over the whole bundle come from the same walk:
-
-```python
-print([bundle.rel_path(n) for n in bundle.notes()])
-print([bundle.rel_path(r) for r in bundle.references()])
-```
-
-## Search: ask a question, not a filename
-
-`bundle.search(text, concept_type=..., tag=...)` ranks Concepts by keyword relevance (BM25F over title, tags, path and body). Ranking rather than substring matching is what lets you ask a real question:
-
-```python
-for hit in bundle.search("how do we choose the cooling rate for Tg?").hits:
-    print(f"{hit.score:.2f}  {hit.entry.path}  {hit.snippet}")
-```
-
-This matters most in Chinese, which is written without spaces: the question 「计算 Tg 的时候升降温怎么选择」 shares no substring with a note titled 「降温速率的选择」, yet shares the term 降温. CJK text is split into single characters **and** adjacent character pairs, and the ranking's own IDF weighting decides which of those carry signal — so there is no segmenter to install and no dictionary to maintain.
-
-This is deliberately not RAG. There are no embeddings, no chunking and no re-ranking model; retrieval's job ends at putting the right document first and handing you the whole thing.
-
-## Search a group wiki
-
-Research groups usually keep methodology in a shared wiki rather than in any one workspace. Point Molab at it once and every search reaches it:
+对终态 Run 的收获写成 `Finding`（或 `Observation` / `Report`）。Plan 和 Note 是产品类，但不是收获目标。
 
 ```console
-$ molab knowledge init /data/group/wiki          # only if it is not an OKF bundle yet
-$ molab knowledge sources add lab-wiki /data/group/wiki --description "group wiki"
-$ molab knowledge sources list
+$ molab runs harvest PROJECT EXP RUN "Tg rose with cooling rate." --of Finding
+$ molab runs analyze-failure PROJECT EXP RUN
+OK Report: failure-analysis-<run-id>
 ```
 
-Registration is a name bound to a directory, recorded in `~/.molab/knowledge.json` — or, with `--workspace`, in `<workspace>/.molab/knowledge.json`, where an entry of the same name fully replaces the user-level one. Searching then spans every registered wiki plus the workspace you are standing in, and each hit says where it came from:
+## 搜组 wiki
 
 ```console
-$ molab knowledge search "计算Tg的时候升降温怎么选择"
-                     knowledge search: '计算Tg的时候升降温怎么选择'
-┏━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━┳━━━━━━━┳━━━━━━━━━━━━━━━━━━━┓
-┃ Ref                  ┃ Title                        ┃ Source   ┃ Score ┃ Match             ┃
-┡━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━╇━━━━━━━╇━━━━━━━━━━━━━━━━━━━┩
-│ lab-wiki:tg-protocol │ 玻璃化转变温度 Tg 的模拟流程 │ lab-wiki │  3.15 │ ## 降温速率的选择 │
-└──────────────────────┴──────────────────────────────┴──────────┴───────┴───────────────────┘
-
-$ molab knowledge read lab-wiki:tg-protocol      # the whole markdown
+$ molab knowledge init /data/group/wiki --title "Lab notes"
+$ molab knowledge sources add lab-wiki /data/group/wiki
+$ molab knowledge search "cooling rate for Tg"
+$ molab knowledge read lab-wiki:lab-notes
 ```
 
-The `<source>:<path>` ref is the portable address of a document: it is what `read` takes, what the API returns, and what an agent passes back to you. The same calls in Python:
-
-```python
-# docs: skip — needs a registered wiki on the executing machine
-from molab.knowledge.sources import search_sources
-
-for hit in search_sources("cooling rate for Tg", limit=5):
-    print(hit.ref, hit.abs_path)     # abs_path is the index.md itself
-```
-
-Nothing about a wiki is Molab-specific: it is markdown in directories, so it lives in git, reviews in pull requests, and reads fine in any editor.
-
-## Let an agent search it
-
-An agent that can reach the group's wiki answers from the group's own practice instead of from generic priors. Two surfaces expose the same search:
-
-- The **interactive agent** (`molab agent`) ships `search_knowledge`, `read_knowledge` and `list_knowledge_sources`, covering the workspace and every registered wiki.
-- **molmcp** — the MCP server the wider MolCrafts ecosystem talks to — exposes the same three tools through its `molab` provider, so any MCP client (Claude Code, Cursor, …) can use them:
-
-```console
-$ pip install molcrafts-molmcp
-$ molmcp config add providers molab
-```
-
-Both read the registry you populated above; there is no second place to register a wiki. Asked "how do we pick the cooling rate for Tg?", the agent searches, gets `lab-wiki:tg-protocol`, reads it, and answers with your group's three-stage protocol — citing the file.
-
-## Import a Zotero library
-
-If your papers already live in Zotero, you do not have to retype them. `molab knowledge import-zotero` links a local Zotero library into a workspace: it opens Zotero's own `zotero.sqlite` **strictly read-only** and materializes each item as a `ReferenceConcept` under `<workspace>/references/` — bibliographic fields into `meta.json`, and each item's PDF pointed at inside Zotero's own `storage/` tree. No bytes are copied, and your Zotero library is never modified.
-
-```console
-$ molab knowledge import-zotero ~/Zotero/zotero.sqlite --dest ./lab
-OK Imported 2 reference(s) into /home/me/lab
-  references/frnkl2002  Understanding Molecular Simulation (2002)
-  references/krmr1990  Dynamics of entangled linear polymer melts (1990)
-```
-
-The argument is the `zotero.sqlite` file in your Zotero data directory (passing the directory itself also works); `--dest` is the workspace to import into, defaulting to the current directory. Close Zotero before importing — the running application holds a lock on its database, and the command will tell you exactly that rather than fail cryptically. The import is idempotent on the Zotero item key: re-running it updates the existing reference directories instead of duplicating them, and the linked source is recorded in `sources.json` at the workspace root.
-
-If something is wrong, the command says so in plain language and exits non-zero:
-
-```console
-$ molab knowledge import-zotero ~/Zotero/zotero.sqlite --dest /tmp/scratch
-Error: Destination is not a molab workspace: /tmp/scratch
-Initialise one first with molab init /tmp/scratch.
-```
-
-The same import is one call in Python — `Bundle.import_zotero` — so scripts and the CLI share a single code path:
-
-```python
-# docs: skip — needs a real Zotero library on the executing machine
-from pathlib import Path
-
-refs = bundle.import_zotero(Path.home() / "Zotero" / "zotero.sqlite")
-print(f"linked {len(refs)} Zotero items")
-```
-
-Once imported, the references are ordinary Concepts: cite them from notes with `note.cite(ref)`, find who cites them with `bundle.backlinks(ref)`, and filter them with `bundle.references()` — exactly as in the sections above.
+`Knowledge(root).search` 是对 title/path/body 的 BM25F。中文同时切 unigram 和相邻 bigram，没有分词器。这不是 RAG。

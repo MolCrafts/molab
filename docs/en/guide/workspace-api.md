@@ -145,9 +145,9 @@ run = exp.add_run({"lr": 1e-3, "seed": 42}, id="baseline-seed-42")
 
 The CLI uses the content-addressing mechanism to achieve repeatable runs. `molab run` derives deterministic run ids from resolved parameters, replica index, and active profile metadata, so re-running the same script can discover and resume or skip existing runs.
 
-Each `Run` stores its data in `<experiment>/runs/run-<run_id>/`. The most important fields live on `run.metadata`, a `RunMetadata` model. Direct convenience properties such as `run.id`, `run.parameters`, `run.status`, and `run.run_dir` simply expose the corresponding metadata fields in a more ergonomic form, and `run.get_result(key)` reads back a result value persisted by `RunContext.set_result` — falling back, when no driver-side result exists, to the completed workflow node of that name in the run's most recent execution (so results of CLI-executed runs are readable through the same accessor).
+Each `Run` stores its data in `<experiment>/runs/<params>/`. `run.json` is the logical definition only (params, `definition_hash`, revision links). Direct convenience properties such as `run.id`, `run.parameters`, and `run.run_dir` expose those fields; status is derived from `run.executions` (each attempt's `execution.json`). `run.get_result(key)` reads a result persisted by `RunContext.set_result`, falling back to the completed workflow node of that name in the run's most recent execution.
 
-One logical run may be executed more than once. Molab does not flatten those attempts; instead it appends `ExecutionRecord` entries to `run.execution_history`, with per-attempt state under `executions/<exec_id>/`. (Hot operational state — status, ownership, heartbeat, the execution records — lives in the run's `run.json (hot state) + alive` sidecar, not in the `run.json` entity file; `run.status` and `run.execution_history` read from it transparently.)
+One logical run may be executed more than once. Each attempt is `executions/eNN/` (`execution.json` + `alive` heartbeat). There is no sidecar of hot state on `run.json`.
 
 If a run should be marked dead without completing normally, `run.cancel()` transitions it to `cancelled` and writes the terminal timestamp.
 

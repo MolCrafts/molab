@@ -1,10 +1,10 @@
 """Surface a PlanOrchestrator run on the Agents + Knowledge tabs.
 
 Five raising writers make the AI activity visible in the UI — the agent-task
-entry + session transcript (Agents tab), and three typed ``KnowledgeItem``
-records mounted under the experiment (Knowledge graph): the ``Decision``
+entry + session transcript (Agents tab), and three typed knowledge
+records mounted under the experiment: the ``Observation``
 experiment record, the ``Finding`` harvested from an execute tail's
-``final_report``, and the ``FailureAnalysis`` for a terminally-failed plan.
+``final_report``, and the ``Report`` for a terminally-failed plan.
 
 Each writer RAISES on failure — with ONE deliberate exception: a failed
 provenance ``cite`` edge is warn-logged, never fatal, because the meta + body
@@ -26,9 +26,7 @@ from typing import TYPE_CHECKING, Any
 from mollog import get_logger
 
 if TYPE_CHECKING:
-    from molab.workspace.edges import EdgeRole
     from molab.workspace.experiment import Experiment
-    from molab.workspace.folder import Folder
     from molab.workspace.knowledge import Knowledge
     from molab.workspace.run import Run
 
@@ -37,10 +35,10 @@ __all__ = [
     "has_artifact",
     "write_agent_task_record",
     "write_experiment_record",
-    "write_failure_analysis_record",
     "write_finding_record",
     "write_plan_book",
     "write_plan_task_status",
+    "write_report_record",
     "write_session_events_record",
 ]
 
@@ -583,13 +581,13 @@ def write_experiment_record(
     model: str,
     execution_id: str,
 ) -> Knowledge:
-    """Write the Decision experiment record via ``write_knowledge``.
+    """Write the Observation experiment record via ``write_knowledge``.
 
     Raises when no ``experiment_report`` artifact exists — the record renders
     from it, and a missing report is the caller's signal to skip this writer
     (checked via :func:`has_artifact`), never a silent no-op.
     """
-    from molab.workspace.knowledge import Decision, SourceRef
+    from molab.knowledge import Observation, SourceRef
     from molab.workspace.knowledge_write import write_knowledge
 
     report = _read_artifact_json(run, execution_id, "experiment_report")
@@ -623,10 +621,10 @@ def write_experiment_record(
     return write_knowledge(
         experiment,
         name=item_name,
-        cls=Decision,
+        of=Observation,
         sources=sources,
         created_by=f"PlanOrchestrator/{model}",
-        body=body,
+        text=body,
         cite=[(run, "derived_from")],
         title=title,
     )
@@ -645,10 +643,12 @@ def write_finding_record(
     Raises when no ``final_report`` exists (caller gates via
     :func:`has_artifact`). Sources cite the run, the experiment, and the
     exact final_report (+ audit_report when present) artifacts; a
-    ``references`` edge connects the Finding to the Decision record when
+    ``references`` edge connects the Finding to the Observation record when
     that record exists — plan → outcome stays traversable.
     """
-    from molab.workspace.knowledge import Finding, Knowledge, SourceRef
+    from molab.knowledge import Finding, Knowledge, KnowledgeNotFoundError, SourceRef
+    from molab.knowledge.concept import append_link
+    from molab.workspace.knowledge import knowledge_dir
     from molab.workspace.knowledge_write import write_knowledge
 
     final_report = _read_artifact_json(run, execution_id, "final_report")
@@ -669,26 +669,26 @@ def write_finding_record(
         block = _render_value(final_report.get(key))
         if block:
             lines += [f"## {label}", "", block, ""]
-    cites: list[tuple[Folder, EdgeRole]] = [(run, "derived_from")]
-    try:
-        decision = experiment.get_folder(f"experiment-record-{run.id}", cls=Knowledge)
-    except Exception:
-        decision = None  # no Decision record (its write raced/failed) — Finding stands alone
-    if decision is not None:
-        cites.append((decision, "references"))
-    return write_knowledge(
+    item = write_knowledge(
         experiment,
         name=item_name,
-        cls=Finding,
+        of=Finding,
         sources=sources,
         created_by=f"PlanOrchestrator/{model}",
-        body="\n".join(lines).rstrip() + "\n",
-        cite=cites,
+        text="\n".join(lines).rstrip() + "\n",
+        cite=[(run, "derived_from")],
         title=title,
     )
+    try:
+        observation = Knowledge.open(knowledge_dir(experiment, f"experiment-record-{run.id}"))
+    except (KnowledgeNotFoundError, FileNotFoundError, OSError):
+        observation = None
+    if observation is not None:
+        append_link(item, observation.path, role="references")
+    return item
 
 
-def write_failure_analysis_record(
+def write_report_record(
     *,
     run: Run,
     experiment: Experiment,
@@ -697,12 +697,12 @@ def write_failure_analysis_record(
     failure_error: str,
     execution_id: str,
 ) -> Knowledge:
-    """Write the FailureAnalysis for a plan that terminally failed.
+    """Write the Report for a plan that terminally failed.
 
     Never called for an approval suspension — a suspension is not a failure
     (the callers carve ``ApprovalPendingError`` out before reaching this).
     """
-    from molab.workspace.knowledge import FailureAnalysis, SourceRef
+    from molab.knowledge import Report, SourceRef
     from molab.workspace.knowledge_write import write_knowledge
 
     item_name = f"failure-{run.id}"
@@ -729,13 +729,13 @@ def write_failure_analysis_record(
     return write_knowledge(
         experiment,
         name=item_name,
-        cls=FailureAnalysis,
+        of=Report,
         sources=[
             SourceRef(kind="run", ref=run.id),
             SourceRef(kind="experiment", ref=experiment.id),
         ],
         created_by=f"PlanOrchestrator/{model}",
-        body="\n".join(lines).rstrip() + "\n",
+        text="\n".join(lines).rstrip() + "\n",
         cite=[(run, "derived_from")],
         title=title,
     )
@@ -770,10 +770,10 @@ def write_plan_book(
     return write_knowledge(
         experiment,
         name=PLAN_BOOK_NAME,
-        cls=Plan,
+        of=Plan,
         sources=sources,
         created_by=f"PlanOrchestrator/{model}",
-        body=body,
+        text=body,
         cite=[(run, "derived_from")],
         title=PLAN_BOOK_NAME,
     )

@@ -2,7 +2,7 @@
 
 The workspace-layer support for the "Notion-style document" embed verb: a
 :class:`~molab.workspace.concepts.Note` embeds a live workspace entity -- a
-``Run`` / ``Experiment`` / ``ReferenceConcept`` (all :class:`Folder` subclasses)
+``Run`` / ``Experiment`` / ``Literature`` (all :class:`Folder` subclasses)
 or an :class:`~molab.workspace.assets.base.Asset` -- as a typed provenance edge.
 This module owns the read-only halves of that verb:
 
@@ -127,7 +127,7 @@ def default_role_for(target: Concept | Folder | Asset) -> EdgeRole:
     """Return the per-kind default embed :class:`EdgeRole` for *target*.
 
     All roles come from the frozen vocabulary (no new roles): a ``Run`` or
-    ``Experiment`` folder -> ``records``, a ``ReferenceConcept`` -> ``cites``,
+    ``Experiment`` folder -> ``records``, a ``Literature`` -> ``cites``,
     and any ``Asset`` (or other folder kind) -> ``references``
     (:data:`~molab.workspace.edges.DEFAULT_EDGE_ROLE`).
 
@@ -191,11 +191,11 @@ def summarize_entity(
 ) -> EntitySummary:
     """Project *target* to an :class:`EntitySummary` (a pure read; writes nothing).
 
-    - A ``Folder`` (``Run`` / ``Experiment`` / ``ReferenceConcept``): ``id`` is
+    - A ``Folder`` (``Run`` / ``Experiment`` / ``Literature``): ``id`` is
       the entity's own id (never its directory name -- the two are deliberately
       different), ``kind`` is its ``meta.json`` type (falling back to the
       folder's kind), and ``title`` is the ``index.md`` H1 -- with a
-      ``ReferenceConcept``'s ``ReferenceMeta.title`` preferred -- else the
+      ``Literature``'s ``ReferenceMeta.title`` preferred -- else the
       directory name.
     - An ``Asset``: ``id`` is the ``asset_id``, ``kind`` is the asset kind, and
       ``title`` is the asset name. *root* is required to anchor the asset (its
@@ -227,12 +227,20 @@ def summarize_entity(
         default_kind = target.type() if isinstance(target, Concept) else target.kind
         kind = str(raw_type) if raw_type is not None else default_kind
         title: str | None = None
-        if kind == REFERENCE_KIND:
+        if kind in {REFERENCE_KIND, "literature", "reference"}:
             ref_title = meta.get("title")
             if isinstance(ref_title, str) and ref_title:
                 title = ref_title
+            else:
+                from molab.knowledge.concepts import Literature
+
+                if isinstance(target, Literature):
+                    bib_title = target.record.title
+                    if isinstance(bib_title, str) and bib_title:
+                        title = bib_title
         if title is None:
-            title = extract_title(target.read_index()) or target.name
+            narrative = target.read() if isinstance(target, Concept) else target.read_index()
+            title = extract_title(narrative) or target.name
         # A Concept *is* its path, so its directory name is its id; a Folder
         # carries an id in its entity record that is deliberately not the
         # directory name (a run dir is ``run-<id>``).

@@ -52,4 +52,11 @@ def notify_concept_created(*, root: Path, concept: Concept, title: str) -> None:
         _HOOK(root=root, concept=concept, title=title)
 
 
-__all__ = ["ConceptCreatedHook", "notify_concept_created", "set_concept_created_hook"]
+set_knowledge_created_hook = set_concept_created_hook
+
+__all__ = [
+    "ConceptCreatedHook",
+    "notify_concept_created",
+    "set_concept_created_hook",
+    "set_knowledge_created_hook",
+]

@@ -460,7 +460,7 @@ def plan(
             "re-running the same draft regenerates it.[/dim]"
         )
         # A terminally-failed plan still materializes (Agents-tab entry with
-        # status failed + a FailureAnalysis knowledge record). The suspension
+        # status failed + a Report knowledge record). The suspension
         # path above never reaches here — ApprovalPendingError is not a failure.
         from molab.harness.services.plan_runtime import PlanFailure
         from molab.harness.services.plan_runtime.materialize import materialize_plan_records

@@ -4,7 +4,7 @@ In OKF a Concept is a **directory** whose path is its identity:
 
 - A :class:`Note` is a Concept whose body is its ``index.md`` and whose
   citations are markdown links (resolved by :meth:`Concept.out_edges`).
-- A :class:`ReferenceConcept` is a Concept whose structured bib record lives in
+- A :class:`Literature` is a Knowledge directory whose structured bib record lives in
   ``meta.json`` (:class:`ReferenceMeta`) and whose human citation text lives in
   ``index.md``. PDFs are *pointed at* via ``ReferenceMeta.pdf_path`` /
   ``pdf_asset_id`` — never copied.
@@ -16,13 +16,18 @@ from a directory's ``meta.json`` ``type``.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
 from typing import ClassVar, cast
 
-from molab.fs import PathArg
+from molab.fs import FileSystem, PathArg
 
-from .concept import META_JSON_FILENAME, Concept, append_link, read_text_or_none
-from .edges import DEFAULT_EDGE_ROLE, EdgeRole
+from .concept import (
+    META_JSON_FILENAME,
+    Concept,
+    read_text_or_none,
+    register_marker_filenames,
+)
+from .knowledge_item import SourceRef
+from .naming import KNOWLEDGE_HEAD_FILES
 from .note_meta import NOTE_TYPE, NoteMeta
 from .reference_meta import ReferenceMeta
 from .types import concept_type
@@ -33,35 +38,10 @@ REFERENCE_KIND = "reference.reference"
 
 @concept_type(NOTE_KIND)
 class Note(Concept):
-    """A note Concept — narrative in ``index.md``, citations as markdown links.
+    """A note — ``knowledges/<name>.md`` with ``class: Note`` frontmatter."""
 
-    Mountable anywhere (convention, not enforcement): a note is just a directory,
-    so it sits equally well at a wiki root or beside a workspace experiment.
-    :meth:`cite` records a reference as a markdown link so
-    :meth:`Concept.out_edges` resolves it back.
-    """
-
+    FILE_DOCUMENT: ClassVar[bool] = True
     DEFAULT_TYPE: ClassVar[str] = NOTE_KIND
-
-    def cite(
-        self,
-        ref: Concept | PathArg,
-        *,
-        text: str | None = None,
-        role: EdgeRole = DEFAULT_EDGE_ROLE,
-    ) -> None:
-        """Cite *ref* — append a typed markdown link resolvable via ``out_edges``.
-
-        A thin delegator over the single
-        :func:`~molab.knowledge.concept.append_link` writer; *role* is recovered
-        by :meth:`Concept.typed_out_edges`.
-
-        Args:
-            ref: The Concept — or bare directory path — being cited.
-            text: Optional link label; defaults to *ref*'s directory name.
-            role: The declared :class:`~molab.knowledge.edges.EdgeRole`.
-        """
-        append_link(self, ref, text=text, role=role)
 
     # -- typed meta.json (tags / status) ----------------------------------
 
@@ -89,59 +69,100 @@ class Note(Concept):
 
     def tags(self) -> list[str]:
         """This note's categorical tags (``[]`` when untagged)."""
+        raw = self.frontmatter().get("tags")
+        if isinstance(raw, list):
+            return [str(item) for item in raw]
         return list(self.read_note_meta().tags)
 
     def status(self) -> str:
         """This note's lifecycle status (``"active"`` by default)."""
+        raw = self.frontmatter().get("status")
+        if isinstance(raw, str) and raw:
+            return raw
         return self.read_note_meta().status
-
-    def set_tags(self, tags: Iterable[str]) -> None:
-        """Set this note's tags, preserving ``status`` and any other meta keys."""
-        current = self.read_note_meta()
-        self.write_note_meta(current.model_copy(update={"tags": list(tags)}))
-
-    def set_status(self, status: str) -> None:
-        """Set this note's status, preserving ``tags`` and any other meta keys."""
-        current = self.read_note_meta()
-        self.write_note_meta(current.model_copy(update={"status": status}))
 
 
 @concept_type(REFERENCE_KIND)
-class ReferenceConcept(Concept):
-    """A reference Concept — a bibliographic record (one Concept per work).
+class Literature(Concept):
+    """A literature record — bib fields in markdown frontmatter."""
 
-    Structured bib fields live in ``meta.json`` (:class:`ReferenceMeta`); the
-    human-readable citation text lives in ``index.md``. PDFs are pointed at via
-    ``ReferenceMeta.pdf_path`` / ``pdf_asset_id`` — never copied.
-
-    Named ``ReferenceConcept`` (not ``Reference``) because the name is load-bearing
-    at a great many ``isinstance`` sites across the server, CLI and harness.
-    """
-
+    FILE_DOCUMENT: ClassVar[bool] = True
     DEFAULT_TYPE: ClassVar[str] = REFERENCE_KIND
 
+    @property
+    def record(self) -> ReferenceMeta:
+        """This literature item's bibliographic record."""
+        return self.read_reference_meta()
+
     def read_reference_meta(self) -> ReferenceMeta:
-        """Load this reference's typed bib ``meta.json`` as a :class:`ReferenceMeta`."""
-        fpath = self._fs.join(str(self.path), META_JSON_FILENAME)
-        return cast("ReferenceMeta", ReferenceMeta.from_json(self._fs.read_text(fpath)))
-
-    def write_reference_meta(self, meta: ReferenceMeta) -> None:
-        """Atomically write this reference's typed bib ``meta.json``.
-
-        The on-disk ``type`` is stamped to the registered concept type
-        (``reference.reference``) so :func:`concept_from_dir` rebuilds a
-        :class:`ReferenceConcept` — note ``ReferenceMeta.type`` itself defaults
-        to the bare ``"reference"`` for the OKF bib payload.
-        """
-        self.write_meta(meta)
+        """Load bibliographic fields from this file's frontmatter."""
+        payload = {
+            k: v
+            for k, v in self.frontmatter().items()
+            if k not in {"class", "type", "kind", "id", "sources", "tags", "status"}
+        }
+        if "type" not in payload:
+            payload = {**payload, "type": "reference"}
+        authors = payload.get("authors")
+        if isinstance(authors, list):
+            payload["authors"] = tuple(str(a) for a in authors)
+        return ReferenceMeta.model_validate(payload)
 
     def citation(self) -> str:
         """The human-readable citation text (its ``index.md``)."""
-        return self.read_index()
-
-    def set_citation(self, text: str) -> None:
-        """Set the human-readable citation text (its ``index.md``)."""
-        self.write_index(text)
+        return self.read()
 
 
-__all__ = ["NOTE_KIND", "REFERENCE_KIND", "Note", "ReferenceConcept"]
+class _SourcedKnowledge(Concept):
+    """Finding / Report / Plan / Observation — require ``sources`` at construct."""
+
+    FILE_DOCUMENT: ClassVar[bool] = True
+
+    def __init__(
+        self,
+        path: PathArg,
+        *,
+        sources: list[SourceRef] | None = None,
+        declared_type: str | None = None,
+        fs: FileSystem | None = None,
+        type: str | None = None,
+    ) -> None:
+        if not sources:
+            raise ValueError(f"{self.__class__.__name__} requires at least one SourceRef")
+        super().__init__(path, type=declared_type if declared_type is not None else type, fs=fs)
+        self._sources = list(sources)
+
+    @property
+    def sources(self) -> list[SourceRef]:
+        """The SourceRef list persisted in the class-named head."""
+        return list(self._sources)
+
+
+class Report(_SourcedKnowledge):
+    """A written-up analysis (including failed-run reports)."""
+
+
+class Finding(_SourcedKnowledge):
+    """A harvested scientific outcome."""
+
+
+class Plan(_SourcedKnowledge):
+    """The experiment or project plan book."""
+
+
+class Observation(_SourcedKnowledge):
+    """A recorded observation or standing choice."""
+
+
+register_marker_filenames(*sorted(KNOWLEDGE_HEAD_FILES))
+
+__all__ = [
+    "NOTE_KIND",
+    "REFERENCE_KIND",
+    "Finding",
+    "Literature",
+    "Note",
+    "Observation",
+    "Plan",
+    "Report",
+]

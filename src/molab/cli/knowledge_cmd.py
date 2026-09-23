@@ -1,12 +1,8 @@
-"""``molab knowledge`` — notes and literature (OKF Concepts) from the CLI.
+"""``molab knowledge`` — notes and literature from the CLI.
 
-The group is thin plumbing over the workspace knowledge surface: everything a
-command does here routes through the same :class:`molab.workspace.Bundle`
-verbs Python callers use (the Python == UI/CLI invariant). ``import-zotero``
-links a local Zotero library read-only via :meth:`Bundle.import_zotero` /
-:func:`molab.workspace.read_zotero_items` — each item becomes a
-``ReferenceConcept`` directory whose ``meta.json`` carries the bib record and
-whose PDF is *pointed at* in place, never copied.
+Commands open a tree with :class:`molab.knowledge.Knowledge` and read documents
+with :meth:`Knowledge.open`. ``import-zotero`` writes :class:`Literature`
+directories (``literature.json`` + ``index.md``); PDFs are pointed at, never copied.
 """
 
 from __future__ import annotations
@@ -83,21 +79,21 @@ def import_zotero(
         ),
     ] = Path(),
 ) -> None:
-    """Link a local Zotero library as reference Concepts (read-only import).
+    """Link a local Zotero library as Literature (read-only import).
 
-    Each Zotero item becomes a ``ReferenceConcept`` directory under
-    ``<dest>/references/`` — bib fields in ``meta.json``, PDFs pointed at in
-    place (never copied). Re-running is idempotent: an item updates its
+    Each Zotero item becomes a ``Literature`` directory under
+    ``<dest>/references/`` — bib fields in ``literature.json``, PDFs pointed at
+    in place (never copied). Re-running is idempotent: an item updates its
     existing directory instead of duplicating it.
     """
-    from molab.workspace import Bundle
+    from molab.knowledge import Knowledge
 
     db = _resolve_zotero_db(database)
     ws = _load_dest_workspace(dest)
 
-    bundle = Bundle(ws.root)
+    tree = Knowledge(ws.root)
     try:
-        refs = bundle.import_zotero(db)
+        refs = tree.import_zotero(db)
     except sqlite3.Error as exc:
         if "locked" in str(exc).lower():
             rprint(
@@ -112,12 +108,13 @@ def import_zotero(
             )
         raise typer.Exit(1) from exc
 
-    rprint(f"[green]OK[/green] Imported {len(refs)} reference(s) into {bundle.root}")
+    rprint(f"[green]OK[/green] Imported {len(refs)} literature record(s) into {tree.path}")
     for ref in refs:
-        meta = ref.read_reference_meta()
+        meta = ref.record
         title = meta.title or "(untitled)"
         year = f" ({meta.year})" if meta.year else ""
-        rprint(f"  {bundle.rel_path(ref)}  [dim]{title}{year}[/dim]")
+        rel = Path(ref.path).relative_to(tree.path).as_posix()
+        rprint(f"  {rel}  [dim]{title}{year}[/dim]")
 
 
 sources_app = typer.Typer(
@@ -171,7 +168,7 @@ def sources_list(
 @sources_app.command("add")
 def sources_add(
     name: Annotated[str, typer.Argument(help="Handle for the wiki, e.g. 'lab-wiki'.")],
-    root: Annotated[Path, typer.Argument(help="The OKF bundle directory.")],
+    root: Annotated[Path, typer.Argument(help="The knowledge tree directory.")],
     description: Annotated[str, typer.Option("--description", help="What this wiki covers.")] = "",
     workspace_scope: Annotated[
         bool,
@@ -206,9 +203,19 @@ def sources_add(
         # Registering a path that is not there yet is legal (a wiki on a share
         # that is not mounted right now), but it is worth saying out loud.
         rprint(f"[yellow]Note:[/yellow] {resolved} does not exist yet.")
-    elif not (resolved / "meta.json").is_file() and not any(resolved.glob("*/meta.json")):
-        rprint(f"[yellow]Note:[/yellow] {resolved} holds no OKF concepts yet.")
-        rprint("Create one with [bold]molab knowledge init[/bold], or add a meta.json.")
+    elif not any(resolved.glob("*/*.json")) and not any(
+        resolved.glob(name)
+        for name in (
+            "note.json",
+            "literature.json",
+            "report.json",
+            "finding.json",
+            "plan.json",
+            "observation.json",
+        )
+    ):
+        rprint(f"[yellow]Note:[/yellow] {resolved} holds no knowledge documents yet.")
+        rprint("Create one with [bold]molab knowledge init[/bold].")
 
     KnowledgeSourceStore(ws_root).add(source, scope=scope)
     rprint(f"[green]OK[/green] Registered [bold]{name}[/bold] -> {resolved} ({scope})")
@@ -242,25 +249,25 @@ def sources_remove(
 
 @knowledge_app.command("init")
 def knowledge_init(
-    directory: Annotated[Path, typer.Argument(help="Directory to turn into an OKF bundle.")],
+    directory: Annotated[Path, typer.Argument(help="Directory to turn into a knowledge tree.")],
     title: Annotated[str, typer.Option("--title", help="Title for the bundle's index.md.")] = "",
 ) -> None:
-    """Create a minimal OKF bundle — a group wiki needs no workspace.
+    """Create a knowledge tree directory — a group wiki needs no workspace.
 
-    Writes the two files that make a directory a Concept: a ``meta.json`` marker
-    and an ``index.md`` narrative. Idempotent: an existing bundle is left alone.
+    Makes the directory. With ``--title``, writes a child Note (``note.json`` +
+    ``index.md``). Idempotent: an existing tree is left alone.
     """
-    from molab.knowledge.concept import Concept
+    from molab.knowledge import Knowledge, Note
 
     target = directory.expanduser().resolve()
-    concept = Concept(target, type="bundle.root")
-    if (target / "meta.json").is_file():
-        rprint(f"[dim]Already an OKF bundle: {target}[/dim]")
+    target.mkdir(parents=True, exist_ok=True)
+    if any(True for _ in Knowledge(target).walk()):
+        rprint(f"[dim]Already a knowledge tree: {target}[/dim]")
         return
-    concept.write_meta()
-    if not (target / "index.md").is_file():
-        concept.set_body(f"# {title or target.name}\n\nNotes in this wiki.\n")
-    rprint(f"[green]OK[/green] Initialised OKF bundle at [bold]{target}[/bold]")
+    if title:
+        child = Note(target / (title.replace(" ", "-").lower() or target.name))
+        child.write(f"# {title}\n\nNotes in this wiki.\n")
+    rprint(f"[green]OK[/green] Initialised knowledge tree at [bold]{target}[/bold]")
     rprint(
         "Register it with "
         f"[bold]molab knowledge sources add <name> {target}[/bold] to make it searchable."
@@ -292,8 +299,8 @@ def knowledge_search(
     from rich import print as _rich_print
     from rich.table import Table
 
+    from molab.knowledge import Knowledge
     from molab.knowledge.sources import search_sources
-    from molab.workspace.bundle import Bundle as WorkspaceBundle
 
     ws_root = _workspace_root(path)
     hits = search_sources(
@@ -304,14 +311,8 @@ def knowledge_search(
         limit=limit,
         concept_type=concept_type,
         tag=tag,
-        # The workspace is searched through its own (layout-pruned) bundle —
-        # the same one the server and the agent tool use.
         workspace_searcher=(
-            (
-                lambda: WorkspaceBundle(ws_root).search(
-                    query, concept_type=concept_type, tag=tag, limit=limit
-                )
-            )
+            (lambda: Knowledge(ws_root).search(query, tag=tag, limit=limit))
             if ws_root is not None
             else None
         ),
@@ -361,10 +362,8 @@ def knowledge_read(
     ] = None,
 ) -> None:
     """Print one knowledge document in full — its metadata, body and edges."""
-    from molab.knowledge.bundle import Bundle
-    from molab.knowledge.errors import ConceptNotFoundError
+    from molab.knowledge import Knowledge, KnowledgeNotFoundError
     from molab.knowledge.sources import KnowledgeSourceStore, SourceNotFoundError
-    from molab.workspace.bundle import Bundle as WorkspaceBundle
 
     ws_root = _workspace_root(path)
     source_name, _, rel = ref.partition(":") if ":" in ref else ("", "", ref)
@@ -374,17 +373,15 @@ def knowledge_read(
         except SourceNotFoundError:
             rprint(f"[red]Error:[/red] no knowledge source named {source_name!r}.")
             raise typer.Exit(1) from None
-        bundle: Bundle = Bundle(root)
     elif ws_root is not None:
         root = ws_root
-        bundle = WorkspaceBundle(root)
     else:
         rprint("[red]Error:[/red] not a workspace — use a '<source>:<path>' ref.")
         raise typer.Exit(1)
 
     try:
-        concept = bundle.get(rel)
-    except (ConceptNotFoundError, FileNotFoundError):
+        concept = Knowledge.open(root / rel if rel else root)
+    except (KnowledgeNotFoundError, FileNotFoundError):
         rprint(f"[red]Error:[/red] no knowledge concept at {ref!r}.")
         rprint("Find valid refs with [bold]molab knowledge search[/bold].")
         raise typer.Exit(1) from None
@@ -396,8 +393,8 @@ def knowledge_read(
     rprint("")
     # The body is markdown the user wrote; print it verbatim rather than letting
     # rich reinterpret its brackets as markup.
-    print(concept.body())
-    if edges := concept.typed_out_edges():
+    print(concept.read())
+    if edges := concept.links():
         rprint("[dim]links:[/dim]")
         for edge in edges:
             rprint(f"  [dim][{edge.role}][/dim] {edge.target}")

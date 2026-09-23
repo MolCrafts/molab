@@ -33,6 +33,7 @@ class TestValidateWorkspace:
         report = ws.validate()
         assert report.ok, report.violations
         assert report.errors == ()
+        assert validate_workspace(ws).ok
 
     def test_never_executed_run_conforms_without_ops_warning(self, tmp_path: Path) -> None:
         ws = _workspace(tmp_path)

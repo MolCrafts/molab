@@ -44,7 +44,6 @@ from .utils import slugify
 from .validate import ValidationReport, validate_workspace
 
 if TYPE_CHECKING:
-    from .bundle import Bundle
     from .models import ComputeTarget
     from .workspace_context import ContextFocus, WorkspaceContext
     from .wp import WorkspacePaths
@@ -176,17 +175,6 @@ class Workspace(Folder):
         meta_path = self.fs.join(self.resolve(), "workspace.json")
         if not self.fs.exists(meta_path):
             self.materialize()
-
-    def as_bundle(self) -> Bundle:
-        """OKF :class:`~molab.workspace.bundle.Bundle` on this workspace's FS.
-
-        Critical for remote workspaces: ``Bundle(root)`` alone defaults to a
-        local FS and sees an empty tree. Always use this (or
-        ``Bundle(root, fs=ws.fs)``) so knowledge walks hit the cache/SSH mirror.
-        """
-        from .bundle import Bundle
-
-        return Bundle(self.root, fs=self.fs)
 
     # ── Properties (entity-specific) ─────────────────────────────────────
 

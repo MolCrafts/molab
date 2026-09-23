@@ -11,7 +11,7 @@ Molab stores state as four nested levels:
 | **Workspace** | Root directory | `./lab` |
 | **Project** | Groups related work | `qm9` |
 | **Experiment** | One repeatable definition | `baseline` |
-| **Run** | One concrete execution | `run-abc123` |
+| **Run** | One concrete execution | `lr=0.001` |
 
 An experiment says *what should be repeatable*. A run records *what actually happened*. That separation is the heart of the model.
 
@@ -44,7 +44,7 @@ result = run.execute(wf)
 print(run.executions[-1].status.value, result.outputs["report"])  # succeeded 0.1
 ```
 
-The run's directory now holds `run.json` (identity and provenance), `run.json (hot state) + alive` (status and ownership), and `executions/<exec_id>/` (per-task outputs). Read it back in a later session:
+The run's directory now holds `run.json` (logical definition only) and `executions/e01/` (the attempt: `execution.json`, `alive` heartbeat, per-task outputs under `out/` and `artifacts/`). Read it back in a later session:
 
 ```python
 same_run = exp.get_run(run.id)

@@ -1,45 +1,28 @@
 import { useQueryClient } from "@tanstack/react-query";
-import {
-  ArrowLeft,
-  BookOpen,
-  Download,
-  ExternalLink,
-  Eye,
-  FileText,
-  NotebookPen,
-  Pencil,
-} from "lucide-react";
-import { type JSX, lazy, Suspense, useMemo, useState } from "react";
+import { ArrowLeft, BookOpen, Download, ExternalLink, FileText, NotebookPen } from "lucide-react";
+import { type JSX, useMemo } from "react";
 import { knowledgeApi } from "@/api";
 import type { NoteDetailResponse } from "@/api/generated/models/NoteDetailResponse";
 import type { ReferenceSummary } from "@/api/generated/models/ReferenceSummary";
-import { EmptyState, EntityHeader } from "@/app/components/entity";
+import { EntityHeader } from "@/app/components/entity";
 import { useNavigationState } from "@/app/state/useNavigationState";
 import type { RendererProps } from "@/app/types";
-import { MarkdownContent } from "@/components/ui/markdown";
 import {
-  WorkbenchAction,
   WorkbenchIconAction,
   WorkbenchOperationState,
   WorkbenchRetryAction,
-  WorkbenchToggleAction,
 } from "@/components/workbench";
 import { DocumentControls } from "@/plugins/knowledge/DocumentControls";
 import { EntityRefCard } from "@/plugins/knowledge/EntityRefCard";
+import { KnowledgeDashboard } from "@/plugins/knowledge/KnowledgeDashboard";
+import { NoteEditor } from "@/plugins/knowledge/NoteEditor";
 import {
   knowledgeKeys,
   useKnowledgeListQuery,
   useKnowledgeNoteQuery,
 } from "@/plugins/knowledge/queries";
 
-// Lazy-loaded so Milkdown / ProseMirror (a heavy dependency graph) is split
-// into an async chunk fetched only when the user enters edit mode, keeping the
-// read-only Knowledge browse path light.
-const NoteEditor = lazy(() =>
-  import("@/plugins/knowledge/NoteEditor").then((m) => ({ default: m.NoteEditor })),
-);
-
-const COLUMN = "mx-auto w-full max-w-3xl";
+const COLUMN = "mx-auto w-full max-w-6xl";
 
 const formatReference = (ref: ReferenceSummary): string => {
   const authors =
@@ -53,20 +36,16 @@ const formatReference = (ref: ReferenceSummary): string => {
 };
 
 /**
- * Knowledge browser — the workspace's OKF Concepts (Notes + literature
- * References). With no selection it lists everything; selecting a note's
- * bundle-relative path opens its narrative (``index.md``). Read-only: authoring
- * happens through the workspace / CLI, not the browser.
+ * Knowledge browser. With no selection it shows a class dashboard; selecting
+ * a document opens its narrative as Notion-style cells (double-click to edit).
  */
 export const KnowledgeViewer = ({ selection, snapshot }: RendererProps): JSX.Element => {
   const nav = useNavigationState(snapshot);
   const queryClient = useQueryClient();
   const listQuery = useKnowledgeListQuery();
   const data = listQuery.data;
-  const [editingRelPath, setEditingRelPath] = useState<string | null>(null);
 
   const relPath = selection.objectId;
-  const editing = editingRelPath === relPath;
 
   // The selected reference (if the path names one) comes from the list directly.
   const selectedReference = useMemo(
@@ -88,11 +67,6 @@ export const KnowledgeViewer = ({ selection, snapshot }: RendererProps): JSX.Ele
   const handleSaved = (updated: NoteDetailResponse): void => {
     queryClient.setQueryData(knowledgeKeys.note(relPath), updated);
     void queryClient.invalidateQueries({ queryKey: knowledgeKeys.lists() });
-    setEditingRelPath(null);
-  };
-
-  const handleEmbedded = (): void => {
-    void noteQuery.refetch();
   };
 
   const back = (): void => nav.setSelection({ objectType: "knowledge", objectId: "" });
@@ -104,19 +78,9 @@ export const KnowledgeViewer = ({ selection, snapshot }: RendererProps): JSX.Ele
         <EntityHeader
           icon={NotebookPen}
           title={note?.name ?? relPath}
+          afterTitle={<DocumentControls key={relPath} relPath={relPath} placement="title" />}
           actions={
             <>
-              {note && (
-                <WorkbenchToggleAction
-                  label={editing ? "Preview document" : "Edit document"}
-                  onClick={() => setEditingRelPath(editing ? null : relPath)}
-                  pressed={editing}
-                >
-                  {editing ? <Eye className="size-icon" /> : <Pencil className="size-icon" />}
-                </WorkbenchToggleAction>
-              )}
-              {/* Portable-Markdown download: a plain <a href> so the server's
-                  Content-Disposition attachment header drives the browser save. */}
               <WorkbenchIconAction label="Export document" asChild>
                 <a href={knowledgeApi.docExportUrl(relPath)} download>
                   <Download className="size-4" />
@@ -133,23 +97,9 @@ export const KnowledgeViewer = ({ selection, snapshot }: RendererProps): JSX.Ele
             <p className="text-body-lg text-destructive">{noteError}</p>
           ) : noteQuery.isPending || !note ? (
             <p className="text-body-lg italic text-muted-foreground">Loading…</p>
-          ) : editing ? (
-            <Suspense
-              fallback={
-                <p className="text-body-lg italic text-muted-foreground">Loading editor…</p>
-              }
-            >
-              <NoteEditor
-                note={note}
-                snapshot={snapshot}
-                onSaved={handleSaved}
-                onEmbedded={handleEmbedded}
-              />
-            </Suspense>
           ) : (
             <div className="space-y-4">
-              <DocumentControls key={relPath} relPath={relPath} />
-              <MarkdownContent text={note.body || "_(empty note)_"} />
+              <NoteEditor note={note} onSaved={handleSaved} />
               {note.cards && note.cards.length > 0 && (
                 <section className="space-y-2 border-t border-border/50 pt-4">
                   <h3 className="text-label font-semibold uppercase tracking-wide text-muted-foreground">
@@ -220,15 +170,13 @@ export const KnowledgeViewer = ({ selection, snapshot }: RendererProps): JSX.Ele
     );
   }
 
-  // --- Browse overview ----------------------------------------------------
   const notes = data?.notes ?? [];
   const references = data?.references ?? [];
-  const empty = data !== undefined && notes.length === 0 && references.length === 0;
 
   return (
     <div className="flex h-full flex-col bg-background">
       <EntityHeader icon={BookOpen} title="Knowledge" />
-      <div className={`${COLUMN} flex-1 space-y-6 overflow-auto px-4 py-6 md:px-8`}>
+      <div className="mx-auto w-full max-w-5xl flex-1 overflow-auto px-4 py-6 md:px-8">
         {listQuery.isPending ? (
           <WorkbenchOperationState kind="loading" title="Loading knowledge…" skeletonRows={4} />
         ) : null}
@@ -241,79 +189,12 @@ export const KnowledgeViewer = ({ selection, snapshot }: RendererProps): JSX.Ele
             }
             action={<WorkbenchRetryAction onClick={() => void listQuery.refetch()} />}
           />
-        ) : null}
-        {empty && (
-          <EmptyState
-            icon={<BookOpen className="h-6 w-6" />}
-            title="No knowledge yet"
-            description="Notes and references mounted anywhere in the workspace appear here. Add them through the workspace or CLI."
+        ) : (
+          <KnowledgeDashboard
+            notes={notes}
+            references={references}
+            onOpen={(path) => nav.setSelection({ objectType: "knowledge", objectId: path })}
           />
-        )}
-
-        {notes.length > 0 && (
-          <section className="space-y-2">
-            <h3 className="text-label font-semibold uppercase tracking-wide text-muted-foreground">
-              Notes ({notes.length})
-            </h3>
-            <ul className="divide-y divide-border/50 border-y border-border/60">
-              {notes.map((n) => (
-                <li key={n.relPath}>
-                  <WorkbenchAction
-                    kind="ghost"
-                    size="content"
-                    type="button"
-                    onClick={() =>
-                      nav.setSelection({ objectType: "knowledge", objectId: n.relPath })
-                    }
-                    className="flex w-full items-start gap-3 px-3 py-3 text-left transition-colors hover:bg-muted/40"
-                  >
-                    <NotebookPen className="mt-1 size-icon flex-none text-muted-foreground" />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-body-lg font-medium text-foreground">
-                        {n.name}
-                      </span>
-                      <span className="block truncate text-label text-muted-foreground">
-                        {n.excerpt.replace(/\n+/g, " ").trim() || "(empty note)"}
-                      </span>
-                    </span>
-                  </WorkbenchAction>
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
-
-        {references.length > 0 && (
-          <section className="space-y-2">
-            <h3 className="text-label font-semibold uppercase tracking-wide text-muted-foreground">
-              References ({references.length})
-            </h3>
-            <ul className="divide-y divide-border/50 border-y border-border/60">
-              {references.map((r) => (
-                <li key={r.relPath}>
-                  <WorkbenchAction
-                    kind="ghost"
-                    size="content"
-                    type="button"
-                    onClick={() =>
-                      nav.setSelection({ objectType: "knowledge", objectId: r.relPath })
-                    }
-                    className="flex w-full items-start gap-3 px-3 py-3 text-left transition-colors hover:bg-muted/40"
-                  >
-                    <FileText className="mt-1 size-icon flex-none text-muted-foreground" />
-                    <span className="min-w-0 flex-1">
-                      <span className="block truncate text-body-lg font-medium text-foreground">
-                        {r.title ?? r.name}
-                      </span>
-                      <span className="block truncate text-label text-muted-foreground">
-                        {formatReference(r)}
-                      </span>
-                    </span>
-                  </WorkbenchAction>
-                </li>
-              ))}
-            </ul>
-          </section>
         )}
       </div>
     </div>

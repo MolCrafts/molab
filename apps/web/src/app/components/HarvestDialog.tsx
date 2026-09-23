@@ -24,7 +24,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { toast } from "@/components/ui/toast";
 import { WorkbenchAction, WorkbenchIconAction } from "@/components/workbench";
 
-const KINDS = ["Finding", "FailureAnalysis", "Note", "Hypothesis"] as const;
+const KINDS = ["Finding", "Observation", "Report"] as const;
 
 interface HarvestDialogProps {
   projectId: string;
@@ -62,7 +62,7 @@ export function HarvestDialog({
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            kind,
+            cls: kind,
             narrative: text,
             created_by: "ui",
           }),

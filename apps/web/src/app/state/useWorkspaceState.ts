@@ -66,19 +66,29 @@ export type SnapshotSlice =
   | "assets"
   | "agentSessions";
 
-// Bootstrap: shallow only. No fan-out over experiments×runs (that was 20+ HTTP
-// calls on every poll and freezes remote workspaces).
-const BOOTSTRAP_SLICES: readonly SnapshotSlice[] = [
-  "workspaces",
-  "projectsList",
-  "agentSessions",
-  "workspaceTree",
-];
-
-// Manual full refresh re-fetches bootstrap slices, then force-reloads any
-// folders that were already expanded (stale-while-revalidate — UI keeps
-// showing the previous children until the new payload lands).
-const REFRESH_SLICES: readonly SnapshotSlice[] = BOOTSTRAP_SLICES;
+/**
+ * Data the current rail view actually reads. First paint fetches only this;
+ * switching views loads the rest. Experiments/runs still expand on demand.
+ */
+export const slicesForView = (view: LeftPanelView | undefined): readonly SnapshotSlice[] => {
+  switch (view) {
+    case "workspace":
+      return ["workspaces", "workspaceTree"];
+    case "asset":
+      return ["workspaces", "projectsList"];
+    case "agent":
+      return ["workspaces", "agentSessions"];
+    case "knowledge":
+    case "runs":
+    case "dashboard":
+    case "activity":
+    case "settings":
+      return ["workspaces"];
+    default:
+      // projects, compare, and unknown rail ids
+      return ["workspaces", "projectsList"];
+  }
+};
 
 const WORKSPACE_TREE_BOOTSTRAP_DEPTH = 2;
 
@@ -97,7 +107,8 @@ const fetchWorkspaceTree = async (): Promise<WorkspaceSnapshot["workspaceRoot"]>
     const fs = getWorkspaceFs();
     const children = await fs.listdir("", {
       maxDepth: WORKSPACE_TREE_BOOTSTRAP_DEPTH,
-      includeCatalog: true,
+      // Catalog enrichment scans every run/execution for assets.json — seconds
+      // on a real lab, and depth-2 from the workspace root has no asset files.
     });
     return treeRootFromListing(fs.root ?? "/", children);
   } catch (err) {
@@ -269,6 +280,8 @@ export const useWorkspaceState = (activeView?: LeftPanelView): WorkspaceState =>
   const [status, setStatus] = useState<WorkspaceStatus>("idle");
   const [error, setError] = useState<Error | null>(null);
   const inflightRef = useRef(false);
+  const queuedSlicesRef = useRef<SnapshotSlice[]>([]);
+  const loadedSlicesRef = useRef(new Set<SnapshotSlice>());
   const snapshotRef = useRef(snapshot);
   snapshotRef.current = snapshot;
 
@@ -286,35 +299,48 @@ export const useWorkspaceState = (activeView?: LeftPanelView): WorkspaceState =>
   const [dataEpoch, setDataEpoch] = useState(0);
 
   const runFetch = useCallback(
-    (slices: readonly SnapshotSlice[], silent: boolean): Promise<void> => {
-      if (slices.length === 0) return Promise.resolve();
-      if (inflightRef.current) return Promise.resolve();
+    (slices: readonly SnapshotSlice[], silent: boolean, force = false): Promise<void> => {
+      const needed = force
+        ? [...slices]
+        : slices.filter((slice) => !loadedSlicesRef.current.has(slice));
+      if (needed.length === 0) return Promise.resolve();
+      if (inflightRef.current) {
+        for (const slice of needed) {
+          if (!queuedSlicesRef.current.includes(slice)) queuedSlicesRef.current.push(slice);
+        }
+        return Promise.resolve();
+      }
       inflightRef.current = true;
-      // Stay "loading" until every slice finishes — early "ready" after the first
-      // slice killed the status-strip busy state (progress bar + heartbeat) while
-      // workspaceTree / projectsList were still in flight.
       if (!silent) setStatus("loading");
 
-      return fetchSlices(snapshotRef.current, slices, (partial) => {
-        snapshotRef.current = partial;
-        setSnapshot(partial);
-        // Partial paint only — do not flip status here.
-        if (!silent) pulseSync();
-      })
-        .then((nextSnapshot: WorkspaceSnapshot) => {
-          snapshotRef.current = nextSnapshot;
-          setSnapshot(nextSnapshot);
+      const drain = async (): Promise<void> => {
+        let batch = needed;
+        try {
+          while (batch.length > 0) {
+            const nextSnapshot = await fetchSlices(snapshotRef.current, batch, (partial) => {
+              snapshotRef.current = partial;
+              setSnapshot(partial);
+              if (!silent) pulseSync();
+            });
+            snapshotRef.current = nextSnapshot;
+            setSnapshot(nextSnapshot);
+            for (const slice of batch) loadedSlicesRef.current.add(slice);
+            batch = queuedSlicesRef.current.splice(0);
+            if (!force) {
+              batch = batch.filter((slice) => !loadedSlicesRef.current.has(slice));
+            }
+          }
           setStatus("ready");
           setError(null);
-        })
-        .catch((err: Error) => {
-          setError(err);
+        } catch (err) {
+          setError(err instanceof Error ? err : new Error(String(err)));
           setStatus((prev) => (prev === "ready" ? "ready" : "error"));
-        })
-        .finally(() => {
+        } finally {
           inflightRef.current = false;
           pulseSync();
-        });
+        }
+      };
+      return drain();
     },
     [],
   );
@@ -331,7 +357,7 @@ export const useWorkspaceState = (activeView?: LeftPanelView): WorkspaceState =>
 
     try {
       const fs = getWorkspaceFs();
-      const children = await fs.listdir(dirPath, { maxDepth: 1, includeCatalog: true });
+      const children = await fs.listdir(dirPath, { maxDepth: 1 });
       const childNodes = direntsToTreeNodes(children);
       const nextRoot = mergeTreeChildren(root, dirPath, childNodes);
       const next = { ...snapshotRef.current, workspaceRoot: nextRoot };
@@ -452,7 +478,10 @@ export const useWorkspaceState = (activeView?: LeftPanelView): WorkspaceState =>
     // Help any open row still on empty/"Loading…" (never successfully loaded).
     setDataEpoch((n) => n + 1);
 
-    void runFetch(REFRESH_SLICES, false).then(() => {
+    const refreshSlices: SnapshotSlice[] = [
+      ...new Set([...loadedSlicesRef.current, ...slicesForView(activeView)]),
+    ];
+    void runFetch(refreshSlices, false, true).then(() => {
       const reloads: Promise<void>[] = [
         ...reopenProjects.map((projectId) => expandProject(projectId, { force: true })),
         ...reopenExperiments.map((key) => {
@@ -484,17 +513,18 @@ export const useWorkspaceState = (activeView?: LeftPanelView): WorkspaceState =>
     [],
   );
 
-  // Bootstrap once — shallow only.
+  // First paint: only the current view. Switching views fills in the rest.
   useEffect(() => {
-    runFetch(BOOTSTRAP_SLICES, false);
-  }, [runFetch]);
+    const silent = loadedSlicesRef.current.size > 0;
+    void runFetch(slicesForView(activeView), silent);
+  }, [activeView, runFetch]);
 
   // Assets: load once when entering the asset view (not on every poll).
   useEffect(() => {
     if (activeView !== "asset") return;
     if (assetsLoadedForViewRef.current) return;
     assetsLoadedForViewRef.current = true;
-    runFetch(["assets"], true);
+    void runFetch(["assets"], true);
   }, [activeView, runFetch]);
 
   return {

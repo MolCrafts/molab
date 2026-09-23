@@ -16,7 +16,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from molab.workspace import Bundle, Note, Workspace
+from molab.workspace import Note, Workspace
+from molab.workspace.bundle import Bundle
 from molab.workspace.folder import Folder
 
 # The spec's body-read cap (mirrors agent/loops/interactive/tools.py).

@@ -1,7 +1,7 @@
 """Session harvest + export — agent-record-export-05.
 
 ``harvest_session`` turns an on-disk :class:`~molab.harness.agent.folders.AgentSession`
-into sourced :class:`~molab.workspace.knowledge.Knowledge` via
+into a sourced :class:`~molab.knowledge.Finding` via
 :func:`~molab.workspace.knowledge_write.write_knowledge`.
 
 ``export_session_zip`` archives the session folder via
@@ -12,9 +12,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from molab.ids import slugify
+from molab.knowledge import Finding, Knowledge, SourceRef
 from molab.workspace.archive import archive_folder_zip
-from molab.workspace.knowledge import Knowledge, SourceRef
 from molab.workspace.knowledge_write import write_knowledge
 
 if TYPE_CHECKING:
@@ -27,24 +26,22 @@ __all__ = ["export_session_zip", "harvest_session"]
 def harvest_session(
     session: AgentSession,
     *,
-    cls: type[Knowledge],
     narrative: str,
     created_by: str,
     host: Folder | None = None,
     name: str | None = None,
 ) -> Knowledge:
-    """Harvest a finished agent session into a typed KnowledgeItem.
+    """Harvest a finished agent session into a :class:`~molab.knowledge.Finding`.
 
     Args:
         session: On-disk agent session folder (has messages / meta).
-        cls: Knowledge subclass (the category).
         narrative: Non-empty interpretation of the session.
         created_by: Author string.
         host: Parent Folder; defaults to the session's parent.
-        name: Optional Concept name; default ``session-harvest-{slug}-{id}``.
+        name: Optional directory name; default ``session-finding-{id}``.
 
     Returns:
-        The written Knowledge.
+        The written Finding.
 
     Raises:
         ValueError: Empty narrative.
@@ -57,9 +54,9 @@ def harvest_session(
     if parent is None:
         raise ValueError("harvest_session needs a host Folder (session has no parent)")
 
-    item_name = name or f"session-{slugify(cls.__name__)}-{session.name}"
+    item_name = name or f"session-finding-{session.name}"
     body_lines = [
-        f"# [{cls.__name__}] agent session {session.name}",
+        f"# [Finding] agent session {session.name}",
         "",
         narrative.strip(),
         "",
@@ -79,12 +76,12 @@ def harvest_session(
     return write_knowledge(
         parent,
         name=item_name,
-        cls=cls,
+        of=Finding,
         sources=[
             SourceRef(kind="agent_action", ref=session.name),
         ],
         created_by=created_by,
-        body=body,
+        text=body,
         cite=[(session, "derived_from")],
         title=f"Session {session.name}",
     )

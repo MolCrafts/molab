@@ -45,7 +45,6 @@ import {
   WorkbenchRetryAction,
 } from "@/components/workbench";
 import { cn } from "@/lib/utils";
-import { selectionForSearchHit } from "@/plugins/knowledge/searchHitSelection";
 import { buildDocTree, type DocEntityKind, type DocTreeNode } from "./knowledgeDocTree";
 import { knowledgeNoteQueryOptions } from "./queries";
 import { useKnowledgeDocs, useKnowledgeFacets } from "./useKnowledgeDocs";
@@ -180,7 +179,7 @@ export const DocTree = ({ snapshot, activeId, onSelect }: DocTreeProps): JSX.Ele
   } = useKnowledgeFacets();
   const filtering = tag !== null || status !== null;
   // Body-aware search (vision-loop-08): a non-empty query switches the tree to
-  // a flat hit list served by GET /knowledge/search (the ONE Bundle.search verb).
+  // a flat hit list served by GET /knowledge/search (Knowledge.search).
   const [search, setSearch] = useState("");
   const [searchHits, setSearchHits] = useState<KnowledgeSearchRow[]>([]);
   const [searchTruncated, setSearchTruncated] = useState(false);
@@ -596,7 +595,7 @@ export const DocTree = ({ snapshot, activeId, onSelect }: DocTreeProps): JSX.Ele
                   size="content"
                   type="button"
                   key={hit.path}
-                  onClick={() => onSelect(selectionForSearchHit(hit))}
+                  onClick={() => onSelect({ objectType: "knowledge", objectId: hit.path })}
                   className={cn(
                     "block w-full rounded-control px-2 py-2 text-left hover:bg-muted",
                     activeId === hit.path && "bg-muted",

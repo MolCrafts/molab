@@ -478,7 +478,7 @@ class PlanTask:
             self.error = exc
             _LOG.warning(f"[plan-task {self.task_id}] failed: {exc!r}")
             # A terminally-failed plan still materializes: the Agents tab shows
-            # it (status failed) and a FailureAnalysis records what happened.
+            # it (status failed) and a Report records what happened.
             # (ApprovalPendingError never reaches here — its branch above keeps
             # a suspension out of the failure records.)
             from .materialize import PlanFailure

@@ -84,21 +84,21 @@ class TestProjectExperimentRunCrud:
 
 class TestKnowledgeCrud:
     def test_add_get_set_knowledge_on_project(self, tmp_path) -> None:
-        from molab.workspace.knowledge import ProtocolNote
+        from molab.knowledge import Note
 
         ws = Workspace.create(tmp_path / "lab", name="lab")
         p = ws.add_project("p")
         exp = p.add_experiment("e")
         p.add_knowledge(
             "note-1",
-            cls=ProtocolNote,
-            body="# hello\n",
+            of=Note,
+            text="# hello\n",
             sources=[exp, "dataset:foo/bar@1"],
             created_by="test",
         )
-        assert p.knowledge("note-1").body().startswith("# hello")
-        p.set_knowledge("note-1", body="# updated\n")
-        assert p.knowledge("note-1").body().startswith("# updated")
+        assert p.knowledge("note-1").read().startswith("# hello")
+        p.set_knowledge("note-1", text="# updated\n")
+        assert p.knowledge("note-1").read().startswith("# updated")
         assert any(x.name == "note-1" for x in p.knowledges())
         p.del_knowledge("note-1")
         with pytest.raises(Exception):  # noqa: B017 — NotFound family

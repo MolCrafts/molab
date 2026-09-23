@@ -11,11 +11,10 @@ Cross-layer payloads are stored as opaque JSON dicts here; the
 upstream layers own the typed shape and own the typed parsing on
 read-back.
 
-Notes + literature are owned by the OKF Concepts (``Note`` /
-``ReferenceConcept`` + its typed ``ReferenceMeta``), reached via the
-``Bundle`` façade / ``concept_from_dir`` — directories whose path is
+Notes + literature are owned by ``molab.knowledge`` (``Note`` /
+``Literature`` + its typed ``ReferenceMeta``) — directories whose path is
 their identity. ``ZoteroItem`` / ``read_zotero_items`` are the
-read-only Zotero importer that produces ``ReferenceConcept`` records
+read-only Zotero importer that produces ``Literature`` records
 (PDFs pointed at, never copied).
 
 Each scope exposes:
@@ -46,10 +45,8 @@ from .assets import (
     Producer,
 )
 from .base import atomic_write_json, atomic_write_text
-from .bundle import Backlink, Bundle
-from .bundle_index import BundleIndex, ConceptIndexEntry, SearchHit, SearchResult
 from .cache import WORKSPACE_CACHE_KIND, CacheFolder
-from .concepts import Note, ReferenceConcept
+from .concepts import Literature, Note
 from .context import Context
 from .doc_embed import EntitySummary, summarize_entity
 
@@ -59,11 +56,9 @@ from .doc_embed import EntitySummary, summarize_entity
 from .domain import Artifact, ContentRef, Execution, ExecutionStatus
 from .edges import DEFAULT_EDGE_ROLE, Edge, EdgeRole
 from .errors import (
-    ConceptNotFoundError,
     ExperimentExistsError,
     ExperimentNotFoundError,
     FolderMoveCollisionError,
-    KnowledgeExistsError,
     KnowledgeNotFoundError,
     ProjectExistsError,
     ProjectNotFoundError,
@@ -82,18 +77,11 @@ from .folder import (
 from .history import AgentRef, EntityRef, GitHistory
 from .knowledge import (
     PLAN_BOOK_NAME,
-    Assumption,
-    Constraint,
-    Decision,
-    FailureAnalysis,
     Finding,
     Knowledge,
-    KnowledgeMetadata,
     Observation,
-    OpenQuestion,
-    ParameterRationale,
     Plan,
-    ProtocolNote,
+    Report,
     SourceKind,
     SourceRef,
 )
@@ -152,22 +140,14 @@ __all__ = [
     "AssetScope",
     "AssetVersion",
     "AssetsView",
-    "Assumption",
-    "Backlink",
-    "Bundle",
-    "BundleIndex",
     "CacheFolder",
     "CheckpointAsset",
     "ComputeTarget",
-    "ConceptIndexEntry",
-    "ConceptNotFoundError",
-    "Constraint",
     "ContentRef",
     "Context",
     "ContextFocus",
     "DataAsset",
     "DataAssetLibrary",
-    "Decision",
     "Edge",
     "EdgeRole",
     "EntityRef",
@@ -183,7 +163,6 @@ __all__ = [
     "ExperimentMetadata",
     "ExperimentNotFoundError",
     "ExperimentRef",
-    "FailureAnalysis",
     "FileStore",
     "Finding",
     "Folder",
@@ -193,19 +172,16 @@ __all__ = [
     "GridSpace",
     "HealthFlag",
     "Knowledge",
-    "KnowledgeExistsError",
-    "KnowledgeMetadata",
     "KnowledgeNotFoundError",
     "KnowledgeRef",
+    "Literature",
     "LivePruneRefusedError",
     "LocalTarget",
     "LogAsset",
     "Note",
     "NoteMeta",
     "Observation",
-    "OpenQuestion",
     "ParamSpace",
-    "ParameterRationale",
     "Params",
     "Plan",
     "Producer",
@@ -214,10 +190,9 @@ __all__ = [
     "ProjectMetadata",
     "ProjectNotFoundError",
     "ProjectRef",
-    "ProtocolNote",
-    "ReferenceConcept",
     "ReferenceMeta",
     "RemoteTarget",
+    "Report",
     "Run",
     "RunContext",
     "RunExistsError",
@@ -229,8 +204,6 @@ __all__ = [
     "RunSetResult",
     "RunStatus",
     "SSHSession",
-    "SearchHit",
-    "SearchResult",
     "SessionManager",
     "SourceKind",
     "SourceRef",

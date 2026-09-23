@@ -26,13 +26,17 @@ def _failed_run(tmp_path: Path, *, run_id: str = "aabbccdd", error: str = "boom"
 
 
 class TestAnalyzeRunFailure:
-    def test_writes_failure_analysis_with_sources(self, tmp_path: Path) -> None:
+    def test_writes_report_with_sources(self, tmp_path: Path) -> None:
+        from molab.knowledge import Report
+
         _ws, _exp, run = _failed_run(tmp_path, error="unique-oom-marker")
         item = analyze_run_failure(run, created_by="test")
-        assert type(item).__name__ == "FailureAnalysis"
-        assert any(s.kind == "run" and s.ref == run.id for s in item.metadata.sources)
-        assert "unique-oom-marker" in item.read_index()
+        assert type(item) is Report
+        assert any(s.kind == "run" and s.ref == run.id for s in item.sources)
+        assert "unique-oom-marker" in item.read()
         assert item.name == f"failure-analysis-{run.id}"
+        assert (item.path / "report.json").is_file()
+        assert not (item.path / "meta.json").exists()
 
     def test_idempotent_name(self, tmp_path: Path) -> None:
         _ws, _exp, run = _failed_run(tmp_path)

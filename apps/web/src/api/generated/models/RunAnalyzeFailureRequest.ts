@@ -3,7 +3,7 @@
 /* tslint:disable */
 /* eslint-disable */
 /**
- * Analyze a failed run into a sourced FailureAnalysis KnowledgeItem.
+ * Analyze a failed run into a sourced Report.
  */
 export type RunAnalyzeFailureRequest = {
     /**

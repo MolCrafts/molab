@@ -16,11 +16,11 @@
 | **工作区** | 一组工作的根 | `workspace.json` |
 | **项目** | 分组相关实验 | `projects/<slug>/project.json` |
 | **实验** | 一个工作流 + 参数空间 | `projects/<slug>/experiments/<slug>/experiment.json` |
-| **运行** | 一次带状态和输出的执行 | `projects/<slug>/experiments/<slug>/runs/run-<id>/run.json` |
+| **运行** | 一次带状态和输出的执行 | `projects/<slug>/experiments/<slug>/runs/<params>/run.json` |
 
 ## 定义 vs. 结果
 
-关键区别在于**实验**（你打算重复什么）和**运行**（实际发生了什么）。实验携带工作流引用、参数空间和溯源信息。运行携带每次尝试可变的东西：状态、时间戳、配置文件、结果、错误和执行历史。
+关键区别在于**实验**（你打算重复什么）和**运行**（实际发生了什么）。实验携带工作流引用、参数空间和溯源信息。运行是不可变意图（`run.json`）。每次尝试是 `executions/eNN/` 下的一次 Execution（`execution.json` 持有状态、结果、错误）。
 
 没有这个分离，重试和比较很快变得模糊不清。
 
@@ -32,26 +32,29 @@
 
 ```
 workspace_root/
-├── workspace.json          ← 实体元数据
-├── project.json            ← 子级索引（项目列表）
-├── meta.json               ← OKF 概念标记
-├── index.md                ← 知识图谱叙述
-└── projects/<project_id>/
-    ├── project.json        ← 实体元数据
-    ├── experiment.json     ← 子级索引（实验列表）
-    └── experiments/<exp_id>/
-        ├── experiment.json ← 实体元数据
-        ├── run.json        ← 子级索引（运行列表）
-        └── runs/run-<id>/
-            ├── run.json    ← 身份和溯源
-            ├── run.json (hot state) + alive ← 热状态（状态、所有权）
-            ├── assets.json ← 运行作用域资产清单
-            └── executions/<exec_id>/
+├── workspace.json                ← 实体元数据（UUIDv7 `id`）
+├── index.md                      ← 工作区叙述；markdown 链接就是图
+├── knowledges/<slug>/            ← 可选的工作区级笔记 / 文献
+│   ├── note.json                 ← 类名头文件（没有 meta.json，没有 type/kind）
+│   └── index.md
+└── projects/<project-slug>/
+    ├── project.json
+    ├── knowledges/<slug>/        ← Finding / Plan / Note / …
+    └── experiments/<experiment-slug>/
+        ├── experiment.json
+        ├── knowledges/<slug>/
+        └── runs/<key=value_…>/   ← 目录名就是参数
+            ├── run.json          ← 只有逻辑定义
+            └── executions/e01/   ← 一次尝试；`e01` 就是它的 id
                 ├── execution.json
-                ├── workflow.json  ← 逐任务输出
-                ├── stdout.log
-                └── stderr.log
+                ├── alive         ← 所有者心跳是 mtime
+                ├── workflow.json
+                ├── artifacts/
+                ├── out/<task>/
+                └── jobs/
 ```
+
+没有 children-index 文件。`ls` 就是索引。知识是类名 json + `index.md`。
 
 ## 下一步
 

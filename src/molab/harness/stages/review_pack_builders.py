@@ -190,7 +190,7 @@ def build_experiment_plan_review_pack(ctx: HarnessRunContext) -> ReviewPack:
         decision_options=["approve", "reject", "revise"],
         audit_hints=[
             "Approve freezes the board; revise re-opens planning with your comment.",
-            "Prior knowledge section lists workspace FailureAnalysis/Finding digests that grounded planning.",
+            "Prior knowledge section lists workspace Report/Finding digests that grounded planning.",
         ],
     )
 

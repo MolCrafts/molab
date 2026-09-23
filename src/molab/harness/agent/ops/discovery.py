@@ -84,25 +84,26 @@ class CatalogDiscovery:
                 return f"# tool {spec.name}\nsource: {spec.source}\n\n{spec.description}"
         # knowledge path
         try:
-            from molab.workspace import Bundle
+            from pathlib import Path
 
-            concept = Bundle(self._root).get(ref)
+            from molab.knowledge import Knowledge
+
+            concept = Knowledge.open(Path(self._root) / ref)
         except Exception as exc:
             return f"error: no detail for {ref!r} ({type(exc).__name__}: {exc})"
         try:
-            meta = concept.read_meta()
-            body = (concept.read_index() or "")[:8000]
-            return f"# {ref}\ntype: {meta.get('type', '?')}\n\n{body}"
+            body = (concept.read() or "")[:8000]
+            return f"# {ref}\nclass: {type(concept).__name__}\n\n{body}"
         except Exception as exc:
             return f"error: {type(exc).__name__}: {exc}"
 
     def _search_knowledge(self, query: str) -> list[Hit]:
         try:
-            from molab.workspace import Bundle
+            from molab.knowledge import Knowledge
         except Exception:
             return []
         try:
-            result = Bundle(self._root).search(query, limit=20)
+            result = Knowledge(self._root).search(query, limit=20)
         except Exception:
             return []
         rows: list[Hit] = []

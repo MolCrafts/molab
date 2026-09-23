@@ -49,8 +49,8 @@ def _last_error(run: Run) -> str | None:
 
 def harvest_run(
     run: Run,
+    of: type[Knowledge],
     *,
-    cls: type[Knowledge],
     narrative: str,
     created_by: str,
     results: dict[str, JSONValue] | None = None,
@@ -70,17 +70,17 @@ def harvest_run(
         )
 
     experiment = run.experiment
-    item_name = name or f"{slugify(cls.__name__)}-{run.id}"
+    item_name = name or f"{slugify(of.__name__)}-{run.id}"
     return write_knowledge(
         experiment,
         name=item_name,
-        cls=cls,
+        of=of,
         sources=[
             SourceRef(kind="run", ref=run.id),
             SourceRef(kind="experiment", ref=experiment.id),
         ],
         created_by=created_by,
-        body=_render_body(run, cls=cls, narrative=narrative, results=results),
+        text=_render_body(run, cls=of, narrative=narrative, results=results),
         cite=[(run, "derived_from")],
     )
 

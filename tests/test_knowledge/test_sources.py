@@ -13,7 +13,7 @@ from molab.knowledge.sources import (
     KnowledgeSourceStore,
     SourceNotFoundError,
     WikiSource,
-    open_bundle,
+    open_source,
     resolve_source,
     search_sources,
 )
@@ -27,7 +27,7 @@ def store(tmp_path: Path) -> KnowledgeSourceStore:
 def _wiki(root: Path, name: str, title: str, body: str) -> Path:
     note = Note(root / name)
     note.write_meta()
-    note.set_body(f"# {title}\n\n{body}\n")
+    note.write(f"# {title}\n\n{body}\n")
     return root
 
 
@@ -121,6 +121,71 @@ class TestKnowledgeSourceStore:
         )
 
 
+class TestASourceDeclaresWhichBackendReadsIt:
+    """``kind`` exists so an unreadable source fails loudly instead of quietly.
+
+    ``WikiSource`` ignores unknown keys, and the config loader splats whatever
+    the JSON holds into it. Without a declared ``kind``, a config written by a
+    later molab (``kind: obsidian``) loses the key on load, the vault opens as
+    OKF, the walk finds no ``meta.json`` anywhere, and the user gets an empty
+    result with nothing to explain it. Declaring the field now — while ``okf`` is
+    still the only value — is what makes that impossible later.
+    """
+
+    def test_a_plain_source_is_okf(self) -> None:
+        assert WikiSource(name="lab", root="/x").kind == "okf"
+
+    def test_the_kind_survives_a_config_round_trip(self, store: KnowledgeSourceStore) -> None:
+        store.add(WikiSource(name="vault", root="/x", kind="obsidian"))
+
+        assert store.get("vault").kind == "obsidian"
+
+    def test_backend_options_survive_a_config_round_trip(self, store: KnowledgeSourceStore) -> None:
+        # Opaque here; only the backend named by *kind* reads them.
+        store.add(
+            WikiSource(name="docs", root="/x", kind="docs", options={"config": "zensical.toml"})
+        )
+
+        assert store.get("docs").options == {"config": "zensical.toml"}
+
+    def test_a_kind_that_is_not_an_identifier_is_refused(self) -> None:
+        # Caught at the boundary: *kind* names a registered reader, so a value
+        # that cannot be one is a config error, not a lookup miss.
+        with pytest.raises(ValueError, match="invalid knowledge source kind"):
+            WikiSource(name="lab", root="/x", kind="Obsidian Vault!")
+
+    def test_an_unreadable_kind_is_still_listable(self, store: KnowledgeSourceStore) -> None:
+        # No backend answers to "obsidian" yet. Listing must still work: a
+        # machine missing one source's reader has to keep using the others.
+        store.add(WikiSource(name="vault", root="/x", kind="obsidian"))
+        store.add(WikiSource(name="lab", root="/y"))
+
+        assert [source.name for source, _ in store.list()] == ["lab", "vault"]
+
+
+class TestAHitNeedNotOfferAFile:
+    """``abs_path`` is a convenience, and some sources have nothing to offer.
+
+    A bibliographic record with no attached PDF has no file to open. Fabricating
+    a path there hands a model something to read that is not on disk, so the
+    field admits ``None`` and the ``ref`` stays the thing that always works.
+    """
+
+    def test_abs_path_accepts_none(self) -> None:
+        from molab.knowledge.bundle_index import ConceptIndexEntry, SearchHit
+        from molab.knowledge.sources import SourcedHit
+
+        hit = SourcedHit(
+            source="papers",
+            hit=SearchHit(entry=ConceptIndexEntry(path="A1B2C3D4", type="reference.reference")),
+            abs_path=None,
+            rank=1,
+        )
+
+        assert hit.abs_path is None
+        assert hit.ref == "papers:A1B2C3D4"  # the ref still addresses it
+
+
 class TestOpenBundle:
     def test_resolves_and_opens_a_registered_wiki(self, tmp_path: Path) -> None:
         wiki = tmp_path / "wiki"
@@ -130,12 +195,12 @@ class TestOpenBundle:
         store.add(WikiSource(name="w", root=str(wiki)))
 
         assert resolve_source("w", store=store) == wiki
-        assert [c.name for c in open_bundle("w", store=store).walk()] == ["n"]
+        assert [c.name for c in open_source("w", store=store).walk()] == ["n"]
 
     def test_opening_an_unregistered_name_raises(self, tmp_path: Path) -> None:
         store = KnowledgeSourceStore(tmp_path / "ws", user_dir=tmp_path / "user")
         with pytest.raises(SourceNotFoundError):
-            open_bundle("nope", store=store)
+            open_source("nope", store=store)
 
 
 class TestSearchSources:

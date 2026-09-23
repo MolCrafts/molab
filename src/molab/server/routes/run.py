@@ -816,18 +816,25 @@ def harvest_run_route(
     body: RunHarvestRequest,
     workspace=Depends(get_workspace),  # noqa: ANN001
 ) -> dict[str, str]:
-    """Harvest a terminal run into a sourced KnowledgeItem under its experiment."""
+    """Harvest a terminal run into sourced Knowledge under its experiment."""
+    from molab.knowledge import Finding, Observation, Report
     from molab.workspace.knowledge import parse_knowledge_class
 
+    harvest_ok = {"Finding": Finding, "Observation": Observation, "Report": Report}
     experiment = _get_experiment(workspace, project_id, experiment_id)
     if not experiment:
         raise RunNotFoundError(project_id, experiment_id, run_id)
     run = _get_run_or_none(experiment, run_id)
     if not run:
         raise RunNotFoundError(project_id, experiment_id, run_id)
+    if body.cls not in harvest_ok:
+        raise HTTPException(
+            status_code=422,
+            detail=f"{body.cls} is not a harvest target",
+        )
     try:
         item = run.harvest(
-            cls=parse_knowledge_class(body.kind),
+            parse_knowledge_class(body.cls),
             narrative=body.narrative,
             created_by=body.created_by,
             results=body.results,
@@ -835,9 +842,8 @@ def harvest_run_route(
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    # Bundle-relative path so the UI can open Knowledge without stripping roots.
     try:
-        rel = item.resolve().relative_to(workspace.resolve()).as_posix()
+        rel = Path(item.path).relative_to(workspace.resolve()).as_posix()
     except Exception:
         rel = item.name
     return {"name": item.name, "path": rel}
@@ -896,7 +902,7 @@ def analyze_run_failure_route(
     body: RunAnalyzeFailureRequest,
     workspace=Depends(get_workspace),  # noqa: ANN001
 ) -> dict[str, str]:
-    """Analyze a failed run into a sourced FailureAnalysis KnowledgeItem.
+    """Analyze a failed run into a sourced Report.
 
     Shares :func:`molab.services.run_failure.analyze_run_failure` with the CLI
     (close-loop-02). Deterministic narrative when ``narrative`` is omitted.
@@ -920,7 +926,7 @@ def analyze_run_failure_route(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     try:
-        rel = item.resolve().relative_to(workspace.resolve()).as_posix()
+        rel = Path(item.path).relative_to(workspace.resolve()).as_posix()
     except Exception:
         rel = item.name
     return {"name": item.name, "path": rel}

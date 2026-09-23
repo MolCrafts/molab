@@ -1,6 +1,6 @@
 """``ReferenceMeta`` — structured bib fields for an OKF Reference Concept (wsokf-05).
 
-A :class:`molab.workspace.concepts.ReferenceConcept` stores its bibliographic
+A :class:`~molab.knowledge.concepts.Literature` stores its bibliographic
 record in ``meta.json`` via this :class:`ConceptMeta` subtype; the narrative
 citation text lives in its ``index.md``. PDFs are *pointed at* (``pdf_path`` /
 ``pdf_asset_id``), never copied.

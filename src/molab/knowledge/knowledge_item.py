@@ -17,7 +17,7 @@ in-tree directory (a ``Run`` / ``Experiment`` / Concept), :meth:`KnowledgeItem.c
 also writes a **typed OKF out-edge** (reusing the P0.1 edge role) so the
 knowledge graph is traversable and the item is *reachable from* what it cites.
 
-Follows the ``ReferenceConcept`` / ``ReferenceMeta`` precedent; registered against
+Follows the ``Literature`` / ``ReferenceMeta`` precedent; registered against
 the shared ``@concept_type`` registry so
 :func:`~molab.knowledge.concept.concept_from_dir` rebuilds it.
 """
@@ -28,25 +28,19 @@ from typing import ClassVar, Literal, cast, get_args
 
 from pydantic import BaseModel, field_validator
 
-from molab.fs import PathArg
-
-from .concept import META_JSON_FILENAME, Concept, append_link
+from .concept import META_JSON_FILENAME, Concept
 from .concept_meta import ConceptMeta
-from .edges import EdgeRole
 from .types import concept_type
 
 KNOWLEDGE_ITEM_KIND = "knowledge.item"
 
 KnowledgeKind = Literal[
-    "Observation",
-    "Decision",
-    "Assumption",
-    "Constraint",
+    "Note",
+    "Literature",
+    "Report",
     "Finding",
-    "FailureAnalysis",
-    "ProtocolNote",
-    "ParameterRationale",
-    "OpenQuestion",
+    "Plan",
+    "Observation",
 ]
 """The typed category of a knowledge item."""
 
@@ -153,24 +147,6 @@ class KnowledgeItem(Concept):
         stays path-derived.
         """
         self.write_meta(meta)
-
-    # ── typed provenance edge (reuse P0.1) ────────────────────────────────
-
-    def cite(self, source: Concept | PathArg, *, role: EdgeRole = "derived_from") -> None:
-        """Record a typed provenance out-edge to an in-tree *source*.
-
-        A thin delegator over :func:`~molab.knowledge.concept.append_link` (the
-        single markdown-edge writer). *source* may be a Concept or a bare
-        directory path, so an item cites a workspace ``Run`` / ``Experiment``
-        without this layer importing the one that owns it. Content-hash / file
-        sources have no directory to point at and live only in ``meta.json``.
-
-        Args:
-            source: The in-tree Concept, or directory path, this item cites.
-            role: The declared :class:`~molab.knowledge.edges.EdgeRole`
-                (default ``"derived_from"``).
-        """
-        append_link(self, source, role=role)
 
 
 __all__ = [

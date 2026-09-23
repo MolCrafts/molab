@@ -4,7 +4,7 @@ Covers the workspace-layer enrichment surface for OKF ``Note`` documents:
 
 - ``knowledge_mount.embed(note, target, *, root, role=None)`` — write ONE typed provenance
   edge from a ``Note`` to a live entity (``Run`` / ``Asset`` / ``Experiment`` /
-  ``ReferenceConcept``) with a per-kind default role from the frozen
+  ``Literature``) with a per-kind default role from the frozen
   ``EdgeRole`` vocabulary; the asset payload is pointed at, never copied.
 - ``summarize_entity`` / ``EntitySummary`` — a pure read projection of an
   entity's ``id`` / ``kind`` / ``title`` (the UI card source).
@@ -23,15 +23,15 @@ from types import SimpleNamespace
 import pytest
 
 from molab.workspace import (
-    Bundle,
     EntitySummary,
+    Literature,
     NoteMeta,
-    ReferenceConcept,
     ReferenceMeta,
     Workspace,
     knowledge_mount,
     summarize_entity,
 )
+from molab.workspace.bundle import Bundle
 from molab.workspace.doc_embed import asset_record_dir
 
 _VALID_ROLES = {"derived_from", "cites", "supersedes", "records", "references"}
@@ -56,11 +56,11 @@ def scene(tmp_path: Path) -> SimpleNamespace:
     src.write_text("payload-bytes")
     asset = exp.data_assets.import_asset("mydata", src)
 
-    # A ReferenceConcept mounted at the bundle root; its title lives in
+    # A Literature mounted at the bundle root; its title lives in
     # ReferenceMeta (no index.md H1).
-    ref = ReferenceConcept(Path(str(ws.resolve())) / "smith2024", fs=ws.fs)
+    ref = Literature(Path(str(ws.resolve())) / "smith2024", fs=ws.fs)
     ref.write_meta()
-    ref.write_reference_meta(ReferenceMeta(title="Smith 2024", year=2024))
+    ref.write(ReferenceMeta(title="Smith 2024", year=2024))
 
     b = Bundle(ws.resolve())
     doc = b.create_note("My Doc", body="# My Doc\n\nbody")
@@ -76,7 +76,7 @@ class TestBundleEmbed:
     def test_embed_run_writes_a_relative_records_edge(self, scene: SimpleNamespace) -> None:
         knowledge_mount.embed(scene.doc, scene.run, root=scene.root)
 
-        edges = scene.doc.typed_out_edges()
+        edges = scene.doc.links()
         matched = [e for e in edges if _norm(e.target) == _norm(scene.run.resolve())]
         assert len(matched) == 1
         assert matched[0].role == "records"
@@ -94,7 +94,7 @@ class TestBundleEmbed:
         knowledge_mount.embed(scene.doc, scene.exp, root=scene.root)
         knowledge_mount.embed(scene.doc, scene.ref, root=scene.root)
 
-        edges = scene.doc.typed_out_edges()
+        edges = scene.doc.links()
         by_target = {_norm(e.target): e.role for e in edges}
 
         record_dir = asset_record_dir(scene.asset, scene.root)
@@ -111,7 +111,7 @@ class TestBundleEmbed:
     def test_explicit_role_overrides_the_per_kind_default(self, scene: SimpleNamespace) -> None:
         knowledge_mount.embed(scene.doc, scene.run, root=scene.root, role="derived_from")
 
-        edges = scene.doc.typed_out_edges()
+        edges = scene.doc.links()
         matched = [e for e in edges if _norm(e.target) == _norm(scene.run.resolve())]
         assert len(matched) == 1
         assert matched[0].role == "derived_from"
@@ -175,8 +175,8 @@ class TestNoteMeta:
     """``Note`` tags / status helpers backed by ``NoteMeta`` (sole owner here)."""
 
     def test_tags_and_status_round_trip_through_meta_yaml(self, scene: SimpleNamespace) -> None:
-        scene.doc.set_tags(["a"])
-        scene.doc.set_status("archived")
+        scene.doc.write(tags=["a"])
+        scene.doc.write(status="archived")
 
         meta = scene.doc.read_note_meta()
         assert isinstance(meta, NoteMeta)
@@ -188,12 +188,12 @@ class TestNoteMeta:
         assert scene.doc.status() == "archived"
 
     def test_partial_update_preserves_the_sibling_field(self, scene: SimpleNamespace) -> None:
-        scene.doc.set_status("archived")
-        scene.doc.set_tags(["x", "y"])  # must not clobber status
+        scene.doc.write(status="archived")
+        scene.doc.write(tags=["x", "y"])  # must not clobber status
         assert scene.doc.status() == "archived"
         assert scene.doc.tags() == ["x", "y"]
 
-        scene.doc.set_status("active")  # must not clobber tags
+        scene.doc.write(status="active")  # must not clobber tags
         assert scene.doc.tags() == ["x", "y"]
 
     def test_bare_marker_defaults_to_untagged_active(self, scene: SimpleNamespace) -> None:

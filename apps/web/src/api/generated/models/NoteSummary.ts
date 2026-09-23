@@ -8,5 +8,7 @@ export type NoteSummary = {
     excerpt: string;
     tags?: Array<string>;
     status?: (string | null);
+    /** Knowledge product class (Note / Finding / …). */
+    cls?: string;
 };
 
