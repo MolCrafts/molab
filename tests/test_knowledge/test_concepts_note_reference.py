@@ -13,6 +13,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from molab.fs import LocalFileSystem
 from molab.knowledge.concept import Concept, concept_from_dir
 from molab.knowledge.concepts import Literature, Note
@@ -20,9 +22,13 @@ from molab.knowledge.reference_meta import ReferenceMeta
 
 
 def _mount[C: Concept](cls: type[C], root: Path, name: str) -> C:
-    """Materialize a Concept of *cls* named *name* directly under *root*."""
+    """Materialize a Concept of *cls* named *name* directly under *root*.
+
+    A Knowledge is one file: writing it stamps the ``class`` frontmatter marker
+    ``Concept.open`` reconstructs the subclass from.
+    """
     concept = cls(root / name)
-    concept.write_meta()
+    concept.write()
     return concept
 
 
@@ -49,8 +55,8 @@ class TestConceptRegistry:
     def test_mount_writes_the_registered_type_marker(self, tmp_path: Path) -> None:
         note = _mount(Note, tmp_path, "idea")
         ref = _mount(Literature, tmp_path, "smith2024")
-        assert note.read_meta()["type"] == "note.note"
-        assert ref.read_meta()["type"] == "reference.reference"
+        assert note.frontmatter()["class"] == "Note"
+        assert ref.frontmatter()["class"] == "Literature"
 
     def test_concept_from_dir_rebuilds_typed_subclass(self, tmp_path: Path) -> None:
         note = _mount(Note, tmp_path, "idea")
@@ -60,10 +66,10 @@ class TestConceptRegistry:
         assert isinstance(concept_from_dir(ref.path, fs=fs), Literature)
 
     def test_a_concept_needs_no_workspace(self, tmp_path: Path) -> None:
-        # The whole point of the OKF library: a plain directory is a Concept.
+        # The whole point of the OKF library: a plain file is a Concept.
         note = _mount(Note, tmp_path, "idea")
-        assert note.path.is_dir()
-        assert (note.path / "meta.json").is_file()
+        assert note.path.is_file()
+        assert note.frontmatter()["class"] == "Note"
         assert not (tmp_path / "workspace.json").exists()
 
 
@@ -91,6 +97,24 @@ class TestNote:
         assert len(typed) == 1
         assert typed[0].role == "derived_from"
         assert Path(typed[0].target) == ref.path
+
+    def test_cite_delegates_to_ref_for_a_knowledge_target(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A Knowledge target takes the canonical verb; a bare directory does not.
+        note = _mount(Note, tmp_path, "idea")
+        ref = _mount(Literature, tmp_path, "smith2024")
+        delegations: list[tuple[object, dict[str, object]]] = []
+
+        def spy(_self: Concept, target: object, **kwargs: object) -> None:
+            delegations.append((target, kwargs))
+
+        monkeypatch.setattr(Note, "ref", spy)
+
+        note.cite(ref, role="derived_from")
+        note.cite(tmp_path / "runs" / "run-abc123", role="records")
+
+        assert delegations == [(ref, {"text": None, "role": "derived_from"})]
 
     def test_cite_accepts_a_bare_directory(self, tmp_path: Path) -> None:
         # A note cites something outside the OKF family (a workspace Run) by path.

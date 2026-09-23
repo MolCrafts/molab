@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from molab.fs import LocalFileSystem
 from molab.knowledge.concept import (
     Concept,
     append_link,
@@ -14,6 +15,8 @@ from molab.knowledge.concept import (
     concept_type_of,
 )
 from molab.knowledge.concept_meta import ConceptMeta
+from molab.knowledge.concepts import Literature, Note
+from molab.knowledge.errors import KnowledgeNotFoundError
 from molab.knowledge.types import concept_type
 
 
@@ -23,6 +26,14 @@ def _write(directory: Path, *, type_str: str = "note.note", body: str = "") -> C
     if body:
         concept.write(body)
     return concept
+
+
+def _run_dir(root: Path) -> Path:
+    """A workspace run directory: an entity record, no Knowledge head."""
+    run_dir = root / "runs" / "run-abc123"
+    run_dir.mkdir(parents=True)
+    (run_dir / "run.json").write_text(json.dumps({"type": "workspace.run", "id": "abc"}) + "\n")
+    return run_dir
 
 
 class TestConceptIdentity:
@@ -173,6 +184,133 @@ class TestConceptEdges:
         with pytest.raises(ValueError, match="invalid edge role"):
             append_link(src, dst, role="bogus")  # type: ignore[arg-type]
         assert src.read() == "original\n"
+
+
+class TestConceptRef:
+    """``.ref`` — the strict cross-reference verb: knowledge → knowledge only."""
+
+    def test_ref_by_object_appends_the_typed_golden_line(self, tmp_path: Path) -> None:
+        src = Note(tmp_path / "idea")
+        dst = Literature(tmp_path / "smith2024")
+        dst.write("Smith et al. 2024\n")
+
+        src.ref(dst, text="smith2024", role="derived_from")
+
+        assert (
+            (tmp_path / "idea.md")
+            .read_text()
+            .endswith("- [@derived_from smith2024](smith2024.md)\n")
+        )
+        assert src.links() == [(str(dst.path), "derived_from")]
+
+    def test_ref_by_path_and_str_path_match_the_object_form(self, tmp_path: Path) -> None:
+        dst = Literature(tmp_path / "smith2024")
+        dst.write("Smith et al. 2024\n")
+
+        for index, form in enumerate((dst, dst.path, str(dst.path))):
+            src = Note(tmp_path / f"note{index}")
+            src.write("# Idea\n")
+
+            src.ref(form, text="smith2024", role="derived_from")
+
+            assert src.links() == [(str(dst.path), "derived_from")]
+            assert (
+                (tmp_path / f"note{index}.md")
+                .read_text()
+                .endswith("- [@derived_from smith2024](smith2024.md)\n")
+            )
+
+    def test_default_role_writes_a_bare_label(self, tmp_path: Path) -> None:
+        src = Note(tmp_path / "idea")
+        dst = Literature(tmp_path / "smith2024")
+        src.write("# Idea\n")
+        dst.write("Smith et al. 2024\n")
+
+        src.ref(dst)
+
+        text = (tmp_path / "idea.md").read_text()
+        assert text.endswith("- [smith2024.md](smith2024.md)\n")
+        assert "@references" not in text
+
+    def test_ref_starts_a_source_that_has_no_narrative_yet(self, tmp_path: Path) -> None:
+        src = Note(tmp_path / "idea")  # construction touches no disk
+        dst = Literature(tmp_path / "smith2024")
+        dst.write("Smith et al. 2024\n")
+
+        src.ref(dst, role="cites")
+
+        assert (tmp_path / "idea.md").read_text() == (
+            "---\nclass: Note\n---\n- [@cites smith2024.md](smith2024.md)\n"
+        )
+
+    def test_ref_accepts_a_target_that_is_not_written_yet(self, tmp_path: Path) -> None:
+        # Construction touches no disk, so an edge may point at a document that
+        # does not exist yet — the raw markdown carries it, links() cannot
+        # resolve it (nothing is there to resolve to).
+        src = Note(tmp_path / "idea")
+        dst = Note(tmp_path / "planned")
+
+        src.ref(dst)
+
+        assert not dst.exists()
+        assert (tmp_path / "idea.md").read_text().endswith("- [planned.md](planned.md)\n")
+        assert src.links() == []
+
+    def test_a_run_directory_object_is_rejected(self, tmp_path: Path) -> None:
+        # concept_from_dir hands back the bare base class for a workspace
+        # entity — that is not a Knowledge, and .ref says so.
+        coordinate = concept_from_dir(_run_dir(tmp_path), fs=LocalFileSystem())
+        assert type(coordinate) is Concept
+
+        src = Note(tmp_path / "idea")
+        src.write("# Idea\n")
+        before = (tmp_path / "idea.md").read_text()
+
+        with pytest.raises(TypeError):
+            src.ref(coordinate)
+
+        assert (tmp_path / "idea.md").read_text() == before
+
+    def test_a_run_directory_path_is_rejected_in_the_path_branch(self, tmp_path: Path) -> None:
+        run_dir = _run_dir(tmp_path)
+        src = Note(tmp_path / "idea")
+        src.write("# Idea\n")
+        before = (tmp_path / "idea.md").read_text()
+
+        for form in (run_dir, str(run_dir)):
+            with pytest.raises(TypeError) as caught:
+                src.ref(form)
+            assert isinstance(caught.value.__cause__, KnowledgeNotFoundError)
+
+        assert (tmp_path / "idea.md").read_text() == before
+
+    def test_non_knowledge_objects_are_rejected(self, tmp_path: Path) -> None:
+        class Coordinate:
+            """Stand-in for a project / experiment / run coordinate."""
+
+            def resolve(self) -> Path:
+                return tmp_path
+
+        src = Note(tmp_path / "idea")
+        src.write("# Idea\n")
+        before = (tmp_path / "idea.md").read_text()
+
+        for bad in (Coordinate(), 42, "projects/p/experiments/e"):
+            with pytest.raises(TypeError):
+                src.ref(bad)
+
+        assert (tmp_path / "idea.md").read_text() == before
+
+    def test_invalid_role_raises_before_any_write(self, tmp_path: Path) -> None:
+        src = Note(tmp_path / "idea")
+        dst = Literature(tmp_path / "smith2024")
+        src.write("# Idea\n")
+        before = (tmp_path / "idea.md").read_text()
+
+        with pytest.raises(ValueError, match="invalid edge role"):
+            src.ref(dst, role="bogus")  # type: ignore[arg-type]
+
+        assert (tmp_path / "idea.md").read_text() == before
 
 
 class TestConceptFromDir:

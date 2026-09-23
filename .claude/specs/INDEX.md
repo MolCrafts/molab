@@ -10,7 +10,6 @@ _Approved 2026-09-23 — knowledge depends on workspace (one way); `.ref(knowled
 
 | # | Spec | Commit theme |
 |---|---|---|
-| 01 | [knowledge-crossref-01-ref](knowledge-crossref-01-ref.md) | `.ref(knowledge)` + `cite` delegation |
 | 02 | [knowledge-crossref-02-owner](knowledge-crossref-02-owner.md) | `folder(host, name, of)` + `Knowledge(host, name)` |
 | 03 | [knowledge-crossref-03-verbs](knowledge-crossref-03-verbs.md) | knowledge takes over the write verbs; `PLAN_BOOK_NAME` |
 | 04 | [knowledge-crossref-04-services](knowledge-crossref-04-services.md) | services owns the projection seam; run_failure redirect |

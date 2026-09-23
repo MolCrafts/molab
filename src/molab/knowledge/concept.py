@@ -499,6 +499,37 @@ class Concept:
             return body
         return self.read_index()
 
+    def ref(
+        self,
+        ref: object,
+        *,
+        text: str | None = None,
+        role: EdgeRole = DEFAULT_EDGE_ROLE,
+    ) -> None:
+        """Cross-reference another Knowledge document — the strict spelling of :meth:`cite`.
+
+        *ref* must denote a Knowledge: a :class:`Concept` subclass instance
+        other than the bare base class (the object :func:`concept_from_dir`
+        hands back for a workspace entity, i.e. a run / project / experiment
+        directory), or a path :meth:`Concept.open` locates such a subclass at.
+        A workspace ``Folder``, an ``Asset``, a bare coordinate or any other
+        object is a programming error, never an edge.
+
+        Args:
+            ref: The target Knowledge, or the path locating it.
+            text: Optional link label; defaults to the target's name.
+            role: The declared :class:`~molab.knowledge.edges.EdgeRole`.
+
+        Raises:
+            TypeError: If *ref* denotes no Knowledge. A path that locates no
+                document chains the underlying
+                :class:`~molab.knowledge.errors.KnowledgeNotFoundError`.
+            ValueError: If *role* is not a known ``EdgeRole`` — validated by
+                :func:`append_link` before any write.
+        """
+        target = _knowledge_target(ref, fs=self._fs)
+        append_link(self, target, text=text, role=role)
+
     def cite(
         self,
         ref: Concept | PathArg,
@@ -508,11 +539,17 @@ class Concept:
     ) -> None:
         """Cite *ref* — append a typed markdown link.
 
-        All six knowledge classes share this verb. *ref* may be another
-        document or a bare directory (a run, an experiment) so knowledge
-        never imports the workspace layer.
+        The loose spelling of :meth:`ref`: a Knowledge target is delegated to
+        it, while a bare directory (a run, an experiment) is still linked as
+        given, so knowledge never imports the workspace layer. All six
+        knowledge classes share this verb.
         """
-        append_link(self, ref, text=text, role=role)
+        try:
+            target = _knowledge_target(ref, fs=self._fs)
+        except TypeError:
+            append_link(self, ref, text=text, role=role)
+            return
+        self.ref(target, text=text, role=role)
 
     def write(
         self,
@@ -702,6 +739,54 @@ class Concept:
             )
             refs.append(lit)
         return refs
+
+
+def _knowledge_target(ref: object, *, fs: FileSystem) -> Concept:
+    """The Knowledge *ref* denotes, or ``TypeError`` — the one strictness rule.
+
+    Shared by :meth:`Concept.ref` (which propagates the error) and
+    :meth:`Concept.cite` (which falls back to its loose path branch): an object
+    denotes a Knowledge when its class is a :class:`Concept` subclass other than
+    the bare base class, and a path denotes one when :meth:`Concept.open`
+    locates such a subclass there. A run / project / experiment directory fails
+    both — :func:`concept_from_dir` reconstructs it as the bare base class, and
+    ``Concept.open`` finds no class-named head in it.
+
+    Args:
+        ref: The candidate — a Concept, a path, or anything else.
+        fs: The filesystem to locate a path through (the caller's own).
+
+    Returns:
+        The Knowledge *ref* denotes.
+
+    Raises:
+        TypeError: If *ref* denotes no Knowledge, chaining the
+            :class:`~molab.knowledge.errors.KnowledgeNotFoundError` a path
+            lookup raised.
+    """
+    if isinstance(ref, Concept):
+        if type(ref) is Concept:
+            raise TypeError(
+                "the bare Concept base class is not a Knowledge: a run / project / "
+                "experiment directory reconstructs to it — cross-reference the document "
+                "it holds instead"
+            )
+        return ref
+    if isinstance(ref, (str, os.PathLike)):
+        from .errors import KnowledgeNotFoundError
+
+        path = str(ref)
+        try:
+            located = Concept.open(path, fs=fs)
+        except KnowledgeNotFoundError as exc:
+            raise TypeError(f"{path!r} locates no Knowledge document") from exc
+        if type(located) is Concept:
+            raise TypeError(f"{path!r} locates a bare Concept, not a Knowledge")
+        return located
+    raise TypeError(
+        f"cross-reference target must be a Knowledge document, got {type(ref).__name__}; "
+        "pass the Knowledge, or the path locating one"
+    )
 
 
 def _record_as_dict(record: object) -> dict[str, object]:
