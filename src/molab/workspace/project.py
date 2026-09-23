@@ -23,8 +23,6 @@ if TYPE_CHECKING:
     from .fs import FileSystem
     from .workspace import Workspace
 
-from molab.knowledge.types import concept_type
-
 from .artifact_repository import AssetRepository
 from .assets import AssetScope, DataAssetLibrary, ImportAction
 from .base import (
@@ -49,7 +47,6 @@ from .fs import PathArg
 from .models import FolderMetadata, ProjectMetadata
 
 
-@concept_type(WORKSPACE_PROJECT_KIND)
 @register_entity_class
 class Project(Folder):
     """Research project container.

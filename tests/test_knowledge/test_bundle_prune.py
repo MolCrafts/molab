@@ -289,6 +289,32 @@ class TestPositionAwarePruning:
         assert "host" in rels
         assert "host/logs" not in rels
 
+    def test_a_real_workspace_run_prunes_its_declared_subdirs(self, tmp_path: Path) -> None:
+        """The run's declaration reaches the walk with no concept type registered.
+
+        ``molab.workspace`` registers no ``@concept_type`` for its entity
+        classes, so the set is read straight off ``Run.NON_CONCEPT_SUBDIRS`` —
+        and a real run still prunes its job output, scoped to the run rather
+        than to the bare directory name.
+        """
+        from molab.workspace.folder import WORKSPACE_RUN_KIND
+        from molab.workspace.run import Run
+
+        assert {"executions", "out"} <= Run.NON_CONCEPT_SUBDIRS
+
+        root = tmp_path / "bundle"
+        run_dir = root / "runs" / "dp=5"
+        self._marker(run_dir, WORKSPACE_RUN_KIND)
+        self._marker(run_dir / "executions" / "e01", "decoy.type")  # job output
+        self._marker(run_dir / "out" / "task", "decoy.type")  # task scratch
+        self._marker(root / "wiki" / "executions" / "kept", "decoy.type")  # other parent
+
+        walked = {Bundle(root).rel_path(c) for c in Bundle(root).walk()}
+
+        assert "runs/dp=5" in walked
+        assert not [rel for rel in walked if rel.startswith("runs/dp=5/")]
+        assert "wiki/executions/kept" in walked
+
     def test_the_same_name_survives_under_any_other_parent(
         self, tmp_path: Path, registered_host: str
     ) -> None:

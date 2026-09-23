@@ -20,7 +20,6 @@ from pathlib import Path as _LocalPath
 from typing import TYPE_CHECKING, cast
 
 from molab._typing import JSONValue
-from molab.knowledge.types import concept_type
 from molab.path import Path
 
 from .assets import AssetScope, AssetsView, DataAssetLibrary
@@ -78,7 +77,6 @@ def set_cli_root_override(path: _LocalPath | str | None, *, explicit: bool = Tru
     _cli_root_override = (_LocalPath(path).resolve(), explicit) if path is not None else None
 
 
-@concept_type(WORKSPACE_ROOT_KIND)
 @register_entity_class
 class Workspace(Folder):
     """Top-level workspace with project management and global asset library.

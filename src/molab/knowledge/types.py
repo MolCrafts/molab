@@ -82,8 +82,8 @@ def resolve_concept_type[D: type](type_str: str, default: D, *, base: type | Non
 def non_concept_subdirs(type_str: str | None) -> frozenset[str]:
     """Subdirectory names a Concept of type *type_str* declares can hold no Concept.
 
-    A registered class may declare a ``NON_CONCEPT_SUBDIRS`` attribute naming the
-    children it *produces* rather than *contains* — for a workspace ``Run``, its
+    A class may declare a ``NON_CONCEPT_SUBDIRS`` attribute naming the children
+    it *produces* rather than *contains* — for a workspace ``Run``, its
     ``executions/`` / ``artifacts/`` / ``logs/`` job output. A walk reads each
     directory's marker anyway, so it knows the **parent's** type and can skip
     those subtrees without enumerating them.
@@ -94,9 +94,13 @@ def non_concept_subdirs(type_str: str | None) -> frozenset[str]:
     else in the tree. Declaring the set on the *parent* type scopes the skip to
     exactly where the layout guarantees nothing is mounted.
 
-    The set flows through the registry at runtime, so ``knowledge`` learns a
-    host layer's layout without importing it. An unknown or unregistered type,
-    or one declaring nothing, prunes nothing.
+    The set is read from the registry first, so a host that registers its own
+    classes through ``@concept_type`` is answered without importing it. A host
+    that registers nothing — ``molab.workspace``, whose entity directories are
+    identified by their class-named JSON — has its declaration read **directly
+    off the class** (:attr:`molab.workspace.run.Run.NON_CONCEPT_SUBDIRS`),
+    through the function-body import the layer firewall allows. An unknown
+    type, or one declaring nothing, prunes nothing.
 
     Args:
         type_str: The Concept ``type`` of the directory being descended into,
@@ -109,6 +113,15 @@ def non_concept_subdirs(type_str: str | None) -> frozenset[str]:
         declared = getattr(cls, "NON_CONCEPT_SUBDIRS", None)
         if declared:
             names.update(declared)
+    if not names:
+        # A workspace run declares its own output subtrees and registers no
+        # concept type; read them off the owning class. Function-body import:
+        # ``molab.workspace`` eagerly loads this package the other way.
+        from molab.workspace.folder import WORKSPACE_RUN_KIND
+        from molab.workspace.run import Run
+
+        if type_str == WORKSPACE_RUN_KIND:
+            names.update(Run.NON_CONCEPT_SUBDIRS)
     return frozenset(names)
 
 

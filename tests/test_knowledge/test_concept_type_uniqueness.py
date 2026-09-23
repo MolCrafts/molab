@@ -193,12 +193,16 @@ def test_folder_type_claims_come_from_their_owning_classes() -> None:
 def test_scan_resolves_the_known_concept_types() -> None:
     # Negative control: a scanner that resolved nothing would make the
     # uniqueness assertion vacuously true.
+    #
+    # The workspace levels are absent by design: a workspace entity declares its
+    # type through its class-named entity JSON (``@register_entity_class``, the
+    # filename axis), not through either type registry, so ``workspace.run``
+    # claims no string here.
     claimed = _claims()
     for expected in (
         "note.note",
         "reference.reference",
         "knowledge.item",
-        "workspace.run",
         "agent.agent",
         "agent.session",
     ):

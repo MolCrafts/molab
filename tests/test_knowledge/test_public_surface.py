@@ -1,21 +1,27 @@
-"""Public surface of ``molab.knowledge`` after the Knowledge-handle unification.
+"""Public surface of ``molab.knowledge`` after the knowledge/workspace flip.
 
-``Bundle`` / ``Concept`` / ``ReferenceConcept`` / ``KnowledgeItem`` /
-``ConceptNotFoundError`` are shims, not ``__all__``. The names a caller is
-allowed to import are pinned below (see :class:`TestPublicAll` and
-:class:`TestTheNamesMolmcpImports`).
+A public name is defined **in** ``molab.knowledge``: no name is handed over from
+``molab.workspace``. ``Bundle`` / ``Concept`` / ``ReferenceConcept`` /
+``KnowledgeItem`` / ``ConceptNotFoundError`` are that layer's own internal
+parts, not ``__all__``. The names a caller is allowed to import are pinned below
+(see :class:`TestPublicAll` and :class:`TestTheNamesMolmcpImports`).
 """
 
 from __future__ import annotations
 
 import importlib
+import inspect
 from pathlib import Path
 
 import pytest
 
 import molab.knowledge as knowledge
-from molab.knowledge import Note
-from molab.knowledge.sources import KnowledgeSourceStore, WikiSource, search_sources
+from molab.knowledge import Knowledge, Note
+from molab.knowledge.bundle_index import ConceptIndexEntry, SearchHit
+from molab.knowledge.sources import (
+    SourcedHit,
+    search_sources,
+)
 
 #: ``module path`` → the attribute a caller imports from it.
 MOLMCP_IMPORTS: tuple[tuple[str, str], ...] = (
@@ -26,6 +32,7 @@ MOLMCP_IMPORTS: tuple[tuple[str, str], ...] = (
     ("molab.knowledge.errors", "KnowledgeNotFoundError"),
 )
 
+#: The names a caller must be able to import by name.
 REQUIRED_PUBLIC: tuple[str, ...] = (
     "Knowledge",
     "Note",
@@ -36,18 +43,49 @@ REQUIRED_PUBLIC: tuple[str, ...] = (
     "Observation",
     "SourceRef",
     "KnowledgeNotFoundError",
-    "folder",
-    # The write verbs a workspace host needs, plus the layout name and the
-    # class-name entry point the redirects (04-07) import from here.
-    "write_knowledge",
-    "mount_note",
-    "normalize_sources",
-    "harvest_run",
-    "parse_knowledge_class",
-    "PLAN_BOOK_NAME",
 )
 
-SHIM_NOT_PUBLIC: tuple[str, ...] = (
+#: The whole exported surface, pinned — so a name added by 01-03 is not handed
+#: out silently (a subset assertion would miss it).
+PINNED_ALL: frozenset[str] = frozenset(
+    {
+        "PLAN_BOOK_NAME",
+        "Edge",
+        "EdgeRole",
+        "Finding",
+        "Knowledge",
+        "KnowledgeNotFoundError",
+        "KnowledgeScope",
+        "KnowledgeSourceStore",
+        "Literature",
+        "Note",
+        "Observation",
+        "Plan",
+        "ReferenceMeta",
+        "Report",
+        "SearchHit",
+        "SearchResult",
+        "SourceKind",
+        "SourceNotFoundError",
+        "SourceRef",
+        "SourcedHit",
+        "WikiSource",
+        "ZoteroItem",
+        "folder",
+        "harvest_run",
+        "mount_note",
+        "normalize_sources",
+        "parse_knowledge_class",
+        "read_zotero_items",
+        "resolve_source",
+        "search_sources",
+        "write_knowledge",
+    }
+)
+
+#: This layer's own internals: real classes a caller reaches through a public
+#: verb, never through ``from molab.knowledge import …``.
+INTERNAL_NOT_PUBLIC: tuple[str, ...] = (
     "Bundle",
     "Concept",
     "ReferenceConcept",
@@ -65,11 +103,20 @@ SHIM_NOT_PUBLIC: tuple[str, ...] = (
 
 @pytest.fixture
 def wiki(tmp_path: Path) -> Path:
-    """A one-note bundle, registered as the named source ``lab``."""
+    """A one-note bundle: ``knowledges/tg-cooling.md`` under ``wiki/``."""
     root = tmp_path / "wiki"
-    note = Note(root / "tg-cooling")
-    note.write("# Cooling rate\n\nQuench at 10 K/ns to reach Tg.\n")
+    Note(root, "tg-cooling").write("# Cooling rate\n\nQuench at 10 K/ns to reach Tg.\n")
     return root
+
+
+def _workspace_hits(root: Path, query: str):
+    """The workspace searched through the seam a host with its own scan passes."""
+    return search_sources(
+        query,
+        workspace_root=root,
+        include_workspace=True,
+        workspace_searcher=lambda: Knowledge(root).search(query),
+    )
 
 
 class TestTheNamesMolmcpImports:
@@ -89,23 +136,31 @@ class TestTheNamesMolmcpImports:
 class TestTheRefFormat:
     """``"<source>:<ref>"`` is how molmcp addresses a document across turns."""
 
-    def test_a_named_source_prefixes_its_name(self, tmp_path: Path, wiki: Path) -> None:
-        store = KnowledgeSourceStore(tmp_path / "ws", user_dir=tmp_path / "user")
-        store.add(WikiSource(name="lab", root=str(wiki)))
+    def test_a_named_source_prefixes_its_name(self) -> None:
+        # Pinned at ``SourcedHit.ref`` — the one place the format is defined.
+        # Not driven end-to-end: ``search_sources`` searches a *registered*
+        # source through ``Bundle``, whose walk descends directories only and so
+        # cannot see a ``knowledges/<slug>.md`` file document (the structural
+        # gap the document-as-file migration left; owned by no member of this
+        # chain). The workspace half below is end-to-end.
+        hit = SourcedHit(
+            source="lab",
+            hit=SearchHit(entry=ConceptIndexEntry(path="knowledges/tg-cooling.md", type="Note")),
+            abs_path=None,
+            rank=1,
+        )
 
-        hits = search_sources("cooling", store=store, include_workspace=False)
-
-        assert [h.ref for h in hits] == ["lab:tg-cooling"]
+        assert hit.ref == "lab:knowledges/tg-cooling.md"
 
     def test_the_active_workspace_is_the_unnamed_source(self, wiki: Path) -> None:
         # A bare ref (no prefix) means "the workspace" — molmcp's read() relies
         # on this to accept a workspace-relative path with no source.
-        hits = search_sources("cooling", workspace_root=wiki, include_workspace=True)
+        [hit] = _workspace_hits(wiki, "cooling")
 
-        assert [h.ref for h in hits] == ["tg-cooling"]
+        assert [hit.ref] == ["knowledges/tg-cooling.md"]
 
     def test_a_ref_round_trips_back_to_its_document(self, wiki: Path) -> None:
-        [hit] = search_sources("cooling", workspace_root=wiki, include_workspace=True)
+        [hit] = _workspace_hits(wiki, "cooling")
         source, _, rel = hit.ref.partition(":") if ":" in hit.ref else ("", "", hit.ref)
 
         assert source == ""
@@ -115,14 +170,14 @@ class TestTheRefFormat:
 class TestTheSearchHitFieldsMolmcpReads:
     def test_every_field_the_search_tool_emits_is_present(self, wiki: Path) -> None:
         # Mirrors the dict built at molmcp knowledge.py:131-138.
-        [hit] = search_sources("cooling", workspace_root=wiki, include_workspace=True)
+        [hit] = Knowledge(wiki).search("cooling").hits
 
-        assert hit.ref and hit.source == "" and hit.rank == 1
-        assert hit.hit.entry.title == "Cooling rate"
-        assert hit.hit.entry.type == "note"
-        assert isinstance(hit.hit.entry.tags, tuple)
-        assert hit.hit.score > 0
-        assert hit.hit.snippet  # the reason the model was given this hit
+        assert hit.entry.path == "knowledges/tg-cooling.md"
+        assert hit.entry.title == "Cooling rate"
+        assert hit.entry.type == "Note"
+        assert isinstance(hit.entry.tags, tuple)
+        assert hit.score > 0
+        assert hit.snippet  # the reason the model was given this hit
 
 
 class TestTheInformationARefMustYield:
@@ -135,17 +190,17 @@ class TestTheInformationARefMustYield:
     """
 
     def test_a_resolved_document_yields_what_the_read_tool_reports(self, wiki: Path) -> None:
-        doc = Note(wiki / "tg-cooling")
+        doc = Note(wiki, "tg-cooling")
 
-        title = doc.read_meta().get("title") or doc.name  # → doc.title
+        title = doc.frontmatter().get("title") or doc.name  # → doc.title
         type_ = doc.type()  # → doc.type
         tags = doc.tags()  # → doc.tags
         body = doc.read()
         edges = doc.links()  # → doc.edges
-        openable = Path(doc.path) / "index.md"  # → doc.origin.body_path
+        openable = doc.path  # → doc.origin.body_path
 
         assert title == "tg-cooling"
-        assert type_ == "note"
+        assert type_ == "note.note"
         assert tuple(tags) == ()
         assert "Quench at 10 K/ns" in body
         assert edges == []
@@ -159,6 +214,23 @@ class TestPublicAll:
     def test_name_is_exported(self, name: str) -> None:
         assert name in knowledge.__all__
 
-    @pytest.mark.parametrize("name", SHIM_NOT_PUBLIC)
-    def test_shim_name_is_not_exported(self, name: str) -> None:
+    def test_the_whole_all_set_is_pinned(self) -> None:
+        assert set(knowledge.__all__) == PINNED_ALL
+
+    @pytest.mark.parametrize("name", INTERNAL_NOT_PUBLIC)
+    def test_internal_name_is_not_exported(self, name: str) -> None:
         assert name not in knowledge.__all__
+
+    def test_every_public_name_is_knowledge_defined(self) -> None:
+        """No public name is handed over from ``molab.workspace``.
+
+        Only *defined* exports are checked: a plain constant
+        (``PLAN_BOOK_NAME``) or a typing alias (``EdgeRole`` / ``SourceKind``)
+        owns no defining module of its own — the alias renders as ``typing``.
+        """
+        for name in knowledge.__all__:
+            obj = getattr(knowledge, name)
+            if not (inspect.isclass(obj) or inspect.isfunction(obj)):
+                continue
+            module = getattr(obj, "__module__", "")
+            assert module.startswith("molab.knowledge"), f"{name} is defined in {module!r}"

@@ -19,7 +19,6 @@ from molab._typing import (
     TaskOutput,
 )
 from molab.ids import compute_definition_hash, generate_uuid7
-from molab.knowledge.types import concept_type
 from molab.path import Path as MolabPath
 from molab.profile import ProfileConfig
 
@@ -187,7 +186,6 @@ def compute_run_definition_hash(
     )
 
 
-@concept_type(WORKSPACE_RUN_KIND)
 @register_entity_class
 class Run(Folder):
     """Single execution instance within an experiment.

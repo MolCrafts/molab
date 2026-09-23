@@ -4,11 +4,15 @@ Workspace is the bottom of the dependency DAG. The only ``molab.*``
 imports allowed under ``src/molab/workspace/`` are ``molab._typing``,
 ``molab.profile``, ``molab.path`` (the cross-host POSIX path primitive),
 the layer-0 filesystem seam (``molab.fs`` / ``molab.gitignore``, shared with
-the ``molab.knowledge`` peer layer), ``molab.knowledge`` itself (the OKF
-library workspace reconstructs typed Concepts through), and the root-level
-helpers (``mollog``, ``molcfg``).
-Every other ``molab.*`` subpackage — ``workflow``, ``agent``,
-``plugins``, ``server``, ``cli``, ``sweep`` — is forbidden.
+the layer above it), and the root-level helpers (``mollog``, ``molcfg``).
+Every other ``molab.*`` subpackage — ``workflow``, ``agent``, ``plugins``,
+``server``, ``cli``, ``sweep``, ``knowledge`` — is forbidden.
+
+``molab.knowledge`` sits **above** workspace and reaches it only through
+function-body imports; the reverse arrow does not exist. Workspace must not
+name knowledge in any form — no import, no identifier, no knowledge-named
+source file (the residue scan that pins that is
+``tests/test_workspace/test_no_knowledge_residue.py``).
 
 This is the mechanical enforcer of the rule documented in the
 ``§ Layer charters → molab.workspace`` section of CLAUDE.md.
@@ -25,6 +29,8 @@ from __future__ import annotations
 import ast
 from pathlib import Path
 
+import pytest
+
 WORKSPACE_ROOT = Path(__file__).resolve().parents[2] / "src" / "molab" / "workspace"
 
 FORBIDDEN_PREFIXES: tuple[str, ...] = (
@@ -35,6 +41,7 @@ FORBIDDEN_PREFIXES: tuple[str, ...] = (
     "molab.cli",
     "molab.services",
     "molab.sweep",
+    "molab.knowledge",
 )
 
 
@@ -87,18 +94,21 @@ def test_workspace_forbids_all_upstream_layers() -> None:
     )
 
 
-def test_guard_detects_violation_when_simulated(tmp_path: Path) -> None:
-    """Negative test: the AST scan must catch a freshly-introduced import."""
+@pytest.mark.parametrize("prefix", FORBIDDEN_PREFIXES)
+def test_guard_detects_violation_when_simulated(prefix: str, tmp_path: Path) -> None:
+    """Negative test: the AST scan must catch a planted import of every ban.
+
+    Parametrised over the whole deny-list, so adding a prefix without proving
+    the scanner sees it cannot ship an unscanned name.
+    """
     fake = tmp_path / "tainted.py"
-    fake.write_text("from molab.workflow.spec import WorkflowSpec\n")
-    hits = _files_importing("molab.workflow", tmp_path)
-    assert any(p == fake for p, _, _ in hits), (
-        "guard failed to detect a planted molab.workflow import"
-    )
+    fake.write_text(f"from {prefix}.spec import Planted\n")
+    hits = _files_importing(prefix, tmp_path)
+    assert any(p == fake for p, _, _ in hits), f"guard failed to detect a planted {prefix} import"
 
 
 def test_workspace_init_does_not_load_workflow_or_agent() -> None:
-    """``import molab.workspace`` must not pull workflow/agent into sys.modules.
+    """``import molab.workspace`` must not pull workflow/agent/knowledge into sys.modules.
 
     Equivalent invariant from CLAUDE.md: workspace is the leaf — touching
     it should never cascade an upstream module load.
@@ -113,6 +123,8 @@ def test_workspace_init_does_not_load_workflow_or_agent() -> None:
         "    'molab.workspace eagerly imported molab.workflow'\n"
         "assert 'molab.harness' not in sys.modules, "
         "    'molab.workspace eagerly imported molab.harness'\n"
+        "assert 'molab.knowledge' not in sys.modules, "
+        "    'molab.workspace eagerly imported molab.knowledge'\n"
     )
     result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr or result.stdout

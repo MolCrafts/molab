@@ -8,11 +8,18 @@ so these tests use unique type strings to stay isolated.
 
 The registry owns no storage class of its own: these tests use a tiny local
 placeholder class to prove the registry works for any caller-supplied type.
+
+:func:`non_concept_subdirs` reads a *host's* pruning declaration two ways: from
+the registry when the host registered its own class, and — for a host that
+registers nothing, such as ``molab.workspace`` — straight off the class that
+declares it, through a function-body import.
 """
 
 from __future__ import annotations
 
 from molab.knowledge.types import (
+    _REGISTRY,
+    non_concept_subdirs,
     register_concept_type,
     resolve_concept_type,
 )
@@ -78,3 +85,38 @@ class TestConceptTypeRegistry:
         register_concept_type("test-idempotent", Only)
 
         assert resolve_concept_type("test-idempotent", _Concept, base=_Concept) is Only
+
+
+class TestNonConceptSubdirs:
+    """A host's pruning declaration, read without it registering a type."""
+
+    def test_a_registered_declaration_is_read_from_the_registry(self) -> None:
+        type_str = "test.host_declares_subdirs"
+
+        class _Host:
+            NON_CONCEPT_SUBDIRS = frozenset({"logs", "out"})
+
+        register_concept_type(type_str, _Host)
+        try:
+            assert non_concept_subdirs(type_str) == frozenset({"logs", "out"})
+        finally:
+            _REGISTRY.pop(type_str, None)
+
+    def test_a_workspace_run_prunes_its_declared_subdirs_with_nothing_registered(self) -> None:
+        # The run type is NOT in the registry (workspace registers no concept
+        # type), so the set can only have come off the class itself.
+        from molab.workspace.folder import WORKSPACE_RUN_KIND
+        from molab.workspace.run import Run
+
+        assert WORKSPACE_RUN_KIND not in _REGISTRY
+        pruned = non_concept_subdirs(WORKSPACE_RUN_KIND)
+
+        assert "executions" in pruned
+        assert "artifacts" in pruned
+        assert pruned == Run.NON_CONCEPT_SUBDIRS
+
+    def test_an_unknown_type_prunes_nothing(self) -> None:
+        assert non_concept_subdirs("totally-unknown-xyz") == frozenset()
+
+    def test_a_directory_with_no_marker_prunes_nothing(self) -> None:
+        assert non_concept_subdirs(None) == frozenset()

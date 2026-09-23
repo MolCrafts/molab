@@ -40,7 +40,6 @@ if TYPE_CHECKING:
 
 from molab._typing import JSONValue
 from molab.ids import compute_definition_hash, generate_uuid7
-from molab.knowledge.types import concept_type
 from molab.path import Path
 
 from .assets import AssetScope, AssetsView, DataAssetLibrary
@@ -117,7 +116,6 @@ def _parse_ir_document(source: str | None) -> dict | None:
     return doc if isinstance(doc, dict) else None
 
 
-@concept_type(WORKSPACE_EXPERIMENT_KIND)
 @register_entity_class
 class Experiment(Folder):
     """Repeatable experiment — a parameter-space container.

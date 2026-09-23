@@ -1,24 +1,29 @@
-"""Residue scan: the workspace source carries no knowledge name (knowledge-crossref-10).
+"""Residue scan: the workspace source carries no knowledge name (10 / 11-guards).
 
-The workspace's read paths no longer know knowledge — the assembler projects no
-``knowledge`` rows, the layout validator owns no knowledge head-file set, and the
-cache prefetch helper is named for the ``meta.json`` Concept mounts it actually
-serves. This pins the terminal state by **identifier and import only** (D12): a
-docstring or comment may still say "knowledge" (review-only, never a criterion),
-but no symbol or import under ``src/molab/workspace/`` may carry the name beyond
-the survivors the workspace legitimately owns:
+The workspace does not know knowledge. ``molab.knowledge`` sits *above* it and
+reaches it only through function-body imports, so the four ``@concept_type``
+registrations the workspace used to carry are gone and no workspace module
+imports knowledge at all. This pins the terminal state by **identifier, import
+module name, non-docstring string literal and source-file stem only** (D12): a
+docstring or a comment may still say "knowledge" (review-only, never a
+criterion), but no name under ``src/molab/workspace/`` may carry the word
+beyond the survivors the workspace legitimately owns:
 
-* ``knowledges`` / ``knowledges.json`` — disk names the workspace owns.
+* ``knowledges`` / ``knowledges.json`` — disk names the workspace owns: the
+  container directory the layout naming law derives (``projects/`` /
+  ``experiments/`` / ``runs/`` / ``knowledges/``), and the legacy per-scope
+  index filename ``molab migrate layout`` lists as a droppable artifact.
 * ``KnowledgeRef`` / the ``knowledge`` field / ``relevant_knowledge`` — the
   retained read-model shape (its one producer is ``molab.services``).
-* the four ``from molab.knowledge.types import concept_type`` registrations in
-  ``workspace.py`` / ``project.py`` / ``experiment.py`` / ``run.py`` — owned by
-  knowledge-crossref-11-guards (D13), deliberately exempt here.
+
+Anything else is residue from a predecessor member and is reported, never
+white-listed here.
 """
 
 from __future__ import annotations
 
 import ast
+import re
 from pathlib import Path
 
 import pytest
@@ -32,32 +37,48 @@ ALLOWED_NAMES = frozenset(
     {"knowledges", "knowledges.json", "KnowledgeRef", "knowledge", "relevant_knowledge"}
 )
 
-#: The four registrations 11-guards removes (D13) — exempt by file + module + symbol.
-CONCEPT_TYPE_FILES = frozenset({"workspace.py", "project.py", "experiment.py", "run.py"})
-CONCEPT_TYPE_MODULE = "molab.knowledge.types"
-CONCEPT_TYPE_SYMBOL = "concept_type"
+#: A run of identifier characters — the unit a name, a literal or a stem is read in.
+_WORD = re.compile(r"[A-Za-z_][A-Za-z0-9_.]*")
 
 
 def _sources() -> list[Path]:
     return [p for p in sorted(WORKSPACE.rglob("*.py")) if "__pycache__" not in p.parts]
 
 
-def _is_exempt_concept_type(py: Path, node: ast.ImportFrom) -> bool:
-    return (
-        py.name in CONCEPT_TYPE_FILES
-        and node.module == CONCEPT_TYPE_MODULE
-        and [alias.name for alias in node.names] == [CONCEPT_TYPE_SYMBOL]
-    )
+def _carries_knowledge(text: str) -> bool:
+    return "knowledge" in text.lower()
 
 
-def _knowledge_imports(source: str, py: Path) -> list[tuple[int, str]]:
+def _tokens(text: str) -> list[str]:
+    """Every identifier-shaped run in *text* that carries the word ``knowledge``."""
+    return [word for word in _WORD.findall(text) if _carries_knowledge(word)]
+
+
+def _docstring_constants(tree: ast.Module) -> set[int]:
+    """The ``id()`` of every docstring constant node — prose, never a criterion."""
+    found: set[int] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef):
+            continue
+        if not node.body:
+            continue
+        first = node.body[0]
+        if (
+            isinstance(first, ast.Expr)
+            and isinstance(first.value, ast.Constant)
+            and isinstance(first.value.value, str)
+        ):
+            found.add(id(first.value))
+    return found
+
+
+def _knowledge_imports(source: str) -> list[tuple[int, str]]:
     """``(lineno, module)`` for every ``molab.knowledge`` import."""
     out: list[tuple[int, str]] = []
     for node in ast.walk(ast.parse(source)):
         if isinstance(node, ast.ImportFrom):
             module = node.module or ""
-            is_knowledge = module == "molab.knowledge" or module.startswith("molab.knowledge.")
-            if is_knowledge and not _is_exempt_concept_type(py, node):
+            if module == "molab.knowledge" or module.startswith("molab.knowledge."):
                 out.append((node.lineno, module))
         elif isinstance(node, ast.Import):
             for alias in node.names:
@@ -66,36 +87,51 @@ def _knowledge_imports(source: str, py: Path) -> list[tuple[int, str]]:
     return out
 
 
-def _identifier(alias: ast.alias) -> str:
-    """The name an alias introduces — its ``as`` name, or the last dotted part."""
-    return alias.asname or alias.name.rsplit(".", 1)[-1]
+def _knowledge_tokens(source: str) -> list[tuple[int, str]]:
+    """``(lineno, token)`` for every knowledge-bearing name, literal or import.
+
+    Docstrings are skipped — prose is review-only (D12) — while a runtime string
+    literal is *not*: a name the code passes around is a name.
+    """
+    tree = ast.parse(source)
+    docstrings = _docstring_constants(tree)
+    found: set[tuple[int, str]] = set()
+
+    def add(lineno: int, text: str) -> None:
+        found.update((lineno, token) for token in _tokens(text))
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                add(node.lineno, alias.name)
+                if alias.asname is not None:
+                    add(node.lineno, alias.asname)
+        elif isinstance(node, ast.ImportFrom):
+            add(node.lineno, node.module or "")
+            for alias in node.names:
+                add(node.lineno, alias.name)
+                if alias.asname is not None:
+                    add(node.lineno, alias.asname)
+        elif isinstance(node, ast.Attribute):
+            add(node.lineno, node.attr)
+        elif isinstance(node, ast.Name):
+            add(node.lineno, node.id)
+        elif isinstance(node, ast.arg | ast.keyword):
+            add(node.lineno, node.arg or "")
+        elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
+            add(node.lineno, node.name)
+        elif (
+            isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and id(node) not in docstrings
+        ):
+            add(node.lineno, node.value)
+    return sorted(found)
 
 
-def _names_for(node: ast.AST) -> list[str]:
-    """The identifiers a node introduces or names, if any."""
-    if isinstance(node, ast.Name):
-        return [node.id]
-    if isinstance(node, ast.Attribute):
-        return [node.attr]
-    if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
-        return [node.name]
-    if isinstance(node, ast.arg):
-        return [node.arg]
-    if isinstance(node, ast.keyword):
-        return [node.arg] if node.arg is not None else []
-    if isinstance(node, ast.alias):
-        return [_identifier(node)]
-    return []
-
-
-def _knowledge_identifiers(source: str) -> list[tuple[int, str]]:
-    """``(lineno, name)`` for every identifier carrying ``knowledge``."""
-    out: list[tuple[int, str]] = []
-    for node in ast.walk(ast.parse(source)):
-        for name in _names_for(node):
-            if "knowledge" in name.lower() and name not in ALLOWED_NAMES:
-                out.append((node.lineno, name))
-    return out
+def _knowledge_stems() -> list[str]:
+    """Source files whose *stem* carries the word — a knowledge-named module."""
+    return [str(py.relative_to(WORKSPACE)) for py in _sources() if _carries_knowledge(py.stem)]
 
 
 class TestNoKnowledgeResidue:
@@ -104,18 +140,28 @@ class TestNoKnowledgeResidue:
         offenders = [
             f"{py.relative_to(WORKSPACE)}:{lineno}: {module}"
             for py in _sources()
-            for lineno, module in _knowledge_imports(py.read_text(encoding="utf-8"), py)
+            for lineno, module in _knowledge_imports(py.read_text(encoding="utf-8"))
         ]
         assert not offenders, "still importing molab.knowledge:\n  " + "\n  ".join(offenders)
 
     @pytest.mark.unit
     def test_workspace_source_has_no_knowledge_token(self) -> None:
+        scanned = {py: _knowledge_tokens(py.read_text(encoding="utf-8")) for py in _sources()}
         offenders = [
-            f"{py.relative_to(WORKSPACE)}:{lineno}: {name}"
-            for py in _sources()
-            for lineno, name in _knowledge_identifiers(py.read_text(encoding="utf-8"))
+            f"{py.relative_to(WORKSPACE)}:{lineno}: {token}"
+            for py, tokens in scanned.items()
+            for lineno, token in tokens
+            if token not in ALLOWED_NAMES
         ]
-        assert not offenders, "knowledge-named identifier remains:\n  " + "\n  ".join(offenders)
+        offenders += [f"{stem}: knowledge-named module" for stem in _knowledge_stems()]
+        assert not offenders, "knowledge-named name remains:\n  " + "\n  ".join(offenders)
+
+        # The other direction: the scan must still *see* the names the workspace
+        # legitimately keeps, or a walk that read nothing would make the
+        # assertion above vacuously true.
+        survivors = {token for tokens in scanned.values() for _lineno, token in tokens}
+        assert survivors <= ALLOWED_NAMES, f"unexpected survivor: {sorted(survivors)}"
+        assert {"knowledges", "KnowledgeRef"} <= survivors
 
     @pytest.mark.unit
     @pytest.mark.parametrize(
