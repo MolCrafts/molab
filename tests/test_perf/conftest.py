@@ -141,15 +141,11 @@ def build_synth_workspace(
     events: bool = True,
 ) -> SynthLayout:
     """Write a complete molab workspace tree under *root* (see module docs)."""
-    try:
-        from molab.knowledge.concepts import Note
-        from molab.knowledge.note_meta import NoteMeta
-    except ImportError:  # pre-extraction tree (baseline capture only)
-        from molab.workspace.concepts import Note  # type: ignore[no-redef]
-        from molab.workspace.note_meta import NoteMeta  # type: ignore[no-redef]
     from molab.workspace.metrics import MetricsWriter
     from molab.workspace.run_ops import RunOpsState
 
+    from molab.knowledge.concepts import Note
+    from molab.knowledge.note_meta import NoteMeta
     from molab.workspace.assets.artifact import ArtifactAsset
     from molab.workspace.assets.base import AssetScope, Producer
     from molab.workspace.assets.manifest import SCHEMA_VERSION, _dump

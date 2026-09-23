@@ -47,6 +47,9 @@ SEVERED_NAMES = (
 SEVERED_REEXPORT = "summarize_entity"
 
 # Names the cut must NOT touch — a sample across every surviving family.
+# ``Note`` / ``Literature`` / ``KnowledgeNotFoundError`` were in this list until
+# knowledge-crossref-09 shed the forwarder shells that carried them; workspace
+# now imports its knowledge names from ``molab.knowledge`` or not at all.
 SURVIVING_NAMES = (
     "Workspace",
     "Project",
@@ -60,9 +63,6 @@ SURVIVING_NAMES = (
     "Params",
     "ComputeTarget",
     "GitHistory",
-    "Literature",
-    "Note",
-    "KnowledgeNotFoundError",
     "KnowledgeRef",
     "ContextFocus",
 )

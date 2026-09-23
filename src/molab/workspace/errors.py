@@ -24,9 +24,6 @@ intentionally not exported from ``molab.workspace``.
 
 from __future__ import annotations
 
-from molab.knowledge.errors import ConceptNotFoundError as _KnowledgeConceptNotFoundError
-from molab.knowledge.errors import KnowledgeNotFoundError as _KnowledgeNotFoundError
-
 
 class _WorkspaceLookupError(LookupError):
     """Base for ``*NotFoundError`` — strict getter miss."""
@@ -84,19 +81,6 @@ class RunExistsError(_WorkspaceConflictError):
     _entity_kind = "run"
 
 
-#: Same object as ``molab.knowledge.errors.KnowledgeNotFoundError``.
-KnowledgeNotFoundError = _KnowledgeNotFoundError
-
-
-#: Re-exported from the OKF library, where ``Bundle`` lives. The **same class
-#: object**, so every ``except ConceptNotFoundError`` site catches what the
-#: bundle actually raises no matter which module it imported from — two classes
-#: for one failure is how a 404 silently becomes a 500. It subclasses
-#: ``LookupError`` like the workspace ``*NotFoundError`` family, so the server's
-#: not-found mapping is unchanged.
-ConceptNotFoundError = _KnowledgeConceptNotFoundError
-
-
 class FolderMoveCollisionError(ValueError):
     """Raised by ``Folder.move_to`` when the destination already exists.
 
@@ -113,11 +97,9 @@ class FolderMoveCollisionError(ValueError):
 
 
 __all__ = [
-    "ConceptNotFoundError",
     "ExperimentExistsError",
     "ExperimentNotFoundError",
     "FolderMoveCollisionError",
-    "KnowledgeNotFoundError",
     "ProjectExistsError",
     "ProjectNotFoundError",
     "RunExistsError",

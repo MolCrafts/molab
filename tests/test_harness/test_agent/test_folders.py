@@ -12,13 +12,10 @@ import inspect
 import json
 from pathlib import Path
 
-import pytest
-
 from molab.harness.agent import folders as agent_folders
 from molab.harness.agent.folders import AGENT_KIND, AGENT_SESSION_KIND, Agent, AgentSession
 from molab.knowledge.types import resolve_concept_type
 from molab.workspace import Workspace
-from molab.workspace import folder as folder_mod
 from molab.workspace.folder import Folder, class_for_folder_type, concept_from_dir
 
 
@@ -44,21 +41,17 @@ class TestAgentTypeRegistration:
     def test_module_has_zero_knowledge_dependency(self) -> None:
         assert "molab.knowledge" not in inspect.getsource(agent_folders)
 
-    def test_concept_from_dir_rebuilds_agent_and_session(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_concept_from_dir_rebuilds_agent_and_session(self, tmp_path: Path) -> None:
+        """The workspace table alone rebuilds both kinds.
+
+        ``folder.py`` imports nothing from ``molab.knowledge`` any more (AST-guarded
+        by ``tests/test_workspace/test_folder.py``), so the workspace type table is
+        not merely consulted first — it is the only registry ``concept_from_dir``
+        can reach, which is why the old spy on the knowledge fallback is gone.
+        """
         ws = Workspace(root=tmp_path / "lab", name="Lab")
         ws.materialize()
         agent_dir = _marker_dir(ws.root, "alpha", type_str=AGENT_KIND, marker_id="alpha")
-
-        consulted: list[str] = []
-        real_resolve = folder_mod.resolve_concept_type
-
-        def _spy(type_str: str, default: object, *, base: type | None = None) -> object:
-            consulted.append(type_str)
-            return real_resolve(type_str, default, base=base)
-
-        monkeypatch.setattr(folder_mod, "resolve_concept_type", _spy)
 
         rebuilt = concept_from_dir(str(agent_dir), ws)
         assert isinstance(rebuilt, Agent)
@@ -68,9 +61,6 @@ class TestAgentTypeRegistration:
         )
         session = concept_from_dir(str(session_dir), rebuilt)
         assert isinstance(session, AgentSession)
-
-        # Secondary evidence only: the workspace table answered both times.
-        assert consulted == []
 
     def test_layout_is_unchanged(self, tmp_path: Path) -> None:
         ws = Workspace(root=tmp_path / "lab", name="Lab")

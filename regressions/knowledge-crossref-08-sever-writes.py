@@ -46,7 +46,9 @@ def main() -> None:
         assert not hasattr(molab.workspace, name), name
         assert name not in molab.workspace.__all__, name
     assert not hasattr(molab.workspace, "summarize_entity")
-    assert len(molab.workspace.__all__) == 91
+    # 91 at this cut; knowledge-crossref-09 shed the nine knowledge names the
+    # workspace's forwarder shells had carried, leaving 82.
+    assert len(molab.workspace.__all__) == 82
     for name in molab.workspace.__all__:
         assert getattr(molab.workspace, name, None) is not None, name
 

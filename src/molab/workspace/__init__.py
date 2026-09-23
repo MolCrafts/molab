@@ -13,9 +13,9 @@ read-back.
 
 Notes + literature are owned by ``molab.knowledge`` (``Note`` /
 ``Literature`` + its typed ``ReferenceMeta``) — directories whose path is
-their identity. ``ZoteroItem`` / ``read_zotero_items`` are the
-read-only Zotero importer that produces ``Literature`` records
-(PDFs pointed at, never copied).
+their identity — and are **not** re-exported here: import them from
+``molab.knowledge``. The read-only Zotero importer (``ZoteroItem`` /
+``read_zotero_items``) lives there too.
 
 Each scope exposes:
 
@@ -46,7 +46,6 @@ from .assets import (
 )
 from .base import atomic_write_json, atomic_write_text
 from .cache import WORKSPACE_CACHE_KIND, CacheFolder
-from .concepts import Literature, Note
 from .context import Context
 
 # ``Asset`` is the manifest-family name imported above; the Project *data*
@@ -54,12 +53,10 @@ from .context import Context
 # ``Asset`` and ``AssetVersion`` are advertised in ``__all__``, so both are
 # bound here — an ``__all__`` entry that does not resolve breaks ``import *``.
 from .domain import Artifact, AssetVersion, ContentRef, Execution, ExecutionStatus
-from .edges import DEFAULT_EDGE_ROLE, Edge, EdgeRole
 from .errors import (
     ExperimentExistsError,
     ExperimentNotFoundError,
     FolderMoveCollisionError,
-    KnowledgeNotFoundError,
     ProjectExistsError,
     ProjectNotFoundError,
     RunExistsError,
@@ -84,11 +81,9 @@ from .models import (
     RunMetadata,
     WorkspaceMetadata,
 )
-from .note_meta import NoteMeta
 from .param import GridSpace, Params, ParamSpace, UniformSpace  # Params is the sweep-cell model
 from .project import Project
 from .prune import ExecutionPruneEntry, ExecutionPrunePlan, LivePruneRefusedError
-from .reference_meta import ReferenceMeta
 from .run import RETRYABLE_STATUSES, TERMINAL_STATUSES, Run, RunContext, RunStatus
 from .runset import RunRecord, RunSet, RunSetResult
 from .target import LocalTarget, RemoteTarget, SessionManager, SSHSession, Target, TargetNotFound
@@ -108,10 +103,8 @@ from .workspace_context import (
     WorkspaceRef,
 )
 from .wp import WorkspacePaths
-from .zotero_concepts import ZoteroItem
 
 __all__ = [
-    "DEFAULT_EDGE_ROLE",
     "LOCAL_TARGET_NAME",
     "RETRYABLE_STATUSES",
     "TERMINAL_STATUSES",
@@ -137,8 +130,6 @@ __all__ = [
     "ContextFocus",
     "DataAsset",
     "DataAssetLibrary",
-    "Edge",
-    "EdgeRole",
     "EntityRef",
     "ErrorInfo",
     "ErrorTraceAsset",
@@ -158,14 +149,10 @@ __all__ = [
     "GitHistory",
     "GridSpace",
     "HealthFlag",
-    "KnowledgeNotFoundError",
     "KnowledgeRef",
-    "Literature",
     "LivePruneRefusedError",
     "LocalTarget",
     "LogAsset",
-    "Note",
-    "NoteMeta",
     "ParamSpace",
     "Params",
     "Producer",
@@ -174,7 +161,6 @@ __all__ = [
     "ProjectMetadata",
     "ProjectNotFoundError",
     "ProjectRef",
-    "ReferenceMeta",
     "RemoteTarget",
     "Run",
     "RunContext",
@@ -199,7 +185,6 @@ __all__ = [
     "WorkspaceMetadata",
     "WorkspacePaths",
     "WorkspaceRef",
-    "ZoteroItem",
     "atomic_write_json",
     "atomic_write_text",
 ]

@@ -43,12 +43,14 @@ from .folder import (
     WORKSPACE_PROJECT_KIND,
     Folder,
     _validate_target_registered,
+    register_entity_class,
 )
 from .fs import PathArg
 from .models import FolderMetadata, ProjectMetadata
 
 
 @concept_type(WORKSPACE_PROJECT_KIND)
+@register_entity_class
 class Project(Folder):
     """Research project container.
 

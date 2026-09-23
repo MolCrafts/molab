@@ -165,17 +165,6 @@ def _claims(decorators: frozenset[str] = _TYPE_CLAIM_DECORATORS) -> dict[str, li
     return by_type
 
 
-#: The one type string each storage family is allowed to share, and the two
-#: modules allowed to claim it. ``molab.workspace`` models a note as a
-#: ``Folder`` (it lives in the entity tree) and ``molab.knowledge`` models it as
-#: a ``Concept`` (it is its own path); both legitimately answer the same
-#: ``meta.json`` ``type``, and ``resolve_concept_type(base=...)`` hands each
-#: family its own. Any *other* duplicate is the shim-re-declaration bug this
-#: scan exists to catch.
-_TWO_FAMILY_CLAIMS = {
-    "note.note": {"molab.knowledge.concepts::Note", "molab.workspace.concepts::Note"},
-}
-
 #: The agent kinds are claimed through the workspace ``meta.json`` type table,
 #: by the layer that owns their Folder classes. One claim each, no duplicate.
 _FOLDER_TYPE_REGISTRY_CLAIMS = {
@@ -185,11 +174,7 @@ _FOLDER_TYPE_REGISTRY_CLAIMS = {
 
 
 def test_each_concept_type_is_claimed_once_per_family() -> None:
-    duplicates = {
-        t: sites
-        for t, sites in _claims().items()
-        if len(sites) > 1 and set(sites) != _TWO_FAMILY_CLAIMS.get(t, set())
-    }
+    duplicates = {t: sites for t, sites in _claims().items() if len(sites) > 1}
     assert duplicates == {}, (
         f"a concept type claimed twice within one family shadows a class silently; "
         f"duplicates: {duplicates}"

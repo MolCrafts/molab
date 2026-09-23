@@ -55,6 +55,7 @@ from .folder import (
     WORKSPACE_RUN_KIND,
     Folder,
     _validate_target_registered,
+    register_entity_class,
 )
 from .fs import PathArg
 from .models import ExperimentMetadata, FolderMetadata, RunStatus
@@ -117,6 +118,7 @@ def _parse_ir_document(source: str | None) -> dict | None:
 
 
 @concept_type(WORKSPACE_EXPERIMENT_KIND)
+@register_entity_class
 class Experiment(Folder):
     """Repeatable experiment — a parameter-space container.
 

@@ -2,14 +2,16 @@
 
 Covers the ``Folder`` lifecycle (lazy mkdir, atomic ``write_json``, id/kind
 validation, ``children`` filtering, metadata round-trip, ``delete`` / ``move_to``)
-and the typed markdown-graph edges (``append_link`` / ``typed_out_edges``).
-The folder-module import-guard subprocess lives at the bottom.
+and the two Folder type tables: the filename axis this module owns
+(``register_entity_class`` / ``class_for_entity_file`` / ``entity_json_names``)
+and the ``meta.json`` ``type`` axis ``concept_from_dir`` consumes. The
+folder-module import-guard subprocess lives at the bottom.
 """
 
 from __future__ import annotations
 
+import ast
 import json
-import os
 import subprocess
 import sys
 import time
@@ -17,19 +19,26 @@ from pathlib import Path
 
 import pytest
 
+from molab.workspace import Experiment, Project, Run, Workspace
 from molab.workspace import folder as folder_mod
 from molab.workspace.folder import (
     Folder,
     FolderMoveCollisionError,
-    append_link,
+    class_for_entity_file,
     class_for_folder_type,
     concept_from_dir,
+    entity_filename,
+    entity_json_names,
+    register_entity_class,
     register_folder_type,
 )
 
 
 # ``Folder`` has no business subclasses at this level; this private subclass
-# exists only so ``children()`` has something concrete to reconstruct.
+# exists only so ``children()`` has something concrete to reconstruct. It is a
+# production-shaped registrar too, so it also proves the filename axis takes a
+# class registered from anywhere.
+@register_entity_class
 class _TestSubFolder(Folder):
     """Minimal Folder subclass used only by the children() filter test."""
 
@@ -197,55 +206,6 @@ class TestFolder:
             folder.write_json(bad_name, {})
 
 
-def _concept_folder(name: str, root: Path) -> Folder:
-    """A materialized base Concept dir (``meta.json`` only) for edge tests."""
-    folder = Folder(name=name, kind="bundle.concept", root_path=str(root))
-    folder.materialize()
-    return folder
-
-
-class TestFolderEdges:
-    def test_append_link_round_trips_role_and_path_view(self, tmp_path: Path) -> None:
-        """``append_link`` writes a typed edge recoverable via ``typed_out_edges``
-        (role intact) while the path-only ``out_edges`` view still resolves the
-        target."""
-        src = _concept_folder("src", tmp_path)
-        dst = _concept_folder("dst", tmp_path)
-        append_link(src, dst, role="derived_from")
-
-        typed = src.typed_out_edges()
-        assert len(typed) == 1
-        assert os.path.normpath(typed[0].target) == os.path.normpath(str(dst.resolve()))
-        assert typed[0].role == "derived_from"
-        assert os.path.normpath(str(dst.resolve())) in {
-            os.path.normpath(e) for e in src.out_edges()
-        }
-
-    def test_legacy_untyped_link_defaults_role_and_is_kept(self, tmp_path: Path) -> None:
-        """A plain pre-role markdown link parses to ``DEFAULT_EDGE_ROLE`` and is
-        never dropped; ``meta.json`` is never consulted for the edge."""
-        from molab.workspace.edges import DEFAULT_EDGE_ROLE
-
-        src = _concept_folder("src", tmp_path)
-        dst = _concept_folder("dst", tmp_path)
-        src.write_index("# src\n\n- [dst](../dst)\n")
-
-        typed = src.typed_out_edges()
-        assert len(typed) == 1
-        assert typed[0].role == DEFAULT_EDGE_ROLE
-        assert os.path.normpath(str(dst.resolve())) in {
-            os.path.normpath(e) for e in src.out_edges()
-        }
-        assert "dst" not in (Path(src.resolve()) / "meta.json").read_text(encoding="utf-8")
-
-    def test_append_link_unknown_role_raises_and_writes_nothing(self, tmp_path: Path) -> None:
-        src = _concept_folder("src", tmp_path)
-        dst = _concept_folder("dst", tmp_path)
-        with pytest.raises(ValueError):
-            append_link(src, dst, role="not_a_role")
-        assert src.read_index() == ""
-
-
 def _marker_dir(root: Path, name: str, marker: dict[str, object]) -> Path:
     """A bare ``meta.json``-only directory (no class-named entity JSON)."""
     child = Path(root) / "root" / name
@@ -294,11 +254,8 @@ class TestFolderTypeRegistry:
     def test_unknown_type_has_no_class(self, type_str: str) -> None:
         assert class_for_folder_type(type_str) is None
 
-    def test_concept_from_dir_rebuilds_a_registered_type(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        """A ``meta.json``-only dir with a registered type rebuilds as that class —
-        and the knowledge registry is never consulted (secondary evidence)."""
+    def test_concept_from_dir_rebuilds_a_registered_type(self, tmp_path: Path) -> None:
+        """A ``meta.json``-only dir with a registered type rebuilds as that class."""
 
         @register_folder_type("test.folder.rebuild")
         class _Rebuilt(Folder):
@@ -307,19 +264,9 @@ class TestFolderTypeRegistry:
         parent = Folder(name="root", kind="test.root", root_path=tmp_path)
         child = _marker_dir(tmp_path, "alpha", {"type": "test.folder.rebuild", "id": "d"})
 
-        consulted: list[str] = []
-        original = folder_mod.resolve_concept_type
-
-        def _spy(type_str: str, default: object, *, base: type | None = None) -> object:
-            consulted.append(type_str)
-            return original(type_str, default, base=base)
-
-        monkeypatch.setattr(folder_mod, "resolve_concept_type", _spy)
-
         rebuilt = concept_from_dir(str(child), parent)
         assert isinstance(rebuilt, _Rebuilt)
         assert rebuilt.metadata.kind == "test.folder.rebuild"
-        assert consulted == [], "the workspace type table must answer before the knowledge registry"
 
     def test_concept_from_dir_falls_back_to_plain_folder(self, tmp_path: Path) -> None:
         """An unregistered ``meta.json`` type still rebuilds as a bare ``Folder``."""
@@ -328,6 +275,110 @@ class TestFolderTypeRegistry:
 
         rebuilt = concept_from_dir(str(child), parent)
         assert type(rebuilt) is Folder
+
+
+class TestFolderTypeTable:
+    """The filename axis of the one Folder type table, and its ``concept_from_dir`` read."""
+
+    def test_entity_filename_is_the_class_name_snake_cased(self) -> None:
+        assert entity_filename(_TestSubFolder) == "__test_sub_folder.json"
+        assert entity_filename(Workspace) == "workspace.json"
+
+    def test_a_registered_class_is_reachable_by_its_entity_file(self) -> None:
+        assert class_for_entity_file(entity_filename(_TestSubFolder)) is _TestSubFolder
+
+    def test_an_unknown_entity_file_has_no_class(self) -> None:
+        assert class_for_entity_file("finding.json") is None
+
+    def test_entity_json_names_leads_with_the_four_core_levels(self) -> None:
+        # Exact equality is asserted fresh-process by the 09 regression script;
+        # in-suite ``_TestSubFolder`` is registered too, so assert the prefix.
+        assert entity_json_names()[:4] == (
+            "workspace.json",
+            "project.json",
+            "experiment.json",
+            "run.json",
+        )
+
+    def test_re_registering_the_same_class_adds_no_second_name(self) -> None:
+        before = entity_json_names()
+
+        register_entity_class(_TestSubFolder)
+
+        assert entity_json_names() == before
+
+    def test_concept_from_dir_rebuilds_every_built_in_level(self, tmp_path: Path) -> None:
+        """The four tree levels rebuild from their own entity filename — no
+        knowledge registry involved."""
+        ws = Workspace(root=tmp_path / "lab")
+        ws.materialize()
+        proj = ws.add_project("p")
+        exp = proj.add_experiment("e")
+        run = exp.add_run(id="r")
+
+        assert type(concept_from_dir(ws.resolve(), ws)) is Workspace
+        assert type(concept_from_dir(proj.resolve(), ws)) is Project
+        assert type(concept_from_dir(exp.resolve(), proj)) is Experiment
+        assert type(concept_from_dir(run.resolve(), exp)) is Run
+
+    def test_a_directory_with_no_marker_is_not_a_folder(self, tmp_path: Path) -> None:
+        """No entity record and no ``meta.json`` → ``TypeError``, not a bare Folder."""
+        parent = Folder(name="root", kind="test.root", root_path=tmp_path)
+        bare = Path(parent.path) / "bare"
+        bare.mkdir(parents=True, exist_ok=True)
+        (bare / "index.md").write_text("# no marker\n")
+
+        with pytest.raises(TypeError, match="is not a Folder"):
+            concept_from_dir(str(bare), parent)
+
+    def test_a_knowledge_directory_is_not_a_folder(self, tmp_path: Path) -> None:
+        """A Knowledge document (``finding.json`` + ``index.md``, no entity record)
+        is refused the same way — without knowledge's head-file list."""
+        parent = Folder(name="root", kind="test.root", root_path=tmp_path)
+        doc = Path(parent.path) / "finding"
+        doc.mkdir(parents=True, exist_ok=True)
+        (doc / "finding.json").write_text("{}")
+        (doc / "index.md").write_text("# a finding\n")
+
+        with pytest.raises(TypeError, match="is not a Folder"):
+            concept_from_dir(str(doc), parent)
+
+
+class TestFolderModuleCut:
+    """``folder.py`` owns its type tables and nothing of knowledge's vocabulary."""
+
+    def test_folder_module_imports_nothing_from_knowledge(self) -> None:
+        tree = ast.parse(Path(folder_mod.__file__).read_text(encoding="utf-8"))
+        offenders: list[str] = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                offenders += [
+                    alias.name
+                    for alias in node.names
+                    if alias.name == "molab.knowledge" or alias.name.startswith("molab.knowledge.")
+                ]
+            elif (
+                isinstance(node, ast.ImportFrom)
+                and node.module is not None
+                and (node.module == "molab.knowledge" or node.module.startswith("molab.knowledge."))
+            ):
+                offenders.append(node.module)
+
+        assert offenders == [], f"folder.py still imports knowledge: {offenders}"
+
+    def test_the_duplicated_edge_machinery_is_gone(self) -> None:
+        """The canonical markdown-edge pair is ``molab.knowledge``'s, not ours."""
+        assert not hasattr(folder_mod, "LinkScan")
+        assert not hasattr(folder_mod, "append_link")
+        for name in ("links", "out_edges", "typed_out_edges"):
+            assert not hasattr(Folder, name), f"Folder.{name} still exists"
+
+    def test_the_workspace_owned_readers_survive(self) -> None:
+        """``index.md`` narrative access and entity-record reading are Folder's own."""
+        for name in ("read_index", "write_index", "read_meta", "from_disk", "children"):
+            assert hasattr(Folder, name), f"Folder.{name} was removed with the edge cut"
+        assert folder_mod.INDEX_FILENAME == "index.md"
+        assert folder_mod.META_JSON_FILENAME == "meta.json"
 
 
 def test_import_guard_folder_pulls_no_upstream_layer() -> None:

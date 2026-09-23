@@ -1,18 +1,15 @@
-"""EdgeRole vocabulary + label-channel encode/parse/validate (typed-provenance-edge P0.1).
+"""EdgeRole vocabulary + label-channel encode/parse/validate.
 
-RED-first: ``molab.workspace.edges`` does not exist yet, so this module fails at
-collection until the slice is implemented.
-
-References:
-- spec:       ``.claude/specs/typed-provenance-edge.md``
-- acceptance: ``.claude/specs/typed-provenance-edge.acceptance.md`` (ac-003 + primitive)
+The vocabulary belongs to ``molab.knowledge.edges`` — the OKF layer that owns
+the markdown edge format. Moved here from ``tests/test_workspace/`` when the
+workspace's forwarder shell went away; the assertions are unchanged.
 """
 
 from __future__ import annotations
 
 import pytest
 
-from molab.workspace.edges import (
+from molab.knowledge.edges import (
     DEFAULT_EDGE_ROLE,
     encode_label,
     parse_role,

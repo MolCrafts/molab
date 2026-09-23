@@ -35,6 +35,7 @@ from .folder import (
     WORKSPACE_ROOT_KIND,
     Folder,
     _load_concept_marker_dict,
+    register_entity_class,
 )
 from .fs import FileSystem, PathArg
 from .fs_local import LocalFileSystem
@@ -78,6 +79,7 @@ def set_cli_root_override(path: _LocalPath | str | None, *, explicit: bool = Tru
 
 
 @concept_type(WORKSPACE_ROOT_KIND)
+@register_entity_class
 class Workspace(Folder):
     """Top-level workspace with project management and global asset library.
 

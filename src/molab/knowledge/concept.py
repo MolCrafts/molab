@@ -909,6 +909,9 @@ def parse_meta_text(text: str) -> dict[str, JSONValue]:
 #: registration order after ``meta.json``. See :func:`register_marker_filenames`.
 _EXTRA_MARKER_FILENAMES: tuple[str, ...] = ()
 
+#: Whether :func:`register_host_markers` has already run this process.
+_HOST_MARKERS_REGISTERED = False
+
 
 def register_marker_filenames(*names: str) -> None:
     """Declare that *names* also mark a directory as a Concept.
@@ -928,8 +931,32 @@ def register_marker_filenames(*names: str) -> None:
     _EXTRA_MARKER_FILENAMES += tuple(n for n in names if n not in _EXTRA_MARKER_FILENAMES)
 
 
+def register_host_markers() -> None:
+    """Declare the host layer's own entity filenames as Concept markers.
+
+    A molab workspace marks each entity directory with its own class-named
+    record (``workspace.json`` / ``project.json`` / ``experiment.json`` /
+    ``run.json``) and writes no second ``meta.json``, so those directories are
+    only Concepts because the host declares them. The host owns that list
+    (:func:`molab.workspace.folder.entity_json_names`) and this is the one place
+    knowledge asks for it — imported **inside the function body**, the only form
+    the layer firewall allows, because ``molab.workspace`` eagerly loads this
+    package the other way. Runs once per process; :func:`marker_filenames`
+    triggers it, so every reader sees the host's names without registering them
+    itself.
+    """
+    global _HOST_MARKERS_REGISTERED
+    if _HOST_MARKERS_REGISTERED:
+        return
+    from molab.workspace.folder import entity_json_names
+
+    register_marker_filenames(*entity_json_names())
+    _HOST_MARKERS_REGISTERED = True
+
+
 def marker_filenames() -> tuple[str, ...]:
     """Every filename that marks a Concept directory, in read order."""
+    register_host_markers()
     return (META_JSON_FILENAME, *_EXTRA_MARKER_FILENAMES)
 
 
@@ -1024,5 +1051,6 @@ __all__ = [
     "parse_meta_text",
     "read_meta_dict",
     "read_text_or_none",
+    "register_host_markers",
     "register_marker_filenames",
 ]

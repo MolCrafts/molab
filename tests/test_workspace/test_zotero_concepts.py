@@ -1,6 +1,6 @@
-"""Tests for read-only Zotero import → Reference concepts on the workspace.
+"""Tests for read-only Zotero import → ``Literature`` records.
 
-Covers ``molab.workspace.zotero_concepts`` (``ZoteroItem`` / ``read_zotero_items``)
+Covers ``molab.knowledge.zotero`` (``ZoteroItem`` / ``read_zotero_items``)
 and its concept-producing consumer ``Bundle.import_zotero``. A minimal
 ``zotero.sqlite`` is built in-place (the real schema subset the reader touches),
 then imported via the OKF :class:`molab.knowledge.bundle.Bundle`. PDFs are
@@ -16,8 +16,7 @@ from pathlib import Path
 
 from molab.knowledge import Literature
 from molab.knowledge.bundle import Bundle
-from molab.workspace import ZoteroItem
-from molab.workspace.zotero_concepts import read_zotero_items
+from molab.knowledge.zotero import ZoteroItem, read_zotero_items
 
 FIXED = datetime(2026, 6, 21, 12, 0, 0, tzinfo=UTC)
 

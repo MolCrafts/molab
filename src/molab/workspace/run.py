@@ -29,7 +29,7 @@ from .base import (
 )
 from .errors import RunExistsError, RunNotFoundError
 from .execution_dirs import execution_dir_names
-from .folder import WORKSPACE_RUN_KIND, Folder
+from .folder import WORKSPACE_RUN_KIND, Folder, register_entity_class
 from .fs import PathArg
 from .models import FolderMetadata, RunMetadata, RunStatus
 from .naming import run_slug
@@ -188,6 +188,7 @@ def compute_run_definition_hash(
 
 
 @concept_type(WORKSPACE_RUN_KIND)
+@register_entity_class
 class Run(Folder):
     """Single execution instance within an experiment.
 

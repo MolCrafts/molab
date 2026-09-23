@@ -18,15 +18,12 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path as _StdPath
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING, ClassVar, NamedTuple, TypeVar, cast
+from typing import TYPE_CHECKING, ClassVar, TypeVar, cast
 
 from molab._typing import JSONValue
-from molab.knowledge.concept import register_marker_filenames
-from molab.knowledge.types import resolve_concept_type
 from molab.path import Path
 
 from .base import _reconstruct
-from .edges import DEFAULT_EDGE_ROLE, Edge, EdgeRole, encode_label, parse_role, validate_role
 from .errors import FolderMoveCollisionError
 from .fs import FileSystem, PathArg
 from .fs_local import LocalFileSystem
@@ -55,7 +52,6 @@ _CAMEL_TO_SNAKE = re.compile(r"(?<!^)(?=[A-Z])")
 # stays in ``index.md`` (Markdown is not a data format for structured fields).
 INDEX_FILENAME = "index.md"
 META_JSON_FILENAME = "meta.json"  # sole concept identity file (type → registry)
-_MD_LINK = re.compile(r"\[([^\]]*)\]\(([^)]+)\)")  # [label](target) — both captured
 
 
 def _parse_iso_datetime(raw: object, *, default: datetime) -> datetime:
@@ -99,10 +95,11 @@ def _folder_metadata_from_marker(
 _CORE_ENTITY_JSON = ("workspace.json", "project.json", "experiment.json", "run.json")
 # The four levels of the tree mark their own directories: each carries a
 # ``type`` and is the level's authoritative record, so ``molab.knowledge``
-# reads them as Concept heads instead of demanding a second ``meta.json``.
-register_marker_filenames(*_CORE_ENTITY_JSON)
+# reads them as Concept heads instead of demanding a second ``meta.json``. It
+# learns the filenames from :func:`entity_json_names`; the workspace declares
+# them here and never reaches the other way.
 #: Entity filename → Folder subclass, filled by :func:`register_entity_class`.
-#: Knowledge reconstructs from the filename (no ``type`` field on disk).
+#: The directory itself says what it is; no ``type`` field is needed.
 _ENTITY_FILE_TO_CLS: dict[str, type[Folder]] = {}
 
 
@@ -119,14 +116,11 @@ def entity_filename(cls: type) -> str:
 def register_entity_class(cls: type[F]) -> type[F]:  # noqa: UP047
     """Register *cls* for reconstruction from its entity filename.
 
-    The same call declares that filename a Concept marker to
-    ``molab.knowledge``: a workspace entity carries its ``type`` in its own
-    entity record and writes no second ``meta.json``, so this is what lets a
-    bundle walk the entity tree without duplicating the record.
+    The class-named record *is* the directory's identity, so this is the whole
+    of what the filename axis needs: :func:`concept_from_dir` looks the
+    filename up and hands the directory to ``cls.from_disk``.
     """
-    name = entity_filename(cls)
-    _ENTITY_FILE_TO_CLS[name] = cls
-    register_marker_filenames(name)
+    _ENTITY_FILE_TO_CLS[entity_filename(cls)] = cls
     return cls
 
 
@@ -171,14 +165,22 @@ def class_for_folder_type(type_str: str) -> type[Folder] | None:
     return _TYPE_TO_CLS.get(type_str)
 
 
-def _entity_json_names() -> tuple[str, ...]:
+def entity_json_names() -> tuple[str, ...]:
+    """Every registered entity filename, the four core levels first.
+
+    The workspace's one declaration of "this directory is an entity of mine":
+    ``_load_concept_marker_dict`` reads them, and ``molab.knowledge`` calls it
+    to learn which filenames mark a Concept directory in a workspace
+    (:func:`molab.knowledge.concept.register_host_markers`) — the workspace
+    never reaches back the other way.
+    """
     extra = tuple(name for name in sorted(_ENTITY_FILE_TO_CLS) if name not in _CORE_ENTITY_JSON)
     return _CORE_ENTITY_JSON + extra
 
 
 def _load_concept_marker_dict(fs: FileSystem, concept_dir: PathArg) -> dict[str, object] | None:
     """Load concept identity: entity JSON first (``type`` optional), else Note ``meta.json``."""
-    for name in _entity_json_names():
+    for name in entity_json_names():
         entity = fs.join(concept_dir, name)
         if not fs.exists(entity):
             continue
@@ -198,25 +200,6 @@ def _load_concept_marker_dict(fs: FileSystem, concept_dir: PathArg) -> dict[str,
             raw: object = json.load(fh)
         return cast("dict[str, object]", raw) if isinstance(raw, dict) else None
     return None
-
-
-class LinkScan(NamedTuple):
-    """Resolved out-links of a Folder's ``index.md``.
-
-    Attributes:
-        concepts: Targets resolving to an existing in-tree dir — the
-            knowledge-graph out-edges (path-only, unchanged for back-compat).
-        external: ``http(s)://`` links.
-        other: In-tree targets that don't resolve to a dir.
-        typed_concepts: The same in-tree concept edges as :attr:`concepts`, each
-            paired with its declared :class:`~molab.workspace.edges.EdgeRole`
-            recovered from the markdown ``[label]`` channel.
-    """
-
-    concepts: list[str]
-    external: list[str]
-    other: list[str]
-    typed_concepts: list[Edge]
 
 
 def _validate_kind(kind: str) -> None:
@@ -448,51 +431,6 @@ class Folder:
         fpath = self._disk().join(self.path, INDEX_FILENAME)
         self._disk().atomic_write_text(fpath, text)
         return fpath
-
-    def links(self) -> LinkScan:
-        """Parse ``index.md`` markdown links, classified (see :class:`LinkScan`).
-
-        Targets resolve relative to this Folder's dir; a trailing ``index.md``
-        is stripped to its containing dir. An in-tree target counts as a
-        knowledge-graph edge when it resolves to an existing dir.
-        """
-        base = PurePosixPath(str(self.resolve()))
-        concepts: list[str] = []
-        external: list[str] = []
-        other: list[str] = []
-        typed_concepts: list[Edge] = []
-        for raw_label, target in _MD_LINK.findall(self.read_index()):
-            if target.startswith(("http://", "https://")):
-                external.append(target)
-                continue
-            norm = PurePosixPath(os.path.normpath(base / target))
-            concept_dir = norm.parent if norm.name == INDEX_FILENAME else norm
-            if self._disk().is_dir(str(concept_dir)):
-                concepts.append(str(concept_dir))
-                role, _human = parse_role(raw_label)
-                typed_concepts.append(Edge(target=str(concept_dir), role=role))
-            else:
-                other.append(target)
-        return LinkScan(
-            concepts=concepts,
-            external=external,
-            other=other,
-            typed_concepts=typed_concepts,
-        )
-
-    def out_edges(self) -> list[str]:
-        """In-tree Folder link targets — the knowledge-graph out-edges (path-only)."""
-        return self.links().concepts
-
-    def typed_out_edges(self) -> list[Edge]:
-        """In-tree out-edges paired with their declared ``EdgeRole``.
-
-        The typed companion to :meth:`out_edges`: each :class:`~molab.workspace.edges.Edge`
-        carries the same resolved target path plus the role recovered from the
-        markdown label channel (a legacy untyped link defaults to
-        :data:`~molab.workspace.edges.DEFAULT_EDGE_ROLE`, never dropped).
-        """
-        return self.links().typed_concepts
 
     # ── Lifecycle ────────────────────────────────────────────────────────
 
@@ -847,73 +785,33 @@ class Folder:
         self.write_meta()
 
 
-def append_link(
-    src: Folder,
-    dst: Folder,
-    *,
-    text: str | None = None,
-    role: EdgeRole = DEFAULT_EDGE_ROLE,
-) -> None:
-    """Append a typed relative markdown link ``src → dst`` to ``src``'s ``index.md``.
-
-    Writes a real markdown link (relative to *src*'s dir) so
-    :meth:`Folder.out_edges` resolves it back to *dst* and
-    :meth:`Folder.typed_out_edges` recovers *role*. The graph lives in markdown,
-    never in ``meta.json``. The *role* is carried in the link's ``[label]``
-    channel via :func:`~molab.workspace.edges.encode_label` — the default role
-    encodes to the bare label, so pre-role output stays byte-identical. Appends
-    unconditionally; link dedup remains a future enhancement.
-
-    Shared helper: :meth:`Bundle.link` and :meth:`Note.cite` both delegate here,
-    so the single source of the markdown-edge format (and the sole role-writing
-    chokepoint) lives in this (lower) module that both import from.
-
-    Args:
-        src: The Concept the edge originates from.
-        dst: The Concept the edge points to.
-        text: Optional link label; defaults to *dst*'s name.
-        role: The declared :class:`~molab.workspace.edges.EdgeRole`; defaults to
-            :data:`~molab.workspace.edges.DEFAULT_EDGE_ROLE`.
-
-    Raises:
-        ValueError: If *role* is not a known ``EdgeRole`` — validated before any
-            write, so an invalid role leaves ``index.md`` untouched.
-    """
-    validate_role(role)
-    rel = os.path.relpath(str(dst.resolve()), str(src.resolve()))
-    rel_posix = PurePosixPath(rel).as_posix()
-    label = text if text is not None else dst.name
-    encoded = encode_label(role, label)
-    existing = src.read_index()
-    prefix = existing if not existing or existing.endswith("\n") else existing + "\n"
-    src.write_index(f"{prefix}- [{encoded}]({rel_posix})\n")
-
-
 def concept_from_dir(child_dir: PathArg, parent: Folder) -> Folder:
-    """Reconstruct *child_dir* as its Folder subclass.
+    """Reconstruct *child_dir* as its Folder subclass, from the workspace type tables.
 
-    Knowledge family (and any :func:`register_entity_class` type) is recovered
-    from the entity filename via reflection — no ``type`` field. A directory
-    whose identity is ``meta.json`` alone resolves ``type`` through the
-    workspace-owned :func:`class_for_folder_type` table first, and only then
-    through the knowledge concept-type registry.
+    Two axes, and no other: a filename the directory carries that
+    :func:`class_for_entity_file` knows (the four tree levels, each registered
+    by its own module), else the ``type`` on the directory's entity record /
+    ``meta.json`` resolved through :func:`class_for_folder_type`. An unknown
+    ``type`` yields the bare :class:`Folder`. A directory with no record at all
+    is not a Folder — including a Knowledge document (``finding.json`` +
+    ``index.md``, which carries no ``meta.json``) — and raises ``TypeError``.
     """
-    from molab.knowledge.naming import KNOWLEDGE_HEAD_FILES
-
     fs = parent._disk()
     try:
         names = fs.listdir(child_dir)
     except OSError:
         names = []
-    if any(name in KNOWLEDGE_HEAD_FILES for name in names):
-        raise TypeError(f"{child_dir} is a Knowledge directory, not a Folder")
     for name in names:
         mapped = class_for_entity_file(name)
         if mapped is not None:
             return mapped.from_disk(child_dir, parent)
-    marker = _load_concept_marker_dict(fs, child_dir) or {}
+    marker = _load_concept_marker_dict(fs, child_dir)
+    if marker is None:
+        raise TypeError(
+            f"{child_dir} is not a Folder: no entity record and no {META_JSON_FILENAME}"
+        )
     type_str = str(marker.get("type", ""))
-    cls = class_for_folder_type(type_str) or resolve_concept_type(type_str, Folder, base=Folder)
+    cls = class_for_folder_type(type_str) or Folder
     return cls.from_disk(child_dir, parent)
 
 
@@ -925,12 +823,11 @@ __all__ = [
     "WORKSPACE_ROOT_KIND",
     "WORKSPACE_RUN_KIND",
     "Folder",
-    "LinkScan",
-    "append_link",
     "class_for_entity_file",
     "class_for_folder_type",
     "concept_from_dir",
     "entity_filename",
+    "entity_json_names",
     "register_entity_class",
     "register_folder_type",
 ]
