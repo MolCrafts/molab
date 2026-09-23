@@ -13,6 +13,7 @@ from pathlib import Path
 
 import pytest
 
+from molab.cli import migrate_cmd
 from molab.cli.migrate_cmd import migrate_workspace
 from molab.workspace import Workspace
 from molab.workspace.validate import validate_workspace
@@ -296,6 +297,28 @@ class TestSafety:
         (target / "keep.txt").write_text("mine", encoding="utf-8")
         with pytest.raises(Exception, match="not empty"):
             migrate_workspace(legacy, target)
+
+
+class TestLegacyKnowledgeIndexKeep:
+    """``knowledges.json`` is the **old children-index filename**, deliberately kept.
+
+    It reads like a workspace knowledge leftover, but its meaning is "an old
+    index that only copied the tree — recognise it and drop it". The migration
+    tool must keep recognising it, so this lock stops a later sweep (11's
+    cleanup scan) from deleting the entry as knowledge debris.
+    """
+
+    def test_the_drop_name_is_registered(self) -> None:
+        assert "knowledges.json" in migrate_cmd._DROP_NAMES
+
+    def test_a_legacy_children_index_does_not_survive(self, legacy: Path, tmp_path: Path) -> None:
+        index = legacy / "projects" / PROJECT_ID / "experiments" / EXPERIMENT_ID / "knowledges.json"
+        _write(index, {"some-id": {"id": "some-id", "title": "cooling-rate"}})
+
+        target = tmp_path / "lab-v3"
+        migrate_workspace(legacy, target)
+
+        assert not list(target.rglob("knowledges.json"))
 
 
 class TestMigrateBrand:

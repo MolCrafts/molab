@@ -1,7 +1,9 @@
 """``molab context`` — print the canonical WorkspaceContext read-model.
 
-The CLI consumer of the same ``assemble_workspace_context()`` the server ``GET
-/context`` route uses — Python and UI operations share one backend code path.
+The CLI consumes the **same** projection the server ``GET /context`` route
+does — ``molab.services.knowledge_context.context_with_knowledge`` assembles the
+complete read-model (knowledge included), so Python and UI operations share one
+backend code path and the CLI defines no projection of its own.
 """
 
 from __future__ import annotations
@@ -30,6 +32,7 @@ def context(
     target_spec: TargetOption = ".",
 ) -> None:
     """Print the workspace's canonical structural read-model (WorkspaceContext)."""
+    from molab.services.knowledge_context import context_with_knowledge
     from molab.workspace import ContextFocus
 
     try:
@@ -40,7 +43,7 @@ def context(
         raise typer.Exit(1) from exc
 
     focus = ContextFocus(project_id=project, experiment_id=experiment, run_id=run)
-    _render(ws.context(focus=focus))
+    _render(context_with_knowledge(ws, focus=focus))
 
 
 def _render(ctx: WorkspaceContext) -> None:

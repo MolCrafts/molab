@@ -600,6 +600,7 @@ def run_harvest(
     """Harvest a terminal run into Finding, Observation, or Report."""
     ws = _open_ws(target_spec)
     from molab.knowledge import Finding, Observation, Report
+    from molab.knowledge.harvest import harvest_run
     from molab.workspace import ExperimentNotFoundError as _ExpNotFound
     from molab.workspace import ProjectNotFoundError as _ProjNotFound
     from molab.workspace import RunNotFoundError as _RunNotFound
@@ -620,7 +621,8 @@ def run_harvest(
         )
         raise typer.Exit(1)
     try:
-        item = run.harvest(
+        item = harvest_run(
+            run,
             cls,
             narrative=narrative,
             created_by=created_by,

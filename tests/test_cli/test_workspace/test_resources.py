@@ -4,11 +4,16 @@ from __future__ import annotations
 
 import inspect
 from pathlib import Path
+from types import SimpleNamespace
+from typing import Any
 
+import pytest
 from typer.testing import CliRunner
 
 from molab.cli.workspace import resources
+from molab.knowledge import Finding
 from molab.workspace import Workspace
+from molab.workspace.run import Run
 
 
 def _failed_run(tmp_path: Path):
@@ -64,6 +69,89 @@ class TestRunHarvest:
                     cwd=str(ws.root),
                 )
             assert result.exit_code == 1, (kind, result.exit_code, result.output)
+
+
+class TestRunHarvestRedirect:
+    """07: the CLI harvests through ``molab.knowledge.harvest.harvest_run``.
+
+    ``Run.harvest`` is what the CLI used to borrow; the redirect must pass the
+    real ``Run``, the class, the narrative and ``created_by`` straight through,
+    so 08 can delete the workspace method without the command breaking.
+    """
+
+    def test_calls_the_knowledge_verb_with_the_run(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        ws, exp, run = _failed_run(tmp_path)
+        import molab.knowledge.harvest as harvest_mod
+
+        calls: list[dict[str, Any]] = []
+
+        def probe(target: Any, of: Any, **kwargs: Any) -> Any:
+            calls.append({"target": target, "of": of, **kwargs})
+            return SimpleNamespace(name="probe")
+
+        def forbidden(*_args: Any, **_kwargs: Any) -> Any:
+            raise AssertionError("Run.harvest must not be called")
+
+        monkeypatch.setattr(harvest_mod, "harvest_run", probe)
+        monkeypatch.setattr(Run, "harvest", forbidden)
+
+        result = CliRunner().invoke(
+            resources.run_app,
+            [
+                "harvest",
+                exp.project.id,
+                exp.id,
+                run.id,
+                "the narrative",
+                "--of",
+                "Finding",
+                "--workspace",
+                str(ws.root),
+            ],
+        )
+
+        assert result.exit_code == 0, result.output
+        assert len(calls) == 1
+        call = calls[0]
+        assert isinstance(call["target"], Run)
+        assert call["target"].id == run.id
+        assert call["of"] is Finding
+        assert call["narrative"] == "the narrative"
+        assert call["created_by"] == "cli"
+
+    def test_rejected_kind_never_calls_the_verb(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        ws, exp, run = _failed_run(tmp_path)
+        import molab.knowledge.harvest as harvest_mod
+
+        calls: list[Any] = []
+
+        def probe(*args: Any, **_kwargs: Any) -> Any:
+            calls.append(args)
+            return SimpleNamespace(name="probe")
+
+        monkeypatch.setattr(harvest_mod, "harvest_run", probe)
+
+        result = CliRunner().invoke(
+            resources.run_app,
+            [
+                "harvest",
+                exp.project.id,
+                exp.id,
+                run.id,
+                "narrative body",
+                "--of",
+                "Decision",
+                "--workspace",
+                str(ws.root),
+            ],
+        )
+
+        assert result.exit_code == 1, result.output
+        assert calls == []
 
 
 class TestRunAnalyzeFailure:
