@@ -10,6 +10,7 @@ import pytest
 from molab.fs import LocalFileSystem
 from molab.knowledge.concept import (
     Concept,
+    Knowledge,
     append_link,
     concept_from_dir,
     concept_type_of,
@@ -17,7 +18,17 @@ from molab.knowledge.concept import (
 from molab.knowledge.concept_meta import ConceptMeta
 from molab.knowledge.concepts import Literature, Note
 from molab.knowledge.errors import KnowledgeNotFoundError
+from molab.knowledge.location import folder
 from molab.knowledge.types import concept_type
+from molab.workspace import Experiment, Workspace
+
+
+@pytest.fixture
+def experiment(tmp_path: Path) -> Experiment:
+    """A real workspace Experiment — the Folder-family host."""
+    workspace = Workspace(root=tmp_path / "lab")
+    workspace.materialize()
+    return workspace.add_project("p").add_experiment("e")
 
 
 def _write(directory: Path, *, type_str: str = "note.note", body: str = "") -> Concept:
@@ -360,3 +371,75 @@ class TestKnowledgeAlias:
         from molab.knowledge.errors import ConceptNotFoundError, KnowledgeNotFoundError
 
         assert ConceptNotFoundError is KnowledgeNotFoundError
+
+
+class TestHostConstruction:
+    """``Concept(host, name)`` — the host supplies path and filesystem."""
+
+    def test_a_file_document_lands_on_the_host_markdown_golden(
+        self, experiment: Experiment
+    ) -> None:
+        note = Note(experiment, "Tg Cooling")
+
+        assert note.path == Path(str(experiment.resolve())) / "knowledges" / "tg-cooling.md"
+
+    def test_a_directory_form_class_keeps_the_directory(self, experiment: Experiment) -> None:
+        assert Concept(experiment, "records").path == (
+            Path(str(experiment.resolve())) / "knowledges" / "records"
+        )
+
+    def test_construction_touches_no_disk(self, experiment: Experiment) -> None:
+        Knowledge(experiment, "x")
+
+        assert not (Path(str(experiment.resolve())) / "knowledges").exists()
+
+    def test_the_hosts_own_disk_is_adopted(self, experiment: Experiment) -> None:
+        assert Note(experiment, "x").fs is experiment._disk()
+
+    def test_a_path_host_yields_the_local_filesystem(self, tmp_path: Path) -> None:
+        assert isinstance(Note(tmp_path / "wiki", "x").fs, LocalFileSystem)
+
+    def test_an_explicit_fs_wins_over_the_hosts_disk(self, tmp_path: Path) -> None:
+        disk = LocalFileSystem()
+
+        assert Knowledge(tmp_path / "wiki", "x", fs=disk).fs is disk
+
+    def test_an_unrecognised_host_fast_fails(self, tmp_path: Path) -> None:
+        class Coordinate:
+            """A resolve()-only stand-in — not a host, and never a local fallback."""
+
+            def resolve(self) -> Path:
+                return tmp_path
+
+        with pytest.raises(TypeError, match="_disk"):
+            Note(Coordinate(), "x")
+
+    def test_the_host_is_not_retained(self, experiment: Experiment) -> None:
+        note = Note(experiment, "x")
+        twin = Knowledge(folder(experiment, "x", Note))
+
+        assert not hasattr(note, "_host")
+        assert note == twin
+        assert hash(note) == hash(twin)
+
+    def test_the_single_argument_path_form_is_unchanged(self) -> None:
+        assert Knowledge("/wiki/cooling").path == Path("/wiki/cooling")
+        assert Concept("/wiki/cooling").path == Path("/wiki/cooling")
+
+    def test_the_first_ref_lands_the_bytes_at_the_host_path(self, experiment: Experiment) -> None:
+        note = Note(experiment, "idea")
+        literature = Literature(experiment, "smith")
+        literature.write("Smith et al. 2024\n")
+
+        note.ref(literature, role="cites")
+
+        assert note.path.is_file()
+        assert "@cites" in note.path.read_text()
+
+    def test_the_first_write_lands_the_bytes_at_the_host_path(self, experiment: Experiment) -> None:
+        note = Note(experiment, "plan")
+        assert not note.path.exists()
+
+        note.write("# Plan\n")
+
+        assert note.path.read_text().endswith("# Plan\n")

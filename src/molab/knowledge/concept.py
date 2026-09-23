@@ -121,26 +121,50 @@ class Concept:
     def __init__(
         self,
         path: PathArg,
+        name: str | None = None,
         *,
         type: str | None = None,
         fs: FileSystem | None = None,
     ) -> None:
-        """Bind this Concept to *path* on *fs*.
+        """Bind this Concept to *path*, or to *path* (a host) plus *name*.
 
         Args:
-            path: The Concept's directory — its identity. Kept as given
-                (already-absolute in every production call path).
+            path: The Concept's directory — its identity (already-absolute in
+                every production call path). With *name* given it is instead
+                the **host**: a ``str`` / :class:`os.PathLike` directory used
+                as given, or a ``Folder``-family object carrying ``_disk()``.
+            name: A human document name. When given, the path is derived by
+                :func:`~molab.knowledge.location.folder` as
+                ``folder(path, name, self.__class__)`` — a ``FILE_DOCUMENT``
+                class lands at ``<host>/knowledges/<slug>.md``, a
+                directory-form class at ``<host>/knowledges/<slug>/`` — and
+                nothing touches disk; the first :meth:`write` / :meth:`ref`
+                lands the bytes.
             type: The ``type`` :meth:`write_meta` stamps; defaults to
                 :attr:`DEFAULT_TYPE`.
-            fs: The filesystem to read and write through; defaults to
-                :class:`~molab.fs.LocalFileSystem`.
-        """
-        self._fs: FileSystem = fs if fs is not None else LocalFileSystem()
-        raw = str(path)
-        if self.__class__.FILE_DOCUMENT:
-            from .naming import as_knowledge_file
+            fs: The filesystem to read and write through; defaults to the
+                host's own disk (never the local one) in the *name* form, and
+                to :class:`~molab.fs.LocalFileSystem` otherwise.
 
-            raw = as_knowledge_file(raw)
+        Raises:
+            TypeError: If *name* is given and *path* is not a recognised host —
+                an object with ``resolve()`` but no ``_disk()`` included.
+        """
+        if name is not None:
+            from .location import _host_disk, folder
+
+            # ``self.__class__``, not ``type(self)``: the *type* kwarg below
+            # shadows the builtin.
+            raw = str(folder(path, name, self.__class__))
+            disk = fs if fs is not None else _host_disk(path)
+        else:
+            raw = str(path)
+            if self.__class__.FILE_DOCUMENT:
+                from .naming import as_knowledge_file
+
+                raw = as_knowledge_file(raw)
+            disk = fs if fs is not None else LocalFileSystem()
+        self._fs: FileSystem = disk
         self._path = raw
         self._type = type if type is not None else self.DEFAULT_TYPE
 

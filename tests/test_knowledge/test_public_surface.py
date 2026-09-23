@@ -36,6 +36,7 @@ REQUIRED_PUBLIC: tuple[str, ...] = (
     "Observation",
     "SourceRef",
     "KnowledgeNotFoundError",
+    "folder",
 )
 
 SHIM_NOT_PUBLIC: tuple[str, ...] = (

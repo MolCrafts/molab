@@ -15,6 +15,15 @@ from molab.knowledge import (
     ReferenceMeta,
     SourceRef,
 )
+from molab.workspace import Experiment, Workspace
+
+
+@pytest.fixture
+def experiment(tmp_path: Path) -> Experiment:
+    """A real workspace Experiment — the Folder-family host."""
+    workspace = Workspace(root=tmp_path / "lab")
+    workspace.materialize()
+    return workspace.add_project("p").add_experiment("e")
 
 
 class TestWrite:
@@ -151,3 +160,28 @@ class TestCite:
         finding.write("# TF32\n")
         finding.cite(lit)
         assert any(Path(edge.target) == lit.path for edge in finding.links())
+
+
+class TestSourcedHostConstruction:
+    """A sourced class takes ``(host, name)`` too; ``sources`` stays required."""
+
+    def test_a_finding_lands_on_the_host_markdown_golden(self, experiment: Experiment) -> None:
+        finding = Finding(
+            experiment, "tg-rise", sources=[SourceRef(kind="experiment", ref="exp-1")]
+        )
+
+        assert finding.path == Path(str(experiment.resolve())) / "knowledges" / "tg-rise.md"
+
+    def test_sources_stay_required_in_the_host_form(self, experiment: Experiment) -> None:
+        with pytest.raises(ValueError):
+            Finding(experiment, "tg-rise")
+
+    def test_the_narrative_write_lands_at_the_host_path(self, experiment: Experiment) -> None:
+        source = SourceRef(kind="experiment", ref="exp-1")
+        finding = Finding(experiment, "tg-rise", sources=[source])
+
+        finding.write("# Tg rises with the cooling rate\n")
+
+        assert finding.path.is_file()
+        assert finding.path.read_text().endswith("# Tg rises with the cooling rate\n")
+        assert finding.sources == [source]

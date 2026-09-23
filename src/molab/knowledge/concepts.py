@@ -121,15 +121,40 @@ class _SourcedKnowledge(Concept):
     def __init__(
         self,
         path: PathArg,
+        name: str | None = None,
         *,
         sources: list[SourceRef] | None = None,
         declared_type: str | None = None,
         fs: FileSystem | None = None,
         type: str | None = None,
     ) -> None:
+        """Bind this document, keeping ``sources`` mandatory.
+
+        Args:
+            path: The document's path, or — with *name* given — its host (a
+                ``str`` / :class:`os.PathLike` directory, or a ``Folder``-family
+                object carrying ``_disk()``).
+            name: A human document name; the host then derives the landed path.
+            sources: The :class:`~molab.knowledge.knowledge_item.SourceRef` list
+                this document harvests from; at least one is required.
+            declared_type: Legacy spelling of *type*.
+            fs: The filesystem to read and write through; defaults to the host's
+                own disk in the *name* form.
+            type: The ``type`` :meth:`~molab.knowledge.concept.Concept.write_meta`
+                stamps.
+
+        Raises:
+            ValueError: If *sources* is empty.
+            TypeError: If *name* is given and *path* is not a recognised host.
+        """
         if not sources:
             raise ValueError(f"{self.__class__.__name__} requires at least one SourceRef")
-        super().__init__(path, type=declared_type if declared_type is not None else type, fs=fs)
+        super().__init__(
+            path,
+            name,
+            type=declared_type if declared_type is not None else type,
+            fs=fs,
+        )
         self._sources = list(sources)
 
     @property
