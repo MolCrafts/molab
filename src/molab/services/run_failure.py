@@ -4,6 +4,10 @@ Shared by CLI, server, and (optionally) lifecycle tools so Python ≡ UI.
 Deterministic narrative path needs **no** LLM: error.txt / metadata.error /
 execution inventory. Optional ``narrative=`` overrides the template.
 
+The write goes through :func:`molab.knowledge.harvest_run`: the knowledge
+package owns execution→knowledge, so this module owns only the failure gate and
+the deterministic narrative, never the storage shape.
+
 Default domain is ``failed`` only; ``cancelled`` requires ``force=True``.
 """
 
@@ -12,7 +16,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from molab.knowledge import Report
+from molab.knowledge import Report, harvest_run
 
 if TYPE_CHECKING:
     from molab.knowledge import Knowledge
@@ -88,7 +92,7 @@ def analyze_run_failure(
         name: Explicit KnowledgeItem name; default ``failure-analysis-{run.id}``.
 
     Returns:
-        The written :class:`~molab.workspace.knowledge.Knowledge`.
+        The written :class:`~molab.knowledge.Knowledge`.
 
     Raises:
         ValueError: Status domain refusal or empty effective narrative.
@@ -104,12 +108,7 @@ def analyze_run_failure(
 
     text = (narrative or "").strip() or build_failure_narrative(run)
     item_name = name or f"{_DEFAULT_NAME_PREFIX}-{run.id}"
-    return run.harvest(
-        Report,
-        narrative=text,
-        created_by=created_by,
-        name=item_name,
-    )
+    return harvest_run(run, Report, narrative=text, created_by=created_by, name=item_name)
 
 
 def _read_error_text(run: Run) -> str:
