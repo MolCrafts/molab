@@ -1,10 +1,10 @@
-"""Tests for :class:`molab.workspace.Bundle` — the OKF bundle façade.
+"""Tests for :class:`molab.knowledge.bundle.Bundle` — the OKF bundle façade.
 
 ``Bundle`` wraps a bundle root and exposes the whole Concept-directory tree as a
 single management entry point: ``walk`` (depth-first Concept enumeration),
 ``get`` (path-as-identity resolution), ``put`` (idempotent materialization) and
 ``link`` (a semantic edge written as a markdown link into ``index.md``, so it
-round-trips through :meth:`Folder.out_edges`).
+round-trips through :meth:`Concept.out_edges`).
 
 Note/doc CRUD (``create_note`` …) is owned by ``test_bundle_docs.py``, the
 derived index by ``test_bundle_index.py``, and body-aware search by
@@ -18,10 +18,10 @@ from pathlib import Path
 
 import pytest
 
-from molab.knowledge import KnowledgeNotFoundError
+from molab.knowledge import KnowledgeNotFoundError, mount_note
+from molab.knowledge.bundle import Bundle
 from molab.knowledge.concept import Concept
-from molab.workspace import Folder, knowledge_mount
-from molab.workspace.bundle import Bundle
+from molab.workspace import Folder
 
 # A concept ``type`` deliberately NOT in the concept-type registry, so it
 # reconstructs as the base workspace ``Folder`` (vs. a knowledge subclass).
@@ -144,7 +144,7 @@ class TestWalk:
         not imported this process — e.g. an agent session mounted at a run) must
         reconstruct as a base Folder rather than break the walk."""
         b = Bundle(tmp_path)
-        b.create_note("findings")
+        _concept("findings", tmp_path)
 
         stray = tmp_path / "some-agent" / "some-session"
         stray.mkdir(parents=True)
@@ -251,13 +251,14 @@ class TestTypedReconstruction:
 
 # ── nested-mount path-doubling regression ────────────────────────────────────
 # Regresses the Bundle path-doubling bug (no ``projects/projects`` / ``runs/runs``
-# segment doubling for a Concept nested deep under the workspace dir, when the
+# segment doubling for a document nested deep under the workspace dir, when the
 # bundle root *is* the workspace dir — the exact case
-# ``services/plan_runtime/record.py`` root-mounts to dodge). Both Bundle verbs
-# that reanchor — get/link (resolution) and walk (enumeration) — are covered.
+# ``services/plan_runtime/record.py`` root-mounts to dodge). Both sides that used
+# to reanchor — resolution / `link` on a nested document, and enumeration of the
+# workspace's nested knowledge — are covered.
 
 KI_BODY_NEEDLE = "zwitterion-retrieval-needle"
-KI_REL = "projects/p/experiments/e/knowledges/ki"
+KI_REL = "projects/p/experiments/e/knowledges/ki.md"
 _DOUBLED_SEGMENTS = ("projects/projects", "experiments/experiments", "runs/runs")
 
 
@@ -270,28 +271,24 @@ class TestNestedMounts:
         ws = Workspace(root=tmp_path / "lab")
         ws.materialize()
         run = ws.add_project("p").add_experiment("e").add_run(id="r")
-        rec = knowledge_mount.mount_note(run, "rec")
+        rec = mount_note(run, "rec")
         real = os.path.normpath(str(rec.resolve()))
 
-        b = Bundle(ws.resolve())
-        rel = f"{b.rel_path(run)}/knowledges/rec"
-        got = b.get(rel)
-
-        assert os.path.normpath(str(got.resolve())) == real
-        assert "projects/projects" not in str(got.resolve())
-        assert "runs/runs" not in str(got.resolve())
+        # the document lands once, in the run's own ``knowledges/``
+        assert real == os.path.normpath(str(Path(str(run.resolve())) / "knowledges" / "rec.md"))
+        assert "projects/projects" not in real
+        assert "runs/runs" not in real
 
         # a typed link from the nested Note back to its Run round-trips
-        b.link(got, run, role="records")
-        edges = {os.path.normpath(p) for p in b.get(rel).out_edges()}
+        Bundle(ws.resolve()).link(rec, run, role="records")
+        edges = {os.path.normpath(p) for p in rec.out_edges()}
         assert os.path.normpath(str(run.resolve())) in edges
 
     def test_knowledge_item_under_experiment_walks_once_undoubled(self, tmp_path: Path) -> None:
         import os
 
-        from molab.knowledge import Finding, SourceRef
+        from molab.knowledge import Finding, Knowledge, SourceRef, write_knowledge
         from molab.workspace import Workspace
-        from molab.workspace.knowledge_write import write_knowledge
 
         ws = Workspace(root=tmp_path / "lab")
         ws.materialize()
@@ -306,14 +303,14 @@ class TestNestedMounts:
             created_by="tests",
             text=f"# Zwitterion finding\n\nthe {KI_BODY_NEEDLE} appears only in this body\n",
         )
-        _ = item
 
-        b = Bundle(ws.resolve())
-        rels = [b.rel_path(f) for f in b.walk()]
+        root = Path(str(ws.resolve()))
+        walked = list(Knowledge(str(root)).walk())
+        rels = [Path(str(concept.path)).relative_to(root).as_posix() for concept in walked]
         assert rels.count(KI_REL) == 1
 
-        walked = next(f for f in b.walk() if b.rel_path(f) == KI_REL)
-        resolved = os.path.normpath(str(walked.resolve()))
+        landed = next(c for c in walked if Path(str(c.path)).as_posix().endswith(KI_REL))
+        resolved = os.path.normpath(str(landed.resolve()))
         assert resolved == os.path.normpath(str(item.resolve()))
         for doubled in _DOUBLED_SEGMENTS:
             assert doubled not in resolved
@@ -339,7 +336,8 @@ class TestForeignFamilyArgumentsResolveToDirectories:
         note = Bundle(ws.resolve()).create_note("Analysis Notes", parent=exp)
 
         assert "object at" not in str(note.path)
-        assert note.path == Path(str(exp.resolve())) / "analysis-notes"
+        # a file document: the note is ``<host>/<slug>.md``, never a dir
+        assert note.path == Path(str(exp.resolve())) / "analysis-notes.md"
 
     def test_link_to_a_workspace_folder(self, tmp_path: Path) -> None:
         from molab.workspace import Workspace
@@ -362,7 +360,10 @@ class TestForeignFamilyArgumentsResolveToDirectories:
         run = ws.add_project("p").add_experiment("e").add_run(id="r")
 
         bundle = Bundle(ws.resolve())
-        note = bundle.create_note("rec")
+        # a directory-form Concept: ``backlinks`` recomputes by walking the
+        # Concept-*directory* tree, so the edge's source must be walked.
+        note = Concept(tmp_path / "lab" / "rec", type=CONCEPT_KIND)
+        note.write_meta()
         bundle.link(note, run, role="records")
 
         assert bundle.rel_path(run) == f"projects/p/experiments/e/runs/{run.name}"

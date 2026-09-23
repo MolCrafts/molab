@@ -48,12 +48,12 @@ from .base import atomic_write_json, atomic_write_text
 from .cache import WORKSPACE_CACHE_KIND, CacheFolder
 from .concepts import Literature, Note
 from .context import Context
-from .doc_embed import EntitySummary, summarize_entity
 
-# ``Asset`` / ``AssetVersion`` deliberately stay unexported here: the names
-# belong to the manifest family above. Reach the Project data identities as
-# ``molab.workspace.domain.Asset`` / ``.AssetVersion``.
-from .domain import Artifact, ContentRef, Execution, ExecutionStatus
+# ``Asset`` is the manifest-family name imported above; the Project *data*
+# identity of the same spelling is ``molab.workspace.domain.Asset``. Both
+# ``Asset`` and ``AssetVersion`` are advertised in ``__all__``, so both are
+# bound here — an ``__all__`` entry that does not resolve breaks ``import *``.
+from .domain import Artifact, AssetVersion, ContentRef, Execution, ExecutionStatus
 from .edges import DEFAULT_EDGE_ROLE, Edge, EdgeRole
 from .errors import (
     ExperimentExistsError,
@@ -75,16 +75,6 @@ from .folder import (
     Folder,
 )
 from .history import AgentRef, EntityRef, GitHistory
-from .knowledge import (
-    PLAN_BOOK_NAME,
-    Finding,
-    Knowledge,
-    Observation,
-    Plan,
-    Report,
-    SourceKind,
-    SourceRef,
-)
 from .models import (
     ComputeTarget,
     ErrorInfo,
@@ -123,7 +113,6 @@ from .zotero_concepts import ZoteroItem
 __all__ = [
     "DEFAULT_EDGE_ROLE",
     "LOCAL_TARGET_NAME",
-    "PLAN_BOOK_NAME",
     "RETRYABLE_STATUSES",
     "TERMINAL_STATUSES",
     "WORKSPACE_CACHE_KIND",
@@ -151,7 +140,6 @@ __all__ = [
     "Edge",
     "EdgeRole",
     "EntityRef",
-    "EntitySummary",
     "ErrorInfo",
     "ErrorTraceAsset",
     "Execution",
@@ -164,14 +152,12 @@ __all__ = [
     "ExperimentNotFoundError",
     "ExperimentRef",
     "FileStore",
-    "Finding",
     "Folder",
     "FolderMetadata",
     "FolderMoveCollisionError",
     "GitHistory",
     "GridSpace",
     "HealthFlag",
-    "Knowledge",
     "KnowledgeNotFoundError",
     "KnowledgeRef",
     "Literature",
@@ -180,10 +166,8 @@ __all__ = [
     "LogAsset",
     "Note",
     "NoteMeta",
-    "Observation",
     "ParamSpace",
     "Params",
-    "Plan",
     "Producer",
     "Project",
     "ProjectExistsError",
@@ -192,7 +176,6 @@ __all__ = [
     "ProjectRef",
     "ReferenceMeta",
     "RemoteTarget",
-    "Report",
     "Run",
     "RunContext",
     "RunExistsError",
@@ -205,8 +188,6 @@ __all__ = [
     "RunStatus",
     "SSHSession",
     "SessionManager",
-    "SourceKind",
-    "SourceRef",
     "Target",
     "TargetNotFound",
     "UniformSpace",

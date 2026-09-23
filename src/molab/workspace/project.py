@@ -45,14 +45,6 @@ from .folder import (
     _validate_target_registered,
 )
 from .fs import PathArg
-from .knowledge import (
-    add_knowledge,
-    del_knowledge,
-    has_knowledge,
-    knowledge,
-    knowledges,
-    set_knowledge,
-)
 from .models import FolderMetadata, ProjectMetadata
 
 
@@ -69,12 +61,6 @@ class Project(Folder):
 
     _exists_error_cls = ProjectExistsError
     _not_found_error_cls = ProjectNotFoundError
-    add_knowledge = add_knowledge
-    knowledge = knowledge
-    set_knowledge = set_knowledge
-    del_knowledge = del_knowledge
-    has_knowledge = has_knowledge
-    knowledges = knowledges
 
     def __init__(
         self,

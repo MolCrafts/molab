@@ -74,9 +74,9 @@ class TestRunHarvest:
 class TestRunHarvestRedirect:
     """07: the CLI harvests through ``molab.knowledge.harvest.harvest_run``.
 
-    ``Run.harvest`` is what the CLI used to borrow; the redirect must pass the
-    real ``Run``, the class, the narrative and ``created_by`` straight through,
-    so 08 can delete the workspace method without the command breaking.
+    ``Run.harvest`` is what the CLI used to borrow; 08 deleted the workspace
+    method, so the redirect must pass the real ``Run``, the class, the narrative
+    and ``created_by`` straight through to the knowledge verb.
     """
 
     def test_calls_the_knowledge_verb_with_the_run(
@@ -91,11 +91,9 @@ class TestRunHarvestRedirect:
             calls.append({"target": target, "of": of, **kwargs})
             return SimpleNamespace(name="probe")
 
-        def forbidden(*_args: Any, **_kwargs: Any) -> Any:
-            raise AssertionError("Run.harvest must not be called")
-
+        # 08 deleted the workspace verb; nothing on the Run can answer it now.
+        assert not hasattr(Run, "harvest")
         monkeypatch.setattr(harvest_mod, "harvest_run", probe)
-        monkeypatch.setattr(Run, "harvest", forbidden)
 
         result = CliRunner().invoke(
             resources.run_app,

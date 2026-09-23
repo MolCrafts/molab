@@ -3,8 +3,8 @@
 Covers ``molab.workspace.zotero_concepts`` (``ZoteroItem`` / ``read_zotero_items``)
 and its concept-producing consumer ``Bundle.import_zotero``. A minimal
 ``zotero.sqlite`` is built in-place (the real schema subset the reader touches),
-then imported via the OKF :class:`molab.workspace.Bundle`. PDFs are *pointed at*
-via ``pdf_path`` — no bytes are copied into the bundle.
+then imported via the OKF :class:`molab.knowledge.bundle.Bundle`. PDFs are
+*pointed at* via ``pdf_path`` — no bytes are copied into the bundle.
 """
 
 from __future__ import annotations
@@ -14,8 +14,9 @@ import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
-from molab.workspace import Literature, ZoteroItem
-from molab.workspace.bundle import Bundle
+from molab.knowledge import Literature
+from molab.knowledge.bundle import Bundle
+from molab.workspace import ZoteroItem
 from molab.workspace.zotero_concepts import read_zotero_items
 
 FIXED = datetime(2026, 6, 21, 12, 0, 0, tzinfo=UTC)

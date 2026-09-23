@@ -82,29 +82,6 @@ class TestProjectExperimentRunCrud:
         assert {x.name for x in ws.projects()} == {"p"}
 
 
-class TestKnowledgeCrud:
-    def test_add_get_set_knowledge_on_project(self, tmp_path) -> None:
-        from molab.knowledge import Note
-
-        ws = Workspace.create(tmp_path / "lab", name="lab")
-        p = ws.add_project("p")
-        exp = p.add_experiment("e")
-        p.add_knowledge(
-            "note-1",
-            of=Note,
-            text="# hello\n",
-            sources=[exp, "dataset:foo/bar@1"],
-            created_by="test",
-        )
-        assert p.knowledge("note-1").read().startswith("# hello")
-        p.set_knowledge("note-1", text="# updated\n")
-        assert p.knowledge("note-1").read().startswith("# updated")
-        assert any(x.name == "note-1" for x in p.knowledges())
-        p.del_knowledge("note-1")
-        with pytest.raises(Exception):  # noqa: B017 — NotFound family
-            p.knowledge("note-1")
-
-
 class TestRunLoad:
     def test_load_roundtrip(self, tmp_path) -> None:
         ws = Workspace.create(tmp_path / "lab", name="lab")

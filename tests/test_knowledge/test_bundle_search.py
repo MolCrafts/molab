@@ -16,8 +16,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from molab.workspace import Note, Workspace
-from molab.workspace.bundle import Bundle
+from molab.knowledge.bundle import Bundle
+from molab.knowledge.concept import Concept
+from molab.workspace import Workspace
 from molab.workspace.folder import Folder
 
 # The spec's body-read cap (mirrors agent/loops/interactive/tools.py).
@@ -38,18 +39,23 @@ def _root(tmp_path: Path) -> Path:
     return root
 
 
-def _note(bundle_root: Path, name: str, index_md: str, *, under: str | None = None) -> Note:
-    """Materialize a ``Note`` Concept with *index_md* as its body.
+def _note(bundle_root: Path, name: str, index_md: str, *, under: str | None = None) -> Concept:
+    """Materialize a Concept dir (``meta.json`` + *index_md*) under *bundle_root*.
 
-    *under* is a bundle-relative plain organizational dir (no ``meta.json``),
-    created on demand — the ``scope`` filter's subtree host.
+    A **directory-form** Concept, not a ``Note``: ``Bundle`` is a
+    Concept-*directory* tree (its walk yields dirs that carry a marker), while
+    the six Knowledge classes are ``FILE_DOCUMENT`` markdown files walked by
+    ``Knowledge``. The assertions here speak the bundle's own vocabulary
+    (``index.md`` bodies, directory-derived identities), so this is the fixture
+    for them. *under* is a bundle-relative plain organizational dir (no
+    ``meta.json``), created on demand — the ``scope`` filter's subtree host.
     """
     host = bundle_root if under is None else bundle_root / under
     host.mkdir(parents=True, exist_ok=True)
-    note = Note(host / name)
-    note.write_meta()  # meta.json — the OKF Concept marker (a Concept's authority)
-    note.write_index(index_md)
-    return note
+    concept = Concept(host / name, type="bundle.concept")
+    concept.write_meta()  # meta.json — the OKF Concept marker (a Concept's authority)
+    concept.write_index(index_md)
+    return concept
 
 
 class TestSearch:

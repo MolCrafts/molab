@@ -1,11 +1,16 @@
 """Tests for the ``Bundle`` docs/notes CRUD surface (knowledge-docs-01).
 
-Covers the workspace-owned document verbs on :class:`molab.workspace.Bundle`
+Covers the bundle-owned document verbs on :class:`molab.knowledge.bundle.Bundle`
 (``create_note`` / ``rename_note`` / ``move_note`` / ``delete_note`` /
 ``backlinks`` / ``export_markdown``) plus the :class:`Backlink` reverse-edge
 wrapper. These are the shared CRUD path CLI and server both call (the
 Python==UI invariant). The base graph verbs (``walk`` / ``get`` / ``put`` /
 ``link``) are owned by ``test_bundle.py``.
+
+``TestBundleDocs`` still pins the pre-file-document *directory* model (a note as
+``<name>/meta.json`` + ``index.md``); those assertions are stale against the
+landed ``FILE_DOCUMENT`` layout and are carried here unchanged for the chain that
+owns the migration. ``TestFileDocumentVerbs`` is the landed coverage.
 """
 
 from __future__ import annotations
@@ -15,11 +20,10 @@ from typing import IO
 
 import pytest
 
+from molab.fs import LocalFileSystem, PathArg
 from molab.knowledge import KnowledgeNotFoundError, Note
+from molab.knowledge.bundle import Bundle
 from molab.knowledge.concept import Concept
-from molab.workspace.bundle import Bundle
-from molab.workspace.fs import PathArg
-from molab.workspace.fs_local import LocalFileSystem
 
 
 @pytest.fixture
@@ -191,3 +195,92 @@ class TestBundleDocs:
 
         assert "PARENT" in out
         assert "CHILD" not in out
+
+
+class TestFileDocumentVerbs:
+    """``create_note`` and friends under the landed file-document layout.
+
+    A ``Note`` is a ``FILE_DOCUMENT``: it lands as one markdown file
+    (``<host>/<slug>.md``) whose head is its frontmatter. ``create_note`` used to
+    build a *directory* at ``<host>/<slug>`` and then call ``write_meta()``,
+    which ``mkdir``-ed a directory at the document's own ``.md`` path — every
+    create died with ``IsADirectoryError``, and so did ``POST /api/knowledge/doc``.
+    """
+
+    def test_create_note_lands_one_markdown_file(self, bundle_root: Path) -> None:
+        b = Bundle(bundle_root)
+
+        note = b.create_note("Design Doc", body="hi")
+
+        assert isinstance(note, Note)
+        assert note.path == bundle_root / "design-doc.md"
+        assert note.path.is_file()
+        assert not (bundle_root / "design-doc").exists()  # never a directory
+        assert not (bundle_root / "design-doc.md").is_dir()
+        assert note.read().strip() == "hi"
+
+    def test_create_note_materializes_an_empty_body(self, bundle_root: Path) -> None:
+        note = Bundle(bundle_root).create_note("Parent")
+
+        assert note.path.is_file()
+        assert note.read() == ""
+
+    def test_create_note_is_idempotent_and_never_truncates(self, bundle_root: Path) -> None:
+        b = Bundle(bundle_root)
+        first = b.create_note("Design Doc", body="ORIGINAL")
+
+        second = b.create_note("Design Doc")
+
+        assert second.path == first.path
+        assert second.read().strip() == "ORIGINAL"
+        assert sorted(p.name for p in bundle_root.iterdir()) == ["design-doc.md"]
+
+    def test_create_note_child_lands_beside_a_document_parent(self, bundle_root: Path) -> None:
+        b = Bundle(bundle_root)
+        parent = b.create_note("Parent")
+        child = b.create_note("Child", parent=parent)
+
+        # a file has no interior: nesting under a document nests beside it
+        assert child.path == bundle_root / "child.md"
+        assert child.path.is_file()
+        assert parent.path.is_file()
+
+    def test_create_note_writes_through_the_atomic_writer(self, bundle_root: Path) -> None:
+        rec = RecordingFileSystem()
+
+        note = Bundle(bundle_root, fs=rec).create_note("Design Doc", body="hello world")
+
+        assert note.read().strip() == "hello world"
+        assert rec.atomic_text_writes == [str(bundle_root / "design-doc.md")]
+        assert rec.write_opens == []
+
+    def test_rename_note_keeps_the_markdown_suffix(self, bundle_root: Path) -> None:
+        b = Bundle(bundle_root)
+        note = b.create_note("Design Doc", body="ORIGINAL BODY")
+
+        b.rename_note(note, "Renamed")
+
+        renamed = bundle_root / "renamed.md"
+        assert renamed.is_file()
+        assert "ORIGINAL BODY" in renamed.read_text()
+        assert not (bundle_root / "design-doc.md").exists()
+        assert not (bundle_root / "renamed").exists()
+
+    def test_move_note_keeps_the_markdown_suffix(self, bundle_root: Path) -> None:
+        b = Bundle(bundle_root)
+        home = b.create_note("Home", body="H")
+        note = b.create_note("Roamer", body="R")
+
+        b.move_note(note, home)
+
+        assert (bundle_root / "roamer.md").is_file()
+        assert not (bundle_root / "roamer").exists()
+        assert home.path.is_file()
+
+    def test_delete_note_removes_the_file(self, bundle_root: Path) -> None:
+        b = Bundle(bundle_root)
+        note = b.create_note("Design Doc", body="hi")
+
+        b.delete_note(note)
+
+        assert not (bundle_root / "design-doc.md").exists()

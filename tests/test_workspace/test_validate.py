@@ -87,12 +87,12 @@ class TestValidateWorkspace:
         assert [v.path for v in stray] == ["leftover-run-output"]
 
     def test_a_concept_mounted_anywhere_is_not_a_stray(self, tmp_path: Path) -> None:
-        # Any Folder subclass may mount at any Folder; meta.json is what makes
-        # a directory legitimate, not its name.
-        from molab.workspace import knowledge_mount
+        # Any Folder subclass may mount at any Folder; the document's own head is
+        # what makes it legitimate, not its name.
+        from molab.knowledge import mount_note
 
         ws = _workspace(tmp_path)
-        knowledge_mount.mount_note(ws.get_project("alpha"), "reading")
+        mount_note(ws.get_project("alpha"), "reading")
 
         report = ws.validate()
         assert "layout.stray" not in {v.rule for v in report.errors}

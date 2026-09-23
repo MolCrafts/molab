@@ -36,7 +36,6 @@ from .naming import run_slug
 
 if TYPE_CHECKING:
     from .experiment import Experiment
-    from .knowledge import Knowledge
 
 # Re-exported for backward compatibility — the canonical definition now
 # lives in ``.models`` so the run-lifecycle collaborators can import it
@@ -682,27 +681,6 @@ class Run(Folder):
     def cancel(self, execution_id: str) -> None:
         """Cancel one selected active Execution; a Run itself is not cancellable."""
         self._execution_repository().seal(execution_id, ExecutionStatus.CANCELLED)
-
-    def harvest(
-        self,
-        of: type[Knowledge],
-        *,
-        narrative: str,
-        created_by: str,
-        results: dict[str, JSONValue] | None = None,
-        name: str | None = None,
-    ) -> Knowledge:
-        """Harvest this terminal run into sourced Knowledge under its experiment."""
-        from .harvest import harvest_run
-
-        return harvest_run(
-            self,
-            of,
-            narrative=narrative,
-            created_by=created_by,
-            results=results,
-            name=name,
-        )
 
     def delete_execution(self, execution_id: str) -> None:
         """Execution provenance is immutable; only workspace bytes may be pruned."""

@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import importlib
+
+import pytest
+
 import molab.knowledge as knowledge
 
 
@@ -26,15 +30,14 @@ class TestLegacyNames:
         assert "ReferenceConcept" not in knowledge.__all__
         assert not hasattr(knowledge, "ReferenceConcept")
 
-    def test_has_knowledge_is_gone(self) -> None:
-        import molab.workspace.knowledge as ws_knowledge
+    def test_workspace_knowledge_module_is_gone(self) -> None:
+        # crossref-08: the workspace shed every knowledge verb — the module that
+        # used to carry them is not merely shrunken, it does not exist.
+        with pytest.raises(ModuleNotFoundError):
+            importlib.import_module("molab.workspace.knowledge")
 
-        assert "HasKnowledge" not in ws_knowledge.__all__
-        assert not hasattr(ws_knowledge, "HasKnowledge")
+    def test_workspace_knowledge_names_are_unreachable(self) -> None:
+        import molab.workspace as workspace
 
-    def test_failure_analysis_is_gone(self) -> None:
-        import molab.workspace.knowledge as ws_knowledge
-
-        assert not hasattr(ws_knowledge, "FailureAnalysis")
-        assert not hasattr(ws_knowledge, "ProtocolNote")
-        assert not hasattr(ws_knowledge, "Decision")
+        for name in ("HasKnowledge", "FailureAnalysis", "ProtocolNote", "Decision"):
+            assert not hasattr(workspace, name)

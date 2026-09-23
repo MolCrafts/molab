@@ -488,14 +488,23 @@ class Bundle:
     # the HTTP boundary (the Python==UI invariant).
 
     def _child_dir(self, name: str, parent: Concept | PathArg | None) -> _StdPath:
-        """Absolute dir for a child Concept *name* under *parent* (root if None).
+        """Absolute dir for a child document *name* under *parent* (root if None).
 
         *parent* goes through :func:`_dir_of`, so a workspace ``Folder`` is
         resolved to its directory rather than stringified into a name — the
         difference between mounting a note under an experiment and creating a
         directory called ``<molab.workspace.experiment.Experiment object …>``.
+
+        A *parent* that is a **file document** (a ``FILE_DOCUMENT`` Concept, whose
+        path is a ``.md`` file) contributes its own directory: a file has no
+        interior, so nesting under a document nests beside it.
         """
-        base = str(self._root) if parent is None else _dir_of(parent)
+        if parent is None:
+            base = str(self._root)
+        elif isinstance(parent, Concept) and type(parent).FILE_DOCUMENT:
+            base = self._fs.dirname(str(parent.path))
+        else:
+            base = _dir_of(parent)
         return _StdPath(self._fs.join(base, name))
 
     def create_note(
@@ -505,29 +514,33 @@ class Bundle:
         parent: Concept | PathArg | None = None,
         body: str = "",
     ) -> Note:
-        """Idempotently create (or fetch) a :class:`Note` document Concept.
+        """Idempotently create (or fetch) a :class:`Note` document.
 
-        *name* is slugified to the directory name (path is identity). With
+        *name* is slugified to the document's filename (path is identity). With
         *parent* ``None`` the note mounts at the bundle root; otherwise it mounts
         under *parent*, which may be a Concept or a bare directory path — so a
         note nests under another note, or under a workspace ``Experiment``, by
         the same call. Repeat calls on the same slug return the existing Concept
-        — no duplicate dir. A non-empty *body* is written to ``index.md``.
+        — no duplicate document.
+
+        A :class:`Note` is a ``FILE_DOCUMENT``: it lands as a single markdown
+        file (``<dir>/<slug>.md``) carrying its head as frontmatter, so this verb
+        never writes a ``meta.json`` — writing one would mean ``mkdir``-ing a
+        *directory* at the document's own ``.md`` path.
 
         Args:
-            name: Human name; slugified to the Concept dir name.
+            name: Human name; slugified to the document's filename.
             parent: Concept or directory to nest under; ``None`` for the root.
-            body: Initial ``index.md`` narrative (written only when non-empty).
+            body: Initial narrative. Written on the creating call; a repeat call
+                never truncates an existing body.
 
         Returns:
             The mounted :class:`Note` (the existing one on a repeat call).
         """
         slug = slugify(name) or name
-        directory = self._child_dir(slug, parent)
-        created = not _is_concept_dir(directory, self._fs)
-        note = Note(directory, fs=self._fs)
-        note.write_meta()
-        if body:
+        note = Note(self._child_dir(slug, parent), fs=self._fs)
+        created = not note.exists()
+        if body or created:
             note.write(body)
         if created:
             self._emit_created(note, title=name)
@@ -536,35 +549,41 @@ class Bundle:
     def rename_note(self, concept: Concept, new_name: str) -> None:
         """Rename *concept* in place (same parent dir), preserving body + children.
 
-        A directory move, so the whole subtree travels as one and the Concept
-        resolves at its new identity path.
+        One move, so the whole document travels as one and the Concept resolves
+        at its new identity path. A file document keeps its ``.md`` suffix (the
+        suffix is how the layout marks a document, not part of the name).
 
         Args:
             concept: The Concept to rename.
-            new_name: The new human name; slugified to the new dir name.
+            new_name: The new human name; slugified to the new document name.
 
         Raises:
-            FileExistsError: If the destination directory already exists.
+            FileExistsError: If the destination already exists.
         """
         slug = slugify(new_name) or new_name
+        if type(concept).FILE_DOCUMENT:
+            slug = f"{slug}{_StdPath(concept.path).suffix}"
         dst = _StdPath(self._fs.join(self._fs.dirname(str(concept.path)), slug))
         self._move_dir(concept.path, dst)
 
     def move_note(self, concept: Concept, new_parent: Concept | PathArg) -> None:
         """Move *concept* under *new_parent*, preserving body + child docs.
 
-        Existing relative links inside the moved ``index.md`` travel verbatim
-        (they are not rewritten) — a derived :meth:`backlinks` recompute
-        reflects the Concept's new identity.
+        Existing relative links inside the moved document travel verbatim (they
+        are not rewritten) — a derived :meth:`backlinks` recompute reflects the
+        Concept's new identity. A file document keeps its ``.md`` suffix.
 
         Args:
             concept: The Concept to move.
             new_parent: The Concept, or directory, to mount it under.
 
         Raises:
-            FileExistsError: If the destination directory already exists.
+            FileExistsError: If the destination already exists.
         """
-        self._move_dir(concept.path, self._child_dir(concept.name, new_parent))
+        name = concept.name
+        if type(concept).FILE_DOCUMENT:
+            name = f"{name}{_StdPath(concept.path).suffix}"
+        self._move_dir(concept.path, self._child_dir(name, new_parent))
 
     def _move_dir(self, src: PathArg, dst: PathArg) -> None:
         """Move a Concept directory, refusing to clobber an existing one."""

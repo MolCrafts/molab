@@ -57,14 +57,6 @@ from .folder import (
     _validate_target_registered,
 )
 from .fs import PathArg
-from .knowledge import (
-    add_knowledge,
-    del_knowledge,
-    has_knowledge,
-    knowledge,
-    knowledges,
-    set_knowledge,
-)
 from .models import ExperimentMetadata, FolderMetadata, RunStatus
 from .naming import disambiguate, entity_slug, run_slug
 from .run import Run, compute_run_definition_hash
@@ -145,12 +137,6 @@ class Experiment(Folder):
 
     _exists_error_cls = ExperimentExistsError
     _not_found_error_cls = ExperimentNotFoundError
-    add_knowledge = add_knowledge
-    knowledge = knowledge
-    set_knowledge = set_knowledge
-    del_knowledge = del_knowledge
-    has_knowledge = has_knowledge
-    knowledges = knowledges
 
     def __init__(
         self,
