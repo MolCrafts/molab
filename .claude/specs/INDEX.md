@@ -10,7 +10,6 @@ _Approved 2026-09-23 — knowledge depends on workspace (one way); `.ref(knowled
 
 | # | Spec | Commit theme |
 |---|---|---|
-| 10 | [knowledge-crossref-10-sever-reads](knowledge-crossref-10-sever-reads.md) | workspace sheds the knowledge-shaped reads |
 | 11 | [knowledge-crossref-11-guards](knowledge-crossref-11-guards.md) | guards + CLAUDE.md law flip |
 | 12 | [knowledge-crossref-12-docs](knowledge-crossref-12-docs.md) | public docs rewritten |
 

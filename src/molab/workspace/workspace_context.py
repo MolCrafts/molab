@@ -17,24 +17,25 @@ Design invariants:
   selected refs) is passed in, never persisted; it defaults to empty.
 - **Health flags are computed, never stored** — and only the workspace-computable subset
   is produced here (``failed_run`` / ``stale_running`` / ``orphan_artifact``).
-  ``missing_output`` (needs the harness ``WorkflowIR``) and ``stale_knowledge`` + a
-  populated ``open_questions`` (need the typed ``KnowledgeItem`` / ``SourceRef`` of P0.4)
-  are computed one layer up later; ``open_questions`` is ``[]`` here by design.
+  ``missing_output`` (needs the harness ``WorkflowIR``) is computed one layer up later.
+- **Knowledge is projected one layer up.** :func:`assemble_workspace_context` is the
+  workspace's own projection: it returns ``knowledge == []`` **by design**, and
+  ``open_questions`` is ``[]`` here by design too. The only producer of the
+  ``knowledge`` field is :func:`molab.services.knowledge_context.context_with_knowledge`,
+  which assembles the rest and covers ``knowledge`` with the knowledge projection —
+  callers consume it as given and never patch the field in with ``model_copy``.
 """
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel
 
 from molab._typing import JSONValue
-from molab.knowledge import Finding, Literature, Note, Observation, Plan, Report
 
 from .assets.scan import scan_assets
-from .bundle_index import extract_title
 from .models import RunStatus
 from .run_heartbeat import is_alive_stale
 
@@ -168,8 +169,10 @@ def assemble_workspace_context(
 ) -> WorkspaceContext:
     """Assemble the canonical :class:`WorkspaceContext` — a pure read.
 
-    Walks the authoritative folder tree + ``run.json`` + ``scan_assets`` + ``Bundle`` and
-    composes them into one read-model. Writes nothing.
+    Walks the authoritative folder tree + ``run.json`` + ``scan_assets`` and
+    composes them into one read-model. Writes nothing. ``knowledge`` is
+    ``[]`` **by design** — the knowledge projection is a layer up
+    (:func:`molab.services.knowledge_context.context_with_knowledge`).
 
     Args:
         workspace: The workspace to project.
@@ -315,22 +318,6 @@ def assemble_workspace_context(
                 )
             )
 
-    knowledge: list[KnowledgeRef] = []
-    from molab.knowledge import Knowledge as KnowledgeHandle
-
-    for concept in KnowledgeHandle(workspace.root).walk():
-        if isinstance(concept, Note | Literature | Report | Finding | Plan | Observation):
-            type_name = type(concept).__name__
-            raw_id = concept.name
-            knowledge.append(
-                KnowledgeRef(
-                    path=Path(concept.path).relative_to(workspace.root).as_posix(),
-                    type=type_name,
-                    title=extract_title(concept.read()) or concept.name,
-                    id=str(raw_id) if raw_id is not None else None,
-                )
-            )
-
     return WorkspaceContext(
         workspace=WorkspaceRef(
             id=workspace.id,
@@ -346,7 +333,7 @@ def assemble_workspace_context(
         failed_runs=failed_runs,
         running_runs=running_runs,
         artifacts=artifacts,
-        knowledge=knowledge,
+        knowledge=[],
         open_questions=[],
         stale_or_missing=flags,
     )

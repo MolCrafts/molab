@@ -196,6 +196,41 @@ def scripted(tmp_path: Path):
 
 class TestPrefetchWorkspaceIndices:
     @pytest.mark.unit
+    def test_meta_mount_prefetch_is_renamed_off_the_knowledge_spelling(self):
+        """The helper serves ``meta.json`` Concept mounts, so it is named for
+        them — the knowledge-shaped names are gone, built from
+        ``execution_dir_names`` as before."""
+        from molab.workspace import fs_cached
+
+        assert not hasattr(fs_cached, "_prefetch_knowledge_children")
+        assert "_KNOWLEDGE_SKIP_DEFAULT" not in vars(fs_cached)
+        assert hasattr(fs_cached, "_prefetch_meta_mounts")
+        assert hasattr(fs_cached, "_META_MOUNT_SKIP")
+        assert "execution_dir_names" in vars(fs_cached)
+
+    @pytest.mark.unit
+    def test_project_level_meta_json_mounts_still_prefetch(self, tmp_path: Path):
+        """A Concept mount carrying ``meta.json`` / ``index.md`` under a project
+        (an Agent mount, not a knowledge document) is still hydrated."""
+        fs = _ScriptedFS()
+        root = "/scratch/me/workspace"
+        fs.files[f"{root}/workspace.json"] = b"{}"
+        fs.files[f"{root}/projects/alpha/project.json"] = b'{"id":"alpha"}'
+        # An Agent mount: a child dir with a meta.json marker + narrative.
+        fs.files[f"{root}/projects/alpha/researcher/meta.json"] = b'{"type":"agent.agent"}'
+        fs.files[f"{root}/projects/alpha/researcher/index.md"] = b"# researcher\n"
+        fs.dirs.add(f"{root}/projects/alpha/researcher")
+
+        cached = CachedRemoteFileSystem(fs, mirror_root=tmp_path / "mirror", ttl_seconds=300)
+        ws = SimpleNamespace(root=root, fs=cached)
+
+        warnings = prefetch_workspace_indices(ws)
+
+        assert warnings == [], warnings
+        cached_paths = cached.cached_paths()
+        assert any("projects/alpha/researcher/meta.json" in k for k in cached_paths), cached_paths
+
+    @pytest.mark.unit
     def test_partial_failure_warns_but_healthy_projects_still_hydrate(self, scripted):
         """A single bad node surfaces a warning; the walk continues and the
         healthy project's ``run.json`` is still hydrated into the cache."""

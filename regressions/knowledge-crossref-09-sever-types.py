@@ -24,8 +24,9 @@ from molab.workspace.folder import class_for_entity_file, entity_json_names
 #: The four levels of the tree, each registered by its own module.
 CORE_ENTITY_JSON = ("workspace.json", "project.json", "experiment.json", "run.json")
 
-#: The forwarder shells the workspace shed. ``bundle_index`` is deliberately not
-#: here — it is still imported by ``workspace_context`` and outlives this cut.
+#: The forwarder shells the workspace shed. ``bundle_index`` outlived this cut
+#: (it was still imported by ``workspace_context``) and is deleted by the
+#: follow-up member knowledge-crossref-10-sever-reads.
 SEVERED_SHELLS = (
     "molab.workspace.edges",
     "molab.workspace.concepts",
@@ -46,7 +47,8 @@ def main() -> None:
     # ── the six shells are gone, and gone for real ───────────────────────────
     for module in SEVERED_SHELLS:
         assert importlib.util.find_spec(module) is None, module
-    assert importlib.util.find_spec("molab.workspace.bundle_index") is not None
+    # ``bundle_index`` was the one shell this cut left standing; 10 removed it.
+    assert importlib.util.find_spec("molab.workspace.bundle_index") is None
 
     # ── knowledge's names left the workspace surface ─────────────────────────
     for name in (

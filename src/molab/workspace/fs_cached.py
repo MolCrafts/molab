@@ -1197,8 +1197,8 @@ def prefetch_workspace_indices(
             ok = _safe_read(fs, meta, state, on_file=on_file) is not None
             if ok:
                 _prefetch_concept_files(fs, project_dir, state, on_file=on_file)
-                # Knowledge Concepts mounted on the project (notes/refs).
-                _prefetch_knowledge_children(
+                # Concept mounts on the project (Agent installs carrying meta.json).
+                _prefetch_meta_mounts(
                     fs, project_dir, state, on_file=on_file, skip={"experiments", "assets", "cache"}
                 )
             return name if ok else None
@@ -1251,7 +1251,7 @@ def prefetch_workspace_indices(
             ok = _safe_read(fs, meta, state, on_file=on_file) is not None
             if ok:
                 _prefetch_concept_files(fs, experiment_dir, state, on_file=on_file)
-                _prefetch_knowledge_children(
+                _prefetch_meta_mounts(
                     fs,
                     experiment_dir,
                     state,
@@ -1318,10 +1318,10 @@ def prefetch_workspace_indices(
     return list(state.warnings)
 
 
-# Container / infrastructure dirs that are never free-form knowledge mounts.
+# Container / infrastructure dirs that are never ``meta.json`` Concept mounts.
 # The per-attempt ones come from their declarations, so a directory declared
-# later cannot be mistaken for a knowledge mount.
-_KNOWLEDGE_SKIP_DEFAULT = execution_dir_names() | frozenset(
+# later cannot be mistaken for a Concept mount.
+_META_MOUNT_SKIP = execution_dir_names() | frozenset(
     {
         "projects",
         "experiments",
@@ -1355,7 +1355,7 @@ def _prefetch_concept_files(
         )
 
 
-def _prefetch_knowledge_children(
+def _prefetch_meta_mounts(
     fs: FileSystem,
     parent_dir: str,
     state: _PrefetchState,
@@ -1363,13 +1363,16 @@ def _prefetch_knowledge_children(
     on_file: Callable[[str], None] | None = None,
     skip: set[str] | frozenset[str] | None = None,
 ) -> None:
-    """Prefetch free-form Concept mounts (notes / references) under *parent_dir*.
+    """Prefetch ``meta.json`` / ``index.md`` Concept mounts under *parent_dir*.
 
-    Knowledge lives as sibling dirs with ``meta.json`` (not only under
-    ``experiments/`` / ``runs/``). Without this, a pin-cached remote walk
-    never sees notes and the Knowledge UI stays empty.
+    A Concept mount (an Agent / AgentSession directory at the project or
+    experiment level) is a sibling dir carrying ``meta.json`` (plus
+    ``index.md``). Without this, a pin-cached remote walk never sees those
+    mounts and the tree stays empty. A knowledge document under
+    ``knowledges/`` is an ordinary file, not a mount, and needs no per-child
+    prefetch.
     """
-    skip_names = set(_KNOWLEDGE_SKIP_DEFAULT)
+    skip_names = set(_META_MOUNT_SKIP)
     if skip:
         skip_names |= set(skip)
     try:

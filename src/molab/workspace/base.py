@@ -5,8 +5,7 @@ and child listing for Workspace, Project, Experiment, and Run.
 
 The atomic write helpers ``atomic_write_json`` / ``atomic_write_text``
 are re-exported from the cross-layer primitive :mod:`molab.atomicio` —
-they live there so the OKF ``knowledge`` bottom layer can cite them
-without importing workspace.
+a cross-layer primitive shared by workspace and knowledge.
 """
 
 from __future__ import annotations

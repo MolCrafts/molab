@@ -2,8 +2,8 @@
 
 The layer-agnostic id / slug / content-hash primitives (``slugify``,
 ``generate_id``, ``generate_asset_id``, ``compute_content_hash``) moved to
-the cross-layer primitive :mod:`molab.ids` (okf-01-01) so the OKF
-``knowledge`` bottom layer can cite them without importing workspace. They
+the cross-layer primitive :mod:`molab.ids` (okf-01-01) — a cross-layer
+primitive shared by workspace and knowledge. They
 remain importable from ``molab.workspace.utils`` (same function objects)
 for back-compat. The run-domain id derivations below
 (``derive_run_id`` / ``derive_execution_id``) stay here — they are

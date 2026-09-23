@@ -98,6 +98,29 @@ class TestValidateWorkspace:
         assert "layout.stray" not in {v.rule for v in report.errors}
         assert report.ok
 
+    def test_headless_children_of_knowledges_are_never_flagged(self, tmp_path: Path) -> None:
+        # ``knowledges/`` is a container the workspace owns. The container-head
+        # check that used to scan its children is gone: a bare child directory
+        # and a plain file item are both legal, and neither is a stray.
+        ws = _workspace(tmp_path)
+        knowledges = Path(ws.resolve()) / "knowledges"
+        (knowledges / "loose").mkdir(parents=True, exist_ok=True)
+        (knowledges / "lab-note.md").write_text("# lab note\n", encoding="utf-8")
+
+        report = validate_workspace(ws.resolve(), fs=ws.fs)
+
+        assert report.ok, report.violations
+        rules = {v.rule for v in report.violations}
+        assert "layout.container" not in rules
+        assert "layout.stray" not in rules
+        assert not any("loose" in v.path or "lab-note" in v.path for v in report.violations)
+
+    def test_validate_takes_no_container_heads_keyword(self, tmp_path: Path) -> None:
+        # The container-head check was deleted, not parameterized: no dead knob.
+        ws = _workspace(tmp_path)
+        with pytest.raises(TypeError):
+            validate_workspace(ws.resolve(), container_heads=("finding.json",))  # type: ignore[call-arg]
+
     def test_project_dir_that_is_not_a_slug_is_flagged(self, tmp_path: Path) -> None:
         ws = _workspace(tmp_path)
         proj = ws.get_project("alpha")

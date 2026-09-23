@@ -303,23 +303,6 @@ class _Checker:
                 f"{name!r} is neither a container {sorted(allowed)} nor a Concept (no {META_JSON})",
             )
 
-    def _check_knowledge_container(self, path: str) -> None:
-        """Every child of ``knowledges/`` must have a class-named entity JSON."""
-        from molab.knowledge.naming import KNOWLEDGE_HEAD_FILES
-
-        knowledges = self._fs.join(path, "knowledges")
-        if not self._fs.is_dir(knowledges):
-            return
-        for name in self._subdirs(knowledges):
-            child = self._fs.join(knowledges, name)
-            if any(self._fs.is_file(self._fs.join(child, ent)) for ent in KNOWLEDGE_HEAD_FILES):
-                continue
-            self._add(
-                child,
-                "layout.stray",
-                f"{name!r} under knowledges/ has no knowledge entity JSON",
-            )
-
     def _check_execution(self, path: str) -> None:
         """Every child of an execution dir is a known attempt container."""
         for name in self._subdirs(path):
@@ -361,7 +344,6 @@ class _Checker:
 
         self._check_concept(root, "workspace")
         self._check_strays(root, "workspace")
-        self._check_knowledge_container(root)
 
         projects_dir = self._fs.join(root, "projects")
         project_dirs = self._subdirs(projects_dir)
@@ -372,7 +354,6 @@ class _Checker:
                 self._add(pdir, "project.slug", f"{pname!r} is not a kebab-case slug")
             self._check_concept(pdir, "project")
             self._check_strays(pdir, "project")
-            self._check_knowledge_container(pdir)
 
             experiments_dir = self._fs.join(pdir, "experiments")
             experiment_dirs = self._subdirs(experiments_dir)
@@ -383,7 +364,6 @@ class _Checker:
                     self._add(edir, "experiment.slug", f"{ename!r} is not a kebab-case slug")
                 self._check_concept(edir, "experiment")
                 self._check_strays(edir, "experiment")
-                self._check_knowledge_container(edir)
 
                 runs_dir = self._fs.join(edir, "runs")
                 run_dirs = self._subdirs(runs_dir)

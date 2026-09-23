@@ -14,7 +14,8 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from molab.knowledge import mount_note
-from molab.workspace import Workspace
+from molab.server.schemas.workspace_context import WorkspaceContextResponse
+from molab.workspace import KnowledgeRef, Workspace, WorkspaceContext
 from molab.workspace.assets import ArtifactAsset, AssetManifest, AssetScope, Producer
 from molab.workspace.workspace_context import (
     ContextFocus,
@@ -33,7 +34,7 @@ def _tree(root_path: object) -> set[str]:
 
 
 class TestAssembleWorkspaceContext:
-    def test_projects_experiments_runs_artifacts_knowledge_assembled_and_ordered(
+    def test_projects_experiments_runs_and_artifacts_assembled_and_ordered(
         self, tmp_path: Path
     ) -> None:
         ws = _ws(tmp_path)
@@ -54,10 +55,36 @@ class TestAssembleWorkspaceContext:
         assert c.experiments[0].project_id == ws.get_project("p").id
         assert len(c.recent_runs) == 2
         assert len(c.artifacts) >= 2
-        assert any("idea" in k.path for k in c.knowledge)
+        # The raw assembler projects no knowledge at all — even with a mounted
+        # document on disk. The only producer is
+        # ``molab.services.knowledge_context.context_with_knowledge``.
+        assert c.knowledge == []
+        assert c.model_dump(mode="json")["knowledge"] == []
         # recent_runs ordered by finished/started descending
         ts = [(rr.finished_at or rr.started_at) for rr in c.recent_runs]
         assert ts == sorted(ts, key=lambda t: t or datetime(1970, 1, 1, tzinfo=UTC), reverse=True)
+
+    def test_knowledge_ref_shape_survives_and_the_consumer_reads_empty_knowledge(
+        self, tmp_path: Path
+    ) -> None:
+        # The read-model *shape* stays workspace-owned; only its producer left.
+        ref = KnowledgeRef(path="knowledges/idea.md", type="Note", title="Idea")
+        assert ref.model_dump() == {
+            "path": "knowledges/idea.md",
+            "type": "Note",
+            "title": "Idea",
+            "id": None,
+        }
+
+        c = assemble_workspace_context(_ws(tmp_path))
+        assert isinstance(c, WorkspaceContext)
+        assert "knowledge" in WorkspaceContext.model_fields
+        assert "open_questions" in WorkspaceContext.model_fields
+
+        # The server projection of a raw context is well-formed with no rows.
+        response = WorkspaceContextResponse.from_context(c)
+        assert response.knowledge == []
+        assert response.openQuestions == []
 
     def test_empty_workspace_yields_all_empty_collections(self, tmp_path: Path) -> None:
         c = assemble_workspace_context(_ws(tmp_path))
