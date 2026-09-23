@@ -26,8 +26,8 @@ from typing import TYPE_CHECKING, Any
 from mollog import get_logger
 
 if TYPE_CHECKING:
+    from molab.knowledge import Knowledge
     from molab.workspace.experiment import Experiment
-    from molab.workspace.knowledge import Knowledge
     from molab.workspace.run import Run
 
 __all__ = [
@@ -569,7 +569,7 @@ def emit_artifact_stage_events(
 
 # ── knowledge experiment-record note ─────────────────────────────────────────
 # Disk write + knowledge.created + guarded cite all go through
-# ``molab.workspace.write_knowledge`` (agent-record-export-02). Plan-only
+# ``molab.knowledge.write_knowledge`` (agent-record-export-02). Plan-only
 # rendering stays here.
 
 
@@ -588,7 +588,7 @@ def write_experiment_record(
     (checked via :func:`has_artifact`), never a silent no-op.
     """
     from molab.knowledge import Observation, SourceRef
-    from molab.workspace.knowledge_write import write_knowledge
+    from molab.knowledge.write import write_knowledge
 
     report = _read_artifact_json(run, execution_id, "experiment_report")
     if report is None:
@@ -646,10 +646,9 @@ def write_finding_record(
     ``references`` edge connects the Finding to the Observation record when
     that record exists — plan → outcome stays traversable.
     """
-    from molab.knowledge import Finding, Knowledge, KnowledgeNotFoundError, SourceRef
-    from molab.knowledge.concept import append_link
-    from molab.workspace.knowledge import knowledge_dir
-    from molab.workspace.knowledge_write import write_knowledge
+    from molab.knowledge import Finding, Knowledge, KnowledgeNotFoundError, Observation, SourceRef
+    from molab.knowledge.location import folder
+    from molab.knowledge.write import write_knowledge
 
     final_report = _read_artifact_json(run, execution_id, "final_report")
     if final_report is None:
@@ -680,11 +679,11 @@ def write_finding_record(
         title=title,
     )
     try:
-        observation = Knowledge.open(knowledge_dir(experiment, f"experiment-record-{run.id}"))
+        observation = Knowledge.open(folder(experiment, f"experiment-record-{run.id}", Observation))
     except (KnowledgeNotFoundError, FileNotFoundError, OSError):
         observation = None
     if observation is not None:
-        append_link(item, observation.path, role="references")
+        item.ref(observation, role="references")
     return item
 
 
@@ -703,7 +702,7 @@ def write_report_record(
     (the callers carve ``ApprovalPendingError`` out before reaching this).
     """
     from molab.knowledge import Report, SourceRef
-    from molab.workspace.knowledge_write import write_knowledge
+    from molab.knowledge.write import write_knowledge
 
     item_name = f"failure-{run.id}"
     completed = _artifact_kinds(run, execution_id)
@@ -753,8 +752,8 @@ def write_plan_book(
     Body prefers the ``plan_report`` artifact; falls back to rendering
     ``experiment_plan``. Never writes under ``run_dir/plan/``.
     """
-    from molab.workspace.knowledge import PLAN_BOOK_NAME, Plan, SourceRef
-    from molab.workspace.knowledge_write import write_knowledge
+    from molab.knowledge import PLAN_BOOK_NAME, Plan, SourceRef
+    from molab.knowledge.write import write_knowledge
 
     body = _plan_book_body(run, execution_id)
     if not body.strip():

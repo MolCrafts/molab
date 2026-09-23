@@ -17,7 +17,15 @@ from pathlib import Path
 
 import pytest
 
-from molab.workspace.folder import Folder, FolderMoveCollisionError, append_link
+from molab.workspace import folder as folder_mod
+from molab.workspace.folder import (
+    Folder,
+    FolderMoveCollisionError,
+    append_link,
+    class_for_folder_type,
+    concept_from_dir,
+    register_folder_type,
+)
 
 
 # ``Folder`` has no business subclasses at this level; this private subclass
@@ -236,6 +244,90 @@ class TestFolderEdges:
         with pytest.raises(ValueError):
             append_link(src, dst, role="not_a_role")
         assert src.read_index() == ""
+
+
+def _marker_dir(root: Path, name: str, marker: dict[str, object]) -> Path:
+    """A bare ``meta.json``-only directory (no class-named entity JSON)."""
+    child = Path(root) / "root" / name
+    child.mkdir(parents=True, exist_ok=True)
+    (child / "meta.json").write_text(json.dumps(marker), encoding="utf-8")
+    return child
+
+
+class TestFolderTypeRegistry:
+    """The ``meta.json`` ``type`` → Folder class table (``register_folder_type``)."""
+
+    def test_registered_type_resolves_to_its_class(self) -> None:
+        @register_folder_type("test.folder.type")
+        class _Registered(Folder):
+            """Test-only Folder subclass."""
+
+        assert class_for_folder_type("test.folder.type") is _Registered
+
+    def test_decorator_returns_the_same_class(self) -> None:
+        class _Passthrough(Folder):
+            """Test-only Folder subclass."""
+
+        assert register_folder_type("test.folder.passthrough")(_Passthrough) is _Passthrough
+
+    def test_same_class_may_re_claim_its_type(self) -> None:
+        @register_folder_type("test.folder.idempotent")
+        class _Idempotent(Folder):
+            """Test-only Folder subclass."""
+
+        assert register_folder_type("test.folder.idempotent")(_Idempotent) is _Idempotent
+        assert class_for_folder_type("test.folder.idempotent") is _Idempotent
+
+    def test_a_different_class_cannot_re_claim_a_type(self) -> None:
+        @register_folder_type("test.folder.conflict")
+        class _First(Folder):
+            """Test-only Folder subclass."""
+
+        class _Second(Folder):
+            """Test-only Folder subclass."""
+
+        with pytest.raises(ValueError, match="already claimed"):
+            register_folder_type("test.folder.conflict")(_Second)
+        assert class_for_folder_type("test.folder.conflict") is _First
+
+    @pytest.mark.parametrize("type_str", ["no.such.type", ""])
+    def test_unknown_type_has_no_class(self, type_str: str) -> None:
+        assert class_for_folder_type(type_str) is None
+
+    def test_concept_from_dir_rebuilds_a_registered_type(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A ``meta.json``-only dir with a registered type rebuilds as that class —
+        and the knowledge registry is never consulted (secondary evidence)."""
+
+        @register_folder_type("test.folder.rebuild")
+        class _Rebuilt(Folder):
+            """Test-only Folder subclass."""
+
+        parent = Folder(name="root", kind="test.root", root_path=tmp_path)
+        child = _marker_dir(tmp_path, "alpha", {"type": "test.folder.rebuild", "id": "d"})
+
+        consulted: list[str] = []
+        original = folder_mod.resolve_concept_type
+
+        def _spy(type_str: str, default: object, *, base: type | None = None) -> object:
+            consulted.append(type_str)
+            return original(type_str, default, base=base)
+
+        monkeypatch.setattr(folder_mod, "resolve_concept_type", _spy)
+
+        rebuilt = concept_from_dir(str(child), parent)
+        assert isinstance(rebuilt, _Rebuilt)
+        assert rebuilt.metadata.kind == "test.folder.rebuild"
+        assert consulted == [], "the workspace type table must answer before the knowledge registry"
+
+    def test_concept_from_dir_falls_back_to_plain_folder(self, tmp_path: Path) -> None:
+        """An unregistered ``meta.json`` type still rebuilds as a bare ``Folder``."""
+        parent = Folder(name="root", kind="test.root", root_path=tmp_path)
+        child = _marker_dir(tmp_path, "beta", {"type": "test.folder.unknown", "id": "d"})
+
+        rebuilt = concept_from_dir(str(child), parent)
+        assert type(rebuilt) is Folder
 
 
 def test_import_guard_folder_pulls_no_upstream_layer() -> None:

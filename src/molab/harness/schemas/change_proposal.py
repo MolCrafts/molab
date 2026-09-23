@@ -18,7 +18,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from molab.workspace.knowledge import SourceRef
+from molab.knowledge import SourceRef
 
 CHANGE_PROPOSAL_KIND = "change_proposal"
 """The ``ArtifactKind`` a stored ChangeProposal is filed under (open ``str``)."""

@@ -10,7 +10,6 @@ _Approved 2026-09-23 — knowledge depends on workspace (one way); `.ref(knowled
 
 | # | Spec | Commit theme |
 |---|---|---|
-| 05 | [knowledge-crossref-05-harness](knowledge-crossref-05-harness.md) | harness redirects; the one Folder type table |
 | 06 | [knowledge-crossref-06-server](knowledge-crossref-06-server.md) | server redirects; consumes the projection |
 | 07 | [knowledge-crossref-07-cli](knowledge-crossref-07-cli.md) | CLI redirects; consumes the projection |
 | 08 | [knowledge-crossref-08-sever-writes](knowledge-crossref-08-sever-writes.md) | workspace sheds the knowledge write verbs |

@@ -4,7 +4,11 @@ The ONE mount-context builder shared by the server's session-create route and
 ``molab agent chat`` (Python = UI law): given an optional scope
 (project/experiment/run), it renders a compact, deterministic markdown block
 from the canonical :class:`~molab.workspace.workspace_context.WorkspaceContext`
-read-model — the projection's first actual agent consumer (vision-loop-11).
+read-model — the projection's first actual agent consumer (vision-loop-11). The
+``knowledge`` rows come from ``molab.services.knowledge_context`` (the one
+projection producer), not from a bare ``Workspace.context()``: a raw assembly
+carries ``knowledge == []`` by design, so the ``## Knowledge`` section would
+otherwise empty out without a symptom.
 
 Strict resolution: an id that does not resolve raises the workspace's typed
 ``*NotFoundError`` — never a silent downgrade to workspace scope. Snapshot
@@ -18,6 +22,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from molab.services.knowledge_context import context_with_knowledge
 from molab.workspace import ContextFocus
 
 if TYPE_CHECKING:
@@ -131,7 +136,8 @@ def _resolve_and_render(
     project, experiment, run = _resolve_scope(
         workspace, project_id=project_id, experiment_id=experiment_id, run_id=run_id
     )
-    context = workspace.context(
+    context = context_with_knowledge(
+        workspace,
         focus=ContextFocus(project_id=project_id, experiment_id=experiment_id, run_id=run_id),
     )
     if run is not None:

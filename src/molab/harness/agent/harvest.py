@@ -2,7 +2,7 @@
 
 ``harvest_session`` turns an on-disk :class:`~molab.harness.agent.folders.AgentSession`
 into a sourced :class:`~molab.knowledge.Finding` via
-:func:`~molab.workspace.knowledge_write.write_knowledge`.
+:func:`~molab.knowledge.write.write_knowledge`.
 
 ``export_session_zip`` archives the session folder via
 :func:`~molab.workspace.archive.archive_folder_zip` — the single zip writer.
@@ -13,8 +13,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from molab.knowledge import Finding, Knowledge, SourceRef
+from molab.knowledge.write import write_knowledge
 from molab.workspace.archive import archive_folder_zip
-from molab.workspace.knowledge_write import write_knowledge
 
 if TYPE_CHECKING:
     from molab.harness.agent.folders import AgentSession

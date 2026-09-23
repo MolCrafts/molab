@@ -13,3 +13,8 @@ class TestHarvestSession:
         assert "cls:" not in src
         assert "of=Finding" in src
         assert "from molab.knowledge import Finding" in inspect.getsource(harvest_mod)
+
+    def test_write_knowledge_comes_from_molab_knowledge(self) -> None:
+        src = inspect.getsource(harvest_mod)
+        assert "from molab.knowledge.write import write_knowledge" in src
+        assert "molab.workspace.knowledge_write" not in src

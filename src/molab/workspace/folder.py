@@ -14,6 +14,7 @@ import json
 import os
 import re
 import shutil
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path as _StdPath
 from pathlib import PurePosixPath
@@ -132,6 +133,42 @@ def register_entity_class(cls: type[F]) -> type[F]:  # noqa: UP047
 def class_for_entity_file(name: str) -> type[Folder] | None:
     """Return the Folder subclass registered for entity file *name*, if any."""
     return _ENTITY_FILE_TO_CLS.get(name)
+
+
+#: ``meta.json`` ``type`` → Folder subclass. A subclass whose identity file is
+#: ``meta.json`` alone (no class-named entity JSON) registers here; the layer
+#: that owns such a Folder owns the claim.
+_TYPE_TO_CLS: dict[str, type[Folder]] = {}
+
+
+def register_folder_type[C: type](type_str: str) -> Callable[[C], C]:
+    """Class decorator — register the ``meta.json`` ``type`` claimed by a Folder subclass.
+
+    The argument is the type string itself (``meta.json`` carries a dotted kind
+    such as ``agent.agent``), so it cannot be derived from the class name the way
+    :func:`register_entity_class` derives an entity filename. Re-claiming a type
+    with the *same* class is a no-op.
+
+    Raises:
+        ValueError: when *type_str* is already claimed by a different class.
+    """
+
+    def register(cls: C) -> C:
+        existing = _TYPE_TO_CLS.get(type_str)
+        if existing is not None and existing is not cls:
+            raise ValueError(
+                f"meta.json type {type_str!r} is already claimed by "
+                f"{existing.__qualname__}; {cls.__qualname__} cannot re-claim it"
+            )
+        _TYPE_TO_CLS[type_str] = cast("type[Folder]", cls)
+        return cls
+
+    return register
+
+
+def class_for_folder_type(type_str: str) -> type[Folder] | None:
+    """Return the Folder subclass registered for a ``meta.json`` ``type``, if any."""
+    return _TYPE_TO_CLS.get(type_str)
 
 
 def _entity_json_names() -> tuple[str, ...]:
@@ -856,9 +893,10 @@ def concept_from_dir(child_dir: PathArg, parent: Folder) -> Folder:
     """Reconstruct *child_dir* as its Folder subclass.
 
     Knowledge family (and any :func:`register_entity_class` type) is recovered
-    from the entity filename via reflection — no ``type`` field. Notes / Agent
-    still resolve ``meta.json`` ``type`` through the concept-type registry.
-    WPER entity JSON with a ``type`` key uses the registry as well.
+    from the entity filename via reflection — no ``type`` field. A directory
+    whose identity is ``meta.json`` alone resolves ``type`` through the
+    workspace-owned :func:`class_for_folder_type` table first, and only then
+    through the knowledge concept-type registry.
     """
     from molab.knowledge.naming import KNOWLEDGE_HEAD_FILES
 
@@ -875,7 +913,7 @@ def concept_from_dir(child_dir: PathArg, parent: Folder) -> Folder:
             return mapped.from_disk(child_dir, parent)
     marker = _load_concept_marker_dict(fs, child_dir) or {}
     type_str = str(marker.get("type", ""))
-    cls = resolve_concept_type(type_str, Folder, base=Folder)
+    cls = class_for_folder_type(type_str) or resolve_concept_type(type_str, Folder, base=Folder)
     return cls.from_disk(child_dir, parent)
 
 
@@ -890,7 +928,9 @@ __all__ = [
     "LinkScan",
     "append_link",
     "class_for_entity_file",
+    "class_for_folder_type",
     "concept_from_dir",
     "entity_filename",
     "register_entity_class",
+    "register_folder_type",
 ]

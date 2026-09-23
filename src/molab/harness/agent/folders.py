@@ -4,10 +4,11 @@ Rehomed onto :class:`molab.workspace.Folder` (the OKF rewrite, wsokf-06): an
 ``Agent`` is a workspace Concept (``kind = "agent.agent"``) whose
 ``AgentSession`` children (``kind = "agent.session"``) are **flat** child
 Concepts — one dir per session, ``meta.json`` for structured identity,
-``messages.jsonl`` for the pydantic-ai history. Both register with the shared
-concept-type registry (``molab.knowledge.types.concept_type`` — the *only*
-knowledge edge), so ``workspace.folder.concept_from_dir`` / ``list_folders`` /
-``get_folder`` rebuild the right subclass. All I/O routes through the Folder's
+``messages.jsonl`` for the pydantic-ai history. Both claim their kind in the
+workspace-owned ``meta.json`` type table (``molab.workspace.folder.register_folder_type``)
+— the identity axis for a Folder that writes no class-named entity JSON — so
+``workspace.folder.concept_from_dir`` / ``list_folders`` / ``get_folder``
+rebuild the right subclass. All I/O routes through the Folder's
 injectable filesystem (``self._disk()``), so a session works against any backend.
 
 Like every workspace Concept, agent dirs use **``meta.json`` as the sole
@@ -29,9 +30,9 @@ import json
 
 from molab._typing import JSONValue
 from molab.harness.agent.folders_metadata import AgentMeta, AgentSessionMeta, SessionStatusStr
-from molab.knowledge.types import concept_type
 from molab.path import Path
 from molab.workspace import Folder
+from molab.workspace.folder import register_folder_type
 from molab.workspace.fs import FileSystem, PathArg
 from molab.workspace.models import FolderMetadata
 
@@ -51,7 +52,7 @@ def _folder_metadata(slug: str, kind: str) -> FolderMetadata:
     return FolderMetadata(id=slug, name=slug, kind=kind)
 
 
-@concept_type(AGENT_SESSION_KIND)
+@register_folder_type(AGENT_SESSION_KIND)
 class AgentSession(Folder):
     """One conversation under an :class:`Agent` — ``kind = "agent.session"``.
 
@@ -155,7 +156,7 @@ class AgentSession(Folder):
         self._disk().write_bytes(path, dump_model_messages(messages))
 
 
-@concept_type(AGENT_KIND)
+@register_folder_type(AGENT_KIND)
 class Agent(Folder):
     """Configured agent persona — ``kind = "agent.agent"``; owns sessions."""
 

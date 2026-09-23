@@ -5,7 +5,7 @@ lifecycle catalog stays in plan/curate. This module only exposes verbs
 that are workspace-owned:
 
 * ``cancel_run`` — :func:`molab.workspace.lifecycle_ops.cancel_run`
-* ``harvest_run`` — :func:`molab.workspace.harvest_run`
+* ``harvest_run`` — :func:`molab.knowledge.harvest.harvest_run`
 
 Mounted only when the ReAct surface is ``lifecycle``.
 """
@@ -80,12 +80,14 @@ def lifecycle_tools(*, workspace_root: Path) -> tuple[Any, ...]:
         the turn.
         """
         from molab.knowledge import Finding
+        from molab.knowledge.harvest import harvest_run
         from molab.workspace import Workspace
 
         try:
             ws = Workspace(root)
             run = ws.get_project(project_id).get_experiment(experiment_id).get_run(run_id)
-            item = run.harvest(
+            item = harvest_run(
+                run,
                 Finding,
                 narrative=narrative,
                 created_by=created_by,
