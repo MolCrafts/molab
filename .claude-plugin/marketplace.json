@@ -1,0 +1,21 @@
+{
+  "name": "molab",
+  "description": "Product-facing agent skills for molab — the experiment planner and its board convention.",
+  "owner": {
+    "name": "MolCrafts"
+  },
+  "plugins": [
+    {
+      "name": "molab",
+      "source": "./plugins/molab",
+      "description": "Interactive molab experiment planner: one step per turn, confirm before every write, ground every API on real source.",
+      "version": "0.1.0",
+      "keywords": [
+        "molab",
+        "experiment-planning",
+        "scientific-workflow",
+        "molcrafts"
+      ]
+    }
+  ]
+}
