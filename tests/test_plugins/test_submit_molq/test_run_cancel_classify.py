@@ -33,51 +33,64 @@ def _active_execution(run):
     return [ex for ex in run.executions if ex.status in ACTIVE_EXECUTION_STATUSES][-1]
 
 
-def _set_executor(run, **executor: object) -> None:
-    """Overwrite the active Execution's ``executor`` info in place."""
-    repo = _repo(run)
-    ex = _active_execution(run)
-    repo.update_operational(ex.id, executor=dict(executor))
-
-
-@pytest.fixture
-def running_run(tmp_path):
-    """A Run with one live (running) Execution whose ``executor`` is empty."""
+def _run(tmp_path):
+    """A Run with no Execution yet."""
     ws = Workspace(root=tmp_path, name="lab")
     ws.materialize()
     project = ws.add_project("p")
     experiment = project.add_experiment("e", workflow_source="s.py", params={})
-    run = experiment.add_run(params={"seed": 1})
-    repo = _repo(run)
-    state = repo.create(mode=ExecutionMode.INITIAL, created_by=SYSTEM_AGENT)
-    repo.start(state.id)
-    return run
+    return experiment.add_run(params={"seed": 1})
+
+
+@pytest.fixture
+def start_run(tmp_path):
+    """Factory: a Run whose one Execution was created QUEUED, then started.
+
+    ``executor`` keys are the start-time facts the worker writes (``host`` /
+    ``pid``) or the scheduler facts molq would have recorded; they are seeded
+    through ``ExecutionRepository.start`` on the fresh QUEUED record, never
+    through ``update_operational`` (which refuses start-time keys).
+    """
+
+    def _start(**executor: object):
+        run = _run(tmp_path)
+        repo = _repo(run)
+        state = repo.create(mode=ExecutionMode.INITIAL, created_by=SYSTEM_AGENT)
+        repo.start(state.id, executor=dict(executor))
+        return run
+
+    return _start
+
+
+@pytest.fixture
+def running_run(start_run):
+    """A Run with one live (running) Execution whose ``executor`` is empty."""
+    return start_run()
 
 
 class TestClassify:
-    def test_molq_backend_with_job_id_classifies_molq(self, running_run):
-        _set_executor(
-            running_run,
+    def test_molq_backend_with_job_id_classifies_molq(self, start_run):
+        run = start_run(
             backend="molq",
             scheduler="slurm",
             cluster_name="hpc",
             job_id="abc-uuid-123",
             scheduler_job_id="88001",
         )
-        plan = classify(running_run)
+        plan = classify(run)
         assert plan.kind == "molq"
         assert plan.detail == "hpc"
         assert plan.job_id == "abc-uuid-123"
 
-    def test_local_pid_same_host_classifies_local(self, running_run):
-        _set_executor(running_run, pid=12345, host=platform.node())
-        plan = classify(running_run)
+    def test_local_pid_same_host_classifies_local(self, start_run):
+        run = start_run(pid=12345, host=platform.node())
+        plan = classify(run)
         assert plan.kind == "local"
         assert plan.detail == "12345"
 
-    def test_pid_on_different_host_is_uncancellable(self, running_run):
-        _set_executor(running_run, pid=12345, host="some-other-host.example")
-        plan = classify(running_run)
+    def test_pid_on_different_host_is_uncancellable(self, start_run):
+        run = start_run(pid=12345, host="some-other-host.example")
+        plan = classify(run)
         assert plan.kind == "none"
         assert "different host" in plan.detail
 

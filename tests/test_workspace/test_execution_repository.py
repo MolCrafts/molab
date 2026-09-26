@@ -421,6 +421,33 @@ class TestExecutionRepositoryUpdateOperational:
 
         assert repo.get(state.id).executor == {"job_id": "j1"}
 
+    def test_executor_is_merged_without_overwriting(self, run: Run) -> None:
+        """arch-own-02d: ``executor=`` adds missing keys under the state lock, never overwrites."""
+        repo = _run_repo(run)
+        repo.create(
+            created_by=AgentRef(id="t", type="system"),
+            executor={"kind": "local", "host": "h", "pid": 1},
+        )
+
+        result = repo.update_operational("e01", executor={"job_id": "j1", "kind": "slurm"})
+
+        expected = {"kind": "local", "host": "h", "pid": 1, "job_id": "j1"}
+        assert result.executor == expected
+        assert repo.get("e01").executor == expected
+
+    @pytest.mark.parametrize("key", ["host", "pid", "python", "platform"])
+    def test_executor_start_time_keys_are_refused(self, run: Run, key: str) -> None:
+        """arch-own-02d (02a handoff): start-time executor keys are written only by ``start``."""
+        repo = _run_repo(run)
+        state = repo.create(created_by=_TEST_AGENT)
+        assert state.status is ExecutionStatus.QUEUED
+        before = _raw_state(repo, state.id)
+
+        with pytest.raises(ValueError, match=key):
+            repo.update_operational(state.id, executor={key: "x"})
+
+        assert _raw_state(repo, state.id) == before
+
     def test_mark_pruned_writes_schema_version_4(self, run: Run) -> None:
         repo = _run_repo(run)
         state = repo.create(created_by=_TEST_AGENT)
@@ -441,6 +468,19 @@ class TestExecutionRepositoryUpdateOperational:
 
         assert _POST_SEAL_FIELDS <= _IMMUTABLE_FIELDS
         assert _IMMUTABLE_FIELDS == _IDENTITY_FIELDS | _POST_SEAL_FIELDS | _PROVENANCE_FIELDS
+
+    def test_creation_fields_compose_named_sets(self) -> None:
+        from molab.workspace.execution_repository import (
+            _CREATION_FIELDS,
+            _CREATION_PROVENANCE_FIELDS,
+            _IDENTITY_FIELDS,
+            _PROVENANCE_FIELDS,
+            _START_PROVENANCE_FIELDS,
+        )
+
+        assert _PROVENANCE_FIELDS == _CREATION_PROVENANCE_FIELDS | _START_PROVENANCE_FIELDS
+        assert not _CREATION_PROVENANCE_FIELDS & _START_PROVENANCE_FIELDS
+        assert _CREATION_FIELDS == _IDENTITY_FIELDS | _CREATION_PROVENANCE_FIELDS
 
 
 def _write(path: Path, payload: dict[str, object]) -> None:
@@ -703,3 +743,254 @@ class TestFoldLegacyAttemptReview:
 
         assert ex.status is ExecutionStatus.FAILED
         assert (dst / "execution.json").is_file()
+
+
+# ── arch-own-02d-submit ──────────────────────────────────────────────────
+#
+# ``merge_remote`` folds the record a worker wrote on another filesystem into
+# the local record of the same attempt: the worker's status / seal / start-time
+# environment / artifacts win, the local executor (scheduler job ids) wins, a
+# sealed local record is never rewritten, and a remote record that is another
+# attempt or rewrites a creation-time ``environment`` key is refused. Locks and
+# history follow ``seal``: seal -> state, history outside the state lock, the
+# ``sealed_commit`` stamp under a re-taken state lock.
+
+_LOCAL_EXECUTOR = {"backend": "molq", "job_id": "j-1", "scheduler_job_id": "123"}
+_LOCAL_ENVIRONMENT = {"submit_cwd": "/home/u/proj", "config_hash": "sha256:c"}
+
+
+def _merge_setup(tmp_path: Path) -> tuple[ExecutionRepository, dict[str, object]]:
+    """A local QUEUED ``e01`` carrying job ids, and a sealed remote record of it."""
+    repo = _repo(tmp_path)
+    repo.create(
+        created_by=AgentRef(id="t", type="system"),
+        executor={"backend": "molq"},
+        environment=dict(_LOCAL_ENVIRONMENT),
+    )
+    local = repo.update_operational("e01", executor=dict(_LOCAL_EXECUTOR))
+    remote_doc: dict[str, object] = {
+        "schema_version": 4,
+        **local.model_dump(mode="json"),
+        "status": "succeeded",
+        "started_at": "2026-01-01T00:00:01Z",
+        "finished_at": "2026-01-01T00:00:09Z",
+        "sealed_at": "2026-01-01T00:00:10Z",
+        "sealed_commit": "deadbeef",
+        "executor": {"backend": "molq", "kind": "local", "host": "node7", "pid": 42},
+        "environment": {**local.environment, "host": "node7"},
+    }
+    return repo, remote_doc
+
+
+def _state_bytes(repo: ExecutionRepository, execution_id: str = "e01") -> bytes:
+    return Path(repo.state_path(execution_id)).read_bytes()
+
+
+class TestMergeRemote:
+    def test_local_executor_wins_remote_state_taken(self, tmp_path: Path) -> None:
+        repo, remote_doc = _merge_setup(tmp_path)
+
+        merged = repo.merge_remote("e01", remote_doc)
+
+        for got in (merged, repo.get("e01")):
+            assert got.status is ExecutionStatus.SUCCEEDED
+            assert got.sealed
+            assert got.executor == {
+                "backend": "molq",
+                "job_id": "j-1",
+                "scheduler_job_id": "123",
+                "kind": "local",
+                "host": "node7",
+                "pid": 42,
+            }
+            assert got.environment == {
+                "submit_cwd": "/home/u/proj",
+                "config_hash": "sha256:c",
+                "host": "node7",
+            }
+            assert got.finished_at == datetime(2026, 1, 1, 0, 0, 9, tzinfo=UTC)
+
+    def test_foreign_sealed_commit_dropped(self, tmp_path: Path) -> None:
+        repo, remote_doc = _merge_setup(tmp_path)
+
+        merged = repo.merge_remote("e01", remote_doc)
+
+        assert merged.sealed_commit != "deadbeef"
+        assert repo.get("e01").sealed_commit != "deadbeef"
+
+    def test_sealed_local_is_not_overwritten(self, tmp_path: Path) -> None:
+        repo, remote_doc = _merge_setup(tmp_path)
+        repo.seal("e01", ExecutionStatus.CANCELLED)
+        before = _state_bytes(repo)
+
+        merged = repo.merge_remote("e01", remote_doc)
+
+        assert merged.status is ExecutionStatus.CANCELLED
+        assert _state_bytes(repo) == before
+
+    @pytest.mark.parametrize(
+        "identity",
+        [{"mode": "rerun"}, {"seq": 2}],
+        ids=lambda identity: next(iter(identity)),
+    )
+    def test_identity_mismatch_raises(self, tmp_path: Path, identity: dict[str, object]) -> None:
+        repo, remote_doc = _merge_setup(tmp_path)
+        before = _state_bytes(repo)
+
+        with pytest.raises(ValueError):
+            repo.merge_remote("e01", {**remote_doc, **identity})
+
+        assert _state_bytes(repo) == before
+
+    def test_environment_rewrite_raises(self, tmp_path: Path) -> None:
+        repo, remote_doc = _merge_setup(tmp_path)
+        remote_doc["environment"] = {
+            **_LOCAL_ENVIRONMENT,
+            "submit_cwd": "/elsewhere",
+            "host": "node7",
+        }
+        before = _state_bytes(repo)
+
+        with pytest.raises(ValueError, match="creation-time environment"):
+            repo.merge_remote("e01", remote_doc)
+
+        assert _state_bytes(repo) == before
+
+    def test_environment_key_dropped_raises(self, tmp_path: Path) -> None:
+        repo, remote_doc = _merge_setup(tmp_path)
+        remote_doc["environment"] = {"submit_cwd": "/home/u/proj", "host": "node7"}
+        before = _state_bytes(repo)
+
+        with pytest.raises(ValueError, match="creation-time environment"):
+            repo.merge_remote("e01", remote_doc)
+
+        assert _state_bytes(repo) == before
+
+    def test_unknown_local_id_raises(self, tmp_path: Path) -> None:
+        repo, remote_doc = _merge_setup(tmp_path)
+
+        with pytest.raises(KeyError):
+            repo.merge_remote("e07", remote_doc)
+
+        assert not Path(repo.state_path("e07")).exists()
+
+    def test_running_remote_is_not_sealed(self, tmp_path: Path) -> None:
+        repo, remote_doc = _merge_setup(tmp_path)
+        remote_doc.update(status="running", finished_at=None, sealed_at=None, sealed_commit=None)
+
+        merged = repo.merge_remote("e01", remote_doc)
+
+        assert merged.status is ExecutionStatus.RUNNING
+        assert merged.sealed is False
+        assert repo.get("e01").status is ExecutionStatus.RUNNING
+
+    def test_sealed_history_sees_merged_record(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from molab.workspace.history import GitHistory
+
+        repo, remote_doc = _merge_setup(tmp_path)
+        real_lock = repo_mod.file_lock
+        events: list[tuple[str, str]] = []
+        held: list[str] = []
+        seen: list[dict[str, object]] = []
+
+        @contextlib.contextmanager
+        def recording_lock(path: Path, *args: object, **kwargs: object) -> Iterator[None]:
+            suffix = _lock_suffix(path)
+            with real_lock(path, *args, **kwargs):  # type: ignore[arg-type]
+                events.append(("acquire", suffix))
+                held.append(suffix)
+                try:
+                    yield
+                finally:
+                    held.remove(suffix)
+                    events.append(("release", suffix))
+
+        def spy_record(self: GitHistory, event: str, *args: object, **kwargs: object) -> str:
+            on_disk = json.loads(Path(repo.state_path("e01")).read_text(encoding="utf-8"))
+            seen.append(
+                {
+                    "event": event,
+                    "status": on_disk["status"],
+                    "sealed_commit": on_disk["sealed_commit"],
+                    "state_held": ".state.lock" in held,
+                }
+            )
+            events.append(("history", event))
+            return "c0ffee"
+
+        monkeypatch.setattr(repo_mod, "file_lock", recording_lock)
+        monkeypatch.setattr(GitHistory, "record", spy_record)
+
+        merged = repo.merge_remote("e01", remote_doc)
+
+        assert seen == [
+            {
+                "event": "ExecutionSealed",
+                "status": "succeeded",
+                "sealed_commit": None,
+                "state_held": False,
+            }
+        ]
+        acquired = [suffix for kind, suffix in events if kind == "acquire"]
+        assert acquired == [".seal.lock", ".state.lock", ".state.lock"]
+        # seal -> state (released) -> history -> state (released) -> seal released:
+        # no nested state locks, never state -> seal.
+        assert events == [
+            ("acquire", ".seal.lock"),
+            ("acquire", ".state.lock"),
+            ("release", ".state.lock"),
+            ("history", "ExecutionSealed"),
+            ("acquire", ".state.lock"),
+            ("release", ".state.lock"),
+            ("release", ".seal.lock"),
+        ]
+        for got in (merged, repo.get("e01")):
+            assert got.sealed_commit == "c0ffee"
+            assert got.status is ExecutionStatus.SUCCEEDED
+
+    def test_remote_status_behind_local_raises(self, tmp_path: Path) -> None:
+        repo, _remote_doc = _merge_setup(tmp_path)
+        started = repo.start("e01")
+        remote_doc: dict[str, object] = {
+            "schema_version": 4,
+            **started.model_dump(mode="json"),
+            "status": "queued",
+        }
+        before = _state_bytes(repo)
+
+        with pytest.raises(ValueError, match="status"):
+            repo.merge_remote("e01", remote_doc)
+
+        assert _state_bytes(repo) == before
+
+    def test_remote_sealed_but_not_terminal_raises(self, tmp_path: Path) -> None:
+        repo, remote_doc = _merge_setup(tmp_path)
+        remote_doc.update(status="running", finished_at=None, sealed_commit=None)
+        before = _state_bytes(repo)
+
+        with pytest.raises(ValueError, match="sealed"):
+            repo.merge_remote("e01", remote_doc)
+
+        assert _state_bytes(repo) == before
+
+    def test_remote_prune_stamp_raises(self, tmp_path: Path) -> None:
+        repo, remote_doc = _merge_setup(tmp_path)
+        remote_doc.update(pruned_at="2026-01-01T00:00:11Z", pruned_dirs=["out"])
+        before = _state_bytes(repo)
+
+        with pytest.raises(ValueError, match="prune"):
+            repo.merge_remote("e01", remote_doc)
+
+        assert _state_bytes(repo) == before
+
+    def test_remote_prune_dirs_only_raises(self, tmp_path: Path) -> None:
+        repo, remote_doc = _merge_setup(tmp_path)
+        remote_doc.update(pruned_dirs=["out"])
+        before = _state_bytes(repo)
+
+        with pytest.raises(ValueError, match="prune"):
+            repo.merge_remote("e01", remote_doc)
+
+        assert _state_bytes(repo) == before

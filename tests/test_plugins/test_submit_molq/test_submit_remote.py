@@ -223,12 +223,16 @@ class TestSubmitHandler:
         )
         handler(None, run, experiment, project)
 
-        # Stage-in happened (one upload of the run dir to the remote scratch).
+        # Stage-in happened: the run dir, then the one attempt's directory.
         uploads = [c for c in transport.calls if c[0] == "upload"]
-        assert len(uploads) == 1
+        assert len(uploads) == 2
         src, dst = uploads[0][1]
         assert src == str(Path(run.run_dir).resolve())
         assert dst.startswith("/scratch/me/molab/")
+        exec_src, exec_dst = uploads[1][1]
+        assert exec_src.endswith("/executions/e01")
+        assert exec_dst.startswith("/scratch/me/molab/")
+        assert exec_dst.endswith("/executions/e01")
 
         # Submitor was constructed with the target's scheduler + transport.
         assert captured_submitor["scheduler"] == "slurm"
@@ -313,14 +317,6 @@ class TestSubmitHandler:
         assert e01.executor["job_id"] == "fake-job-id"
         assert e01.executor["scheduler"] == "slurm"
 
-    @pytest.mark.xfail(
-        strict=True,
-        raises=AssertionError,
-        reason=(
-            "arch-own-02: SubmitHandler.__call__ without execution_id — submits a "
-            "workspace-allocated eNN whose QUEUED record exists before submit_job"
-        ),
-    )
     def test_cli_path_submits_a_precreated_enn_execution(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
@@ -337,14 +333,6 @@ class TestSubmitHandler:
         assert re.fullmatch(r"e\d{2,}", execution_id)
         assert (execution_id, "queued") in captured["records_at_submit"]
 
-    @pytest.mark.xfail(
-        strict=True,
-        raises=AssertionError,
-        reason=(
-            "arch-own-02: SubmitHandler.__call__ remote stage-in — uploads carry "
-            "<run_dir>/executions/e01/execution.json to the target"
-        ),
-    )
     def test_remote_staging_carries_the_execution_dir(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:

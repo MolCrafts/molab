@@ -29,7 +29,7 @@ from .execution_dirs import (
     list_execution_dirs,
     resolve_execution_dir,
 )
-from .execution_repository import ExecutionRepository
+from .execution_repository import _START_TIME_KEYS, ExecutionRepository
 from .file_store import FileStore
 from .history import AgentRef
 from .metrics_seam import MetricRecord, MetricsSink, create_metrics_writer
@@ -62,14 +62,6 @@ _PROFILE_FACTS: dict[str, Callable[[ProfileConfig], JSONValue]] = {
 
 _PROFILE_KEYS: frozenset[str] = frozenset(_PROFILE_FACTS)
 """Environment keys that only ``profile_config`` may supply at creation."""
-
-_START_TIME_KEYS: frozenset[str] = frozenset({"host", "pid", "python", "platform"})
-"""Keys known only when an attempt starts; a creator must never write them.
-
-``ExecutionRepository.start`` never overwrites a key already on the record, and
-``run_reaper`` reads ``executor.host`` before ``environment.host``. A creator
-that wrote ``host`` would pin the reaper to a machine the attempt never ran on.
-"""
 
 _START_FACTS: dict[str, Callable[[], JSONValue]] = {
     "python": lambda: sys.version,

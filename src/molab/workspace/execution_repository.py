@@ -12,7 +12,8 @@ code path holds the state lock and then asks for the seal lock. Locks are
 ``file_lock`` (flock / O_EXCL) and are not reentrant, so code already holding
 the state lock calls the lock-free ``_transition_locked`` kernel instead of
 ``transition``. History (``_record``) runs outside the state lock, so git never
-blocks a writer of the record.
+blocks a writer of the record. ``merge_remote`` (folding a worker's record from
+another filesystem into the local one) follows the same seal -> state order.
 
 Sealed records are immutable. *Sealing* is how a finished attempt is frozen:
 it is two writes. ``seal`` sets ``sealed_at`` and the terminal fields, then,
@@ -40,9 +41,10 @@ creation-time and start-time facts). The union is composed, not copied, so a
 field added to any one set is refused automatically. ``transition`` refuses
 all of them, and is never the way into RUNNING: ``start`` is, and it is the
 only caller that hands start-time provenance to the transition kernel.
-``update_operational`` writes ``executor`` and nothing else: a cluster
-scheduler's job id only exists once the job has been submitted, which is
-normally after creation and before start. Lifecycle fields (status, seal,
+``update_operational`` writes ``executor`` and nothing else, add-only and
+never a start-time key: a cluster scheduler's job id only exists once the job
+has been submitted, which is normally after creation and before start.
+Lifecycle fields (status, seal,
 evidence, artifacts) change only through their own verbs.
 
 Legacy attempts. ``fold_legacy_attempt`` builds a current-schema record from
@@ -121,17 +123,22 @@ _IDENTITY_FIELDS: frozenset[str] = frozenset(
 )
 """Fields that say which attempt a record is; fixed by ``create``."""
 
-_PROVENANCE_FIELDS: frozenset[str] = frozenset(
-    {
-        "based_on_execution_id",
-        "checkpoint_artifact_id",
-        "bypass_cache",
-        "source",
-        "environment",
-        "workflow_digest",
-        "started_at",
-    }
+_CREATION_PROVENANCE_FIELDS: frozenset[str] = frozenset(
+    {"based_on_execution_id", "checkpoint_artifact_id", "bypass_cache", "source"}
 )
+"""Creation-time facts other than identity; written once, by ``create``."""
+
+_START_PROVENANCE_FIELDS: frozenset[str] = frozenset(
+    {"environment", "workflow_digest", "started_at"}
+)
+"""Start-time facts; ``start`` writes them (``environment`` merged, add-only).
+
+``environment`` is here, not in ``_CREATION_PROVENANCE_FIELDS``, because it
+grows at start: the creator's keys are compared key by key (a later record may
+add keys, never change or drop one), not as a whole value.
+"""
+
+_PROVENANCE_FIELDS: frozenset[str] = _CREATION_PROVENANCE_FIELDS | _START_PROVENANCE_FIELDS
 """Creation-time and start-time facts; never written by an update verb.
 
 ``create`` writes the creation-time ones and ``start`` the start-time ones
@@ -154,6 +161,30 @@ so it is recorded afterwards with ``update_operational``.
 
 _OPERATIONAL_FIELDS: frozenset[str] = frozenset({"executor"})
 """The only fields ``update_operational`` writes."""
+
+_START_TIME_KEYS: frozenset[str] = frozenset({"host", "pid", "python", "platform"})
+"""Keys known only when an attempt starts; a creator must never write them.
+
+``ExecutionRepository.start`` never overwrites a key already on the record, and
+``run_reaper`` reads ``executor.host`` before ``environment.host``. A creator
+that wrote ``host`` would pin the reaper to a machine the attempt never ran on,
+so ``update_operational`` refuses an ``executor`` update carrying any of them.
+The one definition; ``execution_context`` imports it from here.
+"""
+
+_CREATION_FIELDS: frozenset[str] = _IDENTITY_FIELDS | _CREATION_PROVENANCE_FIELDS
+"""Fields a remote record must share with the local one to be the same attempt.
+
+Composed from the named sets, so a field added to either is compared too.
+"""
+
+_LIFECYCLE_RANK: dict[ExecutionStatus, int] = {
+    ExecutionStatus.QUEUED: 0,
+    ExecutionStatus.RUNNING: 1,
+    ExecutionStatus.FINALIZING: 1,
+    **dict.fromkeys(TERMINAL_EXECUTION_STATUSES, 2),
+}
+"""How far along its lifecycle a status is; a merge may never move a record back."""
 
 _EVIDENCE_FILES = {
     "runtime": "run.log",
@@ -465,10 +496,17 @@ class ExecutionRepository:
         the lifecycle fields, which change only through ``start`` /
         ``transition`` / ``seal``.
 
-        The new value replaces the whole ``executor`` mapping; it is not
-        merged. A caller adding keys passes ``{**current.executor, **new}``.
-        Nothing here forbids the start-time keys (``host`` / ``pid``) that
-        ``Run.create_execution`` refuses, so callers must not write them.
+        The ``executor`` merge is add-only: the written value is
+        ``{**updates["executor"], **current.executor}``, so a key already on
+        the record (the creator's ``backend`` / ``target``, a fast worker's
+        ``kind`` / ``host`` / ``pid``) keeps its value and only missing keys
+        are added. The read, the merge and the write all happen under the
+        attempt's state lock, the same lock ``start`` takes, so a worker
+        starting the attempt concurrently cannot lose its keys.
+
+        An ``executor`` update carrying a start-time key (``host`` / ``pid``
+        / ``python`` / ``platform``, ``_START_TIME_KEYS``) is refused: only
+        ``start`` writes those, and the reaper reads ``executor.host`` first.
 
         Args:
             execution_id: The attempt to update (``e01``).
@@ -478,8 +516,10 @@ class ExecutionRepository:
             The record as written.
 
         Raises:
-            ValueError: The attempt is sealed, or ``updates`` names a field
-                other than ``executor``.
+            ValueError: The attempt is sealed, ``updates`` names a field other
+                than ``executor``, or the ``executor`` update carries a
+                start-time key.
+            TypeError: The ``executor`` update is not a mapping.
             KeyError: No attempt ``execution_id`` exists under this Run.
         """
         with file_lock(self._state_lock(execution_id)):
@@ -497,9 +537,132 @@ class ExecutionRepository:
                     "update_operational only updates executor; lifecycle fields change "
                     f"through start/transition/seal: {lifecycle}"
                 )
-            state = current.model_copy(update=updates)
+            merged: dict[str, object] = {}
+            if "executor" in updates:
+                executor = updates["executor"]
+                if not isinstance(executor, Mapping):
+                    raise TypeError(
+                        f"executor update must be a mapping, got {type(executor).__name__}"
+                    )
+                start_keys = sorted(_START_TIME_KEYS.intersection(executor))
+                if start_keys:
+                    raise ValueError(
+                        f"cannot write start-time executor keys {start_keys} through "
+                        "update_operational; only start() writes them"
+                    )
+                merged["executor"] = {**executor, **current.executor}
+            state = current.model_copy(update=merged)
             self._write_state(state)
             return state
+
+    def merge_remote(self, execution_id: str, document: Mapping[str, object]) -> Execution:
+        """Fold the record a worker wrote on another filesystem into this one.
+
+        ``document`` is the remote ``execution.json`` of the same attempt. Its
+        ``schema_version`` key is dropped (the ``read_versioned_json`` rule, no
+        version gate) and the rest validated as an ``Execution``.
+
+        Merge rule: the remote record wins for status, ``started_at`` /
+        ``finished_at``, ``environment``, artifacts, evidence, error and
+        ``sealed_at``. ``executor`` is merged with the local keys winning (the
+        scheduler job ids); keys only the worker knows (``kind`` / ``host`` /
+        ``pid``) are kept. The remote ``sealed_commit`` is always dropped: it
+        names a commit in the remote tree's history. The status only moves
+        forward, and the prune stamp is never taken from the remote record
+        (``mark_pruned`` is its one writer).
+
+        Creation-time environment rule: every key of the local
+        ``environment`` must be present in the remote one with an equal value.
+        The remote record may only add keys (the worker's start-time facts);
+        it can never replace ``config_hash`` / ``script`` / ``submit_cwd``.
+
+        Locks follow ``seal``: the seal lock for the whole call, the state
+        lock around the read-check-write, history outside the state lock, and
+        the ``sealed_commit`` stamp under a re-taken state lock on a fresh
+        read of the record.
+
+        Args:
+            execution_id: The local attempt the remote record describes (``e01``).
+            document: The remote ``execution.json`` contents.
+
+        Returns:
+            The record as written; the unchanged local record when it was
+            already sealed (a sealed attempt is immutable, so a replayed merge
+            is a no-op).
+
+        Raises:
+            KeyError: No attempt ``execution_id`` exists locally; nothing is
+                created.
+            ValueError: The remote record is another attempt (a
+                ``_CREATION_FIELDS`` value differs); its status is behind the
+                local one (QUEUED < RUNNING / FINALIZING < terminal); it has
+                ``sealed_at`` with a non-terminal status; it carries a prune
+                stamp (``pruned_at`` / ``pruned_dirs``, written only by
+                ``mark_pruned``); or it rewrites or drops a creation-time
+                ``environment`` key. Nothing is written.
+            pydantic.ValidationError: ``document`` is not a valid ``Execution``.
+        """
+        remote = Execution.model_validate(
+            {key: value for key, value in document.items() if key != "schema_version"}
+        )
+        with file_lock(self._seal_lock(execution_id)):
+            with file_lock(self._state_lock(execution_id)):
+                current = self.get(execution_id)
+                if current.sealed:
+                    return current
+                mismatched = sorted(
+                    name
+                    for name in _CREATION_FIELDS
+                    if getattr(remote, name) != getattr(current, name)
+                )
+                if mismatched:
+                    raise ValueError(f"remote execution.json is not this attempt: {mismatched}")
+                if _LIFECYCLE_RANK[remote.status] < _LIFECYCLE_RANK[current.status]:
+                    raise ValueError(
+                        f"remote execution.json status {remote.status.value!r} is behind "
+                        f"local {current.status.value!r}"
+                    )
+                if remote.sealed_at is not None and (
+                    remote.status not in TERMINAL_EXECUTION_STATUSES
+                ):
+                    raise ValueError(
+                        "remote execution.json is sealed with non-terminal status "
+                        f"{remote.status.value!r}"
+                    )
+                if remote.pruned_at is not None or remote.pruned_dirs:
+                    raise ValueError(
+                        "remote execution.json carries a prune stamp; only mark_pruned "
+                        "writes pruned_at / pruned_dirs"
+                    )
+                rewritten = [
+                    key
+                    for key, value in current.environment.items()
+                    if key not in remote.environment or remote.environment[key] != value
+                ]
+                if rewritten:
+                    raise ValueError(
+                        "remote execution.json rewrites creation-time environment: "
+                        f"{sorted(rewritten)}"
+                    )
+                merged = remote.model_copy(
+                    update={
+                        "executor": {**remote.executor, **current.executor},
+                        "sealed_commit": None,
+                        "pruned_at": current.pruned_at,
+                        "pruned_dirs": current.pruned_dirs,
+                    }
+                )
+                self._write_state(merged)
+            if not merged.sealed:
+                return merged
+            commit = self._record("ExecutionSealed", merged, when=merged.sealed_at)
+            if commit is None:
+                return merged
+            with file_lock(self._state_lock(execution_id)):
+                latest = self.get(execution_id)
+                stamped = latest.model_copy(update={"sealed_commit": commit})
+                self._write_state(stamped)
+            return stamped
 
     # ── seal ─────────────────────────────────────────────────────────────
 
