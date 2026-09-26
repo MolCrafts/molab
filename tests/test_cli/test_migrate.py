@@ -16,6 +16,7 @@ import pytest
 from molab.cli import migrate_cmd
 from molab.cli.migrate_cmd import migrate_workspace
 from molab.workspace import Workspace
+from molab.workspace.schema_version import MOLAB_SCHEMA_VERSION
 from molab.workspace.validate import validate_workspace
 
 PROJECT_ID = "01a06e0a-0000-7000-8000-000000000001"
@@ -177,6 +178,20 @@ class TestFragmentsAreFolded:
         # those records are now the one inline list on execution.json.
         assert not list(attempt_dir.rglob("artifact.json"))
         assert (attempt_dir / "artifacts" / "metrics.jsonl").is_file()
+
+    def test_folded_record_is_current_schema(self, legacy: Path, tmp_path: Path) -> None:
+        """arch-own-02a §6 (D66): the fold writes through the repository's versioned write."""
+        target = tmp_path / "lab-v3"
+        migrate_workspace(legacy, target)
+        record = json.loads(
+            (
+                target
+                / "projects/peo-tg/experiments/ff-regression/runs/dp=5_seed=42"
+                / "executions/e01/execution.json"
+            ).read_text(encoding="utf-8")
+        )
+        assert record["schema_version"] == 4
+        assert record["schema_version"] == MOLAB_SCHEMA_VERSION
 
     def test_evidence_becomes_one_log(self, legacy: Path, tmp_path: Path) -> None:
         target = tmp_path / "lab-v3"

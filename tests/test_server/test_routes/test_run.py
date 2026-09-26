@@ -202,6 +202,22 @@ class TestCreateExecution:
         assert body["executor"] == {"backend": "molq", "target": None}
         assert [e.status.value for e in run.executions] == ["queued"]
 
+    def test_create_records_profile_keys(
+        self, served: ServedFactory, fresh_run: RunFixture
+    ) -> None:
+        """arch-own-02a §6: the route creates through ``Run.create_execution``."""
+        ws, exp, run = fresh_run
+        with served(ws) as client:
+            response = client.post(f"{_run_url(exp, run)}/executions", json={})
+        assert response.status_code == 201, response.text
+        body = response.json()
+        environment = body["environment"]
+        assert {"profile", "config", "config_hash", "submit_cwd"} <= set(environment)
+        assert "python" not in environment
+        assert "host" not in environment
+        assert body["executor"] == {"backend": "molq", "target": None}
+        assert run.execution("e01").environment == environment
+
     def test_initial_after_existing_attempt_is_422(
         self, served: ServedFactory, terminal_run: RunFixture
     ) -> None:

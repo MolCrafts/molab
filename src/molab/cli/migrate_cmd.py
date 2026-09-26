@@ -29,7 +29,12 @@ from typing import Annotated, Any
 import typer
 
 from molab.cli._common import rprint
+from molab.workspace.domain import Execution
 from molab.workspace.execution_dirs import ARTIFACTS, OUT, WORK
+from molab.workspace.execution_repository import (
+    fold_legacy_attempt,
+    legacy_attempt_created_at,
+)
 from molab.workspace.history import (
     AgentRef,
     EntityRef,
@@ -155,11 +160,6 @@ def _write_json(path: Path, payload: dict[str, Any]) -> None:
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def _created_at(payload: dict[str, Any], fallback: str) -> str:
-    value = payload.get("created_at")
-    return value if isinstance(value, str) else fallback
-
-
 def _cas_payload(source_root: Path, digest: str, kind: str) -> Path | None:
     bare = str(digest).removeprefix("sha256:")
     if len(bare) < 2:
@@ -179,17 +179,17 @@ def _migrate_execution(
     source_root: Path,
     target_root: Path,
     report: Report,
-) -> dict[str, Any]:
-    """Fold one attempt's scattered sidecars into a single ``execution.json``."""
-    state = _read_json(src / "execution.json")
-    environment = _read_json(src / "environment.json")
-    exception = _read_json(src / "exception.json")
-    job = _read_json(src / "job.json")
-    slug = execution_slug(seq)
+) -> Execution:
+    """Carry one attempt's bytes across, then fold its record in the workspace.
+
+    The byte work (hard links, log merge, job flattening) lives here; the
+    record fold — legacy sidecars into one ``execution.json`` — is
+    ``fold_legacy_attempt``, the repository's own versioned write.
+    """
     dst.mkdir(parents=True, exist_ok=True)
 
-    # Products: the bytes become `artifacts/`, the records become one inline list.
-    artifacts: list[dict[str, Any]] = []
+    # Products: the bytes become `artifacts/`; the records ride into the fold.
+    artifacts: list[tuple[dict[str, object], str]] = []
     art_dir = src / "artifacts"
     if art_dir.is_dir():
         for item in sorted(art_dir.iterdir()):
@@ -216,14 +216,7 @@ def _migrate_execution(
                     _link(payload, dst / out_rel, report)
             elif (art_dir / out_name).exists():
                 _link(art_dir / out_name, dst / out_rel, report)
-            record.pop("schema_version", None)
-            record["name"] = name
-            record["path"] = (dst / out_rel).relative_to(target_root).as_posix()
-            record.setdefault("source_path", record.get("source_path") or f"{OUT.name}/{out_name}")
-            record["execution_id"] = slug
-            record["run_id"] = run_id
-            record["project_id"] = project_id
-            artifacts.append(record)
+            artifacts.append((record, out_rel))
             report.artifacts += 1
 
     # Evidence: one log, not four files.
@@ -265,51 +258,17 @@ def _migrate_execution(
     if (src / WORK.name).is_dir():
         _link_tree(src / WORK.name, dst / OUT.name, report)
 
-    created = _created_at(state, datetime.now(UTC).isoformat())
-    error = state.get("error") or (exception or None)
-    executor = state.get("executor") or ({"job": job} if job else {})
-    if isinstance(environment.get("environment"), dict):
-        environment = environment["environment"]
-    if environment and not state.get("environment"):
-        state["environment"] = environment
-    # An attempt with no state file never recorded how it ended. That is
-    # "interrupted", never "succeeded" — the migration must not invent a
-    # result the source tree does not claim.
-    status = str(state.get("status") or "interrupted")
-    sealed = state.get("sealed_event_id") is not None or status in {
-        "succeeded",
-        "failed",
-        "cancelled",
-        "interrupted",
-    }
-    record = {
-        "id": slug,
-        "seq": seq,
-        "run_id": run_id,
-        "project_id": project_id,
-        "mode": state.get("mode") or ("initial" if seq == 1 else "rerun"),
-        "status": status,
-        "created_at": created,
-        "started_at": state.get("started_at") or created,
-        "finished_at": state.get("finished_at"),
-        "created_by": state.get("created_by") or {"id": "molab", "type": "system", "name": "Molab"},
-        "based_on_execution_id": execution_slug(seq - 1)
-        if seq > 1 and state.get("based_on_execution_id")
-        else None,
-        "checkpoint_artifact_id": state.get("checkpoint_artifact_id"),
-        "executor": executor,
-        "environment": state.get("environment") or {},
-        "observed_input_ids": state.get("observed_input_ids") or [],
-        "artifacts": artifacts,
-        "evidence": [],
-        "declaration_diff": {},
-        "error": error,
-        "sealed_at": state.get("finished_at") if sealed else None,
-        "sealed_commit": None,
-    }
-    _write_json(dst / "execution.json", _stamp(record))
+    execution = fold_legacy_attempt(
+        src,
+        dst,
+        workspace_root=target_root,
+        seq=seq,
+        run_id=run_id,
+        project_id=project_id,
+        artifacts=artifacts,
+    )
     report.executions += 1
-    return record
+    return execution
 
 
 def _migrate_run(
@@ -343,7 +302,7 @@ def _migrate_run(
     if src_execs.is_dir():
         ordered = sorted(
             (d for d in src_execs.iterdir() if d.is_dir()),
-            key=lambda d: (_created_at(_read_json(d / "execution.json"), ""), d.name),
+            key=lambda d: (legacy_attempt_created_at(d), d.name),
         )
         for index, exec_dir in enumerate(ordered, start=1):
             last_attempt = dst / "executions" / execution_slug(index)

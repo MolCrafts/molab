@@ -8,7 +8,7 @@ import platform
 import sys
 import threading
 import traceback
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
@@ -51,6 +51,75 @@ def _system_agent() -> AgentRef:
         type="system",
         name=f"Python {platform.python_version()} on {host}",
     )
+
+
+_PROFILE_FACTS: dict[str, Callable[[ProfileConfig], JSONValue]] = {
+    "profile": lambda cfg: cfg.name,
+    "config": lambda cfg: cfg.to_dict(),
+    "config_hash": lambda cfg: cfg.content_hash() if len(cfg) > 0 or cfg.name else None,
+}
+"""How each profile-derived environment key is computed at creation."""
+
+_PROFILE_KEYS: frozenset[str] = frozenset(_PROFILE_FACTS)
+"""Environment keys that only ``profile_config`` may supply at creation."""
+
+_START_TIME_KEYS: frozenset[str] = frozenset({"host", "pid", "python", "platform"})
+"""Keys known only when an attempt starts; a creator must never write them.
+
+``ExecutionRepository.start`` never overwrites a key already on the record, and
+``run_reaper`` reads ``executor.host`` before ``environment.host``. A creator
+that wrote ``host`` would pin the reaper to a machine the attempt never ran on.
+"""
+
+_START_FACTS: dict[str, Callable[[], JSONValue]] = {
+    "python": lambda: sys.version,
+    "platform": platform.platform,
+    "host": platform.node,
+    "pid": os.getpid,
+}
+"""How each start-time key (``_START_TIME_KEYS``) is read from this process."""
+
+_EXECUTOR_START_KEYS: frozenset[str] = frozenset({"host", "pid"})
+"""The start-time keys a local starter also writes into ``executor``."""
+
+
+def _creation_environment(profile_config: ProfileConfig | None) -> dict[str, JSONValue]:
+    """Build the creation-time environment from the active profile.
+
+    The one home of the profile rule shared by every creator: every key in
+    ``_PROFILE_KEYS`` is always written, and ``config_hash`` is set only when
+    the profile has content or a name.
+
+    Args:
+        profile_config: The active profile; ``None`` means an empty, unnamed one.
+
+    Returns:
+        A dict whose keys are exactly ``_PROFILE_KEYS``.
+    """
+    cfg = profile_config if profile_config is not None else ProfileConfig({}, name=None)
+    return {key: fact(cfg) for key, fact in _PROFILE_FACTS.items()}
+
+
+def _start_environment() -> dict[str, JSONValue]:
+    """The start-time environment facts of the current process.
+
+    Returns:
+        A dict whose keys are exactly ``_START_TIME_KEYS``.
+    """
+    return {key: _START_FACTS[key]() for key in _START_TIME_KEYS}
+
+
+def _start_executor(environment: dict[str, JSONValue]) -> dict[str, JSONValue]:
+    """The start-time executor facts, taken from the start-time environment.
+
+    Args:
+        environment: The result of ``_start_environment``.
+
+    Returns:
+        ``kind`` (always ``"local"``) plus ``_EXECUTOR_START_KEYS`` from
+        *environment*.
+    """
+    return {"kind": "local", **{key: environment[key] for key in _EXECUTOR_START_KEYS}}
 
 
 class _BoundEvidenceLog:
@@ -123,6 +192,27 @@ class ExecutionContext:
     Run is immutable scientific intent. Operational state, evidence, results,
     heartbeat, workflow state, and emitted outputs all live below this
     Execution's physical directory.
+
+    Constructing the context writes nothing. Entering it creates the QUEUED
+    record (unless *execution_id* names one that already exists) and then
+    starts it; leaving it seals the attempt.
+
+    Args:
+        run: The Run this attempt realizes.
+        profile_config: The active profile; ``None`` means empty and unnamed.
+        execution_id: A *preallocated* attempt, i.e. one whose record was
+            already created (for example by a scheduler submitter) and is
+            still QUEUED. When that record exists, *mode*,
+            *based_on_execution_id*, *checkpoint_artifact_id* and
+            *bypass_cache* are ignored: the record was fixed at creation.
+        mode: How a newly created attempt relates to earlier ones.
+        based_on_execution_id: The predecessor of a newly created attempt.
+        checkpoint_artifact_id: The checkpoint a newly created ``resume``
+            attempt starts from.
+        created_by: Who creates the attempt; defaults to this process.
+        bypass_cache: Whether a newly created attempt ignores the workflow
+            node cache (the per-task result store that lets an unchanged task
+            reuse its earlier output). Read back through :attr:`bypass_cache`.
     """
 
     def __init__(
@@ -135,6 +225,7 @@ class ExecutionContext:
         based_on_execution_id: str | None = None,
         checkpoint_artifact_id: str | None = None,
         created_by: AgentRef | None = None,
+        bypass_cache: bool = False,
     ) -> None:
         self.run = run
         self.run_dir = Path(run.run_dir)
@@ -144,6 +235,7 @@ class ExecutionContext:
         self._mode = mode
         self._based_on_execution_id = based_on_execution_id
         self._checkpoint_artifact_id = checkpoint_artifact_id
+        self._bypass_cache = bypass_cache
         self._created_by = created_by or _system_agent()
         self._state: Execution | None = None
         self._active_task_id: str | None = None
@@ -179,6 +271,16 @@ class ExecutionContext:
     def based_on_execution_id(self) -> str | None:
         """Selected predecessor for retry/resume/reproduction provenance."""
         return self._state.based_on_execution_id if self._state is not None else None
+
+    @property
+    def bypass_cache(self) -> bool:
+        """Whether this attempt ignores the workflow node cache.
+
+        Read from the recorded Execution, not from the constructor argument,
+        so a preallocated attempt reports the flag its creator wrote.
+        ``False`` before the context is entered.
+        """
+        return self._state.bypass_cache if self._state is not None else False
 
     def get_dir(self, name: str, *parts: str) -> Path:
         """One of this attempt's directories, created on demand.
@@ -266,7 +368,13 @@ class ExecutionContext:
                     )
         else:
             state = self._create(None)
-        self._state = self._executions.start(state.id)
+        # The QUEUED check above only gives a friendlier message; the locked
+        # ``start`` decides. If another process started the record in between,
+        # it raises here: no heartbeat, the context is not entered.
+        environment = _start_environment()
+        self._state = self._executions.start(
+            state.id, environment=environment, executor=_start_executor(environment)
+        )
         self._execution_id = state.id
         self._prepare_execution_files()
         self.log("run").append(
@@ -422,27 +530,36 @@ class ExecutionContext:
             self.log("run").append(f"interrupted: {reason}")
 
     def _create(self, execution_id: str | None) -> Execution:
-        environment: dict[str, JSONValue] = {
-            "python": sys.version,
-            "platform": platform.platform(),
-            "host": platform.node(),
-            "pid": os.getpid(),
-            "profile": self._profile_config.name,
-            "config": self._profile_config.to_dict(),
-            "config_hash": (
-                self._profile_config.content_hash()
-                if len(self._profile_config) > 0 or self._profile_config.name
-                else None
-            ),
-        }
+        """Write this attempt's QUEUED record with creation-time facts only.
+
+        Start-time facts (host, python, pid) are added by ``start`` in
+        ``__enter__``, so both paths record them at the same moment.
+
+        Args:
+            execution_id: ``None`` allocates the next ``eNN`` through
+                ``Run.create_execution``; an explicit id whose record is
+                missing takes the create-if-missing path (removed in 02h).
+
+        Returns:
+            The QUEUED record as written.
+        """
+        if execution_id is None:
+            return self.run.create_execution(
+                mode=self._mode,
+                based_on_execution_id=self._based_on_execution_id,
+                checkpoint_artifact_id=self._checkpoint_artifact_id,
+                bypass_cache=self._bypass_cache,
+                profile_config=self._profile_config,
+                created_by=self._created_by,
+            )
         return self._executions.create(
             mode=self._mode,
             created_by=self._created_by,
             execution_id=execution_id,
             based_on_execution_id=self._based_on_execution_id,
             checkpoint_artifact_id=self._checkpoint_artifact_id,
-            executor={"kind": "local", "host": platform.node(), "pid": os.getpid()},
-            environment=environment,
+            environment=_creation_environment(self._profile_config),
+            bypass_cache=self._bypass_cache,
         )
 
     def _prepare_execution_files(self) -> None:

@@ -59,7 +59,7 @@ def cancel_run(
             ``rerun`` for failed/cancelled; nothing for succeeded; plain
             ``run`` for pending unless ``allow_pending``).
     """
-    from .domain import ACTIVE_EXECUTION_STATUSES, ExecutionMode, ExecutionStatus
+    from .domain import ACTIVE_EXECUTION_STATUSES
     from .history import AgentRef
     from .run_reaper import reap_zombie_run
 
@@ -68,12 +68,10 @@ def cancel_run(
     if not active:
         status = run.status_label
         if status == "pending" and allow_pending:
-            repo = run._execution_repository()
-            state = repo.create(
-                mode=ExecutionMode.INITIAL,
-                created_by=AgentRef(id="operator", type="person", name="operator"),
+            state = run.create_execution(
+                created_by=AgentRef(id="operator", type="person", name="operator")
             )
-            repo.seal(state.id, ExecutionStatus.CANCELLED)
+            run.cancel(state.id)
             return None
         owner = {
             "pending": "it has not started — `molab run` owns pending runs",

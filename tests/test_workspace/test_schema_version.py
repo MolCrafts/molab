@@ -44,6 +44,11 @@ def _every_entity_json(workspace_root) -> list:
 
 
 class TestSchemaVersionEmitted:
+    def test_current_version_is_4(self):
+        # arch-own-02a: Execution gains bypass_cache / source / workflow_digest
+        # (and arch-own-01's pruned_at / pruned_dirs ride the same bump).
+        assert MOLAB_SCHEMA_VERSION == 4
+
     def test_every_entity_json_carries_schema_version(self, tmp_path):
         ws = _seed_workspace(tmp_path / "lab")
         targets = _every_entity_json(ws.root)
@@ -92,7 +97,7 @@ class TestOtherSchemaAccepted:
         assert Workspace.load(root).name == "From Tomorrow"
 
     def test_workspace_older_schema_loads(self, tmp_path):
-        # The real case: `lab` on disk is schema 2 while the build writes 3.
+        # The real case: `lab` on disk is one schema behind the version this build writes.
         root = tmp_path / "ws_old"
         root.mkdir()
         (root / "workspace.json").write_text(

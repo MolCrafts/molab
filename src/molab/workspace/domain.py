@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Literal
+from typing import Literal, overload
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -14,6 +14,10 @@ from molab._typing import JSONValue
 from .history import AgentRef, EntityRef
 
 
+@overload
+def _as_utc(value: datetime) -> datetime: ...
+@overload
+def _as_utc(value: datetime | None) -> datetime | None: ...
 def _as_utc(value: datetime | None) -> datetime | None:
     """Attach UTC to a naive timestamp so records stay comparable.
 
@@ -142,6 +146,63 @@ class EvidenceRef(BaseModel):
     size: int
 
 
+class SourceFile(BaseModel):
+    """One source file captured for an Execution, identified by its digest.
+
+    A *digest* is a short fixed-length fingerprint computed from a file's
+    bytes (here with the SHA-256 hash function): any change to the bytes
+    changes it, so it identifies the content independently of where the file
+    lives.
+
+    Attributes:
+        name: The file's name inside the captured source set (``wf.py``).
+        sha256: The content digest of the file's bytes, prefixed with the
+            algorithm name (``sha256:<hex>``).
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    name: str
+    sha256: str
+
+
+class SourceManifest(BaseModel):
+    """The workflow source an Execution was created from.
+
+    This is the value type of :attr:`Execution.source`, not a provenance
+    sub-object: it records which files were captured and where they came from.
+    It carries no directory key, because the directory the files are copied to
+    is derived from the declared execution directories, not stored (the
+    ``source/`` directory, declared by arch-own-02b, which also adds the
+    capture that fills this manifest).
+
+    Attributes:
+        entrypoint: Basename of the entry script (``wf.py``).
+        locator: Absolute path of the entry script at capture time. It records
+            where the source came from and is never used as identity.
+        files: The captured files with their digests.
+        vcs_commit: The commit of the version-control system (VCS, e.g. git)
+            the source was checked out at, if known.
+        vcs_dirty: Whether the working tree had uncommitted changes, if known.
+        captured_at: When the source was captured; a naive value (one with no
+            time zone) is read as UTC.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    entrypoint: str
+    locator: str
+    files: tuple[SourceFile, ...] = ()
+    vcs_commit: str | None = None
+    vcs_dirty: bool | None = None
+    captured_at: datetime
+
+    @field_validator("captured_at", mode="after")
+    @classmethod
+    def _utc(cls, value: datetime) -> datetime:
+        return _as_utc(value)
+
+
 class ArtifactRef(BaseModel):
     """Stable reference to one observed Execution output."""
 
@@ -209,6 +270,31 @@ class Execution(BaseModel):
     checkpoint_artifact_id: str | None = None
     executor: dict[str, JSONValue] = Field(default_factory=dict)
     environment: dict[str, JSONValue] = Field(default_factory=dict)
+    bypass_cache: bool = False
+    """Whether this attempt was created to ignore the workflow node cache.
+
+    The workflow node cache stores each task's output under a key built from
+    the task's code and inputs, so an unchanged task can reuse its earlier
+    output instead of running again. ``True`` means this attempt recomputes
+    every task. A creation-time fact: it is written when the record is
+    created and never changed afterwards.
+    """
+    source: SourceManifest | None = None
+    """The workflow source this attempt was created from, if it was captured.
+
+    A creation-time fact. ``None`` on records that captured no source; no
+    production creator captures one until arch-own-02b.
+    """
+    workflow_digest: str | None = None
+    """Digest of the compiled workflow this attempt ran, recorded at start.
+
+    The *compiled workflow* is the frozen task graph the engine executes; its
+    digest (``sha256:...``) changes whenever that graph does. A start-time
+    fact written by ``ExecutionRepository.start``; always ``None`` on a QUEUED
+    record. Its production writers are arch-own-03a (``Run.start`` and
+    ``ExecutionContext`` pass it to ``start``) and arch-own-03g
+    (``execute_run`` computes it).
+    """
     observed_input_ids: tuple[str, ...] = ()
     artifacts: tuple[Artifact, ...] = ()
     evidence: tuple[EvidenceRef, ...] = ()
@@ -326,4 +412,6 @@ __all__ = [
     "ExperimentRevision",
     "RunDefinition",
     "RunStatusSummary",
+    "SourceFile",
+    "SourceManifest",
 ]

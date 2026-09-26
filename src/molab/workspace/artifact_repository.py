@@ -28,6 +28,7 @@ from .fs import FileSystem, PathArg
 from .fs_local import LocalFileSystem
 from .history import AgentRef, EntityRef, GitHistory, Relation
 from .naming import entity_slug
+from .schema_version import MOLAB_SCHEMA_VERSION
 
 
 def _hash_file(fs: FileSystem, path: str) -> tuple[str, int]:
@@ -271,11 +272,11 @@ class AssetRepository:
         self.fs.mkdir(self.fs.join(asset_root, "versions"), parents=True, exist_ok=True)
         self.fs.atomic_write_json(
             self.fs.join(asset_root, "asset.json"),
-            {"schema_version": 3, **asset.model_dump(mode="json")},
+            {"schema_version": MOLAB_SCHEMA_VERSION, **asset.model_dump(mode="json")},
         )
         self.fs.atomic_write_json(
             self.fs.join(asset_root, "versions", f"v{version.version:03d}.json"),
-            {"schema_version": 3, **version.model_dump(mode="json")},
+            {"schema_version": MOLAB_SCHEMA_VERSION, **version.model_dump(mode="json")},
         )
         self.history.record(
             "AssetVersionCreated",

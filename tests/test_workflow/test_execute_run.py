@@ -113,6 +113,30 @@ class TestExecuteRun:
         with pytest.raises(ValueError, match="rerun=True"):
             run.execute(_build_wf(), fresh=True)
 
+    def test_fresh_rerun_records_bypass_cache(self, tmp_path: Path) -> None:
+        """``fresh=True`` bypasses the cache, so the attempt's record says so."""
+        flag = tmp_path / "healed"
+
+        def build() -> Workflow:
+            wf = Workflow(name="healing")
+
+            @wf.task
+            def stage_a(x: int) -> int:
+                if not Path(str(flag)).exists():
+                    raise RuntimeError("not healed yet")
+                return x
+
+            return wf
+
+        run = _make_run(tmp_path, params={"x": 1})
+        with pytest.raises(RunFailedError):
+            run.execute(build())
+        flag.write_text("ok")
+
+        run.execute(build(), rerun=True, fresh=True)
+
+        assert [e.bypass_cache for e in run.executions] == [False, True]
+
     def test_failed_then_explicit_retry_verbs(self, tmp_path: Path) -> None:
         """Retrying is explicit: a failed run refuses a plain call, resume is
         checkpoint-gated, and ``rerun=True`` opens a fresh Execution."""

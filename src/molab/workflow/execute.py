@@ -197,6 +197,7 @@ async def aexecute_run(
         mode=mode,
         based_on_execution_id=predecessor_id,
         checkpoint_artifact_id=checkpoint_artifact_id,
+        bypass_cache=fresh,
     ) as ctx:
         result = await WorkflowRuntime().execute(
             compiled,

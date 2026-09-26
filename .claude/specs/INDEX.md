@@ -12,7 +12,7 @@ _Step 2 target architecture (plan `pasted-content-id-0977-you-are-scalable-puddl
 |---|---|---|
 | 00 | [arch-own-00-safety-net](arch-own-00-safety-net.md) | 安全网：活路径特征测试与目标行为 strict xfail [done] |
 | 01 | [arch-own-01-cleanup](arch-own-01-cleanup.md) | Phase 1 安全清理（死代码删除 + 四处写入顺序/锁/心跳/prune 修复） [done] |
-| 02a | [arch-own-02a-record](arch-own-02a-record.md) | Execution record carries creation-time vs start-time provenance [approved] |
+| 02a | [arch-own-02a-record](arch-own-02a-record.md) | Execution record carries creation-time vs start-time provenance [done] |
 | 02b | [arch-own-02b-capture](arch-own-02b-capture.md) | per-execution source capture and config-aware run identity [approved] |
 | 02c | [arch-own-02c-dispatch](arch-own-02c-dispatch.md) | molab run creates the Execution record at dispatch time; the worker reads it [approved] |
 | 02d | [arch-own-02d-submit](arch-own-02d-submit.md) | molq submitter creates the QUEUED eNN before submit; staging carries executions/<id>/ and merges the remote record [approved] |

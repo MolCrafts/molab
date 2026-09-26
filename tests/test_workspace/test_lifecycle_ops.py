@@ -122,3 +122,15 @@ class TestZombieReapedFirst:
         with pytest.raises(ValueError, match="failed"):
             cancel_run(run)
         assert _repo(run).get(execution_id).status is ExecutionStatus.FAILED
+
+
+class TestCancelPending:
+    def test_pending_cancel_creates_through_run(self, run: Run) -> None:
+        """arch-own-02a §6: the pending-cancel attempt is created by ``Run.create_execution``."""
+        assert cancel_run(run, allow_pending=True) is None
+
+        [execution] = run.executions
+        assert execution.mode is ExecutionMode.INITIAL
+        assert execution.status is ExecutionStatus.CANCELLED
+        assert "config_hash" in execution.environment
+        assert execution.created_by.id == "operator"

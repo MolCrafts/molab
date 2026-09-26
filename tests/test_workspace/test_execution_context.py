@@ -14,14 +14,17 @@ second raw-``pathlib`` heartbeat implementation on the context.
 
 from __future__ import annotations
 
+import os
+import platform
 import threading
 import time
 from pathlib import Path
 
 import pytest
 
-from molab.workspace import Workspace
-from molab.workspace.domain import ExecutionStatus
+from molab._typing import JSONValue
+from molab.workspace import Run, Workspace
+from molab.workspace.domain import Execution, ExecutionMode, ExecutionStatus
 from molab.workspace.execution_context import ExecutionContext
 from molab.workspace.fs_local import LocalFileSystem
 from tests.support.counting_fs import CountingFileSystem
@@ -106,6 +109,95 @@ class TestExecutionContextHeartbeat:
 
     def test_private_path_helper_removed(self) -> None:
         assert not hasattr(ExecutionContext, "_heartbeat_path")
+
+
+class TestExecutionContextProvenance:
+    """arch-own-02a §5: creation-time facts at create, host/python at start."""
+
+    def test_start_records_host_and_python(self, run: Run) -> None:
+        with run.start():
+            pass
+
+        [execution] = run.executions
+        assert "config_hash" in execution.environment
+        assert "python" in execution.environment
+        assert execution.environment["host"] == platform.node()
+        assert execution.executor["kind"] == "local"
+        assert execution.executor["pid"] == os.getpid()
+
+    def test_preallocated_record_gains_start_facts_on_entry(self, run: Run) -> None:
+        rec = run.create_execution(environment={"submit_cwd": "/x"})
+        assert "python" not in rec.environment
+
+        with run.start(execution_id=rec.id):
+            pass
+
+        [execution] = run.executions
+        assert execution.environment["submit_cwd"] == "/x"
+        assert "python" in execution.environment
+
+    def test_create_if_missing_records_both_halves(self, run: Run) -> None:
+        with run.start():
+            pass
+
+        with run.start(execution_id="exec-custom", mode=ExecutionMode.RERUN):
+            pass
+
+        custom = run.execution("exec-custom")
+        assert custom.id == "exec-custom"
+        assert "config_hash" in custom.environment
+        assert "python" in custom.environment
+
+
+class TestExecutionContextStartOnce:
+    """arch-own-02a §5: the locked start decides; a lost race never enters."""
+
+    def test_start_lost_after_precheck_does_not_enter(
+        self, run: Run, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        rec = run.create_execution()
+        ctx2 = run.start(execution_id=rec.id)
+        original = ctx2._executions.start
+
+        def racing_start(
+            execution_id: str,
+            *,
+            environment: dict[str, JSONValue] | None = None,
+            executor: dict[str, JSONValue] | None = None,
+            workflow_digest: str | None = None,
+        ) -> Execution:
+            # Another process starts the record after ctx2's QUEUED precheck.
+            run._execution_repository().start(rec.id)
+            return original(
+                execution_id,
+                environment=environment,
+                executor=executor,
+                workflow_digest=workflow_digest,
+            )
+
+        monkeypatch.setattr(ctx2._executions, "start", racing_start)
+
+        with pytest.raises(ValueError, match="not queued"), ctx2:
+            pass
+
+        assert run.execution(rec.id).status is ExecutionStatus.RUNNING
+        assert len(run.executions) == 1
+        assert not (Path(str(run.run_dir)) / "executions" / rec.id / "alive").exists()
+
+
+class TestExecutionContextBypassCache:
+    """arch-own-02a §5: ``ctx.bypass_cache`` reads the recorded flag."""
+
+    def test_true_when_requested(self, run: Run) -> None:
+        with run.start(bypass_cache=True) as ctx:
+            assert ctx.bypass_cache is True
+
+    def test_false_by_default(self, run: Run) -> None:
+        with run.start() as ctx:
+            assert ctx.bypass_cache is False
+
+    def test_false_before_entry(self, run: Run) -> None:
+        assert run.start().bypass_cache is False
 
 
 class _AliveRemoveFails(CountingFileSystem):

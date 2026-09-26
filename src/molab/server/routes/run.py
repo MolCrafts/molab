@@ -284,9 +284,8 @@ def create_execution(
             raise HTTPException(status_code=422, detail=f"unknown target {body.target!r}") from exc
     if body.dispatch and target is None:
         raise HTTPException(status_code=422, detail="dispatch requires a compute target")
-    repo = _execution_repository(workspace, run)
     try:
-        state = repo.create(
+        state = run.create_execution(
             mode=ExecutionMode(body.mode),
             created_by=AgentRef(id="ui", type="person", name="Molab UI"),
             based_on_execution_id=body.based_on_execution_id,
@@ -301,7 +300,7 @@ def create_execution(
         try:
             _dispatch_to_molq(target, run, execution_id=state.id)
         except Exception as exc:
-            repo.seal(
+            _execution_repository(workspace, run).seal(
                 state.id,
                 ExecutionStatus.FAILED,
                 error={"type": type(exc).__name__, "message": str(exc)},

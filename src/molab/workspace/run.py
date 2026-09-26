@@ -46,8 +46,15 @@ from .domain import (
     ExecutionStatus,
     RunStatusSummary,
 )
-from .execution_context import RunContext
+from .execution_context import (
+    _PROFILE_KEYS,
+    _START_TIME_KEYS,
+    RunContext,
+    _creation_environment,
+    _system_agent,
+)
 from .execution_repository import ExecutionRepository
+from .history import AgentRef
 
 _logger = get_logger(__name__)
 
@@ -564,21 +571,38 @@ class Run(Folder):
         mode: ExecutionMode = ExecutionMode.INITIAL,
         based_on_execution_id: str | None = None,
         checkpoint_artifact_id: str | None = None,
+        bypass_cache: bool = False,
     ) -> RunContext:
         """Return a context manager for executing this run.
-
-        *profile_config* selects the active molcfg profile; when omitted
-        the run executes with an empty (defaults-only) :class:`ProfileConfig`.
-
-        *execution_id* pre-allocates the execution slot — used by external
-        submitters (e.g. molq) that need to know the per-attempt directory
-        ahead of worker startup.
 
         The returned :class:`RunContext` supports both ``with`` and
         ``async with`` — choose whichever matches the caller's body.
         For the no-arg case, ``Run`` itself is also a context manager
         (sugar that calls ``self.start()`` internally); see
         :meth:`__enter__` / :meth:`__aenter__`.
+
+        Args:
+            profile_config: The active molcfg profile; when omitted the run
+                executes with an empty (defaults-only) :class:`ProfileConfig`.
+            execution_id: Start a pre-allocated attempt — used by external
+                submitters (e.g. molq, the plugin that hands an attempt to a
+                cluster's batch-queue scheduler) that need to know the
+                per-attempt directory ahead of worker startup. When the
+                record already exists, ``mode``, ``based_on_execution_id``,
+                ``checkpoint_artifact_id`` and ``bypass_cache`` are ignored:
+                the record was fixed when it was created.
+            mode: How a newly created attempt relates to earlier ones.
+            based_on_execution_id: The predecessor of a newly created attempt.
+            checkpoint_artifact_id: The checkpoint a newly created ``resume``
+                attempt starts from.
+            bypass_cache: Record that a newly created attempt ignores the
+                workflow node cache — the per-task result store that lets an
+                unchanged task reuse its earlier output instead of running
+                again. Read back as ``ctx.bypass_cache``.
+
+        Returns:
+            An un-entered :class:`RunContext`; entering it creates (if needed)
+            and starts the attempt.
         """
         return RunContext(
             self,
@@ -587,7 +611,108 @@ class Run(Folder):
             mode=mode,
             based_on_execution_id=based_on_execution_id,
             checkpoint_artifact_id=checkpoint_artifact_id,
+            bypass_cache=bypass_cache,
         )
+
+    def create_execution(
+        self,
+        *,
+        mode: ExecutionMode = ExecutionMode.INITIAL,
+        based_on_execution_id: str | None = None,
+        checkpoint_artifact_id: str | None = None,
+        bypass_cache: bool = False,
+        profile_config: ProfileConfig | None = None,
+        environment: dict[str, JSONValue] | None = None,
+        executor: dict[str, JSONValue] | None = None,
+        created_by: AgentRef | None = None,
+    ) -> Execution:
+        """Record a new QUEUED attempt carrying its creation-time facts only.
+
+        The one public way to allocate an attempt (``e01``, ``e02``, …) ahead
+        of starting it. A *profile* is the named configuration the run
+        executes under (a :class:`ProfileConfig`). The record's
+        ``environment`` always holds the three profile keys ``profile`` (its
+        name) / ``config`` (its contents) / ``config_hash`` (a digest of it)
+        built from *profile_config* (``config_hash`` is ``None`` for an
+        empty, unnamed profile); the caller's *environment* (e.g. ``script``,
+        ``submit_cwd``) is merged in beside them. Start-time facts (host,
+        python, platform, pid) are added later, once, by whoever starts the
+        attempt.
+
+        Key rules, checked before anything is written:
+
+        - ``profile`` / ``config`` / ``config_hash`` come only from
+          *profile_config*; naming one in *environment* is refused.
+        - The start-time keys ``host`` / ``pid`` / ``python`` / ``platform``
+          are refused in *environment* **and** *executor*. Starting never
+          overwrites an existing key, and the zombie reaper (``run_reaper``,
+          which marks a ``running`` attempt failed once its owning process on
+          the recorded host is gone) trusts the recorded host, so a
+          creator-written host would pin it to a machine the attempt never
+          ran on.
+
+        Ordering: the signature has no ``source_entrypoint`` parameter yet.
+        It lands in arch-own-02b together with the :class:`SourceManifest`
+        it needs (the record of which workflow source files were captured).
+        Once it does, the order is: build the manifest, ``create(source=)``,
+        then copy the files into the attempt's ``source/`` directory. The
+        ``ExecutionCreated`` history commit therefore precedes the
+        ``source/`` files; history is a soft dependency, and the later
+        Started / Sealed commits carry the files.
+
+        Args:
+            mode: How this attempt relates to earlier ones.
+            based_on_execution_id: The predecessor, when *mode* needs one.
+            checkpoint_artifact_id: The checkpoint to resume from (``resume`` only).
+            bypass_cache: Whether the attempt ignores the workflow node cache;
+                recorded once and never changed.
+            profile_config: The active profile; ``None`` means empty and unnamed.
+            environment: Extra creation-time environment facts.
+            executor: Creation-time executor facts (backend, target).
+            created_by: Who creates the attempt; defaults to this process.
+
+        Returns:
+            The QUEUED record as written.
+
+        Raises:
+            ValueError: *environment* names a profile key, *environment* or
+                *executor* names a start-time key, or *mode* and the
+                predecessor / checkpoint disagree.
+            KeyError: The named predecessor does not exist.
+        """
+        extra = dict(environment or {})
+        profile_conflicts = sorted(_PROFILE_KEYS & extra.keys())
+        if profile_conflicts:
+            raise ValueError(f"environment keys {profile_conflicts} come only from profile_config")
+        start_conflicts = sorted(_START_TIME_KEYS & (extra.keys() | (executor or {}).keys()))
+        if start_conflicts:
+            raise ValueError(
+                f"start-time keys {start_conflicts} cannot be recorded at creation; "
+                "they are added when the Execution starts"
+            )
+        return self._execution_repository().create(
+            mode=mode,
+            created_by=created_by or _system_agent(),
+            based_on_execution_id=based_on_execution_id,
+            checkpoint_artifact_id=checkpoint_artifact_id,
+            executor=dict(executor or {}),
+            environment={**_creation_environment(profile_config), **extra},
+            bypass_cache=bypass_cache,
+        )
+
+    def execution(self, execution_id: str) -> Execution:
+        """Read one attempt of this run.
+
+        Args:
+            execution_id: The attempt id (``e01``).
+
+        Returns:
+            The attempt's current record.
+
+        Raises:
+            KeyError: No attempt ``execution_id`` exists under this run.
+        """
+        return self._execution_repository().get(execution_id)
 
     def execute(
         self,

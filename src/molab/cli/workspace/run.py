@@ -441,7 +441,12 @@ def _make_local_inprocess_handler(
             # completed nodes; the no-fallback semantics live with the
             # workflow layer (see ``seed_from_execution``).
             execution_id, seed_outputs = seed_from_execution(mol_run)
-        with RunContext(mol_run, profile_config=profile_cfg, execution_id=execution_id) as ctx:
+        with RunContext(
+            mol_run,
+            profile_config=profile_cfg,
+            execution_id=execution_id,
+            bypass_cache=fresh,
+        ) as ctx:
             asyncio.run(
                 _execute_compiled(
                     spec,
