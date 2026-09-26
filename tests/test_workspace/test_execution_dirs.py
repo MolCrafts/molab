@@ -136,3 +136,33 @@ class TestPrunableDirs:
         finally:
             mod._REGISTRY.pop("test-unprunable-dir")
             mod._ORDER.remove("test-unprunable-dir")
+
+
+class TestSourceDir:
+    """arch-own-02b §2: ``source/`` is a declared, versioned, non-product peer."""
+
+    def test_source_is_versioned_and_not_a_product(self):
+        from molab.workspace.execution_dirs import SOURCE
+
+        declared = resolve_execution_dir("source")
+
+        assert declared is SOURCE
+        assert declared.versioned is True
+        assert declared.products is False
+
+    def test_source_is_a_declared_name(self):
+        from molab.workspace.execution_dirs import SOURCE
+
+        assert SOURCE.name in execution_dir_names()
+
+    def test_product_set_is_unchanged(self):
+        from molab.workspace.execution_dirs import SOURCE
+
+        assert SOURCE not in product_dirs()
+        assert {d.name for d in product_dirs()} == {"out", "artifacts"}
+
+    def test_scratch_set_is_unchanged(self):
+        from molab.workspace.execution_dirs import SOURCE
+
+        assert SOURCE not in scratch_dirs()
+        assert {d.name for d in scratch_dirs()} == {"out", "work"}

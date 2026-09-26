@@ -18,6 +18,12 @@ from molab.workspace.run import Run, compute_run_definition_hash
 
 WORKSPACE_SRC = Path(__file__).resolve().parents[2] / "src" / "molab" / "workspace"
 
+# captured at HEAD 56d5b466 (unchanged through 71576c24): sha256 of the canonical JSON
+# b'{"experiment_revision_id":"r","input_asset_ids":[],"parameters":{"a":1},"workflow_snapshot":null}'
+# i.e. compute_run_definition_hash(experiment_revision_id="r", parameters={"a": 1}) before
+# arch-own-02b touched the function. Hard-coded golden: it must never change.
+LEGACY = "sha256:f02450eb8f8c17af093bd72ea04ce070cd69a35593a892293d2538c2d3bbd00b"
+
 
 class TestOneImplementation:
     def test_no_other_module_hand_rolls_a_run_definition_hash(self) -> None:
@@ -116,3 +122,37 @@ class TestIdentityIsNeverThePath:
             workflow_snapshot={"entrypoint": "/old/wf.py:compiled"},
         )
         assert with_snapshot.metadata.definition_hash == plain.metadata.definition_hash
+
+
+class TestComputeRunDefinitionHash:
+    """arch-own-02b §4: ``config_hash`` folds in only when given."""
+
+    def test_legacy_hash_is_unchanged(self) -> None:
+        assert (
+            compute_run_definition_hash(experiment_revision_id="r", parameters={"a": 1}) == LEGACY
+        )
+
+    def test_explicit_none_config_hash_is_the_legacy_hash(self) -> None:
+        assert (
+            compute_run_definition_hash(
+                experiment_revision_id="r", parameters={"a": 1}, config_hash=None
+            )
+            == LEGACY
+        )
+
+    def test_config_hash_changes_the_identity(self) -> None:
+        folded = compute_run_definition_hash(
+            experiment_revision_id="r", parameters={"a": 1}, config_hash="sha256:x"
+        )
+
+        assert folded != LEGACY
+
+    def test_distinct_config_hashes_give_distinct_identities(self) -> None:
+        x = compute_run_definition_hash(
+            experiment_revision_id="r", parameters={"a": 1}, config_hash="sha256:x"
+        )
+        y = compute_run_definition_hash(
+            experiment_revision_id="r", parameters={"a": 1}, config_hash="sha256:y"
+        )
+
+        assert x != y

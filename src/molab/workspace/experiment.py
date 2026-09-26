@@ -429,6 +429,7 @@ class Experiment(Folder):
         target: str | None = None,
         workflow_snapshot: dict[str, JSONValue] | None = None,
         input_asset_ids: tuple[str, ...] = (),
+        config_hash: str | None = None,
     ) -> Run:
         """Add a new logical Run under this Experiment.
 
@@ -436,12 +437,16 @@ class Experiment(Folder):
         (``dp=5_seed=42``); ``id=`` overrides only the UUIDv7 identity. Re-adding the
         ``definition_hash`` supports comparison and duplicate detection, but
         never substitutes for identity: every call without an explicit id gets
-        a fresh UUIDv7 Run.
+        a fresh UUIDv7 Run. ``config_hash`` (the profile configuration's hash)
+        folds into ``definition_hash`` when given; see
+        :func:`~molab.workspace.run.compute_run_definition_hash`. To find an
+        existing run by its definition instead, use :meth:`ensure_run`.
         """
         definition_hash = compute_run_definition_hash(
             experiment_revision_id=self.metadata.revision_id,
             parameters=params,
             input_asset_ids=input_asset_ids,
+            config_hash=config_hash,
         )
         resolved_id = id if id is not None else generate_uuid7()
         resolved_target = target if target is not None else self._entity_metadata.default_target
@@ -488,40 +493,125 @@ class Experiment(Folder):
             )
         return runs
 
+    def ensure_run(
+        self,
+        params: dict[str, JSONValue] | None = None,
+        *,
+        config_hash: str | None = None,
+        target: str | None = None,
+        input_asset_ids: tuple[str, ...] = (),
+    ) -> Run:
+        """Return the Run with this definition, creating it if there is none.
+
+        The one "find by ``definition_hash`` or create" verb. The hash is
+        :func:`~molab.workspace.run.compute_run_definition_hash` over this
+        experiment's revision, ``params``, ``input_asset_ids`` and
+        ``config_hash``; among existing runs whose ``definition_hash``
+        matches, the earliest created (ties broken by run id) is returned. On a miss the run is
+        created through :meth:`add_run`, so it gets a fresh UUIDv7 id — there
+        is deliberately no ``id=`` here.
+
+        ``target`` is used only when creating: execution location is not
+        identity, so it never takes part in the lookup. A run added by
+        :meth:`add_run` without a config is found again by
+        ``ensure_run(params)``; the same params under a different
+        ``config_hash`` are a different run (its directory disambiguates,
+        e.g. ``a=1`` / ``a=1-2``).
+
+        Not safe against concurrent processes: two callers racing on the same
+        definition may each create a run, exactly as with :meth:`add_run`.
+
+        Args:
+            params: The run's parameter cell.
+            config_hash: Profile configuration hash, or ``None`` for none.
+            target: Compute target for a newly created run.
+            input_asset_ids: Declared input asset ids.
+
+        Returns:
+            The existing or newly created (and persisted) :class:`Run`.
+        """
+        run, _ = self._ensure_run(
+            params,
+            config_hash=config_hash,
+            target=target,
+            input_asset_ids=input_asset_ids,
+            index=self._definition_index(),
+        )
+        return run
+
+    def _definition_index(self) -> dict[str, Run]:
+        """Map each ``definition_hash`` to its earliest-created run.
+
+        Duplicates (``add_run`` allocates a fresh run every call) resolve by
+        the record — earliest ``created_at``, then run id — never by
+        directory name, so renaming a run directory cannot change the answer.
+        """
+        runs = sorted(self.list_runs(), key=lambda r: (r.metadata.created_at, r.id))
+        index: dict[str, Run] = {}
+        for run in runs:
+            index.setdefault(run.metadata.definition_hash, run)
+        return index
+
+    def _ensure_run(
+        self,
+        params: dict[str, JSONValue] | None,
+        *,
+        config_hash: str | None,
+        target: str | None,
+        input_asset_ids: tuple[str, ...],
+        index: dict[str, Run],
+    ) -> tuple[Run, bool]:
+        """Find the run for this definition in *index*, or create and index it.
+
+        Returns:
+            ``(run, created)`` — ``created`` is ``True`` only for a new run.
+        """
+        definition_hash = compute_run_definition_hash(
+            experiment_revision_id=self.metadata.revision_id,
+            parameters=params,
+            input_asset_ids=input_asset_ids,
+            config_hash=config_hash,
+        )
+        existing = index.get(definition_hash)
+        if existing is not None:
+            return existing, False
+        run = self.add_run(
+            params,
+            config_hash=config_hash,
+            target=target,
+            input_asset_ids=input_asset_ids,
+        )
+        index.setdefault(definition_hash, run)
+        return run, True
+
     def _seed_missing_runs(
         self,
         space: ParamSpace,
         *,
         target: str | None = None,
-        workflow_snapshot: dict[str, JSONValue] | None = None,
     ) -> list[Run]:
         """Seed one fresh Run per *not yet present* cell (idempotent).
 
         :meth:`add_runs` materializes every cell unconditionally — a Run is
         immutable intent, so re-adding creates fresh Runs. ``define`` and
-        ``sweep`` are the *seeding* verbs and stay idempotent: a cell whose
-        ``definition_hash`` already exists is skipped, so re-declaring the
-        same sweep returns only newly-created runs (an empty list on a repeat
-        declaration) and never duplicates.
+        ``sweep`` are the *seeding* verbs and stay idempotent: each cell goes
+        through :meth:`_ensure_run`, so a cell whose ``definition_hash``
+        already exists is skipped, re-declaring the same sweep returns only
+        newly-created runs (an empty list on a repeat declaration) and never
+        duplicates.
         """
-        existing = {run.metadata.definition_hash for run in self.list_runs()}
+        index = self._definition_index()
         runs: list[Run] = []
         for cell in space:
-            cell_params = dict(cell)
-            definition_hash = compute_run_definition_hash(
-                experiment_revision_id=self.metadata.revision_id,
-                parameters=cell_params,
+            run, created = self._ensure_run(
+                cast("dict[str, JSONValue]", dict(cell)),
+                config_hash=None,
+                target=target,
+                input_asset_ids=(),
+                index=index,
             )
-            if definition_hash in existing:
-                continue
-            existing.add(definition_hash)
-            runs.append(
-                self.add_run(
-                    params=cast("dict[str, JSONValue]", cell_params),
-                    target=target,
-                    workflow_snapshot=workflow_snapshot,
-                )
-            )
+            if created:
+                runs.append(run)
         return runs
 
     def define(

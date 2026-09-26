@@ -43,14 +43,19 @@ __all__ = [
 
 
 def derive_run_id(params: Mapping[str, JSONValue], *, length: int = 16) -> str:
-    """Derive a deterministic, content-addressed run id from a parameter dict.
+    """Derive the legacy 16-hex run id from a parameter dict — legacy reader only.
+
+    New runs never get this id: every run created today is a UUIDv7
+    (:meth:`Experiment.add_run` / :meth:`Experiment.ensure_run`), and
+    "find the run for this definition" is a ``definition_hash`` lookup
+    (:meth:`Experiment.ensure_run`). This function survives only so runs
+    written under the old scheme can still be looked up by their exact id
+    (``cli._common.deterministic_run_id``); do not use it to allocate.
 
     The id is a sha256 over the canonicalized parameters — keys sorted, each
     rendered ``k=repr(v)`` — so it is a pure function of the params and
-    independent of dict insertion order. Identical params always map to the
-    same id, which makes run materialization idempotent (see
-    :meth:`Experiment.add_runs`). This is the single canonicalization shared by
-    the workspace layer and ``cli._common.deterministic_run_id``.
+    independent of dict insertion order. This is the single canonicalization
+    shared by the workspace layer and ``cli._common.deterministic_run_id``.
 
     Args:
         params: The run's parameter mapping (JSON-serializable values).

@@ -16,9 +16,10 @@ from pathlib import Path
 
 import pytest
 
+from molab.ids import compute_content_hash
 from molab.profile import ProfileConfig
 from molab.workspace import Run, Workspace
-from molab.workspace.domain import ExecutionMode, ExecutionStatus
+from molab.workspace.domain import ExecutionMode, ExecutionStatus, SourceFile, SourceManifest
 from molab.workspace.history import GitHistory
 
 _START_TIME_KEYS = ("host", "pid", "python", "platform")
@@ -39,6 +40,14 @@ def _spy_history(monkeypatch: pytest.MonkeyPatch, entity_file: str) -> list[tupl
 
     monkeypatch.setattr(GitHistory, "record", spy)
     return seen
+
+
+def _source_tree(factory: pytest.TempPathFactory) -> Path:
+    """``entry.py`` + first-party ``helper.py``, outside the workspace tree."""
+    src = factory.mktemp("src")
+    (src / "entry.py").write_text("import helper\nimport json\n", encoding="utf-8")
+    (src / "helper.py").write_text("VALUE = 1\n", encoding="utf-8")
+    return src / "entry.py"
 
 
 class TestRunMaterialize:
@@ -114,6 +123,95 @@ class TestRunCreateExecution:
         rerun = run.create_execution(mode=ExecutionMode.RERUN)
 
         assert rerun.id == "e02"
+
+    # --- arch-own-02b §3: source capture per execution ----------------------
+
+    def test_source_entrypoint_records_manifest_and_copies_per_execution(
+        self, run: Run, tmp_path_factory: pytest.TempPathFactory
+    ) -> None:
+        entry = _source_tree(tmp_path_factory)
+
+        rec = run.create_execution(source_entrypoint=entry)
+
+        assert rec.id == "e01"
+        assert rec.status is ExecutionStatus.QUEUED
+        assert rec.source is not None
+        assert rec.source.entrypoint == "entry.py"
+        copied = run.run_dir / "executions" / "e01" / "source" / "entry.py"
+        assert copied.is_file()
+        assert rec.source.files[0].sha256 == compute_content_hash(copied)
+        assert not (run.run_dir / "source").exists()
+
+    def test_without_source_entrypoint_nothing_is_captured(self, run: Run) -> None:
+        rec = run.create_execution()
+
+        assert rec.source is None
+        assert not (run.run_dir / "executions" / "e01" / "source").exists()
+
+    def test_failed_capture_seals_the_attempt_failed(
+        self,
+        run: Run,
+        tmp_path_factory: pytest.TempPathFactory,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from molab.workspace.source_snapshot import SourceCaptureError, source_manifest
+
+        entry = _source_tree(tmp_path_factory)
+        real = source_manifest(entry)
+        forged = real.model_copy(
+            update={
+                "files": (
+                    SourceFile(name="entry.py", sha256="sha256:" + "0" * 64),
+                    *real.files[1:],
+                )
+            }
+        )
+
+        def forged_manifest(*_args: object, **_kwargs: object) -> SourceManifest:
+            return forged
+
+        monkeypatch.setattr("molab.workspace.run.source_manifest", forged_manifest)
+
+        with pytest.raises(SourceCaptureError):
+            run.create_execution(source_entrypoint=entry)
+
+        last = run.executions[-1]
+        assert last.status is ExecutionStatus.FAILED
+        assert last.error is not None
+        assert last.error["type"] == "SourceCaptureError"
+        assert last.sealed is True
+
+    def test_missing_entrypoint_creates_no_record(
+        self, run: Run, tmp_path_factory: pytest.TempPathFactory
+    ) -> None:
+        missing = tmp_path_factory.mktemp("nosrc") / "entry.py"
+
+        with pytest.raises(FileNotFoundError):
+            run.create_execution(source_entrypoint=missing)
+
+        assert run.executions == []
+
+    def test_interrupted_capture_seals_the_attempt_failed(
+        self,
+        run: Run,
+        tmp_path_factory: pytest.TempPathFactory,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        entry = _source_tree(tmp_path_factory)
+
+        def interrupted(*_args: object, **_kwargs: object) -> None:
+            raise KeyboardInterrupt
+
+        monkeypatch.setattr("molab.workspace.run.copy_sources", interrupted)
+
+        with pytest.raises(KeyboardInterrupt):
+            run.create_execution(source_entrypoint=entry)
+
+        last = run.executions[-1]
+        assert last.status is ExecutionStatus.FAILED
+        assert last.sealed is True
+        assert last.error is not None
+        assert last.error["type"] == "SourceCaptureError"
 
 
 class TestRunExecution:

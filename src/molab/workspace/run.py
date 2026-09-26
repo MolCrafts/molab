@@ -55,6 +55,7 @@ from .execution_context import (
 )
 from .execution_repository import ExecutionRepository
 from .history import AgentRef
+from .source_snapshot import SourceCaptureError, copy_sources, source_manifest
 
 _logger = get_logger(__name__)
 
@@ -157,6 +158,7 @@ def compute_run_definition_hash(
     experiment_revision_id: str | None,
     parameters: Mapping[str, object] | None,
     input_asset_ids: tuple[str, ...] = (),
+    config_hash: str | None = None,
 ) -> str:
     """The ONE definition-hash for a Run — every seeding path calls this.
 
@@ -182,15 +184,32 @@ def compute_run_definition_hash(
     and the server folded a synthesized snapshot in while ``Experiment.define``
     did not — so the same experiment + params got a different identity
     depending on whether a script or the HTTP API created it.
+
+    ``config_hash`` is the profile configuration's content hash. It folds
+    into the digest **only when given**: with ``None`` the ``"config_hash"``
+    key is absent from the digest input, so the input is byte-identical to
+    the one hashed before the key existed and every existing
+    ``definition_hash`` stays stable. Two runs of the same parameters under
+    different profiles are therefore two runs.
+
+    Args:
+        experiment_revision_id: The owning experiment revision.
+        parameters: The run's parameter cell.
+        input_asset_ids: Declared input asset ids.
+        config_hash: Profile configuration hash, or ``None`` for none.
+
+    Returns:
+        The ``"sha256:…"`` definition hash.
     """
-    return compute_definition_hash(
-        {
-            "experiment_revision_id": experiment_revision_id,
-            "parameters": dict(parameters or {}),
-            "workflow_snapshot": None,
-            "input_asset_ids": tuple(input_asset_ids),
-        }
-    )
+    definition: dict[str, object] = {
+        "experiment_revision_id": experiment_revision_id,
+        "parameters": dict(parameters or {}),
+        "workflow_snapshot": None,
+        "input_asset_ids": tuple(input_asset_ids),
+    }
+    if config_hash is not None:
+        definition["config_hash"] = config_hash
+    return compute_definition_hash(definition)
 
 
 @register_entity_class
@@ -625,6 +644,7 @@ class Run(Folder):
         environment: dict[str, JSONValue] | None = None,
         executor: dict[str, JSONValue] | None = None,
         created_by: AgentRef | None = None,
+        source_entrypoint: PathArg | None = None,
     ) -> Execution:
         """Record a new QUEUED attempt carrying its creation-time facts only.
 
@@ -651,14 +671,26 @@ class Run(Folder):
           creator-written host would pin it to a machine the attempt never
           ran on.
 
-        Ordering: the signature has no ``source_entrypoint`` parameter yet.
-        It lands in arch-own-02b together with the :class:`SourceManifest`
-        it needs (the record of which workflow source files were captured).
-        Once it does, the order is: build the manifest, ``create(source=)``,
-        then copy the files into the attempt's ``source/`` directory. The
-        ``ExecutionCreated`` history commit therefore precedes the
+        Source capture, when *source_entrypoint* is given, runs in this
+        order, after the key rules:
+
+        1. Build the :class:`SourceManifest` (the entrypoint and its
+           first-party imports, with digests and VCS state) from the
+           originals. A missing entrypoint or an unreadable file raises
+           here, before any record exists.
+        2. Create the QUEUED record with ``source=`` that manifest.
+        3. Copy the files into this attempt's ``executions/eNN/source/`` and
+           verify each copy against the manifest. If that fails — or is
+           interrupted (``KeyboardInterrupt`` / ``SystemExit``) — the attempt
+           is sealed ``failed`` with error type ``SourceCaptureError`` (the
+           record keeps the manifest it tried to capture) and the error is
+           raised, so no QUEUED record claims source it does not hold. An
+           interrupt is re-raised as itself, not wrapped.
+
+        The ``ExecutionCreated`` history commit therefore precedes the
         ``source/`` files; history is a soft dependency, and the later
-        Started / Sealed commits carry the files.
+        Started / Sealed commits carry the files. Nothing is written to a
+        run-level ``runs/<slug>/source/``: source belongs to the attempt.
 
         Args:
             mode: How this attempt relates to earlier ones.
@@ -670,6 +702,8 @@ class Run(Folder):
             environment: Extra creation-time environment facts.
             executor: Creation-time executor facts (backend, target).
             created_by: Who creates the attempt; defaults to this process.
+            source_entrypoint: The workflow script to capture; ``None``
+                captures nothing and leaves ``source`` unset.
 
         Returns:
             The QUEUED record as written.
@@ -679,6 +713,12 @@ class Run(Folder):
                 *executor* names a start-time key, or *mode* and the
                 predecessor / checkpoint disagree.
             KeyError: The named predecessor does not exist.
+            FileNotFoundError: *source_entrypoint* is not a file; no record
+                is created.
+            SourceCaptureError: A file in the source closure exists but
+                cannot be read (raised before any record exists), or the
+                source copy failed or did not match the manifest (the attempt
+                was sealed ``failed``).
         """
         extra = dict(environment or {})
         profile_conflicts = sorted(_PROFILE_KEYS & extra.keys())
@@ -690,7 +730,9 @@ class Run(Folder):
                 f"start-time keys {start_conflicts} cannot be recorded at creation; "
                 "they are added when the Execution starts"
             )
-        return self._execution_repository().create(
+        manifest = source_manifest(source_entrypoint) if source_entrypoint is not None else None
+        repo = self._execution_repository()
+        state = repo.create(
             mode=mode,
             created_by=created_by or _system_agent(),
             based_on_execution_id=based_on_execution_id,
@@ -698,7 +740,29 @@ class Run(Folder):
             executor=dict(executor or {}),
             environment={**_creation_environment(profile_config), **extra},
             bypass_cache=bypass_cache,
+            source=manifest,
         )
+        if manifest is None:
+            return state
+        try:
+            copy_sources(manifest, repo.execution_dir(state.id), fs=repo.fs)
+        except BaseException as exc:
+            # BaseException too: an interrupt between create and copy must not
+            # leave a QUEUED record naming source files that are not on disk.
+            message = (
+                str(exc)
+                if isinstance(exc, Exception)
+                else f"source capture interrupted by {type(exc).__name__}"
+            )
+            repo.seal(
+                state.id,
+                ExecutionStatus.FAILED,
+                error={"type": "SourceCaptureError", "message": message},
+            )
+            if isinstance(exc, SourceCaptureError) or not isinstance(exc, Exception):
+                raise
+            raise SourceCaptureError(str(exc)) from exc
+        return state
 
     def execution(self, execution_id: str) -> Execution:
         """Read one attempt of this run.

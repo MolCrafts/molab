@@ -9,12 +9,12 @@ import traceback
 from collections.abc import Callable, Mapping
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any, cast
+from typing import TYPE_CHECKING, Annotated, cast
 
 import typer
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
-from molab._typing import JSONValue
+from molab._typing import JSONValue, TaskOutput
 from molab.cli._app import app
 from molab.cli._common import console, deterministic_run_id, reap_zombie_run, rprint
 from molab.cli._target import TargetOption, resolve_workspace_target
@@ -22,7 +22,7 @@ from molab.profile import MolCfg, ProfileConfig, load_molcfg
 from molab.profile.loader import find_default_config
 from molab.workflow import default_binding_registry
 from molab.workspace.run import RunStatus
-from molab.workspace.source_snapshot import snapshot_sources
+from molab.workspace.source_snapshot import SourceCaptureError, snapshot_sources
 from molab.workspace.target import LocalTarget, RemoteTarget
 
 if TYPE_CHECKING:
@@ -362,9 +362,16 @@ def _dispatch_runs(
                         # Capture the defining script + its first-party import
                         # closure under run_dir/source/ for reproducibility — the
                         # path in ``script`` is not enough if the tree later changes.
-                        source_snapshot = snapshot_sources(
-                            script.resolve(), Path(str(mol_run.run_dir))
-                        )
+                        try:
+                            source_snapshot = snapshot_sources(
+                                script.resolve(), Path(str(mol_run.run_dir))
+                            )
+                        except SourceCaptureError as exc:
+                            rprint(
+                                f"[red]Error:[/red] could not capture the source of "
+                                f"{script.name} for run {mol_run.id}: {exc}"
+                            )
+                            raise typer.Exit(1) from exc
                         mol_run.update_provenance(
                             script=str(script.resolve()),
                             source_snapshot=source_snapshot,
@@ -399,7 +406,7 @@ async def _execute_compiled(
     *,
     run_context: RunContextLike,
     execution_id: str | None = None,
-    seed_outputs: Mapping[str, Any] | None = None,
+    seed_outputs: Mapping[str, TaskOutput] | None = None,
     bypass_cache: bool = False,
 ) -> object:
     """Execute a compiled workflow on the workflow layer's own runtime.
