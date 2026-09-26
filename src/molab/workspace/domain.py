@@ -216,6 +216,23 @@ class Execution(BaseModel):
     error: dict[str, JSONValue] | None = None
     sealed_at: datetime | None = None
     sealed_commit: str | None = None
+    pruned_at: datetime | None = None
+    """When bulk directories were last pruned from this sealed attempt (UTC).
+
+    A *prune* deletes an attempt's reproducible bulk directories to free disk
+    space and keeps this record. ``pruned_at`` is half of the post-seal prune
+    stamp, the one field set written after ``sealed_at``. Only
+    ``ExecutionRepository.mark_pruned`` writes it. ``None`` means the attempt
+    was never pruned.
+    """
+    pruned_dirs: tuple[str, ...] = ()
+    """Sorted names of the execution directories pruned so far (``("out", "work")``).
+
+    The other half of the post-seal prune stamp. Every name is a directory
+    declared prunable (``molab.workspace.execution_dirs.prunable_dirs``), so
+    ``artifacts/`` and the files ``execution.json``, ``workflow.json`` and
+    ``run.log`` are never among them.
+    """
 
     @property
     def sealed(self) -> bool:
@@ -231,7 +248,9 @@ class Execution(BaseModel):
                 return artifact
         raise KeyError(f"Artifact {artifact_id!r} not found in Execution {self.id!r}")
 
-    @field_validator("created_at", "started_at", "finished_at", "sealed_at", mode="after")
+    @field_validator(
+        "created_at", "started_at", "finished_at", "sealed_at", "pruned_at", mode="after"
+    )
     @classmethod
     def _utc(cls, value: datetime | None) -> datetime | None:
         return _as_utc(value)

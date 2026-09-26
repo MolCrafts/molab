@@ -6,6 +6,7 @@
 import { describe, expect, it } from "@rstest/core";
 import type { RunAllSeries } from "@/plugins/molplot";
 import type { ScalarSeries } from "@/plugins/molplot/RunMetricsView";
+import type { MatrixRow } from "./CompareTable";
 import {
   clampWidth,
   compileRunFilter,
@@ -126,9 +127,23 @@ describe("metricRows", () => {
 });
 
 describe("visibleRows", () => {
-  const rows = [
-    { key: "same", values: ["1", "1"], varies: false, counts: [1, 1] },
-    { key: "diff", values: ["1", "2"], varies: true, counts: [1, 1] },
+  const rows: MatrixRow[] = [
+    {
+      key: "same",
+      kind: "parameter",
+      values: ["1", "1"],
+      numeric: [1, 1],
+      varies: false,
+      counts: [1, 1],
+    },
+    {
+      key: "diff",
+      kind: "parameter",
+      values: ["1", "2"],
+      numeric: [1, 2],
+      varies: true,
+      counts: [1, 1],
+    },
   ];
 
   it("keeps only rows that differ", () => {

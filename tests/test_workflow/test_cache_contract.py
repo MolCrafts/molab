@@ -14,6 +14,9 @@ Architectural lock for ``molab.workflow.cache`` — the cache key is
    two runs with different params NEVER share a root-task cache entry.
 6. The injected workdir Path does NOT participate — same params with a
    different workdir/execution still HIT.
+
+It also pins the ``Caching`` constructor's ``store`` / ``store_dir`` XOR
+validation (moved here from the deleted workspace-backed cache tests).
 """
 
 from __future__ import annotations
@@ -24,6 +27,7 @@ import pytest
 
 from molab.workflow import Task, TaskContext, Workflow, WorkflowCompiler, WorkflowRuntime
 from molab.workflow.cache import Caching
+from molab.workflow.cache_store import FileCacheStore
 from molab.workflow.snapshot import TaskSnapshot
 from molab.workspace import Workspace
 
@@ -157,3 +161,15 @@ class TestEngineInjectedCacheIdentity:
 
         assert counters["root"] == 1  # second run served from cache
         assert r1.outputs["root"] == r2.outputs["root"] == "r1"
+
+
+class TestCachingConstructor:
+    """``Caching`` takes exactly one of ``store`` / ``store_dir``."""
+
+    def test_rejects_neither_store_nor_dir(self) -> None:
+        with pytest.raises(ValueError, match="exactly one"):
+            Caching()
+
+    def test_rejects_both_store_and_dir(self, tmp_path: Path) -> None:
+        with pytest.raises(ValueError, match="not accept both"):
+            Caching(store=FileCacheStore(tmp_path / "store"), store_dir=tmp_path / "fs-cache")

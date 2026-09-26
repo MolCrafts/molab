@@ -23,7 +23,6 @@ Each scope exposes:
 - ``{folder}.files``       — ``FileStore`` rooted at that folder (user byte-exit)
 - ``{scope}.assets``       — read-only asset view (typed Asset queries over the manifests)
 - ``{scope}.data_assets``  — ``DataAssetLibrary`` for importing user inputs
-- ``workspace.cache``      — opt-in ``CacheFolder`` (``as_cache_store()``); execute writes ``run_dir/cache`` instead
 
 Upstream layers extend the workspace tree by importing the public
 ``Folder`` base class and mounting their own subclasses via the
@@ -45,7 +44,6 @@ from .assets import (
     Producer,
 )
 from .base import atomic_write_json, atomic_write_text
-from .cache import WORKSPACE_CACHE_KIND, CacheFolder
 from .context import Context
 
 # ``Asset`` is the manifest-family name imported above; the Project *data*
@@ -108,7 +106,6 @@ __all__ = [
     "LOCAL_TARGET_NAME",
     "RETRYABLE_STATUSES",
     "TERMINAL_STATUSES",
-    "WORKSPACE_CACHE_KIND",
     "WORKSPACE_EXPERIMENT_KIND",
     "WORKSPACE_PROJECT_KIND",
     "WORKSPACE_ROOT_KIND",
@@ -122,7 +119,6 @@ __all__ = [
     "AssetScope",
     "AssetVersion",
     "AssetsView",
-    "CacheFolder",
     "CheckpointAsset",
     "ComputeTarget",
     "ContentRef",

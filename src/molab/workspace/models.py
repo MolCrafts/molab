@@ -41,10 +41,10 @@ class ErrorInfo(BaseModel, frozen=True):
     timestamp: datetime
 
 
-# ``WorkflowSnapshotRef`` lives under ``molab.workflow.snapshot_ref`` —
-# workspace stores its on-disk shape as opaque JSON in
-# ``RunMetadata.workflow_snapshot``. The relocation was part of the
-# rectification spec (2026-05-09); see CLAUDE.md § Layer charters.
+# ``RunMetadata.workflow_snapshot`` is a read-only legacy dict: workspace
+# keeps its on-disk shape as opaque JSON and defines no typed model for it.
+# The workflow is the experiment's property
+# (``ExperimentMetadata.workflow_entrypoint``); see CLAUDE.md § Layer charters.
 
 # ── Entity metadata ────────────────────────────────────────────────────────
 #
@@ -68,7 +68,7 @@ class FolderMetadata(BaseModel, frozen=True):
     semantics: stable id (slugified ``name``), human-readable ``name``,
     dotted-ASCII ``kind`` for child filtering, and monotonic
     ``created_at``/``updated_at`` timestamps. The ``extra`` slot lets
-    business subclasses (``CacheFolder`` / Knowledge / Agent folders)
+    business subclasses (e.g. Agent folders)
     stash custom fields without forking the schema.
 
     The ``updated_at`` field is a deliberate deviation from rule 3 above
@@ -260,9 +260,9 @@ class RunMetadata(BaseModel, frozen=True):
     started_at: datetime | None = None
     finished_at: datetime | None = None
     error: ErrorInfo | None = None
-    # Opaque workflow-snapshot payload — the canonical type lives in
-    # ``molab.workflow.snapshot_ref.WorkflowSnapshotRef``; workspace
-    # stores it as a plain dict to avoid an upward dependency.
+    # Opaque legacy workflow-snapshot payload, read-only: nothing writes a
+    # per-run copy any more, and there is no typed model for it — workspace
+    # keeps it as a plain dict.
     workflow_snapshot: dict[str, JSONValue] | None = None
     script: str | None = None
     # Source snapshot — the entrypoint script's bytes + its first-party

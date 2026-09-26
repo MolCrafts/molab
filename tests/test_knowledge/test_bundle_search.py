@@ -7,8 +7,9 @@ a body match — the first matching ``index.md`` line trimmed to <=160 chars.
 Body reads are lazy (only entries that survived the index-level filters and did
 not already match on path/title/tag) and size-capped at 512 KiB; an oversized
 body is skipped for body matching but the entry still matches on its index
-fields (no silent drop). Index-level filters (type / tag kwargs, rebuild) are
-owned by ``test_bundle_index.py``.
+fields (no silent drop). Index-level filters (type / tag kwargs) are owned by
+``test_bundle_index.py``. A search never writes: the index is always scanned in
+memory, and no ``index.json`` / ``INDEX.md`` is persisted (arch-own-01-cleanup).
 """
 
 from __future__ import annotations
@@ -16,10 +17,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from molab.fs import LocalFileSystem
 from molab.knowledge.bundle import Bundle
 from molab.knowledge.concept import Concept
 from molab.workspace import Workspace
 from molab.workspace.folder import Folder
+from tests.support.counting_fs import CountingFileSystem
 
 # The spec's body-read cap (mirrors agent/loops/interactive/tools.py).
 MAX_BODY_SEARCH_BYTES = 512 * 1024
@@ -228,3 +231,45 @@ class TestSearch:
         assert all(hit.snippet is None for hit in result.hits)
         assert all(hit.matched_fields == () for hit in result.hits)
         assert result.truncated is False
+
+
+#: Every ``FileSystem`` method that mutates the disk.
+_WRITE_METHODS = (
+    "mkdir",
+    "write_text",
+    "write_bytes",
+    "rename",
+    "remove",
+    "copy",
+    "copytree",
+    "touch",
+    "chmod",
+    "symlink",
+    "atomic_write_json",
+    "atomic_write_text",
+)
+
+
+class TestSearchNeverWrites:
+    """``Bundle.search`` is a read: zero writes, no persisted index files."""
+
+    def test_search_issues_zero_writes(self, tmp_path: Path) -> None:
+        root = _root(tmp_path)
+        _note(root, "alpha", "# Alpha\n\nthe body of alpha\n")
+        _note(root, "beta", "# Beta\n\nthe body of beta\n", under="group")
+        fs = CountingFileSystem(LocalFileSystem())
+
+        result = Bundle(root, fs=fs).search("body")
+
+        assert result.hits
+        assert fs.count(*_WRITE_METHODS) == 0, dict(fs.calls)
+
+    def test_search_leaves_no_index_files(self, tmp_path: Path) -> None:
+        root = _root(tmp_path)
+        _note(root, "alpha", "# Alpha\n\nthe body of alpha\n")
+
+        result = Bundle(root).search("body")
+
+        assert result.hits
+        assert not (root / "index.json").exists()
+        assert not (root / "INDEX.md").exists()

@@ -96,3 +96,20 @@ class TestContextConsumesProjection:
         assert response.status_code == 200, response.text
         assert response.json()["focus"]["runId"] == run.id
         assert _workspace_files(ws) == before
+
+
+class TestWorkspaceCacheRoutesRemoved:
+    """arch-own-01-cleanup: the two routes that only read the never-written
+    ``<root>/cache/`` are gone; the remote-mirror cache status route stays."""
+
+    def test_no_cache_stats_route(self) -> None:
+        paths = create_app(serve_static=False).openapi()["paths"]
+        assert "/api/workspace/cache/stats" not in paths
+
+    def test_no_cache_delete_route(self) -> None:
+        paths = create_app(serve_static=False).openapi()["paths"]
+        assert "delete" not in paths.get("/api/workspace/cache", {})
+
+    def test_cache_status_route_kept(self) -> None:
+        paths = create_app(serve_static=False).openapi()["paths"]
+        assert "/api/workspace/cache/status" in paths

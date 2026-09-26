@@ -1,32 +1,54 @@
-"""Two-phase execution pruning — plan what to delete, then apply it.
+"""Two-phase execution pruning — plan which bulk to remove, then apply it.
 
-The ONE prune core shared by the CLI (``molab runs prune``) and the harness
-lifecycle capability (Python = UI law): callers *select* execution attempts
-(by explicit ids or by status), :func:`plan_execution_prune` turns the
-selection into a reviewable :class:`ExecutionPrunePlan`, and
-:func:`apply_execution_prune` deletes exactly what the plan lists — nothing
-is decided at delete time.
+This is the ONE prune core. The CLI (``molab runs prune``) and the harness
+lifecycle capability share it, so a prune behaves identically whichever door
+starts it. An *execution* is one attempt at a Run (``executions/e01``).
+Callers *select* attempts, by explicit ids or by status.
+:func:`plan_execution_prune` turns the selection into a reviewable
+:class:`ExecutionPrunePlan`, and :func:`apply_execution_prune` removes exactly
+the directories the plan lists. Nothing is selected at apply time. Apply only
+re-checks that each attempt is sealed.
+
+Pruning removes **bulk only**, meaning reproducible bytes such as trajectories
+and scratch, and it keeps every record: no ``execution.json`` and no
+``executions/<id>/`` directory is ever deleted. The removable set comes from
+data, not from matching names: it is the directories whose
+``ExecutionDir.prunable`` is True
+(:func:`~molab.workspace.execution_dirs.prunable_dirs`, which gives ``out/``,
+``work/``, ``jobs/`` and ``checkpoints/``). Solver output under ``out/`` and
+scheduler stdout/stderr under ``jobs/`` therefore go with the bulk. Other
+entries survive, including ``execution.json``, the node journal
+(``workflow.json``), the attempt's ``run.log`` and ``artifacts/``. So does the
+run-level ``source/``, which lies outside every execution directory. Because
+the record survives, the next attempt's id (``max(seq) + 1``) never reuses a
+pruned one.
 
 The two phases are the safety contract:
 
-* **Plan is where refusal lives.** A ``running`` record on an *actively
-  running* run refuses at plan time (``LivePruneRefusedError``) — the caller
-  never gets a plan it must second-guess. (A ``running`` record on a
-  terminal run is a zombie leftover and prunes normally.)
-* **Apply is mechanical.** It loops :meth:`Run.delete_execution` (already
-  atomic per entry: ``rmtree`` + ``ops`` history rewrite) over the plan's
-  entries and reports what was removed vs. already gone.
-
-Only ``executions/<exec_id>/`` directories and their ``ops`` history entries
-are touched; run status / parameters / artifacts are left alone.
+* **Plan is where refusal lives.** Selecting any attempt that is not *sealed*
+  (finished and frozen by ``ExecutionRepository.seal``) raises
+  ``LivePruneRefusedError``. That covers an attempt that is still active
+  (queued, running or finalizing) and one that is terminal but was never
+  sealed, so the caller never gets a plan it must second-guess. The caller
+  must first reap a *zombie*, meaning an attempt still recorded as
+  ``running`` after its owning process has died
+  (``run_reaper.reap_zombie_run``). Prune never guesses that an attempt is a
+  zombie.
+* **Apply is mechanical.** Per entry, it re-checks the seal before touching
+  bytes, removes each planned directory that still exists and stamps the
+  sealed record (``pruned_at`` / ``pruned_dirs``) through
+  ``ExecutionRepository.mark_pruned``. It returns how many directories it
+  removed.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, ConfigDict
+
+from .domain import ACTIVE_EXECUTION_STATUSES
+from .execution_dirs import prunable_dirs
 
 if TYPE_CHECKING:
     from .run import Run
@@ -41,27 +63,34 @@ __all__ = [
 
 
 class LivePruneRefusedError(RuntimeError):
-    """A selected execution record looks live (running on an active run).
+    """A selected execution is not sealed.
 
-    Raised at **plan** time: cancel the run first (``run.cancel()`` /
-    ``molab runs cancel``) or wait for it to finish.
+    Either still active (queued, running or finalizing) — cancel the attempt
+    first (``run.cancel()`` / ``molab runs cancel``) or wait for it to
+    finish — or terminal but never sealed, which cannot carry the prune stamp.
+    Raised at **plan** time.
     """
 
 
 class ExecutionPruneEntry(BaseModel):
-    """One execution attempt selected for deletion."""
+    """One execution attempt selected for pruning."""
 
     model_config = ConfigDict(frozen=True)
 
     execution_id: str
     status: str
-    dir_exists: bool
+    dirs: tuple[str, ...] = ()
+    """Prunable directories of this attempt that existed at plan time, sorted.
+
+    Exactly what :func:`apply_execution_prune` removes and stamps; empty when
+    the attempt holds no bulk.
+    """
 
 
 class ExecutionPrunePlan(BaseModel):
     """The reviewable outcome of :func:`plan_execution_prune`.
 
-    ``entries`` is exactly what :func:`apply_execution_prune` will delete —
+    ``entries`` is exactly what :func:`apply_execution_prune` will remove —
     the plan is the contract, not a suggestion.
     """
 
@@ -77,28 +106,31 @@ def plan_execution_prune(
     execution_ids: list[str] | None = None,
     statuses: list[str] | None = None,
 ) -> ExecutionPrunePlan:
-    """Select execution attempts of *run* for deletion.
+    """Select execution attempts of *run* and the bulk each would lose.
 
-    Selection is the union semantics callers expect from the CLI: explicit
-    *execution_ids* win when given; otherwise *statuses* filters the history
-    (case-insensitive); with neither, **every** attempt is selected (the
-    CLI's ``all``).
+    Selection follows a fixed precedence. Explicit *execution_ids* win when
+    given. Otherwise *statuses* filters the history (case-insensitive). With
+    neither, **every** attempt is selected, which is the CLI's ``all``. Only
+    sealed attempts may be selected, and every attempt's record is kept. The
+    plan lists only the prunable directories that exist on disk right now.
 
     Args:
         run: The run whose execution history is being pruned.
-        execution_ids: Explicit attempt ids to delete. Unknown ids raise
+        execution_ids: Explicit attempt ids to prune. Unknown ids raise
             ``KeyError`` — a plan must never silently narrow the request.
         statuses: Status names (``"failed"``, ``"cancelled"``, …) selecting
             attempts by their recorded status.
 
     Returns:
-        The frozen plan (possibly empty — nothing matched).
+        The frozen plan, with one entry per selected attempt. An entry's
+        ``dirs`` may be empty when the attempt holds no bulk, and the plan has
+        no entries when nothing matched. Planning is read-only.
 
     Raises:
         KeyError: An explicit ``execution_id`` is not in the run's history.
-        LivePruneRefusedError: A selected record is ``running`` while the run
-            itself is actively ``running`` — deleting a live attempt's state
-            out from under it is never allowed.
+        LivePruneRefusedError: A selected attempt is not sealed — queued,
+            running or finalizing (pruning a live attempt's files out from
+            under it is never allowed), or terminal but unsealed.
     """
     history = list(run.executions)
     by_id = {rec.id: rec for rec in history}
@@ -117,59 +149,111 @@ def plan_execution_prune(
     else:
         selected = history
 
-    # Refusal lives at PLAN time: a running record on an actively-running run
-    # is live state, not prunable history. (On a terminal run it is a zombie
-    # leftover and prunes normally — same rule the CLI enforced.)
-    run_is_running = run.status_summary.active > 0
-    live = [rec for rec in selected if rec.status.value == "running" and run_is_running]
-    if live:
-        raise LivePruneRefusedError(
-            f"{len(live)} selected record(s) look live (status=running on an "
-            f"active run {run.id!r}); cancel the run first or wait for it to finish"
-        )
-
-    exec_root = Path(run.run_dir) / "executions"
-    return ExecutionPrunePlan(
-        run_id=run.id,
-        entries=tuple(
-            ExecutionPruneEntry(
-                execution_id=rec.id,
-                status=rec.status.value,
-                dir_exists=(exec_root / rec.id).exists(),
+    # Refusal lives at PLAN time: only a sealed attempt is prunable history,
+    # because only a sealed record can carry the prune stamp. An active one is
+    # live state (a stale ``running`` one is reaped by the caller first); a
+    # terminal-but-unsealed one would lose its bytes and then fail to stamp.
+    live = [rec for rec in selected if rec.status in ACTIVE_EXECUTION_STATUSES]
+    unsealed = [
+        rec for rec in selected if not rec.sealed and rec.status not in ACTIVE_EXECUTION_STATUSES
+    ]
+    if live or unsealed:
+        reasons: list[str] = []
+        if live:
+            described = ", ".join(f"{rec.id}={rec.status.value}" for rec in live)
+            reasons.append(
+                f"{len(live)} selected execution(s) of run {run.id!r} are still active "
+                f"({described}); cancel them first or wait for them to finish"
             )
-            for rec in selected
-        ),
-    )
+        if unsealed:
+            described = ", ".join(f"{rec.id}={rec.status.value}" for rec in unsealed)
+            reasons.append(
+                f"{len(unsealed)} selected execution(s) of run {run.id!r} are terminal but "
+                f"not sealed ({described}); only a sealed attempt can be pruned"
+            )
+        raise LivePruneRefusedError("; ".join(reasons))
+
+    repo = run._execution_repository()
+    fs = repo.fs
+    candidates = {d.name for d in prunable_dirs()}
+    entries: list[ExecutionPruneEntry] = []
+    for rec in selected:
+        execution_dir = repo.execution_dir(rec.id)
+        try:
+            listing = fs.scandir(execution_dir, with_stat=False)
+        except FileNotFoundError:
+            listing = []
+        present = tuple(
+            sorted(entry.name for entry in listing if entry.is_dir and entry.name in candidates)
+        )
+        entries.append(
+            ExecutionPruneEntry(execution_id=rec.id, status=rec.status.value, dirs=present)
+        )
+    return ExecutionPrunePlan(run_id=run.id, entries=tuple(entries))
 
 
 def apply_execution_prune(run: Run, plan: ExecutionPrunePlan) -> int:
-    """Delete exactly the attempts *plan* lists; return removed-dir count.
+    """Remove exactly the directories *plan* lists; return the removed count.
 
-    Loops :meth:`Run.delete_execution` (atomic per entry). An entry whose
-    directory vanished since planning still has its history row removed —
-    the plan's ids, not the disk, are the contract.
+    Entries are applied in order. An entry with no ``dirs`` is skipped. For
+    every other entry, the attempt's seal is re-checked first. Then each
+    directory in ``entry.dirs`` that still exists is removed, and the sealed
+    record is stamped with ``entry.dirs`` through
+    ``ExecutionRepository.mark_pruned``. The plan, not the disk, is the
+    contract: a directory that vanished since planning is still recorded as
+    pruned, but it is not counted. No record is deleted. ``execution.json`` is
+    only updated with the stamp, and ``workflow.json``, ``run.log`` and
+    ``artifacts/`` are left alone.
+
+    Pass a plan from :func:`plan_execution_prune`. A hand-built entry is
+    re-validated before removal: one that names a non-prunable directory
+    raises ``ValueError`` and nothing of that entry is removed.
 
     Args:
         run: The run the plan was built for.
         plan: The :class:`ExecutionPrunePlan` to execute.
 
     Returns:
-        How many execution directories were actually removed from disk.
+        How many directories were actually removed from disk.
 
     Raises:
-        ValueError: *plan* was built for a different run.
+        ValueError: *plan* was built for a different run (raised before
+            anything is touched). Also raised when a planned attempt is not
+            sealed, or when an entry names a directory that is not prunable;
+            that entry's bytes are left untouched, but entries earlier in the
+            plan have already been applied.
+        KeyError: A planned attempt no longer exists under *run*.
     """
     if plan.run_id != run.id:
         raise ValueError(f"plan was built for run {plan.run_id!r}, not {run.id!r}")
-    import shutil
 
+    repo = run._execution_repository()
+    fs = repo.fs
+    allowed = {d.name for d in prunable_dirs()}
     removed_dirs = 0
-    exec_root = Path(run.run_dir) / "executions"
     for entry in plan.entries:
-        path = exec_root / entry.execution_id
-        if path.exists():
-            shutil.rmtree(path)
-            removed_dirs += 1
-        # Already gone (raced another pruner) — provenance is immutable, so
-        # only the retained workspace bytes are removed; nothing else to do.
+        if not entry.dirs:
+            continue
+        # A hand-built entry may name a non-bulk directory; ``mark_pruned``
+        # would reject it only after the bytes are gone, so refuse it here.
+        refused = sorted(set(entry.dirs) - allowed)
+        if refused:
+            raise ValueError(
+                f"Execution {entry.execution_id!r} of run {run.id!r}: not prunable "
+                f"execution dir(s) {refused!r}; prunable: {sorted(allowed)}"
+            )
+        # Re-check the seal before any byte goes: ``mark_pruned`` refuses an
+        # unsealed record, and bulk removed without its stamp is lost silently.
+        if not repo.get(entry.execution_id).sealed:
+            raise ValueError(
+                f"Execution {entry.execution_id!r} of run {run.id!r} is not sealed; "
+                "refusing to remove its bulk"
+            )
+        execution_dir = repo.execution_dir(entry.execution_id)
+        for name in entry.dirs:
+            path = fs.join(execution_dir, name)
+            if fs.exists(path):
+                fs.remove(path, recursive=True)
+                removed_dirs += 1
+        repo.mark_pruned(entry.execution_id, entry.dirs)
     return removed_dirs

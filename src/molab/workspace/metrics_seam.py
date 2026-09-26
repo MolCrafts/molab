@@ -2,8 +2,8 @@
 
 The mlp host-metrics surface (filename contract + JSONL WAL) is owned by the
 :mod:`molab.plugins.metrics` plugin. Workspace is the bottom layer and must
-not import plugins, so the writer reaches :class:`~molab.workspace.run_assets.RunAssets`
-through this seam — the same pattern as
+not import plugins, so the writer reaches
+:class:`~molab.workspace.execution_context.ExecutionContext` through this seam — the same pattern as
 :func:`molab.workspace.run.set_run_executor`. Importing
 :mod:`molab.plugins.metrics` registers its factory here; ``molab/__init__``
 performs that import, so any ``import molab`` process is wired.

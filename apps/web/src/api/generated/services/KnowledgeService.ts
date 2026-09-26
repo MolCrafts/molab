@@ -93,7 +93,7 @@ export class KnowledgeService {
     }
     /**
      * List Knowledge
-     * List every Note + Literature under the workspace via ``Knowledge.walk``.
+     * List every Knowledge document under the workspace via ``Knowledge.walk``.
      * @param tag Only notes carrying this tag.
      * @param status Only notes with this lifecycle status.
      * @param molabSession
@@ -122,7 +122,7 @@ export class KnowledgeService {
     }
     /**
      * Get Note
-     * Return one document's full body via ``Knowledge.from_dir``.
+     * Return one document's full body via ``Knowledge.open``.
      * @param path The document's workspace-relative path (its identity).
      * @param molabSession
      * @returns NoteDetailResponse Successful Response
@@ -173,7 +173,7 @@ export class KnowledgeService {
     }
     /**
      * Edit Doc
-     * Rewrite a note's body (its ``index.md``) — delegates to ``Note.set_body``.
+     * Rewrite a document's narrative — ``Knowledge.write`` for all six classes.
      * @param path The note Concept's bundle-relative path (its identity).
      * @param requestBody
      * @param molabSession
@@ -259,11 +259,12 @@ export class KnowledgeService {
     }
     /**
      * Embed Doc
-     * Embed a live entity into a document — delegates to ``Bundle.embed``.
+     * Embed a live entity into a document — delegates to the knowledge edge writer.
      *
      * Resolves the source ``Note`` (404 on miss / non-note) and the target entity
      * (``run`` / ``experiment`` / ``asset`` / ``reference``; 404 on miss), then
-     * writes ONE typed provenance edge via ``Bundle.embed`` — the same verb the CLI
+     * writes ONE typed provenance edge via ``Bundle.link`` at the target resolved
+     * by :func:`~molab.knowledge.embed.resolve_embed_target` — the same verb the CLI
      * uses, so the edge-writing logic is never re-built at the HTTP boundary.
      * @param path The source note Concept's bundle-relative path.
      * @param requestBody
@@ -294,11 +295,7 @@ export class KnowledgeService {
     }
     /**
      * Update Doc Meta
-     * Update a note's tags/status — delegates to ``Note.set_tags`` / ``Note.set_status``.
-     *
-     * Each field is applied only when present (``None`` = leave untouched), so a
-     * partial update preserves the sibling field. The write logic is never re-built
-     * here: the same ``Note`` verbs the CLI uses own it (the Python==UI invariant).
+     * Update a document's tags/status — ``Knowledge.write`` for all six classes.
      * @param path The note Concept's bundle-relative path (its identity).
      * @param requestBody
      * @param molabSession

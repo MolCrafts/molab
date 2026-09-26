@@ -293,9 +293,4 @@ export const featureShowcaseHandlers = [
         mutationSummary: approvalOpen ? null : "Moved 3 artifacts into a curated output set.",
       }),
   ),
-
-  http.get("/api/workspace/cache/stats", () =>
-    HttpResponse.json({ entryCount: 42, storeDir: "/mock-workspace/.molab/cache" }),
-  ),
-  http.delete("/api/workspace/cache", () => HttpResponse.json({ removedCount: 42 })),
 ];

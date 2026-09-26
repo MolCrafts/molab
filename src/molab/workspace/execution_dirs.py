@@ -14,6 +14,7 @@ question                                     answer
 ===========================================  =============================
 "what goes into the git history?"            ``versioned``
 "where should a reader look for results?"    ``products``
+"what may a prune remove?"                   ``prunable``
 "is this directory name legal here?"         :func:`resolve_execution_dir`
 ===========================================  =============================
 
@@ -42,6 +43,7 @@ __all__ = [
     "execution_dir_names",
     "list_execution_dirs",
     "product_dirs",
+    "prunable_dirs",
     "register_execution_dir",
     "resolve_execution_dir",
     "scratch_dirs",
@@ -86,6 +88,18 @@ class ExecutionDir:
     reader's pattern must not be charted as if it were a result.
     """
 
+    prunable: bool = False
+    """True when a prune may remove this directory from a sealed attempt.
+
+    A *prune* (``molab runs prune``, or ``molab.workspace.prune``) deletes
+    an attempt's bulk directories to free disk space and keeps its record,
+    ``execution.json``. Only a *sealed* attempt, one that has finished and
+    been frozen, is ever pruned. Defaults to False, the safe direction: a
+    directory whose declaration does not opt in is always kept.
+    ``artifacts/`` is not prunable because ``Artifact.path`` points at its
+    bytes.
+    """
+
 
 # ── molab's own three tiers, plus the two the layout law documents ──────
 #
@@ -103,6 +117,7 @@ WORK = ExecutionDir(
     purpose="Framework scratch: plan boards, harness staging. Disposable.",
     versioned=False,
     products=False,
+    prunable=True,
 )
 
 OUT = ExecutionDir(
@@ -110,6 +125,7 @@ OUT = ExecutionDir(
     purpose="What each task wrote: trajectories, restarts, solver logs, inputs.",
     versioned=False,
     products=True,
+    prunable=True,
 )
 
 ARTIFACTS = ExecutionDir(
@@ -124,6 +140,7 @@ JOBS = ExecutionDir(
     purpose="Scheduler evidence: submit scripts, stdout, stderr.",
     versioned=True,
     products=False,
+    prunable=True,
 )
 
 CHECKPOINTS = ExecutionDir(
@@ -131,6 +148,7 @@ CHECKPOINTS = ExecutionDir(
     purpose="Resumable state a task wrote through ctx.checkpoint.",
     versioned=True,
     products=False,
+    prunable=True,
 )
 
 _REGISTRY: dict[str, ExecutionDir] = {}
@@ -175,6 +193,21 @@ def product_dirs() -> tuple[ExecutionDir, ...]:
     result, and a searcher wants the registered one.
     """
     return tuple(d for d in list_execution_dirs() if d.products)
+
+
+def prunable_dirs() -> tuple[ExecutionDir, ...]:
+    """Directories a prune may remove from a sealed attempt, in registration order.
+
+    See :attr:`ExecutionDir.prunable` for what a prune is. This is the one
+    source of the prunable set. The planner picks candidates from it, and
+    ``ExecutionRepository.mark_pruned`` validates against it.
+
+    Returns:
+        Every declared directory whose ``prunable`` is True. With molab's own
+        seeds these are ``out``, ``work``, ``jobs`` and ``checkpoints``;
+        ``artifacts`` is never included.
+    """
+    return tuple(d for d in list_execution_dirs() if d.prunable)
 
 
 def scratch_dirs() -> tuple[ExecutionDir, ...]:

@@ -9,15 +9,11 @@ then imported via the OKF :class:`molab.knowledge.bundle.Bundle`. PDFs are
 
 from __future__ import annotations
 
-import json
 import sqlite3
-from datetime import UTC, datetime
 from pathlib import Path
 
 from molab.knowledge.bundle import Bundle
 from molab.knowledge.zotero import ZoteroItem, read_zotero_items
-
-FIXED = datetime(2026, 6, 21, 12, 0, 0, tzinfo=UTC)
 
 
 def _make_zotero_db(data_dir: Path) -> Path:
@@ -116,7 +112,8 @@ class TestReadZoteroItems:
 class TestBundleImportZotero:
     """``Bundle.import_zotero`` — link a Zotero library as ``Reference`` Concepts."""
 
-    def test_records_link_in_sources_json(self, tmp_path: Path) -> None:
+    def test_import_writes_no_sources_json(self, tmp_path: Path) -> None:
+        # arch-own-01-cleanup: the persisted ``sources.json`` link record is gone.
         src = tmp_path / "zotero"
         src.mkdir()
         db = _make_zotero_db(src)
@@ -124,11 +121,7 @@ class TestBundleImportZotero:
         bundle_root.mkdir()
         b = Bundle(bundle_root)
 
-        b.import_zotero(db, now=FIXED)
-        sources = json.loads((bundle_root / "sources.json").read_text())
-        assert len(sources) == 1
-        entry = sources[0]
-        assert entry["source"] == "zotero"
-        assert entry["count"] == 2
-        assert entry["imported_at"].startswith("2026-06-21T12:00:00")
-        assert "+00:00" in entry["imported_at"]  # aware-UTC
+        refs = b.import_zotero(db)
+
+        assert len(refs) == 2
+        assert not (bundle_root / "sources.json").exists()

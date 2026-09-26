@@ -249,10 +249,9 @@ class RunResponse(ApiModel):
 
     @classmethod
     def from_model(cls, run: Run) -> RunResponse:
-        # ``workflow_snapshot`` is an opaque JSON dict on disk
-        # (rectification 2026-05-09 — the canonical typed shape lives
-        # in ``molab.workflow.WorkflowSnapshotRef``). The response
-        # fishes the well-known fields out by name. When the run has
+        # ``workflow_snapshot`` is an opaque, read-only legacy JSON dict
+        # on disk with no typed model. The response fishes the
+        # well-known fields out by name. When the run has
         # no snapshot but the experiment carries a ``workflow_source``
         # advisory string, synthesize a minimal snapshot so callers
         # see the label without having to refetch the experiment.
@@ -336,18 +335,6 @@ class WorkspaceInfoResponse(ApiModel):
 
 class FileContentResponse(ApiModel):
     content: str
-
-
-# ── Execution ───────────────────────────────────────────────────────────────
-
-
-class CacheStatsResponse(ApiModel):
-    storeDir: str
-    entryCount: int
-
-
-class CacheClearResponse(ApiModel):
-    removedCount: int
 
 
 # ── Plugin Registry ─────────────────────────────────────────────────────────

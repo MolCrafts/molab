@@ -2,10 +2,8 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
-import type { CacheClearResponse } from '../models/CacheClearResponse';
 import type { CacheControlRequest } from '../models/CacheControlRequest';
 import type { CacheControlResponse } from '../models/CacheControlResponse';
-import type { CacheStatsResponse } from '../models/CacheStatsResponse';
 import type { CacheStatusResponse } from '../models/CacheStatusResponse';
 import type { CurateRequest } from '../models/CurateRequest';
 import type { CurateResponse } from '../models/CurateResponse';
@@ -56,48 +54,6 @@ export class WorkspaceService {
         });
     }
     /**
-     * Get Cache Stats
-     * Workspace content-addressed task cache statistics.
-     * @param molabSession
-     * @returns CacheStatsResponse Successful Response
-     * @throws ApiError
-     */
-    public static getCacheStats(
-        molabSession?: (string | null),
-    ): CancelablePromise<CacheStatsResponse> {
-        return __request(OpenAPI, {
-            method: 'GET',
-            url: '/api/workspace/cache/stats',
-            cookies: {
-                'molab_session': molabSession,
-            },
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
-     * Clear Cache
-     * Clear the workspace content-addressed task cache.
-     * @param molabSession
-     * @returns CacheClearResponse Successful Response
-     * @throws ApiError
-     */
-    public static clearCache(
-        molabSession?: (string | null),
-    ): CancelablePromise<CacheClearResponse> {
-        return __request(OpenAPI, {
-            method: 'DELETE',
-            url: '/api/workspace/cache',
-            cookies: {
-                'molab_session': molabSession,
-            },
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
      * Get Workspace Info
      * Get workspace information.
      * @param molabSession
@@ -127,6 +83,10 @@ export class WorkspaceService {
      * caller via optional query params and is never persisted. ``/runs`` remains the
      * specialized detailed run view (richer per-execution rows); this endpoint is the
      * canonical *structure* and stays consistent with it.
+     *
+     * The ``knowledge`` field comes from the single projection producer
+     * (:mod:`molab.services.knowledge_context`) — the server assembles no producer
+     * of its own, so this route and the CLI report the same rows.
      * @param projectId
      * @param experimentId
      * @param runId

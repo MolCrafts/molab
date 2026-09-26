@@ -1,24 +1,21 @@
-"""Tests for the derived bundle index + its index-level search filters.
+"""Tests for the in-memory bundle index + its index-level search filters.
 
-``Bundle.build_index()`` rolls the whole Concept tree (``meta.json`` +
-markdown-link graph) into a :class:`BundleIndex` and writes two *derived*
-siblings at the bundle root — ``index.json`` (machine) + ``INDEX.md``
-(human/agent). Neither file is a source of truth; both are rebuilt on demand.
-``search()``'s index-level filters (type / tag / text AND semantics, rebuild)
-live here; its body-aware retrieval is owned by ``test_bundle_search.py``.
+``Bundle.scan_index()`` walks the whole Concept tree (``meta.json`` +
+markdown-link graph) into an in-memory :class:`BundleIndex` and returns it with
+the bodies and heads it read. Nothing is persisted: there is no ``index.json``
+or ``INDEX.md`` (arch-own-01-cleanup removed the derived sibling files), so a
+query always sees the tree as it is on disk. ``search()``'s index-level filters
+(type / tag / text AND semantics) live here; its body-aware retrieval is owned
+by ``test_bundle_search.py``.
 """
 
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
 from pathlib import Path
 
 from molab.knowledge.bundle import Bundle
-from molab.knowledge.bundle_index import INDEX_JSON_FILENAME, INDEX_MD_FILENAME
 from molab.workspace import Folder, Workspace
-
-FIXED = datetime(2026, 6, 21, 12, 0, 0, tzinfo=UTC)
 
 CONCEPT_KIND = "bundle.concept"
 
@@ -43,27 +40,24 @@ def _concept(name: str, root_path: Path) -> Folder:
     return folder
 
 
-class TestBuildIndex:
-    """``Bundle.build_index`` — the derived, rebuildable rollup."""
+class TestScanIndex:
+    """``Bundle.scan_index`` — the in-memory rollup; it writes nothing."""
 
     def test_entries_equal_walk_set_with_typed_rows(self, tmp_path: Path) -> None:
         root = _hierarchy(tmp_path)
         b = Bundle(root)
-        idx = b.build_index(now=FIXED)
+        idx, _bodies, _metas = b.scan_index()
         assert {e.path for e in idx.entries} == {b.rel_path(f) for f in b.walk()}
         by_path = {e.path: e for e in idx.entries}
         assert by_path["lab"].type == "workspace.root"
         assert by_path[_run_rel(root)].type == "workspace.run"
 
-    def test_writes_derived_siblings_not_mistaken_for_concepts(self, tmp_path: Path) -> None:
+    def test_persists_no_index_files(self, tmp_path: Path) -> None:
         root = _hierarchy(tmp_path)
         b = Bundle(root)
-        b.build_index(now=FIXED)
-        assert (root / INDEX_JSON_FILENAME).is_file()
-        assert (root / INDEX_MD_FILENAME).is_file()
-        md = (root / INDEX_MD_FILENAME).read_text()
-        assert "lab/projects/p" in md
-        # the derived files are not mistaken for concepts
+        b.scan_index()
+        assert not (root / "index.json").exists()
+        assert not (root / "INDEX.md").exists()
         assert all(not b.rel_path(f).endswith(".json") for f in b.walk())
         assert all(not b.rel_path(f).endswith(".md") for f in b.walk())
 
@@ -74,27 +68,27 @@ class TestBuildIndex:
         b_concept = _concept("beta", root)
         a.write_index("# Alpha Title\n\nbody\n- [to-b](../beta)\n")
         bundle = Bundle(root)
-        idx = bundle.build_index(now=FIXED)
+        idx, bodies, _metas = bundle.scan_index()
         by_path = {e.path: e for e in idx.entries}
         assert by_path["alpha"].title == "Alpha Title"
         assert by_path["beta"].title == "beta"  # no H1 → concept name
         assert by_path["beta"].path == bundle.rel_path(b_concept)
         # link resolves to beta as bundle-relative posix
         assert "beta" in by_path["alpha"].links
+        assert bodies["alpha"].startswith("# Alpha Title")
 
-    def test_rebuild_restores_deleted_siblings(self, tmp_path: Path) -> None:
+    def test_rescan_reflects_new_concept(self, tmp_path: Path) -> None:
         root = _hierarchy(tmp_path)
         b = Bundle(root)
-        b.build_index(now=FIXED)
-        (root / INDEX_JSON_FILENAME).unlink()
-        (root / INDEX_MD_FILENAME).unlink()
-        b.build_index(now=FIXED)
-        assert (root / INDEX_JSON_FILENAME).is_file()
-        assert (root / INDEX_MD_FILENAME).is_file()
+        before, _bodies, _metas = b.scan_index()
+        assert "lab/projects/q" not in {e.path for e in before.entries}
+        Workspace(root=root / "lab").add_project("q")
+        after, _bodies, _metas = b.scan_index()
+        assert "lab/projects/q" in {e.path for e in after.entries}
 
 
 class TestSearchFilters:
-    """``Bundle.search`` index-level filters + rebuild (body-aware match: see
+    """``Bundle.search`` index-level filters (body-aware match: see
     ``test_bundle_search.py``)."""
 
     def test_filter_by_type(self, tmp_path: Path) -> None:
@@ -125,9 +119,9 @@ class TestSearchFilters:
             _run_rel(b.root)
         ]
 
-    def test_rebuild_reflects_new_concept(self, tmp_path: Path) -> None:
+    def test_search_reflects_new_concept(self, tmp_path: Path) -> None:
         root = _hierarchy(tmp_path)
         b = Bundle(root)
-        b.build_index(now=FIXED)
+        b.search()
         Workspace(root=root / "lab").add_project("q")
-        assert any(h.entry.path == "lab/projects/q" for h in b.search(rebuild=True).hits)
+        assert any(h.entry.path == "lab/projects/q" for h in b.search().hits)

@@ -7,8 +7,11 @@ and its mtime is older than :data:`HEARTBEAT_STALE_SECONDS`. A missing
 file is **not** stale (the worker may still be starting, or an HPC job may
 not have claimed yet).
 
-All I/O goes through :meth:`Folder._disk` (``FileSystem.touch`` /
-``stat`` / ``remove``).
+This module is the sole heartbeat implementation. ``ExecutionContext``
+drives it (``touch_alive`` on entry and every interval from its heartbeat
+thread, ``unlink_alive`` on exit); the reapers read it. All I/O goes through
+:meth:`Folder._disk` (``FileSystem.touch`` / ``stat`` / ``remove``), so a
+remote workspace heartbeats exactly like a local one.
 """
 
 from __future__ import annotations

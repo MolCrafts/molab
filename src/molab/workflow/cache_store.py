@@ -3,17 +3,11 @@
 ``Caching`` (in ``workflow.cache``) holds the cache-key derivation, format
 versioning, and LRU eviction policy. The actual *storage* — read / write /
 list / remove / atime — is delegated through the :class:`CacheStore`
-Protocol so the cache can sit on top of either a plain filesystem
-directory (``FileCacheStore``, the execution default at ``<run_dir>/cache``)
-or the workspace's optional ``CacheFolder`` via ``ws.cache.as_cache_store()``
-(returns a ``CacheStore``-conforming adapter — see
-``molab.workspace.cache.folder``). Execution auto-cache never uses the
-workspace-root folder.
-
-Sub-spec ``unify-folder-abstraction-03-system-folder-migration``
-retired the standalone ``WorkspaceCacheStore`` class + the
-``workflow.cache`` subsystem-kind string in favour of the
-``CacheFolder.as_cache_store()`` adapter.
+Protocol so the cache can sit on top of any ``CacheStore``-conforming
+backend. The one shipped backend is ``FileCacheStore``, a plain filesystem
+directory; execution auto-cache roots it under
+``<workspace>/.molab/cache/<run-path>/``, and a caller may pass any other
+directory explicitly (``Caching(store_dir=…)``).
 """
 
 from __future__ import annotations
@@ -74,9 +68,9 @@ class FileCacheStore:
     writes use a temp-file + rename (mirrors workspace's
     :func:`atomic_write_json` semantics for non-JSON-decoded strings).
 
-    Execution auto-cache uses this rooted at ``<run_dir>/cache``.
-    ``ws.cache.as_cache_store()`` remains an explicit workspace-wide
-    alternative; it is not created by execute.
+    Execution auto-cache uses this rooted under
+    ``<workspace>/.molab/cache/<run-path>/``; any other directory is an
+    explicit caller choice.
     """
 
     def __init__(self, store_dir: Path | str) -> None:

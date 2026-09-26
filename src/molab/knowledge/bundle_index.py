@@ -1,12 +1,10 @@
-"""Derived bundle index models for ``molab.workspace`` (OKF rollup).
+"""Derived bundle index models (OKF rollup, in memory only).
 
-:meth:`molab.workspace.Bundle.build_index` walks the whole Concept tree and
-rolls each Concept's identity (path / type / id / tags / title / out-edges) into
-a :class:`BundleIndex`, then writes two **derived** siblings at the bundle root:
-``index.json`` (machine-readable) and ``INDEX.md`` (human/agent-readable, same
-spirit as ``.claude/specs/INDEX.md``). Both are rebuilt on demand from the
-authoritative ``meta.json`` + ``index.md`` graph — never a source of truth (the
-workspace "one source of truth" law).
+:meth:`molab.knowledge.bundle.Bundle.scan_index` walks the whole Concept tree
+and rolls each Concept's identity (path / type / id / tags / title / out-edges)
+into a :class:`BundleIndex`. It is built in memory per query from the
+authoritative ``meta.json`` + ``index.md`` graph and never persisted — never a
+source of truth (the workspace "one source of truth" law).
 
 ``BundleIndex`` is an index *of every Concept in a directory subtree*.
 """
@@ -17,9 +15,6 @@ import re
 from datetime import datetime
 
 from pydantic import BaseModel
-
-INDEX_JSON_FILENAME = "index.json"
-INDEX_MD_FILENAME = "INDEX.md"
 
 # First markdown H1 (``# Title``) line, if any.
 _H1 = re.compile(r"^#\s+(.+?)\s*$", re.MULTILINE)
@@ -105,26 +100,8 @@ class BundleIndex(BaseModel, frozen=True):
     generated_at: datetime | None = None
     entries: tuple[ConceptIndexEntry, ...] = ()
 
-    def to_markdown(self) -> str:
-        """Render the human/agent-readable ``INDEX.md``."""
-        generated = self.generated_at.isoformat() if self.generated_at else "unknown"
-        lines = [
-            "# Knowledge Index",
-            "",
-            f"_Derived — rebuilt by `Bundle.build_index()`. "
-            f"Machine-readable: `{INDEX_JSON_FILENAME}`. Generated {generated}._",
-            "",
-        ]
-        for entry in self.entries:
-            title = entry.title or entry.path
-            tags = f" · tags: {', '.join(entry.tags)}" if entry.tags else ""
-            lines.append(f"- [{title}]({entry.path}) — `{entry.type}`{tags}")
-        return "\n".join(lines) + "\n"
-
 
 __all__ = [
-    "INDEX_JSON_FILENAME",
-    "INDEX_MD_FILENAME",
     "BundleIndex",
     "ConceptIndexEntry",
     "SearchHit",

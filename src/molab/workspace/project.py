@@ -215,6 +215,7 @@ class Project(Folder):
         """Create filesystem structure and persist metadata (non-recursive)."""
         d = self.project_dir
         self._disk().mkdir(d, parents=True, exist_ok=True)
+        self.save()
         from .scientific_repository import ScientificRepository
 
         ScientificRepository(self.workspace.root, fs=self._disk()).record_project(
@@ -222,7 +223,6 @@ class Project(Folder):
             workspace_id=self.workspace.metadata.id,
             path=self.project_dir,
         )
-        self.save()
 
     def write_meta(self) -> str:
         """Stamp concept ``type`` on ``project.json``."""

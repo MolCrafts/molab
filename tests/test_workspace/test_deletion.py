@@ -29,21 +29,6 @@ def _build(tmp_path):
     return ws, p, e, r
 
 
-class TestDeleteExecution:
-    def test_delete_execution_is_an_immutability_tombstone(self, tmp_path):
-        _ws, _p, _e, r = _build(tmp_path)
-        first_exec = r.executions[0].id
-        with pytest.raises(RuntimeError):
-            r.delete_execution(first_exec)
-        # Provenance is immutable — the execution dir survives.
-        assert (Path(r.run_dir) / "executions" / first_exec).exists()
-
-    def test_unknown_execution_also_raises(self, tmp_path):
-        _ws, _p, _e, r = _build(tmp_path)
-        with pytest.raises(RuntimeError):
-            r.delete_execution("exec-does-not-exist")
-
-
 class TestDeleteRun:
     def test_removes_run_dir(self, tmp_path):
         _ws, _p, e, r = _build(tmp_path)

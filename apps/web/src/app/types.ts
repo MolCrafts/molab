@@ -50,8 +50,6 @@ import type { RunCreateRequest } from "../api/generated/models/RunCreateRequest"
 export type { ExperimentCreateRequest, ProjectCreateRequest, RunCreateRequest };
 
 import type { AgentTaskResponse } from "../api/generated/models/AgentTaskResponse";
-import type { CacheClearResponse } from "../api/generated/models/CacheClearResponse";
-import type { CacheStatsResponse } from "../api/generated/models/CacheStatsResponse";
 import type { ExecutionOutputsResponse } from "../api/generated/models/ExecutionOutputsResponse";
 import type { ExperimentResponse } from "../api/generated/models/ExperimentResponse";
 import type { ProjectResponse } from "../api/generated/models/ProjectResponse";
@@ -110,8 +108,6 @@ export interface ApiAssetResponse {
 }
 export type ApiWorkflowSnapshot = WorkflowSnapshotResponse;
 export type ApiRunSummary = ApiRunSummaryModel;
-export type ApiCacheStats = CacheStatsResponse;
-export type ApiCacheClear = CacheClearResponse;
 // AgentTaskResponse is the user-facing task envelope around one runtime
 // session. It already carries taskId/title/updatedAt/sessionId so legacy
 // consumers that expected ``ApiAgentSession`` see the same shape.

@@ -116,7 +116,7 @@ class TestRefreshHeartbeat:
             before_bytes = run_json.read_bytes()
 
             # One heartbeat beat refreshes the per-execution alive mtime.
-            ctx._heartbeat_path().touch()
+            touch_alive(run, ctx.id)
 
             assert alive.stat().st_mtime > before_mtime
             assert alive.stat().st_size == 0

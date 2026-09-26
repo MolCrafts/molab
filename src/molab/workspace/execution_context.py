@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
-from pydantic import BaseModel
+from mollog import get_logger
 
 from molab._typing import JSONValue, TaskOutput
 from molab.profile import ProfileConfig
@@ -33,12 +33,15 @@ from .execution_repository import ExecutionRepository
 from .file_store import FileStore
 from .history import AgentRef
 from .metrics_seam import MetricRecord, MetricsSink, create_metrics_writer
+from .run_heartbeat import HEARTBEAT_INTERVAL_SECONDS, touch_alive, unlink_alive
 from .schema_version import read_versioned_json, write_versioned_json
 
 if TYPE_CHECKING:
     from types import TracebackType
 
     from .run import Run
+
+_logger = get_logger(__name__)
 
 
 def _system_agent() -> AgentRef:
@@ -390,10 +393,6 @@ class ExecutionContext:
     def get_result(self, key: str) -> TaskOutput:
         return self._read_results().get(key)
 
-    def set_workflow(self, workflow: BaseModel | dict[str, JSONValue]) -> None:
-        value = workflow.model_dump(mode="json") if isinstance(workflow, BaseModel) else workflow
-        write_versioned_json(self.execution_dir / "workflow.json", {"workflow": value})
-
     def mark_failed(self, error: str | None = None, traceback_text: str | None = None) -> None:
         if self._failure is not None:
             return
@@ -482,11 +481,8 @@ class ExecutionContext:
             return value
         return value.id
 
-    def _heartbeat_path(self) -> Path:
-        return self.execution_dir / "alive"
-
     def _start_heartbeat(self) -> None:
-        self._heartbeat_path().touch()
+        touch_alive(self.run, self.id)
         stop = threading.Event()
         thread = threading.Thread(
             target=self._heartbeat_loop,
@@ -507,11 +503,24 @@ class ExecutionContext:
         self._heartbeat_thread = None
 
     def _heartbeat_loop(self, stop: threading.Event) -> None:
-        while not stop.wait(30):
-            self._heartbeat_path().touch(exist_ok=True)
+        # A remote ``touch`` can fail transiently; one failure must not kill
+        # the thread, or the owner looks stale while it is still running.
+        while not stop.wait(HEARTBEAT_INTERVAL_SECONDS):
+            try:
+                touch_alive(self.run, self.id)
+            except Exception:
+                _logger.warning(
+                    f"heartbeat touch failed for execution {self.id}; retrying next interval",
+                    exc_info=True,
+                )
 
     def _remove_heartbeat(self) -> None:
-        self._heartbeat_path().unlink(missing_ok=True)
+        # Best effort: a leftover ``alive`` only ages into staleness, while a
+        # raise here would skip ``seal`` and mask the body's own exception.
+        try:
+            unlink_alive(self.run, self.id)
+        except Exception:
+            _logger.warning(f"could not remove heartbeat for execution {self.id}", exc_info=True)
 
 
 RunContext = ExecutionContext

@@ -18,8 +18,8 @@ capability          verb domain
 ``run_rerun``       ``failed``/``cancelled`` only — a fresh attempt from the
                     top (``fresh=true`` additionally bypasses the cache read).
 ``run_cancel``      ``running`` only — the one intervene verb.
-``runs_prune``      delete selected execution attempts of one run
-                    (two-phase: plan, then apply; irreversible).
+``runs_prune``      prune bulk directories of selected execution attempts
+                    of one run; records kept (two-phase: plan, then apply).
 =================  ==========================================================
 
 Execute handlers are **local-only in v1**: a run whose ``metadata.target``
@@ -118,9 +118,10 @@ LIFECYCLE_CAPABILITIES: tuple[ToolCapability, ...] = (
         package="molab",
         name="runs_prune",
         description=(
-            "Delete selected execution attempts of one run (reclaim disk + "
-            "history). Two-phase: a plan lists exactly what would be deleted, "
-            "then apply removes those attempts. Irreversible. A live running "
+            "Prune bulk directories of selected execution attempts of one run "
+            "(reclaim disk); records kept. Two-phase: a plan lists exactly which "
+            "bulk directories would be removed, then apply removes them. The "
+            "removed bytes are irreversible. A queued, running or finalizing "
             "attempt refuses at plan time."
         ),
         input_schema=_input_schema(["run", "execution_ids", "statuses"], ["run"]),

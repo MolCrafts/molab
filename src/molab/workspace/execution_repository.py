@@ -4,12 +4,34 @@ One attempt is one directory — ``executions/e01``, ``executions/e02`` — and
 one file inside it, ``execution.json``, holds the whole attempt: status,
 executor, environment, emitted artifacts, evidence, error, and (once
 terminal) the seal. Nothing about an attempt is stored anywhere else.
+
+Lock order. Every read-modify-write of ``execution.json`` holds the
+per-execution *state* lock. ``seal`` additionally holds the per-execution
+*seal* lock, and always takes it first: seal -> state, never the reverse. No
+code path holds the state lock and then asks for the seal lock. Locks are
+``file_lock`` (flock / O_EXCL) and are not reentrant, so code already holding
+the state lock calls the lock-free ``_transition_locked`` kernel instead of
+``transition``. History (``_record``) runs outside the state lock, so git never
+blocks a writer of the record.
+
+Sealed records are immutable. *Sealing* is how a finished attempt is frozen:
+it is two writes. ``seal`` sets ``sealed_at`` and the terminal fields, then,
+once history has committed, stamps ``sealed_commit`` exactly once, still under
+the seal lock. After that there is one exception, ``_POST_SEAL_FIELDS``: the
+prune stamp ``pruned_at`` / ``pruned_dirs``, written only by ``mark_pruned``.
+Every other field is never rewritten after ``sealed_at``. *Pruning* deletes a
+sealed attempt's bulk directories (reproducible bytes such as ``out/``) to
+free disk space while keeping its record. The stamp is how the record says
+which directories are gone. ``mark_pruned`` takes only the state lock. It
+never needs the seal lock, because it refuses an unsealed record, and a
+sealed record cannot be sealed again.
 """
 
 from __future__ import annotations
 
 import builtins
 import hashlib
+from collections.abc import Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -27,6 +49,7 @@ from .domain import (
     ExecutionStatus,
     RunStatusSummary,
 )
+from .execution_dirs import prunable_dirs
 from .fs import FileSystem, PathArg
 from .fs_local import LocalFileSystem
 from .history import AgentRef, EntityRef, GitHistory, Relation
@@ -55,6 +78,15 @@ _ALLOWED_TRANSITIONS: dict[ExecutionStatus, frozenset[ExecutionStatus]] = {
     ExecutionStatus.CANCELLED: frozenset(),
     ExecutionStatus.INTERRUPTED: frozenset(),
 }
+
+_POST_SEAL_FIELDS: frozenset[str] = frozenset({"pruned_at", "pruned_dirs"})
+"""Fields of a sealed Execution that may still be written.
+
+The prune stamp is the single named exception to "sealed means immutable".
+``mark_pruned`` is the only writer of these keys, and it writes nothing else.
+``transition`` and ``update_operational`` both raise ``ValueError`` when an
+update names one of them, so the keys are never set on an open attempt.
+"""
 
 _EVIDENCE_FILES = {
     "runtime": "run.log",
@@ -191,17 +223,56 @@ class ExecutionRepository:
         status: ExecutionStatus,
         **updates: object,
     ) -> Execution:
+        """Move the attempt to ``status`` under its state lock.
+
+        Args:
+            execution_id: The attempt to move (``e01``).
+            status: The target status; must be allowed from the current one.
+            **updates: Extra fields written in the same record update.
+
+        Returns:
+            The record as written (unchanged when already in ``status``).
+
+        Raises:
+            ValueError: The transition is not allowed, or ``updates`` names a
+                post-seal field.
+        """
         with file_lock(self._state_lock(execution_id)):
-            current = self.get(execution_id)
-            if status == current.status:
-                return current
-            if status not in _ALLOWED_TRANSITIONS[current.status]:
-                raise ValueError(
-                    f"invalid Execution transition: {current.status.value} -> {status.value}"
-                )
-            state = current.model_copy(update={"status": status, **updates})
-            self._write_state(state)
-            return state
+            return self._transition_locked(execution_id, status, **updates)
+
+    def _transition_locked(
+        self,
+        execution_id: str,
+        status: ExecutionStatus,
+        **updates: object,
+    ) -> Execution:
+        """Lock-free transition kernel; the caller must hold the state lock.
+
+        Args:
+            execution_id: The attempt to move (``e01``).
+            status: The target status; must be allowed from the current one.
+            **updates: Extra fields written in the same record update.
+
+        Returns:
+            The record as written (unchanged when already in ``status``).
+
+        Raises:
+            ValueError: The transition is not allowed, or ``updates`` names a
+                post-seal field (only ``mark_pruned`` writes those).
+        """
+        post_seal = _POST_SEAL_FIELDS.intersection(updates)
+        if post_seal:
+            raise ValueError(f"cannot write post-seal fields in a transition: {sorted(post_seal)}")
+        current = self.get(execution_id)
+        if status == current.status:
+            return current
+        if status not in _ALLOWED_TRANSITIONS[current.status]:
+            raise ValueError(
+                f"invalid Execution transition: {current.status.value} -> {status.value}"
+            )
+        state = current.model_copy(update={"status": status, **updates})
+        self._write_state(state)
+        return state
 
     def add_observed_inputs(self, execution_id: str, entity_ids: tuple[str, ...]) -> Execution:
         with file_lock(self._state_lock(execution_id)):
@@ -230,10 +301,21 @@ class ExecutionRepository:
             current = self.get(execution_id)
             if current.sealed:
                 raise ValueError(f"Execution {execution_id!r} is sealed")
-            forbidden = {"id", "seq", "run_id", "project_id", "mode", "created_at", "created_by"}
+            forbidden = {
+                "id",
+                "seq",
+                "run_id",
+                "project_id",
+                "mode",
+                "created_at",
+                "created_by",
+                *_POST_SEAL_FIELDS,
+            }
             overlap = forbidden.intersection(updates)
             if overlap:
-                raise ValueError(f"cannot update Execution identity fields: {sorted(overlap)}")
+                raise ValueError(
+                    f"cannot update Execution identity or post-seal fields: {sorted(overlap)}"
+                )
             state = current.model_copy(update=updates)
             self._write_state(state)
             return state
@@ -248,14 +330,34 @@ class ExecutionRepository:
         error: dict[str, JSONValue] | None = None,
         declaration_diff: dict[str, JSONValue] | None = None,
     ) -> Execution:
-        """Freeze the attempt in place, then record the fact in history."""
+        """Freeze the attempt in place, then record the fact in history.
+
+        Takes the seal lock, then the state lock (fixed order), so the
+        read-modify-write of the record cannot interleave with
+        ``add_artifact`` / ``add_observed_inputs`` / ``update_operational``:
+        a racing writer either lands before the seal reads the record, or is
+        refused afterwards because the record is sealed. History is recorded
+        after the state lock is released; the ``sealed_commit`` stamp re-takes
+        it and applies to a fresh read of the record.
+        """
         with file_lock(self._seal_lock(execution_id)):
-            return self._seal_locked(
-                execution_id,
-                status,
-                error=error,
-                declaration_diff=declaration_diff,
-            )
+            with file_lock(self._state_lock(execution_id)):
+                sealed, newly_sealed = self._seal_locked(
+                    execution_id,
+                    status,
+                    error=error,
+                    declaration_diff=declaration_diff,
+                )
+            if not newly_sealed:
+                return sealed
+            commit = self._record("ExecutionSealed", sealed, when=sealed.sealed_at)
+            if commit is None:
+                return sealed
+            with file_lock(self._state_lock(execution_id)):
+                latest = self.get(execution_id)
+                stamped = latest.model_copy(update={"sealed_commit": commit})
+                self._write_state(stamped)
+            return stamped
 
     def _seal_locked(
         self,
@@ -264,12 +366,18 @@ class ExecutionRepository:
         *,
         error: dict[str, JSONValue] | None = None,
         declaration_diff: dict[str, JSONValue] | None = None,
-    ) -> Execution:
+    ) -> tuple[Execution, bool]:
+        """Seal kernel; the caller must hold the seal lock and the state lock.
+
+        Returns:
+            The sealed record, and whether this call sealed it (``False`` when
+            it was already sealed).
+        """
         if status not in TERMINAL_EXECUTION_STATUSES:
             raise ValueError(f"cannot seal non-terminal status {status.value!r}")
         current = self.get(execution_id)
         if current.sealed:
-            return current
+            return current, False
         if current.status is ExecutionStatus.QUEUED and status in {
             ExecutionStatus.FAILED,
             ExecutionStatus.CANCELLED,
@@ -277,7 +385,7 @@ class ExecutionRepository:
         }:
             finalizing = current
         elif current.status is ExecutionStatus.RUNNING:
-            finalizing = self.transition(execution_id, ExecutionStatus.FINALIZING)
+            finalizing = self._transition_locked(execution_id, ExecutionStatus.FINALIZING)
         elif current.status is ExecutionStatus.FINALIZING:
             finalizing = current
         else:
@@ -296,11 +404,58 @@ class ExecutionRepository:
             }
         )
         self._write_state(sealed)
-        commit = self._record("ExecutionSealed", sealed, when=finished_at)
-        if commit is not None:
-            sealed = sealed.model_copy(update={"sealed_commit": commit})
-            self._write_state(sealed)
-        return sealed
+        return sealed, True
+
+    # ── post-seal ────────────────────────────────────────────────────────
+
+    def mark_pruned(self, execution_id: str, dirs: Iterable[str]) -> Execution:
+        """Stamp a sealed attempt with the bulk directories pruned from it.
+
+        This method only records the prune. It deletes nothing, and the caller
+        (``molab.workspace.prune.apply_execution_prune``) removes the bytes.
+        It writes only ``_POST_SEAL_FIELDS``, under the state lock:
+        ``pruned_dirs`` becomes the sorted union of its previous value and
+        ``dirs``, and ``pruned_at`` becomes the current UTC time. Every other
+        field of the sealed record is left untouched. Once the record is
+        written, an ``ExecutionPruned`` fact is recorded in the workspace's git
+        history, outside the lock.
+
+        Args:
+            execution_id: The sealed attempt (``e01``).
+            dirs: Names of the execution directories that were removed. Each
+                must be the name of a directory declared ``prunable`` (see
+                ``molab.workspace.execution_dirs.prunable_dirs``).
+
+        Returns:
+            The record as written.
+
+        Raises:
+            ValueError: A name in ``dirs`` is not a prunable execution
+                directory (checked first, before the record is read), or the
+                attempt is not sealed.
+            KeyError: No attempt ``execution_id`` exists under this Run.
+        """
+        dirs = tuple(dirs)
+        allowed = {d.name for d in prunable_dirs()}
+        refused = sorted(set(dirs) - allowed)
+        if refused:
+            raise ValueError(
+                f"not prunable execution dir(s) {refused!r}; prunable: {sorted(allowed)}"
+            )
+        with file_lock(self._state_lock(execution_id)):
+            current = self.get(execution_id)
+            if not current.sealed:
+                raise ValueError(
+                    f"Execution {execution_id!r} is not sealed; only a sealed attempt is pruned"
+                )
+            update: dict[str, object] = {
+                "pruned_dirs": tuple(sorted(set(current.pruned_dirs) | set(dirs))),
+                "pruned_at": datetime.now(UTC),
+            }
+            state = current.model_copy(update=update)
+            self._write_state(state)
+        self._record("ExecutionPruned", state, when=state.pruned_at)
+        return state
 
     # ── internals ────────────────────────────────────────────────────────
 

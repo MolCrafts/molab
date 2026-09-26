@@ -88,7 +88,7 @@ class _FailingPutStore:
 @pytest.mark.asyncio
 class TestRuntimeCaching:
     async def test_second_run_hits_cache_and_serves_output_without_recompute(
-        self, workspace: Workspace
+        self, workspace: Workspace, tmp_path: Path
     ) -> None:
         wf = Workflow(name="counted")
 
@@ -98,7 +98,7 @@ class TestRuntimeCaching:
             return 42
 
         compiled = WorkflowCompiler().compile(wf)
-        cache = Caching(store=workspace.cache.as_cache_store())
+        cache = Caching(store_dir=tmp_path / "shared-cache")
 
         run1 = _new_run(workspace, "run1")
         with run1.start() as ctx1:
@@ -136,7 +136,7 @@ class TestRuntimeCaching:
         assert not (Path(workspace.root) / "cache").exists()
 
     async def test_artifact_reregistered_on_hit_without_recompute(
-        self, workspace: Workspace
+        self, workspace: Workspace, tmp_path: Path
     ) -> None:
         wf = Workflow(name="artifact-producer")
 
@@ -147,7 +147,7 @@ class TestRuntimeCaching:
             return "produced"
 
         compiled = WorkflowCompiler().compile(wf)
-        cache = Caching(store=workspace.cache.as_cache_store())
+        cache = Caching(store_dir=tmp_path / "shared-cache")
 
         run1 = _new_run(workspace, "art1")
         with run1.start() as ctx1:
@@ -169,7 +169,7 @@ class TestRuntimeCaching:
         assert len(art2) == 1
         assert art2[0].content.digest == hash1
 
-    async def test_config_change_forces_miss(self, workspace: Workspace) -> None:
+    async def test_config_change_forces_miss(self, workspace: Workspace, tmp_path: Path) -> None:
         """The runtime threads the compiled snapshot's config identity into the
         cache key: same config → HIT, different config → MISS (body reruns)."""
 
@@ -181,7 +181,7 @@ class TestRuntimeCaching:
                 _bump("compute")
                 return self.factor * 10
 
-        cache = Caching(store=workspace.cache.as_cache_store())
+        cache = Caching(store_dir=tmp_path / "shared-cache")
 
         def _compiled(factor: int):
             return WorkflowCompiler().compile(
@@ -221,7 +221,7 @@ class TestRuntimeCaching:
         await WorkflowRuntime().execute(compiled, run_dir=tmp_path / "nc2")
         assert _COUNTERS["step"] == 2
 
-    async def test_actor_is_never_cached(self, workspace: Workspace) -> None:
+    async def test_actor_is_never_cached(self, workspace: Workspace, tmp_path: Path) -> None:
         wf = Workflow(name="actor-wf")
 
         @wf.actor
@@ -230,7 +230,7 @@ class TestRuntimeCaching:
             yield "chunk"
 
         compiled = WorkflowCompiler().compile(wf)
-        cache = Caching(store=workspace.cache.as_cache_store())
+        cache = Caching(store_dir=tmp_path / "shared-cache")
 
         run1 = _new_run(workspace, "act1")
         with run1.start() as ctx1:

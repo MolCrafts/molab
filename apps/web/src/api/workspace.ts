@@ -1,9 +1,6 @@
 import { WorkspaceService } from "@/api/generated/services/WorkspaceService";
 import type { ServedWorkspaceSummary } from "@/app/types";
 
-export type { CacheClearResponse as ApiCacheClear } from "@/api/generated/models/CacheClearResponse";
-export type { CacheStatsResponse as ApiCacheStats } from "@/api/generated/models/CacheStatsResponse";
-
 /** Wire node for `mapWorkspaceTree` (HTTP listing adapted via WorkspaceFs). */
 export interface WorkspaceFileNode {
   id?: string;
@@ -50,8 +47,6 @@ export const workspaceApi = {
     const response = await WorkspaceService.readWorkspaceFile(path);
     return response.content;
   },
-  getCacheStats: () => WorkspaceService.getCacheStats(),
-  clearCache: () => WorkspaceService.clearCache(),
   getWorkspaceFileBlob: async (path: string): Promise<Blob> => {
     // Generated client JSON-decodes this binary route.
     const response = await fetch(`/api/workspace/file/blob?path=${encodeURIComponent(path)}`);

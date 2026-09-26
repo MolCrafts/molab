@@ -1,12 +1,16 @@
 """``molab runs prune`` — interactive hierarchical cleanup.
 
 Walks project → experiment → run → execution step-by-step, letting the user
-manually pick what to delete at each layer. The selection UI lives here; the
-deletion itself goes through the shared two-phase core
-(:func:`molab.workspace.prune.plan_execution_prune` →
-:func:`~molab.workspace.prune.apply_execution_prune`) — the same core the
-harness lifecycle capability drives, so CLI and agent prune identically
-(Python = UI law).
+pick which executions (attempts at a run) to prune. Once the run is chosen,
+its zombie attempts are reaped before the attempts are listed. A zombie is an
+attempt still recorded as ``running`` after its owning process has died, and
+reaping seals it as ``failed``. Pruning removes bulk directories only
+(``out/``, ``work/``, ``jobs/``, ``checkpoints/``) and keeps every execution
+record: ``execution.json`` and the ``executions/<id>/`` directory itself stay.
+The selection UI lives here. The pruning itself goes through the shared
+two-phase core (:func:`molab.workspace.prune.plan_execution_prune` →
+:func:`~molab.workspace.prune.apply_execution_prune`). The harness lifecycle
+capability drives the same core, so the CLI and the agent prune identically.
 """
 
 from __future__ import annotations
@@ -20,7 +24,7 @@ from rich.table import Table
 
 from molab.workspace.run import Run
 
-from ._common import console, rprint, status_color
+from ._common import console, reap_zombie_run, rprint, status_color
 
 
 def _select_one(
@@ -83,7 +87,7 @@ def _select_many(
 
     rprint("[dim]Formats: 1,3,5  |  2-4  |  all  |  failed,cancelled[/dim]")
     raw = typer.prompt(
-        "Select records to delete (empty to abort)",
+        "Select executions to prune (empty to abort)",
         default="",
         show_default=False,
     )
@@ -140,12 +144,20 @@ def prune_runs(
         typer.Option("--path", "-p", help="Workspace path (default: cwd)."),
     ] = None,
 ) -> None:
-    """Interactively delete per-execution records of a run.
+    """Interactively prune bulk directories of a run's executions; records are kept.
 
     Descends project → experiment → run → executions, letting the user
-    pick at each step.  Only the ``execution/{exec_id}/`` directories and
-    matching ``ops`` execution-history entries are touched; run status /
-    parameters / artifacts are left alone.
+    pick at each step. After the run is picked, its zombie attempts are
+    reaped: an attempt still ``running`` after its owner process died is
+    sealed as ``failed``. The attempts are listed only after that. The
+    plan step refuses any attempt that is not sealed, and it exits with
+    code 1 when it does. After a ``y`` confirmation, only the prunable bulk
+    directories of the selected executions are removed: ``out/``,
+    ``work/``, ``jobs/`` and ``checkpoints/``, which include solver logs and
+    scheduler stdout/stderr. The records are kept. That means
+    ``execution.json``, the node journal ``workflow.json``, ``run.log`` and
+    ``artifacts/``. Each pruned record is stamped ``pruned_at`` /
+    ``pruned_dirs``.
     """
     from . import _common
 
@@ -187,7 +199,7 @@ def prune_runs(
 
     run_rows: list[tuple[str, ...]] = []
     for r in runs:
-        status = str(r.status).lower()
+        status = r.status_label
         n_exec = len(r.executions)
         run_rows.append(
             (
@@ -206,6 +218,9 @@ def prune_runs(
         rprint("[dim]Aborted.[/dim]")
         raise typer.Exit(0)
     run = runs[i]
+    # The prune core refuses any active record, so a dead owner's stale
+    # ``running`` Execution must be reaped before listing — callers reap first.
+    reap_zombie_run(run)
 
     # Layer 4: execution records
     rows = _execution_rows(run)
@@ -245,7 +260,8 @@ def prune_runs(
         raise typer.Exit(1) from exc
 
     confirm = typer.prompt(
-        f"Delete {len(plan.entries)} execution record(s) from run {run.id!r}? [y/N]",
+        f"Prune bulk of {len(plan.entries)} execution(s) from run {run.id!r}? "
+        "Records are kept. [y/N]",
         default="N",
         show_default=False,
     )
@@ -254,16 +270,16 @@ def prune_runs(
         raise typer.Exit(0)
 
     for entry in plan.entries:
-        if entry.dir_exists:
-            rprint(f"  [green]OK[/green] removed executions/{entry.execution_id}")
-        else:
-            rprint(f"  [dim]skip[/dim]  {entry.execution_id} (no directory)")
-    deleted_dirs = apply_execution_prune(run, plan)
+        if not entry.dirs:
+            rprint(f"  [dim]skip[/dim]  {entry.execution_id} (no bulk directories)")
+        for name in entry.dirs:
+            rprint(f"  [green]OK[/green] removed executions/{entry.execution_id}/{name}")
+    removed_dirs = apply_execution_prune(run, plan)
 
     remaining = len(run.executions)
     rprint(
-        f"[green]Done.[/green] Removed {deleted_dirs} dir(s), "
-        f"pruned {len(plan.entries)} history entry/entries.  "
+        f"[green]Done.[/green] Removed {removed_dirs} dir(s) from "
+        f"{len(plan.entries)} execution(s); records are kept. "
         f"{remaining} record(s) remain."
     )
 

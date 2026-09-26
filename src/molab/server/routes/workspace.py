@@ -12,7 +12,6 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from molab.services.auth import AuthError, AuthUser, get_auth_service, is_auth_enabled
-from molab.workflow import Caching
 from molab.workspace import ContextFocus, Workspace
 from molab.workspace.fs_cached import CachedRemoteFileSystem, prefetch_workspace_indices
 from molab.workspace.fs_local import LocalFileSystem
@@ -28,8 +27,6 @@ from ..dependencies import (
 from ..deps.auth import get_optional_user
 from ..preview import resolve_sidecar
 from ..schemas import (
-    CacheClearResponse,
-    CacheStatsResponse,
     FileContentResponse,
     TargetTestCheck,
     TargetTestResponse,
@@ -63,29 +60,6 @@ class FileContentUpdateRequest(BaseModel):
 
 
 router = APIRouter(prefix="/workspace", tags=["workspace"])
-
-
-def _workspace_cache(workspace) -> Caching:  # noqa: ANN001
-    return Caching(store=workspace.cache.as_cache_store())
-
-
-@router.get("/cache/stats", response_model=CacheStatsResponse)
-def get_cache_stats(workspace=Depends(get_workspace)) -> CacheStatsResponse:  # noqa: ANN001
-    """Workspace content-addressed task cache statistics."""
-    cache = _workspace_cache(workspace)
-    stats = cache.stats
-    return CacheStatsResponse(
-        storeDir=str(workspace.cache.path),
-        entryCount=entry_count if isinstance(entry_count := stats["entry_count"], int) else 0,
-    )
-
-
-@router.delete("/cache", response_model=CacheClearResponse)
-def clear_cache(workspace=Depends(get_workspace)) -> CacheClearResponse:  # noqa: ANN001
-    """Clear the workspace content-addressed task cache."""
-    cache = _workspace_cache(workspace)
-    removed = cache.clear()
-    return CacheClearResponse(removedCount=removed)
 
 
 MAX_TEXT_BYTES = 2_000_000

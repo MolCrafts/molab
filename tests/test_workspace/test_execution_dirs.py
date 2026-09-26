@@ -49,6 +49,7 @@ class TestPeerStatus:
             "purpose",
             "versioned",
             "products",
+            "prunable",
         }
 
     def test_every_directory_explains_itself(self):
@@ -103,3 +104,35 @@ class TestUndeclaredNamesAreRefused:
             resolve_execution_dir("outputs")
         # The message names what *is* declared, so the fix is obvious.
         assert "artifacts" in str(excinfo.value)
+
+
+class TestPrunableDirs:
+    """Which directories a prune may remove is data (arch-own-01-cleanup)."""
+
+    def test_seeded_prunable_dirs_are_the_bulk_tiers(self):
+        from molab.workspace.execution_dirs import prunable_dirs
+
+        assert {d.name for d in prunable_dirs()} == {"out", "work", "jobs", "checkpoints"}
+
+    def test_promoted_tier_is_not_prunable(self):
+        # ``Artifact.path`` points at these bytes; pruning them would dangle it.
+        assert ARTIFACTS.prunable is False
+
+    def test_undeclared_prunability_defaults_to_kept(self):
+        from molab.workspace import execution_dirs as mod
+        from molab.workspace.execution_dirs import prunable_dirs
+
+        register_execution_dir(
+            ExecutionDir(
+                name="test-unprunable-dir",
+                purpose="Declared by a test without prunable.",
+                versioned=False,
+                products=False,
+            )
+        )
+        try:
+            assert resolve_execution_dir("test-unprunable-dir").prunable is False
+            assert "test-unprunable-dir" not in {d.name for d in prunable_dirs()}
+        finally:
+            mod._REGISTRY.pop("test-unprunable-dir")
+            mod._ORDER.remove("test-unprunable-dir")

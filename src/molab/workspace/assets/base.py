@@ -99,7 +99,7 @@ class Asset(BaseModel):
     """SHA-256 of the asset's payload, prefixed with ``sha256:``.
 
     Set automatically by :class:`~molab.workspace.assets.data.DataAssetLibrary`
-    and :meth:`~molab.workspace.runcontext.RunContext.register_artifact`. Streaming
+    and :meth:`~molab.workspace.execution_context.ExecutionContext.emit_artifact`. Streaming
     or time-series kinds (``log``, ``checkpoint``, ``error_trace``,
     ``execution_state``) leave it ``None`` — content addressing of an
     open-ended stream is ambiguous.

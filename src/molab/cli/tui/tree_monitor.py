@@ -22,10 +22,12 @@ Keybindings (confirm dialog)::
     y              confirm delete
     n / Esc        cancel
 
-Only terminal runs/executions are deleted silently.  Running ones get
-their cancel path inspected first (see :mod:`molab.plugins.submit_molq.cancel`):
+Only terminal runs are deleted silently.  Running ones get their cancel
+path inspected first (see :mod:`molab.plugins.submit_molq.cancel`):
 cancellable ones are cancelled then deleted; uncancellable ones stay
-with a warning printed after the dialog closes.
+with a warning printed after the dialog closes.  Execution records are
+append-only: an execution node is cancelled if running, then kept with a
+warning pointing at ``molab runs prune``.
 
 The tree data model lives in :mod:`molab.cli.tui.tree_model`; pure
 Rich rendering in :mod:`molab.cli.tui.rendering`. This module owns UI
@@ -267,6 +269,9 @@ def _prepare_dialog(targets: list[TreeNode]) -> _DeleteDialog:
                 lines.append(("!", _describe_target(node), f"uncancellable: {detail}"))
             else:
                 lines.append(("⟳", _describe_target(node), f"cancel via {kind}"))
+        elif node.kind == "execution":
+            # Execution records are append-only: the TUI never deletes one.
+            lines.append(("!", _describe_target(node), "records are kept; use molab runs prune"))
         else:
             lines.append(("✓", _describe_target(node), ""))
     return _DeleteDialog(targets=targets, plan_lines=lines)
@@ -301,7 +306,10 @@ def _execute_delete(dialog: _DeleteDialog) -> list[str]:
                     if msg is not None:
                         warnings.append(msg)
                         continue
-                run.delete_execution(exec_id)
+                warnings.append(
+                    f"execution {exec_id} kept: execution records are append-only; "
+                    "prune its bulk with 'molab runs prune'"
+                )
             elif node.kind == "experiment":
                 assert isinstance(node.ref, Experiment)
                 exp = node.ref

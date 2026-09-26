@@ -13,17 +13,31 @@ all legitimately live on in ``molab.knowledge``, and the workspace still writes
 ``knowledges/`` directories and reads its ``KnowledgeRef`` / ``ContextFocus``
 read-models, so a text scan would report the cut several times over. Prose
 mentions of knowledge are out of scope for this guard.
+
+arch-own-01-cleanup extends it with the Phase-1 dead code: the run-context
+family (``runcontext`` / ``run_context`` / ``run_lifecycle`` / ``run_assets``),
+``workflow/_names.py``, ``WorkflowSnapshotRef``, ``derive_execution_id``,
+``Run.delete_execution``, ``ExecutionContext.set_workflow``, ``CacheFolder`` /
+``Workspace.cache`` and the Bundle's persisted index writes. ``set_workflow`` and
+``RunLifecycle`` are substrings of live names, so they are asserted by attribute,
+not by the substring scan.
 """
 
 from __future__ import annotations
 
 import ast
 import importlib
+import inspect
 from pathlib import Path
 
 import pytest
 
 import molab
+import molab.workflow
+from molab.knowledge.bundle import Bundle
+from molab.workspace.execution_context import ExecutionContext
+from molab.workspace.run import Run
+from molab.workspace.workspace import Workspace
 
 SRC = Path(molab.__file__).resolve().parent  # .../src/molab
 TESTS = Path(__file__).resolve().parents[1]  # .../tests
@@ -70,6 +84,20 @@ DELETED_SYMBOLS = [
     "CROSS_HOST_HEARTBEAT_STALE_SECONDS",
     "_migrate_scope_columns",
     "_migrate_artifact_edges",
+    # arch-own-01-cleanup: Phase-1 dead code.
+    "CacheFolder",
+    "WORKSPACE_CACHE_KIND",
+    "as_cache_store",
+    "WorkflowSnapshotRef",
+    "derive_execution_id",
+    "delete_execution",
+    "RunAssets",
+    "ContextStore",
+    "SOURCES_FILENAME",
+    "build_index",
+    "_record_source",
+    "INDEX_JSON_FILENAME",
+    "INDEX_MD_FILENAME",
 ]
 
 DELETED_FILES = [
@@ -87,6 +115,16 @@ DELETED_FILES = [
     SRC / "workspace" / "note_meta.py",
     SRC / "workspace" / "reference_meta.py",
     SRC / "workspace" / "zotero_concepts.py",
+    # arch-own-01-cleanup: the dead run-context family, dead workflow modules
+    # and the never-written workspace cache folder.
+    SRC / "workspace" / "runcontext.py",
+    SRC / "workspace" / "run_context.py",
+    SRC / "workspace" / "run_lifecycle.py",
+    SRC / "workspace" / "run_assets.py",
+    SRC / "workflow" / "_names.py",
+    SRC / "workflow" / "snapshot_ref.py",
+    SRC / "workspace" / "cache" / "folder.py",
+    SRC / "workspace" / "cache" / "__init__.py",
 ]
 
 #: The knowledge names the workspace's public surface no longer carries.
@@ -116,6 +154,15 @@ DELETED_SHELL_MODULES = (
     "molab.workspace.note_meta",
     "molab.workspace.reference_meta",
     "molab.workspace.zotero_concepts",
+    # arch-own-01-cleanup
+    "molab.workspace.runcontext",
+    "molab.workspace.run_context",
+    "molab.workspace.run_lifecycle",
+    "molab.workspace.run_assets",
+    "molab.workspace.cache",
+    "molab.workspace.cache.folder",
+    "molab.workflow._names",
+    "molab.workflow.snapshot_ref",
 )
 
 
@@ -186,3 +233,29 @@ def test_no_importer_of_a_deleted_shell_or_name_survives() -> None:
     assert not offenders, "still importing a deleted workspace shell or name:\n  " + "\n  ".join(
         offenders
     )
+
+
+class TestArchOwn01DeletedAttributes:
+    """arch-own-01-cleanup: the deleted methods / properties / exports are gone
+    from the live classes, and the kept ``RunContext`` alias still resolves."""
+
+    def test_execution_context_has_no_set_workflow(self) -> None:
+        assert not hasattr(ExecutionContext, "set_workflow")
+
+    def test_run_has_no_delete_execution(self) -> None:
+        assert not hasattr(Run, "delete_execution")
+
+    def test_workspace_has_no_cache(self) -> None:
+        assert not hasattr(Workspace, "cache")
+
+    def test_workflow_has_no_snapshot_ref_export(self) -> None:
+        assert not hasattr(molab.workflow, "WorkflowSnapshotRef")
+
+    def test_bundle_has_no_build_index(self) -> None:
+        assert not hasattr(Bundle, "build_index")
+
+    def test_bundle_search_has_no_rebuild_param(self) -> None:
+        assert "rebuild" not in inspect.signature(Bundle.search).parameters
+
+    def test_run_context_alias_is_execution_context(self) -> None:
+        assert molab.RunContext is ExecutionContext

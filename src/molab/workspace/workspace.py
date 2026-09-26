@@ -27,7 +27,6 @@ from .base import (
     _load_metadata,
     _save_metadata,
 )
-from .cache import CacheFolder
 from .errors import ProjectExistsError, ProjectNotFoundError
 from .folder import (
     WORKSPACE_PROJECT_KIND,
@@ -150,7 +149,6 @@ class Workspace(Folder):
         self.root: Path = self._root_path
         self._entity_metadata: WorkspaceMetadata = entity_meta
         self._data_assets: DataAssetLibrary | None = None
-        self._cache_folder: CacheFolder | None = None
 
     # ── Folder hooks ─────────────────────────────────────────────────────
 
@@ -278,25 +276,6 @@ class Workspace(Folder):
         from .wp import WorkspacePaths
 
         return WorkspacePaths(self)
-
-    # ── System folder accessors (singletons via lowercase property) ──────
-
-    @property
-    def cache(self) -> CacheFolder:  # type: ignore[override]
-        """Opt-in workspace-wide :class:`CacheFolder` (``<root>/cache/``).
-
-        Lazily constructed; identity-stable. ``ws.cache is ws.cache``.
-        Execution auto-cache does **not** use this — it writes
-        ``<run_dir>/cache``. The directory is created only on first
-        explicit read/write through this folder.
-        """
-        if self._cache_folder is None:
-            self._cache_folder = CacheFolder(
-                parent=self,
-                name="cache",
-                kind="workspace.cache",
-            )
-        return self._cache_folder
 
     # ── Persistence ─────────────────────────────────────────────────────
 

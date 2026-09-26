@@ -134,11 +134,11 @@ class TestSectionNamesComeFromTheDeclaration:
 
     def test_no_writer_retypes_a_declared_directory_name(self):
         from molab.plugins.metrics import wal
-        from molab.workspace import artifact_repository, execution_context, run_assets
+        from molab.workspace import artifact_repository, execution_context
         from molab.workspace.execution_dirs import execution_dir_names
 
         names = execution_dir_names()
-        for module in (artifact_repository, run_assets, execution_context, wal):
+        for module in (artifact_repository, execution_context, wal):
             retyped = self._code_strings(Path(module.__file__)) & names
             assert not retyped, (
                 f"{module.__name__} hard-codes {sorted(retyped)}; "

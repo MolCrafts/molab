@@ -64,11 +64,13 @@ def _counted_workflow():
 
 class TestBypassCache:
     @pytest.mark.asyncio
-    async def test_bypass_cache_reruns_body_despite_warm_cache(self, workspace: Workspace) -> None:
+    async def test_bypass_cache_reruns_body_despite_warm_cache(
+        self, workspace: Workspace, tmp_path: Path
+    ) -> None:
         """A warm cache would normally serve the body; ``bypass_cache=True``
         forces it to run again (the control run proves the cache is warm)."""
         compiled = _counted_workflow()
-        cache = Caching(store=workspace.cache.as_cache_store())
+        cache = Caching(store_dir=tmp_path / "shared-cache")
 
         run1 = _new_run(workspace, "warm")
         with run1.start() as ctx1:
@@ -91,10 +93,12 @@ class TestBypassCache:
         assert _COUNTERS["step"] == 2
 
     @pytest.mark.asyncio
-    async def test_bypass_cache_still_writes_result_to_cache(self, workspace: Workspace) -> None:
+    async def test_bypass_cache_still_writes_result_to_cache(
+        self, workspace: Workspace, tmp_path: Path
+    ) -> None:
         """Bypass skips the READ only — the fresh result still lands in the cache."""
         compiled = _counted_workflow()
-        cache = Caching(store=workspace.cache.as_cache_store())
+        cache = Caching(store_dir=tmp_path / "shared-cache")
 
         run1 = _new_run(workspace, "seed")
         with run1.start() as ctx1:
@@ -111,12 +115,12 @@ class TestBypassCache:
 
     @pytest.mark.asyncio
     async def test_fresh_marker_forces_bypass_across_process_boundary(
-        self, workspace: Workspace
+        self, workspace: Workspace, tmp_path: Path
     ) -> None:
         """A persisted ``fresh.json`` marker requests the same bypass — the channel
         the server rerun endpoint / molq worker path uses (no explicit kwarg)."""
         compiled = _counted_workflow()
-        cache = Caching(store=workspace.cache.as_cache_store())
+        cache = Caching(store_dir=tmp_path / "shared-cache")
 
         run1 = _new_run(workspace, "warm")
         with run1.start() as ctx1:

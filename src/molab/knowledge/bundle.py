@@ -6,9 +6,9 @@ A *bundle* is a directory subtree whose Concept dirs (dirs that directly hold
 depth — as one management entry point: :meth:`walk` (depth-first Concept
 enumeration), :meth:`get` (path-as-identity resolution), :meth:`put`
 (idempotent materialization), :meth:`link` (a semantic edge written as a
-markdown link, round-tripping through :meth:`Concept.out_edges`), plus a derived
-rollup :meth:`build_index` (→ ``index.json`` machine + ``INDEX.md`` human/agent),
-queried by :meth:`search` (body-aware retrieval returning :class:`SearchResult`).
+markdown link, round-tripping through :meth:`Concept.out_edges`), plus an
+in-memory rollup :meth:`scan_index` queried by :meth:`search` (body-aware
+retrieval returning :class:`SearchResult`). Nothing derived is persisted.
 
 **The root is just a directory.** A bundle needs no workspace: a group wiki, a
 git repo of protocol notes, or a subtree of a molab workspace all open the same
@@ -23,7 +23,6 @@ the root path + filesystem and does **no** disk I/O on construction.
 from __future__ import annotations
 
 import contextlib
-import json
 import os
 from collections.abc import Iterator, Mapping
 from datetime import UTC, datetime
@@ -37,8 +36,6 @@ from molab.gitignore import GITIGNORE_FILENAME
 from molab.ids import slugify
 
 from .bundle_index import (
-    INDEX_JSON_FILENAME,
-    INDEX_MD_FILENAME,
     BundleIndex,
     ConceptIndexEntry,
     SearchHit,
@@ -54,7 +51,6 @@ from .concept import (
     concept_from_dir,
     meta_type,
     read_meta_dict,
-    read_text_or_none,
 )
 from .concepts import Literature, Note
 from .edges import DEFAULT_EDGE_ROLE, EdgeRole
@@ -77,7 +73,6 @@ _MAX_BODY_SEARCH_BYTES = 512 * 1024
 
 REFERENCES_GROUP = "references"
 REFERENCES_GROUP_TYPE = "bundle.references"
-SOURCES_FILENAME = "sources.json"
 
 
 class Backlink(NamedTuple):
@@ -750,7 +745,6 @@ class Bundle:
         path: PathArg,
         *,
         under: Concept | PathArg | None = None,
-        now: datetime | None = None,
     ) -> list[Literature]:
         """Link a local Zotero library (read-only) as ``Reference`` Concepts.
 
@@ -759,13 +753,12 @@ class Bundle:
         *pointed at* via ``ReferenceMeta.pdf_path`` — no bytes are copied.
         Idempotent on ``source_key``: re-importing an item updates its
         ``meta.json`` in place (the slugified Zotero key is the dir name)
-        rather than duplicating it. Records the link in ``sources.json``.
+        rather than duplicating it.
 
         Args:
             path: The ``zotero.sqlite`` to read (opened read-only).
             under: The Concept or directory to mount references beneath
                 (default: a ``references/`` group at the bundle root).
-            now: Import timestamp; defaults to aware-UTC ``datetime.now``.
 
         Returns:
             The :class:`Literature` records created or updated.
@@ -794,7 +787,6 @@ class Bundle:
                 # After write — the document is bib-complete when the event lands.
                 self._emit_created(ref, title=item.title or slug)
             refs.append(ref)
-        self._record_source("zotero", str(path), len(items), now=now)
         return refs
 
     def _references_group(self) -> Concept:
@@ -807,27 +799,6 @@ class Bundle:
         if not self._fs.is_dir(str(group.path)):
             group.write_meta()
         return group
-
-    def _record_source(self, source: str, path: str, count: int, *, now: datetime | None) -> None:
-        """Append (dedup on source+path) a linked-source row into ``sources.json``."""
-        sources_path = self._fs.join(str(self._root), SOURCES_FILENAME)
-        existing: list[dict[str, object]] = []
-        if self._fs.is_file(sources_path):
-            raw = json.loads(self._fs.read_text(sources_path))
-            if isinstance(raw, list):
-                existing = [e for e in raw if isinstance(e, dict)]
-        existing = [
-            e for e in existing if not (e.get("source") == source and e.get("path") == path)
-        ]
-        existing.append(
-            {
-                "source": source,
-                "path": path,
-                "count": count,
-                "imported_at": (now or _utcnow()).isoformat(),
-            }
-        )
-        self._fs.atomic_write_json(sources_path, existing)
 
     # ── derived index + search ───────────────────────────────────────────
 
@@ -872,12 +843,10 @@ class Bundle:
     ) -> tuple[BundleIndex, dict[str, str], dict[str, ConceptMetaDict]]:
         """Walk the bundle into an in-memory :class:`BundleIndex` — **no writes**.
 
-        The read half of :meth:`build_index`: every Concept becomes one
-        :class:`ConceptIndexEntry`, and the ``index.md`` bodies and parsed
-        ``meta.json`` heads read along the way come back with it (keyed by
-        bundle-relative path) so a ranker or lister never re-reads them. A
-        query is a read; only the explicit :meth:`build_index` verb touches
-        the disk.
+        Every Concept becomes one :class:`ConceptIndexEntry`, and the
+        ``index.md`` bodies and parsed ``meta.json`` heads read along the way
+        come back with it (keyed by bundle-relative path) so a ranker or lister
+        never re-reads them. A query is a read; nothing is persisted.
 
         Args:
             now: Index timestamp; defaults to aware-UTC ``datetime.now``.
@@ -899,44 +868,6 @@ class Bundle:
             {entry.path: meta for entry, _body, meta in rows},
         )
 
-    def build_index(self, *, now: datetime | None = None) -> BundleIndex:
-        """Rebuild the derived bundle index and write its two sibling files.
-
-        Walks every Concept, rolls its identity into a :class:`BundleIndex`, and
-        atomically writes ``index.json`` (machine) + ``INDEX.md`` (human/agent)
-        at the bundle root. Always a fresh, full rebuild — never authoritative
-        (``meta.json`` + ``index.md`` remain the source of truth). This is the
-        **only** bundle verb that writes those files; :meth:`search` never does.
-
-        Args:
-            now: Build timestamp; defaults to aware-UTC ``datetime.now``.
-
-        Returns:
-            The freshly built :class:`BundleIndex`.
-        """
-        index, _bodies, _metas = self.scan_index(now=now)
-        self._fs.atomic_write_json(
-            self._fs.join(str(self._root), INDEX_JSON_FILENAME),
-            index.model_dump(mode="json"),
-        )
-        self._fs.atomic_write_text(
-            self._fs.join(str(self._root), INDEX_MD_FILENAME),
-            index.to_markdown(),
-        )
-        return index
-
-    def _load_index(self) -> tuple[BundleIndex, dict[str, str]]:
-        """The last written ``index.json``, or a fresh in-memory scan if absent.
-
-        A read path: when no index has been built yet this scans instead of
-        writing one — a query never leaves derived files behind.
-        """
-        text = read_text_or_none(self._fs.join(str(self._root), INDEX_JSON_FILENAME), fs=self._fs)
-        if text is None:
-            index, bodies, _metas = self.scan_index()
-            return index, bodies
-        return BundleIndex.model_validate(json.loads(text)), {}
-
     def search(
         self,
         text: str | None = None,
@@ -946,7 +877,6 @@ class Bundle:
         scope: str | None = None,
         limit: int = 50,
         include_body: bool = True,
-        rebuild: bool = True,
         index: BundleIndex | None = None,
         bodies: Mapping[str, str] | None = None,
         corpus: Bm25fCorpus | None = None,
@@ -969,8 +899,8 @@ class Bundle:
 
         A body larger than ``_MAX_BODY_SEARCH_BYTES`` (or undecodable) is
         skipped for body matching, but the entry still ranks on its index
-        fields. **A search never writes** — the index is scanned in memory;
-        only :meth:`build_index` persists it.
+        fields. **A search never writes** — the index is scanned in memory
+        and never persisted.
 
         Args:
             text: The query; ``None`` **or empty** means filter-only.
@@ -981,10 +911,9 @@ class Bundle:
                 ``truncated=True`` (never a silent cap).
             include_body: ``False`` skips all body I/O, ranking on the index
                 fields alone.
-            rebuild: Rescan the tree first (default); otherwise reuse the last
-                written ``index.json`` (scanned in memory if absent).
             index: A prebuilt index to rank against — supply it (with *bodies*
                 and ideally *corpus*) and the query does **no I/O at all**.
+                Absent, the tree is scanned in memory (:meth:`scan_index`).
                 This is how a host that caches one scan, such as the server's
                 read model, answers many queries per walk instead of one.
             bodies: ``index.md`` text per bundle-relative path, as returned
@@ -998,10 +927,8 @@ class Bundle:
         """
         if index is not None:
             read_bodies = dict(bodies or {})
-        elif rebuild:
-            index, read_bodies, _metas = self.scan_index()
         else:
-            index, read_bodies = self._load_index()
+            index, read_bodies, _metas = self.scan_index()
         if not text:
             # Filter-only: nothing to rank, so keep deterministic index order.
             candidates = [

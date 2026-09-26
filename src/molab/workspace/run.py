@@ -474,6 +474,7 @@ class Run(Folder):
     def materialize(self) -> None:
         d = self.run_dir
         self._disk().mkdir(d, parents=True, exist_ok=True)
+        self.save()
         from .scientific_repository import ScientificRepository
 
         ScientificRepository(self.experiment.project.workspace.root, fs=self._disk()).record_run(
@@ -481,7 +482,6 @@ class Run(Folder):
             experiment_id=self.experiment.id,
             path=self.run_dir,
         )
-        self.save()
 
     def write_meta(self) -> str:
         """Stamp concept ``type`` on ``run.json``."""
@@ -512,7 +512,7 @@ class Run(Folder):
         del context
         raise RuntimeError(
             "Run-level driver context was removed in schema v2; write through "
-            "ExecutionContext.set_result()/set_workflow()"
+            "ExecutionContext.set_result()"
         )
 
     @classmethod
@@ -680,13 +680,6 @@ class Run(Folder):
     def cancel(self, execution_id: str) -> None:
         """Cancel one selected active Execution; a Run itself is not cancellable."""
         self._execution_repository().seal(execution_id, ExecutionStatus.CANCELLED)
-
-    def delete_execution(self, execution_id: str) -> None:
-        """Execution provenance is immutable; only workspace bytes may be pruned."""
-        raise RuntimeError(
-            f"Execution {execution_id!r} cannot be deleted; use the explicit prune API "
-            "to remove retained workspace content while preserving provenance"
-        )
 
     def _execution_repository(self) -> ExecutionRepository:
         workspace = self.experiment.project.workspace

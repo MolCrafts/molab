@@ -10,8 +10,7 @@ Features:
 - LRU eviction when entry count exceeds ``max_entries``
 - Format version field for forward-compatible schema evolution
 - Pluggable backing storage via :class:`CacheStore`
-  (``FileCacheStore`` for plain directories,
-  ``FileCacheStore(run_dir / "cache")`` for run-local caches; ``ws.cache.as_cache_store()`` is opt-in)
+  (``FileCacheStore`` for plain directories)
 
 Usage::
 
