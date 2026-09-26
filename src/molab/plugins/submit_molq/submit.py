@@ -545,10 +545,12 @@ def make_submit_handler(
 ) -> SubmitHandler:
     """Return a :class:`SubmitHandler` configured for the given scheduler.
 
-    The handler is callable with the standard ``(script, mol_run, experiment,
-    project)`` signature used by :func:`~molab.cli._dispatch_runs`.  The
-    leading ``script`` is accepted for uniformity with the dispatcher
-    and intentionally ignored; the worker rebuilds the run from ``run_dir``.
+    The handler satisfies :class:`molab.cli.workspace.run.RunHandler`: it is
+    called as ``(script, mol_run, experiment, project, *, execution_id=...)``,
+    where ``execution_id`` names the QUEUED Execution the dispatcher created
+    just before the call (``None`` only for ``--resume``). The leading
+    ``script`` is accepted for uniformity with the dispatcher and
+    intentionally ignored; the worker rebuilds the run from ``run_dir``.
 
     All ``None`` values in *resources* and *scheduling* are stripped so that
     molq passes them through as unset, letting each scheduler use its own

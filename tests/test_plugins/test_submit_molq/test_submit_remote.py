@@ -8,6 +8,7 @@ the worker behaviour, which is exercised by the molq suite.
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass, field
 from fnmatch import fnmatch
@@ -15,8 +16,10 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from molq.transport import CommandResult
+from molq.transport import CommandResult, LocalTransport
+from typer.testing import CliRunner
 
+import molab.cli
 from molab.workspace import AgentRef, ComputeTarget, Workspace
 from molab.workspace.domain import ExecutionMode
 from molab.workspace.execution_repository import ExecutionRepository
@@ -349,3 +352,82 @@ class TestSubmitHandler:
         record = Path(run.run_dir) / "executions" / "e01" / "execution.json"
         assert record.is_file()
         assert _uploads_cover(transport.calls, record)
+
+
+_HEALED_MODULE = """\
+from molab.workflow import Workflow, WorkflowCompiler
+
+wf = Workflow(name="staged")
+
+
+@wf.task
+def stage_a(seed: int) -> int:
+    return seed + 1
+
+
+@wf.task(depends_on=["stage_a"])
+def stage_b(stage_a: int) -> int:
+    return stage_a * 100
+
+
+workflow = WorkflowCompiler().compile(wf)
+"""
+
+
+class TestRemoteWorkerOpensStagedAttempt:
+    @pytest.mark.xfail(
+        strict=True,
+        raises=AssertionError,
+        reason=(
+            "arch-own-02: molab execute on a remote target — the staged attempt must be "
+            "openable and its workflow resolvable without the local workspace tree "
+            "(unowned: needs a new arch-own spec for remote worker layout)"
+        ),
+    )
+    def test_worker_runs_from_a_staged_only_layout(self, tmp_path: Path) -> None:
+        """The worker must run from exactly what ``stage_in`` uploads.
+
+        The remote host holds ``<scratch_root>/<ws>/<project>/<exp>/<run>`` —
+        the run dir without ``executions/`` plus ``executions/e01/`` — and no
+        ``workspace.json`` / ``experiment.json`` above it.
+        """
+        from molab.plugins.submit_molq.staging import stage_in
+        from molab.workspace.targets import target_run_dir
+
+        wf_file = tmp_path / "staged_wf.py"
+        wf_file.write_text(_HEALED_MODULE, encoding="utf-8")
+        ws = Workspace(root=tmp_path / "ws", name="remote-lab")
+        project = ws.add_project("p")
+        experiment = project.add_experiment("e")
+        # Hand-written binding (arch-own-04 replaces this with Experiment.bind_workflow).
+        experiment.metadata = experiment.metadata.model_copy(
+            update={"workflow_entrypoint": f"{wf_file}:workflow"}
+        )
+        experiment.save()
+        run = experiment.add_run(params={"seed": 1})
+        run.materialize()
+        queued = run.create_execution()
+        assert queued.id == "e01"
+
+        # The "remote host": a scratch tree disjoint from the workspace, filled by
+        # the production stage_in through a local-copy transport.
+        target = ComputeTarget(
+            name="hpc",
+            host="me@cluster",
+            scheduler="slurm",
+            scratch_root=str(tmp_path / "scratch"),
+        )
+        stage_in(LocalTransport(), run, target, "e01")
+        staged_run_dir = Path(target_run_dir(target, ws, run))
+        staged_record = staged_run_dir / "executions" / "e01" / "execution.json"
+        assert (staged_run_dir / "run.json").is_file()
+        assert staged_record.is_file()
+        assert not any((d / "workspace.json").exists() for d in staged_run_dir.parents)
+
+        result = CliRunner().invoke(
+            molab.cli.app, ["execute", str(staged_run_dir), "--execution-id", "e01"]
+        )
+
+        assert result.exit_code == 0, result.output
+        record = json.loads(staged_record.read_text(encoding="utf-8"))
+        assert record["status"] == "succeeded"

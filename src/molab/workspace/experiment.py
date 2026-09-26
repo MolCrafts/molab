@@ -539,6 +539,37 @@ class Experiment(Folder):
         )
         return run
 
+    def find_run(
+        self,
+        params: dict[str, JSONValue] | None = None,
+        *,
+        config_hash: str | None = None,
+        input_asset_ids: tuple[str, ...] = (),
+    ) -> Run | None:
+        """Return the Run with this definition, or ``None`` when there is none.
+
+        The read-only half of :meth:`ensure_run`: the same
+        :func:`~molab.workspace.run.compute_run_definition_hash` over this
+        experiment's revision, ``params``, ``input_asset_ids`` and
+        ``config_hash``, looked up in the same index (earliest created wins
+        among duplicates). It never creates a run.
+
+        Args:
+            params: The run's parameter cell.
+            config_hash: Profile configuration hash, or ``None`` for none.
+            input_asset_ids: Declared input asset ids.
+
+        Returns:
+            The existing :class:`Run`, or ``None`` if no run has this definition.
+        """
+        definition_hash = compute_run_definition_hash(
+            experiment_revision_id=self.metadata.revision_id,
+            parameters=params,
+            input_asset_ids=input_asset_ids,
+            config_hash=config_hash,
+        )
+        return self._definition_index().get(definition_hash)
+
     def _definition_index(self) -> dict[str, Run]:
         """Map each ``definition_hash`` to its earliest-created run.
 
@@ -800,16 +831,25 @@ class Experiment(Folder):
     # ── Internal helpers ────────────────────────────────────────────────
 
     def list_runs(self) -> list[Run]:
-        """List all runs by scanning the ``runs/`` directory."""
+        """List all runs by scanning the ``runs/`` directory.
+
+        One ``scandir`` pass answers which entries are directories; a
+        directory counts as a run only when it holds a ``run.json``.
+
+        Returns:
+            The runs, ordered by directory name.
+        """
         result: list[Run] = []
-        runs_dir = self._disk().join(self.experiment_dir, "runs")
-        if not self._disk().is_dir(runs_dir):
+        disk = self._disk()
+        runs_dir = disk.join(self.experiment_dir, "runs")
+        if not disk.is_dir(runs_dir):
             return result
-        for entry_name in sorted(self._disk().listdir(runs_dir)):
-            entry_path = self._disk().join(runs_dir, entry_name)
-            if self._disk().is_dir(entry_path) and self._disk().exists(
-                self._disk().join(entry_path, "run.json")
-            ):
+        entries = disk.scandir(runs_dir, with_stat=False)
+        for entry in sorted(entries, key=lambda e: e.name):
+            if not entry.is_dir:
+                continue
+            entry_path = disk.join(runs_dir, entry.name)
+            if disk.exists(disk.join(entry_path, "run.json")):
                 result.append(Run.from_disk(entry_path, self))
         return result
 

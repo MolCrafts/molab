@@ -53,10 +53,37 @@ def _system_agent() -> AgentRef:
     )
 
 
+def profile_config_hash(profile_config: ProfileConfig | None) -> str | None:
+    """Hash the effective configuration of a profile, or ``None`` when there is none.
+
+    The one ``config_hash`` rule: an Execution record's
+    ``environment.config_hash`` and the ``config_hash`` folded into a run's
+    ``definition_hash`` both come from here, so the two always agree for the
+    same profile.
+
+    The hash is content-only. It is ``ProfileConfig.content_hash()``, which
+    covers the configuration data and not the profile name: the name is a
+    label, recorded per attempt as ``environment.profile``, and is not part of
+    identity. Two profiles with the same content but different names therefore
+    hash the same. A name still marks the profile as present, so a named empty
+    profile hashes to the empty content's hash rather than ``None``.
+
+    Args:
+        profile_config: The active profile; ``None`` is treated as an empty,
+            unnamed one.
+
+    Returns:
+        ``profile_config.content_hash()`` when the profile has content or a
+        name, otherwise ``None``.
+    """
+    cfg = profile_config if profile_config is not None else ProfileConfig({}, name=None)
+    return cfg.content_hash() if len(cfg) > 0 or cfg.name else None
+
+
 _PROFILE_FACTS: dict[str, Callable[[ProfileConfig], JSONValue]] = {
     "profile": lambda cfg: cfg.name,
     "config": lambda cfg: cfg.to_dict(),
-    "config_hash": lambda cfg: cfg.content_hash() if len(cfg) > 0 or cfg.name else None,
+    "config_hash": profile_config_hash,
 }
 """How each profile-derived environment key is computed at creation."""
 
@@ -634,4 +661,4 @@ class ExecutionContext:
 
 RunContext = ExecutionContext
 
-__all__ = ["ExecutionContext", "RunContext"]
+__all__ = ["ExecutionContext", "RunContext", "profile_config_hash"]

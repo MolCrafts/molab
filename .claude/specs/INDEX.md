@@ -14,7 +14,7 @@ _Step 2 target architecture (plan `pasted-content-id-0977-you-are-scalable-puddl
 | 01 | [arch-own-01-cleanup](arch-own-01-cleanup.md) | Phase 1 安全清理（死代码删除 + 四处写入顺序/锁/心跳/prune 修复） [done] |
 | 02a | [arch-own-02a-record](arch-own-02a-record.md) | Execution record carries creation-time vs start-time provenance [done] |
 | 02b | [arch-own-02b-capture](arch-own-02b-capture.md) | per-execution source capture and config-aware run identity [done] |
-| 02c | [arch-own-02c-dispatch](arch-own-02c-dispatch.md) | molab run creates the Execution record at dispatch time; the worker reads it [approved] |
+| 02c | [arch-own-02c-dispatch](arch-own-02c-dispatch.md) | molab run creates the Execution record at dispatch time; the worker reads it [done] |
 | 02d | [arch-own-02d-submit](arch-own-02d-submit.md) | molq submitter creates the QUEUED eNN before submit; staging carries executions/<id>/ and merges the remote record [done] |
 | 02e | [arch-own-02e-readers](arch-own-02e-readers.md) | CLI/TUI 读取方改读最新 Execution；状态投影合一 [approved] |
 | 02f | [arch-own-02f-runtime](arch-own-02f-runtime.md) | workflow runtime reads bypass_cache from the Execution record; no execution-id minting [approved] |

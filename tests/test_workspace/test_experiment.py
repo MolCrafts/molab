@@ -17,9 +17,11 @@ from pathlib import Path
 
 import pytest
 
-from molab.workspace import Experiment, GridSpace, Workspace
+from molab.workspace import Experiment, GridSpace, Run, Workspace
+from molab.workspace.fs_local import LocalFileSystem
 from molab.workspace.history import GitHistory
 from molab.workspace.run import compute_run_definition_hash
+from tests.support.counting_fs import CountingFileSystem
 
 _UUID7 = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
 
@@ -137,3 +139,88 @@ class TestExperimentSeedMissingRuns:
         assert len(seeded) == 1
         assert seeded[0].id != existing.id
         assert seeded[0].metadata.parameters == {"lr": 0.2}
+
+
+class TestExperimentFindRun:
+    """arch-own-02c §0: ``find_run`` is a read-only ``definition_hash`` lookup."""
+
+    def test_empty_experiment_finds_nothing(self, experiment: Experiment) -> None:
+        assert experiment.find_run({"a": 1}) is None
+
+    def test_finds_the_ensured_run_by_config_hash(self, experiment: Experiment) -> None:
+        ensured = experiment.ensure_run({"a": 1}, config_hash="h")
+
+        found = experiment.find_run({"a": 1}, config_hash="h")
+
+        assert found is not None
+        assert found.id == ensured.id
+
+    def test_missing_config_hash_is_a_different_definition(self, experiment: Experiment) -> None:
+        experiment.ensure_run({"a": 1}, config_hash="h")
+
+        assert experiment.find_run({"a": 1}) is None
+
+    def test_other_config_hash_is_a_different_definition(self, experiment: Experiment) -> None:
+        experiment.ensure_run({"a": 1}, config_hash="h")
+
+        assert experiment.find_run({"a": 1}, config_hash="h2") is None
+
+    def test_never_creates(self, experiment: Experiment) -> None:
+        assert experiment.find_run({"a": 1}) is None
+        assert len(experiment.list_runs()) == 0
+
+        experiment.ensure_run({"a": 1}, config_hash="h")
+        before = len(experiment.list_runs())
+
+        experiment.find_run({"a": 1}, config_hash="h")
+        experiment.find_run({"a": 1})
+        experiment.find_run({"a": 1}, config_hash="h2")
+
+        assert len(experiment.list_runs()) == before == 1
+
+    def test_finds_a_run_created_by_add_run(self, experiment: Experiment) -> None:
+        added = experiment.add_run({"b": 2})
+
+        found = experiment.find_run({"b": 2})
+
+        assert found is not None
+        assert found.id == added.id
+
+    def test_one_index_for_find_and_ensure(
+        self, experiment: Experiment, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        original = Experiment._definition_index
+        calls: list[int] = []
+
+        def counting(self: Experiment) -> dict[str, Run]:
+            calls.append(1)
+            return original(self)
+
+        monkeypatch.setattr(Experiment, "_definition_index", counting)
+
+        experiment.find_run({"a": 1})
+        assert len(calls) == 1
+
+        experiment.ensure_run({"a": 1})
+        assert len(calls) == 2
+
+
+class TestExperimentListRuns:
+    """arch-own-02b review handoff: the runs container is walked with ``scandir``."""
+
+    def test_list_runs_uses_scandir_not_listdir(self, tmp_path: Path) -> None:
+        fs = CountingFileSystem(LocalFileSystem())
+        experiment = (
+            Workspace(tmp_path, name="lab", fs=fs)
+            .add_project("p")
+            .add_experiment("e", workflow_source="s.py", params={})
+        )
+        for seed in (1, 2, 3):
+            experiment.add_run({"seed": seed})
+        fs.reset()
+
+        runs = experiment.list_runs()
+
+        assert len(runs) == 3
+        assert fs.for_basename("runs", "listdir") == 0, dict(fs.calls)
+        assert fs.for_basename("runs", "scandir") == 1, dict(fs.calls)

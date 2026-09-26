@@ -23,6 +23,16 @@ class TestEntry:
         assert len(_registry) == 1
         assert _registry[0] is ws
 
+    def test_two_workspace_objects_on_one_root_register_once(self, tmp_path):
+        first = Workspace(tmp_path / "ws", name="ws")
+        second = Workspace(tmp_path / "ws", name="ws")
+
+        entry(first)
+        entry(second)
+
+        assert len(_registry) == 1
+        assert _registry[0] is first
+
 
 class TestLoadWorkspaces:
     def test_load_from_script(self, tmp_path):
@@ -122,6 +132,18 @@ class TestFluentExperimentChain:
         assert default_binding_registry.for_experiment(exp) is not None
         # …and the workspace registered for CLI discovery.
         assert any(w is exp.project.workspace for w in _registry)
+
+    def test_define_then_entry_registers_the_workspace_once(self, tmp_path):
+        # ``define`` already registers the workspace; a following
+        # ``me.entry(ws)`` must not list it a second time (``molab run`` would
+        # dispatch every run twice).
+        ws = Workspace(tmp_path / "ws", name="ws")
+        ws.add_project("p").add_experiment("e").define(self._workflow())
+
+        entry(ws)
+
+        assert [w for w in _registry if w is ws] == [ws]
+        assert len(_registry) == 1
 
     def test_execute_without_registered_executor_fails_fast(self, tmp_path, monkeypatch):
         # The seam is required; without it execute() must not silently no-op.

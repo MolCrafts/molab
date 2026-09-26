@@ -43,6 +43,7 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from molab.fs import LocalFileSystem
 from molab.workspace.experiment import set_workflow_executor
 
 if TYPE_CHECKING:
@@ -62,10 +63,35 @@ def entry(workspace: Workspace) -> None:
     (``python script.py``), nobody reads the registry — it is
     effectively a no-op.
 
+    Idempotent per workspace root: ``Experiment.define`` already registers
+    its workspace, so a script that also calls ``me.entry(ws)``, defines
+    several experiments of one workspace, or builds two ``Workspace``
+    objects on the same directory still lists it once — otherwise
+    ``molab run`` would dispatch every run once per registration. The first
+    registration wins. A workspace on a non-local disk is compared by
+    identity, because its root names a path on another machine.
+
     Args:
         workspace: A :class:`~molab.Workspace` to register.
     """
+    key = _registry_key(workspace)
+    if any(_registry_key(registered) == key for registered in _registry):
+        return
     _registry.append(workspace)
+
+
+def _registry_key(workspace: Workspace) -> Path | int:
+    """What makes two registrations the same workspace.
+
+    Args:
+        workspace: A registered or about-to-be-registered workspace.
+
+    Returns:
+        The resolved root for a local workspace, else the object's ``id``.
+    """
+    if isinstance(workspace.fs, LocalFileSystem):
+        return Path(workspace.root).resolve()
+    return id(workspace)
 
 
 def _execute_experiment(experiment: Experiment, workflow: object) -> None:

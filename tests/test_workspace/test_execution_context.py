@@ -18,11 +18,13 @@ import os
 import platform
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
 from molab._typing import JSONValue
+from molab.profile import ProfileConfig
 from molab.workspace import Run, Workspace
 from molab.workspace.domain import Execution, ExecutionMode, ExecutionStatus
 from molab.workspace.execution_context import ExecutionContext
@@ -198,6 +200,70 @@ class TestExecutionContextBypassCache:
 
     def test_false_before_entry(self, run: Run) -> None:
         assert run.start().bypass_cache is False
+
+
+def _profile_config_hash() -> Callable[[ProfileConfig | None], str | None]:
+    """Import ``profile_config_hash`` lazily so a missing symbol fails per test."""
+    from molab.workspace.execution_context import profile_config_hash
+
+    return profile_config_hash
+
+
+_CONSISTENCY_CASES: list[tuple[str, ProfileConfig | None]] = [
+    ("none", None),
+    ("empty-unnamed", ProfileConfig({}, name=None)),
+    ("content-unnamed", ProfileConfig({"a": 1}, name=None)),
+    ("empty-named", ProfileConfig({}, name="cpu")),
+]
+
+
+class TestProfileConfigHash:
+    """arch-own-02c §0: the one ``config_hash`` rule shared by record and identity."""
+
+    def test_none_is_none(self) -> None:
+        assert _profile_config_hash()(None) is None
+
+    def test_empty_unnamed_is_none(self) -> None:
+        assert _profile_config_hash()(ProfileConfig({}, name=None)) is None
+
+    def test_unnamed_with_content_is_its_content_hash(self) -> None:
+        cfg = ProfileConfig({"a": 1}, name=None)
+
+        assert _profile_config_hash()(cfg) == cfg.content_hash()
+
+    def test_named_empty_is_its_content_hash(self) -> None:
+        cfg = ProfileConfig({}, name="cpu")
+
+        assert _profile_config_hash()(cfg) == cfg.content_hash()
+
+    @pytest.mark.parametrize(
+        "cfg",
+        [cfg for _, cfg in _CONSISTENCY_CASES],
+        ids=[case_id for case_id, _ in _CONSISTENCY_CASES],
+    )
+    def test_matches_create_execution_record(self, run: Run, cfg: ProfileConfig | None) -> None:
+        profile_config_hash = _profile_config_hash()
+
+        record = run.create_execution(profile_config=cfg)
+
+        assert record.environment["config_hash"] == profile_config_hash(cfg)
+
+    def test_name_is_not_identity(self) -> None:
+        profile_config_hash = _profile_config_hash()
+
+        assert profile_config_hash(ProfileConfig({"a": 1}, name="cpu")) == profile_config_hash(
+            ProfileConfig({"a": 1}, name="gpu")
+        )
+        assert profile_config_hash(ProfileConfig({}, name="cpu")) == profile_config_hash(
+            ProfileConfig({}, name="gpu")
+        )
+
+    def test_docstring_states_the_hash_is_content_only(self) -> None:
+        doc = _profile_config_hash().__doc__
+
+        assert doc is not None
+        assert "content" in doc.lower()
+        assert "name" in doc.lower()
 
 
 class _AliveRemoveFails(CountingFileSystem):
