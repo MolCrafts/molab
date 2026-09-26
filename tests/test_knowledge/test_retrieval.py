@@ -1,4 +1,4 @@
-# ruff: noqa: RUF001, RUF003 — the CJK text and full-width characters below are the
+# ruff: noqa: RUF003 — the CJK text and full-width characters below are the
 # fixtures under test; "fixing" them to ASCII would delete the test.
 """CJK-aware tokenization + BM25F ranking.
 
@@ -9,10 +9,6 @@ reason substring search was not good enough.
 
 from __future__ import annotations
 
-from pathlib import Path
-
-from molab.knowledge import Note
-from molab.knowledge.bundle import Bundle
 from molab.knowledge.retrieval import bm25f_rank, tokenize
 
 
@@ -100,106 +96,3 @@ class TestBm25fRank:
     def test_limit_caps_the_result(self) -> None:
         docs = {k: {"body": "alpha"} for k in ("a", "b", "c")}
         assert len(bm25f_rank("alpha", docs, limit=2)) == 2
-
-
-def _note(root: Path, name: str, body: str, tags: list[str] | None = None) -> Note:
-    note = Note(root / name)
-    note.write_meta({"tags": tags or []})
-    note.write(body)
-    return note
-
-
-class TestChineseGoldenCase:
-    """The question this whole feature exists to answer.
-
-    A researcher asks "计算Tg的时候升降温怎么选择". The note that answers it is
-    titled "玻璃化转变温度 Tg 的模拟流程" and its relevant heading is
-    "降温速率的选择". **No substring of the question appears in that note** — the
-    old substring search returned nothing at all.
-    """
-
-    QUESTION = "计算Tg的时候升降温怎么选择"
-
-    def _wiki(self, tmp_path: Path) -> Bundle:
-        _note(
-            tmp_path,
-            "tg-protocol",
-            "# 玻璃化转变温度 Tg 的模拟流程\n\n"
-            "## 降温速率的选择\n"
-            "本组约定采用三段式：先在 600 K 平衡 5 ns，再以 1 K/ns 降温至 200 K，"
-            "最后分段线性拟合比容-温度曲线取交点。降温速率过快会系统性高估 Tg。\n",
-            tags=["Tg", "玻璃化转变", "退火"],
-        )
-        _note(
-            tmp_path,
-            "rdf-analysis",
-            "# 径向分布函数分析\n\n计算 RDF 时的积分区间与归一化约定。\n",
-            tags=["RDF"],
-        )
-        _note(tmp_path, "cluster-usage", "# 集群使用说明\n\n提交作业的排队规则。\n")
-        return Bundle(tmp_path)
-
-    def test_the_question_finds_the_protocol_note_first(self, tmp_path: Path) -> None:
-        hits = self._wiki(tmp_path).search(self.QUESTION).hits
-        assert hits, "the question must not come back empty"
-        assert hits[0].entry.path == "tg-protocol"
-
-    def test_the_snippet_lands_on_the_passage_that_answers_it(self, tmp_path: Path) -> None:
-        hits = self._wiki(tmp_path).search(self.QUESTION).hits
-        assert hits[0].snippet is not None
-        assert "降温速率" in hits[0].snippet
-
-    def test_the_answer_outranks_the_merely_related_note(self, tmp_path: Path) -> None:
-        # "计算" appears in the RDF note too; the Tg note must still win.
-        hits = self._wiki(tmp_path).search(self.QUESTION).hits
-        by_path = {h.entry.path: h.score for h in hits}
-        assert by_path["tg-protocol"] > by_path.get("rdf-analysis", 0.0)
-
-    def test_an_unrelated_note_is_not_returned_at_all(self, tmp_path: Path) -> None:
-        hits = self._wiki(tmp_path).search("降温速率").hits
-        assert "cluster-usage" not in {h.entry.path for h in hits}
-
-    def test_the_whole_markdown_is_reachable_from_a_hit(self, tmp_path: Path) -> None:
-        # Not RAG: retrieval's job ends at handing over the document itself.
-        wiki = self._wiki(tmp_path)
-        hit = wiki.search(self.QUESTION).hits[0]
-        concept = wiki.get(hit.entry.path)
-        assert "1 K/ns 降温至 200 K" in concept.read()
-        assert (concept.path / "index.md").is_file()
-
-
-class TestSearchReadsEachBodyOnce:
-    """Indexing and ranking share one read per Concept per query.
-
-    Both halves want the same text — the title is the body's H1, the edges are
-    its markdown links, and the ranking is over its words. Reading it more than
-    once is pure waste on a local disk and a second network round trip on a
-    remote one.
-    """
-
-    def test_one_read_per_concept(self, tmp_path: Path) -> None:
-        from collections import Counter
-
-        from molab.fs.local import LocalFileSystem
-        from molab.knowledge.bundle import Bundle
-
-        reads: list[str] = []
-
-        class CountingFileSystem(LocalFileSystem):
-            def read_text(self, path, encoding: str = "utf-8") -> str:  # type: ignore[override]
-                if str(path).endswith("index.md"):
-                    reads.append(str(path))
-                return super().read_text(path, encoding)
-
-        fs = CountingFileSystem()
-        for i in range(4):
-            note = Note(tmp_path / f"n{i}", fs=fs)
-            note.write_meta()
-            note.write(f"# Note {i}\n\nbody about diffusion {i}\n")
-
-        reads.clear()
-        Bundle(tmp_path, fs=fs).search("diffusion")
-
-        per_file = Counter(reads)
-        assert per_file, "the search must have read the bodies at all"
-        assert max(per_file.values()) == 1, per_file

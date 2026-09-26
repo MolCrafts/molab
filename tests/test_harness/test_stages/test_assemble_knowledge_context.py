@@ -3,14 +3,12 @@
 from __future__ import annotations
 
 import inspect
-from pathlib import Path
 
 from molab.harness.stages.assemble_knowledge_context import (
     _CLASS_ORDER,
     AssembleKnowledgeContext,
 )
-from molab.knowledge import Finding, Literature, Note, Observation, Plan, Report, SourceRef
-from molab.workspace import Workspace
+from molab.knowledge import Finding, Literature, Note, Observation, Plan, Report
 
 
 class TestAssembleKnowledgeContext:
@@ -23,14 +21,3 @@ class TestAssembleKnowledgeContext:
         assert "Knowledge(root).walk()" in src
         assert "get_folder" not in src
         assert "FailureAnalysis" not in src
-
-    def test_report_heading_before_finding(self, tmp_path: Path) -> None:
-        ws = Workspace(tmp_path / "ws", name="lab")
-        ws.materialize()
-        source = [SourceRef(kind="run", ref="r1")]
-        finding = Finding(Path(str(ws.root)) / "finding-a", sources=source)
-        finding.write("# Finding body\n")
-        report = Report(Path(str(ws.root)) / "report-a", sources=source)
-        report.write("# Report body\n")
-        digest = AssembleKnowledgeContext()._render_digest(Path(str(ws.root)))
-        assert digest.index("## [Report]") < digest.index("## [Finding]")

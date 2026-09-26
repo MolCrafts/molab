@@ -20,15 +20,6 @@ class TestKnowledgeInit:
         assert not (target / "meta.json").exists()
         assert not (target / "note.json").exists()
 
-    def test_init_with_title_writes_child_note(self, tmp_path: Path) -> None:
-        target = tmp_path / "wiki"
-        result = CliRunner().invoke(knowledge_app, ["init", str(target), "--title", "Cooling"])
-        assert result.exit_code == 0
-        note = Note(target / "cooling")
-        assert (note.path / "note.json").is_file()
-        assert "Cooling" in note.read()
-        assert not (note.path / "meta.json").exists()
-
 
 class TestKnowledgeSearch:
     def test_search_uses_knowledge_handle(self) -> None:

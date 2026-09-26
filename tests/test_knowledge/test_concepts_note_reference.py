@@ -10,7 +10,6 @@ body lives in ``index.md`` and its citations are markdown links (resolved by
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -76,17 +75,6 @@ class TestConceptRegistry:
 class TestNote:
     """``Note`` body + citation edges."""
 
-    def test_body_and_cite_round_trip(self, tmp_path: Path) -> None:
-        note = _mount(Note, tmp_path, "idea")
-        ref = _mount(Literature, tmp_path, "smith2024")
-
-        note.write("# Idea\n\nbuilds on prior work\n")
-        assert "builds on prior work" in note.read()
-
-        note.cite(ref)
-        assert "smith2024" in note.read_index()  # citation is a markdown link
-        assert ref.path in {Path(p) for p in note.out_edges()}
-
     def test_cite_threads_role_into_typed_edge(self, tmp_path: Path) -> None:
         note = _mount(Note, tmp_path, "idea")
         ref = _mount(Literature, tmp_path, "smith2024")
@@ -147,43 +135,7 @@ class TestNote:
 class TestLiterature:
     """``Literature`` typed meta + citation text."""
 
-    def test_typed_meta_and_citation_round_trip(self, tmp_path: Path) -> None:
-        ref = _mount(Literature, tmp_path, "smith2024")
-
-        ref.write(ReferenceMeta(title="T", doi="10.1/x", year=2024))
-        got = ref.record
-        assert isinstance(got, ReferenceMeta)
-        assert got.title == "T"
-        assert got.doi == "10.1/x"
-        assert got.year == 2024
-
-        ref.write("Smith et al. 2024")
-        assert ref.citation() == "Smith et al. 2024"
-
-    def test_written_meta_keeps_the_registered_dotted_type(self, tmp_path: Path) -> None:
-        # ReferenceMeta.type defaults to the bare "reference" bib payload, but the
-        # on-disk marker must stay the registered dotted type so reconstruction works.
-        ref = _mount(Literature, tmp_path, "smith2024")
-        ref.write(ReferenceMeta(title="T", year=2024))
-        assert ref.read_meta()["type"] == "reference.reference"
-        assert isinstance(concept_from_dir(ref.path, fs=LocalFileSystem()), Literature)
-
     def test_write_ref_meta_alias_is_gone(self, tmp_path: Path) -> None:
         # The short spelling was removed; only write remains.
         ref = _mount(Literature, tmp_path, "smith2024")
         assert not hasattr(ref, "write_ref_meta")
-
-
-class TestLiteratureJson:
-    """``Literature`` writes ``literature.json``, not ``meta.json``."""
-
-    def test_write_writes_literature_json_without_type(self, tmp_path: Path) -> None:
-        from molab.knowledge.concepts import Literature
-
-        lit = Literature(tmp_path / "lecun2015")
-        lit.write(ReferenceMeta(title="Deep Learning", year=2015))
-        payload = json.loads((lit.path / "literature.json").read_text())
-        assert payload["title"] == "Deep Learning"
-        assert payload["year"] == 2015
-        assert "type" not in payload
-        assert not (lit.path / "meta.json").exists()

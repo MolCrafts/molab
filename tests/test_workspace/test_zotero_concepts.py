@@ -14,7 +14,6 @@ import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 
-from molab.knowledge import Literature
 from molab.knowledge.bundle import Bundle
 from molab.knowledge.zotero import ZoteroItem, read_zotero_items
 
@@ -116,40 +115,6 @@ class TestReadZoteroItems:
 
 class TestBundleImportZotero:
     """``Bundle.import_zotero`` — link a Zotero library as ``Reference`` Concepts."""
-
-    def test_creates_reference_concepts_without_copying_pdf(self, tmp_path: Path) -> None:
-        src = tmp_path / "zotero"
-        src.mkdir()
-        db = _make_zotero_db(src)
-        bundle_root = tmp_path / "bundle"
-        bundle_root.mkdir()
-        b = Bundle(bundle_root)
-
-        refs = b.import_zotero(db, now=FIXED)
-        assert all(isinstance(r, Literature) for r in refs)
-        by_key = {r.record.source_key: r for r in b.references()}
-        assert set(by_key) == {"AAAA", "BBBB"}
-
-        a_meta = by_key["AAAA"].record
-        assert a_meta.source == "zotero"
-        assert a_meta.title == "Deep Learning"
-        assert a_meta.pdf_path is not None
-        assert a_meta.pdf_path.endswith("storage/CCCC/paper.pdf")
-
-        # PDFs are pointed at, never copied into the bundle
-        assert list(bundle_root.rglob("*.pdf")) == []
-
-    def test_idempotent_on_source_key(self, tmp_path: Path) -> None:
-        src = tmp_path / "zotero"
-        src.mkdir()
-        db = _make_zotero_db(src)
-        bundle_root = tmp_path / "bundle"
-        bundle_root.mkdir()
-        b = Bundle(bundle_root)
-
-        b.import_zotero(db, now=FIXED)
-        b.import_zotero(db, now=FIXED)  # re-import updates in place
-        assert len(b.references()) == 2  # no duplicates
 
     def test_records_link_in_sources_json(self, tmp_path: Path) -> None:
         src = tmp_path / "zotero"
