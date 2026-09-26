@@ -8,19 +8,27 @@ the worker behaviour, which is exercised by the molq suite.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
+from fnmatch import fnmatch
 from pathlib import Path
 from typing import Any
 
 import pytest
 from molq.transport import CommandResult
 
-from molab.workspace import ComputeTarget, Workspace
+from molab.workspace import AgentRef, ComputeTarget, Workspace
+from molab.workspace.domain import ExecutionMode
+from molab.workspace.execution_repository import ExecutionRepository
 
 
 @dataclass
 class RecordingTransport:
-    """A transport that no-ops every method but records the calls."""
+    """A transport that no-ops every method but records the calls.
+
+    ``upload`` / ``download`` also record their ``exclude`` patterns so a test
+    can decide which local files a staging transfer actually carries.
+    """
 
     calls: list[tuple[str, tuple, dict]] = field(default_factory=list)
 
@@ -56,10 +64,33 @@ class RecordingTransport:
         return None
 
     def upload(self, local: str, remote: str, *, recursive: bool = False, exclude=()) -> None:
-        self._record("upload", (local, remote), {"recursive": recursive})
+        self._record("upload", (local, remote), {"recursive": recursive, "exclude": tuple(exclude)})
 
     def download(self, remote: str, local: str, *, recursive: bool = False, exclude=()) -> None:
-        self._record("download", (remote, local), {"recursive": recursive})
+        self._record(
+            "download", (remote, local), {"recursive": recursive, "exclude": tuple(exclude)}
+        )
+
+
+def _uploads_cover(calls: list[tuple[str, tuple, dict]], local_file: Path) -> bool:
+    """True iff one recorded ``upload`` carries *local_file* to the remote side.
+
+    An upload covers the file when its ``local`` source is the file itself or
+    one of its ancestors, and no component of the file's path relative to that
+    source matches any of the upload's ``exclude`` patterns.
+    """
+    target = Path(local_file).resolve()
+    for method, args, kwargs in calls:
+        if method != "upload":
+            continue
+        source = Path(args[0]).resolve()
+        if target != source and source not in target.parents:
+            continue
+        parts = target.relative_to(source).parts
+        patterns = kwargs.get("exclude", ())
+        if not any(fnmatch(part, pattern) for part in parts for pattern in patterns):
+            return True
+    return False
 
 
 def _make_run(tmp_path: Path):
@@ -69,6 +100,72 @@ def _make_run(tmp_path: Path):
     experiment = project.add_experiment("e", params={})
     run = experiment.add_run(params={"seed": 1})
     return ws, project, experiment, run
+
+
+def _remote_target() -> ComputeTarget:
+    return ComputeTarget(
+        name="hpc",
+        host="me@cluster",
+        scheduler="slurm",
+        scratch_root="/scratch/me/molab",
+    )
+
+
+def _remote_handler():
+    from molab.plugins.submit_molq.submit import make_submit_handler
+
+    return make_submit_handler(
+        scheduler="ignored-when-target-set",
+        cluster=None,
+        resources={},
+        scheduling={},
+        target=_remote_target(),
+    )
+
+
+def _precreate_e01(ws: Workspace, project, run) -> None:
+    """Allocate the QUEUED ``e01`` the way the server does before dispatch."""
+    ExecutionRepository(
+        ws.root, run.run_dir, run_id=run.id, project_id=project.id, fs=ws.fs
+    ).create(
+        mode=ExecutionMode.INITIAL,
+        created_by=AgentRef(id="test", type="person", name="test"),
+    )
+
+
+def _install_fake_submitor(monkeypatch: pytest.MonkeyPatch, run) -> dict[str, Any]:
+    """Replace ``molq.Submitor``; record what ``submit_job`` saw.
+
+    ``records_at_submit`` snapshots ``(id, status)`` of every Execution on disk
+    at the moment ``submit_job`` is called.
+    """
+    captured: dict[str, Any] = {}
+
+    class FakeJob:
+        job_id = "fake-job-id"
+        scheduler_job_id = "fake-sched-id"
+
+    class FakeSubmitor:
+        def __init__(self, target, *, jobs_dir):
+            captured["scheduler"] = target.scheduler
+            captured["jobs_dir"] = jobs_dir
+            self._event_bus = type("EB", (), {"on": lambda *_a, **_kw: None})()
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):  # noqa: ANN002
+            return False
+
+        def submit_job(self, *, argv, resources, scheduling, execution, metadata):
+            captured["submit_argv"] = argv
+            captured["submit_cwd"] = execution.cwd
+            captured["submit_metadata"] = metadata
+            captured["records_at_submit"] = [(e.id, e.status.value) for e in run.executions]
+            return FakeJob()
+
+    monkeypatch.setattr("molq.Submitor", FakeSubmitor)
+    return captured
 
 
 class TestSubmitHandler:
@@ -192,3 +289,75 @@ class TestSubmitHandler:
         assert isinstance(captured["transport"], LocalTransport)
         # jobs_dir lives under the LOCAL run dir, not a remote scratch path.
         assert captured["jobs_dir"].startswith(str(run.run_dir))
+
+    def test_precreated_execution_id_is_submitted_unchanged(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """The server path precreates ``e01``; the handler submits that id as-is."""
+        ws, project, experiment, run = _make_run(tmp_path)
+        _precreate_e01(ws, project, run)
+        transport = RecordingTransport()
+        monkeypatch.setattr("molab.workspace.targets.to_transport", lambda _t: transport)
+        captured = _install_fake_submitor(monkeypatch, run)
+
+        handler = _remote_handler()
+        handler(None, run, experiment, project, execution_id="e01")
+
+        assert captured["submit_metadata"]["execution_id"] == "e01"
+        assert captured["submit_cwd"].endswith("/executions/e01")
+        argv = captured["submit_argv"]
+        flag = argv.index("--execution-id")
+        assert argv[flag : flag + 2] == ["--execution-id", "e01"]
+        assert [e.id for e in run.executions] == ["e01"]
+        (e01,) = run.executions
+        assert e01.executor["job_id"] == "fake-job-id"
+        assert e01.executor["scheduler"] == "slurm"
+
+    @pytest.mark.xfail(
+        strict=True,
+        raises=AssertionError,
+        reason=(
+            "arch-own-02: SubmitHandler.__call__ without execution_id — submits a "
+            "workspace-allocated eNN whose QUEUED record exists before submit_job"
+        ),
+    )
+    def test_cli_path_submits_a_precreated_enn_execution(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """The CLI path passes no id; the attempt must still be a workspace ``eNN``."""
+        _ws, project, experiment, run = _make_run(tmp_path)
+        transport = RecordingTransport()
+        monkeypatch.setattr("molab.workspace.targets.to_transport", lambda _t: transport)
+        captured = _install_fake_submitor(monkeypatch, run)
+
+        handler = _remote_handler()
+        handler(None, run, experiment, project)
+
+        execution_id = captured["submit_metadata"]["execution_id"]
+        assert re.fullmatch(r"e\d{2,}", execution_id)
+        assert (execution_id, "queued") in captured["records_at_submit"]
+
+    @pytest.mark.xfail(
+        strict=True,
+        raises=AssertionError,
+        reason=(
+            "arch-own-02: SubmitHandler.__call__ remote stage-in — uploads carry "
+            "<run_dir>/executions/e01/execution.json to the target"
+        ),
+    )
+    def test_remote_staging_carries_the_execution_dir(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """The remote worker reads its QUEUED record, so stage-in must carry it."""
+        ws, project, experiment, run = _make_run(tmp_path)
+        _precreate_e01(ws, project, run)
+        transport = RecordingTransport()
+        monkeypatch.setattr("molab.workspace.targets.to_transport", lambda _t: transport)
+        _install_fake_submitor(monkeypatch, run)
+
+        handler = _remote_handler()
+        handler(None, run, experiment, project, execution_id="e01")
+
+        record = Path(run.run_dir) / "executions" / "e01" / "execution.json"
+        assert record.is_file()
+        assert _uploads_cover(transport.calls, record)

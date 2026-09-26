@@ -23,6 +23,7 @@ from molab.workflow import (
     Workflow,
     WorkflowCompiler,
 )
+from tests.support.journal import poison_node_output
 
 
 def _make_run(tmp_path: Path, params: dict | None = None):
@@ -151,6 +152,79 @@ class TestExecuteRun:
         # A retry opens a NEW execution (v2 never reopens an attempt).
         assert len(run.executions) == 2
         assert [e.mode.value for e in run.executions] == ["initial", "rerun"]
+
+    def test_resume_with_checkpoint_creates_resume_execution(self, tmp_path: Path) -> None:
+        """A checkpoint is an optional resume input; with one, resume opens e02."""
+        run = _make_run(tmp_path)
+        with run.start() as ctx:
+            cp = ctx.checkpoint("epoch1", data={"step": 1})
+            ctx.mark_failed("boom")
+        assert [e.status.value for e in run.executions] == ["failed"]
+
+        result = run.execute(_build_wf(), resume=True, checkpoint_artifact_id=cp.id)
+
+        assert result.status == "succeeded"
+        assert result.outputs == {"double": 6, "summarize": "got 6"}
+        assert [e.mode.value for e in run.executions] == ["initial", "resume"]
+        resumed = run.executions[1]
+        assert resumed.id == "e02"
+        assert resumed.based_on_execution_id == "e01"
+        assert resumed.checkpoint_artifact_id == cp.id
+
+    @pytest.mark.xfail(
+        strict=True,
+        raises=RunNotExecutableError,
+        reason="arch-own-03: execute_run rerun after success — a succeeded run "
+        "accepts rerun=True and opens a RERUN Execution based on e01",
+    )
+    def test_rerun_after_success_opens_rerun(self, tmp_path: Path) -> None:
+        run = _make_run(tmp_path)
+        run.execute(_build_wf())
+
+        result = run.execute(_build_wf(), rerun=True)
+
+        assert result.status == "succeeded"
+        assert [e.mode.value for e in run.executions] == ["initial", "rerun"]
+        assert run.executions[1].based_on_execution_id == "e01"
+
+    @pytest.mark.xfail(
+        strict=True,
+        raises=RunNotExecutableError,
+        reason="arch-own-03: execute_run resume without checkpoint — RESUME needs "
+        "no checkpoint and seeds completed nodes from the predecessor journal",
+    )
+    def test_resume_without_checkpoint_seeds_from_predecessor(self, tmp_path: Path) -> None:
+        flag = tmp_path / "healed"
+
+        def build() -> Workflow:
+            wf = Workflow(name="healing")
+
+            @wf.task
+            def stage_a(x: int) -> int:
+                return x + 1
+
+            @wf.task(depends_on=["stage_a"])
+            def stage_b(stage_a: int) -> int:
+                if not Path(str(flag)).exists():
+                    raise RuntimeError("not healed yet")
+                return stage_a * 100
+
+            return wf
+
+        run = _make_run(tmp_path, params={"x": 1})
+        with pytest.raises(RunFailedError):
+            run.execute(build())
+        # e01 recorded stage_a == 2; the sentinel 41 can only reach stage_b
+        # through a seed taken from e01's journal (a recompute yields 2).
+        poison_node_output(run.run_dir, "e01", "stage_a", 41)
+        flag.write_text("ok")
+
+        result = run.execute(build(), resume=True)
+
+        assert result.status == "succeeded"
+        assert [e.mode.value for e in run.executions] == ["initial", "resume"]
+        assert run.executions[1].based_on_execution_id == "e01"
+        assert result.outputs["stage_b"] == 4100
 
     def test_running_run_raises(self, tmp_path: Path) -> None:
         run = _make_run(tmp_path)

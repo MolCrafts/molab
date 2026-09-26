@@ -15,7 +15,7 @@ from molab.knowledge import (
     ReferenceMeta,
     SourceRef,
 )
-from molab.workspace import Experiment, Workspace
+from molab.workspace import Experiment, Run, Workspace
 
 
 @pytest.fixture
@@ -145,6 +145,26 @@ class TestKnowledgeSearch:
 
         result = Knowledge(root).search("cooling", of=Note)
         assert {hit.entry.path for hit in result.hits} == {"knowledges/cooling.md"}
+
+    def test_search_spans_every_host(
+        self, lab: Workspace, experiment: Experiment, run: Run
+    ) -> None:
+        """One search from the workspace root ranks root, experiment and run notes."""
+        root_note = Note(Path(lab.root) / "knowledges" / "root-note")
+        root_note.write("# Vitrification protocol\n\nvitrification of the melt, vitrification.\n")
+        Note(experiment, "exp-note").write("# Quench\n\nvitrification at 10 K/s.\n")
+        Note(run, "run-note").write("# Seed 1\n\nvitrification observed.\n")
+        run_rel = Path(run.run_dir).relative_to(lab.root).as_posix()
+
+        result = Knowledge(lab.root).search("vitrification")
+
+        assert {hit.entry.path for hit in result.hits} == {
+            "knowledges/root-note.md",
+            "projects/p/experiments/e/knowledges/exp-note.md",
+            f"{run_rel}/knowledges/run-note.md",
+        }
+        assert result.hits[0].entry.path == "knowledges/root-note.md"
+        assert Knowledge(lab.root).search("vitrification", limit=1).truncated is True
 
 
 class TestCite:
