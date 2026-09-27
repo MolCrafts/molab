@@ -79,7 +79,7 @@ class TestResumeSeedIntegrity:
         """A completed node records its ``snapshot_key``; a JSON-safe output is
         full-fidelity (no ``outputs_lossy`` flag)."""
         compiled = _compiled_returning("old")
-        result = await WorkflowRuntime().execute(compiled, run_dir=tmp_path)
+        result = await WorkflowRuntime().execute(compiled, run_dir=tmp_path, execution_id="e01")
         assert result.status == "succeeded"
         doc = json.loads(_wf_json_path(tmp_path, result.execution_id).read_text())
         (record,) = [t for t in doc["task_configs"] if t["task_id"] == "step"]
@@ -91,7 +91,7 @@ class TestResumeSeedIntegrity:
     async def test_intact_seed_skips_body(self, tmp_path: Path) -> None:
         """An intact seed (same code, full fidelity) skips the body on resume."""
         compiled = _compiled_returning("old")
-        r1 = await WorkflowRuntime().execute(compiled, run_dir=tmp_path)
+        r1 = await WorkflowRuntime().execute(compiled, run_dir=tmp_path, execution_id="e01")
         assert _COUNTERS["step"] == 1
 
         seeds = read_node_outputs(tmp_path, r1.execution_id)
@@ -109,7 +109,7 @@ class TestResumeSeedIntegrity:
         """A seed whose task code changed between attempts (different snapshot
         key) is dropped and the node recomputed with the new value."""
         v1 = _compiled_returning("old")
-        r1 = await WorkflowRuntime().execute(v1, run_dir=tmp_path)
+        r1 = await WorkflowRuntime().execute(v1, run_dir=tmp_path, execution_id="e01")
         assert _COUNTERS["step"] == 1
         seeds = read_node_outputs(tmp_path, r1.execution_id)
         assert seeds == {"step": "old"}
@@ -135,7 +135,7 @@ class TestResumeSeedIntegrity:
             return _Opaque()
 
         compiled = WorkflowCompiler().compile(wf)
-        r1 = await WorkflowRuntime().execute(compiled, run_dir=tmp_path)
+        r1 = await WorkflowRuntime().execute(compiled, run_dir=tmp_path, execution_id="e01")
         assert r1.status == "succeeded"
         assert _COUNTERS["step"] == 1
 
@@ -162,7 +162,7 @@ class TestResumeSeedIntegrity:
         """A pre-upgrade document (no ``snapshot_key``) cannot be verified, so
         its seed is dropped and the node recomputed (backward compatible)."""
         compiled = _compiled_returning("old")
-        r1 = await WorkflowRuntime().execute(compiled, run_dir=tmp_path)
+        r1 = await WorkflowRuntime().execute(compiled, run_dir=tmp_path, execution_id="e01")
         assert _COUNTERS["step"] == 1
 
         # Simulate a workflow.json written before snapshot keys were persisted.
@@ -187,7 +187,7 @@ class TestResumeSeedIntegrity:
         programmatic seeds (e.g. from ``WorkflowResult.outputs``) are honored."""
         compiled = _compiled_returning("old")
         result = await WorkflowRuntime().execute(
-            compiled, run_dir=tmp_path, seed_outputs={"step": "from-memory"}
+            compiled, run_dir=tmp_path, execution_id="e01", seed_outputs={"step": "from-memory"}
         )
         assert result.status == "succeeded"
         assert result.outputs["step"] == "from-memory"
@@ -198,4 +198,6 @@ class TestResumeSeedIntegrity:
         """An unknown seed name raises ``ValueError`` before any IO."""
         compiled = _compiled_returning("old")
         with pytest.raises(ValueError, match="unknown task name"):
-            await WorkflowRuntime().execute(compiled, run_dir=tmp_path, seed_outputs={"nope": 1})
+            await WorkflowRuntime().execute(
+                compiled, run_dir=tmp_path, execution_id="e01", seed_outputs={"nope": 1}
+            )

@@ -13,6 +13,8 @@ Contract:
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from molab.workflow import (
@@ -127,7 +129,9 @@ class TestSubWorkflow:
         outer = WorkflowCompiler().compile(
             Workflow(name="outer-rc").add(SubWorkflow(inner), name="sub")
         )
-        result = await WorkflowRuntime().execute(outer, run_context=object())
+        result = await WorkflowRuntime().execute(
+            outer, run_context=SimpleNamespace(bypass_cache=False)
+        )
         assert result.status == "succeeded"
         assert ran == [True]
         assert result.outputs["sub"] == "ok"

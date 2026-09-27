@@ -72,7 +72,10 @@ def _short_id(full: str) -> str:
 
 
 def _short_exec_label(exec_id: str) -> str:
-    """Format an execution id: ``exec-<6char>[#N]``."""
+    """Format an execution id for the tree: ``eNN`` renders as ``exec-eNN``.
+
+    A legacy ``exec-<id>[-N]`` id is shortened to ``exec-<6char>[#N]``.
+    """
     body = exec_id
     if body.startswith("exec-"):
         body = body[5:]

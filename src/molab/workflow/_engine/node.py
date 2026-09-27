@@ -617,7 +617,7 @@ async def _invoke_body_with_ctx(
 def _workdir_for(deps: WorkflowDeps, name: str):  # noqa: ANN202
     """Scratch ``Path`` for task *name* (``None`` if no run / scratch root).
 
-    Under a tracked run this is ``executions/<id>/work/<task>/``. A bare
+    Under a tracked run this is ``executions/<id>/out/<task>/``. A bare
     execution with ``scratch_root`` uses ``<scratch_root>/<task>/``.
     """
     task_workdir = getattr(deps.run_context, "task_workdir", None)

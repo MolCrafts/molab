@@ -202,7 +202,9 @@ class Plan:
         prior = host.executions
         mode = self._next_execution_mode(prior)
         predecessor = prior[-1].id if prior else None
-        with host.start(mode=mode, based_on_execution_id=predecessor) as run_ctx:
+        # The plan graph never reads the node cache (every LLM node re-runs);
+        # record that on the attempt so execution.json matches the behaviour.
+        with host.start(mode=mode, based_on_execution_id=predecessor, bypass_cache=True) as run_ctx:
             self._bind_approver_execution(run_ctx)
             self._seed_review_decision(host, run_ctx)
             try:
@@ -228,12 +230,23 @@ class Plan:
         capability_registry: CapabilityRegistry | None = None,
         execution_context: Any | None = None,  # noqa: ANN401 — workspace ExecutionContext
     ) -> ModeResult:
-        """Run this bundle on *run* and return a :class:`ModeResult`."""
+        """Run this bundle on *run* and return a :class:`ModeResult`.
+
+        The plan graph never reads the workflow node cache, and the Execution
+        record is what says so: the runtime takes the bypass from
+        ``execution_context.bypass_cache``. Without *execution_context* this
+        opens its own attempt with ``bypass_cache=True``; a caller passing its
+        own context must have opened it with ``run.start(..., bypass_cache=True)``
+        (or ``Run.create_execution(bypass_cache=True)``) — otherwise LLM nodes
+        may be served from the cache.
+        """
         if execution_context is None:
             prior = run.executions
             mode = self._next_execution_mode(prior)
             predecessor = prior[-1].id if prior else None
-            with run.start(mode=mode, based_on_execution_id=predecessor) as owned_context:
+            with run.start(
+                mode=mode, based_on_execution_id=predecessor, bypass_cache=True
+            ) as owned_context:
                 self._bind_approver_execution(owned_context)
                 self._seed_review_decision(run, owned_context)
                 try:
@@ -367,7 +380,6 @@ class Plan:
                 scratch_root=scratch,
                 run_context=execution_context,
                 execution_id=execution_context.id,
-                bypass_cache=True,
             )
         else:
             raw = await WorkflowRuntime().execute(
@@ -377,7 +389,6 @@ class Plan:
                 scratch_root=scratch,
                 run_context=execution_context,
                 execution_id=execution_context.id,
-                bypass_cache=True,
             )
         if not isinstance(raw, WorkflowResult):
             raise StageExecutionError("plan workflow execute did not return a WorkflowResult")

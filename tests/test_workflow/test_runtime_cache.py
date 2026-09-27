@@ -217,8 +217,8 @@ class TestRuntimeCaching:
 
         compiled = WorkflowCompiler().compile(wf)
 
-        await WorkflowRuntime().execute(compiled, run_dir=tmp_path / "nc1")
-        await WorkflowRuntime().execute(compiled, run_dir=tmp_path / "nc2")
+        await WorkflowRuntime().execute(compiled, run_dir=tmp_path / "nc1", execution_id="e01")
+        await WorkflowRuntime().execute(compiled, run_dir=tmp_path / "nc2", execution_id="e01")
         assert _COUNTERS["step"] == 2
 
     async def test_actor_is_never_cached(self, workspace: Workspace, tmp_path: Path) -> None:

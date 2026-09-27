@@ -5,8 +5,7 @@ Graph-execution behaviors owned by ``molab.workflow`` — the ``wf.control`` /
 run time. Branch/loop happy-paths built from the *public* import surface live
 in ``test_control_flow_public_api``; here we pin the engine-level routing
 semantics (bare ``Next`` records no output, ``End`` termination/frame-scoping,
-route validation errors), plus the ``make_execution_id`` id function and the
-plugins→``_engine`` boundary lock.
+route validation errors), plus the plugins→``_engine`` boundary lock.
 
 Spec: .claude/specs/03-molab-workflow-cycles.md
 """
@@ -259,7 +258,7 @@ class TestControlFlowRouting:
 
 
 def test_submit_molq_plugins_do_not_reach_into_engine() -> None:
-    """ac-009 — plugins must use the public ``make_execution_id``, never
+    """ac-009 — plugins use the public ``molab.workflow`` surface only, never
     reach into ``molab.workflow._engine`` (architectural boundary lock)."""
     import re
     from pathlib import Path
@@ -279,6 +278,6 @@ def test_submit_molq_plugins_do_not_reach_into_engine() -> None:
                 )
     assert not violations, (
         "Plugins must not reach into molab.workflow._engine; "
-        "use the public `from molab.workflow import make_execution_id` instead.\n"
+        "import from the public `molab.workflow` surface instead.\n"
         "Violations:\n  " + "\n  ".join(violations)
     )

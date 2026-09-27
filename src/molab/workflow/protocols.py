@@ -124,11 +124,19 @@ class AssetsViewLike(Protocol):
 class RunContextLike(Protocol):
     """Duck-typed shape of ``workspace.run.RunContext`` used by the workflow runtime.
 
-    Captures only the surface the workflow scheduler reaches into: the
-    run reference, the run directory, and the register verbs. Members are
-    read-only properties so the concrete ``RunContext`` (whose ``run_dir`` /
-    ``run`` are properties) structurally satisfies the protocol. Anything else
-    on a real ``RunContext`` is out of scope for the workflow layer.
+    Captures only the surface the workflow scheduler reaches into: the run
+    reference, the run directory, the attempt's cache-bypass flag, and the
+    register verbs. Members are read-only properties so the concrete
+    ``RunContext`` (whose ``run_dir`` / ``run`` / ``bypass_cache`` are
+    properties) structurally satisfies the protocol. Anything else on a real
+    ``RunContext`` is out of scope for the workflow layer.
+
+    ``bypass_cache`` is required: the runtime reads it directly whenever a
+    context is given. The attempt's id is deliberately *not* a member: a
+    real ``ExecutionContext`` exposes it as ``id``, which raises
+    ``RuntimeError`` until the context is entered, so the runtime probes it
+    tolerantly (``id``, else a public ``execution_id`` attribute on a
+    duck-typed context) and falls back to its own ``execution_id=`` kwarg.
     """
 
     @property
@@ -136,6 +144,16 @@ class RunContextLike(Protocol):
 
     @property
     def run(self) -> RunLike: ...
+
+    @property
+    def bypass_cache(self) -> bool:
+        """Whether this Execution's record asks the runtime to skip cache reads.
+
+        Fixed on ``execution.json`` when the attempt is created
+        (``Run.create_execution(bypass_cache=...)`` / ``run.start(bypass_cache=...)``).
+        The runtime ORs it with its own ``bypass_cache`` kwarg.
+        """
+        ...
 
     def emit_artifact(self, data: object, *, name: str | None = ...) -> object: ...
 

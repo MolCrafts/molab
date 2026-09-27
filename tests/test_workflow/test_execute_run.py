@@ -136,6 +136,9 @@ class TestExecuteRun:
         run.execute(build(), rerun=True, fresh=True)
 
         assert [e.bypass_cache for e in run.executions] == [False, True]
+        assert run.executions[-1].mode.value == "rerun"
+        # The record is the request's only home — no side-channel marker file.
+        assert list(Path(str(run.path)).rglob("fresh.json")) == []
 
     def test_failed_then_explicit_retry_verbs(self, tmp_path: Path) -> None:
         """Retrying is explicit: a failed run refuses a plain call, resume is

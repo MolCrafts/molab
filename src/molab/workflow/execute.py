@@ -21,7 +21,7 @@ run status              no flag               ``resume=True``     ``rerun=True``
 ======================  ====================  ==================  ==================
 ``pending``             run (first attempt)   *error* — run's job  *error* — run's job
 ``failed``/``cancelled``  :class:`RunNotExecutableError`  resume (reopen +    rerun (new
-                        — retrying is explicit  seed completed)     ``exec-<id>-N``)
+                        — retrying is explicit  seed completed)     ``eNN``)
 ``succeeded``           :class:`RunNotExecutableError` — done is done
 ``running``             :class:`RunNotExecutableError` — cancel it first
 ======================  ====================  ==================  ==================
@@ -203,7 +203,6 @@ async def aexecute_run(
             compiled,
             run_context=ctx,
             seed_outputs=seed_outputs,
-            bypass_cache=fresh,
         )
     return _raise_if_failed(run, result)
 
@@ -231,13 +230,15 @@ def execute_run(
         resume: ``True`` reopens a failed/cancelled run's last execution and
             seeds its completed nodes (recompute only the rest) — the CLI's
             ``--resume``. Mutually exclusive with ``rerun``.
-        rerun: ``True`` opens a fresh attempt (new ``exec-<run_id>-N``, no
+        rerun: ``True`` opens a fresh attempt (new ``eNN``, no
             seeding) for a failed/cancelled run — the CLI's ``--rerun``.
             With neither flag, a retryable run refuses loudly (retrying is
             an explicit verb, never implicit).
         fresh: ``True`` additionally bypasses the content-addressed cache
-            *read* for that attempt (results are still written back). Requires
-            ``rerun=True`` — the CLI's ``--rerun --fresh``.
+            *read* for that attempt (results are still written back). The
+            request is recorded as ``bypass_cache`` on the new Execution, which
+            the runtime reads. Requires ``rerun=True`` — the CLI's
+            ``--rerun --fresh``.
         profile_config: Optional molcfg profile applied to the run.
 
     Returns:

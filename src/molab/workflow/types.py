@@ -238,7 +238,9 @@ class WorkflowResult(BaseModel):
         status: ``"succeeded"`` | ``"failed"`` | ``"cancelled"``
         outputs: Mapping of task name to task output.
         run_id: Associated workspace Run ID, if any.
-        execution_id: Opaque ID for resumption support.
+        execution_id: The workspace-allocated Execution id (``eNN``) this
+            result was journaled under; ``None`` for a bare run (no Run,
+            no ``run_dir``).
 
     .. note:: Workflow-level result status uses the same terminal vocabulary
        as ``workspace.Run`` (``succeeded`` / ``failed`` / ``cancelled``).
@@ -269,7 +271,7 @@ class WorkflowExecution:
 
     def __init__(
         self,
-        execution_id: str,
+        execution_id: str | None,
         workflow_id: str,
         run_id: str | None = None,
     ) -> None:

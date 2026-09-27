@@ -5,7 +5,10 @@ Post-rectification the runtime takes an opaque duck-typed ``run_context`` and a
 (the legacy ``run=`` kwarg is gone; ``run_dir=`` accepts a path directly). This
 file owns that boundary: failure→status, run_context handling (duck-typed, never
 exposed on the public ``TaskContext``), executions materialization, the bare
-``Runnable`` protocol body, and the ``scratch_root``/``ctx.workdir`` contract.
+``Runnable`` protocol body, the ``scratch_root``/``ctx.workdir`` contract, and
+the execution-id ownership rule (the workspace allocates ``eNN``; the runtime
+only reads one from the caller or the run context, refuses to persist without
+one, and reports ``None`` for a bare in-memory run).
 
 Graph topology (chains, diamonds, dict-merge binding, explicit parallelism) is
 owned by ``test_parallel`` / ``test_by_name_binding`` / ``test_values_on_edges``
@@ -14,6 +17,7 @@ owned by ``test_parallel`` / ``test_by_name_binding`` / ``test_values_on_edges``
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 import pytest
@@ -25,7 +29,10 @@ class _RunContextStub:
     """Minimal duck-typed ``run_context`` — what the runtime now requires.
 
     Exposes ``.run_dir`` / ``.config`` / ``.run`` so the runtime can extract a
-    run dir and forward the value to its private channel. No ``Workspace`` import.
+    run dir and forward the value to its private channel, plus ``.execution_id``
+    — the workspace-allocated attempt id the runtime reads (it never mints one).
+    Pass ``execution_id=None`` for a context that carries no id. No
+    ``Workspace`` import.
     """
 
     def __init__(
@@ -35,8 +42,11 @@ class _RunContextStub:
         config: dict | None = None,
         run_id: str | None = None,
         params: dict | None = None,
+        execution_id: str | None = "e01",
     ):
         self.run_dir = run_dir
+        self.execution_id = execution_id
+        self.bypass_cache = False
         self.config = config or {}
         # Root-task params reach the body by name (engine reads run_context.params).
         self.params = params or {}
@@ -45,6 +55,17 @@ class _RunContextStub:
             (),
             {"id": run_id or "stub-run", "run_dir": run_dir},
         )()
+
+
+def _ok_workflow():
+    """A one-task workflow that always succeeds."""
+    wf = Workflow(name="ok")
+
+    @wf.task
+    async def step(ctx: TaskContext) -> str:
+        return "ok"
+
+    return WorkflowCompiler().compile(wf)
 
 
 @pytest.mark.asyncio
@@ -95,10 +116,10 @@ class TestWorkflowRuntimeExecute:
     async def test_duck_typed_run_context_needs_no_workspace_and_writes_executions(self, tmp_path):
         """The runtime drives a workflow with a stub run_context that has no
         Workspace ancestry whatsoever, and materializes workflow.json under
-        run_dir/executions/<execution_id>/."""
+        run_dir/executions/<the context's execution_id>/."""
         wf = Workflow(name="duck")
 
-        run_ctx = _RunContextStub(run_dir=tmp_path / "stub-run")
+        run_ctx = _RunContextStub(run_dir=tmp_path / "stub-run", execution_id="e01")
 
         @wf.task
         async def step(ctx: TaskContext) -> str:
@@ -109,11 +130,60 @@ class TestWorkflowRuntimeExecute:
         )
         assert result.status == "succeeded"
         assert result.outputs["step"] == "ok"
+        assert result.execution_id == "e01"
+        assert (run_ctx.run_dir / "executions" / "e01" / "workflow.json").is_file()
 
-        executions = run_ctx.run_dir / "executions"
-        assert executions.exists(), "runtime must materialize executions/ under run_dir"
-        wf_jsons = list(executions.rglob("workflow.json"))
-        assert wf_jsons, "workflow.json must be written under run_dir/executions/<id>/"
+    async def test_run_context_public_id_names_the_execution(self, tmp_path: Path) -> None:
+        """The runtime reads the active attempt from the context's public
+        ``id`` — the surface a real ``ExecutionContext`` exposes — and
+        persists under ``executions/<id>/``, with no private-attribute probe."""
+
+        class _PublicIdContext:
+            def __init__(self, run_dir: Path) -> None:
+                self.id = "e01"
+                self.run_dir = run_dir
+                self.bypass_cache = False
+
+        run_ctx = _PublicIdContext(tmp_path / "run")
+        result = await WorkflowRuntime().execute(_ok_workflow(), run_context=run_ctx)
+        assert result.status == "succeeded"
+        assert result.execution_id == "e01"
+        assert (run_ctx.run_dir / "executions" / "e01" / "workflow.json").is_file()
+
+    async def test_run_dir_without_execution_id_raises(self, tmp_path: Path) -> None:
+        """Persisting under a ``run_dir`` needs a workspace-allocated id: the
+        runtime refuses to invent one and writes nothing."""
+        run_dir = tmp_path / "r"
+        with pytest.raises(ValueError, match="execution_id"):
+            await WorkflowRuntime().execute(_ok_workflow(), run_dir=run_dir)
+        assert (run_dir / "executions").exists() is False
+
+    async def test_run_context_without_execution_id_raises(self, tmp_path: Path) -> None:
+        """A run context that carries a run dir but no execution id is refused
+        the same way as a bare ``run_dir``."""
+        run_ctx = _RunContextStub(run_dir=tmp_path / "r", execution_id=None)
+        with pytest.raises(ValueError, match="execution_id"):
+            await WorkflowRuntime().execute(_ok_workflow(), run_context=run_ctx)
+        assert (run_ctx.run_dir / "executions").exists() is False
+
+    async def test_persist_false_needs_no_execution_id(self, tmp_path: Path) -> None:
+        """``persist=False`` (SubWorkflow inner runs) writes no journal, so a run
+        context without an id is fine and no ``workflow.json`` appears."""
+        run_ctx = _RunContextStub(run_dir=tmp_path / "r", execution_id=None)
+        result = await WorkflowRuntime().execute(_ok_workflow(), run_context=run_ctx, persist=False)
+        assert result.status == "succeeded"
+        assert list(run_ctx.run_dir.rglob("workflow.json")) == []
+
+    async def test_bare_execute_has_no_execution_id(self) -> None:
+        """A bare in-memory run is not an Execution: its id is ``None``."""
+        result = await WorkflowRuntime().execute(_ok_workflow())
+        assert result.status == "succeeded"
+        assert result.execution_id is None
+
+    async def test_runtime_exposes_no_id_minter_or_fresh_marker(self) -> None:
+        """The runtime neither mints execution ids nor writes fresh markers."""
+        assert hasattr(WorkflowRuntime, "make_execution_id") is False
+        assert hasattr(WorkflowRuntime, "request_fresh_execution") is False
 
     async def test_scratch_root_gives_every_task_a_workdir(self, tmp_path: Path) -> None:
         """``scratch_root=`` closes the ctx.workdir contract for bare executions.
@@ -154,3 +224,24 @@ class TestWorkflowRuntimeExecute:
         result = await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
         assert result.status == "succeeded"
         assert result.outputs["probe"]["workdir"] is None
+
+
+@pytest.mark.asyncio
+class TestWorkflowRuntimeStart:
+    async def test_run_dir_without_execution_id_raises_before_scheduling(
+        self, tmp_path: Path
+    ) -> None:
+        """``start`` refuses a ``run_dir`` without an id synchronously — no
+        background task is scheduled and nothing is written."""
+        run_dir = tmp_path / "r"
+        before = asyncio.all_tasks()
+        with pytest.raises(ValueError, match="execution_id"):
+            await WorkflowRuntime().start(_ok_workflow(), run_dir=run_dir)
+        assert asyncio.all_tasks() - before == set()
+        assert (run_dir / "executions").exists() is False
+
+    async def test_bare_start_handle_has_no_execution_id(self) -> None:
+        """A bare background run reports ``execution_id is None`` and completes."""
+        handle = await WorkflowRuntime().start(_ok_workflow())
+        assert handle.execution_id is None
+        assert (await handle.wait()).status == "succeeded"

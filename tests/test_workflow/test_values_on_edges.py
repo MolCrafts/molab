@@ -119,6 +119,9 @@ class TestValuesOnEdges:
         class _RunContextStub:
             def __init__(self, work_dir):
                 self.run_dir = work_dir
+                # The workspace allocates execution ids; the runtime only reads one.
+                self.execution_id = "e01"
+                self.bypass_cache = False
                 self.params = {"alpha": 7}
                 self.config = {}
                 self.run = type("RunStub", (), {"id": "stub-run", "run_dir": work_dir})()
