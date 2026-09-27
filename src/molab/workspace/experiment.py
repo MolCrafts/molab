@@ -57,7 +57,7 @@ from .folder import (
     register_entity_class,
 )
 from .fs import PathArg
-from .models import ExperimentMetadata, FolderMetadata, RunStatus
+from .models import ExperimentMetadata, FolderMetadata
 from .naming import disambiguate, entity_slug, run_slug
 from .run import Run, compute_run_definition_hash
 
@@ -805,28 +805,6 @@ class Experiment(Folder):
     def remove_run(self, run_id: str) -> None:
         """Alias of :meth:`del_run`."""
         self.del_run(run_id)
-
-    def remove_failed_runs(self) -> list[str]:
-        """Delete every run whose hot status is ``failed``.
-
-        Reaps zombie ``running`` owners first so a dead scheduler job is
-        treated as failed and removed with the rest. Succeeded, pending,
-        live-running, and cancelled runs stay.
-
-        Returns:
-            Removed run ids, in listing order.
-        """
-        from .run_reaper import reap_zombie_run
-
-        removed: list[str] = []
-        for run in list(self.list_runs()):
-            reap_zombie_run(run)
-            if not run.status_summary.by_status.get(RunStatus.FAILED.value):
-                continue
-            rid = run.id
-            self.remove_run(rid)
-            removed.append(rid)
-        return removed
 
     # ── Internal helpers ────────────────────────────────────────────────
 

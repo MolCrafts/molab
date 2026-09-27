@@ -242,3 +242,64 @@ class TestRunStart:
             pass
 
         assert run.executions[-1].bypass_cache is False
+
+
+def _fail_then_retry(run: Run) -> None:
+    """e01 fails, e02 (a RETRY of e01) succeeds — built through the public API."""
+    with pytest.raises(RuntimeError), run.start():
+        raise RuntimeError("boom")
+    with run.start(mode=ExecutionMode.RETRY, based_on_execution_id="e01"):
+        pass
+
+
+class TestRunStatusLabel:
+    """arch-own-02e D70: ``status_label`` is the latest attempt; history is ``has_failures``."""
+
+    def test_latest_success_after_failure_reads_succeeded(self, run: Run) -> None:
+        _fail_then_retry(run)
+
+        assert run.status_label == "succeeded"
+        assert run.has_failures is True
+        assert run.is_retryable is True
+
+    def test_no_attempt_reads_pending(self, run: Run) -> None:
+        assert run.status_label == "pending"
+        assert run.has_failures is False
+
+    def test_single_failed_attempt_reads_failed(self, run: Run) -> None:
+        with pytest.raises(RuntimeError), run.start():
+            raise RuntimeError("boom")
+
+        assert run.status_label == "failed"
+        assert run.has_failures is True
+
+    def test_queued_attempt_reads_queued(self, run: Run) -> None:
+        run.create_execution()
+
+        assert run.status_label == "queued"
+        assert run.has_failures is False
+        assert run.is_retryable is False
+
+
+class TestRunFinishedAt:
+    """arch-own-02e D70: ``finished_at`` belongs to the latest attempt, like ``status_label``."""
+
+    def test_latest_queued_after_failure_is_none(self, run: Run) -> None:
+        with pytest.raises(RuntimeError), run.start():
+            raise RuntimeError("boom")
+        assert run.executions[0].finished_at is not None
+        run.create_execution(mode=ExecutionMode.RETRY, based_on_execution_id="e01")
+
+        assert run.status_label == "queued"
+        assert run.finished_at is None
+
+    def test_latest_success_after_failure_is_its_finish(self, run: Run) -> None:
+        _fail_then_retry(run)
+        e02 = run.executions[-1]
+
+        assert e02.id == "e02"
+        assert e02.finished_at is not None
+        assert run.finished_at == e02.finished_at
+
+    def test_no_attempt_is_none(self, run: Run) -> None:
+        assert run.finished_at is None

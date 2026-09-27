@@ -13,10 +13,13 @@ import time
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import pytest
+
 from molab.knowledge import mount_note
 from molab.server.schemas.workspace_context import WorkspaceContextResponse
-from molab.workspace import KnowledgeRef, Workspace, WorkspaceContext
+from molab.workspace import KnowledgeRef, Run, Workspace, WorkspaceContext
 from molab.workspace.assets import ArtifactAsset, AssetManifest, AssetScope, Producer
+from molab.workspace.domain import ExecutionMode
 from molab.workspace.workspace_context import (
     ContextFocus,
     assemble_workspace_context,
@@ -31,6 +34,14 @@ def _ws(tmp_path: Path) -> Workspace:
 
 def _tree(root_path: object) -> set[str]:
     return {str(p) for p in Path(str(root_path)).rglob("*")}
+
+
+def _fail_then_retry(run: Run) -> None:
+    """e01 fails, e02 (a RETRY of e01) succeeds — built through the public API."""
+    with pytest.raises(RuntimeError), run.start():
+        raise RuntimeError("boom")
+    with run.start(mode=ExecutionMode.RETRY, based_on_execution_id="e01"):
+        pass
 
 
 class TestAssembleWorkspaceContext:
@@ -149,3 +160,29 @@ class TestAssembleWorkspaceContext:
             assert any(x.run_id == rr.id for x in c.running_runs)
         finally:
             running_ctx.__exit__(None, None, None)
+
+    def test_run_status_is_status_label(self, tmp_path: Path) -> None:
+        """arch-own-02e D70: ``RunRef.status`` is ``Run.status_label``; failures stay flagged."""
+        ws = _ws(tmp_path)
+        run_a = ws.add_project("p").add_experiment("e").add_run(params={"k": 1})
+        _fail_then_retry(run_a)
+
+        c = ws.context()
+
+        ref = next(r for r in c.recent_runs if r.run_id == run_a.id)
+        assert ref.status == run_a.status_label
+        assert ref.status == "succeeded"
+        assert any(x.run_id == run_a.id for x in c.failed_runs)
+
+    def test_queued_run_is_running_and_not_stale(self, tmp_path: Path) -> None:
+        """A QUEUED attempt is active: listed as running, never flagged stale (no alive yet)."""
+        ws = _ws(tmp_path)
+        run_q = ws.add_project("p").add_experiment("e").add_run(params={"k": 1})
+        run_q.create_execution()
+        alive = Path(str(run_q.run_dir)) / "executions" / "e01" / "alive"
+        assert not alive.exists()
+
+        c = assemble_workspace_context(ws)
+
+        assert any(x.run_id == run_q.id for x in c.running_runs)
+        assert not any(h.kind == "stale_running" for h in c.stale_or_missing)

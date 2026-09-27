@@ -25,18 +25,15 @@ from typing import overload
 
 from molab._typing import JSONValue, TaskOutput
 
+from .domain import FAILED_EXECUTION_STATUSES
 from .execution_results import read_completed_node_outputs
-from .models import RunStatus
 from .run import Run, RunWorkflowExecutor, require_run_executor
 
 __all__ = ["RunRecord", "RunSet", "RunSetResult"]
 
-
-def _run_status(run: Run) -> str:
-    """Derive the v2 summary status: pending before any Execution, else latest."""
-    if run.status_summary.not_started:
-        return RunStatus.PENDING.value
-    return run.executions[-1].status.value
+_FAILED_STATUS_VALUES: frozenset[str] = frozenset(
+    status.value for status in FAILED_EXECUTION_STATUSES
+)
 
 
 @dataclass(frozen=True)
@@ -76,8 +73,13 @@ class RunSetResult:
 
     @property
     def failed(self) -> tuple[RunRecord, ...]:
-        """The records whose run did not succeed (honest failure surface)."""
-        return tuple(rec for rec in self.entries if rec.status == RunStatus.FAILED.value)
+        """The records whose latest attempt ended without succeeding.
+
+        Terminal non-success only — ``failed`` / ``cancelled`` /
+        ``interrupted``. Live (queued / running / finalizing) and never-run
+        (``pending``) rows are not failures yet.
+        """
+        return tuple(rec for rec in self.entries if rec.status in _FAILED_STATUS_VALUES)
 
     def to_records(self) -> list[dict[str, object]]:
         """One flat dict per run: params + per-task outputs + identity keys."""
@@ -265,7 +267,7 @@ class RunSet(Sequence[Run]):
                 error = f"{type(exc).__name__}: {exc}"
         return RunRecord(
             run_id=run.id,
-            status=_run_status(run),
+            status=run.status_label,
             params=dict(run.parameters),
             outputs=outputs,
             error=error,

@@ -323,7 +323,7 @@ def _select_candidate_runs(
     for existing, run_params, config_hash, seed_label in candidates:
         mol_run = existing
         status = mol_run.status_label if mol_run is not None else RunStatus.PENDING.value
-        if mol_run is not None and status == RunStatus.RUNNING.value and reap_zombie_run(mol_run):
+        if mol_run is not None and mol_run.status_summary.active > 0 and reap_zombie_run(mol_run):
             status = RunStatus.FAILED.value
             rprint(
                 f"  [yellow]![/yellow] {exp.id}  run={mol_run.id} (stale 'running' run reaped -> failed)"
@@ -765,8 +765,10 @@ def execute(
                 bypass_cache=ctx.bypass_cache,
             )
         )
-    # Judge this attempt, not the run: after a failed e01 a successful rerun
-    # still leaves ``Run.status_label`` at ``failed``.
+    # Judge this attempt, not the run: ``Run.status_label`` is the *latest*
+    # attempt's status, and ``execution_id`` need not be the latest — a sibling
+    # attempt may have been dispatched after it. The exit code must describe
+    # the attempt this worker ran.
     status = run_obj.execution(execution_id).status
     if status is not ExecutionStatus.SUCCEEDED:
         # The scheduler reads this exit code to mark the job failed; a failed run

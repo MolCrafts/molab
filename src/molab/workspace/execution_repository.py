@@ -70,6 +70,7 @@ from ._file_lock import file_lock
 from .artifact_repository import ArtifactRepository
 from .domain import (
     ACTIVE_EXECUTION_STATUSES,
+    FAILED_EXECUTION_STATUSES,
     TERMINAL_EXECUTION_STATUSES,
     Artifact,
     EvidenceRef,
@@ -876,11 +877,7 @@ class ExecutionRepository:
             raise KeyError(f"predecessor Execution {based_on_execution_id!r} not found")
         if predecessor.status in ACTIVE_EXECUTION_STATUSES:
             raise ValueError("an active Execution cannot be used as a predecessor")
-        if mode is ExecutionMode.RETRY and predecessor.status not in {
-            ExecutionStatus.FAILED,
-            ExecutionStatus.CANCELLED,
-            ExecutionStatus.INTERRUPTED,
-        }:
+        if mode is ExecutionMode.RETRY and predecessor.status not in FAILED_EXECUTION_STATUSES:
             raise ValueError("retry requires a failed, cancelled, or interrupted predecessor")
         if mode is ExecutionMode.RESUME:
             if checkpoint_artifact_id is None:

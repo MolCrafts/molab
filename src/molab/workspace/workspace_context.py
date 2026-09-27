@@ -36,7 +36,6 @@ from pydantic import BaseModel
 from molab._typing import JSONValue
 
 from .assets.scan import scan_assets
-from .models import RunStatus
 from .run_heartbeat import is_alive_stale
 
 if TYPE_CHECKING:
@@ -219,7 +218,7 @@ def assemble_workspace_context(
                     if err is not None
                     else None
                 )
-                status = RunStatus.PENDING.value if latest is None else latest.status.value
+                status = run.status_label
                 started = min(
                     (e.started_at for e in executions if e.started_at is not None),
                     default=None,
@@ -249,14 +248,18 @@ def assemble_workspace_context(
                             detail=f"run {run.id} is {status} (retryable){reason}",
                         )
                     )
-                if status == RunStatus.RUNNING.value:
+                # Any live attempt (queued / running / finalizing) counts. The
+                # heartbeat check targets that attempt; a queued one has no
+                # ``alive`` yet, and a missing ``alive`` is never stale.
+                active_id = run.current_execution_id
+                if active_id is not None:
                     running_runs.append(ref)
-                    if latest is not None and is_alive_stale(run, latest.id):
+                    if is_alive_stale(run, active_id):
                         flags.append(
                             HealthFlag(
                                 kind="stale_running",
                                 ref=run.id,
-                                detail=f"run {run.id} is running but its heartbeat is stale",
+                                detail=f"run {run.id} is {status} but its heartbeat is stale",
                             )
                         )
 

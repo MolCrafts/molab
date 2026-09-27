@@ -31,7 +31,10 @@ _STATUS_COLORS: dict[str, str] = {
     "succeeded": "green",
     "failed": "red",
     "running": "yellow",
+    "finalizing": "yellow",
+    "queued": "blue",
     "pending": "blue",
+    "interrupted": "red",
     "cancelled": "gray",
 }
 
@@ -74,14 +77,42 @@ def deterministic_run_id(params: dict[str, JSONValue]) -> str:
 
 
 def run_executor_info(run: Run) -> dict[str, str]:
-    """Return normalized executor metadata for a workspace run.
+    """Return normalized executor metadata from the run's latest Execution.
 
-    Ownership (pid/host) now lives in the OKF ``ops`` sidecar (wsokf-10); it
-    is surfaced as label fallbacks for ``normalize_executor_info``, which only
-    consults scheduler-shaped keys (never pid/host), so an empty labels map is
-    sufficient here.
+    The executor facts (backend / scheduler / cluster / job ids) are recorded
+    on each attempt's ``execution.json``; this reads the most recent attempt,
+    ``run.executions[-1]`` (attempts are ordered by creation). ``run.json`` is
+    not consulted — it holds only the run's logical definition.
+
+    Args:
+        run: The workspace run to describe.
+
+    Returns:
+        The latest Execution's ``executor`` normalized through
+        ``normalize_executor_info``, or ``{}`` when the run has no Execution.
     """
-    return normalize_executor_info(run.metadata.executor_info, {})
+    executions = run.executions
+    return normalize_executor_info(executions[-1].executor if executions else None, {})
+
+
+def run_environment(run: Run) -> dict[str, JSONValue]:
+    """Return the environment recorded on the run's latest Execution.
+
+    The creation- and start-time facts (profile, config, config_hash,
+    script, ...) live on each attempt's ``execution.json``; this reads the
+    most recent attempt, ``run.executions[-1]`` (attempts are ordered by
+    creation), so a rerun shows the profile it was created with. There is no
+    fallback to ``run.json``.
+
+    Args:
+        run: The workspace run to describe.
+
+    Returns:
+        A shallow copy of the latest Execution's ``environment``, or ``{}``
+        when the run has no Execution.
+    """
+    executions = run.executions
+    return dict(executions[-1].environment) if executions else {}
 
 
 __all__ = [
@@ -91,6 +122,7 @@ __all__ = [
     "pid_alive",
     "reap_zombie_run",
     "rprint",
+    "run_environment",
     "run_executor_info",
     "status_color",
 ]

@@ -22,11 +22,12 @@ Keybindings (confirm dialog)::
     y              confirm delete
     n / Esc        cancel
 
-Only terminal runs are deleted silently.  Running ones get their cancel
-path inspected first (see :mod:`molab.plugins.submit_molq.cancel`):
-cancellable ones are cancelled then deleted; uncancellable ones stay
-with a warning printed after the dialog closes.  Execution records are
-append-only: an execution node is cancelled if running, then kept with a
+Only terminal runs are deleted silently.  Active ones (any queued /
+running / finalizing attempt) get their cancel path inspected first
+(see :mod:`molab.plugins.submit_molq.cancel`): cancellable ones are
+cancelled then deleted; uncancellable ones stay with a warning printed
+after the dialog closes.  Execution records are
+append-only: an execution node is cancelled if active, then kept with a
 warning pointing at ``molab runs prune``.
 
 The tree data model lives in :mod:`molab.cli.tui.tree_model`; pure
@@ -248,11 +249,31 @@ def _cancel_kind(run: Run) -> tuple[str, str]:
     return ("none", "no molq job id")
 
 
+def _is_active(node: TreeNode) -> bool:
+    """Whether *node* has a live attempt that must be cancelled before delete.
+
+    Judged from the Execution records, not ``node.status``: a run's label is
+    its latest attempt's raw status (``queued`` / ``finalizing`` included), and
+    a queued attempt may already own a scheduler job.
+    """
+    if node.kind == "run" and isinstance(node.ref, Run):
+        return node.ref.status_summary.active > 0
+    if node.kind == "execution" and isinstance(node.ref, tuple):
+        run, exec_id = node.ref[0], node.ref[1]
+        if not isinstance(run, Run) or not isinstance(exec_id, str):
+            return False
+        try:
+            return run.execution(exec_id).status in ACTIVE_EXECUTION_STATUSES
+        except KeyError:
+            return False
+    return False
+
+
 def _prepare_dialog(targets: list[TreeNode]) -> _DeleteDialog:
     """Classify each target's cancel prospects for display."""
     lines: list[tuple[str, str, str]] = []
     for node in targets:
-        running = (node.status or "").lower() in ("running", "pending")
+        running = _is_active(node)
         if node.kind == "run" and running:
             assert isinstance(node.ref, Run)
             kind, detail = _cancel_kind(node.ref)
@@ -281,8 +302,7 @@ def _execute_delete(dialog: _DeleteDialog) -> list[str]:
     """Run the dialog's plan.  Returns post-action warning messages."""
     warnings: list[str] = []
     for node in dialog.targets:
-        status_lower = (node.status or "").lower()
-        running = status_lower in ("running", "pending")
+        running = _is_active(node)
         try:
             if node.kind == "run":
                 assert isinstance(node.ref, Run)

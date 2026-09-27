@@ -8,8 +8,9 @@ from __future__ import annotations
 import typer
 
 from molab.cli._app import app
-from molab.cli._common import rprint, status_color
+from molab.cli._common import rprint, run_environment, status_color
 from molab.cli._target import TargetOption, open_workspace
+from molab.workspace.domain import ExecutionStatus
 
 
 @app.command()
@@ -34,13 +35,10 @@ def info(target_spec: TargetOption = ".") -> None:
     projects = ws.list_projects()
     total_experiments = 0
     total_runs = 0
-    run_status_counts: dict[str, int] = {
-        "pending": 0,
-        "running": 0,
-        "succeeded": 0,
-        "failed": 0,
-        "cancelled": 0,
-    }
+    # ``status_label`` is the latest attempt's raw status ("pending" when the
+    # run has none), so every Execution status gets its own counter.
+    run_status_counts: dict[str, int] = {"pending": 0}
+    run_status_counts.update({s.value: 0 for s in ExecutionStatus})
     profile_counts: dict[str, int] = {}
 
     for project in projects:
@@ -50,11 +48,11 @@ def info(target_spec: TargetOption = ".") -> None:
             runs = experiment.list_runs()
             total_runs += len(runs)
             for r in runs:
-                status = str(r.status).lower()
+                status = r.status_label
                 if status in run_status_counts:
                     run_status_counts[status] += 1
-                pname = r.metadata.profile
-                if pname:
+                pname = run_environment(r).get("profile")
+                if isinstance(pname, str) and pname:
                     profile_counts[pname] = profile_counts.get(pname, 0) + 1
 
     rprint("\n[bold]Statistics:[/bold]")

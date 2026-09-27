@@ -17,7 +17,6 @@ from ..assets import scan
 from ._assets import count_emitted_artifacts
 
 if TYPE_CHECKING:
-    from molab.workspace.run import Run
     from molab.workspace.workspace import Workspace
 
 __all__ = [
@@ -71,13 +70,6 @@ class WorkspaceInventory(BaseModel):
     asset_count: int
 
 
-def _run_status(run: Run) -> str:
-    """Derive a scalar lifecycle label: pending before any Execution, else latest."""
-    if run.status_summary.not_started:
-        return "pending"
-    return run.executions[-1].status.value
-
-
 def scan_workspace(workspace: Workspace) -> WorkspaceInventory:
     """Classify a workspace tree into a frozen :class:`WorkspaceInventory`.
 
@@ -103,7 +95,7 @@ def scan_workspace(workspace: Workspace) -> WorkspaceInventory:
         experiments: list[ExperimentInventory] = []
         for experiment in project.list_experiments():
             runs = tuple(
-                RunInventory(id=run.id, status=_run_status(run)) for run in experiment.list_runs()
+                RunInventory(id=run.id, status=run.status_label) for run in experiment.list_runs()
             )
             run_count += len(runs)
             experiment_count += 1

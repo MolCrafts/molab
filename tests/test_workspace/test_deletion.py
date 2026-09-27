@@ -43,29 +43,6 @@ class TestDeleteRun:
             e.remove_run("nope")
 
 
-class TestRemoveFailedRuns:
-    def test_deletes_only_failed(self, tmp_path):
-        _ws, _p, e, seeded = _build(tmp_path)
-        ok = e.add_run(params={"seed": 2})
-        fail = e.add_run(params={"seed": 3})
-        with ok.start():
-            pass
-        with fail.start() as ctx:
-            ctx.mark_failed("boom")
-        deleted = e.remove_failed_runs()
-        assert fail.id in deleted
-        assert ok.id not in deleted
-        assert seeded.id not in deleted
-        assert e.has_run(ok.id)
-        assert e.has_run(seeded.id)
-        assert not e.has_run(fail.id)
-
-    def test_noop_when_nothing_failed(self, tmp_path):
-        _ws, _p, e, r = _build(tmp_path)
-        assert e.remove_failed_runs() == []
-        assert e.has_run(r.id)
-
-
 class TestDeleteProject:
     def test_remove_project_clears_everything(self, tmp_path):
         ws, p, _e, _r = _build(tmp_path)

@@ -81,4 +81,4 @@ class TestTimestampsStayComparable:
         attempts = repo.list()
         assert [item.id for item in attempts] == ["e01", "e02"]
         assert all(item.created_at.tzinfo is not None for item in attempts)
-        assert run.finished_at is not None
+        assert run.finished_at is None  # latest attempt (e02) is still queued

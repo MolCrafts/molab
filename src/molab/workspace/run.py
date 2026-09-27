@@ -41,6 +41,7 @@ if TYPE_CHECKING:
 # without a circular ``run.py`` dependency.
 from .domain import (
     ACTIVE_EXECUTION_STATUSES,
+    FAILED_EXECUTION_STATUSES,
     Execution,
     ExecutionMode,
     ExecutionStatus,
@@ -377,41 +378,45 @@ class Run(Folder):
 
     @property
     def status_label(self) -> str:
-        """THE one-word status a person reads — derived, never stored.
+        """The latest attempt's status, as the one word a person reads.
 
         A Run has no scalar status (that is :attr:`status`, which raises on
-        purpose); what callers actually want is one label projected from
-        :attr:`status_summary`, and before this property there were five
-        verbatim copies of the projection across ``workspace`` /
-        ``services`` / ``cli`` — one of which disagreed on the empty-run case.
+        purpose). This label is the status of the most recent Execution —
+        the state the run is in *now* — derived on every read, never stored.
+        ``queued`` and ``finalizing`` are reported as themselves.
 
-        Precedence: anything not started yet is ``pending``; a live attempt
-        makes the run ``running``; otherwise the worst terminal outcome wins
-        (``failed`` → ``cancelled`` → ``interrupted`` → ``succeeded``), and a
-        run with no attempts at all is ``pending``.
+        History is not folded in: an earlier failed attempt followed by a
+        successful one reads ``succeeded``. Ask :attr:`has_failures` whether
+        any attempt ever failed.
+
+        Returns:
+            The latest Execution's ``status.value``, or ``"pending"`` when
+            the run has no Execution at all.
         """
-        summary = self.status_summary
-        if summary.not_started:
-            return "pending"
-        if summary.active > 0:
-            return "running"
-        for status in ("failed", "cancelled", "interrupted", "succeeded"):
-            if summary.by_status.get(status):
-                return status
-        return "succeeded" if summary.total else "pending"
+        executions = self.executions
+        if executions:
+            return executions[-1].status.value
+        return RunStatus.PENDING.value
+
+    @property
+    def has_failures(self) -> bool:
+        """Whether any attempt of this run ended without succeeding.
+
+        Returns:
+            True when at least one Execution is ``failed``, ``cancelled`` or
+            ``interrupted``, regardless of what later attempts did.
+        """
+        return any(item.status in FAILED_EXECUTION_STATUSES for item in self.executions)
 
     @property
     def is_retryable(self) -> bool:
         """Whether resume/rerun may open a new attempt.
 
-        A live Execution (queued/running) must not get a concurrent sibling.
-        Failed/cancelled/interrupted attempts otherwise make the run retryable.
+        A live Execution (queued/running/finalizing) must not get a concurrent
+        sibling. Otherwise any failed/cancelled/interrupted attempt
+        (:attr:`has_failures`) makes the run retryable.
         """
-        if self.status_summary.active > 0:
-            return False
-        return any(
-            item.status.value in {"failed", "cancelled", "interrupted"} for item in self.executions
-        )
+        return self.status_summary.active == 0 and self.has_failures
 
     @property
     def executions(self) -> list[Execution]:
@@ -425,9 +430,16 @@ class Run(Folder):
 
     @property
     def finished_at(self) -> datetime | None:
-        """Terminal timestamp, read from ``run.json``."""
-        finished = [item.finished_at for item in self.executions if item.finished_at is not None]
-        return max(finished, default=None)
+        """When the latest attempt ended — the timestamp beside :attr:`status_label`.
+
+        Returns:
+            The newest Execution's ``finished_at``; ``None`` when there is no
+            attempt yet or the newest one is still active.
+        """
+        executions = self.executions
+        if not executions or executions[-1].status in ACTIVE_EXECUTION_STATUSES:
+            return None
+        return executions[-1].finished_at
 
     @property
     def current_execution_id(self) -> str | None:

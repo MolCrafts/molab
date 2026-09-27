@@ -8,7 +8,7 @@ from __future__ import annotations
 import json
 import sys
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated
 
 import typer
 from rich.console import Console
@@ -16,6 +16,7 @@ from rich.table import Table
 
 from molab.cli._common import (
     rprint,
+    run_environment,
     run_executor_info,
     status_color,
 )
@@ -254,7 +255,7 @@ def run_create(
         rprint(f"[green]OK[/green] Created run: {r.id}")
         rprint(f"  Project: {project_id}")
         rprint(f"  Experiment: {experiment_id}")
-        rprint(f"  Status: {r.status}")
+        rprint(f"  Status: {r.status_label}")
         if parameters:
             rprint(f"  Parameters: {json.dumps(parameters, indent=2)}")
     except typer.Exit:
@@ -298,9 +299,10 @@ def run_list(
     table.add_column("Created")
     table.add_column("Duration")
     for r in runs:
-        status = str(r.status).lower()
+        status = r.status_label
         color = status_color(status)
-        profile_display = r.metadata.profile or "—"
+        profile = run_environment(r).get("profile")
+        profile_display = profile if isinstance(profile, str) and profile else "—"
         finished = r.finished_at.isoformat() if r.finished_at else None
         duration = elapsed(r.metadata.created_at.isoformat(), finished)
         table.add_row(
@@ -351,7 +353,7 @@ def run_cancel(
 ) -> None:
     """Cancel one or more scheduled runs."""
     ws = _open_ws(target_spec)
-    target_runs: list[Any] = []
+    target_runs: list[Run] = []
 
     from molab.workspace import ExperimentNotFoundError as _ExpNotFound
     from molab.workspace import ProjectNotFoundError as _ProjNotFound
@@ -406,10 +408,10 @@ def run_cancel(
             raise typer.Exit(1) from None
         candidates = experiment.list_runs()
         if all_runs:
-            target_runs = [r for r in candidates if r.status not in _TERMINAL_STATUSES]
+            target_runs = [r for r in candidates if r.status_label not in _TERMINAL_STATUSES]
         elif status_filter:
             allowed = {s.strip().lower() for s in status_filter.split(",")}
-            target_runs = [r for r in candidates if r.status in allowed]
+            target_runs = [r for r in candidates if r.status_label in allowed]
         else:
             rprint(
                 "[red]Error:[/red] Specify --all or --status when using --project/--experiment mode."
@@ -420,10 +422,10 @@ def run_cancel(
         rprint("[yellow]No runs matched the criteria — nothing to cancel.[/yellow]")
         raise typer.Exit(0)
 
-    already_terminal = [r for r in target_runs if r.status in _TERMINAL_STATUSES]
-    target_runs = [r for r in target_runs if r.status not in _TERMINAL_STATUSES]
+    already_terminal = [r for r in target_runs if r.status_label in _TERMINAL_STATUSES]
+    target_runs = [r for r in target_runs if r.status_label not in _TERMINAL_STATUSES]
     for r in already_terminal:
-        rprint(f"[yellow]Skipping[/yellow] {r.id} — already terminal: {r.status}")
+        rprint(f"[yellow]Skipping[/yellow] {r.id} — already terminal: {r.status_label}")
     if not target_runs:
         rprint("[yellow]All matched runs are already in a terminal state.[/yellow]")
         raise typer.Exit(0)
@@ -438,7 +440,7 @@ def run_cancel(
         executor_info = run_executor_info(r)
         table.add_row(
             r.id,
-            r.status,
+            r.status_label,
             executor_info.get("scheduler") or scheduler,
             executor_info.get("job_id") or "—",
             executor_info.get("scheduler_job_id") or "—",
@@ -546,7 +548,7 @@ def _retry_run(
     except RunFailedError as exc:
         rprint(f"[red]FAILED[/red] {exc}")
         raise typer.Exit(1) from None
-    rprint(f"[green]OK[/green] {verb} run {run.id} — status: {run.status}")
+    rprint(f"[green]OK[/green] {verb} run {run.id} — status: {run.status_label}")
 
 
 @run_app.command("resume")
@@ -744,7 +746,9 @@ def run_info(
         raise typer.Exit(1) from None
 
     rprint(f"[bold]Run:[/bold] {r.id}")
-    rprint(f"  Status: {r.status}")
+    status = r.status_label
+    env = run_environment(r)
+    rprint(f"  Status: {status}")
     # A failed run must say WHY, right under the status, with the one command to
     # retry — the reason is captured in the canonical record (run.json). The
     # error block is status-gated (run-recovery bug 2): a run that has since
@@ -752,26 +756,33 @@ def run_info(
     # lifecycle also clears metadata.error on success; this is the display-side
     # defense for records written before that fix).
     err = r.metadata.error
-    if err is not None and r.status in RETRYABLE_STATUSES:
+    if err is not None and status in RETRYABLE_STATUSES:
         rprint(f"  [red]Error:[/red] {err.type}: {err.message}")
-        script = r.metadata.script if hasattr(r.metadata, "script") else None
-        hint = f"molab run {script} --resume" if script else "molab run <script> --resume"
+        script = env.get("script")
+        hint = (
+            f"molab run {script} --resume"
+            if isinstance(script, str) and script
+            else "molab run <script> --resume"
+        )
         rprint(f"  [dim]Retry with:[/dim] {hint}")
     rprint(f"  Created: {r.metadata.created_at}")
     if r.finished_at:
         rprint(f"  Finished: {r.finished_at}")
-    if r.metadata.profile:
-        rprint(f"  Profile: [cyan]{r.metadata.profile}[/cyan]")
-        if r.metadata.config_hash:
-            rprint(f"  Config hash: {r.metadata.config_hash[:12]}…")
-        if r.metadata.config:
-            rprint(f"  Config: {json.dumps(r.metadata.config, indent=2, default=str)}")
+    profile = env.get("profile")
+    if isinstance(profile, str) and profile:
+        rprint(f"  Profile: [cyan]{profile}[/cyan]")
+        config_hash = env.get("config_hash")
+        if isinstance(config_hash, str) and config_hash:
+            rprint(f"  Config hash: {config_hash[:12]}…")
+        config = env.get("config")
+        if config:
+            rprint(f"  Config: {json.dumps(config, indent=2, default=str)}")
     rprint(f"  Parameters: {json.dumps(r.parameters, indent=2, default=str)}")
     history = r.executions
     if history:
         rprint("  Executions:")
         for rec in history[-5:]:
-            rprint(f"    {rec.started_at}  {rec.status}  {rec.execution_id}")
+            rprint(f"    {rec.started_at}  {rec.status}  {rec.id}")
 
 
 # Attach prune subcommand from the prune module.

@@ -21,7 +21,7 @@ from rich.text import Text
 
 from molab._run_display import read_run_json
 from molab._typing import JSONValue
-from molab.plugins.submit_molq.metadata import normalize_executor_info
+from molab.cli._common import run_environment, run_executor_info
 from molab.workspace import Experiment, Project, Run, Workspace
 from molab.workspace.execution_dirs import JOBS
 
@@ -45,10 +45,13 @@ class _DeleteDialog:
 
 _STATE_STYLE = {
     "running": "bold cyan",
+    "finalizing": "bold cyan",
     "pending": "yellow",
+    "queued": "yellow",
     "done": "bold green",
     "succeeded": "bold green",
     "failed": "bold red",
+    "interrupted": "bold red",
     "cancelled": "dim",
     "mixed": "bold yellow",
 }
@@ -58,10 +61,13 @@ def _state_icon(status: str | None) -> str:
     s = (status or "").lower()
     return {
         "running": "⟳",
+        "finalizing": "⟳",
         "pending": "·",
+        "queued": "·",
         "succeeded": "✓",
         "done": "✓",
         "failed": "✗",
+        "interrupted": "✗",
         "cancelled": "—",
     }.get(s, "·")
 
@@ -243,13 +249,13 @@ def _detail_run(node: TreeNode) -> list[RenderableType]:
     data = read_run_json(run.run_dir)
     kv = _kv_table()
     kv.add_row("id", str(run.id))
-    status_str = run.status or node.status or ""
-    kv.add_row("status", status_str.upper())
-    if profile := _as_str(data.get("profile")):
+    kv.add_row("status", run.status_label.upper())
+    env = run_environment(run)
+    if profile := _as_str(env.get("profile")):
         kv.add_row("profile", profile)
-    if config_hash := _as_str(data.get("config_hash")):
+    if config_hash := _as_str(env.get("config_hash")):
         kv.add_row("config_hash", config_hash[:16])
-    if script := _as_str(data.get("script")):
+    if script := _as_str(env.get("script")):
         kv.add_row("script", script)
     created_at = data.get("created_at")
     if created_at:
@@ -263,17 +269,15 @@ def _detail_run(node: TreeNode) -> list[RenderableType]:
         msg = err.get("message")
         if msg:
             kv.add_row("error", str(msg))
-    exec_info_dict = _as_dict(data.get("executor_info"))
-    if exec_info_dict:
-        norm = normalize_executor_info(exec_info_dict, {})
-        for key in ("backend", "scheduler", "cluster", "job_id", "scheduler_job_id"):
-            if norm.get(key):
-                kv.add_row(key, str(norm[key]))
+    norm = run_executor_info(run)
+    for key in ("backend", "scheduler", "cluster", "job_id", "scheduler_job_id"):
+        if norm.get(key):
+            kv.add_row(key, str(norm[key]))
     if run.executions:
         kv.add_row("attempts", str(len(run.executions)))
     kv.add_row("run_dir", str(run.run_dir))
 
-    cfg = _as_dict(data.get("config"))
+    cfg = _as_dict(env.get("config"))
     body: list[RenderableType] = [kv]
     if cfg:
         body.append(Text(""))

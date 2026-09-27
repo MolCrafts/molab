@@ -221,7 +221,18 @@ def _fold_status(node: TreeNode) -> str:
     if not node.children:
         return node.status or ""
     statuses = [_fold_status(c) for c in node.children]
-    priority = ("running", "pending", "failed", "cancelled", "succeeded")
+    # Active states first (something is happening now), then the terminal
+    # states a person must act on, then the quiet ones.
+    priority = (
+        "running",
+        "finalizing",
+        "queued",
+        "pending",
+        "failed",
+        "interrupted",
+        "cancelled",
+        "succeeded",
+    )
     for p in priority:
         if p in statuses:
             node.status = p

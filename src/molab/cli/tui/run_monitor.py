@@ -19,7 +19,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 
 from molab._run_display import elapsed as _elapsed
-from molab.plugins.submit_molq.metadata import normalize_executor_info
+from molab.cli._common import run_environment, run_executor_info
 
 if TYPE_CHECKING:
     from molq.dashboard import DashboardState
@@ -197,25 +197,14 @@ class RunMonitor:
         for r in run_list:
             run_id = r.id
             run_name = _run_label(r)
-            try:
-                status = str(r.status)
-            except Exception:
-                status = "pending"
+            status = r.status_label
 
             created_at = r.metadata.created_at.isoformat() if r.metadata.created_at else None
             finished = r.finished_at
             finished_at = finished.isoformat() if finished is not None else None
             elapsed = _elapsed(created_at, finished_at)
 
-            labels_raw = getattr(r.metadata, "labels", None)
-            executor_info = normalize_executor_info(
-                r.metadata.executor_info if isinstance(r.metadata.executor_info, dict) else None,
-                (
-                    {str(k): v for k, v in labels_raw.items() if isinstance(v, str)}
-                    if isinstance(labels_raw, dict)
-                    else None
-                ),
-            )
+            executor_info = run_executor_info(r)
             sched_id = executor_info.get("scheduler_job_id")
 
             messages: list[str] = []
@@ -227,7 +216,8 @@ class RunMonitor:
                 messages.append(reconcile_error[1])
             error_msg = "; ".join(messages) if messages else None
 
-            profile_name = r.metadata.profile or None
+            profile_raw = run_environment(r).get("profile")
+            profile_name = profile_raw if isinstance(profile_raw, str) and profile_raw else None
             extras: tuple[tuple[str, str], ...] = (
                 (("profile", profile_name),) if profile_name else ()
             )
@@ -250,14 +240,15 @@ class RunMonitor:
                 )
             )
 
-            s = status.lower()
-            if s == "running":
+            # ``status_label`` is the latest attempt's raw status, so the
+            # dashboard's four buckets fold the Execution statuses here.
+            if status in ("running", "finalizing"):
                 running += 1
-            elif s == "pending":
+            elif status in ("pending", "queued"):
                 pending += 1
-            elif s in ("succeeded", "done"):
+            elif status == "succeeded":
                 done += 1
-            elif s in ("failed", "cancelled"):
+            elif status in ("failed", "cancelled", "interrupted"):
                 failed += 1
             else:
                 pending += 1  # unknown → treat as pending

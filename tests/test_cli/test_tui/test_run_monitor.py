@@ -11,6 +11,7 @@ nothing else. The molq dashboard is replaced by a fake that polls once, and
 
 from __future__ import annotations
 
+import json
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -20,6 +21,7 @@ import pytest
 from molq.dashboard import DashboardState, JobRow
 
 from molab.cli.tui.run_monitor import RunMonitor
+from molab.profile import ProfileConfig
 from molab.workspace import Workspace
 from molab.workspace.domain import ExecutionMode
 from molab.workspace.execution_repository import ExecutionRepository
@@ -287,3 +289,107 @@ class TestRunMonitorReconcileOffRenderPath:
         assert not any(
             t.name == "molab-run-monitor-reconcile" and t.is_alive() for t in threading.enumerate()
         )
+
+
+# ----------------------------------------------------------------------
+# Rows read the latest Execution (spec arch-own-02e-readers)
+
+_RUN_LEVEL_PROVENANCE = ("profile", "config_hash", "script", "executor_info")
+
+
+def _run_with_record(root: Path) -> Run:
+    """A run whose only provenance is the QUEUED e01 execution record."""
+    ws = Workspace(root / "lab", name="Lab")
+    ws.materialize()
+    run = ws.add_project("p").add_experiment("e").add_run(params={"x": 1})
+    run.create_execution(
+        profile_config=ProfileConfig({"nodes": 2}, name="cpu"),
+        environment={"script": "/lab/s.py"},
+        executor={"backend": "molq", "scheduler": "slurm", "scheduler_job_id": "4242"},
+    )
+    raw = json.loads((run.run_dir / "run.json").read_text())
+    assert not any(key in raw for key in _RUN_LEVEL_PROVENANCE)
+    return run
+
+
+def _sealed_run(root: Path, *, fail: bool) -> Run:
+    """A run whose single attempt e01 was started and sealed in-process."""
+    ws = Workspace(root / "lab", name="Lab")
+    ws.materialize()
+    run = ws.add_project("p").add_experiment("e").add_run(params={"x": 1})
+    if fail:
+        with pytest.raises(RuntimeError), run.start():
+            raise RuntimeError("boom")
+    else:
+        with run.start():
+            pass
+    return run
+
+
+def _single_state(monkeypatch: pytest.MonkeyPatch, runs: list[Run]) -> DashboardState:
+    spy = _install_single_poll(monkeypatch)
+    RunMonitor(title="t").watch(runs)
+    assert len(spy.states) == 1
+    return spy.states[0]
+
+
+class TestRunMonitor:
+    def test_row_state_is_latest_attempt_status(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        run = _run_with_record(tmp_path)
+
+        state = _single_state(monkeypatch, [run])
+
+        assert state.jobs[0].state == "queued"
+
+    def test_row_scheduler_id_from_latest_executor(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        run = _run_with_record(tmp_path)
+
+        state = _single_state(monkeypatch, [run])
+
+        assert state.jobs[0].scheduler_id == "4242"
+
+    def test_row_profile_from_latest_environment(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        run = _run_with_record(tmp_path)
+
+        state = _single_state(monkeypatch, [run])
+
+        assert ("profile", "cpu") in state.jobs[0].extras
+
+    def test_queued_counts_as_pending(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        run = _run_with_record(tmp_path)
+
+        state = _single_state(monkeypatch, [run])
+
+        assert state.pending == 1
+        assert state.running == 0
+
+    def test_sealed_failed_attempt_shows_failed_and_counts(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        run = _sealed_run(tmp_path, fail=True)
+
+        state = _single_state(monkeypatch, [run])
+
+        assert state.jobs[0].state == "failed"
+        assert state.failed == 1
+        assert state.pending == 0
+        assert state.done == 0
+
+    def test_sealed_succeeded_attempt_counts_as_done(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        run = _sealed_run(tmp_path, fail=False)
+
+        state = _single_state(monkeypatch, [run])
+
+        assert state.jobs[0].state == "succeeded"
+        assert state.done == 1
+        assert state.pending == 0

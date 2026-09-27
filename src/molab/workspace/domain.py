@@ -63,6 +63,10 @@ ACTIVE_EXECUTION_STATUSES = frozenset(
     {ExecutionStatus.QUEUED, ExecutionStatus.RUNNING, ExecutionStatus.FINALIZING}
 )
 TERMINAL_EXECUTION_STATUSES = frozenset(set(ExecutionStatus) - ACTIVE_EXECUTION_STATUSES)
+#: Terminal outcomes that count as a failed attempt (anything but success).
+FAILED_EXECUTION_STATUSES = frozenset(
+    {ExecutionStatus.FAILED, ExecutionStatus.CANCELLED, ExecutionStatus.INTERRUPTED}
+)
 
 
 class RunStatusSummary(BaseModel):
@@ -398,6 +402,7 @@ class AssetVersion(BaseModel):
 
 __all__ = [
     "ACTIVE_EXECUTION_STATUSES",
+    "FAILED_EXECUTION_STATUSES",
     "TERMINAL_EXECUTION_STATUSES",
     "Artifact",
     "ArtifactRef",

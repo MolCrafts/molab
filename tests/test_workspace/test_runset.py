@@ -14,7 +14,8 @@ from pathlib import Path
 
 import pytest
 
-from molab.workspace import GridSpace, Workspace
+from molab.workspace import GridSpace, Run, Workspace
+from molab.workspace.domain import ExecutionMode
 from molab.workspace.runset import RunRecord, RunSet, RunSetResult
 
 
@@ -130,3 +131,48 @@ class TestRunSetResult:
         """molab deliberately ships NO pandas bridge — ``to_records()`` rows
         are plain dicts for whatever analysis stack the operator uses."""
         assert not hasattr(_result_fixture(), "to_dataframe")
+
+
+def _fail_then_retry(run: Run) -> None:
+    """e01 fails, e02 (a RETRY of e01) succeeds — built through the public API."""
+    with pytest.raises(RuntimeError), run.start():
+        raise RuntimeError("boom")
+    with run.start(mode=ExecutionMode.RETRY, based_on_execution_id="e01"):
+        pass
+
+
+class TestRunSetStatus:
+    """arch-own-02e D70: a RunSet row's status is its run's ``status_label``."""
+
+    def test_row_status_is_status_label(self, experiment) -> None:
+        run_a = experiment.add_run(params={"k": 1})
+        _fail_then_retry(run_a)
+        run_b = experiment.add_run(params={"k": 2})
+
+        rows = RunSet([run_a, run_b]).collect().to_records()
+
+        assert [r["status"] for r in rows] == [run_a.status_label, run_b.status_label]
+        assert [r["status"] for r in rows] == ["succeeded", "pending"]
+
+
+class TestRunSetResultFailed:
+    """``failed`` keeps every terminal non-success row, not only ``failed``."""
+
+    def test_failed_keeps_cancelled_and_interrupted(self) -> None:
+        statuses = [
+            "succeeded",
+            "failed",
+            "cancelled",
+            "interrupted",
+            "running",
+            "queued",
+            "pending",
+        ]
+        result = RunSetResult(
+            entries=tuple(
+                RunRecord(run_id=f"r{i}", status=s, params={}, outputs={})
+                for i, s in enumerate(statuses)
+            )
+        )
+
+        assert [rec.status for rec in result.failed] == ["failed", "cancelled", "interrupted"]
