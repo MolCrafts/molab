@@ -1,21 +1,14 @@
-"""Operator config (``~/.molab/config.json``) — loader + ``molab.config`` bridge.
+"""Operator config (``~/.molab/config.json``) — the file loader and writer.
 
-The CLI (``molab config set agent.model <id>``) persists operator settings to
-``~/.molab/config.json``. Neither application shell may import the other —
-so the file loader lives here in the shared :mod:`molab.services` layer and
-both the CLI (:mod:`molab.cli.config_cmd`) and the server startup bridge
-delegate to it, keeping one source of truth for the path, the parsing, and
-the ``agent.model`` key name.
-
-:func:`bridge_operator_config` copies the operator-configured values into the
-process-global in-code ``molab.config`` **unless** a value was already
-registered in code — in-code configuration always wins. It bridges the agent
-model (key ``"agent.model"``) and any ``agent.<provider>_api_key`` entries
-(e.g. ``agent.deepseek_api_key`` → ``molab.config["deepseek_api_key"]``, the
-key the router reads). Called at server startup (``create_app``), at plan
-preflight (``services.plan_runtime.preflight_plan_router``) and by the agent
-CLI — so ``molab config set agent.deepseek_api_key sk-…`` is a real key path
-for every shell, while keys still never come from ``os.environ``.
+The loader is shared: the CLI (``molab config``), the server (tunnel
+settings, ``molab.server.tunnel.settings``) and :mod:`molab.services.auth`
+all read the file through :func:`load_operator_config`. The writer is
+CLI-only: ``molab config set <section>.<key> <value>`` persists through
+:func:`set_operator_values` / :func:`save_operator_config`; the server only
+reads. Neither application shell may import the other, so the file API lives
+here in the :mod:`molab.services` layer: one source of truth for the path,
+the parsing and the atomic write. Nothing here copies the file into the
+in-code ``molab.config``; a reader loads the file it needs.
 """
 
 from __future__ import annotations
@@ -31,13 +24,6 @@ logger = get_logger(__name__)
 
 #: Canonical on-disk operator config file (shared with ``molab config``).
 OPERATOR_CONFIG_PATH = Path.home() / ".molab" / "config.json"
-
-#: Canonical in-code ``molab.config`` key for the agent model — same dotted
-#: spelling as the CLI key (``molab config set agent.model <id>``).
-AGENT_MODEL_KEY = "agent.model"
-
-#: Per-tier model mapping consumed by ``AgentRunner(models=...)``.
-AGENT_MODELS_KEY = "agent.models"
 
 
 def load_operator_config(path: Path | None = None) -> dict[str, Any]:
@@ -57,80 +43,13 @@ def load_operator_config(path: Path | None = None) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
-def configured_agent_model(config: dict[str, Any]) -> str | None:
-    """Extract ``agent.model`` from a loaded operator-config dict."""
-    agent_section = config.get("agent")
-    if isinstance(agent_section, dict):
-        model = agent_section.get("model")
-        if isinstance(model, str) and model:
-            return model
-    return None
-
-
-def _tier_map_from_raw(
-    raw: dict[str, Any], *, default_provider: str | None = None
-) -> dict[str, str] | None:
-    """Normalize a cheap/default/heavy dict to fully-qualified ``provider:model`` ids.
-
-    Each tier may already be ``provider:model`` (cross-provider global table) or a
-    bare model id that is qualified with ``default_provider``. Incomplete maps
-    return ``None``.
-    """
-    tiers: dict[str, str] = {}
-    for tier in ("cheap", "default", "heavy"):
-        value = raw.get(tier)
-        if not isinstance(value, str) or not value.strip():
-            return None
-        text = value.strip()
-        if ":" in text:
-            tiers[tier] = text
-        elif default_provider:
-            tiers[tier] = f"{default_provider}:{text}"
-        else:
-            return None
-    return tiers
-
-
-def configured_agent_models(config: dict[str, Any]) -> dict[str, str] | None:
-    """Extract the cheap/default/heavy mapping used by :class:`AgentRunner`.
-
-    Reads the global ``agent.models`` table — each value is a full
-    ``provider:model`` id so the three tiers may come from different providers.
-    """
-    agent = config.get("agent")
-    if not isinstance(agent, dict):
-        return None
-
-    global_raw = agent.get("models")
-    if isinstance(global_raw, dict):
-        return _tier_map_from_raw(global_raw)
-    return None
-
-
-def configured_api_keys(config: dict[str, Any]) -> dict[str, str]:
-    """Extract ``agent.<provider>_api_key`` entries from a loaded config dict.
-
-    Returns ``{"deepseek_api_key": "sk-…", …}`` — the flat spellings the
-    router reads from ``molab.config``. Non-string / empty values are
-    ignored.
-    """
-    agent_section = config.get("agent")
-    if not isinstance(agent_section, dict):
-        return {}
-    return {
-        name: value
-        for name, value in agent_section.items()
-        if name.endswith("_api_key") and isinstance(value, str) and value
-    }
-
-
 def save_operator_config(config: dict[str, Any], path: Path | None = None) -> None:
     """Persist *config* to the operator config file atomically.
 
-    The ONE serialization path for the operator config — the CLI
-    (``molab config set``) and the server's Settings PUT both write through
-    here (temp file + ``rename``, mode ``0o600`` — the file may carry API
-    keys and must never be world-readable, nor half-written).
+    The ONE serialization path for the operator config. Its only writer is
+    the CLI (``molab config set``); the server never writes the file. Temp
+    file + ``rename``, mode ``0o600`` — the file may carry secrets and must
+    never be world-readable, nor half-written.
     """
     target = path if path is not None else OPERATOR_CONFIG_PATH
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -154,7 +73,7 @@ def set_operator_values(
 
     Loads, mutates a copy, and saves atomically via
     :func:`save_operator_config`. Dotted keys create intermediate sections
-    (``"agent.model"`` → ``{"agent": {"model": …}}``); unsetting a missing
+    (``"tunnel.via"`` → ``{"tunnel": {"via": …}}``); unsetting a missing
     key is a no-op. Returns the saved config dict.
     """
     config = load_operator_config(path)
@@ -182,66 +101,9 @@ def set_operator_values(
     return config
 
 
-def resolve_configured_model() -> str | None:
-    """Effective ``agent.model``: in-code config after bridging the operator file."""
-    bridge_operator_config()
-    import molab
-
-    value = molab.config.get(AGENT_MODEL_KEY)
-    return value if isinstance(value, str) and value else None
-
-
-def resolve_configured_models() -> dict[str, str] | None:
-    """Effective cheap/default/heavy map after bridging the operator file."""
-    bridge_operator_config()
-    import molab
-
-    value = molab.config.get(AGENT_MODELS_KEY)
-    if not isinstance(value, dict) or not value:
-        return None
-    return {str(key): str(item) for key, item in value.items()}
-
-
-def bridge_operator_config(path: Path | None = None) -> None:
-    """Bridge operator-config values into the in-code ``molab.config``.
-
-    Idempotent; safe to call from every shell entry point. Bridges the agent
-    model (``agent.model`` → ``molab.config["agent.model"]``) and every
-    ``agent.<provider>_api_key`` entry (→ ``molab.config["<provider>_api_key"]``).
-    A value already registered in code is never overwritten — in-code
-    configuration always wins.
-    """
-    import molab
-
-    config = load_operator_config(path)
-
-    already = molab.config.get(AGENT_MODEL_KEY)
-    if not (isinstance(already, str) and already):
-        model = configured_agent_model(config)
-        if model is not None:
-            molab.config[AGENT_MODEL_KEY] = model
-
-    if molab.config.get(AGENT_MODELS_KEY) is None:
-        models = configured_agent_models(config)
-        if models is not None:
-            molab.config[AGENT_MODELS_KEY] = models
-
-    for name, value in configured_api_keys(config).items():
-        if not molab.config.get(name):
-            molab.config[name] = value
-
-
 __all__ = [
-    "AGENT_MODELS_KEY",
-    "AGENT_MODEL_KEY",
     "OPERATOR_CONFIG_PATH",
-    "bridge_operator_config",
-    "configured_agent_model",
-    "configured_agent_models",
-    "configured_api_keys",
     "load_operator_config",
-    "resolve_configured_model",
-    "resolve_configured_models",
     "save_operator_config",
     "set_operator_values",
 ]

@@ -444,14 +444,29 @@ __all__ = [
     "EntityRef",
     "GitHistory",
     "HistoryEntry",
+    "HistoryPushError",
     "Relation",
     "default_gitignore",
     "push_workspace",
 ]
 
 
+class HistoryPushError(RuntimeError):
+    """``git push`` refused; ``stderr`` is git's own message, verbatim."""
+
+    def __init__(self, stderr: str) -> None:
+        self.stderr = stderr
+        super().__init__(f"git push failed: {stderr}")
+
+
 def push_workspace(workspace: str, remote: str) -> dict[str, str | None]:
-    """Commit anything outstanding, then push the history — the backup verb."""
+    """Commit anything outstanding, then push the history — the backup verb.
+
+    The one sweep-then-push body; ``molab history push`` delegates here.
+
+    Raises:
+        HistoryPushError: ``git push`` exited non-zero.
+    """
     history = GitHistory(workspace)
     commit = history.sweep()
     proc = subprocess.run(
@@ -462,5 +477,5 @@ def push_workspace(workspace: str, remote: str) -> dict[str, str | None]:
         check=False,
     )
     if proc.returncode != 0:
-        raise RuntimeError(f"git push failed: {proc.stderr.strip()}")
+        raise HistoryPushError(proc.stderr.strip())
     return {"commit": commit, "remote": remote}

@@ -45,7 +45,6 @@ def test_source_imports_no_workspace_or_upstream_layer() -> None:
     forbidden = (
         "molab.workspace",
         "molab.workflow",
-        "molab.harness",
         "molab.server",
         "molab.cli",
         "molab.plugins",

@@ -11,27 +11,16 @@ by the single binding seam in :mod:`molab.entry` — and a run reaches it
 through its parent. Nothing is copied onto the run, which is what previously
 let ``Experiment.define`` and the HTTP API disagree about a run's identity.
 
-Two shapes reach this module:
-
-1. **script experiment** — the experiment's ``workflow_entrypoint``, resolved
-   through :func:`molab.entry.load_workflow_from_entrypoint`. molab's own
-   shape, built in here.
-2. **generated run** — the workflow *source* was produced by a tool that owns
-   its own on-disk format (today: the ``workflow_source`` artifact written by
-   the harness ``plan`` pipeline). molab does not parse formats it does not
-   own, so that shape arrives through the :func:`set_workflow_recoverer`
-   inversion seam — the same pattern as
-   :func:`molab.workspace.run.set_run_executor` and
-   :func:`molab.workspace.metrics_seam.set_metrics_writer_factory`.
-
-Dispatch is deterministic and loud: the registered recoverer is consulted
-first, the experiment's entrypoint second, and a run with neither raises
-:class:`WorkflowRecoveryError` naming both — never a silent ``None``.
+There is one shape: the experiment's ``workflow_entrypoint`` (the
+``"<file>:<qualname>"`` locator), resolved through
+:func:`molab.entry.load_workflow_from_entrypoint`. A run whose experiment
+records no entrypoint raises :class:`WorkflowRecoveryError` naming the run —
+never a silent ``None``.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING
 
 from molab.workflow.types import WorkflowError
 
@@ -40,57 +29,19 @@ if TYPE_CHECKING:
     from molab.workspace.run import Run
 
 __all__ = [
-    "WorkflowRecoverer",
     "WorkflowRecoveryError",
     "can_recover_workflow",
     "compiled_workflow_for_run",
-    "get_workflow_recoverer",
-    "set_workflow_recoverer",
 ]
 
 
 class WorkflowRecoveryError(WorkflowError):
     """Raised when a run carries no recoverable workflow identity.
 
-    The error names both persisted shapes and what the run actually carries,
-    so a run that is simply missing its generator is distinguishable from one
-    whose carried shape is broken.
+    The error says what the run actually carries, so a run whose experiment
+    records no entrypoint is distinguishable from one whose entrypoint is
+    broken.
     """
-
-
-@runtime_checkable
-class WorkflowRecoverer(Protocol):
-    """Reconstructs a compiled workflow from a run's own generated source.
-
-    ``can_recover`` must be cheap — callers use it as an executability
-    precondition (the server checks it before dispatching a run to a
-    scheduler) and must not pay for a full compile to get the answer.
-    """
-
-    def can_recover(self, run: Run) -> bool:
-        """True if *run* carries this recoverer's persisted shape."""
-        ...
-
-    def recover(self, run: Run) -> CompiledWorkflow | None:
-        """Compile *run*'s generated workflow, or ``None`` if absent."""
-        ...
-
-
-_recoverer: WorkflowRecoverer | None = None
-
-
-def set_workflow_recoverer(recoverer: WorkflowRecoverer | None) -> None:
-    """Register the generated-source recoverer, or ``None`` to unwind it.
-
-    Called at import time by whichever package owns the generated format.
-    """
-    global _recoverer
-    _recoverer = recoverer
-
-
-def get_workflow_recoverer() -> WorkflowRecoverer | None:
-    """Return the registered recoverer, or ``None`` if the seam is unwired."""
-    return _recoverer
 
 
 def _entrypoint_of(run: Run) -> str | None:
@@ -115,10 +66,8 @@ def _entrypoint_of(run: Run) -> str | None:
 def can_recover_workflow(run: Run) -> bool:
     """True if *run* can be executed by id alone.
 
-    Cheap by contract: neither branch loads or compiles the workflow.
+    Cheap by contract: it neither loads nor compiles the workflow.
     """
-    if _recoverer is not None and _recoverer.can_recover(run):
-        return True
     return _entrypoint_of(run) is not None
 
 
@@ -132,14 +81,9 @@ def compiled_workflow_for_run(run: Run) -> CompiledWorkflow:
         The compiled workflow, ready for :func:`molab.workflow.execute_run`.
 
     Raises:
-        WorkflowRecoveryError: The run carries neither persisted shape, or a
-            carried shape is unloadable (broken source / dead entrypoint).
+        WorkflowRecoveryError: The run's experiment records no entrypoint,
+            or the entrypoint is unloadable.
     """
-    if _recoverer is not None:
-        compiled = _recoverer.recover(run)
-        if compiled is not None:
-            return compiled
-
     entrypoint = _entrypoint_of(run)
     if entrypoint is not None:
         from molab.entry import load_workflow_from_entrypoint
@@ -156,7 +100,5 @@ def compiled_workflow_for_run(run: Run) -> CompiledWorkflow:
     raise WorkflowRecoveryError(
         f"run {run.id} has no recoverable workflow: its experiment records no "
         "'workflow_entrypoint' (set when a workflow is bound via "
-        "Experiment.define/sweep/run) and no generated workflow source is "
-        "registered for it. Re-declare the experiment by running its script, "
-        "or regenerate it with `molab plan`."
+        "Experiment.define/sweep/run). Re-declare the experiment by running its script."
     )

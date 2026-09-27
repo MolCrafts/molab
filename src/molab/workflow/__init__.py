@@ -87,12 +87,9 @@ from .ir import (
 from .outputs import RegisterArtifact, RegisterMetric
 from .protocols import Runnable, Streamable
 from .recovery import (
-    WorkflowRecoverer,
     WorkflowRecoveryError,
     can_recover_workflow,
     compiled_workflow_for_run,
-    get_workflow_recoverer,
-    set_workflow_recoverer,
 )
 from .registry import TaskTypeRegistry, default_registry
 from .snapshot import TaskSnapshot
@@ -186,7 +183,6 @@ __all__ = [
     "WorkflowError",
     "WorkflowExecution",
     "WorkflowGraphIR",
-    "WorkflowRecoverer",
     "WorkflowRecoveryError",
     "WorkflowResult",
     "WorkflowRuntime",
@@ -199,6 +195,4 @@ __all__ = [
     "default_codec",
     "default_registry",
     "execute_run",
-    "get_workflow_recoverer",
-    "set_workflow_recoverer",
 ]

@@ -49,7 +49,6 @@ REQUIRED_PUBLIC: tuple[str, ...] = (
 #: out silently (a subset assertion would miss it).
 PINNED_ALL: frozenset[str] = frozenset(
     {
-        "PLAN_BOOK_NAME",
         "Edge",
         "EdgeRole",
         "Finding",
@@ -224,9 +223,9 @@ class TestPublicAll:
     def test_every_public_name_is_knowledge_defined(self) -> None:
         """No public name is handed over from ``molab.workspace``.
 
-        Only *defined* exports are checked: a plain constant
-        (``PLAN_BOOK_NAME``) or a typing alias (``EdgeRole`` / ``SourceKind``)
-        owns no defining module of its own — the alias renders as ``typing``.
+        Only *defined* exports are checked: a typing alias (``EdgeRole`` /
+        ``SourceKind``) owns no defining module of its own — it renders as
+        ``typing``.
         """
         for name in knowledge.__all__:
             obj = getattr(knowledge, name)

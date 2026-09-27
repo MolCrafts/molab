@@ -11,7 +11,7 @@ second, and started hanging the moment that bug was fixed.
 So anything asserting on a live stream runs against uvicorn on a real
 ephemeral port, over TCP, which is also the only arrangement where "a change
 published while a client is reading reaches that client" says something about
-the product rather than about the harness.
+the product rather than about the test rig.
 """
 
 from __future__ import annotations

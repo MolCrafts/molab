@@ -66,30 +66,27 @@ async def _run_plugin_hook(plugin: object, attr: str) -> None:
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None]:  # noqa: ARG001
-    """Application lifespan: startup and shutdown events.
+    """Application lifespan: run each server plugin's startup and shutdown hook.
 
-    Shutdown order matters: SSE / long-poll generators are woken first (via
-    :func:`~molab.plugins.server.signal_shutdown_server_plugins`) so uvicorn's
-    connection drain can finish, and only then is each plugin's in-flight
-    background work cancelled and awaited, so no orphan task survives teardown.
+    Shutdown order matters: each plugin's SSE / long-poll generators are woken
+    first (via :func:`~molab.plugins.server.signal_shutdown_server_plugins`) so
+    uvicorn's connection drain can finish, and only then is each plugin's
+    in-flight background work cancelled and awaited, so no orphan task
+    survives teardown. With no plugin installed both steps are no-ops.
     """
     from molab.plugins import discover_server_plugins, signal_shutdown_server_plugins
 
-    from .shutdown import mark_shutting_down, reset_shutdown_flag
-
     plugins = discover_server_plugins()
 
-    reset_shutdown_flag()
     for plugin in plugins:
         await _run_plugin_hook(plugin, "startup")
     logger.info("Molab server starting up")
     try:
         yield
     finally:
-        # 1) Cooperative stop for SSE / long-poll generators still open in the
-        # browser. Without this, uvicorn hangs on "Waiting for connections to
-        # close" until every tab disconnects.
-        mark_shutting_down()
+        # 1) Cooperative stop for plugin SSE / long-poll generators still open
+        # in the browser. Without this, uvicorn hangs on "Waiting for
+        # connections to close" until every tab disconnects.
         signal_shutdown_server_plugins()
         # 2) Cancel in-flight background work owned by this process.
         for plugin in plugins:
@@ -210,15 +207,7 @@ def create_app(
             is auto-detected via ``importlib.resources``.
         serve_static: Set to ``False`` to run in API-only mode.
     """
-    # 0. Bridge operator config (~/.molab/config.json) into the in-code
-    #    ``molab.config`` — e.g. ``agent.model`` set via ``molab config`` —
-    #    so server routes see the same configuration the CLI documents.
-    #    In-code registrations keep precedence.
-    from molab.services.operator_config import bridge_operator_config
-
     from .openapi_ids import molab_operation_id
-
-    bridge_operator_config()
 
     app = FastAPI(
         title="Molab API",

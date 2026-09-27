@@ -2,8 +2,7 @@
 
 This is about **source logs**, not scientific record packages. Whether a
 directory is a MolRec record is defined by the external molrec spec (Zarr V3
-root + group attributes); molab does not re-host that contract. Landing may
-tag record-shaped trees for plugins — see ``molab.harness.agent.ops.land``.
+root + group attributes); molab does not re-host that contract.
 
 Detection is **by content, never by extension**. ``leap.log`` and
 ``log.lammps`` share a suffix and nothing else; a ``.csv`` of atom

@@ -10,12 +10,11 @@ It is deliberately distinct from two neighbours:
 
 - The JSON *wire* IR produced by :meth:`Workflow.to_dict`
   (``schema/workflow.json`` — ``task_configs`` + ``links``) is the
-  server/agent contract and is intentionally DAG-only; it rejects control
+  server contract and is intentionally DAG-only; it rejects control
   flow. ``WorkflowGraphIR`` is a superset that *can* represent branches,
   loops, and parallels, so it is the right surface for diagrams and review.
-- :class:`molab.harness.schemas.workflow_ir.WorkflowIR` is the higher-level
-  *scientific-intent* IR (what the experiment wants to compute). This IR is
-  the *executable-graph* layer (how the compiled workflow is wired).
+- This IR is the *executable-graph* layer (how the compiled workflow is
+  wired).
 
 All models are ``frozen`` pydantic, matching the layer convention that pure
 data types are immutable. Edge collections are tuples so the IR round-trips

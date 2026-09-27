@@ -4,9 +4,8 @@ Hierarchy: Workspace -> Project -> Experiment -> Run
 
 Workspace is the bottom of the molab dependency DAG: it knows about
 filesystem layout, atomic JSON I/O, content-addressed assets, and
-typed system folders — and nothing about workflows, sessions, agents,
-or LLMs. The workflow layer uses workspace for caching and
-persistence; the agent layer uses workspace for session storage.
+typed system folders — and nothing about workflows. The workflow layer
+uses workspace for caching and persistence.
 Cross-layer payloads are stored as opaque JSON dicts here; the
 upstream layers own the typed shape and own the typed parsing on
 read-back.
@@ -26,8 +25,7 @@ Each scope exposes:
 
 Upstream layers extend the workspace tree by importing the public
 ``Folder`` base class and mounting their own subclasses via the
-generic five-verb CRUD — see ``molab.harness.agent.folders`` for the
-``Agent`` / ``AgentSession`` pair.
+generic five-verb CRUD.
 """
 
 from .assets import (

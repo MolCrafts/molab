@@ -1,7 +1,7 @@
 """Two-phase execution pruning — ``molab.workspace.prune``.
 
-The ONE prune core the CLI (``molab runs prune``) and the harness lifecycle
-capability share: ``plan_execution_prune`` turns a selection (explicit ids /
+The ONE prune core behind the CLI (``molab runs prune``):
+``plan_execution_prune`` turns a selection (explicit ids /
 statuses / everything) into a frozen, reviewable ``ExecutionPrunePlan``;
 ``apply_execution_prune`` removes exactly the bulk directories the plan lists.
 

@@ -72,8 +72,8 @@ class WorkflowExecutor(Protocol):
     invariant). This Protocol is the inversion seam: the orchestration layer
     implements it and registers it via :func:`set_workflow_executor`, so
     :meth:`Experiment.run` reads fluently — ``exp.run(workflow, ...)`` —
-    without workspace ever importing ``molab.workflow``. (Same pattern as the
-    harness↔agent ``AgentGateway`` Protocol.)
+    without workspace ever importing ``molab.workflow``. (Same pattern as
+    :func:`molab.workspace.run.set_run_executor`.)
     """
 
     def __call__(self, experiment: Experiment, workflow: object) -> None: ...
@@ -120,8 +120,7 @@ def _parse_ir_document(source: str | None) -> dict | None:
 class Experiment(Folder):
     """Repeatable experiment — a parameter-space container.
 
-    Knowledge (including the plan book) lives at ``knowledges/<id>/``.
-    Harness Plan Mode is a separate plugin at ``run_dir/plan/task_board.json``.
+    Knowledge lives at ``knowledges/<id>/``.
 
     Example::
 

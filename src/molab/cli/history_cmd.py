@@ -8,7 +8,6 @@ which the server's ``/api/history/*`` routes also call.
 
 from __future__ import annotations
 
-import subprocess
 from pathlib import Path
 from typing import Annotated, NoReturn
 
@@ -16,7 +15,7 @@ import typer
 
 from molab.cli._common import get_workspace, rprint
 from molab.cli._target import TargetOption, resolve_workspace_target
-from molab.workspace.history import GitHistory
+from molab.workspace.history import GitHistory, HistoryPushError, push_workspace
 from molab.workspace.target import LocalTarget
 
 history_app = typer.Typer(help="Workspace history (git)", no_args_is_help=True)
@@ -84,15 +83,9 @@ def history_push(
 ) -> None:
     """Push the workspace history to a remote — this is the backup."""
     history = _history(target_spec)
-    history.sweep()
-    proc = subprocess.run(
-        ["git", "push", remote, "HEAD"],
-        cwd=history.root,
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if proc.returncode != 0:
-        rprint(f"[red]Error:[/red] {proc.stderr.strip()}")
-        raise typer.Exit(1)
+    try:
+        push_workspace(str(history.root), remote)
+    except HistoryPushError as exc:
+        rprint(f"[red]Error:[/red] {exc.stderr}")
+        raise typer.Exit(1) from None
     rprint(f"[green]OK[/green] pushed → {remote}")

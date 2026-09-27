@@ -10,8 +10,7 @@ delegate to (one code path per user-facing operation). Dependency direction:
 Services may import the domain layers below it (``workflow`` / ``workspace``
 / ``knowledge`` and cross-layer primitives); it MUST NOT import the
 application shells that sit above it — ``molab.server``, ``molab.cli``,
-``molab.plugins`` — nor ``molab.harness``, which is a *consumer* of molab
-and owns its own services under ``molab.harness.services``. The rule holds
+``molab.plugins``. The rule holds
 statically, anywhere (top level, function bodies, TYPE_CHECKING blocks).
 
 AST source scan: a runtime ``sys.modules`` probe cannot catch an import
@@ -28,7 +27,6 @@ SERVICES_ROOT = Path(__file__).resolve().parents[2] / "src" / "molab" / "service
 
 # Everything above the services layer — never importable from it.
 FORBIDDEN_PREFIXES: tuple[str, ...] = (
-    "molab.harness",
     "molab.server",
     "molab.cli",
     "molab.plugins",
@@ -41,7 +39,7 @@ class TestServicesImportGuard:
         assert SERVICES_ROOT.is_dir(), SERVICES_ROOT
 
     def test_services_forbids_application_shells_statically(self) -> None:
-        """No harness / server / cli / plugins imports anywhere in services/."""
+        """No server / cli / plugins imports anywhere in services/."""
         offenders: dict[str, list[str]] = {}
         for prefix in FORBIDDEN_PREFIXES:
             hits = _imports_with_prefix(prefix, SERVICES_ROOT)
@@ -51,7 +49,7 @@ class TestServicesImportGuard:
                     for path, lineno, module in hits
                 ]
         assert not offenders, (
-            "molab.services must not import harness or the application "
+            "molab.services must not import the application "
             "shells (server / cli / plugins).\nOffenders:\n  "
             + "\n  ".join(
                 f"[{prefix}] {hit}" for prefix, lines in offenders.items() for hit in lines

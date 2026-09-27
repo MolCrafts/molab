@@ -7,8 +7,7 @@ duplicating logic or importing each other.
 Contents:
 
 - :mod:`molab.services.operator_config` — the ``~/.molab/config.json``
-  loader + the ``molab.config`` bridge (one source of truth for the path,
-  the parsing, and the ``agent.model`` key).
+  loader/saver (one source of truth for the path and the parsing).
 - :mod:`molab.services.run_failure` — failure analysis for a finished run.
 - :mod:`molab.services.auth` — filesystem users + sessions for
   ``molab serve`` HTTP auth (CLI ``molab auth`` and the server share it).
@@ -16,10 +15,7 @@ Contents:
 Layer rules: services may import ``molab.workflow`` / ``molab.workspace``
 (and cross-layer primitives); it MUST NOT import ``molab.server`` or
 ``molab.cli`` — those application shells sit *above* services and import it,
-never the reverse — and it MUST NOT import ``molab.harness``, which sits
-above it. Harness-owned services live in
-:mod:`molab.harness.services`. Enforced by
-``tests/test_services/test_import_guard.py``.
+never the reverse. Enforced by ``tests/test_services/test_import_guard.py``.
 
 No eager re-exports: importing :mod:`molab.services` stays light; consumers
 import the specific submodule they need.

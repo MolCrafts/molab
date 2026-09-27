@@ -5,7 +5,7 @@ Top-level verbs (``run`` / ``serve`` / ``monitor`` / ``explore`` / ``context`` /
 ``init`` / ``validate``, plus the hidden molq worker entry ``execute``) and
 noun groups (``project`` / ``experiment`` /
 ``runs`` / ``asset`` / ``target`` / ``session`` / ``config`` / ``auth`` /
-``mcp`` / ``git`` / ``knowledge``) register directly on the app. Each
+``git`` / ``knowledge``) register directly on the app. Each
 workspace-bound command resolves its execution target via
 :mod:`molab.cli._target`. There is no ``workspace`` god-group.
 """
@@ -37,7 +37,6 @@ app.command(name="init")(_init_cmd)
 # ── Noun groups (resource CRUD) — flat at top level ──────────────────────────
 from molab.cli.prune import register as _register_prune  # noqa: E402
 from molab.cli.target_cmd import target_app  # noqa: E402
-from molab.cli.workspace.mcp_config import mcp_app  # noqa: E402
 from molab.cli.workspace.resources import (  # noqa: E402
     asset_app,
     experiment_app,
@@ -51,7 +50,6 @@ app.add_typer(experiment_app, name="experiment")
 app.add_typer(run_app, name="runs")
 app.add_typer(asset_app, name="asset")
 app.add_typer(target_app, name="target")
-app.add_typer(mcp_app, name="mcp")
 
 # ── git checkpoint projection group ──────────────────────────────────────────
 from molab.cli.history_cmd import history_app  # noqa: E402

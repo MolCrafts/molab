@@ -294,11 +294,7 @@ def target_to_filesystem(target: Target) -> FileSystem:
 
 @dataclass
 class SSHSession:
-    """A cached SSH Transport connection to a remote target.
-
-    (Renamed from ``Session`` — that name now belongs exclusively to the
-    agent layer's LLM conversation session.)
-    """
+    """A cached SSH Transport connection to a remote target."""
 
     name: str
     target: RemoteTarget

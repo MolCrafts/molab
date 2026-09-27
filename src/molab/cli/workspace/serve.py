@@ -49,8 +49,8 @@ from urllib.parse import urlparse
 
 import typer
 import uvicorn
+from mollog import get_logger
 
-from molab._logger import get_logger
 from molab.cli._app import app
 from molab.cli._common import rprint
 
@@ -801,7 +801,7 @@ def serve(
         _log.info("anyone with the url can reach this workspace — stop with Ctrl+C")
 
     application = create_app()
-    # SSE streams (approvals / agent tails) hold HTTP connections open. On SIGINT
+    # Server-plugin SSE streams hold HTTP connections open. On SIGINT
     # we must wake those generators *before* uvicorn waits for connections to
     # drain — lifespan shutdown runs too late for that. Cap the drain at 3s as
     # a backstop if a client never disconnects.
@@ -866,15 +866,18 @@ def _install_sse_wakeup_on_exit(
     web_proc: subprocess.Popen[bytes] | None = None,
     tunnel: TunnelBackend | None = None,
 ) -> None:
-    """Wrap uvicorn's exit handler so SSE long-polls stop on the first Ctrl+C."""
+    """Wrap uvicorn's exit handler so SSE long-polls stop on the first Ctrl+C.
+
+    Wakes server-plugin SSE generators (via
+    :func:`~molab.plugins.server.signal_shutdown_server_plugins`) before
+    uvicorn starts draining connections; with no plugin installed it is a no-op.
+    """
     original = server.handle_exit
 
     def handle_exit(sig: int, frame: FrameType | None) -> None:
         try:
             from molab.plugins import signal_shutdown_server_plugins
-            from molab.server.shutdown import mark_shutting_down
 
-            mark_shutting_down()
             signal_shutdown_server_plugins()
         except Exception:  # never block signal handling on a soft failure
             pass

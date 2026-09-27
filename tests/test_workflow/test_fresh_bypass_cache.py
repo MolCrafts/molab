@@ -6,8 +6,7 @@ A cache bypass skips cache READS (every body actually runs) while results are
 still written back to the cache. The request has one home: the Execution
 record (``Run.create_execution(bypass_cache=True)`` → ``execution.json``),
 which ``WorkflowRuntime.execute`` reads through ``ctx.bypass_cache``. An
-explicit ``bypass_cache=True`` kwarg is OR-ed in on top (the harness plan
-path relies on it).
+explicit ``bypass_cache=True`` kwarg is OR-ed in on top.
 """
 
 from __future__ import annotations

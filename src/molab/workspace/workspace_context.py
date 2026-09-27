@@ -11,13 +11,12 @@ Design invariants:
   new and the model is never itself canonical (authoritative state stays in the entity
   ``*.json`` / ``assets.json`` / OKF ``meta.json``).
 - **Layer-legal.** This module imports only ``workspace`` + stdlib/pydantic — never
-  ``workflow`` / ``agent`` / ``harness`` (enforced by the workspace import-guard). Workflow
+  upstream layers (enforced by the workspace import-guard). Workflow
   *availability* is read workspace-only from the externalized ``workflow.json``.
 - **Focus is caller-supplied.** :class:`ContextFocus` (active project/experiment/run +
   selected refs) is passed in, never persisted; it defaults to empty.
 - **Health flags are computed, never stored** — and only the workspace-computable subset
   is produced here (``failed_run`` / ``stale_running`` / ``orphan_artifact``).
-  ``missing_output`` (needs the harness ``WorkflowIR``) is computed one layer up later.
 - **Knowledge is projected one layer up.** :func:`assemble_workspace_context` is the
   workspace's own projection: it returns ``knowledge == []`` **by design**, and
   ``open_questions`` is ``[]`` here by design too. The only producer of the

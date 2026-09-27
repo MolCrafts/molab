@@ -5,18 +5,15 @@ A research group's knowledge does not live in one place. There is the lab wiki
 workspace you happen to be standing in. Retrieval should reach all of them and
 say which one each answer came from.
 
-So a *source* is a name bound to a directory. The store is two-tier, mirroring
-:mod:`molab.agent.mcp.store`: **User** (``~/.molab/knowledge.json``) and
-**Workspace** (``<root>/.molab/knowledge.json``). When a name appears in both,
-the Workspace entry **fully replaces** the User one — no per-field merge. Keep
-that rule in step with the MCP store if it ever changes; two settings models
-that look identical but behave differently are worse than either.
+So a *source* is a name bound to a directory. The store is two-tier: **User**
+(``~/.molab/knowledge.json``) and **Workspace** (``<root>/.molab/knowledge.json``).
+When a name appears in both, the Workspace entry **fully replaces** the User
+one — no per-field merge.
 
 Deliberately import-cheap — stdlib + pydantic (+ the light ``bundle_index``
 models). ``Knowledge`` is imported inside :func:`open_source` and
-:func:`search_sources`, so a caller that merely *lists* registered wikis (an MCP
-tool building its catalog, a CLI printing a table) never loads yaml, pathspec or
-the OKF substrate.
+:func:`search_sources`, so a caller that merely *lists* registered wikis (a CLI
+printing a table) never loads yaml, pathspec or the OKF substrate.
 """
 
 from __future__ import annotations
@@ -65,14 +62,12 @@ KNOWLEDGE_CONFIG_FILENAME = "knowledge.json"
 
 MOLAB_DIR = ".molab"
 """Workspace-local hidden dir — the established home for molab's own state
-(``<root>/.molab/git``, ``<root>/.molab/background``). Note this differs from
-MCP's ``<root>/.mcp.json``, which sits at the root only for Claude-Code
-compatibility; there is no such constraint here."""
+(``<root>/.molab/git``, ``<root>/.molab/background``)."""
 
 USER_DIR = Path.home() / ".molab"
 
 #: Source names become JSON keys, CLI arguments and ``<source>:<path>`` ref
-#: prefixes. Same path-safe alphabet as MCP server names.
+#: prefixes, so they use a path-safe alphabet.
 SOURCE_NAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{0,63}$")
 """A source name is a JSON key, a CLI argument and a ref prefix, so it is
 restricted to what all three carry safely — notably no ``:``, which is what lets

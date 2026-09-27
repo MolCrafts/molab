@@ -10,9 +10,10 @@ import typer
 
 from molab.cli._common import rprint
 
-# Single source of truth for the operator config path + loader — shared with
-# the server's startup bridge (server must not import molab.cli, so the
-# loader lives in molab.services.operator_config and the CLI delegates).
+# Single source of truth for the operator config path, loader and writer. The
+# loader is shared with the server and molab.services.auth (the server must
+# not import molab.cli, so it lives in molab.services.operator_config); the
+# writer is CLI-only — the server only reads the file.
 from molab.services.operator_config import (
     OPERATOR_CONFIG_PATH as _CONFIG_PATH,
 )
@@ -57,14 +58,9 @@ def config_set(
 
     Examples::
 
-        molab config set agent.model anthropic:claude-sonnet-4-5
-        molab config set agent.anthropic_api_key sk-ant-...
-        molab config set agent.deepseek_api_key sk-...
         molab config set tunnel.via zrok
         molab config set tunnel.token <token>
-
-    LLM provider keys use ``agent.<provider>_api_key`` — they are bridged
-    into the process config at startup (keys never come from env vars).
+        molab config set section.key value
     """
     # Coerce value
     coerced: str | int | float | bool = value

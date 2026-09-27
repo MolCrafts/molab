@@ -28,8 +28,8 @@ classes, ``SourceRef``, typed edges, the single ``folder(host, name, of)``
 location derivation, BM25F retrieval, named wiki sources, the read-only Zotero
 importer, and the write verbs a workspace host needs — ``write_knowledge`` /
 ``mount_note`` / ``normalize_sources`` (the sourced writer and the note mount),
-``harvest_run`` (a terminal Run's outcome as knowledge), ``parse_knowledge_class``
-and ``PLAN_BOOK_NAME``. Importing this package also imports
+``harvest_run`` (a terminal Run's outcome as knowledge) and
+``parse_knowledge_class``. Importing this package also imports
 :mod:`molab.knowledge.hooks`, so the ``knowledge.created`` history emitter is
 live from the first import.
 
@@ -62,7 +62,6 @@ from .errors import KnowledgeNotFoundError
 from .harvest import harvest_run
 from .knowledge_item import SourceKind, SourceRef
 from .location import folder
-from .naming import PLAN_BOOK_NAME
 from .reference_meta import ReferenceMeta
 from .sources import (
     KnowledgeScope,
@@ -77,7 +76,6 @@ from .write import mount_note, normalize_sources, write_knowledge
 from .zotero import ZoteroItem, read_zotero_items
 
 __all__ = [
-    "PLAN_BOOK_NAME",
     "Edge",
     "EdgeRole",
     "Finding",

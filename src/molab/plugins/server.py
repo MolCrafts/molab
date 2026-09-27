@@ -3,9 +3,8 @@
 A server plugin contributes routers to the gated ``/api`` router and, when it
 owns background work, hooks into the application lifespan. molab discovers
 them by entry point and never imports a provider package by name, so a package
-that sits *above* molab (the harness) can serve its own API from the same
-process, on the same origin, under the same session — without molab ever
-depending on it.
+that depends on molab can serve its own API from the same process, on the same
+origin, under the same session — without molab ever depending on it.
 
 Declare one in ``pyproject.toml``::
 

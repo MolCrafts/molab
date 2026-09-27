@@ -1,8 +1,8 @@
 """Two-phase execution pruning — plan which bulk to remove, then apply it.
 
-This is the ONE prune core. The CLI (``molab runs prune``) and the harness
-lifecycle capability share it, so a prune behaves identically whichever door
-starts it. An *execution* is one attempt at a Run (``executions/e01``).
+This is the ONE prune core. Only the CLI (``molab runs prune``) calls it;
+the server has no prune route. An *execution* is one attempt at a Run
+(``executions/e01``).
 Callers *select* attempts, by explicit ids or by status.
 :func:`plan_execution_prune` turns the selection into a reviewable
 :class:`ExecutionPrunePlan`, and :func:`apply_execution_prune` removes exactly

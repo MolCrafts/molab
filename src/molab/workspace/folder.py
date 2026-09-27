@@ -14,7 +14,6 @@ import json
 import os
 import re
 import shutil
-from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path as _StdPath
 from pathlib import PurePosixPath
@@ -46,12 +45,12 @@ _FORBIDDEN_FILE_NAMES = {".", ".."}
 _CAMEL_TO_SNAKE = re.compile(r"(?<!^)(?=[A-Z])")
 
 # ── OKF: narrative index.md + JSON concept identity ──────────────────────────
-# One structured format on disk: **JSON**. Every Concept dir carries
-# ``meta.json`` (``type`` → registry; path basename = id). WPER domain records
+# One structured format on disk: **JSON**. A generic Folder carries
+# ``meta.json`` (``type`` → folder-type registry; path basename = id). WPER domain records
 # use class-named entity JSON (``project.json`` / ``run.json`` / …). Narrative
 # stays in ``index.md`` (Markdown is not a data format for structured fields).
 INDEX_FILENAME = "index.md"
-META_JSON_FILENAME = "meta.json"  # sole concept identity file (type → registry)
+META_JSON_FILENAME = "meta.json"  # generic Folder identity file (type → registry)
 
 
 def _parse_iso_datetime(raw: object, *, default: datetime) -> datetime:
@@ -127,42 +126,6 @@ def register_entity_class(cls: type[F]) -> type[F]:  # noqa: UP047
 def class_for_entity_file(name: str) -> type[Folder] | None:
     """Return the Folder subclass registered for entity file *name*, if any."""
     return _ENTITY_FILE_TO_CLS.get(name)
-
-
-#: ``meta.json`` ``type`` → Folder subclass. A subclass whose identity file is
-#: ``meta.json`` alone (no class-named entity JSON) registers here; the layer
-#: that owns such a Folder owns the claim.
-_TYPE_TO_CLS: dict[str, type[Folder]] = {}
-
-
-def register_folder_type[C: type](type_str: str) -> Callable[[C], C]:
-    """Class decorator — register the ``meta.json`` ``type`` claimed by a Folder subclass.
-
-    The argument is the type string itself (``meta.json`` carries a dotted kind
-    such as ``agent.agent``), so it cannot be derived from the class name the way
-    :func:`register_entity_class` derives an entity filename. Re-claiming a type
-    with the *same* class is a no-op.
-
-    Raises:
-        ValueError: when *type_str* is already claimed by a different class.
-    """
-
-    def register(cls: C) -> C:
-        existing = _TYPE_TO_CLS.get(type_str)
-        if existing is not None and existing is not cls:
-            raise ValueError(
-                f"meta.json type {type_str!r} is already claimed by "
-                f"{existing.__qualname__}; {cls.__qualname__} cannot re-claim it"
-            )
-        _TYPE_TO_CLS[type_str] = cast("type[Folder]", cls)
-        return cls
-
-    return register
-
-
-def class_for_folder_type(type_str: str) -> type[Folder] | None:
-    """Return the Folder subclass registered for a ``meta.json`` ``type``, if any."""
-    return _TYPE_TO_CLS.get(type_str)
 
 
 def entity_json_names() -> tuple[str, ...]:
@@ -401,7 +364,7 @@ class Folder:
         * optional ``extra`` — free-form map
 
         Domain entities keep class-named JSON for business fields. Subclasses
-        with a rich typed head (Note, Agent, …) override this method.
+        with a rich typed head override this method.
         """
         data: dict[str, JSONValue] = {
             "type": self._kind,
@@ -509,9 +472,8 @@ class Folder:
     # arithmetic is available (``/`` operator, ``.parent``, ``.name``);
     # I/O methods are deliberately absent so a remote-backed folder cannot
     # silently short-circuit to the local filesystem.  All I/O routes
-    # through ``self._disk()``.  This unifies the workspace layer (was: ``str``)
-    # and the agent layer (was: ``pathlib.Path``, local-only) — agent
-    # subclasses now inherit remote-compat for free.
+    # through ``self._disk()``, so every subclass inherits remote-compat
+    # for free.
     #
     # Subclasses with their own entity metadata (Project / Experiment / Run)
     # override ``from_disk`` to load their entity model from a different
@@ -786,15 +748,15 @@ class Folder:
 
 
 def concept_from_dir(child_dir: PathArg, parent: Folder) -> Folder:
-    """Reconstruct *child_dir* as its Folder subclass, from the workspace type tables.
+    """Reconstruct *child_dir* as its Folder subclass, from the entity filename table.
 
-    Two axes, and no other: a filename the directory carries that
-    :func:`class_for_entity_file` knows (the four tree levels, each registered
-    by its own module), else the ``type`` on the directory's entity record /
-    ``meta.json`` resolved through :func:`class_for_folder_type`. An unknown
-    ``type`` yields the bare :class:`Folder`. A directory with no record at all
-    is not a Folder — including a Knowledge document (``finding.json`` +
-    ``index.md``, which carries no ``meta.json``) — and raises ``TypeError``.
+    The entity filename axis, else a bare :class:`Folder`: a filename the
+    directory carries that :func:`class_for_entity_file` knows (the four tree
+    levels, each registered by its own module) picks the subclass; a directory
+    that carries only a ``meta.json`` rebuilds as the bare :class:`Folder`. A
+    directory with no record at all is not a Folder — including a Knowledge
+    document (``finding.json`` + ``index.md``, which carries no ``meta.json``)
+    — and raises ``TypeError``.
     """
     fs = parent._disk()
     try:
@@ -810,9 +772,7 @@ def concept_from_dir(child_dir: PathArg, parent: Folder) -> Folder:
         raise TypeError(
             f"{child_dir} is not a Folder: no entity record and no {META_JSON_FILENAME}"
         )
-    type_str = str(marker.get("type", ""))
-    cls = class_for_folder_type(type_str) or Folder
-    return cls.from_disk(child_dir, parent)
+    return Folder.from_disk(child_dir, parent)
 
 
 __all__ = [
@@ -824,10 +784,8 @@ __all__ = [
     "WORKSPACE_RUN_KIND",
     "Folder",
     "class_for_entity_file",
-    "class_for_folder_type",
     "concept_from_dir",
     "entity_filename",
     "entity_json_names",
     "register_entity_class",
-    "register_folder_type",
 ]

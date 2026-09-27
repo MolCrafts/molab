@@ -240,6 +240,7 @@ class Run(Folder):
     #: standing in a run, so pruning is scoped by position, not by bare name —
     #: a Note in a directory called ``logs`` elsewhere stays visible.
     NON_CONCEPT_SUBDIRS: ClassVar[frozenset[str]] = execution_dir_names() | frozenset(
+        # legacy on-disk name: written by runs before D86 removed the agent layer; tolerated on read
         {"executions", "assets", "cache", "logs", "source", "harness", "alive"}
     )
 

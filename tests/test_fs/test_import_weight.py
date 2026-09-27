@@ -33,12 +33,10 @@ FORBIDDEN_PREFIXES: tuple[str, ...] = (
     "molab.knowledge",
     "molab.workflow",
     "molab.agent",
-    "molab.harness",
     "molab.services",
     "molab.server",
     "molab.cli",
     "molab.plugins",
-    "pydantic_ai",
     "pydantic_graph",
 )
 

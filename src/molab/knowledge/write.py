@@ -71,7 +71,7 @@ def write_knowledge(
         name: Document name; slugified to the landed filename.
         of: Knowledge subclass — this **is** the category (``Plan``, ``Finding``).
         sources: Non-empty source list for sourced classes.
-        created_by: Author (person or ``agent:…`` / ``PlanOrchestrator/…``).
+        created_by: Author (a person or tool identifier).
         text: Narrative for the document.
         cite: Optional ``(target, EdgeRole)`` pairs.
         title: Display title accepted by callers; identity is *name*.

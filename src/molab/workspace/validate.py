@@ -55,10 +55,12 @@ _CONTAINERS: dict[str, frozenset[str]] = {
     "run": frozenset(
         {
             "executions",
+            # legacy on-disk name: written by runs before D86 removed the agent layer; tolerated on read
             "plan",
             "source",
             "assets",
             "knowledges",
+            # legacy on-disk name: written by runs before D86 removed the agent layer; tolerated on read
             "harness",
         }
     ),
@@ -76,8 +78,8 @@ _ENTITY_FILE: dict[str, str] = {
     "experiment": "experiment.json",
     "run": "run.json",
 }
-#: Stable rule id → agent-facing remediation. Keep ids stable — MCP tools
-#: and agent loops filter / dispatch on them.
+#: Stable rule id → remediation hint. Keep ids stable — callers filter /
+#: dispatch on them.
 _RULE_HINTS: dict[str, str] = {
     "workspace.missing": (
         "Create the directory, then call materialize_workspace / "
@@ -135,8 +137,8 @@ def _hint_for(rule: str) -> str:
 class Violation(BaseModel):
     """One conformance finding, anchored at a workspace-relative path.
 
-    Designed for agent loops and MCP tools: ``rule`` is a stable filter key,
-    ``hint`` is the remediation the agent should attempt next.
+    ``rule`` is a stable filter key; ``hint`` is the remediation to attempt
+    next.
     """
 
     model_config = ConfigDict(frozen=True)
@@ -151,8 +153,7 @@ class Violation(BaseModel):
 class ValidationReport(BaseModel):
     """Structured outcome of :func:`validate_workspace`.
 
-    Serializes cleanly for MCP / agent tools via :meth:`model_dump` /
-    :meth:`to_dict`. ``ok`` is True when there are no ``error`` severity
+    Serializes cleanly via :meth:`model_dump` / :meth:`to_dict`. ``ok`` is True when there are no ``error`` severity
     findings; warnings never fail the tree.
     """
 
@@ -212,7 +213,7 @@ class ValidationReport(BaseModel):
         return actions
 
     def to_dict(self) -> dict[str, Any]:
-        """JSON-ready report for MCP tools and agent loops.
+        """JSON-ready report.
 
         Shape::
 

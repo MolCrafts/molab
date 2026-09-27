@@ -1197,7 +1197,7 @@ def prefetch_workspace_indices(
             ok = _safe_read(fs, meta, state, on_file=on_file) is not None
             if ok:
                 _prefetch_concept_files(fs, project_dir, state, on_file=on_file)
-                # Concept mounts on the project (Agent installs carrying meta.json).
+                # Generic Folder mounts on the project (dirs carrying meta.json).
                 _prefetch_meta_mounts(
                     fs, project_dir, state, on_file=on_file, skip={"experiments", "assets", "cache"}
                 )
@@ -1329,8 +1329,10 @@ _META_MOUNT_SKIP = execution_dir_names() | frozenset(
         "assets",
         "cache",
         "executions",
+        # legacy on-disk name: written by runs before D86 removed the agent layer; tolerated on read
         "plan",
         "source",
+        # legacy on-disk name: written by runs before D86 removed the agent layer; tolerated on read
         "harness",
         "alive",
     }
@@ -1365,7 +1367,7 @@ def _prefetch_meta_mounts(
 ) -> None:
     """Prefetch ``meta.json`` / ``index.md`` Concept mounts under *parent_dir*.
 
-    A Concept mount (an Agent / AgentSession directory at the project or
+    A Concept mount (a directory at the project or
     experiment level) is a sibling dir carrying ``meta.json`` (plus
     ``index.md``). Without this, a pin-cached remote walk never sees those
     mounts and the tree stays empty. A knowledge document under

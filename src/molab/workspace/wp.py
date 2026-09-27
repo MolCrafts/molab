@@ -2,12 +2,12 @@
 
 Read/write path ops scoped to a :class:`~molab.workspace.Workspace` root,
 speaking through the workspace's :class:`~molab.workspace.fs.FileSystem`
-(local or remote). Designed for agent loops that fix
+(local or remote). Designed for scripts and tools that fix
 :func:`~molab.workspace.validate.validate_workspace` findings (e.g. move a
 ``layout.stray`` directory under ``projects/.../assets/``).
 
 Entity-aware rehoming (``Run`` → another experiment) stays on
-:meth:`~molab.workspace.folder.Folder.move_to` / curation reorg; this
+:meth:`~molab.workspace.folder.Folder.move_to`; this
 module is the **raw path** surface.
 
 Example::

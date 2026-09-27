@@ -1,7 +1,7 @@
 """``archive_folder_zip`` — Folder directory → zip bytes (single writer).
 
-The one workspace-layer zip archiver shared by agent export, server
-``export_run``, and any future CLI. All I/O goes through the workspace
+The one workspace-layer zip archiver; its caller is the server's
+``export_run`` route. All I/O goes through the workspace
 disk (``folder._disk()``)
 (local and remote backends). Consumers import this module directly
 (``from molab.workspace.archive import archive_folder_zip``) — not
@@ -30,7 +30,7 @@ def archive_folder_zip(folder: Folder) -> bytes:
     """Zip every file under *folder* into a DEFLATED in-memory archive.
 
     Args:
-        folder: Any :class:`Folder` (Run, AgentSession, …). Uses
+        folder: Any :class:`Folder` (Project, Experiment, Run, …). Uses
             :meth:`Folder.resolve` (no lazy mkdir) and the workspace disk.
 
     Returns:

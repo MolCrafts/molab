@@ -3,8 +3,8 @@
 ``WorkspaceContext`` (and its :class:`~molab.workspace.workspace_context.KnowledgeRef`
 row) stays workspace-owned: the *shape* of the read-model lives below, in
 ``molab.workspace``. What lives **here** is the one producer of the ``knowledge``
-field, so the harness, the server and the CLI all read one projection instead of
-walking the tree three ways (CLAUDE.md: CLI commands and server routes both call
+field, so the server and the CLI both read one projection instead of
+walking the tree twice (CLAUDE.md: CLI commands and server routes both call
 services, never each other).
 
 A raw :func:`~molab.workspace.workspace_context.assemble_workspace_context`

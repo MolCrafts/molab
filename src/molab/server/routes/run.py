@@ -187,21 +187,16 @@ def _dispatch_to_molq(target, run, execution_id: str | None = None) -> None:  # 
     *execution_id* is given the worker reuses it (resume reopens; rerun
     runs the freshly-derived id) instead of deriving its own.
     """
-    snapshot = run.metadata.workflow_snapshot
-    entrypoint = snapshot.get("entrypoint") if isinstance(snapshot, dict) else None
-    # A run is executable either via an importable entrypoint (``molab run``
-    # script flow) OR a generated ``build_workflow()`` source the worker compiles
-    # in place (the experiment has no importable module). The generated shape is
-    # owned by whoever wrote it and answers through the workflow recovery seam.
+    # A run is dispatchable only through its experiment's entrypoint.
     from molab.workflow import can_recover_workflow
 
-    if not entrypoint and not can_recover_workflow(run):
+    if not can_recover_workflow(run):
         raise HTTPException(
             status_code=422,
             detail=(
-                f"experiment {run.experiment.id!r} has no workflow entrypoint and no "
-                "generated workflow source; bind a Python Workflow/callable on the "
-                "experiment, or generate one via `molab plan`, before submitting."
+                f"experiment {run.experiment.id!r} has no workflow entrypoint; bind a "
+                "Python Workflow/callable on the experiment (Experiment.define / sweep / "
+                "run) before submitting."
             ),
         )
 
@@ -794,7 +789,7 @@ def export_run(
 
     from molab.workspace.archive import archive_folder_zip
 
-    # One zip writer for CLI/agent/server (agent-record-export-03/07).
+    # The one workspace zip writer (molab.workspace.archive).
     payload = archive_folder_zip(run)
     buffer = io.BytesIO(payload)
     buffer.seek(0)

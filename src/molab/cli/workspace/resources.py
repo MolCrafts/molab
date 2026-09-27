@@ -1,7 +1,4 @@
-"""``molab workspace {project,experiment,runs,target,asset}`` — resource CRUD.
-
-The ``mcp`` config group lives in the sibling :mod:`.mcp_config` module.
-"""
+"""``molab workspace {project,experiment,runs,target,asset}`` — resource CRUD."""
 
 from __future__ import annotations
 
@@ -460,9 +457,10 @@ def run_cancel(
             rprint("[dim]Aborted.[/dim]")
             raise typer.Exit(0)
 
-    # One shared cancel body with the server route and the harness capability
-    # (reap → domain check → executor signal → status flip): the workspace
-    # core with the molq signal hook injected.
+    # The workspace cancel core (reap → domain check → executor signal →
+    # status flip) with the molq signal hook injected. CLI only: the server's
+    # cancel route is a separate implementation (known debt, see
+    # molab.workspace.lifecycle_ops).
     from molab.plugins.submit_molq.cancel import try_cancel
     from molab.workspace.lifecycle_ops import cancel_run as cancel_core
 

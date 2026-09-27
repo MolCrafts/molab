@@ -2,10 +2,10 @@
 
 Covers the ``Folder`` lifecycle (lazy mkdir, atomic ``write_json``, id/kind
 validation, ``children`` filtering, metadata round-trip, ``delete`` / ``move_to``)
-and the two Folder type tables: the filename axis this module owns
+and the one Folder type table — the filename axis this module owns
 (``register_entity_class`` / ``class_for_entity_file`` / ``entity_json_names``)
-and the ``meta.json`` ``type`` axis ``concept_from_dir`` consumes. The
-folder-module import-guard subprocess lives at the bottom.
+that ``concept_from_dir`` consumes; a ``meta.json``-only directory rebuilds as a
+bare ``Folder``. The folder-module import-guard subprocess lives at the bottom.
 """
 
 from __future__ import annotations
@@ -25,12 +25,10 @@ from molab.workspace.folder import (
     Folder,
     FolderMoveCollisionError,
     class_for_entity_file,
-    class_for_folder_type,
     concept_from_dir,
     entity_filename,
     entity_json_names,
     register_entity_class,
-    register_folder_type,
 )
 
 
@@ -214,69 +212,6 @@ def _marker_dir(root: Path, name: str, marker: dict[str, object]) -> Path:
     return child
 
 
-class TestFolderTypeRegistry:
-    """The ``meta.json`` ``type`` → Folder class table (``register_folder_type``)."""
-
-    def test_registered_type_resolves_to_its_class(self) -> None:
-        @register_folder_type("test.folder.type")
-        class _Registered(Folder):
-            """Test-only Folder subclass."""
-
-        assert class_for_folder_type("test.folder.type") is _Registered
-
-    def test_decorator_returns_the_same_class(self) -> None:
-        class _Passthrough(Folder):
-            """Test-only Folder subclass."""
-
-        assert register_folder_type("test.folder.passthrough")(_Passthrough) is _Passthrough
-
-    def test_same_class_may_re_claim_its_type(self) -> None:
-        @register_folder_type("test.folder.idempotent")
-        class _Idempotent(Folder):
-            """Test-only Folder subclass."""
-
-        assert register_folder_type("test.folder.idempotent")(_Idempotent) is _Idempotent
-        assert class_for_folder_type("test.folder.idempotent") is _Idempotent
-
-    def test_a_different_class_cannot_re_claim_a_type(self) -> None:
-        @register_folder_type("test.folder.conflict")
-        class _First(Folder):
-            """Test-only Folder subclass."""
-
-        class _Second(Folder):
-            """Test-only Folder subclass."""
-
-        with pytest.raises(ValueError, match="already claimed"):
-            register_folder_type("test.folder.conflict")(_Second)
-        assert class_for_folder_type("test.folder.conflict") is _First
-
-    @pytest.mark.parametrize("type_str", ["no.such.type", ""])
-    def test_unknown_type_has_no_class(self, type_str: str) -> None:
-        assert class_for_folder_type(type_str) is None
-
-    def test_concept_from_dir_rebuilds_a_registered_type(self, tmp_path: Path) -> None:
-        """A ``meta.json``-only dir with a registered type rebuilds as that class."""
-
-        @register_folder_type("test.folder.rebuild")
-        class _Rebuilt(Folder):
-            """Test-only Folder subclass."""
-
-        parent = Folder(name="root", kind="test.root", root_path=tmp_path)
-        child = _marker_dir(tmp_path, "alpha", {"type": "test.folder.rebuild", "id": "d"})
-
-        rebuilt = concept_from_dir(str(child), parent)
-        assert isinstance(rebuilt, _Rebuilt)
-        assert rebuilt.metadata.kind == "test.folder.rebuild"
-
-    def test_concept_from_dir_falls_back_to_plain_folder(self, tmp_path: Path) -> None:
-        """An unregistered ``meta.json`` type still rebuilds as a bare ``Folder``."""
-        parent = Folder(name="root", kind="test.root", root_path=tmp_path)
-        child = _marker_dir(tmp_path, "beta", {"type": "test.folder.unknown", "id": "d"})
-
-        rebuilt = concept_from_dir(str(child), parent)
-        assert type(rebuilt) is Folder
-
-
 class TestFolderTypeTable:
     """The filename axis of the one Folder type table, and its ``concept_from_dir`` read."""
 
@@ -343,6 +278,16 @@ class TestFolderTypeTable:
         with pytest.raises(TypeError, match="is not a Folder"):
             concept_from_dir(str(doc), parent)
 
+    def test_concept_from_dir_rebuilds_a_meta_json_only_dir_as_plain_folder(
+        self, tmp_path: Path
+    ) -> None:
+        """A legacy ``meta.json``-only dir (an old agent session) rebuilds as a bare ``Folder``."""
+        parent = Folder(name="root", kind="test.root", root_path=tmp_path)
+        child = _marker_dir(tmp_path, "beta", {"type": "agent.session", "id": "d"})
+
+        rebuilt = concept_from_dir(str(child), parent)
+        assert type(rebuilt) is Folder
+
 
 class TestFolderModuleCut:
     """``folder.py`` owns its type tables and nothing of knowledge's vocabulary."""
@@ -380,15 +325,22 @@ class TestFolderModuleCut:
         assert folder_mod.INDEX_FILENAME == "index.md"
         assert folder_mod.META_JSON_FILENAME == "meta.json"
 
+    def test_the_meta_json_type_table_is_gone(self) -> None:
+        """Its only registrar was the agent layer removed in D86."""
+        for name in ("register_folder_type", "class_for_folder_type", "_TYPE_TO_CLS"):
+            assert not hasattr(folder_mod, name), f"folder.{name} still exists"
+        for name in ("register_folder_type", "class_for_folder_type"):
+            assert name not in folder_mod.__all__, f"{name} still in folder.__all__"
+
 
 def test_import_guard_folder_pulls_no_upstream_layer() -> None:
-    """``import molab.workspace.folder`` pulls no upstream layer (workflow /
-    agent) nor ``pydantic_ai`` / ``pydantic_graph`` into ``sys.modules``.
+    """``import molab.workspace.folder`` pulls no upstream layer (workflow)
+    nor ``pydantic_ai`` / ``pydantic_graph`` into ``sys.modules``.
     Subprocess-isolated because the in-process interpreter has those loaded."""
     code = (
         "import sys\n"
         "import molab.workspace.folder  # noqa: F401\n"
-        "for mod in ('molab.workflow', 'molab.harness.agent', 'pydantic_ai', 'pydantic_graph'):\n"
+        "for mod in ('molab.workflow', 'pydantic_ai', 'pydantic_graph'):\n"
         "    assert mod not in sys.modules, "
         "        f'molab.workspace.folder eagerly imported {mod}'\n"
     )

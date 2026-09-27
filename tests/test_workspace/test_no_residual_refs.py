@@ -21,6 +21,14 @@ family (``runcontext`` / ``run_context`` / ``run_lifecycle`` / ``run_assets``),
 ``Workspace.cache`` and the Bundle's persisted index writes. ``set_workflow`` and
 ``RunLifecycle`` are substrings of live names, so they are asserted by attribute,
 not by the substring scan.
+
+drop-harness-01-src (D86) extends it with the Python harness and the core code
+only the harness used: the ``set_workflow_recoverer`` seam, the Folder
+``meta.json`` type table, the operator-config agent bridge, the host adapters
+(``default_science_extras`` / ``MolqPlugin`` / ``MetricsPlugin`` /
+``WorkspacePlugin``), ``workspace.curation``, the server shutdown flag,
+``PLAN_BOOK_NAME`` and ``molab mcp``. ``MolqJobs`` is a substring of the live
+``MolqJobsResponse``, so it is asserted by attribute, not by the substring scan.
 """
 
 from __future__ import annotations
@@ -41,6 +49,7 @@ from molab.workspace.workspace import Workspace
 
 SRC = Path(molab.__file__).resolve().parent  # .../src/molab
 TESTS = Path(__file__).resolve().parents[1]  # .../tests
+REPO = TESTS.parent
 
 
 def _py_files(root: Path = SRC) -> list[Path]:
@@ -98,6 +107,29 @@ DELETED_SYMBOLS = [
     "_record_source",
     "INDEX_JSON_FILENAME",
     "INDEX_MD_FILENAME",
+    # drop-harness-01-src: core code only the harness used.
+    "set_workflow_recoverer",
+    "get_workflow_recoverer",
+    "WorkflowRecoverer",
+    "register_folder_type",
+    "class_for_folder_type",
+    "_TYPE_TO_CLS",
+    "bridge_operator_config",
+    "configured_agent_model",
+    "configured_api_keys",
+    "resolve_configured_model",
+    "_tier_map_from_raw",
+    "AGENT_MODELS_KEY",
+    "default_science_extras",
+    "MolqPlugin",
+    "MetricsPlugin",
+    "WorkspacePlugin",
+    "is_shutting_down",
+    "wait_or_shutdown",
+    "mark_shutting_down",
+    "reset_shutdown_flag",
+    "PLAN_BOOK_NAME",
+    "mcp_config",
 ]
 
 DELETED_FILES = [
@@ -125,6 +157,15 @@ DELETED_FILES = [
     SRC / "workflow" / "snapshot_ref.py",
     SRC / "workspace" / "cache" / "folder.py",
     SRC / "workspace" / "cache" / "__init__.py",
+    # drop-harness-01-src: the harness tree and the core code only it used.
+    SRC / "harness",
+    SRC / "plugins" / "extras.py",
+    SRC / "plugins" / "metrics" / "host.py",
+    SRC / "plugins" / "submit_molq" / "host.py",
+    SRC / "workspace" / "plugin.py",
+    SRC / "workspace" / "curation",
+    SRC / "server" / "shutdown.py",
+    SRC / "cli" / "workspace" / "mcp_config.py",
 ]
 
 #: The knowledge names the workspace's public surface no longer carries.
@@ -163,6 +204,14 @@ DELETED_SHELL_MODULES = (
     "molab.workspace.cache.folder",
     "molab.workflow._names",
     "molab.workflow.snapshot_ref",
+    # drop-harness-01-src
+    "molab.plugins.extras",
+    "molab.plugins.metrics.host",
+    "molab.plugins.submit_molq.host",
+    "molab.workspace.plugin",
+    "molab.workspace.curation",
+    "molab.server.shutdown",
+    "molab.cli.workspace.mcp_config",
 )
 
 
@@ -259,3 +308,26 @@ class TestArchOwn01DeletedAttributes:
 
     def test_run_context_alias_is_execution_context(self) -> None:
         assert molab.RunContext is ExecutionContext
+
+
+class TestDropHarnessResidue:
+    """drop-harness-01-src (D86): nothing names the deleted Python harness."""
+
+    def test_nothing_imports_the_harness(self) -> None:
+        roots = (SRC, TESTS, REPO / "regressions", REPO / "examples")
+        scanned = [path for root in roots for path in _py_files(root)]
+        assert len(scanned) > 100, "guard the guard: a mistyped root makes this vacuous"
+        offenders = [
+            f"{path.relative_to(REPO)}:{lineno}: {module}"
+            for path in scanned
+            for lineno, module in _imported_modules(path)
+            if module == "molab.harness" or module.startswith("molab.harness.")
+        ]
+        assert not offenders, "still importing the deleted harness:\n  " + "\n  ".join(offenders)
+
+    def test_submit_molq_and_metrics_export_no_host_extra(self) -> None:
+        submit_molq = importlib.import_module("molab.plugins.submit_molq")
+        metrics = importlib.import_module("molab.plugins.metrics")
+        for name in ("MolqJobs", "MolqPlugin"):
+            assert not hasattr(submit_molq, name), f"submit_molq still exports {name}"
+        assert not hasattr(metrics, "MetricsPlugin"), "metrics still exports MetricsPlugin"

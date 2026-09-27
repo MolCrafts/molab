@@ -1,7 +1,7 @@
 """Task-type registry for IR-driven workflow assembly.
 
-The agent emits a :term:`workflow IR` (JSON) where each node carries a
-``task_type`` slug like ``"core.add"``. This registry maps slugs to
+Each node of a :term:`workflow IR` (JSON) carries a ``task_type`` slug
+like ``"core.add"``. This registry maps slugs to
 factories that instantiate the corresponding :class:`Task` (or any
 :class:`~Runnable`).
 

@@ -1,9 +1,9 @@
-"""molab: Workflow and agent platform for research experiment management.
+"""molab: Scientific-workflow platform for FAIR research.
 
 Core packages:
     - ``molab.workspace``: File-system-backed experiment management
     - ``molab.workflow``: DAG-based workflow definition and execution
-    - ``molab.plugins``: Optional capabilities (remote HPC, AI agent, ...)
+    - ``molab.plugins``: Optional capabilities (remote HPC, metrics ingest, ...)
 
 Workflow-layer conveniences are re-exported lazily at the top level —
 ``molab.WorkflowCompiler``, ``molab.TaskContext`` and
@@ -15,13 +15,13 @@ the ``molab.workflow`` engine machinery only at that point; plain
 __version__ = "0.1.0"
 
 import molcfg
+from mollog import Logger, get_logger
 
 # Wire the plugin-owned run metrics writer onto the workspace seam
 # (molab.workspace.metrics_seam). The plugin is stdlib-only, so this keeps
 # ``import molab`` light while ``RunContext.register_metric`` stays usable
 # in any process that imported molab.
 import molab.plugins.metrics as _plugins_metrics
-from molab._logger import Logger, get_logger
 from molab.entry import entry
 from molab.path import Path
 
@@ -33,12 +33,12 @@ from molab.workspace.run import Run, RunContext
 from molab.workspace.workspace import Workspace
 
 #: Process-global, in-code molab config — a live ``molcfg.Config``. The
-#: sanctioned place to register runtime values (notably LLM API keys) in code,
-#: never from environment variables. Mutate with molcfg-native syntax::
+#: sanctioned place to register runtime values in code, never from environment
+#: variables. Mutate with molcfg-native syntax::
 #:
 #:     import molab
-#:     molab.config["deepseek_api_key"] = "sk-..."
-#:     molab.config.get("deepseek_api_key")
+#:     molab.config["section.key"] = "value"
+#:     molab.config.get("section.key")
 #:
 #: Distinct from :mod:`molab.profile` — the file-based, per-run profile config.
 config: molcfg.Config = molcfg.Config({})

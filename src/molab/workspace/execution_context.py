@@ -259,7 +259,6 @@ class ExecutionContext:
         self._state: Execution | None = None
         self._active_task_id: str | None = None
         self._failure: dict[str, JSONValue] | None = None
-        self._terminal_override: ExecutionStatus | None = None
         self._workflow_succeeded = False
         self._entered = False
         self._heartbeat_stop: threading.Event | None = None
@@ -363,8 +362,8 @@ class ExecutionContext:
         They land in the tier that is *kept*; anything worth citing is then
         promoted into ``artifacts/`` by ``register_artifact``.
 
-        ``work/`` is left to the framework's own scratch (plan boards,
-        harness staging), which is genuinely disposable.
+        ``work/`` is left to the framework's own scratch (``ctx.files``, emit
+        staging), which is genuinely disposable.
         """
         return self.get_dir(OUT.name, task_name)
 
@@ -411,9 +410,9 @@ class ExecutionContext:
     ) -> bool:
         self._stop_heartbeat()
         self._remove_heartbeat()
-        if exc_type is not None and self._terminal_override is None:
+        if exc_type is not None:
             self._write_exception(exc_type, exc_val, exc_tb)
-        status = self._terminal_override or (
+        status = (
             ExecutionStatus.FAILED
             if exc_type is not None or self._failure is not None
             else ExecutionStatus.SUCCEEDED
@@ -537,16 +536,6 @@ class ExecutionContext:
     def mark_succeeded(self) -> None:
         if self._failure is None:
             self._workflow_succeeded = True
-
-    def mark_interrupted(self, reason: str | None = None) -> None:
-        """Settle this attempt as an intentional, resumable interruption.
-
-        Approval gates and external preemption are history, but not failures.
-        The reason is runtime evidence only; it does not mutate the Run.
-        """
-        self._terminal_override = ExecutionStatus.INTERRUPTED
-        if reason:
-            self.log("run").append(f"interrupted: {reason}")
 
     def _create(self, execution_id: str | None) -> Execution:
         """Write this attempt's QUEUED record with creation-time facts only.

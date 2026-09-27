@@ -12,7 +12,7 @@ enforces is therefore scope-aware:
   type-checkable). A module-level runtime import — the module top level, a class
   body, or a module-level ``if`` / ``try`` whose test is not ``TYPE_CHECKING`` —
   is red.
-- ``molab.workflow`` / ``molab.harness`` / ``molab.server`` / ``molab.cli`` /
+- ``molab.workflow`` / ``molab.server`` / ``molab.cli`` /
   ``molab.services`` / ``molab.plugins`` / ``molab.sweep`` stay **absolutely**
   banned at any depth.
 
@@ -35,7 +35,6 @@ KNOWLEDGE_ROOT = REPO_ROOT / "src" / "molab" / "knowledge"
 #: Banned at any depth, module scope or function body alike.
 ABSOLUTE_BANS: tuple[str, ...] = (
     "molab.workflow",
-    "molab.harness",
     "molab.server",
     "molab.cli",
     "molab.services",
@@ -151,8 +150,8 @@ def test_a_class_body_workspace_import_is_still_caught() -> None:
 
 def test_the_absolute_ban_is_caught_at_any_depth() -> None:
     assert _absolute_offenders("import molab.workflow.compiler") == [(1, "molab.workflow.compiler")]
-    assert _absolute_offenders("def f():\n    import molab.harness.host\n") == [
-        (2, "molab.harness.host")
+    assert _absolute_offenders("def f():\n    import molab.server.app\n") == [
+        (2, "molab.server.app")
     ]
 
 

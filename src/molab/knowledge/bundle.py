@@ -67,8 +67,8 @@ if TYPE_CHECKING:
 
 __all__ = ["Backlink", "Bundle", "BundleScan", "ConceptMetaDict", "ConceptPartition"]
 
-#: Body-search size cap — mirrors the agent file-tools read cap so one
-#: pathological ``index.md`` cannot stall retrieval.
+#: Body-search size cap so one pathological ``index.md`` cannot stall
+#: retrieval.
 _MAX_BODY_SEARCH_BYTES = 512 * 1024
 
 REFERENCES_GROUP = "references"

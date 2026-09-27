@@ -68,7 +68,7 @@ class FolderMetadata(BaseModel, frozen=True):
     semantics: stable id (slugified ``name``), human-readable ``name``,
     dotted-ASCII ``kind`` for child filtering, and monotonic
     ``created_at``/``updated_at`` timestamps. The ``extra`` slot lets
-    business subclasses (e.g. Agent folders)
+    business subclasses
     stash custom fields without forking the schema.
 
     The ``updated_at`` field is a deliberate deviation from rule 3 above
@@ -182,8 +182,7 @@ class ExperimentMetadata(BaseModel, frozen=True):
     differ in random seed.
 
     Workspace does **not** know about workflows; the Experiment-to-
-    Workflow pairing is the caller's concern (typically the agent layer
-    or a user script). The ``workflow_source`` / ``workflow_type`` fields
+    Workflow pairing is the caller's concern (typically a user script). The ``workflow_source`` / ``workflow_type`` fields
     here are advisory free-form strings used by the UI for grouping —
     workspace itself never interprets them.
 
@@ -218,9 +217,9 @@ class ExperimentMetadata(BaseModel, frozen=True):
     # HTTP API drift apart. ``None`` when the bound spec has no module-level
     # name to re-import (a promoted callable, a fixture).
     workflow_entrypoint: str | None = None
-    # Provenance: the plan run that generated this experiment's workflow
-    # (a plan IS a run, so one string suffices — no new entity, and runs
-    # inherit by association; a second run-identity field is forbidden).
+    # Legacy, read-only: set by the plan pipeline removed in D86; nothing
+    # writes it. Surfaced as ``ExperimentResponse.planRunId`` for existing
+    # experiments.
     plan_run_id: str | None = None
     parameter_space: dict[str, JSONValue] = Field(default_factory=dict)
     git_commit: str | None = None

@@ -2,10 +2,10 @@
 
 The workflow has four equivalent surfaces:
 
-- :class:`Workflow` — in-memory pydantic-graph compiled object (the
-  execution entry point).
+- :class:`Workflow` — in-memory compiled object (the execution entry
+  point).
 - **IR** — JSON-serializable ``dict`` matching ``schema/workflow.json``.
-  This is the wire format used by the server and the agent.
+  This is the wire format.
 - **Python script** — a runnable molab module that assigns the IR to a
   top-level ``WORKFLOW_IR`` literal followed by
   ``Workflow.from_dict(WORKFLOW_IR)``. Editable by humans; the IR
@@ -24,9 +24,7 @@ Every conversion is **AST-based / template-based** — we never ``exec``
 user-supplied Python. The Python surface is a structured carrier for
 the IR, not a free-form script.
 
-PlanOrchestrator-specific report digestion, code generation, and handoff
-assembly are not part of this module. They belong to the agent layer;
-the workflow layer only owns generic workflow representations and
+The workflow layer only owns generic workflow representations and
 contract validation.
 """
 
@@ -352,9 +350,8 @@ class WorkflowCodec:
 
     # ── IR ↔ YAML ───────────────────────────────────────────────────────
     #
-    # YAML is offered for the experiment-workspace ``ir/workflow.yaml``
-    # use case PlanOrchestrator produces. JSON remains the canonical wire format
-    # for the server. ``safe_load`` / ``safe_dump`` only — untrusted YAML
+    # YAML is offered for an experiment-workspace ``ir/workflow.yaml``.
+    # JSON remains the canonical wire format. ``safe_load`` / ``safe_dump`` only — untrusted YAML
     # is never executed.
 
     def ir_to_yaml(self, ir: JSONMapping) -> str:

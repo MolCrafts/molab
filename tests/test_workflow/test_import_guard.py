@@ -5,7 +5,6 @@ After rectification, ``src/molab/workflow/`` may import from
 sits on top of) but must NOT import from any other upstream-or-sibling
 layer:
 
-- ``molab.harness`` (harness depends on workflow, not the other way)
 - ``molab.plugins`` (optional capabilities)
 - ``molab.server``, ``molab.cli``, ``molab.sweep`` (application shell)
 
@@ -28,7 +27,6 @@ from pathlib import Path
 WORKFLOW_ROOT = Path(__file__).resolve().parents[2] / "src" / "molab" / "workflow"
 
 FORBIDDEN_PREFIXES: tuple[str, ...] = (
-    "molab.harness",
     "molab.plugins",
     "molab.server",
     "molab.cli",
@@ -93,7 +91,7 @@ def test_compiled_graph_is_layer_private() -> None:
     workflow-refactor-02).
     """
     src_root = Path(__file__).resolve().parents[2] / "src" / "molab"
-    upper_layers = ("server", "cli", "harness", "agent", "sweep", "plugins")
+    upper_layers = ("server", "cli", "agent", "sweep", "plugins")
     offenders: list[str] = []
     for layer in upper_layers:
         layer_root = src_root / layer

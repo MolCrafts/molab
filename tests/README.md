@@ -14,13 +14,10 @@ domains, request validation/aliases, wire shapes, flag parsing, exit codes —
 never domain outcomes (those are already owned below; CLI and server share one
 services code path by law, so re-asserting the outcome twice tests nothing).
 
-**The harness is not tested here.** It is a consumer of molab, not a layer
-inside it, and owns its own suite; the boundary between them is guarded by
-`test_import_direction.py`, which fails the build if molab imports the harness
-or loses a capability when the harness is absent. The former `test_agent` and
-`test_harness` suites were deleted for rewrite — the invariants they were the
-only holders of are listed in
-`.claude/notes/harness-invariants-to-restore.md`.
+**molab stands alone.** The Python agent layer was deleted (D86), and molab
+registers no plugin of its own. `test_import_direction.py` pins that the
+package stays gone and that molab boots, serves and runs science with every
+`molab.*` plugin entry-point group empty.
 
 ## Always keep
 
@@ -36,8 +33,7 @@ only holders of are listed in
   lock owns that), "constructor stores its args", copy/docstring text.
 - Cosmetic input permutations of one code path — keep the strongest case plus
   the boundary; parametrize only when the table is the point.
-- Re-tests of dependencies (pydantic validation mechanics, pydantic-ai retries,
-  stdlib behavior) or of lower layers from upper suites.
+- Re-tests of dependencies (pydantic validation mechanics, stdlib behavior) or of lower layers from upper suites.
 - Timing/threshold tests (flaky by construction; performance belongs in a
   dedicated bench repo, not this suite).
 - More than one test per deprecation alias.

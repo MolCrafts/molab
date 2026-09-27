@@ -76,7 +76,7 @@ def dump_canonical_json(data: object) -> str:
 
     ``indent=2, sort_keys=True, ensure_ascii=False`` + trailing newline —
     the single byte format shared by every atomic JSON writer (entity files,
-    workflow-state checkpoints, harness artifacts), so derived views such as
+    workflow-state checkpoints, run artifacts), so derived views such as
     the git checkpoint projection re-derive byte-identical content.
     """
     return (

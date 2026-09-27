@@ -7,10 +7,10 @@ attempt still recorded as ``running`` after its owning process has died, and
 reaping seals it as ``failed``. Pruning removes bulk directories only
 (``out/``, ``work/``, ``jobs/``, ``checkpoints/``) and keeps every execution
 record: ``execution.json`` and the ``executions/<id>/`` directory itself stay.
-The selection UI lives here. The pruning itself goes through the shared
-two-phase core (:func:`molab.workspace.prune.plan_execution_prune` →
-:func:`~molab.workspace.prune.apply_execution_prune`). The harness lifecycle
-capability drives the same core, so the CLI and the agent prune identically.
+The selection UI lives here. The pruning itself goes through the two-phase
+core (:func:`molab.workspace.prune.plan_execution_prune` →
+:func:`~molab.workspace.prune.apply_execution_prune`). Only the CLI prunes;
+the server has no prune route.
 """
 
 from __future__ import annotations

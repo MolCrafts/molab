@@ -11,11 +11,6 @@ when the plugin *is* that product's molab adapter:
 - ``molvis`` — headless snapshots via molvis
 - ``submit_molq`` — job submission via molq schedulers
 - ``gh`` — GitHub API client (GraphQL + REST) backed by httpx
-
-The agent capability is now provided directly by ``molab.harness.agent``
-(see :class:`molab.harness.agent.AgentRunner`); the old plugin-registry
-indirection for agent / coding-agent providers was removed alongside
-the legacy ``AgentService`` / ``CodingAgentClient`` surfaces.
 """
 
 from __future__ import annotations

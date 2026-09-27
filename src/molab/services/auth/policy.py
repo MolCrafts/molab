@@ -15,7 +15,7 @@ def can_manage_users(user: AuthUser) -> bool:
 
 
 def can_write_operator_config(user: AuthUser) -> bool:
-    """Agent keys / operator config writes — admin only in v1."""
+    """Operator config writes — admin only in v1."""
     return user.role == "admin" and not user.disabled
 
 

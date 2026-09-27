@@ -7,12 +7,8 @@ failure mode is easy to introduce while moving Concept classes between layers â€
 a re-export shim that accidentally *re-declares* ``@concept_type(...)`` instead
 of re-exporting the original class object does exactly this.
 
-A type string is claimed through one of two registries â€” the knowledge-owned
-concept-type registry (``@concept_type(...)``) or the workspace-owned
-``meta.json`` type table (``@register_folder_type(...)``, for a Folder whose
-identity file is ``meta.json`` alone). Both go through the same one-claim-per-
-storage-family rule, so this one scan reads both decorators rather than
-proliferating a second scanner.
+A type string is claimed through the knowledge-owned concept-type registry
+(``@concept_type(...)``), under a one-claim-per-storage-family rule.
 
 An AST scan catches a collision as a readable assertion naming both offenders,
 rather than as a collection error with no context, and reports every duplicate
@@ -34,10 +30,7 @@ from pathlib import Path
 SRC_ROOT = Path(__file__).resolve().parents[2] / "src" / "molab"
 
 #: The decorators that claim a ``type`` string for a storage family.
-_TYPE_CLAIM_DECORATORS = frozenset({"concept_type", "register_folder_type"})
-
-#: The subset claiming through the workspace-owned ``meta.json`` type table.
-_FOLDER_TYPE_CLAIM_DECORATORS = frozenset({"register_folder_type"})
+_TYPE_CLAIM_DECORATORS = frozenset({"concept_type"})
 
 
 def _module_name(py: Path) -> str:
@@ -132,12 +125,7 @@ def _resolve(name: str, module: str, trees: dict[str, ast.Module]) -> str | None
 
 
 def _claims(decorators: frozenset[str] = _TYPE_CLAIM_DECORATORS) -> dict[str, list[str]]:
-    """Map each claimed type string to the ``module::Class`` sites claiming it.
-
-    Both claiming decorators are read by default: ``@concept_type(...)`` (the
-    knowledge concept-type registry) and ``@register_folder_type(...)`` (the
-    workspace ``meta.json`` type table). Pass *decorators* to read one of them.
-    """
+    """Map each claimed type string to the ``module::Class`` sites claiming it."""
     trees = _parsed()
     by_type: dict[str, list[str]] = defaultdict(list)
     for module, tree in trees.items():
@@ -165,14 +153,6 @@ def _claims(decorators: frozenset[str] = _TYPE_CLAIM_DECORATORS) -> dict[str, li
     return by_type
 
 
-#: The agent kinds are claimed through the workspace ``meta.json`` type table,
-#: by the layer that owns their Folder classes. One claim each, no duplicate.
-_FOLDER_TYPE_REGISTRY_CLAIMS = {
-    "agent.agent": "molab.harness.agent.folders::Agent",
-    "agent.session": "molab.harness.agent.folders::AgentSession",
-}
-
-
 def test_each_concept_type_is_claimed_once_per_family() -> None:
     duplicates = {t: sites for t, sites in _claims().items() if len(sites) > 1}
     assert duplicates == {}, (
@@ -181,29 +161,18 @@ def test_each_concept_type_is_claimed_once_per_family() -> None:
     )
 
 
-def test_folder_type_claims_come_from_their_owning_classes() -> None:
-    """``@register_folder_type`` claims are read by the same scan as ``@concept_type``."""
-    claimed = _claims(_FOLDER_TYPE_CLAIM_DECORATORS)
-    for type_str, site in _FOLDER_TYPE_REGISTRY_CLAIMS.items():
-        assert claimed.get(type_str) == [site], (
-            f"{type_str} must be claimed exactly once, by {site}; got {claimed.get(type_str)}"
-        )
-
-
 def test_scan_resolves_the_known_concept_types() -> None:
     # Negative control: a scanner that resolved nothing would make the
     # uniqueness assertion vacuously true.
     #
     # The workspace levels are absent by design: a workspace entity declares its
     # type through its class-named entity JSON (``@register_entity_class``, the
-    # filename axis), not through either type registry, so ``workspace.run``
+    # filename axis), not through the concept-type registry, so ``workspace.run``
     # claims no string here.
     claimed = _claims()
     for expected in (
         "note.note",
         "reference.reference",
         "knowledge.item",
-        "agent.agent",
-        "agent.session",
     ):
         assert expected in claimed, f"{expected} not resolved; claimed={sorted(claimed)}"

@@ -55,8 +55,7 @@ def get_metrics_writer_factory() -> MetricsWriterFactory | None:
 def set_metrics_writer_factory(factory: MetricsWriterFactory | None) -> None:
     """Register the writer factory, or ``None`` to unwind it.
 
-    Called by ``molab.plugins.metrics`` on import and by
-    :class:`~molab.plugins.metrics.host.MetricsPlugin` on host apply/unload.
+    Called by ``molab.plugins.metrics`` on import.
     """
     global _factory
     _factory = factory

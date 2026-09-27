@@ -1,9 +1,12 @@
-"""Run-lifecycle operation cores shared by CLI, server, and harness capabilities.
+"""Run-lifecycle operation cores for the CLI.
 
-Workspace-layer homes for verb bodies that must be reachable from the harness
-capability handlers (harness→workspace is legal; harness→services is not).
-Each op enforces the frozen verb law itself — the capability layer adds
-gating, never semantics.
+Workspace-layer homes for the CLI's verb bodies. Each op enforces the frozen
+verb law itself — a caller adds gating, never semantics.
+
+Known debt: the server does not call this module. Its cancel route
+(``molab.server.routes.run.cancel_execution``) is a separate
+implementation that seals one explicit Execution without reaping first and
+without signalling the executor.
 
 Schema v2: a :class:`Run` is immutable intent, so ``cancel`` intervenes on the
 active physical :class:`~molab.workspace.domain.Execution` objects —
@@ -30,9 +33,9 @@ def cancel_run(
 ) -> str | None:
     """Cancel the actively-running Executions of *run* — the intervene verb.
 
-    The ONE cancel body shared by the CLI (``molab runs cancel``), the
-    server and the harness lifecycle capability. Reaps first (every verb
-    entry reaps — a stale active Execution with a dead owner flips to
+    The cancel body of the CLI (``molab runs cancel``) only; the server's
+    cancel route is a separate implementation (see the module docstring).
+    Reaps first (every verb entry reaps — a stale active Execution with a dead owner flips to
     ``failed`` before the verb decides), then refuses anything outside the
     domain loudly: there is nothing to intervene on.
 

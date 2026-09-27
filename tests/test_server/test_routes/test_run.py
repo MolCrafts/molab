@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import ClassVar, get_args
 
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from molab.knowledge import Report
@@ -337,6 +338,24 @@ class TestCreateExecution:
         assert response.status_code == 201, response.text
         assert submit_recorder.calls == [response.json()["id"]]
         assert [e.status.value for e in run.executions] == ["queued"]
+
+
+class TestDispatchToMolq:
+    """``_dispatch_to_molq``: a run is dispatchable only through its experiment's entrypoint."""
+
+    def test_unbound_experiment_is_422_naming_the_entrypoint(self, fresh_run: RunFixture) -> None:
+        _ws, _exp, run = fresh_run
+        target = ComputeTarget(name="hpc", host="me@h", scheduler="slurm", scratch_root="/scratch")
+
+        with pytest.raises(HTTPException) as excinfo:
+            run_routes._dispatch_to_molq(target, run)
+
+        assert excinfo.value.status_code == 422
+        detail = str(excinfo.value.detail)
+        assert "workflow entrypoint" in detail
+        assert "Experiment.define" in detail
+        assert "molab plan" not in detail
+        assert "generated" not in detail
 
 
 class TestGetExecutionOutputs:

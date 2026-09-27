@@ -8,7 +8,7 @@ persisted via :func:`molab.workspace.base.atomic_write_json` so a crash
 mid-write leaves the previous file intact.
 
 This module sits in ``molab.server`` (Layer 4) and intentionally does
-not import ``molab.harness.agent`` or ``molab.workflow``.  It reaches downward
+not import ``molab.workflow``.  It reaches downward
 into ``molab.workspace`` for two pieces: ``atomic_write_json`` (the
 cross-layer atomic-I/O primitive) and the ``FileSystem`` /
 ``RemoteFileSystem`` types used by

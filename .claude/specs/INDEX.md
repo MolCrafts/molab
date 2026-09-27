@@ -4,6 +4,17 @@ One line per **live** spec. `/mol:spec` adds entries; `/mol:impl` ticks the spec
 
 ## Open
 
+## drop-harness (chain)
+
+_User decisions D85/D86 (2026-09-27; see arch-own.decisions.md): delete the Python harness (UI later); molq plugin becomes a thin pure-submit adapter (follow-up spec). Grill D-1..D-6 in drop-harness-01-src §0._
+
+| # | Spec | Summary |
+|---|---|---|
+| 01 | [drop-harness-01-src](drop-harness-01-src.md) | Delete src/molab/harness + tests + entry points + agent extra; drop harness-only core code; regenerate openapi.json [done] |
+| 02 | [drop-harness-02-docs](drop-harness-02-docs.md) | Public docs, examples, .claude/notes, CLAUDE.md without the harness [approved] |
+| 03 | [drop-harness-03-chain](drop-harness-03-chain.md) | Void 02g/03i/04f; strip harness + generated kind from the arch-own chain [approved] |
+| ui | drop-harness-ui | Remove UI agent/plan/approval pages, regenerate the TS client; gate for the first generate:api specs (03e/04b/06b) [planned] |
+
 ## arch-own (chain)
 
 _Step 2 target architecture (plan `pasted-content-id-0977-you-are-scalable-puddle.md`): one owner per concept across workspace / workflow / knowledge. Every sub-spec design-gated by `architect` design-mode (≥ 2 rounds); decisions D1–D83 in [arch-own.decisions.md](arch-own.decisions.md); every spec audited by `/mol:grill` spec-audit (`grilled: true`). Order = table order; see each spec's `depends_on`._

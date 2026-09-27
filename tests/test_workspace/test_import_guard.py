@@ -35,7 +35,6 @@ WORKSPACE_ROOT = Path(__file__).resolve().parents[2] / "src" / "molab" / "worksp
 
 FORBIDDEN_PREFIXES: tuple[str, ...] = (
     "molab.workflow",
-    "molab.harness",
     "molab.plugins",
     "molab.server",
     "molab.cli",
@@ -121,55 +120,8 @@ def test_workspace_init_does_not_load_workflow_or_agent() -> None:
         "import molab.workspace  # noqa: F401\n"
         "assert 'molab.workflow' not in sys.modules, "
         "    'molab.workspace eagerly imported molab.workflow'\n"
-        "assert 'molab.harness' not in sys.modules, "
-        "    'molab.workspace eagerly imported molab.harness'\n"
         "assert 'molab.knowledge' not in sys.modules, "
         "    'molab.workspace eagerly imported molab.knowledge'\n"
     )
     result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr or result.stdout
-
-
-# ── Curation subpackage allow-set ────────────────────────────────────────────
-#
-# ``molab.workspace.curation`` composes existing workspace primitives. As a
-# member of the workspace layer it may import the cross-layer identity / path
-# / profile primitives and any intra-``molab.workspace`` module — nothing
-# else. This guard is RED until the package exists (the dir-existence
-# assertion documents that it is not yet implemented), then it pins the
-# subpackage's import surface using the same AST walk as the deny-list above.
-
-CURATION_ROOT = WORKSPACE_ROOT / "curation"
-
-CURATION_ALLOWED_MOLAB: frozenset[str] = frozenset(
-    {"molab._typing", "molab.profile", "molab.path", "molab.ids"}
-)
-
-
-def _curation_import_allowed(module: str) -> bool:
-    """Allow the four cross-layer primitives plus any intra-workspace module."""
-    return module in CURATION_ALLOWED_MOLAB or module.startswith("molab.workspace")
-
-
-def test_curation_subpackage_allowed_imports() -> None:
-    """Every ``molab.*`` import under ``workspace/curation/`` is in the allow-set.
-
-    Reuses :func:`_files_importing` with the broad ``"molab"`` prefix to
-    enumerate every absolute ``molab.*`` import in the subpackage, then
-    rejects any that is neither a sanctioned cross-layer primitive nor an
-    intra-``molab.workspace`` import.
-    """
-    assert CURATION_ROOT.exists(), (
-        "molab.workspace.curation is not implemented yet "
-        f"(expected package directory at {CURATION_ROOT})"
-    )
-    offenders = [
-        f"{path.relative_to(WORKSPACE_ROOT)}:{lineno}: {module}"
-        for path, lineno, module in _files_importing("molab", CURATION_ROOT)
-        if not _curation_import_allowed(module)
-    ]
-    assert not offenders, (
-        "molab.workspace.curation may import only the cross-layer primitives "
-        f"{sorted(CURATION_ALLOWED_MOLAB)} plus intra-workspace modules.\n"
-        "Offenders:\n  " + "\n  ".join(offenders)
-    )

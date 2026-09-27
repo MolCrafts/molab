@@ -15,7 +15,6 @@ workspace importing plugins. ``molab/__init__`` performs that import, so any
 from collections.abc import Callable
 from pathlib import Path
 
-from molab.plugins.metrics.host import MetricsPlugin
 from molab.plugins.metrics.mlp_names import (
     DEFAULT_MLP_STEM,
     MLP_INDEX_SUFFIX,
@@ -59,7 +58,6 @@ __all__ = [
     "MLP_ZARR_SUFFIX",
     "MetricReadResult",
     "MetricRecord",
-    "MetricsPlugin",
     "MetricsWriter",
     "discover_mlp_jsonl",
     "has_metrics",

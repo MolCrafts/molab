@@ -65,6 +65,7 @@ _KNOWLEDGE_WALK_PRUNE: frozenset[str] = frozenset(
         "cache",
         "logs",
         "source",
+        # legacy on-disk name: written by runs before D86 removed the agent layer; tolerated on read
         "harness",
         "node_modules",
         "__pycache__",

@@ -1,8 +1,8 @@
 """``harvest_run`` — turn a finished Run's outcome into typed knowledge.
 
-The explicit execution→knowledge verb for plain runs: a researcher (or, later,
-an agent capability) harvests a terminal run into a source-attributed
-Knowledge document mounted under the run's experiment.
+The explicit execution→knowledge verb for plain runs: a researcher harvests
+a terminal run into a source-attributed Knowledge document mounted under the
+run's experiment.
 
 Harvesting is **interpretation, not archival**: the run's raw record already
 lives in ``run.json``/artifacts, so a harvest without a narrative is refused —

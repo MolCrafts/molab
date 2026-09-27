@@ -110,12 +110,14 @@ class ExecutionDir:
 # in the tier that is *kept*, never the disposable one. ``artifacts/`` is
 # reached by promotion, and ``emit_artifact`` promotes from any tier.
 #
-# ``work/`` is left to the framework's own scratch, which really is
-# disposable: plan boards, harness staging, landing copies.
+# ``work/`` is the framework's own scratch: ``ExecutionContext.files``
+# (``ctx.files``) writes here, and ``emit_artifact`` stages in-memory data here
+# before promoting it into ``artifacts/``. Its declaration reaches the UI
+# through ``RunFilesResponse.dirs``.
 
 WORK = ExecutionDir(
     name="work",
-    purpose="Framework scratch: plan boards, harness staging. Disposable.",
+    purpose="Framework scratch: ctx.files writes and emit_artifact staging. Disposable.",
     versioned=False,
     products=False,
     prunable=True,

@@ -1,9 +1,8 @@
 """``ConceptMeta`` — the structured ``meta.json`` payload of an OKF Concept.
 
 The base for every typed ``meta.json`` body in the OKF library (e.g.
-:class:`molab.knowledge.reference_meta.ReferenceMeta`). The agent layer keeps
-its own ``AgentMeta`` / ``AgentSessionMeta`` shapes for its workspace-mounted
-folders; this base serves the Concept types ``molab.knowledge`` owns.
+:class:`molab.knowledge.reference_meta.ReferenceMeta`); it serves the Concept
+types ``molab.knowledge`` owns.
 
 Serialization is **JSON only** (same format family as entity ``*.json``).
 """
