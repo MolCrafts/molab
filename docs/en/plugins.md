@@ -42,8 +42,6 @@ molrec (protocol)  — never imported; products follow the spec by convention
   separate metrics product package.
 - Live append uses the **JSONL WAL** (``*.mlp.jsonl``). Leftover zarr/index
   files are ignored.
-- Builtin agent ``run_land`` tags MolRec roots via the Zarr ``meta``
-  attribute ``molrec_version`` (the record's sole version key) when present.
 
 ### Ingest foreign logs into the host metrics surface
 
@@ -69,23 +67,15 @@ dependencies (e.g. TensorBoard) skip that format without failing the call.
 
 ---
 
-Science adapters that the **plugin host** should see (molq jobs,
-metrics writer) are duck-typed Host extras. The face (a CLI command, a
-server route) constructs them with
-:func:`molab.plugins.extras.default_science_extras` and passes
-``compose_run(..., extra=…)`` / ``compose_plan(..., extra=…)``. The
-**host** never reaches for ``molab.plugins`` itself — it composes what
-it is handed. Inspect the tree with
-``molab harness dump-config --profile run``.
+The metrics writer needs no plugin at all: ``import molab`` wires it
+onto ``molab.workspace.metrics_seam`` (an *inversion seam* — a setter
+in the lower ``workspace`` layer that a higher module fills in, so
+``workspace`` never has to import it), and a plain ``molab run``
+therefore produces its WAL on its own.
 
-Note that molab's own ``molab run`` needs none of this: the metrics
-writer is wired onto ``molab.workspace.metrics_seam`` by ``import
-molab``, so a plain workflow run produces its WAL with no plugin host
-in the picture.
-
-``PluginRegistry`` is only the leftover optional-dep cache (GitHub
-client). It is not the host. Entry-point groups below are **face**
-channels (CLI subcommands, UI bundles), not a second kernel.
+``PluginRegistry`` is only the leftover optional-dependency cache (the
+GitHub client). The entry-point groups below are the third-party
+channels (CLI subcommands, server routes, UI bundles).
 
 molab ships **three completely independent** plugin channels so a
 downstream Python package can extend molab without forking it or
@@ -110,12 +100,11 @@ evolution cadences, so they evolve independently.
 > channel — so each uses its own ``[project.entry-points]`` group in
 > your ``pyproject.toml``.
 
-**molab's own harness is the reference consumer of all three.** It
-ships inside the molab wheel but attaches exactly the way a third-party
-package would (`molab.harness.cli:CLI_PLUGIN`,
-`molab.harness.server:SERVER_PLUGIN`) — nothing in molab core imports
-it, and a plugin never reaches into another package's command tree or
-schema module to attach itself.
+molab itself registers nothing in the ``molab.cli_plugins`` or
+``molab.server_plugins`` groups: they exist for packages that depend on
+molab. A plugin attaches only to the app or router it is handed; it
+never reaches into another package's command tree or schema module to
+attach itself.
 
 ## Adding a CLI command
 
@@ -130,11 +119,11 @@ version = "0.1.0"
 dependencies = ["molab", "typer"]
 
 [project.entry-points."molab.cli_plugins"]
-greeter = "my_plugin.cli:plugin"
+greeter = "my_package.cli:CLI_PLUGIN"
 ```
 
 ```python
-# my_plugin/cli.py
+# my_package/cli.py
 import typer
 
 from molab.plugins.cli import CliPlugin
@@ -148,7 +137,7 @@ def _register(app: typer.Typer) -> None:
     app.command(name="greet")(_hello)
 
 
-plugin = CliPlugin(
+CLI_PLUGIN = CliPlugin(
     id="greeter",
     name="Greeter",
     version="0.1.0",
@@ -193,11 +182,11 @@ optional.
 ```toml
 # pyproject.toml
 [project.entry-points."molab.server_plugins"]
-greeter = "my_plugin.server:SERVER_PLUGIN"
+greeter = "my_package.server:SERVER_PLUGIN"
 ```
 
 ```python
-# my_plugin/server.py
+# my_package/server.py
 from fastapi import APIRouter
 
 from molab.plugins.server import ServerPlugin
@@ -271,7 +260,7 @@ the browser-side loader.
 ```toml
 # pyproject.toml
 [project.entry-points."molab.ui_plugins"]
-greeter = "my_plugin.ui:bundle_dir"
+greeter = "my_package.ui:bundle_dir"
 ```
 
 The referenced symbol must be **either** a :class:`pathlib.Path`
@@ -280,7 +269,7 @@ entry-point name (``greeter`` above) becomes the plugin id used in the
 mount URL.
 
 ```python
-# my_plugin/ui.py
+# my_package/ui.py
 from pathlib import Path
 
 
@@ -323,7 +312,7 @@ time. Bundles with a mismatched version are skipped (logged via
 ### 3. Ship a default-exporting ``index.js``
 
 ```javascript
-// my_plugin/ui_dist/index.js
+// my_package/ui_dist/index.js
 import { MolabPlugin } from "@molcrafts/molab-plugin";
 
 export default class Greeter extends MolabPlugin {
@@ -438,13 +427,3 @@ live inside the main bundle. They do **not** appear in
 ``GET /api/plugins`` and do **not** participate in the entry-point
 discovery described here. Conversely, third-party packages cannot use
 those reserved ids. The two paths run side-by-side without conflict.
-
-The **harness** is the opposite case and worth studying: it also ships
-in the molab wheel, but it is discovered through the entry points like
-anything else (``molab.harness.cli:CLI_PLUGIN`` and
-``molab.harness.server:SERVER_PLUGIN``). Nothing in molab imports it
-by name — `tests/test_import_direction.py` fails the build if anything
-does — so ``molab plan`` / ``agent`` / ``curate`` / ``harness`` and the
-whole ``/api/agent*`` + ``/api/approvals`` surface exist exactly when the
-harness is installed. If you are writing a plugin of your own, read it as
-the worked example.

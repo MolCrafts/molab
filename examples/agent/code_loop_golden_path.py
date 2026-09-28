@@ -1,13 +1,11 @@
-"""Agent code-loop golden path — pure Python API, no agent loop.
+"""Code-loop golden path — a minimal public-API workflow script.
 
-This is the **recipe** an agent should reimplement by consulting molmcp
-(for API discovery / scaffold tools), then writing a script and executing
-it. The molab agent loop does not own create/sweep/plot verbs; it writes
-code that calls these public APIs.
-
-Behavior contract (Chat ReAct): see ``DEFAULT_OPS_PREAMBLE`` —
-consult molmcp → code_write → code_run → read results; plot with
-``import molplot``.
+The script walks the whole life of a small parameter scan using only the
+public molab API: it creates a workspace, declares a one-task workflow,
+sweeps it over a parameter grid (one tracked run per grid value), reads
+the results back as flat records, and optionally plots them. Any caller
+that writes and runs a script against molab — a person or a code
+generator — can follow the same recipe.
 
 Shape:
 

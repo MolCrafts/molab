@@ -10,9 +10,9 @@ When the question is about the shape of the graph itself, start with [Task and A
 
 When the question is about persistent state, start with [Workspace API](workspace-api.md) and [Workspace Architecture](workspace-architecture.md). Those two pages describe the same model from different angles: one from the Python surface, one from the on-disk structure. [Assets](assets.md) explains reusable named resources, and [Workflow Persistence](workflow-persistence.md) explains which pieces of execution state are serialized and which are reconstructed from source.
 
-## Agent and Plan Mode
+## Knowledge
 
-When the question is "I have a research goal in prose, not yet a workflow," go to [Plan Mode](plan-mode.md). It covers the `PlanOrchestrator` two-phase pipeline — interactive planning onto a task board behind a hard review gate, then deterministic realization — the generated workspace layout, and the approval actions. The companion concept page is [Agent](../concept/agent.md), which carries the lifecycle flowchart and explains why the layer is provider-agnostic.
+When the question is "what did this run *mean*," go to [Knowledge and Cross-References](knowledge.md). It covers the markdown documents — notes, plans, reports, findings — that sit beside the experiments they describe, why a document's path is its identity, and how the links between documents form the project's knowledge graph.
 
 ## Operations and Scheduling
 

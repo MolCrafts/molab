@@ -44,7 +44,7 @@ The experiment script is **science + declaration only**. These are platform resp
 | Second `run.start()` after execute to register products | In the task: write under `ctx.workdir`, then `ctx.register_artifact` / `ctx.register_metric` |
 | Nested CLIs for optional trajectory / cutoff | Typed task parameters (or a second task), set via profile / `--override` |
 
-molmcp scaffold tools create workspace nodes and can `validate_workflow`; they **never** drive the runtime. Agents should write the declaration-style script, then invoke `molab run`.
+External tooling may create workspace nodes and validate a workflow, but it **never** drives the runtime: write the declaration-style script, then invoke `molab run`.
 
 ## Profiles: Execution Variants in YAML
 

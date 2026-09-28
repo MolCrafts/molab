@@ -11,7 +11,7 @@ _User decisions D85/D86 (2026-09-27; see arch-own.decisions.md): delete the Pyth
 | # | Spec | Summary |
 |---|---|---|
 | 01 | [drop-harness-01-src](drop-harness-01-src.md) | Delete src/molab/harness + tests + entry points + agent extra; drop harness-only core code; regenerate openapi.json [done] |
-| 02 | [drop-harness-02-docs](drop-harness-02-docs.md) | Public docs, examples, .claude/notes, CLAUDE.md without the harness [approved] |
+| 02 | [drop-harness-02-docs](drop-harness-02-docs.md) | Public docs, examples, .claude/notes, CLAUDE.md without the harness [done] |
 | 03 | [drop-harness-03-chain](drop-harness-03-chain.md) | Void 02g/03i/04f; strip harness + generated kind from the arch-own chain [approved] |
 | ui | drop-harness-ui | Remove UI agent/plan/approval pages, regenerate the TS client; gate for the first generate:api specs (03e/04b/06b) [planned] |
 

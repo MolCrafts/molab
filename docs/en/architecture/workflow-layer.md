@@ -19,9 +19,9 @@ subclasses any third-party engine base class — user-side `Task` and
 workspace storage primitives to persist its own state:
 
 ```
-agent           ───────► workflow ───────► workspace
-(uses both)              (uses workspace    (pure storage primitive,
-                          for caching and    no upstream deps)
+cli / server    ───────► workflow ───────► workspace
+(application             (uses workspace    (pure storage primitive,
+ shells, use both)        for caching and    no upstream deps)
                           atomic JSON)
 ```
 
@@ -39,9 +39,9 @@ Concretely the workflow layer reaches downward for:
   execution unit by `WorkflowRuntime.execute(..., run_context=ctx)` /
   `WorkflowRuntime.run_on(...)`.
 
-The workflow layer does **not** import from `molab.harness.agent`,
+The workflow layer does **not** import from `molab.services`,
 `molab.plugins`, `molab.server`, or `molab.cli`.
-Cross-layer payloads coming *down* from the agent (e.g. opaque
+Cross-layer payloads coming *down* from the callers above it (e.g. opaque
 RunContext-shaped objects, `Mapping[str, JSONValue]` config) flow
 through duck-typed parameters that the workflow scheduler treats as
 opaque.

@@ -1,13 +1,13 @@
 ---
 title: Molab
-description: 面向 FAIR 研究的智能体辅助科学工作流平台
+description: 面向 FAIR 研究的科学工作流平台
 hide:
   - navigation
   - toc
 hero:
   kicker: 手册
   title: Molab
-  description: 用 Python 构建可复现的科学工作流。将任务定义为普通函数，让引擎处理依赖图，并将每次运行持久化到磁盘——可选配 LLM 智能体来规划、生成和驱动实验。
+  description: 用 Python 构建可复现的科学工作流。将任务定义为普通函数，让引擎处理依赖图，并将每次运行持久化到磁盘——运行得出的知识也写在它旁边。
   actions:
     - label: 快速开始
       href: "#start-here"
@@ -177,7 +177,7 @@ molab run train.py --rerun --fresh     # 从头重新执行
 
 ## 工作原理
 
-四个层次，各司其职。松耦合组合。
+每一部分各司其职，松耦合组合。
 
 </div>
 
@@ -191,12 +191,8 @@ molab run train.py --rerun --fresh     # 从头重新执行
     <dd>持久化层级：工作区 → 项目 → 实验 → 运行。每次运行都是一个包含参数、状态和输出的持久记录。</dd>
   </div>
   <div>
-    <dt>智能体 Agent</dt>
-    <dd>LLM 对话层。规划实验、生成工作流代码、通过工具调用驱动运行——全部记录在磁盘会话中。</dd>
-  </div>
-  <div>
-    <dt>流水线 Harness</dt>
-    <dd>实验编排器。两个阶段：交互式规划把任务放上任务板并经过硬审查门禁，随后确定性实现——按任务代码生成、测试、编译——全程留有产物溯源。</dd>
+    <dt>知识 Knowledge</dt>
+    <dd>结果意味着什么。笔记、计划、报告与发现是存放在所描述实验旁边的 markdown 文件；它们之间的链接构成项目的知识图谱。</dd>
   </div>
   <div>
     <dt>资产 Assets</dt>
@@ -219,8 +215,8 @@ molab run train.py --rerun --fresh     # 从头重新执行
 ## 向外扩展，保持轻量
 
 `import molab` 保持轻量——重依赖只在真正用到时加载。核心通过可选 extras
-（`molab[agent]`、`molab[tensorboard]`）连接 molcrafts 栈，并通过两条独立
-插件通道接入你自己的代码。
+（例如 `molab[tensorboard]`）连接 molcrafts 栈，并通过三条独立
+插件通道（CLI、服务端、UI）接入你自己的代码。
 
 </div>
 
@@ -233,9 +229,9 @@ molab run train.py --rerun --fresh     # 从头重新执行
     <strong>molcfg · 运行配置</strong>
     <em>支撑 profile 系统。<code>molcfg.yaml</code> 保存执行变体，一个 <code>--profile</code> 切换。</em>
   </a>
-  <a href="architecture/plan-mode/">
-    <strong>molmcp · 能力发现</strong>
-    <em>为智能体 Harness 落地能力。Plan 经 molmcp 发现完整工具链，再绑定实验所需的最小子集。</em>
+  <a href="plugins/">
+    <strong>服务端插件</strong>
+    <em>通过 <code>molab.server_plugins</code> 入口点，在同一 <code>/api</code> 源与同一会话下提供你自己的路由。</em>
   </a>
   <a href="concept/plugins/">
     <strong>molvis · 可视化</strong>
@@ -272,15 +268,15 @@ molab run train.py --rerun --fresh     # 从头重新执行
   </section>
   <section>
     <h3><a href="concept/">核心概念</a></h3>
-    <p>工作流与工作区模型、智能体层、资产可复现性，以及插件架构。</p>
+    <p>工作流与工作区模型、知识、资产可复现性，以及插件架构。</p>
   </section>
   <section>
     <h3><a href="guide/">指南</a></h3>
-    <p>任务编写、控制流、参数扫描、工作区 API、持久化、配置文件、Plan Mode、服务生命周期与调度桥。</p>
+    <p>任务编写、控制流、参数扫描、工作区 API、持久化、配置文件、知识、服务生命周期与调度桥。</p>
   </section>
   <section>
     <h3><a href="architecture/">架构</a></h3>
-    <p>层级边界、导入规则、智能体防火墙、Plan Mode 流水线，以及工作流引擎设计。</p>
+    <p>层级边界、导入规则，以及工作流引擎设计。</p>
   </section>
 </div>
 
@@ -307,9 +303,9 @@ Molab 不是功能的大杂烩。每个子系统服务于以下目标之一。
     <strong>持久记录</strong>
     <em>每次运行都是一个包含参数、溯源、输出和执行历史的目录。数据不只在内存中。</em>
   </a>
-  <a href="concept/agent/">
-    <strong>智能体辅助科学</strong>
-    <em>LLM 智能体规划实验、生成代码、驱动运行。每个决策都可审计——智能体会话是一等工作区对象。</em>
+  <a href="guide/knowledge/">
+    <strong>相互链接的知识</strong>
+    <em>发现、报告与笔记存放在产生它们的运行旁边，注明来源，并链接成一张知识图谱——不依赖 molab 也能直接阅读的 markdown 文件。</em>
   </a>
 </div>
 
@@ -348,9 +344,9 @@ Molab 不是功能的大杂烩。每个子系统服务于以下目标之一。
     <strong>Sweep · RunSet</strong>
     <em>网格搜索参数，并行执行，用 to_records() 汇总。</em>
   </a>
-  <a href="guide/plan-mode/">
-    <strong>Plan</strong>
-    <em>两阶段规划流水线：任务板 → 审查冻结 → 实现编译。</em>
+  <a href="guide/knowledge/">
+    <strong>Knowledge</strong>
+    <em>把发现、报告与笔记以 markdown 写在实验旁边；它们之间的链接就是知识图谱。</em>
   </a>
 </div>
 

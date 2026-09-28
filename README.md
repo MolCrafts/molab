@@ -5,7 +5,7 @@
   &nbsp;molab
 </h1>
 
-<p><strong>An agent-assisted scientific-workflow platform for FAIR research</strong></p>
+<p><strong>A scientific-workflow platform for FAIR research</strong></p>
 
 <p>
   <a href="https://img.shields.io/github/actions/workflow/status/MolCrafts/molab/ci.yml?style=flat-square&logo=githubactions&logoColor=white&label=CI"><img src="https://img.shields.io/github/actions/workflow/status/MolCrafts/molab/ci.yml?style=flat-square&logo=githubactions&logoColor=white&label=CI" alt="CI"></a>
@@ -22,7 +22,7 @@
 
 </div>
 
-molab turns a Python script of typed tasks into a tracked, reproducible experiment. It pairs a content-hashed workflow engine with a file-system-backed `Workspace → Project → Experiment → Run` hierarchy, profile-driven run variants, and optional cluster submission — then layers on an audited orchestration harness (two-phase plan pipeline, artifact lineage, approval gates), an optional LLM agent that can plan and drive those workflows, and a FastAPI server with a bundled React UI.
+molab turns a Python script of typed tasks into a tracked, reproducible experiment. It pairs a content-hashed workflow engine with a file-system-backed `Workspace → Project → Experiment → Run` hierarchy, profile-driven run variants, and optional cluster submission — then adds a knowledge layer that writes findings, reports and notes beside the runs they describe, and a FastAPI server with a bundled React UI.
 
 > **Under active development.** Public APIs may change between minor releases.
 
@@ -40,12 +40,10 @@ What that unlocks is a research workflow you can trust and revisit: experiments 
 |--------|------------|
 | `molab.workflow`   | Typed task-graph engine — `WorkflowCompiler` (decorator + OOP + protocol styles) compiles to a frozen, content-hashed `CompiledWorkflow`; `WorkflowRuntime` executes it with topology-driven parallelism, IR export, contract validation |
 | `molab.workspace`  | File-system storage primitive — `Workspace → Project → Experiment → Run` `Folder` hierarchy, content-addressed assets, atomic JSON I/O, run lifecycle |
-| `molab.config`     | In-code process-global config — a live `molcfg.Config` for runtime values such as LLM API keys, registered in code (never from env) |
+| `molab.config`     | In-code process-global config — a live `molcfg.Config` kept as a process-level place to register runtime values in code (never from env) |
 | `molab.profile`    | File-based per-run config — `molcfg.yaml` loading and named profiles; resolves `defaults` + `profiles` into an immutable, content-hashed `ProfileConfig` |
-| `molab.agent`      | Optional LLM layer — `AgentRunner` (`mode="text"` one-shot, `mode="agentic"` one ReAct per turn) with persisted `AgentSession`s, built on PydanticAI (lazy-loaded) |
-| `molab.harness`    | Experiment orchestrator — audited stages over a content-addressed Run (artifact lineage, approval gates, executors). Two bundles: `Plan` (interactive planning behind a hard review gate, then deterministic realization into a compiled workflow) and `Chat` (exploratory, scratch-only). The production `molab plan` entry point |
-| `molab.services`   | Application-service layer between the shells and the domain layers — plan/curate runtimes, operator config, agent context, approval notifications. CLI and server both call it and never each other, so a Python operation and a UI operation share one code path |
-| `molab.knowledge`  | Open Knowledge Format concept-type registry — the bottom-layer `@concept_type` registry `workspace` uses to reconstruct typed folders from each concept's persisted type |
+| `molab.services`   | Application-service layer between the shells and the domain layers — `operator_config` (read / write `~/.molab/config.json`), `run_failure`, `auth`. CLI and server both call it and never each other, so a Python operation and a UI operation share one code path |
+| `molab.knowledge`  | Knowledge documents (`knowledges/<slug>.md`, path is identity) and the `@concept_type` registry — sits above `workspace` and reaches it only through function-body imports |
 | `molab.server`     | FastAPI app — REST routes for workspace, projects, experiments, runs, assets, execution, plus SSE streaming and bundled-SPA serving |
 | `molab.cli`        | `molab` command-line entry point — workspace init/info, run/execute, project / experiment / run / asset / target / session subcommands |
 | `molab.plugins`    | On-demand capability registry — `submit_molq` scheduler bridge (SLURM / PBS / LSF) and `gh` GitHub client; core stays dependency-light |
@@ -65,7 +63,7 @@ uv pip install "git+https://github.com/MolCrafts/molab"
 
 Existing workspaces that still have `.molexp/` or `~/.molexp` must run `molab migrate brand` once before using this release.
 
-Requires Python >= 3.12. Core depends on `pydantic`, `pyyaml`, `typer`, `rich`, `fastapi`, `uvicorn`, `zarr`, and the MolCrafts libraries `mollog`, `molcfg`, `molq`, and `molpy` (the workflow engine is self-owned — `pydantic-graph` is no longer a dependency). Optional extras: `molcrafts-molab[agent]` adds the PydanticAI LLM layer; `molcrafts-molab[tensorboard]` adds the TensorBoard scalar reader; `molcrafts-molab[all]` bundles both, and `molcrafts-molab[dev]` pulls everything for development.
+Requires Python >= 3.12. Core depends on `pydantic`, `pyyaml`, `typer`, `rich`, `fastapi`, `uvicorn`, `zarr`, and the MolCrafts libraries `mollog`, `molcfg`, `molq`, and `molpy` (the workflow engine is self-owned — `pydantic-graph` is no longer a dependency). Optional extras: `molcrafts-molab[tensorboard]` adds the TensorBoard scalar reader; `molcrafts-molab[all]` bundles the optional extras, and `molcrafts-molab[dev]` pulls everything for development.
 
 Default `uv pip` / `pip` **does not** compile the React UI (no Node required). A published wheel already ships `src/molab/dist/`.
 
@@ -126,7 +124,7 @@ Attaching a workflow to a tracked `Workspace` experiment (`ws.add_project(...).a
 | [molrs](https://github.com/MolCrafts/molrs)     | Rust core — molecular data structures & compute kernels (native + WASM) |
 | [molpack](https://github.com/MolCrafts/molpack) | Packmol-grade molecular packing (Rust + Python) |
 | [molvis](https://github.com/MolCrafts/molvis)   | WebGL molecular visualization & editing |
-| **molab** | Agent-assisted scientific-workflow platform for FAIR research — this repo |
+| **molab** | Scientific-workflow platform for FAIR research — this repo |
 | [molnex](https://github.com/MolCrafts/molnex)   | Molecular machine-learning framework |
 | [molq](https://github.com/MolCrafts/molq)       | Unified job queue — local / SLURM / PBS / LSF |
 | [molcfg](https://github.com/MolCrafts/molcfg)   | Layered configuration library |

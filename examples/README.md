@@ -61,37 +61,11 @@ You can delete these freely; none of them touch `~/` or any system path.
 | [run-profiles](../docs/guide/run-profiles.md) | `operations/run_profiles_advanced/` | Profile inheritance (`extends`), `--override` dot notation |
 | [workspace-architecture](../docs/guide/workspace-architecture.md) | `operations/remote_targets.py` | LocalTarget, RemoteTarget, ComputeTarget resolution |
 
-## Agent Layer
-
-The agent examples are **offline-first**: each ships an in-file
-`ScriptedRouter` implementing the SDK-free `molab.agent.router.Router`
-Protocol and injects it via `AgentRunner(router=...)` — no network, no API
-key, deterministic exit 0, so both files run inside the examples smoke gate
-(`tests/test_examples_smoke.py`) and break loudly on any API drift. Paste a
-key into the `API_KEY` constant to flip the *same* loop to the real model.
+## A Minimal Script End to End
 
 | Example | What it shows |
 |---|---|
-| `agent/mcp_integration.py` | Agent with MCP toolsets — offline ScriptedRouter simulates tool calls; each turn is one ReAct (`AgentRunner(mode="agentic")`) on a named `AgentSession`. |
-
-> Note: Chat is one `complete_text`. Tool-using work is one ReAct per user line. A REPL is a **session** of those turns (history on `AgentSession`), not a molab loop. Plan is a harness workflow.
->
-> **API keys** — live mode registers the LLM key *in code* via `molab.config["deepseek_api_key"] = ...` (paste into the `API_KEY` constant at the top of each file). `molab.config` is a live `molcfg.Config`; molab reads the key from it, **never from environment variables**.
-
-## Harness Layer
-
-`PlanMode` is the harness `Mode` that turns a short natural-language experiment
-draft into generated, validated, runnable `molab.workflow` source — running its
-stage pipeline (ExperimentReport → WorkflowIR → BoundWorkflow → workflow source)
-on a `workspace.Run` with full provenance + audit. Its back half, `RunMode`
-(chained on the same Run via `molab plan --execute`), generates unit tests,
-really runs them with pytest, executes the workflow through an executor
-subprocess on the real engine, and writes the final report + audit trail.
-
-| Example | What it shows |
-|---|---|
-| `harness/experiment_pipeline.py` | **The flagship**: a natural-language experiment goal → `PlanMode` (plan + validated workflow source) → `RunMode` (generated unit tests REALLY run under pytest, the workflow REALLY executes on the `molab.workflow` engine in an executor subprocess) → extracted `FinalReport` + audit trail. Offline by default via an in-file `CannedGateway` implementing the public `AgentGateway` Protocol — only the LLM is canned; every validator, pytest, and the engine run for real (a seeded 1D random walk whose D = MSD/(2·d·t) ≈ 0.5). Paste a key into `API_KEY` to run the same pipeline against the real DeepSeek API through `RouterBackedAgentGateway`. |
-| `harness/stages_standalone.py` | Harness building blocks in isolation — ToolCapability, InMemoryCapabilityRegistry, CannedGateway pattern for offline stage testing. |
+| `agent/code_loop_golden_path.py` | A minimal public-API workflow script: create a workspace, add a project and an experiment, sweep a one-task workflow over a parameter grid, read the results back with `to_records()`, and (when `molplot` is installed) save a figure under the workspace. The `agent/` directory name is historical; the script uses only the public molab API. |
 
 ## Plugins
 

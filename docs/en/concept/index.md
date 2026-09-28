@@ -8,7 +8,7 @@ Molab is easier to learn when you see it as a few connected models, not one larg
 |---|---|---|
 | **Workflow** | What should happen? | A graph of tasks with named data flow |
 | **Workspace** | What survives after execution? | Persistent hierarchy: Workspace → Project → Experiment → Run |
-| **Agent** | How does the LLM drive this? | Natural-language intent → tool calls → real workspace mutations |
+| **Knowledge** | What did we learn? | Notes, plans, reports and findings stored as markdown files beside the experiments they describe |
 | **Assets** | Where do the data and outputs live? | Named resources at defined scopes, not undocumented paths |
 
 These boundaries are not academic. They let the same workflow run locally during development, from the CLI, or on a cluster — without changing what the workflow means.
@@ -21,6 +21,6 @@ Research code becomes untrustworthy for a boring reason: the script, the paramet
 
 - **[Workflow](workflow.md)** — The computation model: tasks, dependencies, compilation, execution. What stays *outside* the workflow layer.
 - **[Workspace](workspace.md)** — The on-disk hierarchy and the distinction between experiment (definition) and run (outcome).
-- **[Agent](agent.md)** — LLM conversation layer: the pydantic-ai facade, one-shot chat or one ReAct per turn, sessions, and events.
+- **[Knowledge](../guide/knowledge.md)** — What a result *means*: documents whose path is their identity and whose markdown links form the knowledge graph.
 - **[Assets and Reproducibility](assets-and-reproducibility.md)** — Why reusable data needs first-class names and scopes. What FAIR means inside a workspace.
 - **[Plugins](plugins.md)** — The optional transport layer that reaches beyond local execution.

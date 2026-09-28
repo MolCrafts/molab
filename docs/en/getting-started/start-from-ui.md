@@ -84,7 +84,7 @@ binary path come from `--via` / `--tunnel-token` or `molab config`
 
 ## 2. Find your way around
 
-The activity bar on the left switches the panel between six views:
+The activity bar on the left switches the panel between five views:
 
 - **Experiments** — the Project → Experiment → Run tree. This is where
   you create and manage everything; most of this guide lives here.
@@ -97,8 +97,6 @@ The activity bar on the left switches the panel between six views:
   file viewer/editor and "New file / New folder" actions.
 - **Asset** — the asset inventory (artifacts, logs, checkpoints) with
   lineage back to the run and task that produced each one.
-- **Agent Tasks** — LLM-driven sessions; see the
-  [Agent concept](../concept/agent.md) for the loop model behind them.
 
 A command palette and a **Settings** page (remote workspaces, compute
 targets, and Users when auth is on) round out the shell.
@@ -188,7 +186,7 @@ What the tree's context menus offer today:
 | Object | Actions |
 |---|---|
 | Project | Open project · New experiment · Refresh · **Delete project** |
-| Experiment | Open experiment · New run · **Sweep** · Curate · Open workflow · **Delete experiment** |
+| Experiment | Open experiment · New run · **Sweep** · Open workflow · **Delete experiment** |
 | Run | Open run · Start / Resume / Rerun / Rerun fresh · **Cancel run** · Export zip · Harvest · View logs · Copy run ID |
 
 Deletes ask for confirmation and remove the object and its children
@@ -209,8 +207,7 @@ both keeping the same run id:
 **Export** downloads the run directory as a zip. **Harvest** (terminal
 runs only) writes a sourced knowledge document — a `Finding`, `Report`,
 `Plan` or `Observation` — under the experiment from a short narrative. Experiment **Sweep** creates one pending run per value
-on a single parameter axis; **Curate** starts an NL curation task
-(approvals via the top-bar bell when suspended).
+on a single parameter axis.
 
 Still **TODO**: rename/archive entities; rich multi-axis sweep UI;
 bulk multi-select lifecycle; side-by-side run compare beyond the
@@ -227,38 +224,20 @@ existing Compare / Aggregate views.
   Create Experiment and Launch Run dialogs offer, and the **+ Add new
   target…** link in those dialogs lands in the same registry.
 
-## 10. Where the agent fits
-
-**Agent Tasks** has two different modes:
-
-- **Plan Mode** (`PlanComposer`) — full PlanOrchestrator pipeline (two phases +
-  optional execute), approvals inbox, real artifacts. Configure the model
-  under Agent settings (`agent.model` / provider keys).
-- **Interactive chat** — **read-only** today: search knowledge and read
-  workspace files. It does **not** create projects, start runs, or cancel
-  jobs. Use Run lifecycle buttons or Plan Mode for write operations.
-
-See the [Agent concept](../concept/agent.md) and
-[Plan Mode](../guide/plan-mode.md).
-
 ## Feature status
 
 | Capability | From the UI | Notes |
 |---|---|---|
 | Create project / experiment / run | ✅ | Dialogs in the Experiments panel |
-| Draft a workflow on the canvas | ✅ | Editable graph, ⌘S saves — true science still usually needs Python or Plan |
+| Draft a workflow on the canvas | ✅ | Editable graph, ⌘S saves — true science still usually needs Python |
 | Monitor runs (overview, attempts, logs) | ✅ | Plus the Runs dashboard |
 | Delete project / experiment | ✅ | With confirmation |
 | Cancel a running run | ✅ | `POST …/cancel` — same verb as CLI `molab runs cancel` |
 | Start / Resume / Rerun (incl. Rerun fresh) | ✅ | Run header actions; `fresh` bypasses cache reads |
 | Register compute targets / remote workspaces | ✅ | Settings, or inline from dialogs |
 | Assets and lineage browsing | ✅ | Asset panel |
-| Plan Mode + approvals | ✅ | Agent hub; ApprovalsInbox + SSE |
-| Interactive chat (read-only tools) | ✅ | Knowledge + file tools only — not workspace mutation |
-| Agent model / provider settings | ✅ | Agent settings (not Workspace Settings remote/targets tabs) |
 | Export run as ZIP from the run page | ✅ | Uses `archive_folder_zip_iter` (streamed) |
 | Harvest run → Knowledge from UI | ✅ | Terminal runs; `POST …/harvest` → `harvest_run` |
-| Curation (NL reorg) from UI | ✅ | Experiment overview CurateComposer + Approvals |
 | Create parameter sweep from UI | ✅ | Single-axis Sweep dialog (full DOE still Python/CLI) |
 | Rename / archive objects | **TODO** | Create + delete only |
 | Bulk multi-select lifecycle | **TODO** | Multi-select mainly for metrics aggregate |
@@ -269,4 +248,3 @@ Once the click-through model feels natural, [Your First
 Workflow](first-workflow.md) shows how real workflows are authored in
 Python, and [Track a Run](tracked-runs.md) explains what all of this
 looks like on disk.
-disk.

@@ -11,7 +11,7 @@ Workspace
 
 Every persistent byproduct — imported data, task artifacts, logs, checkpoints, error traces, workflow execution state — is a typed `Asset` subclass recorded in a per-scope `assets.json` manifest. Those manifests are authoritative and are what asset queries scan directly — there is no derived asset index beside them. Every metadata write is atomic (temp-file + `os.rename`), so a crash never leaves a half-written JSON file.
 
-Workspace is the bottom of the molab dependency DAG. It owns filesystem layout, atomic JSON, content-addressed assets, and generic per-kind subsystem storage — and **does not know about workflows, sessions, agents, or LLMs**. Upstream layers (workflow, agent) reach *down* into workspace's public surface; the inverse is forbidden by the import-guard test.
+Workspace is the bottom of the molab dependency DAG. It owns filesystem layout, atomic JSON, content-addressed assets, and generic per-kind subsystem storage — and **does not know about workflows or knowledge**. Upstream layers (workflow, knowledge, services, cli, server) reach *down* into workspace's public surface; the inverse is forbidden by the import-guard test.
 
 ## Hierarchy Levels
 

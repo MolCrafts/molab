@@ -14,25 +14,6 @@ Pure data types → `pydantic.BaseModel(frozen=True)`. Runtime containers (live 
 
 **Status:** stable
 
-## approval-gate-instance-name | 2026-06-21 | impl
-
-`ApprovalGate` takes an optional `name=` kwarg that overrides the stage's
-ledger name on that **instance only** (set via `object.__setattr__(self,
-"name", name)` in `__init__`; class-level `ApprovalGate.name` stays
-`"approval_gate"`). Reason: a harness `Mode` keys its per-run completion
-ledger on `stage.name`, and `stage_fingerprint()` keys on the **class** alone
-(instance config is excluded) — so two same-named `ApprovalGate`s in one mode
-would make the second a false ledger cache-hit and get silently skipped.
-`PlanMode` wires two gates: the early experiment-report review gate is named
-`approve_experiment_spec`, the terminal final-report gate keeps the default
-`approval_gate`.
-
-**Rule**: when a `Mode` wires more than one instance of the same `Stage`
-class, give the extra instances a distinct `name=` so each gets its own
-completion-ledger key.
-
-**Status:** stable
-
 ## three-layer-rectification | 2026-05-09 | impl
 
 The molexp dependency DAG was inverted by the rectification spec:
@@ -53,10 +34,6 @@ upstream concern. The fix:
   and for atomic state writes (`workspace.atomic_write_json` for
   `workflow.json` snapshots). The `~/.molexp/cache/` user-home
   shortcut is gone.
-- agent becomes a thin LLM harness that uses both downstream layers
-  through their public surfaces, and confines `pydantic_ai` to
-  `agent/_pydanticai/` (lazy load) and never imports `pydantic_graph`
-  at all.
 
 Mechanical enforcement: three import-guard tests
 (`tests/test_<layer>/test_import_guard.py`). The audit + design lives
@@ -159,33 +136,3 @@ The CLI shares this now (`target_to_filesystem(cached=True)` is the default,
 mirror under `~/.molexp/remote_cache/`), so a CLI verb against a remote target
 no longer pays raw per-call SSH. `revalidate_before` makes each invocation
 revalidate what it touches once, then pin.
-
-## notify-module-globals-need-a-conftest-reset | 2026-09-16 | impl
-
-`services.approval_notify` and `services.workspace_notify` keep their subscriber
-sets **and a `_closed` latch** at module scope. The FastAPI lifespan calls
-`close_approval_subscribers()` on shutdown, so *every* test that exits a
-`TestClient(app)` context set that latch for the rest of the process; a later
-test subscribing without booting the app got a subscription that ended
-immediately. It presented as an order-dependent failure that passed in
-isolation.
-
-`tests/conftest.py` now resets both modules around every test (autouse). Any
-future module-global pub/sub needs the same treatment — a process-wide latch and
-a per-test process are a bad pair.
-
-## approvals-stream-fallback-can-be-deleted | 2026-09-16 | impl
-
-The UI still opens a dedicated `EventSource` to `/api/approvals/events`
-(`useApprovalsStream` in `app/state/queries/agent.ts`) even though approvals now
-also reach the unified workspace stream as `kind="approval"` — every
-`notify_approvals_changed` call site passes a workspace root, so the bridge is
-live and covered at the bus and route level.
-
-It was kept because that coverage stops short of an open stream: both
-`TestClient` and `httpx.ASGITransport` serialize the app against the test, so a
-push arriving *during* an open read is unobservable in-process. Verify the live
-path in a browser (grant an approval, watch the bell update with the dedicated
-stream disabled); once it holds, deleting `useApprovalsStream` is the only
-change — the invalidation path already exists. Until then it is a second
-connection per tab, not a correctness risk.

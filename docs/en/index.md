@@ -1,13 +1,13 @@
 ---
 title: Molab
-description: Agent-assisted scientific-workflow platform for FAIR research
+description: Scientific-workflow platform for FAIR research
 hide:
   - navigation
   - toc
 hero:
   kicker: Manual
   title: Molab
-  description: Build reproducible scientific workflows in Python. Define tasks as plain functions, let the engine handle the graph, and keep every run tracked on disk — with an optional LLM agent that plans, generates, and drives experiments.
+  description: Build reproducible scientific workflows in Python. Define tasks as plain functions, let the engine handle the graph, and keep every run tracked on disk — with the knowledge it produced written beside it.
   actions:
     - label: Get started
       href: "#start-here"
@@ -205,7 +205,7 @@ molab run train.py --rerun --fresh   # re-execute from scratch
 
 ## How it works
 
-Four layers, each with a single job. They compose without coupling.
+Each piece has a single job. They compose without coupling.
 
 </div>
 
@@ -219,12 +219,8 @@ Four layers, each with a single job. They compose without coupling.
     <dd>Persistent hierarchy: Workspace → Project → Experiment → Run. Every run is a durable record with parameters, status, and outputs.</dd>
   </div>
   <div>
-    <dt>Agent</dt>
-    <dd>LLM conversation layer. Plan experiments, generate workflow code, and drive runs through tool calls — all recorded in a session on disk.</dd>
-  </div>
-  <div>
-    <dt>Harness</dt>
-    <dd>Experiment orchestrator. Two phases: interactive planning onto a task board behind a hard review gate, then deterministic realization — per-task codegen, tests, compile — with full artifact lineage.</dd>
+    <dt>Knowledge</dt>
+    <dd>What a result means. Notes, plans, reports, and findings are markdown files beside the experiments they describe; their links form the project's knowledge graph.</dd>
   </div>
   <div>
     <dt>Assets</dt>
@@ -248,8 +244,8 @@ Four layers, each with a single job. They compose without coupling.
 
 `import molab` stays lightweight — heavy integrations load only when you reach for
 them. The core features connect to the wider molcrafts stack through optional extras
-(`molab[agent]`, `molab[tensorboard]`) and to your own code through two independent
-plugin channels.
+(such as `molab[tensorboard]`) and to your own code through three independent
+plugin channels (CLI, server, UI).
 
 </div>
 
@@ -262,9 +258,9 @@ plugin channels.
     <strong>molcfg · run profiles</strong>
     <em>Backs the profile system. <code>molcfg.yaml</code> holds execution variants, switched with one <code>--profile</code> flag.</em>
   </a>
-  <a href="architecture/plan-mode/">
-    <strong>molmcp · capabilities</strong>
-    <em>Grounds the agent harness. Plan discovers the full toolchain through molmcp, then binds the minimal subset an experiment needs.</em>
+  <a href="plugins/">
+    <strong>Server plugins</strong>
+    <em>Serve your own routes on the same <code>/api</code> origin and session via the <code>molab.server_plugins</code> entry point.</em>
   </a>
   <a href="concept/plugins/">
     <strong>molvis · visualization</strong>
@@ -302,15 +298,15 @@ compact table of contents for returning users.
   </section>
   <section>
     <h3><a href="concept/">Concepts</a></h3>
-    <p>Workflow and workspace models, agent layer, asset reproducibility, and plugin architecture.</p>
+    <p>Workflow and workspace models, knowledge, asset reproducibility, and plugin architecture.</p>
   </section>
   <section>
     <h3><a href="guide/">Guides</a></h3>
-    <p>Task authoring, control flow, sweeps, workspace API, persistence, profiles, plan mode, server lifecycle, and scheduler bridge.</p>
+    <p>Task authoring, control flow, sweeps, workspace API, persistence, profiles, knowledge, server lifecycle, and scheduler bridge.</p>
   </section>
   <section>
     <h3><a href="architecture/">Architecture</a></h3>
-    <p>Layer boundaries, import rules, agent firewall, plan-mode pipeline, and workflow engine design.</p>
+    <p>Layer boundaries, import rules, and workflow engine design.</p>
   </section>
 </div>
 
@@ -337,9 +333,9 @@ Molab is not a grab-bag of features. Every subsystem serves one of these goals.
     <strong>Durable records</strong>
     <em>Every run is a directory with parameters, provenance, outputs, and execution history. Nothing lives only in memory.</em>
   </a>
-  <a href="concept/agent/">
-    <strong>Agent-assisted science</strong>
-    <em>An LLM agent plans experiments, generates code, and drives runs. Every decision is auditable — the agent's session is a first-class workspace object.</em>
+  <a href="guide/knowledge/">
+    <strong>Linked knowledge</strong>
+    <em>Findings, reports, and notes live beside the runs that produced them, cite their sources, and link into one knowledge graph — plain markdown files you can read without molab.</em>
   </a>
 </div>
 
@@ -378,9 +374,9 @@ Common entry points you will reach for most often.
     <strong>Sweep · RunSet</strong>
     <em>Grid-search parameters, execute in parallel, summarize with to_records().</em>
   </a>
-  <a href="guide/plan-mode/">
-    <strong>Plan</strong>
-    <em>Two-phase plan pipeline: interactive planning behind a review gate, then deterministic realization.</em>
+  <a href="guide/knowledge/">
+    <strong>Knowledge</strong>
+    <em>Write findings, reports, and notes as markdown beside the experiment; the links between them are the graph.</em>
   </a>
 </div>
 
