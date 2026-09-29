@@ -411,7 +411,11 @@ export class RunsService {
     }
     /**
      * Get Run Execution
-     * Return runtime workflow graph state from workflow.json.
+     * Return one Execution's node journal.
+     *
+     * The journal is owned by the workflow layer and read through
+     * ``molab.workflow.read_journal``; ``status`` is the Execution record's
+     * status. ``workflow`` is null while the attempt has no journal yet.
      * @param projectId
      * @param experimentId
      * @param runId
@@ -1118,7 +1122,11 @@ export class RunsService {
     }
     /**
      * Get Run Execution
-     * Return runtime workflow graph state from workflow.json.
+     * Return one Execution's node journal.
+     *
+     * The journal is owned by the workflow layer and read through
+     * ``molab.workflow.read_journal``; ``status`` is the Execution record's
+     * status. ``workflow`` is null while the attempt has no journal yet.
      * @param projectId
      * @param experimentId
      * @param runId

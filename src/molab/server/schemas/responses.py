@@ -443,10 +443,14 @@ class TensorboardScalarsResponse(ApiModel):
 
 
 class RunExecutionResponse(ApiModel):
-    """Runtime workflow graph state read from ``workflow.json``."""
+    """One Execution's node journal as the workflow layer reports it (``molab.workflow.read_journal``).
+
+    ``status`` is the Execution record's status; ``workflow`` is the journal
+    document (header + ``task_configs``), or null before the journal exists.
+    """
 
     execution_id: str | None = None
-    status: str = "not_started"  # running | completed | failed | not_started
+    status: str = "not_started"  # queued | running | finalizing | succeeded | failed | cancelled | interrupted
     workflow: dict[str, Any] | None = None
 
 

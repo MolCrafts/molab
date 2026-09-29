@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
 from molab.plugins.submit_molq.submit import SubmitHandler
+from molab.workflow import read_journal
 from molab.workspace import (
     ExperimentNotFoundError as WorkspaceExperimentNotFoundError,
 )
@@ -25,7 +26,6 @@ from molab.workspace.execution_repository import ExecutionRepository
 from molab.workspace.fs_cached import CachedRemoteFileSystem
 from molab.workspace.fs_tree import list_tree_children, tree_to_run_file_dicts
 from molab.workspace.history import AgentRef
-from molab.workspace.schema_version import read_versioned_json
 from molab.workspace.targets import get_target
 
 from ..dependencies import get_workspace
@@ -417,12 +417,7 @@ def get_execution_outputs(
         if sealed_record is not None
         else []
     )
-    results: dict[str, object] = {}
-    results_path = fs.join(execution_dir, "results.json")
-    if fs.is_file(results_path):
-        raw_results = read_versioned_json(results_path, fs=fs).get("results")
-        if isinstance(raw_results, dict):
-            results = raw_results
+    results = run.results(execution_id)
     return ExecutionOutputsResponse(
         executionId=execution_id,
         stdout=read_optional("stdout.log"),
@@ -633,7 +628,12 @@ def get_run_execution(
     execution_id: str,
     workspace=Depends(get_workspace),  # noqa: ANN001
 ) -> RunExecutionResponse:
-    """Return runtime workflow graph state from workflow.json."""
+    """Return one Execution's node journal.
+
+    The journal is owned by the workflow layer and read through
+    ``molab.workflow.read_journal``; ``status`` is the Execution record's
+    status. ``workflow`` is null while the attempt has no journal yet.
+    """
     experiment = _get_experiment(workspace, project_id, experiment_id)
     if not experiment:
         raise RunNotFoundError(project_id, experiment_id, run_id)
@@ -646,16 +646,10 @@ def get_run_execution(
         state = repo.get(execution_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    wf_file = workspace.fs.join(repo.execution_dir(execution_id), "workflow.json")
-    if not workspace.fs.is_file(wf_file):
-        return RunExecutionResponse(execution_id=execution_id, status=state.status.value)
-
-    data = read_versioned_json(wf_file, fs=workspace.fs)
-    workflow = data.get("workflow")
     return RunExecutionResponse(
         execution_id=execution_id,
         status=state.status.value,
-        workflow=workflow if isinstance(workflow, dict) else None,
+        workflow=read_journal(run, execution_id),
     )
 
 

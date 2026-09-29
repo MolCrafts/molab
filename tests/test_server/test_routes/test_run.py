@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import inspect
-import json
+import re
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import ClassVar, get_args
@@ -387,6 +387,32 @@ class TestGetExecutionOutputs:
             response = client.get(f"{_run_url(exp, run)}/executions/e99/outputs")
         assert response.status_code == 404
 
+    def test_reports_driver_results(self, served: ServedFactory, fresh_run: RunFixture) -> None:
+        ws, exp, run = fresh_run
+        with run.start() as ctx:
+            ctx.set_result("energy", -1.5)
+            ctx.set_result("converged", True)
+        with served(ws) as client:
+            response = client.get(f"{_run_url(exp, run)}/executions/e01/outputs")
+        assert response.status_code == 200, response.text
+        assert response.json()["results"] == {"energy": -1.5, "converged": True}
+
+    def test_results_empty_without_set_result(
+        self, served: ServedFactory, fresh_run: RunFixture
+    ) -> None:
+        ws, exp, run = fresh_run
+        run.execute(_build_wf())
+        with served(ws) as client:
+            response = client.get(f"{_run_url(exp, run)}/executions/e01/outputs")
+        assert response.status_code == 200, response.text
+        assert response.json()["results"] == {}
+
+    def test_reads_through_run_results(self) -> None:
+        source = inspect.getsource(run_routes.get_execution_outputs)
+        assert "run.results(" in source
+        assert "results.json" not in source
+        assert "read_versioned_json" not in inspect.getsource(run_routes)
+
     @pytest.mark.xfail(
         strict=True,
         raises=AssertionError,
@@ -476,22 +502,52 @@ class TestPromoteArtifact:
 class TestGetRunExecution:
     """``get_run_execution``: the per-node workflow journal of one attempt."""
 
-    @pytest.mark.xfail(
-        strict=True,
-        raises=AssertionError,
-        reason=(
-            "arch-own-03: GET …/executions/{id}/workflow — returns the node journal "
-            "the engine wrote for that attempt"
-        ),
-    )
     def test_returns_node_journal(self, served: ServedFactory, fresh_run: RunFixture) -> None:
-        ws, exp, run = fresh_run
-        run.execute(WorkflowCompiler().compile(_build_wf()))
+        ws, exp, _ = fresh_run
+        run = exp.add_run(params={"x": 3})
+        run.execute(_build_wf())
         with served(ws) as client:
             response = client.get(f"{_run_url(exp, run)}/executions/e01/workflow")
         assert response.status_code == 200, response.text
-        workflow = response.json()["workflow"]
-        assert isinstance(workflow, dict)
-        text = json.dumps(workflow)
-        assert "double" in text
-        assert "summarize" in text
+        body = response.json()
+        assert body["executionId"] == "e01"
+        assert body["status"] == "succeeded"
+        wf = body["workflow"]
+        assert isinstance(wf, dict)
+        assert wf["execution_id"] == "e01"
+        assert wf["workflow_name"] == "pipeline"
+        assert wf["based_on_execution_id"] is None
+        assert re.fullmatch(r"sha256:[0-9a-f]{64}", wf["workflow_digest"])
+        assert wf["workflow_digest"] == WorkflowCompiler().compile(_build_wf()).workflow_digest
+        assert {t["task_id"]: (t["status"], t["outputs"]) for t in wf["task_configs"]} == {
+            "double": ("completed", 6),
+            "summarize": ("completed", "got 6"),
+        }
+        assert "status" not in wf
+
+    def test_reports_based_on_of_rerun(self, served: ServedFactory, failed_run: RunFixture) -> None:
+        ws, exp, run = failed_run
+        run.execute(_build_wf(), rerun=True)
+        with served(ws) as client:
+            second = client.get(f"{_run_url(exp, run)}/executions/e02/workflow")
+            first = client.get(f"{_run_url(exp, run)}/executions/e01/workflow")
+        assert second.status_code == 200, second.text
+        assert second.json()["status"] == "succeeded"
+        assert second.json()["workflow"]["execution_id"] == "e02"
+        assert second.json()["workflow"]["based_on_execution_id"] == "e01"
+        assert first.status_code == 200, first.text
+        assert first.json()["status"] == "failed"
+        assert first.json()["workflow"] is None
+
+    def test_unknown_execution_is_404(self, served: ServedFactory, fresh_run: RunFixture) -> None:
+        ws, exp, run = fresh_run
+        run.execute(_build_wf())
+        with served(ws) as client:
+            response = client.get(f"{_run_url(exp, run)}/executions/e99/workflow")
+        assert response.status_code == 404
+
+    def test_reads_through_workflow_reader(self) -> None:
+        source = inspect.getsource(run_routes.get_run_execution)
+        assert "read_journal(" in source
+        assert "workflow.json" not in source
+        assert "read_versioned_json" not in source
