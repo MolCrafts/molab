@@ -21,7 +21,6 @@ import {
 } from "@/__fixtures__/api";
 import {
   buildEmptySnapshot,
-  mapAgentSessions,
   mapAssets,
   mapExperiments,
   mapProjects,
@@ -38,7 +37,6 @@ describe("buildEmptySnapshot", () => {
     expect(snap.runs).toEqual([]);
     expect(snap.assets).toEqual([]);
     expect(snap.workflows).toEqual([]);
-    expect(snap.agentSessions).toEqual([]);
     expect(snap.consoleEntries).toEqual([]);
     expect(snap.workspaceRoot).toBeNull();
   });
@@ -204,51 +202,5 @@ describe("mapWorkspaceTree", () => {
     expect(result.children[0].kind).toBe("directory");
     expect(result.children[1].kind).toBe("file");
     expect(mapWorkspaceTree("/ws", {}).children).toEqual([]);
-  });
-});
-
-describe("mapAgentSessions", () => {
-  const rawSession = {
-    taskId: "task-abc",
-    title: "Baseline experiment",
-    sessionId: "sess-abc",
-    status: "completed",
-    goal: "Run baseline experiment",
-    createdAt: "2026-03-01T10:00:00Z",
-    events: [
-      { type: "PlanCreated", ts: "2026-03-01T10:00:01Z", payload: {} },
-      { type: "SessionCompleted", ts: "2026-03-01T10:05:00Z", payload: {} },
-    ],
-  };
-
-  it("maps ids, goal, title, status, createdAt, and event count", () => {
-    const [result] = mapAgentSessions([rawSession]);
-    expect(result.id).toBe("task-abc");
-    expect(result.sessionId).toBe("sess-abc");
-    expect(result.goal).toBe("Run baseline experiment");
-    expect(result.title).toBe("Baseline experiment");
-    expect(result.status).toBe("completed");
-    expect(result.createdAt).toBe("2026-03-01T10:00:00Z");
-    expect(result.eventCount).toBe(2);
-  });
-
-  it("falls back to sessionId for id when taskId is absent", () => {
-    const { taskId: _drop, ...withoutTaskId } = rawSession;
-    // mapAgentSessions defensively falls back to sessionId when taskId is
-    // absent; AgentTaskResponse types taskId as required, so cast the
-    // deliberately-incomplete fixture to the param element type.
-    const [result] = mapAgentSessions([
-      withoutTaskId as Parameters<typeof mapAgentSessions>[0][number],
-    ]);
-    expect(result.id).toBe("sess-abc");
-    expect(result.sessionId).toBe("sess-abc");
-  });
-
-  it("defaults title to an empty string when absent", () => {
-    const { title: _drop, ...withoutTitle } = rawSession;
-    const [result] = mapAgentSessions([
-      withoutTitle as Parameters<typeof mapAgentSessions>[0][number],
-    ]);
-    expect(result.title).toBe("");
   });
 });

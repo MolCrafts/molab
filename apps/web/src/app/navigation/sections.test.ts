@@ -23,7 +23,6 @@ describe("navigation contributions", () => {
       "dashboard",
       "projects",
       "runs",
-      "agent",
       "knowledge",
       "asset",
       "workspace",
@@ -57,7 +56,6 @@ describe("navigation contributions", () => {
     );
     expect(getNavigationContribution("asset").emptySelection?.title).toBe("No asset selected");
     expect(getNavigationContribution("workspace").emptySelection?.title).toBe("No file selected");
-    expect(getNavigationContribution("agent").emptySelection?.title).toBe("No agent task selected");
   });
 
   it("matches canonical and compatibility paths", () => {

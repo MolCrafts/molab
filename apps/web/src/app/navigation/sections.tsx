@@ -154,7 +154,6 @@ const PRODUCT_ROUTE_FALLBACK: ReadonlyArray<{
     id: "compare",
     matches: (pathname) => pathname === "/compare" || pathname.startsWith("/compare/"),
   },
-  { id: "agent", matches: (pathname) => pathname.startsWith("/agent-tasks") },
   { id: "knowledge", matches: (pathname) => pathname.startsWith("/knowledge") },
   { id: "asset", matches: (pathname) => pathname.startsWith("/assets") },
   { id: "workspace", matches: (pathname) => pathname.startsWith("/workspace") },

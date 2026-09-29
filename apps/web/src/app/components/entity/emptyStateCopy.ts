@@ -25,8 +25,4 @@ export const EMPTY_COPY = {
   emptyFolder: {
     title: "Empty",
   },
-  agentSessions: {
-    title: "No tasks",
-    description: "Describe a goal below.",
-  },
 } as const;

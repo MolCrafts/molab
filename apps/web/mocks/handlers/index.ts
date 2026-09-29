@@ -4,8 +4,6 @@
 
 import { http, HttpResponse } from "msw";
 
-import { agentHandlers } from "./agent";
-import { agentAdminHandlers } from "./agent_admin";
 import { assetHandlers } from "./assets";
 import { authHandlers } from "./auth";
 import { catalogHandlers } from "./catalog";
@@ -34,8 +32,6 @@ const unsupportedMockApiHandler = http.all(/\/api\/.*/, ({ request }) =>
  */
 export const handlers = [
     ...authHandlers,
-    ...agentHandlers,
-    ...agentAdminHandlers,
     ...assetHandlers,
     ...catalogHandlers,
     ...executionHandlers,

@@ -1,5 +1,4 @@
 import {
-  Bot,
   Check,
   Copy,
   FileQuestion,
@@ -569,18 +568,6 @@ export const ExperimentViewer = ({
               <DropdownMenuItem onClick={() => setSweepOpen(true)}>
                 <Grid3x3 className="size-icon-sm" />
                 Sweep
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() =>
-                  setSelection({
-                    objectType: "agent",
-                    objectId: "new",
-                    scope: { projectId, experimentId },
-                  })
-                }
-              >
-                <Bot className="size-icon-sm" />
-                Agent
               </DropdownMenuItem>
               <DropdownMenuItem
                 onClick={() => {

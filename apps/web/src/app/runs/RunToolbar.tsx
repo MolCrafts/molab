@@ -1,4 +1,4 @@
-import { Ban, Bot, Copy, Download, MoreHorizontal, Play, Plus } from "lucide-react";
+import { Ban, Copy, Download, MoreHorizontal, Play, Plus } from "lucide-react";
 import { type JSX, useEffect, useMemo, useState } from "react";
 import { runsApi } from "@/api";
 import { ExecutionAttemptCreateRequest } from "@/api/generated/models/ExecutionAttemptCreateRequest";
@@ -19,7 +19,6 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
@@ -72,7 +71,6 @@ export interface RunToolbarProps {
   onRefresh: () => void;
   onCancel: () => Promise<void>;
   onDispatched?: (executionId: string) => void;
-  onOpenAgent: () => void;
 }
 
 export function RunToolbar({
@@ -81,7 +79,6 @@ export function RunToolbar({
   onRefresh,
   onCancel,
   onDispatched,
-  onOpenAgent,
 }: RunToolbarProps): JSX.Element {
   const { writeDeniedReason } = usePermissions();
   const selectedExecution = run.executionHistory.find(
@@ -272,10 +269,6 @@ export function RunToolbar({
           </DropdownMenuItem>
           <DropdownMenuItem onClick={() => void navigator.clipboard.writeText(run.id)}>
             <Copy className="size-icon-sm" /> Copy run ID
-          </DropdownMenuItem>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem onClick={onOpenAgent}>
-            <Bot className="size-icon-sm" /> Open agent
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

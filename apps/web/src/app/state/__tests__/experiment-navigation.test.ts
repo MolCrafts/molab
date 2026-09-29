@@ -31,7 +31,6 @@ const snapshot: WorkspaceSnapshot = {
       projectId: "p 1",
       parameterSpace: {},
       workflowSource: null,
-      planRunId: null,
     },
   ],
   runs: [],
@@ -47,7 +46,6 @@ const snapshot: WorkspaceSnapshot = {
       experimentId: "e/1",
     },
   ],
-  agentSessions: [],
   workspaceRoot: null,
   consoleEntries: [],
 };

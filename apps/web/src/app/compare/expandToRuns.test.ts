@@ -28,7 +28,6 @@ const experiment = (id: string, projectId: string, runCount: number): Experiment
   projectId,
   parameterSpace: {},
   workflowSource: null,
-  planRunId: null,
   runCount,
   workspaceKey: "lab-v3",
 });

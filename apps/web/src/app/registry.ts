@@ -157,10 +157,6 @@ export const renderPlanByObjectType: Record<SemanticObjectType, RenderPlan> = {
     center: [{ panelKind: "editor", contentType: "text", fileKind: "text" }],
     right: [{ panelKind: "inspector", contentType: "metadata", fileKind: "text" }],
   },
-  agent: {
-    center: [{ panelKind: "viewer", contentType: "metadata", fileKind: "json" }],
-    right: [{ panelKind: "inspector", contentType: "metadata", fileKind: "json" }],
-  },
   task: {
     center: [{ panelKind: "viewer", contentType: "metadata", fileKind: "json" }],
     right: [{ panelKind: "inspector", contentType: "metadata", fileKind: "json" }],

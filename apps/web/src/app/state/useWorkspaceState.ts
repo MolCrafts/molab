@@ -8,9 +8,7 @@ import {
   workspacesApi,
 } from "@/api";
 import {
-  agentApi,
   buildEmptySnapshot,
-  mapAgentSessions,
   mapAssets,
   mapExperiments,
   mapProjects,
@@ -59,12 +57,7 @@ export interface WorkspaceState {
 
 // Slice = an independently fetchable chunk of the snapshot.
 // Entity hierarchy (experiments / runs) is **not** a slice — it loads on expand.
-export type SnapshotSlice =
-  | "workspaces"
-  | "workspaceTree"
-  | "projectsList"
-  | "assets"
-  | "agentSessions";
+export type SnapshotSlice = "workspaces" | "workspaceTree" | "projectsList" | "assets";
 
 /**
  * Data the current rail view actually reads. First paint fetches only this;
@@ -76,8 +69,6 @@ export const slicesForView = (view: LeftPanelView | undefined): readonly Snapsho
       return ["workspaces", "workspaceTree"];
     case "asset":
       return ["workspaces", "projectsList"];
-    case "agent":
-      return ["workspaces", "agentSessions"];
     case "knowledge":
     case "runs":
     case "dashboard":
@@ -189,15 +180,6 @@ const fetchAllAssets = async (projects: ProjectSummary[]): Promise<WorkspaceSnap
   return Array.from(new Map(projectAssets.flat().map((item) => [item.id, item])).values());
 };
 
-const fetchAgentSessionsList = async (): Promise<WorkspaceSnapshot["agentSessions"]> => {
-  try {
-    return mapAgentSessions(await agentApi.listSessions());
-  } catch (err) {
-    console.warn("Agent sessions unavailable:", err);
-    return [];
-  }
-};
-
 const applySlicePatch = async (
   current: WorkspaceSnapshot,
   slice: SnapshotSlice,
@@ -211,8 +193,6 @@ const applySlicePatch = async (
       return { projects: await fetchProjectsList(current.workspaces) };
     case "assets":
       return { assets: await fetchAllAssets(activeWorkspaceProjects(current)) };
-    case "agentSessions":
-      return { agentSessions: await fetchAgentSessionsList() };
   }
 };
 
@@ -221,15 +201,11 @@ type SliceLoader = (
   slice: SnapshotSlice,
 ) => Promise<Partial<WorkspaceSnapshot>>;
 
-const INDEPENDENT_SLICES: readonly SnapshotSlice[] = [
-  "workspaces",
-  "workspaceTree",
-  "agentSessions",
-];
+const INDEPENDENT_SLICES: readonly SnapshotSlice[] = ["workspaces", "workspaceTree"];
 
 /**
- * Run snapshot slices by dependency level. Workspaces, file tree, and agent
- * sessions start together; projects wait for the workspace list; assets wait
+ * Run snapshot slices by dependency level. Workspaces and the file tree
+ * start together; projects wait for the workspace list; assets wait
  * for the resulting project list. Patches are merged in descriptor order so
  * network completion order cannot make the snapshot nondeterministic.
  */

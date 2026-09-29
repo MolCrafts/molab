@@ -8,7 +8,7 @@ import { prepareMarkdownMath } from "@/lib/markdown-math";
 import { cn } from "@/lib/utils";
 
 /**
- * Token-styled markdown body for agent prose (answers, summaries, plans).
+ * Token-styled markdown body (knowledge notes, READMEs, summaries).
  *
  * The project does not ship the Tailwind typography plugin, so every
  * element is styled explicitly through descendant selectors against the
@@ -74,7 +74,7 @@ export const MarkdownContent = ({
       components={{
         a: ({ children, href }) =>
           href?.startsWith("/") ? (
-            // Internal entity link (entity-linkify) — same-tab navigation.
+            // Internal entity link — same-tab navigation.
             <a href={href}>{children}</a>
           ) : (
             <a href={href} target="_blank" rel="noreferrer">

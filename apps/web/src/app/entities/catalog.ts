@@ -49,9 +49,6 @@ export const buildCatalog = (
   for (const a of snapshot.assets) {
     entries.push(entry({ kind: "asset", id: a.id, label: a.name, status: a.status }, a.summary));
   }
-  for (const s of snapshot.agentSessions) {
-    entries.push(entry({ kind: "agent", id: s.id, label: s.goal, status: s.status }));
-  }
   // Knowledge docs ride the same list (vision-loop-08): id = the doc's
   // bundle-relative path, which entityPath() maps to /knowledge/<path>.
   for (const doc of knowledgeDocs) {

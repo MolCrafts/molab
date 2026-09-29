@@ -229,7 +229,7 @@ export const GlobalCommandPalette = ({
             kind="error"
             density="compact"
             title="Knowledge entries unavailable"
-            detail={`${knowledgeError} Projects, experiments, runs, workflows, assets, and agents remain searchable.`}
+            detail={`${knowledgeError} Projects, experiments, runs, workflows, and assets remain searchable.`}
             action={<WorkbenchRetryAction onClick={() => void knowledgeQuery.refetch()} />}
           />
         )}

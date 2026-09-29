@@ -1,5 +1,4 @@
 import { Menu } from "lucide-react";
-import { ApprovalsBell } from "@/app/approvals/ApprovalsBell";
 import { UserMenu } from "@/app/auth";
 import { WorkbenchIconAction } from "@/components/workbench";
 
@@ -36,7 +35,6 @@ export const ContextBar = ({ onMenuClick }: ContextBarProps): JSX.Element => {
         </div>
 
         <div className="flex items-center justify-end gap-1">
-          <ApprovalsBell />
           <UserMenu />
         </div>
       </div>

@@ -81,9 +81,6 @@ export const entityPath = (ref: EntityRef, snapshot: WorkspaceSnapshot): string 
     case "asset":
       return `/assets/${enc(ref.id)}`;
 
-    case "agent":
-      return ref.id === "new" ? "/agent-tasks/new" : `/agent-tasks/${enc(ref.id)}`;
-
     case "knowledge":
       // id is a bundle-relative concept path (may contain "/"); bare id → browse.
       return ref.id ? `/knowledge/${ref.id.split("/").map(enc).join("/")}` : "/knowledge";
@@ -106,7 +103,6 @@ export const SECTION_PATH = {
   activity: "/activity",
   workflows: "/workflows",
   assets: "/assets",
-  agents: "/agent-tasks",
   knowledge: "/knowledge",
   settings: "/settings",
 } as const;

@@ -1,7 +1,5 @@
 import type { PluginAPI, PluginComponent } from "@molcrafts/molab-plugin";
 import {
-  AgentSessionInspectorLazy,
-  AgentViewerLazy,
   AssetViewerLazy,
   ExperimentViewerLazy,
   ImageViewerLazy,
@@ -59,7 +57,6 @@ export const registerDefaultRenderers = (api: PluginAPI): void => {
   editor("run", "json", "metadata", "viewer", "Run Overview", RunViewerLazy);
   editor("asset", "json", "metadata", "viewer", "Asset Overview", AssetViewerLazy);
   editor("workspace-file", "image", "image", "viewer", "Image Preview", ImageViewerLazy);
-  editor("agent", "json", "metadata", "viewer", "Agent Task", AgentViewerLazy);
   editor("task", "json", "metadata", "viewer", "Task Overview", TaskViewerLazy);
 
   inspector("project", "json", "metadata", "inspector", "Project Inspector", MetadataInspectorLazy);
@@ -73,14 +70,6 @@ export const registerDefaultRenderers = (api: PluginAPI): void => {
   );
   inspector("run", "json", "metadata", "inspector", "Run Inspector", MetadataInspectorLazy);
   inspector("asset", "json", "metadata", "inspector", "Asset Inspector", MetadataInspectorLazy);
-  inspector(
-    "agent",
-    "json",
-    "metadata",
-    "inspector",
-    "Agent Task Inspector",
-    AgentSessionInspectorLazy,
-  );
   inspector("task", "json", "metadata", "inspector", "Task Inspector", TaskViewerLazy);
 
   const workspaceFileKinds: readonly FileKind[] = [

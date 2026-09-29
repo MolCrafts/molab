@@ -3,8 +3,6 @@ export { catalogApi } from "@/api/catalog";
 export { experimentsApi } from "@/api/experiments";
 export type { EmbedRole, EmbedTargetKind, EntityCard } from "@/api/knowledge";
 export { knowledgeApi } from "@/api/knowledge";
-export { plansApi } from "@/api/plans";
-export { planTasksApi } from "@/api/planTasks";
 export { projectsApi, projectsWsApi } from "@/api/projects";
 export type { RunFilesResponse } from "@/api/runs";
 export { runsApi } from "@/api/runs";

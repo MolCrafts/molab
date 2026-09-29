@@ -10,7 +10,7 @@ interface MolplotRawChartProps {
 
 /**
  * React wrapper around molplot's ``RawChart`` — for callers that receive
- * arbitrary Vega-Lite specs (e.g. agent-emitted visualizations).
+ * arbitrary Vega-Lite specs (e.g. `*.mlp.vl.json` products).
  *
  * Spec updates flow through ``RawChart.update()`` only when the serialized
  * payload changes — parent re-renders with a new object identity must not

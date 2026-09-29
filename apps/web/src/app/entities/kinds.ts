@@ -10,7 +10,6 @@ import {
   Archive,
   Blocks,
   BookOpen,
-  Bot,
   Box,
   FileText,
   FlaskConical,
@@ -86,13 +85,6 @@ export const ENTITY_META: Record<EntityKind, EntityKindMeta> = {
     label: "Asset",
     plural: "Assets",
     icon: Archive,
-    iconClassName: "text-muted-foreground",
-  },
-  agent: {
-    kind: "agent",
-    label: "Agent Task",
-    plural: "Agent Tasks",
-    icon: Bot,
     iconClassName: "text-muted-foreground",
   },
   "workspace-file": {

@@ -5,8 +5,6 @@
 import type { CacheControlRequest } from '../models/CacheControlRequest';
 import type { CacheControlResponse } from '../models/CacheControlResponse';
 import type { CacheStatusResponse } from '../models/CacheStatusResponse';
-import type { CurateRequest } from '../models/CurateRequest';
-import type { CurateResponse } from '../models/CurateResponse';
 import type { DirectoryCreateRequest } from '../models/DirectoryCreateRequest';
 import type { FileContentResponse } from '../models/FileContentResponse';
 import type { FileContentUpdateRequest } from '../models/FileContentUpdateRequest';
@@ -24,35 +22,6 @@ import type { CancelablePromise } from '../core/CancelablePromise';
 import { OpenAPI } from '../core/OpenAPI';
 import { request as __request } from '../core/request';
 export class WorkspaceService {
-    /**
-     * Curate Workspace
-     * Gate + execute one deterministic destructive-curation op (single stack).
-     *
-     * Shares the ``run_curation_proposal`` backend with ``molab curate`` (Python ≡
-     * UI). ``approve=false`` (default) records the proposal and refuses; ``true``
-     * executes the mutation. Either way the §8 ``change_proposal`` artifact is the audit.
-     * @param requestBody
-     * @param molabSession
-     * @returns CurateResponse Successful Response
-     * @throws ApiError
-     */
-    public static curateWorkspace(
-        requestBody: CurateRequest,
-        molabSession?: (string | null),
-    ): CancelablePromise<CurateResponse> {
-        return __request(OpenAPI, {
-            method: 'POST',
-            url: '/api/workspace/curate',
-            cookies: {
-                'molab_session': molabSession,
-            },
-            body: requestBody,
-            mediaType: 'application/json',
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
     /**
      * Get Workspace Info
      * Get workspace information.

@@ -3,7 +3,6 @@ import {
   Activity,
   Archive,
   Blocks,
-  Bot,
   FolderTree,
   GitCompare,
   LayoutDashboard,
@@ -42,9 +41,6 @@ const DashboardExplorer = lazyWithPrefetch(() =>
 );
 const AssetsExplorer = lazyWithPrefetch(() =>
   import("@/app/assets/AssetsExplorer").then((module) => ({ default: module.AssetsExplorer })),
-);
-const AgentExplorer = lazyWithPrefetch(() =>
-  import("@/app/agent/AgentExplorer").then((module) => ({ default: module.AgentExplorer })),
 );
 const FilesExplorer = lazyWithPrefetch(() =>
   import("@/app/files/FilesExplorer").then((module) => ({ default: module.FilesExplorer })),
@@ -128,24 +124,6 @@ export const CORE_NAVIGATION: readonly NavigationContribution[] = [
     landing: ComparePane,
     retainSelectionFor: [],
     matches: (pathname) => pathname === "/compare" || pathname.startsWith("/compare/"),
-  },
-  {
-    id: "agent",
-    label: "Agent",
-    explorerTitle: "Agent tasks",
-    breadcrumbLabel: "Agent",
-    icon: Bot,
-    route: "/agent-tasks",
-    placement: "primary",
-    order: 40,
-    shellMode: "explorer",
-    explorer: AgentExplorer,
-    emptySelection: {
-      title: "No agent task selected",
-      description: "Select an agent task from the explorer, or start a new one.",
-    },
-    retainSelectionFor: ["agent"],
-    matches: (pathname) => pathname.startsWith("/agent-tasks"),
   },
   {
     id: "asset",

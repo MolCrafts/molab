@@ -193,17 +193,6 @@ export const RunViewer = (props: RunRendererProps): JSX.Element => {
                 setSelectedExecutionId(executionId);
                 setActiveTab("executions");
               }}
-              onOpenAgent={() =>
-                setSelection({
-                  objectType: "agent",
-                  objectId: "new",
-                  scope: {
-                    projectId: run.projectId,
-                    experimentId: run.experimentId,
-                    runId: run.id,
-                  },
-                })
-              }
             />
           </>
         }

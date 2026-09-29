@@ -42,7 +42,6 @@ const emptySnapshot = {
   runs: [],
   assets: [],
   workflows: [],
-  agentSessions: [],
   workspaceRoot: null,
   consoleEntries: [],
   workspaces: [],
@@ -178,7 +177,6 @@ describe("resolveRenderer", () => {
       ],
       assets: [],
       workflows: [],
-      agentSessions: [],
       workspaceRoot: null,
       consoleEntries: [],
       workspaces: [],
@@ -217,7 +215,6 @@ describe("renderPlanByObjectType", () => {
     "asset",
     "workflow",
     "workspace-file",
-    "agent",
     "task",
     "knowledge",
   ] as const;

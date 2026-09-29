@@ -6,7 +6,6 @@ import { AppShell } from "@/app/layout/AppShell";
 import { ErrorBoundary } from "@/app/layout/ErrorBoundary";
 import { RouteProfiler } from "@/app/layout/RouteProfiler";
 import { prefetchPrimaryNavigationOnIdle } from "@/app/navigation/prefetch";
-import { OAuthCallbackPage } from "@/app/oauth/OAuthCallbackPage";
 import { prefetchRenderer } from "@/app/renderers/lazyRenderers";
 import { useWorkspaceRuns } from "@/app/runs/useWorkspaceRuns";
 import {
@@ -32,8 +31,7 @@ const buildDefaultInspectorTarget = (selection: Selection | null): InspectorTarg
 };
 
 // Workspace-backed app tree. Kept as a separate component so its hooks only
-// mount on non-OAuth routes — App's early return for /oauth-callback must not
-// skip hooks within the same component (Rules of Hooks).
+// mount on non-login routes.
 const WorkspaceApp = ({ pathname }: { pathname: string }): JSX.Element => {
   const activeView = getLeftPanelViewFromPath(pathname);
   const {
@@ -184,12 +182,6 @@ const WorkspaceApp = ({ pathname }: { pathname: string }): JSX.Element => {
 
 const App = (): JSX.Element => {
   const location = useLocation();
-  // OAuth popup target — bypass workspace boot so the page can postMessage
-  // its code/state back to the opener without spinning up the whole app.
-  if (location.pathname === "/oauth-callback") {
-    return <OAuthCallbackPage />;
-  }
-
   const content = (
     <AuthProvider>
       {location.pathname === "/login" ? (

@@ -31,7 +31,7 @@ export interface TreeNodeAction {
 export interface TreeNode {
   id: string;
   label: string;
-  /** Hover tooltip; defaults to `label` (e.g. an agent task's full goal). */
+  /** Hover tooltip; defaults to `label` (e.g. a long name that the row truncates). */
   hoverTitle?: string;
   labelClassName?: string;
   icon?: ComponentType<{ className?: string }>;

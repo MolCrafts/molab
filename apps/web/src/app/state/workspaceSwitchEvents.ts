@@ -1,5 +1,5 @@
 /**
- * Workspace-switch event emitter — mirrors mcpEvents.ts.
+ * Workspace-switch event emitter.
  *
  * On a workspace switch, any module that holds a long-lived
  * workspace-bound resource (open EventSource, file watcher, etc.) should

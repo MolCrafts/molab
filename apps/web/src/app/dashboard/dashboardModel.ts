@@ -1,5 +1,3 @@
-import type { PendingApprovalItem } from "@/api/generated/models/PendingApprovalItem";
-import { pendingApprovalPath, pendingApprovalTitle } from "@/app/approvals/presentation";
 import { experimentPath, projectPath, runPath } from "@/app/entities/paths";
 import { runActivityAt, runPresentationStatus } from "@/app/runs/projections";
 import { groupForStatus } from "@/app/runs/statusGroups";
@@ -12,11 +10,11 @@ const MAX_RECENT_ITEMS = 5;
 
 export interface DashboardAttentionItem {
   id: string;
-  kind: "approval" | "data" | "failed-run" | "workspace";
+  kind: "data" | "failed-run" | "workspace";
   title: string;
   detail: string;
   href?: string;
-  retry?: "approvals" | "runs";
+  retry?: "runs";
   actionLabel: string;
   tone: "critical" | "warning";
 }
@@ -28,7 +26,7 @@ export interface DashboardAttentionOverflow {
 
 export interface DashboardRecentItem {
   id: string;
-  type: "Agent task" | "Project" | "Experiment" | "Run";
+  type: "Project" | "Experiment" | "Run";
   title: string;
   detail: string;
   href: string;
@@ -60,8 +58,6 @@ export const buildDashboardModel = (
   snapshot: WorkspaceSnapshot,
   runs: WorkspaceRunRow[],
   options: {
-    approvalsError?: string | null;
-    pendingApprovals?: PendingApprovalItem[];
     runsError?: string | null;
     truncated?: boolean;
   } = {},
@@ -98,22 +94,6 @@ export const buildDashboardModel = (
     );
   }
 
-  if (options.approvalsError) {
-    addAttention(
-      {
-        id: "approvals-unavailable",
-        kind: "data",
-        title: "Approvals are unavailable",
-        detail: options.approvalsError,
-        retry: "approvals",
-        actionLabel: "Retry",
-        tone: "critical",
-      },
-      490,
-      "/agent-tasks",
-    );
-  }
-
   for (const workspace of snapshot.workspaces) {
     if (!workspace.unreachable && !workspace.needsAuth) continue;
     addAttention(
@@ -132,23 +112,6 @@ export const buildDashboardModel = (
       },
       450,
       "/settings",
-    );
-  }
-
-  for (const approval of options.pendingApprovals ?? []) {
-    addAttention(
-      {
-        id: `approval-${approval.taskId}-${approval.requestId}`,
-        kind: "approval",
-        title: pendingApprovalTitle(approval),
-        detail: `${approval.projectId}/${approval.experimentId} · waiting for your decision`,
-        href: pendingApprovalPath(approval),
-        actionLabel: "Review",
-        tone: "warning",
-      },
-      400,
-      "/agent-tasks",
-      timestampValue(approval.requestedAt),
     );
   }
 
@@ -230,14 +193,6 @@ export const buildDashboardModel = (
         "Experiment",
       href: experimentPath(experiment.projectId, experiment.id),
       timestamp: experiment.updatedAt,
-    })),
-    ...snapshot.agentSessions.map((session) => ({
-      id: `agent-${session.id}`,
-      type: "Agent task" as const,
-      title: session.title,
-      detail: session.status.replace(/_/g, " "),
-      href: `/agent-tasks/${encodeURIComponent(session.id)}`,
-      timestamp: session.createdAt,
     })),
     ...runs
       .filter((run) => {

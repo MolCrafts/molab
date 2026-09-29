@@ -17,7 +17,7 @@ const deferred = <T>(): Deferred<T> => {
 };
 
 describe("slicesForView", () => {
-  it("does not fetch the file tree or agent sessions on knowledge", () => {
+  it("does not fetch the file tree on knowledge", () => {
     expect(slicesForView("knowledge")).toEqual(["workspaces"]);
   });
 
@@ -30,10 +30,6 @@ describe("slicesForView", () => {
     expect(slicesForView("compare")).toEqual(["workspaces", "projectsList"]);
   });
 
-  it("loads agent sessions only on Agent", () => {
-    expect(slicesForView("agent")).toEqual(["workspaces", "agentSessions"]);
-  });
-
   it("keeps dashboard off the file tree", () => {
     expect(slicesForView("dashboard")).toEqual(["workspaces"]);
   });
@@ -44,7 +40,6 @@ describe("workspace bootstrap slice plan", () => {
     const gates = new Map<SnapshotSlice, Deferred<Partial<WorkspaceSnapshot>>>([
       ["workspaces", deferred()],
       ["workspaceTree", deferred()],
-      ["agentSessions", deferred()],
       ["projectsList", deferred()],
     ]);
     const starts: SnapshotSlice[] = [];
@@ -63,7 +58,7 @@ describe("workspace bootstrap slice plan", () => {
 
     const resultPromise = fetchSlices(
       buildEmptySnapshot(),
-      ["workspaces", "projectsList", "agentSessions", "workspaceTree"],
+      ["workspaces", "projectsList", "workspaceTree"],
       undefined,
       async (snapshot, slice) => {
         starts.push(slice);
@@ -75,11 +70,10 @@ describe("workspace bootstrap slice plan", () => {
       },
     );
 
-    expect(starts).toEqual(["workspaces", "workspaceTree", "agentSessions"]);
+    expect(starts).toEqual(["workspaces", "workspaceTree"]);
 
     gates.get("workspaces")?.resolve({ workspaces: [workspace] });
     gates.get("workspaceTree")?.resolve({ workspaceRoot: null });
-    gates.get("agentSessions")?.resolve({ agentSessions: [] });
     await projectsStarted.promise;
 
     expect(starts).toContain("projectsList");

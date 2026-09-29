@@ -2,7 +2,7 @@
  * Cross-feature fixtures for `npm run dev:web` (leaf `npm run dev`).
  *
  * Domain handlers own entity CRUD. This file fills the small read models that
- * span domains (knowledge, plans, approvals, cache and workspaces),
+ * span domains (knowledge, cache and workspaces),
  * so every navigation destination can be exercised without a Python server.
  */
 
@@ -58,8 +58,6 @@ const notes = new Map<string, ShowcaseNote>(
   ].map((note) => [note.relPath, note]),
 );
 
-let approvalOpen = true;
-
 const noteSummary = (note: ShowcaseNote) => ({
   name: note.name,
   relPath: note.relPath,
@@ -68,15 +66,6 @@ const noteSummary = (note: ShowcaseNote) => ({
   tags: note.tags,
 });
 
-const planSummary = {
-  runId: "plan-run-001",
-  projectId: "protein-folding",
-  experimentId: "exp-001",
-  title: "Protein folding precision sweep",
-  status: "waiting_approval",
-  hasWorkflow: true,
-  createdAt: "2025-01-15T09:10:00.000Z",
-};
 
 export const featureShowcaseHandlers = [
   http.get("/api/workspaces", () =>
@@ -208,89 +197,4 @@ export const featureShowcaseHandlers = [
       role: body.role ?? "references",
     });
   }),
-
-  http.get("/api/plans", () => HttpResponse.json({ plans: [planSummary], total: 1 })),
-  http.get("/api/projects/:projectId/experiments/:experimentId/plans", () =>
-    HttpResponse.json({
-      plans: [
-        {
-          runId: planSummary.runId,
-          title: planSummary.title,
-          status: planSummary.status,
-          hasWorkflow: planSummary.hasWorkflow,
-          createdAt: planSummary.createdAt,
-        },
-      ],
-      total: 1,
-    }),
-  ),
-
-  http.get("/api/approvals", () => {
-    const items = approvalOpen
-      ? [
-          {
-            taskKind: "plan",
-            taskId: "plan-task-001",
-            requestId: "approval-001",
-            projectId: "protein-folding",
-            experimentId: "exp-001",
-            runId: "plan-run-001",
-            intent: "Create and launch the bf16 precision sweep",
-            reason: "The plan will materialize a new workflow and submit GPU jobs.",
-            preview: "4 runs · learning_rate × precision · dardel-gpu",
-            requestedAt: "2025-01-15T11:58:00.000Z",
-            scope: "experiment",
-            packId: "review-pack-001",
-            metadata: { risk: "medium", estimated_gpu_hours: 12 },
-          },
-        ]
-      : [];
-    return HttpResponse.json({ items, total: items.length });
-  }),
-
-  http.post("/api/approvals/:taskKind/:taskId/decisions", ({ params }) => {
-    approvalOpen = false;
-    return HttpResponse.json({
-      taskKind: params.taskKind,
-      taskId: params.taskId,
-      status: "approved",
-    });
-  }),
-
-  http.post(
-    "/api/projects/:projectId/experiments/:experimentId/curate-tasks",
-    async ({ params, request }) => {
-      const body = (await request.json()) as { request?: string; model?: string };
-      return HttpResponse.json({
-        taskId: "curate-showcase-001",
-        projectId: params.projectId,
-        experimentId: params.experimentId,
-        runId: "curate-run-001",
-        status: "waiting_approval",
-        model: body.model ?? "gpt-5",
-        requestPreview: body.request ?? "Reorganize experiment outputs",
-        createdAt: new Date().toISOString(),
-        capabilityId: "workspace.reorganize",
-        granted: null,
-      });
-    },
-  ),
-
-  http.get(
-    "/api/projects/:projectId/experiments/:experimentId/curate-tasks/:taskId",
-    ({ params }) =>
-      HttpResponse.json({
-        taskId: params.taskId,
-        projectId: params.projectId,
-        experimentId: params.experimentId,
-        runId: "curate-run-001",
-        status: approvalOpen ? "waiting_approval" : "completed",
-        model: "gpt-5",
-        requestPreview: "Reorganize experiment outputs",
-        createdAt: new Date().toISOString(),
-        capabilityId: "workspace.reorganize",
-        granted: !approvalOpen,
-        mutationSummary: approvalOpen ? null : "Moved 3 artifacts into a curated output set.",
-      }),
-  ),
 ];

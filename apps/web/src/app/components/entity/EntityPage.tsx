@@ -82,8 +82,8 @@ export const KeyValueGrid = ({ items }: KeyValueGridProps): JSX.Element => {
 // One template every entity viewer renders into. Owns the outer flex column,
 // the header chrome (via :class:`EntityHeader`), and the tab bar + tab content
 // pattern. Viewers only supply the data: header props, tab list, optional
-// post-tab body. This is what keeps Workflow / Run / Asset / Project / Agent
-// settings looking identical regardless of which tab is active.
+// post-tab body. This is what keeps Workflow / Run / Asset / Project
+// pages looking identical regardless of which tab is active.
 
 export interface EntityPageTab {
   value: string;

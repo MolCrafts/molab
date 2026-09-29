@@ -1,5 +1,4 @@
 import { describe, expect, it } from "@rstest/core";
-import { PendingApprovalItem } from "@/api/generated/models/PendingApprovalItem";
 import { buildDashboardModel } from "@/app/dashboard/dashboardModel";
 import type { WorkspaceRunRow } from "@/app/runs/types";
 import type { WorkspaceSnapshot } from "@/app/types";
@@ -11,7 +10,6 @@ const snapshot: WorkspaceSnapshot = {
   runs: [],
   assets: [],
   workflows: [],
-  agentSessions: [],
   workspaceRoot: null,
   consoleEntries: [],
 };
@@ -54,18 +52,6 @@ const run = (id: string, status: string, createdAt: string): WorkspaceRunRow => 
       backendMetadata: {},
     },
   ],
-});
-
-const approval = (requestId: string, requestedAt: string): PendingApprovalItem => ({
-  experimentId: "experiment",
-  intent: "approve_experiment_plan",
-  projectId: "project",
-  reason: "Review the generated plan.",
-  requestId,
-  requestedAt,
-  runId: "",
-  taskId: `task-${requestId}`,
-  taskKind: PendingApprovalItem.taskKind.PLAN,
 });
 
 describe("buildDashboardModel", () => {
@@ -120,38 +106,6 @@ describe("buildDashboardModel", () => {
     });
   });
 
-  it("ranks blocking approvals ahead of completeness warnings and failed runs", () => {
-    const model = buildDashboardModel(snapshot, [run("failed", "failed", "2026-08-30T11:00:00Z")], {
-      pendingApprovals: [approval("one", "2026-08-30T10:00:00Z")],
-      truncated: true,
-    });
-
-    expect(model.attention.map((item) => item.id)).toEqual([
-      "approval-task-one-one",
-      "runs-truncated",
-      "failed-run-failed",
-    ]);
-    expect(model.attention[0]).toMatchObject({
-      actionLabel: "Review",
-      href: "/agent-tasks/task-one",
-      kind: "approval",
-      tone: "warning",
-    });
-  });
-
-  it("sorts approvals by request time within their priority", () => {
-    const model = buildDashboardModel(snapshot, [], {
-      pendingApprovals: [
-        approval("older", "2026-08-30T09:00:00Z"),
-        approval("newer", "2026-08-30T11:00:00Z"),
-      ],
-    });
-    expect(model.attention.map((item) => item.id)).toEqual([
-      "approval-task-newer-newer",
-      "approval-task-older-older",
-    ]);
-  });
-
   it("links overflow only when hidden items share one destination", () => {
     const failedOnly = buildDashboardModel(
       snapshot,
@@ -162,41 +116,21 @@ describe("buildDashboardModel", () => {
     expect(failedOnly.attentionOverflow).toEqual({ label: "View 1 more", href: "/runs" });
 
     const mixed = buildDashboardModel(
-      snapshot,
+      {
+        ...snapshot,
+        workspaces: Array.from({ length: 6 }, (_, index) => ({
+          key: `remote-${index}`,
+          label: `Remote ${index}`,
+          isRemote: true,
+          path: null,
+          active: false,
+          unreachable: true,
+        })),
+      },
       Array.from({ length: 2 }, (_, index) =>
         run(`failed-${index}`, "failed", `2026-08-30T0${index}:00:00Z`),
       ),
-      {
-        pendingApprovals: Array.from({ length: 6 }, (_, index) =>
-          approval(`approval-${index}`, `2026-08-30T0${index}:30:00Z`),
-        ),
-      },
     );
     expect(mixed.attentionOverflow).toEqual({ label: "View 3 more", href: null });
-  });
-
-  it("includes agent tasks in continue work", () => {
-    const model = buildDashboardModel(
-      {
-        ...snapshot,
-        agentSessions: [
-          {
-            id: "agent-1",
-            sessionId: "session-1",
-            title: "Review convergence",
-            goal: "Review convergence",
-            status: "waiting_for_review",
-            createdAt: "2026-08-30T12:00:00Z",
-            eventCount: 3,
-          },
-        ],
-      },
-      [],
-    );
-    expect(model.recentItems[0]).toMatchObject({
-      id: "agent-agent-1",
-      type: "Agent task",
-      href: "/agent-tasks/agent-1",
-    });
   });
 });

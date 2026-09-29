@@ -17,7 +17,6 @@ describe("navigation contribution boundary", () => {
     expect(sections).toContain("emptySelection");
     expect(coreNav).toContain("explorer: RunsExplorer");
     expect(coreNav).toContain("explorer: AssetsExplorer");
-    expect(coreNav).toContain("explorer: AgentExplorer");
     expect(coreNav).toContain("explorer: FilesExplorer");
     expect(coreNav).toContain("explorer: ProjectsExplorer");
     expect(coreNav).toContain("explorer: ActivityExplorer");
@@ -65,17 +64,12 @@ describe("navigation contribution boundary", () => {
     expect(explorer).toContain("NavigationExplorerProps");
   });
 
-  it("removes Assets and Agent domain logic from LeftPanel", () => {
+  it("removes Assets domain logic from LeftPanel", () => {
     const leftPanel = readAppSource("panels/LeftPanel.tsx");
     const assets = readAppSource("assets/AssetsExplorer.tsx");
-    const agent = readAppSource("agent/AgentExplorer.tsx");
 
     expect(leftPanel).not.toContain("buildAssetNodes");
-    expect(leftPanel).not.toContain("buildAgentNodes");
-    expect(leftPanel).not.toContain("handleDeleteAgentTask");
     expect(assets).toContain("buildAssetExplorerNodes");
-    expect(agent).toContain("buildAgentExplorerNodes");
-    expect(agent).toContain("agentApi.deleteSession");
   });
 
   it("moves Files tree and filesystem commands out of LeftPanel", () => {
@@ -117,7 +111,6 @@ describe("navigation contribution boundary", () => {
     expect(centerPanel).not.toContain("leftPanelView ===");
     expect(centerPanel).not.toContain("DashboardPage");
     expect(centerPanel).not.toContain("RunsPage");
-    expect(centerPanel).not.toContain("No agent task selected");
     expect(centerPanel).not.toContain("No document selected");
     expect(appShell).not.toContain('from "@/app/runs/inspector/RunInspector"');
     expect(appShell).toContain("InspectorSurfaceRegistration");

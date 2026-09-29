@@ -1,5 +1,4 @@
 import type {
-  AgentSessionSummary,
   AssetSummary,
   ExperimentSummary,
   ProjectSummary,
@@ -29,10 +28,6 @@ const findRun = (snapshot: RendererSnapshot, id: string): RunSummary | null => {
 
 const findAsset = (snapshot: RendererSnapshot, id: string): AssetSummary | null => {
   return snapshot.assets.find((asset) => asset.id === id) ?? null;
-};
-
-const findAgentSession = (snapshot: RendererSnapshot, id: string): AgentSessionSummary | null => {
-  return snapshot.agentSessions.find((s) => s.id === id) ?? null;
 };
 
 const findWorkflow = (snapshot: RendererSnapshot, id: string): WorkflowSummary | null => {
@@ -92,9 +87,6 @@ export const buildMetadataFields = (
       ) {
         fields.push({ label: "Workflow file", value: experiment.workflowFile });
       }
-      if (experiment.planRunId) {
-        fields.push({ label: "Plan run ID", value: experiment.planRunId });
-      }
       fields.push({ label: "Project ID", value: experiment.projectId });
       return fields;
     },
@@ -153,19 +145,6 @@ export const buildMetadataFields = (
         { label: "Status", value: workflow.status },
         { label: "Summary", value: workflow.summary },
         { label: "Updated", value: workflow.updatedAt },
-      ];
-    },
-    agent: () => {
-      const session = findAgentSession(snapshot, selection.objectId);
-      if (!session) {
-        return emptyFields("agent", selection.objectId);
-      }
-      return [
-        { label: "Task", value: session.id },
-        { label: "Status", value: session.status },
-        { label: "Goal", value: session.goal },
-        { label: "Events", value: String(session.eventCount) },
-        { label: "Created", value: session.createdAt },
       ];
     },
     "workspace-file": () => {

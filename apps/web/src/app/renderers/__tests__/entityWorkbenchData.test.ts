@@ -36,7 +36,6 @@ const experiment = (
   projectId: project.id,
   parameterSpace,
   workflowSource: null,
-  planRunId: null,
 });
 
 const run = (
@@ -106,7 +105,6 @@ const snapshot: WorkspaceSnapshot = {
     },
   ],
   workflows: [workflow],
-  agentSessions: [],
   workspaceRoot: null,
   consoleEntries: [],
 };

@@ -10,7 +10,6 @@ export type SemanticObjectType =
   | "asset"
   | "workflow"
   | "workspace-file"
-  | "agent"
   | "task"
   | "knowledge";
 
@@ -49,14 +48,12 @@ import type { RunCreateRequest } from "../api/generated/models/RunCreateRequest"
 
 export type { ExperimentCreateRequest, ProjectCreateRequest, RunCreateRequest };
 
-import type { AgentTaskResponse } from "../api/generated/models/AgentTaskResponse";
 import type { ExecutionOutputsResponse } from "../api/generated/models/ExecutionOutputsResponse";
 import type { ExperimentResponse } from "../api/generated/models/ExperimentResponse";
 import type { ProjectResponse } from "../api/generated/models/ProjectResponse";
 import type { RunResponse } from "../api/generated/models/RunResponse";
 import type { RunStatusSummaryResponse } from "../api/generated/models/RunStatusSummaryResponse";
 import type { RunSummary as ApiRunSummaryModel } from "../api/generated/models/RunSummary";
-import type { SessionEventResponse } from "../api/generated/models/SessionEventResponse";
 import type { WorkflowSnapshotResponse } from "../api/generated/models/WorkflowSnapshotResponse";
 
 // Re-export as Api*Response for compatibility
@@ -108,16 +105,6 @@ export interface ApiAssetResponse {
 }
 export type ApiWorkflowSnapshot = WorkflowSnapshotResponse;
 export type ApiRunSummary = ApiRunSummaryModel;
-// AgentTaskResponse is the user-facing task envelope around one runtime
-// session. It already carries taskId/title/updatedAt/sessionId so legacy
-// consumers that expected ``ApiAgentSession`` see the same shape.
-export type ApiAgentSession = AgentTaskResponse;
-// The wire shape is {type, ts, payload}; `type` now carries the snake_case
-// AgentEvent `kind` (the server snapshot sets type=kind, and live SSE frames
-// are normalized by normalizeStreamFrame). Deliberately NOT repointed to the
-// generated AgentEvent union — that would cascade into the server's
-// PascalCase-keyed review-sync logic.
-export type ApiSessionEvent = SessionEventResponse;
 
 /**
  * Known asset kinds emitted by the unified catalog. The list is open — the
@@ -163,8 +150,6 @@ export interface ExperimentSummary {
   projectId: string;
   parameterSpace: Record<string, unknown>;
   workflowSource: string | null;
-  /** The plan run that generated this experiment's workflow (vision-loop-10). */
-  planRunId: string | null;
   /** Server-reported count when list is shallow (runs not loaded yet). */
   runCount?: number | null;
   /** Served-workspace key, stamped at expand time. */
@@ -239,17 +224,6 @@ export interface WorkflowSummary {
   graph?: TaskGraphJson;
 }
 
-export interface AgentSessionSummary {
-  id: string;
-  sessionId: string;
-  /** Server-side task title (curated for plan tasks, goal-derived otherwise). */
-  title: string;
-  goal: string;
-  status: SemanticStatus;
-  createdAt: string;
-  eventCount: number;
-}
-
 export interface WorkspaceTreeNode {
   id: string;
   name: string;
@@ -305,7 +279,6 @@ export interface WorkspaceSnapshot {
   runs: RunSummary[];
   assets: AssetSummary[];
   workflows: WorkflowSummary[];
-  agentSessions: AgentSessionSummary[];
   workspaceRoot: WorkspaceTreeNode | null;
   consoleEntries: ConsoleEntry[];
 }
@@ -342,21 +315,6 @@ export interface WorkspaceFileSelection {
   hasPreviewSidecar?: boolean;
 }
 
-/** Mount scope for a new agent chat (vision-loop-11): the entity whose state
- * is injected as the session's context block. Project is the shallowest legal
- * scope; deeper ids require their parents. */
-export interface AgentMountScope {
-  projectId: string;
-  experimentId?: string;
-  runId?: string;
-}
-
-export interface AgentSelection {
-  objectType: "agent";
-  objectId: string; // task_id, or "new" for the goal-input state
-  scope?: AgentMountScope; // only meaningful when objectId === "new"
-}
-
 export interface TaskSelection {
   objectType: "task";
   taskId: string; // workflow-graph node id
@@ -373,7 +331,6 @@ export type Selection =
   | ObjectSelection
   | WorkflowSelection
   | WorkspaceFileSelection
-  | AgentSelection
   | TaskSelection
   | KnowledgeSelection;
 
@@ -403,7 +360,7 @@ export interface RendererKey {
  */
 export type RendererSnapshot = Pick<
   WorkspaceSnapshot,
-  "projects" | "experiments" | "runs" | "assets" | "workflows" | "agentSessions" | "workspaces"
+  "projects" | "experiments" | "runs" | "assets" | "workflows" | "workspaces"
 >;
 
 export interface RendererProps {

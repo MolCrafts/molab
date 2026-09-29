@@ -10,7 +10,6 @@
 import { entityPath } from "@/app/entities/paths";
 import { getNavigationContribution } from "@/app/navigation/sections";
 import type { BreadcrumbItem, LeftPanelView, Selection, WorkspaceSnapshot } from "@/app/types";
-import { agentTaskDisplayTitle } from "@/lib/agent-task-title";
 
 const crumb = (label: string, to?: string): BreadcrumbItem => (to ? { label, to } : { label });
 
@@ -76,14 +75,6 @@ export const buildTrail = (
     case "asset": {
       const asset = snapshot.assets.find((a) => a.id === selection.objectId);
       return [root, crumb(asset?.name ?? selection.objectId)];
-    }
-    case "agent": {
-      if (selection.objectId === "new") return [root, crumb("New Task")];
-      if (selection.objectId === "settings") return [root, crumb("Settings")];
-      const session = snapshot.agentSessions.find((s) => s.id === selection.objectId);
-      // Markdown-stripped short title — goals are free-form drafts and would
-      // otherwise leak "# …" markers into the trail.
-      return [root, crumb(session ? agentTaskDisplayTitle(session, 60) : selection.objectId)];
     }
     case "knowledge": {
       if (!selection.objectId) return [crumb(root.label)];

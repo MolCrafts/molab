@@ -2,7 +2,7 @@
  * Code-split a centre renderer behind its own chunk.
  *
  * The renderer registry wants a plain `ComponentType<RendererProps>`, but the
- * heavy viewers (the agent stack, the flowgram canvas, Monaco) should not be in
+ * heavy viewers (the flowgram canvas, Monaco) should not be in
  * the entry bundle — most sessions never open them. This wraps `React.lazy` so
  * a registration keeps its eager-looking shape while the module is fetched on
  * first render, with the workbench's standard loading surface in between.

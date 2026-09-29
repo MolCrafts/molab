@@ -16,19 +16,11 @@ export const AssetViewerLazy = lazyWithPrefetch(() =>
 export const ImageViewerLazy = lazyWithPrefetch(() =>
   import("./ImageViewer").then((module) => ({ default: module.ImageViewer })),
 );
-export const AgentViewerLazy = lazyWithPrefetch(() =>
-  import("./AgentViewer").then((module) => ({ default: module.AgentViewer })),
-);
 export const TaskViewerLazy = lazyWithPrefetch(() =>
   import("./TaskViewer").then((module) => ({ default: module.TaskViewer })),
 );
 export const MetadataInspectorLazy = lazyWithPrefetch(() =>
   import("./MetadataInspector").then((module) => ({ default: module.MetadataInspector })),
-);
-export const AgentSessionInspectorLazy = lazyWithPrefetch(() =>
-  import("./AgentSessionInspector").then((module) => ({
-    default: module.AgentSessionInspector,
-  })),
 );
 
 const RENDERER_BY_TYPE: Partial<Record<SemanticObjectType, { prefetch: () => unknown }>> = {
@@ -36,7 +28,6 @@ const RENDERER_BY_TYPE: Partial<Record<SemanticObjectType, { prefetch: () => unk
   experiment: ExperimentViewerLazy,
   run: RunViewerLazy,
   asset: AssetViewerLazy,
-  agent: AgentViewerLazy,
   task: TaskViewerLazy,
 };
 
