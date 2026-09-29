@@ -29,6 +29,11 @@ only the harness used: the ``set_workflow_recoverer`` seam, the Folder
 ``WorkspacePlugin``), ``workspace.curation``, the server shutdown flag,
 ``PLAN_BOOK_NAME`` and ``molab mcp``. ``MolqJobs`` is a substring of the live
 ``MolqJobsResponse``, so it is asserted by attribute, not by the substring scan.
+
+arch-own-02h extends it with the run-level provenance it removed
+(``Run.update_provenance``, ``snapshot_sources`` and the ``RunMetadata``
+fields passed as kwargs), backfills 02f's fresh-marker names, and asserts that
+no ``arch-own-02`` xfail is left in ``tests/``.
 """
 
 from __future__ import annotations
@@ -130,6 +135,18 @@ DELETED_SYMBOLS = [
     "reset_shutdown_flag",
     "PLAN_BOOK_NAME",
     "mcp_config",
+    # arch-own-02f: the fresh marker and caller-minted execution ids.
+    "make_execution_id",
+    "request_fresh_execution",
+    "fresh_requested",
+    "FRESH_MARKER_FILENAME",
+    "fresh.json",
+    # arch-own-02h: run-level provenance; ``=`` pins the kwarg spelling, so a
+    # local ``executor_info = …`` or the ``source_snapshot`` module is not hit.
+    "update_provenance",
+    "snapshot_sources",
+    "source_snapshot=",
+    "executor_info=",
 ]
 
 DELETED_FILES = [
@@ -331,3 +348,34 @@ class TestDropHarnessResidue:
         for name in ("MolqJobs", "MolqPlugin"):
             assert not hasattr(submit_molq, name), f"submit_molq still exports {name}"
         assert not hasattr(metrics, "MetricsPlugin"), "metrics still exports MetricsPlugin"
+
+
+def _xfail_reasons(path: Path) -> list[tuple[int, str]]:
+    """``reason=`` string constants of every ``*.xfail(...)`` call in *path*."""
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    found: list[tuple[int, str]] = []
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
+            continue
+        if node.func.attr != "xfail":
+            continue
+        for kw in node.keywords:
+            if (
+                kw.arg == "reason"
+                and isinstance(kw.value, ast.Constant)
+                and isinstance(kw.value.value, str)
+            ):
+                found.append((node.lineno, kw.value.value))
+    return found
+
+
+def test_no_arch_own_02_xfail_remains() -> None:
+    files = _py_files(TESTS)
+    assert any(_xfail_reasons(p) for p in files), "guard the guard: no xfail found at all"
+    offenders = [
+        f"{path.relative_to(REPO)}:{lineno}: {reason}"
+        for path in files
+        for lineno, reason in _xfail_reasons(path)
+        if reason.startswith("arch-own-02")
+    ]
+    assert not offenders, "arch-own-02 xfails left:\n  " + "\n  ".join(offenders)

@@ -213,17 +213,21 @@ class ExecutionContext:
     Execution's physical directory.
 
     Constructing the context writes nothing. Entering it creates the QUEUED
-    record (unless *execution_id* names one that already exists) and then
-    starts it; leaving it seals the attempt.
+    record through ``Run.create_execution`` (or, with *execution_id*, looks
+    up the one already created) and then starts it; leaving it seals the
+    attempt.
 
     Args:
         run: The Run this attempt realizes.
         profile_config: The active profile; ``None`` means empty and unnamed.
-        execution_id: A *preallocated* attempt, i.e. one whose record was
-            already created (for example by a scheduler submitter) and is
-            still QUEUED. When that record exists, *mode*,
-            *based_on_execution_id*, *checkpoint_artifact_id* and
-            *bypass_cache* are ignored: the record was fixed at creation.
+            With *execution_id* it may be omitted (the recorded config runs)
+            or equal the recorded one; a different ``profile`` or
+            ``config_hash`` raises ``ValueError`` on entry.
+        execution_id: A *preallocated* attempt, i.e. one already created by
+            ``run.create_execution(...)`` (for example by a scheduler
+            submitter) and still QUEUED. Its creation facts are fixed, so
+            passing *mode*, *based_on_execution_id*, *checkpoint_artifact_id*
+            or *bypass_cache* alongside it raises ``ValueError``.
         mode: How a newly created attempt relates to earlier ones.
         based_on_execution_id: The predecessor of a newly created attempt.
         checkpoint_artifact_id: The checkpoint a newly created ``resume``
@@ -246,9 +250,29 @@ class ExecutionContext:
         created_by: AgentRef | None = None,
         bypass_cache: bool = False,
     ) -> None:
+        if execution_id is not None:
+            conflicts = [
+                name
+                for name, given in (
+                    ("mode", mode is not ExecutionMode.INITIAL),
+                    ("based_on_execution_id", based_on_execution_id is not None),
+                    ("checkpoint_artifact_id", checkpoint_artifact_id is not None),
+                    ("bypass_cache", bypass_cache),
+                )
+                if given
+            ]
+            if conflicts:
+                raise ValueError(
+                    f"Execution {execution_id!r} is preallocated; {', '.join(conflicts)} "
+                    "cannot be passed with an explicit execution_id, because "
+                    "run.create_execution(...) fixed them when it created the record"
+                )
         self.run = run
         self.run_dir = Path(run.run_dir)
-        self._profile_config = profile_config or ProfileConfig({}, name=None)
+        self._requested_profile_config = profile_config
+        self._profile_config = (
+            profile_config if profile_config is not None else ProfileConfig({}, name=None)
+        )
         self._explicit_execution_id = execution_id
         self._execution_id: str | None = None
         self._mode = mode
@@ -330,6 +354,7 @@ class ExecutionContext:
 
     @property
     def config(self) -> ProfileConfig:
+        """The profile this attempt runs with; with an explicit id, the recorded one."""
         return self._profile_config
 
     @property
@@ -375,17 +400,9 @@ class ExecutionContext:
             raise RuntimeError("ExecutionContext cannot be entered twice")
         state: Execution
         if self._explicit_execution_id is not None:
-            try:
-                state = self._executions.get(self._explicit_execution_id)
-            except KeyError:
-                state = self._create(self._explicit_execution_id)
-            else:
-                if state.status is not ExecutionStatus.QUEUED:
-                    raise ValueError(
-                        f"preallocated Execution {state.id!r} is {state.status.value}, not queued"
-                    )
+            state = self._preallocated(self._explicit_execution_id)
         else:
-            state = self._create(None)
+            state = self._create()
         # The QUEUED check above only gives a friendlier message; the locked
         # ``start`` decides. If another process started the record in between,
         # it raises here: no heartbeat, the context is not entered.
@@ -537,38 +554,74 @@ class ExecutionContext:
         if self._failure is None:
             self._workflow_succeeded = True
 
-    def _create(self, execution_id: str | None) -> Execution:
-        """Write this attempt's QUEUED record with creation-time facts only.
+    def _create(self) -> Execution:
+        """Write this attempt's QUEUED record through ``Run.create_execution``.
 
         Start-time facts (host, python, pid) are added by ``start`` in
         ``__enter__``, so both paths record them at the same moment.
 
-        Args:
-            execution_id: ``None`` allocates the next ``eNN`` through
-                ``Run.create_execution``; an explicit id whose record is
-                missing takes the create-if-missing path (removed in 02h).
-
         Returns:
             The QUEUED record as written.
         """
-        if execution_id is None:
-            return self.run.create_execution(
-                mode=self._mode,
-                based_on_execution_id=self._based_on_execution_id,
-                checkpoint_artifact_id=self._checkpoint_artifact_id,
-                bypass_cache=self._bypass_cache,
-                profile_config=self._profile_config,
-                created_by=self._created_by,
-            )
-        return self._executions.create(
+        return self.run.create_execution(
             mode=self._mode,
-            created_by=self._created_by,
-            execution_id=execution_id,
             based_on_execution_id=self._based_on_execution_id,
             checkpoint_artifact_id=self._checkpoint_artifact_id,
-            environment=_creation_environment(self._profile_config),
             bypass_cache=self._bypass_cache,
+            profile_config=self._profile_config,
+            created_by=self._created_by,
         )
+
+    def _preallocated(self, execution_id: str) -> Execution:
+        """Look up a preallocated QUEUED record and adopt its recorded config.
+
+        Every check runs before ``start``, so a failure leaves the record
+        QUEUED. The locked ``start`` re-checks the status authoritatively.
+
+        Args:
+            execution_id: The attempt created earlier by ``run.create_execution``.
+
+        Returns:
+            The QUEUED record.
+
+        Raises:
+            ValueError: The record does not exist, is not QUEUED, or was
+                created with a different ``profile`` / ``config_hash`` than
+                the ``profile_config`` passed here.
+        """
+        try:
+            state = self._executions.get(execution_id)
+        except KeyError:
+            raise ValueError(
+                f"Execution {execution_id!r} does not exist under Run {self.run.id!r}; "
+                "create it with run.create_execution(...) before starting it"
+            ) from None
+        if state.status is not ExecutionStatus.QUEUED:
+            raise ValueError(
+                f"preallocated Execution {state.id!r} is {state.status.value}, not queued"
+            )
+        env = state.environment
+        recorded_config = env.get("config")
+        recorded_profile = env.get("profile")
+        recorded = ProfileConfig(
+            dict(recorded_config) if isinstance(recorded_config, dict) else {},
+            name=recorded_profile if isinstance(recorded_profile, str) else None,
+        )
+        requested = self._requested_profile_config
+        if requested is not None:
+            wanted = _creation_environment(requested)
+            if (wanted["profile"], wanted["config_hash"]) != (
+                env.get("profile"),
+                env.get("config_hash"),
+            ):
+                raise ValueError(
+                    f"profile_config differs from the one Execution {state.id!r} was "
+                    f"created with (profile={env.get('profile')!r}, "
+                    f"config_hash={env.get('config_hash')!r}); an Execution runs only "
+                    "with the config recorded at its creation"
+                )
+        self._profile_config = recorded
+        return state
 
     def _prepare_execution_files(self) -> None:
         """Make the attempt's two directories. Its state is already one file."""

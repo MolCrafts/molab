@@ -1,9 +1,7 @@
 """Source capture — the exact workflow source an Execution was created from.
 
-molab records the entrypoint *path* (``RunMetadata.script``) and an AST *hash*
-(``workflow_snapshot.code_hash``), but a path and a hash cannot give the code
-back: if the file is later edited or deleted, the code that produced an attempt
-is unrecoverable. This module captures the entrypoint **plus its first-party
+A path and an AST hash of the entrypoint cannot give the code back: if the file
+is later edited or deleted, the code that produced an attempt is unrecoverable. This module captures the entrypoint **plus its first-party
 local-module import closure** (sibling ``.py`` modules in the entrypoint's
 directory, transitively), per attempt, in two steps:
 
@@ -16,8 +14,8 @@ directory, transitively), per attempt, in two steps:
    :class:`SourceCaptureError` on any mismatch.
 
 ``Run.create_execution(source_entrypoint=...)`` runs them in that order around
-creating the record. :func:`snapshot_sources` is the legacy run-level adapter
-over the same two functions.
+creating the record, so each attempt's manifest is on its Execution record and
+its copies are under ``executions/eNN/source/``.
 
 The workspace layer must not import upstream molab layers (see the layer DAG in
 CLAUDE.md / ``test_import_guard``); this module uses only the stdlib and
@@ -45,7 +43,7 @@ from .file_store import FileStore
 from .fs import FileSystem, PathArg
 from .fs_local import LocalFileSystem
 
-__all__ = ["SourceCaptureError", "copy_sources", "snapshot_sources", "source_manifest"]
+__all__ = ["SourceCaptureError", "copy_sources", "source_manifest"]
 
 
 class SourceCaptureError(RuntimeError):
@@ -249,49 +247,3 @@ def copy_sources(
                 f"source copy {relpath!r} has digest {copied}, manifest recorded "
                 f"{entry.sha256}; the original changed after the manifest was built"
             )
-
-
-def snapshot_sources(
-    entrypoint: Path, run_dir: Path, *, now: datetime | None = None
-) -> dict[str, object]:
-    """Legacy run-level adapter: capture into ``run_dir/source/`` as a dict.
-
-    Deprecated shape kept for the CLI until it switches to
-    ``Run.create_execution(source_entrypoint=...)``; implemented as
-    :func:`source_manifest` + :func:`copy_sources`, so there is one
-    copy-and-digest implementation.
-
-    Args:
-        entrypoint: The defining script (the file molab re-imports to execute).
-        run_dir: The Run's directory; sources land under ``run_dir/source/``.
-        now: Capture timestamp (injectable for deterministic tests).
-
-    Returns:
-        A manifest suitable for ``RunMetadata.source_snapshot``::
-
-            {
-                "dir": "source",
-                "entrypoint": "phase4.py",
-                "files": [{"name": "phase4.py", "sha256": "sha256:..."}, ...],
-                "captured_at": "2026-06-17T13:00:00",
-            }
-
-    Idempotent (re-snapshotting overwrites the copies). Files are copied flat
-    by basename; first-party module names are unique within one directory,
-    so basenames do not collide.
-
-    Raises:
-        FileNotFoundError: *entrypoint* is not a file.
-        SourceCaptureError: A file could not be read, copied or verified
-            (this used to be skipped silently).
-    """
-    stamp = (now or datetime.now()).isoformat()
-    manifest = source_manifest(entrypoint, now=now)
-    copy_sources(manifest, run_dir)
-    files = [{"name": f.name, "sha256": f.sha256} for f in manifest.files]
-    return {
-        "dir": "source",
-        "entrypoint": manifest.entrypoint,
-        "files": files,
-        "captured_at": stamp,
-    }

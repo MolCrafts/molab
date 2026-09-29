@@ -23,6 +23,17 @@ def _ops_dirs(run) -> tuple[Path, Path]:
     return root / "ops", root / "_ops"
 
 
+_PROVENANCE_FIELDS = (
+    "script",
+    "source_snapshot",
+    "submit_cwd",
+    "profile",
+    "config",
+    "config_hash",
+    "executor_info",
+)
+
+
 class TestRunMetadata:
     def test_hot_state_fields_are_model_fields(self) -> None:
         fields = RunMetadata.model_fields
@@ -55,6 +66,33 @@ class TestRunMetadata:
         assert meta.status == RunStatus.FAILED
         assert not hasattr(meta, "heartbeat_at")
         assert not hasattr(meta, "labels")
+
+    def test_execution_provenance_fields_are_not_model_fields(self) -> None:
+        fields = RunMetadata.model_fields
+        for name in _PROVENANCE_FIELDS:
+            assert name not in fields, f"{name!r} lives on the Execution record"
+
+    def test_legacy_provenance_keys_are_ignored(self) -> None:
+        meta = RunMetadata.model_validate(
+            {
+                "id": "r",
+                "definition_hash": "h",
+                "experiment_revision_id": "rev",
+                "script": "/x.py",
+                "source_snapshot": {"dir": "source"},
+                "submit_cwd": "/tmp",
+                "profile": "cpu",
+                "config": {"cpus": 8},
+                "config_hash": "abc",
+                "executor_info": {"job_id": "j"},
+            }
+        )
+        assert meta.id == "r"
+        for name in _PROVENANCE_FIELDS:
+            assert not hasattr(meta, name)
+
+    def test_run_has_no_update_provenance(self, run) -> None:
+        assert not hasattr(run, "update_provenance")
 
     def test_cancel_and_lifecycle_write_execution_json_not_ops(self, run) -> None:
         ops, legacy = _ops_dirs(run)
@@ -111,30 +149,3 @@ class TestRunMetadata:
         ops, legacy = _ops_dirs(run)
         assert not ops.exists()
         assert not legacy.exists()
-
-
-class TestUpdateProvenance:
-    def test_update_provenance_persists_submit_fields(self, run) -> None:
-        run.materialize()
-        run.update_provenance(
-            script="/tmp/wf.py",
-            submit_cwd="/tmp",
-            profile="cpu",
-            config={"cpus": 8},
-            config_hash="abc",
-            executor_info={"backend": "molq", "scheduler": "slurm"},
-        )
-        # The deprecated in-memory compatibility shell retains submit fields.
-        assert run.metadata.script == "/tmp/wf.py"
-        assert run.metadata.submit_cwd == "/tmp"
-        assert run.metadata.profile == "cpu"
-        assert run.metadata.config == {"cpus": 8}
-        assert run.metadata.executor_info["scheduler"] == "slurm"
-        # …but run.json persists only the logical definition fields.
-        on_disk = _read_run_json(run)
-        assert "script" not in on_disk
-        assert "submit_cwd" not in on_disk
-        assert "profile" not in on_disk
-        assert "config" not in on_disk
-        assert "config_hash" not in on_disk
-        assert "executor_info" not in on_disk

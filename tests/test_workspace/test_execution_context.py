@@ -138,17 +138,129 @@ class TestExecutionContextProvenance:
         assert execution.environment["submit_cwd"] == "/x"
         assert "python" in execution.environment
 
-    def test_create_if_missing_records_both_halves(self, run: Run) -> None:
+    def test_unknown_explicit_id_is_refused_not_created(self, run: Run) -> None:
         with run.start():
             pass
 
-        with run.start(execution_id="exec-custom", mode=ExecutionMode.RERUN):
+        with pytest.raises(ValueError, match="create_execution"), run.start(execution_id="e09"):
             pass
 
-        custom = run.execution("exec-custom")
-        assert custom.id == "exec-custom"
-        assert "config_hash" in custom.environment
-        assert "python" in custom.environment
+        assert [x.id for x in run.executions] == ["e01"]
+        assert not (Path(str(run.run_dir)) / "executions" / "e09").exists()
+
+
+class TestExecutionContext:
+    """arch-own-02h §1: an explicit id names an existing QUEUED record; its facts are fixed."""
+
+    def test_queued_record_starts_and_seals(self, run: Run) -> None:
+        run.create_execution()
+
+        with run.start(execution_id="e01") as ctx:
+            assert ctx.id == "e01"
+            assert run.execution("e01").status is ExecutionStatus.RUNNING
+            assert len(run.executions) == 1
+
+        assert [x.id for x in run.executions] == ["e01"]
+        assert run.executions[0].status is ExecutionStatus.SUCCEEDED
+
+    def test_unknown_id_raises_and_creates_nothing(self, run: Run) -> None:
+        with pytest.raises(ValueError, match="create_execution"), run.start(execution_id="e09"):
+            pass
+
+        assert run.executions == []
+        assert not (Path(str(run.run_dir)) / "executions" / "e09").exists()
+
+    @pytest.mark.parametrize(
+        ("kwargs", "name"),
+        [
+            ({"mode": ExecutionMode.RERUN}, "mode"),
+            ({"based_on_execution_id": "e01"}, "based_on_execution_id"),
+            ({"checkpoint_artifact_id": "a"}, "checkpoint_artifact_id"),
+            ({"bypass_cache": True}, "bypass_cache"),
+        ],
+    )
+    def test_creation_args_with_explicit_id_raise_at_call_time(
+        self, run: Run, kwargs: dict[str, object], name: str
+    ) -> None:
+        run.create_execution()
+
+        with pytest.raises(ValueError, match=name):
+            run.start(execution_id="e01", **kwargs)
+
+        record = run.execution("e01")
+        assert record.status is ExecutionStatus.QUEUED
+        assert record.started_at is None
+
+    def test_config_is_the_recorded_one(self, run: Run) -> None:
+        run.create_execution(profile_config=ProfileConfig({"k": 1}, name="cpu"))
+
+        with run.start(execution_id="e01") as ctx:
+            assert ctx.config.name == "cpu"
+            assert ctx.config.to_dict() == {"k": 1}
+
+    def test_equal_profile_config_is_accepted(self, run: Run) -> None:
+        run.create_execution(profile_config=ProfileConfig({"k": 1}, name="cpu"))
+
+        with run.start(ProfileConfig({"k": 1}, name="cpu"), execution_id="e01") as ctx:
+            assert ctx.config.name == "cpu"
+
+    def test_explicit_empty_profile_matches_a_profileless_record(self, run: Run) -> None:
+        run.create_execution()
+
+        with run.start(ProfileConfig({}, name=None), execution_id="e01") as ctx:
+            assert ctx.config.to_dict() == {}
+
+    def test_equal_hash_with_a_different_dict_shape_is_accepted(self, run: Run) -> None:
+        run.create_execution(profile_config=ProfileConfig({"xs": [1, 2]}, name="cpu"))
+
+        with run.start(ProfileConfig({"xs": (1, 2)}, name="cpu"), execution_id="e01"):
+            pass
+
+        assert run.execution("e01").status is ExecutionStatus.SUCCEEDED
+
+    @pytest.mark.parametrize(
+        "requested",
+        [ProfileConfig({"k": 2}, name="cpu"), ProfileConfig({"k": 1}, name="gpu")],
+    )
+    def test_differing_profile_config_raises_and_leaves_it_queued(
+        self, run: Run, requested: ProfileConfig
+    ) -> None:
+        run.create_execution(profile_config=ProfileConfig({"k": 1}, name="cpu"))
+
+        with (
+            pytest.raises(ValueError, match="profile_config"),
+            run.start(requested, execution_id="e01"),
+        ):
+            pass
+
+        record = run.execution("e01")
+        assert record.status is ExecutionStatus.QUEUED
+        assert record.started_at is None
+
+    def test_sealed_id_raises_not_queued(self, run: Run) -> None:
+        with run.start() as ctx:
+            sealed_id = ctx.id
+
+        with pytest.raises(ValueError, match="not queued"), run.start(execution_id=sealed_id):
+            pass
+
+    def test_not_queued_is_reported_before_a_config_mismatch(self, run: Run) -> None:
+        with run.start(ProfileConfig({"k": 1}, name="cpu")):
+            pass
+
+        with (
+            pytest.raises(ValueError, match="not queued"),
+            run.start(ProfileConfig({"k": 2}, name="cpu"), execution_id="e01"),
+        ):
+            pass
+
+    def test_start_without_id_allocates_sequential_ids(self, run: Run) -> None:
+        with run.start():
+            pass
+        with run.start(mode=ExecutionMode.RERUN):
+            pass
+
+        assert [x.id for x in run.executions] == ["e01", "e02"]
 
 
 class TestExecutionContextStartOnce:

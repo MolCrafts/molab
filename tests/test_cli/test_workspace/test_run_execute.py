@@ -210,6 +210,7 @@ class TestExecute:
         assert spy.config.name == "cpu"
         assert spy.config.to_dict() == {"k": 1}
         assert spy.config.content_hash() == run.execution("e01").environment["config_hash"]
+        assert "run_dir" not in spy.config.to_dict()
         assert spy.bypass_cache == [False]
 
     def test_bypass_cache_comes_from_the_record(

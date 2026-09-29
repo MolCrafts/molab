@@ -379,9 +379,9 @@ class TestRemoteWorkerOpensStagedAttempt:
         strict=True,
         raises=AssertionError,
         reason=(
-            "arch-own-02: molab execute on a remote target — the staged attempt must be "
-            "openable and its workflow resolvable without the local workspace tree "
-            "(unowned: needs a new arch-own spec for remote worker layout)"
+            "unowned-remote-worker: molab execute on a remote target — the staged attempt "
+            "must be openable and its workflow resolvable without the local workspace tree "
+            "(found by arch-own-02c; needs a new spec for remote worker layout)"
         ),
     )
     def test_worker_runs_from_a_staged_only_layout(self, tmp_path: Path) -> None:

@@ -238,7 +238,6 @@ class ExecutionRepository:
         *,
         mode: ExecutionMode = ExecutionMode.INITIAL,
         created_by: AgentRef,
-        execution_id: str | None = None,
         based_on_execution_id: str | None = None,
         checkpoint_artifact_id: str | None = None,
         executor: dict[str, JSONValue] | None = None,
@@ -248,12 +247,14 @@ class ExecutionRepository:
     ) -> Execution:
         """Allocate the next attempt after validating retry/resume semantics.
 
-        The record is written QUEUED with its creation-time facts only.
+        This is the one place a run's ``eNN`` ids are allocated: the id is
+        always the next sequence slug and is never reused. The only caller in
+        ``src`` is ``Run.create_execution``. The record is written QUEUED with
+        its creation-time facts only.
 
         Args:
             mode: How this attempt relates to earlier ones.
             created_by: The agent creating the attempt.
-            execution_id: An explicit id; defaults to the next ``eNN`` slug.
             based_on_execution_id: The predecessor attempt, when ``mode`` needs one.
             checkpoint_artifact_id: The checkpoint to resume from (``resume`` only).
             executor: Creation-time executor facts (backend, target).
@@ -267,7 +268,8 @@ class ExecutionRepository:
         Raises:
             ValueError: ``mode`` and the predecessor / checkpoint disagree.
             KeyError: The named predecessor does not exist.
-            FileExistsError: A record with the chosen id already exists.
+            FileExistsError: A record with the next id already exists (for
+                example a legacy directory of that name).
         """
         self.fs.mkdir(self.executions_dir, parents=True, exist_ok=True)
         with file_lock(self._create_lock()):
@@ -281,7 +283,7 @@ class ExecutionRepository:
             now = datetime.now(UTC)
             seq = max((item.seq for item in prior), default=0) + 1
             state = Execution(
-                id=execution_id or execution_slug(seq),
+                id=execution_slug(seq),
                 seq=seq,
                 run_id=self.run_id,
                 project_id=self.project_id,

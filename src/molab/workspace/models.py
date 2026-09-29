@@ -238,10 +238,13 @@ class RunMetadata(BaseModel, frozen=True):
 
     Only identity, parameters, definition/revision links, declared inputs,
     workflow reference, and target hint are written to schema-v2 ``run.json``.
-    The execution-era fields below remain temporarily readable by legacy
-    callers but are never persisted by :class:`Run`; their authoritative
-    replacements live in ``executions/<execution-id>/execution.json`` and the
-    append-only provenance store.
+    Execution-time provenance (script, source, profile, config, executor)
+    lives only on the Execution record (``environment`` / ``source`` /
+    ``executor`` in ``executions/eNN/execution.json``). The execution-era
+    fields still here (``status`` / ``owner_pid`` / ``owner_host`` /
+    ``started_at`` / ``finished_at`` / ``error``) are never persisted by
+    :class:`Run` and are removed by arch-own-03j; ``workflow_snapshot`` /
+    ``workflow_id`` / ``workflow_version`` are removed by arch-own-04e.
     """
 
     model_config = ConfigDict(extra="ignore", frozen=True)
@@ -263,24 +266,11 @@ class RunMetadata(BaseModel, frozen=True):
     # per-run copy any more, and there is no typed model for it — workspace
     # keeps it as a plain dict.
     workflow_snapshot: dict[str, JSONValue] | None = None
-    script: str | None = None
-    # Source snapshot — the entrypoint script's bytes + its first-party
-    # local-import closure, copied under ``run_dir/source/`` at dispatch (see
-    # ``molab.workspace.source_snapshot.snapshot_sources``). ``script`` records
-    # the *path* and ``workflow_snapshot.code_hash`` an AST hash; this carries the
-    # actual source manifest so a run is reproducible from its own directory even
-    # if the live tree changes. ``None`` for runs dispatched before this existed.
-    source_snapshot: dict[str, JSONValue] | None = None
-    submit_cwd: str | None = None
-    profile: str | None = None
-    config: dict[str, JSONValue] = Field(default_factory=dict)
-    config_hash: str | None = None
-    executor_info: dict[str, JSONValue] = Field(default_factory=dict)
 
     # Intended compute target name (matches a ComputeTarget in the workspace
     # registry).  Captured at run-creation time so the UI can filter and the
     # actual submitter can pick the right SubmitHandler later.  Distinct from
-    # ``executor_info.cluster_name`` which is populated post-submit by molq.
+    # the Execution's ``executor``, which is populated post-submit by molq.
     target: str | None = None
 
     # Workflow versioning — populated by RunContext.bind_workflow_version().

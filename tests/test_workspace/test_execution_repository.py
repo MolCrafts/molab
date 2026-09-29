@@ -282,6 +282,15 @@ class TestExecutionRepositoryCreate:
         assert got.bypass_cache is True
         assert got.source == source
 
+    def test_create_has_no_execution_id_parameter(self, run: Run) -> None:
+        import inspect
+
+        assert "execution_id" not in inspect.signature(ExecutionRepository.create).parameters
+        repo = _run_repo(run)
+        repo.create(created_by=_TEST_AGENT)
+        repo.create(created_by=_TEST_AGENT, mode=ExecutionMode.RERUN)
+        assert [x.id for x in repo.list()] == ["e01", "e02"]
+
     def test_raw_schema_version_is_4(self, run: Run) -> None:
         repo = _run_repo(run)
         repo.create(created_by=_TEST_AGENT)

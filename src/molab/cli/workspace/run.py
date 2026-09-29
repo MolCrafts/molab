@@ -724,7 +724,7 @@ def execute(
 
     run_obj, experiment = _open_run(Path(run_dir))
     try:
-        record = run_obj.execution(execution_id)
+        run_obj.execution(execution_id)
     except KeyError as exc:
         rprint(
             f"[red]Error:[/red] run {run_obj.id} has no execution {execution_id!r}; "
@@ -745,17 +745,10 @@ def execute(
         raise typer.Exit(1) from exc
     default_binding_registry.bind(experiment, spec)
 
-    environment = record.environment
-    recorded_config = environment.get("config")
-    recorded_profile = environment.get("profile")
-    profile_cfg = ProfileConfig(
-        dict(recorded_config) if isinstance(recorded_config, dict) else {},
-        name=recorded_profile if isinstance(recorded_profile, str) else None,
-    )
-
     seed_outputs = read_node_outputs(run_obj.run_dir, execution_id)
     rprint(f"[dim]execute[/dim] run={run_obj.id} execution={execution_id}")
-    with RunContext(run_obj, profile_config=profile_cfg, execution_id=execution_id) as ctx:
+    # The recorded config runs: RunContext adopts it from the Execution record.
+    with RunContext(run_obj, execution_id=execution_id) as ctx:
         asyncio.run(
             _execute_compiled(
                 spec,

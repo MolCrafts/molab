@@ -241,7 +241,7 @@ class Run(Folder):
     #: a Note in a directory called ``logs`` elsewhere stays visible.
     NON_CONCEPT_SUBDIRS: ClassVar[frozenset[str]] = execution_dir_names() | frozenset(
         # legacy on-disk name: written by runs before D86 removed the agent layer; tolerated on read
-        {"executions", "assets", "cache", "logs", "source", "harness", "alive"}
+        {"executions", "assets", "cache", "logs", "harness", "alive"}
     )
 
     def __init__(
@@ -615,13 +615,16 @@ class Run(Folder):
         Args:
             profile_config: The active molcfg profile; when omitted the run
                 executes with an empty (defaults-only) :class:`ProfileConfig`.
-            execution_id: Start a pre-allocated attempt — used by external
-                submitters (e.g. molq, the plugin that hands an attempt to a
-                cluster's batch-queue scheduler) that need to know the
-                per-attempt directory ahead of worker startup. When the
-                record already exists, ``mode``, ``based_on_execution_id``,
-                ``checkpoint_artifact_id`` and ``bypass_cache`` are ignored:
-                the record was fixed when it was created.
+            execution_id: Start a pre-allocated attempt — a QUEUED record
+                already created by ``run.create_execution(...)`` (e.g. by molq,
+                the plugin that hands an attempt to a cluster's batch-queue
+                scheduler, which needs the per-attempt directory ahead of
+                worker startup). Raises ``ValueError`` when the record does
+                not exist, is not QUEUED, or when ``mode``,
+                ``based_on_execution_id``, ``checkpoint_artifact_id`` or
+                ``bypass_cache`` is passed with it. ``profile_config`` may be
+                omitted (the recorded config runs) or equal the recorded one;
+                a different one raises ``ValueError``.
             mode: How a newly created attempt relates to earlier ones.
             based_on_execution_id: The predecessor of a newly created attempt.
             checkpoint_artifact_id: The checkpoint a newly created ``resume``
@@ -632,8 +635,8 @@ class Run(Folder):
                 again. Read back as ``ctx.bypass_cache``.
 
         Returns:
-            An un-entered :class:`RunContext`; entering it creates (if needed)
-            and starts the attempt.
+            An un-entered :class:`RunContext`; entering it creates (without
+            ``execution_id``) and starts the attempt.
         """
         return RunContext(
             self,
@@ -985,11 +988,3 @@ class Run(Folder):
             self._reload_metadata_from_disk()
             self.metadata = self.metadata.model_copy(update=updates)
             self._write_run_json()
-
-    def update_provenance(self, **updates: object) -> None:
-        """Patch ``RunMetadata`` fields on ``run.json`` and persist.
-
-        Public spelling used by ``molab run``, the molq submit plugin, and
-        the server start route. Same contract as :meth:`_update_metadata`.
-        """
-        self._update_metadata(**updates)

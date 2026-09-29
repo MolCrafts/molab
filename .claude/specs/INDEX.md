@@ -30,7 +30,7 @@ _Step 2 target architecture (plan `pasted-content-id-0977-you-are-scalable-puddl
 | 02e | [arch-own-02e-readers](arch-own-02e-readers.md) | CLI/TUI 读取方改读最新 Execution；状态投影合一 [done] |
 | 02f | [arch-own-02f-runtime](arch-own-02f-runtime.md) | workflow runtime reads bypass_cache from the Execution record; no execution-id minting [done] |
 | 02g | [arch-own-02g-harness-ids](arch-own-02g-harness-ids.md) | harness 新 run 走 Experiment.ensure_run（UUIDv7） [superseded by drop-harness] |
-| 02h | [arch-own-02h-sever](arch-own-02h-sever.md) | 切断：移除 RunMetadata 执行期来源字段、显式 id 回退与 run 级 source/ [approved] |
+| 02h | [arch-own-02h-sever](arch-own-02h-sever.md) | 切断：移除 RunMetadata 执行期来源字段、显式 id 回退与 run 级 source/ [done] |
 | 03a | [arch-own-03a-modes](arch-own-03a-modes.md) | 执行模式创建规则与 Run 路径访问器 [approved] |
 | 03b | [arch-own-03b-journal](arch-own-03b-journal.md) | workflow digest + node journal owned by workflow [approved] |
 | 03c | [arch-own-03c-cache](arch-own-03c-cache.md) | 节点缓存按 run 身份定位，缓存键覆盖有效配置 [approved] |
