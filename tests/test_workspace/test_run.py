@@ -24,6 +24,7 @@ from molab.workspace.history import GitHistory
 
 _START_TIME_KEYS = ("host", "pid", "python", "platform")
 _PROFILE_KEYS = {"profile", "config", "config_hash"}
+_DIGEST = "sha256:" + "ab" * 32
 
 
 def _spy_history(monkeypatch: pytest.MonkeyPatch, entity_file: str) -> list[tuple[str, bool]]:
@@ -120,9 +121,78 @@ class TestRunCreateExecution:
 
         with pytest.raises(ValueError):
             run.create_execution()
+        run.cancel("e01")
         rerun = run.create_execution(mode=ExecutionMode.RERUN)
 
         assert rerun.id == "e02"
+
+    # --- arch-own-03a §1b (D57): creation-time config inheritance -----------
+
+    def test_non_initial_without_profile_inherits_predecessor_config(self, run: Run) -> None:
+        cpu = ProfileConfig({"k": 1}, name="cpu")
+        with pytest.raises(RuntimeError), run.start(cpu):
+            raise RuntimeError("boom")
+        e01 = run.execution("e01").environment
+
+        resume = run.create_execution(mode=ExecutionMode.RESUME)
+
+        assert resume.based_on_execution_id == "e01"
+        assert resume.environment["profile"] == "cpu"
+        assert resume.environment["config"] == {"k": 1}
+        assert resume.environment["config_hash"] == e01["config_hash"]
+        assert e01["config_hash"] is not None
+
+        run.cancel(resume.id)
+        explicit = run.create_execution(
+            mode=ExecutionMode.RERUN, profile_config=ProfileConfig({"k": 2}, name=None)
+        )
+        assert (
+            explicit.environment["config_hash"] == ProfileConfig({"k": 2}, name=None).content_hash()
+        )
+        assert explicit.environment["config_hash"] != e01["config_hash"]
+
+        run.cancel(explicit.id)
+        empty = run.create_execution(
+            mode=ExecutionMode.RERUN, profile_config=ProfileConfig({}, name=None)
+        )
+        assert empty.environment["config"] == {}
+        assert empty.environment["config_hash"] is None
+
+    @pytest.mark.parametrize("mode", [ExecutionMode.RERUN, ExecutionMode.REPRODUCE])
+    def test_inherits_after_success(self, run: Run, mode: ExecutionMode) -> None:
+        with run.start(ProfileConfig({"k": 1}, name="cpu")):
+            pass
+        e01 = run.execution("e01").environment
+
+        rec = run.create_execution(mode=mode)
+
+        assert rec.based_on_execution_id == "e01"
+        assert {k: rec.environment[k] for k in _PROFILE_KEYS} == {
+            "profile": "cpu",
+            "config": {"k": 1},
+            "config_hash": e01["config_hash"],
+        }
+
+    def test_initial_without_profile_is_empty(self, run: Run) -> None:
+        rec = run.create_execution(mode=ExecutionMode.INITIAL)
+
+        assert rec.environment == {"profile": None, "config": {}, "config_hash": None}
+
+    def test_inherited_missing_hash_is_none(self, run: Run) -> None:
+        import json
+
+        with pytest.raises(RuntimeError), run.start(ProfileConfig({"k": 1}, name="cpu")):
+            raise RuntimeError("boom")
+        path = run.execution_dir("e01") / "execution.json"
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        del raw["environment"]["config_hash"]
+        path.write_text(json.dumps(raw), encoding="utf-8")
+
+        rec = run.create_execution(mode=ExecutionMode.RERUN)
+
+        assert "config_hash" in rec.environment
+        assert rec.environment["config_hash"] is None
+        assert rec.environment["profile"] == "cpu"
 
     # --- arch-own-02b §3: source capture per execution ----------------------
 
@@ -242,6 +312,65 @@ class TestRunStart:
             pass
 
         assert run.executions[-1].bypass_cache is False
+
+    def test_workflow_digest_is_recorded(self, run: Run) -> None:
+        with run.start(workflow_digest=_DIGEST):
+            pass
+
+        assert run.executions[-1].workflow_digest == _DIGEST
+
+    def test_workflow_digest_defaults_none(self, run: Run) -> None:
+        with run.start():
+            pass
+
+        assert run.executions[-1].workflow_digest is None
+
+    def test_workflow_digest_with_explicit_id(self, run: Run) -> None:
+        rec = run.create_execution()
+        assert rec.workflow_digest is None
+
+        with run.start(execution_id=rec.id, workflow_digest=_DIGEST):
+            pass
+
+        assert run.execution(rec.id).workflow_digest == _DIGEST
+        assert len(run.executions) == 1
+
+
+class TestRunExecutionDir:
+    """arch-own-03a §2: the public, pure execution-directory accessor."""
+
+    def test_is_the_layout_path_and_is_not_created(self, run: Run) -> None:
+        path = run.execution_dir("e01")
+
+        assert isinstance(path, Path)
+        assert path == Path(run.run_dir) / "executions" / "e01"
+        assert not path.exists()
+
+    def test_accepts_a_legacy_uuid_id(self, run: Run) -> None:
+        legacy = "0190f3c2-7e1a-7000-8000-000000000000"
+
+        assert run.execution_dir(legacy) == Path(run.run_dir) / "executions" / legacy
+
+    @pytest.mark.parametrize("bad", ["", "../x", "a/b", "..", ".", "a\\b"])
+    def test_rejects_path_like_ids(self, run: Run, bad: str) -> None:
+        with pytest.raises(ValueError):
+            run.execution_dir(bad)
+
+
+class TestRunMachineDir:
+    """arch-own-03a §2: ``<root>/.molab/runs/<run-id>``, never created."""
+
+    def test_is_under_the_workspace_machine_dir(self, workspace: Workspace, run: Run) -> None:
+        path = run.machine_dir()
+
+        assert isinstance(path, Path)
+        assert path == Path(str(workspace.root)) / ".molab" / "runs" / run.id
+        assert not path.exists()
+
+    def test_two_runs_differ(self, run: Run) -> None:
+        other = run.experiment.add_run(params={"lr": 2e-4})
+
+        assert run.machine_dir() != other.machine_dir()
 
 
 def _fail_then_retry(run: Run) -> None:

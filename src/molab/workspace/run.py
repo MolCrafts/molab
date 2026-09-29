@@ -54,7 +54,7 @@ from .execution_context import (
     _system_agent,
 )
 from .execution_repository import _START_TIME_KEYS, ExecutionRepository
-from .history import AgentRef
+from .history import MOLAB_DIR, AgentRef
 from .source_snapshot import SourceCaptureError, copy_sources, source_manifest
 
 _logger = get_logger(__name__)
@@ -603,6 +603,7 @@ class Run(Folder):
         based_on_execution_id: str | None = None,
         checkpoint_artifact_id: str | None = None,
         bypass_cache: bool = False,
+        workflow_digest: str | None = None,
     ) -> RunContext:
         """Return a context manager for executing this run.
 
@@ -613,8 +614,11 @@ class Run(Folder):
         :meth:`__enter__` / :meth:`__aenter__`.
 
         Args:
-            profile_config: The active molcfg profile; when omitted the run
-                executes with an empty (defaults-only) :class:`ProfileConfig`.
+            profile_config: The active molcfg profile. When omitted, an
+                ``initial`` attempt runs with an empty (defaults-only)
+                :class:`ProfileConfig` and any other mode inherits its
+                predecessor's recorded config; either way ``ctx.config`` is
+                the config the record holds.
             execution_id: Start a pre-allocated attempt — a QUEUED record
                 already created by ``run.create_execution(...)`` (e.g. by molq,
                 the plugin that hands an attempt to a cluster's batch-queue
@@ -633,6 +637,10 @@ class Run(Folder):
                 workflow node cache — the per-task result store that lets an
                 unchanged task reuse its earlier output instead of running
                 again. Read back as ``ctx.bypass_cache``.
+            workflow_digest: An opaque digest of the workflow this attempt
+                runs (``sha256:...``), recorded by the start transition before
+                any task runs. A start-time fact, so unlike the creation
+                arguments it may be passed with ``execution_id``.
 
         Returns:
             An un-entered :class:`RunContext`; entering it creates (without
@@ -646,6 +654,7 @@ class Run(Folder):
             based_on_execution_id=based_on_execution_id,
             checkpoint_artifact_id=checkpoint_artifact_id,
             bypass_cache=bypass_cache,
+            workflow_digest=workflow_digest,
         )
 
     def create_execution(
@@ -712,8 +721,13 @@ class Run(Folder):
             based_on_execution_id: The predecessor, when *mode* needs one.
             checkpoint_artifact_id: The checkpoint to resume from (``resume`` only).
             bypass_cache: Whether the attempt ignores the workflow node cache;
-                recorded once and never changed.
-            profile_config: The active profile; ``None`` means empty and unnamed.
+                recorded once and never changed (always ``True`` for
+                ``reproduce``).
+            profile_config: The active profile. ``None`` means empty and
+                unnamed for ``initial``; for any other mode it means the
+                predecessor's recorded ``profile`` / ``config`` /
+                ``config_hash`` are copied (a key it lacks is ``None``). An
+                explicit profile, even an empty one, is never replaced.
             environment: Extra creation-time environment facts.
             executor: Creation-time executor facts (backend, target).
             created_by: Who creates the attempt; defaults to this process.
@@ -723,10 +737,14 @@ class Run(Folder):
         Returns:
             The QUEUED record as written.
 
+        Mode rules are ``ExecutionRepository.create``'s: ``retry`` is stored
+        as ``rerun``, a non-initial mode defaults its predecessor to the
+        latest attempt, and no attempt is created while one is active.
+
         Raises:
             ValueError: *environment* names a profile key, *environment* or
-                *executor* names a start-time key, or *mode* and the
-                predecessor / checkpoint disagree.
+                *executor* names a start-time key, *mode* and the
+                predecessor / checkpoint disagree, or an attempt is active.
             KeyError: The named predecessor does not exist.
             FileNotFoundError: *source_entrypoint* is not a file; no record
                 is created.
@@ -745,15 +763,25 @@ class Run(Folder):
                 f"start-time keys {start_conflicts} cannot be recorded at creation; "
                 "they are added when the Execution starts"
             )
-        manifest = source_manifest(source_entrypoint) if source_entrypoint is not None else None
         repo = self._execution_repository()
+        # D57: a non-initial attempt without a profile inherits its
+        # predecessor's; ``create`` re-checks the predecessor under its lock.
+        predecessor = (
+            repo.resolve_predecessor(mode, based_on_execution_id)
+            if profile_config is None
+            else None
+        )
+        if predecessor is not None:
+            based_on_execution_id = predecessor.id
+        profile_environment = _creation_environment(profile_config, inherit_from=predecessor)
+        manifest = source_manifest(source_entrypoint) if source_entrypoint is not None else None
         state = repo.create(
             mode=mode,
             created_by=created_by or _system_agent(),
             based_on_execution_id=based_on_execution_id,
             checkpoint_artifact_id=checkpoint_artifact_id,
             executor=dict(executor or {}),
-            environment={**_creation_environment(profile_config), **extra},
+            environment={**profile_environment, **extra},
             bypass_cache=bypass_cache,
             source=manifest,
         )
@@ -792,6 +820,52 @@ class Run(Folder):
             KeyError: No attempt ``execution_id`` exists under this run.
         """
         return self._execution_repository().get(execution_id)
+
+    def execution_dir(self, execution_id: str) -> Path:
+        """The directory of one attempt of this run: ``executions/<id>``.
+
+        Pure path arithmetic delegated to the repository's layout, so the
+        layout is defined once; nothing is created. A legacy UUID-shaped id
+        is accepted as an opaque id.
+
+        Args:
+            execution_id: The attempt id (``e01``).
+
+        Returns:
+            The attempt's directory as a :class:`pathlib.Path`.
+
+        Raises:
+            ValueError: *execution_id* is empty, ``.`` or ``..``, or contains
+                a path separator, so it could name a path outside the
+                attempts directory.
+        """
+        if execution_id in {"", ".", ".."} or "/" in execution_id or "\\" in execution_id:
+            raise ValueError(f"not an execution id: {execution_id!r}")
+        return Path(self._execution_repository().execution_dir(execution_id))
+
+    def machine_dir(self) -> Path:
+        """This run's machine-state directory: ``<workspace>/.molab/runs/<run-id>``.
+
+        Machine state a person never opens; it can be deleted whole and is
+        keyed by run id. The directory is not created here (nor is the run
+        directory); a user creates it when it first writes.
+
+        Contract: only *content-addressed* state may live here, i.e. state
+        whose key is a content digest so that one key always means one
+        computed result (e.g. the workflow node cache keyed by
+        ``snapshot.key`` + ``inputs_hash``). Legacy 16-hex run ids can repeat
+        across experiments and such runs share this directory; the sharing is
+        harmless only for content-addressed state. Identity-sensitive state
+        must not live here: no locks, no owner / heartbeat, no per-run
+        counters or markers, nothing that belongs to *this run* rather than
+        to the content. Locks stay under ``.molab/locks/`` and attempt facts
+        in ``executions/eNN/execution.json``.
+
+        Returns:
+            The directory as a :class:`pathlib.Path`.
+        """
+        root = str(self.experiment.project.workspace.root)
+        return Path(self._disk().join(root, MOLAB_DIR, "runs", self.id))
 
     def execute(
         self,

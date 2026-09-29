@@ -241,14 +241,21 @@ class TestCreateExecution:
         assert body["id"] == "e02"
         assert body["basedOnExecutionId"] == "e01"
 
-    @pytest.mark.xfail(
-        strict=True,
-        raises=AssertionError,
-        reason=(
-            "arch-own-03: POST …/executions mode=resume — a RESUME without a "
-            "checkpoint is created, based on the failed predecessor"
-        ),
-    )
+    def test_retry_request_is_stored_as_rerun(
+        self, served: ServedFactory, failed_run: RunFixture
+    ) -> None:
+        """arch-own-03a §1: a RETRY request is created as a RERUN."""
+        ws, exp, run = failed_run
+        with served(ws) as client:
+            response = client.post(
+                f"{_run_url(exp, run)}/executions",
+                json={"mode": "retry", "basedOnExecutionId": "e01"},
+            )
+        assert response.status_code == 201, response.text
+        body = response.json()
+        assert body["mode"] == "rerun"
+        assert body["id"] == "e02"
+
     def test_resume_without_checkpoint_is_created(
         self, served: ServedFactory, failed_run: RunFixture
     ) -> None:

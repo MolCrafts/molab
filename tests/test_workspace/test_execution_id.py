@@ -10,7 +10,7 @@ leads back to its path with no lookup. Global uniqueness comes from the pair
 
 from __future__ import annotations
 
-from molab.workspace.domain import ExecutionMode
+from molab.workspace.domain import ExecutionMode, ExecutionStatus
 from molab.workspace.execution_repository import ExecutionRepository
 from molab.workspace.history import AgentRef
 
@@ -32,6 +32,7 @@ def test_execution_repository_numbers_attempts_in_order(run) -> None:
     run.materialize()
     repo = _repo(run)
     first = repo.create(mode=ExecutionMode.INITIAL, created_by=_TEST_AGENT)
+    repo.seal("e01", ExecutionStatus.CANCELLED)
     second = repo.create(mode=ExecutionMode.RERUN, created_by=_TEST_AGENT)
     assert (first.id, first.seq) == ("e01", 1)
     assert (second.id, second.seq) == ("e02", 2)
@@ -48,6 +49,7 @@ def test_two_execution_repository_creates_get_distinct_ids(run) -> None:
     run.materialize()
     repo = _repo(run)
     first = repo.create(mode=ExecutionMode.INITIAL, created_by=_TEST_AGENT).id
+    repo.seal("e01", ExecutionStatus.CANCELLED)
     second = repo.create(mode=ExecutionMode.RERUN, created_by=_TEST_AGENT).id
     assert first != second
 
@@ -65,6 +67,7 @@ class TestTimestampsStayComparable:
         run.materialize()
         repo = _repo(run)
         repo.create(mode=ExecutionMode.INITIAL, created_by=_TEST_AGENT)
+        repo.seal("e01", ExecutionStatus.CANCELLED)
         repo.create(mode=ExecutionMode.RERUN, created_by=_TEST_AGENT)
 
         # Rewrite one attempt the way an older molab wrote it: no zone.

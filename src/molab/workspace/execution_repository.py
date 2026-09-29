@@ -63,6 +63,7 @@ import json
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 
 from molab._typing import JSONValue
 
@@ -70,7 +71,6 @@ from ._file_lock import file_lock
 from .artifact_repository import ArtifactRepository
 from .domain import (
     ACTIVE_EXECUTION_STATUSES,
-    FAILED_EXECUTION_STATUSES,
     TERMINAL_EXECUTION_STATUSES,
     Artifact,
     EvidenceRef,
@@ -194,6 +194,50 @@ _EVIDENCE_FILES = {
 }
 
 
+def _creation_mode(mode: ExecutionMode) -> ExecutionMode:
+    """The mode a new attempt is stored with: ``retry`` becomes ``rerun``."""
+    return ExecutionMode.RERUN if mode is ExecutionMode.RETRY else mode
+
+
+def _resolve_predecessor(
+    mode: ExecutionMode,
+    prior: builtins.list[Execution],
+    based_on_execution_id: str | None,
+) -> Execution | None:
+    """The one predecessor rule shared by ``create`` and ``resolve_predecessor``.
+
+    Args:
+        mode: The normalized mode (never ``retry``).
+        prior: Every attempt of the run, ordered by ``seq``.
+        based_on_execution_id: The named predecessor; ``None`` means the latest.
+
+    Returns:
+        ``None`` for ``initial``; otherwise the terminal predecessor.
+
+    Raises:
+        ValueError: No attempt exists yet, or one is still active.
+        KeyError: The named predecessor does not exist.
+    """
+    if mode is ExecutionMode.INITIAL:
+        return None
+    if based_on_execution_id is None:
+        if not prior:
+            raise ValueError(f"{mode.value} Execution requires a prior attempt")
+        predecessor = prior[-1]
+    else:
+        found = {item.id: item for item in prior}.get(based_on_execution_id)
+        if found is None:
+            raise KeyError(f"predecessor Execution {based_on_execution_id!r} not found")
+        predecessor = found
+    active = [item.id for item in prior if item.status in ACTIVE_EXECUTION_STATUSES]
+    if active:
+        raise ValueError(
+            f"Execution {active[-1]} is still active; cancel it before creating "
+            f"a {mode.value} Execution"
+        )
+    return predecessor
+
+
 class ExecutionRepository:
     """Own each Execution independently; never mutates Run history."""
 
@@ -245,32 +289,62 @@ class ExecutionRepository:
         bypass_cache: bool = False,
         source: SourceManifest | None = None,
     ) -> Execution:
-        """Allocate the next attempt after validating retry/resume semantics.
+        """Allocate the next attempt after validating its mode rules.
 
         This is the one place a run's ``eNN`` ids are allocated: the id is
         always the next sequence slug and is never reused. The only caller in
         ``src`` is ``Run.create_execution``. The record is written QUEUED with
-        its creation-time facts only.
+        its creation-time facts only. Every rule below is checked under the
+        create lock before anything is written, so a refused creation leaves
+        no file and no history commit.
+
+        Mode rules:
+            - ``retry`` is accepted as input and stored as ``rerun``; no new
+              ``"retry"`` record is ever written (legacy ones still read).
+            - No new attempt is created while any attempt of this run is
+              still active (queued / running / finalizing); cancel it first.
+            - A non-``initial`` mode needs a prior attempt. Without
+              *based_on_execution_id* the predecessor is the latest attempt;
+              either way it must be terminal, and ``based_on_execution_id``
+              is recorded as the resolved predecessor.
+            - ``initial``: only before any attempt exists, with no
+              predecessor and no checkpoint.
+            - ``rerun``: after any terminal predecessor, including a
+              succeeded one.
+            - ``resume``: the predecessor must not have succeeded. A
+              checkpoint is optional; when given it must be one of the
+              predecessor's artifacts.
+            - ``reproduce``: the predecessor must have succeeded, and the
+              record always has ``bypass_cache=True`` whatever was passed.
+            - A checkpoint is valid only for ``resume``.
 
         Args:
             mode: How this attempt relates to earlier ones.
             created_by: The agent creating the attempt.
-            based_on_execution_id: The predecessor attempt, when ``mode`` needs one.
+            based_on_execution_id: The predecessor attempt; ``None`` means the
+                latest attempt for every mode but ``initial``.
             checkpoint_artifact_id: The checkpoint to resume from (``resume`` only).
             executor: Creation-time executor facts (backend, target).
             environment: Creation-time environment facts (profile, script).
-            bypass_cache: Whether the attempt ignores the workflow node cache.
+            bypass_cache: Whether the attempt ignores the workflow node cache;
+                forced to ``True`` for ``reproduce``.
             source: The captured workflow source, if any.
 
         Returns:
             The QUEUED record as written.
 
         Raises:
-            ValueError: ``mode`` and the predecessor / checkpoint disagree.
-            KeyError: The named predecessor does not exist.
+            ValueError: ``mode`` and the predecessor / checkpoint disagree, a
+                non-``initial`` mode has no prior attempt, or an attempt of
+                this run is still active.
+            KeyError: The named predecessor, or the checkpoint within it, does
+                not exist.
             FileExistsError: A record with the next id already exists (for
                 example a legacy directory of that name).
         """
+        mode = _creation_mode(mode)
+        if mode is ExecutionMode.REPRODUCE:
+            bypass_cache = True
         self.fs.mkdir(self.executions_dir, parents=True, exist_ok=True)
         with file_lock(self._create_lock()):
             prior = self.list()
@@ -303,6 +377,32 @@ class ExecutionRepository:
             self._write_state(state)
             self._record("ExecutionCreated", state, when=now)
             return state
+
+    def resolve_predecessor(
+        self,
+        mode: ExecutionMode,
+        based_on_execution_id: str | None,
+    ) -> Execution | None:
+        """Resolve the attempt a new attempt of *mode* would be based on.
+
+        The one predecessor rule: ``create`` applies it under its lock, and
+        ``Run.create_execution`` applies it to inherit the predecessor's
+        config. ``retry`` is treated as ``rerun``.
+
+        Args:
+            mode: The requested mode.
+            based_on_execution_id: The named predecessor; ``None`` means the
+                latest attempt.
+
+        Returns:
+            ``None`` for ``initial``; otherwise the terminal predecessor.
+
+        Raises:
+            ValueError: The run has no attempt yet, or an attempt of this run
+                (the predecessor included) is still active.
+            KeyError: The named predecessor does not exist.
+        """
+        return _resolve_predecessor(_creation_mode(mode), self.list(), based_on_execution_id)
 
     # ── read ─────────────────────────────────────────────────────────────
 
@@ -361,8 +461,8 @@ class ExecutionRepository:
             environment: Start-time environment facts (host, python, platform, pid).
             executor: Start-time executor facts (kind, host, pid).
             workflow_digest: Digest of the compiled workflow this attempt runs
-                (``sha256:...``). No production caller passes it yet; its
-                writers land in arch-own-03a / arch-own-03g.
+                (``sha256:...``), stored as an opaque string. ``Run.start`` /
+                ``ExecutionContext`` forward it here.
 
         Returns:
             The RUNNING record as written.
@@ -863,28 +963,22 @@ class ExecutionRepository:
         based_on_execution_id: str | None,
         checkpoint_artifact_id: str | None,
     ) -> Execution | None:
-        by_id = {item.id: item for item in prior}
+        """Apply the mode rules of ``create`` to an already-normalized *mode*."""
         if mode is ExecutionMode.INITIAL:
             if prior:
                 raise ValueError("initial Execution is only valid before any attempt exists")
             if based_on_execution_id or checkpoint_artifact_id:
                 raise ValueError("initial Execution cannot have a predecessor or checkpoint")
             return None
-        if based_on_execution_id is None:
-            if mode is ExecutionMode.RERUN:
-                return None
-            raise ValueError(f"{mode.value} Execution requires based_on_execution_id")
-        predecessor = by_id.get(based_on_execution_id)
-        if predecessor is None:
-            raise KeyError(f"predecessor Execution {based_on_execution_id!r} not found")
-        if predecessor.status in ACTIVE_EXECUTION_STATUSES:
-            raise ValueError("an active Execution cannot be used as a predecessor")
-        if mode is ExecutionMode.RETRY and predecessor.status not in FAILED_EXECUTION_STATUSES:
-            raise ValueError("retry requires a failed, cancelled, or interrupted predecessor")
+        predecessor = cast("Execution", _resolve_predecessor(mode, prior, based_on_execution_id))
         if mode is ExecutionMode.RESUME:
-            if checkpoint_artifact_id is None:
-                raise ValueError("resume requires checkpoint_artifact_id")
-            predecessor.artifact(checkpoint_artifact_id)
+            if predecessor.status is ExecutionStatus.SUCCEEDED:
+                raise ValueError(
+                    f"resume needs a predecessor that did not succeed; {predecessor.id} "
+                    "succeeded (rerun or reproduce it instead)"
+                )
+            if checkpoint_artifact_id is not None:
+                predecessor.artifact(checkpoint_artifact_id)
         elif checkpoint_artifact_id is not None:
             raise ValueError("checkpoint_artifact_id is only valid for resume")
         if mode is ExecutionMode.REPRODUCE and predecessor.status is not ExecutionStatus.SUCCEEDED:

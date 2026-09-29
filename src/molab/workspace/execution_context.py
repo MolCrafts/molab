@@ -102,21 +102,54 @@ _EXECUTOR_START_KEYS: frozenset[str] = frozenset({"host", "pid"})
 """The start-time keys a local starter also writes into ``executor``."""
 
 
-def _creation_environment(profile_config: ProfileConfig | None) -> dict[str, JSONValue]:
+def _creation_environment(
+    profile_config: ProfileConfig | None,
+    *,
+    inherit_from: Execution | None = None,
+) -> dict[str, JSONValue]:
     """Build the creation-time environment from the active profile.
 
     The one home of the profile rule shared by every creator: every key in
     ``_PROFILE_KEYS`` is always written, and ``config_hash`` is set only when
     the profile has content or a name.
 
+    Inheritance (arch-own-03a, D57): with *profile_config* ``None`` and an
+    *inherit_from* predecessor, the three keys are copied verbatim from the
+    predecessor's recorded environment; a key it lacks is written as
+    ``None``. An explicit *profile_config* (even an empty one) always wins.
+
     Args:
-        profile_config: The active profile; ``None`` means an empty, unnamed one.
+        profile_config: The active profile; ``None`` means an empty, unnamed
+            one, or the predecessor's when *inherit_from* is given.
+        inherit_from: The predecessor whose recorded config a non-initial
+            attempt inherits when no profile is passed.
 
     Returns:
         A dict whose keys are exactly ``_PROFILE_KEYS``.
     """
+    if profile_config is None and inherit_from is not None:
+        recorded = inherit_from.environment
+        return {key: recorded.get(key) for key in _PROFILE_FACTS}
     cfg = profile_config if profile_config is not None else ProfileConfig({}, name=None)
     return {key: fact(cfg) for key, fact in _PROFILE_FACTS.items()}
+
+
+def _recorded_config(environment: dict[str, JSONValue]) -> ProfileConfig:
+    """The profile an attempt runs with, projected from its recorded environment.
+
+    Args:
+        environment: The record's ``environment``.
+
+    Returns:
+        A :class:`ProfileConfig` built from the recorded ``config`` and
+        ``profile`` (empty and unnamed where they are missing).
+    """
+    recorded_config = environment.get("config")
+    recorded_profile = environment.get("profile")
+    return ProfileConfig(
+        dict(recorded_config) if isinstance(recorded_config, dict) else {},
+        name=recorded_profile if isinstance(recorded_profile, str) else None,
+    )
 
 
 def _start_environment() -> dict[str, JSONValue]:
@@ -219,8 +252,9 @@ class ExecutionContext:
 
     Args:
         run: The Run this attempt realizes.
-        profile_config: The active profile; ``None`` means empty and unnamed.
-            With *execution_id* it may be omitted (the recorded config runs)
+        profile_config: The active profile; ``None`` means empty and unnamed
+            for an ``initial`` attempt, and the predecessor's recorded config
+            for any other mode. With *execution_id* it may be omitted (the recorded config runs)
             or equal the recorded one; a different ``profile`` or
             ``config_hash`` raises ``ValueError`` on entry.
         execution_id: A *preallocated* attempt, i.e. one already created by
@@ -236,6 +270,9 @@ class ExecutionContext:
         bypass_cache: Whether a newly created attempt ignores the workflow
             node cache (the per-task result store that lets an unchanged task
             reuse its earlier output). Read back through :attr:`bypass_cache`.
+        workflow_digest: An opaque digest of the workflow this attempt runs,
+            recorded by the start transition before any task runs. A
+            start-time fact, so it may be passed with *execution_id*.
     """
 
     def __init__(
@@ -249,6 +286,7 @@ class ExecutionContext:
         checkpoint_artifact_id: str | None = None,
         created_by: AgentRef | None = None,
         bypass_cache: bool = False,
+        workflow_digest: str | None = None,
     ) -> None:
         if execution_id is not None:
             conflicts = [
@@ -279,6 +317,8 @@ class ExecutionContext:
         self._based_on_execution_id = based_on_execution_id
         self._checkpoint_artifact_id = checkpoint_artifact_id
         self._bypass_cache = bypass_cache
+        self._workflow_digest = workflow_digest
+        self._execution_dir: Path | None = None
         self._created_by = created_by or _system_agent()
         self._state: Execution | None = None
         self._active_task_id: str | None = None
@@ -307,7 +347,17 @@ class ExecutionContext:
 
     @property
     def execution_dir(self) -> Path:
-        return self.run_dir / "executions" / self.id
+        """This attempt's directory, as ``Run.execution_dir`` lays it out.
+
+        Cached on entry, so repeated ``get_dir`` / ``log`` / ``metrics``
+        calls do not rebuild the repository.
+
+        Raises:
+            RuntimeError: The context has not been entered.
+        """
+        if self._execution_dir is None:
+            raise RuntimeError("ExecutionContext has not been entered")
+        return self._execution_dir
 
     @property
     def based_on_execution_id(self) -> str | None:
@@ -354,7 +404,13 @@ class ExecutionContext:
 
     @property
     def config(self) -> ProfileConfig:
-        """The profile this attempt runs with; with an explicit id, the recorded one."""
+        """The profile this attempt runs with.
+
+        ``ctx.config`` is always the record's config: once entered, it is
+        projected from the ``profile`` / ``config`` keys of the attempt's
+        recorded environment, whether the attempt was created here (and
+        possibly inherited its predecessor's config) or preallocated.
+        """
         return self._profile_config
 
     @property
@@ -408,9 +464,13 @@ class ExecutionContext:
         # it raises here: no heartbeat, the context is not entered.
         environment = _start_environment()
         self._state = self._executions.start(
-            state.id, environment=environment, executor=_start_executor(environment)
+            state.id,
+            environment=environment,
+            executor=_start_executor(environment),
+            workflow_digest=self._workflow_digest,
         )
         self._execution_id = state.id
+        self._execution_dir = self.run.execution_dir(state.id)
         self._prepare_execution_files()
         self.log("run").append(
             f"{datetime.now(UTC).isoformat()} execution started mode={state.mode.value}"
@@ -560,17 +620,24 @@ class ExecutionContext:
         Start-time facts (host, python, pid) are added by ``start`` in
         ``__enter__``, so both paths record them at the same moment.
 
+        The *requested* profile is passed through (``None`` stays ``None``),
+        so a non-initial attempt without a profile inherits its
+        predecessor's config; the context then runs with the config the
+        record holds, never a default it did not record.
+
         Returns:
             The QUEUED record as written.
         """
-        return self.run.create_execution(
+        state = self.run.create_execution(
             mode=self._mode,
             based_on_execution_id=self._based_on_execution_id,
             checkpoint_artifact_id=self._checkpoint_artifact_id,
             bypass_cache=self._bypass_cache,
-            profile_config=self._profile_config,
+            profile_config=self._requested_profile_config,
             created_by=self._created_by,
         )
+        self._profile_config = _recorded_config(state.environment)
+        return state
 
     def _preallocated(self, execution_id: str) -> Execution:
         """Look up a preallocated QUEUED record and adopt its recorded config.
@@ -601,12 +668,7 @@ class ExecutionContext:
                 f"preallocated Execution {state.id!r} is {state.status.value}, not queued"
             )
         env = state.environment
-        recorded_config = env.get("config")
-        recorded_profile = env.get("profile")
-        recorded = ProfileConfig(
-            dict(recorded_config) if isinstance(recorded_config, dict) else {},
-            name=recorded_profile if isinstance(recorded_profile, str) else None,
-        )
+        recorded = _recorded_config(env)
         requested = self._requested_profile_config
         if requested is not None:
             wanted = _creation_environment(requested)

@@ -314,6 +314,53 @@ class TestExecutionContextBypassCache:
         assert run.start().bypass_cache is False
 
 
+_DIGEST = "sha256:" + "ab" * 32
+
+
+class TestExecutionContextExecutionDir:
+    """arch-own-03a §4: ``ctx.execution_dir`` derives from ``Run.execution_dir``."""
+
+    def test_equals_the_run_accessor(self, run: Run) -> None:
+        with run.start() as ctx:
+            assert ctx.execution_dir == run.execution_dir(ctx.id)
+            assert ctx.execution_dir.is_dir()
+
+    def test_raises_before_entry(self, run: Run) -> None:
+        with pytest.raises(RuntimeError):
+            _ = run.start().execution_dir
+
+    def test_layout_literal_is_not_in_the_context_source(self) -> None:
+        import inspect
+
+        import molab.workspace.execution_context as module
+
+        assert '"executions"' not in inspect.getsource(module)
+
+
+class TestExecutionContextConfig:
+    """arch-own-03a §1b (D57): ``ctx.config`` is always the record's config."""
+
+    def test_created_context_runs_record_config(self, run: Run) -> None:
+        with pytest.raises(RuntimeError), run.start(ProfileConfig({"k": 1}, name="cpu")):
+            raise RuntimeError("boom")
+        e01_hash = run.execution("e01").environment["config_hash"]
+
+        with run.start(mode=ExecutionMode.RESUME) as ctx:
+            assert ctx.config.name == "cpu"
+            assert ctx.config.to_dict() == {"k": 1}
+            assert run.execution(ctx.id).environment["config_hash"] == e01_hash
+
+
+class TestExecutionContextWorkflowDigest:
+    """arch-own-03a §3: the start transition records the digest."""
+
+    def test_digest_is_recorded_at_start(self, run: Run) -> None:
+        with ExecutionContext(run, workflow_digest=_DIGEST) as ctx:
+            record = run._execution_repository().get(ctx.id)
+            assert record.workflow_digest == _DIGEST
+            assert record.status is ExecutionStatus.RUNNING
+
+
 def _profile_config_hash() -> Callable[[ProfileConfig | None], str | None]:
     """Import ``profile_config_hash`` lazily so a missing symbol fails per test."""
     from molab.workspace.execution_context import profile_config_hash

@@ -2,8 +2,9 @@
 
 A Run has no scalar status; every physical Execution is sealed independently
 as SUCCEEDED / FAILED / INTERRUPTED / CANCELLED and is immutable once sealed.
-Recovery is a *new* Execution (RETRY, based on a failed/cancelled/interrupted
-predecessor) — it never mutates the failed attempt.
+Recovery is a *new* Execution (RERUN, based on a terminal predecessor; a
+RETRY request is stored as RERUN since arch-own-03a) — it never mutates the
+failed attempt.
 
 Bug 1 (v2) — a failed Execution is immutable: a subsequent attempt is a new
 Execution and never flips the failed one back to ``succeeded``. There is no
@@ -51,7 +52,7 @@ class TestNoOpAttemptKeepsPriorStatus:
     def test_failed_execution_stays_failed_after_retry(self, run):
         failed_id = _fail_once(run)
 
-        with run.start(mode=ExecutionMode.RETRY, based_on_execution_id=failed_id):
+        with run.start(mode=ExecutionMode.RERUN, based_on_execution_id=failed_id):
             pass  # clean retry — a NEW Execution, must not flip the failed one
 
         states = {s.id: s for s in run.executions}
@@ -65,7 +66,7 @@ class TestNoOpAttemptKeepsPriorStatus:
         assert state.error["type"] == "RuntimeError"
         assert state.error["message"] == "boom"
 
-        with run.start(mode=ExecutionMode.RETRY, based_on_execution_id=failed_id):
+        with run.start(mode=ExecutionMode.RERUN, based_on_execution_id=failed_id):
             pass
 
         # The retry must not clear the failed Execution's error.
@@ -74,7 +75,7 @@ class TestNoOpAttemptKeepsPriorStatus:
     def test_retry_is_new_execution_not_aborted(self, run):
         failed_id = _fail_once(run)
 
-        with run.start(mode=ExecutionMode.RETRY, based_on_execution_id=failed_id):
+        with run.start(mode=ExecutionMode.RERUN, based_on_execution_id=failed_id):
             pass
 
         executions = run.executions
@@ -92,7 +93,7 @@ class TestNoOpAttemptKeepsPriorStatus:
         """A retry that records new results is real work — it succeeds."""
         failed_id = _fail_once(run)
 
-        with run.start(mode=ExecutionMode.RETRY, based_on_execution_id=failed_id) as ctx:
+        with run.start(mode=ExecutionMode.RERUN, based_on_execution_id=failed_id) as ctx:
             ctx.set_result("train", {"loss": 0.1})
             retry_id = ctx.id
 
@@ -103,7 +104,7 @@ class TestNoOpAttemptKeepsPriorStatus:
         """A clean retry resolves to SUCCEEDED (the workflow runtime's signal)."""
         failed_id = _fail_once(run)
 
-        with run.start(mode=ExecutionMode.RETRY, based_on_execution_id=failed_id) as ctx:
+        with run.start(mode=ExecutionMode.RERUN, based_on_execution_id=failed_id) as ctx:
             ctx.mark_succeeded()
 
         assert run.executions[-1].status is ExecutionStatus.SUCCEEDED
@@ -129,7 +130,7 @@ class TestSuccessClearsStaleError:
     def test_retry_execution_has_no_error_on_disk(self, run):
         failed_id = _fail_once(run)
 
-        with run.start(mode=ExecutionMode.RETRY, based_on_execution_id=failed_id) as ctx:
+        with run.start(mode=ExecutionMode.RERUN, based_on_execution_id=failed_id) as ctx:
             ctx.mark_succeeded()
             retry_id = ctx.id
 

@@ -288,6 +288,7 @@ class TestExecutionRepositoryCreate:
         assert "execution_id" not in inspect.signature(ExecutionRepository.create).parameters
         repo = _run_repo(run)
         repo.create(created_by=_TEST_AGENT)
+        repo.seal("e01", ExecutionStatus.CANCELLED)
         repo.create(created_by=_TEST_AGENT, mode=ExecutionMode.RERUN)
         assert [x.id for x in repo.list()] == ["e01", "e02"]
 
@@ -295,6 +296,266 @@ class TestExecutionRepositoryCreate:
         repo = _run_repo(run)
         repo.create(created_by=_TEST_AGENT)
         assert _raw_state(repo, "e01")["schema_version"] == _SCHEMA_V4
+
+
+def _terminal(
+    repo: ExecutionRepository,
+    mode: ExecutionMode,
+    status: ExecutionStatus,
+    **kw: object,
+) -> Execution:
+    """create -> start -> seal(*status*): one terminal attempt of *mode*."""
+    state = repo.create(mode=mode, created_by=_TEST_AGENT, **kw)  # type: ignore[arg-type]
+    repo.start(state.id)
+    return repo.seal(state.id, status)
+
+
+def _attempt_dirs(repo: ExecutionRepository) -> set[str]:
+    root = Path(repo.executions_dir)
+    return {p.name for p in root.iterdir()} if root.exists() else set()
+
+
+_NON_INITIAL = (
+    ExecutionMode.RERUN,
+    ExecutionMode.RETRY,
+    ExecutionMode.RESUME,
+    ExecutionMode.REPRODUCE,
+)
+_NOT_SUCCEEDED = (
+    ExecutionStatus.FAILED,
+    ExecutionStatus.CANCELLED,
+    ExecutionStatus.INTERRUPTED,
+)
+
+
+class TestExecutionRepositoryCreateModes:
+    """arch-own-03a §1: one creation rule set for every Execution mode."""
+
+    # --- RETRY is stored as RERUN -----------------------------------------
+
+    def test_retry_is_stored_as_rerun(self, run: Run) -> None:
+        repo = _run_repo(run)
+        _terminal(repo, ExecutionMode.INITIAL, ExecutionStatus.FAILED)
+
+        rec = repo.create(mode=ExecutionMode.RETRY, created_by=_TEST_AGENT)
+
+        assert rec.mode is ExecutionMode.RERUN
+        assert rec.based_on_execution_id == "e01"
+        assert _raw_state(repo, rec.id)["mode"] == "rerun"
+
+    def test_retry_after_success_is_stored_as_rerun(self, run: Run) -> None:
+        repo = _run_repo(run)
+        _terminal(repo, ExecutionMode.INITIAL, ExecutionStatus.SUCCEEDED)
+
+        rec = repo.create(mode=ExecutionMode.RETRY, created_by=_TEST_AGENT)
+
+        assert rec.mode is ExecutionMode.RERUN
+        assert rec.based_on_execution_id == "e01"
+
+    def test_legacy_retry_record_still_reads(self, run: Run) -> None:
+        repo = _run_repo(run)
+        _terminal(repo, ExecutionMode.INITIAL, ExecutionStatus.FAILED)
+        path = Path(repo.state_path("e01"))
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        raw["mode"] = "retry"
+        path.write_text(json.dumps(raw), encoding="utf-8")
+
+        assert repo.get("e01").mode is ExecutionMode.RETRY
+        rec = repo.create(mode=ExecutionMode.RERUN, created_by=_TEST_AGENT)
+        assert rec.id == "e02"
+        assert rec.based_on_execution_id == "e01"
+
+    # --- the predecessor defaults to the latest attempt -------------------
+
+    def test_based_on_defaults_to_latest(self, run: Run) -> None:
+        repo = _run_repo(run)
+        _terminal(repo, ExecutionMode.INITIAL, ExecutionStatus.FAILED)
+        _terminal(repo, ExecutionMode.RERUN, ExecutionStatus.SUCCEEDED)
+
+        rec = repo.create(mode=ExecutionMode.RERUN, created_by=_TEST_AGENT)
+
+        assert rec.based_on_execution_id == "e02"
+
+    @pytest.mark.parametrize(
+        "mode", [ExecutionMode.RERUN, ExecutionMode.RESUME, ExecutionMode.REPRODUCE]
+    )
+    def test_default_predecessor_must_be_terminal(self, run: Run, mode: ExecutionMode) -> None:
+        repo = _run_repo(run)
+        repo.create(created_by=_TEST_AGENT)
+        before = _attempt_dirs(repo)
+
+        with pytest.raises(ValueError, match="active"):
+            repo.create(mode=mode, created_by=_TEST_AGENT)
+
+        assert len(repo.list()) == 1
+        assert _attempt_dirs(repo) == before
+
+    def test_any_active_attempt_refuses_a_new_one(self, run: Run) -> None:
+        """Handoff from 02e: no new attempt while one is active, even based on an older one."""
+        repo = _run_repo(run)
+        _terminal(repo, ExecutionMode.INITIAL, ExecutionStatus.FAILED)
+        repo.create(mode=ExecutionMode.RERUN, created_by=_TEST_AGENT)
+
+        with pytest.raises(ValueError, match="active"):
+            repo.create(
+                mode=ExecutionMode.RERUN,
+                based_on_execution_id="e01",
+                created_by=_TEST_AGENT,
+            )
+
+        assert [x.id for x in repo.list()] == ["e01", "e02"]
+
+    @pytest.mark.parametrize("mode", _NON_INITIAL)
+    def test_non_initial_on_empty_run_is_refused(self, run: Run, mode: ExecutionMode) -> None:
+        repo = _run_repo(run)
+
+        with pytest.raises(ValueError, match="prior attempt"):
+            repo.create(mode=mode, created_by=_TEST_AGENT)
+
+        assert repo.list() == []
+        assert _attempt_dirs(repo) == set()
+
+    # --- RESUME -----------------------------------------------------------
+
+    @pytest.mark.parametrize("status", _NOT_SUCCEEDED)
+    def test_resume_without_checkpoint(self, run: Run, status: ExecutionStatus) -> None:
+        repo = _run_repo(run)
+        _terminal(repo, ExecutionMode.INITIAL, status)
+
+        rec = repo.create(mode=ExecutionMode.RESUME, created_by=_TEST_AGENT)
+
+        assert rec.mode is ExecutionMode.RESUME
+        assert rec.based_on_execution_id == "e01"
+        assert rec.checkpoint_artifact_id is None
+
+    @pytest.mark.parametrize("based_on", [None, "e01"])
+    def test_resume_after_success_is_refused(self, run: Run, based_on: str | None) -> None:
+        repo = _run_repo(run)
+        _terminal(repo, ExecutionMode.INITIAL, ExecutionStatus.SUCCEEDED)
+        before = _attempt_dirs(repo)
+
+        with pytest.raises(ValueError, match="succeeded"):
+            repo.create(
+                mode=ExecutionMode.RESUME,
+                based_on_execution_id=based_on,
+                created_by=_TEST_AGENT,
+            )
+
+        assert _attempt_dirs(repo) == before
+
+    def test_resume_checkpoint_must_belong_to_predecessor(self, run: Run) -> None:
+        with run.start() as ctx:
+            cp = ctx.checkpoint("c1")
+            ctx.mark_failed("boom")
+        repo = _run_repo(run)
+        assert repo.get("e01").status is ExecutionStatus.FAILED
+        _terminal(repo, ExecutionMode.RERUN, ExecutionStatus.FAILED)
+        before = _attempt_dirs(repo)
+
+        with pytest.raises(KeyError):
+            repo.create(
+                mode=ExecutionMode.RESUME,
+                based_on_execution_id="e02",
+                checkpoint_artifact_id=cp.id,
+                created_by=_TEST_AGENT,
+            )
+        assert _attempt_dirs(repo) == before
+
+        rec = repo.create(
+            mode=ExecutionMode.RESUME,
+            based_on_execution_id="e01",
+            checkpoint_artifact_id=cp.id,
+            created_by=_TEST_AGENT,
+        )
+        assert rec.checkpoint_artifact_id == cp.id
+        assert rec.based_on_execution_id == "e01"
+
+    # --- RERUN ------------------------------------------------------------
+
+    def test_rerun_after_success(self, run: Run) -> None:
+        repo = _run_repo(run)
+        _terminal(repo, ExecutionMode.INITIAL, ExecutionStatus.SUCCEEDED)
+
+        rec = repo.create(mode=ExecutionMode.RERUN, created_by=_TEST_AGENT)
+
+        assert rec.id == "e02"
+        assert rec.based_on_execution_id == "e01"
+
+    def test_checkpoint_only_valid_for_resume(self, run: Run) -> None:
+        repo = _run_repo(run)
+        _terminal(repo, ExecutionMode.INITIAL, ExecutionStatus.FAILED)
+        before = _attempt_dirs(repo)
+
+        with pytest.raises(ValueError, match="only valid for resume"):
+            repo.create(
+                mode=ExecutionMode.RERUN,
+                checkpoint_artifact_id="x",
+                created_by=_TEST_AGENT,
+            )
+
+        assert _attempt_dirs(repo) == before
+
+    # --- REPRODUCE --------------------------------------------------------
+
+    def test_reproduce_forces_bypass_cache(self, run: Run) -> None:
+        repo = _run_repo(run)
+        _terminal(repo, ExecutionMode.INITIAL, ExecutionStatus.SUCCEEDED)
+
+        rec = repo.create(mode=ExecutionMode.REPRODUCE, bypass_cache=False, created_by=_TEST_AGENT)
+
+        assert rec.bypass_cache is True
+        assert repo.get(rec.id).bypass_cache is True
+        assert _raw_state(repo, rec.id)["bypass_cache"] is True
+
+    def test_reproduce_requires_succeeded(self, run: Run) -> None:
+        repo = _run_repo(run)
+        _terminal(repo, ExecutionMode.INITIAL, ExecutionStatus.FAILED)
+        before = _attempt_dirs(repo)
+
+        with pytest.raises(ValueError, match="succeeded"):
+            repo.create(mode=ExecutionMode.REPRODUCE, created_by=_TEST_AGENT)
+
+        assert _attempt_dirs(repo) == before
+
+    # --- INITIAL is unchanged ---------------------------------------------
+
+    def test_initial_after_an_attempt_is_refused(self, run: Run) -> None:
+        repo = _run_repo(run)
+        _terminal(repo, ExecutionMode.INITIAL, ExecutionStatus.FAILED)
+        before = _attempt_dirs(repo)
+
+        with pytest.raises(ValueError):
+            repo.create(mode=ExecutionMode.INITIAL, created_by=_TEST_AGENT)
+
+        assert _attempt_dirs(repo) == before
+
+    def test_initial_with_based_on_is_refused(self, run: Run) -> None:
+        repo = _run_repo(run)
+
+        with pytest.raises(ValueError):
+            repo.create(
+                mode=ExecutionMode.INITIAL,
+                based_on_execution_id="e01",
+                created_by=_TEST_AGENT,
+            )
+
+        assert _attempt_dirs(repo) == set()
+
+    # --- the one predecessor resolution (§1b) -----------------------------
+
+    def test_resolve_predecessor(self, run: Run) -> None:
+        repo = _run_repo(run)
+        assert repo.resolve_predecessor(ExecutionMode.INITIAL, None) is None
+        _terminal(repo, ExecutionMode.INITIAL, ExecutionStatus.FAILED)
+        _terminal(repo, ExecutionMode.RERUN, ExecutionStatus.SUCCEEDED)
+
+        latest = repo.resolve_predecessor(ExecutionMode.RERUN, None)
+        named = repo.resolve_predecessor(ExecutionMode.RESUME, "e01")
+
+        assert latest is not None and latest.id == "e02"
+        assert named is not None and named.id == "e01"
+        with pytest.raises(KeyError):
+            repo.resolve_predecessor(ExecutionMode.RERUN, "e09")
 
 
 class TestExecutionRepositoryStart:
