@@ -50,6 +50,7 @@ code (CLI / server / cluster workers) can recover it via
 ``default_binding_registry.for_experiment(experiment)``.
 """
 
+from ._engine.persistence import read_journal, read_outputs, read_resume_seeds
 from ._engine.runtime import WorkflowRuntime
 from .binding import WorkflowBinding, WorkflowBindingRegistry, default_binding_registry
 from .cache import Caching
@@ -71,6 +72,7 @@ from .contract import (
     ValidationReport,
     WorkflowContract,
 )
+from .digest import compute_workflow_digest
 
 # NOTE: importing ``.execute`` also registers the workspace-side
 # ``set_run_executor`` seam that backs ``Run.execute`` / ``RunSet.execute``.
@@ -191,8 +193,12 @@ __all__ = [
     "aexecute_run",
     "can_recover_workflow",
     "compiled_workflow_for_run",
+    "compute_workflow_digest",
     "default_binding_registry",
     "default_codec",
     "default_registry",
     "execute_run",
+    "read_journal",
+    "read_outputs",
+    "read_resume_seeds",
 ]

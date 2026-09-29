@@ -77,12 +77,21 @@ from .plan import START
 def _snapshot_key_of(deps: WorkflowDeps, name: str) -> str | None:
     """The task's ``TaskSnapshot.key`` (code+config identity), if one exists.
 
-    Persisted next to a completed task's outputs in ``workflow.json`` so
-    resume seeding can verify the output was produced by the SAME code —
-    see :func:`.persistence.filter_resume_seeds`.
+    Persisted on a completed task's journal record so resume seeding can
+    verify the output was produced by the SAME code — see
+    :func:`.persistence._verify_seeds`.
     """
     snap = deps.snapshots.get(name)
     return snap.key if snap is not None else None
+
+
+def _dependent_params_hash_of(deps: WorkflowDeps, name: str) -> str | None:
+    """The hash of the task's ``dependent_params`` callable, if it declares one.
+
+    Persisted beside :func:`_snapshot_key_of` — ``dependent_params`` changes
+    the effective config, which the task snapshot does not cover.
+    """
+    return deps.dependent_params_hashes.get(name)
 
 
 def _cache_is_active(deps: WorkflowDeps, name: str) -> bool:
@@ -325,7 +334,7 @@ class _PlanEngine:
             # Body already produced its value (seed_outputs); skip running it
             # but still route as if it returned that value.
             return state.results.get(name)
-        mark_task_status(deps.run_dir, deps.execution_id, name, "running")
+        mark_task_status(deps.journal_dir, name, "running")
         try:
             if _cache_is_active(deps, name):
                 # Opt-in content-addressed caching (batch Task only): on a hit
@@ -336,8 +345,7 @@ class _PlanEngine:
             return await run_task_body(name, deps, state, delivered=delivered)
         except Exception as exc:
             mark_task_status(
-                deps.run_dir,
-                deps.execution_id,
+                deps.journal_dir,
                 name,
                 "failed",
                 error=f"{type(exc).__name__}: {exc}",
@@ -363,8 +371,7 @@ class _PlanEngine:
             recorded_value, dispatch = _classify_return(event.raw, edge_set, task_name=name)
         except Exception as exc:
             mark_task_status(
-                deps.run_dir,
-                deps.execution_id,
+                deps.journal_dir,
                 name,
                 "failed",
                 error=f"{type(exc).__name__}: {exc}",
@@ -373,16 +380,22 @@ class _PlanEngine:
         if recorded_value is not NO_OUTPUT:
             state.record(name, recorded_value)
             mark_task_status(
-                deps.run_dir,
-                deps.execution_id,
+                deps.journal_dir,
                 name,
                 "completed",
                 output=recorded_value,
                 snapshot_key=_snapshot_key_of(deps, name),
+                dependent_params_hash=_dependent_params_hash_of(deps, name),
             )
         else:
             state.completed.add(name)
-            mark_task_status(deps.run_dir, deps.execution_id, name, "completed")
+            mark_task_status(
+                deps.journal_dir,
+                name,
+                "completed",
+                snapshot_key=_snapshot_key_of(deps, name),
+                dependent_params_hash=_dependent_params_hash_of(deps, name),
+            )
 
         # wf.loop max_iters guard — increment the until-task's counter
         # whenever it would route "continue"; once at the cap, emit
@@ -480,7 +493,7 @@ class _PlanEngine:
         limiter = deps.parallel_limiters.get(body)
 
         async def _one(element: TaskInput) -> TaskOutput:
-            mark_task_status(deps.run_dir, deps.execution_id, body, "running")
+            mark_task_status(deps.journal_dir, body, "running")
             try:
                 if limiter is not None:
                     async with limiter:
@@ -488,8 +501,7 @@ class _PlanEngine:
                 return await run_task_body(body, deps, state, element=element)
             except Exception as exc:  # capture per-element, aggregate below
                 mark_task_status(
-                    deps.run_dir,
-                    deps.execution_id,
+                    deps.journal_dir,
                     body,
                     "failed",
                     error=f"{type(exc).__name__}: {exc}",
@@ -504,8 +516,7 @@ class _PlanEngine:
         }
         if failures:
             mark_task_status(
-                deps.run_dir,
-                deps.execution_id,
+                deps.journal_dir,
                 body,
                 "failed",
                 error=f"{len(failures)} parallel element failure(s)",
@@ -516,12 +527,12 @@ class _PlanEngine:
         state.completed.add(body)
         state.parallel_runs[body] = len(ordered)
         mark_task_status(
-            deps.run_dir,
-            deps.execution_id,
+            deps.journal_dir,
             body,
             "completed",
             output=ordered,
             snapshot_key=_snapshot_key_of(deps, body),
+            dependent_params_hash=_dependent_params_hash_of(deps, body),
         )
 
 

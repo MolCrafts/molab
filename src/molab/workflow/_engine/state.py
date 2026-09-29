@@ -107,6 +107,11 @@ class WorkflowDeps:
         user_deps: Application-level deps forwarded from the caller.
         remote_executor: Optional remote-execution gateway (set by molq).
         run_dir: Path to the run's directory on disk (may be None).
+        execution_id: The attempt id (``eNN``) for the cache manifest; ``None``
+            for a bare or persistence-off run.
+        journal_dir: The directory the node journal is written to — the
+            workspace-supplied ``run_context.execution_dir`` — or ``None``
+            when this execution writes no journal.
         registration_by_name: name → :class:`TaskRegistration`. Built fresh
             per execution by the runtime from ``compiled._tasks``.
         parallel_decls: ``body_task_name → ParallelDecl``.
@@ -125,6 +130,9 @@ class WorkflowDeps:
         snapshots: ``task_name → TaskSnapshot`` (the compiled artifact's
             per-task static identity). The cache hook keys on
             ``snapshots[name].key | input_hash``.
+        dependent_params_hashes: ``task_name → hash of its dependent_params
+            callable`` (``None`` when it has none), recorded on each
+            completed journal record for the resume-seed gate.
     """
 
     run: RunLike | None = None
@@ -136,6 +144,7 @@ class WorkflowDeps:
     remote_executor: UserDeps = None
     run_dir: Path | None = None
     execution_id: str | None = None
+    journal_dir: Path | None = None
     registration_by_name: Mapping[str, TaskRegistration] = field(default_factory=dict)
     parallel_decls: Mapping[str, ParallelDecl] = field(default_factory=dict)
     loop_max_iters: Mapping[str, int] = field(default_factory=dict)
@@ -143,4 +152,5 @@ class WorkflowDeps:
     cache: Caching | None = None
     bypass_cache: bool = False
     snapshots: Mapping[str, TaskSnapshot] = field(default_factory=dict)
+    dependent_params_hashes: Mapping[str, str | None] = field(default_factory=dict)
     scratch_root: Path | None = None

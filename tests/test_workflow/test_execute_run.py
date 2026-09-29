@@ -277,3 +277,17 @@ class TestExecuteRun:
         result = asyncio.run(run.aexecute(_build_wf()))
         assert result.status == "succeeded"
         assert result.outputs["summarize"] == "got 6"
+
+
+class TestWorkspaceRunExecutor:
+    def test_read_outputs_matches_the_public_reader(self, tmp_path: Path) -> None:
+        from molab.workflow import read_outputs
+        from molab.workspace.run import require_run_executor
+
+        run = _make_run(tmp_path)
+        run.execute(_build_wf())
+
+        outputs = require_run_executor().read_outputs(run, "e01")  # type: ignore[attr-defined]
+
+        assert outputs == read_outputs(run, "e01")
+        assert outputs == {"double": 6, "summarize": "got 6"}

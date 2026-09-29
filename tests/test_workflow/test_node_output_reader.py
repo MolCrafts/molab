@@ -65,3 +65,30 @@ class TestReadNodeOutputs:
     def test_malformed_json_returns_empty(self, tmp_path: Path) -> None:
         _write_workflow_json(tmp_path, "exec-x", "{not json")
         assert read_node_outputs(tmp_path, "exec-x") == {}
+
+    def test_schema_v3_document(self, tmp_path: Path) -> None:
+        """A v3 journal (no top-level status, identity fields on records) reads
+        the same way: only completed records with outputs, lossy omitted."""
+        doc = {
+            "schema_version": 3,
+            "execution_id": "e02",
+            "workflow_digest": "sha256:" + "a" * 64,
+            "workflow_name": "wf",
+            "based_on_execution_id": "e01",
+            "started_at": "2026-09-29T00:00:00",
+            "finished_at": None,
+            "task_configs": [
+                {
+                    "task_id": "a",
+                    "status": "completed",
+                    "outputs": 1,
+                    "snapshot_key": "k:c",
+                    "dependent_params_hash": None,
+                },
+                {"task_id": "b", "status": "completed", "outputs": "x", "outputs_lossy": True},
+                {"task_id": "c", "status": "running", "outputs": 3},
+            ],
+            "links": [],
+        }
+        _write_workflow_json(tmp_path, "e02", doc)
+        assert read_node_outputs(tmp_path, "e02") == {"a": 1}

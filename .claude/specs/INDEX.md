@@ -32,7 +32,7 @@ _Step 2 target architecture (plan `pasted-content-id-0977-you-are-scalable-puddl
 | 02g | [arch-own-02g-harness-ids](arch-own-02g-harness-ids.md) | harness 新 run 走 Experiment.ensure_run（UUIDv7） [superseded by drop-harness] |
 | 02h | [arch-own-02h-sever](arch-own-02h-sever.md) | 切断：移除 RunMetadata 执行期来源字段、显式 id 回退与 run 级 source/ [done] |
 | 03a | [arch-own-03a-modes](arch-own-03a-modes.md) | 执行模式创建规则与 Run 路径访问器 [done] |
-| 03b | [arch-own-03b-journal](arch-own-03b-journal.md) | workflow digest + node journal owned by workflow [approved] |
+| 03b | [arch-own-03b-journal](arch-own-03b-journal.md) | workflow digest + node journal owned by workflow [done] |
 | 03c | [arch-own-03c-cache](arch-own-03c-cache.md) | 节点缓存按 run 身份定位，缓存键覆盖有效配置 [approved] |
 | 03d | [arch-own-03d-seam](arch-own-03d-seam.md) | run-executor 接缝懒注册 + 结果读取经接缝（删除 execution_results.py） [approved] |
 | 03e | [arch-own-03e-routes](arch-own-03e-routes.md) | 服务端路由改经所有者读取 journal 与 results [approved] (gated on drop-harness-ui, D-6) |

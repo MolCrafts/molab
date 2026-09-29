@@ -108,3 +108,31 @@ def test_compiled_graph_is_layer_private() -> None:
         "CompiledWorkflow.graph; use the public codec/introspection surface.\n  "
         + "\n  ".join(offenders)
     )
+
+
+#: Private members of workspace objects the workflow layer used to probe.
+_WORKSPACE_PRIVATE_MEMBERS = frozenset(
+    {"_execution_repository", "_get_execution_id", "_execution_id"}
+)
+
+
+def test_workflow_reads_no_workspace_private_members() -> None:
+    """``src/molab/workflow`` reaches workspace only through public members.
+
+    The runtime reads the attempt from ``run_context.id`` /
+    ``execution_dir`` / ``based_on_execution_id`` and an attempt record from
+    ``run.execution(id)``; no attribute access or ``getattr`` string may name
+    the workspace's private execution plumbing.
+    """
+    hits: list[str] = []
+    for py in _iter_workflow_py_files():
+        tree = ast.parse(py.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            name = None
+            if isinstance(node, ast.Attribute):
+                name = node.attr
+            elif isinstance(node, ast.Constant) and isinstance(node.value, str):
+                name = node.value
+            if name in _WORKSPACE_PRIVATE_MEMBERS:
+                hits.append(f"{py.relative_to(WORKFLOW_ROOT)}:{node.lineno}: {name}")
+    assert not hits, "workflow probes private workspace members:\n  " + "\n  ".join(hits)

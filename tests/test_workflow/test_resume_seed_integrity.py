@@ -1,203 +1,234 @@
-"""Resume-seed integrity — persisted outputs are verified before seeding.
+"""Resume-seed integrity on real RESUME contexts.
 
-A resumed execution seeds completed-node outputs from the prior attempt's
-``executions/<exec_id>/workflow.json``. Those persisted values are only
-trustworthy when (a) they were produced by the SAME task code + config
-(verified via the persisted ``snapshot_key`` vs the live recomputed
-``TaskSnapshot.key``) and (b) they did not go through the lossy ``_jsonable``
-observability rendering (``outputs_lossy`` flag). This module owns the
-verification contract in ``_engine/persistence.py`` (``filter_resume_seeds`` /
-``read_node_outputs``) plus the ``execute(seed_outputs=…)`` fail-fast gate.
+A resumed attempt (``run.start(mode=RESUME, based_on_execution_id=…)``) seeds
+completed-node outputs from its predecessor's journal. The runtime's one seed
+gate verifies every seed against the ``based_on`` journal before the new
+attempt's journal is opened: a seed survives only when its task's code,
+``dependent_params`` and fidelity match AND every upstream is itself verified.
+The ``execute(seed_outputs=…)`` fail-fast on unknown names is pinned here too.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
 from pathlib import Path
 
 import pytest
 
 from molab.workflow import (
-    TaskContext,
     Workflow,
     WorkflowCompiler,
     WorkflowRuntime,
+    read_journal,
+    read_outputs,
+    read_resume_seeds,
 )
-from molab.workflow._engine.persistence import filter_resume_seeds, read_node_outputs
+from molab.workspace import Workspace
+from molab.workspace.domain import ExecutionMode
 
-# ── module-level per-task execution counters ─────────────────────────────────
+# ── module-level counters + failure switch ──────────────────────────────────
 _COUNTERS: dict[str, int] = {}
+_FAIL = {"on": True}
 
 
-def _bump(name: str) -> int:
+def _bump(name: str) -> None:
     _COUNTERS[name] = _COUNTERS.get(name, 0) + 1
-    return _COUNTERS[name]
 
 
 @pytest.fixture(autouse=True)
-def _reset_counters() -> None:
+def _reset() -> None:
     _COUNTERS.clear()
+    _FAIL["on"] = True
 
 
-def _compiled_returning(value: object):
-    """A 1-task workflow whose body counts invocations and returns *value*.
-
-    The returned value is baked into the body source, so two different values
-    produce two different ``code_hash``es (⇒ different snapshot keys for the
-    same task name) — the "task code changed between attempts" shape.
-    """
-    wf = Workflow(name="resume-seed")
-
-    if value == "old":
-
-        @wf.task
-        async def step(ctx: TaskContext) -> str:
-            _bump("step")
-            return "old"
-
-    else:
-
-        @wf.task
-        async def step(ctx: TaskContext) -> str:
-            _bump("step")
-            return "new"
-
-    return WorkflowCompiler().compile(wf)
+# ── task bodies: a → b → c, where c fails while the switch is on ────────────
 
 
-def _wf_json_path(run_dir: Path, execution_id: str) -> Path:
-    return run_dir / "executions" / execution_id / "workflow.json"
+def a_v1() -> int:
+    _bump("a")
+    return 1
+
+
+def a_v2() -> int:
+    _bump("a")
+    return 2
+
+
+def b_v1(a: int) -> int:
+    _bump("b")
+    return a + 10
+
+
+def b_v2(a: int) -> int:
+    _bump("b")
+    return a + 100
+
+
+def c(b: int) -> int:
+    _bump("c")
+    if _FAIL["on"]:
+        raise RuntimeError("c is not ready")
+    return b
 
 
 class _Opaque:
-    """A non-JSON-safe output (str-ified by the lossy ``_jsonable`` path)."""
+    """A non-JSON-safe output (stored through the lossy rendering)."""
+
+
+def opaque() -> object:
+    _bump("opaque")
+    return _Opaque()
+
+
+def after(opaque: object) -> str:
+    _bump("after")
+    if _FAIL["on"]:
+        raise RuntimeError("after is not ready")
+    return "done"
+
+
+def step() -> str:
+    _bump("step")
+    return "computed"
+
+
+def _chain(a_body=a_v1, b_body=b_v1):
+    wf = Workflow(name="chain")
+    wf.add(a_body, name="a")
+    wf.add(b_body, name="b", depends_on=["a"])
+    wf.add(c, name="c", depends_on=["b"])
+    return WorkflowCompiler().compile(wf)
+
+
+def _run(tmp_path: Path):
+    ws = Workspace(tmp_path / "ws", name="lab")
+    return ws.add_project("p").add_experiment("e").add_run(params={"x": 1})
+
+
+def _attempt(run, compiled, *, mode=None, based_on=None, seed_outputs=None):
+    kwargs = {} if mode is None else {"mode": mode, "based_on_execution_id": based_on}
+    with run.start(**kwargs) as ctx:
+        return asyncio.run(
+            WorkflowRuntime().execute(compiled, run_context=ctx, seed_outputs=seed_outputs)
+        )
+
+
+def _resume(run, compiled, seed_outputs, *, bypass_cache=False):
+    with run.start(
+        mode=ExecutionMode.RESUME, based_on_execution_id="e01", bypass_cache=bypass_cache
+    ) as ctx:
+        return asyncio.run(
+            WorkflowRuntime().execute(compiled, run_context=ctx, seed_outputs=seed_outputs)
+        )
+
+
+def _failed_e01(run, compiled) -> None:
+    result = _attempt(run, compiled)
+    assert result.status == "failed"
+    _FAIL["on"] = False
 
 
 class TestResumeSeedIntegrity:
-    @pytest.mark.asyncio
-    async def test_completed_node_persists_snapshot_key(self, tmp_path: Path) -> None:
-        """A completed node records its ``snapshot_key``; a JSON-safe output is
-        full-fidelity (no ``outputs_lossy`` flag)."""
-        compiled = _compiled_returning("old")
-        result = await WorkflowRuntime().execute(compiled, run_dir=tmp_path, execution_id="e01")
-        assert result.status == "succeeded"
-        doc = json.loads(_wf_json_path(tmp_path, result.execution_id).read_text())
-        (record,) = [t for t in doc["task_configs"] if t["task_id"] == "step"]
+    def test_completed_node_persists_identity(self, tmp_path: Path) -> None:
+        run = _run(tmp_path)
+        compiled = _chain()
+        _failed_e01(run, compiled)
+        doc = read_journal(run, "e01")
+        (record,) = [t for t in doc["task_configs"] if t["task_id"] == "a"]
         assert record["status"] == "completed"
-        assert record["snapshot_key"] == compiled.snapshots["step"].key
+        assert record["snapshot_key"] == compiled.snapshots["a"].key
         assert "outputs_lossy" not in record
 
-    @pytest.mark.asyncio
-    async def test_intact_seed_skips_body(self, tmp_path: Path) -> None:
-        """An intact seed (same code, full fidelity) skips the body on resume."""
-        compiled = _compiled_returning("old")
-        r1 = await WorkflowRuntime().execute(compiled, run_dir=tmp_path, execution_id="e01")
-        assert _COUNTERS["step"] == 1
+    def test_intact_seed_skips_body(self, tmp_path: Path) -> None:
+        run = _run(tmp_path)
+        compiled = _chain()
+        _failed_e01(run, compiled)
+        seeds = read_resume_seeds(run, "e01", compiled)
+        assert seeds == {"a": 1, "b": 11}
 
-        seeds = read_node_outputs(tmp_path, r1.execution_id)
-        assert seeds == {"step": "old"}
+        result = _resume(run, compiled, seeds)
 
-        r2 = await WorkflowRuntime().execute(
-            compiled, run_dir=tmp_path, execution_id=r1.execution_id, seed_outputs=seeds
-        )
-        assert r2.status == "succeeded"
-        assert r2.outputs["step"] == "old"
-        assert _COUNTERS["step"] == 1  # body NOT rerun — seed verified intact
+        assert result.status == "succeeded"
+        assert result.execution_id == "e02"
+        assert result.outputs == {"a": 1, "b": 11, "c": 11}
+        assert _COUNTERS == {"a": 1, "b": 1, "c": 2}
+        assert read_journal(run, "e02")["based_on_execution_id"] == "e01"
 
-    @pytest.mark.asyncio
-    async def test_changed_code_seed_dropped_and_recomputed(self, tmp_path: Path) -> None:
-        """A seed whose task code changed between attempts (different snapshot
-        key) is dropped and the node recomputed with the new value."""
-        v1 = _compiled_returning("old")
-        r1 = await WorkflowRuntime().execute(v1, run_dir=tmp_path, execution_id="e01")
-        assert _COUNTERS["step"] == 1
-        seeds = read_node_outputs(tmp_path, r1.execution_id)
-        assert seeds == {"step": "old"}
+    def test_changed_code_seed_dropped_and_recomputed(self, tmp_path: Path) -> None:
+        run = _run(tmp_path)
+        _failed_e01(run, _chain())
+        v2 = _chain(b_body=b_v2)
 
-        v2 = _compiled_returning("new")
-        assert v2.snapshots["step"].key != v1.snapshots["step"].key
-        r2 = await WorkflowRuntime().execute(
-            v2, run_dir=tmp_path, execution_id=r1.execution_id, seed_outputs=seeds
-        )
-        assert r2.status == "succeeded"
-        assert r2.outputs["step"] == "new"  # NOT the stale "old"
-        assert _COUNTERS["step"] == 2  # body reran
+        result = _resume(run, v2, read_outputs(run, "e01"))
 
-    @pytest.mark.asyncio
-    async def test_lossy_output_flagged_and_never_seeded(self, tmp_path: Path) -> None:
-        """A lossy output is flagged, refused by ``read_node_outputs``, dropped
-        by the engine gate even when force-fed, and recomputed on resume."""
+        assert result.status == "succeeded"
+        assert result.outputs["b"] == 101
+        assert _COUNTERS["a"] == 1
+        assert _COUNTERS["b"] == 2
+
+    def test_changed_upstream_recomputes_downstream(self, tmp_path: Path) -> None:
+        run = _run(tmp_path)
+        _failed_e01(run, _chain())
+        v2 = _chain(a_body=a_v2)
+
+        result = _resume(run, v2, {"a": 1, "b": 11})
+
+        assert result.status == "succeeded"
+        assert _COUNTERS["a"] == 2
+        assert _COUNTERS["b"] == 2
+        assert result.outputs["b"] == 12
+
+    def test_lossy_seed_recomputed(self, tmp_path: Path) -> None:
         wf = Workflow(name="lossy")
-
-        @wf.task
-        async def step(ctx: TaskContext) -> object:
-            _bump("step")
-            return _Opaque()
-
+        wf.add(opaque, name="opaque")
+        wf.add(after, name="after", depends_on=["opaque"])
         compiled = WorkflowCompiler().compile(wf)
-        r1 = await WorkflowRuntime().execute(compiled, run_dir=tmp_path, execution_id="e01")
-        assert r1.status == "succeeded"
-        assert _COUNTERS["step"] == 1
-
-        doc = json.loads(_wf_json_path(tmp_path, r1.execution_id).read_text())
-        (record,) = [t for t in doc["task_configs"] if t["task_id"] == "step"]
+        run = _run(tmp_path)
+        _failed_e01(run, compiled)
+        doc = read_journal(run, "e01")
+        (record,) = [t for t in doc["task_configs"] if t["task_id"] == "opaque"]
         assert record["outputs_lossy"] is True
+        assert read_resume_seeds(run, "e01", compiled) == {}
 
-        # read_node_outputs refuses to offer the truncated value as a seed…
-        assert read_node_outputs(tmp_path, r1.execution_id) == {}
+        result = _resume(run, compiled, {"opaque": record["outputs"]})
 
-        # …and even a force-fed seed is dropped by the engine-side gate.
-        forced = {"step": record["outputs"]}
-        kept = filter_resume_seeds(tmp_path, r1.execution_id, forced, compiled.snapshots)
-        assert kept == {}
+        assert result.status == "succeeded"
+        assert _COUNTERS["opaque"] == 2
 
-        r2 = await WorkflowRuntime().execute(
-            compiled, run_dir=tmp_path, execution_id=r1.execution_id, seed_outputs=forced
-        )
-        assert r2.status == "succeeded"
-        assert _COUNTERS["step"] == 2  # recomputed, not seeded
-
-    @pytest.mark.asyncio
-    async def test_seed_without_persisted_snapshot_key_dropped(self, tmp_path: Path) -> None:
-        """A pre-upgrade document (no ``snapshot_key``) cannot be verified, so
-        its seed is dropped and the node recomputed (backward compatible)."""
-        compiled = _compiled_returning("old")
-        r1 = await WorkflowRuntime().execute(compiled, run_dir=tmp_path, execution_id="e01")
-        assert _COUNTERS["step"] == 1
-
-        # Simulate a workflow.json written before snapshot keys were persisted.
-        wf_path = _wf_json_path(tmp_path, r1.execution_id)
-        doc = json.loads(wf_path.read_text())
+    def test_unverifiable_record_recomputed(self, tmp_path: Path) -> None:
+        """A pre-upgrade journal (no digest, no snapshot keys) cannot vouch for
+        its outputs, so they are recomputed."""
+        run = _run(tmp_path)
+        compiled = _chain()
+        _failed_e01(run, compiled)
+        path = run.execution_dir("e01") / "workflow.json"
+        doc = json.loads(path.read_text())
+        doc.pop("workflow_digest")
         for task in doc["task_configs"]:
             task.pop("snapshot_key", None)
-        wf_path.write_text(json.dumps(doc))
+        path.write_text(json.dumps(doc))
 
-        seeds = read_node_outputs(tmp_path, r1.execution_id)
-        assert seeds == {"step": "old"}  # the value is still offered…
+        # Bypass the node cache so a recompute is observable as a body run.
+        result = _resume(run, compiled, read_outputs(run, "e01"), bypass_cache=True)
 
-        r2 = await WorkflowRuntime().execute(
-            compiled, run_dir=tmp_path, execution_id=r1.execution_id, seed_outputs=seeds
-        )
-        assert r2.status == "succeeded"
-        assert _COUNTERS["step"] == 2  # …but cannot be verified ⇒ recomputed
+        assert result.status == "succeeded"
+        assert _COUNTERS["a"] == 2
 
-    @pytest.mark.asyncio
-    async def test_seeds_without_prior_document_pass_through(self, tmp_path: Path) -> None:
-        """With no prior ``workflow.json`` there is nothing to verify against, so
-        programmatic seeds (e.g. from ``WorkflowResult.outputs``) are honored."""
-        compiled = _compiled_returning("old")
-        result = await WorkflowRuntime().execute(
-            compiled, run_dir=tmp_path, execution_id="e01", seed_outputs={"step": "from-memory"}
-        )
+    def test_seeds_pass_through_on_initial_context(self, tmp_path: Path) -> None:
+        """With no predecessor there is nothing to verify against, so
+        programmatic seeds are honoured."""
+        wf = Workflow(name="one")
+        wf.add(step, name="step")
+        run = _run(tmp_path)
+
+        result = _attempt(run, WorkflowCompiler().compile(wf), seed_outputs={"step": "from-memory"})
+
         assert result.status == "succeeded"
         assert result.outputs["step"] == "from-memory"
-        assert _COUNTERS.get("step", 0) == 0  # seeded, body skipped
+        assert _COUNTERS.get("step", 0) == 0
 
-    @pytest.mark.asyncio
-    async def test_unknown_seed_name_fails_fast(self, tmp_path: Path) -> None:
-        """An unknown seed name raises ``ValueError`` before any IO."""
-        compiled = _compiled_returning("old")
+    def test_unknown_seed_name_fails_fast(self, tmp_path: Path) -> None:
+        run = _run(tmp_path)
         with pytest.raises(ValueError, match="unknown task name"):
-            await WorkflowRuntime().execute(
-                compiled, run_dir=tmp_path, execution_id="e01", seed_outputs={"nope": 1}
-            )
+            _attempt(run, _chain(), seed_outputs={"nope": 1})

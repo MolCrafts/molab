@@ -17,11 +17,11 @@ Tests never *read* the journal to assert anything — they observe seeding
 through the public API (``WorkflowResult.outputs``) or through files the
 workflow itself wrote.
 
-The helper targets the current journal shape: ``task_configs[]`` entries keyed
-by ``task_id`` carrying ``status`` / ``outputs`` / ``snapshot_key``, plus the
-document-level ``outputs`` map. ``snapshot_key`` is left untouched, so the
-resume filter still accepts the poisoned value as a valid seed. When the
-journal schema changes (arch-own-03b-journal) this helper changes with it.
+The helper targets the schema-v3 journal: ``task_configs[]`` entries keyed by
+``task_id`` carrying ``status`` / ``outputs`` / ``snapshot_key``. A legacy
+document-level ``outputs`` map, if present, is rewritten too. ``snapshot_key``
+and the header ``workflow_digest`` are left untouched, so the seed gate still
+accepts the poisoned value as a valid seed.
 """
 
 from __future__ import annotations

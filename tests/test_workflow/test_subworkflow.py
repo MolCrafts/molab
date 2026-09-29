@@ -13,6 +13,7 @@ Contract:
 
 from __future__ import annotations
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -113,7 +114,9 @@ class TestSubWorkflow:
             SubWorkflow(inner)._resolve_output_name()
 
     @pytest.mark.asyncio
-    async def test_inner_runs_via_injected_sub_runner_without_run_context(self) -> None:
+    async def test_inner_runs_via_injected_sub_runner_without_run_context(
+        self, tmp_path: Path
+    ) -> None:
         """The inner task does NOT see ``run_context`` on its ctx; the engine
         injects a ``sub_runner`` capability bound to the outer run instead."""
         ran: list[bool] = []
@@ -129,12 +132,16 @@ class TestSubWorkflow:
         outer = WorkflowCompiler().compile(
             Workflow(name="outer-rc").add(SubWorkflow(inner), name="sub")
         )
-        result = await WorkflowRuntime().execute(
-            outer, run_context=SimpleNamespace(bypass_cache=False)
+        slot = tmp_path / "slot"
+        run_context = SimpleNamespace(
+            id="e01", execution_dir=slot, based_on_execution_id=None, bypass_cache=False
         )
+        result = await WorkflowRuntime().execute(outer, run_context=run_context)
         assert result.status == "succeeded"
         assert ran == [True]
         assert result.outputs["sub"] == "ok"
+        # The journal describes the outer graph only.
+        assert list(tmp_path.rglob("workflow.json")) == [slot / "workflow.json"]
 
     @pytest.mark.asyncio
     async def test_as_parallel_body_forwards_element_without_node_growth(self) -> None:

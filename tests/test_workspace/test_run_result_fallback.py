@@ -11,9 +11,8 @@ was not JSON-serializable, so only a truncated observability rendering was
 persisted) is NEVER returned as a real result — a warning explains why and
 ``None`` is returned, matching the existing not-found contract.
 
-The last test class writes the execution document through the REAL
-workflow-layer writer (``mark_task_status``) so the field-name contract
-between the two layers cannot silently drift.
+The writer ⟷ reader contract (a document written by the real workflow-layer
+writer) lives in ``tests/test_workflow/test_persistence.py``.
 """
 
 from __future__ import annotations
@@ -173,44 +172,3 @@ class TestLossyOutputs:
             logger.remove_handler(handler)
         assert any("JSON-serializable" in message for message in collected), collected
         assert any("set_result" in message for message in collected), collected
-
-
-# ── drift guard: document written by the real workflow-layer writer ─────────
-
-
-class TestWorkflowWriterContract:
-    """Cross-layer field-name contract (workspace reader ⟷ workflow writer)."""
-
-    @staticmethod
-    def _seed_pending_task(run: Run, execution_id: str, name: str) -> Path:
-        from molab.workflow._engine.persistence import write_initial_workflow_json
-
-        run_dir = Path(str(run.run_dir))
-        write_initial_workflow_json(run_dir, execution_id)
-        wf_path = run_dir / "executions" / execution_id / "workflow.json"
-        document = json.loads(wf_path.read_text())
-        document["task_configs"] = [{"task_id": name, "status": "pending"}]
-        wf_path.write_text(json.dumps(document))
-        return run_dir
-
-    def test_fallback_reads_output_written_by_mark_task_status(self, run):
-        from molab.workflow._engine.persistence import mark_task_status
-
-        with run.start() as ctx:
-            execution_id = ctx.id
-        run_dir = self._seed_pending_task(run, execution_id, "train")
-        mark_task_status(
-            run_dir, execution_id, "train", "completed", output={"loss": 0.5}, snapshot_key="k"
-        )
-        assert run.get_result("train", execution_id=execution_id) == {"loss": 0.5}
-
-    def test_lossy_flag_written_by_mark_task_status_is_respected(self, run):
-        from molab.workflow._engine.persistence import mark_task_status
-
-        with run.start() as ctx:
-            execution_id = ctx.id
-        run_dir = self._seed_pending_task(run, execution_id, "train")
-        mark_task_status(
-            run_dir, execution_id, "train", "completed", output=object(), snapshot_key="k"
-        )
-        assert run.get_result("train", execution_id=execution_id) is None

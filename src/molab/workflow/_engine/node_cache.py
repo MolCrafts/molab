@@ -103,11 +103,11 @@ def _artifact_manifest(deps: WorkflowDeps, name: str) -> list[dict[str, JSONValu
     execution_id = deps.execution_id
     if run is None or execution_id is None:
         return []
-    repository = getattr(run, "_execution_repository", None)
-    if not callable(repository):
+    execution = getattr(run, "execution", None)
+    if not callable(execution):
         return []
     try:
-        artifacts = repository().get(execution_id).artifacts
+        artifacts = execution(execution_id).artifacts
     except Exception:
         return []
     manifest: list[dict[str, JSONValue]] = []
@@ -170,15 +170,14 @@ def _put_file_blobs(deps: WorkflowDeps, manifest: list[dict]) -> None:
     put_blob = getattr(store, "put_blob", None)
     if not callable(put_blob) or not manifest:
         return
-    run_dir = getattr(deps.run_context, "run_dir", None) or getattr(deps, "run_dir", None)
-    if run_dir is None:
-        return
-    from molab.workspace.naming import workspace_root
-
     # Artifact paths are workspace-relative — that is what makes them portable.
-    root = workspace_root(Path(run_dir))
-    if root is None:
+    # The root comes down the run's public chain; any missing link fails soft.
+    node: object = getattr(deps.run_context, "run", None)
+    for link in ("experiment", "project", "workspace", "root"):
+        node = getattr(node, link, None)
+    if node is None:
         return
+    root = Path(str(node))
     for entry in manifest:
         content_hash = entry.get("content_hash")
         rel = entry.get("path")

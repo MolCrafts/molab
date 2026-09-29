@@ -52,6 +52,7 @@ if TYPE_CHECKING:
     from molab.profile import ProfileConfig
     from molab.workspace.run import Run
 
+    from .protocols import TaskOutput
     from .types import WorkflowResult
 
 __all__ = [
@@ -186,12 +187,6 @@ async def aexecute_run(
         rerun=rerun,
         checkpoint_artifact_id=checkpoint_artifact_id,
     )
-    if seed_outputs and predecessor_id is not None:
-        from ._engine.persistence import filter_resume_seeds
-
-        seed_outputs = filter_resume_seeds(
-            run.run_dir, predecessor_id, seed_outputs, compiled.snapshots
-        )
     with run.start(
         profile_config,
         mode=mode,
@@ -317,6 +312,13 @@ class _WorkspaceRunExecutor:
             fresh=fresh,
             checkpoint_artifact_id=checkpoint_artifact_id,
         )
+
+    @staticmethod
+    def read_outputs(run: Run, execution_id: str) -> dict[str, TaskOutput]:
+        """Completed-node outputs of one attempt (:func:`molab.workflow.read_outputs`)."""
+        from ._engine.persistence import read_outputs as _read_outputs
+
+        return _read_outputs(run, execution_id)
 
     async def aexecute(
         self,

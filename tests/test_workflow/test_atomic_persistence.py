@@ -1,8 +1,9 @@
-"""Invariant lock: workflow persistence routes through ``FileStore.put``.
+"""Invariant lock: node-journal writes route through ``FileStore.put``.
 
-The run-scoped byte exit is :class:`~molab.workspace.file_store.FileStore`
-(atomic via :mod:`molab.atomicio`). This source scan pins that wiring in
-``_engine.persistence.write_initial_workflow_json``.
+The byte exit is :class:`~molab.workspace.file_store.FileStore` (atomic via
+:mod:`molab.atomicio`). This source scan pins that wiring: every journal
+writer in ``_engine.persistence`` goes through ``_put_journal``, and
+``_put_journal`` is a ``FileStore(journal_dir).put`` of ``JOURNAL_NAME``.
 """
 
 from __future__ import annotations
@@ -20,22 +21,29 @@ PERSISTENCE_FILE = (
 )
 
 
-def test_persistence_uses_filestore_for_workflow_json() -> None:
-    """``write_initial_workflow_json`` writes through ``_put_under_run`` / FileStore."""
+def _function_source(name: str) -> str:
     text = PERSISTENCE_FILE.read_text()
     tree = ast.parse(text)
-    target_func = next(
-        (
-            node
-            for node in ast.walk(tree)
-            if isinstance(node, ast.FunctionDef) and node.name == "write_initial_workflow_json"
-        ),
+    node = next(
+        (n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == name),
         None,
     )
-    assert target_func is not None, "expected write_initial_workflow_json function"
+    assert node is not None, f"expected function {name}"
+    return ast.get_source_segment(text, node) or ""
 
-    func_src = ast.get_source_segment(text, target_func) or ""
-    assert "_put_under_run" in func_src, (
-        "write_initial_workflow_json must write via FileStore, not raw tmp.write_text"
-    )
-    assert "write_text" not in func_src
+
+def test_put_journal_is_a_filestore_put() -> None:
+    src = _function_source("_put_journal")
+    assert "FileStore(journal_dir).put(JOURNAL_NAME" in src
+    assert "write_text" not in src
+
+
+def test_initial_journal_writes_via_put_journal() -> None:
+    src = _function_source("write_initial_workflow_json")
+    assert "_put_journal" in src, "write_initial_workflow_json must write via FileStore"
+    assert "write_text" not in src
+
+
+def test_coalesced_writer_flushes_via_put_journal() -> None:
+    assert "_put_journal" in _function_source("_flush_locked")
+    assert "_put_journal" in _function_source("open_execution_document")

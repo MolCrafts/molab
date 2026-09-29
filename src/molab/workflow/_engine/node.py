@@ -345,11 +345,10 @@ def _promote_outputs(
                     mime=marker.mime,
                     consumed=list(consumed) or None,
                 )
-                run_dir = getattr(run_context, "run_dir", None)
                 source_path = getattr(artifact, "source_path", None)
-                execution_id = getattr(artifact, "execution_id", None)
-                if run_dir is not None and source_path is not None and execution_id is not None:
-                    return str(Path(run_dir) / "executions" / execution_id / source_path)
+                execution_dir = getattr(run_context, "execution_dir", None)
+                if execution_dir is not None and source_path is not None:
+                    return str(Path(execution_dir) / source_path)
                 return str(path)
             return str(path)
         register_metric = getattr(run_context, "register_metric", None)

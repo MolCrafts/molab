@@ -86,6 +86,14 @@ class RunLike(Protocol):
     @property
     def id(self) -> str: ...
 
+    def execution(self, execution_id: str) -> object:
+        """Read one attempt's record (``KeyError`` when there is none)."""
+        ...
+
+    def execution_dir(self, execution_id: str) -> Path:
+        """The directory of one attempt; the workspace owns the layout."""
+        ...
+
 
 @runtime_checkable
 class UpstreamViewLike(Protocol):
@@ -125,19 +133,34 @@ class RunContextLike(Protocol):
     """Duck-typed shape of ``workspace.run.RunContext`` used by the workflow runtime.
 
     Captures only the surface the workflow scheduler reaches into: the run
-    reference, the run directory, the attempt's cache-bypass flag, and the
-    register verbs. Members are read-only properties so the concrete
-    ``RunContext`` (whose ``run_dir`` / ``run`` / ``bypass_cache`` are
-    properties) structurally satisfies the protocol. Anything else on a real
-    ``RunContext`` is out of scope for the workflow layer.
+    reference, the run directory, the attempt it names (``id`` /
+    ``execution_dir`` / ``based_on_execution_id``), the attempt's cache-bypass
+    flag, and the register verbs. Members are read-only properties so the
+    concrete ``ExecutionContext`` structurally satisfies the protocol.
+    Anything else on a real context is out of scope for the workflow layer.
 
-    ``bypass_cache`` is required: the runtime reads it directly whenever a
-    context is given. The attempt's id is deliberately *not* a member: a
-    real ``ExecutionContext`` exposes it as ``id``, which raises
-    ``RuntimeError`` until the context is entered, so the runtime probes it
-    tolerantly (``id``, else a public ``execution_id`` attribute on a
-    duck-typed context) and falls back to its own ``execution_id=`` kwarg.
+    ``id``, ``execution_dir`` and ``based_on_execution_id`` are required: the
+    runtime writes the node journal into ``execution_dir`` (it composes no
+    path itself) and verifies resume seeds against the
+    ``based_on_execution_id`` attempt; a context lacking them is a
+    ``TypeError``. ``bypass_cache`` is read directly whenever a context is
+    given.
     """
+
+    @property
+    def id(self) -> str:
+        """The attempt id (``eNN``) this context has open."""
+        ...
+
+    @property
+    def execution_dir(self) -> Path:
+        """The attempt's directory, supplied by the workspace."""
+        ...
+
+    @property
+    def based_on_execution_id(self) -> str | None:
+        """The predecessor attempt this one resumes / reruns, if any."""
+        ...
 
     @property
     def run_dir(self) -> Path: ...

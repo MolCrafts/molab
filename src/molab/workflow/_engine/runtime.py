@@ -6,13 +6,14 @@ backends because there is only one.  Execution modes:
 - ``execute()`` — run to completion, return :class:`WorkflowResult`.
 - ``start()`` — launch in background, return :class:`WorkflowExecution`.
 
-No per-frame snapshots are written; ``workflow.json`` is opened via
-:func:`.persistence.open_execution_document` for observability (per-node
-:func:`.persistence.mark_task_status` updates are coalesced in memory and
-flushed at bounded staleness; terminal states flush synchronously, and a
-``finally``-path :func:`.persistence.close_execution_document` guarantees
-the last write even when the engine raises). Resume is caller-driven via
-``WorkflowResult.outputs`` + ``execute(seed_outputs=…)``.
+No per-frame snapshots are written. The node journal (``workflow.json``) is
+opened via :func:`.persistence.open_execution_document` in the directory the
+run context names (``run_context.execution_dir``); node completions and
+failures flush synchronously, ``running`` marks are coalesced, and a
+``finally``-path :func:`.persistence.close_execution_document` guarantees the
+last write even when the engine raises. Resume is caller-driven via
+``execute(seed_outputs=…)``; the seeds are verified against the
+``based_on_execution_id`` attempt's journal by the one seed gate.
 
 Each ``CompiledWorkflow`` carries a frozen
 :class:`~molab.workflow._engine.plan.ExecutionPlan` (see
@@ -41,6 +42,8 @@ from .node import _workdir_for
 from .state import WorkflowDeps, WorkflowState
 
 if TYPE_CHECKING:
+    from molab.workspace.run import Run
+
     from ..cache import Caching
     from ..compiled import CompiledWorkflow, _ExperimentLike
     from .plan import ExecutionPlan
@@ -185,33 +188,51 @@ def _get_run_id(run_context: RunContextLike | None) -> str | None:
     return getattr(run, "id", getattr(run, "run_id", None))
 
 
-#: Message for the ``ValueError`` raised when a persisting execution resolves
-#: a ``run_dir`` but no execution id.
-_MISSING_EXECUTION_ID = (
-    "execution_id is required to persist under a run_dir: the workspace allocates "
-    "Execution ids — open one with Run.create_execution() or run.start() and pass "
-    "execution_id= (or run_context=)"
+#: ``TypeError`` message for a ``run_context`` that does not name its attempt.
+_CONTEXT_CONTRACT = (
+    "run_context must provide id / execution_dir / based_on_execution_id "
+    "(RunContextLike); open one with run.start()"
+)
+
+#: ``ValueError`` message for journal-shaped kwargs without a ``run_context``.
+_NO_CONTEXT = (
+    "the node journal belongs to an Execution; open one with run.start() and pass run_context="
 )
 
 
-def _get_active_execution_id(run_context: RunContextLike | None) -> str | None:
-    """Read the open attempt's id from *run_context*'s public surface.
+def _read_context(
+    run_context: RunContextLike | None,
+    *,
+    execution_id: str | None,
+    run_dir: str | Path | None,
+) -> tuple[str | None, Path | None, str | None]:
+    """Read the attempt a ``run_context`` names: ``(id, execution_dir, based_on)``.
 
-    A workspace ``ExecutionContext`` names its attempt through ``.id``, which
-    raises ``RuntimeError`` until the context is entered — that reads as "no
-    id yet". A duck-typed context without ``.id`` may carry a public
-    ``execution_id`` attribute instead.
+    The runtime composes no path: the journal goes to the directory the
+    workspace hands out, ``run_context.execution_dir``.
+
+    Raises:
+        TypeError: *run_context* lacks ``id`` / ``execution_dir`` /
+            ``based_on_execution_id``.
+        ValueError: ``run_dir=`` or ``execution_id=`` without a
+            *run_context*, or an ``execution_id=`` that is not the context's.
     """
     if run_context is None:
-        return None
+        if run_dir is not None or execution_id is not None:
+            raise ValueError(_NO_CONTEXT)
+        return None, None, None
     try:
-        value = getattr(run_context, "id", None)
-    except RuntimeError:
-        value = None
-    if isinstance(value, str) and value:
-        return value
-    value = getattr(run_context, "execution_id", None)
-    return value if isinstance(value, str) and value else None
+        context_id = run_context.id
+        execution_dir = Path(run_context.execution_dir)
+        based_on = run_context.based_on_execution_id
+    except AttributeError as exc:
+        raise TypeError(_CONTEXT_CONTRACT) from exc
+    if execution_id is not None and execution_id != context_id:
+        raise ValueError(
+            f"execution_id={execution_id!r} is not the run_context's attempt "
+            f"{context_id!r}; the run_context names the Execution"
+        )
+    return context_id, execution_dir, based_on
 
 
 def _record_run_failure(
@@ -307,6 +328,7 @@ class WorkflowRuntime:
         run_dir: Path | None,
         execution_id: str | None,
         config: JSONMapping | None,
+        journal_dir: Path | None = None,
         deps: UserDeps,
         cache: Caching | None = None,
         bypass_cache: bool = False,
@@ -351,6 +373,7 @@ class WorkflowRuntime:
             remote_executor=None,
             run_dir=run_dir,
             execution_id=execution_id,
+            journal_dir=journal_dir,
             registration_by_name=registration_by_name,
             parallel_decls=parallel_decls,
             loop_max_iters=loop_max_iters,
@@ -358,6 +381,7 @@ class WorkflowRuntime:
             cache=cache,
             bypass_cache=bypass_cache,
             snapshots=compiled.snapshots,
+            dependent_params_hashes=compiled.dependent_params_hashes,
             scratch_root=scratch_root,
         )
 
@@ -439,19 +463,29 @@ class WorkflowRuntime:
         ``ctx.inputs`` — the channel a :class:`~molab.workflow.SubWorkflow`
         uses to pass its node input (fan-out element / upstream output) into
         the inner workflow. ``persist=False`` (engine-internal — set by the
-        ``sub_runner`` capability for SubWorkflow inner runs) disables ALL
-        ``workflow.json`` persistence for this execution, so a nested run
-        inheriting the outer ``run_context`` never rewrites the parent
-        execution's document: after a run containing SubWorkflows,
-        ``executions/<exec_id>/workflow.json`` describes the OUTER graph only.
+        ``sub_runner`` capability for SubWorkflow inner runs) disables the
+        node journal for this execution, so a nested run inheriting the outer
+        ``run_context`` never rewrites the parent's journal, which therefore
+        describes the OUTER graph only.
+
+        **Context contract.** The ``run_context`` names the attempt: the
+        runtime reads its ``id``, ``execution_dir`` and
+        ``based_on_execution_id`` and composes no path of its own. The node
+        journal is written to ``run_context.execution_dir`` (when ``persist``
+        is on); a bare run (no ``run_context``) writes no journal and reports
+        ``execution_id`` ``None``. Non-empty ``seed_outputs`` are verified
+        against the ``based_on_execution_id`` attempt's journal by the one
+        seed gate (transitive: a changed upstream drops every seed downstream
+        of it); with no predecessor, or no predecessor journal, they pass
+        unchanged.
 
         Args:
             compiled: The frozen workflow to run.
-            execution_id: The workspace-allocated Execution id (``eNN``). It
-                comes from the caller or from the open ``run_context``
-                only — the runtime never mints one. Allocate it with
-                ``Run.create_execution()`` or open it with ``run.start()``.
-                A bare run (no ``run_dir`` / ``run_context``) has none.
+            run_context: The open attempt (``with run.start() as ctx``).
+            run_dir: Accepted beside a ``run_context`` for signature
+                compatibility only; it does not locate the journal.
+            execution_id: Optional; when given it must equal
+                ``run_context.id``. The runtime never mints an id.
             bypass_cache: Skip cache READS for this execution (the
                 ``--fresh`` escape hatch) — every task body runs, results
                 are still written back to the cache. Effective when this
@@ -463,69 +497,65 @@ class WorkflowRuntime:
             ``None`` for a bare run.
 
         Raises:
-            ValueError: ``persist`` is on, a ``run_dir`` resolves (explicitly
-                or from ``run_context``) and no ``execution_id`` is known.
-                Raised before any IO, so nothing is written. Also raised for
-                ``seed_outputs`` naming unknown tasks.
+            TypeError: ``run_context`` lacks ``id``, ``execution_dir`` or
+                ``based_on_execution_id``.
+            ValueError: ``run_dir=`` or ``execution_id=`` is given without a
+                ``run_context``; ``execution_id=`` differs from
+                ``run_context.id``; or ``seed_outputs`` names unknown tasks.
+                Raised before any IO, so nothing is written.
         """
 
         # Validate seed_outputs FAIL-FAST before any IO / scheduling work.
         state = self._build_initial_state(compiled, seed_outputs)
 
+        execution_id, execution_dir, based_on = _read_context(
+            run_context, execution_id=execution_id, run_dir=run_dir
+        )
         resolved_run_dir = _resolve_run_dir(run_context, run_dir)
         run_id = _get_run_id(run_context)
-
-        # The workspace allocates Execution ids; the runtime only reads one.
-        execution_id = execution_id or _get_active_execution_id(run_context)
         # The Execution record carries the cache-bypass request; an explicit
         # kwarg still ORs in.
         if run_context is not None:
             bypass_cache = bypass_cache or run_context.bypass_cache
 
-        # Ownership guard — a journal under ``run_dir`` needs a workspace-
-        # allocated id. Raised before any IO so nothing lands on disk.
-        journal: tuple[Path, str] | None = None
-        if persist and resolved_run_dir is not None:
-            if execution_id is None:
-                raise ValueError(_MISSING_EXECUTION_ID)
-            journal = (resolved_run_dir, execution_id)
+        # The journal lives only in the directory the workspace hands out; a
+        # bare run and a SubWorkflow inner run (``persist=False``) write none.
+        journal_dir = execution_dir if persist else None
 
-        # Resume-seed integrity gate — runs BEFORE the prior workflow.json is
-        # rewritten below. Seeds whose persisted snapshot key no longer matches
-        # the live task code, whose persisted output is lossy, or that cannot
-        # be verified (pre-upgrade document) are dropped with a warning and
-        # recomputed; see ``filter_resume_seeds``. Unknown names already
-        # failed fast in ``_build_initial_state`` above.
-        if seed_outputs and journal is not None:
-            from .persistence import filter_resume_seeds
+        # The one seed gate, against the predecessor's journal — before this
+        # attempt's journal is opened. Unknown names already failed fast above.
+        if seed_outputs and run_context is not None and based_on:
+            from .persistence import _verify_seeds, read_journal
 
-            verified = filter_resume_seeds(*journal, seed_outputs, compiled.snapshots)
+            verified = _verify_seeds(
+                read_journal(cast("Run", run_context.run), based_on),
+                seed_outputs,
+                compiled,
+                execution_id=based_on,
+            )
             if set(verified) != set(seed_outputs):
                 seed_outputs = verified
                 state = self._build_initial_state(compiled, seed_outputs)
 
-        # Observability — open the execution document (initial workflow.json is
-        # written synchronously under ``<run_dir>/executions/<execution_id>/``
-        # so the execution-id directory always exists post-execution for
-        # tooling) and register the coalescing in-memory writer: per-node
-        # ``mark_task_status`` updates buffer in memory and flush at bounded
-        # staleness instead of rewriting the document per transition. The
-        # graph runner persists no per-frame snapshots (resume is caller-driven
-        # via seed_outputs).
-        if journal is not None:
+        if journal_dir is not None and execution_id is not None:
             from .persistence import open_execution_document
 
-            open_execution_document(*journal, compiled=compiled)
+            open_execution_document(
+                journal_dir,
+                execution_id=execution_id,
+                compiled=compiled,
+                based_on_execution_id=based_on,
+            )
 
         try:
             workflow_deps = self._build_deps(
                 compiled,
                 run_context=run_context,
                 run_dir=resolved_run_dir,
-                # ``deps.execution_id`` gates per-task workflow.json status
-                # writes (``mark_task_status``); a persistence-off (nested)
-                # run must not touch the parent's document.
+                # ``deps.execution_id`` names the attempt for the cache
+                # manifest; a persistence-off (nested) run reads none.
                 execution_id=execution_id if persist else None,
+                journal_dir=journal_dir,
                 config=config,
                 deps=deps,
                 cache=_resolve_cache(cache, self.cache, run_context),
@@ -550,15 +580,9 @@ class WorkflowRuntime:
                 _record_run_failure(run_context, result_state.error)
             elif not result_state.failed and persist and run_context is not None:
                 _record_run_success(run_context)
-            if journal is not None:
-                from .persistence import mark_workflow_finished
+            from .persistence import mark_workflow_finished
 
-                mark_workflow_finished(
-                    *journal,
-                    status="failed" if result_state.failed else "succeeded",
-                    outputs=result_state.results,
-                    error=result_state.error,
-                )
+            mark_workflow_finished(journal_dir, succeeded=not result_state.failed)
 
             return WorkflowResult(
                 status="failed" if result_state.failed else "succeeded",
@@ -566,19 +590,13 @@ class WorkflowRuntime:
                 run_id=run_id,
                 execution_id=execution_id,
             )
-        except WorkflowError as exc:
+        except WorkflowError:
             # Programming errors in the workflow definition / task body
             # (CycleError, UnknownRouteError, MissingRouteError, …)
             # propagate to the caller.
-            if journal is not None:
-                from .persistence import mark_workflow_finished
+            from .persistence import mark_workflow_finished
 
-                mark_workflow_finished(
-                    *journal,
-                    status="failed",
-                    outputs=dict(state.results),
-                    error=str(exc),
-                )
+            mark_workflow_finished(journal_dir, succeeded=False)
             raise
         except Exception as exc:
             logger.exception(f"Workflow {compiled.name!r} execution failed")
@@ -592,15 +610,9 @@ class WorkflowRuntime:
             tb_text = "".join(traceback.format_exception(exc))
             if run_context is not None:
                 _record_run_failure(run_context, error_text, traceback_text=tb_text)
-            if journal is not None:
-                from .persistence import mark_workflow_finished
+            from .persistence import mark_workflow_finished
 
-                mark_workflow_finished(
-                    *journal,
-                    status="failed",
-                    outputs=dict(state.results),
-                    error=error_text,
-                )
+            mark_workflow_finished(journal_dir, succeeded=False)
             # ``state`` is mutated in place by the graph runner, so it still
             # holds every task result recorded before the raise. Preserve them
             # so the caller can resume via ``seed_outputs=`` instead of
@@ -618,10 +630,9 @@ class WorkflowRuntime:
             # node records and end the writer lifecycle. No-op on the normal
             # paths (mark_workflow_finished already flushed + closed) and for
             # persistence-off (SubWorkflow inner) executions.
-            if journal is not None:
-                from .persistence import close_execution_document
+            from .persistence import close_execution_document
 
-                close_execution_document(*journal)
+            close_execution_document(journal_dir)
 
     # ── start ────────────────────────────────────────────────────────────────
 
@@ -640,14 +651,16 @@ class WorkflowRuntime:
     ) -> WorkflowExecution:
         """Launch workflow as background asyncio task.
 
-        See :meth:`execute` for ``seed_outputs`` semantics; the same
-        fail-fast validation applies before scheduling the background task.
+        See :meth:`execute` for ``seed_outputs`` semantics, the
+        ``run_context`` / ``run_dir`` / ``execution_id`` contract, the journal
+        location and the seed gate; the same fail-fast validation applies
+        before scheduling the background task.
 
         Args:
             compiled: The frozen workflow to run.
-            execution_id: The workspace-allocated Execution id (``eNN``),
-                from the caller or the open ``run_context`` only — the
-                runtime never mints one. A bare run has none.
+            run_context: The open attempt (``with run.start() as ctx``).
+            run_dir: Signature compatibility only beside a ``run_context``.
+            execution_id: Optional; must equal ``run_context.id``.
             bypass_cache: Skip cache READS (results are still written back).
                 Effective when this kwarg is true OR the Execution record
                 requests it (``run_context.bypass_cache``).
@@ -657,34 +670,49 @@ class WorkflowRuntime:
             ``None`` for a bare run.
 
         Raises:
-            ValueError: A ``run_dir`` resolves and no ``execution_id`` is
-                known — raised synchronously, before any IO and before the
-                background task is created. Also raised for ``seed_outputs``
-                naming unknown tasks.
+            TypeError: ``run_context`` lacks ``id``, ``execution_dir`` or
+                ``based_on_execution_id``.
+            ValueError: ``run_dir=`` / ``execution_id=`` without a
+                ``run_context``, an ``execution_id=`` that is not the
+                context's, or ``seed_outputs`` naming unknown tasks — raised
+                synchronously, before any IO and before the background task
+                is created.
         """
         # Fail-fast on bad seeds so the caller observes the ValueError
         # synchronously, not via an awaited handle.
         seed_state = self._build_initial_state(compiled, seed_outputs)
+        execution_id, journal_dir, based_on = _read_context(
+            run_context, execution_id=execution_id, run_dir=run_dir
+        )
         resolved_run_dir = _resolve_run_dir(run_context, run_dir)
         run_id = _get_run_id(run_context)
-        execution_id = execution_id or _get_active_execution_id(run_context)
         if run_context is not None:
             bypass_cache = bypass_cache or run_context.bypass_cache
 
-        # Ownership guard — see ``execute()``; ``start`` always persists when a
-        # run_dir resolves, so it raises here, before any task is scheduled.
-        journal: tuple[Path, str] | None = None
-        if resolved_run_dir is not None:
-            if execution_id is None:
-                raise ValueError(_MISSING_EXECUTION_ID)
-            journal = (resolved_run_dir, execution_id)
+        # The one seed gate — see ``execute()``.
+        if seed_outputs and run_context is not None and based_on:
+            from .persistence import _verify_seeds, read_journal
 
-        # Observability — see ``execute()`` for the rationale (initial write +
-        # coalescing in-memory writer; closed in ``_bg``'s ``finally``).
-        if journal is not None:
+            verified = _verify_seeds(
+                read_journal(cast("Run", run_context.run), based_on),
+                seed_outputs,
+                compiled,
+                execution_id=based_on,
+            )
+            if set(verified) != set(seed_outputs):
+                seed_state = self._build_initial_state(compiled, verified)
+
+        # ``start`` always persists when a context names the attempt; the
+        # writer is closed in ``_bg``'s ``finally``.
+        if journal_dir is not None and execution_id is not None:
             from .persistence import open_execution_document
 
-            open_execution_document(*journal, compiled=compiled)
+            open_execution_document(
+                journal_dir,
+                execution_id=execution_id,
+                compiled=compiled,
+                based_on_execution_id=based_on,
+            )
 
         handle = _GraphWorkflowExecution(
             execution_id=execution_id,
@@ -701,6 +729,7 @@ class WorkflowRuntime:
                     run_context=run_context,
                     run_dir=resolved_run_dir,
                     execution_id=execution_id,
+                    journal_dir=journal_dir,
                     config=config,
                     deps=deps,
                     cache=resolved_cache,
@@ -719,16 +748,10 @@ class WorkflowRuntime:
                     run_id=run_id,
                     execution_id=execution_id,
                 )
-                if journal is not None:
-                    from .persistence import mark_workflow_finished
+                from .persistence import mark_workflow_finished
 
-                    mark_workflow_finished(
-                        *journal,
-                        status="failed" if result_state.failed else "succeeded",
-                        outputs=result_state.results,
-                        error=result_state.error,
-                    )
-            except Exception as exc:
+                mark_workflow_finished(journal_dir, succeeded=not result_state.failed)
+            except Exception:
                 # ``seed_state`` is mutated in place by the graph runner — it
                 # carries the results of every task that completed before the
                 # raise. Preserve them for ``seed_outputs=`` resume.
@@ -738,24 +761,17 @@ class WorkflowRuntime:
                     run_id=handle.run_id,
                     execution_id=execution_id,
                 )
-                if journal is not None:
-                    from .persistence import mark_workflow_finished
+                from .persistence import mark_workflow_finished
 
-                    mark_workflow_finished(
-                        *journal,
-                        status="failed",
-                        outputs=dict(seed_state.results),
-                        error=str(exc),
-                    )
+                mark_workflow_finished(journal_dir, succeeded=False)
                 logger.exception(f"Background workflow {compiled.name!r} failed")
             finally:
                 # Terminal-flush guarantee for paths the except-arm never sees
                 # (cancellation): land the last document state, end the writer
                 # lifecycle. No-op when mark_workflow_finished already closed.
-                if journal is not None:
-                    from .persistence import close_execution_document
+                from .persistence import close_execution_document
 
-                    close_execution_document(*journal)
+                close_execution_document(journal_dir)
                 handle._done_event.set()
 
         handle._task = asyncio.create_task(_bg())

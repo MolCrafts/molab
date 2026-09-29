@@ -110,6 +110,26 @@ class CompiledWorkflow:
         """``until_task_name → max_iters`` — derived once, reused per run."""
         return {loop.until: loop.max_iters for loop in self._loops}
 
+    # ── Content identity (derived once; the artifact is frozen) ───────────
+
+    @cached_property
+    def dependent_params_hashes(self) -> Mapping[str, str | None]:
+        """``task_name → hash of its dependent_params callable`` (``None`` if none).
+
+        The one implementation both :attr:`workflow_digest` and the node
+        journal's resume-seed gate read.
+        """
+        from .digest import _dependent_params_hashes
+
+        return _dependent_params_hashes(self)
+
+    @cached_property
+    def workflow_digest(self) -> str:
+        """Content-addressed identity: see :func:`molab.workflow.compute_workflow_digest`."""
+        from .digest import compute_workflow_digest
+
+        return compute_workflow_digest(self)
+
     # ── Boundary introspection ────────────────────────────────────────────
 
     @property

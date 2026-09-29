@@ -119,8 +119,10 @@ class TestValuesOnEdges:
         class _RunContextStub:
             def __init__(self, work_dir):
                 self.run_dir = work_dir
-                # The workspace allocates execution ids; the runtime only reads one.
-                self.execution_id = "e01"
+                # The context names its attempt; the journal lands in execution_dir.
+                self.id = "e01"
+                self.execution_dir = work_dir / "slot"
+                self.based_on_execution_id = None
                 self.bypass_cache = False
                 self.params = {"alpha": 7}
                 self.config = {}
