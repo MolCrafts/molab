@@ -432,3 +432,123 @@ class TestRunFinishedAt:
 
     def test_no_attempt_is_none(self, run: Run) -> None:
         assert run.finished_at is None
+
+
+def _results_file(run: Run, execution_id: str) -> Path:
+    return Path(str(run.execution_dir(execution_id))) / "results.json"
+
+
+class TestRunResults:
+    def test_returns_driver_results(self, run: Run) -> None:
+        with run.start() as ctx:
+            ctx.set_result("a", 1)
+            ctx.set_result("b", [1, 2])
+            eid = ctx.id
+        assert run.results(eid) == {"a": 1, "b": [1, 2]}
+
+    def test_empty_without_results_file(self, run: Run) -> None:
+        with run.start() as ctx:
+            eid = ctx.id
+        assert run.results(eid) == {}
+
+    def test_empty_results_file_is_empty(self, run: Run) -> None:
+        with run.start() as ctx:
+            eid = ctx.id
+        _results_file(run, eid).write_text("")
+        assert run.results(eid) == {}
+
+    def test_corrupt_results_file_raises(self, run: Run) -> None:
+        with run.start() as ctx:
+            eid = ctx.id
+        _results_file(run, eid).write_text("{not json")
+        with pytest.raises(ValueError, match=r"results\.json"):
+            run.results(eid)
+
+    def test_non_dict_results_raises(self, run: Run) -> None:
+        with run.start() as ctx:
+            eid = ctx.id
+        _results_file(run, eid).write_text('{"schema_version": 3, "results": [1]}')
+        with pytest.raises(ValueError, match=r"results\.json"):
+            run.results(eid)
+
+    def test_returns_a_copy(self, run: Run) -> None:
+        with run.start() as ctx:
+            ctx.set_result("a", 1)
+            eid = ctx.id
+        first = run.results(eid)
+        first["a"] = 99
+        first["b"] = 2
+        assert run.results(eid) == {"a": 1}
+
+    def test_reads_through_workspace_fs(self, tmp_path: Path) -> None:
+        from molab.workspace.fs_local import LocalFileSystem
+        from tests.support.counting_fs import CountingFileSystem
+
+        fs = CountingFileSystem(LocalFileSystem())
+        ws = Workspace(tmp_path / "ws", name="lab", fs=fs)  # type: ignore[arg-type]
+        run = ws.add_project("p").add_experiment("e").add_run(params={"x": 1})
+        with run.start() as ctx:
+            ctx.set_result("a", 1)
+            eid = ctx.id
+        fs.reset()
+        assert run.results(eid) == {"a": 1}
+        assert fs.for_basename("results.json", "open") == 1
+
+
+class TestRunGetResult:
+    def test_driver_result_wins_and_skips_seam(self, run: Run, stub_executor) -> None:
+        with run.start() as ctx:
+            ctx.set_result("train", "driver-value")
+            eid = ctx.id
+        stub_executor.outputs[eid] = {"train": "node"}
+        assert run.get_result("train", execution_id=eid) == "driver-value"
+        assert stub_executor.calls == []
+
+    def test_driver_none_does_not_fall_back(self, run: Run, stub_executor) -> None:
+        with run.start() as ctx:
+            ctx.set_result("train", None)
+            eid = ctx.id
+        stub_executor.outputs[eid] = {"train": "node"}
+        assert run.get_result("train", execution_id=eid) is None
+        assert stub_executor.calls == []
+
+    def test_falls_back_to_seam_outputs(self, run: Run, stub_executor) -> None:
+        with run.start() as ctx:
+            eid = ctx.id
+        assert eid == "e01"
+        stub_executor.outputs["e01"] = {"train": {"loss": 0.125}}
+        assert run.get_result("train", execution_id="e01") == {"loss": 0.125}
+        assert stub_executor.calls == [(run.id, "e01")]
+
+    def test_selected_execution_is_passed_through(self, run: Run, stub_executor) -> None:
+        with run.start() as ctx:
+            old = ctx.id
+        with run.start(mode=ExecutionMode.RERUN) as ctx:
+            new = ctx.id
+        stub_executor.outputs[old] = {"train": "old"}
+        stub_executor.outputs[new] = {"train": "new"}
+        assert run.get_result("train", execution_id=old) == "old"
+        assert run.get_result("train", execution_id=new) == "new"
+        assert stub_executor.calls == [(run.id, old), (run.id, new)]
+
+    def test_unknown_key_returns_none(self, run: Run, stub_executor) -> None:
+        with run.start() as ctx:
+            eid = ctx.id
+        stub_executor.outputs[eid] = {"train": 1}
+        assert run.get_result("other", execution_id=eid) is None
+
+    def test_does_not_parse_the_journal(self, run: Run, stub_executor) -> None:
+        with run.start() as ctx:
+            eid = ctx.id
+        journal = Path(str(run.execution_dir(eid))) / "workflow.json"
+        journal.write_text("{not json")
+        stub_executor.outputs[eid] = {"train": 1}
+        assert run.get_result("train", execution_id=eid) == 1
+
+    def test_cancel_preserves_driver_results(self, run: Run, stub_executor) -> None:
+        with run.start() as ctx:
+            ctx.set_result("train", "driver-value")
+            eid = ctx.id
+            run.cancel(eid)
+        assert run.get_result("train", execution_id=eid) == "driver-value"
+        assert run.executions[-1].status is ExecutionStatus.CANCELLED

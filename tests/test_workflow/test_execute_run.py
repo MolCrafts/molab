@@ -287,7 +287,29 @@ class TestWorkspaceRunExecutor:
         run = _make_run(tmp_path)
         run.execute(_build_wf())
 
-        outputs = require_run_executor().read_outputs(run, "e01")  # type: ignore[attr-defined]
+        outputs = require_run_executor().read_outputs(run, "e01")
 
         assert outputs == read_outputs(run, "e01")
         assert outputs == {"double": 6, "summarize": "got 6"}
+
+    def test_factory_returns_seam_implementation(self, tmp_path: Path) -> None:
+        import molab.workflow
+        import molab.workflow.execute
+        from molab.workflow.execute import workspace_run_executor
+
+        first, second = workspace_run_executor(), workspace_run_executor()
+        assert first is not second
+        for member in ("execute", "aexecute", "read_outputs"):
+            assert callable(getattr(first, member)), member
+        assert "workspace_run_executor" in molab.workflow.execute.__all__
+        assert "workspace_run_executor" not in molab.workflow.__all__
+
+        wf = Workflow(name="single")
+
+        @wf.task
+        def train() -> dict:
+            return {"loss": 0.125}
+
+        run = _make_run(tmp_path)
+        run.execute(WorkflowCompiler().compile(wf))
+        assert workspace_run_executor().read_outputs(run, "e01") == {"train": {"loss": 0.125}}

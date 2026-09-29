@@ -10,9 +10,19 @@ Workflow-layer conveniences are re-exported lazily at the top level —
 ``molab.WorkflowRuntime`` resolve on first attribute access (loading
 the ``molab.workflow`` engine machinery only at that point; plain
 ``import molab`` stays light).
+
+``import molab`` also wires the workspace run-executor seam
+(``molab.workspace.run.set_run_executor``) with a lazy proxy, so
+``Run.execute`` / ``Run.get_result`` / ``RunSet`` work in any process that
+imported molab without loading the workflow layer until first use.
 """
 
+from __future__ import annotations
+
 __version__ = "0.1.0"
+
+from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 import molcfg
 from mollog import Logger, get_logger
@@ -29,8 +39,85 @@ from molab.path import Path
 from molab.workspace.experiment import Experiment
 from molab.workspace.param import GridSpace, ParamSpace, UniformSpace
 from molab.workspace.project import Project
-from molab.workspace.run import Run, RunContext
+from molab.workspace.run import Run, RunContext, RunWorkflowExecutor, set_run_executor
 from molab.workspace.workspace import Workspace
+
+if TYPE_CHECKING:
+    from molab._typing import TaskOutput
+
+
+def _load_workflow_run_executor() -> RunWorkflowExecutor:
+    """Import the workflow layer's seam implementation through its public factory."""
+    from molab.workflow.execute import workspace_run_executor
+
+    return workspace_run_executor()
+
+
+class _LazyRunExecutor:
+    """Run-executor seam proxy that loads the workflow layer on first call.
+
+    Mirrors ``molab.workspace.run.RunWorkflowExecutor``; keep in lockstep.
+    The delegate is stateless, so there is no lock: concurrent first calls at
+    worst build two equivalent instances.
+    """
+
+    def __init__(
+        self, load: Callable[[], RunWorkflowExecutor] = _load_workflow_run_executor
+    ) -> None:
+        self._load = load
+        self._delegate: RunWorkflowExecutor | None = None
+
+    def _target(self) -> RunWorkflowExecutor:
+        if self._delegate is None:
+            self._delegate = self._load()
+        return self._delegate
+
+    def execute(
+        self,
+        run: Run,
+        workflow: object | None,
+        *,
+        resume: bool = False,
+        rerun: bool = False,
+        fresh: bool = False,
+        checkpoint_artifact_id: str | None = None,
+    ) -> object:
+        return self._target().execute(
+            run,
+            workflow,
+            resume=resume,
+            rerun=rerun,
+            fresh=fresh,
+            checkpoint_artifact_id=checkpoint_artifact_id,
+        )
+
+    async def aexecute(
+        self,
+        run: Run,
+        workflow: object | None,
+        *,
+        resume: bool = False,
+        rerun: bool = False,
+        fresh: bool = False,
+        checkpoint_artifact_id: str | None = None,
+    ) -> object:
+        return await self._target().aexecute(
+            run,
+            workflow,
+            resume=resume,
+            rerun=rerun,
+            fresh=fresh,
+            checkpoint_artifact_id=checkpoint_artifact_id,
+        )
+
+    def read_outputs(self, run: Run, execution_id: str) -> dict[str, TaskOutput]:
+        return self._target().read_outputs(run, execution_id)
+
+
+# Wire the workspace run-executor seam; ``molab.workflow`` loads on first use.
+# The annotation makes ``ty check`` verify the proxy against the Protocol.
+_RUN_EXECUTOR: RunWorkflowExecutor = _LazyRunExecutor()
+set_run_executor(_RUN_EXECUTOR)
 
 #: Process-global, in-code molab config — a live ``molcfg.Config``. The
 #: sanctioned place to register runtime values in code, never from environment

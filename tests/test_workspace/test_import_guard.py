@@ -125,3 +125,36 @@ def test_workspace_init_does_not_load_workflow_or_agent() -> None:
     )
     result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
     assert result.returncode == 0, result.stderr or result.stdout
+
+
+def test_get_result_in_fresh_process_loads_workflow_lazily(tmp_path: Path) -> None:
+    """A process that only imported molab reads node outputs via the lazy seam."""
+    import subprocess
+    import sys
+
+    root = str(tmp_path / "ws")
+    writer = (
+        "import molab\n"
+        "from molab.workflow import Workflow, WorkflowCompiler\n"
+        "wf = Workflow(name='single')\n"
+        "@wf.task\n"
+        "def train() -> dict:\n"
+        "    return {'loss': 0.125}\n"
+        f"ws = molab.Workspace({root!r}, name='lab')\n"
+        "run = ws.add_project('p').add_experiment('e').add_run(params={'x': 1})\n"
+        "run.execute(WorkflowCompiler().compile(wf))\n"
+    )
+    result = subprocess.run([sys.executable, "-c", writer], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr or result.stdout
+
+    reader = (
+        "import sys, molab\n"
+        f"ws = molab.Workspace.load({root!r})\n"
+        "[run] = ws.get_project('p').get_experiment('e').list_runs()\n"
+        "assert 'molab.workflow' not in sys.modules\n"
+        "value = run.get_result('train', execution_id='e01')\n"
+        "assert value == {'loss': 0.125}, value\n"
+        "assert 'molab.workflow' in sys.modules\n"
+    )
+    result = subprocess.run([sys.executable, "-c", reader], capture_output=True, text=True)
+    assert result.returncode == 0, result.stderr or result.stdout

@@ -1,8 +1,8 @@
 """RunSet / RunSetResult — the workspace-layer batch container (runset-api sub-task 2).
 
 Pure-container behaviour only: sequence protocol, record building, summary
-helpers (``to_records`` / ``min_by`` / ``max_by``), and the unwired-executor
-failure mode. Execution through the workflow layer is locked in
+helpers (``to_records`` / ``min_by`` / ``max_by``), persisted outputs read
+through the run-executor seam, and lazy seam resolution. Execution through the workflow layer is locked in
 ``tests/test_workflow/test_runset_execute.py``.
 """
 
@@ -42,9 +42,9 @@ class TestRunSetContainer:
         assert len(summary) == 4
         assert all(rec["status"] == "pending" for rec in summary.to_records())
 
-    def test_execute_without_workflow_layer_fails_fast(self, tmp_path: Path) -> None:
-        """Without ``import molab.workflow`` the executor seam is unwired;
-        ``RunSet.execute`` must fail fast with guidance, never fall back."""
+    def test_execute_resolves_workflow_layer_lazily(self, tmp_path: Path) -> None:
+        """``import molab`` wires the seam lazily: ``RunSet.execute`` in a
+        process that never imported ``molab.workflow`` loads it on demand."""
         code = (
             "import sys\n"
             "from molab.workspace import GridSpace, Workspace\n"
@@ -53,15 +53,46 @@ class TestRunSetContainer:
             f"ws = Workspace(root={str(tmp_path / 'ws2')!r}, name='lab')\n"
             "exp = ws.add_project('p').add_experiment('e')\n"
             "rs = RunSet(exp.add_runs(GridSpace({'x': [1]})))\n"
-            "try:\n"
-            "    rs.execute()\n"
-            "except RuntimeError as exc:\n"
-            "    assert 'workflow' in str(exc), str(exc)\n"
-            "else:\n"
-            "    raise SystemExit('RunSet.execute did not fail fast')\n"
+            "[record] = rs.execute().to_records()\n"
+            "assert record['status'] == 'pending', record\n"
+            "assert record['error'].startswith('RuntimeError: '), record\n"
+            "assert 'no workflow bound' in record['error'], record\n"
+            "assert 'molab.workflow' in sys.modules\n"
         )
         result = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True)
         assert result.returncode == 0, result.stderr or result.stdout
+
+
+class TestRunSetPersistedOutputs:
+    def test_collect_reads_latest_execution_through_seam(self, experiment, stub_executor) -> None:
+        run = experiment.add_run(params={"lr": 0.1})
+        with run.start() as ctx:
+            first = ctx.id
+        with run.start(mode=ExecutionMode.RERUN) as ctx:
+            second = ctx.id
+        assert (first, second) == ("e01", "e02")
+        stub_executor.outputs = {"e01": {"loss": 1}, "e02": {"loss": 2}}
+
+        records = RunSet([run]).collect().to_records()
+
+        assert records[0]["loss"] == 2
+        assert stub_executor.calls == [(run.id, "e02")]
+
+    def test_collect_skips_seam_for_unexecuted_runs(self, experiment, stub_executor) -> None:
+        summary = _seeded_runset(experiment).collect()
+        assert stub_executor.calls == []
+        assert all(rec["status"] == "pending" for rec in summary.to_records())
+
+    def test_outputs_are_not_refiltered(self, experiment, stub_executor) -> None:
+        run = experiment.add_run(params={"lr": 0.1})
+        with run.start() as ctx:
+            eid = ctx.id
+        outputs = {"train": {"loss": 0.5}, "model": "<obj>", "none": None}
+        stub_executor.outputs[eid] = outputs
+
+        [record] = RunSet([run]).collect()
+
+        assert record.outputs == outputs
 
 
 def _result_fixture() -> RunSetResult:

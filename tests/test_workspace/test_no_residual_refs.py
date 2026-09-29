@@ -147,6 +147,10 @@ DELETED_SYMBOLS = [
     "snapshot_sources",
     "source_snapshot=",
     "executor_info=",
+    # arch-own-03d: workspace's second parser of the node journal.
+    "read_completed_node_outputs",
+    "NodeOutputRecord",
+    "_execution_node_output",
 ]
 
 DELETED_FILES = [
@@ -183,6 +187,8 @@ DELETED_FILES = [
     SRC / "workspace" / "curation",
     SRC / "server" / "shutdown.py",
     SRC / "cli" / "workspace" / "mcp_config.py",
+    # arch-own-03d: the journal is parsed by the workflow layer only.
+    SRC / "workspace" / "execution_results.py",
 ]
 
 #: The knowledge names the workspace's public surface no longer carries.
@@ -228,6 +234,8 @@ DELETED_SHELL_MODULES = (
     "molab.workspace.plugin",
     "molab.workspace.curation",
     "molab.server.shutdown",
+    # arch-own-03d
+    "molab.workspace.execution_results",
     "molab.cli.workspace.mcp_config",
 )
 

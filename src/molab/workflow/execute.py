@@ -50,7 +50,7 @@ from .compiler import Workflow, WorkflowCompiler
 
 if TYPE_CHECKING:
     from molab.profile import ProfileConfig
-    from molab.workspace.run import Run
+    from molab.workspace.run import Run, RunWorkflowExecutor
 
     from .protocols import TaskOutput
     from .types import WorkflowResult
@@ -60,6 +60,7 @@ __all__ = [
     "RunNotExecutableError",
     "aexecute_run",
     "execute_run",
+    "workspace_run_executor",
 ]
 
 
@@ -338,6 +339,18 @@ class _WorkspaceRunExecutor:
             fresh=fresh,
             checkpoint_artifact_id=checkpoint_artifact_id,
         )
+
+
+def workspace_run_executor() -> RunWorkflowExecutor:
+    """Return the workflow layer's implementation of the workspace run-executor seam.
+
+    The composition root (``molab/__init__``) reaches the implementation only
+    through this factory; each call returns a fresh, stateless instance.
+
+    Returns:
+        An object satisfying ``molab.workspace.run.RunWorkflowExecutor``.
+    """
+    return _WorkspaceRunExecutor()
 
 
 # Wire the seam at import time so ``run.execute(workflow)`` works as soon as

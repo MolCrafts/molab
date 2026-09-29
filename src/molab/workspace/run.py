@@ -85,21 +85,30 @@ TERMINAL_STATUSES: frozenset[str] = frozenset(
 # ── Cross-layer run-execution seam ──────────────────────────────────────────
 #
 # Workspace MUST NOT import the workflow layer (hard layer-DAG invariant), yet
-# ``run.execute(workflow)`` should read fluently. Same inversion pattern as
-# ``experiment.set_workflow_executor``: the workflow layer implements the
-# Protocol below and registers itself at ``import molab.workflow`` time
-# (see ``molab.workflow.execute``), so by the time a caller holds a workflow
-# object to pass in, the seam is wired.
+# ``run.execute(workflow)`` should read fluently and ``run.get_result`` must
+# reach node outputs whose journal only the workflow layer parses. Same
+# inversion pattern as ``experiment.set_workflow_executor``: the composition
+# root ``molab/__init__`` registers a lazy proxy at ``import molab`` time, and
+# ``molab.workflow`` is only loaded on the proxy's first call. The workflow
+# layer may also register its own implementation directly (replacing the
+# proxy; the behaviour is identical).
 
 
 class RunWorkflowExecutor(Protocol):
     """One-step tracked execution of a workflow against a :class:`Run`.
 
-    Implemented by ``molab.workflow.execute`` and registered via
-    :func:`set_run_executor`. ``workflow`` is opaque to workspace (a
-    ``CompiledWorkflow`` / ``Workflow``, or ``None`` to resolve the
-    experiment's bound workflow); the return value is an opaque
+    The implementation is whatever ``molab.workflow.execute.workspace_run_executor()``
+    returns, registered via :func:`set_run_executor`. ``workflow`` is opaque
+    to workspace (a ``CompiledWorkflow`` / ``Workflow``, or ``None`` to
+    resolve the experiment's bound workflow); the return value is an opaque
     ``molab.workflow.WorkflowResult``.
+
+    **``_LazyRunExecutor`` in ``molab/__init__.py`` mirrors this Protocol
+    member by member (the signatures and keywords of ``execute`` /
+    ``aexecute`` / ``read_outputs``); changing any member here must change
+    that proxy too.** The proxy is bound through the annotation
+    ``_RUN_EXECUTOR: RunWorkflowExecutor``, so ``ty check src/`` checks it
+    structurally, and ``tests/test_init.py`` compares the signatures.
     """
 
     def execute(
@@ -124,28 +133,53 @@ class RunWorkflowExecutor(Protocol):
         checkpoint_artifact_id: str | None = None,
     ) -> object: ...
 
+    def read_outputs(self, run: Run, execution_id: str) -> dict[str, TaskOutput]:
+        """Return the outputs of the attempt's completed workflow nodes.
+
+        The node journal's schema belongs to the workflow layer; workspace
+        never parses it. Dropping lossy records is the implementation's job.
+
+        Args:
+            run: The run the attempt belongs to.
+            execution_id: The attempt id (``e01``).
+
+        Returns:
+            ``{task_name: output}``; empty when the attempt recorded none.
+        """
+        ...
+
 
 _run_executor: RunWorkflowExecutor | None = None
 
 
 def set_run_executor(executor: RunWorkflowExecutor) -> None:
-    """Register the workflow-layer implementation backing :meth:`Run.execute`.
+    """Register the implementation backing :meth:`Run.execute` and friends.
 
-    Called once at ``import molab.workflow`` time. Until then,
-    :meth:`Run.execute` (and ``RunSet.execute``) fail fast — never a silent
-    fallback.
+    The composition root ``molab/__init__`` registers a lazy proxy at
+    ``import molab`` time, which loads ``molab.workflow`` on its first call.
+    The workflow layer may also register its own implementation directly
+    (replacing the proxy; the behaviour is identical).
+
+    Args:
+        executor: The seam implementation.
     """
     global _run_executor
     _run_executor = executor
 
 
 def require_run_executor() -> RunWorkflowExecutor:
-    """Return the registered executor, or fail fast with guidance."""
+    """Return the registered executor, or fail fast.
+
+    Returns:
+        The registered seam implementation.
+
+    Raises:
+        RuntimeError: Nothing is registered — never a silent fallback.
+    """
     if _run_executor is None:
         raise RuntimeError(
-            "Run.execute needs the workflow layer; `import molab.workflow` "
-            "(e.g. `from molab.workflow import Workflow`) registers "
-            "the executor."
+            "no run executor registered — `molab/__init__` registers one lazily; "
+            "something replaced it with nothing"
         )
     return _run_executor
 
@@ -453,59 +487,72 @@ class Run(Folder):
         """Alias of :attr:`Folder.path` — the run directory as ``pathlib.Path``."""
         return self.path
 
-    def get_result(self, key: str, *, execution_id: str) -> TaskOutput:
-        """Read a result value for *key*.
+    def results(self, execution_id: str) -> dict[str, TaskOutput]:
+        """Return the driver-side results one attempt recorded.
 
-        Resolution order:
+        These are the values ``ctx.set_result`` persisted into the attempt's
+        ``results.json``, read through the workspace ``FileSystem``. From
+        arch-own-03f they are read from the ``semantic_type="result"``
+        Artifact instead; the signature and the ``ValueError`` on corrupt
+        data stay.
 
-        1. Driver-side results persisted by ``RunContext.set_result`` into
-           ``run.json`` (``context.results``) — always win when the key is
-           present, even with a ``None`` value.
-        2. Fallback: the completed workflow node named *key* in the run's
-           most recent execution's persisted node outputs
-           (``executions/<exec_id>/workflow.json``). This keeps results of
-           CLI-executed runs (``molab run``), which never call
-           ``set_result``, readable through the same accessor.
+        Args:
+            execution_id: The attempt id (``e01``).
 
-        Returns ``None`` when neither source has the key, when the run has
-        not been executed yet, or when ``run.json`` does not exist on disk.
-        A node output flagged ``outputs_lossy`` (the original value was not
-        JSON-serializable, so only a truncated observability rendering was
-        persisted) is never returned as a real result — a warning explains
-        why and ``None`` is returned.
+        Returns:
+            A fresh ``{key: value}`` dict; empty when the attempt recorded no
+            results (no file, or an empty one).
+
+        Raises:
+            ValueError: The results file is not valid JSON or its
+                ``results`` entry is not an object — a corrupt canonical
+                record is surfaced, never replaced by node outputs.
         """
         from .schema_version import read_versioned_json
 
-        results_path = Path(self.run_dir / "executions" / execution_id / "results.json")
-        if not results_path.exists() or results_path.stat().st_size == 0:
-            return self._execution_node_output(execution_id, key)
+        fs = self._disk()
+        path = fs.join(self.execution_dir(execution_id), "results.json")
         try:
-            data = read_versioned_json(results_path)
-        except (OSError, ValueError):
-            return None
-        results = data.get("results", {})
-        if isinstance(results, dict) and key in results:
+            if fs.stat(path).size == 0:
+                return {}
+        except FileNotFoundError:
+            return {}
+        try:
+            data = read_versioned_json(path, fs=fs)
+        except ValueError as exc:
+            raise ValueError(f"corrupt results file {path}: {exc}") from exc
+        results = data.get("results", {}) if isinstance(data, dict) else None
+        if not isinstance(results, dict):
+            raise ValueError(f"corrupt results file {path}: 'results' is not an object")
+        return dict(results)
+
+    def get_result(self, key: str, *, execution_id: str) -> TaskOutput:
+        """Read a result value for *key* from one attempt.
+
+        Resolution order:
+
+        1. The attempt's driver-side results (:meth:`results`) — a present
+           key always wins, even with a ``None`` value.
+        2. Otherwise the output of the completed workflow node named *key*,
+           asked of the run-executor seam. The workflow layer owns the node
+           journal and its lossy policy: a node whose output could not be
+           persisted faithfully is not returned.
+
+        Args:
+            key: The result key or workflow node name.
+            execution_id: The attempt id (``e01``).
+
+        Returns:
+            The value, or ``None`` when neither source has *key*.
+
+        Raises:
+            ValueError: The attempt's results file is corrupt (see
+                :meth:`results`).
+        """
+        results = self.results(execution_id)
+        if key in results:
             return results[key]
-        return self._execution_node_output(execution_id, key)
-
-    def _execution_node_output(self, execution_id: str, key: str) -> TaskOutput:
-        """Read one workflow node result from the selected Execution."""
-        from .execution_results import read_completed_node_outputs
-
-        record = read_completed_node_outputs(Path(str(self.run_dir)), execution_id).get(key)
-        if record is None:
-            return None
-        if record.lossy:
-            _logger.warning(
-                f"run {self.id}: node output {key!r} from execution {execution_id!r} "
-                f"is not returned by get_result — the original value was not "
-                f"JSON-serializable, so only a lossy (truncated) observability "
-                f"rendering was persisted. Make the task return a JSON-safe value, "
-                f"or persist it explicitly with ctx.set_result({key!r}, ...) from a "
-                f"driver-side run."
-            )
-            return None
-        return record.value
+        return require_run_executor().read_outputs(self, execution_id).get(key)
 
     # ── Persistence ─────────────────────────────────────────────────────
 

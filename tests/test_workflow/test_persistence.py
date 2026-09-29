@@ -369,6 +369,10 @@ class TestReadOutputs:
         outputs, messages = _collect_warnings(lambda: read_outputs(run, eid))
         assert outputs == {"a": 1}
         assert any("'model'" in message and "lossy" in message for message in messages), messages
+        # The reader serves read-back (Run.get_result / RunSet) as well as
+        # resume seeding: its warning must not speak of resume (arch-own-03d).
+        assert not any("resume" in m or "recomputed" in m for m in messages), messages
+        assert any("JSON-safe" in m for m in messages), messages
 
     def test_returns_poisoned_value(self, tmp_path: Path) -> None:
         run = _run(tmp_path)

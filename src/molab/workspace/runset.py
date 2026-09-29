@@ -5,8 +5,10 @@ parameter cell and returns a :class:`RunSet`; ``RunSet.execute`` drives every
 ``pending`` run through the exact same execution path as ``molab run``
 (RunContext lifecycle → status machine, ``alive`` heartbeat →
 workflow engine), reached via the :func:`~molab.workspace.run.set_run_executor`
-inversion seam — the workspace layer never imports workflow. One run's
-failure never interrupts its siblings; the summary reports it honestly.
+inversion seam — the workspace layer never imports workflow; ``import molab``
+wires the seam lazily. Persisted node outputs are read through the same seam.
+One run's failure never interrupts its siblings; the summary reports it
+honestly.
 
 :class:`RunSetResult` is the analysis-friendly summary: one record per run
 (params flattened + per-task outputs + ``run_id`` / ``status`` / ``error``),
@@ -20,13 +22,11 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import overload
 
 from molab._typing import JSONValue, TaskOutput
 
 from .domain import FAILED_EXECUTION_STATUSES
-from .execution_results import read_completed_node_outputs
 from .run import Run, RunWorkflowExecutor, require_run_executor
 
 __all__ = ["RunRecord", "RunSet", "RunSetResult"]
@@ -169,6 +169,9 @@ class RunSet(Sequence[Run]):
         status and persisted outputs. A failing run is recorded (``status`` +
         ``error``) and never interrupts its siblings.
 
+        The run-executor seam is wired lazily by ``import molab``, so the
+        workflow layer is loaded on demand when it was not imported yet.
+
         Args:
             parallel: Maximum number of runs executing concurrently (≥ 1).
             resume: Act on failed/cancelled runs by resuming them.
@@ -178,8 +181,7 @@ class RunSet(Sequence[Run]):
         Raises:
             ValueError: ``parallel`` < 1, ``resume`` and ``rerun`` together,
                 or ``fresh`` without ``rerun``.
-            RuntimeError: Called with the workflow layer not imported, or
-                from inside a running event loop.
+            RuntimeError: Called from inside a running event loop.
         """
         if parallel < 1:
             raise ValueError(f"parallel must be >= 1, got {parallel}")
@@ -275,15 +277,15 @@ class RunSet(Sequence[Run]):
 
     @staticmethod
     def _persisted_outputs(run: Run) -> dict[str, TaskOutput]:
-        """Latest execution's completed-node outputs (lossy records dropped)."""
+        """Latest execution's completed-node outputs, read through the seam.
+
+        A run with no Execution never touches the seam, so ``collect()`` on
+        unexecuted runs does not load the workflow layer.
+        """
         history = run.executions
         if not history:
             return {}
-        execution_id = history[-1].id
-        if not execution_id:
-            return {}
-        records = read_completed_node_outputs(Path(str(run.run_dir)), execution_id)
-        return {name: rec.value for name, rec in records.items() if not rec.lossy}
+        return dict(require_run_executor().read_outputs(run, history[-1].id))
 
     @staticmethod
     def _persisted_error(run: Run) -> str | None:

@@ -200,10 +200,10 @@ def _completed_outputs(
             continue
         if task.get("outputs_lossy"):
             logger.warning(
-                f"resume: persisted output of task {name!r} in execution "
+                f"persisted output of task {name!r} in execution "
                 f"{execution_id!r} is lossy (the original value was not "
-                f"JSON-safe and was truncated for observability); the node "
-                f"will be recomputed instead of seeded"
+                f"JSON-safe and was truncated for observability), so it is "
+                f"omitted; make the task return a JSON-safe value"
             )
             continue
         outputs[name] = task["outputs"]
