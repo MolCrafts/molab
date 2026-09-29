@@ -10,10 +10,10 @@ _User decisions D85/D86 (2026-09-27; see arch-own.decisions.md): delete the Pyth
 
 | # | Spec | Summary |
 |---|---|---|
-| 01 | [drop-harness-01-src](drop-harness-01-src.md) | Delete src/molab/harness + tests + entry points + agent extra; drop harness-only core code; regenerate openapi.json [done] |
-| 02 | [drop-harness-02-docs](drop-harness-02-docs.md) | Public docs, examples, .claude/notes, CLAUDE.md without the harness [done] |
-| 03 | [drop-harness-03-chain](drop-harness-03-chain.md) | Void 02g/03i/04f; strip harness + generated kind from the arch-own chain [approved] |
-| ui | drop-harness-ui | Remove UI agent/plan/approval pages, regenerate the TS client; gate for the first generate:api specs (03e/04b/06b) [planned] |
+| 01 | [drop-harness-01-src](drop-harness-01-src.md) | Python harness + harness-only core code deleted (tests, entry points, agent extra; openapi.json regenerated) [done] |
+| 02 | [drop-harness-02-docs](drop-harness-02-docs.md) | docs / notes / CLAUDE.md without the harness [done] |
+| 03 | [drop-harness-03-chain](drop-harness-03-chain.md) | arch-own rescoping: void 02g/03i/04f; strip harness + generated kind from the chain [done] |
+| ui | drop-harness-ui | remove UI agent/plan/approval pages and regenerate the TS client; gate for the first generate:api specs (03e/04b/06b) [done — implemented directly at user request 2026-09-29, no spec file] |
 
 ## arch-own (chain)
 
@@ -29,24 +29,24 @@ _Step 2 target architecture (plan `pasted-content-id-0977-you-are-scalable-puddl
 | 02d | [arch-own-02d-submit](arch-own-02d-submit.md) | molq submitter creates the QUEUED eNN before submit; staging carries executions/<id>/ and merges the remote record [done] |
 | 02e | [arch-own-02e-readers](arch-own-02e-readers.md) | CLI/TUI 读取方改读最新 Execution；状态投影合一 [done] |
 | 02f | [arch-own-02f-runtime](arch-own-02f-runtime.md) | workflow runtime reads bypass_cache from the Execution record; no execution-id minting [done] |
-| 02g | [arch-own-02g-harness-ids](arch-own-02g-harness-ids.md) | harness 新 run 走 Experiment.ensure_run（UUIDv7） [approved] |
+| 02g | [arch-own-02g-harness-ids](arch-own-02g-harness-ids.md) | harness 新 run 走 Experiment.ensure_run（UUIDv7） [superseded by drop-harness] |
 | 02h | [arch-own-02h-sever](arch-own-02h-sever.md) | 切断：移除 RunMetadata 执行期来源字段、显式 id 回退与 run 级 source/ [approved] |
 | 03a | [arch-own-03a-modes](arch-own-03a-modes.md) | 执行模式创建规则与 Run 路径访问器 [approved] |
 | 03b | [arch-own-03b-journal](arch-own-03b-journal.md) | workflow digest + node journal owned by workflow [approved] |
 | 03c | [arch-own-03c-cache](arch-own-03c-cache.md) | 节点缓存按 run 身份定位，缓存键覆盖有效配置 [approved] |
 | 03d | [arch-own-03d-seam](arch-own-03d-seam.md) | run-executor 接缝懒注册 + 结果读取经接缝（删除 execution_results.py） [approved] |
-| 03e | [arch-own-03e-routes](arch-own-03e-routes.md) | 服务端路由改经所有者读取 journal 与 results [approved] |
+| 03e | [arch-own-03e-routes](arch-own-03e-routes.md) | 服务端路由改经所有者读取 journal 与 results [approved] (gated on drop-harness-ui, D-6) |
 | 03f | [arch-own-03f-results](arch-own-03f-results.md) | results.json becomes a result Artifact [approved] |
 | 03g | [arch-own-03g-execute](arch-own-03g-execute.md) | execute_run 统一：启动 QUEUED 记录、RESUME 从 based_on 取种子（配置一致才复用）、启动时记录 digest [approved] |
 | 03h | [arch-own-03h-cli](arch-own-03h-cli.md) | CLI resume/rerun and the worker go through execute_run [approved] |
-| 03i | [arch-own-03i-harness](arch-own-03i-harness.md) | harness 生命周期 resume/rerun 域对齐单一 resume 语义，plan Execution 启动即记录 digest [approved] |
+| 03i | [arch-own-03i-harness](arch-own-03i-harness.md) | harness 生命周期 resume/rerun 域对齐单一 resume 语义，plan Execution 启动即记录 digest [superseded by drop-harness] |
 | 03j | [arch-own-03j-prune](arch-own-03j-prune.md) | 收尾：删除遗留 journal 辅助函数与 RunMetadata 执行期字段，加 workflow 布局守卫 [approved] |
 | 04a | [arch-own-04a-bind](arch-own-04a-bind.md) | Experiment.bind_workflow — the association record and its sole writer [approved] |
-| 04b | [arch-own-04b-writers](arch-own-04b-writers.md) | switch every Workflow↔Experiment writer to Experiment.bind_workflow, plus molab migrate workflow-kind [approved] |
+| 04b | [arch-own-04b-writers](arch-own-04b-writers.md) | switch every Workflow↔Experiment writer to Experiment.bind_workflow, plus molab migrate workflow-kind [approved] (gated on drop-harness-ui, D-6) |
 | 04c | [arch-own-04c-resolve](arch-own-04c-resolve.md) | kind-dispatched workflow resolution, loader moved into workflow [approved] |
 | 04d | [arch-own-04d-readers](arch-own-04d-readers.md) | workflow 关联的读者切换与遗留字段删除 [approved] |
 | 04e | [arch-own-04e-identity](arch-own-04e-identity.md) | workflow identity — workflow_digest is the only identity; the document carries none; retire run-level workflow fields [approved] |
-| 04f | [arch-own-04f-generated](arch-own-04f-generated.md) | generated workflows bind by id (plan run + execution + entry); recoverer seam removed [approved] |
+| 04f | [arch-own-04f-generated](arch-own-04f-generated.md) | generated workflows bind by id (plan run + execution + entry); recoverer seam removed [superseded by drop-harness] |
 | 05a | [arch-own-05a-find-refs](arch-own-05a-find-refs.md) | molab: 引用与 Workspace.find [approved] |
 | 05b | [arch-own-05b-artifact-readers](arch-own-05b-artifact-readers.md) | Artifact readers move onto Execution records, execution-relative Artifact.path [approved] |
 | 05c | [arch-own-05c-asset-model](arch-own-05c-asset-model.md) | one Asset schema at every scope [approved] |
@@ -54,7 +54,7 @@ _Step 2 target architecture (plan `pasted-content-id-0977-you-are-scalable-puddl
 | 05e | [arch-own-05e-asset-writers](arch-own-05e-asset-writers.md) | AssetRepository import writers, legacy record rewrite, `molab migrate assets` [approved] |
 | 05f | [arch-own-05f-manifest-delete](arch-own-05f-manifest-delete.md) | delete the manifest family and the legacy asset read branches [approved] |
 | 06a | [arch-own-06a-walker](arch-own-06a-walker.md) | one walker over workspace host enumeration, with the ranker moved out of Bundle [approved] |
-| 06b | [arch-own-06b-verbs](arch-own-06b-verbs.md) | document verbs on Concept, one container rule, hostPath creation/move, CLI/UI off Bundle [approved] |
+| 06b | [arch-own-06b-verbs](arch-own-06b-verbs.md) | document verbs on Concept, one container rule, hostPath creation/move, CLI/UI off Bundle [approved] (gated on drop-harness-ui, D-6) |
 | 06c | [arch-own-06c-refs](arch-own-06c-refs.md) | molab: entity references as the one knowledge link form [approved] |
 | 06d | [arch-own-06d-migrate](arch-own-06d-migrate.md) | molab migrate knowledge (opt-in, dry-run, one commit, owner-side writes) [approved] |
 | 06e | [arch-own-06e-delete](arch-own-06e-delete.md) | 删除 Bundle / 目录形态 / 概念类型注册表 / 06c 遗留读垫片 [approved] |
@@ -73,7 +73,7 @@ _Closed 01–12 on `feat/knowledge-crossref` (2026-09-23) — knowledge depends 
 | 02 | knowledge-crossref-02-owner | `folder(host, name, of)` + host construction |
 | 03 | knowledge-crossref-03-verbs | write verbs move into `molab.knowledge` |
 | 04 | knowledge-crossref-04-services | services own the knowledge projection |
-| 05 | knowledge-crossref-05-harness | harness redirect + Folder type table |
+| 05 | knowledge-crossref-05-harness | harness redirect + Folder type table (harness + Folder type table removed by drop-harness) |
 | 06 | knowledge-crossref-06-server | server redirect |
 | 07 | knowledge-crossref-07-cli | CLI harvest redirect |
 | 08 | knowledge-crossref-08-sever-writes | sever the workspace write verbs |
@@ -93,7 +93,7 @@ _Closed 01–08 on `feat/knowledge-unify` (2026-09-20) — Knowledge + six class
 | 03 | knowledge-unify-03-services | analyze_run_failure writes Report |
 | 04 | knowledge-unify-04-cli | CLI Knowledge(root); harvest Finding/Observation/Report |
 | 05 | knowledge-unify-05-server | server walk/search/open; harvest of= |
-| 06 | knowledge-unify-06-harness | harness digest + records on six classes |
+| 06 | knowledge-unify-06-harness | harness digest + records on six classes (code removed by drop-harness) |
 | 07 | knowledge-unify-07-ui | web plugin six classes + generate:api |
 | 08 | knowledge-unify-08-cutover | delete shims, docs, grep-clean |
 
@@ -105,8 +105,10 @@ _One persist format: JSONL metrics in artifacts/, no ops/ sidecar, no harness.sq
 |---|---|---|
 | 01 | [persist-one-01-metrics](persist-one-01-metrics.md) | JSONL-only host metrics under artifacts/ [approved] |
 | 02 | [persist-one-02-run-state](persist-one-02-run-state.md) | fold ops into run.json; alive mtime heartbeat [superseded by arch-own-02a-record] |
-| 03 | [persist-one-03-harness-files](persist-one-03-harness-files.md) | file stores replace harness.sqlite [approved] |
+| 03 | [persist-one-03-harness-files](persist-one-03-harness-files.md) | file stores replace harness.sqlite [superseded by drop-harness] |
 | 04 | [persist-one-04-cutover](persist-one-04-cutover.md) | callers, docs, delete sqlitelog [approved] |
+
+_Historical harness chains — their code was removed by drop-harness (D86)._
 
 ## host-reflect (chain)
 
