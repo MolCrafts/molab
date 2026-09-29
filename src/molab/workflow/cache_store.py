@@ -5,8 +5,8 @@ versioning, and LRU eviction policy. The actual *storage* — read / write /
 list / remove / atime — is delegated through the :class:`CacheStore`
 Protocol so the cache can sit on top of any ``CacheStore``-conforming
 backend. The one shipped backend is ``FileCacheStore``, a plain filesystem
-directory; execution auto-cache roots it under
-``<workspace>/.molab/cache/<run-path>/``, and a caller may pass any other
+directory; execution auto-cache roots it at ``run.machine_dir() / "cache"``,
+and a caller may pass any other
 directory explicitly (``Caching(store_dir=…)``).
 """
 
@@ -68,9 +68,9 @@ class FileCacheStore:
     writes use a temp-file + rename (mirrors workspace's
     :func:`atomic_write_json` semantics for non-JSON-decoded strings).
 
-    Execution auto-cache uses this rooted under
-    ``<workspace>/.molab/cache/<run-path>/``; any other directory is an
-    explicit caller choice.
+    Execution auto-cache uses this rooted at ``run.machine_dir() / "cache"``
+    (the run's machine-state directory, keyed by run identity); any other
+    directory is an explicit caller choice.
     """
 
     def __init__(self, store_dir: Path | str) -> None:

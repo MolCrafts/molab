@@ -278,3 +278,57 @@ class TestWorkflowRuntimeStart:
         handle = await WorkflowRuntime().start(_ok_workflow())
         assert handle.execution_id is None
         assert (await handle.wait()).status == "succeeded"
+
+
+class TestAutoCacheFromRunContext:
+    """The auto node cache lives in the run's machine dir, or nowhere."""
+
+    def test_real_run_uses_machine_dir_cache(self, tmp_path: Path) -> None:
+        from molab.workflow._engine.runtime import _auto_cache_from_run_context
+        from molab.workflow.protocols import RunLike
+
+        ws = Workspace(tmp_path / "lab")
+        run = ws.add_project(name="p").add_experiment(name="e").add_run(params={"x": 1})
+        assert isinstance(run, RunLike)
+        with run.start() as ctx:
+            cache = _auto_cache_from_run_context(ctx)
+        assert cache is not None
+        assert cache.store.store_dir == run.machine_dir() / "cache"
+        assert not (run.machine_dir() / "cache").exists()  # created on first put only
+
+    def test_none_returns_none(self) -> None:
+        from molab.workflow._engine.runtime import _auto_cache_from_run_context
+
+        assert _auto_cache_from_run_context(None) is None
+
+    def test_stub_without_machine_dir_returns_none(self, tmp_path: Path) -> None:
+        from molab.workflow._engine.runtime import _auto_cache_from_run_context
+
+        run_ctx = _RunContextStub(run_dir=tmp_path / "r")
+        assert _auto_cache_from_run_context(run_ctx) is None
+        result = asyncio.run(WorkflowRuntime().execute(_ok_workflow(), run_context=run_ctx))
+        assert result.status == "succeeded"
+        assert not (tmp_path / "r" / ".cache").exists()
+
+    def test_machine_dir_raising_disables_cache(self, tmp_path: Path) -> None:
+        from molab.workflow._engine.runtime import _auto_cache_from_run_context
+
+        def broken() -> Path:
+            raise OSError("unreachable workspace")
+
+        run_ctx = SimpleNamespace(run=SimpleNamespace(machine_dir=broken))
+        assert _auto_cache_from_run_context(run_ctx) is None
+
+    def test_runtime_module_composes_no_cache_path(self) -> None:
+        import ast
+        import inspect
+
+        from molab.workflow._engine import runtime
+
+        assert not hasattr(runtime, "_cache_dir")
+        tree = ast.parse(inspect.getsource(runtime))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                assert node.module != "molab.workspace.naming"
+            if isinstance(node, ast.Constant):
+                assert node.value not in {".cache", ".molab"}

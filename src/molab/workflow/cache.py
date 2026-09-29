@@ -15,10 +15,9 @@ Features:
 Usage::
 
     # Run-local (the execute default when a RunContext is attached):
-    from pathlib import Path
     from molab.workflow import Caching, FileCacheStore
 
-    cache = Caching(store=FileCacheStore(Path(run_dir) / "cache"), max_entries=1000)
+    cache = Caching(store=FileCacheStore(run.machine_dir() / "cache"), max_entries=1000)
 
     # Or plain filesystem (no run needed):
     cache = Caching(store_dir=Path("./cache"), max_entries=1000)
@@ -103,7 +102,7 @@ class Caching:
     Two construction shapes:
 
     - ``Caching(store=<CacheStore>)`` — supply any store directly. The
-      execute default is ``FileCacheStore(run_dir / "cache")``.
+      execute default is ``FileCacheStore(run.machine_dir() / "cache")``.
     - ``Caching(store_dir=<Path>)`` — backward-compat shorthand that
       builds a :class:`FileCacheStore` rooted at *store_dir*.
 

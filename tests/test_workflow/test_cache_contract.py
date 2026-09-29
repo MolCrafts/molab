@@ -1,7 +1,7 @@
 """Cache-identity contract: code_hash + config_hash + inputs_hash.
 
 Architectural lock for ``molab.workflow.cache`` — the cache key is
-``f(snapshot.key, inputs_hash)`` and nothing else. Six pins:
+``f(snapshot.key, inputs_hash)`` and nothing else. Ten pins:
 
 1. ``inputs`` participate in ``cache_key`` — differing inputs ⇒ different key.
 2. Identical code + config + inputs collide on one ``cache_key`` (reuse).
@@ -14,6 +14,15 @@ Architectural lock for ``molab.workflow.cache`` — the cache key is
    two runs with different params NEVER share a root-task cache entry.
 6. The injected workdir Path does NOT participate — same params with a
    different workdir/execution still HIT.
+7. The effective config participates — same params under profile data
+   ``{"dt": 1.0}`` and ``{"dt": 2.0}`` MISS.
+8. Same params and same config data HIT (across workspaces).
+8b. The profile *name* does NOT participate — only its data does.
+9. A ``dependent_params`` overlay *value* participates — changing the overlay
+   between two attempts of one run MISSES downstream.
+10. Execution location does NOT participate — the local-handler and the
+    worker shape of one run (the worker takes its config from the record and
+    injects no ``run_dir``) share their auto-cache entries.
 
 It also pins the ``Caching`` constructor's ``store`` / ``store_dir`` XOR
 validation (moved here from the deleted workspace-backed cache tests).
@@ -25,11 +34,13 @@ from pathlib import Path
 
 import pytest
 
+from molab.profile import ProfileConfig
 from molab.workflow import Task, TaskContext, Workflow, WorkflowCompiler, WorkflowRuntime
 from molab.workflow.cache import Caching
 from molab.workflow.cache_store import FileCacheStore
 from molab.workflow.snapshot import TaskSnapshot
 from molab.workspace import Workspace
+from molab.workspace.domain import ExecutionMode
 
 
 class _Body(Task):
@@ -161,6 +172,129 @@ class TestEngineInjectedCacheIdentity:
 
         assert counters["root"] == 1  # second run served from cache
         assert r1.outputs["root"] == r2.outputs["root"] == "r1"
+
+
+def _dt_workflow(counters: dict[str, int], name: str = "dt"):
+    wf = Workflow(name=name)
+
+    @wf.task
+    async def root(ratio: str, dt: float) -> float:
+        counters["root"] += 1
+        return dt * 10
+
+    return WorkflowCompiler().compile(wf)
+
+
+def _dependent_workflow(factor: float, counters: dict[str, int]):
+    def overlay(prev: dict) -> dict:
+        return {"T": factor * prev["src"].output["Tg"]}
+
+    def src() -> dict:
+        counters["src"] += 1
+        return {"Tg": 2.0}
+
+    def mech(T: float) -> float:
+        counters["mech"] += 1
+        return T
+
+    wf = Workflow(name="dependent")
+    wf.add(src, name="src")
+    wf.add(mech, name="mech", depends_on=["src"], dependent_params=overlay)
+    return WorkflowCompiler().compile(wf)
+
+
+class TestEffectiveConfigCacheIdentity:
+    """Pins 7-10 — the effective config is in the key; name and location are not."""
+
+    @pytest.mark.asyncio
+    async def test_differing_profile_config_misses(self, tmp_path: Path) -> None:
+        """Pin 7 — same params, profile ``dt`` 1.0 vs 2.0 ⇒ two body runs."""
+        counters = {"root": 0}
+        compiled = _dt_workflow(counters)
+        cache = Caching(store_dir=tmp_path / "shared-cache")
+
+        run1 = _workspace_run(tmp_path, "a", {"ratio": "r1"})
+        with run1.start(ProfileConfig({"dt": 1.0}, name="p")) as ctx1:
+            r1 = await WorkflowRuntime().execute(compiled, run_context=ctx1, cache=cache)
+        run2 = _workspace_run(tmp_path, "b", {"ratio": "r1"})
+        with run2.start(ProfileConfig({"dt": 2.0}, name="p")) as ctx2:
+            r2 = await WorkflowRuntime().execute(compiled, run_context=ctx2, cache=cache)
+
+        assert counters["root"] == 2
+        assert r1.outputs["root"] == 10.0
+        assert r2.outputs["root"] == 20.0
+
+    @pytest.mark.asyncio
+    async def test_same_params_same_config_hits(self, tmp_path: Path) -> None:
+        """Pin 8 — equal params and equal config data ⇒ one body run."""
+        counters = {"root": 0}
+        compiled = _dt_workflow(counters)
+        cache = Caching(store_dir=tmp_path / "shared-cache")
+
+        for name in ("ws1", "ws2"):
+            run = _workspace_run(tmp_path, name, {"ratio": "r1"})
+            with run.start(ProfileConfig({"dt": 1.0}, name="p")) as ctx:
+                result = await WorkflowRuntime().execute(compiled, run_context=ctx, cache=cache)
+            assert result.outputs["root"] == 10.0
+
+        assert counters["root"] == 1
+
+    @pytest.mark.asyncio
+    async def test_profile_name_alone_does_not_miss(self, tmp_path: Path) -> None:
+        """Pin 8b — profile names ``a`` / ``b`` over equal data ⇒ one body run."""
+        counters = {"root": 0}
+        compiled = _dt_workflow(counters)
+        cache = Caching(store_dir=tmp_path / "shared-cache")
+
+        for name in ("a", "b"):
+            run = _workspace_run(tmp_path, name, {"ratio": "r1"})
+            with run.start(ProfileConfig({"dt": 1.0}, name=name)) as ctx:
+                result = await WorkflowRuntime().execute(compiled, run_context=ctx, cache=cache)
+            assert result.outputs["root"] == 10.0
+
+        assert counters["root"] == 1
+
+    @pytest.mark.asyncio
+    async def test_dependent_params_overlay_change_misses(self, tmp_path: Path) -> None:
+        """Pin 9 — overlay factor 0.5 then 2.0 on e01 / e02 of one run ⇒ miss."""
+        counters = {"src": 0, "mech": 0}
+        cache = Caching(store_dir=tmp_path / "shared-cache")
+        run = _workspace_run(tmp_path, "dep", {"ratio": "r1"})
+
+        with run.start() as ctx:
+            first = await WorkflowRuntime().execute(
+                _dependent_workflow(0.5, counters), run_context=ctx, cache=cache
+            )
+        with run.start(mode=ExecutionMode.RERUN) as ctx:
+            second = await WorkflowRuntime().execute(
+                _dependent_workflow(2.0, counters), run_context=ctx, cache=cache
+            )
+
+        assert first.outputs["mech"] == 1.0
+        assert second.outputs["mech"] == 4.0
+        assert counters["mech"] == 2
+
+    @pytest.mark.asyncio
+    async def test_local_and_worker_contexts_share_cache(self, tmp_path: Path) -> None:
+        """Pin 10 (guard) — local-handler vs worker shape of one run share the
+        auto cache: the worker's config comes from the record, with no run_dir."""
+        counters = {"root": 0}
+        compiled = _dt_workflow(counters)
+        run = _workspace_run(tmp_path, "shape", {"ratio": "r1"})
+        cfg = ProfileConfig({"dt": 1.0}, name="p")
+
+        run.create_execution(profile_config=cfg)
+        with run.start(cfg, execution_id="e01") as ctx:
+            local = await WorkflowRuntime().execute(compiled, run_context=ctx)
+
+        run.create_execution(mode=ExecutionMode.RERUN, profile_config=cfg)
+        with run.start(execution_id="e02") as ctx:
+            assert "run_dir" not in ctx.config
+            assert ctx.config.to_dict() == {"dt": 1.0}
+            worker = await WorkflowRuntime().execute(compiled, run_context=ctx)
+
+        assert counters["root"] == 1
+        assert local.outputs["root"] == worker.outputs["root"] == 10.0
 
 
 class TestCachingConstructor:

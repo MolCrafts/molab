@@ -50,6 +50,10 @@ from ..types import (
 from .node_params import _resolve_dependent_params
 from .state import WorkflowDeps, WorkflowState
 
+# Sentinel for ``run_task_body(effective_config=…)``: distinguishes "resolve it
+# here" from an already-resolved effective config that is legitimately ``None``.
+_UNRESOLVED_CONFIG: Any = object()
+
 if TYPE_CHECKING:
     from .._graph_decl import TaskRegistration
     from ..compiled import CompiledWorkflow
@@ -202,6 +206,7 @@ async def run_task_body(
     *,
     element: TaskInput = NO_OUTPUT,
     delivered: TaskInput = NO_OUTPUT,
+    effective_config: JSONMapping | None = _UNRESOLVED_CONFIG,
 ) -> TaskOutput:
     """Invoke one task's body against a freshly-built context.
 
@@ -216,6 +221,11 @@ async def run_task_body(
     * otherwise *delivered* — the value carried on the activating trigger
       edge (a branch-routed value or a loop-back from the previous
       iteration) — becomes ``ctx.inputs``.
+
+    *effective_config* is the task's already-resolved config (profile plus
+    ``dependent_params`` overlay), passed by the cached path so the user's
+    ``dependent_params`` function runs once per execution; left unset it is
+    resolved here. A ``wf.parallel`` element always uses ``deps.config``.
     """
     registration = deps.registration_by_name.get(name)
     if registration is None:
@@ -241,12 +251,13 @@ async def run_task_body(
             inputs = delivered
         else:
             inputs = _collect_upstream_outputs(registration, state)
-        effective_config = _resolve_dependent_params(
-            registration=registration,
-            state=state,
-            run_context=deps.run_context,
-            base_config=deps.config,
-        )
+        if effective_config is _UNRESOLVED_CONFIG:
+            effective_config = _resolve_dependent_params(
+                registration=registration,
+                state=state,
+                run_context=deps.run_context,
+                base_config=deps.config,
+            )
 
     # Capabilities-as-inputs: an engine-internal task may declare
     # ``__wf_capability__``; the engine injects the named capability as

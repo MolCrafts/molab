@@ -22,6 +22,7 @@ from molab.workflow import (
     WorkflowRuntime,
 )
 from molab.workspace import Workspace
+from molab.workspace.domain import ExecutionMode
 
 # ── module-level per-task execution counters (bodies increment these) ───────
 _COUNTERS: dict[str, int] = {}
@@ -113,9 +114,7 @@ class TestRuntimeCaching:
         assert r2.outputs["step"] == 42
         assert _COUNTERS["step"] == 1
 
-    async def test_auto_cache_from_run_context_writes_under_molab_cache(
-        self, workspace: Workspace
-    ) -> None:
+    async def test_auto_cache_writes_under_run_machine_dir(self, workspace: Workspace) -> None:
         wf = Workflow(name="auto-cache")
 
         @wf.task
@@ -128,12 +127,33 @@ class TestRuntimeCaching:
         with run.start() as ctx:
             result = await WorkflowRuntime().execute(compiled, run_context=ctx)
         assert result.outputs["step"] == 7
-        # Machine state lives under .molab/, never inside a scientific dir.
-        cache_root = Path(workspace.root) / ".molab" / "cache"
-        assert cache_root.is_dir()
-        assert list(cache_root.glob("*/*.json"))
-        assert not (Path(run.run_dir) / "cache").exists()
-        assert not (Path(workspace.root) / "cache").exists()
+        # Machine state keyed by run identity, never inside a scientific dir.
+        root = Path(workspace.root)
+        assert run.machine_dir() == root / ".molab" / "runs" / run.id
+        assert list((run.machine_dir() / "cache").glob("*.json"))
+        assert not (root / ".molab" / "cache").exists()
+        assert not (Path(run.run_dir) / ".cache").exists()
+        assert not (root / "cache").exists()
+
+    async def test_auto_cache_shared_across_executions_of_one_run(
+        self, workspace: Workspace
+    ) -> None:
+        wf = Workflow(name="auto-shared")
+
+        @wf.task
+        async def step(ctx: TaskContext) -> int:
+            _bump("shared")
+            return 3
+
+        compiled = WorkflowCompiler().compile(wf)
+        run = _new_run(workspace, "shared")
+        with run.start() as ctx:
+            first = await WorkflowRuntime().execute(compiled, run_context=ctx)
+        with run.start(mode=ExecutionMode.RERUN) as ctx:
+            second = await WorkflowRuntime().execute(compiled, run_context=ctx)
+        assert [e.id for e in run.executions] == ["e01", "e02"]
+        assert first.outputs["step"] == second.outputs["step"] == 3
+        assert _COUNTERS["shared"] == 1  # keyed by the run, not the attempt dir
 
     async def test_artifact_reregistered_on_hit_without_recompute(
         self, workspace: Workspace, tmp_path: Path

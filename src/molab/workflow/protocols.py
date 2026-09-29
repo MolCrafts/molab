@@ -94,6 +94,19 @@ class RunLike(Protocol):
         """The directory of one attempt; the workspace owns the layout."""
         ...
 
+    def machine_dir(self) -> Path:
+        """The run-level machine-state directory the workspace hands out.
+
+        ``<workspace>/.molab/runs/<run-id>/``: machine state a person never
+        opens, keyed by run identity. The workflow node cache lives in its
+        ``cache/`` subdirectory.
+
+        Returns:
+            The directory as a :class:`pathlib.Path`. It is not created by
+            this call; only content-addressed state may live under it.
+        """
+        ...
+
 
 @runtime_checkable
 class UpstreamViewLike(Protocol):

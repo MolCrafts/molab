@@ -5,18 +5,28 @@ cache get/put dance: collect + JSON-safe the inputs, look up by
 ``(snapshot, inputs)``, re-register cached artifacts on a hit, and store the
 result + produced-artifact manifest on a miss. Kept apart from the dispatch
 core in :mod:`.node`.
+
+The cache ``inputs`` payload covers every runtime input of a task: upstream
+outputs, engine-injected root inputs (run params), a trigger-delivered value
+and the task's **effective config** — the profile data with any
+``dependent_params`` overlay *value* applied. Two terms are deliberately out:
+the profile *name* (only its data is config) and the execution location (the
+content-addressed workdir; the effective config carries no ``run_dir``), so
+attempts of one run executed in different places share their entries.
 """
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from pathlib import Path
 from typing import cast
 
 from mollog import get_logger
 
-from ..protocols import JSONValue, TaskInput, TaskOutput
+from ..protocols import JSONMapping, JSONValue, TaskInput, TaskOutput
 from ..types import UnknownTaskError
 from .node import NO_OUTPUT, _collect_upstream_outputs, run_task_body
+from .node_params import _resolve_dependent_params
 from .state import WorkflowDeps, WorkflowState
 
 logger = get_logger(__name__)
@@ -57,16 +67,39 @@ def _canonical_root_inputs(value: TaskOutput) -> TaskOutput:
     return value
 
 
+def _canonical_config(config: object) -> JSONValue:
+    """Canonicalize a task's effective config for cache identity.
+
+    ``None`` becomes ``{}`` (one key shape for "no config"). A ``Mapping`` —
+    including a :class:`~molab.profile.ProfileConfig` — becomes a plain dict
+    of its entries; a profile's *name* is not an entry, so it is excluded,
+    matching ``ProfileConfig.content_hash`` (data, never name). Anything else
+    is returned as-is for the JSON-safety check to judge. Key order is
+    normalized downstream by ``Caching._compute_input_hash`` (``sort_keys``).
+    """
+    if config is None:
+        return {}
+    if isinstance(config, Mapping):
+        return cast("JSONValue", {str(k): v for k, v in config.items()})
+    return cast("JSONValue", config)
+
+
 def _cache_inputs(
     name: str,
     state: WorkflowState,
     upstream: TaskInput,
     delivered: TaskInput = NO_OUTPUT,
+    *,
+    config: JSONMapping | None = None,
 ) -> dict[str, JSONValue]:
     """Build the cache ``inputs`` mapping — the task's FULL runtime-input identity.
 
-    ``{"inputs": <upstream>}`` is the shipped key shape for plain tasks
-    (unchanged, so existing cache entries stay valid). When the engine
+    ``{"inputs": <upstream>, "config": <effective config>}`` is the key shape
+    for plain tasks. The effective config (profile data plus any
+    ``dependent_params`` overlay value, see :func:`_canonical_config`) is
+    always present — ``None`` and ``{}`` give the same key — and the profile
+    name is not part of it. It rides the cache's own ``inputs`` term, never
+    the ``TaskSnapshot``. When the engine
     injected root inputs for *name* (sweep params + workdir for a workspace
     run, possibly merged with a SubWorkflow-forwarded value), they are folded
     in under a separate ``"root_inputs"`` key — because the body binds its
@@ -75,11 +108,15 @@ def _cache_inputs(
     :func:`_canonical_root_inputs`). A trigger-*delivered* value (branch-routed
     / loop-back input for a dep-less task) likewise joins the identity under a
     ``"delivered"`` key — two different routed values must never share a cache
-    entry. Determinism: the downstream ``Caching._compute_input_hash``
-    serializes with ``sort_keys=True``, so key insertion order never moves the
-    hash.
+    entry. The execution location is not part of the identity: the workdir is
+    stripped and the effective config carries no ``run_dir``. Determinism: the
+    downstream ``Caching._compute_input_hash`` serializes with
+    ``sort_keys=True``, so key insertion order never moves the hash.
     """
-    payload: dict[str, JSONValue] = {"inputs": cast("JSONValue", upstream)}
+    payload: dict[str, JSONValue] = {
+        "inputs": cast("JSONValue", upstream),
+        "config": _canonical_config(config),
+    }
     if name in state.root_inputs:
         root = _canonical_root_inputs(state.root_inputs[name])
         payload["root_inputs"] = cast("JSONValue", root)
@@ -241,9 +278,13 @@ async def run_task_body_cached(
     Gating (caller pre-checks ``deps.cache is not None``, non-actor task,
     ``name in deps.snapshots``):
 
-    * collect the upstream inputs once and wrap them — together with any
-      engine-injected root inputs for this task (sweep params; the workdir
-      Path is canonicalized out) — as the cache ``inputs`` payload;
+    * collect the upstream inputs once and resolve the task's effective
+      config once (profile data plus the ``dependent_params`` overlay value —
+      the user's function runs exactly once per execution, on a hit too, since
+      the key needs its value); wrap them — together with any engine-injected
+      root inputs for this task (sweep params; the workdir Path is
+      canonicalized out) — as the cache ``inputs`` payload. The profile name
+      and the execution location are not part of the key;
     * ``cache.get`` → on HIT, re-register the cached artifact manifest into
       the current run and return the recorded ``result`` WITHOUT running the
       body (the per-task body counter must not increment);
@@ -265,7 +306,13 @@ async def run_task_body_cached(
     assert cache is not None and snapshot is not None  # caller-gated
 
     inputs = _collect_upstream_outputs(registration, state)
-    cache_inputs = _cache_inputs(name, state, inputs, delivered)
+    effective_config = _resolve_dependent_params(
+        registration=registration,
+        state=state,
+        run_context=deps.run_context,
+        base_config=deps.config,
+    )
+    cache_inputs = _cache_inputs(name, state, inputs, delivered, config=effective_config)
     cacheable = _is_json_safe(cache_inputs)
 
     # ``bypass_cache`` (the --fresh escape hatch) skips the READ only: the
@@ -292,7 +339,9 @@ async def run_task_body_cached(
                 )
             return payload.get("result")
 
-    raw = await run_task_body(name, deps, state, delivered=delivered)
+    raw = await run_task_body(
+        name, deps, state, delivered=delivered, effective_config=effective_config
+    )
 
     if cacheable and _is_json_safe(raw):
         manifest = _artifact_manifest(deps, name)

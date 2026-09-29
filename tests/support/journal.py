@@ -6,7 +6,7 @@ proving seed provenance. Older suites still write journals directly
 (``tests/test_workflow/test_resume_seed_integrity.py``,
 ``test_node_output_reader.py``, ``test_resume_from_ops.py``,
 ``tests/test_workspace/test_run_result_fallback.py``); a journal schema change
-must update those too. The node cache under ``.molab/cache/`` hands
+must update those too. The node cache under ``.molab/runs/<run-id>/cache/`` hands
 a recomputed node the very same value a seed would carry, so a test cannot
 tell "seeded from the predecessor attempt" from "ran again" by looking at a
 normal output. Replacing the predecessor's recorded output with a sentinel

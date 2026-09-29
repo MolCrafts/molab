@@ -92,10 +92,10 @@ def _resolve_cache(
 
     1. an explicit ``cache=`` kwarg passed to ``execute`` / ``start`` / …;
     2. the runtime's flat ``self.cache`` instance attribute;
-    3. auto-derived from a workspace ``run_context`` that exposes
-       ``run_dir`` — a :class:`FileCacheStore` under ``<workspace>/.molab/cache/``
-       (never the workspace-root ``cache/``);
-    4. ``None`` (caching off — identical behaviour to before this spec).
+    3. auto-derived from ``run_context.run.machine_dir() / "cache"`` — a
+       :class:`FileCacheStore` in the run's machine-state directory, keyed by
+       run identity (see :func:`_auto_cache_from_run_context`);
+    4. ``None`` (caching off).
     """
     if explicit is not None:
         return explicit
@@ -104,40 +104,34 @@ def _resolve_cache(
     return _auto_cache_from_run_context(run_context)
 
 
-def _cache_dir(run_dir: Path) -> Path:
-    """Cache location for *run_dir* — machine state, so it lives in ``.molab/``.
-
-    Walks up to the workspace root (the directory holding ``workspace.json``)
-    and keys the cache by the run's path below it, so two runs never share a
-    cache and no scientific directory gains a machine-only subdirectory.
-    """
-    from molab.workspace.naming import workspace_root
-
-    root = workspace_root(run_dir)
-    if root is None:
-        return run_dir / ".cache"
-    rel = run_dir.relative_to(root).as_posix().replace("/", "%")
-    return root / ".molab" / "cache" / rel
+# The node cache's own subdirectory inside the machine dir the workspace hands
+# out — workflow-owned content naming, not a workspace layout literal.
+_NODE_CACHE_DIRNAME = "cache"
 
 
 def _auto_cache_from_run_context(run_context: RunContextLike | None) -> Caching | None:
-    """Best-effort: build a run-local ``Caching`` from a run_context.
+    """Best-effort: build the run's node cache from a run_context.
 
-    Cache lives under ``<workspace>/.molab/cache/``. Returns ``None`` when the duck-typed
-    surface does not expose a ``run_dir``. Never raises. Never creates a
-    workspace-root ``cache/``.
+    The cache is auto-derived from ``run_context.run.machine_dir() / "cache"``:
+    the workspace hands out the run's machine-state directory and the workflow
+    names its own content inside it, so the workflow composes no workspace
+    path. The directory is created by the store on its first put.
+
+    The ``machine_dir`` probe is deliberately duck-typed: the node cache is an
+    optional acceleration, so a run context whose run has no callable
+    ``machine_dir`` (or whose ``machine_dir()`` raises ``TypeError`` /
+    ``OSError``) disables caching altogether — every task recomputes and the
+    result is still correct. Never raises.
     """
     if run_context is None:
         return None
-    run_dir = getattr(run_context, "run_dir", None)
-    if run_dir is None:
-        run = getattr(run_context, "run", None)
-        run_dir = getattr(run, "run_dir", None)
-    if run_dir is None:
+    run = getattr(run_context, "run", None)
+    machine_dir = getattr(run, "machine_dir", None)
+    if not callable(machine_dir):
         return None
     try:
-        store_dir = _cache_dir(Path(run_dir))
-    except TypeError:
+        store_dir = Path(machine_dir()) / _NODE_CACHE_DIRNAME
+    except (TypeError, OSError):
         return None
     from ..cache import Caching
     from ..cache_store import FileCacheStore
@@ -285,8 +279,9 @@ class WorkflowRuntime:
     ``self.cache`` is a flat, settable :class:`~molab.workflow.cache.Caching`
     instance attribute (default ``None`` — caching off). It is the lowest
     priority cache source; an explicit ``cache=`` kwarg on any execution
-    method wins, and a run-local cache under ``<workspace>/.molab/cache/`` is auto-derived
-    from a ``run_context`` when neither is set (see :func:`_resolve_cache`).
+    method wins, and the run's node cache is auto-derived from
+    ``run_context.run.machine_dir() / "cache"`` when neither is set (see
+    :func:`_resolve_cache`).
     """
 
     def __init__(self) -> None:
