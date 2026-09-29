@@ -20,9 +20,10 @@ goldens pin the repo files a later edit could silently regress.
 4. No ``examples/**/*.py`` imports ``molab.harness`` or ``molab.agent``.
 5. CLAUDE.md: every line mentioning "harness" is a ``drop-harness`` reference;
    the harness/agent tokens are gone; ``ctx.files`` lands in
-   ``executions/eNN/work/``; the D-1 / D-2 / D-6 (``drop-harness-ui``) named
+   ``executions/eNN/work/``; the D-1 / D-2 named
    exceptions, the three entry-point groups and the four inversion seams are
-   present; the layout tree keeps its ``work/`` row.
+   present; the layout tree keeps its ``work/`` row. (D-6 was time-boxed until
+   ``drop-harness-ui`` landed; since ce500be7 its sentence is asserted absent.)
 6. The three harness notes are absent; ``integration.md`` has no "harness",
    no ChangeProposal / InteractiveLoop / AgentGateway, no reference to a
    deleted section, keeps "Workspace Copilot" + ``workspace/copilot.py`` and
@@ -84,9 +85,9 @@ _CLAUDE_ABSENT = (
     "plan-book",
     "arbitrary_types_allowed",
     "products under `executions/eNN/out/`",
+    "Time-boxed exception (D-6",
 )
 _CLAUDE_PRESENT = (
-    "drop-harness-ui",
     "D-1",
     "D-2",
     "molab.cli_plugins",
