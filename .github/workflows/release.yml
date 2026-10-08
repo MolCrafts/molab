@@ -2,8 +2,8 @@ name: release
 
 # A `v*` tag on MolCrafts builds the sdist and the wheel with the web UI
 # bundled (src/molexp/dist) and publishes them to PyPI (trusted publishing,
-# environment `release`). workflow_dispatch is a dry run anywhere: the same
-# build, kept as a workflow artifact.
+# release.yml and the `pypi` environment). workflow_dispatch is a dry run
+# anywhere: the same build, kept as a workflow artifact, and no environment.
 on:
   push:
     tags: ["v*"]
@@ -39,7 +39,7 @@ jobs:
     needs: build
     if: github.event_name == 'push' && github.repository_owner == 'MolCrafts'
     runs-on: ubuntu-latest
-    environment: release
+    environment: ${{ github.event_name == 'push' && 'pypi' || '' }}
     permissions:
       id-token: write
     steps:
