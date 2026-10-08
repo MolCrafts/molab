@@ -37,5 +37,4 @@ describe("pathForNextAction", () => {
     const path = pathForNextAction(action, snapshot);
     expect(path).toContain("/runs/run1");
   });
-
 });

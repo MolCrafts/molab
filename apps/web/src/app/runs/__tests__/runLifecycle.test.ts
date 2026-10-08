@@ -67,12 +67,12 @@ describe("defaultExecutionMode", () => {
     expect(defaultExecutionMode(executionModeOptions({ attempts: 0, basedOnStatus: null }))).toBe(
       "initial",
     );
-    expect(defaultExecutionMode(executionModeOptions({ attempts: 1, basedOnStatus: "failed" }))).toBe(
-      "rerun",
-    );
-    expect(defaultExecutionMode(executionModeOptions({ attempts: 5, basedOnStatus: "queued" }))).toBe(
-      "rerun",
-    );
+    expect(
+      defaultExecutionMode(executionModeOptions({ attempts: 1, basedOnStatus: "failed" })),
+    ).toBe("rerun");
+    expect(
+      defaultExecutionMode(executionModeOptions({ attempts: 5, basedOnStatus: "queued" })),
+    ).toBe("rerun");
   });
 });
 
