@@ -14,6 +14,7 @@ from molexp.workflow import TaskContext, WorkflowCompiler
 
 wf = WorkflowCompiler(name="pipeline")
 
+
 @wf.task
 async def fetch(ctx: TaskContext) -> dict:
     return {"n": 42}
@@ -22,6 +23,7 @@ async def fetch(ctx: TaskContext) -> dict:
 ```python
 # 2. Subclass the convenience base class
 from molexp.workflow import Task, TaskContext
+
 
 class Fetch(Task):
     async def execute(self, ctx: TaskContext) -> dict:
@@ -44,7 +46,8 @@ Dependencies are declared **by task name** (not output name). The return value o
 ```python
 @wf.task
 async def square() -> float:
-    return 42.0 ** 2
+    return 42.0**2
+
 
 # ``square``'s output binds to the downstream parameter named after it.
 @wf.task(depends_on=["square"])
@@ -60,7 +63,7 @@ from molexp.workflow import WorkflowCompiler
 
 class Process(Task):
     async def execute(self, ctx: TaskContext, fetch: dict) -> int:
-        return fetch["n"] * 2                       # upstream output binds by its task name
+        return fetch["n"] * 2  # upstream output binds by its task name
 
 
 class Report(Task):
@@ -70,8 +73,8 @@ class Report(Task):
 
 compiled = (
     WorkflowCompiler(name="pipeline")
-    .add(Fetch())                                   # auto-named "fetch"
-    .add(Process(), depends_on=["fetch"])           # name inferred from class
+    .add(Fetch())  # auto-named "fetch"
+    .add(Process(), depends_on=["fetch"])  # name inferred from class
     .add(Report(), depends_on=["process"], name="report")
     .compile()
 )
@@ -100,15 +103,17 @@ from molexp.workflow import TaskContext, WorkflowCompiler
 
 wf = WorkflowCompiler(name="stream")
 
+
 @wf.actor
 async def monitor(ctx: TaskContext):
     for item in [1, 2, 3]:
-        yield {"seen": item}   # last yield becomes the task output
+        yield {"seen": item}  # last yield becomes the task output
 ```
 
 ```python
 # Subclass Actor
 from molexp.workflow import Actor, TaskContext
+
 
 class Monitor(Actor):
     async def run(self, ctx: TaskContext):
@@ -155,17 +160,21 @@ from molexp.workflow import WorkflowCompiler
 
 wf = WorkflowCompiler(name="fan-out", entry="scatter")
 
+
 @wf.task
 async def scatter() -> list[int]:
     return [1, 2, 3, 4]
 
+
 @wf.task
 async def compute(value: int) -> int:
-    return value ** 2               # one element binds positionally to `value`
+    return value**2  # one element binds positionally to `value`
+
 
 @wf.task
 async def reduce(values: list[int]) -> int:
-    return sum(values)              # the collected results, one per element, in order
+    return sum(values)  # the collected results, one per element, in order
+
 
 wf.parallel(map_over="scatter", body="compute", join="reduce", max_concurrency=2)
 ```

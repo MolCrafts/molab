@@ -16,8 +16,8 @@ async def compute(scale: float = 1.0) -> float:
 compiled = wf.compile()
 
 runtime = WorkflowRuntime()
-result = await runtime.execute(compiled)      # block until done
-handle = await runtime.start(compiled)        # background handle
+result = await runtime.execute(compiled)  # block until done
+handle = await runtime.start(compiled)  # background handle
 result = await handle.wait()
 ```
 
@@ -62,7 +62,7 @@ ws = me.Workspace("./lab", name="lab")
 exp = ws.project("demo").experiment("baseline").run(compiled, params={"scale": [2.0]})
 run = exp.list_runs()[0]
 
-with run.start() as ctx:      # run.start(profile_config=cfg) to attach a resolved profile
+with run.start() as ctx:  # run.start(profile_config=cfg) to attach a resolved profile
     await runtime.execute(compiled, run_context=ctx)
 ```
 

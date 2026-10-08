@@ -120,8 +120,8 @@ from molexp.workflow import (
 Forbidden outside `molexp.workflow`:
 
 ```python
-import pydantic_graph                 # dependency removed — forbidden everywhere in src/
-import molexp.workflow._engine        # private subtree
+import pydantic_graph  # dependency removed — forbidden everywhere in src/
+import molexp.workflow._engine  # private subtree
 ```
 
 The import-boundary firewall is enforced by

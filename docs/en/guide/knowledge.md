@@ -41,7 +41,7 @@ from molexp.workspace import NoteMeta
 
 note.write_note_meta(NoteMeta(tags=["analysis", "rdf"], status="draft"))
 
-print(note.tags())    # ['analysis', 'rdf']
+print(note.tags())  # ['analysis', 'rdf']
 print(note.status())  # draft
 ```
 

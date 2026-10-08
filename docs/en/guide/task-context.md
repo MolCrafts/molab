@@ -9,6 +9,7 @@ A task body declares the runtime values it consumes as **named parameters**. The
 ```python
 from molexp.workflow import Task, TaskContext
 
+
 class Record(Task):
     async def execute(self, ctx: TaskContext, value: int, scale: int = 1) -> int:
         return value * scale
@@ -26,7 +27,7 @@ When present (named `ctx`, or annotated `TaskContext`), the leading parameter re
 
 ```python
 class TaskContext[StateT, InputT]:
-    workdir: Path | None      # content-addressed scratch dir for THIS task
+    workdir: Path | None  # content-addressed scratch dir for THIS task
 ```
 
 `ctx.workdir` is a content-addressed scratch directory derived from the task's content identity — the sanctioned place a task writes intermediate files. It is a bare `pathlib.Path`, stable across runs for identical task content, and `None` when no workspace run is attached. A fan-out body shares one `workdir` across elements, so per-element bodies should sub-namespace it. Include `ctx` in the signature only when the body actually writes there.
@@ -62,13 +63,13 @@ ws = me.Workspace("./lab", name="lab")
 exp = ws.project("demo").experiment("baseline").run(compiled, params={"lr": [1e-3]})
 run = exp.list_runs()[0]
 
-with run.start() as ctx:                  # run.start(profile_config=cfg) to attach a profile
+with run.start() as ctx:  # run.start(profile_config=cfg) to attach a profile
     result = await WorkflowRuntime().execute(compiled, run_context=ctx)
     ctx.set_result("final_loss", result.outputs["train"])
     ctx.register_artifact(result.outputs["train"], name="metrics.json")
     ctx.log("train").append("done")
 
-print(run.get_result("final_loss"))   # public read-back on the Run entity
+print(run.get_result("final_loss"))  # public read-back on the Run entity
 ```
 
 `ctx.set_result(...)` stores lightweight values on the run record, `ctx.register_artifact(...)` registers an `ArtifactAsset`, `ctx.log(name)` appends to a `LogAsset`, `ctx.checkpoint(...)` chains `CheckpointAsset`s, and `ctx.find_asset(...)` walks run → experiment → project → workspace. Assets written this way carry a `Producer` record automatically; while a task body is executing, the engine tags the active task id so queries like `run.assets.query(producer_task="train")` work. See the [Unified Asset Model](assets.md) guide for the complete picture of scopes, the per-scope `assets.json` manifests, and the per-kind subclasses.
@@ -85,8 +86,8 @@ from molexp.workflow import Actor
 
 class Monitor(Actor):
     async def run(self, ctx: TaskContext, source: list[int]):
-        for item in source:            # ``source`` binds the upstream output
-            yield {"seen": item}       # last yield becomes the task output
+        for item in source:  # ``source`` binds the upstream output
+            yield {"seen": item}  # last yield becomes the task output
 ```
 
 There is no inter-task message-passing channel: an earlier `receive()` / `send()` surface was never wired (every path raised `NotImplementedError`) and has been removed. An actor yields its outputs; it does not exchange messages mid-run with peer tasks.

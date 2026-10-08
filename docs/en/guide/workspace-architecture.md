@@ -40,8 +40,8 @@ The hierarchy is created from the top down, but not every step has identical ide
 ```python
 import molexp as me
 
-ws = me.Workspace("./lab", name="lab")                    # lightweight object; no files yet
-project = ws.project("MD Simulations")                    # materializes workspace.json and project.json
+ws = me.Workspace("./lab", name="lab")  # lightweight object; no files yet
+project = ws.project("MD Simulations")  # materializes workspace.json and project.json
 exp = project.experiment(
     "temperature-300K",
     params={"T": 300, "pressure": 1.0},
@@ -51,7 +51,7 @@ exp = project.experiment(
 run = exp.add_run(
     {"T": 300, "pressure": 1.0, "seed": 42},
     id="temperature-300K-seed-42",
-)                                                         # materializes run.json
+)  # materializes run.json
 ```
 
 Re-calling the project or experiment factory with the same name or id returns the same in-memory object within the current process and loads from disk when needed. Runs only behave that way when the run id is stable.
@@ -69,7 +69,7 @@ class TrainTask(Task):
         return {"loss": lr * 10}
 
 
-compiled = WorkflowCompiler(name="train").add(TrainTask()).compile()   # task auto-named "train"
+compiled = WorkflowCompiler(name="train").add(TrainTask()).compile()  # task auto-named "train"
 exp = project.experiment("baseline").run(compiled, params={"lr": [1e-3]})
 
 # Workspace just provides the Run the workflow executes within.
@@ -126,7 +126,7 @@ project.data_assets.import_asset("dataset", "qm9.csv")
 
 # Driver-side, around the workflow execution
 with run.start() as ctx:
-    dataset = ctx.find_asset("dataset")       # walks run → experiment → project → workspace
+    dataset = ctx.find_asset("dataset")  # walks run → experiment → project → workspace
     result = await WorkflowRuntime().execute(compiled, run_context=ctx)
     ctx.register_artifact(result.outputs["train"], name="metrics.json")
     ctx.log("train").append("epoch 1")

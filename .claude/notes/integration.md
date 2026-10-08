@@ -80,23 +80,23 @@ them behind one assembler** so all three become consumers of the same shape.
 ```python
 class WorkspaceContext(BaseModel):
     # identity
-    workspace: WorkspaceRef                      # id, name, root, targets
+    workspace: WorkspaceRef  # id, name, root, targets
     # focus (ephemeral — supplied by the caller, NOT stored)
-    focus: ContextFocus                          # active project/experiment/run + selection
+    focus: ContextFocus  # active project/experiment/run + selection
     # structure
     projects: list[ProjectRef]
-    experiments: list[ExperimentRef]             # incl. parameter_space summary
-    workflows: list[WorkflowRef]                 # available compiled/IR workflows
+    experiments: list[ExperimentRef]  # incl. parameter_space summary
+    workflows: list[WorkflowRef]  # available compiled/IR workflows
     # execution
-    recent_runs: list[RunRef]                    # ordered by finished/started
-    failed_runs: list[RunRef]                    # status ∈ retryable domain
+    recent_runs: list[RunRef]  # ordered by finished/started
+    failed_runs: list[RunRef]  # status ∈ retryable domain
     running_runs: list[RunRef]
     # grounding
-    artifacts: list[ArtifactRef]                 # recent / focus-scoped
-    knowledge: list[KnowledgeRef]                # relevant items (§5)
-    open_questions: list[KnowledgeRef]           # OpenQuestion items + spec ResolvedQuestion gaps
+    artifacts: list[ArtifactRef]  # recent / focus-scoped
+    knowledge: list[KnowledgeRef]  # relevant items (§5)
+    open_questions: list[KnowledgeRef]  # OpenQuestion items + spec ResolvedQuestion gaps
     # health
-    stale_or_missing: list[HealthFlag]           # see §1.4
+    stale_or_missing: list[HealthFlag]  # see §1.4
 ```
 
 `ContextFocus` (active project/experiment/run + `selected_object_refs`) is the
@@ -343,17 +343,25 @@ storage substrate — it is a `Note` with a typed head:
 
 ```python
 KnowledgeKind = Literal[
-    "Observation", "Decision", "Assumption", "Constraint", "Finding",
-    "FailureAnalysis", "ProtocolNote", "ParameterRationale", "OpenQuestion",
+    "Observation",
+    "Decision",
+    "Assumption",
+    "Constraint",
+    "Finding",
+    "FailureAnalysis",
+    "ProtocolNote",
+    "ParameterRationale",
+    "OpenQuestion",
 ]
 
-class KnowledgeMeta(ConceptMeta):              # extends workspace/concept_meta.py
+
+class KnowledgeMeta(ConceptMeta):  # extends workspace/concept_meta.py
     kind: KnowledgeKind
-    sources: list[SourceRef]                   # REQUIRED, non-empty (see 5.2)
+    sources: list[SourceRef]  # REQUIRED, non-empty (see 5.2)
     status: Literal["active", "stale", "superseded", "conflicting"] = "active"
-    supersedes: list[str] = []                 # KnowledgeItem ids
+    supersedes: list[str] = []  # KnowledgeItem ids
     confidence: float | None = None
-    created_by: str                            # user / agent:name
+    created_by: str  # user / agent:name
 ```
 
 The body (`index.md`) holds the human-readable content; `meta.json` holds the
@@ -368,8 +376,8 @@ existing canonical object:
 ```python
 class SourceRef(BaseModel):
     kind: Literal["artifact", "run", "experiment", "file", "decision", "agent_action", "reference"]
-    ref: str            # content_hash | run_id | path | proposal_id | reference id
-    span: str | None = None   # line range / cell / figure region, when applicable
+    ref: str  # content_hash | run_id | path | proposal_id | reference id
+    span: str | None = None  # line range / cell / figure region, when applicable
 ```
 
 Persisted as typed OKF out-edges so the knowledge graph is queryable both ways
@@ -493,17 +501,19 @@ gate — the proposal is the *payload* the gate decides on.
 ```python
 class ChangeProposal(BaseModel):
     id: str
-    intent: str                                  # what & why, structured
-    current_state: StateSnapshot                 # refs to affected objects' current versions
-    proposed_change: ChangeSpec                  # typed diff (workflow IR diff / param-space delta / knowledge merge / run op)
-    affected_objects: list[ObjectRef]            # the ONLY objects Act may touch
+    intent: str  # what & why, structured
+    current_state: StateSnapshot  # refs to affected objects' current versions
+    proposed_change: (
+        ChangeSpec  # typed diff (workflow IR diff / param-space delta / knowledge merge / run op)
+    )
+    affected_objects: list[ObjectRef]  # the ONLY objects Act may touch
     expected_benefit: str
     risks: list[str]
     reversibility: Literal["reversible", "partially", "irreversible"]
-    approval_level: Literal["auto", "user", "elevated"]   # maps to §6.2 modes / policy
-    evidence: list[ArtifactRef]                   # cited artifacts (required for execution proposals)
-    knowledge: list[SourceRef]                    # cited KnowledgeItems
-    execution_result: ProposalOutcome | None = None   # filled AFTER approval+act
+    approval_level: Literal["auto", "user", "elevated"]  # maps to §6.2 modes / policy
+    evidence: list[ArtifactRef]  # cited artifacts (required for execution proposals)
+    knowledge: list[SourceRef]  # cited KnowledgeItems
+    execution_result: ProposalOutcome | None = None  # filled AFTER approval+act
 ```
 
 `approval_level` is derived from a `policy` (`harness/policy/`): the high-risk set

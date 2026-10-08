@@ -19,13 +19,16 @@ from molexp.workflow import WorkflowCompiler
 
 wf = WorkflowCompiler(name="demo")
 
+
 @wf.task
 def fetch() -> list[float]:
     return [1.0, 4.0, 9.0]
 
+
 @wf.task(depends_on=["fetch"])
 def summarize(data: list[float]) -> float:
     return sum(data)
+
 
 compiled = wf.compile()
 ```
@@ -74,6 +77,7 @@ result = run.execute(wf)
 @wf.task
 def source() -> dict:
     return {"x": 10, "y": 20}
+
 
 @wf.task(depends_on=["source"])
 def consumer(x: int, y: int, z: int = 0) -> int:

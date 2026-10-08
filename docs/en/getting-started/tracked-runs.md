@@ -21,13 +21,16 @@ from molexp.workflow import WorkflowCompiler
 
 wf = WorkflowCompiler(name="baseline")
 
+
 @wf.task
 def train(lr: float) -> dict:
     return {"loss": lr * 100}
 
+
 @wf.task(depends_on=["train"])
 def report(loss: float) -> float:
     return loss
+
 
 # Create the hierarchy
 ws = me.Workspace("./lab", name="lab")

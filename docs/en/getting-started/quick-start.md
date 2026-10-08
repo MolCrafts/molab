@@ -13,13 +13,16 @@ from molexp.workflow import WorkflowCompiler
 # 1. Define the workflow
 wf = WorkflowCompiler(name="sum")
 
+
 @wf.task
 def fetch(scale: float = 1.0) -> dict:
     return {"values": [1.0, 4.0, 9.0], "scale": scale}
 
+
 @wf.task(depends_on=["fetch"])
 def summarize(values: list[float], scale: float = 1.0) -> float:
     return sum(values) * scale
+
 
 # 2. Create the workspace hierarchy
 ws = me.Workspace("./lab", name="lab")
@@ -72,8 +75,8 @@ After the script exits, the run is still there. Open a new Python session and re
 # The run persists on disk — open the same workspace and read it back.
 # run.id was printed above; use it here.
 same_run = ws.project("demo").experiment("sum").get_run(run.id)
-print(same_run.status)                     # succeeded
-print(same_run.get_result("summarize"))    # 28.0
+print(same_run.status)  # succeeded
+print(same_run.get_result("summarize"))  # 28.0
 ```
 
 `get_run(params=...)` rediscovers the run by its content-addressed identity — the same params always resolve to the same run.

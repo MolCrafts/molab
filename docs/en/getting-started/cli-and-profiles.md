@@ -12,9 +12,11 @@ from molexp.workflow import WorkflowCompiler
 
 wf = WorkflowCompiler(name="sum")
 
+
 @wf.task
 def fetch(scale: float) -> list[float]:
     return [1.0 * scale, 2.0 * scale, 3.0 * scale]
+
 
 (
     me.Workspace("./lab", name="lab")
@@ -71,7 +73,9 @@ Task parameters receive profile fields by name:
 
 ```python
 @wf.task(depends_on=["fetch"])
-def compute(fetch: list[float], optimizer: dict | None = None, skip_heavy_compute: bool = False) -> float:
+def compute(
+    fetch: list[float], optimizer: dict | None = None, skip_heavy_compute: bool = False
+) -> float:
     if skip_heavy_compute:
         return 0.0
     lr = (optimizer or {}).get("lr", 1.0)
