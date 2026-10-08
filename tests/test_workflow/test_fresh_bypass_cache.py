@@ -1,4 +1,4 @@
-"""``bypass_cache`` / fresh-execution escape hatch (run-recovery bug 4).
+"""``bypass_cache`` / fresh-execution escape hatch.
 
 ``--rerun`` opens a new execution but the content-addressed cache may still
 serve deterministic tasks — tasks with side effects would silently not re-run.

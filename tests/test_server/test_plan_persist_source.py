@@ -105,9 +105,9 @@ class TestCompilePackageToIR:
         display IR too — built in a SUBPROCESS (the harness never execs the
         multi-module program in-process; the display path honors the same trust
         posture), with each node's source sliced from its own module and the
-        typed-default params surfaced as input_schema. Regression: production
-        multi-file plans logged `No module named 'workflow'` and the UI graph
-        stayed empty."""
+        typed-default params surfaced as input_schema. The sibling modules must
+        be importable in that subprocess, otherwise the import fails with
+        `No module named 'workflow'` and the UI graph is empty."""
         ir = _compile_package_to_ir(_package_source())
         assert ir is not None
         by_id = {tc["task_id"]: tc for tc in ir["task_configs"]}

@@ -23,5 +23,5 @@ class CheckpointAsset(Asset):
 
     def load(self, scope_dir: Path) -> dict[str, Any]:
         target = self.absolute_path(scope_dir)
-        with open(target) as fh:  # noqa: PTH123
+        with open(target, encoding="utf-8") as fh:  # noqa: PTH123
             return json.load(fh)

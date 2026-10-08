@@ -1,8 +1,9 @@
-"""Regression tests for the lazy sub-package loader in ``molexp/__init__``.
+"""Tests for the lazy sub-package loader in ``molexp/__init__``.
 
-``from molexp import workflow`` used to hit infinite recursion: the lazy
-``__getattr__`` itself did ``from molexp import workflow``, which re-enters
-``__getattr__`` through ``importlib._bootstrap._handle_fromlist``.
+Every import form of a lazy sub-package resolves without recursion. The lazy
+``__getattr__`` must import the sub-module directly rather than via
+``from molexp import <name>``, because that form re-enters ``__getattr__``
+through ``importlib._bootstrap._handle_fromlist``.
 """
 
 from __future__ import annotations

@@ -251,7 +251,7 @@ class TestEnsureAsksFirst:
 
     def test_yes_downloads_to_local_bin(self, tmp_path: Path) -> None:
         def fake_fetch(dest: Path) -> None:
-            dest.write_text("#!/bin/sh\n")
+            dest.write_text("#!/bin/sh\n", encoding="utf-8")
             dest.chmod(0o755)
 
         with (
@@ -270,7 +270,7 @@ class TestEnsureAsksFirst:
         dest = tmp_path / "custom" / "cloudflared"
 
         def fake_fetch(path: Path) -> None:
-            path.write_text("#!/bin/sh\n")
+            path.write_text("#!/bin/sh\n", encoding="utf-8")
             path.chmod(0o755)
 
         with (

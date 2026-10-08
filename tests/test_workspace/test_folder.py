@@ -48,7 +48,7 @@ class TestFolder:
         folder = Folder(parent=None, name="alpha", kind="test.root", root_path=tmp_path)
 
         written = Path(str(folder.write_json("data.json", {"k": 1})))
-        assert json.loads(written.read_text()) == {"k": 1}
+        assert json.loads(written.read_text(encoding="utf-8")) == {"k": 1}
 
         target_path = Path(folder.path()) / "data.json"
 

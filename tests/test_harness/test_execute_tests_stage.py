@@ -146,8 +146,8 @@ class TestExecuteTests:
         """A missing test runner is an environment precondition, not a test
         failure: the stage must say so (naming the interpreter and the fix),
         must not invoke the executor, and must not persist a ``test_result``
-        blaming the generated tests. Regression: this surfaced in production
-        as ``generated tests failed (pytest exit 1)``."""
+        blaming the generated tests — never an anonymous
+        ``generated tests failed (pytest exit 1)``."""
         import importlib.util as _ilu
 
         from molexp.harness.errors import StageExecutionError
@@ -179,8 +179,8 @@ class TestExecuteTests:
     def test_missing_import_names_the_unimportable_modules(self, ctx) -> None:
         """A collection-time ``ModuleNotFoundError`` is an environment/dependency
         gap of the *experiment*: the failure must name the unimportable modules
-        and the interpreter, not just ``pytest exit 2``. Regression: a generated
-        LJ-scan's ``import numpy`` surfaced as an anonymous test failure."""
+        and the interpreter, not just ``pytest exit 2`` — e.g. a generated
+        script's ``import numpy`` is never reported as an anonymous test failure."""
         from molexp.harness import LocalExecutor
         from molexp.harness.errors import StagePersistedFailureError
         from molexp.harness.stages import ExecuteTests
@@ -202,8 +202,8 @@ class TestExecuteTests:
         """molexp task bodies are async-first, so generated tests routinely carry
         ``@pytest.mark.asyncio`` — when the interpreter lacks pytest-asyncio,
         every test fails with pytest's generic 'async def functions are not
-        natively supported'. The stage must name the missing plugin. Regression:
-        22 generated LJ-scan tests failed anonymously in production."""
+        natively supported'. The stage must name the missing plugin so those
+        failures are never anonymous."""
         from datetime import datetime
 
         from molexp.harness.errors import StagePersistedFailureError
@@ -244,8 +244,8 @@ class TestExecuteTests:
         the captured output, so the NEXT ``generate_test_code`` regeneration (the
         repair loop and the post-eviction re-run both thread
         ``feedback_inputs(ctx, "test_code_feedback")``) learns from the failure
-        instead of re-rolling blind. Production: three consecutive re-runs each
-        invented a different wrong assertion."""
+        instead of re-rolling blind (inventing a different wrong assertion on
+        each re-run)."""
         from molexp.harness import LocalExecutor
         from molexp.harness.errors import StagePersistedFailureError
         from molexp.harness.stages import ExecuteTests

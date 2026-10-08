@@ -17,7 +17,7 @@ from molexp.workspace import Workspace
 
 
 def _read_run_json(run) -> dict:
-    return json.loads(Path(str(run.run_dir / "run.json")).read_text())
+    return json.loads(Path(str(run.run_dir / "run.json")).read_text(encoding="utf-8"))
 
 
 def _second_handle(tmp_path, run):

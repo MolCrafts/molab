@@ -1,0 +1,60 @@
+name: lint
+
+# Same jobs in every context (feature branch or dev/master, fork or
+# upstream); see "CI and release" in docs/en/development/index.md.
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [dev, master, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lint-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ !contains(fromJSON('["refs/heads/dev","refs/heads/master","refs/heads/main"]'), github.ref) && !startsWith(github.ref, 'refs/tags/') }}
+
+# molexp is built against its partners (.github/partners.env) at the commits
+# scripts/partners.py resolves -- molpy's and molrs's dev, or their branches
+# named like this one -- checked out as siblings, the layout the
+# [tool.uv.sources] path dependencies expect. The pre-commit hooks resolve them
+# the same way (`partners.py run`), so a local gate and CI judge one commit.
+env:
+  # uv builds molrs through maturin's PEP 517 hook; this makes that cargo
+  # build --locked as well.
+  MATURIN_PEP517_ARGS: --locked
+
+jobs:
+  python:
+    name: lint / python
+    # A pull request inside a fork was already run by its push.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository || github.repository_owner == 'MolCrafts'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: MolCrafts/molcrafts-ci/actions/setup-python@master
+      - uses: MolCrafts/molcrafts-ci/actions/setup-partners@master
+      # molrs/rust-toolchain.toml pins the compiler that builds the molrs wheel.
+      - uses: MolCrafts/molcrafts-ci/actions/setup-rust@master
+        with:
+          toolchain-dir: ../molrs
+          cache: molrs-python
+          workspaces: ../molrs/molrs-python -> ../target
+      - run: python3 scripts/partners.py check
+      - run: uv sync --extra dev
+      - run: uv run ruff format --check src/ tests/
+      - run: uv run ruff check src/ tests/
+      - run: uv run ty check src/
+
+  web:
+    name: lint / web
+    # A pull request inside a fork was already run by its push.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name != github.repository || github.repository_owner == 'MolCrafts'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: MolCrafts/molcrafts-ci/actions/setup-node@master
+      - run: npm run lint
+      - run: npm run typecheck

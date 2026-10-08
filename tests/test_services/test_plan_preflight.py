@@ -154,11 +154,11 @@ class TestPreflightSuccess:
     ) -> None:
         """Constructor-level incompatibility must fail AT preflight.
 
-        The pydantic-ai 2.0 removal of ``Agent(output_retries=...)`` only
-        crashed on the pipeline's first *structured* call — a text-only
-        preflight sailed past it. The preflight must therefore leave a
-        structured (schema-keyed) agent in the router cache, proving the
-        structured constructor ran against the installed SDK.
+        A constructor kwarg the installed pydantic-ai rejects surfaces only on
+        a *structured* agent — a text-only preflight never builds one. The
+        preflight therefore leaves a structured (schema-keyed) agent in the
+        router cache, proving the structured constructor ran against the
+        installed SDK.
         """
         import molexp
 

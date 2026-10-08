@@ -13,7 +13,10 @@ The agent layer exposes four user-visible names:
 
 ```python
 from molexp.agent import (
-    AgentRunner, AgentRunResult, AgentRuntime, AgentSession,
+    AgentRunner,
+    AgentRunResult,
+    AgentRuntime,
+    AgentSession,
 )
 ```
 

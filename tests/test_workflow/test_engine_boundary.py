@@ -40,7 +40,7 @@ def _iter_py_files(root: Path) -> list[Path]:
 
 
 def _classes_in(path: Path) -> list[ast.ClassDef]:
-    tree = ast.parse(path.read_text())
+    tree = ast.parse(path.read_text(encoding="utf-8"))
     return [n for n in ast.walk(tree) if isinstance(n, ast.ClassDef)]
 
 

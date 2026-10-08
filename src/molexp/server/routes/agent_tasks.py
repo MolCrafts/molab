@@ -842,8 +842,6 @@ def _compose_system_prompt_response(
             # Scope ids on the task may be stale after a reorg — show base only.
             workspace_instructions = ""
 
-    skill_instructions = ""
-    session_override: str | None = None
     plan_addendum = ""
     if plan_mode:
         plan_addendum = (
@@ -856,10 +854,6 @@ def _compose_system_prompt_response(
     parts = [base]
     if workspace_instructions:
         parts.append(workspace_instructions)
-    if skill_instructions:
-        parts.append(skill_instructions)
-    if session_override:
-        parts.append(session_override)
     if plan_addendum:
         parts.append(plan_addendum)
     effective = "\n\n".join(parts)
@@ -867,8 +861,6 @@ def _compose_system_prompt_response(
     return AgentSystemPromptResponse(
         base=base,
         workspaceInstructions=workspace_instructions,
-        skillInstructions=skill_instructions,
-        sessionOverride=session_override,
         planMode=plan_mode,
         effective=effective,
     )

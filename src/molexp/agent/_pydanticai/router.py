@@ -463,15 +463,12 @@ class PydanticAIRouter:
         """
         toolsets = self._mcp_toolsets_for(mcp_tools)
         model = self._tier_models[tier]
-        return cast(
-            "Agent[None, SchemaT]",
-            Agent(
-                model=model,
-                output_type=schema,
-                system_prompt=system,
-                toolsets=toolsets,
-                retries={"output": 2},
-            ),
+        return Agent(
+            model=model,
+            output_type=schema,
+            system_prompt=system,
+            toolsets=toolsets,
+            retries={"output": 2},
         )
 
     def _fire(self, hook: EventCallback, event: ProviderEvent) -> None:
@@ -937,7 +934,7 @@ def _coerce_model_value(value: object) -> PydanticAiModel:
     if isinstance(value, str):
         provider_name, sep, model_name = value.partition(":")
         if sep and provider_name == "deepseek":
-            import httpx
+            import httpx2
             from pydantic_ai.models.openai import OpenAIChatModel
             from pydantic_ai.providers.deepseek import DeepSeekProvider
 
@@ -958,7 +955,7 @@ def _coerce_model_value(value: object) -> PydanticAiModel:
             # does not, so the failures look like an intermittent DeepSeek
             # outage. DeepSeek's API is directly reachable; the proxy is for
             # other traffic and must not intercept it.
-            http_client = httpx.AsyncClient(trust_env=False, timeout=600)
+            http_client = httpx2.AsyncClient(trust_env=False, timeout=600)
             return OpenAIChatModel(
                 model_name,
                 provider=DeepSeekProvider(api_key=api_key, http_client=http_client),

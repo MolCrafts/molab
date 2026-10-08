@@ -270,8 +270,8 @@ class TestWorkflowIRValidator:
     def test_shell_command_in_parameter_value_inputs(self) -> None:
         """An agent that smuggles a shell injection through ``inputs[k].value``
         (rather than the natural-language ``purpose``) must still trip the
-        deny list. Regression: the previous ``_string_fields`` only scanned
-        free-text fields, leaving parameter values as a soft channel."""
+        deny list: ``_string_fields`` scans parameter values as well as
+        free-text fields, so parameter values are not a soft channel."""
         from molexp.harness.schemas.parameter import ParameterValue
         from molexp.harness.schemas.workflow_ir import PlanTaskIR
         from molexp.harness.validators.workflow_ir import WorkflowIRValidator
@@ -298,9 +298,8 @@ class TestWorkflowIRValidator:
 
     def test_backtick_in_acceptance_criteria_is_not_flagged(self) -> None:
         """Natural-language acceptance criteria often quote filenames with
-        backticks (e.g. ``output matches `expected.csv` ``). The old
-        deny-list included ``` ` ``` which produced false positives on
-        perfectly fine prose. Regression: it must no longer trip."""
+        backticks (e.g. ``output matches `expected.csv` ``). The deny-list
+        does not include ``` ` ```, so such prose is not flagged."""
         from molexp.harness.schemas.workflow_ir import PlanTaskIR
         from molexp.harness.validators.workflow_ir import WorkflowIRValidator
 

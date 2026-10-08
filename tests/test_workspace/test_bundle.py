@@ -8,8 +8,8 @@ round-trips through :meth:`Folder.out_edges`).
 
 Note/doc CRUD (``create_note`` …) is owned by ``test_bundle_docs.py``, the
 derived index by ``test_bundle_index.py``, and body-aware search by
-``test_bundle_search.py`` — this file owns walk / get / put / link plus the
-typed-reconstruction and nested-mount path-doubling regressions.
+``test_bundle_search.py`` — this file owns walk / get / put / link plus typed
+reconstruction and undoubled paths for nested mounts.
 """
 
 from __future__ import annotations
@@ -246,10 +246,10 @@ class TestTypedReconstruction:
         assert isinstance(by_rel["lab/projects/p/experiments/e/runs/run-r"], Run)
 
 
-# ── nested-mount path-doubling regression ────────────────────────────────────
-# Regresses the Bundle path-doubling bug (no ``projects/projects`` / ``runs/runs``
-# segment doubling for a Concept nested deep under the workspace dir, when the
-# bundle root *is* the workspace dir — the exact case
+# ── nested mounts resolve without path doubling ──────────────────────────────
+# A Concept nested deep under the workspace dir never gets ``projects/projects``
+# / ``runs/runs`` segment doubling when the bundle root *is* the workspace dir —
+# the exact case
 # ``services/plan_runtime/record.py`` root-mounts to dodge). Both Bundle verbs
 # that reanchor — get/link (resolution) and walk (enumeration) — are covered.
 

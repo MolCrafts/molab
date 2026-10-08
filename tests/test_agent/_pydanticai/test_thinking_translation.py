@@ -1,9 +1,10 @@
 """Reasoning-part → ``ThinkingDeltaChunk`` translation.
 
-The router's ``_request_stream_chunk`` is the seam that used to drop a
-reasoning model's chain-of-thought on the floor (it handled only ``TextPart`` /
-``TextPartDelta``). These pure-sync unit tests exercise that translation
-directly, since no offline pydantic-ai model emits a ``ThinkingPart``.
+The router's ``_request_stream_chunk`` is the seam that carries a reasoning
+model's chain-of-thought into the chunk stream: it translates ``ThinkingPart`` /
+``ThinkingPartDelta`` as well as ``TextPart`` / ``TextPartDelta``. These
+pure-sync unit tests exercise that translation directly, since no offline
+pydantic-ai model emits a ``ThinkingPart``.
 """
 
 from __future__ import annotations
@@ -27,9 +28,8 @@ from molexp.agent._pydanticai.router import (
 
 
 class TestRequestStreamChunk:
-    """Reasoning stream events surface as ``ThinkingDeltaChunk`` (regression:
-    ``_request_stream_chunk`` once handled only text parts and dropped a
-    reasoning model's chain-of-thought)."""
+    """Reasoning stream events surface as ``ThinkingDeltaChunk`` — a reasoning
+    model's chain-of-thought is never dropped in favour of text parts only."""
 
     def test_thinking_part_start_surfaces_as_thinking_chunk(self) -> None:
         chunk = _request_stream_chunk(

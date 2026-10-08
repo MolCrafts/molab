@@ -7,8 +7,9 @@ tag record-shaped trees for plugins — see ``molexp.agent.ops.land``.
 
 Detection is **by content, never by extension**. ``leap.log`` and
 ``log.lammps`` share a suffix and nothing else; a ``.csv`` of atom
-coordinates is not a metrics table. Every probe reads a bounded prefix of
-the candidate file and looks for a marker the format actually guarantees.
+coordinates is not a metrics table. A LAMMPS log is recognised by molpy's
+metric reader (:func:`molexp.plugins.metrics_ingest.lammps.is_lammps_log`),
+which reads a bounded prefix of the file.
 
 A file nobody can classify yields :attr:`LogFormat.UNKNOWN`, which is a
 correct answer — the caller leaves it as a plain artifact rather than
@@ -22,12 +23,9 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
-# LAMMPS writes this immediately before every thermo header row.
-_LAMMPS_MARKER = b"Per MPI rank memory allocation"
-# ...and this on the first line of any log it opens.
-_LAMMPS_BANNER = b"LAMMPS ("
+from .lammps import is_lammps_log
+
 _TFEVENT_PREFIX = "events.out.tfevents."
-_PROBE_BYTES = 64 * 1024
 
 
 class LogFormat(StrEnum):
@@ -56,38 +54,6 @@ class FormatHit:
 
     detail: str = ""
     """Short human-readable reason, for the operator-facing report."""
-
-
-def _head(path: Path, size: int = _PROBE_BYTES) -> bytes:
-    try:
-        with path.open("rb") as handle:
-            return handle.read(size)
-    except OSError:
-        return b""
-
-
-def is_lammps_log(path: Path) -> bool:
-    """True when *path* is a LAMMPS log that contains a thermo table.
-
-    The banner alone is not enough: a log whose run never reached a thermo
-    section has nothing to convert, so require the thermo marker.
-    """
-    head = _head(path)
-    if not head:
-        return False
-    if _LAMMPS_MARKER in head:
-        return True
-    if _LAMMPS_BANNER not in head[:512]:
-        return False
-    # Banner present but the marker sits past the probe window — scan the
-    # rest in bounded chunks rather than loading the whole file.
-    try:
-        with path.open("rb") as handle:
-            handle.seek(len(head))
-            tail = handle.read(4 * 1024 * 1024)
-    except OSError:
-        return False
-    return _LAMMPS_MARKER in tail
 
 
 def is_tensorboard_dir(path: Path) -> bool:
@@ -144,8 +110,7 @@ def detect_log_formats(run_dir: Path | str, *, max_depth: int = 3) -> list[Forma
                 seen_tb.add(parent)
                 hits.append(FormatHit(LogFormat.TENSORBOARD, parent, "tfevents files"))
             continue
-        looks_like_log = path.suffix in {".log", ".lammps", ".out", ".txt"}
-        if looks_like_log and is_lammps_log(path):
+        if is_lammps_log(path):
             hits.append(FormatHit(LogFormat.LAMMPS_LOG, path, "thermo table present"))
             continue
         if path.suffix == ".csv":

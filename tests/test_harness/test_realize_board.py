@@ -41,8 +41,6 @@ from molexp.harness.schemas import (
 from molexp.harness.stages.input_space import input_set_to_param_space
 from molexp.harness.stages.realize_board import RealizeBoard
 
-pytestmark = pytest.mark.asyncio
-
 _MODULE_SRC = "async def make_task(ctx) -> dict:\n    return {}\n"
 _TEST_SRC = "def test_it():\n    assert True\n"
 _FAILURE_MARKER = "MARKER_TASK_FAILURE_XYZ"

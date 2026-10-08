@@ -18,8 +18,6 @@ import pytest
 from molexp.agent.loops.hooks import HookOutcome
 from molexp.agent.router import ToolCallChunk, ToolResultChunk
 
-pytestmark = pytest.mark.asyncio
-
 
 def _router(model: object) -> object:
     """Build a :class:`PydanticAIRouter` whose every tier is ``model``."""

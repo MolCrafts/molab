@@ -16,7 +16,7 @@ from pathlib import Path
 try:
     import psutil  # optional dev dependency
 except ImportError:
-    psutil = None  # ty: ignore[invalid-assignment]
+    psutil = None
 
 
 class ServerManager:
@@ -181,7 +181,7 @@ class ServerManager:
 
         if follow:
             # Follow mode - tail -f style
-            with open(log_file) as f:  # noqa: PTH123
+            with open(log_file, encoding="utf-8") as f:  # noqa: PTH123
                 # Seek to end minus N lines
                 f.seek(0, 2)  # Go to end
                 file_size = f.tell()
@@ -216,7 +216,7 @@ class ServerManager:
                         time.sleep(0.1)
         else:
             # Just read last N lines
-            with open(log_file) as f:  # noqa: PTH123
+            with open(log_file, encoding="utf-8") as f:  # noqa: PTH123
                 all_lines = f.readlines()
                 for line in all_lines[-lines:]:
                     yield line.rstrip()
@@ -255,7 +255,7 @@ class ServerManager:
 
         if background:
             # Run in background
-            with open(self.server_log, "a") as log:  # noqa: PTH123
+            with open(self.server_log, "a", encoding="utf-8") as log:  # noqa: PTH123
                 # Only detach from parent if kill_on_exit is False
                 # When kill_on_exit is True, keep it in the same process group
                 process = subprocess.Popen(
@@ -289,7 +289,7 @@ class ServerManager:
         cmd = ["npm", "run", "dev"]
 
         if background:
-            with open(self.ui_log, "a") as log:  # noqa: PTH123
+            with open(self.ui_log, "a", encoding="utf-8") as log:  # noqa: PTH123
                 # Only detach from parent if kill_on_exit is False
                 # When kill_on_exit is True, keep it in the same process group
                 process = subprocess.Popen(
@@ -425,13 +425,13 @@ class ServerManager:
     def _read_pid(self, pid_file: Path) -> int | None:
         """Read PID from file."""
         try:
-            return int(pid_file.read_text().strip())
+            return int(pid_file.read_text(encoding="utf-8").strip())
         except (ValueError, FileNotFoundError):
             return None
 
     def _write_pid(self, pid_file: Path, pid: int) -> None:
         """Write PID to file."""
-        pid_file.write_text(str(pid))
+        pid_file.write_text(str(pid), encoding="utf-8")
 
     def _register_cleanup_handler(self) -> None:
         """Register cleanup handler to kill background processes on exit."""

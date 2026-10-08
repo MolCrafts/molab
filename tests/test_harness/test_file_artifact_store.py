@@ -5,7 +5,7 @@ Mirrors ``molexp.harness.store.file_artifact_store``. Locks the contract:
 - ``PlanArtifactRef.sha256`` == ``compute_content_hash(path)`` bare hex;
 - idempotent per ``(kind, content)`` — identical bytes under one kind reuse the
   ref, identical bytes under two kinds stay distinct, and an idempotent hit
-  unions new ``parent_ids`` (both regressions of a sha-only id overwrite);
+  unions new ``parent_ids`` (the id hashes ``kind:sha``, never the sha alone);
 - ``get`` / ``get_ref`` / ``list_by_kind`` (creation order) / ``latest_by_kind``.
 """
 
@@ -95,9 +95,9 @@ class TestFileArtifactStore:
     def test_same_content_different_kinds_yields_distinct_ids(self, store) -> None:
         """Identical bytes under two kinds MUST yield two distinct ids.
 
-        Regression: with a sha-only id, the second ``put_*`` overwrote the
-        first ref's metadata (kind, parent_ids). Now we hash ``kind:sha`` to
-        keep them apart and preserve the audit trail per kind.
+        The id hashes ``kind:sha``, so the second ``put_*`` never overwrites the
+        first ref's metadata (kind, parent_ids) and the audit trail is preserved
+        per kind.
         """
         text = "shared payload"
         a = store.put_text(kind="log", text=text, created_by="x", parent_ids=[])

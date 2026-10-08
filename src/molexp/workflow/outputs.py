@@ -20,10 +20,10 @@ with the same verbs as ``RunContext``)::
 
     @wf.task
     async def export_lammps(ctx, system) -> dict:
-        from molpy.io.writers import write_lammps_data
+        import molpy as mp
 
         out = ctx.workdir / "system.data"
-        write_lammps_data(str(out), system.to_frame(), atom_style="full")
+        mp.io.write_lammps_data(out, system.to_frame())
         return {
             "data_file": ctx.register_artifact(out, mime="chemical/x-lammps-data"),
             "n_atoms": ctx.register_metric("n_atoms", system.n_atoms),

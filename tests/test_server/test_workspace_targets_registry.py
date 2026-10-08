@@ -108,7 +108,7 @@ class TestWorkspaceTargetRegistry:
         assert [t.name for t in r2.list()] == ["hpc1", "hpc2"]
         assert r2.get("hpc1") == rich
 
-        raw = json.loads(registry_path.read_text())
+        raw = json.loads(registry_path.read_text(encoding="utf-8"))
         assert raw["targets"][0]["ssh_opts"] == ["-o", "StrictHostKeyChecking=accept-new"]
 
     @pytest.mark.unit
@@ -124,21 +124,21 @@ class TestWorkspaceTargetRegistry:
         (the cache is mutated only after the disk write succeeds)."""
         r = WorkspaceTargetRegistry(store_path=registry_path)
         r.add(_make_target("existing"))
-        before_disk = registry_path.read_text()
+        before_disk = registry_path.read_text(encoding="utf-8")
 
         with patch("molexp.server.workspace_targets.atomic_write_json") as bad_write:
             bad_write.side_effect = OSError("simulated disk full")
             with pytest.raises(OSError, match="simulated disk full"):
                 r.add(_make_target("doomed"))
 
-        assert registry_path.read_text() == before_disk
+        assert registry_path.read_text(encoding="utf-8") == before_disk
         assert [t.name for t in r.list()] == ["existing"]
 
     @pytest.mark.unit
     def test_corrupt_store_file_raises_typed_error(self, registry_path: Path):
         """A corrupt store file surfaces a clear error rather than silent truncation."""
         registry_path.parent.mkdir(parents=True, exist_ok=True)
-        registry_path.write_text("{not json")
+        registry_path.write_text("{not json", encoding="utf-8")
 
         r = WorkspaceTargetRegistry(store_path=registry_path)
         with pytest.raises(ValueError, match=r"workspace_targets\.json"):
@@ -163,7 +163,8 @@ class TestWorkspaceTargetRegistry:
                         }
                     ],
                 }
-            )
+            ),
+            encoding="utf-8",
         )
         r = WorkspaceTargetRegistry(store_path=registry_path)
         target = r.get("legacy")

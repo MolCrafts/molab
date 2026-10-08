@@ -28,10 +28,10 @@ class TestProviderError:
 
     @pytest.mark.asyncio
     async def test_dunder_attributes_stay_mutable_for_exception_propagation(self) -> None:
-        """Regression: every mode runs inside ``harness.stage()`` (an
+        """Every mode runs inside ``harness.stage()`` (an
         ``@asynccontextmanager``); contextlib's ``__aexit__`` assigns
-        ``exc.__traceback__``. If ``__setattr__`` blocked dunders, that write
-        raised a masking ``AttributeError`` and crashed the run instead of
+        ``exc.__traceback__``. ``__setattr__`` therefore lets dunders through:
+        blocking them would raise a masking ``AttributeError`` instead of
         surfacing the original ``ProviderError``.
         """
         from contextlib import asynccontextmanager

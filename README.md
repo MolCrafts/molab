@@ -8,7 +8,7 @@
 <p><strong>An agent-assisted scientific-workflow platform for FAIR research</strong></p>
 
 <p>
-  <a href="https://img.shields.io/github/actions/workflow/status/MolCrafts/molexp/ci.yml?style=flat-square&logo=githubactions&logoColor=white&label=CI"><img src="https://img.shields.io/github/actions/workflow/status/MolCrafts/molexp/ci.yml?style=flat-square&logo=githubactions&logoColor=white&label=CI" alt="CI"></a>
+  <a href="https://img.shields.io/github/actions/workflow/status/MolCrafts/molab/test.yml?style=flat-square&logo=githubactions&logoColor=white&label=test"><img src="https://img.shields.io/github/actions/workflow/status/MolCrafts/molab/test.yml?style=flat-square&logo=githubactions&logoColor=white&label=test" alt="test"></a>
   <a href="https://pypi.org/project/molexp/"><img src="https://img.shields.io/pypi/v/molexp?style=flat-square&logo=pypi&logoColor=white&label=PyPI" alt="PyPI"></a>
   <a href="https://pypi.org/project/molexp/"><img src="https://img.shields.io/pypi/pyversions/molexp?style=flat-square&logo=python&logoColor=white" alt="Python"></a>
   <img src="https://img.shields.io/badge/license-BSD--3--Clause-18432B?style=flat-square" alt="License">

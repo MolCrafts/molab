@@ -132,7 +132,7 @@ def _parse_task_json(path: Path, task_id: str) -> PersistedAgentTask | None:
     if not path.exists():
         return None
     try:
-        raw = json.loads(path.read_text())
+        raw = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return None
     if not isinstance(raw, dict):

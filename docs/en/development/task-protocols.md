@@ -9,12 +9,14 @@ from typing import Protocol, AsyncIterator, runtime_checkable
 @runtime_checkable
 class Runnable(Protocol):
     """Batch task: produces a single value per execution."""
+
     async def execute(self, ctx) -> "Any": ...
 
 
 @runtime_checkable
 class Streamable(Protocol):
     """Streaming actor: yields a series of values."""
+
     async def run(self, ctx) -> AsyncIterator["Any"]: ...
 ```
 
@@ -32,7 +34,9 @@ class ExternalProcessor:
         # runtime values arrive as the body's own named parameters, not off ctx
         return {"processed": records}
 
+
 from molexp.workflow import WorkflowCompiler
+
 compiled = WorkflowCompiler(name="pipeline").add(ExternalProcessor()).compile()
 ```
 

@@ -193,7 +193,7 @@ manager.start(background=True, kill_on_exit=False)
 manager.start(background=True, kill_on_exit=True)
 
 # Check status
-manager.status()        # → {"api": {...}, "ui": {...}}
+manager.status()  # → {"api": {...}, "ui": {...}}
 manager.is_running()
 
 # Stream logs
@@ -247,6 +247,7 @@ Pass a custom `config_dir=Path("./.local")` to the constructor to relocate them.
 ```python
 # docs: skip — illustrative fragment (``mount``/``app`` are create_app internals)
 from importlib.resources import files
+
 webapp = files("molexp") / "dist"
 if webapp.is_dir() and (webapp / "index.html").exists():
     mount(app, webapp)

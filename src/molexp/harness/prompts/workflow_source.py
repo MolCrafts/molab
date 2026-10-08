@@ -61,7 +61,7 @@ SYSTEM_PROMPT = (
     "value; downstream tasks bind those names.\n\n"
     "IMPLEMENT EACH TASK BODY WITH THE REAL molcrafts API — never a "
     "placeholder/stub, and NEVER an invented symbol:\n"
-    "- Import the capability INSIDE the function (e.g. `from molpy.core.cg import "
+    "- Import the capability INSIDE the function (e.g. `from molpy import "
     "CoarseGrain`). NEVER import molcrafts packages at module top level — the "
     "module is imported during validation where molpy may be absent; in-function "
     "imports run only at execution.\n"
@@ -73,16 +73,18 @@ SYSTEM_PROMPT = (
     "shape — call ``molcrafts_describe``/``molcrafts_search`` FIRST and use the "
     "exact symbol/signature it returns. The '## Available molcrafts capabilities' "
     "catalog is a starting point, NOT the whole API: it lists the bound action "
-    "capabilities but omits most data-type accessors (e.g. ``molpy.core.box.Box`` "
+    "capabilities but omits most data-type accessors (e.g. ``molpy.Box`` "
     "members) — look those up via molmcp rather than inventing `box[i]`-style "
     "indexing or any plausible-sounding method. Never emit a symbol you have not "
     "seen in the catalog OR confirmed through molmcp; if molmcp cannot find it, "
     "it does not exist — pick a different real API. Build a "
     "coarse-grained structure the real way: `cg = CoarseGrain()`, then "
     "`bead = cg.def_bead(type=..., charge=..., x=..., y=..., z=...)` per bead, and "
-    "`cg.def_cgbond(bead_a, bead_b, type=...)` per bond (a CGBond joins TWO Bead "
-    "objects — `CGBond(bead_a, bead_b)`). Grow with `cg.replicate(n, transform=...)` "
-    "/ `cg.merge(other)` / `cg.move([dx, dy, dz])`.\n\n"
+    "`cg.def_cgbond(bead_a, bead_b, type=...)` per bond (a CgBond joins TWO Bead "
+    "objects — `cg.def_cgbond(bead_a, bead_b)`). Grow with "
+    "`cg.replicate(template, rotations, translations, frag_ids)` (one (3, 3) "
+    "rotation, one (3,) translation and one int32 fragment id per copy) / "
+    "`cg.merge(other)` / `cg.translate([dx, dy, dz])`.\n\n"
     "STUB ANTI-PATTERNS — EACH ONE IS AUTO-REJECTED BY REVIEW. A task must DO the "
     "work its report step describes, never fake its outputs. Do NOT ship any of "
     "these:\n"
@@ -115,42 +117,45 @@ SYSTEM_PROMPT = (
     "Use `molpy.Frame` / `molpy.Block` (never import molrs directly).\n\n"
     "DEFINE THE FORCE FIELD EXPLICITLY when the workflow exports to a simulator. A "
     "ForceField is built through styles, never standalone types:\n"
-    "    from molpy import ForceField\n"
-    "    ff = ForceField()\n"
-    '    astyle = ff.def_atomstyle("full")\n'
-    '    tN = astyle.def_type("N", mass=1.0, charge=+1.0, sigma=1.0, epsilon=1.0)\n'
-    '    tP = astyle.def_type("P", mass=1.0, charge=-1.0, sigma=1.0, epsilon=1.0)\n'
-    '    pair = ff.def_pairstyle("lj/cut"); pair.def_type(tN, tN, epsilon=1.0, sigma=1.0)\n'
-    '    bond = ff.def_bondstyle("fene"); bond.def_type(tN, tP, name="backbone", k=30.0, r0=1.5, epsilon=1.0, sigma=1.0)\n'
+    "    from molpy.ff.forcefield import ForceField\n"
+    '    ff = ForceField(units="lj")\n'
+    '    astyle = ff.def_style("atom", "full")\n'
+    '    tN = astyle.def_type("N", mass=1.0, charge=+1.0)\n'
+    '    tP = astyle.def_type("P", mass=1.0, charge=-1.0)\n'
+    '    pair = ff.def_style("pair", "lj/cut", {"cutoff": 2.5})\n'
+    '    pair.def_type("N-N", tN, tN, epsilon=1.0, sigma=1.0); pair.def_type("P-P", tP, tP, epsilon=1.0, sigma=1.0)\n'
+    '    bond = ff.def_style("bond", "fene"); bond.def_type("backbone", tN, tP, k=30.0, r0=1.5, epsilon=1.0, sigma=1.0)\n'
+    "Every atom type needs a pair type and a pair style needs its `cutoff`; "
+    "`ForceField(units=...)` names the units its parameters are in.\n"
     "A bead-spring CG model is `pair_style lj/cut` + `bond_style fene` + per-type "
     "charges; emit charges on the atom types, not as an afterthought.\n\n"
     "EXPORT A COMPLETE LAMMPS SYSTEM — data file AND force-field AND input script, "
-    "never just coordinates. A CoarseGrain's `to_frame()` yields `beads`/`cgbonds` "
-    "blocks, but the LAMMPS writers read `atoms`/`bonds`, so BRIDGE the CG frame "
-    "into an atomistic Frame first (beads become atoms; a CG bead IS a LAMMPS "
-    "atom):\n"
+    "never just coordinates. A CoarseGrain's `to_frame()` yields an `atoms` block "
+    "(`type`, `charge`, `x`, `y`, `z` — a CG bead IS a LAMMPS atom) and a `bonds` "
+    "block (`atomi`, `atomj` as 0-based row indices, `type`); a bonded LAMMPS data "
+    "file also needs a `mol_id` per atom, and the frame needs its box:\n"
     "    import numpy as np, molpy as mp\n"
-    '    src = cg.to_frame(); bd, cb = src["beads"], src["cgbonds"]; n = bd.nrows\n'
-    '    types = [str(t) for t in np.asarray(bd["type"])]\n'
-    "    frame = mp.Frame()\n"
-    '    frame["atoms"] = mp.Block({"id": np.arange(1, n + 1), "mol_id": np.ones(n, int),\n'
-    '        "type": np.asarray(types), "charge": np.asarray(bd["charge"], float),\n'
-    '        "x": np.asarray(bd["x"], float), "y": np.asarray(bd["y"], float), "z": np.asarray(bd["z"], float)})\n'
-    '    frame["bonds"] = mp.Block({"id": np.arange(1, cb.nrows + 1),\n'
-    '        "type": np.asarray([str(t) for t in np.asarray(cb["type"])]),\n'
-    '        "atomi": np.asarray(cb["ibead"], int), "atomj": np.asarray(cb["jbead"], int)})\n'
+    '    frame = cg.to_frame(); n = frame["atoms"].n_rows\n'
+    '    frame["atoms"]["mol_id"] = np.ones(n, dtype=np.int64)\n'
     "    frame.box = mp.Box([box, box, box])\n"
+    "A style molrs does not ship (bond `fene`) is declared in the force-field IR "
+    "(LAMMPS standard) before writing, inside the task that writes:\n"
+    "    from molpy.ff import style_registry\n"
+    "    class Fene(style_registry.StyleDeclaration):\n"
+    '        category, name, lammps, replace = "bond", "fene", "positional", True\n'
+    '        params = {"k": "E/L^2", "r0": "L", "epsilon": "E", "sigma": "L"}\n'
+    '        expression = ("-0.5*k*r0^2*log(1-(r/r0)^2)"\n'
+    '                      "+step(2^(1/6)*sigma-r)*(4*epsilon*((sigma/r)^12-(sigma/r)^6)+epsilon)")\n'
     "Then write the whole set under `ctx.workdir`:\n"
-    "    from molpy.io.writers import write_lammps_system\n"
-    "    files = write_lammps_system(ctx.workdir / \"system\", frame, ff)   # -> {'data','ff'}\n"
-    "    from molpy.io.emit.lammps import LammpsEmitter\n"
-    "    class _Holder:\n"
-    "        def __init__(self, f): self._f = f\n"
-    "        def to_frame(self): return self._f\n"
-    '    emitted = LammpsEmitter().emit(_Holder(frame), ff, ctx.workdir, prefix="run",\n'
-    '        atom_style="full", units="lj")   # writes run.data + run.in.settings + run.in.init + run.in (the input script)\n'
-    "(atom_style is one of full / charge / atomic / body — NOT 'molecular' — when "
-    "writing the data file.)\n\n"
+    '    mp.io.write_lammps_data(ctx.workdir / "system.data", frame)\n'
+    '    mp.io.write_lammps_forcefield(ctx.workdir / "system.ff", ff, frame, units="lj")\n'
+    "    from molpy.engine import LammpsEngine\n"
+    "    paths = LammpsEngine(check_executable=False).generate_inputs(\n"
+    '        frame, ff, ctx.workdir, prefix="run", atom_style="full", units="lj")\n'
+    "    # -> {'data','settings','init','input'}: run.data + run.in.settings + run.in.init + run.in (the input script)\n"
+    "(`units` is the LAMMPS units style the coefficients are written in — the "
+    "ForceField's own `units`; atom_style is one of full / charge / atomic / "
+    "body — NOT 'molecular' — for charged beads.)\n\n"
     "SURFACE RUN PRODUCTS so the UI can show them. A task body writes files only "
     "under `ctx.workdir`, then publishes with `ctx.register_artifact` / "
     "`ctx.register_metric` (same verbs as the driver-side RunContext):\n"
@@ -173,51 +178,51 @@ SYSTEM_PROMPT = (
     "    async def define_forcefield(sigma: float = 1.0, epsilon: float = 1.0,\n"
     "                                bead_mass: float = 1.0, cation_charge: float = 1.0,\n"
     "                                anion_charge: float = -1.0) -> dict:\n"
-    "        from molpy import ForceField\n\n"
-    "        ff = ForceField()\n"
-    '        astyle = ff.def_atomstyle("full")\n'
-    '        tN = astyle.def_type("N", mass=bead_mass, charge=cation_charge, sigma=sigma, epsilon=epsilon)\n'
-    '        tP = astyle.def_type("P", mass=bead_mass, charge=anion_charge, sigma=sigma, epsilon=epsilon)\n'
-    '        pair = ff.def_pairstyle("lj/cut")\n'
-    "        pair.def_type(tN, tN, epsilon=epsilon, sigma=sigma)\n"
-    "        pair.def_type(tP, tP, epsilon=epsilon, sigma=sigma)\n"
-    '        bond = ff.def_bondstyle("fene")\n'
-    '        bond.def_type(tN, tP, name="backbone", k=30.0, r0=1.5, epsilon=epsilon, sigma=sigma)\n'
+    "        from molpy.ff.forcefield import ForceField\n\n"
+    '        ff = ForceField(units="lj")\n'
+    '        astyle = ff.def_style("atom", "full")\n'
+    '        tN = astyle.def_type("N", mass=bead_mass, charge=cation_charge)\n'
+    '        tP = astyle.def_type("P", mass=bead_mass, charge=anion_charge)\n'
+    '        pair = ff.def_style("pair", "lj/cut", {"cutoff": 2.5 * sigma})\n'
+    '        pair.def_type("N-N", tN, tN, epsilon=epsilon, sigma=sigma)\n'
+    '        pair.def_type("P-P", tP, tP, epsilon=epsilon, sigma=sigma)\n'
+    '        bond = ff.def_style("bond", "fene")\n'
+    '        bond.def_type("backbone", tN, tP, k=30.0, r0=1.5, epsilon=epsilon, sigma=sigma)\n'
     '        return {"forcefield": ff, "bead_spec": {"cation_charge": cation_charge, "anion_charge": anion_charge}}\n\n'
     '    @wf.task(depends_on=["define_forcefield"])\n'
     "    async def build_monomer(bead_spec) -> dict:\n"
-    "        from molpy.core.cg import CoarseGrain\n\n"
+    "        from molpy import CoarseGrain\n\n"
     "        m = CoarseGrain()\n"
     '        cat = m.def_bead(type="N", charge=bead_spec["cation_charge"], x=0.0, y=0.0, z=0.0)\n'
     '        ani = m.def_bead(type="P", charge=bead_spec["anion_charge"], x=0.0, y=1.0, z=0.0)\n'
-    '        m.def_cgbond(cat, ani, type="backbone")   # CGBond(bead_a, bead_b)\n'
+    '        m.def_cgbond(cat, ani, type="backbone")   # a CgBond joins two Beads\n'
     '        return {"monomer": m}\n\n'
     '    @wf.task(depends_on=["build_monomer", "define_forcefield"])\n'
     "    async def export_lammps(ctx, monomer, forcefield,\n"
     "                            box: float = 20.0,\n"
     '                            atom_style: Literal["full", "charge"] = "full") -> dict:\n'
     "        import numpy as np, molpy as mp\n"
-    "        from molpy.io.writers import write_lammps_system\n\n"
-    '        src = monomer.to_frame(); bd, cb = src["beads"], src["cgbonds"]; n = bd.nrows\n'
-    '        types = [str(t) for t in np.asarray(bd["type"])]\n'
+    "        from molpy.ff import style_registry\n\n"
+    "        class Fene(style_registry.StyleDeclaration):\n"
+    '            category, name, lammps, replace = "bond", "fene", "positional", True\n'
+    '            params = {"k": "E/L^2", "r0": "L", "epsilon": "E", "sigma": "L"}\n'
+    '            expression = ("-0.5*k*r0^2*log(1-(r/r0)^2)"\n'
+    '                          "+step(2^(1/6)*sigma-r)*(4*epsilon*((sigma/r)^12-(sigma/r)^6)+epsilon)")\n\n'
+    '        frame = monomer.to_frame(); atoms = frame["atoms"]; n = atoms.n_rows\n'
     '        xyz = ctx.workdir / "structure.xyz"\n'
     '        with open(xyz, "w") as fh:\n'
     '            fh.write(f"{n}\\nCG structure\\n")\n'
-    '            for t, x, y, z in zip(types, np.asarray(bd["x"]), np.asarray(bd["y"]), np.asarray(bd["z"])):\n'
+    '            for t, x, y, z in zip(atoms["type"], atoms["x"], atoms["y"], atoms["z"]):\n'
     '                fh.write(f"{t} {x:.4f} {y:.4f} {z:.4f}\\n")\n'
-    "        frame = mp.Frame()\n"
-    '        frame["atoms"] = mp.Block({"id": np.arange(1, n + 1), "mol_id": np.ones(n, int),\n'
-    '            "type": np.asarray(types), "charge": np.asarray(bd["charge"], float),\n'
-    '            "x": np.asarray(bd["x"], float), "y": np.asarray(bd["y"], float), "z": np.asarray(bd["z"], float)})\n'
-    '        frame["bonds"] = mp.Block({"id": np.arange(1, cb.nrows + 1),\n'
-    '            "type": np.asarray([str(t) for t in np.asarray(cb["type"])]),\n'
-    '            "atomi": np.asarray(cb["ibead"], int), "atomj": np.asarray(cb["jbead"], int)})\n'
+    '        atoms["mol_id"] = np.ones(n, dtype=np.int64)\n'
     "        frame.box = mp.Box([box, box, box])\n"
-    '        files = write_lammps_system(ctx.workdir / "system", frame, forcefield)\n'
+    '        data, ff_file = ctx.workdir / "system.data", ctx.workdir / "system.ff"\n'
+    "        mp.io.write_lammps_data(data, frame)\n"
+    "        mp.io.write_lammps_forcefield(ff_file, forcefield, frame, units=forcefield.units)\n"
     "        return {\n"
     '            "structure": ctx.register_artifact(xyz, mime="chemical/x-xyz"),\n'
-    '            "lammps_data": ctx.register_artifact(files["data"]),\n'
-    '            "lammps_forcefield": ctx.register_artifact(files["ff"]),\n'
+    '            "lammps_data": ctx.register_artifact(data),\n'
+    '            "lammps_forcefield": ctx.register_artifact(ff_file),\n'
     '            "n_atoms": ctx.register_metric("n_atoms", float(n)),\n'
     "        }\n\n"
     "    return wf\n"

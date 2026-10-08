@@ -33,13 +33,9 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from pathlib import Path
 
-import pytest
-
 from molexp.harness.schemas import BlockedTask, CommandResult
 from molexp.harness.stages.generate_workflow_source import _slug
 from molexp.harness.stages.realize_task import realize_one_task
-
-pytestmark = pytest.mark.asyncio
 
 # A generic task body + test the codegen stub returns; the worker renames the
 # module's top function to the task slug, so the exact name here is irrelevant.

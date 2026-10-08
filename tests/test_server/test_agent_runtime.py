@@ -13,8 +13,6 @@ from collections.abc import AsyncIterator
 from pathlib import Path
 from typing import Any
 
-import pytest
-
 from molexp.agent.router import (
     AgenticChunk,
     FinalChunk,
@@ -31,8 +29,6 @@ from molexp.server.agent_runtime import (
     AgentSessionRuntime,
     AgentTurn,
 )
-
-pytestmark = pytest.mark.asyncio
 
 
 class _ScriptedRouter:

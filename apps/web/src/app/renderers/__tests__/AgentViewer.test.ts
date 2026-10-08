@@ -275,9 +275,9 @@ describe("groupEventsIntoTurns", () => {
   });
 
   it("opens a live turn when loop_started follows a bare clarification_required", () => {
-    // Create-plan used to write only clarification_required; the scope reply
-    // then wrote the first loop_started, which must not stay absorbed into the
-    // already-closed goal bubble (that froze the UI with no spinner).
+    // Create-plan may write only clarification_required; the scope reply then
+    // writes the first loop_started, which must open a live turn rather than
+    // stay absorbed into the already-closed goal bubble (no spinner, frozen UI).
     const events: ApiSessionEvent[] = [
       ev("clarification_required", {
         request_id: "context-turn-1",

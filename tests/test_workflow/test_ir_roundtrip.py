@@ -5,7 +5,7 @@ delegates to ``default_codec``): from_ir yields a runnable spec, to_ir is its
 inverse for IR- and Python-built specs, typed control-flow edges (data /
 control / branch / loop / parallel) survive the round-trip, and node
 ``position`` round-trips without entering the topology hash. The codec's own
-golden/byte-identity contracts live in ``test_codec``.
+rendering contracts live in ``test_codec``.
 """
 
 from __future__ import annotations
@@ -142,8 +142,8 @@ def _ir_excluding_id(spec: CompiledWorkflow) -> dict:
 class TestTypedEdgeRoundtrip:
     """Typed-edge IR: data / control / branch / loop / parallel round-trip.
 
-    Together these cover all five ``kind`` values. ``spec.to_ir()`` no longer
-    rejects control flow; the structured ``entries`` / ``loops`` / ``parallels``
+    Together these cover all five ``kind`` values. ``spec.to_ir()`` accepts
+    control flow; the structured ``entries`` / ``loops`` / ``parallels``
     arrays make the reload lossless. Lowering's reachability rules make a single
     all-five-in-one graph impractical, so each kind rides a real, compilable
     workflow.
@@ -162,7 +162,7 @@ class TestTypedEdgeRoundtrip:
         wf.add(_Constant(value=value), name=name, depends_on=deps, **kw)
 
     def test_branch_and_entry_round_trip(self) -> None:
-        """A spec with wf.entry + wf.branch — previously rejected — now round-trips."""
+        """A spec with wf.entry + wf.branch round-trips."""
         wf = WorkflowCompiler(name="branchy", entry="fetch")
         self._slug(wf, "fetch", 1)
         self._slug(wf, "validate", 2, deps=["fetch"], routes={"ok": "publish", "fail": "rollback"})

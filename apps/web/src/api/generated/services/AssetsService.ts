@@ -207,8 +207,8 @@ export class AssetsService {
      * Raises:
      * AssetNotFoundError: Unknown asset id (404).
      * PreviewSidecarNotFoundError: No sidecar next to the dataset (404).
-     * NoReaderInSidecarError / AmbiguousReaderError / PreviewReaderError:
-     * The sidecar is empty / ambiguous / broken (422).
+     * NoReaderInSidecarError / PreviewReaderError: The sidecar names no
+     * reader, or reading through it failed (422).
      * @param assetId
      * @param format
      * @param limit
@@ -491,8 +491,8 @@ export class AssetsService {
      * Raises:
      * AssetNotFoundError: Unknown asset id (404).
      * PreviewSidecarNotFoundError: No sidecar next to the dataset (404).
-     * NoReaderInSidecarError / AmbiguousReaderError / PreviewReaderError:
-     * The sidecar is empty / ambiguous / broken (422).
+     * NoReaderInSidecarError / PreviewReaderError: The sidecar names no
+     * reader, or reading through it failed (422).
      * @param assetId
      * @param ws
      * @param format

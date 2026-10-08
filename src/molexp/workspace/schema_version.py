@@ -40,7 +40,7 @@ def read_versioned_json(path: str | Path, *, fs: FileSystem | None = None) -> di
         with fs.open(str(path)) as fh:
             data = json.load(fh)
     else:
-        with open(path) as fh:  # noqa: PTH123
+        with open(path, encoding="utf-8") as fh:  # noqa: PTH123
             data = json.load(fh)
     if "schema_version" not in data:
         raise IncompatibleSchemaError(

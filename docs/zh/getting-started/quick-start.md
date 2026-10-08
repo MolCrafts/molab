@@ -13,13 +13,16 @@ from molexp.workflow import WorkflowCompiler
 # 1. 定义工作流
 wf = WorkflowCompiler(name="sum")
 
+
 @wf.task
 def fetch(scale: float = 1.0) -> dict:
     return {"values": [1.0, 4.0, 9.0], "scale": scale}
 
+
 @wf.task(depends_on=["fetch"])
 def summarize(values: list[float], scale: float = 1.0) -> float:
     return sum(values) * scale
+
 
 # 2. 创建工作区层级
 ws = me.Workspace("./lab", name="lab")
@@ -73,8 +76,8 @@ import molexp as me
 
 ws = me.Workspace("./lab", name="lab")
 same_run = ws.project("demo").experiment("sum").get_run(run.id)
-print(same_run.status)                     # succeeded
-print(same_run.get_result("summarize"))    # 28.0
+print(same_run.status)  # succeeded
+print(same_run.get_result("summarize"))  # 28.0
 ```
 
 ## 下一步

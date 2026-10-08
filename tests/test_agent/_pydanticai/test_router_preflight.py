@@ -2,10 +2,10 @@
 
 Unlike the sibling router tests these deliberately construct REAL
 ``pydantic_ai.Agent`` instances (via the credential-free ``'test'``
-model): the regression being pinned is a *constructor-kwarg* one — the
-1.x-only ``Agent(output_retries=...)`` was removed in pydantic-ai 2.0,
-so a text-only preflight passed while the first structured call crashed
-mid-pipeline with a ``TypeError``. ``preflight()`` must therefore force
+model): what is pinned is *constructor-kwarg* compatibility with the installed
+pydantic-ai — a structured agent can take kwargs a text-only agent never sees,
+so a text-only preflight can pass while the first structured call crashes
+mid-pipeline with a ``TypeError``. ``preflight()`` therefore forces
 structured-agent construction against the installed SDK, not a stub.
 """
 

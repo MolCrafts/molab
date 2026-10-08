@@ -110,9 +110,11 @@ from molexp.workflow import WorkflowCompiler
 
 wf = WorkflowCompiler(name="sum")
 
+
 @wf.task
 def fetch(scale: float = 1.0) -> dict:
     return {"values": [1.0, 4.0, 9.0], "scale": scale}
+
 
 @wf.task(depends_on=["fetch"])
 def summarize(values: list[float], scale: float) -> float:
@@ -161,11 +163,7 @@ Collapse the results to plain records and pick the best.
 </div>
 
 ```python
-scan = (
-    ws.project("demo")
-    .experiment("lr-scan")
-    .sweep(wf, {"scale": [1.0, 2.0, 4.0]})
-)
+scan = ws.project("demo").experiment("lr-scan").sweep(wf, {"scale": [1.0, 2.0, 4.0]})
 summary = scan.execute()
 best = summary.min_by("summarize")
 ```
@@ -187,9 +185,7 @@ rerun, and scheduler-backed execution.
 
 ```python
 # train.py — register the experiment once
-ws.project("demo").experiment("sum").run(
-    wf.compile(), params={"scale": [1.0, 2.0]}
-)
+ws.project("demo").experiment("sum").run(wf.compile(), params={"scale": [1.0, 2.0]})
 ```
 
 ```bash

@@ -37,9 +37,9 @@ class TestCollectEvidenceText:
     def test_confirmed_symbol_miss_promotes_to_capability_gap(self) -> None:
         d = diagnose_failure(
             Exception("x"),
-            "AttributeError: 'molpy.core.box.Box' object has no attribute 'lengths'",
+            "AttributeError: 'molpy.Box' object has no attribute 'lengths'",
         )
-        assert "molpy.core.box.Box.lengths" in d.symbols or any("Box" in s for s in d.symbols)
+        assert "molpy.Box.lengths" in d.symbols or any("Box" in s for s in d.symbols)
 
         def lookup(symbol: str) -> dict:
             return {"ok": False, "code": "SYMBOL_NOT_FOUND", "error": "gone", "ref": symbol}
@@ -49,7 +49,7 @@ class TestCollectEvidenceText:
         assert d.is_capability_gap
 
     def test_molmcp_unavailable_is_not_a_capability_gap(self) -> None:
-        d = diagnose_failure(Exception("x"), "use molpy.core.box.Box.lengths please")
+        d = diagnose_failure(Exception("x"), "use molpy.Box.lengths please")
         text = collect_evidence_text(
             d,
             lookup=lambda s: {

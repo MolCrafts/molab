@@ -1,15 +1,14 @@
-"""IR serialization + cache identity for ``promote_callable`` bodies (regression).
+"""IR serialization + cache identity for ``promote_callable`` bodies.
 
-``_EntryTask`` used to capture the live callable as its task config, so
-``CompiledWorkflow.to_graph_ir()`` failed with a raw pydantic ValidationError
-(``GraphTaskIR.config`` values must be JSON). The fix:
+``GraphTaskIR.config`` values must be JSON, so ``_EntryTask`` never stores the
+live callable as its task config:
 
 - an **importable** promoted callable serializes as a ``"module:qualname"``
   entrypoint ref in the graph IR (re-imported via importlib at execution time);
 - a **non-importable** callable (lambda, closure, ``__main__``/REPL function)
   raises a clear, actionable error at IR time instead of the pydantic one;
-- in-memory execution (``WorkflowRuntime().execute``) keeps working for
-  non-importable callables exactly as before;
+- in-memory execution (``WorkflowRuntime().execute``) works for
+  non-importable callables;
 - the content-addressed cache snapshot keys on the *resolved* callable's
   source, never on the ref string, so editing the body still invalidates.
 """

@@ -71,7 +71,7 @@ async def fetch() -> int:
 
 
 compiled = wf.compile()
-print(compiled.workflow_id)   # e.g. "c3f9e2b8a7d4e1f0"
+print(compiled.workflow_id)  # e.g. "c3f9e2b8a7d4e1f0"
 ```
 
 Properties:
@@ -114,7 +114,7 @@ For a workspace run, the runtime pre-sets every root task's inputs to `{"params"
 # docs: skip — signature overview (``...`` placeholders, not runnable values)
 runtime = WorkflowRuntime()
 result = await runtime.execute(compiled, run_context=ctx, seed_outputs=..., cache=...)
-handle = await runtime.start(compiled)            # background, returns WorkflowExecution
+handle = await runtime.start(compiled)  # background, returns WorkflowExecution
 result = await runtime.run_on(compiled, experiment, parameters=...)  # fresh Run + execute
 ```
 
@@ -129,9 +129,9 @@ For caching and snapshotting, each task carries a `TaskSnapshot`:
 ```python
 class TaskSnapshot:
     task_id: str
-    task_type: str        # module.qualname
-    code_hash: str        # sha256 of AST-normalized execute() source
-    config_hash: str      # sha256 of the task's serialized config
+    task_type: str  # module.qualname
+    code_hash: str  # sha256 of AST-normalized execute() source
+    config_hash: str  # sha256 of the task's serialized config
     code_source: str
     created_at: datetime
     config_data: dict

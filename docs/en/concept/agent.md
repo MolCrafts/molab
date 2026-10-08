@@ -10,10 +10,10 @@ Four names:
 
 ```python
 from molexp.agent import (
-    AgentRunner,      # entry point — model + mode="text"|"agentic", call .run()
-    AgentRunResult,   # returned by .run() — text, token usage, events
-    AgentRuntime,     # frozen bundle: session + router + execution_env
-    AgentSession,     # on-disk handle for a conversation
+    AgentRunner,  # entry point — model + mode="text"|"agentic", call .run()
+    AgentRunResult,  # returned by .run() — text, token usage, events
+    AgentRuntime,  # frozen bundle: session + router + execution_env
+    AgentSession,  # on-disk handle for a conversation
 )
 ```
 

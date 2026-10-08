@@ -39,9 +39,9 @@ class Fetch(Task):
 
 compiled = WorkflowCompiler(name="demo").add(Fetch()).compile()
 
-graph = compiled.to_graph_ir()          # full graph (UI / observability)
+graph = compiled.to_graph_ir()  # full graph (UI / observability)
 parallel_edges = [e for e in graph.edges if e.kind == "parallel"]
 
-wire = compiled.to_ir()                 # round-trippable wire format
+wire = compiled.to_ir()  # round-trippable wire format
 rebuilt = CompiledWorkflow.from_ir(wire)
 ```

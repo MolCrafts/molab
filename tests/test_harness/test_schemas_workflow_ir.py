@@ -1,7 +1,6 @@
 """Tests for ``ExpectedOutput`` (harness workflow-IR schema).
 
-Regression (spec 01 janitor finding #1b): opening ``ArtifactKind = str`` must
-not lose the non-empty constraint the former ``Literal[...]`` enforced —
+``ArtifactKind`` is an open ``str``, but an artifact kind is never empty —
 ``ExpectedOutput.kind`` pins ``min_length=1`` to match ``PlanArtifactRef.kind``.
 """
 

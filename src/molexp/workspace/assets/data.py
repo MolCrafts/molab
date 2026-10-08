@@ -129,7 +129,7 @@ class DataAssetLibrary:
         )
 
         asset_dir.mkdir(parents=True, exist_ok=True)
-        with open(asset_dir / "asset.json", "w") as f:  # noqa: PTH123
+        with open(asset_dir / "asset.json", "w", encoding="utf-8") as f:  # noqa: PTH123
             json.dump(asset.model_dump(mode="json"), f, indent=2)
 
         self._emit_added(asset)
@@ -192,7 +192,7 @@ class DataAssetLibrary:
         # place); the scanner reads assets/<id>/asset.json.
         asset_dir = self.root / asset.asset_id
         asset_dir.mkdir(parents=True, exist_ok=True)
-        with open(asset_dir / "asset.json", "w") as f:  # noqa: PTH123
+        with open(asset_dir / "asset.json", "w", encoding="utf-8") as f:  # noqa: PTH123
             json.dump(asset.model_dump(mode="json"), f, indent=2)
 
         self._emit_added(asset)
@@ -207,7 +207,7 @@ class DataAssetLibrary:
         for asset_dir in self.root.iterdir():
             meta_file = asset_dir / "asset.json"
             if meta_file.exists():
-                with open(meta_file) as f:  # noqa: PTH123
+                with open(meta_file, encoding="utf-8") as f:  # noqa: PTH123
                     data = json.load(f)
                 out.append(DataAsset.model_validate(data))
         return out

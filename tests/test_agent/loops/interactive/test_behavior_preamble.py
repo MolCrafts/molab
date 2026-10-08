@@ -25,8 +25,6 @@ from molexp.agent.session import Session
 from molexp.agent.session_storage import InMemorySessionStorage
 from molexp.agent.types import UsageBreakdown
 
-pytestmark = pytest.mark.asyncio
-
 
 class _EmptyMcpCatalog:
     """Turn catalog that opens nothing — isolates tests from ~/.molexp MCP."""

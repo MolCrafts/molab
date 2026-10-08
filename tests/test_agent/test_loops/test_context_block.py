@@ -5,15 +5,11 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from pathlib import Path
 
-import pytest
-
 from molexp.agent.router import FinalChunk
 from molexp.agent.runner import AgentRunner
 from molexp.agent.session import Session
 from molexp.agent.session_storage import InMemorySessionStorage
 from molexp.agent.types import UsageBreakdown
-
-pytestmark = pytest.mark.asyncio
 
 _BASE_PROMPT = "You are the molexp assistant."
 _CONTEXT_BLOCK = "## Mounted run\n\n- sigma: 0.25\n- status: succeeded"

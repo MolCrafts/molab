@@ -1,9 +1,8 @@
-"""Regression tests for ``Folder.from_disk`` disk inheritance.
+"""Tests for ``Folder.from_disk`` disk inheritance.
 
-The disk lives on :attr:`Workspace.fs`. Children must resolve the same
-backend via :meth:`Folder._disk` after reload — they must not store their
-own FileSystem (that was the mid-2026 ``from_disk`` drop bug, now
-impossible because there is nothing to drop).
+The disk lives on :attr:`Workspace.fs`. Children resolve the same backend via
+:meth:`Folder._disk` after reload — they never store their own FileSystem, so
+a reload has no per-child disk that could be dropped.
 """
 
 from __future__ import annotations

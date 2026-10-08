@@ -23,7 +23,7 @@ or moved.
 Converters, and what each is built on:
 
 ============  ==================================================
-LAMMPS log    ``molpy.io.read_LAMMPS_log`` (lazy — molpy owns the format)
+LAMMPS log    ``molpy.io.lammps.LammpsLogMetricReader`` (lazy — molpy owns the format)
 TensorBoard   :mod:`molexp.plugins.tensorboard` (optional dependency)
 CSV           stdlib :mod:`csv`, operator-supplied column mapping
 ============  ==================================================
@@ -39,7 +39,6 @@ from molexp.plugins.metrics_ingest.detect import (
     LogFormat,
     detect_log_formats,
     has_metrics_buffer,
-    is_lammps_log,
     is_tensorboard_dir,
 )
 from molexp.plugins.metrics_ingest.ingest import (
@@ -47,6 +46,7 @@ from molexp.plugins.metrics_ingest.ingest import (
     Skip,
     ingest_run,
 )
+from molexp.plugins.metrics_ingest.lammps import is_lammps_log
 from molexp.plugins.metrics_ingest.tabular import ColumnMapping
 
 __all__ = [

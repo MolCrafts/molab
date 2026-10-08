@@ -3,7 +3,7 @@
 /* tslint:disable */
 /* eslint-disable */
 /**
- * One ``Per MPI rank ... Loop time`` block as columns + numeric rows.
+ * One run's thermo table as columns + numeric rows.
  */
 export type LammpsThermoStage = {
     columns?: Array<string>;

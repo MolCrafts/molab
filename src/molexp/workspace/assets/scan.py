@@ -110,7 +110,7 @@ def _load_data_assets(scope_dir: Path) -> Iterator[Asset]:
         if not record.is_file():
             continue
         try:
-            with open(record) as fh:  # noqa: PTH123
+            with open(record, encoding="utf-8") as fh:  # noqa: PTH123
                 yield parse_asset(json.load(fh))
         except (OSError, ValueError):
             continue

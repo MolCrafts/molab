@@ -167,9 +167,8 @@ class TestInMemoryCapabilityRegistry:
     def test_validate_call_unrestricted_schema_accepts_any_keys(self) -> None:
         """A schema with NO ``properties`` key is unrestricted: any parameters accepted.
 
-        Regression: the previous implementation treated absent ``properties`` as
-        an empty closed set, rejecting every call to a capability whose author
-        had left the schema permissive.
+        Absent ``properties`` is not an empty closed set: a capability whose
+        author left the schema permissive accepts every call.
         """
         from molexp.harness.registry.in_memory import InMemoryCapabilityRegistry
         from molexp.harness.schemas.capability import ToolCapability

@@ -1,15 +1,15 @@
-"""Failure-recovery correctness of the run lifecycle (run-recovery bugs 1-3).
+"""Failure-recovery correctness of the run lifecycle.
 
-Bug 1 — an *empty* ``with run.start(): pass`` on a failed run must never flip
+No-op attempts — an *empty* ``with run.start(): pass`` on a failed run must never flip
 the run to ``succeeded``: success is a positive signal (workflow status or new
 results), never the default. A signal-less attempt on a failed/cancelled run
 is a no-op: the run keeps its prior status and the execution record is closed
 as ``"aborted"``.
 
-Bug 2 — a genuinely successful attempt must clear the stale ``metadata.error``
+Stale errors — a genuinely successful attempt must clear the stale ``metadata.error``
 so the canonical record stops describing a failure that no longer exists.
 
-Bug 3 — the common failure path (engine swallows the task exception and
+Swallowed failures — the common failure path (engine swallows the task exception and
 resolves the run to FAILED via ``mark_failed``; nothing propagates out of the
 ``with`` block) must still persist ``executions/<exec_id>/error.txt``.
 """
@@ -38,7 +38,7 @@ def _fail_once(run) -> None:
     assert run.status == RunStatus.FAILED
 
 
-# ── Bug 1: no-op attempts never default to success ──────────────────────────
+# ── no-op attempts never default to success ─────────────────────────────────
 
 
 class TestNoOpAttemptKeepsPriorStatus:
@@ -116,7 +116,7 @@ class TestNoOpAttemptKeepsPriorStatus:
         assert run.status == RunStatus.SUCCEEDED
 
 
-# ── Bug 2: success clears the stale error ────────────────────────────────────
+# ── success clears the stale error ──────────────────────────────────────────
 
 
 class TestSuccessClearsStaleError:
@@ -131,7 +131,7 @@ class TestSuccessClearsStaleError:
         assert reloaded.status == RunStatus.SUCCEEDED
 
 
-# ── Bug 3: engine-swallowed failures still write error.txt ──────────────────
+# ── engine-swallowed failures still write error.txt ─────────────────────────
 
 
 class TestErrorTxtOnSwallowedFailure:
