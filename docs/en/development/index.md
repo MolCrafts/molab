@@ -9,10 +9,14 @@ Contributor-facing docs for working on `molexp` internals.
 
 ## CI and release
 
+Each workflow's first job, `<file> / context`, runs
+[`MolCrafts/molcrafts-ci/actions/ci-context`](https://github.com/MolCrafts/molcrafts-ci/tree/master/actions/ci-context);
+every other job gates on its outputs (tier, upstream, pull request dedup).
+
 | workflow | fast tier (a feature-branch push to MolCrafts) | full tier (every fork push; dev / master / main on MolCrafts; PRs, tags, dispatches) | upstream only |
 |---|---|---|---|
 | `lint.yml` | `lint / python` (partners, lock, ruff incl. PLW1514, ty), `lint / web` (biome, tsc) | same | — |
-| `test.yml` | `test / tier`, `test / python (ubuntu-latest)` (pytest), `test / web` (rstest) | + `test / python (macos-latest)` | — |
+| `test.yml` | `test / context`, `test / python (ubuntu-latest)` (pytest), `test / web` (rstest) | + `test / python (macos-latest)` | — |
 | `docs.yml` | `docs / build` (strict Zensical, en + zh) | same | — |
 | `release.yml` | — | — | `v*` tag: `release / build`, `release / pypi` (PyPI, environment `pypi`); `workflow_dispatch` is a dry run anywhere |
 
