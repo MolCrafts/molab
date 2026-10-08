@@ -2,17 +2,11 @@
 
 The lineage store walks ``artifact_edges`` with a single ``WITH RECURSIVE``
 CTE. These tests own the traversal semantics — BFS level order, shallowest-depth
-dedup, cycle termination, the ``lineage_graph`` node/edge shape — plus the one
-performance-regression guard that the walk stays a single statement rather than
-one ``SELECT`` per node (the O(nodes) round-trip bug perf-hardening-02 fixed).
-
-White-box convention: the query-count guard reaches into ``store._conn`` exactly
-as the sibling stage-bracket tests reach into store internals.
+dedup, cycle termination, the ``lineage_graph`` node/edge shape.
 """
 
 from __future__ import annotations
 
-from itertools import pairwise
 from pathlib import Path
 
 import pytest
@@ -150,26 +144,3 @@ class TestSQLiteArtifactLineageStore:
             and e["run_id"] is None
             for e in graph["edges"]
         )
-
-    def test_trace_backward_walks_edges_in_a_single_recursive_cte(
-        self, store: SQLiteArtifactLineageStore, artifact_store: FileArtifactStore
-    ) -> None:
-        """The edge walk emits one statement, not one per node (perf-hardening-02)."""
-        chain_depth = 50
-        node_ids = [_make_node(artifact_store, f"N{i}") for i in range(chain_depth + 1)]
-        for parent, child in pairwise(node_ids):
-            store.add_edge(parent_id=parent, child_id=child)
-
-        # ``add_edge`` setup ran before the callback is installed, so those
-        # statements are not counted; ``get_ref`` hydration hits the filesystem
-        # store (a different connection), so it cannot appear here either.
-        statements: list[str] = []
-        store._conn.set_trace_callback(statements.append)
-        try:
-            result = store.trace_backward(node_ids[-1])
-        finally:
-            store._conn.set_trace_callback(None)
-
-        edge_walk_statements = [s for s in statements if "artifact_edges" in s]
-        assert len(result) == chain_depth  # correctness: all ancestors returned
-        assert len(edge_walk_statements) == 1

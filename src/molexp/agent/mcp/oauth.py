@@ -49,6 +49,7 @@ from threading import Lock
 
 from mcp.client.auth import OAuthClientProvider, TokenStorage
 from mcp.shared.auth import (
+    AuthorizationCodeResult,
     OAuthClientInformationFull,
     OAuthClientMetadata,
     OAuthToken,
@@ -197,10 +198,10 @@ class OAuthFlowSession:
 
     def __init__(self) -> None:
         self._authorize_url_future: asyncio.Future[str] | None = None
-        self._callback_future: asyncio.Future[tuple[str, str | None]] | None = None
-        # Cache the (code, state) tuple if it was submitted before the
-        # callback_future was lazily created; we replay it on first access.
-        self._pending_callback: tuple[str, str | None] | None = None
+        self._callback_future: asyncio.Future[AuthorizationCodeResult] | None = None
+        # Cache the redirect parameters if they were submitted before the
+        # callback_future was lazily created; we replay them on first access.
+        self._pending_callback: AuthorizationCodeResult | None = None
         self._cancelled: BaseException | None = None
         # Holds the background task that drives ``OAuthClientProvider``
         # so the callback route can await its completion (and so it isn't
@@ -216,7 +217,7 @@ class OAuthFlowSession:
         return self._authorize_url_future
 
     @property
-    def callback_future(self) -> asyncio.Future[tuple[str, str | None]]:
+    def callback_future(self) -> asyncio.Future[AuthorizationCodeResult]:
         if self._callback_future is None:
             self._callback_future = asyncio.get_event_loop().create_future()
             if self._pending_callback is not None:
@@ -231,8 +232,8 @@ class OAuthFlowSession:
         if not fut.done():
             fut.set_result(authorize_url)
 
-    async def callback_handler(self) -> tuple[str, str | None]:
-        """SDK awaits this to receive ``(code, state)`` from the browser."""
+    async def callback_handler(self) -> AuthorizationCodeResult:
+        """SDK awaits this to receive the redirect's ``code`` / ``state`` / ``iss``."""
         try:
             return await asyncio.wait_for(self.callback_future, timeout=CALLBACK_TIMEOUT_SECONDS)
         except TimeoutError:
@@ -240,20 +241,21 @@ class OAuthFlowSession:
                 f"OAuth callback not received within {CALLBACK_TIMEOUT_SECONDS:.0f}s"
             ) from None
 
-    def submit_callback(self, code: str, state: str | None) -> bool:
+    def submit_callback(self, code: str, state: str | None, iss: str | None = None) -> bool:
         """Called by ``/oauth/callback``. Returns True iff the future was
         still pending — duplicate / late submissions return False rather
         than raising so the route handler can convert to 410 Gone."""
+        result = AuthorizationCodeResult(code=code, state=state, iss=iss)
         if self._callback_future is None:
             # Future not yet created (no awaiter) — stash the result so
             # the next reader sees it on first access.
             if self._pending_callback is not None:
                 return False
-            self._pending_callback = (code, state)
+            self._pending_callback = result
             return True
         if self._callback_future.done():
             return False
-        self._callback_future.set_result((code, state))
+        self._callback_future.set_result(result)
         return True
 
     def cancel(self, reason: str = "cancelled") -> None:
@@ -415,7 +417,7 @@ async def _runtime_redirect_handler(_url: str) -> None:
     )
 
 
-async def _runtime_callback_handler() -> tuple[str, str | None]:
+async def _runtime_callback_handler() -> AuthorizationCodeResult:
     raise RuntimeError(
         "OAuth callback unavailable at runtime — token expired or never set; "
         "click Connect in the agent settings."

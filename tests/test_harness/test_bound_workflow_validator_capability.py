@@ -2,8 +2,8 @@
 
 These fire only when a ``CapabilityRegistry`` is supplied. Codes:
 ``unknown_capability`` / ``capability_call_invalid`` / ``backend_not_supported``
-/ ``undeclared_side_effect``. Also locks the regression that ``registry=None``
-stays byte-identical to Phase 3, and the skip semantics for an unknown cap.
+/ ``undeclared_side_effect``. Also locks that ``registry=None`` stays
+byte-identical to Phase 3, and the skip semantics for an unknown cap.
 """
 
 from __future__ import annotations

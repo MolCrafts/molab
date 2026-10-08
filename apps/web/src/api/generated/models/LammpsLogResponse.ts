@@ -4,7 +4,7 @@
 /* eslint-disable */
 import type { LammpsThermoStage } from './LammpsThermoStage';
 /**
- * Parsed LAMMPS log thermo stages, produced by ``molpy.io.LAMMPSLog``.
+ * Parsed LAMMPS log thermo stages, produced by ``molpy.io.read_lammps_log``.
  */
 export type LammpsLogResponse = {
     nStages?: number;

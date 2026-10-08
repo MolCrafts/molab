@@ -48,7 +48,7 @@ class TestFileStore:
         def spy(path: Path, data: object) -> None:
             seen.append(Path(path))
             Path(path).parent.mkdir(parents=True, exist_ok=True)
-            Path(path).write_text('{"ok": true}')
+            Path(path).write_text('{"ok": true}', encoding="utf-8")
 
         monkeypatch.setattr("molexp.workspace.file_store.atomic_write_json", spy)
         FileStore(tmp_path).put("run.json", {"a": 1})

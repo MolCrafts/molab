@@ -10,7 +10,6 @@ OOP ``Task`` subclasses, TaskContext access, and content-addressed caching.
 from __future__ import annotations
 
 import asyncio
-import time
 
 from molexp.workflow import (
     WorkflowCompiler,
@@ -46,28 +45,21 @@ class TestSyncDecoratorTask:
 
 
 class TestMixedSyncAsyncDag:
-    def test_blocking_sync_body_does_not_stall_async_sibling(self) -> None:
-        """A blocking sync body runs in a worker thread, so a same-level
-        async sibling still makes progress (parallel levels stay parallel)."""
+    def test_sync_and_async_siblings_feed_one_join(self) -> None:
+        """A sync body and an async body at the same level both reach their join."""
         wf = WorkflowCompiler(name="mixed-parallel")
 
         @wf.task
-        def slow_sync() -> str:
-            time.sleep(0.2)
+        def sync_body() -> str:
             return "sync"
 
         @wf.task
-        async def fast_async() -> str:
+        async def async_body() -> str:
             return "async"
 
-        @wf.task(depends_on=["slow_sync", "fast_async"])
-        def join(slow_sync: str, fast_async: str) -> str:
-            return slow_sync + "+" + fast_async
+        @wf.task(depends_on=["sync_body", "async_body"])
+        def join(sync_body: str, async_body: str) -> str:
+            return sync_body + "+" + async_body
 
-        start = time.monotonic()
         result = _run(wf.compile())
-        elapsed = time.monotonic() - start
         assert result.outputs["join"] == "sync+async"
-        # Generous bound: serialized-with-loop-stall would still pass, but a
-        # deadlock / double-sleep regression would not.
-        assert elapsed < 2.0

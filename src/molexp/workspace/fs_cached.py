@@ -37,7 +37,7 @@ import os
 import shutil
 import threading
 import time
-from collections.abc import Callable, Iterable, Iterator, Sequence
+from collections.abc import Callable, Generator, Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -336,7 +336,7 @@ class CachedRemoteFileSystem:
         self._connected = True
 
     @contextlib.contextmanager
-    def force_fetch(self) -> Iterator[None]:
+    def force_fetch(self) -> Generator[None]:
         """Bypass pin for this thread — every read/listdir hits the remote.
 
         Used by active refreshes. Concurrent UI threads keep serving the
@@ -972,7 +972,7 @@ class CachedRemoteFileSystem:
         self._write_sidecar()
 
     @contextlib.contextmanager
-    def batched(self) -> Iterator[None]:
+    def batched(self) -> Generator[None]:
         """Defer sidecar writes for the duration of a bulk operation.
 
         Per-op cache records/invalidations only mark the sidecar dirty; the

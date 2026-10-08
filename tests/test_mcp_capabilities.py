@@ -104,7 +104,7 @@ _CG_PAYLOAD: dict[str, object] = {
         {
             "rank": 1,
             "node": {
-                "qualname": "molpy.core.cg.CGBond",
+                "qualname": "molpy.CgBond",
                 "name": "CGBond",
                 "kind": "class",
                 "file": "molpy/core/cg.py",
@@ -115,7 +115,7 @@ _CG_PAYLOAD: dict[str, object] = {
         {
             "rank": 2,
             "node": {
-                "qualname": "molpy.core.cg.CoarseGrain",
+                "qualname": "molpy.CoarseGrain",
                 "name": "CoarseGrain",
                 "kind": "class",
                 "file": "molpy/core/cg.py",
@@ -133,10 +133,10 @@ _IO_PAYLOAD: dict[str, object] = {
         {
             "rank": 1,
             "node": {
-                "qualname": "molpy.io.writers.write_lammps_data",
+                "qualname": "molpy.io.write_lammps_data",
                 "name": "write_lammps_data",
                 "kind": "function",
-                "file": "molpy/io/writers.py",
+                "file": "molpy/io/__init__.py",
                 "signature": "write_lammps_data(file: PathLike, frame: Any, atom_style: str='full') -> None",
                 "summary": "Write a Frame object to a LAMMPS data file.",
             },
@@ -145,7 +145,7 @@ _IO_PAYLOAD: dict[str, object] = {
         {
             "rank": 2,
             "node": {
-                "qualname": "molpy.core.cg.CGBond",
+                "qualname": "molpy.CgBond",
                 "name": "CGBond",
                 "kind": "class",
                 "signature": None,
@@ -179,14 +179,14 @@ _LIVE_SEARCH_PAYLOAD: dict[str, object] = {
         },
         {
             "kind": "class",
-            "title": "molpy.io.writers.LammpsDataWriter",
+            "title": "molpy.io.lammps.LammpsDumpReader",
             "signature": None,
-            "summary": "Write a Frame to a LAMMPS data file.",
+            "summary": "Lazy, indexed reader of LAMMPS dump files.",
             "executable": False,
             "provenance": {
                 "type": "code_graph",
                 "language": "python",
-                "node_id": "molpy/io/writers.py#molpy.io.writers.LammpsDataWriter#class",
+                "node_id": "molpy/io/lammps.py#molpy.io.lammps.LammpsDumpReader#class",
             },
             "snapshot": "local:hash:sha256-deadbeef",
         },
@@ -218,7 +218,7 @@ class TestLiveSearchExploreShape:
         by_id = {c.id: c for c in caps}
         assert set(by_id) == {
             "molpy.engine.openmm.OpenMMEngine.render_minimize_script",
-            "molpy.io.writers.LammpsDataWriter",
+            "molpy.io.lammps.LammpsDumpReader",
         }
         method = by_id["molpy.engine.openmm.OpenMMEngine.render_minimize_script"]
         assert method.name == "render_minimize_script"
@@ -273,13 +273,13 @@ class TestLiveSearchExploreShape:
                 },
                 {
                     "kind": "class",
-                    "title": "molpy.core.cg.CoarseGrain",
+                    "title": "molpy.CoarseGrain",
                     "summary": "CG structure.",
                 },
             ]
         }
         caps = capabilities_from_payloads([payload])
-        assert [c.id for c in caps] == ["molpy.core.cg.CoarseGrain"]
+        assert [c.id for c in caps] == ["molpy.CoarseGrain"]
 
 
 class TestCapabilityFromNode:
@@ -287,9 +287,9 @@ class TestCapabilityFromNode:
         node = _IO_PAYLOAD["matches"][0]["node"]  # type: ignore[index]
         cap = capability_from_node(node, snapshot_commit="7fa1b1a")
         assert cap is not None
-        assert cap.id == "molpy.io.writers.write_lammps_data"
+        assert cap.id == "molpy.io.write_lammps_data"
         assert cap.package == "molpy"
-        assert cap.callable_path == "molpy.io.writers.write_lammps_data"
+        assert cap.callable_path == "molpy.io.write_lammps_data"
         assert cap.description.startswith("Write a Frame")
         assert cap.supported_backends == ["local"]
         assert cap.tags == ["function"]
@@ -301,7 +301,7 @@ class TestCapabilityFromNode:
         node = _CG_PAYLOAD["matches"][0]["node"]  # type: ignore[index]
         cap = capability_from_node(node)
         assert cap is not None
-        assert cap.id == "molpy.core.cg.CGBond"
+        assert cap.id == "molpy.CgBond"
         assert "properties" not in cap.input_schema  # wildcard
 
     def test_node_without_qualname_is_skipped(self) -> None:
@@ -312,11 +312,11 @@ class TestCapabilitiesFromPayloads:
     def test_union_is_deduped_by_id(self) -> None:
         caps = capabilities_from_payloads([_CG_PAYLOAD, _IO_PAYLOAD])
         ids = [c.id for c in caps]
-        assert ids.count("molpy.core.cg.CGBond") == 1  # deduped across payloads
+        assert ids.count("molpy.CgBond") == 1  # deduped across payloads
         assert set(ids) == {
-            "molpy.core.cg.CGBond",
-            "molpy.core.cg.CoarseGrain",
-            "molpy.io.writers.write_lammps_data",
+            "molpy.CgBond",
+            "molpy.CoarseGrain",
+            "molpy.io.write_lammps_data",
         }
 
     def test_registry_validates_real_and_class_calls(self) -> None:
@@ -325,19 +325,19 @@ class TestCapabilitiesFromPayloads:
 
         # Known good call against the parsed function schema.
         registry.validate_call(
-            "molpy.io.writers.write_lammps_data",
+            "molpy.io.write_lammps_data",
             {"file": "out.data", "frame": object()},
         )
         # Class-constructor capability (wildcard schema) accepts any kwargs.
-        registry.validate_call("molpy.core.cg.CGBond", {"a": 1, "b": 2, "type": "fene"})
+        registry.validate_call("molpy.CgBond", {"a": 1, "b": 2, "type": "fene"})
 
         # Missing a required key is rejected.
         with pytest.raises(CapabilityCallValidationError):
-            registry.validate_call("molpy.io.writers.write_lammps_data", {"file": "out.data"})
+            registry.validate_call("molpy.io.write_lammps_data", {"file": "out.data"})
         # An unexpected key against a restricted schema is rejected.
         with pytest.raises(CapabilityCallValidationError):
             registry.validate_call(
-                "molpy.io.writers.write_lammps_data",
+                "molpy.io.write_lammps_data",
                 {"file": "o", "frame": object(), "bogus": 1},
             )
 

@@ -8,7 +8,7 @@ checkpoints, and asset access during execution.
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Generator
 from datetime import datetime
 from pathlib import Path  # local-FS path for RunContext (LLM/worker-local I/O)
 from typing import TYPE_CHECKING, Protocol, cast
@@ -570,7 +570,7 @@ class Run(Folder):
         self.update_ops(lambda state: state.model_copy(update={"status": status}))
 
     @contextlib.contextmanager
-    def _metadata_lock(self) -> Iterator[None]:
+    def _metadata_lock(self) -> Generator[None]:
         """Advisory inter-process lock guarding ``run.json`` read-modify-write.
 
         Uses a ``run.json.lock`` sidecar next to ``run.json``. Degrades to

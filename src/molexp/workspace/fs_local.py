@@ -98,7 +98,7 @@ class LocalFileSystem:
     def write_text(path: PathArg, content: str, *, mode: int = 0o600) -> None:
         p = Path(path)
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text(content)
+        p.write_text(content, encoding="utf-8")
         os.chmod(p, mode)  # noqa: PTH101
 
     @staticmethod

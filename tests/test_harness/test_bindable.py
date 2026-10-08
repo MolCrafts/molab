@@ -30,8 +30,8 @@ def _cap(cid: str, *, kind: str = "function") -> ToolCapability:
 
 class TestBindable:
     def test_science_qualname_and_capability_are_bindable(self) -> None:
-        assert is_bindable_capability_id("molpy.io.writers.write_lammps_data")
-        assert is_bindable_capability(_cap("molpy.io.writers.write_lammps_data"))
+        assert is_bindable_capability_id("molpy.io.write_lammps_data")
+        assert is_bindable_capability(_cap("molpy.io.write_lammps_data"))
 
     def test_notes_tests_ui_and_section_anchors_are_rejected(self) -> None:
         junk = (
@@ -42,7 +42,7 @@ class TestBindable:
             "mollog.get_logger",
             "molmcp.collection.index.CollectionIndex.explore",
             "molexp.harness.stages.resolve_capabilities",
-            "molpy.core.cg.CoarseGrain._private",
+            "molpy.CoarseGrain._private",
         )
         for cid in junk:
             assert not is_bindable_capability_id(cid), cid

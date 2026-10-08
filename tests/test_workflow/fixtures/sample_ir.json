@@ -13,7 +13,7 @@
         "path": "qm9.h5"
       },
       "task_id": "inspect",
-      "task_type": "golden_inspect"
+      "task_type": "sample_inspect"
     },
     {
       "config": {
@@ -21,7 +21,7 @@
         "lr": 0.001
       },
       "task_id": "train",
-      "task_type": "golden_train"
+      "task_type": "sample_train"
     }
   ]
 }

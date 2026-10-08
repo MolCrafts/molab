@@ -484,11 +484,10 @@ export class RunsService {
     }
     /**
      * Get Run Lammps Log
-     * Parse a LAMMPS log file and return thermo stages.
+     * Parse a LAMMPS log file and return its thermo stages.
      *
-     * Inlined parser — ``molpy.io`` does not export a multi-stage log
-     * reader, so the route owns this lightweight regex-based parse to
-     * avoid coupling the API surface to a transient molpy refactor.
+     * ``molpy.io.read_lammps_log`` parses the log; each ``run`` with a thermo
+     * table is one stage.
      * @param projectId
      * @param experimentId
      * @param runId
@@ -1338,11 +1337,10 @@ export class RunsService {
     }
     /**
      * Get Run Lammps Log
-     * Parse a LAMMPS log file and return thermo stages.
+     * Parse a LAMMPS log file and return its thermo stages.
      *
-     * Inlined parser — ``molpy.io`` does not export a multi-stage log
-     * reader, so the route owns this lightweight regex-based parse to
-     * avoid coupling the API surface to a transient molpy refactor.
+     * ``molpy.io.read_lammps_log`` parses the log; each ``run`` with a thermo
+     * table is one stage.
      * @param projectId
      * @param experimentId
      * @param runId

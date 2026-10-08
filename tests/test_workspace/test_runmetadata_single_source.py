@@ -20,11 +20,11 @@ from molexp.workspace.run_ops import RunOpsState
 
 
 def _read_run_json(run) -> dict:
-    return json.loads(Path(str(run.run_dir / "run.json")).read_text())
+    return json.loads(Path(str(run.run_dir / "run.json")).read_text(encoding="utf-8"))
 
 
 def _read_ops_json(run) -> dict:
-    return json.loads(Path(str(run.run_dir / "ops" / "run.json")).read_text())
+    return json.loads(Path(str(run.run_dir / "ops" / "run.json")).read_text(encoding="utf-8"))
 
 
 # ── (a) field removal + extra=ignore ────────────────────────────────────────

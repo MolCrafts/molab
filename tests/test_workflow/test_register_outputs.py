@@ -50,7 +50,7 @@ class TestPromoteRegisterArtifact:
         assert scratch.parent.name == "export"
         assert "work" in scratch.parts
         assert "executions" in scratch.parts
-        assert promoted.read_text() == "atoms"
+        assert promoted.read_text(encoding="utf-8") == "atoms"
         assert promoted != captured["scratch"]
         found = run.assets.query(producer_task="export", kind="artifact")
         assert any(a.name == "system.data" for a in found)

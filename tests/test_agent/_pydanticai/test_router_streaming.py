@@ -18,8 +18,6 @@ from molexp.agent.router import (
     ToolResultChunk,
 )
 
-pytestmark = pytest.mark.asyncio
-
 
 def _router(model: object) -> object:
     """Build a :class:`PydanticAIRouter` whose every tier is ``model``."""

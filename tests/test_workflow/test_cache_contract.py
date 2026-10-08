@@ -108,7 +108,7 @@ class TestEngineInjectedCacheIdentity:
 
     @pytest.mark.asyncio
     async def test_differing_run_params_never_share_root_cache(self, tmp_path: Path) -> None:
-        """Regression — the first sweep cell's root result must NOT be served to
+        """The first sweep cell's root result must NOT be served to
         every other cell. Different run params ⇒ root-task cache MISS ⇒ body runs."""
         counters = {"root": 0}
         wf = WorkflowCompiler(name="sweep")

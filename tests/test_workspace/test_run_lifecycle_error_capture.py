@@ -1,12 +1,11 @@
-"""Regression: a FAILED run must persist WHY it failed in the canonical record.
+"""A FAILED run persists WHY it failed in the canonical record.
 
 When a task raises, the workflow engine catches the exception into a failed
 ``WorkflowResult`` and does NOT re-raise (so ``molexp run`` can resume). On that
-engine-swallowed path ``RunContext.__exit__`` used to set ``status=failed`` but
-drop the error message ``mark_failed`` had stashed — leaving
-``run.json`` / ``execution.json`` with ``error: null`` while the reason lived
-only in the workflow-layer ``workflow.json``. That is a silent-invalid-state
-defect (the authoritative record lies).
+engine-swallowed path ``RunContext.__exit__`` sets ``status=failed`` AND keeps
+the error message ``mark_failed`` stashed, so ``run.json`` / ``execution.json``
+never carry ``error: null`` for a failed run while the reason lives only in the
+workflow-layer ``workflow.json`` — the authoritative record must not lie.
 
 These pin that the failing-task error (type + message) lands in BOTH
 workspace-owned canonical records. (The operator-facing ``failed_run`` health

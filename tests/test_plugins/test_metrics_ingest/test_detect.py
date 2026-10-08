@@ -1,4 +1,4 @@
-"""Unit tests for :mod:`molexp.plugins.molrec.detect`."""
+"""Unit tests for :mod:`molexp.plugins.metrics_ingest.detect`."""
 
 from __future__ import annotations
 
@@ -10,9 +10,9 @@ from molexp.plugins.metrics_ingest.detect import (
     LogFormat,
     detect_log_formats,
     has_metrics_buffer,
-    is_lammps_log,
     is_tensorboard_dir,
 )
+from molexp.plugins.metrics_ingest.lammps import is_lammps_log
 
 LAMMPS_HEAD = """LAMMPS (2 Aug 2023)
 Per MPI rank memory allocation (min/avg/max) = 3.5 | 3.5 | 3.5 Mbytes

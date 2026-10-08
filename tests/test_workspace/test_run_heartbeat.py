@@ -13,7 +13,7 @@ from pathlib import Path
 
 
 def _read_ops(run) -> dict:
-    return json.loads(Path(str(run.run_dir / "ops" / "run.json")).read_text())
+    return json.loads(Path(str(run.run_dir / "ops" / "run.json")).read_text(encoding="utf-8"))
 
 
 class TestRefreshHeartbeat:

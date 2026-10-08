@@ -157,7 +157,7 @@ class TestBindMolcraftsTasks:
         _seed_workflow_ir_ref(store)
         catalog_ref = store.put_text(
             kind="capability_catalog",
-            text="## Available molcrafts capabilities\n\n- molpy.core.cg.CoarseGrain",
+            text="## Available molcrafts capabilities\n\n- molpy.CoarseGrain",
             created_by="stage:resolve_capabilities",
             parent_ids=[],
         )

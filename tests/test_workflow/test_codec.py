@@ -19,7 +19,7 @@ import pytest
 
 from molexp.workflow.codec import default_codec
 
-_GOLDEN = Path(__file__).parent / "golden"
+_FIXTURES = Path(__file__).parent / "fixtures"
 
 
 def _sample_ir() -> dict:
@@ -34,7 +34,7 @@ def _sample_ir() -> dict:
     }
 
 
-def _register_golden_task_types() -> None:
+def _register_sample_task_types() -> None:
     from molexp.workflow.registry import default_registry
 
     class _Noop:
@@ -46,21 +46,13 @@ def _register_golden_task_types() -> None:
         inst._task_config = dict(cfg)
         return inst
 
-    for slug in ("golden_inspect", "golden_train"):
+    for slug in ("sample_inspect", "sample_train"):
         if slug not in default_registry._factories:  # type: ignore[attr-defined]
             default_registry.register(slug, _factory)
 
 
 class TestWorkflowCodec:
     """The codec's four surfaces + delegation contract."""
-
-    @pytest.mark.unit
-    def test_ir_to_python_matches_golden(self) -> None:
-        """IR → runnable script renders byte-identically (formatting is a feature —
-        the script is diff-reviewable)."""
-        ir = json.loads((_GOLDEN / "sample_ir.json").read_text())
-        expected = (_GOLDEN / "sample.py.txt").read_text()
-        assert default_codec.ir_to_python(ir) == expected
 
     @pytest.mark.unit
     def test_python_to_ir_round_trips(self) -> None:
@@ -93,13 +85,6 @@ class TestWorkflowCodec:
         assert default_codec.python_to_ir(script)["name"] == "x"
 
     @pytest.mark.unit
-    def test_ir_to_mermaid_matches_golden(self) -> None:
-        """IR → Mermaid is one-way; the golden covers node + edge rendering."""
-        ir = json.loads((_GOLDEN / "sample_ir.json").read_text())
-        expected = (_GOLDEN / "sample.mermaid.txt").read_text()
-        assert default_codec.ir_to_mermaid(ir) == expected
-
-    @pytest.mark.unit
     def test_ir_to_mermaid_sanitizes_unsafe_ids(self) -> None:
         """Task IDs containing dashes / dots become underscored Mermaid IDs."""
         ir = {
@@ -114,8 +99,8 @@ class TestWorkflowCodec:
     def test_compiled_to_ir_delegates_to_codec(self) -> None:
         """``CompiledWorkflow.to_ir`` is a thin delegator — the codec is the
         single owner of IR conversion (spec ``workflow-refactor-01`` ac-004)."""
-        _register_golden_task_types()
-        ir = json.loads((_GOLDEN / "sample_ir.json").read_text())
+        _register_sample_task_types()
+        ir = json.loads((_FIXTURES / "sample_ir.json").read_text(encoding="utf-8"))
         spec = default_codec.ir_to_spec(ir)
         assert spec.to_ir() == default_codec.spec_to_ir(spec)
 

@@ -54,7 +54,7 @@ def _read_context_results(run: Run) -> dict[str, Any]:
     if not run_json.exists():
         return {}
     try:
-        with open(run_json) as fh:  # noqa: PTH123
+        with open(run_json, encoding="utf-8") as fh:  # noqa: PTH123
             data = json.load(fh)
     except (OSError, json.JSONDecodeError):
         return {}
@@ -621,14 +621,14 @@ class RunFileTextResponse(BaseModel):
 
 
 class LammpsThermoStage(BaseModel):
-    """One ``Per MPI rank ... Loop time`` block as columns + numeric rows."""
+    """One run's thermo table as columns + numeric rows."""
 
     columns: list[str] = Field(default_factory=list)
     rows: list[list[float]] = Field(default_factory=list)
 
 
 class LammpsLogResponse(BaseModel):
-    """Parsed LAMMPS log thermo stages, produced by ``molpy.io.LAMMPSLog``."""
+    """Parsed LAMMPS log thermo stages, produced by ``molpy.io.read_lammps_log``."""
 
     path: str
     version: str | None = None

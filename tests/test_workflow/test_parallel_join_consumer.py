@@ -4,7 +4,7 @@ A downstream task consuming a ``wf.parallel`` join alongside another dependency
 must observe the join's *real* output — never a silently coalesced ``None``.
 ``_collect_upstream_outputs`` raises :class:`MissingUpstreamResultError` for a
 declared dependency that never recorded a result, instead of coalescing to
-``None`` (the original production bug).
+``None``.
 """
 
 from __future__ import annotations
@@ -20,7 +20,7 @@ from molexp.workflow.types import MissingUpstreamResultError
 
 @pytest.mark.asyncio
 async def test_parallel_join_consumer_sees_real_output_not_none() -> None:
-    """Regression — ``D`` depending on ``[J, X]`` observes J's real reduced
+    """``D`` depending on ``[J, X]`` observes J's real reduced
     output (not ``None``) alongside X's output.
 
     Graph: ``M`` emits a list; ``parallel(map_over=M, body=B, join=J)`` squares
@@ -112,7 +112,7 @@ class TestCollectUpstreamOutputs:
 
     def test_single_dep_missing_also_fails_fast(self) -> None:
         """Boundary — a one-dep consumer whose sole dep is unrecorded raises
-        rather than coalescing to ``None`` (the bug's root shape)."""
+        rather than coalescing to ``None`` (the minimal fail-fast case)."""
         registration = _registration("consumer", depends_on=["a"])
         state = WorkflowState()
 

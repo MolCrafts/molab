@@ -201,7 +201,6 @@ export type { WorkspaceTargetCreateRequest } from './models/WorkspaceTargetCreat
 export type { WorkspaceTargetListResponse } from './models/WorkspaceTargetListResponse';
 export type { WorkspaceTargetResponse } from './models/WorkspaceTargetResponse';
 
-export { AgentService } from './services/AgentService';
 export { AgentAdminService } from './services/AgentAdminService';
 export { AgentTasksService } from './services/AgentTasksService';
 export { ApprovalsService } from './services/ApprovalsService';

@@ -643,7 +643,7 @@ def _read_servers(path: Path) -> dict[str, JSONValue]:
     if not path.exists():
         return {}
     try:
-        content = json.loads(path.read_text())
+        content = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
     raw = content.get("mcpServers") if isinstance(content, dict) else None

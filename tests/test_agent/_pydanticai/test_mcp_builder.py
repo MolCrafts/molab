@@ -13,7 +13,6 @@ Locks the ``MCPServer*`` → ``MCPToolset`` migration mapping molexp owns:
 
 from __future__ import annotations
 
-import httpx
 import pytest
 
 from molexp.agent._pydanticai.mcp import build_mcp_server
@@ -64,44 +63,19 @@ class TestBuildMcpServer:
         assert transport.url == "https://example.test/sse"
         assert transport.headers == {"Authorization": "Bearer t"}
 
-    def test_sse_transport_wins_and_injects_http_client_via_factory(self) -> None:
+    def test_sse_transport_wins_over_url_shape(self) -> None:
         from pydantic_ai.mcp import SSETransport
 
-        client = httpx.AsyncClient()
-        try:
-            toolset = build_mcp_server(
-                transport="sse",
-                name="srv2",
-                # URL does NOT end in /sse — explicit transport still wins.
-                url="https://example.test/events",
-                http_client=client,
-            )
-
-            transport = toolset.wrapped.client.transport
-            assert isinstance(transport, SSETransport)
-            assert transport.url == "https://example.test/events"
-            factory = transport.httpx_client_factory
-            assert factory is not None
-            assert factory(headers={}, timeout=None, auth=None) is client
-        finally:
-            del client
-
-    def test_http_client_takes_precedence_over_headers(self) -> None:
-        client = httpx.AsyncClient()
         toolset = build_mcp_server(
-            transport="http",
-            name="srv3",
-            url="https://example.test/mcp",
-            http_client=client,
-            headers={"X-Ignored": "yes"},
+            transport="sse",
+            name="srv2",
+            # URL does NOT end in /sse — explicit transport still wins.
+            url="https://example.test/events",
         )
 
         transport = toolset.wrapped.client.transport
-        # v1 precedence: http_client is authoritative, headers are dropped.
-        assert transport.headers == {}
-        factory = transport.httpx_client_factory
-        assert factory is not None
-        assert factory() is client
+        assert isinstance(transport, SSETransport)
+        assert transport.url == "https://example.test/events"
 
     def test_unknown_transport_raises_value_error(self) -> None:
         with pytest.raises(ValueError, match="ws"):

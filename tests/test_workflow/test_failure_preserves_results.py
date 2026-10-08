@@ -1,12 +1,10 @@
-"""Regression: a failed run keeps the outputs of tasks that already finished.
+"""A failed run keeps the outputs of tasks that already finished.
 
 When a task body raises, the exception propagates out of the graph runner.
-``WorkflowRuntime.execute`` used to discard everything and return
-``outputs={}`` — throwing away the (often expensive) results of every task
-that already finished. The in-place-mutated ``WorkflowState`` still holds
-those results, so the failed ``WorkflowResult`` now carries them, letting the
-caller resume via ``seed_outputs=`` instead of recomputing from scratch
-(P1-6 / ac-011).
+``WorkflowRuntime.execute`` does not discard the (often expensive) results of
+the tasks that already finished: the in-place-mutated ``WorkflowState`` holds
+them, and the failed ``WorkflowResult`` carries them in ``outputs``, so the
+caller can resume via ``seed_outputs=`` instead of recomputing from scratch.
 """
 
 from __future__ import annotations

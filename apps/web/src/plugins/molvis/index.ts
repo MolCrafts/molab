@@ -46,7 +46,7 @@ const molvisPlugin: UiPluginModule = {
       label: "MolVis",
       priority: 40,
       matcher: {
-        // Logs (molpy.io.LAMMPSLog) + molvis-core supported formats +
+        // Logs (molpy.io.read_lammps_log) + molvis-core supported formats +
         // MolRec Zarr markers (discovery only until a Zarr frame reader ships).
         patterns: [
           "log.lammps",

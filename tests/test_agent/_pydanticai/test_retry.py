@@ -16,7 +16,7 @@ from molexp.agent._pydanticai.retry import RetryPolicy, should_retry, sleep_for
 
 class TestRetryPolicy:
     def test_schema_parse_excluded_from_default_retry_on(self) -> None:
-        """Regression (14:30-min prod call): schema_parse must NOT be retried
+        """schema_parse is NOT retried
         at the router level — pydantic-ai's ``Agent(retries={"output": N})``
         retries it cheaply as a follow-up turn, whereas the router re-sends the
         full multi-thousand-token prompt. The default is exactly the two

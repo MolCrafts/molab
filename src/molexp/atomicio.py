@@ -21,7 +21,7 @@ import json
 import os
 import tempfile
 import time
-from collections.abc import Iterator
+from collections.abc import Generator
 from pathlib import Path
 
 from mollog import get_logger
@@ -126,7 +126,7 @@ def file_lock(
     lock_path: Path,
     *,
     timeout: float = DEFAULT_LOCK_TIMEOUT_SECONDS,
-) -> Iterator[None]:
+) -> Generator[None]:
     """Hold an exclusive advisory lock on *lock_path* for the ``with`` body.
 
     Serializes read-modify-write cycles on a JSON file written by several

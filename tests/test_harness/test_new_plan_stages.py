@@ -150,8 +150,8 @@ def _two_cap_registry():
 
     return InMemoryCapabilityRegistry(
         [
-            _cap("molpy.core.cg.CoarseGrain", "CoarseGrain", "Build a CG structure."),
-            _cap("molpy.io.writers.write_gromacs", "write_gromacs", "Write a GROMACS topology."),
+            _cap("molpy.CoarseGrain", "CoarseGrain", "Build a CG structure."),
+            _cap("molpy.io.write_gromacs_top_system", "write_gromacs", "Write a GROMACS topology."),
         ]
     )
 
@@ -221,7 +221,7 @@ class TestResolveCapabilities:
         ctx.agent_gateway.register(
             agent_name="capability_selector",
             output={
-                "selected": [{"id": "molpy.core.cg.CoarseGrain", "reason": "builds the CG beads"}],
+                "selected": [{"id": "molpy.CoarseGrain", "reason": "builds the CG beads"}],
                 "notes": "",
             },
             output_kind="capability_selection",
@@ -229,7 +229,7 @@ class TestResolveCapabilities:
         ref = asyncio.run(ResolveCapabilities().run(ctx))
         assert ref.kind == "capability_catalog"
         text = ctx.artifact_store.get(ref.id).decode("utf-8")
-        assert "molpy.core.cg.CoarseGrain" in text
+        assert "molpy.CoarseGrain" in text
         assert "builds the CG beads" in text  # the LLM's reason is shown
         assert "write_gromacs" not in text  # the un-selected capability is omitted
 
@@ -241,7 +241,7 @@ class TestResolveCapabilities:
         ref = asyncio.run(ResolveCapabilities().run(ctx))
         text = ctx.artifact_store.get(ref.id).decode("utf-8")
         assert "LLM selector unavailable" in text
-        assert "molpy.core.cg.CoarseGrain" in text and "write_gromacs" in text
+        assert "molpy.CoarseGrain" in text and "write_gromacs" in text
 
     def test_empty_catalog_note_when_no_registry(self, tmp_path: Path) -> None:
         from molexp.harness.stages.resolve_capabilities import ResolveCapabilities
@@ -303,9 +303,9 @@ class TestValidateInputSet:
     def test_flags_axis_targeting_a_list_valued_ir_input(self, tmp_path: Path) -> None:
         """A sweep axis delivers ONE scalar per cell — an axis whose IR root input
         is list-valued would change the parameter's shape (the task iterates it).
-        Regression: a real ``--execute`` run passed ``sigma_values=0.9`` into
-        ``for sigma in sigma_values`` → ``TypeError: 'float' object is not
-        iterable``. Such a param belongs in ``fixed_params``, passed whole."""
+        Sweeping it would pass ``sigma_values=0.9`` into ``for sigma in
+        sigma_values`` → ``TypeError: 'float' object is not iterable``. Such a
+        param belongs in ``fixed_params``, passed whole."""
         from molexp.harness.errors import StagePersistedFailureError
         from molexp.harness.stages.validate_input_set import ValidateInputSet
 

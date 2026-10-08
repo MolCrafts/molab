@@ -45,8 +45,8 @@ class TestStructuralDeadlockDetection:
             return "joined"
 
         with pytest.raises(WorkflowDeadlockError) as excinfo:
-            # wait_for bounds the regression: if detection ever stopped being
-            # structural this would hang and surface as TimeoutError instead.
+            # wait_for bounds the test: detection is structural, so a
+            # non-structural detector would hang and surface as TimeoutError.
             await asyncio.wait_for(WorkflowRuntime().execute(wf.compile()), timeout=10)
 
         assert "bad" in str(excinfo.value), "the error must name the unsatisfied dependency"

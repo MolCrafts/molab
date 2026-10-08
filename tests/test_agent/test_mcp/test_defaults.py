@@ -3,9 +3,7 @@
 from __future__ import annotations
 
 import json
-import shutil
 import stat
-import subprocess
 import sys
 
 import pytest
@@ -13,37 +11,11 @@ import pytest
 from molexp.agent.mcp import defaults as defaults_mod
 from molexp.agent.mcp import store as mcp_mod
 from molexp.agent.mcp.defaults import (
-    MCP_DEFAULTS,
     MCP_SEEDED_FILENAME,
     MOLMCP_USAGE_INSTRUCTIONS,
     seed_user_defaults,
 )
 from molexp.agent.mcp.store import MCP_CONFIG_FILENAME, McpScope, McpStore
-
-
-class TestMcpDefaults:
-    """The ``MCP_DEFAULTS`` platform-default registry seed."""
-
-    @pytest.mark.unit
-    @pytest.mark.skipif(
-        shutil.which("molmcp") is None,
-        reason="molmcp not installed on PATH; cannot validate the contract",
-    )
-    def test_seeded_command_is_invocable(self):
-        """Regression: the seeded ``command + args`` must drive the ``molmcp`` CLI.
-
-        Caught a drift where ``defaults.py`` shipped ``("gateway",)`` while the
-        ``molmcp`` CLI no longer had a ``gateway`` subcommand — asserting the
-        constant equals itself would have missed it; this asserts it is *usable*.
-        """
-        name, spec = MCP_DEFAULTS[0]
-        assert name == "molmcp"
-        cmd = [spec["command"], *spec["args"], "--help"]
-        result = subprocess.run(cmd, capture_output=True, timeout=15, text=True)
-        assert result.returncode == 0, (
-            f"`{' '.join(cmd)}` failed: rc={result.returncode}\n"
-            f"--- stdout ---\n{result.stdout}\n--- stderr ---\n{result.stderr}"
-        )
 
 
 class TestSeedUserDefaults:

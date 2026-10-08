@@ -396,13 +396,12 @@ def get_run_lammps_log(
     path: str = Query(..., description="Relative path of the log file under run_dir"),
     workspace=Depends(get_workspace),  # noqa: ANN001
 ) -> LammpsLogResponse:
-    """Parse a LAMMPS log file and return thermo stages.
+    """Parse a LAMMPS log file and return its thermo stages.
 
-    Inlined parser — ``molpy.io`` does not export a multi-stage log
-    reader, so the route owns this lightweight regex-based parse to
-    avoid coupling the API surface to a transient molpy refactor.
+    ``molpy.io.read_lammps_log`` parses the log; each ``run`` with a thermo
+    table is one stage.
     """
-    import re
+    from molpy.io import read_lammps_log
 
     experiment = _get_experiment(workspace, project_id, experiment_id)
     if not experiment:
@@ -420,33 +419,16 @@ def get_run_lammps_log(
     if not target.is_file():
         raise HTTPException(status_code=404, detail=f"log file not found: {path}")
 
-    text = target.read_text(encoding="utf-8", errors="replace")
-    version = text.split("\n", 1)[0].strip() if text else None
-
+    parsed = read_lammps_log(target)
     stages: list[LammpsThermoStage] = []
-    for block in re.findall(
-        r"Per MPI rank memory allocation .*?\n(.*?)Loop time of",
-        text,
-        flags=re.DOTALL,
-    ):
-        lines = [ln for ln in block.splitlines() if ln.strip()]
-        if not lines:
-            continue
-        columns = lines[0].split()
-        rows: list[list[float]] = []
-        for ln in lines[1:]:
-            parts = ln.split()
-            if len(parts) != len(columns):
-                continue
-            try:
-                rows.append([float(x) for x in parts])
-            except ValueError:
-                continue
-        stages.append(LammpsThermoStage(columns=columns, rows=rows))
+    for lammps_run in parsed.runs:
+        thermo = lammps_run.thermo
+        if thermo is not None and thermo.columns:
+            stages.append(LammpsThermoStage(columns=thermo.columns, rows=thermo.rows.tolist()))
 
     return LammpsLogResponse(
         path=path,
-        version=version,
+        version=parsed.version,
         nStages=len(stages),
         stages=stages,
     )

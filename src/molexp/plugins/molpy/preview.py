@@ -1,87 +1,92 @@
-"""Dataset preview via ``molpy.io.BaseTrajectoryReader``.
+"""Dataset preview through molpy's per-format readers.
 
-Sidecars declare exactly one concrete reader subclass. This module
-imports molpy's public surface and must track molpy releases.
+A dataset previews through its same-stem ``.py`` sidecar, which names the
+dataset's reader in one module-level variable, :data:`SIDECAR_READER`: a
+callable that takes the dataset path and returns a :class:`FrameReader`.
+molpy's per-format readers are exactly that, so the sidecar of a file molpy
+can parse is one line::
+
+    import molpy as mp
+
+    READER = mp.io.lammps.LammpsDumpReader
+
+A dataset in a format of its own names a class with ``n_frames`` and
+``read_frame(index)`` instead; it can wrap a per-format reader, or build its
+frames with ``molpy.Frame``. Either way molab never parses a dataset itself.
+
+This module tracks molpy's public surface; the host
+(:mod:`molexp.server.preview`) only finds the sidecar and caps the frames.
 """
 
 from __future__ import annotations
 
-import inspect
-import tempfile
-from collections.abc import Iterable
+from collections.abc import Sequence
 from pathlib import Path
-from typing import TYPE_CHECKING
+from types import ModuleType
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
-from molexp.server.exceptions import (
-    AmbiguousReaderError,
-    NoReaderInSidecarError,
-    PreviewReaderError,
-)
+from molexp.server.exceptions import NoReaderInSidecarError, PreviewReaderError
 
 if TYPE_CHECKING:
-    from molpy.io import BaseTrajectoryReader
+    from molpy import Frame
+
+#: The sidecar variable that names the dataset's reader.
+SIDECAR_READER = "READER"
 
 
-def require_molpy() -> tuple[type, type]:
-    """Return ``(Frame, BaseTrajectoryReader)`` or raise a rebuild hint."""
-    try:
-        from molpy import Frame
-        from molpy.io import BaseTrajectoryReader
-    except ImportError as exc:
-        raise ImportError(
-            "Preview needs molpy. Rebuild the science stack: "
-            "`maturin develop --release` in molrs/molrs-python, then "
-            "`pip install -e .` in molpy."
-        ) from exc
-    return Frame, BaseTrajectoryReader
+@runtime_checkable
+class FrameReader(Protocol):
+    """What a preview reads frames through.
+
+    molpy's per-format readers (``mp.io.xyz.XyzReader``,
+    ``mp.io.lammps.LammpsDumpReader``, ``mp.io.pdb.PdbReader``, …) satisfy it
+    as they are.
+    """
+
+    @property
+    def n_frames(self) -> int:
+        """Number of frames in the dataset."""
+        ...
+
+    def read_frame(self, index: int) -> Frame:
+        """The frame at *index*."""
+        ...
 
 
-def readers_in(module: object) -> list[type]:
-    """Concrete ``BaseTrajectoryReader`` subclasses defined in *module*."""
-    _, base = require_molpy()
-    found: list[type] = []
-    for obj in vars(module).values():
-        if not inspect.isclass(obj):
-            continue
-        if not issubclass(obj, base):
-            continue
-        if obj is base:
-            continue
-        if getattr(obj, "__module__", None) != getattr(module, "__name__", None):
-            continue
-        if inspect.isabstract(obj):
-            continue
-        found.append(obj)
-    return found
+def open_reader(sidecar: ModuleType, dataset_path: Path) -> FrameReader:
+    """Open *dataset_path* with the reader the *sidecar* names.
 
-
-def open_reader(module: object, dataset_path: Path) -> BaseTrajectoryReader:
-    """Instantiate the sidecar's sole reader against *dataset_path*."""
-    readers = readers_in(module)
-    if not readers:
-        raise NoReaderInSidecarError(str(getattr(module, "__file__", dataset_path)))
-    if len(readers) > 1:
-        raise AmbiguousReaderError(
-            str(getattr(module, "__file__", dataset_path)),
-            [cls.__name__ for cls in readers],
+    Raises:
+        NoReaderInSidecarError: The sidecar defines no :data:`SIDECAR_READER`.
+        PreviewReaderError: The reader cannot be opened on the dataset, or
+            what it returns is not a :class:`FrameReader`.
+    """
+    sidecar_path = str(getattr(sidecar, "__file__", dataset_path))
+    reader_factory = getattr(sidecar, SIDECAR_READER, None)
+    if reader_factory is None:
+        raise NoReaderInSidecarError(sidecar_path)
+    if not callable(reader_factory):
+        raise PreviewReaderError(
+            str(dataset_path), f"{SIDECAR_READER} in {sidecar_path} is not callable"
         )
     try:
-        return readers[0](dataset_path)
+        reader = reader_factory(dataset_path)
     except Exception as exc:
-        raise PreviewReaderError(str(dataset_path), f"instantiation failed: {exc}") from exc
+        raise PreviewReaderError(str(dataset_path), f"opening the reader failed: {exc}") from exc
+    if not isinstance(reader, FrameReader):
+        raise PreviewReaderError(
+            str(dataset_path),
+            f"{SIDECAR_READER} returned a {type(reader).__name__}, "
+            "which has no n_frames / read_frame(index)",
+        )
+    return reader
 
 
-def frames_to_extxyz(frames: Iterable[object]) -> bytes:
-    """Serialize molpy Frames through ``molpy.io.write_xyz_trajectory``."""
-    require_molpy()
-    from molpy.io import write_xyz_trajectory
+def frames_to_extxyz(frames: Sequence[Frame]) -> bytes:
+    """Encode *frames* as one extended-XYZ trajectory (``molpy.io.write_xyz_str``)."""
+    from molpy.io import write_xyz_str
 
-    with tempfile.NamedTemporaryFile(suffix=".xyz", delete=False) as tmp:
-        tmp_path = Path(tmp.name)
     try:
-        write_xyz_trajectory(tmp_path, list(frames))
-        return tmp_path.read_bytes()
+        return "".join(write_xyz_str(frame) for frame in frames).encode()
     except Exception as exc:
-        raise PreviewReaderError(str(tmp_path), f"write_xyz_trajectory failed: {exc}") from exc
-    finally:
-        tmp_path.unlink(missing_ok=True)
+        raise PreviewReaderError("<frames>", f"write_xyz_str failed: {exc}") from exc

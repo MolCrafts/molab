@@ -33,8 +33,6 @@ from molexp.server.agent_runtime import AgentSessionRegistry
 from molexp.server.routes import agent as agent_routes
 from molexp.server.schemas import UserMessageCreateRequest
 
-pytestmark = pytest.mark.asyncio
-
 
 class _ScriptedRouter:
     async def stream_agentic(

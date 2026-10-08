@@ -21,7 +21,8 @@ services code path by law, so re-asserting the outcome twice tests nothing).
   engine-boundary scan, on-disk layout naming law.
 - One test per verb/state transition of a core contract (run/resume/rerun
   domains, gate grant/reject/suspend, cache identity, seed validation).
-- One regression test per real production bug, docstring citing the bug.
+- When a production bug is fixed, the contract it broke gets a unit test (if
+  none exists) whose docstring states the contract, not the bug's history.
 
 ## Never add
 
@@ -31,9 +32,16 @@ services code path by law, so re-asserting the outcome twice tests nothing).
   the boundary; parametrize only when the table is the point.
 - Re-tests of dependencies (pydantic validation mechanics, pydantic-ai retries,
   stdlib behavior) or of lower layers from upper suites.
-- Timing/threshold tests (flaky by construction; performance belongs in a
+- Speed tests: timing/threshold assertions, statement or call counts kept as
+  performance guards (flaky by construction; performance belongs in a
   dedicated bench repo, not this suite).
-- More than one test per deprecation alias.
+- Regression tests: golden/snapshot comparisons of whole outputs, tests that
+  pin how a past bug was fixed rather than a contract, source scans for a
+  historical defect pattern.
+- End-to-end tests: a browser, a full app or server run, a production build's
+  output, external services or binaries (an LLM API, a network, an installed
+  CLI such as `molmcp`).
+- Unseeded randomness: seed every random generator a test uses.
 - UI source-contract tests that assert component source as text — test pure
   logic modules instead; extract logic out of components to make it testable.
 

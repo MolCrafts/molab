@@ -53,7 +53,7 @@ class AssetManifest:
         """Return a fresh mapping ``{asset_id -> Asset}`` from disk."""
         if not self.path.exists():
             return {}
-        with open(self.path) as fh:  # noqa: PTH123
+        with open(self.path, encoding="utf-8") as fh:  # noqa: PTH123
             data = json.load(fh)
         raw_assets: dict = data.get("assets", {})
         return {aid: parse_asset(entry) for aid, entry in raw_assets.items()}
@@ -96,7 +96,7 @@ class AssetManifest:
     def _load_raw(self) -> dict:
         if not self.path.exists():
             return {}
-        with open(self.path) as fh:  # noqa: PTH123
+        with open(self.path, encoding="utf-8") as fh:  # noqa: PTH123
             data = json.load(fh)
         return dict(data.get("assets", {}))
 

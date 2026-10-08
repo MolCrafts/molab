@@ -181,7 +181,7 @@ def _read_servers(config_path: Path) -> dict[str, Any]:
     if not config_path.exists():
         return {}
     try:
-        content = json.loads(config_path.read_text())
+        content = json.loads(config_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return {}
     raw = content.get("mcpServers") if isinstance(content, dict) else None
@@ -201,7 +201,7 @@ def _read_sentinel(sentinel_path: Path) -> set[str]:
     if not sentinel_path.exists():
         return set()
     try:
-        content = json.loads(sentinel_path.read_text())
+        content = json.loads(sentinel_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
         return set()
     seeded = content.get("seeded") if isinstance(content, dict) else None

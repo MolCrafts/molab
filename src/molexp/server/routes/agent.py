@@ -70,6 +70,9 @@ def _gone() -> HTTPException:
     "/{path:path}",
     methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
     name="agent_disabled",
+    # A catch-all for retired routes, not an API: one schema operation per
+    # method would share one operation id.
+    include_in_schema=False,
 )
 async def agent_disabled(path: str) -> None:  # noqa: ARG001
     raise _gone()

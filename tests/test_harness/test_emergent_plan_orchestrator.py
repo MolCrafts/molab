@@ -34,9 +34,8 @@ from molexp.harness.plan import (
 from molexp.harness.schemas import ApprovalDecision
 from molexp.harness.stages import auto_grant_approver
 from molexp.services.plan_runtime import drive_plan_mode
+from molexp.workflow import LoopMaxItersExceeded
 from molexp.workspace import Workspace
-
-pytestmark = pytest.mark.asyncio
 
 _USER_INPUT = (
     '{"title": "Zwitterion CG", '
@@ -128,7 +127,8 @@ class TestStoreBundle:
 
 class TestGuardFailSteersBack:
     async def test_malformed_final_board_never_reaches_the_gate(self, run: Any) -> None:
-        with contextlib.suppress(Exception):
+        # The form loop gives up after max_iters and says so.
+        with pytest.warns(LoopMaxItersExceeded), contextlib.suppress(Exception):
             await Plan(
                 draft=_CannedDraft(_malformed_board()),
                 approve=auto_grant_approver,

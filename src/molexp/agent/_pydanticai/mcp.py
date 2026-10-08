@@ -21,27 +21,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
-    import httpx
     from pydantic_ai.toolsets import PrefixedToolset
-
-
-def _make_httpx_client_factory(
-    http_client: httpx.AsyncClient,
-) -> Callable[..., httpx.AsyncClient]:
-    """Adapt a pre-built ``httpx.AsyncClient`` to fastmcp's ``httpx_client_factory``.
-
-    fastmcp calls the factory with keyword arguments (``headers``, ``auth``,
-    ``timeout``, ``follow_redirects``, …); accepting ``**kwargs`` and ignoring
-    them mirrors pydantic-ai's own internal adapter — the user-supplied client
-    is authoritative for headers/auth/timeouts.
-    """
-
-    def factory(**_kwargs: object) -> httpx.AsyncClient:
-        return http_client
-
-    return factory
 
 
 def build_mcp_server(
@@ -52,7 +32,6 @@ def build_mcp_server(
     args: tuple[str, ...] = (),
     env: dict[str, str] | None = None,
     url: str = "",
-    http_client: httpx.AsyncClient | None = None,
     headers: dict[str, str] | None = None,
     keep_alive: bool = True,
 ) -> PrefixedToolset[Any]:
@@ -61,10 +40,6 @@ def build_mcp_server(
     Returns the ``MCPToolset`` wrapped with ``.prefixed(name)`` so every tool
     is exposed as ``{name}_{tool}`` — identical naming to the v1
     ``tool_prefix=name`` behavior. ``name`` is also set as the toolset ``id``.
-
-    The caller passes either ``http_client`` or ``headers`` (never both);
-    when ``http_client`` is given it is authoritative and ``headers`` are
-    ignored, matching the v1 builder's precedence.
 
     ``keep_alive`` defaults to ``True`` so a plan that reuses the same
     toolset instance (see :class:`PydanticAIRouter` MCP cache) does not
@@ -83,13 +58,8 @@ def build_mcp_server(
         return MCPToolset(stdio, id=name).prefixed(name)
 
     if transport in ("http", "sse"):
-        factory = _make_httpx_client_factory(http_client) if http_client is not None else None
         transport_cls = StreamableHttpTransport if transport == "http" else SSETransport
-        fastmcp_transport = transport_cls(
-            url=url,
-            headers=headers if http_client is None else None,
-            httpx_client_factory=factory,
-        )
+        fastmcp_transport = transport_cls(url=url, headers=headers)
         return MCPToolset(fastmcp_transport, id=name).prefixed(name)
 
     raise ValueError(f"Unknown MCP transport: {transport!r}")
@@ -111,12 +81,12 @@ async def check_stdio_handshake(
     import asyncio
     import contextlib
     import os
-    from collections.abc import Iterator
+    from collections.abc import Generator
 
     from pydantic_ai.mcp import MCPToolset, StdioTransport
 
     @contextlib.contextmanager
-    def _silence_process_stdio() -> Iterator[None]:
+    def _silence_process_stdio() -> Generator[None]:
         saved_out = os.dup(1)
         saved_err = os.dup(2)
         devnull = os.open(os.devnull, os.O_WRONLY)

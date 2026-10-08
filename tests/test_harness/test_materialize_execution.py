@@ -148,9 +148,8 @@ class TestMaterializeExecution:
         """Multi-file source: per-task modules land under ``workflow/``; the
         assembly (``source``) is injected as ``workflow/__init__.py`` when
         ``files`` omit it; the test lands under ``tests/``; and the driver
-        imports the package by ``module_name``. Regression: a silent __init__
-        drop left generated/workflow/ without ``build_workflow``, breaking
-        CompileWorkflow with AttributeError."""
+        imports the package by ``module_name``. ``generated/workflow/`` therefore
+        always exposes ``build_workflow`` for CompileWorkflow."""
         from molexp.harness.schemas import WorkflowSource
 
         assembly = (
@@ -211,7 +210,7 @@ class TestMaterializeExecution:
         """Driver parses; names the runtime surface; embeds sorted params JSON;
         mentions outputs.json + the canonical terminal-success status; branches
         on --compile-only; mounts scratch_root so ``ctx.workdir`` is available
-        to task bodies (regression: bare execution crashed on NoneType/str)."""
+        to task bodies (it is never ``None`` during bare execution)."""
         _seed_all(ctx.artifact_store)
         _run(ctx)
 
@@ -242,9 +241,8 @@ class TestMaterializeExecution:
     def test_input_set_overlays_fixed_params_and_sweep_first_cell(self, ctx) -> None:
         """``fixed_params`` land in the driver PARAMS verbatim (whole values —
         the channel for list-valued root inputs), and the sweep's first cell
-        overlays the IR default (n_steps 500 → 1000). Regression: a real
-        ``--execute`` run swept ``sigma_values`` per-scalar and crashed
-        iterating a float."""
+        overlays the IR default (n_steps 500 → 1000). A list-valued input such
+        as ``sigma_values`` reaches the task whole, never swept per-scalar."""
         _seed_all(ctx.artifact_store)
         _seed_input_set(ctx.artifact_store, fixed_params={"sigma_values": [0.9, 1.0]})
         _run(ctx)

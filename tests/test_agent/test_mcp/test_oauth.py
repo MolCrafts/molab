@@ -80,10 +80,13 @@ class TestOAuthFlowSession:
 
     def test_callback_round_trips(self):
         sess = OAuthFlowSession()
-        sess.submit_callback("CODE", "STATE")
-        code, state = asyncio.run(sess.callback_handler())
-        assert code == "CODE"
-        assert state == "STATE"
+        sess.submit_callback("CODE", "STATE", iss="https://issuer.example")
+        result = asyncio.run(sess.callback_handler())
+        assert (result.code, result.state, result.iss) == (
+            "CODE",
+            "STATE",
+            "https://issuer.example",
+        )
 
     def test_duplicate_callback_returns_false(self):
         sess = OAuthFlowSession()

@@ -79,7 +79,7 @@ def _records_for(
 ) -> Iterator[dict[str, JSONValue]]:
     source = _relative(hit.path, run_dir)
     if hit.format is LogFormat.LAMMPS_LOG:
-        return thermo_records(hit.path, extra_tags={"source": source})
+        return thermo_records(hit.path, source=source)
     if hit.format is LogFormat.TENSORBOARD:
         return scalar_records(hit.path)
     if hit.format is LogFormat.CSV:
