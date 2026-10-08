@@ -47,4 +47,4 @@ class TestFolderFiles:
         assert dest.read_text() == "hello"
         assert dest.parent == Path(proj.resolve())
         assert proj._disk() is ws.fs
-        assert not hasattr(proj, "fs")
+        assert proj.fs is ws.fs

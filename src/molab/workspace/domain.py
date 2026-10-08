@@ -356,7 +356,16 @@ class Execution(BaseModel):
         raise KeyError(f"Artifact {artifact_id!r} not found in Execution {self.id!r}")
 
     # Set by Run when it hands the record out. Absent on a bare load from disk.
+    # Not part of the record: two attempts compare equal with or without it.
     _run: object | None = PrivateAttr(default=None)
+
+    def __eq__(self, other: object) -> bool:
+        if type(other) is not Execution:
+            return NotImplemented
+        return self.model_dump() == other.model_dump()
+
+    def __hash__(self) -> int:
+        return hash(self.model_dump_json())
 
     def execute(self, workflow: object, /) -> object:
         """Run *workflow* as this queued attempt.
