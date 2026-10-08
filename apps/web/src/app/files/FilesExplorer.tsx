@@ -166,7 +166,9 @@ export const buildFilesExplorerNodes = (
       onPrefetch: () => {
         if (isFile) {
           void import("@/plugins/editor/TextEditor");
-          void import("@monaco-editor/react");
+          void import("@/plugins/editor/MonacoEditor").then((mod) => {
+            mod.MonacoEditor.prefetch();
+          });
           if (fileSelection.fileKind === "image") {
             void import("@/app/renderers/ImageViewer");
           }

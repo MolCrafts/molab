@@ -38,9 +38,6 @@ dependencies = [
 [project.optional-dependencies]
 tensorboard = ["tensorboard>=2.15"]
 all = ["molcrafts-molab[tensorboard]"]
-# Protocol suite only — never imported from src/. Sibling path in
-# [tool.uv.sources]; CI UV_NO_SOURCES=1 skips this extra.
-conformance = ["molrec"]
 dev = [
     "molcrafts-molab[all]",
     "pytest>=7.0",
@@ -77,7 +74,6 @@ molcrafts-molcfg = { path = "../molcfg", editable = true }
 molcrafts-molq = { path = "../molq", editable = true }
 molcrafts-molpy = { path = "../molpy", editable = true }
 molcrafts-molrs = { path = "../molrs/molrs-python", editable = true }
-molrec = { path = "../molrec", editable = true }
 
 [project.scripts]
 molab = "molab.cli:app"
