@@ -14,7 +14,7 @@ Contributor-facing docs for working on `molexp` internals.
 | `lint.yml` | `lint / python` (partners, lock, ruff incl. PLW1514, ty), `lint / web` (biome, tsc) | same | — |
 | `test.yml` | `test / tier`, `test / python (ubuntu-latest)` (pytest), `test / web` (rstest) | + `test / python (macos-latest)` | — |
 | `docs.yml` | `docs / build` (strict Zensical, en + zh) | same | — |
-| `release.yml` | — | — | `v*` tag: `release / build`, `release / pypi` (PyPI, environment `release`); `workflow_dispatch` is a dry run anywhere |
+| `release.yml` | — | — | `v*` tag: `release / build`, `release / pypi` (PyPI, environment `pypi`); `workflow_dispatch` is a dry run anywhere |
 
 CI builds molexp against its partners, never against published releases or a
 developer's own sibling checkouts: `.github/partners.env` names them (molpy and
@@ -30,4 +30,4 @@ push already ran. Shared setup is
 `MolCrafts/molcrafts-ci/actions/<name>@master`. Windows is not a target
 (termios, process groups). To release, bump `version` in `pyproject.toml`,
 merge to master and push a `v*` tag; the PyPI trusted publisher must name
-`release.yml` and the `release` environment.
+`release.yml` and the `pypi` environment.
