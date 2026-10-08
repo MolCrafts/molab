@@ -15,7 +15,7 @@ every other job gates on its outputs (tier, upstream, pull request dedup).
 
 | workflow | fast tier (a feature-branch push to MolCrafts) | full tier (every fork push; dev / master / main on MolCrafts; PRs, tags, dispatches) | upstream only |
 |---|---|---|---|
-| `lint.yml` | `lint / python` (partners, lock, ruff incl. PLW1514, ty), `lint / web` (biome, tsc) | same | — |
+| `lint.yml` | `lint / python` (partners, lock, ruff incl. PLW1514, ty), `lint / web` (biome, tsc), `lint / workflows` (`actions/check-workflows`) | same | — |
 | `test.yml` | `test / context`, `test / python (ubuntu-latest)` (pytest), `test / web` (rstest) | + `test / python (macos-latest)` | — |
 | `docs.yml` | `docs / build` (strict Zensical, en + zh) | same | — |
 | `release.yml` | — | — | `v*` tag: `release / build`, `release / pypi` (PyPI, environment `pypi`); `workflow_dispatch` is a dry run anywhere |
