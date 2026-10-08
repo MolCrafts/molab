@@ -73,10 +73,7 @@ from .contract import (
     WorkflowContract,
 )
 from .digest import compute_workflow_digest
-
-# NOTE: importing ``.execute`` also registers the workspace-side
-# ``set_run_executor`` seam that backs ``Run.execute`` / ``RunSet.execute``.
-from .execute import RunFailedError, RunNotExecutableError, aexecute_run, execute_run
+from .execute import RunFailedError, RunNotExecutableError
 from .ir import (
     EdgeKind,
     GraphEdgeIR,
@@ -86,11 +83,13 @@ from .ir import (
     GraphTaskIR,
     WorkflowGraphIR,
 )
+from .loader import load_workflow_from_entrypoint
 from .outputs import RegisterArtifact, RegisterMetric
 from .protocols import Runnable, Streamable
 from .recovery import (
     WorkflowRecoveryError,
     can_recover_workflow,
+    compiled_workflow_for_experiment,
     compiled_workflow_for_run,
 )
 from .registry import TaskTypeRegistry, default_registry
@@ -118,11 +117,6 @@ from .types import (
     WorkflowError,
     WorkflowExecution,
     WorkflowResult,
-)
-from .version import (
-    TaskTopologyEntry,
-    WorkflowVersion,
-    WorkflowVersionConflictError,
 )
 
 __all__ = [
@@ -165,7 +159,6 @@ __all__ = [
     "TaskInputSpec",
     "TaskOutputSpec",
     "TaskSnapshot",
-    "TaskTopologyEntry",
     "TaskTypeRegistry",
     "UnconditionalEdges",
     "UnknownRouteError",
@@ -188,16 +181,14 @@ __all__ = [
     "WorkflowRecoveryError",
     "WorkflowResult",
     "WorkflowRuntime",
-    "WorkflowVersion",
-    "WorkflowVersionConflictError",
-    "aexecute_run",
     "can_recover_workflow",
+    "compiled_workflow_for_experiment",
     "compiled_workflow_for_run",
     "compute_workflow_digest",
     "default_binding_registry",
     "default_codec",
     "default_registry",
-    "execute_run",
+    "load_workflow_from_entrypoint",
     "read_journal",
     "read_outputs",
     "read_resume_seeds",

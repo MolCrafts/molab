@@ -2,12 +2,12 @@
 
 Reads a local ``zotero.sqlite`` (opened read-only) and yields :class:`ZoteroItem`
 records. Each item's first PDF is *resolved to a path* under Zotero's own
-``storage/`` tree — no bytes are read or copied. :meth:`Bundle.import_zotero`
+``storage/`` tree — no bytes are read or copied. :meth:`Concept.import_zotero`
 turns these into :class:`~molab.knowledge.concepts.Literature` documents
 whose ``ReferenceMeta.pdf_path`` points at (never copies) the original file.
 
 This is a port of ``molab.knowledge.zotero`` onto the workspace surface; it is
-the importer that yields ``Literature`` directories.
+the importer that yields ``Literature`` markdown files.
 """
 
 from __future__ import annotations
@@ -79,7 +79,7 @@ def _item_pdf(conn: sqlite3.Connection, item_id: int, storage_root: Path) -> str
     return str(storage_root / attachment_key / filename)
 
 
-def read_zotero_items(path: str | PathLike[str]) -> list[ZoteroItem]:
+def read_zotero(path: str | PathLike[str]) -> list[ZoteroItem]:
     """Parse a ``zotero.sqlite`` (read-only) into :class:`ZoteroItem` records.
 
     Attachments and notes are excluded; each regular item's PDF (if any) is
@@ -121,4 +121,4 @@ def read_zotero_items(path: str | PathLike[str]) -> list[ZoteroItem]:
         conn.close()
 
 
-__all__ = ["ZoteroItem", "read_zotero_items"]
+__all__ = ["ZoteroItem", "read_zotero"]

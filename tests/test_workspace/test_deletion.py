@@ -17,7 +17,7 @@ def _build(tmp_path):
     ws = Workspace(root=tmp_path, name="lab")
     ws.materialize()
     p = ws.add_project("proj-a")
-    e = p.add_experiment("exp-x", workflow_source="s.py", params={})
+    e = p.add_experiment("exp-x", params={})
     r = e.add_run(params={"seed": 1})
 
     # Seed two terminal Executions (both succeeded) so the run has history

@@ -10,15 +10,15 @@ The runtime no longer mints execution ids or reads a ``fresh.json`` sidecar:
    request recorded on the Execution is honoured: the body runs again despite
    the warm cache (counter 2), and the record still says ``bypass_cache=True``.
 3. A bare ``execute(c)`` has no Execution, so ``result.execution_id`` is
-   ``None``; ``execute(c, run_dir=...)`` without a run context is refused with
-   ``ValueError`` (the runtime does not invent an attempt id for a directory).
+   ``None``; ``execute(c, run_dir=...)`` is a ``TypeError`` (``run_dir`` is
+   not a parameter).
 4. No ``fresh.json`` is written anywhere, and ``WorkflowRuntime`` has no
    ``make_execution_id`` attribute.
 
 Expected stdout (exactly these lines, exit code 0):
 
     e01 True 2
-    None ValueError
+    None TypeError
     arch-own-02f-runtime: ok
 
 Provenance: goldens hard-coded from molab's own behaviour (no third-party
@@ -46,7 +46,7 @@ from molab.workflow import (
 from molab.workspace import Workspace
 
 _GOLDEN_BYPASS = "e01 True 2"
-_GOLDEN_BARE = "None ValueError"
+_GOLDEN_BARE = "None TypeError"
 _GOLDEN_OK = "arch-own-02f-runtime: ok"
 
 _COUNTER: dict[str, int] = {"step": 0}

@@ -39,8 +39,8 @@ def test_put_journal_is_a_filestore_put() -> None:
 
 
 def test_initial_journal_writes_via_put_journal() -> None:
-    src = _function_source("write_initial_workflow_json")
-    assert "_put_journal" in src, "write_initial_workflow_json must write via FileStore"
+    src = _function_source("open_execution_document")
+    assert "_put_journal" in src, "open_execution_document must write via FileStore"
     assert "write_text" not in src
 
 

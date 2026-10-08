@@ -17,6 +17,7 @@ import { type JSX, type ReactNode, useId } from "react";
 
 import { STATUS_GROUPS, type StatusGroupId } from "@/app/runs/statusGroups";
 import { WorkbenchAction } from "@/components/workbench";
+import { formatDurationCompact } from "@/lib/format-time";
 import { cn } from "@/lib/utils";
 
 import type { StatusCountRollup } from "./Dashboard";
@@ -181,6 +182,18 @@ export interface ScheduleItem {
   render?: (children: ReactNode) => ReactNode;
 }
 
+const SCHEDULE_LABEL = "minmax(0,16rem)";
+
+const pad2 = (value: number): string => value.toString().padStart(2, "0");
+
+/** Clock when the window is short; month-day and clock when it spans days. */
+const formatScheduleAxis = (ms: number, spanMs: number): string => {
+  const date = new Date(ms);
+  const clock = `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+  if (spanMs < 36 * 60 * 60 * 1000) return clock;
+  return `${pad2(date.getMonth() + 1)}-${pad2(date.getDate())} ${clock}`;
+};
+
 const STATUS_FILL: Record<StatusGroupId, string> = {
   running: "bg-status-running",
   pending: "bg-status-queued",
@@ -210,49 +223,73 @@ export const Schedule = ({ items, empty, className }: ScheduleProps): ReactNode 
   const span = Math.max(1, max - min);
 
   return (
-    <ol className={cn("divide-y divide-border/50 border-y border-border/70", className)}>
-      {items.map((item) => {
-        const start = item.start;
-        const end = item.end ?? now;
-        const left = start === null ? 0 : ((start - min) / span) * 100;
-        const width = start === null ? 0 : Math.max(1.5, ((end - start) / span) * 100);
-        const fill = item.status ? STATUS_FILL[item.status] : "bg-muted-foreground/40";
-        const row = (
-          <span className="grid min-w-0 grid-cols-[9rem_minmax(0,1fr)] items-center gap-3 px-2 py-2">
-            <span className="min-w-0">
-              <span className="flex min-w-0 items-center gap-2">
-                <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", fill)} />
-                <span className="truncate text-micro font-medium text-foreground">
-                  {item.label}
+    <div className={className}>
+      <ol className="divide-y divide-border/50 border-y border-border/70">
+        {items.map((item) => {
+          const start = item.start;
+          const end = item.end ?? now;
+          const left = start === null ? 0 : ((start - min) / span) * 100;
+          const width = start === null ? 0 : Math.max(1.5, ((end - start) / span) * 100);
+          const fill = item.status ? STATUS_FILL[item.status] : "bg-muted-foreground/40";
+          const duration =
+            start === null ? "" : formatDurationCompact(Math.max(0, end - start) / 1000);
+          const detail = [
+            item.detail,
+            duration,
+            item.end === null && start !== null ? "running" : null,
+          ]
+            .filter((part) => part != null && part !== "")
+            .join(" · ");
+          const row = (
+            <span
+              className="grid min-w-0 items-center gap-3 px-2 py-2"
+              style={{ gridTemplateColumns: `${SCHEDULE_LABEL} minmax(0,1fr)` }}
+            >
+              <span className="min-w-0">
+                <span className="flex min-w-0 items-center gap-2">
+                  <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", fill)} />
+                  <span className="truncate text-micro font-medium text-foreground">
+                    {item.label}
+                  </span>
                 </span>
+                {detail !== "" && (
+                  <span className="block truncate pl-3 text-micro text-muted-foreground">
+                    {detail}
+                  </span>
+                )}
               </span>
-              {item.detail != null && (
-                <span className="block truncate pl-3 text-micro text-muted-foreground">
-                  {item.detail}
-                </span>
-              )}
+              <span className="relative h-4 border-x border-border/60">
+                {start !== null && (
+                  <span
+                    className={cn(
+                      "absolute top-1/2 h-1.5 -translate-y-1/2 rounded-control",
+                      fill,
+                      item.end === null && "opacity-70",
+                    )}
+                    style={{ left: `${left}%`, width: `${Math.min(100 - left, width)}%` }}
+                  />
+                )}
+              </span>
             </span>
-            <span className="relative h-4 border-x border-border/60">
-              {start !== null && (
-                <span
-                  className={cn(
-                    "absolute top-1/2 h-1.5 -translate-y-1/2 rounded-control",
-                    fill,
-                    item.end === null && "opacity-70",
-                  )}
-                  style={{ left: `${left}%`, width: `${Math.min(100 - left, width)}%` }}
-                />
-              )}
-            </span>
-          </span>
-        );
-        return (
-          <li key={item.id} className="min-w-0">
-            {item.render ? item.render(row) : row}
-          </li>
-        );
-      })}
-    </ol>
+          );
+          return (
+            <li key={item.id} className="min-w-0">
+              {item.render ? item.render(row) : row}
+            </li>
+          );
+        })}
+      </ol>
+      <div
+        className="grid items-center gap-3 px-2 pt-1 font-mono text-micro tabular-nums text-muted-foreground"
+        style={{ gridTemplateColumns: `${SCHEDULE_LABEL} minmax(0,1fr)` }}
+      >
+        <span />
+        <span className="flex justify-between">
+          <span>{formatScheduleAxis(min, span)}</span>
+          <span>{formatScheduleAxis(max, span)}</span>
+        </span>
+      </div>
+    </div>
   );
 };
 

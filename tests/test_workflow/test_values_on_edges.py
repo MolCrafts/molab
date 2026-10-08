@@ -122,7 +122,7 @@ class TestValuesOnEdges:
                 # The context names its attempt; the journal lands in execution_dir.
                 self.id = "e01"
                 self.execution_dir = work_dir / "slot"
-                self.based_on_execution_id = None
+                self.predecessor = None
                 self.bypass_cache = False
                 self.params = {"alpha": 7}
                 self.config = {}

@@ -70,7 +70,9 @@ class ProjectCreateRequest(ApiModel):
 
 class ExperimentCreateRequest(ApiModel):
     name: str = Field(..., description="Human-readable experiment name")
-    workflow_source: str | None = Field(None, description="Path to workflow file")
+    workflow_source: dict[str, Any] | None = Field(
+        None, description="Workflow IR document; bound as the document kind"
+    )
     description: str = Field("", description="Experiment description")
     parameter_space: dict[str, Any] = Field(
         default_factory=dict, description="Parameter space definition"
@@ -116,7 +118,7 @@ class RunHarvestRequest(ApiModel):
     ] = Field(default="Finding", description="Knowledge class name")
     narrative: str = Field(..., description="Non-empty interpretation")
     created_by: str = Field(default="ui", description="Author string")
-    name: str | None = Field(default=None, description="Optional KnowledgeItem name")
+    name: str | None = Field(default=None, description="Optional knowledge document name")
     results: dict[str, Any] | None = Field(
         default=None, description="Optional headline results table"
     )
@@ -134,7 +136,7 @@ class RunAnalyzeFailureRequest(ApiModel):
         default=False,
         description="When true, also accept cancelled runs (default: failed only)",
     )
-    name: str | None = Field(default=None, description="Optional KnowledgeItem name")
+    name: str | None = Field(default=None, description="Optional knowledge document name")
 
 
 class ExecutionAttemptCreateRequest(ApiModel):
@@ -143,6 +145,12 @@ class ExecutionAttemptCreateRequest(ApiModel):
     mode: Literal["initial", "retry", "rerun", "resume", "reproduce"] = "initial"
     based_on_execution_id: str | None = None
     checkpoint_artifact_id: str | None = None
+    bypass_cache: bool = Field(
+        default=False,
+        description=(
+            "Recompute every task, ignoring cached node results. Always true for reproduce."
+        ),
+    )
     target: str | None = None
     dispatch: bool = Field(
         default=False,
@@ -162,12 +170,17 @@ class ArtifactPromoteRequest(ApiModel):
 class WorkflowDocumentRequest(ApiModel):
     """Edited workflow IR document posted by the free-layout canvas.
 
-    ``document`` is the wire IR (``{task_configs, links, entries, loops,
-    parallels, ...}``) matching ``workflow/schema/workflow.json``. The route
-    validates it through ``WorkflowCodec.ir_to_spec`` before persisting.
+    ``document`` is the identity-free wire IR (``{task_configs, links, entries,
+    loops, parallels, ...}``). The route validates it through
+    ``WorkflowCodec.ir_to_spec`` before persisting. The compiled digest lives
+    on the Execution, not in this document.
     """
 
     document: dict[str, Any] = Field(..., description="Workflow IR document")
+    convert_to_document: bool = Field(
+        default=False,
+        description="Replace a code-kind binding with this document",
+    )
 
 
 # ── Execution ───────────────────────────────────────────────────────────────
@@ -184,10 +197,12 @@ class ExecutionCreateRequest(ApiModel):
     workflow_json: dict[str, Any] | None = Field(
         default=None,
         description=(
-            "Optional workflow IR (matches schema/workflow.json). When "
-            "provided and the experiment has no workflow bound yet, the "
-            "server binds it and persists the IR to disk. Subsequent "
-            "calls reuse the on-disk binding."
+            "Optional workflow IR (WorkflowCodec.ir_to_spec). On an unbound "
+            "experiment it is bound as the document kind before the run is "
+            "created. On a document experiment it must match the bound document. "
+            "On a code experiment it is rejected; convert with PUT .../workflow "
+            "and convertToDocument. The request never writes the in-process "
+            "binding memo."
         ),
     )
 

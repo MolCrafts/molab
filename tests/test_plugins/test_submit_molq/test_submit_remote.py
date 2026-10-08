@@ -406,7 +406,7 @@ class TestRemoteWorkerOpensStagedAttempt:
         experiment.save()
         run = experiment.add_run(params={"seed": 1})
         run.materialize()
-        queued = run.create_execution()
+        queued = run._create_execution()
         assert queued.id == "e01"
 
         # The "remote host": a scratch tree disjoint from the workspace, filled by

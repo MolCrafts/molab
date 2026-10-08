@@ -134,7 +134,7 @@ class TestSubWorkflow:
         )
         slot = tmp_path / "slot"
         run_context = SimpleNamespace(
-            id="e01", execution_dir=slot, based_on_execution_id=None, bypass_cache=False
+            id="e01", execution_dir=slot, predecessor=None, bypass_cache=False
         )
         result = await WorkflowRuntime().execute(outer, run_context=run_context)
         assert result.status == "succeeded"

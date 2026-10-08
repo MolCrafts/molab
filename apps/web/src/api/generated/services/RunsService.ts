@@ -295,7 +295,7 @@ export class RunsService {
     }
     /**
      * Download Artifact Content
-     * Stream one Execution Artifact's bytes from the authoritative manifest.
+     * Stream one Execution Artifact's bytes.
      * @param projectId
      * @param experimentId
      * @param runId
@@ -673,9 +673,14 @@ export class RunsService {
      * Create Run
      * Create a run in a specific project/experiment (body carries scope ids).
      *
-     * If ``request.workflow_json`` is supplied and the experiment has no
-     * workflow bound, compile and persist the IR before the run is
-     * materialized so worker processes can pick it up off disk.
+     * ``workflow_json``, when set, is compiled first (invalid IR is 400). An
+     * unbound experiment is bound as the document kind before the run is
+     * created, so the run records the revision from that binding. A document
+     * experiment must already carry the same normalized IR; a difference is
+     * 409 (``PUT .../workflow`` first). A code experiment is 409; convert it
+     * with ``PUT .../workflow`` and ``convertToDocument``. A legacy experiment
+     * that still needs ``molab migrate workflow-kind`` is 409. This route
+     * never writes the in-process binding memo.
      * @param requestBody
      * @param molabSession
      * @returns RunResponse Successful Response
@@ -997,7 +1002,7 @@ export class RunsService {
     }
     /**
      * Download Artifact Content
-     * Stream one Execution Artifact's bytes from the authoritative manifest.
+     * Stream one Execution Artifact's bytes.
      * @param projectId
      * @param experimentId
      * @param runId
@@ -1405,9 +1410,14 @@ export class RunsService {
      * Create Run
      * Create a run in a specific project/experiment (body carries scope ids).
      *
-     * If ``request.workflow_json`` is supplied and the experiment has no
-     * workflow bound, compile and persist the IR before the run is
-     * materialized so worker processes can pick it up off disk.
+     * ``workflow_json``, when set, is compiled first (invalid IR is 400). An
+     * unbound experiment is bound as the document kind before the run is
+     * created, so the run records the revision from that binding. A document
+     * experiment must already carry the same normalized IR; a difference is
+     * 409 (``PUT .../workflow`` first). A code experiment is 409; convert it
+     * with ``PUT .../workflow`` and ``convertToDocument``. A legacy experiment
+     * that still needs ``molab migrate workflow-kind`` is 409. This route
+     * never writes the in-process binding memo.
      * @param ws
      * @param requestBody
      * @param molabSession

@@ -1,23 +1,7 @@
-"""Residue scan: the workspace source carries no knowledge name (10 / 11-guards).
+"""Residue scan: workspace source carries no knowledge vocabulary.
 
-The workspace does not know knowledge. ``molab.knowledge`` sits *above* it and
-reaches it only through function-body imports, so the four ``@concept_type``
-registrations the workspace used to carry are gone and no workspace module
-imports knowledge at all. This pins the terminal state by **identifier, import
-module name, non-docstring string literal and source-file stem only** (D12): a
-docstring or a comment may still say "knowledge" (review-only, never a
-criterion), but no name under ``src/molab/workspace/`` may carry the word
-beyond the survivors the workspace legitimately owns:
-
-* ``knowledges`` / ``knowledges.json`` — disk names the workspace owns: the
-  container directory the layout naming law derives (``projects/`` /
-  ``experiments/`` / ``runs/`` / ``knowledges/``), and the legacy per-scope
-  index filename ``molab migrate layout`` lists as a droppable artifact.
-* ``KnowledgeRef`` / the ``knowledge`` field / ``relevant_knowledge`` — the
-  retained read-model shape (its one producer is ``molab.services``).
-
-Anything else is residue from a predecessor member and is reported, never
-white-listed here.
+Identifiers, literals, docstrings and comments under ``src/molab/workspace/``
+are all in scope. The allowlist is empty.
 """
 
 from __future__ import annotations
@@ -32,10 +16,8 @@ import molab
 
 WORKSPACE = Path(molab.__file__).resolve().parent / "workspace"
 
-#: The names the workspace keeps: disk names it owns + the retained read-model.
-ALLOWED_NAMES = frozenset(
-    {"knowledges", "knowledges.json", "KnowledgeRef", "knowledge", "relevant_knowledge"}
-)
+#: Nothing under workspace may carry the word.
+ALLOWED_NAMES = frozenset()
 
 #: A run of identifier characters — the unit a name, a literal or a stem is read in.
 _WORD = re.compile(r"[A-Za-z_][A-Za-z0-9_.]*")
@@ -156,17 +138,33 @@ class TestNoKnowledgeResidue:
         offenders += [f"{stem}: knowledge-named module" for stem in _knowledge_stems()]
         assert not offenders, "knowledge-named name remains:\n  " + "\n  ".join(offenders)
 
-        # The other direction: the scan must still *see* the names the workspace
-        # legitimately keeps, or a walk that read nothing would make the
-        # assertion above vacuously true.
-        survivors = {token for tokens in scanned.values() for _lineno, token in tokens}
-        assert survivors <= ALLOWED_NAMES, f"unexpected survivor: {sorted(survivors)}"
-        assert {"knowledges", "KnowledgeRef"} <= survivors
+    @pytest.mark.unit
+    def test_workspace_prose_names_no_knowledge(self) -> None:
+        offenders = [
+            str(py.relative_to(WORKSPACE))
+            for py in _sources()
+            if "knowledge" in py.read_text(encoding="utf-8").lower()
+        ]
+        assert not offenders, "prose still names knowledge:\n  " + "\n  ".join(offenders)
+
+    @pytest.mark.unit
+    def test_detector_sees_a_planted_name(self) -> None:
+        found = _knowledge_tokens("KnowledgeRef = 1\nx = 'knowledges'\n")
+
+        assert (1, "KnowledgeRef") in found
+        assert (2, "knowledges") in found
 
     @pytest.mark.unit
     @pytest.mark.parametrize(
         "symbol",
-        ["_prefetch_knowledge_children", "_KNOWLEDGE_SKIP_DEFAULT", "_check_knowledge_container"],
+        [
+            "_prefetch_knowledge_children",
+            "_KNOWLEDGE_SKIP_DEFAULT",
+            "_check_knowledge_container",
+            "NON_CONCEPT_SUBDIRS",
+            "_check_strays",
+            "KnowledgeRef",
+        ],
     )
     def test_deleted_symbol_leaves_no_identifier(self, symbol: str) -> None:
         offenders = [

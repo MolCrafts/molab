@@ -19,9 +19,8 @@ from molab.workspace import (
 from molab.workspace import (
     RunNotFoundError as WorkspaceRunNotFoundError,
 )
-from molab.workspace.assets import ArtifactAsset
-from molab.workspace.domain import ExecutionMode, ExecutionStatus
-from molab.workspace.execution_dirs import JOBS, WORK
+from molab.workspace.domain import Artifact, ExecutionMode, ExecutionStatus
+from molab.workspace.execution_dirs import JOBS, product_dirs
 from molab.workspace.execution_repository import ExecutionRepository
 from molab.workspace.fs_cached import CachedRemoteFileSystem
 from molab.workspace.fs_tree import list_tree_children, tree_to_run_file_dicts
@@ -110,72 +109,25 @@ def _execution_response(state) -> ExecutionResponse:  # noqa: ANN001
     )
 
 
-def _execution_artifacts(
-    workspace,  # noqa: ANN001
-    project_id: str,
-    experiment_id: str,
-    run_id: str,
-    execution_id: str,
-) -> list[ArtifactAsset]:
-    """Return the ArtifactAssets owned by one execution from the authoritative manifest."""
-    from molab.workspace.assets import ArtifactAsset, AssetScope
-    from molab.workspace.assets.scan import scan_assets
-
-    scope = AssetScope(kind="run", ids=(project_id, experiment_id, run_id))
-    return [
-        asset
-        for asset in scan_assets(workspace.root, scope=scope, fs=workspace.fs)
-        if isinstance(asset, ArtifactAsset)
-        and asset.producer is not None
-        and asset.producer.execution_id == execution_id
-    ]
-
-
-def _asset_response(asset: ArtifactAsset) -> ArtifactResponse:
-    """Map a manifest :class:`ArtifactAsset` to the API response shape."""
-    producer = asset.producer
+def _artifact_response(artifact: Artifact) -> ArtifactResponse:
+    """Map an Execution Artifact record onto the API response shape."""
+    content = artifact.content
     return ArtifactResponse(
-        id=asset.asset_id,
-        executionId=(producer.execution_id or "") if producer else "",
-        runId=(producer.run_id or "") if producer else "",
-        projectId=asset.scope.ids[0] if asset.scope.ids else "",
-        name=asset.name,
-        sourcePath=str(asset.path),
-        digest=asset.content_hash or "",
-        size=asset.size,
-        contentKind="file",
-        mediaType=asset.mime,
-        semanticType=None,
-        declarationId=None,
-        inputEntityIds=list(producer.inputs) if producer else [],
-        metadata={"task_id": producer.task_id} if producer and producer.task_id else {},
-        createdAt=asset.created_at.isoformat(),
-    )
-
-
-def _download_artifact(
-    workspace,  # noqa: ANN001
-    run,  # noqa: ANN001
-    execution_id: str,
-    artifact_id: str,
-) -> StreamingResponse:
-    """Stream one manifest-backed Artifact's bytes."""
-    from molab.workspace.assets import ArtifactAsset
-    from molab.workspace.assets.scan import get_asset
-
-    asset = get_asset(workspace.root, artifact_id, fs=workspace.fs)
-    if not isinstance(asset, ArtifactAsset):
-        raise HTTPException(status_code=404, detail=f"Artifact {artifact_id!r} not found")
-    producer = asset.producer
-    if producer is None or producer.run_id != run.id or producer.execution_id != execution_id:
-        raise HTTPException(status_code=404, detail="Artifact is not owned by this Execution")
-    target = workspace.fs.join(str(run.run_dir), str(asset.path))
-    if not workspace.fs.is_file(target):
-        raise HTTPException(status_code=404, detail="artifact payload not found")
-    return StreamingResponse(
-        workspace.fs.open(target, "rb"),
-        media_type=asset.mime or "application/octet-stream",
-        headers={"Content-Disposition": f'inline; filename="{asset.name}"'},
+        id=artifact.id,
+        executionId=artifact.execution_id,
+        runId=artifact.run_id,
+        projectId=artifact.project_id,
+        name=artifact.name,
+        sourcePath=artifact.source_path,
+        digest=content.digest,
+        size=content.size,
+        contentKind=content.kind,
+        mediaType=artifact.media_type,
+        semanticType=artifact.semantic_type,
+        declarationId=artifact.declaration_id,
+        inputEntityIds=list(artifact.input_entity_ids),
+        metadata=dict(artifact.metadata),
+        createdAt=artifact.created_at.isoformat(),
     )
 
 
@@ -184,19 +136,26 @@ def _dispatch_to_molq(target, run, execution_id: str | None = None) -> None:  # 
 
     Resources and scheduling come from the target's defaults — the API
     has no per-run CLI overrides like ``molab run --cpus``. When
-    *execution_id* is given the worker reuses it (resume reopens; rerun
-    runs the freshly-derived id) instead of deriving its own.
+    *execution_id* is given the worker starts that record (a RESUME record
+    is the new Execution; rerun runs the freshly-derived id) instead of
+    deriving its own.
     """
-    # A run is dispatchable only through its experiment's entrypoint.
     from molab.workflow import can_recover_workflow
 
     if not can_recover_workflow(run):
+        kind = run.experiment.workflow_kind
+        if kind is None:
+            root = run.experiment.project.workspace.root
+            remedy = f"run `molab migrate workflow-kind {root}`"
+        elif kind == "code":
+            remedy = "run the experiment's defining script to bind a code locator"
+        else:
+            remedy = "PUT a workflow document on the experiment's /workflow route"
         raise HTTPException(
             status_code=422,
             detail=(
-                f"experiment {run.experiment.id!r} has no workflow entrypoint; bind a "
-                "Python Workflow/callable on the experiment (Experiment.define / sweep / "
-                "run) before submitting."
+                f"experiment {run.experiment.id!r} cannot be dispatched "
+                f"(workflow_kind={kind!r}); {remedy}"
             ),
         )
 
@@ -280,11 +239,12 @@ def create_execution(
     if body.dispatch and target is None:
         raise HTTPException(status_code=422, detail="dispatch requires a compute target")
     try:
-        state = run.create_execution(
+        state = run._create_execution(
             mode=ExecutionMode(body.mode),
             created_by=AgentRef(id="ui", type="person", name="Molab UI"),
-            based_on_execution_id=body.based_on_execution_id,
-            checkpoint_artifact_id=body.checkpoint_artifact_id,
+            predecessor=body.based_on_execution_id,
+            checkpoint=body.checkpoint_artifact_id,
+            bypass_cache=body.bypass_cache,
             executor={"backend": "molq", "target": body.target},
             environment={"submit_cwd": str(Path.cwd().resolve())},
         )
@@ -359,7 +319,7 @@ def get_execution_outputs(
     execution_id: str,
     workspace=Depends(get_workspace),  # noqa: ANN001
 ) -> ExecutionOutputsResponse:
-    """Separate stdio, managed Artifacts, evidence, and unregistered work files."""
+    """Separate stdio, managed Artifacts, evidence, and unregistered product files."""
     experiment = _get_experiment(workspace, project_id, experiment_id)
     run = _get_run_or_none(experiment, run_id) if experiment else None
     if run is None:
@@ -376,28 +336,29 @@ def get_execution_outputs(
         path = fs.join(execution_dir, name)
         return fs.read_text(path, encoding="utf-8") if fs.is_file(path) else None
 
-    artifacts = _execution_artifacts(workspace, project_id, experiment_id, run_id, execution_id)
-    artifact_responses = [_asset_response(asset) for asset in artifacts]
-    registered_task_dirs = {
-        asset.producer.task_id
-        for asset in artifacts
-        if asset.producer is not None and asset.producer.task_id
-    }
-    work_dir = fs.join(execution_dir, WORK.name)
+    artifacts = run.execution(execution_id).artifacts
+    artifact_responses = [_artifact_response(artifact) for artifact in artifacts]
+    registered = {artifact.path for artifact in artifacts}
+    # Where a reader looks for results is declared data (``products``), not a
+    # name: tasks write ``out/<task>/``, and a registered artifact is already
+    # listed above, so only the rest of the product tiers is "unregistered".
     unregistered: list[RunFileNode] = []
-    if fs.is_dir(work_dir):
-        prefix = work_dir.rstrip("/") + "/"
-        for path in sorted(fs.rglob(work_dir, "*")):
+    exec_prefix = execution_dir.rstrip("/") + "/"
+    for tier in product_dirs():
+        tier_dir = fs.join(execution_dir, tier.name)
+        if not fs.is_dir(tier_dir):
+            continue
+        for path in sorted(fs.rglob(tier_dir, "*")):
             if not fs.is_file(path):
                 continue
-            rel = path[len(prefix) :] if path.startswith(prefix) else fs.basename(path)
-            if any(rel == task or rel.startswith(task + "/") for task in registered_task_dirs):
+            rel = path[len(exec_prefix) :] if path.startswith(exec_prefix) else path
+            if rel in registered:
                 continue
             stat = fs.stat(path)
             unregistered.append(
                 RunFileNode(
                     name=fs.basename(path),
-                    relPath=f"work/{rel}",
+                    relPath=rel,
                     type="file",
                     size=stat.size,
                     modified=stat.mtime,
@@ -460,26 +421,11 @@ def promote_artifact(
         metadata=body.metadata,
     )
     return ArtifactPromotionResponse(
-        asset=ManagedAssetResponse(
-            id=asset.id,
-            projectId=asset.project_id,
-            title=asset.title,
-            createdAt=asset.created_at.isoformat(),
-            versionCount=len(run.experiment.project.assets.versions(asset.id)),
+        asset=ManagedAssetResponse.from_model(
+            asset,
+            len(run.experiment.project.assets.versions(asset.id)),
         ),
-        version=AssetVersionResponse(
-            id=version.id,
-            assetId=version.asset_id,
-            sourceArtifactId=version.source_artifact_id,
-            version=version.version,
-            digest=version.content.digest,
-            size=version.content.size,
-            contentKind=version.content.kind,
-            mediaType=version.media_type,
-            semanticType=version.semantic_type,
-            metadata=version.metadata,
-            createdAt=version.created_at.isoformat(),
-        ),
+        version=AssetVersionResponse.from_model(version),
     )
 
 
@@ -494,12 +440,27 @@ def download_artifact_content(
     artifact_id: str,
     workspace=Depends(get_workspace),  # noqa: ANN001
 ) -> StreamingResponse:
-    """Stream one Execution Artifact's bytes from the authoritative manifest."""
+    """Stream one Execution Artifact's bytes."""
     experiment = _get_experiment(workspace, project_id, experiment_id)
     run = _get_run_or_none(experiment, run_id) if experiment else None
     if run is None:
         raise RunNotFoundError(project_id, experiment_id, run_id)
-    return _download_artifact(workspace, run, execution_id, artifact_id)
+    try:
+        artifact = run.execution(execution_id).artifact(artifact_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    try:
+        location = run.artifact_location(execution_id, artifact)
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    if not workspace.fs.is_file(location):
+        raise HTTPException(status_code=404, detail="artifact payload not found")
+    filename = Path(artifact.name).name
+    return StreamingResponse(
+        workspace.fs.open(location, "rb"),
+        media_type=artifact.media_type or "application/octet-stream",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
 
 
 @router.post("", response_model=RunResponse, status_code=201)
@@ -679,19 +640,33 @@ def get_run_files(
         raise RunNotFoundError(project_id, experiment_id, run_id)
 
     fs = workspace.fs
-    repo = _execution_repository(workspace, run)
     try:
-        repo.get(execution_id)
+        execution = run.execution(execution_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    run_dir = repo.execution_dir(execution_id)
+    execution_dir = run.execution_dir(execution_id)
+    run_dir = str(execution_dir)
     # Drop pinned listings so newly-written ``*.mlp.jsonl`` / artifacts show up.
     _invalidate_run_nav_cache(workspace, run_dir)
 
-    artifacts = repo.get(execution_id).artifacts
-    artifact_index = {
-        item.path.rsplit(f"/executions/{execution_id}/", 1)[-1]: item for item in artifacts
-    }
+    artifact_index: dict[str, Artifact] = {}
+    base = str(execution_dir).rstrip("/")
+    for artifact in execution.artifacts:
+        try:
+            location = run.artifact_location(execution_id, artifact)
+        except ValueError:
+            continue
+        loc = str(location).rstrip("/")
+        if loc == base:
+            rel = ""
+        elif loc.startswith(base + "/"):
+            rel = loc[len(base) + 1 :]
+        else:
+            try:
+                rel = Path(loc).resolve().relative_to(Path(base).resolve()).as_posix()
+            except (ValueError, OSError):
+                continue
+        artifact_index[rel] = artifact
 
     tree = list_tree_children(fs, run_dir, max_depth=8)
     raw_nodes = tree_to_run_file_dicts(tree)
@@ -805,11 +780,9 @@ def harvest_run_route(
     workspace=Depends(get_workspace),  # noqa: ANN001
 ) -> dict[str, str]:
     """Harvest a terminal run into sourced Knowledge under its experiment."""
-    from molab.knowledge import Finding, Observation, Report
-    from molab.knowledge.concepts import parse_knowledge_class
-    from molab.knowledge.harvest import harvest_run
+    from molab.knowledge.concepts import HARVEST_TARGETS
 
-    harvest_ok = {"Finding": Finding, "Observation": Observation, "Report": Report}
+    harvest_ok = HARVEST_TARGETS
     experiment = _get_experiment(workspace, project_id, experiment_id)
     if not experiment:
         raise RunNotFoundError(project_id, experiment_id, run_id)
@@ -822,9 +795,8 @@ def harvest_run_route(
             detail=f"{body.cls} is not a harvest target",
         )
     try:
-        item = harvest_run(
+        item = harvest_ok[body.cls].harvest(
             run,
-            parse_knowledge_class(body.cls),
             narrative=body.narrative,
             created_by=body.created_by,
             results=body.results,

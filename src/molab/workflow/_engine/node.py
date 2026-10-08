@@ -211,7 +211,7 @@ async def run_task_body(
     """Invoke one task's body against a freshly-built context.
 
     The engine (:mod:`.engine`) routes every node through here so
-    context-construction + remote-gate + dependent-params logic lives in one
+    context-construction + dependent-params logic lives in one
     place. Input resolution (values-on-edges):
 
     * *element* (``wf.parallel`` fan-out) is used as ``ctx.inputs`` directly;
@@ -255,7 +255,6 @@ async def run_task_body(
             effective_config = _resolve_dependent_params(
                 registration=registration,
                 state=state,
-                run_context=deps.run_context,
                 base_config=deps.config,
             )
 
@@ -291,16 +290,6 @@ async def run_task_body(
     set_active_task = getattr(deps.run_context, "set_active_task", None)
     if callable(set_active_task):
         set_active_task(name)
-
-    remote = getattr(registration, "remote", None)
-    if remote is not None and element is NO_OUTPUT:
-        remote_executor = getattr(deps, "remote_executor", None)
-        if remote_executor is not None:
-            return await remote_executor.execute_remote(
-                entry=registration,
-                inputs=inputs,
-                run_dir=getattr(deps, "run_dir", None),
-            )
 
     # Parameter binding treats an absent config as an empty one; the body-call
     # helpers below take a non-optional mapping.

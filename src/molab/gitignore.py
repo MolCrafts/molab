@@ -1,7 +1,7 @@
 """``.gitignore``-aware path filter for workspace tree walks.
 
 Scientific workspaces are often git-managed: dependency trees, build
-outputs, and editor caches already live in ``.gitignore``. Bundle
+outputs, and editor caches already live in ``.gitignore``. Knowledge
 enumeration (``GET /api/knowledge``) and the UI file browser
 (``GET /api/workspace/files``) share this matcher so they skip the same
 paths git would — without re-implementing a second hard-coded denylist.

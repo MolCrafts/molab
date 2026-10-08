@@ -225,9 +225,10 @@ def _detail_experiment(node: TreeNode) -> list[RenderableType]:
         kv.add_row("description", meta.description)
     if meta.tags:
         kv.add_row("tags", ", ".join(meta.tags))
-    wf_src = getattr(meta, "workflow_source", None)
-    if wf_src:
-        kv.add_row("workflow", str(wf_src))
+    if exp.workflow_kind is not None:
+        kv.add_row("workflow_kind", exp.workflow_kind)
+    if meta.workflow_entrypoint:
+        kv.add_row("workflow_entrypoint", meta.workflow_entrypoint)
     n_rep = getattr(meta, "n_replicas", None)
     if n_rep is not None:
         kv.add_row("n_replicas", str(n_rep))
@@ -309,11 +310,11 @@ def _detail_execution(node: TreeNode) -> list[RenderableType]:
             kv.add_row("scheduler_job_id", str(job_id))
     if node.elapsed:
         kv.add_row("elapsed", node.elapsed)
-    exec_dir = run.run_dir / "executions" / exec_id
+    exec_dir = run.execution_dir(exec_id)
     kv.add_row("execution_dir", str(exec_dir))
     # Per-attempt artifacts now live under executions/<id>/; surface
     # whichever ones exist so users can locate them at a glance.
-    for fname in ("workflow.json", "error.txt"):
+    for fname in ("workflow.json",):
         candidate = exec_dir / fname
         if candidate.exists():
             kv.add_row(fname, str(candidate))

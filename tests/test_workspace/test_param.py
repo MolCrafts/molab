@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from molab.workspace.param import GridSpace, Params, UniformSpace
+from molab.param import GridSpace, Params, UniformSpace
 
 
 class TestParamsClass:

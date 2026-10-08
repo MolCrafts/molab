@@ -135,6 +135,12 @@ export default defineConfig(({ command }) => {
       },
     },
     server: {
+      // The engine and texlive-basic are a one-time local download (~125 MB,
+      // AGPL). Dev serves them; the production bundle does not copy them
+      // into the wheel.
+      publicDir: {
+        ignore: ["busytex/**"],
+      },
       // Mock mode is self-contained. Leaving the Python proxy enabled there
       // turns any intentionally unimplemented fixture into a noisy HPM
       // connection error when no backend is running.

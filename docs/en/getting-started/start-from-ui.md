@@ -21,7 +21,7 @@ The UI presents the same hierarchy the workspace stores on disk:
 | **Project** | A container that groups related experiments. |
 | **Experiment** | A workflow plus a parameter space plus an optional default compute target. |
 | **Run** | One immutable execution request: concrete parameters, a status (`pending → running → succeeded / failed / cancelled`). |
-| **Execution** | One physical attempt of a run (`exec-<run_id>[-N]`). A run accumulates attempts when it is resumed or rerun. |
+| **Execution** | One physical attempt of a run (`eNN`). A run accumulates attempts when it is resumed or rerun. |
 
 ## 1. Start the server
 
@@ -167,7 +167,7 @@ Click any run in the tree to open the run page:
 
 - **Overview** — run id, project, experiment, parameters, results,
   duration, backend, and execution count.
-- **Executions** — one row per attempt (`exec-<run_id>-N`) with its
+- **Executions** — one row per attempt (`eNN`) with its
   status and timing; selecting an attempt scopes the Logs tab to it.
 - **Logs** — captured stdout/stderr per attempt, with a "view latest"
   shortcut.
@@ -198,9 +198,9 @@ immutable record of an execution request; you **cancel** a live
 A `failed` or `cancelled` run can be continued — two distinct verbs,
 both keeping the same run id:
 
-- **Resume** — reopen the existing attempt, keep the completed tasks'
+- **Resume** — create a new Execution, keep the completed tasks'
   outputs, recompute only what didn't finish.
-- **Rerun** — open a fresh attempt (`exec-<run_id>-N`) from the top of
+- **Rerun** — open a fresh attempt (`eNN`) from the top of
   the graph; **Rerun fresh** also bypasses content-addressed cache
   reads (`?fresh=true` / CLI `--rerun --fresh`).
 

@@ -9,6 +9,7 @@ task and every upstream of it are verified.
 
 from __future__ import annotations
 
+import ast
 import asyncio
 import json
 from pathlib import Path
@@ -32,7 +33,6 @@ from molab.workflow._engine.persistence import (
     mark_task_status,
     mark_workflow_finished,
     open_execution_document,
-    write_initial_workflow_json,
 )
 from molab.workspace import Workspace
 from tests.support.counting_fs import CountingFileSystem
@@ -179,12 +179,11 @@ class TestOpenExecutionDocument:
         assert doc["execution_id"] == "e01"
         assert doc["based_on_execution_id"] is None
         assert doc["workflow_digest"] == compiled.workflow_digest
+        assert "workflow_id" not in doc
         assert doc["workflow_name"] == "ab"
         assert doc["started_at"] is not None
         assert doc["finished_at"] is not None
         assert {"status", "outputs", "error"}.isdisjoint(doc)
-        if "workflow_id" in doc:
-            assert doc["workflow_id"] == compiled.to_ir(strict=False)["workflow_id"]
 
     def test_writes_into_the_given_directory(self, tmp_path: Path) -> None:
         run = _run(tmp_path)
@@ -461,11 +460,10 @@ class TestWorkflowWriterContract:
         with run.start() as ctx:
             eid = ctx.id
         journal_dir = run.execution_dir(eid)
-        write_initial_workflow_json(journal_dir, execution_id=eid)
         path = journal_dir / "workflow.json"
-        doc = json.loads(path.read_text())
-        doc["task_configs"] = [{"task_id": name, "status": "pending"}]
-        path.write_text(json.dumps(doc))
+        path.write_text(
+            json.dumps({"task_configs": [{"task_id": name, "status": "pending"}], "links": []})
+        )
         return eid, journal_dir
 
     def test_both_readers_return_the_written_output(self, tmp_path: Path) -> None:
@@ -481,3 +479,50 @@ class TestWorkflowWriterContract:
         mark_task_status(journal_dir, "train", "completed", output=object(), snapshot_key="k")
         assert read_outputs(run, eid) == {}
         assert run.get_result("train", execution_id=eid) is None
+
+
+_LEGACY_JOURNAL_HELPERS = (
+    "read_node_outputs",
+    "last_resumable_execution_id",
+    "seed_from_execution",
+    "filter_resume_seeds",
+    "write_initial_workflow_json",
+    "_workflow_relpath",
+    "_workflow_json_path",
+)
+
+
+def _imported_modules(path: Path) -> list[tuple[int, str]]:
+    """Every ``(lineno, dotted name)`` *path* imports, from an AST scan."""
+    out: list[tuple[int, str]] = []
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        if isinstance(node, ast.Import):
+            out.extend((node.lineno, alias.name) for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            out.append((node.lineno, node.module))
+            out.extend((node.lineno, f"{node.module}.{alias.name}") for alias in node.names)
+    return out
+
+
+class TestLegacyJournalHelpersRemoved:
+    """The ``(run_dir, execution_id)`` journal helpers are gone, including the seed filter."""
+
+    @pytest.mark.parametrize("name", _LEGACY_JOURNAL_HELPERS)
+    def test_helper_is_absent(self, name: str) -> None:
+        assert not hasattr(persistence, name)
+
+    def test_no_importer_survives(self) -> None:
+        repo = Path(__file__).resolve().parents[2]
+        roots = (repo / "src" / "molab", repo / "tests")
+        scanned = [
+            path for root in roots for path in root.rglob("*.py") if "__pycache__" not in path.parts
+        ]
+        assert len(scanned) > 100
+        banned = {f"molab.workflow._engine.persistence.{name}" for name in _LEGACY_JOURNAL_HELPERS}
+        offenders = [
+            f"{path.relative_to(repo)}:{lineno}: {module}"
+            for path in scanned
+            for lineno, module in _imported_modules(path)
+            if module in banned
+        ]
+        assert not offenders, "legacy journal helper still imported:\n  " + "\n  ".join(offenders)

@@ -7,17 +7,22 @@ no ``getattr`` guessing.
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import Field
 
 from molab.workspace import (
+    Execution,
     Experiment,
     Project,
     Run,
+    WorkflowKind,
 )
+from molab.workspace.domain import ArtifactOrigin, Asset, AssetVersion, ImportOrigin
 from molab.workspace.execution_dirs import ExecutionDir, list_execution_dirs
+from molab.workspace.experiment import WORKFLOW_DOC_FILENAME
 
 from ._wire import ApiModel
 
@@ -29,6 +34,37 @@ def _str_or_none(value: object) -> str | None:
     return str(value)
 
 
+def _latest_execution(executions: Iterable[Execution]) -> Execution | None:
+    """The newest attempt, keyed by ``(created_at, seq)``.
+
+    Args:
+        executions: Attempts of one run, or of every run on a detail response.
+
+    Returns:
+        The latest execution, or ``None`` when *executions* is empty.
+    """
+    found = list(executions)
+    if not found:
+        return None
+    return max(found, key=lambda execution: (execution.created_at, execution.seq))
+
+
+def _latest_source_commit(executions: Iterable[Execution]) -> str | None:
+    """``source.vcs_commit`` of the newest attempt.
+
+    Args:
+        executions: Attempts to scan. An empty sequence returns ``None``.
+
+    Returns:
+        The commit string, or ``None`` when there is no attempt or it captured
+        no source.
+    """
+    latest = _latest_execution(executions)
+    if latest is None or latest.source is None:
+        return None
+    return latest.source.vcs_commit
+
+
 class WorkflowDocumentResponse(ApiModel):
     """The persisted (normalized) workflow IR document for an experiment."""
 
@@ -38,13 +74,11 @@ class WorkflowDocumentResponse(ApiModel):
 
 
 def _read_context_results(run: Run) -> dict[str, Any]:
-    """Read the ``context.results`` block from run.json on disk.
+    """Read a legacy results mapping if an old run record still carries one.
 
-    The ``Context`` object is owned by the active ``RunContext`` only; once
-    a run has finished, the only place ``results`` survives is the
-    ``context`` sub-object inside ``run.json``. We read it lazily so the
-    REST response can show "what did this run produce" without bringing
-    runtime state into the persisted ``RunMetadata`` model.
+    Current attempts keep products on the Execution. This helper only looks
+    at a leftover mapping inside ``run.json`` so an old record can still
+    answer. It does not write.
     """
     run_json = Path(run.run_dir / "run.json")
     if not run_json.exists():
@@ -74,12 +108,16 @@ class ProjectResponse(ApiModel):
     config: dict[str, Any] = Field(default_factory=dict)
     created: str
     experimentCount: int | None = None
+    ref: str
 
     @classmethod
     def from_model(cls, project: Project, experiment_count: int | None = None) -> ProjectResponse:
+        from molab.workspace.refs import ref_of
+
         return cls(
             id=project.id,
             name=project.name,
+            ref=str(ref_of(project)),
             path=workspace_relative(project.workspace.resolve(), project.path),
             description=project.description,
             owner=project.owner,
@@ -102,7 +140,8 @@ class ExperimentResponse(ApiModel):
 
     description: str = ""
     workflow: str | None = None
-    workflowType: str | None = None
+    workflowKind: WorkflowKind | None = None
+    workflowEntrypoint: str | None = None
     planRunId: str | None = None
     gitCommit: str | None = None
     parameterSpace: dict[str, Any] = Field(default_factory=dict)
@@ -110,6 +149,7 @@ class ExperimentResponse(ApiModel):
     created: str
     runCount: int | None = None
     runs: list[RunSummary] = Field(default_factory=list)
+    ref: str
 
     @classmethod
     def from_model(
@@ -117,6 +157,7 @@ class ExperimentResponse(ApiModel):
     ) -> ExperimentResponse:
         # Always expose runCount so the nav shows "2 runs" before expand.
         # Full run rows are only included when *runs* is passed (detail GET).
+        git_commit = None
         if runs is not None:
             run_objs = runs
             run_list = [
@@ -138,21 +179,34 @@ class ExperimentResponse(ApiModel):
         else:
             run_list = []
             run_count = len(experiment.list_runs())
+        from molab.workspace.refs import ref_of
+
+        document = experiment.workflow_document
+        workflow = json.dumps(document, sort_keys=True) if document is not None else None
+        entrypoint = experiment.metadata.workflow_entrypoint
+        if experiment.workflow_kind == "document":
+            entrypoint = None
+        if runs is not None:
+            git_commit = _latest_source_commit(
+                execution for run in run_objs for execution in run.executions
+            )
         return cls(
             id=experiment.id,
             projectId=experiment.project.id,
             name=experiment.name,
             path=workspace_relative(experiment.project.workspace.resolve(), experiment.path),
             description=experiment.description,
-            workflow=experiment.metadata.workflow_source,
-            workflowType=experiment.metadata.workflow_type,
+            workflow=workflow,
+            workflowKind=experiment.workflow_kind,
+            workflowEntrypoint=entrypoint,
             planRunId=experiment.metadata.plan_run_id,
-            gitCommit=experiment.metadata.git_commit,
+            gitCommit=git_commit,
             parameterSpace=experiment.metadata.parameter_space,
             defaultTarget=experiment.metadata.default_target,
             created=experiment.created_at.isoformat(),
             runCount=run_count,
             runs=run_list,
+            ref=str(ref_of(experiment)),
         )
 
 
@@ -246,33 +300,34 @@ class RunResponse(ApiModel):
     workflowSource: str | None = None
     executions: list[ExecutionResponse] = Field(default_factory=list)
     target: str | None = None
+    ref: str
+    """Canonical reference. Only the server composes it."""
 
     @classmethod
     def from_model(cls, run: Run) -> RunResponse:
-        # ``workflow_snapshot`` is an opaque, read-only legacy JSON dict
-        # on disk with no typed model. The response fishes the
-        # well-known fields out by name. When the run has
-        # no snapshot but the experiment carries a ``workflow_source``
-        # advisory string, synthesize a minimal snapshot so callers
-        # see the label without having to refetch the experiment.
+        from molab.workspace.refs import ref_of
+
+        experiment = run.experiment
+        document = experiment.workflow_document
+        wf_source = json.dumps(document, sort_keys=True) if document is not None else None
+        kind = experiment.workflow_kind
         wf_snap = None
-        snap = run.metadata.workflow_snapshot
-        wf_source: str | None = run.experiment.metadata.workflow_source
-        if isinstance(snap, dict):
-            source = snap.get("source") or wf_source or ""
+        if kind is not None:
+            entrypoint = experiment.metadata.workflow_entrypoint
+            if entrypoint:
+                source = entrypoint
+            elif document is not None:
+                source = WORKFLOW_DOC_FILENAME
+            else:
+                source = kind
+            latest = _latest_execution(run.executions)
             wf_snap = WorkflowSnapshotResponse(
-                source=str(source),
-                gitCommit=_str_or_none(snap.get("git_commit"))
-                or run.experiment.metadata.git_commit,
-                codeHash=_str_or_none(snap.get("code_hash")),
-                configHash=_str_or_none(snap.get("config_hash")),
-            )
-        elif wf_source:
-            wf_snap = WorkflowSnapshotResponse(
-                source=wf_source,
-                gitCommit=run.experiment.metadata.git_commit,
-                codeHash=None,
-                configHash=None,
+                source=source,
+                gitCommit=_latest_source_commit(run.executions),
+                codeHash=None if latest is None else latest.workflow_digest,
+                configHash=(
+                    None if latest is None else _str_or_none(latest.environment.get("config_hash"))
+                ),
             )
         executions = [
             ExecutionResponse(
@@ -314,6 +369,7 @@ class RunResponse(ApiModel):
             workflowSource=wf_source,
             executions=executions,
             target=run.metadata.target,
+            ref=str(ref_of(run)),
         )
 
 
@@ -596,19 +652,81 @@ class ManagedAssetResponse(ApiModel):
     createdAt: str
     versionCount: int = 0
 
+    @classmethod
+    def from_model(cls, asset: Asset, version_count: int) -> ManagedAssetResponse:
+        """Map a domain asset onto the wire.
+
+        Args:
+            asset: The asset. ``projectId`` comes from its scope.
+            version_count: How many versions the asset has.
+
+        Returns:
+            The response model.
+        """
+        return cls(
+            id=asset.id,
+            projectId=asset.project_id or "",
+            title=asset.title,
+            createdAt=asset.created_at.isoformat(),
+            versionCount=version_count,
+        )
+
 
 class AssetVersionResponse(ApiModel):
     id: str
     assetId: str
-    sourceArtifactId: str
+    sourceArtifactId: str | None = None
+    originKind: Literal["artifact", "import"]
+    originRef: str | None = None
+    originUri: str | None = None
+    importAction: str | None = None
     version: int
-    digest: str
-    size: int
-    contentKind: str
+    digest: str | None = None
+    size: int | None = None
+    contentKind: str | None = None
     mediaType: str | None = None
     semanticType: str | None = None
     metadata: dict[str, Any] = Field(default_factory=dict)
     createdAt: str
+
+    @classmethod
+    def from_model(cls, version: AssetVersion) -> AssetVersionResponse:
+        """Map one asset version, including its origin, onto the wire.
+
+        Args:
+            version: The version record.
+
+        Returns:
+            The response model. Digest fields are ``None`` when the version
+            has no content reference.
+        """
+        origin = version.origin
+        content = version.content
+        origin_ref: str | None = None
+        origin_uri: str | None = None
+        import_action: str | None = None
+        if isinstance(origin, ArtifactOrigin):
+            origin_ref = origin.ref
+        elif isinstance(origin, ImportOrigin):
+            origin_uri = origin.uri
+            import_action = origin.action
+        return cls(
+            id=version.id,
+            assetId=version.asset_id,
+            sourceArtifactId=version.source_artifact_id,
+            originKind=origin.kind,
+            originRef=origin_ref,
+            originUri=origin_uri,
+            importAction=import_action,
+            version=version.version,
+            digest=None if content is None else content.digest,
+            size=None if content is None else content.size,
+            contentKind=None if content is None else content.kind,
+            mediaType=version.media_type,
+            semanticType=version.semantic_type,
+            metadata=dict(version.metadata),
+            createdAt=version.created_at.isoformat(),
+        )
 
 
 class ArtifactPromotionResponse(ApiModel):

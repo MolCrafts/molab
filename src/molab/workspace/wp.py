@@ -4,7 +4,7 @@ Read/write path ops scoped to a :class:`~molab.workspace.Workspace` root,
 speaking through the workspace's :class:`~molab.workspace.fs.FileSystem`
 (local or remote). Designed for scripts and tools that fix
 :func:`~molab.workspace.validate.validate_workspace` findings (e.g. move a
-``layout.stray`` directory under ``projects/.../assets/``).
+stray out of an execution directory).
 
 Entity-aware rehoming (``Run`` → another experiment) stays on
 :meth:`~molab.workspace.folder.Folder.move_to`; this

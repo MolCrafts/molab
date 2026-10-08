@@ -1,38 +1,34 @@
 /**
  * Pure, React-free, IO-free builders for the Knowledge document shell:
  *
- * - {@link buildDocTree} recovers parent/child nesting from Note `relPath`
- *   segments and buckets the top level into a dedicated knowledge-base group
- *   (workspace-root bundle docs) plus one group per attached entity
- *   (project / experiment / run).
+ * - {@link buildDocTree} groups documents by the server-reported `hostPath`.
+ *   The empty host is the knowledge-base group; every other host is one flat
+ *   group. Documents are never nested.
  * - {@link buildOutline} extracts a document's H1–H3 headings, in order,
  *   ignoring H4+ and any `#` lines inside fenced code blocks.
- *
- * These are the sole automatable units of the 04 knowledge-tree feature; the
- * surrounding tree / panel components are non-binding UI verification.
  */
 
 export interface DocEntry {
-  /** The Note's bundle-relative identity path (its directory). */
+  /** Workspace-relative path of the markdown file. */
   relPath: string;
-  /** Display name for the Note. */
+  /** Display name. */
   name: string;
+  /** Workspace-relative host directory. `""` is the workspace root. */
+  hostPath: string;
 }
 
-export type DocEntityKind = "project" | "experiment" | "run";
-
-export type DocTreeNodeKind = "group" | "dir" | "doc";
+export type DocTreeNodeKind = "group" | "doc";
 
 export interface DocTreeNode {
-  /** Stable id: the accumulated relPath for docs/dirs, or `group:*` for groups. */
+  /** Stable id: the document relPath, `group:knowledge-base`, or `group:host:<hostPath>`. */
   id: string;
   /** Display label. */
   name: string;
   kind: DocTreeNodeKind;
-  /** The Note's bundle-relative identity path — set only for `kind === "doc"`. */
+  /** The document path — set only for `kind === "doc"`. */
   relPath: string | null;
-  /** For entity groups: the owning entity kind + its directory name. Absent on the KB group. */
-  entity?: { kind: DocEntityKind; dir: string };
+  /** Workspace-relative host. `""` is the workspace root. */
+  hostPath: string;
   children: DocTreeNode[];
 }
 
@@ -45,158 +41,47 @@ export interface OutlineHeading {
 export const KB_GROUP_ID = "group:knowledge-base";
 const KB_GROUP_NAME = "Knowledge base";
 
-interface Owner {
-  groupId: string;
-  groupName: string;
-  entity?: { kind: DocEntityKind; dir: string };
-  /** Number of leading path segments consumed by the entity prefix. */
-  prefixLen: number;
-}
-
 /**
- * Classify a Note by its relPath: which top-level group owns it and how many
- * leading segments are the entity-container prefix. A relPath under
- * `projects/…[/experiments/…[/runs/…]]` belongs to the deepest such entity;
- * everything else is a root-bundle knowledge-base doc.
- *
- * What a segment holds is a *directory name*, never an id — an experiment's
- * slug, a run's parameters. It is carried as `dir` so a consumer resolving it
- * against the entity list compares it with what the server reports as that
- * entity's path, not with a UUIDv7 that appears nowhere in the tree.
- */
-const classify = (segments: string[]): Owner => {
-  if (segments[0] === "projects" && segments.length >= 2) {
-    const projectDir = segments[1];
-    if (segments[2] === "experiments" && segments.length >= 4) {
-      const experimentDir = segments[3];
-      if (segments[4] === "runs" && segments.length >= 6) {
-        const runDir = segments[5];
-        return {
-          groupId: `group:run:${runDir}`,
-          groupName: runDir,
-          entity: { kind: "run", dir: runDir },
-          prefixLen: 6,
-        };
-      }
-      return {
-        groupId: `group:experiment:${experimentDir}`,
-        groupName: experimentDir,
-        entity: { kind: "experiment", dir: experimentDir },
-        prefixLen: 4,
-      };
-    }
-    return {
-      groupId: `group:project:${projectDir}`,
-      groupName: projectDir,
-      entity: { kind: "project", dir: projectDir },
-      prefixLen: 2,
-    };
-  }
-  return { groupId: KB_GROUP_ID, groupName: KB_GROUP_NAME, prefixLen: 0 };
-};
-
-/** Insert one Note into its group, materializing intermediate dir nodes. */
-const insert = (group: DocTreeNode, entry: DocEntry, prefixLen: number): void => {
-  const segments = entry.relPath.split("/");
-  const remaining = segments.slice(prefixLen);
-
-  // A Note whose relPath is exactly the entity container (no sub-path) attaches
-  // directly under the group as a leaf.
-  if (remaining.length === 0) {
-    upsertDoc(group.children, entry.relPath, entry.relPath, entry.name);
-    return;
-  }
-
-  let level = group.children;
-  for (let i = 0; i < remaining.length; i += 1) {
-    const nodeRelPath = segments.slice(0, prefixLen + i + 1).join("/");
-    const isLeaf = i === remaining.length - 1;
-    let node = level.find((n) => n.id === nodeRelPath);
-    if (!node) {
-      node = {
-        id: nodeRelPath,
-        name: isLeaf ? entry.name : remaining[i],
-        kind: isLeaf ? "doc" : "dir",
-        relPath: isLeaf ? entry.relPath : null,
-        children: [],
-      };
-      level.push(node);
-    } else if (isLeaf) {
-      // A previously-created intermediate dir is now confirmed to be a Note.
-      node.kind = "doc";
-      node.relPath = entry.relPath;
-      node.name = entry.name;
-    }
-    level = node.children;
-  }
-};
-
-/** Add or promote a leaf doc node in `children` (idempotent on id). */
-const upsertDoc = (children: DocTreeNode[], id: string, relPath: string, name: string): void => {
-  const existing = children.find((n) => n.id === id);
-  if (existing) {
-    existing.kind = "doc";
-    existing.relPath = relPath;
-    existing.name = name;
-    return;
-  }
-  children.push({ id, name, kind: "doc", relPath, children: [] });
-};
-
-const ENTITY_RANK: Record<DocEntityKind, number> = { project: 0, experiment: 1, run: 2 };
-
-/** Sort a node's children in place (dirs before docs, each alphabetical). */
-const sortChildren = (nodes: DocTreeNode[]): void => {
-  nodes.sort((a, b) => {
-    if (a.kind !== b.kind) {
-      // dirs group above sibling docs for a stable, readable tree.
-      if (a.kind === "dir") return -1;
-      if (b.kind === "dir") return 1;
-    }
-    return a.name.localeCompare(b.name);
-  });
-  for (const node of nodes) sortChildren(node.children);
-};
-
-/**
- * Assemble a nested document tree from a flat list of Notes. The top level is a
- * dedicated knowledge-base group (root-bundle docs) plus one group per entity
- * (project / experiment / run) that has attached docs. Nesting within a group is
- * recovered from the Notes' relPath segments. Empty input yields an empty tree.
+ * Group documents by `hostPath`. The workspace root (`""`) is the knowledge-base
+ * group and leads. Every other host is `group:host:<hostPath>`. Children are
+ * flat documents. Empty input yields an empty tree.
  */
 export const buildDocTree = (entries: DocEntry[]): DocTreeNode[] => {
   const groups = new Map<string, DocTreeNode>();
 
   for (const entry of entries) {
-    const segments = entry.relPath.split("/").filter(Boolean);
-    if (segments.length === 0) continue;
-    const owner = classify(segments);
-    let group = groups.get(owner.groupId);
+    const hostPath = entry.hostPath;
+    const id = hostPath === "" ? KB_GROUP_ID : `group:host:${hostPath}`;
+    let group = groups.get(id);
     if (!group) {
       group = {
-        id: owner.groupId,
-        name: owner.groupName,
+        id,
+        name: hostPath === "" ? KB_GROUP_NAME : hostPath,
         kind: "group",
         relPath: null,
-        ...(owner.entity ? { entity: owner.entity } : {}),
+        hostPath,
         children: [],
       };
-      groups.set(owner.groupId, group);
+      groups.set(id, group);
     }
-    insert(group, { ...entry, relPath: segments.join("/") }, owner.prefixLen);
+    group.children.push({
+      id: entry.relPath,
+      name: entry.name,
+      kind: "doc",
+      relPath: entry.relPath,
+      hostPath,
+      children: [],
+    });
   }
 
   const ordered = [...groups.values()].sort((a, b) => {
-    // The KB group leads; entity groups follow, ranked by kind then id.
-    if (a.entity === undefined) return b.entity === undefined ? 0 : -1;
-    if (b.entity === undefined) return 1;
-    if (a.entity.kind !== b.entity.kind) {
-      return ENTITY_RANK[a.entity.kind] - ENTITY_RANK[b.entity.kind];
-    }
-    return a.entity.dir.localeCompare(b.entity.dir);
+    if (a.hostPath === "" && b.hostPath !== "") return -1;
+    if (b.hostPath === "" && a.hostPath !== "") return 1;
+    return a.hostPath.localeCompare(b.hostPath);
   });
-
-  for (const group of ordered) sortChildren(group.children);
+  for (const group of ordered) {
+    group.children.sort((a, b) => a.name.localeCompare(b.name));
+  }
   return ordered;
 };
 
@@ -239,4 +124,55 @@ export const buildOutline = (markdown: string): OutlineHeading[] => {
   }
 
   return headings;
+};
+
+export type HostKind = "workspace" | "project" | "experiment" | "run";
+
+export interface HostOption {
+  hostPath: string;
+  kind: HostKind;
+  label: string;
+  disabled: boolean;
+}
+
+/**
+ * Hosts a document can move to. The first option is the workspace root.
+ * Every other option copies the entity's server `path` and is sorted by it.
+ * The document's current host is disabled. No path is composed.
+ */
+export const listHostOptions = (
+  entities: {
+    projects: ReadonlyArray<{ path: string; name: string }>;
+    experiments: ReadonlyArray<{ path: string; name: string }>;
+    runs: ReadonlyArray<{ path: string; name: string }>;
+  },
+  currentHostPath: string,
+): HostOption[] => {
+  const rest: Array<Omit<HostOption, "disabled">> = [
+    ...entities.projects.map((item) => ({
+      hostPath: item.path,
+      kind: "project" as const,
+      label: item.name,
+    })),
+    ...entities.experiments.map((item) => ({
+      hostPath: item.path,
+      kind: "experiment" as const,
+      label: item.name,
+    })),
+    ...entities.runs.map((item) => ({
+      hostPath: item.path,
+      kind: "run" as const,
+      label: item.name,
+    })),
+  ];
+  rest.sort((a, b) => a.hostPath.localeCompare(b.hostPath));
+  return [
+    {
+      hostPath: "",
+      kind: "workspace",
+      label: "Workspace root",
+      disabled: currentHostPath === "",
+    },
+    ...rest.map((item) => ({ ...item, disabled: item.hostPath === currentHostPath })),
+  ];
 };

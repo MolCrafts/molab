@@ -29,7 +29,7 @@ When execution begins, the runtime builds the initial workflow state (optionally
 
 If a `RunContext` is attached (`execute(..., run_context=ctx)`), the runtime binds the run's profile config into every task **by name**, binds the run's sweep parameters into root tasks **by name** (with a content-addressed `workdir` exposed as `ctx.workdir`), persists per-node outputs under the run's execution directory, and back-propagates task failures so the run's final status is correct.
 
-The runtime also relies on the compiled workflow identity rather than on ad hoc process state. `workflow_id` is derived deterministically from the workflow name and task topology, which is what makes it useful for correlating equivalent graphs across executions and machines.
+The runtime also relies on the compiled workflow identity rather than on ad hoc process state. `workflow_digest` is derived deterministically from the workflow name and task topology, which is what makes it useful for correlating equivalent graphs across executions and machines.
 
 ## Where Persistent State Lives
 
@@ -39,11 +39,11 @@ Workflow execution state — the `workflow.json` snapshot under `<run_dir>/execu
 
 Cache persistence is pluggable. `Caching` orchestrates the cache policy (key derivation, format version, LRU eviction); the storage primitive is a `CacheStore` implementation supplied at construction time:
 
-- `FileCacheStore(run_dir / "cache")` — the default when you pass a `run_context`; the runtime builds this automatically. Task-result cache lives **under the run**, not at the workspace root.
-- `ws.cache.as_cache_store()` — an explicit workspace-wide cache folder. Execution does not auto-create it.
+- `FileCacheStore(`.molab/runs/<run-id>/cache/`)` — the default when you pass a `run_context`; the runtime builds this automatically. Task-result cache lives **under the run**, not at the workspace root.
+- `an explicit FileCacheStore` — an explicit workspace-wide cache folder. Execution does not auto-create it.
 - `FileCacheStore(path)` — any other directory. Useful when the caller has no run (e.g. ad-hoc scripts; the FastAPI server's process-local cache).
 
-The user-home `~/.molab/cache/` shortcut from earlier Molab versions is gone — caching is always either run-local or explicitly opted into via `FileCacheStore` / `ws.cache`.
+There is no user-home cache. `WorkflowRuntime.execute` / `start` no longer take `run_dir=`. `load_workflow_from_entrypoint` lives in `molab.workflow` only.
 
 ## Blocking Execution and Background Execution
 

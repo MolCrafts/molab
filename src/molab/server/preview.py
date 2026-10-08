@@ -36,7 +36,6 @@ __all__ = [
     "PreviewReaderError",
     "PreviewSidecarNotFoundError",
     "SidecarInfo",
-    "asset_has_sidecar",
     "frames_to_extxyz",
     "load_preview",
     "load_sidecar_reader",
@@ -125,12 +124,3 @@ def snapshot_reader(
     from molab.plugins.molvis.snapshot import render_png
 
     return render_png(preview_frames(dataset_path, limit=limit), dataset_path=str(dataset_path))
-
-
-def asset_has_sidecar(workspace, asset) -> bool:  # noqa: ANN001
-    from .routes._scope import resolve_scope_dir
-
-    scope_dir = resolve_scope_dir(workspace, asset.scope)
-    if scope_dir is None:
-        return False
-    return resolve_sidecar(asset.absolute_path(scope_dir)) is not None

@@ -2,7 +2,7 @@
 
 One `molab` script usually needs more than one execution shape. You may want a fast smoke run for local iteration, a conservative default for everyday work, and a heavier configuration for production or cluster submission. `molcfg` exists so those variants stay in data instead of leaking into ad-hoc flags or duplicated scripts.
 
-The framework treats a profile as opaque user data. It loads a config file, resolves one named profile, injects the merged mapping as the run's build-time config, and records the chosen profile on the run. The framework does not assign special meaning to keys like `epochs`, `dataset`, or `skip_heavy_compute`; task code reads those fields explicitly, by declaring them as parameters.
+A profile `config_hash` is content-only: the profile name is a label, so two profiles with the same data share one run. New run ids are UUIDv7. The framework treats a profile as opaque user data. It loads a config file, resolves one named profile, injects the merged mapping as the run's build-time config, and records the chosen profile on the run. The framework does not assign special meaning to keys like `epochs`, `dataset`, or `skip_heavy_compute`; task code reads those fields explicitly, by declaring them as parameters.
 
 ## A Config File Makes Variants Explicit
 

@@ -32,11 +32,12 @@ import { CreateExperimentDialog } from "@/app/components/CreateExperimentDialog"
 import { CreateProjectDialog } from "@/app/components/CreateProjectDialog";
 import { CreateRunDialog } from "@/app/components/CreateRunDialog";
 import { EMPTY_COPY } from "@/app/components/entity";
+import { buildRunListActions } from "@/app/entities/runListActions";
 import type { NavigationExplorerProps } from "@/app/navigation/sections";
 import { TreeMenuItems, type TreeNode, type TreeNodeAction, TreeView } from "@/app/panels/TreeView";
 import { prefetchRenderer } from "@/app/renderers/lazyRenderers";
 import { defaultExecutionId } from "@/app/renderers/useRunViewer";
-import { buildRunListActions } from "@/app/runs/runListActions";
+import { experimentWorkflowLabel } from "@/app/state/api";
 import { executionOutputsQueryOptions, projectAssetsQueryOptions } from "@/app/state/entityQueries";
 import type {
   ExperimentSummary,
@@ -944,7 +945,7 @@ export const ProjectsExplorer = ({
         <CreateRunDialog
           projectId={createRunExperiment.projectId}
           experimentId={createRunExperiment.id}
-          workflowFile={createRunExperiment.workflowFile || ""}
+          workflowFile={experimentWorkflowLabel(createRunExperiment)}
           open
           trigger={null}
           onOpenChange={(open) => {

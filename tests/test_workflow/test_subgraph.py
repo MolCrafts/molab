@@ -96,10 +96,10 @@ class TestSubgraph:
         assert by_name["c"].depends_on == ["b"]
         assert _all_names(sub) == {"a", "b", "c"}
 
-    def test_recomputes_workflow_id(self) -> None:
+    def test_recomputes_workflow_digest(self) -> None:
         spec, _ = _build_chain()
         sub = spec.subgraph(["c"])
-        assert sub.workflow_id != spec.workflow_id
+        assert sub.workflow_digest != spec.workflow_digest
 
     def test_include_downstream_pulls_in_reachable_closure(self) -> None:
         spec, _ = _build_diamond()

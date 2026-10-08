@@ -3,7 +3,7 @@
 /* tslint:disable */
 /* eslint-disable */
 /**
- * One search hit projected from the bundle index entry.
+ * One search hit projected from a search-index row.
  */
 export type KnowledgeSearchRow = {
     path: string;

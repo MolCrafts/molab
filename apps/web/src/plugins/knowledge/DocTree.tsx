@@ -3,10 +3,9 @@ import {
   Blocks,
   BookOpen,
   Check,
-  FilePlus,
+  FileText,
   Filter,
   FlaskConical,
-  Folder,
   FolderInput,
   NotebookPen,
   Pencil,
@@ -45,8 +44,10 @@ import {
   WorkbenchRetryAction,
 } from "@/components/workbench";
 import { cn } from "@/lib/utils";
-import { buildDocTree, type DocEntityKind, type DocTreeNode } from "./knowledgeDocTree";
+import { HostPickerDialog } from "./HostPickerDialog";
+import { buildDocTree, type DocTreeNode, KB_GROUP_ID, listHostOptions } from "./knowledgeDocTree";
 import { knowledgeNoteQueryOptions } from "./queries";
+import { isTexDocument } from "./texDocument";
 import { useKnowledgeDocs, useKnowledgeFacets } from "./useKnowledgeDocs";
 
 interface KnowledgeFilterProps {
@@ -148,10 +149,17 @@ interface DocTreeProps {
   onSelect: (selection: Selection) => void;
 }
 
-const ENTITY_ICON: Record<DocEntityKind, ComponentType<{ className?: string }>> = {
-  project: Blocks,
-  experiment: FlaskConical,
-  run: PlayCircle,
+const groupPresentation = (
+  snapshot: WorkspaceSnapshot,
+  hostPath: string,
+): { label: string; icon: ComponentType<{ className?: string }> } => {
+  const project = snapshot.projects.find((row) => row.path === hostPath);
+  if (project) return { label: project.name, icon: Blocks };
+  const experiment = snapshot.experiments.find((row) => row.path === hostPath);
+  if (experiment) return { label: experiment.name, icon: FlaskConical };
+  const run = snapshot.runs.find((row) => row.path === hostPath);
+  if (run) return { label: run.name, icon: PlayCircle };
+  return { label: hostPath, icon: BookOpen };
 };
 
 const collectExpandIds = (nodes: DocTreeNode[], acc: string[]): string[] => {
@@ -245,6 +253,7 @@ export const DocTree = ({ snapshot, activeId, onSelect }: DocTreeProps): JSX.Ele
     successLabel: string;
     run: () => Promise<void>;
   } | null>(null);
+  const [moveTarget, setMoveTarget] = useState<{ path: string; hostPath: string } | null>(null);
 
   useEffect(() => {
     if (!operationSuccess) return;
@@ -252,7 +261,9 @@ export const DocTree = ({ snapshot, activeId, onSelect }: DocTreeProps): JSX.Ele
     return () => window.clearTimeout(handle);
   }, [operationSuccess]);
 
-  const tree = buildDocTree(notes.map((n) => ({ relPath: n.relPath, name: n.name })));
+  const tree = buildDocTree(
+    notes.map((n) => ({ relPath: n.relPath, name: n.name, hostPath: n.hostPath ?? "" })),
+  );
 
   const guard = async (
     runningLabel: string,
@@ -274,7 +285,7 @@ export const DocTree = ({ snapshot, activeId, onSelect }: DocTreeProps): JSX.Ele
     }
   };
 
-  const handleCreateRoot = async (): Promise<void> => {
+  const handleCreate = async (hostPath: string): Promise<void> => {
     const name = await prompt({
       title: "New document",
       label: "Document name",
@@ -282,20 +293,7 @@ export const DocTree = ({ snapshot, activeId, onSelect }: DocTreeProps): JSX.Ele
       confirmLabel: "Create",
     });
     if (!name) return;
-    await guard("Creating document…", "Document created.", () => createDoc(name));
-  };
-
-  const handleCreateChild = async (parentPath: string): Promise<void> => {
-    const name = await prompt({
-      title: "New child document",
-      label: "Document name",
-      description: parentPath,
-      confirmLabel: "Create",
-    });
-    if (!name) return;
-    await guard("Creating child document…", "Child document created.", () =>
-      createDoc(name, parentPath),
-    );
+    await guard("Creating document…", "Document created.", () => createDoc(name, hostPath));
   };
 
   const handleRename = async (path: string, current: string): Promise<void> => {
@@ -309,16 +307,8 @@ export const DocTree = ({ snapshot, activeId, onSelect }: DocTreeProps): JSX.Ele
     await guard("Renaming document…", "Document renamed.", () => renameDoc(path, name));
   };
 
-  const handleMove = async (path: string): Promise<void> => {
-    const parentPath = await prompt({
-      title: "Move document",
-      label: "New parent path",
-      description: "The bundle-relative path of the parent document.",
-      placeholder: "kb/parent-note",
-      confirmLabel: "Move",
-    });
-    if (!parentPath) return;
-    await guard("Moving document…", "Document moved.", () => moveDoc(path, parentPath));
+  const handleMove = (path: string, currentHost: string): void => {
+    setMoveTarget({ path, hostPath: currentHost });
   };
 
   const handleDelete = async (path: string, name: string): Promise<void> => {
@@ -328,7 +318,7 @@ export const DocTree = ({ snapshot, activeId, onSelect }: DocTreeProps): JSX.Ele
         <>
           Document{" "}
           <InlineCode className="rounded-control bg-muted px-1 py-1 text-label">{name}</InlineCode>{" "}
-          and its child documents will be permanently removed.
+          will be permanently removed.
         </>
       ),
       confirmLabel: "Delete",
@@ -339,16 +329,9 @@ export const DocTree = ({ snapshot, activeId, onSelect }: DocTreeProps): JSX.Ele
   };
 
   const docActions = (node: DocTreeNode): TreeNodeAction[] => {
-    if (node.relPath === null) return [];
+    if (node.relPath === null || isTexDocument(node.relPath)) return [];
     const path = node.relPath;
     return [
-      {
-        id: "new-child",
-        label: "New child document",
-        icon: FilePlus,
-        disabled: operationLabel !== null,
-        onSelect: () => void handleCreateChild(path),
-      },
       {
         id: "rename",
         label: "Rename",
@@ -361,7 +344,7 @@ export const DocTree = ({ snapshot, activeId, onSelect }: DocTreeProps): JSX.Ele
         label: "Move",
         icon: FolderInput,
         disabled: operationLabel !== null,
-        onSelect: () => void handleMove(path),
+        onSelect: () => void handleMove(path, node.hostPath),
       },
       {
         id: "delete",
@@ -375,28 +358,13 @@ export const DocTree = ({ snapshot, activeId, onSelect }: DocTreeProps): JSX.Ele
     ];
   };
 
-  /**
-   * Name the entity a doc group hangs off, given its directory.
-   *
-   * Matched on the path each entity reports, because that directory is a name
-   * and the id is a UUIDv7 that never appears in the tree. The directory is
-   * itself readable, so it stands in when nothing matches.
-   */
-  const entityLabel = (kind: DocEntityKind, dir: string): string => {
-    const ownsDir = (path: string): boolean => path.split("/").pop() === dir;
-    if (kind === "project") return snapshot.projects.find((p) => ownsDir(p.path))?.name ?? dir;
-    if (kind === "experiment")
-      return snapshot.experiments.find((e) => ownsDir(e.path))?.name ?? dir;
-    return snapshot.runs.find((r) => ownsDir(r.path))?.name ?? dir;
-  };
-
   const toTreeNode = (node: DocTreeNode): TreeNode => {
     if (node.kind === "doc" && node.relPath) {
       const path = node.relPath;
       return {
         id: node.id,
         label: node.name,
-        icon: NotebookPen,
+        icon: isTexDocument(path) ? FileText : NotebookPen,
         iconClassName: "text-muted-foreground",
         onPrefetch: () => {
           void import("./KnowledgeViewer");
@@ -404,39 +372,27 @@ export const DocTree = ({ snapshot, activeId, onSelect }: DocTreeProps): JSX.Ele
         },
         onSelect: () => onSelect({ objectType: "knowledge", objectId: path }),
         actions: docActions(node),
-        children: node.children.length > 0 ? node.children.map(toTreeNode) : undefined,
       };
     }
-    if (node.kind === "group") {
-      const isKb = node.entity === undefined;
-      const label = node.entity ? entityLabel(node.entity.kind, node.entity.dir) : node.name;
-      const icon = node.entity ? ENTITY_ICON[node.entity.kind] : BookOpen;
-      return {
-        id: node.id,
-        label,
-        icon,
-        iconClassName: "text-muted-foreground",
-        labelClassName: "font-semibold",
-        actions: isKb
-          ? [
-              {
-                id: "new-doc",
-                label: "New document",
-                icon: Plus,
-                disabled: operationLabel !== null,
-                onSelect: () => void handleCreateRoot(),
-              },
-            ]
-          : undefined,
-        children: node.children.map(toTreeNode),
-      };
-    }
-    // Intermediate directory segment (no Note of its own).
+    const presented =
+      node.id === KB_GROUP_ID
+        ? { label: node.name, icon: BookOpen }
+        : groupPresentation(snapshot, node.hostPath);
     return {
       id: node.id,
-      label: node.name,
-      icon: Folder,
+      label: presented.label,
+      icon: presented.icon,
       iconClassName: "text-muted-foreground",
+      labelClassName: "font-semibold",
+      actions: [
+        {
+          id: "new-doc",
+          label: "New document",
+          icon: Plus,
+          disabled: operationLabel !== null,
+          onSelect: () => void handleCreate(node.hostPath),
+        },
+      ],
       children: node.children.map(toTreeNode),
     };
   };
@@ -496,7 +452,7 @@ export const DocTree = ({ snapshot, activeId, onSelect }: DocTreeProps): JSX.Ele
           label="New document"
           kind="ghost"
           disabled={operationLabel !== null}
-          onClick={() => void handleCreateRoot()}
+          onClick={() => void handleCreate("")}
         >
           <Plus className="size-icon" />
         </WorkbenchIconAction>
@@ -659,6 +615,19 @@ export const DocTree = ({ snapshot, activeId, onSelect }: DocTreeProps): JSX.Ele
       )}
       {promptDialog}
       {confirmDialog}
+      <HostPickerDialog
+        open={moveTarget !== null}
+        onOpenChange={(open) => {
+          if (!open) setMoveTarget(null);
+        }}
+        options={listHostOptions(snapshot, moveTarget?.hostPath ?? "")}
+        onPick={(hostPath) => {
+          if (!moveTarget) return;
+          const path = moveTarget.path;
+          setMoveTarget(null);
+          void guard("Moving document…", "Document moved.", () => moveDoc(path, hostPath));
+        }}
+      />
     </div>
   );
 };

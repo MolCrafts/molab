@@ -1,9 +1,8 @@
 """Workspace utility functions.
 
 The layer-agnostic id / slug / content-hash primitives (``slugify``,
-``generate_id``, ``generate_asset_id``, ``compute_content_hash``) moved to
-the cross-layer primitive :mod:`molab.ids` (okf-01-01) — a cross-layer
-primitive shared by workspace and knowledge. They
+``generate_id``, ``compute_content_hash``) moved to
+the cross-layer primitive :mod:`molab.ids` (okf-01-01). They
 remain importable from ``molab.workspace.utils`` (same function objects)
 for back-compat. The run-domain id derivation below (``derive_run_id``)
 stays here — it is workspace-specific, not a layer-agnostic primitive.
@@ -17,7 +16,6 @@ from typing import TYPE_CHECKING
 
 from molab.ids import (
     compute_content_hash,
-    generate_asset_id,
     generate_id,
     hash_bytes,
     hash_copy,
@@ -30,16 +28,15 @@ if TYPE_CHECKING:
 __all__ = [
     "compute_content_hash",
     "derive_run_id",
-    "generate_asset_id",
     "generate_id",
     "hash_bytes",
     "hash_copy",
     "slugify",
 ]
 
-#: The mandatory Run-directory prefix (layout naming law: ``runs/run-<id>/``).
-#: Part of the on-disk contract, not cosmetic — the ONE definition every
-#: strip/build site cites instead of restating ``"run-"`` per call site.
+#: Legacy directory prefix still recognized when reading an old tree.
+#: New runs are named by their parameters. This constant is the one
+#: definition every strip/build site cites instead of restating the prefix.
 
 
 def derive_run_id(params: Mapping[str, JSONValue], *, length: int = 16) -> str:

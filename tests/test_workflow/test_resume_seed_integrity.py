@@ -1,6 +1,6 @@
 """Resume-seed integrity on real RESUME contexts.
 
-A resumed attempt (``run.start(mode=RESUME, based_on_execution_id=…)``) seeds
+A resumed attempt (``run.start(mode=RESUME, predecessor=…)``) seeds
 completed-node outputs from its predecessor's journal. The runtime's one seed
 gate verifies every seed against the ``based_on`` journal before the new
 attempt's journal is opened: a seed survives only when its task's code,
@@ -107,7 +107,7 @@ def _run(tmp_path: Path):
 
 
 def _attempt(run, compiled, *, mode=None, based_on=None, seed_outputs=None):
-    kwargs = {} if mode is None else {"mode": mode, "based_on_execution_id": based_on}
+    kwargs = {} if mode is None else {"mode": mode, "predecessor": based_on}
     with run.start(**kwargs) as ctx:
         return asyncio.run(
             WorkflowRuntime().execute(compiled, run_context=ctx, seed_outputs=seed_outputs)
@@ -115,9 +115,7 @@ def _attempt(run, compiled, *, mode=None, based_on=None, seed_outputs=None):
 
 
 def _resume(run, compiled, seed_outputs, *, bypass_cache=False):
-    with run.start(
-        mode=ExecutionMode.RESUME, based_on_execution_id="e01", bypass_cache=bypass_cache
-    ) as ctx:
+    with run.start(mode=ExecutionMode.RESUME, predecessor="e01", bypass_cache=bypass_cache) as ctx:
         return asyncio.run(
             WorkflowRuntime().execute(compiled, run_context=ctx, seed_outputs=seed_outputs)
         )

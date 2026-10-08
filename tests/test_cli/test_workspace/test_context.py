@@ -18,7 +18,6 @@ from typer.testing import CliRunner
 from molab.cli import app
 from molab.cli.workspace import context as context_cmd
 from molab.knowledge import Note
-from molab.knowledge.write import write_knowledge
 from molab.workspace import Workspace
 from molab.workspace.workspace_context import WorkspaceContext
 
@@ -34,10 +33,9 @@ def _with_note(tmp_path: Path, name: str, text: str) -> Workspace:
     ws = Workspace(tmp_path / "ws", name="lab")
     ws.materialize()
     experiment = ws.add_project("p").add_experiment("e")
-    write_knowledge(
+    Note.create(
         experiment,
-        name=name,
-        of=Note,
+        name,
         sources=[],
         created_by="cli",
         text=text,

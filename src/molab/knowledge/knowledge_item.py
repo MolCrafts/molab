@@ -1,76 +1,40 @@
-"""``KnowledgeItem`` — a typed, source-linked OKF Concept.
+"""Typed pointers a knowledge document cites.
 
-A ``KnowledgeItem`` is a Note-shaped Concept whose ``meta.json`` carries a typed
-head (:class:`KnowledgeMeta`: a :data:`KnowledgeKind` plus a **required,
-non-empty** list of :class:`SourceRef`) and whose human narrative lives in
-``index.md``.
-
-**The load-bearing invariant** — every KnowledgeItem carries ≥1 ``SourceRef`` —
-is enforced at :class:`KnowledgeMeta` construction: a sourceless meta **fails
-loudly** (``ValidationError``). So no execution-derived knowledge can be created
-unsourced (integration.md §5.2, coordination invariant #4).
-
-**Sources vs edges.** ``meta.json`` (``KnowledgeMeta.sources``) is the
-*authoritative* typed record of every source (any :data:`SourceKind`, incl.
-content-hash / file references that have no in-tree home). Where a source *is* an
-in-tree directory (a ``Run`` / ``Experiment`` / Concept), :meth:`KnowledgeItem.cite`
-also writes a **typed OKF out-edge** (reusing the P0.1 edge role) so the
-knowledge graph is traversable and the item is *reachable from* what it cites.
-
-Follows the ``Literature`` / ``ReferenceMeta`` precedent; registered against
-the shared ``@concept_type`` registry so
-:func:`~molab.knowledge.concept.concept_from_dir` rebuilds it.
+:class:`SourceRef` is the value written as a markdown link. A run, experiment,
+project, artifact or asset is a reference; literature is an https link; a file
+is a relative path.
 """
 
 from __future__ import annotations
 
-from typing import ClassVar, Literal, cast, get_args
+from pathlib import Path, PurePosixPath
+from typing import Literal
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel
 
-from .concept import META_JSON_FILENAME, Concept
-from .concept_meta import ConceptMeta
-from .types import concept_type
-
-KNOWLEDGE_ITEM_KIND = "knowledge.item"
-
-KnowledgeKind = Literal[
-    "Note",
-    "Literature",
-    "Report",
-    "Finding",
-    "Plan",
-    "Observation",
-]
-"""The typed category of a knowledge item."""
-
-KNOWLEDGE_KINDS: tuple[KnowledgeKind, ...] = get_args(KnowledgeKind)
-"""The KnowledgeKind vocabulary, in declaration order."""
+from .edges import Edge
 
 
-def parse_knowledge_kind(value: str) -> KnowledgeKind:
-    """Validate an untrusted ``kind`` string against :data:`KnowledgeKind`.
-
-    Agent tools and CLI flags carry the kind as a free ``str``. Passing that
-    straight into a ``Literal``-typed API only defers the failure to model
-    construction, mid-turn; validating at the boundary yields one clear error
-    naming the whole vocabulary.
-
-    Raises:
-        ValueError: If *value* is not one of :data:`KNOWLEDGE_KINDS`.
-    """
-    for kind in KNOWLEDGE_KINDS:
-        if value == kind:
-            return kind
-    raise ValueError(
-        f"unknown knowledge kind {value!r}; expected one of: {', '.join(KNOWLEDGE_KINDS)}"
-    )
+def _relative_posix(path: str, base: str) -> str:
+    """*path* relative to *base*, including ``..`` segments, as posix."""
+    dest = Path(path).parts
+    start = Path(base).parts
+    common = 0
+    for left, right in zip(dest, start, strict=False):
+        if left != right:
+            break
+        common += 1
+    ups = ("..",) * (len(start) - common)
+    return PurePosixPath(*ups, *dest[common:]).as_posix()
 
 
 SourceKind = Literal[
     "artifact",
     "run",
     "experiment",
+    "project",
+    "execution",
+    "asset",
     "file",
     "decision",
     "agent_action",
@@ -80,7 +44,7 @@ SourceKind = Literal[
 
 
 class SourceRef(BaseModel, frozen=True):
-    """A typed pointer to an existing canonical object a KnowledgeItem derives from.
+    """A typed pointer to an existing canonical object a document derives from.
 
     Attributes:
         kind: What sort of object *ref* names.
@@ -93,69 +57,149 @@ class SourceRef(BaseModel, frozen=True):
     ref: str
     span: str | None = None
 
-
-class KnowledgeMeta(ConceptMeta):
-    """The typed ``meta.json`` head of a :class:`KnowledgeItem`.
-
-    Extends :class:`ConceptMeta` (frozen, ``extra="allow"``). ``sources`` is
-    **required and non-empty** — the single chokepoint that makes a sourceless
-    knowledge item impossible.
-    """
-
-    type: str = KNOWLEDGE_ITEM_KIND
-    kind: KnowledgeKind
-    sources: list[SourceRef]
-    status: Literal["active", "stale", "superseded", "conflicting"] = "active"
-    supersedes: tuple[str, ...] = ()
-    confidence: float | None = None
-    created_by: str
-
-    @field_validator("sources")
     @classmethod
-    def _require_at_least_one_source(cls, value: list[SourceRef]) -> list[SourceRef]:
-        """Reject an empty ``sources`` list — the source-attribution invariant."""
-        if not value:
-            raise ValueError(
-                "a KnowledgeItem must carry at least one SourceRef — source "
-                "attribution is required (no unsourced knowledge)"
-            )
-        return value
+    def of(
+        cls,
+        entity: object,
+        *,
+        artifact_id: str | None = None,
+        span: str | None = None,
+    ) -> SourceRef:
+        """A source pointing at a live workspace entity.
 
+        Project, Experiment, Run, Asset, and a Run plus *artifact_id* become
+        the ``molab:`` reference :func:`molab.workspace.refs.ref_of` builds.
+        Any other workspace ``Folder`` is a ``file`` source at that folder's
+        absolute path.
 
-@concept_type(KNOWLEDGE_ITEM_KIND)
-class KnowledgeItem(Concept):
-    """A typed, source-linked knowledge Concept (see the module docstring)."""
-
-    DEFAULT_TYPE: ClassVar[str] = KNOWLEDGE_ITEM_KIND
-
-    # ── typed head (meta.json) ────────────────────────────────────────────
-
-    def read_knowledge_meta(self) -> KnowledgeMeta:
-        """Load this item's typed :class:`KnowledgeMeta` from ``meta.json``.
-
-        Raises loudly (``ValidationError``) if the on-disk head is not a valid
-        KnowledgeMeta — e.g. missing ``kind`` or an empty ``sources`` list.
+        Raises:
+            TypeError: *entity* is not a workspace folder or asset, or
+                *artifact_id* is set on a non-Run.
         """
-        fpath = self._fs.join(str(self.path), META_JSON_FILENAME)
-        return cast("KnowledgeMeta", KnowledgeMeta.from_json(self._fs.read_text(fpath)))
+        from molab.workspace.domain import Asset
+        from molab.workspace.experiment import Experiment
+        from molab.workspace.folder import Folder
+        from molab.workspace.project import Project
+        from molab.workspace.refs import ref_of
+        from molab.workspace.run import Run
 
-    def write_knowledge_meta(self, meta: KnowledgeMeta) -> None:
-        """Atomically write this item's typed ``meta.json``.
+        if isinstance(entity, (Project, Experiment, Run, Asset)):
+            built = ref_of(entity, artifact_id=artifact_id)
+            return cls(kind=built.kind, ref=str(built), span=span)
+        if artifact_id is not None:
+            raise TypeError(f"artifact_id is only valid on a Run, got {type(entity).__name__}")
+        if isinstance(entity, Folder):
+            return cls(kind="file", ref=str(entity.resolve()), span=span)
+        raise TypeError(f"SourceRef.of cannot name a {type(entity).__name__}")
 
-        ``type`` / ``id`` are stamped by :meth:`Concept.write_meta`, so
-        :func:`concept_from_dir` rebuilds a :class:`KnowledgeItem` and identity
-        stays path-derived.
+    @property
+    def link_role(self) -> str:
+        """``cites`` for a literature reference; ``derived_from`` otherwise."""
+        return "cites" if self.kind == "reference" else "derived_from"
+
+    def link_target(self, base_dir: str) -> str:
+        """The markdown target this source writes, relative to *base_dir*.
+
+        Entity kinds require a ``molab:`` ref (build one with :meth:`of`).
+        A literature DOI becomes an https DOI URL. A file path that is
+        absolute is rewritten relative to *base_dir*.
+
+        Raises:
+            ValueError: An entity kind is not a ``molab:`` ref, or a reference
+                is neither an http(s) URL nor a DOI.
         """
-        self.write_meta(meta)
+        from molab.workspace.refs import is_ref
+
+        if self.kind in {"project", "experiment", "run", "execution", "artifact", "asset"}:
+            if not is_ref(self.ref):
+                raise ValueError(
+                    f"entity source {self.ref!r} is not a molab reference; use SourceRef.of"
+                )
+            target = self.ref
+        elif self.kind == "reference":
+            text = self.ref
+            if text.startswith(("http://", "https://")):
+                target = text
+            elif text.upper().startswith("DOI:"):
+                target = "https://doi.org/" + text.split(":", 1)[1]
+            elif text.startswith("10."):
+                target = "https://doi.org/" + text
+            else:
+                raise ValueError(f"reference {text!r} is not an http(s) URL or a DOI")
+        else:
+            if Path(self.ref).is_absolute():
+                target = _relative_posix(self.ref, base_dir)
+            else:
+                target = self.ref
+        if self.span:
+            return f"{target}#{self.span}"
+        return target
+
+    def link_line(self, base_dir: str) -> str:
+        """The one source-link line, rendered by :func:`edges.link_line`."""
+        from .edges import encode_label, link_line
+
+        target = self.link_target(base_dir)
+        leaf = target.split("#", 1)[0].rstrip("/").rsplit("/", 1)[-1]
+        role = "cites" if self.link_role == "cites" else "derived_from"
+        return link_line(encode_label(role, leaf), target)
+
+    @classmethod
+    def from_edge(cls, edge: Edge) -> SourceRef:
+        """The source a typed edge writes back as.
+
+        A ``molab:`` target keeps its parsed kind. An https target is a
+        reference. Anything else is a file at the absolute path. A ``#fragment``
+        becomes *span*. A malformed ref raises :class:`InvalidRefError`.
+        """
+        from molab.workspace.refs import is_ref, parse_ref
+
+        raw = edge.target
+        target, sep, fragment = raw.partition("#")
+        span = fragment if sep else None
+        if is_ref(target):
+            parsed = parse_ref(target)
+            return cls(kind=parsed.kind, ref=target, span=span)
+        if target.startswith(("http://", "https://")):
+            return cls(kind="reference", ref=target, span=span)
+        return cls(kind="file", ref=target, span=span)
+
+    @classmethod
+    def normalize(
+        cls,
+        sources: list[SourceRef | object] | None,
+        *,
+        default_host: object,
+    ) -> list[SourceRef]:
+        """Normalize a free-form source list into typed :class:`SourceRef`\\ s.
+
+        A ``Folder`` becomes :meth:`of`. An empty request is
+        ``[SourceRef.of(default_host)]``. A DOI string becomes an https DOI
+        reference. Any other string is a ``file`` source.
+        """
+        from molab.workspace.folder import Folder
+
+        if not sources:
+            return [cls.of(default_host)]
+        out: list[SourceRef] = []
+        for item in sources:
+            if isinstance(item, SourceRef):
+                out.append(item)
+            elif isinstance(item, Folder):
+                out.append(cls.of(item))
+            else:
+                text = str(item)
+                if text.upper().startswith("DOI:"):
+                    doi = "https://doi.org/" + text.split(":", 1)[1]
+                    out.append(cls(kind="reference", ref=doi))
+                elif text.startswith("10."):
+                    out.append(cls(kind="reference", ref="https://doi.org/" + text))
+                else:
+                    out.append(cls(kind="file", ref=text))
+        return out
 
 
 __all__ = [
-    "KNOWLEDGE_ITEM_KIND",
-    "KNOWLEDGE_KINDS",
-    "KnowledgeItem",
-    "KnowledgeKind",
-    "KnowledgeMeta",
     "SourceKind",
     "SourceRef",
-    "parse_knowledge_kind",
 ]

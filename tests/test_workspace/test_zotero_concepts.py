@@ -1,9 +1,9 @@
 """Tests for read-only Zotero import → ``Literature`` records.
 
-Covers ``molab.knowledge.zotero`` (``ZoteroItem`` / ``read_zotero_items``)
-and its concept-producing consumer ``Bundle.import_zotero``. A minimal
+Covers ``molab.knowledge.zotero`` (``ZoteroItem`` / ``read_zotero``)
+and its concept-producing consumer ``Concept.import_zotero``. A minimal
 ``zotero.sqlite`` is built in-place (the real schema subset the reader touches),
-then imported via the OKF :class:`molab.knowledge.bundle.Bundle`. PDFs are
+then imported through a knowledge root handle. PDFs are
 *pointed at* via ``pdf_path`` — no bytes are copied into the bundle.
 """
 
@@ -12,8 +12,8 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from molab.knowledge.bundle import Bundle
-from molab.knowledge.zotero import ZoteroItem, read_zotero_items
+from molab.knowledge.concept import Concept
+from molab.knowledge.zotero import ZoteroItem, read_zotero
 
 
 def _make_zotero_db(data_dir: Path) -> Path:
@@ -83,11 +83,11 @@ def _make_zotero_db(data_dir: Path) -> Path:
 
 
 class TestReadZoteroItems:
-    """``read_zotero_items`` — parse a ``zotero.sqlite`` into ``ZoteroItem`` records."""
+    """``read_zotero`` — parse a ``zotero.sqlite`` into ``ZoteroItem`` records."""
 
     def test_parses_bib_fields_and_resolves_pdf_pointer(self, tmp_path: Path) -> None:
         db = _make_zotero_db(tmp_path)
-        items = {i.key: i for i in read_zotero_items(db)}
+        items = {i.key: i for i in read_zotero(db)}
         assert set(items) == {"AAAA", "BBBB"}  # attachment item excluded
 
         a = items["AAAA"]
@@ -105,12 +105,12 @@ class TestReadZoteroItems:
     def test_opens_database_read_only(self, tmp_path: Path) -> None:
         db = _make_zotero_db(tmp_path)
         before = db.read_bytes()
-        read_zotero_items(db)
+        read_zotero(db)
         assert db.read_bytes() == before  # opened read-only, never mutated
 
 
-class TestBundleImportZotero:
-    """``Bundle.import_zotero`` — link a Zotero library as ``Reference`` Concepts."""
+class TestConceptImportZotero:
+    """``Concept.import_zotero`` — link a Zotero library as literature documents."""
 
     def test_import_writes_no_sources_json(self, tmp_path: Path) -> None:
         # arch-own-01-cleanup: the persisted ``sources.json`` link record is gone.
@@ -119,7 +119,7 @@ class TestBundleImportZotero:
         db = _make_zotero_db(src)
         bundle_root = tmp_path / "bundle"
         bundle_root.mkdir()
-        b = Bundle(bundle_root)
+        b = Concept(bundle_root)
 
         refs = b.import_zotero(db)
 

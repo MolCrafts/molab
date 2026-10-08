@@ -1,7 +1,8 @@
-import { type ReactNode, useId } from "react";
+import type { ReactNode } from "react";
 
-import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
+
+import { DashboardCard } from "./Dashboard";
 
 interface OverviewPageProps {
   children: ReactNode;
@@ -18,7 +19,7 @@ export const OverviewPage = ({ children, aside, className }: OverviewPageProps):
           aside && "xl:grid-cols-(--overview-grid-columns)",
         )}
       >
-        <div className="min-w-0 space-y-8">{children}</div>
+        <div className="min-w-0 space-y-6">{children}</div>
         {aside && (
           <aside className="min-w-0 space-y-6 border-t border-border/60 pt-6 xl:border-l xl:border-t-0 xl:pl-8 xl:pt-0">
             {aside}
@@ -36,31 +37,22 @@ interface OverviewSectionProps {
   className?: string;
 }
 
+/** Section on an overview. Renders `DashboardCard` so every tab shares one block. */
 export const OverviewSection = ({
   title,
   description,
   children,
   className,
-}: OverviewSectionProps): JSX.Element => {
-  const headingId = useId();
-
-  return (
-    <section className={cn("space-y-3", className)} aria-labelledby={headingId}>
-      <div>
-        <h3 id={headingId} className="text-body-lg font-medium text-foreground">
-          {title}
-        </h3>
-        {description && (
-          <p className="mt-1 max-w-2xl text-body-lg leading-relaxed text-muted-foreground">
-            {description}
-          </p>
-        )}
-      </div>
-      <Separator className="opacity-60" />
-      {children}
-    </section>
-  );
-};
+}: OverviewSectionProps): JSX.Element => (
+  <DashboardCard title={title} className={className}>
+    {description ? (
+      <p className="mb-3 max-w-2xl text-body leading-relaxed text-muted-foreground">
+        {description}
+      </p>
+    ) : null}
+    {children}
+  </DashboardCard>
+);
 
 interface OverviewHighlightProps {
   label: string;

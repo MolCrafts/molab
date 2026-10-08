@@ -11,7 +11,7 @@ export type { ArtifactPromoteRequest } from './models/ArtifactPromoteRequest';
 export type { ArtifactPromotionResponse } from './models/ArtifactPromotionResponse';
 export type { ArtifactRefResponse } from './models/ArtifactRefResponse';
 export type { ArtifactResponse } from './models/ArtifactResponse';
-export type { AssetVersionResponse } from './models/AssetVersionResponse';
+export { AssetVersionResponse } from './models/AssetVersionResponse';
 export type { AuthStatusResponse } from './models/AuthStatusResponse';
 export type { AuthTokenResponse } from './models/AuthTokenResponse';
 export type { AuthUserListResponse } from './models/AuthUserListResponse';

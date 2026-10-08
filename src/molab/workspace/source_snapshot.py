@@ -13,7 +13,7 @@ directory, transitively), per attempt, in two steps:
    and verifies every copy against the manifest, raising
    :class:`SourceCaptureError` on any mismatch.
 
-``Run.create_execution(source_entrypoint=...)`` runs them in that order around
+``Run._create_execution(source_entrypoint=...)`` runs them in that order around
 creating the record, so each attempt's manifest is on its Execution record and
 its copies are under ``executions/eNN/source/``.
 
@@ -31,6 +31,7 @@ consumer scripts (e.g. ``phase1.py`` importing ``eval_df`` / ``experiment``).
 from __future__ import annotations
 
 import ast
+import hashlib
 import os
 import subprocess
 from datetime import UTC, datetime
@@ -43,7 +44,7 @@ from .file_store import FileStore
 from .fs import FileSystem, PathArg
 from .fs_local import LocalFileSystem
 
-__all__ = ["SourceCaptureError", "copy_sources", "source_manifest"]
+__all__ = ["SourceCaptureError", "copy_sources", "local_import_digest", "source_manifest"]
 
 
 class SourceCaptureError(RuntimeError):
@@ -88,6 +89,31 @@ def _local_import_closure(entrypoint: Path) -> list[Path]:
                 stack.append(candidate)
     rest = sorted((p for p in seen if p != entrypoint), key=lambda p: p.name)
     return [entrypoint, *rest]
+
+
+def local_import_digest(module_file: PathArg) -> str | None:
+    """Digest of the first-party modules *module_file* imports, itself excluded.
+
+    The same closure an attempt captures as source: sibling ``.py`` modules
+    imported anywhere in the file (a function body included), transitively.
+    The importing file itself is left out — its own code is identified
+    elsewhere — so the digest changes exactly when a helper module changes.
+
+    Args:
+        module_file: The file that defines the code being identified.
+
+    Returns:
+        ``sha256`` over the sorted ``(name, content digest)`` pairs, or
+        ``None`` when the file imports no first-party module (or is missing).
+    """
+    path = Path(module_file).resolve()
+    if not path.is_file():
+        return None
+    deps = _local_import_closure(path)[1:]
+    if not deps:
+        return None
+    payload = "\n".join(f"{dep.name}:{_sha256(dep)}" for dep in deps)
+    return hashlib.sha256(payload.encode()).hexdigest()
 
 
 def _sha256(path: Path) -> str:

@@ -1,6 +1,6 @@
 import { Activity, AlertTriangle, Maximize2 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { EmptyState, OverviewSection } from "@/app/components/entity";
+import { DashboardCanvas, EmptyState, OverviewSection } from "@/app/components/entity";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import {
@@ -710,14 +710,10 @@ export const RunMetricsView = ({
   );
 
   return (
-    <ChartWorkbench
-      settings={settings}
-      settingsFooter={readSummary}
-      open={panelOpen}
-      onOpenChange={setPanelOpen}
-    >
+    <ChartWorkbench settings={settings} open={panelOpen} onOpenChange={setPanelOpen}>
       <div className="min-h-0 min-w-0 flex-1 overflow-auto">
-        <div className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-4 md:px-6">
+        <DashboardCanvas>
+          <p className="font-mono text-micro tabular-nums text-muted-foreground">{readSummary}</p>
           {grouped.length > 0 ? (
             grouped.map(([groupName, items]) => (
               <OverviewSection key={groupName || "_root"} title={groupName ? groupName : "Scalars"}>
@@ -744,7 +740,7 @@ export const RunMetricsView = ({
           )}
 
           <OtherRecords records={records} />
-        </div>
+        </DashboardCanvas>
       </div>
     </ChartWorkbench>
   );

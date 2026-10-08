@@ -14,7 +14,7 @@ Leftover ``*.mlp.zarr/`` and ``*.mlp.index.json`` are ignored.
   into this module's writer and land in the WAL via :class:`FileStore`.
 * A molab Run is a workspace host (``run.json`` + run-root ``alive``), not a
   MolRec record. Filename gate ``*.mlp.jsonl`` is the host surface; the WAL
-  is not catalogued as an :class:`~molab.workspace.assets.ArtifactAsset`.
+  is not catalogued as an :class:`~molab.workspace.domain.Artifact`.
 * :meth:`MetricsWriter.flush` does not densify.
 
 Wire API (``read_run_metrics``) returns compact event records so the UI and

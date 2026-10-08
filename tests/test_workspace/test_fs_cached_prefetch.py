@@ -205,8 +205,61 @@ class TestPrefetchWorkspaceIndices:
         assert not hasattr(fs_cached, "_prefetch_knowledge_children")
         assert "_KNOWLEDGE_SKIP_DEFAULT" not in vars(fs_cached)
         assert hasattr(fs_cached, "_prefetch_meta_mounts")
-        assert hasattr(fs_cached, "_META_MOUNT_SKIP")
+        assert not hasattr(fs_cached, "_META_MOUNT_SKIP")
         assert "execution_dir_names" in vars(fs_cached)
+
+    @pytest.mark.unit
+    def test_meta_mount_skip_is_derived_at_call_time(self) -> None:
+        from molab.workspace import fs_cached
+        from molab.workspace.execution_dirs import ExecutionDir, register_execution_dir
+
+        register_execution_dir(
+            ExecutionDir(
+                name="late", purpose="registered after import", versioned=False, products=False
+            )
+        )
+        skip = fs_cached._meta_mount_skip()
+
+        assert "late" in skip
+        assert {"projects", "experiments", "runs", "executions"} <= skip
+        assert "zz-unregistered" not in skip
+        assert not hasattr(fs_cached, "_META_MOUNT_SKIP")
+
+    def test_index_file_names_are_entity_and_attempt_records(self) -> None:
+        from molab.workspace.fs_cached import INDEX_FILE_NAMES
+
+        assert {
+            "workspace.json",
+            "project.json",
+            "experiment.json",
+            "run.json",
+            "execution.json",
+        } == INDEX_FILE_NAMES
+        assert 'invalidate(scope="indices")' in (INDEX_FILE_NAMES.__doc__ or "")
+
+    def test_prefetch_reads_attempt_records_and_no_children_index(self, tmp_path: Path) -> None:
+        from tests.support.counting_fs import CountingFileSystem
+
+        ws = Workspace(tmp_path / "lab", name="lab")
+        ws.materialize()
+        run = ws.add_project("p").add_experiment("e").add_run(params={"seed": 1})
+        run_dir = Path(str(run.run_dir))
+        attempt = "0190f0e2-7c1a-7d4e-9b2a-3c4d5e6f7a8b"
+        (run_dir / "executions" / "e01").mkdir(parents=True)
+        (run_dir / "executions" / "e01" / "execution.json").write_text("{}\n", encoding="utf-8")
+        (run_dir / "executions" / attempt).mkdir()
+        (run_dir / "executions" / attempt / "execution.json").write_text("{}\n", encoding="utf-8")
+        (run_dir / "executions" / "notes.txt").write_text("stray\n", encoding="utf-8")
+        disk = CountingFileSystem(LocalFileSystem())
+
+        warnings = prefetch_workspace_indices(SimpleNamespace(root=str(ws.root), fs=disk))
+
+        assert warnings == []
+        assert disk.for_basename("execution.json", "read_text") == 2
+        assert disk.for_basename("projects.json") == 0
+        assert disk.for_basename("experiments.json") == 0
+        assert disk.for_basename("runs.json") == 0
+        assert disk.for_basename("notes.txt") == 0
 
     @pytest.mark.unit
     def test_project_level_meta_json_mounts_still_prefetch(self, tmp_path: Path):

@@ -21,12 +21,12 @@ import { request as __request } from '../core/request';
 export class KnowledgeService {
     /**
      * Entity Backlinks
-     * Knowledge documents citing one entity — a thin ``Bundle.backlinks`` read.
+     * Knowledge documents citing one entity.
      *
      * Pure derived read (no reverse index persisted): resolves the entity
-     * Folder, then asks the bundle which Concepts' ``index.md`` edges point at
-     * it. 404 on an unresolvable entity — never an empty-list fallback for a
-     * bad ref (no-fallback law).
+     * folder, then walks documents whose edges point at its reference.
+     * 404 on an unresolvable entity — never an empty-list fallback
+     * for a bad ref.
      * @param kind Entity kind.
      * @param projectId
      * @param experimentId
@@ -148,7 +148,7 @@ export class KnowledgeService {
     }
     /**
      * Create Doc
-     * Create a :class:`Note` document — delegates to ``Bundle.create_note``.
+     * Create a :class:`Note` under *hostPath* (the workspace root when omitted).
      * @param requestBody
      * @param molabSession
      * @returns NoteSummary Successful Response
@@ -174,7 +174,7 @@ export class KnowledgeService {
     /**
      * Edit Doc
      * Rewrite a document's narrative — ``Knowledge.write`` for all six classes.
-     * @param path The note Concept's bundle-relative path (its identity).
+     * @param path The note Concept's workspace-relative document path (its identity).
      * @param requestBody
      * @param molabSession
      * @returns NoteDetailResponse Successful Response
@@ -203,8 +203,8 @@ export class KnowledgeService {
     }
     /**
      * Move Doc
-     * Rename and/or reparent a note — delegates to ``Bundle.rename_note`` / ``move_note``.
-     * @param path The note Concept's bundle-relative path (its identity).
+     * Rename and/or move a document onto another host.
+     * @param path The note Concept's workspace-relative document path (its identity).
      * @param requestBody
      * @param molabSession
      * @returns NoteSummary Successful Response
@@ -233,8 +233,8 @@ export class KnowledgeService {
     }
     /**
      * Delete Doc
-     * Delete a note (its directory subtree) — delegates to ``Bundle.delete_note``.
-     * @param path The note Concept's bundle-relative path (its identity).
+     * Delete a document. Inbound links are left dangling.
+     * @param path The note Concept's workspace-relative document path (its identity).
      * @param molabSession
      * @returns MessageResponse Successful Response
      * @throws ApiError
@@ -259,14 +259,13 @@ export class KnowledgeService {
     }
     /**
      * Embed Doc
-     * Embed a live entity into a document — delegates to the knowledge edge writer.
+     * Embed a live entity into a document — one typed edge via ``append_link``.
      *
-     * Resolves the source ``Note`` (404 on miss / non-note) and the target entity
+     * Resolves the source document (404 on miss) and the target entity
      * (``run`` / ``experiment`` / ``asset`` / ``reference``; 404 on miss), then
-     * writes ONE typed provenance edge via ``Bundle.link`` at the target resolved
-     * by :func:`~molab.knowledge.embed.resolve_embed_target` — the same verb the CLI
-     * uses, so the edge-writing logic is never re-built at the HTTP boundary.
-     * @param path The source note Concept's bundle-relative path.
+     * writes ONE typed provenance edge at the target resolved by
+     * :func:`~molab.knowledge.embed.resolve_embed_target`.
+     * @param path The source note Concept's workspace-relative document path.
      * @param requestBody
      * @param molabSession
      * @returns EmbedResponse Successful Response
@@ -296,7 +295,7 @@ export class KnowledgeService {
     /**
      * Update Doc Meta
      * Update a document's tags/status — ``Knowledge.write`` for all six classes.
-     * @param path The note Concept's bundle-relative path (its identity).
+     * @param path The note Concept's workspace-relative document path (its identity).
      * @param requestBody
      * @param molabSession
      * @returns NoteSummary Successful Response
@@ -325,8 +324,8 @@ export class KnowledgeService {
     }
     /**
      * Get Backlinks
-     * Return every Concept linking at *path* — delegates to ``Bundle.backlinks``.
-     * @param path The target Concept's bundle-relative path (its identity).
+     * Return every document linking at *path*.
+     * @param path The target Concept's workspace-relative document path (its identity).
      * @param molabSession
      * @returns BacklinksResponse Successful Response
      * @throws ApiError
@@ -351,8 +350,8 @@ export class KnowledgeService {
     }
     /**
      * Export Doc
-     * Export a note as portable Markdown — delegates to ``Bundle.export_markdown``.
-     * @param path The note Concept's bundle-relative path (its identity).
+     * Export a document as its narrative markdown.
+     * @param path The note Concept's workspace-relative document path (its identity).
      * @param molabSession
      * @returns any Successful Response
      * @throws ApiError

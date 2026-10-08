@@ -26,12 +26,13 @@ const seedExperiment = (id: string, projectId: string): ApiExperimentResponse =>
     name: id,
     description: "",
     workflow: null,
-    workflowType: "yaml",
+    workflowKind: "document",
     gitCommit: null,
     parameterSpace: {},
     runCount: 0,
     runs: [],
     created: new Date().toISOString(),
+    ref: `molab:experiment/${id}`,
   };
   setExperiment(experiment);
   return experiment;

@@ -149,6 +149,7 @@ const mockRun = (
         id,
         name,
         path: `projects/${projectId}/experiments/${experimentId}/runs/${name}`,
+        ref: `molab:experiment/${experimentId}/run/${id}`,
         projectId,
         experimentId,
         status,
@@ -226,6 +227,7 @@ export function seed(): void {
             config: { priority: "high" },
             created: isoAt(-1440),
             experimentCount: 2,
+            ref: "molab:project/protein-folding",
         },
         {
             id: "catalyst-search",
@@ -237,13 +239,14 @@ export function seed(): void {
             config: { priority: "medium" },
             created: isoAt(-2880),
             experimentCount: 1,
+            ref: "molab:project/catalyst-search",
         },
     ];
 
     projects.forEach((p) => db.projects.set(p.id, p));
 
     // Experiments
-    const experiments: ApiExperimentResponse[] = [
+    const experiments: Array<ApiExperimentResponse> = [
         {
             id: "exp-001",
             projectId: "protein-folding",
@@ -251,7 +254,7 @@ export function seed(): void {
             path: "projects/protein-folding/experiments/alphafold-baseline",
             description: "Initial baseline run with AF2",
             workflow: workflowIr("alphafold-baseline", "model.alphafold"),
-            workflowType: "yaml",
+            workflowKind: "document",
             gitCommit: "a1b2c3d",
             parameterSpace: { lr: [0.001, 0.0005] },
             runCount: 4,
@@ -264,6 +267,7 @@ export function seed(): void {
                 },
             ],
             created: isoAt(-1300),
+            ref: "molab:experiment/exp-001",
         },
         {
             id: "exp-002",
@@ -272,12 +276,13 @@ export function seed(): void {
             path: "projects/protein-folding/experiments/structure-sweep",
             description: "Parameter sweep on secondary structure",
             workflow: workflowIr("structure-sweep", "simulation.gromacs"),
-            workflowType: "yaml",
+            workflowKind: "document",
             gitCommit: "d4e5f6g",
             parameterSpace: { temperature: [0.8, 1.0, 1.2] },
             runCount: 3,
             runs: [],
             created: isoAt(-900),
+            ref: "molab:experiment/exp-002",
         },
         {
             id: "exp-101",
@@ -286,7 +291,7 @@ export function seed(): void {
             path: "projects/catalyst-search/experiments/catalyst-sweep",
             description: "Screening ligand libraries",
             workflow: workflowIr("catalyst-screen", "simulation.dft"),
-            workflowType: "yaml",
+            workflowKind: "document",
             gitCommit: "h7i8j9k",
             parameterSpace: { ligand: ["L1", "L2", "L3"] },
             runCount: 2,
@@ -299,6 +304,7 @@ export function seed(): void {
                 },
             ],
             created: isoAt(-700),
+            ref: "molab:experiment/exp-101",
         },
     ];
 

@@ -14,6 +14,8 @@ second raw-``pathlib`` heartbeat implementation on the context.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import os
 import platform
 import threading
@@ -26,7 +28,13 @@ import pytest
 from molab._typing import JSONValue
 from molab.profile import ProfileConfig
 from molab.workspace import Run, Workspace
-from molab.workspace.domain import Execution, ExecutionMode, ExecutionStatus
+from molab.workspace.artifact_repository import ArtifactRepository
+from molab.workspace.domain import (
+    RESULT_SEMANTIC_TYPE,
+    Execution,
+    ExecutionMode,
+    ExecutionStatus,
+)
 from molab.workspace.execution_context import ExecutionContext
 from molab.workspace.fs_local import LocalFileSystem
 from tests.support.counting_fs import CountingFileSystem
@@ -36,7 +44,7 @@ class TestExecutionContextHeartbeat:
     def test_alive_goes_through_workspace_fs(self, tmp_path: Path) -> None:
         fs = CountingFileSystem(LocalFileSystem())
         ws = Workspace(tmp_path, fs=fs)
-        experiment = ws.add_project("p").add_experiment("e", workflow_source="s.py", params={})
+        experiment = ws.add_project("p").add_experiment("e", params={})
         run = experiment.add_run(params={"seed": 1})
         fs.reset()
 
@@ -54,7 +62,7 @@ class TestExecutionContextHeartbeat:
         # heartbeat file, never a reason to skip the seal.
         fs = _AliveRemoveFails(LocalFileSystem())
         ws = Workspace(tmp_path, fs=fs)
-        experiment = ws.add_project("p").add_experiment("e", workflow_source="s.py", params={})
+        experiment = ws.add_project("p").add_experiment("e", params={})
         run = experiment.add_run(params={"seed": 1})
 
         with run.start() as ctx:
@@ -69,7 +77,7 @@ class TestExecutionContextHeartbeat:
     def test_failed_alive_remove_does_not_mask_body_error(self, tmp_path: Path) -> None:
         fs = _AliveRemoveFails(LocalFileSystem())
         ws = Workspace(tmp_path, fs=fs)
-        experiment = ws.add_project("p").add_experiment("e", workflow_source="s.py", params={})
+        experiment = ws.add_project("p").add_experiment("e", params={})
         run = experiment.add_run(params={"seed": 1})
 
         with pytest.raises(RuntimeError, match="body failed"), run.start():
@@ -85,7 +93,7 @@ class TestExecutionContextHeartbeat:
         from molab.workspace import execution_context as ctx_mod
 
         ws = Workspace(tmp_path)
-        experiment = ws.add_project("p").add_experiment("e", workflow_source="s.py", params={})
+        experiment = ws.add_project("p").add_experiment("e", params={})
         run = experiment.add_run(params={"seed": 1})
         calls: list[int] = []
 
@@ -128,7 +136,7 @@ class TestExecutionContextProvenance:
         assert execution.executor["pid"] == os.getpid()
 
     def test_preallocated_record_gains_start_facts_on_entry(self, run: Run) -> None:
-        rec = run.create_execution(environment={"submit_cwd": "/x"})
+        rec = run._create_execution(environment={"submit_cwd": "/x"})
         assert "python" not in rec.environment
 
         with run.start(execution_id=rec.id):
@@ -142,7 +150,7 @@ class TestExecutionContextProvenance:
         with run.start():
             pass
 
-        with pytest.raises(ValueError, match="create_execution"), run.start(execution_id="e09"):
+        with pytest.raises(ValueError, match="does not exist"), run.start(execution_id="e09"):
             pass
 
         assert [x.id for x in run.executions] == ["e01"]
@@ -153,7 +161,7 @@ class TestExecutionContext:
     """arch-own-02h §1: an explicit id names an existing QUEUED record; its facts are fixed."""
 
     def test_queued_record_starts_and_seals(self, run: Run) -> None:
-        run.create_execution()
+        run._create_execution()
 
         with run.start(execution_id="e01") as ctx:
             assert ctx.id == "e01"
@@ -164,7 +172,7 @@ class TestExecutionContext:
         assert run.executions[0].status is ExecutionStatus.SUCCEEDED
 
     def test_unknown_id_raises_and_creates_nothing(self, run: Run) -> None:
-        with pytest.raises(ValueError, match="create_execution"), run.start(execution_id="e09"):
+        with pytest.raises(ValueError, match="does not exist"), run.start(execution_id="e09"):
             pass
 
         assert run.executions == []
@@ -174,15 +182,15 @@ class TestExecutionContext:
         ("kwargs", "name"),
         [
             ({"mode": ExecutionMode.RERUN}, "mode"),
-            ({"based_on_execution_id": "e01"}, "based_on_execution_id"),
-            ({"checkpoint_artifact_id": "a"}, "checkpoint_artifact_id"),
+            ({"predecessor": "e01"}, "predecessor"),
+            ({"checkpoint": "a"}, "checkpoint"),
             ({"bypass_cache": True}, "bypass_cache"),
         ],
     )
     def test_creation_args_with_explicit_id_raise_at_call_time(
         self, run: Run, kwargs: dict[str, object], name: str
     ) -> None:
-        run.create_execution()
+        run._create_execution()
 
         with pytest.raises(ValueError, match=name):
             run.start(execution_id="e01", **kwargs)
@@ -192,26 +200,26 @@ class TestExecutionContext:
         assert record.started_at is None
 
     def test_config_is_the_recorded_one(self, run: Run) -> None:
-        run.create_execution(profile_config=ProfileConfig({"k": 1}, name="cpu"))
+        run._create_execution(profile_config=ProfileConfig({"k": 1}, name="cpu"))
 
         with run.start(execution_id="e01") as ctx:
             assert ctx.config.name == "cpu"
             assert ctx.config.to_dict() == {"k": 1}
 
     def test_equal_profile_config_is_accepted(self, run: Run) -> None:
-        run.create_execution(profile_config=ProfileConfig({"k": 1}, name="cpu"))
+        run._create_execution(profile_config=ProfileConfig({"k": 1}, name="cpu"))
 
         with run.start(ProfileConfig({"k": 1}, name="cpu"), execution_id="e01") as ctx:
             assert ctx.config.name == "cpu"
 
     def test_explicit_empty_profile_matches_a_profileless_record(self, run: Run) -> None:
-        run.create_execution()
+        run._create_execution()
 
         with run.start(ProfileConfig({}, name=None), execution_id="e01") as ctx:
             assert ctx.config.to_dict() == {}
 
     def test_equal_hash_with_a_different_dict_shape_is_accepted(self, run: Run) -> None:
-        run.create_execution(profile_config=ProfileConfig({"xs": [1, 2]}, name="cpu"))
+        run._create_execution(profile_config=ProfileConfig({"xs": [1, 2]}, name="cpu"))
 
         with run.start(ProfileConfig({"xs": (1, 2)}, name="cpu"), execution_id="e01"):
             pass
@@ -225,7 +233,7 @@ class TestExecutionContext:
     def test_differing_profile_config_raises_and_leaves_it_queued(
         self, run: Run, requested: ProfileConfig
     ) -> None:
-        run.create_execution(profile_config=ProfileConfig({"k": 1}, name="cpu"))
+        run._create_execution(profile_config=ProfileConfig({"k": 1}, name="cpu"))
 
         with (
             pytest.raises(ValueError, match="profile_config"),
@@ -269,7 +277,7 @@ class TestExecutionContextStartOnce:
     def test_start_lost_after_precheck_does_not_enter(
         self, run: Run, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        rec = run.create_execution()
+        rec = run._create_execution()
         ctx2 = run.start(execution_id=rec.id)
         original = ctx2._executions.start
 
@@ -403,7 +411,7 @@ class TestProfileConfigHash:
     def test_matches_create_execution_record(self, run: Run, cfg: ProfileConfig | None) -> None:
         profile_config_hash = _profile_config_hash()
 
-        record = run.create_execution(profile_config=cfg)
+        record = run._create_execution(profile_config=cfg)
 
         assert record.environment["config_hash"] == profile_config_hash(cfg)
 
@@ -434,3 +442,217 @@ class _AliveRemoveFails(CountingFileSystem):
             self.by_basename[("remove", "alive")] += 1
             raise OSError("remote remove failed")
         self._wrap("remove", self._inner.remove)(path, *args, **kwargs)
+
+
+class TestExecutionContextEmitArtifact:
+    def test_second_emit_of_same_name_raises(self, run: Run) -> None:
+        with run.start() as ctx:
+            first = ctx.emit_artifact(b"one", name="a.txt")
+            with pytest.raises(ValueError, match=first.id):
+                ctx.emit_artifact(b"two", name="a.txt")
+            execution_id = ctx.id
+        recorded = run.execution(execution_id).artifacts
+        assert [artifact.id for artifact in recorded] == [first.id]
+        assert first.content.digest == "sha256:" + hashlib.sha256(b"one").hexdigest()
+
+    def test_user_results_json_and_set_result_do_not_collide(self, run: Run) -> None:
+        with run.start() as ctx:
+            execution_id = ctx.id
+            ctx.emit_artifact(b'{"user": 1}', name="results.json")
+            ctx.set_result("k", 1)
+        named = [
+            artifact
+            for artifact in run.execution(execution_id).artifacts
+            if artifact.name == "results.json"
+        ]
+        assert len(named) == 2
+        assert len({artifact.path for artifact in named}) == 2
+        assert any(artifact.path.endswith("artifacts/results.json") for artifact in named)
+        assert any(artifact.path.endswith("artifacts/_molab/results.json") for artifact in named)
+        workspace = run.experiment.project.workspace
+        repository = ArtifactRepository(workspace.root, fs=workspace.fs)
+        execution_dir = run.execution_dir(execution_id)
+        for artifact in named:
+            payload = repository.read_bytes(artifact, execution_dir=execution_dir)
+            assert "sha256:" + hashlib.sha256(payload).hexdigest() == artifact.content.digest
+
+    def test_public_emit_refuses_reserved(self, run: Run) -> None:
+        with run.start() as ctx:
+            with pytest.raises(ValueError):
+                ctx.emit_artifact({"x": 1}, name="_molab/x.json")
+            with pytest.raises(ValueError):
+                ctx.emit_artifact(b"x", name="y", semantic_type="result")
+
+    def test_parallel_emits_of_distinct_names_all_recorded(self, run: Run) -> None:
+        names = [f"n{index}.txt" for index in range(20)]
+        errors: list[BaseException] = []
+
+        def emit_batch(ctx: ExecutionContext, batch: list[str]) -> None:
+            try:
+                for name in batch:
+                    ctx.emit_artifact(name.encode(), name=name)
+            except BaseException as exc:
+                errors.append(exc)
+
+        with run.start() as ctx:
+            workers = [
+                threading.Thread(target=emit_batch, args=(ctx, names[offset::4]), daemon=True)
+                for offset in range(4)
+            ]
+            for worker in workers:
+                worker.start()
+            deadline = time.monotonic() + 45
+            for worker in workers:
+                remaining = deadline - time.monotonic()
+                worker.join(timeout=max(remaining, 0.0))
+            assert not any(worker.is_alive() for worker in workers)
+            assert errors == []
+            recorded = run.execution(ctx.id).artifacts
+            assert len(recorded) == 20
+            assert {artifact.name for artifact in recorded} == set(names)
+
+    def test_reused_checkpoint_label_is_refused(self, run: Run) -> None:
+        with run.start() as ctx:
+            execution_id = ctx.id
+            first = ctx.checkpoint("latest", data={"step": 1})
+            with pytest.raises(ValueError, match=first.id):
+                ctx.checkpoint("latest", data={"step": 2})
+        checkpoints = [
+            artifact
+            for artifact in run.execution(execution_id).artifacts
+            if artifact.semantic_type == "checkpoint"
+        ]
+        assert len(checkpoints) == 1
+        assert checkpoints[0].id == first.id
+        saved = json.loads(
+            (run.execution_dir(execution_id) / "checkpoints" / "latest.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        assert saved["data"] == {"step": 1}
+        workspace = run.experiment.project.workspace
+        payload = ArtifactRepository(workspace.root, fs=workspace.fs).read_bytes(
+            first, execution_dir=run.execution_dir(execution_id)
+        )
+        assert first.content.digest == "sha256:" + hashlib.sha256(payload).hexdigest()
+
+
+class TestExecutionContextResults:
+    def test_set_result_is_in_memory(self, run: Run) -> None:
+        with run.start() as ctx:
+            ctx.set_result("energy", -1.5)
+            ctx.set_result("energy", -2.25)
+            assert ctx.get_result("energy") == -2.25
+            execution_id = ctx.id
+            assert list(run.execution_dir(execution_id).rglob("results.json")) == []
+            assert not (run.execution_dir(execution_id) / "artifacts" / "_molab").exists()
+            assert all(
+                artifact.semantic_type != RESULT_SEMANTIC_TYPE
+                for artifact in run.execution(execution_id).artifacts
+            )
+
+    def test_set_result_snapshots_value(self, run: Run) -> None:
+        with run.start() as ctx:
+            value = {"a": [1]}
+            ctx.set_result("v", value)
+            value["a"].append(2)
+            assert ctx.get_result("v") == {"a": [1]}
+
+    def test_set_result_rejects_non_json(self, run: Run) -> None:
+        with run.start() as ctx, pytest.raises(TypeError):
+            ctx.set_result("x", object())
+
+    def test_set_result_outside_context_raises(self, run: Run) -> None:
+        ctx = run.start()
+        with pytest.raises(RuntimeError):
+            ctx.set_result("k", 1)
+
+    def test_exit_emits_one_result_artifact(self, run: Run) -> None:
+        with run.start() as ctx:
+            execution_id = ctx.id
+            ctx.set_active_task("train")
+            ctx.set_result("energy", -1.5)
+            ctx.set_result("converged", True)
+            ctx.set_result("energy", -2.25)
+        results = [
+            artifact
+            for artifact in run.execution(execution_id).artifacts
+            if artifact.semantic_type == RESULT_SEMANTIC_TYPE
+        ]
+        assert len(results) == 1
+        artifact = results[0]
+        assert artifact.name == "results.json"
+        assert artifact.media_type == "application/json"
+        assert artifact.path.endswith("artifacts/_molab/results.json")
+        assert "task_id" not in artifact.metadata
+        workspace = run.experiment.project.workspace
+        payload = ArtifactRepository(workspace.root, fs=workspace.fs).read_bytes(
+            artifact, execution_dir=run.execution_dir(execution_id)
+        )
+        assert json.loads(payload) == {"energy": -2.25, "converged": True}
+
+    def test_failed_block_still_emits(self, run: Run) -> None:
+        execution_id = ""
+        with pytest.raises(ValueError, match="boom"), run.start() as ctx:
+            execution_id = ctx.id
+            ctx.set_result("k", 1)
+            raise ValueError("boom")
+        assert run.execution(execution_id).status is ExecutionStatus.FAILED
+        results = [
+            artifact
+            for artifact in run.execution(execution_id).artifacts
+            if artifact.semantic_type == RESULT_SEMANTIC_TYPE
+        ]
+        assert len(results) == 1
+        workspace = run.experiment.project.workspace
+        payload = ArtifactRepository(workspace.root, fs=workspace.fs).read_bytes(
+            results[0], execution_dir=run.execution_dir(execution_id)
+        )
+        assert json.loads(payload) == {"k": 1}
+
+    def test_no_set_result_no_artifact(self, run: Run) -> None:
+        with run.start() as ctx:
+            execution_id = ctx.id
+        results = [
+            artifact
+            for artifact in run.execution(execution_id).artifacts
+            if artifact.semantic_type == RESULT_SEMANTIC_TYPE
+        ]
+        assert results == []
+
+    def test_none_value_is_recorded(self, run: Run) -> None:
+        with run.start() as ctx:
+            execution_id = ctx.id
+            ctx.set_result("k", None)
+        results = [
+            artifact
+            for artifact in run.execution(execution_id).artifacts
+            if artifact.semantic_type == RESULT_SEMANTIC_TYPE
+        ]
+        assert len(results) == 1
+        workspace = run.experiment.project.workspace
+        payload = ArtifactRepository(workspace.root, fs=workspace.fs).read_bytes(
+            results[0], execution_dir=run.execution_dir(execution_id)
+        )
+        assert json.loads(payload) == {"k": None}
+
+    def test_externally_sealed_records_no_results(self, run: Run) -> None:
+        with run.start() as ctx:
+            execution_id = ctx.id
+            ctx.set_result("k", 1)
+            run.cancel(ctx.id)
+        assert run.execution(execution_id).status is ExecutionStatus.CANCELLED
+        results = [
+            artifact
+            for artifact in run.execution(execution_id).artifacts
+            if artifact.semantic_type == RESULT_SEMANTIC_TYPE
+        ]
+        assert results == []
+        log = (run.execution_dir(execution_id) / "run.log").read_text(encoding="utf-8")
+        assert "results not recorded" in log
+
+    def test_set_result_docstring_states_exit_persistence(self) -> None:
+        doc = ExecutionContext.set_result.__doc__
+        assert doc is not None
+        assert "__exit__" in doc
+        assert "checkpoint" in doc

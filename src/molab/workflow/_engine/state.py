@@ -105,8 +105,6 @@ class WorkflowDeps:
         run_context: The active RunContext (may be None).
         config: The active :class:`~molab.profile.ProfileConfig` (may be None).
         user_deps: Application-level deps forwarded from the caller.
-        remote_executor: Optional remote-execution gateway (set by molq).
-        run_dir: Path to the run's directory on disk (may be None).
         execution_id: The attempt id (``eNN``) for the cache manifest; ``None``
             for a bare or persistence-off run.
         journal_dir: The directory the node journal is written to — the
@@ -139,10 +137,6 @@ class WorkflowDeps:
     run_context: RunContextLike | None = None
     config: JSONMapping | None = None
     user_deps: UserDeps = None
-    # ``remote_executor`` is a duck-typed callable from molq when present.
-    # It is reached only by molq-aware tasks and is opaque to the runtime.
-    remote_executor: UserDeps = None
-    run_dir: Path | None = None
     execution_id: str | None = None
     journal_dir: Path | None = None
     registration_by_name: Mapping[str, TaskRegistration] = field(default_factory=dict)

@@ -11,6 +11,7 @@ import { http, HttpResponse } from "msw";
 interface ShowcaseNote {
   name: string;
   relPath: string;
+  hostPath: string;
   excerpt: string;
   status: string;
   tags: string[];
@@ -18,11 +19,25 @@ interface ShowcaseNote {
   links: string[];
 }
 
+const documentSlug = (name: string): string => {
+  const slug = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+  return slug || name;
+};
+
+const documentRelPath = (hostPath: string, name: string): string => {
+  const file = `${documentSlug(name)}.md`;
+  return hostPath === "" ? `knowledges/${file}` : `${hostPath}/knowledges/${file}`;
+};
+
 const notes = new Map<string, ShowcaseNote>(
   [
     {
       name: "AlphaFold benchmark findings",
-      relPath: "notes/alphafold-benchmark",
+      relPath: "knowledges/alphafold-benchmark.md",
+      hostPath: "",
       excerpt: "The bf16 baseline converged fastest while preserving mean pLDDT.",
       status: "published",
       tags: ["protein-folding", "benchmark"],
@@ -38,11 +53,12 @@ const notes = new Map<string, ShowcaseNote>(
         "",
         "> Linked to experiment `exp-001` and checkpoint `asset-003`.",
       ].join("\n"),
-      links: ["notes/gpu-retry-playbook"],
+      links: ["knowledges/gpu-retry-playbook.md"],
     },
     {
       name: "GPU retry playbook",
-      relPath: "notes/gpu-retry-playbook",
+      relPath: "knowledges/gpu-retry-playbook.md",
+      hostPath: "",
       excerpt: "Operational notes for recovering failed MolQ and Slurm attempts.",
       status: "draft",
       tags: ["operations", "molq", "gpu"],
@@ -53,7 +69,7 @@ const notes = new Map<string, ShowcaseNote>(
         "2. Reduce `batch_size` by half.",
         "3. Resume with the same config hash for provenance continuity.",
       ].join("\n"),
-      links: ["notes/alphafold-benchmark"],
+      links: ["knowledges/alphafold-benchmark.md"],
     },
   ].map((note) => [note.relPath, note]),
 );
@@ -61,6 +77,7 @@ const notes = new Map<string, ShowcaseNote>(
 const noteSummary = (note: ShowcaseNote) => ({
   name: note.name,
   relPath: note.relPath,
+  hostPath: note.hostPath,
   excerpt: note.excerpt,
   status: note.status,
   tags: note.tags,
@@ -119,6 +136,14 @@ export const featureShowcaseHandlers = [
         { kind: "experiment", id: "exp-001", title: "AlphaFold Baseline", status: "active" },
         { kind: "run", id: "run-001", title: "run-001", status: "succeeded" },
         { kind: "asset", id: "asset-003", title: "alphafold.pt", status: "active" },
+        {
+          kind: "run",
+          id: "deadbeef",
+          title: "missing run",
+          ref: "molab:experiment/exp-001/run/deadbeef",
+          missing: true,
+          status: null,
+        },
       ],
     });
   }),
@@ -152,7 +177,7 @@ export const featureShowcaseHandlers = [
       entity,
       backlinks: [
         {
-          path: "notes/alphafold-benchmark",
+          path: "knowledges/alphafold-benchmark.md",
           title: "AlphaFold benchmark findings",
           type: "note",
           role: "records",
@@ -186,6 +211,49 @@ export const featureShowcaseHandlers = [
     if (body.tags) note.tags = body.tags;
     if (body.status) note.status = body.status;
     return HttpResponse.json(noteSummary(note));
+  }),
+
+  http.post("/api/knowledge/doc", async ({ request }) => {
+    const body = (await request.json()) as { name?: string; body?: string; hostPath?: string | null };
+    const name = body.name ?? "note";
+    const hostPath = body.hostPath ?? "";
+    const relPath = documentRelPath(hostPath, name);
+    const note: ShowcaseNote = {
+      name,
+      relPath,
+      hostPath,
+      excerpt: body.body ?? "",
+      status: "active",
+      tags: [],
+      body: body.body ?? "",
+      links: [],
+    };
+    notes.set(relPath, note);
+    return HttpResponse.json(noteSummary(note), { status: 201 });
+  }),
+
+  http.patch("/api/knowledge/doc", async ({ request }) => {
+    const path = new URL(request.url).searchParams.get("path") ?? "";
+    const note = notes.get(path);
+    if (!note) return HttpResponse.json({ detail: "Note not found" }, { status: 404 });
+    const body = (await request.json()) as { name?: string | null; hostPath?: string | null };
+    if (body.name) note.name = body.name;
+    if (body.hostPath !== undefined && body.hostPath !== null && body.hostPath !== note.hostPath) {
+      const file = note.relPath.split("/").pop() ?? `${documentSlug(note.name)}.md`;
+      const hostPath = body.hostPath;
+      const relPath = hostPath === "" ? `knowledges/${file}` : `${hostPath}/knowledges/${file}`;
+      notes.delete(path);
+      note.hostPath = hostPath;
+      note.relPath = relPath;
+      notes.set(relPath, note);
+    }
+    return HttpResponse.json(noteSummary(note));
+  }),
+
+  http.delete("/api/knowledge/doc", ({ request }) => {
+    const path = new URL(request.url).searchParams.get("path") ?? "";
+    notes.delete(path);
+    return HttpResponse.json({ message: `note ${path} deleted` });
   }),
 
   http.post("/api/knowledge/doc/embed", async ({ request }) => {

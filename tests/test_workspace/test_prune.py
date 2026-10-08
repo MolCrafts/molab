@@ -84,7 +84,7 @@ def _seed_executions(run: Run, statuses: tuple[str, ...]) -> list[str]:
 def seeded(tmp_path: Path) -> Run:
     """A run with e01 succeeded, e02 failed, e03 failed."""
     ws = Workspace(root=tmp_path, name="prune-lab")
-    exp = ws.add_project("proj-a").add_experiment("exp-x", workflow_source="s.py", params={})
+    exp = ws.add_project("proj-a").add_experiment("exp-x", params={})
     run = exp.add_run(params={"seed": 1})
     assert _seed_executions(run, ("succeeded", "failed", "failed")) == ["e01", "e02", "e03"]
     return run

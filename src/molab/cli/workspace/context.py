@@ -17,7 +17,7 @@ from molab.cli._common import rprint
 from molab.cli._target import TargetOption, open_workspace
 
 if TYPE_CHECKING:
-    from molab.workspace.workspace_context import WorkspaceContext
+    from molab.services.knowledge_context import KnowledgeContext
 
 
 @app.command()
@@ -46,7 +46,7 @@ def context(
     _render(context_with_knowledge(ws, focus=focus))
 
 
-def _render(ctx: WorkspaceContext) -> None:
+def _render(ctx: KnowledgeContext) -> None:
     """Render *ctx* as a structured summary; missing state renders as explicit none."""
     rprint(f"[bold]{ctx.workspace.name}[/bold]  [dim]{ctx.workspace.root}[/dim]")
     rprint(f"  projects:    {len(ctx.projects)}")

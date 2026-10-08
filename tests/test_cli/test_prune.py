@@ -43,7 +43,7 @@ def _repo(run: Run) -> ExecutionRepository:
 
 def _single_run(root: Path) -> Run:
     ws = Workspace(root=root, name="prune-cli-lab")
-    exp = ws.add_project("proj-a").add_experiment("exp-x", workflow_source="s.py", params={})
+    exp = ws.add_project("proj-a").add_experiment("exp-x", params={})
     return exp.add_run(params={"seed": 1})
 
 

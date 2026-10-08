@@ -1,7 +1,7 @@
 """Response schema for ``GET /api/workspace/copilot`` — the Workspace Copilot summary.
 
-A camelCase serialization wrapper over the workspace-layer ``WorkspaceSummary``
-(:mod:`molab.workspace.copilot`). Reuses the P0.2 ``*RefResponse`` models for the
+A camelCase serialization wrapper over ``WorkspaceSummary``
+(:mod:`molab.services.copilot`). Reuses the P0.2 ``*RefResponse`` models for the
 shared identity shapes; adds a ``NextActionResponse`` for the advisory next-actions.
 """
 
@@ -20,7 +20,7 @@ from .workspace_context import (
 )
 
 if TYPE_CHECKING:
-    from molab.workspace.copilot import NextAction, WorkspaceSummary
+    from molab.services.copilot import NextAction, WorkspaceSummary
 
 
 class NextActionResponse(ApiModel):
@@ -50,7 +50,6 @@ class WorkspaceSummaryResponse(ApiModel):
     failedRuns: list[RunRefResponse] = Field(default_factory=list)
     runningRuns: list[RunRefResponse] = Field(default_factory=list)
     healthFlags: list[HealthFlagResponse] = Field(default_factory=list)
-    openQuestions: list[KnowledgeRefResponse] = Field(default_factory=list)
     relevantKnowledge: list[KnowledgeRefResponse] = Field(default_factory=list)
     nextActions: list[NextActionResponse] = Field(default_factory=list)
 
@@ -64,7 +63,6 @@ class WorkspaceSummaryResponse(ApiModel):
             failedRuns=[RunRefResponse.from_ref(r) for r in summary.failed_runs],
             runningRuns=[RunRefResponse.from_ref(r) for r in summary.running_runs],
             healthFlags=[HealthFlagResponse.from_flag(h) for h in summary.health_flags],
-            openQuestions=[KnowledgeRefResponse.from_ref(k) for k in summary.open_questions],
             relevantKnowledge=[
                 KnowledgeRefResponse.from_ref(k) for k in summary.relevant_knowledge
             ],

@@ -4,8 +4,7 @@ Provides shared JSON persistence, metadata loading, child reconstruction,
 and child listing for Workspace, Project, Experiment, and Run.
 
 The atomic write helpers ``atomic_write_json`` / ``atomic_write_text``
-are re-exported from the cross-layer primitive :mod:`molab.atomicio` —
-a cross-layer primitive shared by workspace and knowledge.
+are re-exported from the cross-layer primitive :mod:`molab.atomicio`.
 """
 
 from __future__ import annotations

@@ -20,6 +20,13 @@ export const INTERNAL_PLUGIN_DESCRIPTORS: readonly InternalPluginDescriptor[] = 
     load: () => import("@/plugins/editor/plugin"),
   },
   {
+    id: "busytex",
+    name: "BusyTeX",
+    description: "Compiles .tex files to PDF in the browser with TeXlyre BusyTeX pdfLaTeX.",
+    userToggleable: true,
+    load: () => import("@/plugins/busytex/plugin"),
+  },
+  {
     id: "workflow",
     name: "Workflow",
     description: "Workflow graph viewer, source tab, and right-rail inspector.",

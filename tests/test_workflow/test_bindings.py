@@ -16,6 +16,7 @@ from molab.workflow import (
     WorkflowCompiler,
     default_binding_registry,
 )
+from molab.workflow.binding import WorkflowBinding
 
 
 class _StubExperiment:
@@ -49,6 +50,14 @@ class TestWorkflowBindingRegistry:
         reg.bind(exp, spec)
         assert reg.unbind(exp) is True
         assert reg.is_bound(exp, spec) is False
+
+    def test_binding_carries_workflow_digest(self) -> None:
+        reg = WorkflowBindingRegistry()
+        spec = _make_spec("digest")
+        exp = _StubExperiment("e1")
+        binding = reg.bind(exp, spec)
+        assert binding.workflow_digest == spec.workflow_digest
+        assert "workflow_id" not in WorkflowBinding.model_fields
 
     def test_bind_rejects_target_without_string_id(self) -> None:
         reg = WorkflowBindingRegistry()

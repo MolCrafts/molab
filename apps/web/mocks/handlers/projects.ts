@@ -62,6 +62,7 @@ export const projectHandlers = [
             config: {},
             created: new Date().toISOString(),
             experimentCount: 0,
+            ref: `molab:project/${id}`,
         };
 
         setProject(newProject);

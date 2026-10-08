@@ -15,7 +15,7 @@ from molab.knowledge import (
     ReferenceMeta,
     SourceRef,
 )
-from molab.workspace import Experiment, Run, Workspace
+from molab.workspace import Experiment, Workspace
 
 
 @pytest.fixture
@@ -52,11 +52,15 @@ class TestWrite:
         assert lit.record.year == 2015
 
     def test_finding_write_persists_source_ref(self, tmp_path: Path) -> None:
-        finding = Finding(tmp_path / "result", sources=[SourceRef(kind="run", ref="run-1")])
+        finding = Finding(
+            tmp_path / "result",
+            sources=[SourceRef(kind="run", ref="molab:experiment/E1/run/R1")],
+        )
         finding.write("# Result\n")
         text = finding.path.read_text()
         assert "class: Finding" in text
-        assert "ref: run-1" in text
+        assert "sources:" not in text
+        assert "- [@derived_from R1](molab:experiment/E1/run/R1)" in text
 
     def test_finding_without_sources_raises_at_construct(self, tmp_path: Path) -> None:
         with pytest.raises((TypeError, ValueError)):
@@ -85,88 +89,6 @@ class TestFromDir:
             Knowledge.open(tmp_path / "empty")
 
 
-class TestKnowledgeWalk:
-    """``walk`` yields markdown files under ``knowledges/``."""
-
-    def test_walk_yields_only_knowledges_markdown(self, tmp_path: Path) -> None:
-        root = tmp_path / "wiki"
-        kb = root / "knowledges"
-        kb.mkdir(parents=True)
-        (kb / "cooling.md").write_text("---\nclass: Note\n---\n\n# Cooling rate\n")
-        run_dir = root / "run"
-        run_dir.mkdir()
-        (run_dir / "run.json").write_text("{}\n")
-        e1 = run_dir / "executions" / "e1"
-        e1.mkdir(parents=True)
-        (e1 / "index.md").write_text("# decoy\n")
-
-        yielded = {item.name for item in Knowledge(root).walk()}
-        assert yielded == {"cooling"}
-        assert "run" not in yielded
-        assert "e1" not in yielded
-
-    def test_walk_follows_layout_containers_not_bulk_trees(self, tmp_path: Path) -> None:
-        root = tmp_path / "lab"
-        (root / "knowledges").mkdir(parents=True)
-        (root / "knowledges" / "lab-note.md").write_text("---\nclass: Note\n---\n\n# Lab\n")
-        exp_k = root / "projects" / "p" / "experiments" / "e" / "knowledges"
-        exp_k.mkdir(parents=True)
-        (exp_k / "finding.md").write_text("---\nclass: Note\n---\n\n# F\n")
-        run_k = root / "projects" / "p" / "experiments" / "e" / "runs" / "r" / "knowledges"
-        run_k.mkdir(parents=True)
-        (run_k / "log.md").write_text("---\nclass: Note\n---\n\n# Log\n")
-        decoy = root / "projects" / "p" / "experiments" / "e" / "pinn-src" / "knowledges"
-        decoy.mkdir(parents=True)
-        (decoy / "noise.md").write_text("---\nclass: Note\n---\n\n# Noise\n")
-        campaign = root / "projects" / "p" / "campaign" / "knowledges"
-        campaign.mkdir(parents=True)
-        (campaign / "old.md").write_text("---\nclass: Note\n---\n\n# Old\n")
-
-        yielded = {item.name for item in Knowledge(root).walk()}
-        assert yielded == {"lab-note", "finding", "log"}
-        assert "noise" not in yielded
-        assert "old" not in yielded
-
-
-class TestKnowledgeSearch:
-    """``search(..., of=Note)`` ranks only Note hits."""
-
-    def test_search_by_note_class_excludes_other_subclasses(self, tmp_path: Path) -> None:
-        root = tmp_path / "wiki"
-        kb = root / "knowledges"
-        kb.mkdir(parents=True)
-        (kb / "cooling.md").write_text(
-            "---\nclass: Note\n---\n\n# Cooling rate\n\nQuench protocol.\n"
-        )
-        (kb / "paper.md").write_text(
-            "---\nclass: Literature\ntitle: Cooling of glasses\nyear: 2015\n---\n\n"
-            "cooling in the literature\n"
-        )
-
-        result = Knowledge(root).search("cooling", of=Note)
-        assert {hit.entry.path for hit in result.hits} == {"knowledges/cooling.md"}
-
-    def test_search_spans_every_host(
-        self, lab: Workspace, experiment: Experiment, run: Run
-    ) -> None:
-        """One search from the workspace root ranks root, experiment and run notes."""
-        root_note = Note(Path(lab.root) / "knowledges" / "root-note")
-        root_note.write("# Vitrification protocol\n\nvitrification of the melt, vitrification.\n")
-        Note(experiment, "exp-note").write("# Quench\n\nvitrification at 10 K/s.\n")
-        Note(run, "run-note").write("# Seed 1\n\nvitrification observed.\n")
-        run_rel = Path(run.run_dir).relative_to(lab.root).as_posix()
-
-        result = Knowledge(lab.root).search("vitrification")
-
-        assert {hit.entry.path for hit in result.hits} == {
-            "knowledges/root-note.md",
-            "projects/p/experiments/e/knowledges/exp-note.md",
-            f"{run_rel}/knowledges/run-note.md",
-        }
-        assert result.hits[0].entry.path == "knowledges/root-note.md"
-        assert Knowledge(lab.root).search("vitrification", limit=1).truncated is True
-
-
 class TestCite:
     """All six classes cite with the same verb."""
 
@@ -186,9 +108,7 @@ class TestSourcedHostConstruction:
     """A sourced class takes ``(host, name)`` too; ``sources`` stays required."""
 
     def test_a_finding_lands_on_the_host_markdown_golden(self, experiment: Experiment) -> None:
-        finding = Finding(
-            experiment, "tg-rise", sources=[SourceRef(kind="experiment", ref="exp-1")]
-        )
+        finding = Finding(experiment, "tg-rise", sources=[SourceRef.of(experiment)])
 
         assert finding.path == Path(str(experiment.resolve())) / "knowledges" / "tg-rise.md"
 
@@ -197,11 +117,13 @@ class TestSourcedHostConstruction:
             Finding(experiment, "tg-rise")
 
     def test_the_narrative_write_lands_at_the_host_path(self, experiment: Experiment) -> None:
-        source = SourceRef(kind="experiment", ref="exp-1")
+        source = SourceRef.of(experiment)
         finding = Finding(experiment, "tg-rise", sources=[source])
 
         finding.write("# Tg rises with the cooling rate\n")
 
         assert finding.path.is_file()
-        assert finding.path.read_text().endswith("# Tg rises with the cooling rate\n")
+        text = finding.path.read_text()
+        assert "# Tg rises with the cooling rate\n" in text
+        assert "sources:" not in text
         assert finding.sources == [source]

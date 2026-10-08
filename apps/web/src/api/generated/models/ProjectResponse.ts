@@ -12,5 +12,6 @@ export type ProjectResponse = {
     config?: Record<string, any>;
     created: string;
     experimentCount?: (number | null);
+    ref: string;
 };
 

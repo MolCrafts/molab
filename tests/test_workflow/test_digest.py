@@ -111,7 +111,7 @@ class TestComputeWorkflowDigest:
     def test_same_named_task_body_change_differs(self) -> None:
         """The qualname bug: two decorator bodies named ``b`` must not collide."""
         v1, v2 = _ab(), _ab(b_body=b_other_body)
-        assert v1.workflow_id == v2.workflow_id
+        assert not hasattr(v1, "workflow_id")
         assert compute_workflow_digest(v1) != compute_workflow_digest(v2)
 
     def test_depends_on_change_differs(self) -> None:

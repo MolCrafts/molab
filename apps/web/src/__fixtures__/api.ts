@@ -19,6 +19,7 @@ export const fixtureProject: ProjectResponse = {
   path: "projects/alpha-project",
   created: "2026-03-01T00:00:00Z",
   description: "First project",
+  ref: "molab:project/proj-alpha",
 };
 
 export const fixtureProjectNoDescription: ProjectResponse = {
@@ -26,6 +27,7 @@ export const fixtureProjectNoDescription: ProjectResponse = {
   name: "Beta Project",
   path: "projects/beta-project",
   created: "2026-03-02T00:00:00Z",
+  ref: "molab:project/proj-beta",
 };
 
 export const fixtureExperiment: ExperimentResponse = {
@@ -36,6 +38,7 @@ export const fixtureExperiment: ExperimentResponse = {
   created: "2026-03-01T10:00:00Z",
   workflow: "workflow.py",
   description: "Baseline experiment",
+  ref: "molab:experiment/exp-001",
 };
 
 export const fixtureExperimentNoDescription: ExperimentResponse = {
@@ -45,6 +48,7 @@ export const fixtureExperimentNoDescription: ExperimentResponse = {
   path: "projects/alpha-project/experiments/variant",
   created: "2026-03-02T10:00:00Z",
   workflow: "variant.py",
+  ref: "molab:experiment/exp-002",
 };
 
 const fixtureStatus = (status: string) => ({
@@ -66,6 +70,7 @@ export const fixtureRun: ApiRunResponse = {
   created: "2026-03-01T11:00:00Z",
   finished: "2026-03-01T12:00:00Z",
   parameters: { lr: 0.001 },
+  ref: "molab:experiment/exp-001/run/run-abc",
 };
 
 export const fixtureRunPending: ApiRunResponse = {

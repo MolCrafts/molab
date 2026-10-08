@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Archive, Download } from "lucide-react";
-import { assetsApi } from "@/api";
+import { assetsApi, assetVersionOrigin } from "@/api";
 import { DashboardCanvas, EntityPage, OverviewSurface } from "@/app/components/entity";
 import { assetDetailQueryOptions, assetVersionsQueryOptions } from "@/app/state/entityQueries";
 import type { ScopedRendererProps } from "@/app/types";
@@ -90,7 +90,7 @@ export const AssetViewer = ({
           label: "Overview",
           content: (
             <OverviewSurface>
-              <DashboardCanvas className="max-w-4xl space-y-8">
+              <DashboardCanvas>
                 <dl className="grid gap-3 text-label sm:grid-cols-[10rem_1fr]">
                   <dt className="text-muted-foreground">Asset ID</dt>
                   <dd className="break-all font-mono">{selection.objectId}</dd>
@@ -103,7 +103,7 @@ export const AssetViewer = ({
                 </dl>
                 <p className="text-label text-muted-foreground">
                   Asset identity is stable across storage locations. Each row below is an immutable
-                  content version promoted from an Artifact.
+                  content version promoted from an Artifact or imported.
                 </p>
               </DashboardCanvas>
             </OverviewSurface>
@@ -114,7 +114,7 @@ export const AssetViewer = ({
           label: `Versions (${versions.length})`,
           content: (
             <OverviewSurface>
-              <DashboardCanvas className="max-w-5xl">
+              <DashboardCanvas>
                 {versions.length === 0 ? (
                   <WorkbenchOperationState
                     kind={asset ? "empty" : "loading"}
@@ -130,7 +130,7 @@ export const AssetViewer = ({
                     <TableHeader>
                       <TableRow>
                         <TableHead>Version</TableHead>
-                        <TableHead>Source artifact</TableHead>
+                        <TableHead>Origin</TableHead>
                         <TableHead>Content</TableHead>
                         <TableHead>Size</TableHead>
                         <TableHead>Created</TableHead>
@@ -141,9 +141,11 @@ export const AssetViewer = ({
                         <TableRow key={version.id}>
                           <TableCell className="font-mono">v{version.version}</TableCell>
                           <TableCell className="font-mono text-label">
-                            {version.sourceArtifactId}
+                            {assetVersionOrigin(version)}
                           </TableCell>
-                          <TableCell className="font-mono text-micro">{version.digest}</TableCell>
+                          <TableCell className="font-mono text-micro">
+                            {version.digest ?? "—"}
+                          </TableCell>
                           <TableCell className="font-mono text-label">
                             {formatBytes(version.size)}
                           </TableCell>

@@ -202,6 +202,7 @@ const TreeRow = ({
         }
         if (node.onSelect) {
           node.onSelect();
+          if (hasChildren && !isExpanded) onToggle(node.id);
         } else if (hasChildren) {
           onToggle(node.id);
         }
@@ -377,6 +378,8 @@ export const TreeView = ({
     }
     if (node.onSelect) {
       node.onSelect();
+      // Opening a folder-like row also shows what is inside it.
+      if (node.children !== undefined && !expanded.has(node.id)) toggle(node.id);
     } else if (node.children !== undefined) {
       toggle(node.id);
     }

@@ -15,7 +15,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
-from molab.workspace.assets import scan
+from molab.workspace.refs import MolabRef
 
 from ..dependencies import get_workspace
 from ..exceptions import AssetNotFoundError
@@ -25,20 +25,22 @@ from ..preview import (
     preview_frames,
     snapshot_reader,
 )
-from ._scope import resolve_scope_dir
 
 router = APIRouter(prefix="/assets", tags=["assets"])
 
 
 def _resolve_dataset_path(workspace, asset_id: str) -> Path:  # noqa: ANN001
-    """Resolve the asset's on-disk path, raising a typed 404 if unknown."""
-    asset = scan.get_asset(workspace.root, asset_id)
-    if asset is None:
-        raise AssetNotFoundError(asset_id)
-    scope_dir = resolve_scope_dir(workspace, asset.scope)
-    if scope_dir is None:
-        raise AssetNotFoundError(asset_id)
-    return asset.absolute_path(scope_dir)
+    """Resolve the asset's on-disk path, raising a typed 404 if the bytes are gone.
+
+    An unknown or ambiguous id is not caught here. Lookup failures propagate
+    to the process-wide handlers.
+    """
+    asset = workspace.find(MolabRef(asset_id=asset_id))
+    try:
+        path = workspace.assets_at(asset.scope).payload_path(asset.id)
+    except KeyError as exc:
+        raise AssetNotFoundError(asset_id) from exc
+    return Path(path)
 
 
 @router.get("/{asset_id}/preview")
@@ -61,7 +63,7 @@ def preview_asset(
         ``image/png`` for ``png``.
 
     Raises:
-        AssetNotFoundError: Unknown asset id (404).
+        AssetNotFoundError: The asset resolved, but its payload is missing (404).
         PreviewSidecarNotFoundError: No sidecar next to the dataset (404).
         NoReaderInSidecarError / AmbiguousReaderError / PreviewReaderError:
             The molpy sidecar has no reader / too many / failed (422).

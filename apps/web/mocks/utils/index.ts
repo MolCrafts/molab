@@ -51,6 +51,7 @@ export function seedWorkspace(config: {
                 config: p.config || {},
                 created: p.created || new Date().toISOString(),
                 experimentCount: p.experimentCount ?? 0,
+                ref: `molab:project/${p.id || "project"}`,
             };
             setProject(project);
         });
@@ -66,13 +67,14 @@ export function seedWorkspace(config: {
                 name: e.name || "Test Experiment",
                 description: e.description || "",
                 workflow: e.workflow || "workflow.yml",
-                workflowType: e.workflowType || "yaml",
+                workflowKind: e.workflowKind || "document",
                 gitCommit: e.gitCommit || null,
                 parameterSpace: e.parameterSpace || {},
                 defaultInputs: e.defaultInputs || [],
                 runCount: e.runCount ?? 0,
                 runs: e.runs || [],
                 created: e.created || new Date().toISOString(),
+                ref: `molab:experiment/${e.id || "exp"}`,
             };
             setExperiment(experiment);
         });
@@ -145,6 +147,7 @@ export function addProject(data: Partial<ApiProjectResponse>): ApiProjectRespons
         config: data.config || {},
         created: data.created || new Date().toISOString(),
         experimentCount: data.experimentCount ?? 0,
+        ref: data.ref || `molab:project/${data.id || "project"}`,
     };
     setProject(project);
     return project;
@@ -161,13 +164,14 @@ export function addExperiment(data: Partial<ApiExperimentResponse>): ApiExperime
         name: data.name || "New Experiment",
         description: data.description || "",
         workflow: data.workflow || "workflow.yml",
-        workflowType: data.workflowType || "yaml",
+        workflowKind: data.workflowKind || "document",
         gitCommit: data.gitCommit || null,
         parameterSpace: data.parameterSpace || {},
         defaultInputs: data.defaultInputs || [],
         runCount: data.runCount ?? 0,
         runs: data.runs || [],
         created: data.created || new Date().toISOString(),
+        ref: data.ref || `molab:experiment/${data.id || "exp"}`,
     };
     setExperiment(experiment);
     return experiment;

@@ -30,7 +30,7 @@ from molab.workflow.contract import (
 
 def _sample_contract() -> WorkflowContract:
     return WorkflowContract(
-        workflow_id="workflow_00000000",
+        workflow_digest="workflow_00000000",
         task_io=(
             TaskIO(
                 task_id="A",
@@ -119,6 +119,8 @@ class TestWorkflowCodecYamlRoundTrip:
         spec = default_codec.ir_to_spec(ir_in)
         ir_out = default_codec.spec_to_ir(spec)
         assert "workflow_contract" not in ir_out
+        assert "workflow_id" not in ir_out
+        assert "workflow_digest" not in ir_out
 
 
 class TestWorkflowCodecYamlSafety:

@@ -10,7 +10,6 @@ import inspect
 import tempfile
 from collections.abc import Iterable
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from molab.server.exceptions import (
     AmbiguousReaderError,
@@ -18,15 +17,12 @@ from molab.server.exceptions import (
     PreviewReaderError,
 )
 
-if TYPE_CHECKING:
-    from molpy.io import BaseTrajectoryReader
-
 
 def require_molpy() -> tuple[type, type]:
     """Return ``(Frame, BaseTrajectoryReader)`` or raise a rebuild hint."""
     try:
         from molpy import Frame
-        from molpy.io import BaseTrajectoryReader
+        from molpy.io import BaseTrajectoryReader  # ty: ignore[unresolved-import]
     except ImportError as exc:
         raise ImportError(
             "Preview needs molpy. Rebuild the science stack: "
@@ -55,7 +51,7 @@ def readers_in(module: object) -> list[type]:
     return found
 
 
-def open_reader(module: object, dataset_path: Path) -> BaseTrajectoryReader:
+def open_reader(module: object, dataset_path: Path) -> Iterable[object]:
     """Instantiate the sidecar's sole reader against *dataset_path*."""
     readers = readers_in(module)
     if not readers:
@@ -79,7 +75,7 @@ def frames_to_extxyz(frames: Iterable[object]) -> bytes:
     with tempfile.NamedTemporaryFile(suffix=".xyz", delete=False) as tmp:
         tmp_path = Path(tmp.name)
     try:
-        write_xyz_trajectory(tmp_path, list(frames))
+        write_xyz_trajectory(tmp_path, list(frames))  # ty: ignore[invalid-argument-type]
         return tmp_path.read_bytes()
     except Exception as exc:
         raise PreviewReaderError(str(tmp_path), f"write_xyz_trajectory failed: {exc}") from exc

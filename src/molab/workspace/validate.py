@@ -32,6 +32,7 @@ from pydantic import BaseModel, ConfigDict, computed_field
 
 from .execution_dirs import execution_dir_names
 from .fs_local import LocalFileSystem
+from .naming import EXPERIMENT_CONTAINER, PROJECT_CONTAINER, RUN_CONTAINER
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -43,33 +44,8 @@ Severity = Literal["error", "warning"]
 
 _SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
-META_JSON = "meta.json"
 _EXECUTION_RE = re.compile(r"^e\d+$")
-
-#: Structural container subdirs per level — directories that hold children or
-#: payload rather than being Concepts themselves, so they carry no meta.json.
-_CONTAINERS: dict[str, frozenset[str]] = {
-    "workspace": frozenset({"projects", "assets", "knowledges"}),
-    "project": frozenset({"experiments", "assets", "knowledges"}),
-    "experiment": frozenset({"runs", "assets", "knowledges"}),
-    "run": frozenset(
-        {
-            "executions",
-            # legacy on-disk name: written by runs before D86 removed the agent layer; tolerated on read
-            "plan",
-            "source",
-            "assets",
-            "knowledges",
-            # legacy on-disk name: written by runs before D86 removed the agent layer; tolerated on read
-            "harness",
-        }
-    ),
-}
-
-#: Per-attempt dirs under ``executions/<id>/``. Products, logs, scheduler
-#: jobs and scratch live here — never at the run root. Read from the
-#: declarations so a directory cannot be legal on disk yet illegal here.
-_EXECUTION_CONTAINERS = execution_dir_names()
+_LEGACY_EXECUTION_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 
 #: level -> entity filename (singular — lives on the concept's own directory)
 _ENTITY_FILE: dict[str, str] = {
@@ -112,14 +88,17 @@ _RULE_HINTS: dict[str, str] = {
         "Rename the attempt directory to its sequence number (e01, e02, …); "
         "the id in execution.json must match it."
     ),
+    "execution.legacy_name": (
+        "Run `molab migrate layout <old> <new>` to rename legacy UUID attempt "
+        "directories to e01, e02, …"
+    ),
     "concept.marker": (
         "Stamp type on workspace.json / project.json / experiment.json / "
         "run.json. Notes and other Folders use meta.json."
     ),
     "layout.stray": (
-        "Move with ws.wp.mv(src, dst) / me.wp.mv(ws, src, dst) under the "
-        "four-tier tree (e.g. projects/<id>/assets/…), or add meta.json to "
-        "make it an OKF Concept, or ws.wp.rm(path, recursive=True) if disposable."
+        "Only declared execution directories live under executions/<id>/; "
+        "move it with ws.wp.mv(...) or remove it."
     ),
 }
 
@@ -268,9 +247,6 @@ class _Checker:
 
     # -- per-level checks ------------------------------------------------
 
-    def _has_concept_marker(self, path: str) -> bool:
-        return self._fs.is_file(self._fs.join(path, META_JSON))
-
     def _entity_has_type(self, path: str, entity: str) -> bool:
         fpath = self._fs.join(path, entity)
         if not self._fs.is_file(fpath):
@@ -289,46 +265,43 @@ class _Checker:
         if not self._entity_has_type(path, entity):
             self._add(path, "concept.marker", f"missing type on {entity}")
 
-    def _check_strays(self, path: str, level: str) -> None:
-        """Every child dir is a known container or a Concept (has meta.json)."""
-        allowed = _CONTAINERS[level]
+    def _check_execution(self, path: str) -> None:
+        """Every child of an execution dir is a declared attempt directory."""
+        allowed = execution_dir_names()
         for name in self._subdirs(path):
             if name in allowed:
                 continue
             child = self._fs.join(path, name)
-            if self._has_concept_marker(child):
-                continue  # a Concept may mount at any Folder
             self._add(
                 child,
                 "layout.stray",
-                f"{name!r} is neither a container {sorted(allowed)} nor a Concept (no {META_JSON})",
-            )
-
-    def _check_execution(self, path: str) -> None:
-        """Every child of an execution dir is a known attempt container."""
-        for name in self._subdirs(path):
-            if name in _EXECUTION_CONTAINERS:
-                continue
-            child = self._fs.join(path, name)
-            self._add(
-                child,
-                "layout.stray",
-                f"{name!r} is not an execution container {sorted(_EXECUTION_CONTAINERS)}",
+                f"{name!r} is not an execution container {sorted(allowed)}",
             )
 
     def _check_run(self, path: str) -> None:
         self._check_concept(path, "run")
-        self._check_strays(path, "run")
         execs = self._fs.join(path, "executions")
         if not self._fs.is_dir(execs):
             return
         for name in self._subdirs(execs):
             attempt = self._fs.join(execs, name)
-            if not _EXECUTION_RE.match(name):
+            if _EXECUTION_RE.match(name):
+                pass
+            elif _LEGACY_EXECUTION_RE.match(name):
+                self._add(
+                    attempt,
+                    "execution.legacy_name",
+                    (
+                        f"{name!r} is a legacy attempt UUID; run `molab migrate layout` "
+                        "to rename it to eNN"
+                    ),
+                    severity="warning",
+                )
+            else:
                 self._add(
                     attempt,
                     "execution.name",
-                    f"{name!r} is not an attempt number (e01, e02, …)",
+                    f"{name!r} is not an attempt number (e01, e02, …) or a legacy attempt UUID",
                 )
             self._check_execution(attempt)
 
@@ -344,9 +317,8 @@ class _Checker:
             return self._found
 
         self._check_concept(root, "workspace")
-        self._check_strays(root, "workspace")
 
-        projects_dir = self._fs.join(root, "projects")
+        projects_dir = self._fs.join(root, PROJECT_CONTAINER)
         project_dirs = self._subdirs(projects_dir)
 
         for pname in project_dirs:
@@ -354,9 +326,8 @@ class _Checker:
             if not _SLUG_RE.match(pname):
                 self._add(pdir, "project.slug", f"{pname!r} is not a kebab-case slug")
             self._check_concept(pdir, "project")
-            self._check_strays(pdir, "project")
 
-            experiments_dir = self._fs.join(pdir, "experiments")
+            experiments_dir = self._fs.join(pdir, EXPERIMENT_CONTAINER)
             experiment_dirs = self._subdirs(experiments_dir)
 
             for ename in experiment_dirs:
@@ -364,9 +335,8 @@ class _Checker:
                 if not _SLUG_RE.match(ename):
                     self._add(edir, "experiment.slug", f"{ename!r} is not a kebab-case slug")
                 self._check_concept(edir, "experiment")
-                self._check_strays(edir, "experiment")
 
-                runs_dir = self._fs.join(edir, "runs")
+                runs_dir = self._fs.join(edir, RUN_CONTAINER)
                 run_dirs = self._subdirs(runs_dir)
 
                 for rname in run_dirs:

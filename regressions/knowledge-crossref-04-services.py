@@ -10,21 +10,23 @@ third-party runtime.
 
 from __future__ import annotations
 
+import inspect
 import tempfile
 from pathlib import Path
 
-from molab.knowledge import Report, mount_note
-from molab.knowledge.harvest import harvest_run as knowledge_harvest_run
+from molab.knowledge import Report
+from molab.knowledge.write import mount_note
 from molab.services import run_failure
-from molab.services.knowledge_context import context_with_knowledge
+from molab.services.knowledge_context import KnowledgeRef, context_with_knowledge
 from molab.services.run_failure import analyze_run_failure
-from molab.workspace import KnowledgeRef, Workspace
+from molab.workspace import Workspace
+from molab.workspace.refs import ref_of
 
 
 def main() -> None:
-    # The redirect's contract: the module binds knowledge's own function object.
-    assert run_failure.harvest_run is knowledge_harvest_run
+    # The failure Report is knowledge's own harvest, not a services writer.
     assert run_failure.Report is Report
+    assert "Report.harvest(" in inspect.getsource(analyze_run_failure)
 
     with tempfile.TemporaryDirectory() as raw:
         workspace = Workspace(root=Path(raw) / "lab", name="Lab")
@@ -43,7 +45,7 @@ def main() -> None:
         # A Knowledge document is a file: no directory, no report.json sidecar.
         assert item.path.name == f"failure-analysis-{run.id}.md"
         assert item.path.is_file()
-        assert any(s.kind == "run" and s.ref == run.id for s in item.sources)
+        assert any(s.kind == "run" and s.ref == str(ref_of(run)) for s in item.sources)
 
         # A Note mounted at the workspace root projects as its own file-form row
         # (walk order is not a contract, so the golden is taken on a workspace

@@ -14,6 +14,7 @@ from pathlib import Path
 
 from molab.knowledge import Finding, Knowledge, Note, SourceRef, folder
 from molab.workspace import Workspace
+from molab.workspace.refs import ref_of
 
 
 def main() -> None:
@@ -31,7 +32,7 @@ def main() -> None:
 
         # Host construction derives path and disk, and writes nothing.
         cooling = Note(experiment, "Tg Cooling")
-        rise = Finding(experiment, "Tg Rise", sources=[SourceRef(kind="experiment", ref="exp-1")])
+        rise = Finding(experiment, "Tg Rise", sources=[SourceRef.of(experiment)])
         assert cooling.path == knowledges / "tg-cooling.md"
         assert rise.path == knowledges / "tg-rise.md"
         assert cooling.fs is experiment._disk()
@@ -39,6 +40,7 @@ def main() -> None:
 
         # The first write lands the bytes; .ref appends the hard-coded edge label.
         rise.write("# Tg rises with the cooling rate\n")
+        assert str(ref_of(experiment)) in rise.read()
         cooling.ref(rise, role="cites")
         assert cooling.path.is_file()
         assert "@cites" in cooling.path.read_text()

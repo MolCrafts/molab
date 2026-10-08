@@ -19,6 +19,7 @@ import { useBlocker } from "react-router-dom";
 import { workflowApi } from "@/api";
 import { useInspectedTask } from "@/app/state/inspectedTask";
 import type { ScopedRendererProps } from "@/app/types";
+
 import {
   AlertDialog,
   AlertDialogAction,
@@ -29,7 +30,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { WorkbenchDismissAction } from "@/components/workbench";
+import { WorkbenchAction, WorkbenchDismissAction } from "@/components/workbench";
 import { FlowgramCanvas } from "@/components/workflow/flowgram-canvas";
 import { FlowgramCanvasToolbar } from "@/components/workflow/flowgram-canvas-toolbar";
 import {
@@ -40,9 +41,12 @@ import {
   taskGraphToWireDocument,
 } from "@/components/workflow/flowgram-document";
 import type { TaskGraphJson } from "@/components/workflow/task-graph-ir";
+import { workflowEditPolicy } from "./workflowEditPolicy";
+
 export const WorkflowGraphViewer = ({
   selection,
   snapshot,
+  onRefresh,
 }: ScopedRendererProps<"experiments" | "runs" | "workflows" | "workspaces">): JSX.Element => {
   const { inspectTask } = useInspectedTask();
   const workflow = snapshot.workflows.find((item) => item.id === selection.objectId) ?? null;
@@ -54,6 +58,8 @@ export const WorkflowGraphViewer = ({
   // Bumped on save/discard to force the canvas to re-initialize from the
   // authoritative document (flowgram only reads `initialData` on mount).
   const [revision, setRevision] = useState(0);
+  const [convertConfirmed, setConvertConfirmed] = useState(false);
+  const [convertOpen, setConvertOpen] = useState(false);
 
   const dirty = draft !== null;
 
@@ -65,6 +71,8 @@ export const WorkflowGraphViewer = ({
     setSavedGraph(null);
     setDraft(null);
     setError(null);
+    setConvertConfirmed(false);
+    setConvertOpen(false);
   }, [selection.objectId]);
 
   // Prefer the freshly-saved graph, else the snapshot's IR.
@@ -75,19 +83,23 @@ export const WorkflowGraphViewer = ({
   );
 
   const handleSave = useCallback(async (): Promise<void> => {
-    if (!workflow || !draft) return;
+    const source = draft ?? (convertConfirmed ? (document ?? { nodes: [], edges: [] }) : null);
+    if (!workflow || !source) return;
     setSaving(true);
     setError(null);
     try {
       const wire = taskGraphToWireDocument(
-        flowgramDocToTaskGraphJson(draft, workflow.name ?? "Workflow"),
+        flowgramDocToTaskGraphJson(source, workflow.name ?? "Workflow"),
       );
-      const persisted = await workflowApi.save(workflow.projectId, workflow.experimentId, wire);
+      const persisted = await workflowApi.save(workflow.projectId, workflow.experimentId, wire, {
+        convertToDocument: convertConfirmed,
+      });
       // Reload from the server-normalized document so the canvas reflects
       // exactly what was persisted, and remount it to drop the stale draft.
       setSavedGraph(normalizeTaskGraph(persisted));
       setDraft(null);
       setRevision((r) => r + 1);
+      if (convertConfirmed) onRefresh();
     } catch (err) {
       // Keep `draft` so the user can fix and retry — never silently lose edits.
       setError(
@@ -98,7 +110,7 @@ export const WorkflowGraphViewer = ({
     } finally {
       setSaving(false);
     }
-  }, [workflow, draft]);
+  }, [workflow, draft, document, convertConfirmed, onRefresh]);
 
   const handleDiscard = useCallback((): void => {
     setDraft(null);
@@ -152,6 +164,10 @@ export const WorkflowGraphViewer = ({
     );
   }
 
+  const experiment = snapshot.experiments.find((item) => item.id === workflow.experimentId) ?? null;
+  const policy = workflowEditPolicy(experiment?.workflowKind);
+  const readOnly = policy.mode === "convert" && !convertConfirmed;
+  const entrypoint = experiment?.workflowEntrypoint;
   const isEmpty = !document || document.nodes.length === 0;
 
   return (
@@ -164,10 +180,22 @@ export const WorkflowGraphViewer = ({
                 onSave={handleSave}
                 onDiscard={handleDiscard}
                 saving={saving}
-                dirty={dirty}
+                dirty={dirty || (policy.mode === "convert" && convertConfirmed)}
               />
             </div>
           </div>
+
+          {readOnly && policy.mode === "convert" && (
+            <div className="pointer-events-auto flex flex-wrap items-center justify-between gap-3 rounded-control border border-border bg-background/90 px-3 py-2 text-label text-foreground">
+              <p>
+                This experiment runs a {policy.kind} workflow
+                {entrypoint ? ` (${entrypoint})` : ""}. The graph is a read-only view.
+              </p>
+              <WorkbenchAction kind="secondary" size="compact" onClick={() => setConvertOpen(true)}>
+                Convert to document…
+              </WorkbenchAction>
+            </div>
+          )}
 
           {error && (
             <div
@@ -184,7 +212,7 @@ export const WorkflowGraphViewer = ({
           )}
         </div>
 
-        {isEmpty ? (
+        {isEmpty && policy.mode !== "convert" ? (
           <div className="flex h-full flex-col items-center justify-center gap-1 px-6 text-center">
             <p className="text-body font-medium text-foreground">No tasks in this workflow yet</p>
             <p className="max-w-sm text-label text-muted-foreground">
@@ -192,10 +220,18 @@ export const WorkflowGraphViewer = ({
               the workflow definition.
             </p>
           </div>
+        ) : readOnly ? (
+          <FlowgramCanvas
+            key={`${workflow.id}:${revision}:ro`}
+            document={document ?? { nodes: [], edges: [] }}
+            editable={false}
+            onChange={setDraft}
+            onNodeClick={(taskId) => inspectTask(taskId, "")}
+          />
         ) : (
           <FlowgramCanvas
             key={`${workflow.id}:${revision}`}
-            document={document}
+            document={document ?? { nodes: [], edges: [] }}
             editable
             onChange={setDraft}
             onNodeClick={(taskId) => inspectTask(taskId, "")}
@@ -220,6 +256,29 @@ export const WorkflowGraphViewer = ({
             <AlertDialogCancel onClick={() => blocker.reset?.()}>Stay</AlertDialogCancel>
             <AlertDialogAction intent="danger" onClick={() => blocker.proceed?.()}>
               Leave
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={convertOpen} onOpenChange={setConvertOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Convert to document?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Saving an edited graph rebinds this experiment to the graph document and creates a new
+              revision; future runs execute the graph, not the code entrypoint.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setConvertConfirmed(true);
+                setConvertOpen(false);
+              }}
+            >
+              Convert to document
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

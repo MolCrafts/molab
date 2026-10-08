@@ -9,7 +9,7 @@ Workspace
         └── Run          (one execution attempt; re-runs append ExecutionRecords)
 ```
 
-Every persistent byproduct — imported data, task artifacts, logs, checkpoints, error traces, workflow execution state — is a typed `Asset` subclass recorded in a per-scope `assets.json` manifest. Those manifests are authoritative and are what asset queries scan directly — there is no derived asset index beside them. Every metadata write is atomic (temp-file + `os.rename`), so a crash never leaves a half-written JSON file.
+Every persistent byproduct — imported data, task artifacts, logs, checkpoints, error traces, workflow execution state — is a typed `Asset` subclass recorded in a per-scope `asset.json` manifest. Those manifests are authoritative and are what asset queries scan directly — there is no derived asset index beside them. Every metadata write is atomic (temp-file + `os.rename`), so a crash never leaves a half-written JSON file.
 
 Workspace is the bottom of the molab dependency DAG. It owns filesystem layout, atomic JSON, content-addressed assets, and generic per-kind subsystem storage — and **does not know about workflows or knowledge**. Upstream layers (workflow, knowledge, services, cli, server) reach *down* into workspace's public surface; the inverse is forbidden by the import-guard test.
 
@@ -20,7 +20,7 @@ Workspace is the bottom of the molab dependency DAG. It owns filesystem layout, 
 | `Workspace` | `<root>/` | `workspace.json` | Top-level container. Materialized explicitly or when the first child is created. |
 | `Project` | `<root>/projects/<project_id>/` | `project.json` | Research-area container (MD, ML training, data pipeline, …). |
 | `Experiment` | `<project>/experiments/<exp_id>/` | `experiment.json` | Concrete parameter set + replica count. Workspace stores the parameter binding; pairing the experiment with a workflow is the *caller's* concern. |
-| `Run` | `<exp>/runs/run-<run_id>/` | `run.json` | Single execution instance; re-runs append `ExecutionRecord` entries. |
+| `Run` | `<exp>/runs/<params>/` | `run.json` | Single execution instance; re-runs append `ExecutionRecord` entries. |
 
 Children are **not** stored as lists in the parent metadata — parents discover children by scanning the filesystem. This keeps writes local and avoids lock contention.
 
@@ -28,10 +28,10 @@ Children are **not** stored as lists in the parent metadata — parents discover
 
 Scientific workflows tend to run the same pipeline many times with different parameters, then compare outcomes. The `Experiment → Run` split reflects that:
 
-- **Experiment** is the *definition* — parameters, replica count, seeds, optional advisory `workflow_source` / `workflow_type` strings used by the UI for grouping.
+- **Experiment** is the *definition* — parameters, replica count, seeds, optional advisory `workflow_kind` / `workflow_kind` strings used by the UI for grouping.
 - **Run** is a *realization* — one execution, one set of concrete parameter values, one outcome.
 
-Each `Run` captures reproducibility metadata: an opaque `workflow_snapshot` payload (the canonical typed shape lives in `molab.workflow.WorkflowSnapshotRef`; workspace stores it as a JSON `dict`), the resolved molcfg profile, a `config_hash`, execution history, error info, and produced artifacts.
+Each `Run` captures reproducibility metadata: an opaque `workflow_digest` payload (the canonical typed shape lives in `molab.workflow.workflow_digest`; workspace stores it as a JSON `dict`), the resolved molcfg profile, a `config_hash`, execution history, error info, and produced artifacts.
 
 ## Creating a Hierarchy
 
@@ -111,9 +111,9 @@ Entering `run.start()` opens a `RunContext` which:
 3. Appends a new `ExecutionState` to `run.executions`.
 4. Runs the workflow; the heartbeat `alive` file is touched every 30 s.
 5. On success, seals the execution as `succeeded` with the final timestamp.
-6. On failure, seals it as `failed` and writes `executions/<exec_id>/error.txt`.
+6. On failure, seals it as `failed` and writes `executions/<exec_id>/traceback.txt`.
 
-Every attempt appears in `run.executions`, newest last — a run that was retried twice will have three executions. An execution is opened with `ExecutionMode.INITIAL` the first time; a re-execution needs an explicit `mode=` (`RERUN` to start fresh, `RETRY` after a failure, `RESUME` with a checkpoint, `REPRODUCE` after a success).
+Every attempt appears in `run.executions`, newest last. An execution is opened with `ExecutionMode.INITIAL` the first time. A later attempt needs an explicit mode: `RERUN` after any terminal attempt, `RESUME` when the predecessor failed, was cancelled, or was interrupted, and `REPRODUCE` after a success. `ExecutionMode.RETRY` is stored as `RERUN`.
 
 ## Assets
 
@@ -155,17 +155,17 @@ molab info      # show workspace summary
 ```
 ./lab/
 ├── workspace.json
-├── assets.json                     # workspace-scoped asset manifest (authoritative)
+├── asset.json                     # workspace-scoped asset manifest (authoritative)
 ├── data_assets/<asset_id>/payload/ # imported DataAssets
 └── projects/
     └── qm9/
         ├── project.json
-        ├── assets.json             # project-scoped asset manifest
+        ├── asset.json             # project-scoped asset manifest
         ├── data_assets/            # project-scoped DataAssets
         └── experiments/
             └── baseline/
                 ├── experiment.json
-                ├── assets.json     # experiment-scoped asset manifest
+                ├── asset.json     # experiment-scoped asset manifest
                 ├── data_assets/    # experiment-scoped DataAssets
                 └── runs/
                     └── <key=value_…>/
@@ -177,6 +177,25 @@ molab info      # show workspace summary
                             ├── artifacts/
                             └── out/<task>/
 ```
+
+## Upgrading an existing workspace
+
+Run these once on a tree that predates the current layout:
+
+- `molab migrate assets` — until this has run, any leftover legacy asset record makes asset reads answer 409 `MIGRATION_REQUIRED`.
+- `molab migrate workflow-kind` — records whether each experiment runs code or a graph document.
+- `molab migrate knowledge` — moves old documents into `<host>/knowledges/<slug>.md`.
+
+A registered wiki whose documents sit under `<wiki>/knowledges/` must re-register that directory as its source root: `molab knowledge sources remove <name>`, then `molab knowledge sources add <name> <wiki>/knowledges`.
+
+A new workspace's `workspace.json` id is a UUIDv7, written create-if-absent the first time it is materialized and never rewritten. An existing slug id is kept.
+
+### Removed API
+
+- `WorkflowRuntime.execute` / `start` no longer take `run_dir=`. The cache and the journal live at `.molab/runs/<run-id>/cache/` and `executions/eNN/workflow.json`, taken from the run's identity.
+- `ErrorInfo` (removed; read `Execution.error`)
+- `molab.entry.load_workflow_from_entrypoint` is gone. Import `molab.workflow.load_workflow_from_entrypoint`. `molab.entry` does not re-export it.
+- The authoring `remote=` kwarg is removed. Remote execution goes through the compute target and the scheduler.
 
 ## Runnable Example
 

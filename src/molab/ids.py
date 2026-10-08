@@ -1,7 +1,7 @@
 """Identity primitives — slug / unique-id / content-hash, cross-layer.
 
 Holds the pure, layer-agnostic helpers behind molab's identity law:
-uniqueness (:func:`generate_id` / :func:`generate_asset_id`),
+uniqueness (:func:`generate_id` / :func:`generate_uuid7`),
 reproducibility (:func:`compute_content_hash`), and slug derivation
 (:func:`slugify`). They sit *above* ``molab.workspace`` in the same
 category as :mod:`molab.path` and :mod:`molab.atomicio` — citable from
@@ -83,15 +83,6 @@ def generate_id() -> str:
         8-character hex string, e.g., ``'a3f2e8d9'``.
     """
     return uuid4().hex[:8]
-
-
-def generate_asset_id() -> str:
-    """Generate a unique asset id using UUID.
-
-    Returns:
-        UUID string, e.g., ``'a3f2e8d9-4b1c-4e5f-9a2b-1c3d4e5f6a7b'``.
-    """
-    return str(uuid4())
 
 
 def generate_uuid7() -> str:
@@ -260,7 +251,6 @@ __all__ = [
     "clear_hash_memo",
     "compute_content_hash",
     "compute_definition_hash",
-    "generate_asset_id",
     "generate_id",
     "generate_uuid7",
     "hash_bytes",

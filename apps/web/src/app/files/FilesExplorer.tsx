@@ -182,10 +182,15 @@ export const buildFilesExplorerNodes = (
         }
         actions.onIntentDirectory?.(node.path);
       },
-      onSelect: () => {
-        if (isFile) actions.onSelect(fileSelection);
-        else if (semantic) actions.onSelect({ objectType: semantic.type, objectId: semantic.id });
-      },
+      // A plain directory has nothing to open, so its row click toggles it.
+      onSelect:
+        isFile || semantic
+          ? () => {
+              if (isFile) actions.onSelect(fileSelection);
+              else if (semantic)
+                actions.onSelect({ objectType: semantic.type, objectId: semantic.id });
+            }
+          : undefined,
       actions: isFile
         ? [
             {

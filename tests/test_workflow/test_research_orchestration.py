@@ -38,6 +38,26 @@ class TestDependentParams:
         assert result.status == "succeeded"
         assert result.outputs["mechanical"] == pytest.approx(0.42)
 
+    async def test_upstream_view_exposes_output_only(self) -> None:
+        seen: list[object] = []
+        wf = Workflow(name="output-only")
+
+        @wf.task
+        async def cooling(ctx: TaskContext) -> dict:
+            return {"Tg": 0.6}
+
+        @wf.task(
+            depends_on=["cooling"],
+            dependent_params=lambda prev: seen.append(prev["cooling"]) or {"T": 1.0},
+        )
+        async def mechanical(T: float) -> float:
+            return float(T)
+
+        result = await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
+        assert result.status == "succeeded"
+        assert seen[0].output == {"Tg": 0.6}
+        assert not hasattr(seen[0], "assets")
+
 
 # ── ac-002 ── @wf.reduce ──────────────────────────────────────────────────────
 

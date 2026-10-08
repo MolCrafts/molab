@@ -9,7 +9,7 @@ import { Activity } from "lucide-react";
 import type { JSX } from "react";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { EntityHeader } from "@/app/components/entity";
+import { EntityPage } from "@/app/components/entity";
 import { runPath } from "@/app/entities/paths";
 import { eventTypeFilterLabel, WORKSPACE_EVENT_TYPES } from "@/app/runs/activityFeed";
 import { WorkspaceActivityFeed } from "@/app/runs/WorkspaceActivityFeed";
@@ -32,8 +32,7 @@ export const ActivityPage = ({ snapshot }: ActivityPageProps): JSX.Element => {
   };
 
   return (
-    <div className="flex h-full flex-col overflow-hidden">
-      <EntityHeader icon={Activity} title="Activity" />
+    <EntityPage icon={Activity} title="Activity">
       <div className="flex flex-wrap gap-1 border-b border-border/70 px-3 py-2">
         <WorkbenchAction
           kind="ghost"
@@ -71,6 +70,6 @@ export const ActivityPage = ({ snapshot }: ActivityPageProps): JSX.Element => {
           eventType={eventType}
         />
       </div>
-    </div>
+    </EntityPage>
   );
 };

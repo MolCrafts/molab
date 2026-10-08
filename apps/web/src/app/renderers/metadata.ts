@@ -87,6 +87,9 @@ export const buildMetadataFields = (
       ) {
         fields.push({ label: "Workflow file", value: experiment.workflowFile });
       }
+      if (experiment.workflowKind) {
+        fields.push({ label: "Workflow kind", value: experiment.workflowKind });
+      }
       fields.push({ label: "Project ID", value: experiment.projectId });
       return fields;
     },

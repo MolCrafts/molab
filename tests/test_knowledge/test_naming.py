@@ -1,39 +1,17 @@
-"""Class-named knowledge heads: ``Note`` → ``note.json``, never ``meta.json``."""
+"""Knowledge filenames are markdown files under knowledges/."""
 
-from __future__ import annotations
-
-from molab.knowledge.naming import knowledge_filename
+from molab.knowledge.naming import KNOWLEDGE_CONTAINER, as_knowledge_file, is_knowledge_file
 
 
-class TestKnowledgeFilename:
-    """``knowledge_filename(cls)`` is the singular snake_case class json."""
+class TestKnowledgeFileNames:
+    def test_markdown_suffixes_are_knowledge_files(self) -> None:
+        assert is_knowledge_file("note.md")
+        assert is_knowledge_file("note.MDX")
+        assert not is_knowledge_file("note.json")
 
-    def test_note(self) -> None:
-        from molab.knowledge import Note
+    def test_a_suffixless_path_gains_md(self) -> None:
+        assert as_knowledge_file("knowledges/idea") == "knowledges/idea.md"
+        assert as_knowledge_file("knowledges/idea.md") == "knowledges/idea.md"
 
-        assert knowledge_filename(Note) == "note.json"
-
-    def test_literature(self) -> None:
-        from molab.knowledge import Literature
-
-        assert knowledge_filename(Literature) == "literature.json"
-
-    def test_report(self) -> None:
-        from molab.knowledge import Report
-
-        assert knowledge_filename(Report) == "report.json"
-
-    def test_finding(self) -> None:
-        from molab.knowledge import Finding
-
-        assert knowledge_filename(Finding) == "finding.json"
-
-    def test_plan(self) -> None:
-        from molab.knowledge import Plan
-
-        assert knowledge_filename(Plan) == "plan.json"
-
-    def test_observation(self) -> None:
-        from molab.knowledge import Observation
-
-        assert knowledge_filename(Observation) == "observation.json"
+    def test_the_container_name_is_knowledges(self) -> None:
+        assert KNOWLEDGE_CONTAINER == "knowledges"

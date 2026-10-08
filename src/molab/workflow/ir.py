@@ -9,7 +9,7 @@ control edges, branch routes, loops, parallel fan-outs). It is produced by
 It is deliberately distinct from two neighbours:
 
 - The JSON *wire* IR produced by :meth:`Workflow.to_dict`
-  (``schema/workflow.json`` — ``task_configs`` + ``links``) is the
+  (``WorkflowCodec.spec_to_ir``'s ``task_configs`` + ``links`` shape) is the
   server contract and is intentionally DAG-only; it rejects control
   flow. ``WorkflowGraphIR`` is a superset that *can* represent branches,
   loops, and parallels, so it is the right surface for diagrams and review.
@@ -132,7 +132,6 @@ class WorkflowGraphIR(BaseModel):
     model_config = _FROZEN
 
     name: str
-    workflow_id: str
     version: str = "0"
     mode: str = "batch"
     tasks: tuple[GraphTaskIR, ...] = ()
@@ -194,7 +193,6 @@ def build_workflow_graph_ir(spec: CompiledWorkflow) -> WorkflowGraphIR:
     )
     return WorkflowGraphIR(
         name=spec.name,
-        workflow_id=spec.workflow_id,
         version=spec.version_label,
         mode=spec._mode,
         tasks=tasks,

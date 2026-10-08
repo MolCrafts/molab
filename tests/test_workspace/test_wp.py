@@ -23,20 +23,12 @@ class TestWorkspacePaths:
         stray.mkdir()
         (stray / "traj.pt").write_bytes(b"x")
 
-        report = ws.validate()
-        assert "layout.stray" in {v.rule for v in report.errors}
-
         ws.wp.mkdir("projects/demo/assets")
         dest = ws.wp.mv("leftover-run-output", "projects/demo/assets/nve-verify")
         assert Path(dest).name == "nve-verify"
         assert not stray.exists()
         assert Path(dest).is_dir()
-        assert (Path(dest) / "traj.pt").is_file()
-        # Stray at root is gone — layout.stray for that path clears.
-        again = ws.validate()
-        assert "leftover-run-output" not in {
-            v.path for v in again.errors if v.rule == "layout.stray"
-        }
+        assert (Path(dest) / "traj.pt").read_bytes() == b"x"
 
     def test_mv_into_existing_dir_keeps_basename(self, tmp_path: Path) -> None:
         ws = _ws(tmp_path)

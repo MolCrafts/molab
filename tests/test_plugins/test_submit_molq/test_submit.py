@@ -271,6 +271,25 @@ class TestSubmitHandler:
         flag = spy.argv.index("--execution-id")
         assert spy.argv[flag : flag + 2] == ["--execution-id", "e01"]
 
+    def test_the_worker_interpreter_is_configurable(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """An x86 login node submitting to aarch64 GPUs names the node's python."""
+        _ws, project, experiment, run = _make_run(tmp_path)
+        spy = _install_fake_submitor(monkeypatch, run)
+        handler = make_submit_handler(
+            scheduler="local",
+            cluster=None,
+            resources={},
+            scheduling={},
+            python="/venvs/aarch64/bin/python",
+        )
+
+        handler(None, run, experiment, project)
+
+        assert spy.argv is not None
+        assert spy.argv[0] == "/venvs/aarch64/bin/python"
+
     def test_no_uuid_execution_dir(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
         _ws, project, experiment, run = _make_run(tmp_path)
         _install_fake_submitor(monkeypatch, run)
@@ -297,7 +316,7 @@ class TestSubmitHandler:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         _ws, project, experiment, run = _make_run(tmp_path)
-        run.create_execution()
+        run._create_execution()
         run.cancel("e01")
         spy = _install_fake_submitor(monkeypatch, run)
 
@@ -313,7 +332,7 @@ class TestSubmitHandler:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         _ws, project, experiment, run = _make_run(tmp_path)
-        run.create_execution()
+        run._create_execution()
         run.cancel("e01")
         spy = _install_fake_submitor(monkeypatch, run)
 
@@ -340,7 +359,7 @@ class TestSubmitHandler:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         _ws, project, experiment, run = _make_run(tmp_path)
-        run.create_execution()
+        run._create_execution()
         spy = _install_fake_submitor(monkeypatch, run)
 
         with pytest.raises(ValueError):
@@ -679,7 +698,7 @@ class TestReconcileSubmission:
         from molab.plugins.submit_molq.submit import reconcile_submission
 
         _ws, _project, _experiment, run = _make_run(tmp_path)
-        run.create_execution()
+        run._create_execution()
         before = _record_bytes(run, "e01")
         spy = _install_refreshing_submitor(monkeypatch, state=JobState.FAILED)
 
@@ -696,7 +715,7 @@ class TestReconcileSubmission:
         from molab.plugins.submit_molq.submit import reconcile_submission
 
         _ws, _project, _experiment, run = _make_run(tmp_path)
-        run.create_execution(executor={"backend": "molq", "target": None})
+        run._create_execution(executor={"backend": "molq", "target": None})
         before = _record_bytes(run, "e01")
         spy = _install_refreshing_submitor(monkeypatch, state=JobState.FAILED)
 

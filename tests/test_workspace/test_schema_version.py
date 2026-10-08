@@ -44,10 +44,9 @@ def _every_entity_json(workspace_root) -> list:
 
 
 class TestSchemaVersionEmitted:
-    def test_current_version_is_4(self):
-        # arch-own-02a: Execution gains bypass_cache / source / workflow_digest
-        # (and arch-own-01's pruned_at / pruned_dirs ride the same bump).
-        assert MOLAB_SCHEMA_VERSION == 4
+    def test_current_version_is_5(self):
+        # arch-own-05c: one Asset schema. The constant moved 4 → 5 with that model.
+        assert MOLAB_SCHEMA_VERSION == 5
 
     def test_every_entity_json_carries_schema_version(self, tmp_path):
         ws = _seed_workspace(tmp_path / "lab")

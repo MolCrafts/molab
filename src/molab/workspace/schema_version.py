@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from .fs import FileSystem
 
-MOLAB_SCHEMA_VERSION = 4
+MOLAB_SCHEMA_VERSION = 5
 
 
 def versioned_payload(payload: dict[str, Any]) -> dict[str, Any]:

@@ -29,7 +29,7 @@ interface WorkflowFileLink {
 }
 
 interface WorkflowFilePayload {
-  workflow_id: string;
+  workflow_digest?: string;
   name?: string | null;
   task_configs: WorkflowFileNode[];
   links: WorkflowFileLink[];

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 
-from .protocols import JSONMapping, TaskBody, UpstreamViewLike, UserDeps
+from .protocols import JSONMapping, TaskBody, UpstreamViewLike
 
 type DependentParamsFn = Callable[[Mapping[str, UpstreamViewLike]], JSONMapping]
 
@@ -112,7 +112,6 @@ class TaskRegistration:
         "is_actor",
         "name",
         "position",
-        "remote",
         "task_type",
     )
 
@@ -122,7 +121,6 @@ class TaskRegistration:
         fn_or_class: TaskBody,
         depends_on: list[str],
         is_actor: bool = False,
-        remote: UserDeps = None,
         task_type: str | None = None,
         dependent_params: DependentParamsFn | None = None,
         position: tuple[float, float] | None = None,
@@ -131,7 +129,6 @@ class TaskRegistration:
         self.fn_or_class = fn_or_class
         self.depends_on = depends_on
         self.is_actor = is_actor
-        self.remote = remote
         self.task_type = task_type
         self.dependent_params = dependent_params
         # Editor-canvas coordinate metadata (free-layout graph). Pure UI

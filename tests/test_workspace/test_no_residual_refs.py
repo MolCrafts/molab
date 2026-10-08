@@ -1,389 +1,130 @@
-"""Residual-reference guard for the workspace-slim-01 deletion spec.
-
-Asserts the deleted unwired subsystems leave zero trace in the shipped
-source tree: no symbol definitions, no imports, no ``__all__`` entries,
-and no orphaned module files. Scans ``src/molab/`` only — test files
-referencing removed symbols are deleted separately.
-
-It also carries the knowledge-crossref-09 residue: the six forwarder shells
-the workspace shed, the knowledge names that left its public surface, and the
-duplicated markdown-edge machinery. Those are asserted by **attribute and
-import**, never by a substring scan — ``Note`` / ``append_link`` / ``LinkScan``
-all legitimately live on in ``molab.knowledge``, and the workspace still writes
-``knowledges/`` directories and reads its ``KnowledgeRef`` / ``ContextFocus``
-read-models, so a text scan would report the cut several times over. Prose
-mentions of knowledge are out of scope for this guard.
-
-arch-own-01-cleanup extends it with the Phase-1 dead code: the run-context
-family (``runcontext`` / ``run_context`` / ``run_lifecycle`` / ``run_assets``),
-``workflow/_names.py``, ``WorkflowSnapshotRef``, ``derive_execution_id``,
-``Run.delete_execution``, ``ExecutionContext.set_workflow``, ``CacheFolder`` /
-``Workspace.cache`` and the Bundle's persisted index writes. ``set_workflow`` and
-``RunLifecycle`` are substrings of live names, so they are asserted by attribute,
-not by the substring scan.
-
-drop-harness-01-src (D86) extends it with the Python harness and the core code
-only the harness used: the ``set_workflow_recoverer`` seam, the Folder
-``meta.json`` type table, the operator-config agent bridge, the host adapters
-(``default_science_extras`` / ``MolqPlugin`` / ``MetricsPlugin`` /
-``WorkspacePlugin``), ``workspace.curation``, the server shutdown flag,
-``PLAN_BOOK_NAME`` and ``molab mcp``. ``MolqJobs`` is a substring of the live
-``MolqJobsResponse``, so it is asserted by attribute, not by the substring scan.
-
-arch-own-02h extends it with the run-level provenance it removed
-(``Run.update_provenance``, ``snapshot_sources`` and the ``RunMetadata``
-fields passed as kwargs), backfills 02f's fresh-marker names, and asserts that
-no ``arch-own-02`` xfail is left in ``tests/``.
-"""
+"""Manifest-scanner imports stay inside the asset package (arch-own-05d)."""
 
 from __future__ import annotations
 
 import ast
-import importlib
-import inspect
 from pathlib import Path
 
-import pytest
+SRC = Path(__file__).resolve().parents[2] / "src"
+MOLAB = SRC / "molab"
+ASSETS = MOLAB / "workspace" / "assets"
+INIT = MOLAB / "workspace" / "__init__.py"
 
-import molab
-import molab.workflow
-from molab.knowledge.bundle import Bundle
-from molab.workspace.execution_context import ExecutionContext
-from molab.workspace.run import Run
-from molab.workspace.workspace import Workspace
-
-SRC = Path(molab.__file__).resolve().parent  # .../src/molab
-TESTS = Path(__file__).resolve().parents[1]  # .../tests
-REPO = TESTS.parent
-
-
-def _py_files(root: Path = SRC) -> list[Path]:
-    return [p for p in root.rglob("*.py") if "__pycache__" not in p.parts]
-
-
-# Distinctive symbols that must not appear anywhere under src/molab/ after the cut.
-DELETED_SYMBOLS = [
-    "RunFingerprint",
-    "_hash_payload",
-    "_environment_signature",
-    "_FINGERPRINT_HASH_HEX_LEN",
-    "CheckpointState",
-    "OutputAsset",
-    "ExecutionStateAsset",
-    "_register_channel",
-    "resumed_step",
-    "checkpoint_step",
-    "last_step",
-    # workspace-slim-02: the bare-pathlib container-index mechanism — the
-    # entity *.json is the sole truth source, the catalog the derived index.
-    "_rebuild_container_index",
-    "_refresh_runs_index",
-    "_refresh_executions_index",
-    "_refresh_experiments_index",
-    "_refresh_projects_index",
-    # JSON-only identity + one children-index (plural).
-    "META_YAML_FILENAME",
-    "_legacy_index_filename",
-    "_drop_legacy_index",
-    "_LEGACY_META_YAML",
-    "_LEGACY_METADATA_FILENAME",
-    "_LEGACY_INDEX_FILE",
-    "from_yaml",
-    "write_ref_meta",
-    "LEGACY_AGENT_MODEL_KEY",
-    "_LEGACY_TASK_FILE",
-    "ReadOnlyStateView",
-    "_normalize_legacy_status",
-    "_atomic_write_json",
-    "CROSS_HOST_HEARTBEAT_STALE_SECONDS",
-    "_migrate_scope_columns",
-    "_migrate_artifact_edges",
-    # arch-own-01-cleanup: Phase-1 dead code.
-    "CacheFolder",
-    "WORKSPACE_CACHE_KIND",
-    "as_cache_store",
-    "WorkflowSnapshotRef",
-    "derive_execution_id",
-    "delete_execution",
-    "RunAssets",
-    "ContextStore",
-    "SOURCES_FILENAME",
-    "build_index",
-    "_record_source",
-    "INDEX_JSON_FILENAME",
-    "INDEX_MD_FILENAME",
-    # drop-harness-01-src: core code only the harness used.
-    "set_workflow_recoverer",
-    "get_workflow_recoverer",
-    "WorkflowRecoverer",
-    "register_folder_type",
-    "class_for_folder_type",
-    "_TYPE_TO_CLS",
-    "bridge_operator_config",
-    "configured_agent_model",
-    "configured_api_keys",
-    "resolve_configured_model",
-    "_tier_map_from_raw",
-    "AGENT_MODELS_KEY",
-    "default_science_extras",
-    "MolqPlugin",
-    "MetricsPlugin",
-    "WorkspacePlugin",
-    "is_shutting_down",
-    "wait_or_shutdown",
-    "mark_shutting_down",
-    "reset_shutdown_flag",
-    "PLAN_BOOK_NAME",
-    "mcp_config",
-    # arch-own-02f: the fresh marker and caller-minted execution ids.
-    "make_execution_id",
-    "request_fresh_execution",
-    "fresh_requested",
-    "FRESH_MARKER_FILENAME",
-    "fresh.json",
-    # arch-own-02h: run-level provenance; ``=`` pins the kwarg spelling, so a
-    # local ``executor_info = …`` or the ``source_snapshot`` module is not hit.
-    "update_provenance",
-    "snapshot_sources",
-    "source_snapshot=",
-    "executor_info=",
-    # arch-own-03d: workspace's second parser of the node journal.
-    "read_completed_node_outputs",
-    "NodeOutputRecord",
-    "_execution_node_output",
-]
-
-DELETED_FILES = [
-    SRC / "workspace" / "checkpoint.py",
-    SRC / "workspace" / "resume_policy.py",
-    SRC / "workspace" / "assets" / "output.py",
-    SRC / "workspace" / "assets" / "execution.py",
-    SRC / "tree_monitor.py",
-    # knowledge-crossref-09: the six forwarder shells the workspace shed.
-    # ``bundle_index.py`` is deliberately absent — it is still imported by
-    # ``workspace_context.py`` and is deleted by the follow-up member.
-    SRC / "workspace" / "edges.py",
-    SRC / "workspace" / "concepts.py",
-    SRC / "workspace" / "concept_meta.py",
-    SRC / "workspace" / "note_meta.py",
-    SRC / "workspace" / "reference_meta.py",
-    SRC / "workspace" / "zotero_concepts.py",
-    # arch-own-01-cleanup: the dead run-context family, dead workflow modules
-    # and the never-written workspace cache folder.
-    SRC / "workspace" / "runcontext.py",
-    SRC / "workspace" / "run_context.py",
-    SRC / "workspace" / "run_lifecycle.py",
-    SRC / "workspace" / "run_assets.py",
-    SRC / "workflow" / "_names.py",
-    SRC / "workflow" / "snapshot_ref.py",
-    SRC / "workspace" / "cache" / "folder.py",
-    SRC / "workspace" / "cache" / "__init__.py",
-    # drop-harness-01-src: the harness tree and the core code only it used.
-    SRC / "harness",
-    SRC / "plugins" / "extras.py",
-    SRC / "plugins" / "metrics" / "host.py",
-    SRC / "plugins" / "submit_molq" / "host.py",
-    SRC / "workspace" / "plugin.py",
-    SRC / "workspace" / "curation",
-    SRC / "server" / "shutdown.py",
-    SRC / "cli" / "workspace" / "mcp_config.py",
-    # arch-own-03d: the journal is parsed by the workflow layer only.
-    SRC / "workspace" / "execution_results.py",
-]
-
-#: The knowledge names the workspace's public surface no longer carries.
-DELETED_PUBLIC_NAMES = (
-    "DEFAULT_EDGE_ROLE",
-    "Edge",
-    "EdgeRole",
-    "Literature",
-    "Note",
-    "NoteMeta",
-    "ReferenceMeta",
-    "ZoteroItem",
-    "ConceptNotFoundError",
-    "KnowledgeNotFoundError",
+_FORBIDDEN_NAMES = frozenset(
+    {"AssetsView", "scan_assets", "get_asset", "find_by_content_hash", "scan", "view"}
 )
 
-#: The duplicated markdown-edge machinery: two module attributes and the three
-#: ``Folder`` methods that read them.
-DELETED_FOLDER_MODULE_ATTRS = ("LinkScan", "append_link")
-DELETED_FOLDER_METHODS = ("links", "out_edges", "typed_out_edges")
-
-#: Shell modules no source or test file may import any more.
-DELETED_SHELL_MODULES = (
-    "molab.workspace.edges",
-    "molab.workspace.concepts",
-    "molab.workspace.concept_meta",
-    "molab.workspace.note_meta",
-    "molab.workspace.reference_meta",
-    "molab.workspace.zotero_concepts",
-    # arch-own-01-cleanup
-    "molab.workspace.runcontext",
-    "molab.workspace.run_context",
-    "molab.workspace.run_lifecycle",
-    "molab.workspace.run_assets",
-    "molab.workspace.cache",
-    "molab.workspace.cache.folder",
-    "molab.workflow._names",
-    "molab.workflow.snapshot_ref",
-    # drop-harness-01-src
-    "molab.plugins.extras",
-    "molab.plugins.metrics.host",
-    "molab.plugins.submit_molq.host",
-    "molab.workspace.plugin",
-    "molab.workspace.curation",
-    "molab.server.shutdown",
-    # arch-own-03d
-    "molab.workspace.execution_results",
-    "molab.cli.workspace.mcp_config",
-)
+# Files and symbols this spec removes. The assertions below use these tuples.
+DELETED_FILES = ("server/routes/_scope.py",)
+DELETED_SYMBOLS = ("asset_has_sidecar",)
 
 
-@pytest.mark.parametrize("symbol", DELETED_SYMBOLS)
-def test_symbol_has_zero_residue(symbol: str) -> None:
-    offenders = [
-        str(p.relative_to(SRC)) for p in _py_files() if symbol in p.read_text(encoding="utf-8")
-    ]
-    assert not offenders, f"{symbol!r} still referenced in: {offenders}"
+def _allowed(path: Path) -> bool:
+    resolved = path.resolve()
+    if resolved == INIT.resolve():
+        return True
+    try:
+        resolved.relative_to(ASSETS.resolve())
+    except ValueError:
+        return False
+    return True
 
 
-@pytest.mark.parametrize("path", DELETED_FILES)
-def test_deleted_module_absent(path: Path) -> None:
-    assert not path.exists(), f"{path} should have been deleted"
+def _forbidden_module(module: str | None) -> bool:
+    if module is None:
+        return False
+    parts = module.split(".")
+    return "assets" in parts and ({"scan", "view"} & set(parts))
 
 
-@pytest.mark.parametrize(
-    "name", ["RunFingerprint", "OutputAsset", "ExecutionStateAsset", *DELETED_PUBLIC_NAMES]
-)
-def test_public_export_removed(name: str) -> None:
-    mod = importlib.import_module("molab.workspace")
-    assert not hasattr(mod, name), f"molab.workspace still exports {name}"
-    assert name not in getattr(mod, "__all__", []), f"{name} still in molab.workspace.__all__"
-
-
-@pytest.mark.parametrize("name", DELETED_FOLDER_MODULE_ATTRS)
-def test_folder_module_attr_removed(name: str) -> None:
-    folder = importlib.import_module("molab.workspace.folder")
-    assert not hasattr(folder, name), f"molab.workspace.folder still defines {name}"
-
-
-@pytest.mark.parametrize("name", DELETED_FOLDER_METHODS)
-def test_folder_method_removed(name: str) -> None:
-    folder = importlib.import_module("molab.workspace.folder")
-    assert not hasattr(folder.Folder, name), f"Folder.{name} still exists"
-
-
-@pytest.mark.parametrize("name", ["KnowledgeNotFoundError", "ConceptNotFoundError"])
-def test_workspace_errors_carries_no_knowledge_alias(name: str) -> None:
-    errors = importlib.import_module("molab.workspace.errors")
-    assert not hasattr(errors, name), f"molab.workspace.errors still aliases {name}"
-    assert name not in errors.__all__
-
-
-def _imported_modules(path: Path) -> list[tuple[int, str]]:
-    """Every ``(lineno, dotted name)`` *path* imports, from an AST scan."""
-    out: list[tuple[int, str]] = []
-    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-        if isinstance(node, ast.Import):
-            out += [(node.lineno, alias.name) for alias in node.names]
-        elif isinstance(node, ast.ImportFrom) and node.module:
-            out.append((node.lineno, node.module))
-            out += [(node.lineno, f"{node.module}.{alias.name}") for alias in node.names]
-    return out
-
-
-def test_no_importer_of_a_deleted_shell_or_name_survives() -> None:
-    """No file under ``src/`` or ``tests/`` imports a shed shell, or one of the
-    knowledge names that left ``molab.workspace``."""
-    banned = set(DELETED_SHELL_MODULES) | {f"molab.workspace.{n}" for n in DELETED_PUBLIC_NAMES}
-    offenders = [
-        f"{path}:{lineno}: {module}"
-        for root in (SRC, TESTS)
-        for path in _py_files(root)
-        for lineno, module in _imported_modules(path)
-        if module in banned
-    ]
-    assert not offenders, "still importing a deleted workspace shell or name:\n  " + "\n  ".join(
-        offenders
-    )
-
-
-class TestArchOwn01DeletedAttributes:
-    """arch-own-01-cleanup: the deleted methods / properties / exports are gone
-    from the live classes, and the kept ``RunContext`` alias still resolves."""
-
-    def test_execution_context_has_no_set_workflow(self) -> None:
-        assert not hasattr(ExecutionContext, "set_workflow")
-
-    def test_run_has_no_delete_execution(self) -> None:
-        assert not hasattr(Run, "delete_execution")
-
-    def test_workspace_has_no_cache(self) -> None:
-        assert not hasattr(Workspace, "cache")
-
-    def test_workflow_has_no_snapshot_ref_export(self) -> None:
-        assert not hasattr(molab.workflow, "WorkflowSnapshotRef")
-
-    def test_bundle_has_no_build_index(self) -> None:
-        assert not hasattr(Bundle, "build_index")
-
-    def test_bundle_search_has_no_rebuild_param(self) -> None:
-        assert "rebuild" not in inspect.signature(Bundle.search).parameters
-
-    def test_run_context_alias_is_execution_context(self) -> None:
-        assert molab.RunContext is ExecutionContext
-
-
-class TestDropHarnessResidue:
-    """drop-harness-01-src (D86): nothing names the deleted Python harness."""
-
-    def test_nothing_imports_the_harness(self) -> None:
-        roots = (SRC, TESTS, REPO / "regressions", REPO / "examples")
-        scanned = [path for root in roots for path in _py_files(root)]
-        assert len(scanned) > 100, "guard the guard: a mistyped root makes this vacuous"
-        offenders = [
-            f"{path.relative_to(REPO)}:{lineno}: {module}"
-            for path in scanned
-            for lineno, module in _imported_modules(path)
-            if module == "molab.harness" or module.startswith("molab.harness.")
-        ]
-        assert not offenders, "still importing the deleted harness:\n  " + "\n  ".join(offenders)
-
-    def test_submit_molq_and_metrics_export_no_host_extra(self) -> None:
-        submit_molq = importlib.import_module("molab.plugins.submit_molq")
-        metrics = importlib.import_module("molab.plugins.metrics")
-        for name in ("MolqJobs", "MolqPlugin"):
-            assert not hasattr(submit_molq, name), f"submit_molq still exports {name}"
-        assert not hasattr(metrics, "MetricsPlugin"), "metrics still exports MetricsPlugin"
-
-
-def _xfail_reasons(path: Path) -> list[tuple[int, str]]:
-    """``reason=`` string constants of every ``*.xfail(...)`` call in *path*."""
-    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
-    found: list[tuple[int, str]] = []
-    for node in ast.walk(tree):
-        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
+def _hits() -> list[str]:
+    found: list[str] = []
+    for path in MOLAB.rglob("*.py"):
+        if "__pycache__" in path.parts or _allowed(path):
             continue
-        if node.func.attr != "xfail":
-            continue
-        for kw in node.keywords:
-            if (
-                kw.arg == "reason"
-                and isinstance(kw.value, ast.Constant)
-                and isinstance(kw.value.value, str)
-            ):
-                found.append((node.lineno, kw.value.value))
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if _forbidden_module(alias.name):
+                        found.append(f"{path}:{node.lineno}: import {alias.name}")
+            elif isinstance(node, ast.ImportFrom):
+                names = [alias.name for alias in node.names]
+                if _forbidden_module(node.module) or any(
+                    name in _FORBIDDEN_NAMES for name in names
+                ):
+                    found.append(
+                        f"{path}:{node.lineno}: from {node.module} import {', '.join(names)}"
+                    )
     return found
 
 
-def test_no_arch_own_02_xfail_remains() -> None:
-    files = _py_files(TESTS)
-    assert any(_xfail_reasons(p) for p in files), "guard the guard: no xfail found at all"
+def test_manifest_scanner_is_not_imported_outside_assets() -> None:
+    assert _hits() == []
+
+
+def test_scope_helper_and_sidecar_predicate_are_gone() -> None:
+    for relative in DELETED_FILES:
+        assert not (MOLAB / relative).exists(), relative
     offenders = [
-        f"{path.relative_to(REPO)}:{lineno}: {reason}"
-        for path in files
-        for lineno, reason in _xfail_reasons(path)
-        if reason.startswith("arch-own-02")
+        path
+        for path in SRC.rglob("*.py")
+        if "__pycache__" not in path.parts
+        and any(symbol in path.read_text(encoding="utf-8") for symbol in DELETED_SYMBOLS)
     ]
-    assert not offenders, "arch-own-02 xfails left:\n  " + "\n  ".join(offenders)
+    assert offenders == []
+
+
+_DELETED_ASSET_MODULES = (
+    "manifest",
+    "scan",
+    "view",
+    "accessors",
+    "data",
+    "artifact",
+    "log",
+    "checkpoint",
+    "error",
+    "_adapter",
+    "base",
+)
+_DELETED_ASSET_SYMBOLS = (
+    "ArtifactAsset",
+    "AssetManifest",
+    "AssetsView",
+    "CheckpointAsset",
+    "DataAsset",
+    "DataAssetLibrary",
+    "ErrorTraceAsset",
+    "LogAsset",
+    "Producer",
+)
+
+
+def test_manifest_family_is_gone() -> None:
+    import molab.ids as ids
+    import molab.workflow.protocols as protocols
+    import molab.workspace as workspace
+    import molab.workspace.assets as assets
+    import molab.workspace.utils as utils
+
+    assert assets.__all__ == ["lineage"]
+    assert workspace.Asset is workspace.domain.Asset
+    assert "UnmigratedAssetError" in workspace.__all__
+    for name in _DELETED_ASSET_SYMBOLS:
+        assert not hasattr(workspace, name), name
+    for module in _DELETED_ASSET_MODULES:
+        assert not (ASSETS / f"{module}.py").exists(), module
+    assert not hasattr(protocols, "AssetsViewLike")
+    assert "assets" not in protocols.UpstreamViewLike.__annotations__
+    assert not hasattr(ids, "generate_asset_id")
+    assert "generate_asset_id" not in getattr(ids, "__all__", ())
+    assert not hasattr(utils, "generate_asset_id")
+
+    quoted = '"assets.json"'
+    hits = sorted(
+        path.relative_to(MOLAB).as_posix()
+        for path in MOLAB.rglob("*.py")
+        if "__pycache__" not in path.parts and quoted in path.read_text(encoding="utf-8")
+    )
+    assert hits == ["cli/migrate_cmd.py", "workspace/artifact_repository.py"]

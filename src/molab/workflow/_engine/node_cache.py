@@ -11,7 +11,7 @@ outputs, engine-injected root inputs (run params), a trigger-delivered value
 and the task's **effective config** — the profile data with any
 ``dependent_params`` overlay *value* applied. Two terms are deliberately out:
 the profile *name* (only its data is config) and the execution location (the
-content-addressed workdir; the effective config carries no ``run_dir``), so
+task output directory; the effective config carries no ``run_dir``), so
 attempts of one run executed in different places share their entries.
 """
 
@@ -125,13 +125,10 @@ def _cache_inputs(
     return payload
 
 
-def _artifact_manifest(deps: WorkflowDeps, name: str) -> list[dict[str, JSONValue]]:
-    """Build the JSON artifact manifest for task *name* in the current run.
+def _task_artifacts(deps: WorkflowDeps, name: str) -> list[object]:
+    """Artifacts on this attempt whose ``metadata.task_id`` is *name*.
 
-    Queries the run's Execution artifact index for artifacts whose producing
-    task is *name* and snapshots each as a JSON dict
-    ``{name, kind, content_hash, asset_id}``. Returns ``[]`` when no
-    workspace run / execution id is reachable.
+    Any missing run, execution id, or execution record fails soft to ``[]``.
     """
     run_context = deps.run_context
     if run_context is None:
@@ -147,11 +144,23 @@ def _artifact_manifest(deps: WorkflowDeps, name: str) -> list[dict[str, JSONValu
         artifacts = execution(execution_id).artifacts
     except Exception:
         return []
+    found: list[object] = []
+    for artifact in artifacts:
+        metadata = getattr(artifact, "metadata", None) or {}
+        try:
+            task_id = metadata.get("task_id")
+        except Exception:
+            continue
+        if task_id == name:
+            found.append(artifact)
+    return found
+
+
+def _project_artifacts(artifacts: list[object]) -> list[dict[str, JSONValue]]:
+    """JSON manifest rows for *artifacts*. Fields, including ``path``, stay put."""
     manifest: list[dict[str, JSONValue]] = []
     for artifact in artifacts:
         metadata = getattr(artifact, "metadata", None) or {}
-        if metadata.get("task_id") != name:
-            continue
         content = getattr(artifact, "content", None)
         digest = getattr(content, "digest", None)
         if not digest:
@@ -168,6 +177,15 @@ def _artifact_manifest(deps: WorkflowDeps, name: str) -> list[dict[str, JSONValu
             }
         )
     return manifest
+
+
+def _artifact_manifest(deps: WorkflowDeps, name: str) -> list[dict[str, JSONValue]]:
+    """Build the JSON artifact manifest for task *name* in the current run.
+
+    Projects :func:`_task_artifacts`. Returns ``[]`` when no workspace run
+    or execution id is reachable.
+    """
+    return _project_artifacts(_task_artifacts(deps, name))
 
 
 def _upstream_asset_ids(deps: WorkflowDeps, registration: object) -> tuple[str, ...]:
@@ -201,32 +219,39 @@ def _upstream_asset_ids(deps: WorkflowDeps, registration: object) -> tuple[str, 
     return tuple(ids)
 
 
-def _put_file_blobs(deps: WorkflowDeps, manifest: list[dict]) -> None:
-    """Copy registered file bytes into the cache blob store (cache axis)."""
+def _put_file_blobs(deps: WorkflowDeps, artifacts: list[object]) -> None:
+    """Copy registered file bytes into the cache blob store (cache axis).
+
+    Bytes come from ``run.artifact_location``. A stand-in run with no such
+    method returns without logging. A resolve failure or a missing file is
+    skipped with a debug log. This function does not join a workspace root
+    or ``artifact.path``.
+    """
     store = getattr(getattr(deps, "cache", None), "store", None)
     put_blob = getattr(store, "put_blob", None)
-    if not callable(put_blob) or not manifest:
+    if not callable(put_blob) or not artifacts:
         return
-    # Artifact paths are workspace-relative — that is what makes them portable.
-    # The root comes down the run's public chain; any missing link fails soft.
-    node: object = getattr(deps.run_context, "run", None)
-    for link in ("experiment", "project", "workspace", "root"):
-        node = getattr(node, link, None)
-    if node is None:
+    run_context = getattr(deps, "run_context", None)
+    run = getattr(run_context, "run", None) if run_context is not None else None
+    locate = getattr(run, "artifact_location", None)
+    if not callable(locate):
         return
-    root = Path(str(node))
-    for entry in manifest:
-        content_hash = entry.get("content_hash")
-        rel = entry.get("path")
-        if not content_hash or not rel:
+    execution_id = deps.execution_id
+    for artifact in artifacts:
+        content = getattr(artifact, "content", None)
+        digest = getattr(content, "digest", None)
+        if not digest:
             continue
-        path = root / rel
-        if not path.is_file():
-            continue
+        name = getattr(artifact, "name", None)
         try:
-            put_blob(str(content_hash), path.read_bytes())
+            location = locate(execution_id, artifact)
+            path = Path(location)
+            if not path.is_file():
+                logger.debug(f"cache: blob put for {name!r} skipped")
+                continue
+            put_blob(str(digest), path.read_bytes())
         except Exception:
-            logger.debug(f"cache: blob put for {entry.get('name')!r} skipped")
+            logger.debug(f"cache: blob put for {name!r} skipped")
 
 
 def _restore_cached_files(
@@ -309,7 +334,6 @@ async def run_task_body_cached(
     effective_config = _resolve_dependent_params(
         registration=registration,
         state=state,
-        run_context=deps.run_context,
         base_config=deps.config,
     )
     cache_inputs = _cache_inputs(name, state, inputs, delivered, config=effective_config)
@@ -344,8 +368,9 @@ async def run_task_body_cached(
     )
 
     if cacheable and _is_json_safe(raw):
-        manifest = _artifact_manifest(deps, name)
-        _put_file_blobs(deps, manifest)
+        produced = _task_artifacts(deps, name)
+        _put_file_blobs(deps, produced)
+        manifest = _project_artifacts(produced)
         result_payload = cast("dict[str, JSONValue]", {"result": raw, "files": manifest})
         try:
             cache.put(snapshot, cache_inputs, result_payload)

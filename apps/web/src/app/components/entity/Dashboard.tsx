@@ -128,7 +128,7 @@ export const DashboardCanvas = ({
   children: ReactNode;
   className?: string;
 }): JSX.Element => (
-  <div className={cn("mx-auto w-full max-w-5xl space-y-8 px-6 py-8 md:px-8 md:py-8", className)}>
+  <div className={cn("mx-auto w-full max-w-6xl space-y-6 px-4 py-4 md:px-6", className)}>
     {children}
   </div>
 );
@@ -265,6 +265,8 @@ interface StatusDistributionProps {
   counts: StatusCountRollup;
   /** Show the legend list under the bar. Default true. */
   legend?: boolean;
+  /** Noun for the accessible total. Default "runs". */
+  unit?: string;
   className?: string;
 }
 
@@ -272,6 +274,7 @@ interface StatusDistributionProps {
 export const StatusDistribution = ({
   counts,
   legend = true,
+  unit = "runs",
   className,
 }: StatusDistributionProps): JSX.Element => {
   const empty = counts.total === 0;
@@ -281,7 +284,7 @@ export const StatusDistribution = ({
       <div
         className="flex h-1.5 overflow-hidden rounded-control bg-muted"
         role="img"
-        aria-label={empty ? "No runs" : `Status mix across ${counts.total} runs`}
+        aria-label={empty ? `No ${unit}` : `Status mix across ${counts.total} ${unit}`}
       >
         {!empty &&
           STATUS_GROUPS.map((group) => {
@@ -327,116 +330,6 @@ export const StatusDistribution = ({
           })}
         </ul>
       )}
-    </div>
-  );
-};
-
-// ── Charts ───────────────────────────────────────────────────────────────────
-
-export interface DonutSegment {
-  label: string;
-  value: number;
-  color: string;
-}
-
-interface StatusDonutProps {
-  segments: DonutSegment[];
-  size?: number;
-  thickness?: number;
-  /** Big number drawn in the hole; defaults to the segment total. */
-  centerValue?: ReactNode;
-  centerLabel?: ReactNode;
-}
-
-/**
- * A donut chart of categorical counts with a centered total and a legend.
- * Built from stroke-dashoffset arcs — no chart library.
- */
-export const StatusDonut = ({
-  segments,
-  size = 132,
-  thickness = 14,
-  centerValue,
-  centerLabel,
-}: StatusDonutProps): JSX.Element => {
-  const total = segments.reduce((sum, seg) => sum + seg.value, 0);
-  const radius = (size - thickness) / 2;
-  const circ = 2 * Math.PI * radius;
-  const center = size / 2;
-  const visible = segments.filter((seg) => seg.value > 0);
-
-  let acc = 0;
-
-  return (
-    <div className="flex items-center gap-4">
-      <div className="relative flex-none" style={{ width: size, height: size }}>
-        <svg
-          width={size}
-          height={size}
-          viewBox={`0 0 ${size} ${size}`}
-          role="img"
-          aria-label={`Status distribution across ${total} items`}
-        >
-          <g transform={`rotate(-90 ${center} ${center})`}>
-            <circle
-              cx={center}
-              cy={center}
-              r={radius}
-              fill="none"
-              className="stroke-muted"
-              strokeWidth={thickness}
-            />
-            {total > 0 &&
-              visible.map((seg) => {
-                const frac = seg.value / total;
-                const dash = frac * circ;
-                const node = (
-                  <circle
-                    key={seg.label}
-                    cx={center}
-                    cy={center}
-                    r={radius}
-                    fill="none"
-                    stroke={seg.color}
-                    strokeWidth={thickness}
-                    strokeDasharray={`${dash} ${circ - dash}`}
-                    strokeDashoffset={-acc * circ}
-                    strokeLinecap="butt"
-                  />
-                );
-                acc += frac;
-                return node;
-              })}
-          </g>
-        </svg>
-        <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-          <span className="text-display font-semibold leading-none tabular-nums text-foreground">
-            {centerValue ?? total}
-          </span>
-          {centerLabel && (
-            <span className="mt-1 text-micro text-muted-foreground">{centerLabel}</span>
-          )}
-        </div>
-      </div>
-      <ul className="min-w-0 flex-1 space-y-2">
-        {segments.map((seg) => {
-          const pct = total > 0 ? (seg.value / total) * 100 : 0;
-          return (
-            <li key={seg.label} className="flex items-center gap-2 text-label">
-              <span
-                aria-hidden="true"
-                className="inline-block h-2 w-2 flex-none rounded-full"
-                style={{ backgroundColor: seg.color }}
-              />
-              <span className="min-w-0 flex-1 truncate text-muted-foreground">{seg.label}</span>
-              <span className="font-medium tabular-nums text-foreground">{seg.value}</span>
-              <span className="w-control-comfortable text-right tabular-nums text-muted-foreground">
-                {pct.toFixed(0)}%
-              </span>
-            </li>
-          );
-        })}
-      </ul>
     </div>
   );
 };

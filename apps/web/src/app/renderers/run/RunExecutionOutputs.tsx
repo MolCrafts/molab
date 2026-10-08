@@ -1,11 +1,19 @@
+import { useQuery } from "@tanstack/react-query";
 import { Archive, File, FileOutput, Folder, Terminal } from "lucide-react";
 import { type JSX, useEffect, useState } from "react";
 import { runsApi } from "@/api";
+import { ApiError } from "@/api/generated";
 import type { ExecutionOutputsResponse } from "@/api/generated/models/ExecutionOutputsResponse";
 import type { RunFileNode } from "@/api/generated/models/RunFileNode";
 import { EmptyState } from "@/app/components/entity";
 import { type TreeNode, TreeView } from "@/app/panels/TreeView";
+import {
+  artifactContentQueryOptions,
+  runFileBlobQueryOptions,
+  runFileTextQueryOptions,
+} from "@/app/state/entityQueries";
 import { WorkbenchIconAction } from "@/components/workbench";
+import { formatBytes } from "@/lib/format-bytes";
 
 type SelectedOutput =
   | { kind: "artifact"; id: string }
@@ -22,17 +30,43 @@ interface RunExecutionOutputsProps {
   onPromoted?: () => void;
 }
 
-const artifactUrl = (
-  projectId: string,
-  experimentId: string,
-  runId: string,
-  executionId: string,
-  artifactId: string,
-): string =>
-  `/api/projects/${encodeURIComponent(projectId)}/experiments/${encodeURIComponent(experimentId)}/runs/${encodeURIComponent(runId)}/executions/${encodeURIComponent(executionId)}/artifacts/${encodeURIComponent(artifactId)}/content`;
-
 const formatSize = (size: number | null | undefined): string | undefined =>
-  size == null ? undefined : `${size} B`;
+  size == null ? undefined : formatBytes(size);
+
+/** Open each tier and its task folders (`out/<task>`) so products are one click away. */
+const taskDirIds = (rows: RunFileNode[]): string[] => {
+  const ids = new Set<string>();
+  for (const row of rows) {
+    const parts = row.relPath.split("/").filter(Boolean);
+    if (parts.length > 1) ids.add(`dir:${parts[0]}`);
+    if (parts.length > 2) ids.add(`dir:${parts[0]}/${parts[1]}`);
+  }
+  return [...ids];
+};
+
+/** Files a browser draws itself; everything else previews as text. */
+type BinaryKind = "image" | "pdf";
+const binaryKindOf = (path: string): BinaryKind | null => {
+  const ext = path.slice(path.lastIndexOf(".") + 1).toLowerCase();
+  if (["png", "jpg", "jpeg", "gif", "webp"].includes(ext)) return "image";
+  if (ext === "pdf") return "pdf";
+  return null;
+};
+
+/** An object URL for a blob, revoked when the blob changes or the view unmounts. */
+const useObjectUrl = (blob: Blob | undefined): string | null => {
+  const [url, setUrl] = useState<string | null>(null);
+  useEffect(() => {
+    if (!blob) {
+      setUrl(null);
+      return;
+    }
+    const next = URL.createObjectURL(blob);
+    setUrl(next);
+    return () => URL.revokeObjectURL(next);
+  }, [blob]);
+  return url;
+};
 
 const buildFileTree = (rows: RunFileNode[], onSelect: (path: string) => void): TreeNode[] => {
   const roots: TreeNode[] = [];
@@ -57,7 +91,8 @@ const buildFileTree = (rows: RunFileNode[], onSelect: (path: string) => void): T
         dirs.set(dirId, dir);
         siblings.push(dir);
       }
-      siblings = dir.children ?? (dir.children = []);
+      if (!dir.children) dir.children = [];
+      siblings = dir.children;
     }
     siblings.push(leaf);
   }
@@ -73,56 +108,67 @@ export const RunExecutionOutputs = ({
   selectedExecutionId,
   onPromoted,
 }: RunExecutionOutputsProps): JSX.Element => {
-  const [selected, setSelected] = useState<SelectedOutput | null>(null);
-  const [preview, setPreview] = useState<string | null>(null);
-  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [picked, setPicked] = useState<{
+    executionId: string;
+    selected: SelectedOutput;
+  } | null>(null);
+  const selected =
+    picked && selectedExecutionId !== null && picked.executionId === selectedExecutionId
+      ? picked.selected
+      : null;
+  const choose = (next: SelectedOutput): void => {
+    if (!selectedExecutionId) return;
+    setPicked({ executionId: selectedExecutionId, selected: next });
+  };
 
-  useEffect(() => {
-    setSelected(null);
-    setPreview(null);
-    setPreviewError(null);
-  }, [selectedExecutionId]);
+  const artifactId = selected?.kind === "artifact" ? selected.id : "";
+  const filePath = selected?.kind === "file" ? selected.path : "";
+  const artifactQuery = useQuery({
+    ...artifactContentQueryOptions(
+      projectId,
+      experimentId,
+      runId,
+      selectedExecutionId ?? "",
+      artifactId,
+    ),
+    enabled: selected?.kind === "artifact" && selectedExecutionId !== null,
+  });
+  const binaryKind = selected?.kind === "file" ? binaryKindOf(filePath) : null;
+  const fileQuery = useQuery({
+    ...runFileTextQueryOptions(projectId, experimentId, runId, selectedExecutionId ?? "", filePath),
+    enabled: selected?.kind === "file" && binaryKind === null && selectedExecutionId !== null,
+  });
+  const blobQuery = useQuery({
+    ...runFileBlobQueryOptions(projectId, experimentId, runId, selectedExecutionId ?? "", filePath),
+    enabled: binaryKind !== null && selectedExecutionId !== null,
+  });
+  const blobUrl = useObjectUrl(binaryKind ? blobQuery.data : undefined);
+  const fileError = binaryKind ? blobQuery.error : fileQuery.error;
 
-  useEffect(() => {
-    let cancelled = false;
-    setPreview(null);
-    setPreviewError(null);
-    if (!selectedExecutionId || !outputs || !selected) return;
-
-    if (selected.kind === "stdio") {
-      setPreview(outputs[selected.name] ?? `No ${selected.name} captured.`);
-      return;
-    }
-    if (selected.kind === "artifact") {
-      fetch(artifactUrl(projectId, experimentId, runId, selectedExecutionId, selected.id))
-        .then((response) => {
-          if (!response.ok) throw new Error(`HTTP ${response.status}`);
-          return response.text();
-        })
-        .then((value) => {
-          if (!cancelled) setPreview(value.slice(0, 300_000));
-        })
-        .catch((reason: unknown) => {
-          if (!cancelled)
-            setPreviewError(reason instanceof Error ? reason.message : "Preview unavailable");
-        });
-      return () => {
-        cancelled = true;
-      };
-    }
-    runsApi
-      .getRunFileText(projectId, experimentId, runId, selectedExecutionId, selected.path)
-      .then((response) => {
-        if (!cancelled) setPreview(response.content);
-      })
-      .catch((reason: unknown) => {
-        if (!cancelled)
-          setPreviewError(reason instanceof Error ? reason.message : "Preview unavailable");
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [experimentId, projectId, runId, selected, selectedExecutionId, outputs]);
+  const previewError =
+    selected?.kind === "artifact"
+      ? artifactQuery.error instanceof ApiError && artifactQuery.error.status === 404
+        ? "Artifact bytes not found for this execution."
+        : artifactQuery.error instanceof Error
+          ? artifactQuery.error.message
+          : artifactQuery.error
+            ? "Preview unavailable"
+            : null
+      : selected?.kind === "file"
+        ? fileError instanceof Error
+          ? fileError.message
+          : fileError
+            ? "Preview unavailable"
+            : null
+        : null;
+  const preview =
+    selected?.kind === "stdio"
+      ? (outputs?.[selected.name] ?? `No ${selected.name} captured.`)
+      : selected?.kind === "artifact"
+        ? (artifactQuery.data ?? null)
+        : selected?.kind === "file"
+          ? (fileQuery.data ?? null)
+          : null;
 
   if (!selectedExecutionId) {
     return (
@@ -149,20 +195,20 @@ export const RunExecutionOutputs = ({
     id: `artifact:${item.id}`,
     label: item.name,
     icon: Archive,
-    meta: `${item.size} B`,
+    meta: formatBytes(item.size),
     right: item.semanticType ? (
       <span className="uppercase tracking-tight text-micro text-muted-foreground">
         {item.semanticType}
       </span>
     ) : undefined,
-    onSelect: () => setSelected({ kind: "artifact", id: item.id }),
+    onSelect: () => choose({ kind: "artifact", id: item.id }),
   }));
 
   const stdioNodes: TreeNode[] = (["stdout", "stderr", "runtime"] as const).map((name) => ({
     id: `stdio:${name}`,
     label: name,
     icon: Terminal,
-    onSelect: () => setSelected({ kind: "stdio", name }),
+    onSelect: () => choose({ kind: "stdio", name }),
   }));
 
   const nodes: TreeNode[] = [
@@ -182,7 +228,7 @@ export const RunExecutionOutputs = ({
             id: "files",
             label: "Files",
             icon: Folder,
-            children: buildFileTree(files, (path) => setSelected({ kind: "file", path })),
+            children: buildFileTree(files, (path) => choose({ kind: "file", path })),
           } satisfies TreeNode,
         ]
       : []),
@@ -208,7 +254,7 @@ export const RunExecutionOutputs = ({
         <TreeView
           nodes={nodes}
           activeId={activeId}
-          expandPath={["artifacts", "files", "stdio"]}
+          expandPath={["artifacts", "files", "stdio", ...taskDirIds(files)]}
           emptyTitle="No outputs"
         />
       </div>
@@ -234,8 +280,38 @@ export const RunExecutionOutputs = ({
             </WorkbenchIconAction>
           </div>
         )}
-        <Preview value={preview} error={previewError} empty="Select an output" />
+        {binaryKind && !previewError ? (
+          <BinaryPreview kind={binaryKind} url={blobUrl} name={filePath} />
+        ) : (
+          <Preview value={preview} error={previewError} empty="Select an output" />
+        )}
       </div>
+    </div>
+  );
+};
+
+const BinaryPreview = ({
+  kind,
+  url,
+  name,
+}: {
+  kind: BinaryKind;
+  url: string | null;
+  name: string;
+}): JSX.Element => {
+  if (!url) {
+    return (
+      <div className="flex h-full items-center justify-center text-label text-muted-foreground">
+        Loading preview…
+      </div>
+    );
+  }
+  if (kind === "pdf") {
+    return <iframe title={name} src={url} className="h-full w-full border-0 bg-background" />;
+  }
+  return (
+    <div className="flex min-h-full items-center justify-center bg-background p-4">
+      <img src={url} alt={name} className="max-h-full max-w-full object-contain" />
     </div>
   );
 };

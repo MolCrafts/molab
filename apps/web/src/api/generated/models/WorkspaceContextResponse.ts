@@ -25,7 +25,6 @@ export type WorkspaceContextResponse = {
     runningRuns?: Array<RunRefResponse>;
     artifacts?: Array<ArtifactRefResponse>;
     knowledge?: Array<KnowledgeRefResponse>;
-    openQuestions?: Array<KnowledgeRefResponse>;
     staleOrMissing?: Array<HealthFlagResponse>;
 };
 

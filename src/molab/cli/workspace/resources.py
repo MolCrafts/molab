@@ -290,23 +290,37 @@ def run_list(
     from molab._run_display import elapsed
 
     table = Table(title=f"Runs in {project_id}/{experiment_id}")
-    table.add_column("Run ID", style="cyan")
+    table.add_column("Run", style="cyan", overflow="fold")
     table.add_column("Status", style="green")
+    table.add_column("Attempts", justify="right")
     table.add_column("Profile", style="cyan")
-    table.add_column("Created")
+    table.add_column("Started")
     table.add_column("Duration")
-    for r in runs:
+    for r in sorted(runs, key=lambda item: item.name):
         status = r.status_label
         color = status_color(status)
         profile = run_environment(r).get("profile")
         profile_display = profile if isinstance(profile, str) and profile else "—"
-        finished = r.finished_at.isoformat() if r.finished_at else None
-        duration = elapsed(r.metadata.created_at.isoformat(), finished)
+        # The latest attempt's own times: a run defined today for a job that ran
+        # last month (an adopted attempt) must not read as a negative duration.
+        attempts = r.executions
+        latest = attempts[-1] if attempts else None
+        started = latest.started_at if latest else None
+        finished = latest.finished_at if latest else None
+        # A queued attempt has not started: no duration, and the time shown is
+        # when it was queued.
+        duration = (
+            elapsed(started.isoformat(), finished.isoformat() if finished else None)
+            if started
+            else None
+        )
+        started = started or (latest.created_at if latest else r.metadata.created_at)
         table.add_row(
-            r.id,
+            r.name,
             f"[{color}]{status}[/{color}]",
+            str(len(attempts)),
             profile_display,
-            r.metadata.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+            started.astimezone().strftime("%Y-%m-%d %H:%M:%S"),
             duration or "—",
         )
     _console.print(table)
@@ -556,9 +570,10 @@ def run_resume(
     run_id: Annotated[str, typer.Argument(help="Run ID")],
     target_spec: TargetOption = ".",
 ) -> None:
-    """Resume a failed/cancelled run (reopen last execution, seed completed nodes).
+    """Open a new RESUME execution based on the latest attempt.
 
     CLI twin of ``POST .../{run_id}/resume`` and ``molab run --resume``.
+    Completed nodes are seeded from that attempt's journal.
     """
     _retry_run(project_id, experiment_id, run_id, target_spec, resume=True)
 
@@ -599,13 +614,12 @@ def run_harvest(
 ) -> None:
     """Harvest a terminal run into Finding, Observation, or Report."""
     ws = _open_ws(target_spec)
-    from molab.knowledge import Finding, Observation, Report
-    from molab.knowledge.harvest import harvest_run
+    from molab.knowledge.concepts import HARVEST_TARGETS
     from molab.workspace import ExperimentNotFoundError as _ExpNotFound
     from molab.workspace import ProjectNotFoundError as _ProjNotFound
     from molab.workspace import RunNotFoundError as _RunNotFound
 
-    harvest_targets = {"Finding": Finding, "Observation": Observation, "Report": Report}
+    harvest_targets = HARVEST_TARGETS
     try:
         project = ws.get_project(project_id)
         experiment = project.get_experiment(experiment_id)
@@ -621,9 +635,8 @@ def run_harvest(
         )
         raise typer.Exit(1)
     try:
-        item = harvest_run(
+        item = cls.harvest(
             run,
-            cls,
             narrative=narrative,
             created_by=created_by,
         )
@@ -743,19 +756,19 @@ def run_info(
         rprint(f"[red]Error:[/red] Run not found: {run_id}")
         raise typer.Exit(1) from None
 
-    rprint(f"[bold]Run:[/bold] {r.id}")
+    rprint(f"[bold]Run:[/bold] {r.name}  [dim]{r.id}[/dim]")
+    rprint(f"  Path: {r.run_dir}")
     status = r.status_label
     env = run_environment(r)
     rprint(f"  Status: {status}")
     # A failed run must say WHY, right under the status, with the one command to
-    # retry — the reason is captured in the canonical record (run.json). The
+    # retry — the reason is captured in the latest Execution record. The
     # error block is status-gated (run-recovery bug 2): a run that has since
-    # succeeded must not keep advertising a stale error + retry hint (the
-    # lifecycle also clears metadata.error on success; this is the display-side
-    # defense for records written before that fix).
-    err = r.metadata.error
+    # succeeded must not keep advertising a stale error + retry hint.
+    last = r.executions[-1] if r.executions else None
+    err = last.error if last is not None else None
     if err is not None and status in RETRYABLE_STATUSES:
-        rprint(f"  [red]Error:[/red] {err.type}: {err.message}")
+        rprint(f"  [red]Error:[/red] {err.get('type')}: {err.get('message')}")
         script = env.get("script")
         hint = (
             f"molab run {script} --resume"
@@ -780,7 +793,14 @@ def run_info(
     if history:
         rprint("  Executions:")
         for rec in history[-5:]:
-            rprint(f"    {rec.started_at}  {rec.status}  {rec.id}")
+            out = r.execution_dir(rec.id) / "out"
+            tasks = (
+                sorted(d.name for d in out.iterdir() if d.is_dir() and any(d.iterdir()))
+                if out.is_dir()
+                else []
+            )
+            where = f"out/{{{','.join(tasks)}}}" if tasks else "no out/ (cached or nothing written)"
+            rprint(f"    {rec.id}  {rec.status}  {rec.started_at}  {where}")
 
 
 # Attach prune subcommand from the prune module.
@@ -820,9 +840,8 @@ def asset_list(
 ) -> None:
     """List assets across ALL scopes (workspace, project, experiment, run).
 
-    The default view scans every scope's authoritative ``assets.json`` manifest
-    — the same count ``molab context`` reports — with a Scope column locating
-    each asset. Use ``--scope`` to restrict to one scope kind.
+    Named assets are listed with a Scope column. Use ``--scope`` to restrict
+    to one scope kind. ``run`` is accepted and matches nothing.
     """
     ws = _open_ws(target_spec)
 
@@ -833,12 +852,13 @@ def asset_list(
         )
         raise typer.Exit(1)
 
-    from molab.workspace.assets import scan
+    from molab.workspace.artifact_repository import scan_asset_repositories
 
-    assets = scan.scan_assets(ws.root, fs=ws.fs)
+    assets = [asset for repo in scan_asset_repositories(ws) for asset in repo.list()]
     total = len(assets)
     if scope is not None:
-        assets = [a for a in assets if a.scope.kind == scope]
+        assets = [asset for asset in assets if asset.scope.kind == scope]
+    assets.sort(key=lambda asset: (asset.created_at, asset.id))
     shown = assets[:limit]
 
     if not shown:
@@ -853,17 +873,17 @@ def asset_list(
     title = "Assets (all scopes)" if scope is None else f"Assets ({scope} scope)"
     table = Table(title=title)
     table.add_column("Asset ID", style="cyan")
-    table.add_column("Name", style="green")
+    table.add_column("Title", style="green")
     table.add_column("Kind")
     table.add_column("Scope", style="magenta")
     table.add_column("Created")
-    for a in shown:
+    for asset in shown:
         table.add_row(
-            a.asset_id[:12] + "...",
-            a.name,
-            a.kind if hasattr(a, "kind") else "-",
-            _format_asset_scope(a.scope),
-            a.created_at.strftime("%Y-%m-%d %H:%M"),
+            asset.id[:12] + "...",
+            asset.title,
+            asset.kind,
+            _format_asset_scope(asset.scope),
+            asset.created_at.strftime("%Y-%m-%d %H:%M"),
         )
     _console.print(table)
     if len(assets) > len(shown):
@@ -875,27 +895,34 @@ def asset_info(
     asset_id: Annotated[str, typer.Argument(help="The asset id to inspect.")],
     target_spec: TargetOption = ".",
 ) -> None:
-    """Show one asset's full record — wraps ``assets.scan.get_asset``."""
-    from molab.workspace.assets import scan as asset_scan
+    """Show one named asset: identity, scope, and versions."""
+    from molab.workspace.domain import ArtifactOrigin, ImportOrigin
+    from molab.workspace.errors import AmbiguousRefError, RefNotFoundError
+    from molab.workspace.refs import MolabRef
 
     ws = _open_ws(target_spec)
-
-    asset = asset_scan.get_asset(ws.root, asset_id, fs=ws.fs)
-    if asset is None:
-        rprint(f"[red]Error:[/red] no asset with id {asset_id!r} in this workspace.")
-        raise typer.Exit(1)
-    rprint(f"[bold]{asset.name}[/bold]  ({asset.asset_id})")
-    # ``kind`` is the subclass-declared discriminator (base Asset omits it).
-    rprint(f"  kind         : {asset.kind if hasattr(asset, 'kind') else type(asset).__name__}")
+    try:
+        asset = ws.find(MolabRef(asset_id=asset_id))
+    except (RefNotFoundError, AmbiguousRefError) as exc:
+        rprint(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(1) from exc
+    rprint(f"[bold]{asset.title}[/bold]  ({asset.id})")
+    rprint(f"  kind         : {asset.kind}")
     rprint(f"  scope        : {_format_asset_scope(asset.scope)}")
-    rprint(f"  content_hash : {asset.content_hash or '(none)'}")
-    producer = asset.producer
-    if producer is not None:
-        rprint(f"  producer     : run={producer.run_id or '-'} task={producer.task_id or '-'}")
-        if producer.inputs:
-            rprint(f"  inputs       : {', '.join(producer.inputs)}")
-    rprint(f"  path         : {asset.path}")
     rprint(f"  created      : {asset.created_at.isoformat()}")
+    for version in ws.assets_at(asset.scope).versions(asset.id):
+        digest = version.content.digest if version.content is not None else "(none)"
+        origin = version.origin
+        if isinstance(origin, ImportOrigin):
+            origin_text = f"import:{origin.action} {origin.uri}"
+        elif isinstance(origin, ArtifactOrigin):
+            origin_text = f"artifact:{origin.artifact_id}"
+        else:
+            origin_text = origin.kind
+        rprint(f"  v{version.version:03d}  {digest}  {origin_text}")
+        if isinstance(origin, ImportOrigin):
+            for input_id in origin.input_ids:
+                rprint(f"  input {input_id}")
 
 
 @asset_app.command("lineage")
@@ -908,8 +935,11 @@ def asset_lineage(
     target_spec: TargetOption = ".",
 ) -> None:
     """Trace an asset's provenance — wraps ``assets.lineage.ancestors/descendants``."""
+    from molab.workspace.artifact_repository import scan_asset_repositories
     from molab.workspace.assets import lineage as asset_lineage_mod
-    from molab.workspace.assets import scan as asset_scan
+    from molab.workspace.domain import Asset
+    from molab.workspace.errors import AmbiguousRefError, RefNotFoundError
+    from molab.workspace.refs import MolabRef
 
     if direction not in ("ancestors", "descendants", "both"):
         rprint(
@@ -917,10 +947,15 @@ def asset_lineage(
         )
         raise typer.Exit(1)
     ws = _open_ws(target_spec)
+    try:
+        ws.find(MolabRef(asset_id=asset_id))
+    except (RefNotFoundError, AmbiguousRefError) as exc:
+        rprint(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(1) from exc
 
-    if asset_scan.get_asset(ws.root, asset_id, fs=ws.fs) is None:
-        rprint(f"[red]Error:[/red] no asset with id {asset_id!r} in this workspace.")
-        raise typer.Exit(1)
+    named: dict[str, Asset] = {
+        asset.id: asset for repo in scan_asset_repositories(ws) for asset in repo.list()
+    }
 
     def _render(label: str, arrow: str, ids: set[str]) -> None:
         rprint(f"[bold]{label}[/bold] ({len(ids)}):")
@@ -928,12 +963,8 @@ def asset_lineage(
             rprint("  (none)")
             return
         for related_id in sorted(ids):
-            related = asset_scan.get_asset(ws.root, related_id, fs=ws.fs)
-            suffix = (
-                f"  {related.name} ({related.kind if hasattr(related, 'kind') else '?'})"
-                if related is not None
-                else ""
-            )
+            related = named.get(related_id)
+            suffix = f"  {related.title} ({related.kind})" if related is not None else ""
             rprint(f"  {arrow} {related_id}{suffix}")
 
     if direction in ("ancestors", "both"):

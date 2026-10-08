@@ -9,7 +9,7 @@ Design invariants:
 
 - **Pure projection.** :func:`assemble_workspace_context` is a read — it stores nothing
   new and the model is never itself canonical (authoritative state stays in the entity
-  ``*.json`` / ``assets.json`` / OKF ``meta.json``).
+  ``*.json`` / OKF ``meta.json``).
 - **Layer-legal.** This module imports only ``workspace`` + stdlib/pydantic — never
   upstream layers (enforced by the workspace import-guard). Workflow
   *availability* is read workspace-only from the externalized ``workflow.json``.
@@ -17,24 +17,18 @@ Design invariants:
   selected refs) is passed in, never persisted; it defaults to empty.
 - **Health flags are computed, never stored** — and only the workspace-computable subset
   is produced here (``failed_run`` / ``stale_running`` / ``orphan_artifact``).
-- **Knowledge is projected one layer up.** :func:`assemble_workspace_context` is the
-  workspace's own projection: it returns ``knowledge == []`` **by design**, and
-  ``open_questions`` is ``[]`` here by design too. The only producer of the
-  ``knowledge`` field is :func:`molab.services.knowledge_context.context_with_knowledge`,
-  which assembles the rest and covers ``knowledge`` with the knowledge projection —
-  callers consume it as given and never patch the field in with ``model_copy``.
 """
 
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 from pydantic import BaseModel
 
 from molab._typing import JSONValue
 
-from .assets.scan import scan_assets
 from .run_heartbeat import is_alive_stale
 
 if TYPE_CHECKING:
@@ -96,8 +90,13 @@ class RunRef(BaseModel, frozen=True):
     current_execution_id: str | None = None
 
 
-class ArtifactRef(BaseModel, frozen=True):
-    """An asset + its producer lineage (from the manifest scan)."""
+class ContextArtifact(BaseModel, frozen=True):
+    """One emitted Artifact in the workspace read-model.
+
+    ``path`` is workspace-relative and comes from ``walk_artifacts`` (the
+    same location ``ArtifactRepository.locate`` returns). This is not
+    :class:`molab.workspace.domain.ArtifactRef`, which is only an id pointer.
+    """
 
     asset_id: str
     scope: str
@@ -107,15 +106,6 @@ class ArtifactRef(BaseModel, frozen=True):
     run_id: str | None = None
     execution_id: str | None = None
     task_id: str | None = None
-
-
-class KnowledgeRef(BaseModel, frozen=True):
-    """A knowledge Concept's identity (bundle-relative path + type + title)."""
-
-    path: str
-    type: str
-    title: str
-    id: str | None = None
 
 
 class HealthFlag(BaseModel, frozen=True):
@@ -146,9 +136,7 @@ class WorkspaceContext(BaseModel, frozen=True):
     recent_runs: list[RunRef] = []
     failed_runs: list[RunRef] = []
     running_runs: list[RunRef] = []
-    artifacts: list[ArtifactRef] = []
-    knowledge: list[KnowledgeRef] = []
-    open_questions: list[KnowledgeRef] = []
+    artifacts: list[ContextArtifact] = []
     stale_or_missing: list[HealthFlag] = []
 
 
@@ -167,10 +155,8 @@ def assemble_workspace_context(
 ) -> WorkspaceContext:
     """Assemble the canonical :class:`WorkspaceContext` — a pure read.
 
-    Walks the authoritative folder tree + ``run.json`` + ``scan_assets`` and
-    composes them into one read-model. Writes nothing. ``knowledge`` is
-    ``[]`` **by design** — the knowledge projection is a layer up
-    (:func:`molab.services.knowledge_context.context_with_knowledge`).
+    Walks the authoritative folder tree + ``run.json`` and
+    composes them into one read-model. Writes nothing.
 
     Args:
         workspace: The workspace to project.
@@ -204,9 +190,7 @@ def assemble_workspace_context(
                     parameter_space=dict(experiment.parameter_space),
                 )
             )
-            # A freshly-loaded Experiment rehydrates workflow_source from workflow.json
-            # (experiment.from_disk), so this covers both embedded + externalized IRs.
-            if experiment.workflow_source is not None:
+            if experiment.workflow_kind is not None:
                 workflows.append(WorkflowRef(experiment_id=experiment.id, name=experiment.name))
             for run in experiment.list_runs():
                 executions = run.executions
@@ -250,7 +234,7 @@ def assemble_workspace_context(
                 # Any live attempt (queued / running / finalizing) counts. The
                 # heartbeat check targets that attempt; a queued one has no
                 # ``alive`` yet, and a missing ``alive`` is never stale.
-                active_id = run.current_execution_id
+                active_id = run.execution_id
                 if active_id is not None:
                     running_runs.append(ref)
                     if is_alive_stale(run, active_id):
@@ -264,44 +248,26 @@ def assemble_workspace_context(
 
     recent_runs = sorted(run_refs, key=_run_sort_key, reverse=True)
 
-    artifacts: list[ArtifactRef] = []
-    for asset in scan_assets(root):
-        producer = asset.producer
-        artifacts.append(
-            ArtifactRef(
-                asset_id=asset.asset_id,
-                scope=asset.scope.urn,
-                kind=str(getattr(asset, "kind", "")),
-                path=str(asset.path),
-                content_hash=asset.content_hash,
-                run_id=producer.run_id if producer else None,
-                execution_id=producer.execution_id if producer else None,
-                task_id=producer.task_id if producer else None,
-            )
-        )
-        if producer and producer.run_id and producer.run_id not in run_ids:
-            flags.append(
-                HealthFlag(
-                    kind="orphan_artifact",
-                    ref=asset.asset_id,
-                    detail=(
-                        f"asset {asset.asset_id} names producer run "
-                        f"{producer.run_id!r}, which no longer resolves"
-                    ),
-                )
-            )
-
+    artifacts: list[ContextArtifact] = []
     # Emitted products, read from the Executions that own them.
-    from .artifact_repository import scan_artifacts
+    from .artifact_repository import walk_artifacts
 
-    for art in scan_artifacts(workspace):
+    root_path = Path(root).resolve()
+    for located in walk_artifacts(workspace):
+        art = located.artifact
         task_id = art.metadata.get("task_id") if isinstance(art.metadata, dict) else None
+        relative = ""
+        if located.location is not None:
+            try:
+                relative = Path(located.location).resolve().relative_to(root_path).as_posix()
+            except ValueError:
+                relative = ""
         artifacts.append(
-            ArtifactRef(
+            ContextArtifact(
                 asset_id=art.id,
                 scope=f"artifact:{art.project_id}:{art.run_id}:{art.execution_id}",
                 kind=art.semantic_type or "artifact",
-                path=art.source_path,
+                path=relative,
                 content_hash=art.content.digest,
                 run_id=art.run_id,
                 execution_id=art.execution_id,
@@ -335,19 +301,16 @@ def assemble_workspace_context(
         failed_runs=failed_runs,
         running_runs=running_runs,
         artifacts=artifacts,
-        knowledge=[],
-        open_questions=[],
         stale_or_missing=flags,
     )
 
 
 __all__ = [
-    "ArtifactRef",
+    "ContextArtifact",
     "ContextFocus",
     "ExperimentRef",
     "HealthFlag",
     "HealthFlagKind",
-    "KnowledgeRef",
     "ProjectRef",
     "RunRef",
     "WorkflowRef",

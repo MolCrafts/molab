@@ -75,15 +75,15 @@ class TestEmitArtifactProduct:
             assert artifact.name == "nve.pt"
         assert [a.name for a in run.executions[-1].artifacts] == ["nve.pt"]
 
-    def test_emitting_same_content_is_content_addressed(self, run):
+    def test_re_emitting_same_path_is_refused(self, run):
         with run.start() as ctx:
             dest = ctx.get_dir("work") / "nve.pt"
             dest.write_bytes(b"traj")
             first = ctx.emit_artifact(dest, name="nve.pt")
-            second = ctx.emit_artifact(dest, name="nve.pt")
-            assert first.id != second.id
-            assert first.content.digest == second.content.digest
-            assert dest.read_bytes() == b"traj"
+            with pytest.raises(ValueError, match=first.id):
+                ctx.emit_artifact(dest, name="nve.pt")
+        assert [a.id for a in run.executions[-1].artifacts] == [first.id]
+        assert dest.read_bytes() == b"traj"
 
     def test_requires_src_or_name(self, run):
         with run.start() as ctx, pytest.raises(ValueError, match="name"):

@@ -10,7 +10,11 @@ import { request as __request } from '../core/request';
 export class WorkflowService {
     /**
      * Put Workflow Document
-     * Validate, normalize, and persist an edited workflow IR document.
+     * Bind a normalized workflow IR as the document kind.
+     *
+     * Legacy experiments are 409 (migrate first). Code-kind experiments are
+     * 409 unless ``convertToDocument`` is set. Invalid IR, including an
+     * unregistered ``task_type``, is 400. Nothing is written on 409 or 400.
      * @param projectId
      * @param experimentId
      * @param requestBody
@@ -72,7 +76,11 @@ export class WorkflowService {
     }
     /**
      * Put Workflow Document
-     * Validate, normalize, and persist an edited workflow IR document.
+     * Bind a normalized workflow IR as the document kind.
+     *
+     * Legacy experiments are 409 (migrate first). Code-kind experiments are
+     * 409 unless ``convertToDocument`` is set. Invalid IR, including an
+     * unregistered ``task_type``, is 400. Nothing is written on 409 or 400.
      * @param projectId
      * @param experimentId
      * @param ws

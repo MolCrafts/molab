@@ -13,7 +13,7 @@ Every persistent byproduct — imported data, task artifacts, logs, checkpoints 
 | Experiment | Derived feature caches |
 | Run | Task artifacts, logs, checkpoints |
 
-Assets are recorded in each scope's `assets.json` manifest. Queries scan these manifests — no filesystem walking, no undocumented paths:
+Assets are recorded in each scope's `asset.json` manifest. Queries scan these manifests — no filesystem walking, no undocumented paths:
 
 ```python
 # docs: skip — conceptual illustration; requires a workspace and run context
@@ -30,7 +30,7 @@ Beyond outputs, Molab persists the metadata that makes a run interpretable later
 
 | Record | Where | What it captures |
 |---|---|---|
-| Workflow snapshot | `run.json` | The exact graph identity (`workflow_id`) |
+| Workflow snapshot | `run.json` | The exact graph identity (`workflow_digest`) |
 | Config hash | `run.json` | The resolved profile's `config_hash` |
 | Execution history | `executions/eNN/execution.json` + `alive` | Status, timestamps, attempt; heartbeat is `alive` mtime |
 | Per-task outputs | `executions/<exec_id>/workflow.json` | Each task's return value |

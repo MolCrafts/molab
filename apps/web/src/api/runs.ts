@@ -30,6 +30,13 @@ export const runsApi = {
     runId: string,
     executionId: string,
   ) => RunsService.getExecutionOutputs(projectId, experimentId, runId, executionId),
+  getArtifactContent: (
+    projectId: string,
+    experimentId: string,
+    runId: string,
+    executionId: string,
+    artifactId: string,
+  ) => RunsService.downloadArtifactContent(projectId, experimentId, runId, executionId, artifactId),
   promoteArtifact: (
     projectId: string,
     experimentId: string,

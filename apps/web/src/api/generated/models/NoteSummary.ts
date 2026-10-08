@@ -5,6 +5,7 @@
 export type NoteSummary = {
     name: string;
     relPath: string;
+    hostPath?: string;
     excerpt: string;
     tags?: Array<string>;
     status?: (string | null);

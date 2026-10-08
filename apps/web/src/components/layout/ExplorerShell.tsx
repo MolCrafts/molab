@@ -118,7 +118,10 @@ export const LeftExplorer = ({
   const column = (
     <div
       className={cn(
-        "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background outline-none",
+        // h-full: a resizable panel wraps its child in a block, so flex-1 alone
+        // lets the column grow to its content and the whole column (header
+        // included) scrolls instead of the body.
+        "flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background outline-none",
         className,
       )}
     >
@@ -134,7 +137,9 @@ export const LeftExplorer = ({
         {toolbar ? <div className="space-y-2">{toolbar}</div> : null}
       </header>
 
-      <ScrollArea className="min-h-0 flex-1">
+      {/* Radix wraps the body in display:table, which sizes rows to their
+          content and defeats truncate; block keeps rows at the column width. */}
+      <ScrollArea className="min-h-0 flex-1 [&_[data-radix-scroll-area-viewport]>div]:!block">
         <div className={cn("min-h-full px-2 py-row-pad", bodyClassName)}>{children}</div>
       </ScrollArea>
     </div>
@@ -160,7 +165,7 @@ const HORIZONTAL_HANDLE =
 
 /** Dock height when nothing is persisted — about six rows plus its header.
  *  Min is header + one two-line item; 60px clips the bag under overflow-hidden. */
-const DOCK_SIZE = { default: "200px", min: "88px", max: "70%" };
+const DOCK_SIZE = { default: "160px", min: "88px", max: "70%" };
 
 export interface ExplorerDockProps {
   /** The explorer column; takes whatever height the dock leaves it. */
@@ -197,7 +202,9 @@ export const ExplorerDock = ({
     autoSavePanelIds={["explorer", "dock"]}
     className="min-h-0 min-w-0 flex-1"
   >
-    <ResizablePanel id="explorer" defaultSize="calc(100% - 200px)" minSize="88px">
+    {/* No defaultSize: react-resizable-panels v4 does not parse calc(), so
+        the explorer takes whatever the dock leaves. */}
+    <ResizablePanel id="explorer" minSize="88px">
       {children}
     </ResizablePanel>
     <ResizableHandle className={HORIZONTAL_HANDLE} />

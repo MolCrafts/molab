@@ -63,7 +63,9 @@ router = APIRouter(prefix="/workspace", tags=["workspace"])
 
 
 MAX_TEXT_BYTES = 2_000_000
-IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg"}
+# What /file/blob streams: formats a browser renders by itself. SVG stays out —
+# served from this origin it can run script.
+BINARY_PREVIEW_EXTENSIONS = {".png", ".jpg", ".jpeg", ".gif", ".webp", ".pdf"}
 
 
 def resolve_workspace_path(root: Path, path_str: str) -> Path:
@@ -156,8 +158,8 @@ def get_workspace_copilot(workspace=Depends(get_workspace)) -> WorkspaceSummaryR
     names the operation it would perform in ``op``, and whoever executes it owns
     the policy for what that operation requires.
     """
+    from molab.services.copilot import summarize_workspace
     from molab.services.knowledge_context import context_with_knowledge
-    from molab.workspace.copilot import summarize_workspace
 
     summary = summarize_workspace(context_with_knowledge(workspace))
     return WorkspaceSummaryResponse.from_summary(summary)
@@ -299,25 +301,46 @@ def list_workspace_files(
     # (remote asset scans still work via the catalog API, not inline chips).
     asset_index_by_abs: dict[str, dict] = {}
     if "catalog" in include_set and isinstance(fs, LocalFileSystem):
-        from molab.workspace.assets import scan
+        from molab.workspace.artifact_repository import scan_asset_repositories, walk_artifacts
+        from molab.workspace.errors import AmbiguousRefError, RefNotFoundError
 
-        from ._scope import resolve_scope_dir
-
-        for asset in scan.scan_assets(workspace.root):
-            scope_dir = resolve_scope_dir(workspace, asset.scope)
-            if scope_dir is None:
+        for loc in walk_artifacts(workspace):
+            if loc.location is None:
                 continue
             try:
-                abs_path = (scope_dir / asset.path).resolve()
+                abs_path = Path(loc.location).resolve()
             except OSError:
                 continue
+            task_id = loc.artifact.metadata.get("task_id")
             asset_index_by_abs[str(abs_path)] = {
-                "assetId": asset.asset_id,
-                "assetKind": asset.kind,  # type: ignore[attr-defined]
-                "producerRunId": asset.producer.run_id if asset.producer else None,
-                "producerTaskId": asset.producer.task_id if asset.producer else None,
+                "assetId": loc.artifact.id,
+                "assetKind": loc.artifact.semantic_type or "artifact",
+                "producerRunId": loc.run_id,
+                "producerTaskId": task_id if isinstance(task_id, str) else None,
                 "hasPreviewSidecar": resolve_sidecar(abs_path) is not None,
             }
+
+        for repository in scan_asset_repositories(workspace):
+            for asset in repository.list():
+                try:
+                    abs_path = Path(repository.payload_path(asset.id)).resolve()
+                except (OSError, KeyError, ValueError, RefNotFoundError, AmbiguousRefError):
+                    continue
+                key = str(abs_path)
+                sidecar = resolve_sidecar(abs_path) is not None
+                existing = asset_index_by_abs.get(key)
+                if existing is not None:
+                    existing["assetId"] = asset.id
+                    existing["assetKind"] = asset.kind
+                    existing["hasPreviewSidecar"] = sidecar
+                    continue
+                asset_index_by_abs[key] = {
+                    "assetId": asset.id,
+                    "assetKind": asset.kind,
+                    "producerRunId": None,
+                    "producerTaskId": None,
+                    "hasPreviewSidecar": sidecar,
+                }
 
     # Single tree walk — same implementation as GET …/runs/{id}/files.
     nodes = list_tree_children(fs, requested, max_depth=effective_depth, ignore=ignore_fn)
@@ -379,7 +402,7 @@ def read_workspace_file_blob(
 
     name = fs.basename(target)
     suffix = ("." + name.rsplit(".", 1)[-1]).lower() if "." in name else ""
-    if suffix not in IMAGE_EXTENSIONS:
+    if suffix not in BINARY_PREVIEW_EXTENSIONS:
         raise HTTPException(status_code=400, detail="Unsupported binary preview type")
 
     media_type = mimetypes.guess_type(name)[0] or "application/octet-stream"
@@ -449,19 +472,14 @@ def open_workspace(
     _assert_open_workspace_allowed(request, user)
     if isinstance(request, WorkspaceOpenLocalRequest):
         path = Path(request.path).expanduser().resolve()
-        created = False
         if not path.exists():
             if not request.create_if_missing:
                 raise HTTPException(status_code=404, detail="Workspace path not found")
             path.mkdir(parents=True, exist_ok=True)
-            created = True
 
         set_workspace_path_override(path)
+        # Constructor writes workspace.json when the marker is absent.
         workspace = Workspace(path)
-        if created:
-            # Only a just-created directory is materialized — opening an
-            # existing path must never write workspace.json on its own.
-            workspace.materialize()
         return WorkspaceInfoResponse(
             root=str(workspace.root),
             projectCount=len(workspace.list_projects()),

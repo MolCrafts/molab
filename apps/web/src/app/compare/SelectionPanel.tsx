@@ -1,109 +1,47 @@
 /**
  * The selection being assembled, docked at the foot of the left panel.
  *
- * Grouping is the Project → Experiment → Run tree. A selected project or
- * experiment expands to the snapshot's children.
+ * Rows are the bag, grouped by category (an empty category is Ungrouped).
+ * Move up / Move down reorder that bag. The hydrated project tree supplies
+ * display names when the snapshot knows the entity.
  */
 
-import { ArrowUpRight, ChevronRight, GitCompare, Trash2, X } from "lucide-react";
-import { type JSX, useMemo, useState } from "react";
+import { ArrowUpRight, ChevronDown, ChevronUp, GitCompare, Trash2 } from "lucide-react";
+import { type JSX, useMemo } from "react";
 import { Link } from "react-router-dom";
 
 import type { WorkspaceSnapshot } from "@/app/types";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { WorkbenchIconAction } from "@/components/workbench";
-import { cn } from "@/lib/utils";
 
-import {
-  type ComparisonExperimentNode,
-  type ComparisonProjectNode,
-  hydrateComparisonTree,
-  keysUnderExperiment,
-  keysUnderProject,
-} from "./comparisonTree";
-import { useCompareSet } from "./useCompareSet";
+import { buildCategoryGroups, hydrateComparisonTree } from "./comparisonTree";
+import { type CompareItem, itemKey } from "./types";
+import { compareSet, reorderItems, setItemCategory, useCompareSet } from "./useCompareSet";
 
-const INDENT = ["pl-1", "pl-4", "pl-7"] as const;
+const entryLabel = (entry: CompareItem, tree: ReturnType<typeof hydrateComparisonTree>): string => {
+  const project = tree.find(
+    (node) =>
+      node.workspaceKey === entry.ref.workspaceKey && node.projectId === entry.ref.projectId,
+  );
+  if (entry.ref.kind === "project")
+    return project?.name || entry.projectName || entry.ref.projectId;
+  if (entry.ref.kind === "experiment") {
+    const experimentId = entry.ref.experimentId;
+    const experiment = project?.experiments.find((node) => node.experimentId === experimentId);
+    return experiment?.name || entry.experimentName || experimentId;
+  }
+  return entry.runName || entry.ref.runId;
+};
 
-const Row = ({
-  label,
-  indent,
-  open,
-  expandable,
-  onToggle,
-  onRemove,
-}: {
-  label: string;
-  indent: 0 | 1 | 2;
-  open?: boolean;
-  expandable?: boolean;
-  onToggle?: () => void;
-  onRemove?: () => void;
-}): JSX.Element => (
-  <div
-    className={cn(
-      "flex min-w-0 items-center gap-hairline rounded-hairline py-row-pad pr-1 hover:bg-muted/40",
-      INDENT[indent],
-    )}
-  >
-    {expandable ? (
-      <WorkbenchIconAction
-        label={open ? `Collapse ${label}` : `Expand ${label}`}
-        className="size-control-compact flex-none"
-        onClick={onToggle}
-      >
-        <ChevronRight className={cn("size-icon-sm transition-transform", open && "rotate-90")} />
-      </WorkbenchIconAction>
-    ) : (
-      <span className="size-control-compact flex-none" />
-    )}
-    <span className="min-w-0 flex-1 truncate font-mono text-label text-foreground" title={label}>
-      {label}
-    </span>
-    {onRemove ? (
-      <WorkbenchIconAction
-        label={`Remove ${label}`}
-        className="size-control-compact flex-none"
-        onClick={onRemove}
-      >
-        <X className="size-icon-sm" />
-      </WorkbenchIconAction>
-    ) : null}
-  </div>
-);
+const assignCategory = (entries: readonly CompareItem[], key: string, raw: string): void => {
+  const trimmed = raw.trim();
+  compareSet.replace(setItemCategory(entries, key, trimmed.length === 0 ? null : trimmed));
+};
 
 export const SelectionPanel = ({ snapshot }: { snapshot: WorkspaceSnapshot }): JSX.Element => {
   const { entries, count, remove, clear } = useCompareSet();
   const tree = useMemo(() => hydrateComparisonTree(entries, snapshot), [entries, snapshot]);
-  const [open, setOpen] = useState<Set<string> | null>(null);
-
-  const derivedOpen = useMemo(() => {
-    const next = new Set<string>();
-    for (const project of tree) {
-      const hasBagRuns = project.experiments.some((experiment) =>
-        experiment.runs.some((run) => !run.virtual),
-      );
-      if (hasBagRuns) next.add(project.id);
-      for (const experiment of project.experiments) {
-        if (experiment.runs.some((run) => !run.virtual)) next.add(experiment.id);
-      }
-    }
-    return next;
-  }, [tree]);
-  const expanded = open ?? derivedOpen;
-
-  const toggle = (id: string): void => {
-    setOpen((current) => {
-      const next = new Set(current ?? derivedOpen);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
-  const removeAll = (keys: string[]): void => {
-    for (const key of keys) remove(key);
-  };
+  const groups = useMemo(() => buildCategoryGroups(entries), [entries]);
 
   return (
     <section
@@ -134,45 +72,52 @@ export const SelectionPanel = ({ snapshot }: { snapshot: WorkspaceSnapshot }): J
 
       {count === 0 ? null : (
         <ScrollArea className="min-h-0 min-w-0 flex-1">
-          <div className="min-w-0 pb-2">
-            {tree.map((project: ComparisonProjectNode) => (
-              <div key={project.id} className="mb-1">
-                <Row
-                  label={project.name}
-                  indent={0}
-                  expandable={project.experiments.length > 0}
-                  open={expanded.has(project.id)}
-                  onToggle={() => toggle(project.id)}
-                  onRemove={() => removeAll(keysUnderProject(entries, project))}
-                />
-                {expanded.has(project.id)
-                  ? project.experiments.map((experiment: ComparisonExperimentNode) => (
-                      <div key={experiment.id}>
-                        <Row
-                          label={experiment.name}
-                          indent={1}
-                          expandable={experiment.runs.length > 0}
-                          open={expanded.has(experiment.id)}
-                          onToggle={() => toggle(experiment.id)}
-                          onRemove={
-                            experiment.virtual
-                              ? undefined
-                              : () => removeAll(keysUnderExperiment(entries, project, experiment))
-                          }
-                        />
-                        {expanded.has(experiment.id)
-                          ? experiment.runs.map((run) => (
-                              <Row
-                                key={run.key}
-                                label={run.entry.runName}
-                                indent={2}
-                                onRemove={run.virtual ? undefined : () => remove(run.key)}
-                              />
-                            ))
-                          : null}
-                      </div>
-                    ))
-                  : null}
+          <div className="min-w-0 space-y-2 pb-2">
+            {groups.map((group) => (
+              <div key={group.category ?? ""}>
+                <p className="px-2 pt-1 font-mono text-micro text-muted-foreground">
+                  {group.category ?? "Ungrouped"}
+                </p>
+                {group.items.map((entry) => {
+                  const key = itemKey(entry.ref);
+                  const index = entries.findIndex((item) => itemKey(item.ref) === key);
+                  const label = entryLabel(entry, tree);
+                  return (
+                    <div
+                      key={key}
+                      className="flex min-w-0 items-center gap-hairline px-1 py-row-pad"
+                    >
+                      <WorkbenchIconAction
+                        label="Move up"
+                        disabled={index <= 0}
+                        onClick={() => compareSet.replace(reorderItems(entries, index, index - 1))}
+                      >
+                        <ChevronUp className="size-icon-sm" />
+                      </WorkbenchIconAction>
+                      <WorkbenchIconAction
+                        label="Move down"
+                        disabled={index < 0 || index >= entries.length - 1}
+                        onClick={() => compareSet.replace(reorderItems(entries, index, index + 1))}
+                      >
+                        <ChevronDown className="size-icon-sm" />
+                      </WorkbenchIconAction>
+                      <span className="min-w-0 flex-1 truncate font-mono text-label" title={label}>
+                        {label}
+                      </span>
+                      <input
+                        aria-label={`Category for ${label}`}
+                        defaultValue={entry.category ?? ""}
+                        key={`${key}:${entry.category ?? ""}`}
+                        placeholder="Category"
+                        className="h-control-compact w-16 rounded-control border border-border bg-transparent px-1 font-mono text-micro"
+                        onBlur={(event) => assignCategory(entries, key, event.target.value)}
+                      />
+                      <WorkbenchIconAction label={`Remove ${label}`} onClick={() => remove(key)}>
+                        <Trash2 className="size-icon-sm" />
+                      </WorkbenchIconAction>
+                    </div>
+                  );
+                })}
               </div>
             ))}
           </div>

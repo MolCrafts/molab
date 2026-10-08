@@ -11,8 +11,10 @@ depending on which door created it, which is the bug these tests lock out.
 from __future__ import annotations
 
 import ast
+import json
 from pathlib import Path
 
+from molab.ids import compute_definition_hash
 from molab.workspace import Workspace
 from molab.workspace.run import Run, compute_run_definition_hash
 
@@ -115,13 +117,51 @@ class TestIdentityIsNeverThePath:
         ws.materialize()
         experiment = ws.add_project("p").add_experiment("e")
         plain = experiment.add_run(params={"seed": 2})
-        with_snapshot = Run(
-            parent=experiment,
-            parameters={"seed": 2},
-            experiment_revision_id=experiment.metadata.revision_id,
-            workflow_snapshot={"entrypoint": "/old/wf.py:compiled"},
+        run_json = plain.run_dir / "run.json"
+        payload = json.loads(run_json.read_text(encoding="utf-8"))
+        assert isinstance(payload, dict)
+        payload["workflow_snapshot"] = {"entrypoint": "/old/wf.py:compiled"}
+        payload["workflow_id"] = "wf-old"
+        payload["workflow_version"] = 3
+        run_json.write_text(json.dumps(payload), encoding="utf-8")
+
+        loaded = Run.load(plain.run_dir)
+
+        assert loaded.metadata.definition_hash == plain.metadata.definition_hash
+        assert loaded.id == plain.id
+        for name in ("workflow_snapshot", "workflow_id", "workflow_version"):
+            assert hasattr(loaded.metadata, name) is False
+            assert name not in type(loaded.metadata).model_fields
+        assert (
+            compute_run_definition_hash(
+                experiment_revision_id=experiment.metadata.revision_id,
+                parameters={"seed": 2},
+            )
+            == plain.metadata.definition_hash
         )
-        assert with_snapshot.metadata.definition_hash == plain.metadata.definition_hash
+
+        loaded._update_metadata(target="x")
+        rewritten = json.loads(run_json.read_text(encoding="utf-8"))
+        assert isinstance(rewritten, dict)
+        for name in ("workflow_snapshot", "workflow_id", "workflow_version"):
+            assert name not in rewritten
+
+    def test_golden_hash_is_stable(self) -> None:
+        """The frozen ``workflow_snapshot: None`` key stays in the digest input."""
+        golden = "sha256:30119ce961ee6a1797296eea0ce32d1509d4a93b4b2adfe3af8ff56888001fad"
+        got = compute_run_definition_hash(
+            experiment_revision_id="rev-golden", parameters={"seed": 1}
+        )
+        via_ids = compute_definition_hash(
+            {
+                "experiment_revision_id": "rev-golden",
+                "parameters": {"seed": 1},
+                "workflow_snapshot": None,
+                "input_asset_ids": (),
+            }
+        )
+        assert got == golden
+        assert got == via_ids
 
 
 class TestComputeRunDefinitionHash:

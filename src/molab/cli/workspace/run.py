@@ -9,26 +9,25 @@ import traceback
 from collections.abc import Mapping
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, NamedTuple, Protocol, cast
+from typing import TYPE_CHECKING, Annotated, NamedTuple, Protocol
 
 import typer
 from rich.progress import BarColumn, Progress, SpinnerColumn, TextColumn, TimeElapsedColumn
 
-from molab._typing import JSONValue, TaskOutput
+from molab._typing import JSONValue
 from molab.cli._app import app
 from molab.cli._common import console, deterministic_run_id, reap_zombie_run, rprint
 from molab.cli._target import TargetOption, resolve_workspace_target
 from molab.profile import MolCfg, ProfileConfig, load_molcfg
 from molab.profile.loader import find_default_config
 from molab.workflow import default_binding_registry
-from molab.workspace.domain import ExecutionMode, ExecutionStatus
+from molab.workspace.domain import ExecutionMode
 from molab.workspace.execution_context import profile_config_hash
 from molab.workspace.run import RunStatus
 from molab.workspace.source_snapshot import SourceCaptureError
 from molab.workspace.target import LocalTarget, RemoteTarget
 
 if TYPE_CHECKING:
-    from molab.workflow.protocols import RunContextLike
     from molab.workspace.experiment import Experiment
     from molab.workspace.models import ComputeTarget
     from molab.workspace.project import Project
@@ -40,9 +39,9 @@ class RunHandler(Protocol):
     """Dispatch one selected run: execute it in-process or submit it.
 
     The dispatcher creates the run's QUEUED Execution record immediately
-    before the call and hands its id as *execution_id* (``None`` only for
-    ``--resume``, whose reopen path still picks its own attempt). The molq
-    ``SubmitHandler`` satisfies this structurally.
+    before the call and hands its id as *execution_id*. ``--resume`` creates
+    a new RESUME record based on the latest attempt; it does not reopen one.
+    The molq ``SubmitHandler`` satisfies this structurally.
     """
 
     def __call__(
@@ -53,7 +52,7 @@ class RunHandler(Protocol):
         project: Project,
         /,
         *,
-        execution_id: str | None,
+        execution_id: str,
     ) -> None: ...
 
 
@@ -326,21 +325,27 @@ def _select_candidate_runs(
         if mol_run is not None and mol_run.status_summary.active > 0 and reap_zombie_run(mol_run):
             status = RunStatus.FAILED.value
             rprint(
-                f"  [yellow]![/yellow] {exp.id}  run={mol_run.id} (stale 'running' run reaped -> failed)"
+                f"  [yellow]![/yellow] {exp.name}  {mol_run.name} (stale 'running' run reaped -> failed)"
             )
         if continue_verb is not None:
-            # resume / rerun own exactly the finished-but-not-succeeded runs
-            # (failed / cancelled / interrupted). pending is plain run's job,
-            # succeeded is done, and a live running run must never get a
-            # second execution — all skipped, which keeps the three verbs
-            # orthogonal. The retryable domain is the shared workspace policy.
+            # Neither verb creates a run. Resume keeps the retryable domain
+            # (a failed/cancelled/interrupted attempt, nothing active). Rerun
+            # opens a fresh attempt on any finished run, including one whose
+            # latest attempt succeeded; a live attempt still blocks it.
             if mol_run is None:
                 rprint(f"  [dim]- {exp.id}  seed={seed_label} (no existing run, skipped)[/dim]")
                 continue
-            if not mol_run.is_retryable:
+            if continue_verb == "rerun":
+                if not mol_run.executions or mol_run.status_summary.active > 0:
+                    rprint(
+                        f"  [dim]- {exp.name}  {mol_run.name} ({status}, skipped — "
+                        "rerun needs a finished attempt and no active one)[/dim]"
+                    )
+                    continue
+            elif not mol_run.is_retryable:
                 rprint(
-                    f"  [dim]- {exp.id}  run={mol_run.id} ({status}, skipped — "
-                    f"{continue_verb} only retries failed/cancelled runs)[/dim]"
+                    f"  [dim]- {exp.name}  {mol_run.name} ({status}, skipped — "
+                    "resume only retries failed/cancelled runs)[/dim]"
                 )
                 continue
         elif mol_run is not None:
@@ -349,16 +354,16 @@ def _select_candidate_runs(
             # retrying a failure is an explicit --resume / --rerun.
             if not mol_run.status_summary.not_started:
                 rprint(
-                    f"  [dim]- {exp.id}  run={mol_run.id} ({status}, skipped — "
+                    f"  [dim]- {exp.name}  {mol_run.name} ({status}, skipped — "
                     "use --resume or --rerun to retry)[/dim]"
                 )
                 continue
         else:
             mol_run = exp.ensure_run(run_params, config_hash=config_hash)
-        label_text = f"seed={seed_label}" if seed_label is not None else f"run={mol_run.id}"
+        label_text = f"seed={seed_label}" if seed_label is not None else mol_run.name
         selected_runs.append((mol_run, label_text))
         icon = "[cyan]>[/cyan]" if continue_verb is not None else "[dim]o[/dim]"
-        rprint(f"  {icon} {exp.id}  {label_text}")
+        rprint(f"  {icon} {exp.name}  {label_text}")
     return selected_runs
 
 
@@ -370,19 +375,22 @@ def _create_dispatch_execution(
     profile_cfg: ProfileConfig,
     script: Path,
     submit_cwd: str,
-) -> str | None:
+) -> str:
     """Create the QUEUED Execution record one dispatched run will start.
 
     The only place ``molab run`` creates a record. A plain run opens an
     ``initial`` attempt (only not-started runs are selected); ``--rerun``
-    opens a ``rerun`` attempt based on the run's latest, terminal one.
-    ``--resume`` creates nothing: its handler still reopens the last attempt
-    itself (arch-own-03 replaces that).
+    opens a ``rerun`` attempt based on the run's latest one; ``--resume``
+    opens a ``resume`` attempt based on that same latest attempt. Completed
+    nodes are seeded later, from the predecessor's journal, by
+    ``execution.execute``.
 
     Args:
         mol_run: The run about to be dispatched.
         continue_verb: ``None`` (plain run), ``"resume"`` or ``"rerun"``.
         fresh: Record that the attempt bypasses the workflow node cache.
+            Ignored for ``--resume``, which always records ``bypass_cache``
+            false.
         profile_cfg: The profile the attempt runs under; recorded as its
             ``profile`` / ``config`` / ``config_hash``.
         script: The defining script; recorded as ``environment.script`` and
@@ -390,27 +398,33 @@ def _create_dispatch_execution(
         submit_cwd: The directory ``molab run`` was invoked from.
 
     Returns:
-        The new attempt's id (``e01``, ``e02``, …), or ``None`` for
-        ``--resume``.
+        The new attempt's id (``e01``, ``e02``, …).
 
     Raises:
+        ValueError: The workspace refuses this mode for this run (for
+            example a RESUME based on an attempt that already succeeded).
+            The dispatcher turns that into a skip.
         typer.Exit: The script's source could not be captured (the attempt
             is sealed FAILED by the workspace and the batch stops).
     """
     if continue_verb == "resume":
-        return None
-    if continue_verb == "rerun":
-        mode = ExecutionMode.RERUN
+        mode = ExecutionMode.RESUME
         based_on: str | None = mol_run.executions[-1].id
+        bypass_cache = False
+    elif continue_verb == "rerun":
+        mode = ExecutionMode.RERUN
+        based_on = mol_run.executions[-1].id
+        bypass_cache = fresh
     else:
         mode = ExecutionMode.INITIAL
         based_on = None
+        bypass_cache = fresh
     entrypoint = script.resolve()
     try:
-        record = mol_run.create_execution(
+        record = mol_run._create_execution(
             mode=mode,
-            based_on_execution_id=based_on,
-            bypass_cache=fresh,
+            predecessor=based_on,
+            bypass_cache=bypass_cache,
             profile_config=profile_cfg,
             environment={"script": str(entrypoint), "submit_cwd": submit_cwd},
             source_entrypoint=entrypoint,
@@ -439,7 +453,10 @@ def _execute_selected(
 
     Each run's Execution record is created on the line right before its
     handler call, so a batch interrupted part-way leaves no QUEUED record on
-    the runs it never reached.
+    the runs it never reached. A ``ValueError`` from creation (the workspace
+    refuses the mode) prints a skip line and does not call the handler; the
+    progress bar still advances. A source-capture ``RuntimeError`` is not
+    caught and still aborts the batch.
 
     Args:
         all_replicas: ``(run, experiment, project)`` for every selected run.
@@ -455,16 +472,21 @@ def _execute_selected(
         The runs that were handed to *run_handler*, in order.
     """
 
-    def _dispatch_one(mol_run: Run, exp: Experiment, project: Project) -> None:
-        execution_id = _create_dispatch_execution(
-            mol_run,
-            continue_verb=continue_verb,
-            fresh=fresh,
-            profile_cfg=profile_cfg,
-            script=script,
-            submit_cwd=submit_cwd,
-        )
+    def _dispatch_one(mol_run: Run, exp: Experiment, project: Project) -> bool:
+        try:
+            execution_id = _create_dispatch_execution(
+                mol_run,
+                continue_verb=continue_verb,
+                fresh=fresh,
+                profile_cfg=profile_cfg,
+                script=script,
+                submit_cwd=submit_cwd,
+            )
+        except ValueError as exc:
+            rprint(f"  [dim]- {exp.name}  {mol_run.name} (skipped — {exc})[/dim]")
+            return False
         run_handler(script, mol_run, exp, project, execution_id=execution_id)
+        return True
 
     dispatched_runs: list[Run] = []
     if show_progress and all_replicas:
@@ -479,15 +501,31 @@ def _execute_selected(
             task_id = progress.add_task("running workflows", total=len(all_replicas))
             for mol_run, exp, project in all_replicas:
                 progress.update(task_id, description=f"{exp.id} / {mol_run.id}")
-                _dispatch_one(mol_run, exp, project)
-                dispatched_runs.append(mol_run)
+                if _dispatch_one(mol_run, exp, project):
+                    dispatched_runs.append(mol_run)
                 progress.advance(task_id)
     else:
         for mol_run, exp, project in all_replicas:
-            _dispatch_one(mol_run, exp, project)
-            dispatched_runs.append(mol_run)
-            rprint(f"  [cyan]>[/cyan] dispatched {exp.id}  run={mol_run.id}")
+            if _dispatch_one(mol_run, exp, project):
+                dispatched_runs.append(mol_run)
+                rprint(f"  [cyan]>[/cyan] dispatched {exp.name}  {mol_run.name}")
     return dispatched_runs
+
+
+def _refuse_unrecoverable(replicas: list[tuple[Run, Experiment, Project]]) -> None:
+    """Exit before submitting when a worker could not rebuild a run's workflow."""
+    from molab.workflow import can_recover_workflow
+
+    stuck = sorted({exp.name for run, exp, _project in replicas if not can_recover_workflow(run)})
+    if not stuck:
+        return
+    rprint(
+        "[red]Error:[/red] a scheduler worker re-imports the workflow, and these experiments "
+        f"record no importable locator: {', '.join(stuck)}.\n"
+        "  Keep the Workflow (or its compiled object) in a module-level variable of the "
+        "script, e.g. [bold]wf = Workflow(...)[/bold], and pass that to define()."
+    )
+    raise typer.Exit(1)
 
 
 def _dispatch_runs(
@@ -503,6 +541,7 @@ def _dispatch_runs(
     dry_run: bool = False,
     show_progress: bool = False,
     fresh: bool = False,
+    require_recoverable: bool = False,
 ) -> tuple[int, list[Run]]:
     """Select the runs of every bound experiment in *script* and dispatch them.
 
@@ -518,9 +557,14 @@ def _dispatch_runs(
         dry_run: Select (and create missing runs) but create no Execution.
         show_progress: Draw a progress bar while dispatching.
         fresh: Record that each new attempt bypasses the workflow node cache.
+        require_recoverable: Refuse, before any attempt is created, a run whose
+            workflow another process could not rebuild (a scheduler worker
+            re-imports the script; it cannot use this process's binding).
 
     Returns:
-        ``(number of selected runs, runs dispatched or selected)``.
+        ``(count, runs)``. Dry-run and select-only return the selected count.
+        A live dispatch returns how many runs were actually handed to the
+        handler; a creation skip is not counted.
     """
     workspaces, override_path = _load_script_workspaces(script, workspace, explicit_workspace)
 
@@ -561,6 +605,9 @@ def _dispatch_runs(
             rprint(f"\n[green]OK[/green] compiled workflow plan: {total_dispatched} run(s) ready.")
         return total_dispatched, [mol_run for mol_run, _exp, _project in all_replicas]
 
+    if require_recoverable:
+        _refuse_unrecoverable(all_replicas)
+
     dispatched_runs = _execute_selected(
         all_replicas,
         run_handler,
@@ -571,62 +618,25 @@ def _dispatch_runs(
         profile_cfg=profile_cfg,
         submit_cwd=str(Path.cwd().resolve()),
     )
+    dispatched_count = len(dispatched_runs)
     if not suppress_ok:
         verb = {"resume": "resumed", "rerun": "reran"}.get(continue_verb or "", "completed")
-        rprint(f"\n[green]OK[/green] {total_dispatched} runs {verb}.")
-    return total_dispatched, dispatched_runs
+        rprint(f"\n[green]OK[/green] {dispatched_count} runs {verb}.")
+    return dispatched_count, dispatched_runs
 
 
-async def _execute_compiled(
-    spec: object,
-    *,
-    run_context: RunContextLike,
-    execution_id: str | None = None,
-    seed_outputs: Mapping[str, TaskOutput] | None = None,
-    bypass_cache: bool = False,
-) -> object:
-    """Execute a compiled workflow on the workflow layer's own runtime.
-
-    No plugin host is involved: the only load-bearing effect a host profile
-    contributed on this path was the mlp metrics writer, and ``import molab``
-    already wires that onto :mod:`molab.workspace.metrics_seam`.
-    """
-    from molab.workflow import WorkflowRuntime
-    from molab.workflow.compiled import CompiledWorkflow
-
-    if not isinstance(spec, CompiledWorkflow):
-        raise TypeError("spec must be a CompiledWorkflow")
-    return await WorkflowRuntime().execute(
-        spec,
-        run_context=run_context,
-        execution_id=execution_id,
-        seed_outputs=seed_outputs,
-        bypass_cache=bypass_cache,
-    )
-
-
-def _make_local_inprocess_handler(
-    profile_cfg: ProfileConfig, *, verb: str | None = None
-) -> RunHandler:
+def _make_local_inprocess_handler() -> RunHandler:
     """Build the handler that executes one run in this process.
 
-    The handler starts the QUEUED record the dispatcher created; whether the
-    node cache is bypassed is read back from that record
-    (``ctx.bypass_cache``), never passed alongside it. ``--resume`` still
-    reopens the run's last attempt and seeds its completed nodes
-    (arch-own-03 replaces that path).
-
-    Args:
-        profile_cfg: The profile the attempts run under.
-        verb: ``None`` (plain run), ``"resume"`` or ``"rerun"``.
+    The handler starts the QUEUED record the dispatcher created.
+    ``execute_run`` reads that record's config, ``bypass_cache`` and, for a
+    RESUME record, the predecessor journal. A failed attempt is persisted
+    and swallowed here so the rest of the batch still runs; the result
+    report reads the record afterwards.
 
     Returns:
         A :class:`RunHandler`.
     """
-    import asyncio
-
-    from molab.workflow._engine.persistence import seed_from_execution
-    from molab.workspace.run import RunContext
 
     def _handler(
         _script: Path,
@@ -635,31 +645,16 @@ def _make_local_inprocess_handler(
         _project: Project,
         /,
         *,
-        execution_id: str | None,
+        execution_id: str,
     ) -> None:
-        spec = default_binding_registry.for_experiment(experiment)
-        if spec is None:
-            raise RuntimeError(f"Experiment {experiment.name!r} has no workflow attached.")
-        seed_outputs = None
-        if verb == "resume":
-            # Reopen the last failed/interrupted execution and seed its
-            # completed nodes; the no-fallback semantics live with the
-            # workflow layer (see ``seed_from_execution``).
-            execution_id, seed_outputs = seed_from_execution(mol_run)
-        with RunContext(
-            mol_run,
-            profile_config=profile_cfg,
-            execution_id=execution_id,
-        ) as ctx:
-            asyncio.run(
-                _execute_compiled(
-                    spec,
-                    run_context=cast("RunContextLike", ctx),
-                    execution_id=execution_id,
-                    seed_outputs=seed_outputs,
-                    bypass_cache=ctx.bypass_cache,
-                )
-            )
+        from molab.workflow import RunFailedError, compiled_workflow_for_experiment
+        from molab.workflow.execute import execute_run
+
+        spec = compiled_workflow_for_experiment(experiment)
+        try:
+            execute_run(spec, mol_run, execution_id=execution_id)
+        except RunFailedError:
+            return
 
     return _handler
 
@@ -698,12 +693,11 @@ def execute(
 
     This is what the molq submit plugin launches on the scheduler:
     ``python -m molab.cli execute <run_dir> --execution-id <eid>``. It starts
-    the QUEUED record the submitter created. The workflow comes only from
-    :func:`molab.workflow.compiled_workflow_for_run` (the record's
-    ``environment.script`` is provenance, never imported); the config, the
-    profile and ``bypass_cache`` come from the record. ``--config`` /
-    ``--profile`` are refused, because the config that runs is the recorded
-    one.
+    the QUEUED record the submitter created — workflow via
+    :func:`molab.workflow.compiled_workflow_for_run`, config / profile /
+    ``bypass_cache`` from the record; a RESUME record seeds completed nodes
+    from its ``based_on`` attempt. ``--config`` / ``--profile`` are refused,
+    because the config that runs is the recorded one.
 
     Args:
         run_dir: The run's directory.
@@ -712,25 +706,19 @@ def execute(
         profile: Refused when given.
 
     Raises:
-        typer.Exit: Exit code 1 when the run or the attempt cannot be found,
-            an override is given, the workflow cannot be recovered, or the
-            attempt does not succeed.
+        typer.Exit: Exit code 1 when the run cannot be found, an override is
+            given, the workflow cannot be recovered, the record is not a
+            startable QUEUED attempt, or the attempt does not succeed.
     """
-    import asyncio
-
-    from molab.workflow import WorkflowRecoveryError, compiled_workflow_for_run
-    from molab.workflow._engine.persistence import read_node_outputs
-    from molab.workspace.run import RunContext
+    from molab.workflow import (
+        RunFailedError,
+        RunNotExecutableError,
+        WorkflowRecoveryError,
+        compiled_workflow_for_run,
+    )
+    from molab.workflow.execute import execute_run
 
     run_obj, experiment = _open_run(Path(run_dir))
-    try:
-        run_obj.execution(execution_id)
-    except KeyError as exc:
-        rprint(
-            f"[red]Error:[/red] run {run_obj.id} has no execution {execution_id!r}; "
-            "the submitter must create it first with Run.create_execution."
-        )
-        raise typer.Exit(1) from exc
     if config is not None or profile is not None:
         rprint(
             f"[red]Error:[/red] execution {execution_id} already records its config; "
@@ -745,39 +733,30 @@ def execute(
         raise typer.Exit(1) from exc
     default_binding_registry.bind(experiment, spec)
 
-    seed_outputs = read_node_outputs(run_obj.run_dir, execution_id)
     rprint(f"[dim]execute[/dim] run={run_obj.id} execution={execution_id}")
-    # The recorded config runs: RunContext adopts it from the Execution record.
-    with RunContext(run_obj, execution_id=execution_id) as ctx:
-        asyncio.run(
-            _execute_compiled(
-                spec,
-                run_context=cast("RunContextLike", ctx),
-                execution_id=execution_id,
-                seed_outputs=seed_outputs,
-                bypass_cache=ctx.bypass_cache,
-            )
+    try:
+        execute_run(spec, run_obj, execution_id=execution_id)
+    except (RunNotExecutableError, ValueError) as exc:
+        rprint(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(1) from None
+    except RunFailedError:
+        status = run_obj.execution(execution_id).status.value
+        rprint(
+            f"[red]FAILED[/red] execute run={run_obj.id} execution={execution_id} status={status}"
         )
-    # Judge this attempt, not the run: ``Run.status_label`` is the *latest*
-    # attempt's status, and ``execution_id`` need not be the latest — a sibling
-    # attempt may have been dispatched after it. The exit code must describe
-    # the attempt this worker ran.
-    status = run_obj.execution(execution_id).status
-    if status is not ExecutionStatus.SUCCEEDED:
-        # The scheduler reads this exit code to mark the job failed; a failed run
-        # reported as success would strand the whole pipeline.
-        rprint(f"[red]FAILED[/red] execute run={run_obj.id} status={status.value}")
-        raise typer.Exit(1)
-    rprint(f"[green]OK[/green] execute complete run={run_obj.id} status={status.value}")
+        raise typer.Exit(1) from None
+    status = run_obj.execution(execution_id).status.value
+    rprint(
+        f"[green]OK[/green] execute complete run={run_obj.id} "
+        f"execution={execution_id} status={status}"
+    )
 
 
 def _open_run(run_dir: Path) -> tuple[Run, Experiment]:
     """Open the run stored at *run_dir* and its experiment.
 
-    The workspace root is the nearest ancestor holding ``workspace.json``; the
-    run id is the ``id`` in ``run.json``; the experiment is the one whose
-    directory contains *run_dir*, found by walking the workspace tree. No
-    directory name is parsed.
+    Delegates to :meth:`molab.workspace.run.Run.load`. A missing workspace,
+    a ``run.json`` with no id, or a run the workspace does not hold is exit 1.
 
     Args:
         run_dir: The run's directory.
@@ -786,35 +765,34 @@ def _open_run(run_dir: Path) -> tuple[Run, Experiment]:
         ``(run, experiment)``.
 
     Raises:
-        typer.Exit: Exit code 1 when there is no workspace above *run_dir*,
-            ``run.json`` has no string ``id``, or no experiment of the
-            workspace holds that run.
+        typer.Exit: Exit code 1 when ``Run.load`` cannot open the run.
     """
-    from molab._run_display import read_run_json
-    from molab.workspace import RunNotFoundError, Workspace
-    from molab.workspace.naming import workspace_root
+    from pydantic import ValidationError
+
+    from molab.workspace.errors import RunNotFoundError
+    from molab.workspace.run import Run
 
     run_dir = Path(run_dir).resolve()
-    root = workspace_root(run_dir)
-    if root is None:
-        rprint(f"[red]Error:[/red] no workspace.json above {run_dir}.")
-        raise typer.Exit(1)
-    run_id = read_run_json(run_dir).get("id")
-    if not isinstance(run_id, str) or not run_id:
+    try:
+        run = Run.load(run_dir)
+    except FileNotFoundError as exc:
+        if "workspace.json" in str(exc):
+            rprint(f"[red]Error:[/red] no workspace.json above {run_dir}.")
+        else:
+            rprint(f"[red]Error:[/red] run.json under {run_dir} has no run id.")
+        raise typer.Exit(1) from None
+    except ValidationError:
         rprint(f"[red]Error:[/red] run.json under {run_dir} has no run id.")
-        raise typer.Exit(1)
-
-    ws = Workspace.load(root)
-    for project in ws.list_projects():
-        for experiment in project.list_experiments():
-            if not run_dir.is_relative_to(Path(experiment.path).resolve()):
-                continue
-            try:
-                return experiment.get_run(run_id), experiment
-            except RunNotFoundError:
-                continue
-    rprint(f"[red]Error:[/red] could not locate run {run_id} under {root}.")
-    raise typer.Exit(1)
+        raise typer.Exit(1) from None
+    except RunNotFoundError as exc:
+        root = run_dir
+        for candidate in (run_dir, *run_dir.parents):
+            if (candidate / "workspace.json").is_file():
+                root = candidate
+                break
+        rprint(f"[red]Error:[/red] could not locate run {exc.entity_id} under {root}.")
+        raise typer.Exit(1) from None
+    return run, run.experiment
 
 
 def _spawn_background_local_run(
@@ -936,66 +914,60 @@ def _run_dry_run(
         rprint("[dim]No runnable bound experiments found.[/dim]")
 
 
-def _latest_error_txt(run: Run) -> str | None:
-    """Path of the newest execution's ``error.txt``, if one was written."""
-    try:
-        exec_id = run.current_execution_id
-        candidates = []
-        if exec_id:
-            candidates.append(Path(str(run.run_dir)) / "executions" / exec_id / "error.txt")
-        executions_dir = Path(str(run.run_dir)) / "executions"
-        if executions_dir.is_dir():
-            candidates.extend(sorted(executions_dir.glob("*/error.txt"), reverse=True))
-        for candidate in candidates:
-            if candidate.is_file():
-                return str(candidate)
-    except Exception:  # a missing sidecar must never mask the failure report
+def _failure_detail(run: Run) -> str | None:
+    """One line naming the latest attempt's recorded error and its evidence.
+
+    Args:
+        run: A run this invocation dispatched.
+
+    Returns:
+        ``None`` when the run has no attempt. Otherwise the evidence
+        directory, prefixed by ``type: message`` when the latest attempt
+        recorded an error. Missing keys print as ``?``.
+    """
+    if not run.executions:
         return None
-    return None
+    latest = run.executions[-1]
+    evidence = f"Execution evidence under {run.execution_dir(latest.id)}"
+    err = latest.error
+    if not err:
+        return evidence
+    kind = err.get("type", "?")
+    message = err.get("message", "?")
+    return f"{kind}: {message} ({evidence})"
 
 
-def _report_local_results(
-    dispatched: list[tuple[Run, str | None]], continue_verb: str | None
-) -> None:
+def _report_local_results(dispatched: list[tuple[Run, str]], continue_verb: str | None) -> None:
     """Print an honest terminal-status summary and set the process exit code.
 
-    In-process execution settles each dispatched attempt to a terminal status
-    synchronously, so an attempt that did not reach ``succeeded`` (``failed`` /
-    ``cancelled``) must make ``molab run`` exit non-zero — scripts, CI steps,
-    and schedulers read that exit code, and reporting "OK ... completed" over a
-    failed run is a silent-failure trap. Only runs that actually executed are
-    inspected (skipped runs never enter *dispatched*), and each is judged by
-    the attempt this dispatch created — its own record, ``run.execution(eid)``
-    — never by the run's other attempts. ``--resume`` creates no record
-    (``eid`` is ``None``) and reopens the run's last attempt, so that is the
-    one it is judged by.
+    Each dispatched run is judged by :attr:`Run.status_label`, the latest
+    attempt's status — the attempt this invocation created. A successful
+    resume after an earlier failure therefore exits 0. Skipped runs never
+    enter *dispatched*.
 
     Args:
         dispatched: ``(run, execution_id)`` for each attempt this invocation
-            executed; ``execution_id`` is ``None`` for ``--resume``.
+            started.
         continue_verb: ``None`` (plain run), ``"resume"`` or ``"rerun"``.
 
     Raises:
-        typer.Exit: Exit code 1 when any dispatched attempt did not succeed.
+        typer.Exit: Exit code 1 when any dispatched run's latest attempt did
+            not succeed.
     """
     verb = {"resume": "resumed", "rerun": "reran"}.get(continue_verb or "", "completed")
     if not dispatched:
         rprint(f"\n[dim]No runs {verb}.[/dim]")
         return
-    failed: list[tuple[Run, ExecutionStatus]] = []
-    for mol_run, execution_id in dispatched:
-        record = (
-            mol_run.execution(execution_id) if execution_id is not None else mol_run.executions[-1]
-        )
-        if record.status is not ExecutionStatus.SUCCEEDED:
-            failed.append((mol_run, record.status))
+    failed = [
+        mol_run for mol_run, _execution_id in dispatched if mol_run.status_label != "succeeded"
+    ]
     if failed:
         rprint("")
-        for mol_run, status in failed:
-            rprint(f"  [red]x[/red] run={mol_run.id}  status={status.value}")
-            error_txt = _latest_error_txt(mol_run)
-            if error_txt is not None:
-                rprint(f"    [dim]error: {error_txt}[/dim]")
+        for mol_run in failed:
+            rprint(f"  [red]x[/red] run={mol_run.id}  status={mol_run.status_label}")
+            detail = _failure_detail(mol_run)
+            if detail is not None:
+                rprint(f"    [dim]{detail}[/dim]")
         rprint(f"\n[red]FAILED[/red] {len(failed)} of {len(dispatched)} runs did not succeed.")
         rprint(
             "[dim]Retry: molab run <script> --resume (continue) or --rerun (from the top).[/dim]"
@@ -1019,8 +991,8 @@ def _run_local_inprocess(
     the handler is wrapped to collect ``(run, execution_id)`` as it runs.
     """
     mode_label = _profile_mode_label(profile_cfg, "[green]local[/green]")
-    execute_one = _make_local_inprocess_handler(profile_cfg, verb=continue_verb)
-    dispatched: list[tuple[Run, str | None]] = []
+    execute_one = _make_local_inprocess_handler()
+    dispatched: list[tuple[Run, str]] = []
 
     def _collecting_handler(
         run_script: Path,
@@ -1029,7 +1001,7 @@ def _run_local_inprocess(
         project: Project,
         /,
         *,
-        execution_id: str | None,
+        execution_id: str,
     ) -> None:
         execute_one(run_script, mol_run, experiment, project, execution_id=execution_id)
         dispatched.append((mol_run, execution_id))
@@ -1063,6 +1035,8 @@ def _submit_to_scheduler(
     scheduling: dict[str, JSONValue],
     block: bool,
     fresh: bool = False,
+    worker_python: str | None = None,
+    preamble: list[str] | None = None,
 ) -> None:
     """Submit the run plan through molq and report (or monitor) the result."""
     from molab.plugins.submit_molq.metadata import supported_schedulers
@@ -1083,6 +1057,8 @@ def _submit_to_scheduler(
         resources=resources,
         scheduling=scheduling,
         target=selected_target,
+        preamble=preamble or None,
+        python=worker_python,
     )
     handler: RunHandler = submit_handler
     mode_label = _profile_mode_label(profile_cfg, f"[magenta]{selected_scheduler}[/magenta]")
@@ -1097,6 +1073,7 @@ def _submit_to_scheduler(
         mode_label=mode_label,
         suppress_ok=True,
         fresh=fresh,
+        require_recoverable=True,
     )
     if n == 0:
         verb = {"resume": "resumed", "rerun": "reran"}.get(continue_verb or "", "submitted")
@@ -1176,9 +1153,9 @@ def run(
         typer.Option(
             "--resume",
             help=(
-                "Reopen each non-succeeded run's last execution and continue at "
-                "workflow-node granularity (seed already-completed nodes from disk, "
-                "recompute the rest). Mutually exclusive with --rerun."
+                "Open a new RESUME Execution based on each failed/cancelled run's "
+                "latest attempt; completed nodes are seeded from that attempt's "
+                "journal, the rest recompute. Mutually exclusive with --rerun."
             ),
         ),
     ] = False,
@@ -1187,10 +1164,11 @@ def run(
         typer.Option(
             "--rerun",
             help=(
-                "Re-execute failed/cancelled runs in a new execution (no seed). "
-                "Deterministic tasks may still be served from the content-addressed "
-                "cache — add --fresh to bypass cache reads. Mutually exclusive with "
-                "--resume."
+                "Open a new RERUN execution on each finished run, including one "
+                "whose latest attempt succeeded (no seed). A run with an active "
+                "attempt is skipped. Deterministic tasks may still be served from "
+                "the content-addressed cache — add --fresh to bypass cache reads. "
+                "Mutually exclusive with --resume."
             ),
         ),
     ] = False,
@@ -1261,6 +1239,25 @@ def run(
             "--block", help="Block and open monitor after submit.", rich_help_panel="HPC Options"
         ),
     ] = False,
+    worker_python: Annotated[
+        str | None,
+        typer.Option(
+            "--python",
+            help=(
+                "Interpreter that runs the worker on the compute node (default: this "
+                "process's). Needed when the nodes have another architecture or venv."
+            ),
+            rich_help_panel="HPC Options",
+        ),
+    ] = None,
+    preamble: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--preamble",
+            help="Shell line run in the job before the worker (repeatable): module load …",
+            rich_help_panel="HPC Options",
+        ),
+    ] = None,
     target_spec: TargetOption = ".",
 ) -> None:
     """Execute the workflow(s) defined by *script*."""
@@ -1361,6 +1358,8 @@ def run(
         scheduling={"queue": selected_queue, "account": account, "qos": qos},
         block=block,
         fresh=fresh,
+        worker_python=worker_python,
+        preamble=preamble or [],
     )
 
 

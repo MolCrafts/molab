@@ -22,7 +22,7 @@ class TestRunCancel:
         assert run.executions[0].status == ExecutionStatus.CANCELLED
 
     def test_cancel_keeps_the_executor_on_the_execution_record(self, run):
-        state = run.create_execution(executor={"job_id": "uuid-123", "scheduler_job_id": "456"})
+        state = run._create_execution(executor={"job_id": "uuid-123", "scheduler_job_id": "456"})
         with run.start(execution_id=state.id):
             run.cancel(state.id)
         record = run.execution(state.id)

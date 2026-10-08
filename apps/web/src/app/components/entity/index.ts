@@ -1,9 +1,6 @@
 export type { EmptyStateDensity, EmptyStateProps } from "@/components/ui/empty-state";
 export { EmptyState } from "@/components/ui/empty-state";
-export type {
-  DonutSegment,
-  StatusCountRollup,
-} from "./Dashboard";
+export type { StatusCountRollup } from "./Dashboard";
 export {
   CopyButton,
   DashboardCanvas,
@@ -14,7 +11,6 @@ export {
   OverviewSurface,
   ParamChip,
   StatusDistribution,
-  StatusDonut,
 } from "./Dashboard";
 export type { DataTableColumn, DataTableProps, DataTableRowAction } from "./DataTable";
 export { DataTable } from "./DataTable";

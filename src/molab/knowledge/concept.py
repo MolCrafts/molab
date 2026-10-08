@@ -1,120 +1,82 @@
-"""``Concept`` — an OKF Concept: a directory whose **path is its identity**.
+"""``Concept`` — a knowledge document whose **path is its identity**.
 
-In the Open Knowledge Format a Concept is a plain directory holding two files:
+A product document is one markdown file, ``knowledges/<name>.md``. YAML
+frontmatter names the class; the narrative's markdown links are the graph.
+A bare :class:`Concept` is only a root handle for ``walk`` / ``search`` /
+``open`` / ``import_zotero``.
 
-- ``meta.json`` — the typed head. Its one required field, ``type``, is the key
-  into the concept-type registry (:mod:`molab.knowledge.types`), so a directory
-  says what it is and :func:`concept_from_dir` rebuilds the right subclass.
-- ``index.md`` — the human narrative. Its markdown links **are** the knowledge
-  graph: every in-tree link that resolves to a directory is a typed out-edge
-  (:meth:`Concept.typed_out_edges`), with the role riding in the ``[label]``
-  channel.
+**Path is identity.** A ``Concept`` holds an absolute path and a
+:class:`~molab.fs.FileSystem`. It has no parent pointer and composes no path
+from a hierarchy, so the same handle opens a group wiki or a subtree of a
+workspace.
 
-**Path is identity, and that is the whole design.** A ``Concept`` holds an
-absolute path and a :class:`~molab.fs.FileSystem`; it has no parent pointer and
-composes no path from a hierarchy. That is what lets an OKF bundle open *any*
-directory — a group wiki, a git repo, a subtree of a molab workspace — without
-a workspace, and it is why reading a Concept never depends on knowing what
-contains it.
-
-Contrast the workspace :class:`~molab.workspace.folder.Folder` family, whose
-``resolve()`` deliberately *does* chain through parents to replay the frozen
-layout (``projects/`` / ``experiments/`` / ``runs/run-``). The two families are
-independent by design and share only the concept-type registry, which keeps them
-apart via ``resolve_concept_type(..., base=...)``.
+The workspace :class:`~molab.workspace.folder.Folder` family is a separate
+base: its ``resolve()`` replays ``projects/`` / ``experiments/`` / ``runs/``.
 """
 
 from __future__ import annotations
 
-import json
 import os
+import posixpath
 import re
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, ClassVar, NamedTuple
 
 from molab.fs import FileSystem, LocalFileSystem, PathArg
 
-from .concept_meta import ConceptMeta
-from .edges import DEFAULT_EDGE_ROLE, Edge, EdgeRole, encode_label, parse_role, validate_role
-from .types import resolve_concept_type
+from .edges import (
+    DEFAULT_EDGE_ROLE,
+    Edge,
+    EdgeRole,
+    encode_label,
+    link_line,
+    parse_role,
+    validate_role,
+)
 
 if TYPE_CHECKING:
-    from molab._typing import JSONValue
-
-    from .bundle_index import SearchResult
     from .concepts import Literature
-
-INDEX_FILENAME = "index.md"
-META_JSON_FILENAME = "meta.json"
-
-#: OKF operational sidecar — hot machine state, never knowledge. Skipped by walks.
-OPS_DIR = "_ops"
-
-#: Directories a Knowledge walk never enters. Run output and machine state
-#: cannot hold a product document; visiting them on a workspace is the hang.
-_KNOWLEDGE_WALK_PRUNE: frozenset[str] = frozenset(
-    {
-        OPS_DIR,
-        "executions",
-        "out",
-        "artifacts",
-        "jobs",
-        "work",
-        "checkpoints",
-        "cache",
-        "logs",
-        "source",
-        # legacy on-disk name: written by runs before D86 removed the agent layer; tolerated on read
-        "harness",
-        "node_modules",
-        "__pycache__",
-        "dist",
-        "assets",
-    }
-)
-
-#: Layout containers whose children are entity folders (or ``knowledges/``).
-#: Everywhere else the walk only descends into these names — so ``pinn-src/``,
-#: ``campaign/``, ``ic/`` and similar bulk trees are never scanned.
-_KNOWLEDGE_WALK_CONTAINERS: frozenset[str] = frozenset(
-    {"knowledges", "projects", "experiments", "runs"}
-)
+    from .edges import Backlink
+    from .search import SearchResult
 
 #: ``[label](target)`` — both halves captured; the label carries the edge role.
 _MD_LINK = re.compile(r"\[([^\]]*)\]\(([^)]+)\)")
 
-#: Fallback ``type`` for a directory whose ``meta.json`` declares none.
+#: Declared type of a bare root handle.
 FALLBACK_CONCEPT_TYPE = "concept"
 
 
 class LinkScan(NamedTuple):
-    """Resolved out-links of a Concept's ``index.md``.
+    """Resolved out-links of a Concept's narrative.
 
     Attributes:
-        concepts: Targets resolving to an existing in-tree dir — the
-            knowledge-graph out-edges (path-only).
+        concepts: Existing in-tree paths. :meth:`Concept.out_edges` reports these.
         external: ``http(s)://`` links.
-        other: In-tree targets that don't resolve to a dir.
-        typed_concepts: The same edges as :attr:`concepts`, each paired with the
-            :class:`~molab.knowledge.edges.EdgeRole` recovered from the
-            markdown ``[label]`` channel.
+        other: Schemes and anchors that are not refs and not relative paths.
+        typed_concepts: Typed edges, including refs and missing paths.
+        refs: ``molab:`` targets, verbatim.
+        missing: Relative paths that do not exist, as absolute paths.
     """
 
     concepts: list[str]
     external: list[str]
     other: list[str]
     typed_concepts: list[Edge]
+    refs: list[str]
+    missing: list[str]
 
 
 class Concept:
-    """An OKF Concept — a directory addressed by its absolute path.
+    """An OKF Concept.
 
-    Product Knowledge subclasses (``FILE_DOCUMENT``) are instead a
-    ``knowledges/<name>.md`` file whose YAML frontmatter names the class.
+    A bare ``Knowledge`` is a root handle: it walks, searches and opens
+    documents, and it is not a document itself. Product subclasses are one
+    markdown file, ``knowledges/<name>.md``, whose YAML frontmatter names
+    the class.
     """
 
-    #: The ``meta.json`` ``type`` a bare construction of this class declares.
+    #: Declared type of a bare root handle. A file document uses its own.
     DEFAULT_TYPE: ClassVar[str] = FALLBACK_CONCEPT_TYPE
     #: Product documents are markdown files, not directories.
     FILE_DOCUMENT: ClassVar[bool] = False
@@ -130,34 +92,32 @@ class Concept:
         """Bind this Concept to *path*, or to *path* (a host) plus *name*.
 
         Args:
-            path: The Concept's directory — its identity (already-absolute in
-                every production call path). With *name* given it is instead
-                the **host**: a ``str`` / :class:`os.PathLike` directory used
-                as given, or a ``Folder``-family object carrying ``_disk()``.
+            path: This handle's path. A file document's path is its markdown
+                file. With *name* given, *path* is instead the **host**: a
+                ``str`` / :class:`os.PathLike` directory used as given, or a
+                workspace ``Folder``.
             name: A human document name. When given, the path is derived by
                 :func:`~molab.knowledge.location.folder` as
-                ``folder(path, name, self.__class__)`` — a ``FILE_DOCUMENT``
-                class lands at ``<host>/knowledges/<slug>.md``, a
-                directory-form class at ``<host>/knowledges/<slug>/`` — and
-                nothing touches disk; the first :meth:`write` / :meth:`ref`
-                lands the bytes.
-            type: The ``type`` :meth:`write_meta` stamps; defaults to
-                :attr:`DEFAULT_TYPE`.
+                ``folder(path, name, self.__class__)``. A document class lands
+                at ``<host>/knowledges/<slug>.md``. Nothing touches disk; the
+                first :meth:`write` / :meth:`ref` lands the bytes.
+            type: Declared type; defaults to :attr:`DEFAULT_TYPE`.
             fs: The filesystem to read and write through; defaults to the
                 host's own disk (never the local one) in the *name* form, and
                 to :class:`~molab.fs.LocalFileSystem` otherwise.
 
         Raises:
             TypeError: If *name* is given and *path* is not a recognised host —
-                an object with ``resolve()`` but no ``_disk()`` included.
+                a path or a workspace Folder. An object with ``resolve()``
+                that is not a Folder is rejected.
         """
         if name is not None:
-            from .location import _host_disk, folder
+            from .location import _host_fs, folder
 
             # ``self.__class__``, not ``type(self)``: the *type* kwarg below
             # shadows the builtin.
             raw = str(folder(path, name, self.__class__))
-            disk = fs if fs is not None else _host_disk(path)
+            disk = fs if fs is not None else _host_fs(path)
         else:
             raw = str(path)
             if self.__class__.FILE_DOCUMENT:
@@ -228,68 +188,13 @@ class Concept:
             return self._fs.is_file(self._path)
         return self._fs.is_dir(self._path)
 
-    # ── meta.json (the typed head) ───────────────────────────────────────
-
-    def read_meta(self) -> dict[str, JSONValue]:
-        """This Concept's ``meta.json`` as a plain dict (``{}`` when absent).
-
-        One filesystem call: the file is read directly and an absent marker is
-        the ``FileNotFoundError`` it raises — never an ``exists`` probe first
-        (two round trips on a remote filesystem for one answer).
-        """
-        return read_meta_dict(self._path, fs=self._fs) or {}
-
-    def write_meta(self, meta: ConceptMeta | Mapping[str, object] | None = None) -> None:
-        """Atomically write this Concept's ``meta.json``, creating the dir.
-
-        The on-disk ``type`` and ``id`` are always stamped to this Concept's own
-        type and directory name, so :func:`concept_from_dir` reconstructs the
-        same class and identity stays path-derived no matter what *meta* says.
-
-        Args:
-            meta: The typed head to write; ``None`` writes the bare
-                ``{type, id}`` marker.
-        """
-        if meta is None:
-            payload: dict[str, object] = {}
-        elif isinstance(meta, ConceptMeta):
-            payload = meta.model_dump(mode="json")
-        else:
-            payload = dict(meta)
-        payload["type"] = self._type
-        payload["id"] = self.name
-        self._fs.mkdir(self._path, parents=True, exist_ok=True)
-        self._fs.atomic_write_text(
-            self._fs.join(self._path, META_JSON_FILENAME),
-            json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
-        )
-
-    def _persist(self, data: object | None = None) -> None:
-        """Persist the class-named JSON — never ``meta.json``, never ``type``/``kind``."""
-        from .naming import knowledge_filename
-
-        payload: dict[str, object]
-        if data is None:
-            payload = {}
-        elif isinstance(data, ConceptMeta):
-            payload = dict(data.model_dump(mode="json"))
-        elif isinstance(data, Mapping):
-            payload = {str(key): value for key, value in data.items()}
-        else:
-            payload = {}
-        payload.pop("type", None)
-        payload.pop("kind", None)
-        payload.pop("id", None)
-        sources = getattr(self, "_sources", None)
-        if sources:
-            payload["sources"] = [
-                s.model_dump(mode="json") if hasattr(s, "model_dump") else s for s in sources
-            ]
-        self._fs.mkdir(self._path, parents=True, exist_ok=True)
-        self._fs.atomic_write_text(
-            self._fs.join(self._path, knowledge_filename(type(self))),
-            json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
-        )
+    def _require_document(self, verb: str) -> None:
+        """Refuse a document verb on a bare root handle."""
+        if not type(self).FILE_DOCUMENT:
+            raise TypeError(
+                "a Knowledge root handle is not a document; open one with "
+                f"Knowledge.open(path) or use Note/Literature/… ({verb})"
+            )
 
     @classmethod
     def open(
@@ -298,140 +203,98 @@ class Concept:
         *,
         fs: FileSystem | None = None,
     ) -> Concept:
-        """Open the document at *directory*, choosing the subclass from the class-named json."""
+        """Open the markdown document at *directory*.
+
+        A ``.md`` / ``.mdx`` path is opened as written. A suffix-less path is
+        the same file with ``.md`` appended. A directory is not a document.
+
+        Raises:
+            KnowledgeNotFoundError: The file is absent.
+        """
         from .errors import KnowledgeNotFoundError
-        from .naming import knowledge_filename
+        from .naming import as_knowledge_file, is_knowledge_file
 
         disk = fs if fs is not None else LocalFileSystem()
-        from .concepts import Finding, Literature, Note, Observation, Plan, Report
-        from .naming import is_knowledge_file
-
         raw = str(directory)
         if is_knowledge_file(raw):
             return cls._open_markdown(raw, disk)
-        from .naming import as_knowledge_file
-
         md = as_knowledge_file(raw)
         if disk.is_file(md):
             return cls._open_markdown(md, disk)
-
-        mapping = {
-            knowledge_filename(Note): Note,
-            knowledge_filename(Literature): Literature,
-            knowledge_filename(Report): Report,
-            knowledge_filename(Finding): Finding,
-            knowledge_filename(Plan): Plan,
-            knowledge_filename(Observation): Observation,
-        }
-        for name, klass in mapping.items():
-            text = read_text_or_none(disk.join(str(directory), name), fs=disk)
-            if text is None:
-                continue
-            payload: dict[str, object] = {}
-            if text.strip():
-                raw = json.loads(text)
-                if isinstance(raw, dict):
-                    payload = raw
-            if klass in (Finding, Report, Plan, Observation):
-                from .knowledge_item import SourceRef
-
-                sources_raw = payload.get("sources") or []
-                if not isinstance(sources_raw, list):
-                    sources_raw = []
-                sources = [
-                    SourceRef.model_validate(row) if not isinstance(row, SourceRef) else row
-                    for row in sources_raw
-                ]
-                if klass is Finding:
-                    return Finding(directory, sources=sources, fs=disk)
-                if klass is Report:
-                    return Report(directory, sources=sources, fs=disk)
-                if klass is Plan:
-                    return Plan(directory, sources=sources, fs=disk)
-                return Observation(directory, sources=sources, fs=disk)
-            return klass(directory, fs=disk)
         raise KnowledgeNotFoundError(str(directory))
 
     @classmethod
     def _open_markdown(cls, path: str, disk: FileSystem) -> Concept:
         """Open a ``.md`` / ``.mdx`` Knowledge file from its frontmatter ``class``."""
-        from .concepts import Finding, Literature, Note, Observation, Plan, Report
+        from .concepts import _PRODUCTS, Note, _SourcedKnowledge
         from .errors import KnowledgeNotFoundError
         from .frontmatter import split_frontmatter
-        from .knowledge_item import SourceRef
 
         text = read_text_or_none(path, fs=disk)
         if text is None:
             raise KnowledgeNotFoundError(path)
         meta, _body = split_frontmatter(text)
         class_name = str(meta.get("class") or "Note")
-        mapping = {
-            "Note": Note,
-            "Literature": Literature,
-            "Report": Report,
-            "Finding": Finding,
-            "Plan": Plan,
-            "Observation": Observation,
-        }
-        klass = mapping.get(class_name, Note)
-        sources_raw = meta.get("sources") or []
-        if not isinstance(sources_raw, list):
-            sources_raw = []
-        sources = []
-        for row in sources_raw:
-            if isinstance(row, SourceRef):
-                sources.append(row)
-                continue
-            if isinstance(row, dict):
-                row = dict(row)
-                if row.get("span") is not None:
-                    row["span"] = str(row["span"])
-            sources.append(SourceRef.model_validate(row))
-        if klass in (Finding, Report, Plan, Observation):
-            if not sources:
-                sources = [SourceRef(kind="file", ref=PurePosixPath(path).name)]
-            return klass(path, sources=sources, fs=disk)
+        klass = _PRODUCTS.get(class_name, Note)
+        if issubclass(klass, _SourcedKnowledge):
+            return klass._from_disk(path, fs=disk)
         return klass(path, fs=disk)
 
-    def walk(self) -> Iterator[Concept]:
-        """Yield Knowledge subclasses under this handle that hold a class-named head.
+    def _document_paths(self) -> Iterator[str]:
+        """Yield each markdown file this handle walks, in listing order.
 
-        Only descends ``knowledges/``, ``projects/``, ``experiments/``, and
-        ``runs/`` (plus each entity folder those containers hold). Bulk trees
-        next to them (``pinn-src/``, ``campaign/``, ``ic/``, …) are skipped.
+        A directory that is itself a workspace root lists ``knowledges/*.md``
+        on the root and on every project, experiment and run. Any other
+        directory is itself the container. Both lookups keep this handle's
+        spelling and ignore the CLI root override.
+
+        Yields:
+            Absolute paths of markdown files, spelled from this handle's path.
         """
-        yield from self._walk_knowledge(self._path)
+        from molab.workspace import Workspace
 
-    def _walk_knowledge(self, directory: str) -> Iterator[Concept]:
-        from .errors import KnowledgeNotFoundError
+        from .location import is_workspace_root
         from .naming import KNOWLEDGE_CONTAINER, is_knowledge_file
 
-        try:
-            entries = self._fs.scandir(directory, with_stat=False)
-        except (OSError, ValueError):
-            return
-        dirname = PurePosixPath(directory).name
-        if dirname == KNOWLEDGE_CONTAINER:
-            for entry in entries:
-                if not entry.is_file or not is_knowledge_file(entry.name):
-                    continue
-                child = self._fs.join(directory, entry.name)
-                try:
-                    yield type(self).open(child, fs=self._fs)
-                except KnowledgeNotFoundError:
-                    continue
-            return
-        # ``projects/`` / ``experiments/`` / ``runs/`` hold entity folders —
-        # enter every child. Everywhere else, only layout containers.
-        descend_all = dirname in {"projects", "experiments", "runs"}
-        for entry in entries:
-            if not entry.is_dir or entry.name in _KNOWLEDGE_WALK_PRUNE:
+        if is_workspace_root(self._path, fs=self._fs):
+            containers = [
+                self._fs.join(str(host), KNOWLEDGE_CONTAINER)
+                for host in Workspace.list_hosts(self._path, fs=self._fs)
+            ]
+        else:
+            containers = [self._path]
+        for container in containers:
+            try:
+                entries = self._fs.scandir(container, with_stat=False)
+            except (OSError, ValueError):
                 continue
-            if entry.name.startswith("."):
+            files = sorted(
+                (entry for entry in entries if entry.is_file and is_knowledge_file(entry.name)),
+                key=lambda entry: entry.name,
+            )
+            for entry in files:
+                yield self._fs.join(container, entry.name)
+
+    def walk(self) -> Iterator[Concept]:
+        """Yield each Knowledge document under this handle.
+
+        When this path is a workspace root, the documents are the
+        ``knowledges/*.md`` files of the root and of every project, experiment
+        and run. Any other directory is itself the container: its own markdown
+        files, not a subdirectory. A missing directory yields nothing. The
+        walk stays on the path the caller named.
+
+        Yields:
+            One opened document per markdown file. A file that cannot be
+            opened is skipped.
+        """
+        from .errors import KnowledgeNotFoundError
+
+        for path in self._document_paths():
+            try:
+                yield type(self).open(path, fs=self._fs)
+            except KnowledgeNotFoundError:
                 continue
-            if not descend_all and entry.name not in _KNOWLEDGE_WALK_CONTAINERS:
-                continue
-            yield from self._walk_knowledge(self._fs.join(directory, entry.name))
 
     def search(
         self,
@@ -442,69 +305,76 @@ class Concept:
         limit: int = 50,
         include_text: bool = True,
     ) -> SearchResult:
-        """Search documents under this handle. *of* is a subclass to keep (e.g. ``Note``)."""
-        from .bundle import Bundle
-        from .bundle_index import BundleIndex, ConceptIndexEntry, extract_title
+        """Search the documents :meth:`walk` would yield.
 
-        root = Path(self._path)
-        entries = []
+        Each file is read once. *of*, when a class, keeps that class and its
+        subclasses. *tag* keeps documents whose frontmatter lists that tag.
+        Ranking goes through :func:`molab.knowledge.search.search_index`.
+
+        Args:
+            text: The query. ``None`` or empty keeps index order.
+            of: A Knowledge subclass to keep, or ``None`` for every class.
+            tag: A frontmatter tag that must be present.
+            limit: Maximum hits. A cut result reports ``truncated``.
+            include_text: ``False`` ranks on title, tags and path only.
+
+        Returns:
+            The ranked hits. Each entry path is relative to this handle and
+            keeps the ``.md`` suffix. ``type`` is the Knowledge class name.
+        """
+        from .concepts import _PRODUCTS, Note
+        from .frontmatter import split_frontmatter
+        from .search import ConceptIndexEntry, extract_title, search_index
+
+        entries: list[ConceptIndexEntry] = []
         bodies: dict[str, str] = {}
-        for item in self.walk():
-            if isinstance(of, type) and not isinstance(item, of):
+        for path in self._document_paths():
+            raw = read_text_or_none(path, fs=self._fs)
+            if raw is None:
                 continue
-            if tag is not None and tag not in item.tags():
+            meta, body = split_frontmatter(raw)
+            class_name = str(meta.get("class") or "Note")
+            klass = _PRODUCTS.get(class_name, Note)
+            if isinstance(of, type) and not issubclass(klass, of):
                 continue
-            rel = Path(str(item.path)).relative_to(root).as_posix()
-            body = item.read() if include_text else ""
-            bodies[rel] = body
+            tags_raw = meta.get("tags")
+            tags = tuple(str(item) for item in tags_raw) if isinstance(tags_raw, list) else ()
+            if tag is not None and tag not in tags:
+                continue
+            title = extract_title(body) or PurePosixPath(path).stem
+            rel = PurePosixPath(os.path.relpath(path, self._path)).as_posix()
+            bodies[rel] = body if include_text else ""
             entries.append(
                 ConceptIndexEntry(
                     path=rel,
-                    type=type(item).__name__,
-                    title=extract_title(body) or item.name,
-                    tags=tuple(item.tags()),
+                    type=klass.__name__,
+                    title=title,
+                    tags=tags,
                 )
             )
-        return Bundle(self.path, fs=self._fs).search(
+        return search_index(
+            tuple(entries),
+            bodies,
             text,
-            tag=None,
             limit=limit,
             include_body=include_text,
-            index=BundleIndex(entries=tuple(entries)),
-            bodies=bodies,
         )
 
     def type(self) -> str:
-        """The ``meta.json`` ``type``, falling back to this Concept's declared type."""
-        raw = self.read_meta().get("type")
-        return str(raw) if raw else self._type
+        """This handle's declared type. A file document does not read disk."""
+        return self._type
 
     def tags(self) -> list[str]:
-        """Categorical labels from frontmatter (file) or ``meta.json`` (directory)."""
-        if self.__class__.FILE_DOCUMENT:
-            raw = self.frontmatter().get("tags")
-            return [str(t) for t in raw] if isinstance(raw, list) else []
-        raw = self.read_meta().get("tags")
+        """Categorical labels from frontmatter."""
+        self._require_document("tags")
+        raw = self.frontmatter().get("tags")
         return [str(t) for t in raw] if isinstance(raw, list) else []
 
-    # ── index.md (the narrative, and the graph) ──────────────────────────
-
-    def read_index(self) -> str:
-        """This Concept's ``index.md`` (``""`` when absent) — one read, no probe."""
-        text = read_text_or_none(self._fs.join(self._path, INDEX_FILENAME), fs=self._fs)
-        return "" if text is None else text
-
-    def write_index(self, text: str) -> None:
-        """Atomically write this Concept's ``index.md``, creating the dir."""
-        self._fs.mkdir(self._path, parents=True, exist_ok=True)
-        self._fs.atomic_write_text(self._fs.join(self._path, INDEX_FILENAME), text)
-
     def frontmatter(self) -> dict[str, object]:
-        """YAML frontmatter of a file document (``{}`` when absent or a directory)."""
+        """YAML frontmatter of this file document."""
         from .frontmatter import split_frontmatter
 
-        if not self.__class__.FILE_DOCUMENT:
-            return {}
+        self._require_document("frontmatter")
         text = read_text_or_none(self._path, fs=self._fs)
         if text is None:
             return {}
@@ -514,15 +384,13 @@ class Concept:
     def read(self) -> str:
         """This document's narrative (markdown body, frontmatter stripped)."""
         from .frontmatter import split_frontmatter
-        from .naming import is_knowledge_file
 
-        if type(self).FILE_DOCUMENT or is_knowledge_file(self._path):
-            text = read_text_or_none(self._path, fs=self._fs)
-            if text is None:
-                return ""
-            _meta, body = split_frontmatter(text)
-            return body
-        return self.read_index()
+        self._require_document("read")
+        text = read_text_or_none(self._path, fs=self._fs)
+        if text is None:
+            return ""
+        _meta, body = split_frontmatter(text)
+        return body
 
     def ref(
         self,
@@ -534,9 +402,8 @@ class Concept:
         """Cross-reference another Knowledge document — the strict spelling of :meth:`cite`.
 
         *ref* must denote a Knowledge: a :class:`Concept` subclass instance
-        other than the bare base class (the object :func:`concept_from_dir`
-        hands back for a workspace entity, i.e. a run / project / experiment
-        directory), or a path :meth:`Concept.open` locates such a subclass at.
+        other than the bare base class, or a path :meth:`Concept.open` locates
+        such a subclass at.
         A workspace ``Folder``, an ``Asset``, a bare coordinate or any other
         object is a programming error, never an edge.
 
@@ -576,6 +443,169 @@ class Concept:
             return
         self.ref(target, text=text, role=role)
 
+    def backlinks(self, *, within: Concept | PathArg | None = None) -> list[Backlink]:
+        """Documents under *within* whose links point at this one.
+
+        A self-edge is not a backlink. Computed by walking; nothing is indexed.
+
+        Args:
+            within: Tree to scan. ``None`` scans the enclosing workspace when
+                this document lives in a ``knowledges/`` directory.
+
+        Returns:
+            One :class:`~molab.knowledge.edges.Backlink` per inbound edge.
+
+        Raises:
+            ValueError: If *within* is omitted and this document is not a host
+                document inside a workspace.
+        """
+        root = self._scan_root(within)
+        target = self._norm(self.path)
+        return [
+            link
+            for link in backlinks_to([str(self.path)], within=root.path, fs=self._fs)
+            if self._norm(link.source.path) != target
+        ]
+
+    def rename(self, new_name: str, *, within: Concept | PathArg | None = None) -> None:
+        """Rename this document in place and rewrite inbound links.
+
+        Args:
+            new_name: The new human name.
+            within: Tree whose inbound links are rewritten.
+
+        Raises:
+            FileExistsError: If the destination already exists.
+            ValueError: If *within* is omitted and cannot be derived.
+        """
+        from .location import document_slug
+
+        self._require_document("rename")
+        slug = document_slug(new_name)
+        if type(self).FILE_DOCUMENT:
+            slug = f"{slug}{PurePosixPath(self._path).suffix}"
+        dst = self._fs.join(self._fs.dirname(self._path), slug)
+        if self._norm(dst) == self._norm(self._path):
+            return
+        if self._fs.exists(dst):
+            raise FileExistsError(f"cannot rename {self._path!r} to {dst!r}: destination exists")
+        inbound = self.backlinks(within=within)
+        old = self._path
+        self._fs.rename(old, dst)
+        self._path = dst
+        _rewrite_inbound(inbound, old, dst)
+
+    def move_to(
+        self,
+        host: object,
+        *,
+        stem: str | None = None,
+        relink: bool = True,
+        within: Concept | PathArg | None = None,
+    ) -> None:
+        """Move this document onto *host* and rewrite relative links.
+
+        Args:
+            host: A Folder, a path, or a bare Knowledge handle.
+            stem: Filename stem kept exactly as ``<stem>.md``, with no slug.
+                ``None`` keeps the slug derived from this document's name.
+            relink: When false, move the bytes and update this handle only.
+                Outbound and inbound links stay as they were.
+            within: Tree whose inbound links are rewritten.
+
+        Raises:
+            FileExistsError: If the destination already exists.
+            TypeError: If *host* is a document instance.
+            ValueError: If *stem* is empty, contains ``/``, or is ``.`` / ``..``,
+                or *within* is omitted and cannot be derived.
+        """
+        from .location import folder
+
+        if stem is not None and (stem == "" or "/" in stem or stem in {".", ".."}):
+            raise ValueError(f"stem {stem!r} is not a single path segment")
+        planned = str(folder(host, self.name, type(self)))  # ty: ignore[invalid-argument-type]
+        dst = planned if stem is None else self._fs.join(self._fs.dirname(planned), f"{stem}.md")
+        if self._norm(dst) == self._norm(self._path):
+            return
+        if self._fs.exists(dst):
+            raise FileExistsError(f"cannot move {self._path!r} to {dst!r}: destination exists")
+        old = self._path
+        inbound = None
+        old_dir = ""
+        if relink:
+            inbound = self.backlinks(within=within)
+            old_dir = _link_base(self)
+        self._fs.mkdir(self._fs.dirname(dst), parents=True, exist_ok=True)
+        self._fs.rename(old, dst)
+        self._path = dst
+        if relink and inbound is not None:
+            new_dir = _link_base(self)
+            _retarget_links(self, lambda target: _rehome_link(target, old_dir, new_dir))
+            _rewrite_inbound(inbound, old, dst)
+
+    def delete(self) -> None:
+        """Remove this document. Inbound links are left dangling."""
+        self._require_document("delete")
+        self._fs.remove(self._path)
+
+    def export(self) -> str:
+        """This document's narrative, without frontmatter."""
+        return self.read()
+
+    def _scan_root(self, within: Concept | PathArg | None) -> Concept:
+        """The tree *within* names, or the enclosing workspace for a host document."""
+        if within is not None:
+            if isinstance(within, Concept):
+                return within
+            return Knowledge(within, fs=self._fs)
+        from .location import enclosing_workspace_root
+        from .naming import KNOWLEDGE_CONTAINER
+
+        if PurePosixPath(self._path).parent.name == KNOWLEDGE_CONTAINER:
+            root = enclosing_workspace_root(self.path, fs=self._fs)
+            if root is not None:
+                return Knowledge(root, fs=self._fs)
+        raise ValueError(f"{self.path} is not inside a workspace; pass within= explicitly")
+
+    @classmethod
+    def create(
+        cls,
+        host: object,
+        name: str,
+        *,
+        sources: list[object] | None = None,
+        created_by: str,
+        text: str,
+        cite: Sequence[tuple[object, str]] = (),
+        title: str = "",
+    ) -> Concept:
+        """Write this class under *host* (idempotent on *name*).
+
+        Args:
+            host: Parent folder (a Project or Experiment).
+            name: Document name; slugified to the landed filename.
+            sources: Source list. Required for Finding, Report, Plan, Observation.
+            created_by: Author (a person or tool identifier).
+            text: Narrative for the document.
+            cite: Optional ``(target, role)`` pairs.
+            title: History summary for ``knowledge.created``. Falls back to *name*.
+
+        Returns:
+            The written document.
+        """
+        from .write import write_knowledge
+
+        return write_knowledge(
+            host,  # ty: ignore[invalid-argument-type]
+            name=name,
+            of=cls,
+            sources=list(sources or ()),
+            created_by=created_by,
+            text=text,
+            cite=cite,  # ty: ignore[invalid-argument-type]
+            title=title,
+        )
+
     def write(
         self,
         text: str | object | None = None,
@@ -583,39 +613,50 @@ class Concept:
         *,
         tags: list[str] | None = None,
         status: str | None = None,
+        replace: bool = False,
     ) -> None:
         """Write this document.
 
         A string is the narrative, or a full markdown document with YAML
         frontmatter. Structured records (``ReferenceMeta``, sources, tags)
         fold into the frontmatter. One file: ``knowledges/<name>.md``.
+
+        With ``replace=True``, *text* is the whole file. It is persisted
+        verbatim: no frontmatter merge and no source rendering. Equal bytes
+        are left untouched.
+
+        Args:
+            text: Narrative, a full markdown document, or a structured record
+                when *data* is omitted.
+            data: Structured record folded into the frontmatter.
+            tags: Frontmatter tags. ``None`` leaves stored tags alone.
+            status: Frontmatter status. ``None`` leaves stored status alone.
+            replace: Persist *text* as the whole file.
+
+        Raises:
+            TypeError: ``replace=True`` and *text* is not a ``str``.
+            ValueError: ``replace=True`` and the frontmatter ``class`` is not
+                this document's class.
         """
         from .frontmatter import dump_frontmatter, split_frontmatter
         from .naming import as_knowledge_file
 
-        if not self.__class__.FILE_DOCUMENT:
-            record = data
-            narrative: str | None
-            if text is None:
-                narrative = None
-            elif isinstance(text, str):
-                narrative = text
-            else:
-                record = text if record is None else record
-                narrative = None
-            extra: dict[str, object] = {}
-            if tags is not None:
-                extra["tags"] = list(tags)
-            if status is not None:
-                extra["status"] = status
-            if extra:
-                if record is None:
-                    record = extra
-                elif isinstance(record, Mapping):
-                    record = {**{str(k): v for k, v in record.items()}, **extra}
-            self._persist(record)
-            if narrative is not None:
-                self.write_index(narrative)
+        self._require_document("write")
+        if replace:
+            if not isinstance(text, str):
+                raise TypeError(
+                    f"replace=True requires the whole document as str, got {type(text).__name__}"
+                )
+            meta, _body = split_frontmatter(text)
+            declared = meta.get("class")
+            if declared != type(self).__name__:
+                raise ValueError(
+                    f"frontmatter class {declared!r} does not match {type(self).__name__}"
+                )
+            if self._fs.is_file(self._path) and self._fs.read_text(self._path) == text:
+                return
+            self._fs.mkdir(self._fs.dirname(self._path), parents=True, exist_ok=True)
+            self._fs.atomic_write_text(self._path, text)
             return
 
         if self.__class__.FILE_DOCUMENT:
@@ -646,26 +687,55 @@ class Concept:
         extra.pop("type", None)
         extra.pop("kind", None)
         extra.pop("id", None)
-        sources = getattr(self, "_sources", None)
-        if sources and "sources" not in extra:
-            extra["sources"] = [
-                s.model_dump(mode="json") if hasattr(s, "model_dump") else s for s in sources
-            ]
+        sources = list(getattr(self, "_sources", None) or [])
         existing_fm = self.frontmatter()
         merged = {**existing_fm, **extra}
         if narrative is None:
             narrative = self.read()
         parent = str(PurePosixPath(self._path).parent)
         self._fs.mkdir(parent, parents=True, exist_ok=True)
-        self._fs.atomic_write_text(self._path, dump_frontmatter(merged, narrative or ""))
-        srcs = merged.get("sources")
-        if isinstance(srcs, list) and srcs:
-            from .knowledge_item import SourceRef
+        body, _appended = append_source_links(narrative or "", sources, base_dir=parent)
+        self._fs.atomic_write_text(self._path, dump_frontmatter(merged, body))
 
-            self._sources = [  # type: ignore[attr-defined]
-                SourceRef.model_validate(row) if not isinstance(row, SourceRef) else row
-                for row in srcs
-            ]
+    @classmethod
+    def write_document(
+        cls,
+        path: PathArg,
+        text: str,
+        *,
+        fs: FileSystem | None = None,
+    ) -> Concept:
+        """Offline migration writer: persists a composed document verbatim, with no source invariant; ``write_knowledge`` is the create path.
+
+        The class comes from *text*'s frontmatter ``class``. A sourced class
+        is opened through its disk constructor, so legacy ``sources:`` rows
+        are never passed to a constructor that requires them.
+
+        Args:
+            path: The markdown file to persist.
+            text: The whole file, including frontmatter.
+            fs: Filesystem to write through. Defaults to the local one.
+
+        Returns:
+            The document handle for *path*.
+
+        Raises:
+            ValueError: Frontmatter has no ``class``, or the name is unknown.
+            TypeError: *text* is not a ``str``.
+        """
+        from .concepts import parse_class
+        from .frontmatter import split_frontmatter
+
+        meta, _body = split_frontmatter(text)
+        class_name = meta.get("class")
+        if not isinstance(class_name, str) or class_name == "":
+            raise ValueError("knowledge document requires a frontmatter class")
+        klass = parse_class(class_name)
+        disk = fs if fs is not None else LocalFileSystem()
+        opener = getattr(klass, "_from_disk", None)
+        handle = opener(str(path), fs=disk) if opener is not None else klass(path, fs=disk)
+        handle.write(text, replace=True)
+        return handle
 
     def links(self) -> list[Edge]:
         """The documents this one cites — typed markdown links in the narrative."""
@@ -674,14 +744,15 @@ class Concept:
     def scan_links(self, body: str) -> LinkScan:
         """Classify the markdown links in *body* as if it were this Concept's.
 
-        The same scan as :meth:`links`, against text the caller already holds.
-        Indexing reads every ``index.md`` for its title and then wants its
-        edges; without this the file would be read a second time to answer a
-        question the first read already contained.
+        The same scan as :meth:`links`, against the narrative the caller
+        already holds, so a title read does not read the file a second time
+        for its edges.
 
         Args:
-            body: The ``index.md`` text to scan.
+            body: The narrative to scan.
         """
+        from molab.workspace.refs import is_ref
+
         base = PurePosixPath(self._path)
         if self.__class__.FILE_DOCUMENT:
             base = base.parent
@@ -689,69 +760,84 @@ class Concept:
         external: list[str] = []
         other: list[str] = []
         typed_concepts: list[Edge] = []
+        refs: list[str] = []
+        missing: list[str] = []
         for raw_label, target in _MD_LINK.findall(body):
+            role, _human = parse_role(raw_label)
             if target.startswith(("http://", "https://")):
                 external.append(target)
+                if role in {"cites", "derived_from"}:
+                    typed_concepts.append(Edge(target=target, role=role))
                 continue
-            norm = PurePosixPath(os.path.normpath(base / target))
-            concept_dir = norm.parent if norm.name == INDEX_FILENAME else norm
-            if self._fs.is_dir(str(concept_dir)) or self._fs.is_file(str(concept_dir)):
-                concepts.append(str(concept_dir))
-                role, _human = parse_role(raw_label)
-                typed_concepts.append(Edge(target=str(concept_dir), role=role))
-            else:
+            if is_ref(target):
+                refs.append(target)
+                typed_concepts.append(Edge(target=target, role=role))
+                continue
+            head = target.split("/", 1)[0]
+            if target.startswith("#") or ":" in head:
                 other.append(target)
+                continue
+            path_part, sep, fragment = target.partition("#")
+            norm = PurePosixPath(os.path.normpath(str(base / path_part)))
+            resolved = str(norm)
+            edge_target = f"{resolved}#{fragment}" if sep else resolved
+            if self._fs.is_dir(resolved) or self._fs.is_file(resolved):
+                concepts.append(resolved)
+            else:
+                missing.append(resolved)
+            typed_concepts.append(Edge(target=edge_target, role=role))
         return LinkScan(
             concepts=concepts,
             external=external,
             other=other,
             typed_concepts=typed_concepts,
+            refs=refs,
+            missing=missing,
         )
 
     def out_edges(self) -> list[str]:
         """In-tree link targets (paths only)."""
         return self.scan_links(self.read()).concepts
 
-    def typed_out_edges(self) -> list[Edge]:
-        """Same as :meth:`links` — kept for Folder-shaped call sites."""
-        return self.links()
-
     def import_zotero(
         self,
         path: PathArg,
         *,
-        under: PathArg | None = None,
+        under: object | None = None,
         now: object | None = None,
     ) -> list[Literature]:
-        """Link a local Zotero library as :class:`Literature` directories.
+        """Import a local Zotero library as Literature markdown files.
 
-        Each item becomes ``literature.json`` + ``index.md`` under *under*
-        (default: ``references/`` at this handle). PDFs are pointed at, never
-        copied. Idempotent on the slugified Zotero key.
+        Each item is written through :func:`~molab.knowledge.write.write_knowledge`.
+        With *under* omitted, this handle is the host: a workspace root lands
+        in ``knowledges/``, a plain wiki in its own directory. A repeat import
+        merges frontmatter and does not create a second file. PDFs are pointed
+        at, never copied.
 
         Args:
             path: The ``zotero.sqlite`` to read (opened read-only).
-            under: Directory to mount literature beneath.
+            under: Host to write under. ``None`` uses this handle.
             now: Unused; accepted so callers matching the old signature keep working.
 
         Returns:
             The :class:`Literature` records created or updated.
         """
-        from molab.ids import slugify
-
         from .concepts import Literature
         from .reference_meta import ReferenceMeta
-        from .zotero import read_zotero_items
+        from .write import write_knowledge
+        from .zotero import read_zotero
 
         _ = now
-        host = Path(str(under)) if under is not None else Path(self._path) / "references"
-        items = read_zotero_items(path)
+        host: object = self if under is None else under
         refs: list[Literature] = []
-        for item in items:
-            slug = slugify(item.key) or item.key
-            lit = Literature(self._fs.join(str(host), slug), fs=self._fs)
-            lit.write(
-                ReferenceMeta(
+        for item in read_zotero(path):
+            written = write_knowledge(
+                host,  # ty: ignore[invalid-argument-type]
+                name=item.key,
+                of=Literature,
+                created_by="zotero",
+                text="",
+                record=ReferenceMeta(
                     title=item.title,
                     authors=item.authors,
                     year=item.year,
@@ -760,9 +846,10 @@ class Concept:
                     pdf_path=item.pdf_path,
                     source="zotero",
                     source_key=item.key,
-                )
+                ),
+                fs=self._fs,
             )
-            refs.append(lit)
+            refs.append(written)  # ty: ignore[invalid-argument-type]
         return refs
 
 
@@ -774,8 +861,7 @@ def _knowledge_target(ref: object, *, fs: FileSystem) -> Concept:
     denotes a Knowledge when its class is a :class:`Concept` subclass other than
     the bare base class, and a path denotes one when :meth:`Concept.open`
     locates such a subclass there. A run / project / experiment directory fails
-    both — :func:`concept_from_dir` reconstructs it as the bare base class, and
-    ``Concept.open`` finds no class-named head in it.
+    both — ``Concept.open`` finds no markdown document there.
 
     Args:
         ref: The candidate — a Concept, a path, or anything else.
@@ -816,6 +902,8 @@ def _knowledge_target(ref: object, *, fs: FileSystem) -> Concept:
 
 def _record_as_dict(record: object) -> dict[str, object]:
     """Flatten a write() record into frontmatter keys (no type/kind/id)."""
+    from .concept_meta import ConceptMeta
+
     if isinstance(record, ConceptMeta):
         payload = dict(record.model_dump(mode="json"))
     elif isinstance(record, Mapping):
@@ -828,6 +916,223 @@ def _record_as_dict(record: object) -> dict[str, object]:
     return payload
 
 
+def _skip_link(target: str) -> bool:
+    """Whether *target* is an external, schemed, anchor, or molab reference.
+
+    A reference, including a ``#span`` suffix, is canonical text. Rewriting it
+    as a relative path would drop the only provenance record on a disk-opened
+    document.
+    """
+    from molab.workspace.refs import is_ref
+
+    return target.startswith(("#", "http://", "https://")) or "://" in target or is_ref(target)
+
+
+def _link_base(doc: Concept) -> str:
+    """The directory relative links in *doc* are resolved against."""
+    if type(doc).FILE_DOCUMENT:
+        return str(PurePosixPath(doc.path).parent)
+    return str(doc.path)
+
+
+def _rehome_link(target: str, old_dir: str, new_dir: str) -> str | None:
+    """Re-express a relative *target* from *old_dir* against *new_dir*."""
+    if _skip_link(target):
+        return None
+    absolute = os.path.normpath(str(PurePosixPath(old_dir) / target))
+    return PurePosixPath(os.path.relpath(absolute, new_dir)).as_posix()
+
+
+def _rewrite_inbound(inbound: Sequence[Backlink], old: str, new: str) -> None:
+    """Point inbound edges that named *old* at *new*."""
+
+    def _rewrite(doc: Concept, target: str) -> str | None:
+        if _skip_link(target):
+            return None
+        resolved = os.path.normpath(str(PurePosixPath(_link_base(doc)) / target))
+        if Concept._norm(resolved) != Concept._norm(old):
+            return None
+        return PurePosixPath(os.path.relpath(new, _link_base(doc))).as_posix()
+
+    for link in inbound:
+        doc = link.source
+        _retarget_links(doc, lambda target, doc=doc: _rewrite(doc, target))
+
+
+def retarget_links(
+    text: str,
+    rewrite: Callable[[str, bool], str | None],
+) -> tuple[str, int]:
+    """Replace markdown link targets in *text*. Pure: no I/O.
+
+    *rewrite* receives ``(target, image)``. ``image`` is true when the match
+    is preceded by ``!``. ``None`` or the same target keeps the link. A
+    different string replaces only the target; the label stays byte-for-byte.
+    The same grammar as :meth:`Concept.scan_links`, including links inside
+    fenced code.
+
+    Args:
+        text: Markdown to scan.
+        rewrite: Maps ``(target, image)`` to a new target, or ``None`` to keep it.
+
+    Returns:
+        The new text and how many targets actually changed.
+    """
+    count = 0
+
+    def _sub(match: re.Match[str]) -> str:
+        nonlocal count
+        label, target = match.group(1), match.group(2)
+        image = match.start() > 0 and text[match.start() - 1] == "!"
+        updated = rewrite(target, image)
+        if updated is None or updated == target:
+            return match.group(0)
+        count += 1
+        return f"[{label}]({updated})"
+
+    return _MD_LINK.sub(_sub, text), count
+
+
+def _retarget_links(doc: Concept, rewrite: Callable[[str], str | None]) -> bool:
+    """Rewrite markdown link targets in *doc*, keeping labels.
+
+    Args:
+        doc: The document to rewrite.
+        rewrite: Maps a raw target to its replacement, or ``None`` to keep it.
+
+    Returns:
+        Whether the narrative changed.
+    """
+    new, count = retarget_links(doc.read(), lambda target, _image: rewrite(target))
+    if count > 0:
+        doc.write(new)
+    return count > 0
+
+
+def append_source_links(
+    body: str,
+    sources: Sequence[object],
+    *,
+    base_dir: str,
+) -> tuple[str, int]:
+    """Append each source's link line once.
+
+    A source whose ``(role, posixpath.normpath(target))`` is already a link
+    in *body*, or was already appended in this call, is skipped. Each line
+    comes from ``SourceRef.link_line``; this function renders none itself.
+
+    Args:
+        body: Narrative to extend.
+        sources: Source rows. Each must provide ``link_target``, ``link_role``
+            and ``link_line``.
+        base_dir: Directory ``link_target`` relativizes file paths against.
+
+    Returns:
+        The new body and how many lines were appended.
+
+    Raises:
+        ValueError: A source's ``link_target`` rejects its ref (a bare entity id).
+    """
+    if not sources:
+        return body, 0
+    have = {
+        (parse_role(label)[0], posixpath.normpath(target))
+        for label, target in _MD_LINK.findall(body)
+    }
+    lines: list[str] = []
+    for source in sources:
+        target = source.link_target(base_dir)  # ty: ignore[unresolved-attribute]
+        role = source.link_role  # ty: ignore[unresolved-attribute]
+        key = (role, posixpath.normpath(target))
+        if key in have:
+            continue
+        have.add(key)
+        lines.append(source.link_line(base_dir))  # ty: ignore[unresolved-attribute]
+    if not lines:
+        return body, 0
+    text = body
+    if text and not text.endswith("\n"):
+        text += "\n"
+    return text + "\n".join(lines) + "\n", len(lines)
+
+
+def remove_legacy_files(
+    directory: PathArg,
+    names: Sequence[str],
+    *,
+    fs: FileSystem,
+) -> list[str]:
+    """Delete named plain files in *directory*, then remove it when empty.
+
+    Never recursive, and never touches an entry that was not named. A name
+    that is a subdirectory is left in place and reported.
+
+    Args:
+        directory: Directory holding the legacy files.
+        names: Plain file names to delete when they are files.
+        fs: Filesystem the directory lives on.
+
+    Returns:
+        Sorted names that remain after the named files are gone. Empty when
+        the directory itself was removed.
+
+    Raises:
+        ValueError: A name contains ``/`` or is ``.`` / ``..``.
+    """
+    for name in names:
+        if "/" in name or name in {".", ".."}:
+            raise ValueError(f"legacy name {name!r} is not a single file name")
+    if not fs.is_dir(directory):
+        return []
+    for name in names:
+        path = fs.join(directory, name)
+        if fs.is_file(path):
+            fs.remove(path)
+    remaining = fs.listdir(directory)
+    if not remaining:
+        Path(os.fspath(directory)).rmdir()
+        return []
+    return sorted(remaining)
+
+
+def backlinks_to(
+    targets: Iterable[str],
+    *,
+    within: PathArg,
+    fs: FileSystem,
+) -> list[Backlink]:
+    """Documents under *within* that link any of *targets*.
+
+    A path matches by normalized spelling. A ``molab:`` ref matches the
+    canonical string. Self-edges are included; :meth:`Concept.backlinks`
+    drops those.
+
+    Not part of :data:`molab.knowledge.__all__`. The server imports it from
+    this module.
+    """
+    from molab.workspace.refs import is_ref
+
+    from .edges import Backlink
+
+    wanted_refs: list[str] = []
+    wanted_paths: list[str] = []
+    for target in targets:
+        if is_ref(target):
+            wanted_refs.append(target.split("#", 1)[0])
+        else:
+            wanted_paths.append(Concept._norm(target))
+    found: list[Backlink] = []
+    for source in Knowledge(within, fs=fs).walk():
+        for edge in source.links():
+            if is_ref(edge.target):
+                hit = edge.target.split("#", 1)[0] in wanted_refs
+            else:
+                hit = Concept._norm(edge.target.split("#", 1)[0]) in wanted_paths
+            if hit:
+                found.append(Backlink(source=source, role=edge.role))
+    return found
+
+
 def append_link(
     src: Concept,
     dst: Concept | PathArg,
@@ -835,12 +1140,12 @@ def append_link(
     text: str | None = None,
     role: EdgeRole = DEFAULT_EDGE_ROLE,
 ) -> None:
-    """Append a typed relative markdown link ``src → dst`` to ``src``'s ``index.md``.
+    """Append a typed relative markdown link ``src → dst`` to ``src``'s body.
 
     The single markdown-edge writer, and the sole role-writing chokepoint:
-    ``Bundle.link``, ``Note.cite`` and ``KnowledgeItem.cite`` all delegate here,
-    so the on-disk edge format cannot drift. The graph lives in markdown, never
-    in ``meta.json``. The default role encodes to the bare label, so pre-role
+    ``Note.cite`` delegates here,
+    so the on-disk edge format cannot drift. The graph lives in the markdown
+    body. The default role encodes to the bare label, so pre-role
     output stays byte-identical. Appends unconditionally; link dedup remains a
     future enhancement.
 
@@ -857,10 +1162,20 @@ def append_link(
 
     Raises:
         ValueError: If *role* is not a known ``EdgeRole`` — validated before any
-            write, so an invalid role leaves ``index.md`` untouched.
+            write, so an invalid role leaves the document body untouched.
         TypeError: If *dst* is neither a ``Concept`` nor a path.
     """
     validate_role(role)
+    from molab.workspace.refs import MolabRef, is_ref
+
+    if isinstance(dst, MolabRef) or (isinstance(dst, str) and is_ref(dst)):
+        target = str(dst)
+        label = text if text is not None else target.rstrip("/").rsplit("/", 1)[-1]
+        encoded = encode_label(role, label)
+        existing = src.read()
+        prefix = existing if not existing or existing.endswith("\n") else existing + "\n"
+        src.write(prefix + link_line(encoded, target) + "\n")
+        return
     if isinstance(dst, Concept):
         dst_path = str(dst.path)
     elif isinstance(dst, (str, os.PathLike)):
@@ -869,7 +1184,7 @@ def append_link(
         # Never ``str()`` an arbitrary object into a link: that would write a
         # repr as the target and produce a silently broken edge. A caller
         # holding a foreign-family object (a workspace ``Folder``) passes its
-        # directory; ``Bundle`` does that coercion at its own boundary.
+        # directory.
         raise TypeError(
             f"edge target must be a Concept or a path, got {type(dst).__name__}; "
             "pass its directory (e.g. folder.resolve())"
@@ -881,7 +1196,7 @@ def append_link(
     encoded = encode_label(role, label)
     existing = src.read()
     prefix = existing if not existing or existing.endswith("\n") else existing + "\n"
-    src.write(f"{prefix}- [{encoded}]({rel_posix})\n")
+    src.write(prefix + link_line(encoded, rel_posix) + "\n")
 
 
 def read_text_or_none(path: PathArg, *, fs: FileSystem) -> str | None:
@@ -897,161 +1212,17 @@ def read_text_or_none(path: PathArg, *, fs: FileSystem) -> str | None:
         return None
 
 
-def parse_meta_text(text: str) -> dict[str, JSONValue]:
-    """Parse a ``meta.json`` document into a dict (``{}`` for empty / non-mapping)."""
-    try:
-        loaded = json.loads(text)
-    except json.JSONDecodeError:
-        return {}
-    return loaded if isinstance(loaded, dict) else {}
-
-
-#: Extra filenames a host layer has declared to be Concept markers, tried in
-#: registration order after ``meta.json``. See :func:`register_marker_filenames`.
-_EXTRA_MARKER_FILENAMES: tuple[str, ...] = ()
-
-#: Whether :func:`register_host_markers` has already run this process.
-_HOST_MARKERS_REGISTERED = False
-
-
-def register_marker_filenames(*names: str) -> None:
-    """Declare that *names* also mark a directory as a Concept.
-
-    A host layer may already write a typed record per directory and have no
-    reason to write a second one: a molab workspace's ``run.json`` /
-    ``project.json`` *is* that run's or project's identity, and it carries the
-    same ``type`` key ``meta.json`` would. Registering those filenames lets a
-    bundle walk the workspace tree without either layer importing the other, and
-    without duplicating the record — the one-source-of-truth law applies across
-    this seam too.
-
-    Idempotent, and order-preserving: ``meta.json`` is always tried first, so a
-    directory that carries both reads as its own Concept head.
-    """
-    global _EXTRA_MARKER_FILENAMES
-    _EXTRA_MARKER_FILENAMES += tuple(n for n in names if n not in _EXTRA_MARKER_FILENAMES)
-
-
-def register_host_markers() -> None:
-    """Declare the host layer's own entity filenames as Concept markers.
-
-    A molab workspace marks each entity directory with its own class-named
-    record (``workspace.json`` / ``project.json`` / ``experiment.json`` /
-    ``run.json``) and writes no second ``meta.json``, so those directories are
-    only Concepts because the host declares them. The host owns that list
-    (:func:`molab.workspace.folder.entity_json_names`) and this is the one place
-    knowledge asks for it — imported **inside the function body**, the only form
-    the layer firewall allows, because ``molab.workspace`` eagerly loads this
-    package the other way. Runs once per process; :func:`marker_filenames`
-    triggers it, so every reader sees the host's names without registering them
-    itself.
-    """
-    global _HOST_MARKERS_REGISTERED
-    if _HOST_MARKERS_REGISTERED:
-        return
-    from molab.workspace.folder import entity_json_names
-
-    register_marker_filenames(*entity_json_names())
-    _HOST_MARKERS_REGISTERED = True
-
-
-def marker_filenames() -> tuple[str, ...]:
-    """Every filename that marks a Concept directory, in read order."""
-    register_host_markers()
-    return (META_JSON_FILENAME, *_EXTRA_MARKER_FILENAMES)
-
-
-def read_meta_dict(directory: PathArg, *, fs: FileSystem) -> dict[str, JSONValue] | None:
-    """The parsed Concept head at *directory*, or ``None`` when there is none.
-
-    ``None`` means "not a Concept directory" (no marker file at all); an empty
-    or non-mapping marker parses to ``{}``. One read per candidate, no probe —
-    the single primitive the bundle walk uses to decide concept-ness *and* type
-    together. Candidates are ``meta.json`` then whatever the host registered
-    (:func:`register_marker_filenames`), first hit wins.
-    """
-    for name in marker_filenames():
-        text = read_text_or_none(fs.join(directory, name), fs=fs)
-        if text is None:
-            continue
-        meta = parse_meta_text(text)
-        # A host's record may name the type by its *filename* instead of a
-        # ``type`` key — a molab workspace reconstructs its knowledge family
-        # that way (``observation.json`` → ``observation``). Fill it in so every
-        # reader downstream sees one typed head, without the record growing a
-        # second spelling of what its own name already says.
-        if name != META_JSON_FILENAME and "type" not in meta:
-            meta["type"] = name.removesuffix(".json")
-        return meta
-    return None
-
-
-def meta_type(meta: Mapping[str, object] | None) -> str:
-    """The ``type`` string carried by a parsed ``meta.json`` (``""`` when absent)."""
-    if not meta:
-        return ""
-    raw = meta.get("type", "")
-    return str(raw) if raw else ""
-
-
-def concept_type_of(directory: PathArg, *, fs: FileSystem) -> str:
-    """The ``meta.json`` ``type`` declared at *directory* (``""`` when absent)."""
-    return meta_type(read_meta_dict(directory, fs=fs))
-
-
-def concept_from_dir(
-    directory: PathArg,
-    *,
-    fs: FileSystem,
-    type_str: str | None = None,
-) -> Concept:
-    """Reconstruct *directory* as its registered :class:`Concept` subclass.
-
-    Reads the OKF ``meta.json`` ``type`` and resolves it through the shared
-    concept-type registry, filtered to the ``Concept`` family
-    (``base=Concept``) so a workspace ``Folder`` subclass registered under the
-    same registry is never handed back here. An unknown, foreign or absent type
-    yields a base :class:`Concept` carrying the declared type string — the walk
-    stays total over a heterogeneous tree instead of raising.
-
-    Args:
-        directory: The Concept directory to reconstruct.
-        fs: The filesystem to read through.
-        type_str: The already-read ``meta.json`` ``type`` (``""`` for a
-            marker without one). A walker that has just parsed the marker
-            passes it so the file is read exactly once; ``None`` reads it here.
-    """
-    from .errors import KnowledgeNotFoundError
-
-    try:
-        return Concept.open(directory, fs=fs)
-    except KnowledgeNotFoundError:
-        pass
-    if type_str is None:
-        type_str = concept_type_of(directory, fs=fs)
-    cls = resolve_concept_type(type_str, Concept, base=Concept)
-    return cls(directory, type=type_str or None, fs=fs)
-
-
 Knowledge = Concept
 
 
 __all__ = [
     "FALLBACK_CONCEPT_TYPE",
-    "INDEX_FILENAME",
-    "META_JSON_FILENAME",
-    "OPS_DIR",
     "Concept",
     "Knowledge",
     "LinkScan",
     "append_link",
-    "concept_from_dir",
-    "concept_type_of",
-    "marker_filenames",
-    "meta_type",
-    "parse_meta_text",
-    "read_meta_dict",
+    "append_source_links",
     "read_text_or_none",
-    "register_host_markers",
-    "register_marker_filenames",
+    "remove_legacy_files",
+    "retarget_links",
 ]

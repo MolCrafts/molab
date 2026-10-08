@@ -19,6 +19,7 @@ import pytest
 
 from molab.workspace import Workspace
 from molab.workspace.history import (
+    MAX_RECORD_BYTES,
     SYSTEM_AGENT,
     EntityRef,
     GitHistory,
@@ -95,6 +96,38 @@ class TestRecord:
         assert entry.relations[0].object == RUN
         assert entry.summary == "dp=5_seed=42 e01 succeeded"
 
+    def test_a_ghost_path_is_dropped_and_the_real_file_is_tracked(self, tmp_path):
+        history = GitHistory(tmp_path)
+        history.init()
+        real = tmp_path / "a.json"
+        real.write_text("{}", encoding="utf-8")
+
+        commit = history.record("RunDefined", subject=RUN, paths=(real, tmp_path / "ghost.json"))
+
+        assert commit is not None
+        assert "a.json" in _git(tmp_path, "ls-files").splitlines()
+
+    def test_a_deleted_tracked_file_is_committed_as_a_deletion(self, tmp_path):
+        history = GitHistory(tmp_path)
+        history.init()
+        path = tmp_path / "x.json"
+        path.write_text("{}", encoding="utf-8")
+        history.record("RunDefined", subject=RUN, paths=(path,))
+        path.unlink()
+
+        commit = history.record("RunDefined", subject=RUN, paths=(path,))
+
+        assert commit is not None
+        assert "x.json" not in _git(tmp_path, "ls-files").splitlines()
+
+    def test_only_a_vanished_path_records_nothing(self, tmp_path):
+        history = GitHistory(tmp_path)
+        history.init()
+        (tmp_path / "scratch.txt").write_text("leave me", encoding="utf-8")
+
+        assert history.record("RunDefined", subject=RUN, paths=(tmp_path / "gone.json",)) is None
+        assert "scratch.txt" in _git(tmp_path, "status", "--porcelain")
+
 
 class TestQuery:
     def test_an_entity_is_found_through_a_relation_not_only_as_subject(self, tmp_path):
@@ -149,3 +182,49 @@ class TestSoftDependency:
         assert history.sweep("adopt existing workspace") is not None
         tracked = _git(ws.root, "ls-files")
         assert "projects/p/experiments/e/runs/seed=1/run.json" in tracked
+
+
+class TestBulkNeverEntersHistory:
+    """Git holds the record, not the bytes — whatever the file is called."""
+
+    def test_an_oversize_file_with_an_unlisted_extension_is_left_unstaged(self, tmp_path):
+        history = GitHistory(tmp_path)
+        history.init()
+        (tmp_path / "run.json").write_text('{"id": "x"}')
+        (tmp_path / "traj_seg001.traj").write_bytes(b"\0" * (MAX_RECORD_BYTES + 1))
+
+        commit = history.sweep("adopt")
+
+        tracked = _git(tmp_path, "ls-files")
+        assert commit is not None
+        assert "run.json" in tracked
+        assert "traj_seg001.traj" not in tracked
+
+    def test_a_tree_of_only_bulk_records_nothing(self, tmp_path):
+        history = GitHistory(tmp_path)
+        history.init()
+        history.sweep()
+        (tmp_path / "blob.bin2").write_bytes(b"\0" * (MAX_RECORD_BYTES + 1))
+        assert history.sweep() is None
+
+    @pytest.mark.parametrize(
+        "rel",
+        [
+            "projects/p/assets/model/payload",
+            "projects/p/assets/model/payload/model.ckpt-5065000.index",
+            "runs/a/traj_seg001.traj",
+            "runs/a/frames.extxyz",
+            "models/events.out.tfevents.1700000000.host",
+            "models/model.ckpt-5065000.data-00000-of-00001",
+            "data/liqwat.tar.gz",
+        ],
+    )
+    def test_the_ignore_file_names_the_common_bulk_shapes(self, tmp_path, rel):
+        GitHistory(tmp_path).init()
+        path = tmp_path / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("x")
+        assert (
+            subprocess.run(["git", "check-ignore", "-q", rel], cwd=tmp_path, check=False).returncode
+            == 0
+        )

@@ -1,8 +1,7 @@
 """Public surface of ``molab.knowledge`` after the knowledge/workspace flip.
 
 A public name is defined **in** ``molab.knowledge``: no name is handed over from
-``molab.workspace``. ``Bundle`` / ``Concept`` / ``ReferenceConcept`` /
-``KnowledgeItem`` / ``ConceptNotFoundError`` are that layer's own internal
+``molab.workspace``. Retired product names and ``ConceptNotFoundError`` are that layer's own internal
 parts, not ``__all__``. The names a caller is allowed to import are pinned below
 (see :class:`TestPublicAll` and :class:`TestTheNamesMolmcpImports`).
 """
@@ -17,11 +16,12 @@ import pytest
 
 import molab.knowledge as knowledge
 from molab.knowledge import Knowledge, Note
-from molab.knowledge.bundle_index import ConceptIndexEntry, SearchHit
+from molab.knowledge.search import ConceptIndexEntry, SearchHit
 from molab.knowledge.sources import (
     SourcedHit,
     search_sources,
 )
+from molab.workspace import Workspace
 
 #: ``module path`` → the attribute a caller imports from it.
 MOLMCP_IMPORTS: tuple[tuple[str, str], ...] = (
@@ -71,40 +71,33 @@ PINNED_ALL: frozenset[str] = frozenset(
         "WikiSource",
         "ZoteroItem",
         "folder",
-        "harvest_run",
-        "mount_note",
-        "normalize_sources",
-        "parse_knowledge_class",
-        "read_zotero_items",
+        "parse_class",
+        "read_zotero",
         "resolve_source",
         "search_sources",
-        "write_knowledge",
     }
 )
 
 #: This layer's own internals: real classes a caller reaches through a public
 #: verb, never through ``from molab.knowledge import …``.
 INTERNAL_NOT_PUBLIC: tuple[str, ...] = (
-    "Bundle",
     "Concept",
     "ReferenceConcept",
-    "KnowledgeItem",
     "ConceptNotFoundError",
     "Backlink",
-    "BundleIndex",
     "ConceptIndexEntry",
     "LinkScan",
-    "knowledge_filename",
     "extract_title",
-    "NoteMeta",
 )
 
 
 @pytest.fixture
 def wiki(tmp_path: Path) -> Path:
-    """A one-note bundle: ``knowledges/tg-cooling.md`` under ``wiki/``."""
+    """A one-note workspace: ``knowledges/tg-cooling.md`` under ``wiki/``."""
     root = tmp_path / "wiki"
-    Note(root, "tg-cooling").write("# Cooling rate\n\nQuench at 10 K/ns to reach Tg.\n")
+    workspace = Workspace(root, name="wiki")
+    workspace.materialize()
+    Note(workspace, "tg-cooling").write("# Cooling rate\n\nQuench at 10 K/ns to reach Tg.\n")
     return root
 
 
@@ -138,7 +131,7 @@ class TestTheRefFormat:
     def test_a_named_source_prefixes_its_name(self) -> None:
         # Pinned at ``SourcedHit.ref`` — the one place the format is defined.
         # Not driven end-to-end: ``search_sources`` searches a *registered*
-        # source through ``Bundle``, whose walk descends directories only and so
+        # source through the old walker, which descends directories only and so
         # cannot see a ``knowledges/<slug>.md`` file document (the structural
         # gap the document-as-file migration left; owned by no member of this
         # chain). The workspace half below is end-to-end.

@@ -3,7 +3,7 @@ import { type JSX, lazy, Suspense, useCallback, useEffect, useMemo, useState } f
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useCompareSet } from "@/app/compare";
 import { itemFromWorkspaceRunRow } from "@/app/compare/entries";
-import { EntityHeader } from "@/app/components/entity";
+import { EntityPage } from "@/app/components/entity";
 import { runPath } from "@/app/entities/paths";
 import { SurfaceErrorBoundary } from "@/app/layout/SurfaceErrorBoundary";
 import type { InspectorSurfaceRegistration } from "@/app/panels/inspectorSurface";
@@ -275,45 +275,43 @@ export const RunsPage = ({ snapshot, onInspectorChange }: RunsPageProps): JSX.El
     ? `Showing first ${rows.length} runs (truncated). Narrow filters or raise the limit.`
     : `${filteredRuns.length} of ${rows.length} runs match current filters`;
 
-  // A served workspace that failed this poll contributes no rows. Say so —
-  // an absent workspace is otherwise indistinguishable from an empty one.
-  const unreachableNote =
-    unreachable.length > 0
-      ? ` · ${unreachable.length} workspace${unreachable.length === 1 ? "" : "s"} unreachable (${unreachable.join(", ")})`
-      : "";
-
   return (
-    <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden">
-      <EntityHeader
-        icon={ListChecks}
-        title="Runs"
-        titleTooltip={headerSummary}
-        actions={
-          <WorkbenchIconAction
-            label={loading ? "Refreshing runs" : "Refresh runs"}
-            kind="ghost"
-            type="button"
-            onClick={refresh}
-            disabled={loading}
-            title={
-              loading
-                ? "Refreshing…"
-                : lastSyncedAt
-                  ? `Refresh · synced ${formatRelative(lastSyncedAt.toISOString())}`
-                  : "Refresh"
-            }
-            size="default"
-            className="text-muted-foreground hover:text-foreground"
-          >
-            <RefreshCw className={cn("size-icon-sm", loading && "mol-motion-progress-spin")} />
-          </WorkbenchIconAction>
-        }
-      />
-      <div className="border-b border-border/60 px-4 py-2 text-micro text-muted-foreground">
-        {headerSummary}
-        {lastSyncedAt ? ` · synced ${formatRelative(lastSyncedAt.toISOString())}` : ""}
-        {unreachableNote}
-      </div>
+    <EntityPage
+      icon={ListChecks}
+      title="Runs"
+      titleTooltip={headerSummary}
+      meta={
+        <>
+          <span>{headerSummary}</span>
+          {lastSyncedAt ? <span>synced {formatRelative(lastSyncedAt.toISOString())}</span> : null}
+          {unreachable.length > 0 ? (
+            <span>
+              {unreachable.length} unreachable ({unreachable.join(", ")})
+            </span>
+          ) : null}
+        </>
+      }
+      actions={
+        <WorkbenchIconAction
+          label={loading ? "Refreshing runs" : "Refresh runs"}
+          kind="ghost"
+          type="button"
+          onClick={refresh}
+          disabled={loading}
+          title={
+            loading
+              ? "Refreshing…"
+              : lastSyncedAt
+                ? `Refresh · synced ${formatRelative(lastSyncedAt.toISOString())}`
+                : "Refresh"
+          }
+          size="default"
+          className="text-muted-foreground hover:text-foreground"
+        >
+          <RefreshCw className={cn("size-icon-sm", loading && "mol-motion-progress-spin")} />
+        </WorkbenchIconAction>
+      }
+    >
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
         {error ? (
           <WorkbenchOperationState
@@ -363,6 +361,6 @@ export const RunsPage = ({ snapshot, onInspectorChange }: RunsPageProps): JSX.El
           onPageSizeChange={setJobsPageSize}
         />
       </div>
-    </div>
+    </EntityPage>
   );
 };

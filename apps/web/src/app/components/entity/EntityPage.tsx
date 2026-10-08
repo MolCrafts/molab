@@ -99,7 +99,10 @@ interface EntityPageProps {
   icon: ComponentType<{ className?: string }>;
   title: string;
   titleTooltip?: string;
+  afterTitle?: ReactNode;
   actions?: ReactNode;
+  /** Facts under the title. One home for counts that used to be a subtitle sentence. */
+  meta?: ReactNode;
 
   // Tabs — controlled (pass ``activeTab`` + ``onActiveTabChange``) or
   // uncontrolled (pass ``defaultTab``). Omit ``tabs`` entirely for a
@@ -117,7 +120,9 @@ export const EntityPage = ({
   icon,
   title,
   titleTooltip,
+  afterTitle,
   actions,
+  meta,
   tabs,
   activeTab,
   defaultTab,
@@ -125,8 +130,19 @@ export const EntityPage = ({
   children,
 }: EntityPageProps): JSX.Element => {
   return (
-    <div className="flex h-full flex-col bg-background">
-      <EntityHeader icon={icon} title={title} titleTooltip={titleTooltip} actions={actions} />
+    <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
+      <EntityHeader
+        icon={icon}
+        title={title}
+        titleTooltip={titleTooltip}
+        afterTitle={afterTitle}
+        actions={actions}
+      />
+      {meta ? (
+        <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 border-b border-border px-4 py-2 font-mono text-micro tabular-nums text-muted-foreground">
+          {meta}
+        </div>
+      ) : null}
 
       {tabs && tabs.length > 0 ? (
         <EntityTabs
@@ -144,7 +160,7 @@ export const EntityPage = ({
           ))}
         </EntityTabs>
       ) : (
-        children && <div className="flex flex-1 flex-col overflow-hidden">{children}</div>
+        children && <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{children}</div>
       )}
     </div>
   );

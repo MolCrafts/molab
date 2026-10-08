@@ -27,7 +27,7 @@ which made workspace neither a clean storage primitive nor a clean
 upstream concern. The fix:
 
 - workspace becomes a pure storage primitive (filesystem hierarchy,
-  atomic JSON, content-addressed assets, generic per-kind `SubsystemStore`).
+  atomic JSON, per-host `asset.json` records, generic per-kind `SubsystemStore`).
   Knows nothing about workflows, sessions, agents, or LLMs.
 - workflow becomes a graph engine that uses workspace for caching
   (`WorkspaceCacheStore` backed by `SubsystemStore("workflow.cache")`)
@@ -47,8 +47,8 @@ Side effects worth remembering:
   workspace-side `_promote_to_workflow` / `_resolve_*_entrypoint`
   helpers, and `workspace/sessions.py:SessionLibrary` are **gone**.
   Pairing an Experiment with a workflow is the caller's concern;
-  workflow exposes `promote_callable` / `WorkflowSnapshotRef`
-  publicly.
+  workflow exposes `promote_callable` publicly. Identity of a run's
+  workflow is `workflow_digest` on the Execution and the journal header.
 - `agent/_legacy_types.py` is gone; `ToolSchema` / `ModelToolCall`
   live permanently in `agent/tools/spec.py`; `to_jsonable` lives
   privately in `agent/sessions/_serde.py`.
@@ -60,14 +60,14 @@ Side effects worth remembering:
 ## workspace-read-model-memory | 2026-09-16 | impl
 
 The server now keeps state resident that used to be re-read per request: the
-`Workspace` instance caches `Run` entities via `Folder._children_cache`
+`Workspace` instance keeps recently read `Run` entities in memory
 (`Experiment.list_runs` reuses them), and `services.workspace_read_model`
 holds the `RunsSnapshot` / `AssetScanSnapshot` / `KnowledgeSnapshot` plus the
 BM25F corpus. Cost is roughly **50–100 MB at 10 000 runs**, in exchange for
 warm list requests doing zero filesystem I/O.
 
 No eviction policy exists. Above ~100 k runs, add one (LRU over
-`_children_cache`, or drop snapshot rows outside the active project) rather
+that in-memory map, or drop snapshot rows outside the active project) rather
 than reverting the cache — the alternative is ~5 file reads per run per
 request, which is what made the UI unusable on NFS.
 

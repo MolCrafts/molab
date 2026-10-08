@@ -16,7 +16,7 @@ stays attached only to the failed Execution that produced it.
 Bug 3 — the common failure path (engine swallows the task exception and
 resolves the Execution to FAILED via ``mark_failed``; nothing propagates out
 of the ``with`` block) must still persist failure evidence under
-``executions/<exec_id>/`` (``exception.json``).
+``executions/<exec_id>/`` (the Execution's ``error``).
 """
 
 from __future__ import annotations
@@ -52,7 +52,7 @@ class TestNoOpAttemptKeepsPriorStatus:
     def test_failed_execution_stays_failed_after_retry(self, run):
         failed_id = _fail_once(run)
 
-        with run.start(mode=ExecutionMode.RERUN, based_on_execution_id=failed_id):
+        with run.start(mode=ExecutionMode.RERUN, predecessor=failed_id):
             pass  # clean retry — a NEW Execution, must not flip the failed one
 
         states = {s.id: s for s in run.executions}
@@ -66,7 +66,7 @@ class TestNoOpAttemptKeepsPriorStatus:
         assert state.error["type"] == "RuntimeError"
         assert state.error["message"] == "boom"
 
-        with run.start(mode=ExecutionMode.RERUN, based_on_execution_id=failed_id):
+        with run.start(mode=ExecutionMode.RERUN, predecessor=failed_id):
             pass
 
         # The retry must not clear the failed Execution's error.
@@ -75,7 +75,7 @@ class TestNoOpAttemptKeepsPriorStatus:
     def test_retry_is_new_execution_not_aborted(self, run):
         failed_id = _fail_once(run)
 
-        with run.start(mode=ExecutionMode.RERUN, based_on_execution_id=failed_id):
+        with run.start(mode=ExecutionMode.RERUN, predecessor=failed_id):
             pass
 
         executions = run.executions
@@ -93,7 +93,7 @@ class TestNoOpAttemptKeepsPriorStatus:
         """A retry that records new results is real work — it succeeds."""
         failed_id = _fail_once(run)
 
-        with run.start(mode=ExecutionMode.RERUN, based_on_execution_id=failed_id) as ctx:
+        with run.start(mode=ExecutionMode.RERUN, predecessor=failed_id) as ctx:
             ctx.set_result("train", {"loss": 0.1})
             retry_id = ctx.id
 
@@ -104,7 +104,7 @@ class TestNoOpAttemptKeepsPriorStatus:
         """A clean retry resolves to SUCCEEDED (the workflow runtime's signal)."""
         failed_id = _fail_once(run)
 
-        with run.start(mode=ExecutionMode.RERUN, based_on_execution_id=failed_id) as ctx:
+        with run.start(mode=ExecutionMode.RERUN, predecessor=failed_id) as ctx:
             ctx.mark_succeeded()
 
         assert run.executions[-1].status is ExecutionStatus.SUCCEEDED
@@ -130,7 +130,7 @@ class TestSuccessClearsStaleError:
     def test_retry_execution_has_no_error_on_disk(self, run):
         failed_id = _fail_once(run)
 
-        with run.start(mode=ExecutionMode.RERUN, based_on_execution_id=failed_id) as ctx:
+        with run.start(mode=ExecutionMode.RERUN, predecessor=failed_id) as ctx:
             ctx.mark_succeeded()
             retry_id = ctx.id
 
@@ -145,20 +145,19 @@ class TestSuccessClearsStaleError:
 
 
 class TestErrorTxtOnSwallowedFailure:
-    def test_mark_failed_path_writes_exception_json(self, run):
+    def test_mark_failed_records_error_on_execution(self, run):
         """The engine catches task exceptions and resolves the Execution to
         FAILED via mark_failed — no exception reaches the ``with`` exit.
-        Failure evidence must still land in the execution directory."""
+        The error lands on the Execution record, not an ``exception.json`` sidecar."""
         with run.start() as ctx:
             ctx.mark_failed("ZeroDivisionError: division by zero")
             exec_id = ctx.id
 
         assert run.executions[-1].status is ExecutionStatus.FAILED
-        exception_json = Path(str(run.run_dir)) / "executions" / exec_id / "exception.json"
-        assert exception_json.exists()
-        content = exception_json.read_text()
-        assert "ZeroDivisionError" in content
-        assert "division by zero" in content
+        err = run.executions[-1].error
+        assert err is not None
+        assert err["message"] == "ZeroDivisionError: division by zero"
+        assert not (run.execution_dir(exec_id) / "exception.json").exists()
 
     def test_mark_failed_traceback_lands_in_traceback_txt(self, run):
         """The workflow runtime forwards the formatted task traceback through

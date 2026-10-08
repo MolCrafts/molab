@@ -89,11 +89,11 @@ Each verb owns a **disjoint** job. Nothing overlaps, nothing falls back silently
 | Verb | Domain | What it does |
 |---|---|---|
 | `molab run` | `pending` only | Creates missing runs, executes pending ones |
-| `--resume` | `failed` / `cancelled` | Reopens the existing execution, seeds completed tasks |
+| `--resume` | `failed` / `cancelled` | Creates a new Execution and seeds completed tasks |
 | `--rerun` | `failed` / `cancelled` | Opens a fresh execution from the top |
 | `--rerun --fresh` | `failed` / `cancelled` | Like `--rerun` but also bypasses the cache read |
 
-`succeeded` and `running` runs are always skipped — that's by design. Retrying is always explicit.
+A profile `config_hash` is content-only and the profile name is only a label. New run ids are UUIDv7. The process exit code follows the attempt that actually ran. `succeeded` and `running` runs are skipped unless you ask for another attempt. Asking again is always explicit.
 
 ```bash
 molab run train.py --profile smoke

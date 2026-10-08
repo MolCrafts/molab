@@ -78,6 +78,10 @@ class TestFromIR:
         with pytest.raises(ValueError, match="ghost"):
             CompiledWorkflow.from_ir(ir, registry=registry)
 
+    def test_legacy_workflow_id_is_ignored(self, registry: TaskTypeRegistry) -> None:
+        spec = CompiledWorkflow.from_ir(_ir_constant_add(), registry=registry)
+        assert {t.name for t in spec._tasks} == {"a", "b", "c"}
+
     @pytest.mark.asyncio
     async def test_reconstructed_spec_is_runnable(self, registry: TaskTypeRegistry) -> None:
         spec = CompiledWorkflow.from_ir(_ir_constant_add(), registry=registry)
@@ -87,11 +91,12 @@ class TestFromIR:
 
 
 class TestToIR:
-    def test_to_ir_then_from_ir_preserves_workflow_id(self, registry: TaskTypeRegistry) -> None:
+    def test_to_ir_then_from_ir_preserves_workflow_digest(self, registry: TaskTypeRegistry) -> None:
         original = CompiledWorkflow.from_ir(_ir_constant_add(), registry=registry)
         ir = original.to_ir()
         rebuilt = CompiledWorkflow.from_ir(ir, registry=registry)
-        assert rebuilt.workflow_id == original.workflow_id
+        assert rebuilt.workflow_digest == original.workflow_digest
+        assert "workflow_id" not in ir
         assert rebuilt.name == original.name
         assert {t.name for t in rebuilt._tasks} == {t.name for t in original._tasks}
 
@@ -126,18 +131,6 @@ class TestToIR:
         spec = WorkflowCompiler().compile(wf)
         with pytest.raises(ValueError, match="task_type slug"):
             spec.to_ir()
-
-
-def _ir_excluding_id(spec: CompiledWorkflow) -> dict:
-    """Serialize ``spec`` to wire IR, dropping the topology-hash ``workflow_id``.
-
-    ``workflow_id`` is a content hash recomputed from the (post-lowering)
-    task list, so it legitimately differs across a serialize/reload cycle
-    even when the topology is identical. Everything else must round-trip.
-    """
-    ir = dict(default_codec.spec_to_ir(spec))
-    ir.pop("workflow_id", None)
-    return ir
 
 
 class TestTypedEdgeRoundtrip:
@@ -184,7 +177,7 @@ class TestTypedEdgeRoundtrip:
         rebuilt = default_codec.ir_to_spec(ir)
         assert tuple(sorted(rebuilt._branch_edges)) == tuple(sorted(spec._branch_edges))
         assert rebuilt._entries == spec._entries
-        assert _ir_excluding_id(rebuilt) == _ir_excluding_id(spec)
+        assert default_codec.spec_to_ir(rebuilt) == default_codec.spec_to_ir(spec)
 
     def test_control_edge_round_trips(self) -> None:
         wf = Workflow(name="cf", entry="a")
@@ -197,7 +190,7 @@ class TestTypedEdgeRoundtrip:
         assert {link["kind"] for link in ir["links"]} == {"control"}
         rebuilt = default_codec.ir_to_spec(ir)
         assert tuple(rebuilt._control_edges) == tuple(spec._control_edges) == (("a", "b"),)
-        assert _ir_excluding_id(rebuilt) == _ir_excluding_id(spec)
+        assert default_codec.spec_to_ir(rebuilt) == default_codec.spec_to_ir(spec)
 
     def test_loop_and_parallel_round_trip(self) -> None:
         wf = Workflow(name="lp")
@@ -225,7 +218,7 @@ class TestTypedEdgeRoundtrip:
         assert [(p.map_over, p.body, p.join, p.max_concurrency) for p in rebuilt._parallels] == [
             (p.map_over, p.body, p.join, p.max_concurrency) for p in spec._parallels
         ]
-        assert _ir_excluding_id(rebuilt) == _ir_excluding_id(spec)
+        assert default_codec.spec_to_ir(rebuilt) == default_codec.spec_to_ir(spec)
 
 
 class TestNodePosition:

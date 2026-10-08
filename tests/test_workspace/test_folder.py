@@ -11,6 +11,7 @@ bare ``Folder``. The folder-module import-guard subprocess lives at the bottom.
 from __future__ import annotations
 
 import ast
+import inspect
 import json
 import subprocess
 import sys
@@ -19,6 +20,7 @@ from pathlib import Path
 
 import pytest
 
+from molab.fs import LocalFileSystem
 from molab.workspace import Experiment, Project, Run, Workspace
 from molab.workspace import folder as folder_mod
 from molab.workspace.folder import (
@@ -349,3 +351,50 @@ def test_import_guard_folder_pulls_no_upstream_layer() -> None:
         print("stderr:", result.stderr.decode())
         print("stdout:", result.stdout.decode())
     assert result.returncode == 0, "import-guard subprocess failed; see captured stderr above"
+
+
+class TestFolderChildById:
+    """Id lookup is ``_child_by_id``; name lookup stays on ``_find_folder``."""
+
+    def test_child_by_id_finds_project_uuid(self, workspace: Workspace, project: Project) -> None:
+        found = workspace._child_by_id(project.id, cls=Project)
+        assert found is not None
+        assert found.id == project.id
+        assert workspace._child_by_id("not-a-project", cls=Project) is None
+
+    def test_get_folder_still_resolves_project_id(
+        self, workspace: Workspace, project: Project
+    ) -> None:
+        assert workspace.get_folder(project.id, cls=Project).id == project.id
+
+    def test_find_folder_delegates_id_lookup(self) -> None:
+        source = inspect.getsource(Folder._find_folder)
+        assert "_child_by_id" in source
+        assert "metadata.id ==" not in source
+
+
+class TestFolderFs:
+    """``Folder.fs`` is the public read-only disk accessor."""
+
+    def test_a_project_and_a_run_share_the_injected_disk(self, tmp_path: Path) -> None:
+        disk = LocalFileSystem()
+        ws = Workspace(tmp_path / "lab", name="Lab", fs=disk)
+        project = ws.add_project("p")
+        run = project.add_experiment("e").add_run(params={"seed": 1})
+
+        assert project.fs is disk
+        assert run.fs is disk
+
+    def test_an_unmounted_folder_uses_the_local_filesystem(self, tmp_path: Path) -> None:
+        folder = Folder(name="x", kind="t", root_path=tmp_path)
+
+        assert isinstance(folder.fs, LocalFileSystem)
+
+    def test_assigning_fs_raises(self, tmp_path: Path) -> None:
+        folder = Folder(name="x", kind="t", root_path=tmp_path)
+
+        with pytest.raises(AttributeError):
+            folder.fs = LocalFileSystem()  # type: ignore[misc]
+
+    def test_workspace_does_not_override_fs(self) -> None:
+        assert "fs" not in Workspace.__dict__

@@ -6,10 +6,13 @@ to consistent JSON error responses.
 
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from molab.workflow.types import WorkflowError
+from molab.workspace.errors import AmbiguousRefError, RefNotFoundError, UnmigratedAssetError
 from molab.workspace.errors import (
     ExperimentExistsError as WorkspaceExperimentExistsError,
 )
@@ -28,8 +31,10 @@ from molab.workspace.errors import (
 from molab.workspace.errors import (
     RunNotFoundError as WorkspaceRunNotFoundError,
 )
+from molab.workspace.refs import InvalidRefError
 
 from .exceptions import (
+    ConflictError,
     DuplicateResourceError,
     ExperimentNotFoundError,
     MolabError,
@@ -113,6 +118,22 @@ def register_exception_handlers(app: FastAPI) -> None:
             },
         )
 
+    @app.exception_handler(UnmigratedAssetError)
+    async def unmigrated_asset_handler(
+        request: Request,  # noqa: ARG001
+        exc: UnmigratedAssetError,
+    ) -> JSONResponse:
+        """A scope still holds a pre-unified asset record."""
+        return JSONResponse(
+            status_code=409,
+            content={
+                "error": {
+                    "code": "MIGRATION_REQUIRED",
+                    "message": str(exc),
+                }
+            },
+        )
+
     @app.exception_handler(FileNotFoundError)
     async def file_not_found_handler(request: Request, exc: FileNotFoundError) -> JSONResponse:  # noqa: ARG001
         """Handle Python FileNotFoundError."""
@@ -181,6 +202,45 @@ def register_exception_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=409,
             content=DuplicateResourceError("Experiment", exc.entity_id).to_dict(),
+        )
+
+    @app.exception_handler(RefNotFoundError)
+    async def ref_not_found_handler(
+        request: Request,  # noqa: ARG001
+        exc: RefNotFoundError,
+    ) -> JSONResponse:
+        details: dict[str, str] = {"resource": exc.segment, "identifier": exc.entity_id}
+        if exc.ref is not None:
+            details["ref"] = str(exc.ref)
+        return JSONResponse(
+            status_code=404,
+            content={
+                "error": {"code": "NOT_FOUND", "message": str(exc), "details": details},
+            },
+        )
+
+    @app.exception_handler(AmbiguousRefError)
+    async def ambiguous_ref_handler(
+        request: Request,  # noqa: ARG001
+        exc: AmbiguousRefError,
+    ) -> JSONResponse:
+        details: dict[str, Any] = {
+            "identifier": exc.entity_id,
+            "candidates": [str(candidate) for candidate in exc.candidates],
+        }
+        if exc.locations:
+            details["locations"] = list(exc.locations)
+        conflict = ConflictError(str(exc), details=details)
+        return JSONResponse(status_code=conflict.status_code, content=conflict.to_dict())
+
+    @app.exception_handler(InvalidRefError)
+    async def invalid_ref_handler(
+        request: Request,  # noqa: ARG001
+        exc: InvalidRefError,
+    ) -> JSONResponse:
+        return JSONResponse(
+            status_code=422,
+            content={"error": {"code": "INVALID_REF", "message": str(exc)}},
         )
 
     @app.exception_handler(WorkspaceRunExistsError)

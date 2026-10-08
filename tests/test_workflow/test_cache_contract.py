@@ -283,11 +283,11 @@ class TestEffectiveConfigCacheIdentity:
         run = _workspace_run(tmp_path, "shape", {"ratio": "r1"})
         cfg = ProfileConfig({"dt": 1.0}, name="p")
 
-        run.create_execution(profile_config=cfg)
+        run._create_execution(profile_config=cfg)
         with run.start(cfg, execution_id="e01") as ctx:
             local = await WorkflowRuntime().execute(compiled, run_context=ctx)
 
-        run.create_execution(mode=ExecutionMode.RERUN, profile_config=cfg)
+        run._create_execution(mode=ExecutionMode.RERUN, profile_config=cfg)
         with run.start(execution_id="e02") as ctx:
             assert "run_dir" not in ctx.config
             assert ctx.config.to_dict() == {"dt": 1.0}

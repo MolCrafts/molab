@@ -34,7 +34,14 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { WorkbenchIconAction } from "@/components/workbench";
 import { cn } from "@/lib/utils";
+import { buildEmbedGroups } from "./embedGroups";
 import { SLASH_COMMANDS, slashCommandMarkdown } from "./slashCommands";
+
+const EMBED_ICON: Partial<Record<EmbedTargetKind, ComponentType<{ className?: string }>>> = {
+  experiment: FlaskConical,
+  run: PlayCircle,
+  asset: Archive,
+};
 
 const BLOCK_ICON: Record<string, ComponentType<{ className?: string }>> = {
   heading1: Heading1,
@@ -48,37 +55,6 @@ const BLOCK_ICON: Record<string, ComponentType<{ className?: string }>> = {
   codeBlock: Code2,
   table: Table,
 };
-
-interface EmbedGroup {
-  kind: EmbedTargetKind;
-  label: string;
-  icon: ComponentType<{ className?: string }>;
-  items: Array<{ id: string; label: string }>;
-}
-
-const buildEmbedGroups = (
-  snapshot: Pick<RendererSnapshot, "experiments" | "runs" | "assets">,
-): EmbedGroup[] =>
-  [
-    {
-      kind: "experiment" as const,
-      label: "Experiments",
-      icon: FlaskConical,
-      items: snapshot.experiments.map((e) => ({ id: e.id, label: e.name })),
-    },
-    {
-      kind: "run" as const,
-      label: "Runs",
-      icon: PlayCircle,
-      items: snapshot.runs.map((r) => ({ id: r.id, label: r.name || r.id })),
-    },
-    {
-      kind: "asset" as const,
-      label: "Assets",
-      icon: Archive,
-      items: snapshot.assets.map((a) => ({ id: a.id, label: a.name })),
-    },
-  ].filter((group) => group.items.length > 0);
 
 interface SlashMenuProps {
   /** The source note's bundle-relative path (embed edge origin). */
@@ -220,17 +196,20 @@ export const SlashMenu = ({
                 <CommandEmpty>No entities to embed.</CommandEmpty>
                 {embedGroups.map((group) => (
                   <CommandGroup key={group.kind} heading={group.label}>
-                    {group.items.map((item) => (
-                      <CommandItem
-                        key={`${group.kind}:${item.id}`}
-                        value={`${group.kind} ${item.label} ${item.id}`}
-                        disabled={embedding}
-                        onSelect={() => void embed(group.kind, item.id)}
-                      >
-                        <group.icon className={cn("size-icon text-muted-foreground")} />
-                        <span className="flex-1 truncate">{item.label}</span>
-                      </CommandItem>
-                    ))}
+                    {group.items.map((item) => {
+                      const Icon = EMBED_ICON[group.kind] ?? Archive;
+                      return (
+                        <CommandItem
+                          key={`${group.kind}:${item.id}`}
+                          value={`${group.kind} ${item.label} ${item.id}`}
+                          disabled={embedding}
+                          onSelect={() => void embed(group.kind, item.target)}
+                        >
+                          <Icon className={cn("size-icon text-muted-foreground")} />
+                          <span className="flex-1 truncate">{item.label}</span>
+                        </CommandItem>
+                      );
+                    })}
                   </CommandGroup>
                 ))}
               </>

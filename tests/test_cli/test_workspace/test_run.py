@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 import re
 import sys
-from collections.abc import Awaitable, Callable, Iterator
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -24,18 +24,23 @@ import typer
 from typer.testing import CliRunner
 
 import molab.cli
-import molab.cli.workspace.run as run_module
 from molab._run_display import read_run_json
 from molab.cli._common import deterministic_run_id
 from molab.cli.workspace.run import _submit_to_scheduler
 from molab.profile import ProfileConfig
-from molab.workflow import Workflow, WorkflowCompiler, default_binding_registry
+from molab.workflow import (
+    Workflow,
+    WorkflowCompiler,
+    WorkflowRecoveryError,
+    default_binding_registry,
+)
 from molab.workspace import Workspace
 from molab.workspace.domain import Execution, ExecutionMode, ExecutionStatus
 from molab.workspace.execution_repository import ExecutionRepository
 from molab.workspace.experiment import Experiment
 from molab.workspace.project import Project
 from molab.workspace.run import Run
+from tests.support.journal import poison_node_output
 
 _UUID7 = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
 
@@ -170,6 +175,77 @@ def _seal(run: Run, execution_id: str, status: ExecutionStatus) -> None:
     repository.seal(execution_id, status)
 
 
+def _capture_prints(monkeypatch: pytest.MonkeyPatch) -> object:
+    """Record ``rprint`` from the run command as plain text."""
+    from rich.console import Console
+
+    from molab.cli.workspace import run as run_cli
+
+    recording = Console(record=True, width=200)
+    monkeypatch.setattr(run_cli, "rprint", recording.print)
+    return recording
+
+
+def _printed(recording: object) -> str:
+    from rich.console import Console
+
+    assert isinstance(recording, Console)
+    return recording.export_text()
+
+
+def _execute_run_calls(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
+    """Delegating spy on ``molab.workflow.execute.execute_run``."""
+    import molab.workflow as workflow_pkg
+    import molab.workflow.execute as execute_mod
+
+    original = execute_mod.execute_run
+    seen: list[dict[str, object]] = []
+
+    def wrapper(workflow: object, run: object, **kwargs: object) -> object:
+        seen.append(dict(kwargs))
+        return original(workflow, run, **kwargs)
+
+    monkeypatch.setattr(execute_mod, "execute_run", wrapper)
+    monkeypatch.setattr(workflow_pkg, "execute_run", wrapper, raising=False)
+    return seen
+
+
+def _bind_healing(tmp_path: Path) -> tuple[Project, Experiment, Run, Path, Path]:
+    """In-process healing workflow: stage_b fails until FLAG exists.
+
+    ``stage_a`` returns ``seed + 1``. With ``params={"seed": 1}`` a recompute
+    writes ``"200"``; a seed of the poisoned predecessor output 41 writes
+    ``"4100"``.
+    """
+    _ws, project, exp, [run] = _declared(tmp_path)
+    flag = tmp_path / "healed"
+    result = tmp_path / "result.txt"
+    wf = Workflow(name="healing")
+
+    @wf.task
+    def stage_a(seed: int) -> int:
+        return seed + 1
+
+    @wf.task(depends_on=["stage_a"])
+    def stage_b(stage_a: int) -> str:
+        if not flag.exists():
+            raise RuntimeError("FLAG missing")
+        text = str(stage_a * 100)
+        result.write_text(text)
+        return text
+
+    default_binding_registry.bind(exp, WorkflowCompiler().compile(wf))
+    return project, exp, run, flag, result
+
+
+def _fail_then_succeed(run: Run) -> None:
+    """e01 failed, e02 succeeded — retryable, but the latest attempt is done."""
+    run._create_execution()
+    _seal(run, "e01", ExecutionStatus.FAILED)
+    run._create_execution(mode=ExecutionMode.RERUN, predecessor="e01")
+    _seal(run, "e02", ExecutionStatus.SUCCEEDED)
+
+
 # seed 2 fails, seed 1 succeeds — one ``molab run`` with a mixed outcome.
 _SPLIT_SCRIPT = """\
 import molab as me
@@ -231,7 +307,7 @@ class TestCreateDispatchExecution:
 
         _ws, _project, _exp, [run] = _declared(tmp_path)
         script = _plain_script(tmp_path)
-        run.create_execution()
+        run._create_execution()
         _fail(run, "e01")
 
         execution_id = _create_dispatch_execution(
@@ -249,12 +325,14 @@ class TestCreateDispatchExecution:
         assert record.based_on_execution_id == "e01"
         assert record.bypass_cache is True
 
-    def test_resume_creates_nothing(self, tmp_path: Path) -> None:
+    def test_resume_creates_a_queued_record_based_on_the_latest_attempt(
+        self, tmp_path: Path
+    ) -> None:
         from molab.cli.workspace.run import _create_dispatch_execution
 
         _ws, _project, _exp, [run] = _declared(tmp_path)
         script = _plain_script(tmp_path)
-        run.create_execution()
+        run._create_execution()
         _fail(run, "e01")
 
         execution_id = _create_dispatch_execution(
@@ -266,8 +344,31 @@ class TestCreateDispatchExecution:
             submit_cwd=str(tmp_path),
         )
 
-        assert execution_id is None
-        assert len(run.executions) == 1
+        assert execution_id == "e02"
+        record = run.execution("e02")
+        assert record.mode.value == "resume"
+        assert record.based_on_execution_id == "e01"
+        assert record.status.value == "queued"
+        assert record.bypass_cache is False
+        assert record.environment["script"] == str(script.resolve())
+
+    def test_resume_based_on_a_succeeded_attempt_raises(self, tmp_path: Path) -> None:
+        from molab.cli.workspace.run import _create_dispatch_execution
+
+        _ws, _project, _exp, [run] = _declared(tmp_path)
+        _fail_then_succeed(run)
+
+        with pytest.raises(ValueError, match="succeeded"):
+            _create_dispatch_execution(
+                run,
+                continue_verb="resume",
+                fresh=False,
+                profile_cfg=ProfileConfig({}, name=None),
+                script=_plain_script(tmp_path),
+                submit_cwd=str(tmp_path),
+            )
+
+        assert len(run.executions) == 2
 
 
 # ── _execute_selected ─────────────────────────────────────────────────────────
@@ -358,6 +459,58 @@ class TestExecuteSelected:
         assert [c.run_id for c in handler.calls] == [first.id]
         assert second.executions == []
 
+    @pytest.mark.parametrize("show_progress", [False, True])
+    def test_creation_value_error_is_a_skip(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, show_progress: bool
+    ) -> None:
+        from molab.cli.workspace.run import _execute_selected
+
+        _ws, project, exp, [run] = _declared(tmp_path)
+        _fail_then_succeed(run)
+        handler = _SpyHandler()
+        printed = _capture_prints(monkeypatch)
+
+        dispatched = _execute_selected(
+            [(run, exp, project)],
+            handler,
+            _plain_script(tmp_path),
+            show_progress=show_progress,
+            continue_verb="resume",
+            fresh=False,
+            profile_cfg=ProfileConfig({}, name=None),
+            submit_cwd=str(tmp_path),
+        )
+
+        assert handler.calls == []
+        assert dispatched == []
+        assert len(run.executions) == 2
+        assert "skipped" in _printed(printed)
+
+    def test_failed_run_beside_a_skip_is_dispatched(self, tmp_path: Path) -> None:
+        from molab.cli.workspace.run import _execute_selected
+
+        _ws, project, exp, [skipped, failed] = _declared(tmp_path, n_runs=2)
+        _fail_then_succeed(skipped)
+        failed._create_execution()
+        _seal(failed, "e01", ExecutionStatus.FAILED)
+        handler = _SpyHandler()
+
+        dispatched = _execute_selected(
+            [(skipped, exp, project), (failed, exp, project)],
+            handler,
+            _plain_script(tmp_path),
+            show_progress=False,
+            continue_verb="resume",
+            fresh=False,
+            profile_cfg=ProfileConfig({}, name=None),
+            submit_cwd=str(tmp_path),
+        )
+
+        assert [call.run_id for call in handler.calls] == [failed.id]
+        assert handler.calls[0].execution_id == "e02"
+        assert [item.id for item in dispatched] == [failed.id]
+        assert len(skipped.executions) == 2
+
 
 # ── _dispatch_runs ────────────────────────────────────────────────────────────
 
@@ -397,6 +550,144 @@ class TestDispatchRuns:
         assert handler.calls == []
         for run in runs:
             assert run.executions == []
+
+    def test_skipped_resume_is_not_counted(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        from molab.cli.workspace.run import _dispatch_runs
+
+        ws, _project, exp, [run] = _declared(tmp_path)
+        _fail_then_succeed(run)
+        wf = Workflow(name="one")
+
+        @wf.task
+        def only(seed: int) -> int:
+            return seed
+
+        default_binding_registry.bind(exp, WorkflowCompiler().compile(wf))
+        monkeypatch.setattr(
+            "molab.cli.workspace.run._load_script_workspaces", lambda *_a, **_k: ([ws], None)
+        )
+        handler = _SpyHandler()
+
+        n, selected = _dispatch_runs(
+            script=_plain_script(tmp_path),
+            profile_cfg=ProfileConfig({}, name=None),
+            continue_verb="resume",
+            workspace=ws.root,
+            explicit_workspace=True,
+            run_handler=handler,
+            mode_label="local",
+            dry_run=False,
+        )
+
+        assert (n, selected) == (0, [])
+        assert handler.calls == []
+        assert len(run.executions) == 2
+
+
+# ── _make_local_inprocess_handler ─────────────────────────────────────────────
+
+
+class TestMakeLocalInprocessHandler:
+    def test_resume_seeds_completed_nodes_from_the_predecessor(self, tmp_path: Path) -> None:
+        from molab.cli.workspace.run import _make_local_inprocess_handler
+
+        project, exp, run, flag, result = _bind_healing(tmp_path)
+        handler = _make_local_inprocess_handler()
+        script = _plain_script(tmp_path)
+        initial = run.create_execution()
+        assert initial.id == "e01"
+        handler(script, run, exp, project, execution_id="e01")
+        assert run.execution("e01").status.value == "failed"
+        # e01 recorded stage_a == 2; 41 reaches stage_b only as a seed.
+        poison_node_output(run.run_dir, "e01", "stage_a", 41)
+        flag.write_text("ok", encoding="utf-8")
+        resume = run.create_execution(mode=ExecutionMode.RESUME, based_on_execution_id="e01")
+        assert resume.id == "e02"
+
+        handler(script, run, exp, project, execution_id="e02")
+
+        assert run.execution("e02").status.value == "succeeded"
+        assert result.read_text(encoding="utf-8") == "4100"
+        assert len(run.executions) == 2
+
+    def test_failed_initial_returns_without_raising(self, tmp_path: Path) -> None:
+        from molab.cli.workspace.run import _make_local_inprocess_handler
+
+        project, exp, run, _flag, _result = _bind_healing(tmp_path)
+        queued = run.create_execution()
+        assert queued.id == "e01"
+        assert queued.status.value == "queued"
+        assert queued.mode.value == "initial"
+
+        _make_local_inprocess_handler()(
+            _plain_script(tmp_path), run, exp, project, execution_id="e01"
+        )
+
+        assert run.execution("e01").status.value == "failed"
+
+    def test_document_experiment_runs_the_queued_record(self, tmp_path: Path) -> None:
+        from molab.cli.workspace.run import _make_local_inprocess_handler
+
+        default_binding_registry.clear()
+        ws = Workspace(tmp_path / "ws", name="ws")
+        project = ws.add_project("p")
+        exp = project.add_experiment("calc")
+        exp.bind_workflow(
+            "document",
+            document={
+                "name": "constant_add",
+                "task_configs": [
+                    {
+                        "task_id": "a",
+                        "task_type": "core.constant",
+                        "config": {"value": 2},
+                        "status": "pending",
+                    },
+                    {
+                        "task_id": "b",
+                        "task_type": "core.constant",
+                        "config": {"value": 3},
+                        "status": "pending",
+                    },
+                    {"task_id": "c", "task_type": "core.add", "config": {}, "status": "pending"},
+                ],
+                "links": [
+                    {"source": "a", "target": "c", "mapping": {}, "status": "pending"},
+                    {"source": "b", "target": "c", "mapping": {}, "status": "pending"},
+                ],
+                "metadata": {"label": None, "description": None, "tags": [], "custom": {}},
+            },
+        )
+        run = exp.add_run(params={"seed": 1})
+        queued = run.create_execution()
+        assert queued.id == "e01"
+        assert queued.status.value == "queued"
+
+        _make_local_inprocess_handler()(
+            tmp_path / "unused.py", run, exp, project, execution_id="e01"
+        )
+
+        assert run.execution("e01").status.value == "succeeded"
+
+    def test_unbound_experiment_leaves_the_record_queued(self, tmp_path: Path) -> None:
+        from molab.cli.workspace.run import _make_local_inprocess_handler
+
+        default_binding_registry.clear()
+        ws = Workspace(tmp_path / "ws", name="ws")
+        project = ws.add_project("p")
+        exp = project.add_experiment("bare")
+        run = exp.add_run(params={"seed": 1})
+        queued = run.create_execution()
+        assert queued.status.value == "queued"
+
+        with pytest.raises(WorkflowRecoveryError):
+            _make_local_inprocess_handler()(
+                tmp_path / "unused.py", run, exp, project, execution_id="e01"
+            )
+
+        assert run.execution("e01").status.value == "queued"
 
 
 # ── run (command) ─────────────────────────────────────────────────────────────
@@ -466,15 +757,7 @@ class TestRun:
         exit_code, output = _molab("run", str(script), "--local", "-ws", str(tmp_path))
         assert exit_code == 1, output
         _heal(tmp_path)
-
-        original: Callable[..., Awaitable[object]] = run_module._execute_compiled
-        seen_bypass: list[object] = []
-
-        async def _spy(spec: object, **kwargs: object) -> object:
-            seen_bypass.append(kwargs.get("bypass_cache"))
-            return await original(spec, **kwargs)
-
-        monkeypatch.setattr(run_module, "_execute_compiled", _spy)
+        seen = _execute_run_calls(monkeypatch)
 
         exit_code, output = _molab(
             "run", str(script), "--rerun", "--fresh", "--local", "-ws", str(tmp_path)
@@ -482,16 +765,8 @@ class TestRun:
 
         assert exit_code == 0, output
         assert _only_run(tmp_path).execution("e02").bypass_cache is True
-        assert seen_bypass == [True]
+        assert seen == [{"execution_id": "e02"}]
 
-    @pytest.mark.xfail(
-        strict=True,
-        raises=AssertionError,
-        reason=(
-            "arch-own-03: molab run --resume (local) — opens a new QUEUED RESUME e02 "
-            "based on e01 instead of reopening the terminal e01"
-        ),
-    )
     def test_resume_after_failure_opens_a_resume_execution(self, tmp_path: Path) -> None:
         script = _write_script(tmp_path)
         exit_code, output = _molab("run", str(script), "--local", "-ws", str(tmp_path))
@@ -505,6 +780,59 @@ class TestRun:
         assert [e.mode.value for e in executions] == ["initial", "resume"]
         assert [e.based_on_execution_id for e in executions] == [None, "e01"]
         assert [e.status.value for e in executions] == ["failed", "succeeded"]
+
+    def test_rerun_fresh_after_resume(self, tmp_path: Path) -> None:
+        script = _write_script(tmp_path)
+        exit_code, output = _molab("run", str(script), "--local", "-ws", str(tmp_path))
+        assert exit_code == 1, output
+        _heal(tmp_path)
+        exit_code, output = _molab("run", str(script), "--resume", "--local", "-ws", str(tmp_path))
+        assert exit_code == 0, output
+
+        exit_code, output = _molab(
+            "run", str(script), "--rerun", "--fresh", "--local", "-ws", str(tmp_path)
+        )
+
+        assert exit_code == 0, output
+        third = _only_run(tmp_path).execution("e03")
+        assert third.mode.value == "rerun"
+        assert third.based_on_execution_id == "e02"
+        assert third.bypass_cache is True
+
+    def test_rerun_after_success_opens_a_rerun_execution(self, tmp_path: Path) -> None:
+        script = _write_script(tmp_path)
+        _heal(tmp_path)
+        exit_code, output = _molab("run", str(script), "--local", "-ws", str(tmp_path))
+        assert exit_code == 0, output
+        assert [item.status.value for item in _only_run(tmp_path).executions] == ["succeeded"]
+
+        exit_code, output = _molab("run", str(script), "--rerun", "--local", "-ws", str(tmp_path))
+
+        assert exit_code == 0, output
+        executions = _only_run(tmp_path).executions
+        assert [item.id for item in executions] == ["e01", "e02"]
+        assert executions[1].mode.value == "rerun"
+        assert executions[1].based_on_execution_id == "e01"
+        assert executions[1].status.value == "succeeded"
+
+    def test_resume_skips_run_whose_latest_attempt_succeeded(self, tmp_path: Path) -> None:
+        script = _write_script(tmp_path)
+        exit_code, output = _molab("run", str(script), "--local", "-ws", str(tmp_path))
+        assert exit_code == 1, output
+        _heal(tmp_path)
+        exit_code, output = _molab("run", str(script), "--rerun", "--local", "-ws", str(tmp_path))
+        assert exit_code == 0, output
+        assert [item.status.value for item in _only_run(tmp_path).executions] == [
+            "failed",
+            "succeeded",
+        ]
+
+        exit_code, output = _molab("run", str(script), "--resume", "--local", "-ws", str(tmp_path))
+
+        assert exit_code == 0, output
+        assert "skipped" in output
+        assert "No runs resumed." in output
+        assert len(_only_run(tmp_path).executions) == 2
 
     def test_one_failed_run_of_two_exits_1(self, tmp_path: Path) -> None:
         script = tmp_path / "split.py"
@@ -527,43 +855,115 @@ class TestRun:
 
 
 class TestReportLocalResults:
-    def test_judges_the_dispatched_attempt_not_a_later_one(self, tmp_path: Path) -> None:
-        from molab.cli.workspace.run import _report_local_results
-
-        _ws, _project, _exp, [run] = _declared(tmp_path)
-        run.create_execution()
-        _seal(run, "e01", ExecutionStatus.SUCCEEDED)
-        # A concurrent invocation queued e02 after this dispatch ran e01.
-        run.create_execution(mode=ExecutionMode.RERUN, based_on_execution_id="e01")
-
-        _report_local_results([(run, "e01")], None)
-
-    def test_failed_dispatched_attempt_exits_1_despite_a_later_success(
-        self, tmp_path: Path
+    def test_a_later_attempt_is_the_label(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         from molab.cli.workspace.run import _report_local_results
 
         _ws, _project, _exp, [run] = _declared(tmp_path)
-        run.create_execution()
-        _seal(run, "e01", ExecutionStatus.FAILED)
-        run.create_execution(mode=ExecutionMode.RERUN, based_on_execution_id="e01")
-        _seal(run, "e02", ExecutionStatus.SUCCEEDED)
+        run._create_execution()
+        _seal(run, "e01", ExecutionStatus.SUCCEEDED)
+        # A later attempt is queued. status_label is that attempt, not e01.
+        run._create_execution(mode=ExecutionMode.RERUN, predecessor="e01")
+        printed = _capture_prints(monkeypatch)
 
         with pytest.raises(typer.Exit) as excinfo:
             _report_local_results([(run, "e01")], None)
 
         assert excinfo.value.exit_code == 1
+        assert "status=queued" in _printed(printed)
+
+    def test_a_later_success_exits_0(self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        from molab.cli.workspace.run import _report_local_results
+
+        _ws, _project, _exp, [run] = _declared(tmp_path)
+        run._create_execution()
+        _seal(run, "e01", ExecutionStatus.FAILED)
+        run._create_execution(mode=ExecutionMode.RERUN, predecessor="e01")
+        _seal(run, "e02", ExecutionStatus.SUCCEEDED)
+        printed = _capture_prints(monkeypatch)
+
+        _report_local_results([(run, "e01")], None)
+
+        assert "OK 1 runs completed." in _printed(printed)
+        assert run.status_label == "succeeded"
+        assert run.has_failures is True
 
     def test_resume_without_an_id_judges_the_latest_attempt(self, tmp_path: Path) -> None:
         from molab.cli.workspace.run import _report_local_results
 
         _ws, _project, _exp, [run] = _declared(tmp_path)
-        run.create_execution()
+        run._create_execution()
         _seal(run, "e01", ExecutionStatus.FAILED)
-        run.create_execution(mode=ExecutionMode.RERUN, based_on_execution_id="e01")
+        run._create_execution(mode=ExecutionMode.RERUN, predecessor="e01")
         _seal(run, "e02", ExecutionStatus.SUCCEEDED)
 
         _report_local_results([(run, None)], "resume")
+
+    def test_successful_resume_exits_0(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from molab.cli.workspace.run import _report_local_results
+
+        _ws, _project, _exp, [run] = _declared(tmp_path)
+        _fail_then_succeed(run)
+        printed = _capture_prints(monkeypatch)
+
+        _report_local_results([(run, "e02")], "resume")
+
+        assert "OK 1 runs resumed." in _printed(printed)
+        assert run.status_label == "succeeded"
+        assert run.has_failures is True
+
+    def test_failed_latest_attempt_names_the_error_not_error_txt(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from molab.cli.workspace.run import _report_local_results
+
+        _ws, _project, _exp, [run] = _declared(tmp_path)
+        with pytest.raises(RuntimeError, match="FLAG missing"), run.start():
+            raise RuntimeError("FLAG missing")
+        printed = _capture_prints(monkeypatch)
+
+        with pytest.raises(typer.Exit) as excinfo:
+            _report_local_results([(run, "e01")], None)
+
+        assert excinfo.value.exit_code == 1
+        text = _printed(printed)
+        assert "FLAG missing" in text
+        assert "error.txt" not in text
+
+    def test_empty_dispatch_says_no_runs(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        from molab.cli.workspace.run import _report_local_results
+
+        printed = _capture_prints(monkeypatch)
+
+        _report_local_results([], None)
+
+        assert "No runs" in _printed(printed)
+
+
+# ── _failure_detail ───────────────────────────────────────────────────────────
+
+
+class TestFailureDetail:
+    def test_names_the_recorded_error_and_evidence_directory(self, tmp_path: Path) -> None:
+        from molab.cli.workspace.run import _failure_detail
+
+        _ws, _project, _exp, [run] = _declared(tmp_path)
+        with pytest.raises(RuntimeError, match="FLAG missing"), run.start():
+            raise RuntimeError("FLAG missing")
+
+        assert _failure_detail(run) == (
+            f"RuntimeError: FLAG missing (Execution evidence under {run.execution_dir('e01')})"
+        )
+
+    def test_no_attempts_returns_none(self, tmp_path: Path) -> None:
+        from molab.cli.workspace.run import _failure_detail
+
+        _ws, _project, _exp, [run] = _declared(tmp_path)
+
+        assert _failure_detail(run) is None
 
 
 # ── _submit_to_scheduler ──────────────────────────────────────────────────────
@@ -644,7 +1044,7 @@ def scheduler_fixture(
     project = ws.add_project("p")
     exp = project.add_experiment("e")
     run = exp.add_run(params={"seed": 1})
-    run.create_execution()
+    run._create_execution()
     run.cancel("e01")
 
     script = tmp_path / "s.py"
@@ -656,7 +1056,14 @@ def scheduler_fixture(
     def only(seed: int) -> int:
         return seed
 
-    default_binding_registry.bind(exp, WorkflowCompiler().compile(wf))
+    compiled = WorkflowCompiler().compile(wf)
+    default_binding_registry.bind(exp, compiled)
+    # A scheduler worker re-imports the workflow, so submission needs a locator.
+    exp.bind_workflow(
+        "code",
+        entrypoint=f"{script}:wf",
+        document=compiled.to_graph_ir().model_dump(mode="json"),
+    )
     monkeypatch.setattr(
         "molab.cli.workspace.run._load_script_workspaces", lambda *_a, **_k: ([ws], None)
     )
@@ -703,14 +1110,6 @@ class TestSubmitToScheduler:
         assert list(run_dir.rglob("fresh.json")) == []
         assert sorted(p.name for p in (run_dir / "executions").iterdir()) == ["e01", "e02"]
 
-    @pytest.mark.xfail(
-        strict=True,
-        raises=AssertionError,
-        reason=(
-            "arch-own-03: molab run --resume --scheduler — the submit handler receives "
-            "a pre-created QUEUED RESUME e02 based on e01"
-        ),
-    )
     def test_resume_hands_a_queued_resume_record(
         self, monkeypatch: pytest.MonkeyPatch, scheduler_fixture: SchedulerFixture
     ) -> None:
@@ -908,3 +1307,18 @@ class TestSelectCandidateRuns:
 
         assert selected == []
         assert len(exp.list_runs()) == 0
+
+
+class TestRunHelpText:
+    def test_resume_help_opens_a_new_execution(self) -> None:
+        code, out = _molab("run", "--help")
+
+        assert code == 0
+        assert "new RESUME Execution" in out
+        assert "Reopen" not in out
+
+    def test_worker_help_does_not_name_a_run_id_directory(self) -> None:
+        code, out = _molab("execute", "--help")
+
+        assert code == 0
+        assert "run-<id>" not in out

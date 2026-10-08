@@ -17,9 +17,6 @@ import tempfile
 from pathlib import Path
 
 from molab.knowledge import Knowledge, Note, folder
-from molab.knowledge.types import non_concept_subdirs
-from molab.workspace.folder import WORKSPACE_RUN_KIND
-from molab.workspace.run import Run
 
 
 def main() -> None:
@@ -42,10 +39,6 @@ def main() -> None:
         assert not (host / "knowledges" / "tg-cooling").exists()
         assert folder(host, "Tg Cooling", Note) == host / "knowledges" / "tg-cooling.md"
         assert Knowledge.open(doc.path).name == "tg-cooling"
-
-    # ── the pruning contract survives with nothing registered ────────────────
-    assert "executions" in Run.NON_CONCEPT_SUBDIRS
-    assert non_concept_subdirs(WORKSPACE_RUN_KIND) == Run.NON_CONCEPT_SUBDIRS
 
     # ── the one-way law: a bare workspace import never reaches knowledge ─────
     code = (

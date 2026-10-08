@@ -24,7 +24,7 @@ _TEST_AGENT = AgentRef(id="test", type="person", name="test")
 
 def _run_with_succeeded_e01(root: Path) -> Run:
     ws = Workspace(root=root, name="tui-lab")
-    exp = ws.add_project("proj-a").add_experiment("exp-x", workflow_source="s.py", params={})
+    exp = ws.add_project("proj-a").add_experiment("exp-x", params={})
     run = exp.add_run(params={"seed": 1})
     repo = ExecutionRepository(
         ws.root, run.run_dir, run_id=run.id, project_id=run.experiment.project.id, fs=ws.fs
@@ -56,9 +56,9 @@ class TestExecuteDelete:
 
 def _run_with_queued_e01(root: Path) -> Run:
     ws = Workspace(root=root, name="tui-lab")
-    exp = ws.add_project("proj-a").add_experiment("exp-x", workflow_source="s.py", params={})
+    exp = ws.add_project("proj-a").add_experiment("exp-x", params={})
     run = exp.add_run(params={"seed": 1})
-    state = run.create_execution(created_by=_TEST_AGENT)
+    state = run._create_execution(created_by=_TEST_AGENT)
     assert state.status is ExecutionStatus.QUEUED
     return run
 

@@ -8,9 +8,9 @@ export type ExperimentCreateRequest = {
      */
     name: string;
     /**
-     * Path to workflow file
+     * Workflow IR document; bound as the document kind
      */
-    workflowSource?: (string | null);
+    workflowSource?: (Record<string, any> | null);
     /**
      * Experiment description
      */

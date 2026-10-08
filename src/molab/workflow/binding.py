@@ -38,7 +38,7 @@ class WorkflowBinding(BaseModel):
     model_config = ConfigDict(frozen=True)
 
     experiment_id: str
-    workflow_id: str
+    workflow_digest: str
 
 
 class WorkflowBindingRegistry:
@@ -61,7 +61,7 @@ class WorkflowBindingRegistry:
                 f"bind expects an experiment with a non-empty string `id`; got {experiment!r}"
             )
         self._by_experiment[exp_id] = compiled
-        return WorkflowBinding(experiment_id=exp_id, workflow_id=compiled.workflow_id)
+        return WorkflowBinding(experiment_id=exp_id, workflow_digest=compiled.workflow_digest)
 
     def for_experiment(self, experiment: _ExperimentLike) -> CompiledWorkflow | None:
         """Return the compiled workflow bound to *experiment*, or ``None``."""

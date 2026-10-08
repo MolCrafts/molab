@@ -56,13 +56,7 @@ dataset = ws.data_assets.import_asset("lig-library", "ligands.csv")
 project_dataset = ws.project("demo").data_assets.import_asset("lig-subset", "ligands.csv")
 ```
 
-The import stores the payload under `<scope>/assets/<asset_id>/payload/` and registers a `DataAsset` that remembers the action used (`copy` / `move` / `symlink` / `hardlink`) and the source path. Look up imported data by name (`ws.data_assets.get("lig-library")`) or scan the workspace with the module-level manifest scanner:
-
-```python
-from molab.workspace.assets import scan
-
-everything = scan.scan_assets(ws.root)
-```
+The import stores the payload under `<scope>/assets/<asset_id>/` and writes `asset.json` plus `versions/vNNN.json`. `data_assets` is that same repository. Look up imported data by name (`ws.data_assets.get("lig-library")`). `promote` copies a run artifact into that repository. Until `molab migrate assets` has run once, a leftover legacy record raises `UnmigratedAssetError` and every asset read answers 409 `MIGRATION_REQUIRED`.
 
 ## Concurrency and atomicity
 

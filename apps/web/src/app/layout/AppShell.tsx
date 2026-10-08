@@ -21,6 +21,8 @@ import {
 import { WorkbenchStatusStrip } from "@/components/workbench";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { useContributionGeneration } from "@/lib/contribution-runtime";
+import { buildMolabRefIndex } from "@/lib/entity-linkify";
+import { MolabRefIndexContext } from "@/lib/molab-ref-context";
 import { listStatusBarItems, useWorkbenchGeneration } from "@/plugins/contributions/workbench";
 import { setHostActions } from "@/plugins/host_actions";
 import { usePluginPreferencesGeneration } from "@/plugins/preferences";
@@ -50,7 +52,7 @@ interface AppShellProps {
   onActiveRefresh: () => void;
 }
 
-const NAV_SIZE = { default: "272px", min: "216px", max: "384px" };
+const NAV_SIZE = { default: "360px", min: "216px", max: "640px" };
 const INSPECTOR_SIZE = { default: "280px", min: "240px", max: "420px" };
 const SHELL_PANEL_IDS = ["navigator", "workspace"];
 
@@ -313,7 +315,7 @@ export const AppShell = ({
         <div className="h-full overflow-hidden border-r border-border bg-surface">{navContent}</div>
       </ResizablePanel>
       <ResizableHandle />
-      <ResizablePanel id="workspace" defaultSize="calc(100% - 272px)">
+      <ResizablePanel id="workspace">
         <ResizablePanelGroup
           id="molab-workbench-detail"
           direction="horizontal"
@@ -321,12 +323,7 @@ export const AppShell = ({
           autoSavePanelIds={inspectorPanelIds}
           className="h-full"
         >
-          <ResizablePanel
-            id="work-surface"
-            defaultSize={inspectorVisible ? "calc(100% - 280px)" : "100%"}
-          >
-            {centerContent}
-          </ResizablePanel>
+          <ResizablePanel id="work-surface">{centerContent}</ResizablePanel>
           {inspectorVisible && (
             <>
               <ResizableHandle />
@@ -348,42 +345,44 @@ export const AppShell = ({
   );
 
   return (
-    <InspectedTaskContext.Provider value={inspectedTaskContext}>
-      <CommandKeymap />
-      <GlobalCommandPalette snapshot={snapshot} />
-      <div className="flex h-screen flex-col bg-background text-foreground">
-        <ContextBar onMenuClick={isMobile ? () => setMobileNavOpen(true) : undefined} />
-        {/* Work surface above a plugin bottom drawer and a 28px status bar. */}
-        <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
-          {workbenchColumns}
-          <PluginBottomPanelHost />
-          <WorkbenchStatusStrip
-            isRefreshing={isRefreshing}
-            onRemoteIndexReady={onWorkspaceRefresh}
-            activeWorkspace={activeWorkspace}
-            onReconnect={handleReconnect}
-            extras={statusBarExtras.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-                title={item.tooltip ?? item.text}
-                className="max-w-40 truncate px-1 font-mono text-micro text-statusbar-foreground/90 hover:text-statusbar-foreground"
-                onClick={() => {
-                  if (item.command) runCommand(item.command);
-                }}
-              >
-                {item.text}
-              </button>
-            ))}
+    <MolabRefIndexContext.Provider value={useMemo(() => buildMolabRefIndex(snapshot), [snapshot])}>
+      <InspectedTaskContext.Provider value={inspectedTaskContext}>
+        <CommandKeymap />
+        <GlobalCommandPalette snapshot={snapshot} />
+        <div className="flex h-screen flex-col bg-background text-foreground">
+          <ContextBar onMenuClick={isMobile ? () => setMobileNavOpen(true) : undefined} />
+          {/* Work surface above a plugin bottom drawer and a 28px status bar. */}
+          <main className="flex min-h-0 flex-1 flex-col overflow-hidden">
+            {workbenchColumns}
+            <PluginBottomPanelHost />
+            <WorkbenchStatusStrip
+              isRefreshing={isRefreshing}
+              onRemoteIndexReady={onWorkspaceRefresh}
+              activeWorkspace={activeWorkspace}
+              onReconnect={handleReconnect}
+              extras={statusBarExtras.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  title={item.tooltip ?? item.text}
+                  className="max-w-40 truncate px-1 font-mono text-micro text-statusbar-foreground/90 hover:text-statusbar-foreground"
+                  onClick={() => {
+                    if (item.command) runCommand(item.command);
+                  }}
+                >
+                  {item.text}
+                </button>
+              ))}
+            />
+          </main>
+          <RemoteConnectDialog
+            workspace={activeWorkspace}
+            open={connectOpen}
+            onOpenChange={setConnectOpen}
+            onConnected={onWorkspaceRefresh}
           />
-        </main>
-        <RemoteConnectDialog
-          workspace={activeWorkspace}
-          open={connectOpen}
-          onOpenChange={setConnectOpen}
-          onConnected={onWorkspaceRefresh}
-        />
-      </div>
-    </InspectedTaskContext.Provider>
+        </div>
+      </InspectedTaskContext.Provider>
+    </MolabRefIndexContext.Provider>
   );
 };

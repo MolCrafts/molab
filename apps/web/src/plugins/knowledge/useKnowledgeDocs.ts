@@ -23,9 +23,9 @@ export interface UseKnowledgeDocs {
   loading: boolean;
   error: string | null;
   reload: () => Promise<void>;
-  createDoc: (name: string, parentPath?: string | null) => Promise<void>;
+  createDoc: (name: string, hostPath?: string | null) => Promise<void>;
   renameDoc: (path: string, name: string) => Promise<void>;
-  moveDoc: (path: string, parentPath: string) => Promise<void>;
+  moveDoc: (path: string, hostPath: string) => Promise<void>;
   deleteDoc: (path: string) => Promise<void>;
   getBacklinks: (path: string) => Promise<NoteSummary[]>;
 }
@@ -47,8 +47,8 @@ export const useKnowledgeDocs = (filters: KnowledgeDocFilters = {}): UseKnowledg
   }, [queryClient]);
 
   const createDoc = useCallback(
-    async (name: string, parentPath?: string | null): Promise<void> => {
-      await knowledgeApi.createDoc(name, { parentPath: parentPath ?? null });
+    async (name: string, hostPath?: string | null): Promise<void> => {
+      await knowledgeApi.createDoc(name, { hostPath: hostPath ?? null });
       await invalidateLists();
     },
     [invalidateLists],
@@ -63,8 +63,8 @@ export const useKnowledgeDocs = (filters: KnowledgeDocFilters = {}): UseKnowledg
   );
 
   const moveDoc = useCallback(
-    async (path: string, parentPath: string): Promise<void> => {
-      await knowledgeApi.moveDoc(path, parentPath);
+    async (path: string, hostPath: string): Promise<void> => {
+      await knowledgeApi.moveDoc(path, hostPath);
       await invalidateLists();
     },
     [invalidateLists],

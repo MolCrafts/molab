@@ -51,6 +51,7 @@ export const mapProjects = (
     summary: project.description || "No description",
     updatedAt: project.created,
     experimentCount: project.experimentCount ?? null,
+    ref: project.ref,
     ...(workspaceKey ? { workspaceKey } : {}),
   }));
 };
@@ -107,11 +108,19 @@ export const mapExperiments = (
       projectId,
       parameterSpace: (experiment.parameterSpace ?? {}) as Record<string, unknown>,
       workflowSource,
+      workflowKind: experiment.workflowKind,
+      workflowEntrypoint: experiment.workflowEntrypoint ?? null,
+      ref: experiment.ref,
       runCount: experiment.runCount ?? null,
       ...(workspaceKey ? { workspaceKey } : {}),
     };
   });
 };
+
+/** One label for a workflow: a document name, else a code locator, else empty. */
+export const experimentWorkflowLabel = (
+  experiment: Pick<ExperimentSummary, "workflowFile" | "workflowEntrypoint">,
+): string => experiment.workflowFile || experiment.workflowEntrypoint || "";
 
 export const mapRuns = (
   projectId: string,
@@ -210,6 +219,7 @@ export const mapRuns = (
         lastError && typeof lastError.message === "string"
           ? lastError.message
           : (run.error?.message ?? null),
+      ...(run.ref ? { ref: run.ref } : {}),
       ...(workspaceKey ? { workspaceKey } : {}),
     };
   });

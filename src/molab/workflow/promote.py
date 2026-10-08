@@ -173,14 +173,19 @@ def resolve_callable_entrypoint(fn: Callable) -> str:
     return f"{file_path}:{qualname}"
 
 
-def resolve_spec_entrypoint(spec: CompiledWorkflow) -> str:
+def resolve_spec_entrypoint(spec: CompiledWorkflow, *, authored: object = None) -> str:
     """Return ``"<file>:<varname>"`` for *spec*.
 
     A ``CompiledWorkflow`` carries no source-level name; the worker re-imports it by
     looking up the variable that holds it. We find that module by
     asking the first registered task (which always lives in the same
     user module that assembled the spec) for its source, then scan
-    that module's globals for a binding to *spec* by identity.
+    that module's globals for a binding to *spec* by identity — or to
+    *authored*, the :class:`Workflow` the spec was compiled from. A script
+    usually keeps only ``wf = Workflow(...)`` at module scope and hands it to
+    ``Experiment.define``, which compiles a fresh object no global names; the
+    loader compiles a ``Workflow`` it finds, so naming the authored object is
+    an equally good locator.
 
     Raises:
         ValueError: If the spec's first task has no associated module
@@ -195,7 +200,7 @@ def resolve_spec_entrypoint(spec: CompiledWorkflow) -> str:
         )
     file_path = Path(inspect.getfile(mod)).resolve()
     for var, val in vars(mod).items():
-        if val is spec:
+        if val is spec or (authored is not None and val is authored):
             return f"{file_path}:{var}"
     raise ValueError(
         f"cannot determine an importable entrypoint: {spec!r} is not "

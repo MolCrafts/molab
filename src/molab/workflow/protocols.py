@@ -44,7 +44,6 @@ from .._typing import (
 )
 
 __all__ = [
-    "AssetsViewLike",
     "JSONMapping",
     "JSONValue",
     "RunContextLike",
@@ -94,6 +93,14 @@ class RunLike(Protocol):
         """The directory of one attempt; the workspace owns the layout."""
         ...
 
+    def artifact_location(self, execution_id: str, artifact: object) -> str:
+        """Resolve one artifact to a path on this run's filesystem.
+
+        The workspace owns both the execution-relative form and the legacy
+        workspace-relative form. Callers do not join a root onto ``artifact.path``.
+        """
+        ...
+
     def machine_dir(self) -> Path:
         """The run-level machine-state directory the workspace hands out.
 
@@ -112,33 +119,10 @@ class RunLike(Protocol):
 class UpstreamViewLike(Protocol):
     """View handed to a ``dependent_params`` callback per upstream task.
 
-    Exposes the upstream task's recorded output and (when a workspace
-    ``RunContext`` is attached) a producer-task-filtered asset query handle.
+    Exposes the upstream task's recorded output.
     """
 
     output: TaskOutput
-    assets: AssetsViewLike | None
-
-
-@runtime_checkable
-class AssetsViewLike(Protocol):
-    """Duck-typed shape of ``workspace.assets.AssetsView`` used by the workflow runtime.
-
-    Only the ``.query(**filters)`` method is reached by workflow code; this
-    protocol covers it without importing the workspace's ``Asset`` /
-    ``AssetList`` types into the workflow layer.
-    """
-
-    def query(
-        self,
-        *,
-        kind: str | type | None = ...,
-        producer_run: str | None = ...,
-        producer_task: str | None = ...,
-        tag: tuple[str, str] | None = ...,
-        limit: int | None = ...,
-        recursive: bool = ...,
-    ) -> TaskOutput: ...
 
 
 @runtime_checkable
@@ -147,15 +131,15 @@ class RunContextLike(Protocol):
 
     Captures only the surface the workflow scheduler reaches into: the run
     reference, the run directory, the attempt it names (``id`` /
-    ``execution_dir`` / ``based_on_execution_id``), the attempt's cache-bypass
+    ``execution_dir`` / ``predecessor``), the attempt's cache-bypass
     flag, and the register verbs. Members are read-only properties so the
     concrete ``ExecutionContext`` structurally satisfies the protocol.
     Anything else on a real context is out of scope for the workflow layer.
 
-    ``id``, ``execution_dir`` and ``based_on_execution_id`` are required: the
+    ``id``, ``execution_dir`` and ``predecessor`` are required: the
     runtime writes the node journal into ``execution_dir`` (it composes no
     path itself) and verifies resume seeds against the
-    ``based_on_execution_id`` attempt; a context lacking them is a
+    predecessor attempt; a context lacking them is a
     ``TypeError``. ``bypass_cache`` is read directly whenever a context is
     given.
     """
@@ -171,7 +155,7 @@ class RunContextLike(Protocol):
         ...
 
     @property
-    def based_on_execution_id(self) -> str | None:
+    def predecessor(self) -> str | None:
         """The predecessor attempt this one resumes / reruns, if any."""
         ...
 
@@ -186,7 +170,7 @@ class RunContextLike(Protocol):
         """Whether this Execution's record asks the runtime to skip cache reads.
 
         Fixed on ``execution.json`` when the attempt is created
-        (``Run.create_execution(bypass_cache=...)`` / ``run.start(bypass_cache=...)``).
+        (``Run._create_execution(bypass_cache=...)`` / ``run.start(bypass_cache=...)``).
         The runtime ORs it with its own ``bypass_cache`` kwarg.
         """
         ...

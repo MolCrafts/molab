@@ -13,7 +13,7 @@ failures flush synchronously, ``running`` marks are coalesced, and a
 ``finally``-path :func:`.persistence.close_execution_document` guarantees the
 last write even when the engine raises. Resume is caller-driven via
 ``execute(seed_outputs=…)``; the seeds are verified against the
-``based_on_execution_id`` attempt's journal by the one seed gate.
+predecessor attempt's journal by the one seed gate.
 
 Each ``CompiledWorkflow`` carries a frozen
 :class:`~molab.workflow._engine.plan.ExecutionPlan` (see
@@ -157,21 +157,6 @@ async def _run_compiled(
     return state
 
 
-def _resolve_run_dir(
-    run_context: RunContextLike | None, explicit_run_dir: str | Path | None
-) -> Path | None:
-    """Pick the run directory: explicit ``run_dir=`` wins, else duck-type
-    ``run_context.run_dir``."""
-    if explicit_run_dir is not None:
-        return Path(explicit_run_dir)
-    if run_context is None:
-        return None
-    run_dir = getattr(run_context, "run_dir", None)
-    if run_dir is not None:
-        return Path(run_dir)
-    return None
-
-
 def _get_run_id(run_context: RunContextLike | None) -> str | None:
     """Extract a stable run identifier from a duck-typed run_context."""
     if run_context is None:
@@ -184,7 +169,7 @@ def _get_run_id(run_context: RunContextLike | None) -> str | None:
 
 #: ``TypeError`` message for a ``run_context`` that does not name its attempt.
 _CONTEXT_CONTRACT = (
-    "run_context must provide id / execution_dir / based_on_execution_id "
+    "run_context must provide id / execution_dir / predecessor "
     "(RunContextLike); open one with run.start()"
 )
 
@@ -198,7 +183,6 @@ def _read_context(
     run_context: RunContextLike | None,
     *,
     execution_id: str | None,
-    run_dir: str | Path | None,
 ) -> tuple[str | None, Path | None, str | None]:
     """Read the attempt a ``run_context`` names: ``(id, execution_dir, based_on)``.
 
@@ -207,18 +191,18 @@ def _read_context(
 
     Raises:
         TypeError: *run_context* lacks ``id`` / ``execution_dir`` /
-            ``based_on_execution_id``.
-        ValueError: ``run_dir=`` or ``execution_id=`` without a
-            *run_context*, or an ``execution_id=`` that is not the context's.
+            ``predecessor``.
+        ValueError: ``execution_id=`` without a *run_context*, or an
+            ``execution_id=`` that is not the context's.
     """
     if run_context is None:
-        if run_dir is not None or execution_id is not None:
+        if execution_id is not None:
             raise ValueError(_NO_CONTEXT)
         return None, None, None
     try:
         context_id = run_context.id
         execution_dir = Path(run_context.execution_dir)
-        based_on = run_context.based_on_execution_id
+        based_on = run_context.predecessor
     except AttributeError as exc:
         raise TypeError(_CONTEXT_CONTRACT) from exc
     if execution_id is not None and execution_id != context_id:
@@ -244,8 +228,8 @@ def _record_run_failure(
     the failure even though no exception reached it.
 
     ``traceback_text`` forwards the formatted stack of the swallowed task
-    exception so the workspace can land a REAL traceback in
-    ``executions/<exec_id>/error.txt`` (not a placeholder note).
+    exception so the workspace can record it on the Execution record's
+    ``error`` (not a placeholder note).
     """
     mark_failed = getattr(run_context, "mark_failed", None)
     if callable(mark_failed):
@@ -320,7 +304,6 @@ class WorkflowRuntime:
         compiled: CompiledWorkflow,
         *,
         run_context: RunContextLike | None,
-        run_dir: Path | None,
         execution_id: str | None,
         config: JSONMapping | None,
         journal_dir: Path | None = None,
@@ -365,8 +348,6 @@ class WorkflowRuntime:
             run_context=run_context,
             config=effective_config,
             user_deps=deps,
-            remote_executor=None,
-            run_dir=run_dir,
             execution_id=execution_id,
             journal_dir=journal_dir,
             registration_by_name=registration_by_name,
@@ -431,7 +412,6 @@ class WorkflowRuntime:
         compiled: CompiledWorkflow,
         *,
         run_context: RunContextLike | None = None,
-        run_dir: str | Path | None = None,
         config: JSONMapping | None = None,
         deps: UserDeps = None,
         execution_id: str | None = None,
@@ -465,20 +445,18 @@ class WorkflowRuntime:
 
         **Context contract.** The ``run_context`` names the attempt: the
         runtime reads its ``id``, ``execution_dir`` and
-        ``based_on_execution_id`` and composes no path of its own. The node
-        journal is written to ``run_context.execution_dir`` (when ``persist``
-        is on); a bare run (no ``run_context``) writes no journal and reports
-        ``execution_id`` ``None``. Non-empty ``seed_outputs`` are verified
-        against the ``based_on_execution_id`` attempt's journal by the one
-        seed gate (transitive: a changed upstream drops every seed downstream
-        of it); with no predecessor, or no predecessor journal, they pass
-        unchanged.
+        ``predecessor`` and composes no path of its own. The node
+        journal's location comes only from ``run_context.execution_dir``
+        (when ``persist`` is on); a bare run (no ``run_context``) writes no
+        journal and reports ``execution_id`` ``None``. Non-empty
+        ``seed_outputs`` are verified against the predecessor
+        attempt's journal by the one seed gate (transitive: a changed
+        upstream drops every seed downstream of it); with no predecessor, or
+        no predecessor journal, they pass unchanged.
 
         Args:
             compiled: The frozen workflow to run.
             run_context: The open attempt (``with run.start() as ctx``).
-            run_dir: Accepted beside a ``run_context`` for signature
-                compatibility only; it does not locate the journal.
             execution_id: Optional; when given it must equal
                 ``run_context.id``. The runtime never mints an id.
             bypass_cache: Skip cache READS for this execution (the
@@ -493,20 +471,19 @@ class WorkflowRuntime:
 
         Raises:
             TypeError: ``run_context`` lacks ``id``, ``execution_dir`` or
-                ``based_on_execution_id``.
-            ValueError: ``run_dir=`` or ``execution_id=`` is given without a
-                ``run_context``; ``execution_id=`` differs from
-                ``run_context.id``; or ``seed_outputs`` names unknown tasks.
-                Raised before any IO, so nothing is written.
+                ``predecessor``.
+            ValueError: ``execution_id=`` is given without a ``run_context``;
+                ``execution_id=`` differs from ``run_context.id``; or
+                ``seed_outputs`` names unknown tasks. Raised before any IO,
+                so nothing is written.
         """
 
         # Validate seed_outputs FAIL-FAST before any IO / scheduling work.
         state = self._build_initial_state(compiled, seed_outputs)
 
         execution_id, execution_dir, based_on = _read_context(
-            run_context, execution_id=execution_id, run_dir=run_dir
+            run_context, execution_id=execution_id
         )
-        resolved_run_dir = _resolve_run_dir(run_context, run_dir)
         run_id = _get_run_id(run_context)
         # The Execution record carries the cache-bypass request; an explicit
         # kwarg still ORs in.
@@ -546,7 +523,6 @@ class WorkflowRuntime:
             workflow_deps = self._build_deps(
                 compiled,
                 run_context=run_context,
-                run_dir=resolved_run_dir,
                 # ``deps.execution_id`` names the attempt for the cache
                 # manifest; a persistence-off (nested) run reads none.
                 execution_id=execution_id if persist else None,
@@ -597,10 +573,11 @@ class WorkflowRuntime:
             logger.exception(f"Workflow {compiled.name!r} execution failed")
             # Carry the exception TYPE alongside the message ("ZeroDivisionError:
             # division by zero"), matching the task-level record engine.py writes,
-            # so the workspace can persist a typed ErrorInfo instead of a bare
-            # message with no type. The FULL formatted traceback rides along so
-            # the run's error.txt holds the real stack (the exception itself is
-            # swallowed here — this is its last chance to be captured).
+            # so the workspace can persist it on the Execution record's
+            # ``error`` instead of a bare message with no type. The formatted
+            # traceback rides along so that record holds the real stack (the
+            # exception itself is swallowed here — this is its last chance to
+            # be captured).
             error_text = f"{type(exc).__name__}: {exc}"
             tb_text = "".join(traceback.format_exception(exc))
             if run_context is not None:
@@ -636,7 +613,6 @@ class WorkflowRuntime:
         compiled: CompiledWorkflow,
         *,
         run_context: RunContextLike | None = None,
-        run_dir: str | Path | None = None,
         config: JSONMapping | None = None,
         deps: UserDeps = None,
         execution_id: str | None = None,
@@ -647,14 +623,13 @@ class WorkflowRuntime:
         """Launch workflow as background asyncio task.
 
         See :meth:`execute` for ``seed_outputs`` semantics, the
-        ``run_context`` / ``run_dir`` / ``execution_id`` contract, the journal
-        location and the seed gate; the same fail-fast validation applies
-        before scheduling the background task.
+        ``run_context`` / ``execution_id`` contract, the journal location
+        (only ``run_context.execution_dir``) and the seed gate; the same
+        fail-fast validation applies before scheduling the background task.
 
         Args:
             compiled: The frozen workflow to run.
             run_context: The open attempt (``with run.start() as ctx``).
-            run_dir: Signature compatibility only beside a ``run_context``.
             execution_id: Optional; must equal ``run_context.id``.
             bypass_cache: Skip cache READS (results are still written back).
                 Effective when this kwarg is true OR the Execution record
@@ -666,20 +641,16 @@ class WorkflowRuntime:
 
         Raises:
             TypeError: ``run_context`` lacks ``id``, ``execution_dir`` or
-                ``based_on_execution_id``.
-            ValueError: ``run_dir=`` / ``execution_id=`` without a
-                ``run_context``, an ``execution_id=`` that is not the
-                context's, or ``seed_outputs`` naming unknown tasks — raised
-                synchronously, before any IO and before the background task
-                is created.
+                ``predecessor``.
+            ValueError: ``execution_id=`` without a ``run_context``, an
+                ``execution_id=`` that is not the context's, or
+                ``seed_outputs`` naming unknown tasks — raised synchronously,
+                before any IO and before the background task is created.
         """
         # Fail-fast on bad seeds so the caller observes the ValueError
         # synchronously, not via an awaited handle.
         seed_state = self._build_initial_state(compiled, seed_outputs)
-        execution_id, journal_dir, based_on = _read_context(
-            run_context, execution_id=execution_id, run_dir=run_dir
-        )
-        resolved_run_dir = _resolve_run_dir(run_context, run_dir)
+        execution_id, journal_dir, based_on = _read_context(run_context, execution_id=execution_id)
         run_id = _get_run_id(run_context)
         if run_context is not None:
             bypass_cache = bypass_cache or run_context.bypass_cache
@@ -711,7 +682,7 @@ class WorkflowRuntime:
 
         handle = _GraphWorkflowExecution(
             execution_id=execution_id,
-            workflow_id=compiled.workflow_id,
+            workflow_digest=compiled.workflow_digest,
             run_id=run_id,
         )
 
@@ -722,7 +693,6 @@ class WorkflowRuntime:
                 workflow_deps = self._build_deps(
                     compiled,
                     run_context=run_context,
-                    run_dir=resolved_run_dir,
                     execution_id=execution_id,
                     journal_dir=journal_dir,
                     config=config,
@@ -815,11 +785,13 @@ class WorkflowRuntime:
                 compiled, run_context=run_ctx, config=config, deps=deps, cache=cache
             )
         if result.status != "succeeded":
-            err = run.metadata.error
+            err = run.execution(run_ctx.id).error
+            err_type = err.get("type") if isinstance(err, dict) else None
+            err_message = err.get("message") if isinstance(err, dict) else None
             err_msg = (
                 f"workflow {compiled.name!r} ended with status {result.status!r}: "
-                f"{err.type}: {err.message}"
-                if err is not None
+                f"{err_type}: {err_message}"
+                if err_type is not None and err_message is not None
                 else f"workflow {compiled.name!r} ended with status {result.status!r}"
             )
             raise RuntimeError(err_msg)
@@ -829,10 +801,10 @@ class WorkflowRuntime:
 class _GraphWorkflowExecution(WorkflowExecution):
     """Concrete WorkflowExecution returned by start()."""
 
-    def __init__(self, execution_id: str | None, workflow_id: str, run_id: str | None) -> None:
+    def __init__(self, execution_id: str | None, workflow_digest: str, run_id: str | None) -> None:
         super().__init__(
             execution_id=execution_id,
-            workflow_id=workflow_id,
+            workflow_digest=workflow_digest,
             run_id=run_id,
         )
         self._result: WorkflowResult | None = None

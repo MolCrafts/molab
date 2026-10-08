@@ -38,7 +38,7 @@ async def main() -> None:
     compiled = WorkflowCompiler().compile(wf)
     result = await WorkflowRuntime().execute(compiled)
 
-    print(f"workflow_id: {compiled.workflow_id}")
+    print(f"workflow_digest: {compiled.workflow_digest}")
     print(f"status:      {result.status}")
     print(f"outputs:     {result.outputs}")
 

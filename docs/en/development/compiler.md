@@ -15,14 +15,14 @@ wf.control / wf.branch / wf.loop / wf.parallel    →  control-flow declarations
                   (validation + snapshotting + structural lowering)
                               │
                               ▼
-        CompiledWorkflow (frozen: name, workflow_id, version,
+        CompiledWorkflow (frozen: name, workflow_digest, version,
                           tasks, snapshots, .graph)
                               │
                               ▼
         WorkflowRuntime().execute(compiled, ...)   →  WorkflowResult
 ```
 
-One compilation boundary: `WorkflowCompiler().compile(wf)` validates the declarations, computes the `workflow_id`, snapshots every task, and lowers the whole thing to a frozen, molab-owned `ExecutionPlan` stored on the artifact as `.graph`. The runtime never recompiles — it builds fresh per-execution state/deps and drives the prebuilt plan through the structural engine (`engine.run_plan`).
+One compilation boundary: `WorkflowCompiler().compile(wf)` validates the declarations, computes the `workflow_digest`, snapshots every task, and lowers the whole thing to a frozen, molab-owned `ExecutionPlan` stored on the artifact as `.graph`. The runtime never recompiles — it builds fresh per-execution state/deps and drives the prebuilt plan through the structural engine (`engine.run_plan`).
 
 ## Source Layout
 
@@ -50,14 +50,14 @@ src/molab/workflow/
     ├── node_params.py     # dependent_params resolution
     ├── runtime.py         # WorkflowRuntime (execute / start / run_on)
     ├── state.py           # WorkflowState, WorkflowDeps
-    └── persistence.py     # coalescing workflow.json writer + read_node_outputs (resume seed source)
+    └── persistence.py     # coalescing workflow.json writer + read_journal (resume seed source)
 ```
 
 The outer API (`molab.workflow.__init__`) is the public boundary. Anything under `_engine/` is an implementation detail and can break between releases.
 
 ## Deterministic Workflow ID
 
-`workflow_id` is a 16-hex-character `sha256` over the workflow `name` plus, for each task, `name + type(fn_or_class).__qualname__ + sorted(depends_on)` (see `_helpers._stable_workflow_id`):
+`workflow_digest` is a 16-hex-character `sha256` over the workflow `name` plus, for each task, `name + type(fn_or_class).__qualname__ + sorted(depends_on)` (see `_helpers.compute_workflow_digest`):
 
 ```python
 from molab.workflow import Workflow, WorkflowCompiler
@@ -71,7 +71,7 @@ async def fetch() -> int:
 
 
 compiled = WorkflowCompiler().compile(wf)
-print(compiled.workflow_id)   # e.g. "c3f9e2b8a7d4e1f0"
+print(compiled.workflow_digest)   # e.g. "c3f9e2b8a7d4e1f0"
 ```
 
 Properties:
@@ -80,7 +80,7 @@ Properties:
 - **Topology-scoped** — changing only the *implementation* of a task keeps the ID stable; changing edges or class identity changes it.
 - **Cheap** — no source hashing happens at this level; that's `TaskSnapshot`'s job.
 
-Pair `workflow_id` with `config_hash` on `RunMetadata` and the experiment's persisted graph IR when you need to group runs that share a topology + source version.
+Pair `workflow_digest` with `config_hash` on `RunMetadata` and the experiment's persisted graph IR when you need to group runs that share a topology + source version.
 
 ## Validation and Lowering
 
@@ -118,7 +118,7 @@ handle = await runtime.start(compiled)            # background, returns Workflow
 result = await runtime.run_on(compiled, experiment, parameters=...)  # fresh Run + execute
 ```
 
-`seed_outputs` pre-populates already-known task outputs (the caller-driven resume path — seeded nodes skip their body but still route); unknown seed names fail fast. Resume seeds come from `read_node_outputs(run_dir, execution_id)`, the persisted node-level state of a prior execution.
+`seed_outputs` pre-populates already-known task outputs (the caller-driven resume path — seeded nodes skip their body but still route); unknown seed names fail fast. Resume seeds come from `read_journal(run_dir, execution_id)`, the persisted node-level state of a prior execution.
 
 Per-node status persistence is observability state, not engine coordination: during a live execution the runtime opens an in-memory execution document (`persistence.open_execution_document`), per-task transitions mutate it and flush within a bounded-staleness window (`WORKFLOW_JSON_MAX_STALENESS_S`), while task failures, terminal states, and the runtime's `finally`-path `close_execution_document` flush synchronously. Nothing in scheduling ever waits on that timer.
 
@@ -154,19 +154,19 @@ cache = Caching(store=FileCacheStore("./cache"), max_entries=1000)
 result = await WorkflowRuntime().execute(compiled, cache=cache)
 ```
 
-For callers with no run, use `FileCacheStore(path)` or a plain `store_dir=...` argument. The user-home `~/.molab/cache/` shortcut from earlier Molab versions is gone — execute writes `run_dir/cache`, never a workspace-root `cache/`.
+For callers with no run, use `FileCacheStore(path)` or a plain `store_dir=...` argument. Execute writes `.molab/runs/<run-id>/cache/`, never a workspace-root cache and never a user-home cache. The authoring `remote=` kwarg is removed; remote execution goes through the target and the scheduler.
 
 ## What the Compiler Does Not Do
 
-- **It does not serialize executable workflows.** There is no `CompiledWorkflow.load(...)` path; workflows are authored in Python and re-imported on each execution. `to_graph_ir()` / `to_ir()` are one-way exports for the UI, server, and provenance — use them plus `workflow_id` and the experiment's source snapshot for traceability.
-- **It does not allocate workers or pick execution backends.** Per-task `remote=` hints are carried through but interpreted by the runtime / plugins, not the compiler.
+- **It does not serialize executable workflows.** There is no `CompiledWorkflow.load(...)` path; workflows are authored in Python and re-imported on each execution. `to_graph_ir()` / `to_ir()` are one-way exports for the UI, server, and provenance — use them plus `workflow_digest` and the experiment's source snapshot for traceability.
+- **It does not allocate workers or pick execution backends.** The authoring `remote=` kwarg is removed; the scheduler path owns remote execution.
 - **It does not infer data contracts.** `depends_on` declares both ordering and the data interface — the declared upstreams' outputs are bound to the body's named parameters (keyed by upstream task name) — but the *types* flowing through are your responsibility (use generics on `Task` / `TaskContext` if you want static checking). Optional declared contracts live in `contract.py` (`validate_workflow_contract`).
 
 ## Extension Points
 
 Keep the boundaries:
 
-- **New authoring surface** → add to `compiler.py`; make sure `_stable_workflow_id` still produces a stable hash.
+- **New authoring surface** → add to `compiler.py`; make sure `compute_workflow_digest` still produces a stable hash.
 - **Different runtime** → a swap-in runtime must consume a `CompiledWorkflow` and honor the `execute` / `start` signatures; `WorkflowRuntime` is the only one we ship.
 - **New cache strategy** → implement a `CacheStore`, or compose `Caching` with a different storage backend; don't teach the lowering about caching directly.
 - **New snapshot semantics** → change `TaskSnapshot`; bump `CACHE_FORMAT_VERSION` in `cache.py` so stale cache entries are invalidated.
@@ -175,7 +175,7 @@ All other public behaviour should route through `molab.workflow`'s re-exports.
 
 ## Pointer to the Implementation
 
-- `molab.workflow._helpers._stable_workflow_id` — workflow ID hash
+- `molab.workflow._helpers.compute_workflow_digest` — workflow ID hash
 - `molab.workflow.compiler.compile_registrations` — validation + snapshotting + lowering entry
 - `molab.workflow._engine.compiler.WorkflowGraphCompiler` — topology → `ExecutionPlan`
 - `molab.workflow._engine.plan.ExecutionPlan` — the frozen lowering artifact

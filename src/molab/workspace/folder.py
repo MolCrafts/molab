@@ -4,7 +4,7 @@ Introduces ``Folder``: a plain Python class providing the contract every
 directory under a workspace satisfies — lazy mkdir, atomic JSON, id /
 name / kind validation, parent pointer, generic five-verb CRUD
 (``add_folder`` / ``get_folder`` / ``has_folder`` / ``list_folders`` /
-``remove_folder``), one plural JSON children-index per class, lifecycle
+``remove_folder``), the directory tree as the only child index, lifecycle
 metadata, and delete / move operations.
 """
 
@@ -93,10 +93,8 @@ def _folder_metadata_from_marker(
 
 _CORE_ENTITY_JSON = ("workspace.json", "project.json", "experiment.json", "run.json")
 # The four levels of the tree mark their own directories: each carries a
-# ``type`` and is the level's authoritative record, so ``molab.knowledge``
-# reads them as Concept heads instead of demanding a second ``meta.json``. It
-# learns the filenames from :func:`entity_json_names`; the workspace declares
-# them here and never reaches the other way.
+# ``type`` and is the level's authoritative record. The filenames are
+# declared here.
 #: Entity filename → Folder subclass, filled by :func:`register_entity_class`.
 #: The directory itself says what it is; no ``type`` field is needed.
 _ENTITY_FILE_TO_CLS: dict[str, type[Folder]] = {}
@@ -131,11 +129,7 @@ def class_for_entity_file(name: str) -> type[Folder] | None:
 def entity_json_names() -> tuple[str, ...]:
     """Every registered entity filename, the four core levels first.
 
-    The workspace's one declaration of "this directory is an entity of mine":
-    ``_load_concept_marker_dict`` reads them, and ``molab.knowledge`` calls it
-    to learn which filenames mark a Concept directory in a workspace
-    (:func:`molab.knowledge.concept.register_host_markers`) — the workspace
-    never reaches back the other way.
+    The workspace's one declaration of "this directory is an entity of mine".
     """
     extra = tuple(name for name in sorted(_ENTITY_FILE_TO_CLS) if name not in _CORE_ENTITY_JSON)
     return _CORE_ENTITY_JSON + extra
@@ -222,9 +216,9 @@ def _validate_target_registered(workspace: object, target: str | None) -> None:
 class Folder:
     """A location on a workspace disk.
 
-    The disk itself is :attr:`Workspace.fs` (a :class:`FileSystem`: local,
+    The disk itself is :attr:`Folder.fs` (a :class:`FileSystem`: local,
     remote, or cached). A Folder does not own a disk — it resolves I/O
-    through the workspace it is attached to. User byte writes go through
+    by walking to the root Folder. User byte writes go through
     :attr:`files` (a :class:`FileStore` rooted here).
 
     Carries a ``parent`` pointer, lazy materialization, atomic JSON IO,
@@ -297,6 +291,17 @@ class Folder:
         return LocalFileSystem()
 
     @property
+    def fs(self) -> FileSystem:
+        """The disk this location lives on; resolved by walking to the root Folder; the Folder does not own it.
+
+        Read-only: assigning to ``fs`` raises ``AttributeError``.
+
+        Returns:
+            The same filesystem object :meth:`_disk` returns.
+        """
+        return self._disk()
+
+    @property
     def files(self) -> FileStore:
         """Byte-exit rooted at this folder. Does not own the disk."""
         from .file_store import FileStore
@@ -351,7 +356,7 @@ class Folder:
         self._disk().atomic_write_json(fpath, data)
         return fpath
 
-    # ── OKF meta.json (sole concept identity; type → knowledge registry) ──
+    # ── OKF meta.json (sole concept identity) ──
 
     def write_meta(self) -> str:
         """Write the OKF ``meta.json`` concept identity (``type`` = this kind).
@@ -382,7 +387,7 @@ class Folder:
         raw = _load_concept_marker_dict(self._disk(), self.resolve())
         return cast("dict[str, JSONValue]", raw) if raw is not None else {}
 
-    # ── OKF narrative + markdown-link knowledge graph ─────────────────────
+    # ── OKF narrative ─────────────────────────────────────────────────────
 
     def read_index(self) -> str:
         """Return the OKF ``index.md`` narrative, or ``""`` if absent."""
@@ -610,8 +615,16 @@ class Folder:
                 if isinstance(loaded, cls):
                     self._children_cache[loaded._name] = loaded
                     return loaded
+        return self._child_by_id(name, cls=cls)
+
+    def _child_by_id(self, entity_id: str, *, cls: type[F]) -> F | None:
+        """The child of type *cls* whose entity id is *entity_id*, if any.
+
+        The one id lookup inside the workspace layer. Directory names and
+        display names stay on :meth:`_find_folder`.
+        """
         for child in self.list_folders(cls=cls):
-            if child.metadata.id == name:
+            if child.metadata.id == entity_id:
                 return child
         return None
 
@@ -681,8 +694,8 @@ class Folder:
         Called by :meth:`move_to` after the folder identity is updated and
         before any :meth:`resolve`-dependent write: entity subclasses resolve
         their directory from the entity id, so a stale entity id would land
-        :meth:`write_meta` in a freshly created old-id dir and key the rebuilt
-        children index by the old id. Default: no entity metadata, no-op.
+        :meth:`write_meta` in a freshly created old-id dir and key the in-memory
+        child cache by the old id. Default: no entity metadata, no-op.
         """
 
     def _move_target_id(self, new_name: str | None) -> str:
@@ -711,8 +724,8 @@ class Folder:
                 "(it uses OS-level shutil.move); remote-backed folders cannot be moved."
             )
         target_id = self._move_target_id(new_name)
-        # Honor the child class's container layout (``runs/run-<id>``,
-        # ``projects/<id>``, …) via the same ``child_dir`` hook that mounting
+        # Honor the child class's container layout (``runs/<slug>``,
+        # ``projects/<slug>``, …) via the same ``child_dir`` hook that mounting
         # uses — a naive ``new_parent.path()/id`` join would strand the moved
         # folder outside its container and hide it from ``list_folders``.
         target_dir = Path(type(self).child_dir(new_parent, target_id))
@@ -754,9 +767,7 @@ def concept_from_dir(child_dir: PathArg, parent: Folder) -> Folder:
     directory carries that :func:`class_for_entity_file` knows (the four tree
     levels, each registered by its own module) picks the subclass; a directory
     that carries only a ``meta.json`` rebuilds as the bare :class:`Folder`. A
-    directory with no record at all is not a Folder — including a Knowledge
-    document (``finding.json`` + ``index.md``, which carries no ``meta.json``)
-    — and raises ``TypeError``.
+    directory with no record at all is not a Folder and raises ``TypeError``.
     """
     fs = parent._disk()
     try:

@@ -136,6 +136,8 @@ export interface ProjectSummary {
   workspaceKey?: string;
   /** Server-reported count when list is shallow (experiments not loaded yet). */
   experimentCount?: number | null;
+  /** Server-composed molab reference. */
+  ref?: string;
 }
 
 export interface ExperimentSummary {
@@ -154,6 +156,11 @@ export interface ExperimentSummary {
   runCount?: number | null;
   /** Served-workspace key, stamped at expand time. */
   workspaceKey?: string;
+  workflowKind?: "code" | "document" | null;
+  /** Code-workflow locator. Never fetched; absent on document experiments. */
+  workflowEntrypoint?: string | null;
+  /** Server-composed molab reference. */
+  ref?: string;
 }
 
 export interface ExecutionRecordSummary {
@@ -191,6 +198,8 @@ export interface RunSummary {
   finishedAt: string | null;
   executionHistory: ExecutionRecordSummary[];
   errorMessage: string | null;
+  /** Canonical run reference from the server. Absent on a fixture that predates it. */
+  ref?: string;
   /** Served-workspace key, stamped at expand time. */
   workspaceKey?: string;
 }

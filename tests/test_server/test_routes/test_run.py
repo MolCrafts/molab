@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import inspect
+import json
 import re
 from collections.abc import Callable, Iterator
 from pathlib import Path
@@ -17,7 +18,7 @@ from molab.server.routes import run as run_routes
 from molab.server.schemas.requests import RunHarvestRequest
 from molab.workflow import Workflow, WorkflowCompiler
 from molab.workspace import Experiment, Run, Workspace
-from molab.workspace.domain import Artifact
+from molab.workspace.domain import Artifact, ExecutionMode
 from molab.workspace.models import ComputeTarget
 from molab.workspace.targets import add_target
 
@@ -137,6 +138,18 @@ class TestHarvestRunRoute:
         assert response.status_code == 422
         assert "is not a harvest target" in str(response.json())
 
+    def test_note_is_not_a_harvest_target(
+        self, served: ServedFactory, terminal_run: RunFixture
+    ) -> None:
+        ws, exp, run = terminal_run
+        with served(ws) as client:
+            response = client.post(
+                f"{_run_url(exp, run)}/harvest",
+                json={"cls": "Note", "narrative": "a note is not a harvest"},
+            )
+        assert response.status_code == 422
+        assert "is not a harvest target" in str(response.json())
+
     def test_finding_harvests(self, served: ServedFactory, terminal_run: RunFixture) -> None:
         ws, exp, run = terminal_run
         with served(ws) as client:
@@ -154,7 +167,7 @@ class TestHarvestRunRouteRedirect:
     def test_harvest_imports_knowledge_parse(self) -> None:
         src = inspect.getsource(run_routes.harvest_run_route)
         assert "molab.knowledge" in src
-        assert "harvest_run(" in src
+        assert ".harvest(" in src
         assert "molab.workspace.knowledge" not in src
         assert "run.harvest(" not in src
 
@@ -241,6 +254,35 @@ class TestCreateExecution:
         assert body["id"] == "e02"
         assert body["basedOnExecutionId"] == "e01"
 
+    def test_bypass_cache_is_recorded(self, served: ServedFactory, failed_run: RunFixture) -> None:
+        ws, exp, run = failed_run
+        with served(ws) as client:
+            response = client.post(
+                f"{_run_url(exp, run)}/executions",
+                json={"mode": "rerun", "basedOnExecutionId": "e01", "bypassCache": True},
+            )
+        assert response.status_code == 201, response.text
+        assert response.json()["id"] == "e02"
+        assert run.execution("e02").bypass_cache is True
+
+    def test_bypass_cache_defaults_false(
+        self, served: ServedFactory, failed_run: RunFixture
+    ) -> None:
+        ws, exp, run = failed_run
+        with served(ws) as client:
+            response = client.post(
+                f"{_run_url(exp, run)}/executions",
+                json={"mode": "rerun", "basedOnExecutionId": "e01"},
+            )
+        assert response.status_code == 201, response.text
+        assert run.execution("e02").bypass_cache is False
+
+    def test_openapi_declares_bypass_cache(self) -> None:
+        from molab.server.app import create_app
+
+        schema = create_app().openapi()["components"]["schemas"]["ExecutionAttemptCreateRequest"]
+        assert schema["properties"]["bypassCache"]["default"] is False
+
     def test_retry_request_is_stored_as_rerun(
         self, served: ServedFactory, failed_run: RunFixture
     ) -> None:
@@ -315,14 +357,6 @@ class TestCreateExecution:
         assert response.status_code == 422, response.text
         assert run.executions == []
 
-    @pytest.mark.xfail(
-        strict=True,
-        raises=AssertionError,
-        reason=(
-            "arch-own-04: POST …/executions dispatch=true — a UI-authored workflow "
-            "document is a dispatchable workflow; SubmitHandler receives the queued id"
-        ),
-    )
     def test_dispatch_accepts_ui_authored_document(
         self,
         served: ServedFactory,
@@ -347,11 +381,77 @@ class TestCreateExecution:
         assert [e.status.value for e in run.executions] == ["queued"]
 
 
-class TestDispatchToMolq:
-    """``_dispatch_to_molq``: a run is dispatchable only through its experiment's entrypoint."""
+_CONSTANT_ADD = {
+    "name": "constant_add",
+    "task_configs": [
+        {
+            "task_id": "a",
+            "task_type": "core.constant",
+            "config": {"value": 2},
+            "status": "pending",
+        },
+        {
+            "task_id": "b",
+            "task_type": "core.constant",
+            "config": {"value": 3},
+            "status": "pending",
+        },
+        {"task_id": "c", "task_type": "core.add", "config": {}, "status": "pending"},
+    ],
+    "links": [
+        {"source": "a", "target": "c", "mapping": {}, "status": "pending"},
+        {"source": "b", "target": "c", "mapping": {}, "status": "pending"},
+    ],
+    "metadata": {"label": None, "description": None, "tags": [], "custom": {}},
+}
 
-    def test_unbound_experiment_is_422_naming_the_entrypoint(self, fresh_run: RunFixture) -> None:
+
+class _MolqRecorder:
+    """Stands in for ``SubmitHandler``: records one call and submits nothing."""
+
+    calls: ClassVar[list[str | None]] = []
+
+    def __init__(self, **_kwargs: object) -> None:
+        pass
+
+    def __call__(
+        self,
+        _script: object,
+        _run: Run,
+        _experiment: Experiment,
+        _project: object,
+        *,
+        execution_id: str | None = None,
+    ) -> None:
+        type(self).calls.append(execution_id)
+
+
+class TestDispatchToMolq:
+    """``_dispatch_to_molq`` asks only ``can_recover_workflow``."""
+
+    def test_document_bound_experiment_submits_once(
+        self, fresh_run: RunFixture, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        _ws, exp, run = fresh_run
+        exp.bind_workflow("document", document=_CONSTANT_ADD)
+        _MolqRecorder.calls = []
+        monkeypatch.setattr(run_routes, "SubmitHandler", _MolqRecorder)
+        target = ComputeTarget(name="hpc", host="me@h", scheduler="slurm", scratch_root="/scratch")
+
+        run_routes._dispatch_to_molq(target, run)
+
+        assert _MolqRecorder.calls == [None]
+
+    def test_unbound_snapshot_is_422_naming_migrate(
+        self, fresh_run: RunFixture, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         _ws, _exp, run = fresh_run
+        path = Path(run.run_dir) / "run.json"
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload["workflow_snapshot"] = {"entrypoint": "/x.py:wf"}
+        path.write_text(json.dumps(payload), encoding="utf-8")
+        _MolqRecorder.calls = []
+        monkeypatch.setattr(run_routes, "SubmitHandler", _MolqRecorder)
         target = ComputeTarget(name="hpc", host="me@h", scheduler="slurm", scratch_root="/scratch")
 
         with pytest.raises(HTTPException) as excinfo:
@@ -359,10 +459,9 @@ class TestDispatchToMolq:
 
         assert excinfo.value.status_code == 422
         detail = str(excinfo.value.detail)
-        assert "workflow entrypoint" in detail
-        assert "Experiment.define" in detail
+        assert "molab migrate workflow-kind" in detail
         assert "molab plan" not in detail
-        assert "generated" not in detail
+        assert _MolqRecorder.calls == []
 
 
 class TestGetExecutionOutputs:
@@ -413,14 +512,6 @@ class TestGetExecutionOutputs:
         assert "results.json" not in source
         assert "read_versioned_json" not in inspect.getsource(run_routes)
 
-    @pytest.mark.xfail(
-        strict=True,
-        raises=AssertionError,
-        reason=(
-            "arch-own-05: GET …/executions/{id}/outputs — artifacts are read from "
-            "execution.json, so the emitted artifact is listed"
-        ),
-    )
     def test_lists_emitted_artifacts(self, served: ServedFactory, fresh_run: RunFixture) -> None:
         ws, exp, run = fresh_run
         artifact = _emit_metrics(run)
@@ -429,18 +520,24 @@ class TestGetExecutionOutputs:
         assert response.status_code == 200, response.text
         assert [a["id"] for a in response.json()["artifacts"]] == [artifact.id]
 
+    def test_lists_task_products_once(self, served: ServedFactory, fresh_run: RunFixture) -> None:
+        """A task's ``out/<task>/`` files are listed; a registered artifact is not repeated."""
+        ws, exp, run = fresh_run
+        artifact = _emit_metrics(run)
+        task_dir = run.path / "executions" / "e01" / "out" / "figures"
+        task_dir.mkdir(parents=True)
+        (task_dir / "fig1.png").write_bytes(b"\x89PNG")
+        with served(ws) as client:
+            response = client.get(f"{_run_url(exp, run)}/executions/e01/outputs")
+        assert response.status_code == 200, response.text
+        listed = [node["relPath"] for node in response.json()["unregistered"]]
+        assert listed == ["out/figures/fig1.png"]
+        assert artifact.path not in listed
+
 
 class TestDownloadArtifactContent:
     """``download_artifact_content``: stream one emitted artifact's bytes."""
 
-    @pytest.mark.xfail(
-        strict=True,
-        raises=AssertionError,
-        reason=(
-            "arch-own-05: GET …/artifacts/{id}/content — an artifact recorded in "
-            "execution.json streams its bytes"
-        ),
-    )
     def test_streams_emitted_artifact(self, served: ServedFactory, fresh_run: RunFixture) -> None:
         ws, exp, run = fresh_run
         artifact = _emit_metrics(run)
@@ -452,6 +549,24 @@ class TestDownloadArtifactContent:
         on_disk = Path(run.run_dir) / "executions" / "e01" / "artifacts" / "metrics.json"
         assert response.content == on_disk.read_bytes()
 
+    def test_unknown_artifact_is_404(self, served: ServedFactory, fresh_run: RunFixture) -> None:
+        ws, exp, run = fresh_run
+        _emit_metrics(run)
+        with served(ws) as client:
+            response = client.get(f"{_run_url(exp, run)}/executions/e01/artifacts/missing/content")
+        assert response.status_code == 404
+
+    def test_foreign_attempt_is_404(self, served: ServedFactory, fresh_run: RunFixture) -> None:
+        ws, exp, run = fresh_run
+        artifact = _emit_metrics(run)
+        with run.start(mode=ExecutionMode.RERUN):
+            pass
+        with served(ws) as client:
+            response = client.get(
+                f"{_run_url(exp, run)}/executions/e02/artifacts/{artifact.id}/content"
+            )
+        assert response.status_code == 404
+
 
 class TestGetRunFiles:
     """``get_run_files``: the attempt tree, enriched from ``execution.json``."""
@@ -461,6 +576,24 @@ class TestGetRunFiles:
     ) -> None:
         ws, exp, run = fresh_run
         artifact = _emit_metrics(run)
+        with served(ws) as client:
+            response = client.get(f"{_run_url(exp, run)}/executions/e01/files")
+        assert response.status_code == 200, response.text
+        node = _find_node(response.json()["nodes"], "artifacts/metrics.json")
+        assert node is not None
+        assert node["assetId"] == artifact.id
+
+    def test_legacy_record_node_carries_artifact_id(
+        self, served: ServedFactory, fresh_run: RunFixture
+    ) -> None:
+        ws, exp, run = fresh_run
+        artifact = _emit_metrics(run)
+        state = run.execution_dir("e01") / "execution.json"
+        raw = json.loads(state.read_text(encoding="utf-8"))
+        raw["artifacts"][0]["path"] = (
+            (run.execution_dir("e01") / artifact.path).relative_to(Path(str(ws.root))).as_posix()
+        )
+        state.write_text(json.dumps(raw), encoding="utf-8")
         with served(ws) as client:
             response = client.get(f"{_run_url(exp, run)}/executions/e01/files")
         assert response.status_code == 200, response.text
@@ -487,6 +620,20 @@ class TestPromoteArtifact:
         assert body["version"]["sourceArtifactId"] == artifact.id
         assert body["version"]["digest"] == artifact.content.digest
         assert body["asset"]["versionCount"] == 1
+
+    def test_promote_returns_origin(self, served: ServedFactory, fresh_run: RunFixture) -> None:
+        ws, exp, run = fresh_run
+        artifact = _emit_metrics(run)
+        with served(ws) as client:
+            response = client.post(
+                f"{_run_url(exp, run)}/executions/e01/artifacts/{artifact.id}/promote",
+                json={},
+            )
+        assert response.status_code == 201, response.text
+        version = response.json()["version"]
+        assert version["originKind"] == "artifact"
+        assert version["originRef"].startswith("molab:experiment/")
+        assert version["sourceArtifactId"] == artifact.id
 
     def test_unknown_artifact_is_404(self, served: ServedFactory, fresh_run: RunFixture) -> None:
         ws, exp, run = fresh_run

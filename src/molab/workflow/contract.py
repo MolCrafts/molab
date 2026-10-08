@@ -140,7 +140,7 @@ class WorkflowContract(BaseModel):
 
     model_config = _FROZEN
 
-    workflow_id: str
+    workflow_digest: str
     task_io: tuple[TaskIO, ...] = ()
     validation_checks: tuple[ValidationCheck, ...] = ()
 

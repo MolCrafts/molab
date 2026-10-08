@@ -4,8 +4,10 @@ The workflow has four equivalent surfaces:
 
 - :class:`Workflow` — in-memory compiled object (the execution entry
   point).
-- **IR** — JSON-serializable ``dict`` matching ``schema/workflow.json``.
-  This is the wire format.
+- **IR** — JSON-serializable ``dict`` in the shape
+  ``WorkflowCodec.spec_to_ir`` emits and ``WorkflowCodec.ir_to_spec`` accepts.
+  This is the wire format. The document carries no identity; ``workflow_digest``
+  lives on the Execution and the journal header.
 - **Python script** — a runnable molab module that assigns the IR to a
   top-level ``WORKFLOW_IR`` literal followed by
   ``Workflow.from_dict(WORKFLOW_IR)``. Editable by humans; the IR
@@ -237,9 +239,13 @@ class WorkflowCodec:
         )
 
     def spec_to_ir(self, spec: CompiledWorkflow, *, strict: bool = True) -> JSONMapping:
-        """Serialize a :class:`Workflow` to the JSON IR shape (see ``schema/workflow.json``).
+        """Serialize a workflow to the JSON wire IR (the shape ``ir_to_spec`` accepts).
 
-        This is the authoritative :class:`Workflow` → IR body;
+        The wire IR is a function of the document alone. It carries no identity
+        key. ``workflow_digest`` folds task code and lives on the Execution and
+        the journal header, so re-saving an unchanged document stays byte-identical.
+
+        ``WorkflowCodec.spec_to_ir`` owns this wire-IR shape;
         :meth:`Workflow.to_dict` delegates here.
 
         ``strict`` (default ``True``) requires every task to carry a
@@ -309,7 +315,6 @@ class WorkflowCodec:
             "custom": {},
         }
         return {
-            "workflow_id": f"workflow_{spec.workflow_id[:8]}",
             "name": spec.name,
             "task_configs": task_configs,
             "links": links,

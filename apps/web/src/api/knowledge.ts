@@ -42,14 +42,14 @@ export const knowledgeApi = {
   editDoc: (path: string, body: string) => KnowledgeService.editDoc(path, { body }),
   updateDocMeta: (path: string, patch: { tags?: string[]; status?: string }) =>
     KnowledgeService.updateDocMeta(path, patch),
-  createDoc: (name: string, options: { parentPath?: string | null; body?: string } = {}) =>
+  createDoc: (name: string, options: { hostPath?: string | null; body?: string } = {}) =>
     KnowledgeService.createDoc({
       name,
-      parentPath: options.parentPath ?? null,
+      hostPath: options.hostPath ?? null,
       body: options.body ?? "",
     }),
   renameDoc: (path: string, name: string) => KnowledgeService.moveDoc(path, { name }),
-  moveDoc: (path: string, parentPath: string) => KnowledgeService.moveDoc(path, { parentPath }),
+  moveDoc: (path: string, hostPath: string) => KnowledgeService.moveDoc(path, { hostPath }),
   deleteDoc: async (path: string): Promise<void> => {
     await KnowledgeService.deleteDoc(path);
   },

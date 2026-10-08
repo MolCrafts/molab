@@ -7,10 +7,12 @@ owns one real attempt and all mutable/runtime state beneath it.
 from __future__ import annotations
 
 import contextlib
-from collections.abc import Iterator, Mapping
+import json
+from collections.abc import Iterator, Mapping, Sequence
 from datetime import datetime
+from os import PathLike
 from pathlib import Path  # local-FS path for RunContext (LLM/worker-local I/O)
-from typing import TYPE_CHECKING, ClassVar, Protocol, cast
+from typing import TYPE_CHECKING, Protocol, cast
 
 from mollog import get_logger
 
@@ -27,11 +29,10 @@ from .base import (
     _reconstruct,
 )
 from .errors import RunExistsError, RunNotFoundError
-from .execution_dirs import execution_dir_names
 from .folder import WORKSPACE_RUN_KIND, Folder, register_entity_class
 from .fs import PathArg
 from .models import FolderMetadata, RunMetadata, RunStatus
-from .naming import run_slug
+from .naming import RUN_CONTAINER, run_slug
 
 if TYPE_CHECKING:
     from .experiment import Experiment
@@ -42,6 +43,8 @@ if TYPE_CHECKING:
 from .domain import (
     ACTIVE_EXECUTION_STATUSES,
     FAILED_EXECUTION_STATUSES,
+    RESULT_SEMANTIC_TYPE,
+    Artifact,
     Execution,
     ExecutionMode,
     ExecutionStatus,
@@ -53,6 +56,7 @@ from .execution_context import (
     _creation_environment,
     _system_agent,
 )
+from .execution_dirs import JOBS, OUT
 from .execution_repository import _START_TIME_KEYS, ExecutionRepository
 from .history import MOLAB_DIR, AgentRef
 from .source_snapshot import SourceCaptureError, copy_sources, source_manifest
@@ -119,7 +123,8 @@ class RunWorkflowExecutor(Protocol):
         resume: bool = False,
         rerun: bool = False,
         fresh: bool = False,
-        checkpoint_artifact_id: str | None = None,
+        checkpoint: str | None = None,
+        execution_id: str | None = None,
     ) -> object: ...
 
     async def aexecute(
@@ -130,7 +135,8 @@ class RunWorkflowExecutor(Protocol):
         resume: bool = False,
         rerun: bool = False,
         fresh: bool = False,
-        checkpoint_artifact_id: str | None = None,
+        checkpoint: str | None = None,
+        execution_id: str | None = None,
     ) -> object: ...
 
     def read_outputs(self, run: Run, execution_id: str) -> dict[str, TaskOutput]:
@@ -246,14 +252,19 @@ def compute_run_definition_hash(
     return compute_definition_hash(definition)
 
 
+def _non_empty(directory: Path) -> bool:
+    """Whether *directory* exists and holds at least one entry (a cache hit leaves it empty)."""
+    return directory.is_dir() and any(directory.iterdir())
+
+
 @register_entity_class
 class Run(Folder):
     """Single execution instance within an experiment.
 
     Inherits :class:`Folder` (sub-spec 02): ``kind`` is
     :data:`WORKSPACE_RUN_KIND`, ``parent`` is the owning
-    :class:`Experiment`. The on-disk directory uses the ``run-<id>``
-    prefix preserved from the pre-refactor layout — see
+    :class:`Experiment`. The directory name is the run's parameters
+    (a digest of ``definition_hash`` when there are none) — see
     :meth:`child_dir`.
 
     Example::
@@ -267,17 +278,6 @@ class Run(Folder):
     _exists_error_cls = RunExistsError
     _not_found_error_cls = RunNotFoundError
 
-    #: Run-internal subtrees that never hold a Concept: the directories a run
-    #: *produces* (per-attempt state, job output, caches, logs), as opposed to
-    #: the knowledge mounted beside them. Read by
-    #: :func:`molab.knowledge.types.non_concept_subdirs` when a bundle walk is
-    #: standing in a run, so pruning is scoped by position, not by bare name —
-    #: a Note in a directory called ``logs`` elsewhere stays visible.
-    NON_CONCEPT_SUBDIRS: ClassVar[frozenset[str]] = execution_dir_names() | frozenset(
-        # legacy on-disk name: written by runs before D86 removed the agent layer; tolerated on read
-        {"executions", "assets", "cache", "logs", "harness", "alive"}
-    )
-
     def __init__(
         self,
         *,
@@ -287,11 +287,10 @@ class Run(Folder):
         experiment: Experiment | None = None,
         parameters: dict[str, JSONValue] | None = None,
         id: str | None = None,
-        workflow_snapshot: dict[str, JSONValue] | None = None,
         target: str | None = None,
         definition_hash: str | None = None,
         experiment_revision_id: str | None = None,
-        input_asset_ids: tuple[str, ...] = (),
+        inputs: tuple[str, ...] = (),
         _entity_metadata: RunMetadata | None = None,
     ) -> None:
         resolved_parent = parent if parent is not None else experiment
@@ -305,17 +304,16 @@ class Run(Folder):
             else RunMetadata(
                 id=id or generate_uuid7(),
                 parameters=parameters or {},
-                workflow_snapshot=workflow_snapshot,
                 target=target,
                 definition_hash=definition_hash
                 or compute_run_definition_hash(
                     experiment_revision_id=experiment_revision_id,
                     parameters=parameters,
-                    input_asset_ids=input_asset_ids,
+                    input_asset_ids=inputs,
                 ),
                 experiment_revision_id=experiment_revision_id
                 or resolved_parent.metadata.revision_id,
-                input_asset_ids=input_asset_ids,
+                input_asset_ids=inputs,
             )
         )
 
@@ -339,13 +337,15 @@ class Run(Folder):
     # ── Folder hooks ─────────────────────────────────────────────────────
 
     def resolve(self) -> MolabPath:
-        return MolabPath(self._disk().join(self.experiment.experiment_dir, "runs", self._name))
+        return MolabPath(
+            self._disk().join(self.experiment.experiment_dir, RUN_CONTAINER, self._name)
+        )
 
     @classmethod
     def child_dir(cls, parent: Folder, derived_id: str) -> MolabPath:
         """Folder hook — runs live under ``runs/<params>/``."""
         # resolve() not path() — pure layout math must not mkdir on remote.
-        return MolabPath(parent._disk().join(parent.resolve(), "runs", derived_id))
+        return MolabPath(parent._disk().join(parent.resolve(), RUN_CONTAINER, derived_id))
 
     @classmethod
     def from_disk(cls, child_dir: PathArg, parent: Folder) -> Run:
@@ -397,6 +397,19 @@ class Run(Folder):
     @property
     def parameters(self) -> dict[str, JSONValue]:
         return self._entity_metadata.parameters
+
+    @property
+    def created_at(self) -> datetime:
+        return self._entity_metadata.created_at
+
+    @property
+    def inputs(self) -> tuple[str, ...]:
+        """Asset ids this run declares as inputs."""
+        return self._entity_metadata.input_asset_ids
+
+    @property
+    def target(self) -> str | None:
+        return self._entity_metadata.target
 
     @property
     def status(self) -> str:
@@ -456,7 +469,7 @@ class Run(Folder):
     @property
     def executions(self) -> list[Execution]:
         """Every physical Execution, ordered by creation time."""
-        return self._execution_repository().list()
+        return [self._bound(item) for item in self._execution_repository().list()]
 
     @property
     def execution_history(self) -> list[Execution]:
@@ -477,7 +490,7 @@ class Run(Folder):
         return executions[-1].finished_at
 
     @property
-    def current_execution_id(self) -> str | None:
+    def execution_id(self) -> str | None:
         """Id of the newest still-active attempt, if any."""
         active = [item for item in self.executions if item.status in ACTIVE_EXECUTION_STATUSES]
         return active[-1].id if active else None
@@ -490,49 +503,64 @@ class Run(Folder):
     def results(self, execution_id: str) -> dict[str, TaskOutput]:
         """Return the driver-side results one attempt recorded.
 
-        These are the values ``ctx.set_result`` persisted into the attempt's
-        ``results.json``, read through the workspace ``FileSystem``. From
-        arch-own-03f they are read from the ``semantic_type="result"``
-        Artifact instead; the signature and the ``ValueError`` on corrupt
-        data stay.
+        These are the values ``ctx.set_result`` persisted as the Execution's
+        result Artifact (``semantic_type`` :data:`RESULT_SEMANTIC_TYPE`),
+        read through the artifact repository. Every call reads the bytes
+        again and returns a fresh copy. An unknown attempt, or one with no
+        result Artifact, is an empty mapping.
 
         Args:
             execution_id: The attempt id (``e01``).
 
         Returns:
-            A fresh ``{key: value}`` dict; empty when the attempt recorded no
-            results (no file, or an empty one).
+            A fresh ``{key: value}`` dict.
 
         Raises:
-            ValueError: The results file is not valid JSON or its
-                ``results`` entry is not an object — a corrupt canonical
-                record is surfaced, never replaced by node outputs.
+            ValueError: The attempt has more than one result Artifact, or
+                that Artifact's bytes are unreadable, not valid JSON, or not
+                an object. The message names the Artifact id.
         """
-        from .schema_version import read_versioned_json
-
-        fs = self._disk()
-        path = fs.join(self.execution_dir(execution_id), "results.json")
         try:
-            if fs.stat(path).size == 0:
-                return {}
-        except FileNotFoundError:
+            execution = self.execution(execution_id)
+        except KeyError:
             return {}
+        result_artifacts = [
+            artifact
+            for artifact in execution.artifacts
+            if artifact.semantic_type == RESULT_SEMANTIC_TYPE
+        ]
+        if not result_artifacts:
+            return {}
+        if len(result_artifacts) > 1:
+            listed = ", ".join(artifact.id for artifact in result_artifacts)
+            raise ValueError(
+                f"Execution {execution_id!r} has more than one result Artifact: {listed}"
+            )
+        artifact = result_artifacts[0]
+        execution_dir = self.execution_dir(execution_id)
         try:
-            data = read_versioned_json(path, fs=fs)
-        except ValueError as exc:
-            raise ValueError(f"corrupt results file {path}: {exc}") from exc
-        results = data.get("results", {}) if isinstance(data, dict) else None
-        if not isinstance(results, dict):
-            raise ValueError(f"corrupt results file {path}: 'results' is not an object")
-        return dict(results)
+            raw = self._execution_repository().artifacts.read_bytes(
+                artifact, execution_dir=execution_dir
+            )
+            parsed = json.loads(raw)
+        except (OSError, ValueError) as exc:
+            raise ValueError(
+                f"result Artifact {artifact.id} of Execution {execution_id!r} is unreadable: {exc}"
+            ) from exc
+        if not isinstance(parsed, dict):
+            raise ValueError(
+                f"result Artifact {artifact.id} of Execution {execution_id!r} is not an object"
+            )
+        return dict(parsed)
 
     def get_result(self, key: str, *, execution_id: str) -> TaskOutput:
         """Read a result value for *key* from one attempt.
 
         Resolution order:
 
-        1. The attempt's driver-side results (:meth:`results`) — a present
-           key always wins, even with a ``None`` value.
+        1. The attempt's driver-side results (:meth:`results`) — the
+           Execution's result Artifact. A present key always wins, even
+           with a ``None`` value.
         2. Otherwise the output of the completed workflow node named *key*,
            asked of the run-executor seam. The workflow layer owns the node
            journal and its lossy policy: a node whose output could not be
@@ -546,8 +574,8 @@ class Run(Folder):
             The value, or ``None`` when neither source has *key*.
 
         Raises:
-            ValueError: The attempt's results file is corrupt (see
-                :meth:`results`).
+            ValueError: The attempt's result Artifact is unreadable or not
+                an object (see :meth:`results`).
         """
         results = self.results(execution_id)
         if key in results:
@@ -604,40 +632,42 @@ class Run(Folder):
     def load(cls, run_dir: PathArg) -> Run:
         """Load a :class:`Run` from its on-disk directory.
 
-        Layout contract (single implementation used by train scripts)::
-
-            <workspace>/projects/<project>/experiments/<exp>/runs/run-<id>/
+        The directory name is the run's parameters; identity is the ``id``
+        in ``run.json``. Renaming the directory still loads the same run.
 
         Args:
-            run_dir: Path to the ``run-<id>`` directory (contains ``run.json``).
+            run_dir: Path to the run directory (contains ``run.json``).
 
         Returns:
             Reconstructed :class:`Run` bound to its parent experiment.
 
         Raises:
-            FileNotFoundError: Missing workspace / project / experiment / run.json.
-            RunNotFoundError: Parent chain incomplete.
+            FileNotFoundError: No ``workspace.json`` above *run_dir*, or no
+                ``run.json``.
+            RunNotFoundError: No experiment in that workspace owns this run,
+                or the loaded run's directory is not *run_dir*.
         """
         from .workspace import Workspace
 
         run_path = Path(str(run_dir)).resolve()
-        # <ws>/projects/<proj>/experiments/<exp>/runs/run-<id>
-        # parents: [0]=runs, [1]=exp, [2]=experiments, [3]=proj, [4]=projects, [5]=ws
-        workspace_root = run_path.parents[5]
-        project_id = run_path.parents[3].name
-        experiment_id = run_path.parents[1].name
-        run_name = run_path.name
-        run_id = run_name.removeprefix("run-") if run_name.startswith("run-") else run_name
-
-        workspace = Workspace.load(workspace_root)
-        project = workspace.project(project_id)
-        experiment = project.experiment(experiment_id)
-        # Prefer loading via experiment so cache/indices stay consistent.
-        if experiment.has_run(run_id):
-            return experiment.get_run(run_id)
-        # Fallback: reconstruct from run.json (NFS race / partial index).
+        root = Workspace.enclosing_root(run_path)
+        if root is None:
+            raise FileNotFoundError(f"no workspace.json above {run_path}")
         meta = _load_metadata(RunMetadata, run_path / "run.json")
-        return _reconstruct(cls, {"experiment": experiment, "metadata": meta})
+        ws = Workspace.load(root)
+        for project in ws.list_projects():
+            for experiment in project.list_experiments():
+                experiment_dir = Path(str(experiment.experiment_dir)).resolve()
+                if not run_path.is_relative_to(experiment_dir):
+                    continue
+                try:
+                    run = experiment.get_run(meta.id)
+                except RunNotFoundError:
+                    continue
+                if Path(str(run.run_dir)).resolve() != run_path:
+                    raise RunNotFoundError(meta.id)
+                return run
+        raise RunNotFoundError(meta.id)
 
     # ── Execution ───────────────────────────────────────────────────────
 
@@ -647,8 +677,8 @@ class Run(Folder):
         *,
         execution_id: str | None = None,
         mode: ExecutionMode = ExecutionMode.INITIAL,
-        based_on_execution_id: str | None = None,
-        checkpoint_artifact_id: str | None = None,
+        predecessor: str | None = None,
+        checkpoint: str | None = None,
         bypass_cache: bool = False,
         workflow_digest: str | None = None,
     ) -> RunContext:
@@ -667,18 +697,17 @@ class Run(Folder):
                 predecessor's recorded config; either way ``ctx.config`` is
                 the config the record holds.
             execution_id: Start a pre-allocated attempt — a QUEUED record
-                already created by ``run.create_execution(...)`` (e.g. by molq,
-                the plugin that hands an attempt to a cluster's batch-queue
-                scheduler, which needs the per-attempt directory ahead of
-                worker startup). Raises ``ValueError`` when the record does
+                already queued for this attempt (a scheduler needs the
+                per-attempt directory ahead of worker startup). Raises
+                ``ValueError`` when the record does
                 not exist, is not QUEUED, or when ``mode``,
-                ``based_on_execution_id``, ``checkpoint_artifact_id`` or
+                ``predecessor``, ``checkpoint`` or
                 ``bypass_cache`` is passed with it. ``profile_config`` may be
                 omitted (the recorded config runs) or equal the recorded one;
                 a different one raises ``ValueError``.
             mode: How a newly created attempt relates to earlier ones.
-            based_on_execution_id: The predecessor of a newly created attempt.
-            checkpoint_artifact_id: The checkpoint a newly created ``resume``
+            predecessor: The predecessor of a newly created attempt.
+            checkpoint: The checkpoint a newly created ``resume``
                 attempt starts from.
             bypass_cache: Record that a newly created attempt ignores the
                 workflow node cache — the per-task result store that lets an
@@ -698,8 +727,8 @@ class Run(Folder):
             profile_config=profile_config,
             execution_id=execution_id,
             mode=mode,
-            based_on_execution_id=based_on_execution_id,
-            checkpoint_artifact_id=checkpoint_artifact_id,
+            predecessor=predecessor,
+            checkpoint=checkpoint,
             bypass_cache=bypass_cache,
             workflow_digest=workflow_digest,
         )
@@ -719,8 +748,166 @@ class Run(Folder):
     ) -> Execution:
         """Record a new QUEUED attempt carrying its creation-time facts only.
 
-        The one public way to allocate an attempt (``e01``, ``e02``, …) ahead
-        of starting it. A *profile* is the named configuration the run
+        A scheduler queues an attempt before its worker starts. A *profile*
+        is the named configuration the run executes under (a
+        :class:`ProfileConfig`). The record's ``environment`` always holds
+        ``profile`` / ``config`` / ``config_hash``, built from
+        *profile_config* (``config_hash`` is ``None`` for an empty, unnamed
+        profile); the caller's *environment* is merged in beside them.
+        Start-time facts are added later, once, by whoever starts the attempt.
+
+        Mode rules live in ``ExecutionRepository.create``: ``retry`` is stored
+        as ``rerun``, a non-initial mode defaults its predecessor to the
+        latest attempt, and no attempt is created while one is active.
+        ``reproduce`` always records ``bypass_cache``.
+
+        Args:
+            mode: How this attempt relates to earlier ones.
+            based_on_execution_id: The predecessor, when *mode* needs one.
+            checkpoint_artifact_id: The checkpoint a ``resume`` attempt starts
+                from. Only valid with ``resume``.
+            bypass_cache: Whether the attempt ignores the workflow node cache.
+                Recorded once and never changed.
+            profile_config: The active profile. ``None`` means empty and
+                unnamed for ``initial``; for any other mode it means the
+                predecessor's recorded profile is copied. An explicit profile,
+                even an empty one, is never replaced.
+            environment: Extra creation-time environment facts. Naming
+                ``profile``, ``config``, ``config_hash``, or a start-time key
+                is refused.
+            executor: Creation-time executor facts (backend, target).
+                Start-time keys are refused.
+            created_by: Who creates the attempt; defaults to this process.
+            source_entrypoint: The workflow script to capture. ``None``
+                captures nothing and leaves ``source`` unset.
+
+        Returns:
+            The QUEUED record as written.
+
+        Raises:
+            ValueError: *environment* names a profile key, *environment* or
+                *executor* names a start-time key, *mode* and the predecessor
+                or checkpoint disagree, or an attempt is active.
+            KeyError: The named predecessor does not exist.
+            FileNotFoundError: *source_entrypoint* is not a file; no record
+                is created.
+            SourceCaptureError: A source file cannot be read, or the copy
+                failed or did not match the manifest.
+        """
+        return self._create_execution(
+            mode=mode,
+            predecessor=based_on_execution_id,
+            checkpoint=checkpoint_artifact_id,
+            bypass_cache=bypass_cache,
+            profile_config=profile_config,
+            environment=environment,
+            executor=executor,
+            created_by=created_by,
+            source_entrypoint=source_entrypoint,
+        )
+
+    def adopt_execution(
+        self,
+        *,
+        status: ExecutionStatus | str = ExecutionStatus.SUCCEEDED,
+        started_at: datetime,
+        finished_at: datetime,
+        products: Mapping[str, PathArg | Sequence[PathArg]] | None = None,
+        jobs: Sequence[PathArg] = (),
+        log: PathArg | None = None,
+        mode: ExecutionMode = ExecutionMode.INITIAL,
+        based_on_execution_id: str | None = None,
+        executor: dict[str, JSONValue] | None = None,
+        environment: dict[str, JSONValue] | None = None,
+        error: dict[str, JSONValue] | None = None,
+        created_by: AgentRef | None = None,
+        digest: bool = True,
+    ) -> Execution:
+        """Record a finished attempt that ran outside molab, moving its bytes in.
+
+        For a job that already ran — a scheduler chain, a hand-launched
+        script — before its run was part of a workspace. The bytes are
+        renamed (same filesystem; nothing is copied) into the next ``eNN``:
+
+        - ``products={"nve": "old/out"}`` — a directory becomes
+          ``out/nve/``; a file, or each item of a sequence, lands inside
+          ``out/nve/`` under its own name.
+        - ``jobs`` — scheduler stdout/stderr and submit scripts, flat in
+          ``jobs/``.
+        - ``log`` — the attempt's own log, as ``run.log``.
+
+        The record is written once, sealed, with the real start and finish
+        times; with *digest* each moved path's content digest is in its
+        evidence. A refused adoption moves everything back and writes nothing.
+
+        Args:
+            status: How the attempt ended (terminal).
+            started_at: When the attempt started.
+            finished_at: When it ended.
+            products: Task name -> what that task wrote.
+            jobs: Scheduler evidence files.
+            log: The attempt's log file.
+            mode: How this attempt relates to earlier ones (``create``'s rules).
+            based_on_execution_id: The predecessor, when *mode* needs one.
+            executor: Executor facts, e.g. ``{"scheduler": "slurm", "job_ids": [...]}``.
+            environment: Environment facts.
+            error: The failure, for a failed attempt.
+            created_by: Who adopts it; defaults to this process.
+            digest: Whether to hash every moved path into the record.
+
+        Returns:
+            The sealed record.
+
+        Raises:
+            ValueError: *status* is not terminal, or the mode rules refuse.
+            FileExistsError: Two sources land on the same destination.
+            FileNotFoundError: A source does not exist.
+        """
+        moves: list[tuple[PathArg, str]] = []
+        for task, value in (products or {}).items():
+            if not task or "/" in task or task in {".", ".."}:
+                raise ValueError(f"not a task name: {task!r}")
+            if isinstance(value, (str, PathLike)) and Path(str(value)).is_dir():
+                moves.append((str(value), f"{OUT.name}/{task}"))
+                continue
+            items = [value] if isinstance(value, (str, PathLike)) else list(value)
+            moves.extend((str(item), f"{OUT.name}/{task}/{Path(str(item)).name}") for item in items)
+        moves.extend((item, f"{JOBS.name}/{Path(item).name}") for item in jobs)
+        if log is not None:
+            moves.append((log, "run.log"))
+        state = self._execution_repository().adopt(
+            status=ExecutionStatus(status),
+            created_by=created_by or _system_agent(),
+            started_at=started_at,
+            finished_at=finished_at,
+            moves=moves,
+            mode=mode,
+            based_on_execution_id=based_on_execution_id,
+            executor=executor,
+            environment=environment,
+            error=error,
+            digest=digest,
+        )
+        return self._bound(state)
+
+    def _create_execution(
+        self,
+        *,
+        mode: ExecutionMode = ExecutionMode.INITIAL,
+        predecessor: str | None = None,
+        checkpoint: str | None = None,
+        bypass_cache: bool = False,
+        profile_config: ProfileConfig | None = None,
+        environment: dict[str, JSONValue] | None = None,
+        executor: dict[str, JSONValue] | None = None,
+        created_by: AgentRef | None = None,
+        source_entrypoint: PathArg | None = None,
+    ) -> Execution:
+        """Record a new QUEUED attempt carrying its creation-time facts only.
+
+        Internal. ``run.execute`` and ``run.start`` allocate through here.
+        A scheduler queues an attempt before its worker starts. A *profile*
+        is the named configuration the run
         executes under (a :class:`ProfileConfig`). The record's
         ``environment`` always holds the three profile keys ``profile`` (its
         name) / ``config`` (its contents) / ``config_hash`` (a digest of it)
@@ -765,8 +952,8 @@ class Run(Folder):
 
         Args:
             mode: How this attempt relates to earlier ones.
-            based_on_execution_id: The predecessor, when *mode* needs one.
-            checkpoint_artifact_id: The checkpoint to resume from (``resume`` only).
+            predecessor: The predecessor, when *mode* needs one.
+            checkpoint: The checkpoint to resume from (``resume`` only).
             bypass_cache: Whether the attempt ignores the workflow node cache;
                 recorded once and never changed (always ``True`` for
                 ``reproduce``).
@@ -813,27 +1000,23 @@ class Run(Folder):
         repo = self._execution_repository()
         # D57: a non-initial attempt without a profile inherits its
         # predecessor's; ``create`` re-checks the predecessor under its lock.
-        predecessor = (
-            repo.resolve_predecessor(mode, based_on_execution_id)
-            if profile_config is None
-            else None
-        )
-        if predecessor is not None:
-            based_on_execution_id = predecessor.id
-        profile_environment = _creation_environment(profile_config, inherit_from=predecessor)
+        inherited = repo.resolve_predecessor(mode, predecessor) if profile_config is None else None
+        if inherited is not None:
+            predecessor = inherited.id
+        profile_environment = _creation_environment(profile_config, inherit_from=inherited)
         manifest = source_manifest(source_entrypoint) if source_entrypoint is not None else None
         state = repo.create(
             mode=mode,
             created_by=created_by or _system_agent(),
-            based_on_execution_id=based_on_execution_id,
-            checkpoint_artifact_id=checkpoint_artifact_id,
+            based_on_execution_id=predecessor,
+            checkpoint_artifact_id=checkpoint,
             executor=dict(executor or {}),
             environment={**profile_environment, **extra},
             bypass_cache=bypass_cache,
             source=manifest,
         )
         if manifest is None:
-            return state
+            return self._bound(state)
         try:
             copy_sources(manifest, repo.execution_dir(state.id), fs=repo.fs)
         except BaseException as exc:
@@ -852,7 +1035,12 @@ class Run(Folder):
             if isinstance(exc, SourceCaptureError) or not isinstance(exc, Exception):
                 raise
             raise SourceCaptureError(str(exc)) from exc
-        return state
+        return self._bound(state)
+
+    def _bound(self, record: Execution) -> Execution:
+        """Attach this Run so ``execution.execute`` can start the attempt."""
+        record._run = self  # ty: ignore[invalid-assignment]
+        return record
 
     def execution(self, execution_id: str) -> Execution:
         """Read one attempt of this run.
@@ -866,7 +1054,7 @@ class Run(Folder):
         Raises:
             KeyError: No attempt ``execution_id`` exists under this run.
         """
-        return self._execution_repository().get(execution_id)
+        return self._bound(self._execution_repository().get(execution_id))
 
     def execution_dir(self, execution_id: str) -> Path:
         """The directory of one attempt of this run: ``executions/<id>``.
@@ -890,6 +1078,64 @@ class Run(Folder):
             raise ValueError(f"not an execution id: {execution_id!r}")
         return Path(self._execution_repository().execution_dir(execution_id))
 
+    def products_dir(self, task: str, *, execution_id: str | None = None) -> Path:
+        """Where *task* wrote its products: ``executions/<id>/out/<task>``.
+
+        The read side of a finished run. Without *execution_id* it is the
+        newest **succeeded** attempt that holds ``out/<task>``, so neither a
+        failed or cancelled retry nor a rerun served entirely from the node
+        cache (which writes no ``out/``; its outputs name the attempt that
+        computed them) shadows the data a figure was drawn from.
+
+        Args:
+            task: The task name (``nve``).
+            execution_id: A specific attempt; ``None`` means the newest
+                succeeded one.
+
+        Returns:
+            The directory as a :class:`pathlib.Path` (not checked for existence).
+
+        Raises:
+            LookupError: No attempt of this run has succeeded.
+        """
+        if execution_id is None:
+            done = [item for item in self.executions if item.status is ExecutionStatus.SUCCEEDED]
+            if not done:
+                raise LookupError(f"run {self.name!r} has no succeeded attempt")
+            holding = [
+                item for item in done if _non_empty(self.execution_dir(item.id) / OUT.name / task)
+            ]
+            execution_id = (holding or done)[-1].id
+        return self.execution_dir(execution_id) / OUT.name / task
+
+    def artifact_location(self, execution_id: str, artifact: Artifact) -> str:
+        """Resolve one Artifact of this run to a path on its filesystem.
+
+        The only cross-layer entry. ``artifact.run_id`` / ``artifact.execution_id``
+        must name this run and *execution_id*; a new-form record carries no
+        workspace path, so a mismatch can only be seen here.
+
+        Args:
+            execution_id: The attempt that must own *artifact*.
+            artifact: The record to resolve.
+
+        Returns:
+            A path string on the filesystem this run lives on.
+
+        Raises:
+            ValueError: *artifact* belongs to another run or attempt, or
+                :meth:`ArtifactRepository.locate` rejects its path.
+        """
+        if artifact.run_id != self.id or artifact.execution_id != execution_id:
+            raise ValueError(
+                f"Artifact {artifact.id} belongs to run {artifact.run_id!r} "
+                f"execution {artifact.execution_id!r}, not run {self.id!r} "
+                f"execution {execution_id!r}"
+            )
+        return self._execution_repository().artifacts.locate(
+            artifact, execution_dir=self.execution_dir(execution_id)
+        )
+
     def machine_dir(self) -> Path:
         """This run's machine-state directory: ``<workspace>/.molab/runs/<run-id>``.
 
@@ -912,27 +1158,31 @@ class Run(Folder):
             The directory as a :class:`pathlib.Path`.
         """
         root = str(self.experiment.project.workspace.root)
-        return Path(self._disk().join(root, MOLAB_DIR, "runs", self.id))
+        return Path(self._disk().join(root, MOLAB_DIR, RUN_CONTAINER, self.id))
 
     def execute(
         self,
-        workflow: object,
+        workflow: object | None = None,
         /,
         *,
         resume: bool = False,
         rerun: bool = False,
         fresh: bool = False,
-        checkpoint_artifact_id: str | None = None,
+        checkpoint: str | None = None,
     ) -> object:
         """Execute *workflow* against this run in one step and return the result.
 
-        Folds the driver dance — ``run.start()`` context, workflow-runtime
-        dispatch, asyncio plumbing — into a single synchronous call on the
-        same execution path ``molab run`` uses (RunContext lifecycle: status
-        machine, ``alive`` heartbeat). *workflow* is a
-        ``CompiledWorkflow`` or an uncompiled ``Workflow``
-        (auto-compiled). Returns a ``molab.workflow.WorkflowResult`` whose
-        ``.outputs`` maps task name → output.
+        Allocates the attempt, then runs it the same way
+        ``execution.execute(workflow)`` runs one that is already queued
+        (``run.execution(execution_id)``). Folds the driver dance —
+        ``run.start()`` context, workflow-runtime dispatch, asyncio plumbing —
+        into a single synchronous call on the same execution path ``molab run``
+        uses (RunContext lifecycle: status machine, ``alive`` heartbeat).
+        *workflow* is a ``CompiledWorkflow``, an uncompiled ``Workflow``
+        (auto-compiled), or ``None`` to resolve the experiment's bound
+        workflow through the run-executor seam. Returns a
+        ``molab.workflow.WorkflowResult`` whose ``.outputs`` maps task name
+        → output.
 
         Verbs mirror the CLI: a ``pending`` run executes (first attempt); a
         ``failed`` / ``cancelled`` run *resumes* its last execution, or opens
@@ -953,27 +1203,32 @@ class Run(Folder):
             resume=resume,
             rerun=rerun,
             fresh=fresh,
-            checkpoint_artifact_id=checkpoint_artifact_id,
+            checkpoint=checkpoint,
         )
 
     async def aexecute(
         self,
-        workflow: object,
+        workflow: object | None = None,
         /,
         *,
         resume: bool = False,
         rerun: bool = False,
         fresh: bool = False,
-        checkpoint_artifact_id: str | None = None,
+        checkpoint: str | None = None,
     ) -> object:
-        """Async variant of :meth:`execute` — same semantics, awaitable."""
+        """Async variant of :meth:`execute` — same semantics, awaitable.
+
+        *workflow* is a ``CompiledWorkflow``, an uncompiled ``Workflow``
+        (auto-compiled), or ``None`` to resolve the experiment's bound
+        workflow through the run-executor seam.
+        """
         return await require_run_executor().aexecute(
             self,
             workflow,
             resume=resume,
             rerun=rerun,
             fresh=fresh,
-            checkpoint_artifact_id=checkpoint_artifact_id,
+            checkpoint=checkpoint,
         )
 
     # ── Sugar: ``with run as ctx:`` / ``async with run as ctx:`` ────────
@@ -1018,9 +1273,6 @@ class Run(Folder):
 
     # ── Internal (frozen-metadata mutation helpers) ──────────────────────
 
-    def _set_status(self, status: RunStatus) -> None:
-        self._update_metadata(status=status)
-
     @contextlib.contextmanager
     def _metadata_lock(self) -> Iterator[None]:
         """Advisory inter-process lock guarding ``run.json`` read-modify-write.
@@ -1058,10 +1310,7 @@ class Run(Folder):
     def _write_run_json(self, *, context: dict[str, object] | None = None) -> None:
         """Write only logical Run definition fields to ``run.json``.
 
-        ``RunMetadata`` temporarily retains deprecated fields as an in-memory
-        compatibility shell for callers being migrated. They are deliberately
-        excluded here: operational state and results can only be persisted by
-        an Execution.
+        Operational state and results are persisted by an Execution, not here.
         """
         from .file_store import FileStore
         from .schema_version import versioned_payload
@@ -1083,10 +1332,7 @@ class Run(Folder):
                 "definition_hash",
                 "experiment_revision_id",
                 "input_asset_ids",
-                "workflow_snapshot",
                 "target",
-                "workflow_id",
-                "workflow_version",
             },
         )
 
@@ -1101,9 +1347,8 @@ class Run(Folder):
         The read-modify-write cycle (reload from disk → apply updates →
         atomic save) runs under :meth:`_metadata_lock` so concurrent
         processes updating different fields cannot drop each other's
-        writes (lost-update protection). Status, ownership, and
-        execution history are first-class ``RunMetadata`` fields and
-        may be written here.
+        writes (lost-update protection). Only logical-definition fields
+        may be updated here; attempt status belongs to the Execution.
         """
         with self._metadata_lock():
             self._reload_metadata_from_disk()

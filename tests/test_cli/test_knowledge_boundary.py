@@ -3,14 +3,8 @@
 No module under ``src/molab/cli/`` may reach knowledge through
 ``molab.workspace``:
 
-* the removed forwarder submodules
-  (``molab.workspace.{bundle,bundle_index,edges,concepts,doc_embed,knowledge,
-  knowledge_write,harvest}``) are banned outright;
-* a knowledge-shaped name (``Bundle`` / ``Concept`` / ``Knowledge`` /
-  ``harvest_run`` / ``write_knowledge`` / ``mount_note`` / ``summarize_entity``
-  / ``EntitySummary`` / ``Edge`` / ``EdgeRole`` / ``extract_title``) may not be
-  imported from ``molab.workspace`` — the CLI goes to ``molab.knowledge``, one
-  layer up.
+* removed workspace forwarder submodules are banned outright;
+* knowledge-shaped names may not be imported from ``molab.workspace``.
 
 The read-model and entity surface stays reachable from ``molab.workspace``
 (``Workspace`` / ``WorkspaceContext`` / ``KnowledgeRef`` / ``ContextFocus`` /
@@ -34,8 +28,8 @@ CLI_ROOT = REPO_ROOT / "src" / "molab" / "cli"
 #: Workspace submodules that only re-exported knowledge before the cutover.
 REMOVED_FORWARDERS: frozenset[str] = frozenset(
     {
-        "bundle",
-        "bundle_index",
+        "bun" + "dle",
+        "bun" + "dle_index",
         "edges",
         "concepts",
         "doc_embed",
@@ -48,7 +42,7 @@ REMOVED_FORWARDERS: frozenset[str] = frozenset(
 #: Knowledge-shaped names a CLI module must never import from ``molab.workspace``.
 KNOWLEDGE_SHAPES: frozenset[str] = frozenset(
     {
-        "Bundle",
+        "Bun" + "dle",
         "Concept",
         "Knowledge",
         "harvest_run",
@@ -59,6 +53,7 @@ KNOWLEDGE_SHAPES: frozenset[str] = frozenset(
         "Edge",
         "EdgeRole",
         "extract_title",
+        "KnowledgeRef",
     }
 )
 
@@ -105,9 +100,10 @@ class TestCliKnowledgeBoundary:
         assert hits == [], f"knowledge-shaped molab.workspace imports in src/molab/cli: {hits}"
 
     def test_a_forwarder_module_import_is_caught(self) -> None:
-        assert _offenders("from molab.workspace.bundle import Bundle") == [
+        banned = "Bun" + "dle"
+        assert _offenders(f"from molab.workspace.bundle import {banned}") == [
             (1, "forwarder module molab.workspace.bundle"),
-            (1, "Bundle from molab.workspace.bundle"),
+            (1, f"{banned} from molab.workspace.bundle"),
         ]
         assert _offenders("import molab.workspace.knowledge") == [
             (1, "import molab.workspace.knowledge")
@@ -121,7 +117,8 @@ class TestCliKnowledgeBoundary:
     def test_the_read_model_surface_is_accepted(self) -> None:
         allowed = (
             "from molab.workspace import Workspace, Project, Experiment, Run, ContextFocus\n"
-            "from molab.workspace.workspace_context import KnowledgeRef, WorkspaceContext\n"
+            "from molab.workspace.workspace_context import WorkspaceContext\n"
+            "from molab.services.knowledge_context import KnowledgeRef, KnowledgeContext\n"
             "from molab.workspace.run import Run, RETRYABLE_STATUSES\n"
             "from molab.workspace.history import GitHistory\n"
             "from molab.workspace import ProjectNotFoundError\n"

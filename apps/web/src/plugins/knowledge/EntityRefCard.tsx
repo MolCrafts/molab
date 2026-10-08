@@ -10,9 +10,12 @@ import type { ComponentType, JSX } from "react";
 import type { EntityCard } from "@/api/generated/models/EntityCard";
 import { StatusBadge } from "@/app/components/entity";
 import { useNavigationState } from "@/app/state/useNavigationState";
-import type { RendererSnapshot, Selection } from "@/app/types";
+import type { RendererSnapshot } from "@/app/types";
 import { WorkbenchAction } from "@/components/workbench";
 import { cn } from "@/lib/utils";
+import { toSelection } from "./entityCardSelection";
+
+export { toSelection };
 
 const KIND_ICON: Record<string, ComponentType<{ className?: string }>> = {
   run: PlayCircle,
@@ -31,29 +34,6 @@ const KIND_ICON_CLASS: Record<string, string> = {
 };
 
 /**
- * Map an embedded-entity card onto the navigation selection that opens it.
- * Runs / experiments / assets are entity ids; references and notes are OKF
- * Concepts reached by their bundle-relative path (the `knowledge` object type).
- * Returns `null` when the card carries nothing navigable so the card renders
- * disabled rather than dead-linking.
- */
-const toSelection = (card: EntityCard): Selection | null => {
-  switch (card.kind) {
-    case "run":
-      return { objectType: "run", objectId: card.id };
-    case "experiment":
-      return { objectType: "experiment", objectId: card.id };
-    case "asset":
-      return { objectType: "asset", objectId: card.id };
-    case "reference":
-    case "note":
-      return card.relPath ? { objectType: "knowledge", objectId: card.relPath } : null;
-    default:
-      return card.relPath ? { objectType: "knowledge", objectId: card.relPath } : null;
-  }
-};
-
-/**
  * A clickable inline card for an entity a document embeds. Renders the 06
  * summary card (kind / title / status) and, on click, reuses the LeftPanel
  * navigation via `useNavigationState().setSelection` to open the target entity —
@@ -68,7 +48,8 @@ export const EntityRefCard = ({
   snapshot: RendererSnapshot;
 }): JSX.Element => {
   const nav = useNavigationState(snapshot);
-  const selection = toSelection(card);
+  const assetIds = new Set(snapshot.assets.map((item) => item.id));
+  const selection = toSelection(card, assetIds);
   const Icon = KIND_ICON[card.kind] ?? FileText;
 
   return (

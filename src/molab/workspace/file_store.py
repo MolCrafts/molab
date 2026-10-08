@@ -100,6 +100,39 @@ class FileStore:
         self._put_via_fs(str(target), data)
         return target
 
+    def move_in(self, relpath: str | Path, src: str | PathLike[str]) -> Path:
+        """Move the file or directory *src* to *relpath* under the root.
+
+        A rename, so nothing is copied or read: the bytes keep their inode,
+        which is what lets a caller prove they arrived untouched. Bringing an
+        existing tree into a workspace is the use; ``put`` is the write path.
+
+        Args:
+            relpath: Destination under the root.
+            src: An existing file or directory on the same filesystem.
+
+        Returns:
+            The destination path.
+
+        Raises:
+            NotImplementedError: The disk is not local.
+            FileNotFoundError: *src* does not exist.
+            FileExistsError: Something already exists at *relpath*.
+            OSError: *src* is on another filesystem (``EXDEV``); a cross-device
+                move would be a copy, and this verb never copies.
+        """
+        if not isinstance(self._fs, LocalFileSystem):
+            raise NotImplementedError("FileStore.move_in renames local paths; the disk is remote")
+        source = Path(fspath(src))
+        if not source.exists() and not source.is_symlink():
+            raise FileNotFoundError(f"FileStore.move_in: {source} does not exist")
+        target = self.resolve(relpath)
+        if target.exists() or target.is_symlink():
+            raise FileExistsError(f"FileStore.move_in: {target} already exists")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        source.rename(target)
+        return target
+
     def _put_via_fs(self, target: str, data: _PutData) -> None:
         disk = self._fs
         parent = disk.dirname(target)

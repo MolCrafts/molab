@@ -19,7 +19,7 @@ export type RunAnalyzeFailureRequest = {
      */
     force?: boolean;
     /**
-     * Optional KnowledgeItem name
+     * Optional knowledge document name
      */
     name?: (string | null);
 };

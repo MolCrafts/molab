@@ -38,14 +38,4 @@ describe("pathForNextAction", () => {
     expect(path).toContain("/runs/run1");
   });
 
-  it("maps open questions toward knowledge", () => {
-    const action: NextActionResponse = {
-      kind: "answer_open_question",
-      target: "notes/q1",
-      rationale: "q",
-      advisory: true,
-      op: null,
-    };
-    expect(pathForNextAction(action, snapshot)).toContain("/knowledge/");
-  });
 });

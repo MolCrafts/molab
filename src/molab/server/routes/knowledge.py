@@ -1,23 +1,22 @@
-"""Knowledge routes — browse + author the workspace's OKF Concepts.
+"""Knowledge routes — browse + author the workspace's OKF documents.
 
-Notes (``Note``) and literature (``Literature``) are knowledge
-Concept ``Folder``s mounted anywhere under the workspace, reached through the
-:class:`~molab.knowledge.bundle.Bundle` façade. These routes expose them over
-HTTP for the UI's Knowledge tab; the legacy per-scope ``/api/library`` surface
-was removed in wsokf-11, so this is the greenfield read API for OKF knowledge.
+Documents are markdown files under a host's ``knowledges/`` directory. Create,
+embed, rename, move, delete, backlinks and export call the knowledge verbs
+(``write_knowledge`` / ``append_link`` / ``Concept.rename`` / ``move_to`` /
+``delete`` / ``backlinks`` / ``export``). ``entity_backlinks`` calls
+``backlinks_to``.
 
-The mutating document endpoints (create / edit-body / rename-move / delete /
-backlinks / export) are **thin delegators** to the knowledge-owned ``Bundle``
-verbs (``create_note`` / ``rename_note`` / ``move_note`` / ``delete_note`` /
-``backlinks`` / ``export_markdown``) — CLI and server call the same verbs, so
-the CRUD logic lives in one place (the Python==UI invariant), never re-built at
-the HTTP boundary. Each mutating handler is gated by :func:`_require_writable`
-(405 against a remote/read-only served workspace); every path-addressed handler
-maps :class:`ConceptNotFoundError` (and a non-``Note`` concept) to a 404.
+A host's ``manuscript/*.tex`` and ``knowledges/*.tex`` are listed and opened
+read-only beside those documents. Knowledge verbs do not write them.
+
+Each mutating handler is gated by :func:`_require_writable` (405 against a
+remote/read-only served workspace). A missing document is a 404.
 """
 
 from __future__ import annotations
 
+import logging
+import os
 from pathlib import Path as _StdPath
 from typing import TYPE_CHECKING, Annotated, Literal
 
@@ -25,7 +24,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel
 
-from molab.knowledge.bundle import Bundle
 from molab.knowledge.concepts import Note
 from molab.knowledge.edges import EdgeRole
 from molab.server.dependencies import get_workspace
@@ -36,21 +34,21 @@ from ..schemas import MessageResponse
 
 if TYPE_CHECKING:
     from molab.knowledge.concept import Concept
-    from molab.workspace.assets.base import Asset
-    from molab.workspace.experiment import Experiment
+    from molab.workspace.domain import Asset
     from molab.workspace.folder import Folder
-    from molab.workspace.run import Run
 
 __all__ = ["router"]
 
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 
+_LOG = logging.getLogger(__name__)
 _EXCERPT_CHARS = 320
 
 
 class NoteSummary(BaseModel):
     name: str
     relPath: str
+    hostPath: str = ""
     excerpt: str
     tags: list[str] = []
     status: str | None = None
@@ -76,13 +74,15 @@ class KnowledgeListResponse(BaseModel):
 
 
 class EntityCard(BaseModel):
-    """A clickable summary card for an entity a document embeds (05 resolver)."""
+    """A clickable summary card for an entity a document embeds."""
 
     kind: str
     id: str
     title: str
     relPath: str | None = None
     status: str | None = None
+    ref: str | None = None
+    missing: bool = False
 
 
 class NoteDetailResponse(BaseModel):
@@ -98,10 +98,9 @@ class EmbedRequest(BaseModel):
 
     target_kind: Literal["run", "asset", "experiment", "reference"]
     target: str
-    # ``None`` = defer to ``Bundle.embed``'s per-kind default (run/experiment ->
-    # records, reference -> cites, asset/other -> references), so an HTTP embed
-    # with no explicit role writes the SAME edge a CLI ``Bundle.embed`` call
-    # would — the Python==UI invariant. An explicit role overrides.
+    # ``None`` defers to :func:`molab.knowledge.embed.default_role_for`
+    # (run/experiment -> records, reference -> cites, asset/other -> references).
+    # An explicit role overrides.
     role: EdgeRole | None = None
     text: str | None = None
 
@@ -117,7 +116,7 @@ class EmbedResponse(BaseModel):
 class DocCreateRequest(BaseModel):
     name: str
     body: str = ""
-    parentPath: str | None = None
+    hostPath: str | None = None
 
 
 class DocBodyUpdate(BaseModel):
@@ -126,11 +125,11 @@ class DocBodyUpdate(BaseModel):
 
 class DocMoveRequest(BaseModel):
     name: str | None = None
-    parentPath: str | None = None
+    hostPath: str | None = None
 
 
 class DocMetaUpdate(BaseModel):
-    """Partial update of a note's ``meta.json`` tags/status.
+    """Partial update of a document's tags/status.
 
     Each field is independently optional; ``None`` means "leave untouched", which
     maps onto ``Note.set_tags`` / ``Note.set_status`` each preserving the sibling
@@ -145,9 +144,56 @@ class BacklinksResponse(BaseModel):
     backlinks: list[NoteSummary]
 
 
-def _bundle(workspace: Workspace) -> Bundle:
-    """Document tree on the workspace's own filesystem (remote pin cache / local)."""
-    return Bundle(workspace.root, fs=workspace.fs)
+def _path_of(target: object) -> str:
+    """Directory or file *target* names, without resolving a path."""
+    from molab.knowledge.concept import Concept
+
+    if isinstance(target, Concept):
+        return str(target.path)
+    if isinstance(target, (str, os.PathLike)):
+        return os.fspath(target)
+    resolve = getattr(target, "resolve", None)
+    if callable(resolve):
+        return str(resolve())
+    return str(target)
+
+
+def _rel(workspace: Workspace, path: object) -> str:
+    """*path* relative to the workspace root, as a posix string."""
+    return _StdPath(_path_of(path)).relative_to(_StdPath(str(workspace.root))).as_posix()
+
+
+def _host_rel(workspace: Workspace, doc_path: object) -> str:
+    """Host of *doc_path* relative to the workspace root. ``.`` is ``""``."""
+    from molab.knowledge.location import host_of
+
+    host = host_of(_path_of(doc_path))
+    try:
+        rel = _StdPath(str(host)).relative_to(_StdPath(str(workspace.root))).as_posix()
+    except ValueError:
+        return ""
+    return "" if rel == "." else rel
+
+
+def _resolve_host(workspace: Workspace, host_path: str | None) -> str:
+    """Absolute path of *host_path*, or the workspace root when it is empty.
+
+    Raises:
+        HTTPException: 404 when *host_path* is not a host ``list_hosts`` yields.
+    """
+    if host_path is None or host_path == "":
+        return str(workspace.root)
+    root = _StdPath(str(workspace.root))
+    for host in Workspace.list_hosts(workspace.root, fs=workspace.fs):
+        try:
+            rel = _StdPath(str(host)).relative_to(root).as_posix()
+        except ValueError:
+            continue
+        if rel == ".":
+            rel = ""
+        if rel == host_path:
+            return workspace.fs.join(str(workspace.root), host_path)
+    raise HTTPException(status.HTTP_404_NOT_FOUND, f"host {host_path!r} not found")
 
 
 def _require_writable(request: Request) -> None:
@@ -161,17 +207,14 @@ def _require_writable(request: Request) -> None:
     assert_workspace_writable(active_served_key() or "", request.method)
 
 
-def _note_summary(bundle: Bundle, note: Concept) -> NoteSummary:
-    """Build a :class:`NoteSummary` for *note* (identity + excerpt + tags/status).
-
-    ``tags``/``status`` come from the 05 :class:`~molab.knowledge.note_meta.NoteMeta`
-    helpers (an untagged note reads back ``[]`` / ``"active"``).
-    """
+def _note_summary(workspace: Workspace, note: Concept) -> NoteSummary:
+    """Build a :class:`NoteSummary` for *note* (identity + host + excerpt)."""
     body = note.read() or ""
     status_val = note.status() if isinstance(note, Note) else None
     return NoteSummary(
         name=note.name,
-        relPath=bundle.rel_path(note),
+        relPath=_rel(workspace, note.path),
+        hostPath=_host_rel(workspace, note.path),
         excerpt=body[:_EXCERPT_CHARS],
         tags=note.tags(),
         status=status_val,
@@ -179,84 +222,127 @@ def _note_summary(bundle: Bundle, note: Concept) -> NoteSummary:
     )
 
 
-def _note_detail(
-    bundle: Bundle, workspace: Workspace, note: Concept, path: str
-) -> NoteDetailResponse:
-    """Build a :class:`NoteDetailResponse` for *note* at its identity *path*.
-
-    Enriches the response with ``cards`` — one :class:`EntityCard` per typed
-    out-edge that resolves to a live entity (Run / Experiment / Reference / Note
-    / Asset), each projected by the 05 entity-summary resolver
-    (:func:`~molab.knowledge.embed.summarize_entity`).
-    """
+def _note_detail(workspace: Workspace, note: Concept, path: str) -> NoteDetailResponse:
+    """Build a :class:`NoteDetailResponse` for *note* at its identity *path*."""
     return NoteDetailResponse(
         name=note.name,
         relPath=path,
         body=note.read(),
         links=list(note.out_edges()),
-        cards=_resolve_cards(bundle, workspace, note),
+        cards=_resolve_cards(workspace, note),
     )
 
 
-def _resolve_cards(bundle: Bundle, workspace: Workspace, note: Concept) -> list[EntityCard]:
-    """Resolve *note*'s typed out-edges to :class:`EntityCard` summary cards.
-
-    Each edge target is resolved back to its live entity; an edge that resolves
-    to no entity is skipped (it cannot be summarized as a card).
-    """
-    from molab.knowledge.embed import summarize_entity
-
+def _resolve_cards(workspace: Workspace, note: Concept) -> list[EntityCard]:
+    """Resolve *note*'s typed out-edges to :class:`EntityCard` summary cards."""
     cards: list[EntityCard] = []
     for edge in note.links():
-        entity = _resolve_edge_entity(bundle, workspace, edge.target)
-        if entity is None:
-            continue
-        summary = summarize_entity(entity, root=workspace.root)
-        cards.append(
-            EntityCard(
-                kind=summary.kind,
-                id=summary.id,
-                title=summary.title,
-                relPath=_entity_rel_path(bundle, entity),
-                status=_entity_status(entity),
-            )
-        )
+        card = _resolve_edge_entity(workspace, edge)
+        if card is not None:
+            cards.append(card)
     return cards
 
 
-def _resolve_edge_entity(
-    bundle: Bundle, workspace: Workspace, target: str
-) -> Concept | Folder | Asset | None:
-    """Resolve a typed out-edge *target* path back to its live entity, or ``None``.
+def _resolve_edge_entity(workspace: Workspace, edge: object) -> EntityCard | None:
+    """One card for *edge*, or ``None`` when the edge is not a card."""
+    from molab.knowledge.edges import Edge
+    from molab.workspace.refs import is_ref
 
-    A Concept dir (``meta.json`` present) resolves to its typed ``Concept`` via
-    the bundle; an asset record dir (``<scope>/assets/<asset_id>/``) resolves to
-    its :class:`~molab.workspace.assets.base.Asset` via the manifest scanner.
-    """
-    from molab.knowledge.errors import ConceptNotFoundError
-    from molab.workspace.assets.scan import get_asset
-
-    abs_path = _StdPath(str(target))
-    try:
-        rel = abs_path.relative_to(bundle.root).as_posix()
-    except ValueError:
+    if not isinstance(edge, Edge):
         return None
-    try:
-        return bundle.get(rel)
-    except ConceptNotFoundError:
-        pass
-    if abs_path.parent.name == "assets":
-        return get_asset(workspace.root, abs_path.name)
-    return None
-
-
-def _entity_rel_path(bundle: Bundle, entity: Concept | Folder | Asset) -> str | None:
-    """A ``Folder`` entity's bundle-relative identity path; ``None`` for an ``Asset``."""
-    from molab.workspace.assets.base import Asset
-
-    if isinstance(entity, Asset):
+    if is_ref(edge.target):
+        return _ref_card(workspace, edge.target)
+    if edge.target.startswith(("http://", "https://")):
         return None
-    return bundle.rel_path(entity)
+    return _path_card(workspace, edge.target)
+
+
+def _ref_tail(target: str) -> str:
+    """The last segment of a reference, ignoring a fragment."""
+    return target.split("#", 1)[0].rstrip("/").rsplit("/", 1)[-1]
+
+
+def _ref_card(workspace: Workspace, target: str) -> EntityCard:
+    """A card for a reference edge. A bad edge is ``missing``, never a failed GET."""
+    from molab.knowledge.concept import Concept
+    from molab.knowledge.embed import summarize_entity
+    from molab.server.schemas.responses import workspace_relative
+    from molab.workspace.domain import Artifact, Asset, Execution
+    from molab.workspace.errors import AmbiguousRefError, RefNotFoundError
+    from molab.workspace.folder import Folder
+    from molab.workspace.refs import InvalidRefError, parse_ref
+
+    body = target.split("#", 1)[0]
+    try:
+        parsed = parse_ref(body)
+    except InvalidRefError:
+        return EntityCard(kind="ref", id=_ref_tail(target), title=target, ref=target, missing=True)
+    try:
+        entity = workspace.find(body)
+    except RefNotFoundError:
+        return EntityCard(
+            kind=parsed.kind, id=_ref_tail(target), title=target, ref=target, missing=True
+        )
+    except AmbiguousRefError as exc:
+        _LOG.warning("ambiguous reference %s (%d candidates)", target, len(exc.candidates))
+        return EntityCard(
+            kind=parsed.kind,
+            id=_ref_tail(target),
+            title=f"{target} (ambiguous: {len(exc.candidates)} candidates)",
+            ref=target,
+            missing=True,
+        )
+    if isinstance(entity, (Concept, Folder, Asset)):
+        title = summarize_entity(entity).title
+    elif isinstance(entity, Artifact):
+        title = entity.name
+    elif isinstance(entity, Execution):
+        title = entity.id
+    else:
+        title = _ref_tail(target)
+    rel = (
+        workspace_relative(workspace.root, entity.resolve()) if isinstance(entity, Folder) else None
+    )
+    return EntityCard(
+        kind=parsed.kind,
+        id=_ref_tail(target),
+        title=title,
+        relPath=rel,
+        ref=target,
+        missing=False,
+    )
+
+
+def _document_card(workspace: Workspace, document: Concept) -> EntityCard:
+    """A card for a knowledge document, as a path edge resolves one."""
+    from molab.knowledge.embed import summarize_entity
+
+    summary = summarize_entity(document)
+    return EntityCard(
+        kind=summary.kind,
+        id=summary.id,
+        title=summary.title,
+        relPath=_rel(workspace, document),
+        status=_entity_status(document),
+    )
+
+
+def _path_card(workspace: Workspace, target: str) -> EntityCard | None:
+    """A path edge: a document, a missing document, a legacy directory, or nothing."""
+    from molab.knowledge import Knowledge
+    from molab.knowledge.errors import KnowledgeNotFoundError
+
+    path = target.split("#", 1)[0]
+    try:
+        document = Knowledge.open(path, fs=workspace.fs)
+    except (KnowledgeNotFoundError, FileNotFoundError, OSError, ValueError):
+        document = None
+    else:
+        return _document_card(workspace, document)
+    if workspace.fs.is_dir(path) or workspace.fs.is_file(path):
+        return None
+    name = _StdPath(path).name or path
+    return EntityCard(kind="document", id=name, title=target, missing=True)
 
 
 def _entity_status(entity: Concept | Folder | Asset) -> str | None:
@@ -265,66 +351,40 @@ def _entity_status(entity: Concept | Folder | Asset) -> str | None:
 
 
 def _resolve_embed_entity(
-    bundle: Bundle, workspace: Workspace, target_kind: str, target: str
+    workspace: Workspace, target_kind: str, target: str
 ) -> Concept | Folder | Asset:
-    """Resolve an embed ``(target_kind, target)`` to a live ``Folder`` / ``Asset``.
+    """Resolve an embed ``(target_kind, target)`` to a live entity.
 
-    Mirrors :func:`_resolve_note`'s not-found → 404 policy: an unknown run /
-    experiment / asset / reference (or a target that resolves to no entity) is a
-    404, never a silent miss.
+    A run target must be a reference. An experiment or asset target is a
+    reference, or a bare id resolved by :meth:`Workspace.find`. A miss, an
+    ambiguity, or a malformed reference propagates to the process-wide handlers.
     """
-    from molab.knowledge.errors import ConceptNotFoundError
+    from molab.workspace.refs import REF_SCHEME, MolabRef, is_ref, parse_ref
 
     if target_kind == "reference":
         try:
-            return bundle.get(target)
-        except ConceptNotFoundError as exc:
+            return _open_doc(workspace, target)
+        except HTTPException as exc:
             raise HTTPException(
                 status.HTTP_404_NOT_FOUND, f"reference {target!r} not found"
             ) from exc
 
-    entity: Concept | Folder | Asset | None
     if target_kind == "run":
-        entity = _find_run(workspace, target)
-    elif target_kind == "experiment":
-        entity = _find_experiment(workspace, target)
-    else:  # "asset" — the Literal on EmbedRequest guarantees no other value
-        from molab.workspace.assets.scan import get_asset
-
-        entity = get_asset(workspace.root, target)
-    if entity is None:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"{target_kind} {target!r} not found")
-    return entity
-
-
-def _find_run(workspace: Workspace, run_id: str) -> Run | None:
-    """Find a ``Run`` by id across every project/experiment, or ``None``."""
-    for project in workspace.list_projects():
-        for experiment in project.list_experiments():
-            if experiment.has_run(run_id):
-                return experiment.get_run(run_id)
-    return None
-
-
-def _find_experiment(workspace: Workspace, experiment_id: str) -> Experiment | None:
-    """Find an ``Experiment`` by id across every project, or ``None``."""
-    for project in workspace.list_projects():
-        if project.has_experiment(experiment_id):
-            return project.get_experiment(experiment_id)
-    return None
-
-
-def _resolve_note(bundle: Bundle, path: str) -> Note:
-    """Resolve *path* to a :class:`Note`, mapping miss / non-note to a 404."""
-    from molab.knowledge.errors import ConceptNotFoundError
-
-    try:
-        concept = bundle.get(path)
-    except ConceptNotFoundError as exc:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"note {path!r} not found") from exc
-    if not isinstance(concept, Note):
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"concept {path!r} is not a note")
-    return concept
+        if not is_ref(target):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                f"a run target must be a {REF_SCHEME} reference",
+            )
+        return workspace.find(parse_ref(target, kind="run"))  # ty: ignore[invalid-return-type]
+    if target_kind == "experiment":
+        ref = (
+            parse_ref(target, kind="experiment")
+            if is_ref(target)
+            else MolabRef(experiment_id=target)
+        )
+        return workspace.find(ref)  # ty: ignore[invalid-return-type]
+    ref = parse_ref(target, kind="asset") if is_ref(target) else MolabRef(asset_id=target)
+    return workspace.find(ref)  # ty: ignore[invalid-return-type]
 
 
 def _open_doc(workspace: Workspace, path: str) -> Concept:
@@ -332,9 +392,54 @@ def _open_doc(workspace: Workspace, path: str) -> Concept:
     from molab.knowledge import Knowledge, KnowledgeNotFoundError
 
     try:
-        return Knowledge.open(_StdPath(str(workspace.root)) / path)
+        return Knowledge.open(workspace.fs.join(str(workspace.root), path), fs=workspace.fs)
     except (KnowledgeNotFoundError, FileNotFoundError, OSError) as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"note {path!r} not found") from exc
+
+
+def _reject_tex(path: str) -> None:
+    """Refuse a knowledge write verb on a TeX file.
+
+    Raises:
+        HTTPException: 405 when *path* is ``.tex`` or ``.ltx``.
+    """
+    from molab.knowledge.tex_docs import is_tex_file
+
+    if is_tex_file(path):
+        raise HTTPException(
+            status.HTTP_405_METHOD_NOT_ALLOWED,
+            "a TeX file is shown in knowledge and is not edited there",
+        )
+
+
+def _tex_text(workspace: Workspace, path: str) -> str:
+    """Read a workspace-relative TeX file (404 when it is missing or escapes)."""
+    from molab.knowledge.concept import read_text_or_none
+    from molab.knowledge.tex_docs import is_tex_file
+
+    pure = _StdPath(path)
+    if not is_tex_file(path) or pure.is_absolute() or ".." in pure.parts:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"note {path!r} not found")
+    absolute = workspace.fs.join(str(workspace.root), path)
+    try:
+        _StdPath(absolute).relative_to(_StdPath(str(workspace.root)))
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"note {path!r} not found") from exc
+    text = read_text_or_none(absolute, fs=workspace.fs)
+    if text is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, f"note {path!r} not found")
+    return text
+
+
+def _tex_detail(workspace: Workspace, path: str) -> NoteDetailResponse:
+    """A TeX file as a read-only note detail. The body is the file itself."""
+    return NoteDetailResponse(
+        name=_StdPath(path).stem,
+        relPath=path,
+        body=_tex_text(workspace, path),
+        links=[],
+        cards=[],
+    )
 
 
 class EntityBacklinkRow(BaseModel):
@@ -361,19 +466,21 @@ def entity_backlinks(
     run_id: Annotated[str | None, Query(alias="runId")] = None,
     workspace: Workspace = Depends(get_workspace),
 ) -> EntityBacklinksResponse:
-    """Knowledge documents citing one entity — a thin ``Bundle.backlinks`` read.
+    """Knowledge documents citing one entity.
 
     Pure derived read (no reverse index persisted): resolves the entity
-    Folder, then asks the bundle which Concepts' ``index.md`` edges point at
-    it. 404 on an unresolvable entity — never an empty-list fallback for a
-    bad ref (no-fallback law).
+    folder, then walks documents whose edges point at its reference.
+    404 on an unresolvable entity — never an empty-list fallback
+    for a bad ref.
     """
-    from molab.knowledge.bundle_index import extract_title
+    from molab.knowledge.concept import backlinks_to
+    from molab.knowledge.search import extract_title
     from molab.workspace.errors import (
         ExperimentNotFoundError,
         ProjectNotFoundError,
         RunNotFoundError,
     )
+    from molab.workspace.refs import ref_of
 
     try:
         experiment = workspace.get_project(project_id).get_experiment(experiment_id)
@@ -388,15 +495,20 @@ def entity_backlinks(
     except (ProjectNotFoundError, ExperimentNotFoundError, RunNotFoundError) as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, str(exc)) from exc
 
-    bundle = _bundle(workspace)
     rows: list[EntityBacklinkRow] = []
-    for link in bundle.backlinks(entity):
-        meta = link.source.read_meta()
+    for link in backlinks_to(
+        [str(ref_of(entity))],
+        within=workspace.root,
+        fs=workspace.fs,
+    ):
+        narrative = link.source.read() or ""
+        front = link.source.frontmatter()
+        kind_name = front.get("class") or front.get("type") or type(link.source).__name__
         rows.append(
             EntityBacklinkRow(
-                path=bundle.rel_path(link.source),
-                title=extract_title(link.source.read_index() or "") or link.source.name,
-                type=str(meta.get("type", "")),
+                path=_rel(workspace, link.source),
+                title=extract_title(narrative) or link.source.name,
+                type=str(kind_name),
                 role=str(link.role),
             )
         )
@@ -404,7 +516,7 @@ def entity_backlinks(
 
 
 class KnowledgeSearchRow(BaseModel):
-    """One search hit projected from the bundle index entry."""
+    """One search hit projected from a search-index row."""
 
     path: str
     title: str
@@ -414,7 +526,7 @@ class KnowledgeSearchRow(BaseModel):
 
 
 class KnowledgeSearchResponse(BaseModel):
-    """``GET /knowledge/search`` — body-aware retrieval over the bundle."""
+    """``GET /knowledge/search`` — body-aware retrieval over the documents."""
 
     hits: list[KnowledgeSearchRow]
     truncated: bool
@@ -429,10 +541,10 @@ def search_knowledge(
 ) -> KnowledgeSearchResponse:
     """Search the workspace knowledge tree — wraps ``Knowledge.search``."""
     from molab.knowledge import Knowledge
-    from molab.knowledge.concepts import parse_knowledge_class
+    from molab.knowledge.concepts import parse_class
 
-    cls = parse_knowledge_class(type) if type else None
-    result = Knowledge(workspace.root).search(q, of=cls, tag=tag)
+    cls = parse_class(type) if type else None
+    result = Knowledge(workspace.root, fs=workspace.fs).search(q, of=cls, tag=tag)
     return KnowledgeSearchResponse(
         hits=[
             KnowledgeSearchRow(
@@ -456,14 +568,16 @@ def list_knowledge(
     ] = None,
     workspace: Workspace = Depends(get_workspace),
 ) -> KnowledgeListResponse:
-    """List every Knowledge document under the workspace via ``Knowledge.walk``."""
+    """List every Knowledge document, plus each host's TeX manuscripts."""
     from molab.knowledge import Knowledge, Literature
+    from molab.knowledge.concept import read_text_or_none
+    from molab.knowledge.tex_docs import TEX_CLASS, iter_tex_documents, tex_host_path
 
-    root = Knowledge(workspace.root)
+    root = Knowledge(workspace.root, fs=workspace.fs)
     notes: list[NoteSummary] = []
     references: list[ReferenceSummary] = []
     for item in root.walk():
-        rel = _StdPath(item.path).relative_to(workspace.root).as_posix()
+        rel = _rel(workspace, item.path)
         tags = item.tags()
         if tag is not None and tag not in tags:
             continue
@@ -475,6 +589,7 @@ def list_knowledge(
             NoteSummary(
                 name=item.name,
                 relPath=rel,
+                hostPath=_host_rel(workspace, item.path),
                 excerpt=body[:_EXCERPT_CHARS],
                 tags=tags,
                 status=status_val,
@@ -497,11 +612,23 @@ def list_knowledge(
                 )
             )
 
+    if tag is None and status is None:
+        for absolute in iter_tex_documents(workspace.root, workspace.fs):
+            rel = _rel(workspace, absolute)
+            text = read_text_or_none(absolute, fs=workspace.fs) or ""
+            notes.append(
+                NoteSummary(
+                    name=_StdPath(rel).stem,
+                    relPath=rel,
+                    hostPath=tex_host_path(rel),
+                    excerpt=text[:_EXCERPT_CHARS],
+                    cls=TEX_CLASS,
+                )
+            )
+
     notes.sort(key=lambda n: n.name)
     references.sort(key=lambda r: (r.year or 0, r.name), reverse=True)
-    return KnowledgeListResponse(
-        notes=notes, references=references, total=len(notes) + len(references)
-    )
+    return KnowledgeListResponse(notes=notes, references=references, total=len(notes))
 
 
 @router.get("/note", response_model=NoteDetailResponse)
@@ -509,26 +636,19 @@ def get_note(
     path: str = Query(..., description="The document's workspace-relative path (its identity)."),
     workspace: Workspace = Depends(get_workspace),
 ) -> NoteDetailResponse:
-    """Return one document's full body via ``Knowledge.open``."""
-    from molab.knowledge import Knowledge, KnowledgeNotFoundError, Note
+    """Return one document's full body via ``Knowledge.open``.
 
-    try:
-        concept = Knowledge.open(_StdPath(str(workspace.root)) / path)
-    except (KnowledgeNotFoundError, FileNotFoundError, OSError) as exc:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"note {path!r} not found") from exc
-    bundle = _bundle(workspace)
-    if isinstance(concept, Note):
-        return _note_detail(bundle, workspace, concept, path)
-    return NoteDetailResponse(
-        name=concept.name,
-        relPath=path,
-        body=concept.read(),
-        links=list(concept.out_edges()),
-        cards=_resolve_cards(bundle, workspace, concept),
-    )
+    A ``.tex`` / ``.ltx`` path is the file bytes, not a Knowledge document.
+    """
+    from molab.knowledge.tex_docs import is_tex_file
+
+    if is_tex_file(path):
+        return _tex_detail(workspace, path)
+    concept = _open_doc(workspace, path)
+    return _note_detail(workspace, concept, path)
 
 
-# ── Document authoring — thin delegators to workspace ``Bundle`` verbs ────────
+# ── Document authoring — knowledge verbs, one host per document ───────────────
 
 
 @router.post(
@@ -541,11 +661,19 @@ def create_doc(
     body: DocCreateRequest,
     workspace: Workspace = Depends(get_workspace),
 ) -> NoteSummary:
-    """Create a :class:`Note` document — delegates to ``Bundle.create_note``."""
-    bundle = _bundle(workspace)
-    parent = _resolve_note(bundle, body.parentPath) if body.parentPath else None
-    note = bundle.create_note(body.name, parent=parent, body=body.body)
-    return _note_summary(bundle, note)
+    """Create a :class:`Note` under *hostPath* (the workspace root when omitted)."""
+    from molab.knowledge.write import write_knowledge
+
+    host = _resolve_host(workspace, body.hostPath)
+    note = write_knowledge(
+        host,
+        name=body.name,
+        of=Note,
+        created_by="ui",
+        text=body.body,
+        fs=workspace.fs,
+    )
+    return _note_summary(workspace, note)
 
 
 @router.post(
@@ -555,26 +683,26 @@ def create_doc(
 )
 def embed_doc(
     body: EmbedRequest,
-    path: str = Query(..., description="The source note Concept's bundle-relative path."),
+    path: str = Query(
+        ..., description="The source note Concept's workspace-relative document path."
+    ),
     workspace: Workspace = Depends(get_workspace),
 ) -> EmbedResponse:
-    """Embed a live entity into a document — delegates to the knowledge edge writer.
+    """Embed a live entity into a document — one typed edge via ``append_link``.
 
-    Resolves the source ``Note`` (404 on miss / non-note) and the target entity
+    Resolves the source document (404 on miss) and the target entity
     (``run`` / ``experiment`` / ``asset`` / ``reference``; 404 on miss), then
-    writes ONE typed provenance edge via ``Bundle.link`` at the target resolved
-    by :func:`~molab.knowledge.embed.resolve_embed_target` — the same verb the CLI
-    uses, so the edge-writing logic is never re-built at the HTTP boundary.
+    writes ONE typed provenance edge at the target resolved by
+    :func:`~molab.knowledge.embed.resolve_embed_target`.
     """
+    _reject_tex(path)
+    from molab.knowledge.concept import append_link
     from molab.knowledge.embed import default_role_for, resolve_embed_target
 
-    bundle = _bundle(workspace)
-    note = _resolve_note(bundle, path)
-    target = _resolve_embed_entity(bundle, workspace, body.target_kind, body.target)
-    # Resolve the effective role the same way the edge writer will, so the
-    # echoed response reports the edge that was actually written.
+    doc = _open_doc(workspace, path)
+    target = _resolve_embed_entity(workspace, body.target_kind, body.target)
     role = body.role if body.role is not None else default_role_for(target)
-    bundle.link(note, resolve_embed_target(target, root=workspace.root), role=role)
+    append_link(doc, resolve_embed_target(target), role=role)
     return EmbedResponse(srcPath=path, target=body.target, role=role)
 
 
@@ -585,14 +713,16 @@ def embed_doc(
 )
 def edit_doc(
     payload: DocBodyUpdate,
-    path: str = Query(..., description="The note Concept's bundle-relative path (its identity)."),
+    path: str = Query(
+        ..., description="The note Concept's workspace-relative document path (its identity)."
+    ),
     workspace: Workspace = Depends(get_workspace),
 ) -> NoteDetailResponse:
     """Rewrite a document's narrative — ``Knowledge.write`` for all six classes."""
-    bundle = _bundle(workspace)
+    _reject_tex(path)
     doc = _open_doc(workspace, path)
     doc.write(payload.body)
-    return _note_detail(bundle, workspace, doc, path)
+    return _note_detail(workspace, doc, path)
 
 
 @router.patch(
@@ -602,17 +732,22 @@ def edit_doc(
 )
 def move_doc(
     payload: DocMoveRequest,
-    path: str = Query(..., description="The note Concept's bundle-relative path (its identity)."),
+    path: str = Query(
+        ..., description="The note Concept's workspace-relative document path (its identity)."
+    ),
     workspace: Workspace = Depends(get_workspace),
 ) -> NoteSummary:
-    """Rename and/or reparent a note — delegates to ``Bundle.rename_note`` / ``move_note``."""
-    bundle = _bundle(workspace)
-    note = _resolve_note(bundle, path)
-    if payload.name is not None:
-        bundle.rename_note(note, payload.name)
-    if payload.parentPath is not None:
-        bundle.move_note(note, _resolve_note(bundle, payload.parentPath))
-    return _note_summary(bundle, note)
+    """Rename and/or move a document onto another host."""
+    _reject_tex(path)
+    doc = _open_doc(workspace, path)
+    try:
+        if payload.name is not None:
+            doc.rename(payload.name, within=workspace.root)
+        if payload.hostPath is not None:
+            doc.move_to(_resolve_host(workspace, payload.hostPath), within=workspace.root)
+    except FileExistsError as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, str(exc)) from exc
+    return _note_summary(workspace, doc)
 
 
 @router.patch(
@@ -622,15 +757,17 @@ def move_doc(
 )
 def update_doc_meta(
     payload: DocMetaUpdate,
-    path: str = Query(..., description="The note Concept's bundle-relative path (its identity)."),
+    path: str = Query(
+        ..., description="The note Concept's workspace-relative document path (its identity)."
+    ),
     workspace: Workspace = Depends(get_workspace),
 ) -> NoteSummary:
     """Update a document's tags/status — ``Knowledge.write`` for all six classes."""
-    bundle = _bundle(workspace)
+    _reject_tex(path)
     doc = _open_doc(workspace, path)
     if payload.tags is not None or payload.status is not None:
         doc.write(tags=payload.tags, status=payload.status)
-    return _note_summary(bundle, doc)
+    return _note_summary(workspace, doc)
 
 
 @router.delete(
@@ -639,54 +776,58 @@ def update_doc_meta(
     dependencies=[Depends(_require_writable)],
 )
 def delete_doc(
-    path: str = Query(..., description="The note Concept's bundle-relative path (its identity)."),
+    path: str = Query(
+        ..., description="The note Concept's workspace-relative document path (its identity)."
+    ),
     workspace: Workspace = Depends(get_workspace),
 ) -> MessageResponse:
-    """Delete a note (its directory subtree) — delegates to ``Bundle.delete_note``."""
-    bundle = _bundle(workspace)
-    note = _resolve_note(bundle, path)
-    bundle.delete_note(note)
+    """Delete a document. Inbound links are left dangling."""
+    _reject_tex(path)
+    doc = _open_doc(workspace, path)
+    doc.delete()
     return MessageResponse(message=f"note {path!r} deleted")
 
 
 @router.get("/backlinks", response_model=BacklinksResponse)
 def get_backlinks(
-    path: str = Query(..., description="The target Concept's bundle-relative path (its identity)."),
+    path: str = Query(
+        ..., description="The target Concept's workspace-relative document path (its identity)."
+    ),
     workspace: Workspace = Depends(get_workspace),
 ) -> BacklinksResponse:
-    """Return every Concept linking at *path* — delegates to ``Bundle.backlinks``."""
-    from molab.knowledge.errors import ConceptNotFoundError
+    """Return every document linking at *path*."""
+    from molab.knowledge.tex_docs import is_tex_file
 
-    bundle = _bundle(workspace)
-    try:
-        concept = bundle.get(path)
-    except ConceptNotFoundError as exc:
-        raise HTTPException(status.HTTP_404_NOT_FOUND, f"concept {path!r} not found") from exc
-
-    backlinks: list[NoteSummary] = []
-    for link in bundle.backlinks(concept):
-        source = link.source
-        body = source.read_index() or ""
-        backlinks.append(
-            NoteSummary(
-                name=source.name,
-                relPath=bundle.rel_path(source),
-                excerpt=body[:_EXCERPT_CHARS],
-            )
-        )
+    if is_tex_file(path):
+        _tex_text(workspace, path)
+        return BacklinksResponse(backlinks=[])
+    doc = _open_doc(workspace, path)
+    backlinks = [
+        _note_summary(workspace, link.source) for link in doc.backlinks(within=workspace.root)
+    ]
     return BacklinksResponse(backlinks=backlinks)
 
 
 @router.get("/doc/export")
 def export_doc(
-    path: str = Query(..., description="The note Concept's bundle-relative path (its identity)."),
+    path: str = Query(
+        ..., description="The note Concept's workspace-relative document path (its identity)."
+    ),
     workspace: Workspace = Depends(get_workspace),
 ) -> PlainTextResponse:
-    """Export a note as portable Markdown — delegates to ``Bundle.export_markdown``."""
-    bundle = _bundle(workspace)
-    note = _resolve_note(bundle, path)
-    markdown = bundle.export_markdown(note)
-    filename = f"{note.name}.md"
+    """Export a document as its narrative markdown, or the TeX file itself."""
+    from molab.knowledge.tex_docs import is_tex_file
+
+    if is_tex_file(path):
+        filename = _StdPath(path).name
+        return PlainTextResponse(
+            content=_tex_text(workspace, path),
+            media_type="text/plain; charset=utf-8",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    doc = _open_doc(workspace, path)
+    markdown = doc.export()
+    filename = f"{doc.name}.md"
     return PlainTextResponse(
         content=markdown,
         media_type="text/markdown",

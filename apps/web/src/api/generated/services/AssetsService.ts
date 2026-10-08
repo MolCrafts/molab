@@ -21,7 +21,7 @@ export class AssetsService {
      * ``image/png`` for ``png``.
      *
      * Raises:
-     * AssetNotFoundError: Unknown asset id (404).
+     * AssetNotFoundError: The asset resolved, but its payload is missing (404).
      * PreviewSidecarNotFoundError: No sidecar next to the dataset (404).
      * NoReaderInSidecarError / AmbiguousReaderError / PreviewReaderError:
      * The molpy sidecar has no reader / too many / failed (422).
@@ -71,7 +71,7 @@ export class AssetsService {
      * ``image/png`` for ``png``.
      *
      * Raises:
-     * AssetNotFoundError: Unknown asset id (404).
+     * AssetNotFoundError: The asset resolved, but its payload is missing (404).
      * PreviewSidecarNotFoundError: No sidecar next to the dataset (404).
      * NoReaderInSidecarError / AmbiguousReaderError / PreviewReaderError:
      * The molpy sidecar has no reader / too many / failed (422).

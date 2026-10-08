@@ -36,32 +36,32 @@ _Step 2 target architecture (plan `pasted-content-id-0977-you-are-scalable-puddl
 | 03c | [arch-own-03c-cache](arch-own-03c-cache.md) | 节点缓存按 run 身份定位，缓存键覆盖有效配置 [done] |
 | 03d | [arch-own-03d-seam](arch-own-03d-seam.md) | run-executor 接缝懒注册 + 结果读取经接缝（删除 execution_results.py） [done] |
 | 03e | [arch-own-03e-routes](arch-own-03e-routes.md) | 服务端路由改经所有者读取 journal 与 results [done] (gated on drop-harness-ui, D-6) |
-| 03f | [arch-own-03f-results](arch-own-03f-results.md) | results.json becomes a result Artifact [approved] |
-| 03g | [arch-own-03g-execute](arch-own-03g-execute.md) | execute_run 统一：启动 QUEUED 记录、RESUME 从 based_on 取种子（配置一致才复用）、启动时记录 digest [approved] |
-| 03h | [arch-own-03h-cli](arch-own-03h-cli.md) | CLI resume/rerun and the worker go through execute_run [approved] |
+| 03f | [arch-own-03f-results](arch-own-03f-results.md) | results.json becomes a result Artifact [code-complete] |
+| 03g | [arch-own-03g-execute](arch-own-03g-execute.md) | execute_run 统一：启动 QUEUED 记录、RESUME 从 based_on 取种子（配置一致才复用）、启动时记录 digest [code-complete] |
+| 03h | [arch-own-03h-cli](arch-own-03h-cli.md) | CLI resume/rerun and the worker go through execute_run [code-complete] |
 | 03i | [arch-own-03i-harness](arch-own-03i-harness.md) | harness 生命周期 resume/rerun 域对齐单一 resume 语义，plan Execution 启动即记录 digest [superseded by drop-harness] |
-| 03j | [arch-own-03j-prune](arch-own-03j-prune.md) | 收尾：删除遗留 journal 辅助函数与 RunMetadata 执行期字段，加 workflow 布局守卫 [approved] |
-| 04a | [arch-own-04a-bind](arch-own-04a-bind.md) | Experiment.bind_workflow — the association record and its sole writer [approved] |
-| 04b | [arch-own-04b-writers](arch-own-04b-writers.md) | switch every Workflow↔Experiment writer to Experiment.bind_workflow, plus molab migrate workflow-kind [approved] (gated on drop-harness-ui, D-6) |
-| 04c | [arch-own-04c-resolve](arch-own-04c-resolve.md) | kind-dispatched workflow resolution, loader moved into workflow [approved] |
-| 04d | [arch-own-04d-readers](arch-own-04d-readers.md) | workflow 关联的读者切换与遗留字段删除 [approved] |
-| 04e | [arch-own-04e-identity](arch-own-04e-identity.md) | workflow identity — workflow_digest is the only identity; the document carries none; retire run-level workflow fields [approved] |
+| 03j | [arch-own-03j-prune](arch-own-03j-prune.md) | 收尾：删除遗留 journal 辅助函数与 RunMetadata 执行期字段，加 workflow 布局守卫 [code-complete] |
+| 04a | [arch-own-04a-bind](arch-own-04a-bind.md) | Experiment.bind_workflow — the association record and its sole writer [code-complete] |
+| 04b | [arch-own-04b-writers](arch-own-04b-writers.md) | switch every Workflow↔Experiment writer to Experiment.bind_workflow, plus molab migrate workflow-kind [code-complete] (gated on drop-harness-ui, D-6) |
+| 04c | [arch-own-04c-resolve](arch-own-04c-resolve.md) | kind-dispatched workflow resolution, loader moved into workflow [code-complete] |
+| 04d | [arch-own-04d-readers](arch-own-04d-readers.md) | workflow 关联的读者切换与遗留字段删除 [code-complete] |
+| 04e | [arch-own-04e-identity](arch-own-04e-identity.md) | workflow identity — workflow_digest is the only identity; the document carries none; retire run-level workflow fields [code-complete] |
 | 04f | [arch-own-04f-generated](arch-own-04f-generated.md) | generated workflows bind by id (plan run + execution + entry); recoverer seam removed [superseded by drop-harness] |
-| 05a | [arch-own-05a-find-refs](arch-own-05a-find-refs.md) | molab: 引用与 Workspace.find [approved] |
-| 05b | [arch-own-05b-artifact-readers](arch-own-05b-artifact-readers.md) | Artifact readers move onto Execution records, execution-relative Artifact.path [approved] |
-| 05c | [arch-own-05c-asset-model](arch-own-05c-asset-model.md) | one Asset schema at every scope [approved] |
-| 05d | [arch-own-05d-asset-readers](arch-own-05d-asset-readers.md) | move every remaining asset reader onto AssetRepository / Workspace.find [approved] |
-| 05e | [arch-own-05e-asset-writers](arch-own-05e-asset-writers.md) | AssetRepository import writers, legacy record rewrite, `molab migrate assets` [approved] |
-| 05f | [arch-own-05f-manifest-delete](arch-own-05f-manifest-delete.md) | delete the manifest family and the legacy asset read branches [approved] |
-| 06a | [arch-own-06a-walker](arch-own-06a-walker.md) | one walker over workspace host enumeration, with the ranker moved out of Bundle [approved] |
-| 06b | [arch-own-06b-verbs](arch-own-06b-verbs.md) | document verbs on Concept, one container rule, hostPath creation/move, CLI/UI off Bundle [approved] (gated on drop-harness-ui, D-6) |
-| 06c | [arch-own-06c-refs](arch-own-06c-refs.md) | molab: entity references as the one knowledge link form [approved] |
-| 06d | [arch-own-06d-migrate](arch-own-06d-migrate.md) | molab migrate knowledge (opt-in, dry-run, one commit, owner-side writes) [approved] |
-| 06e | [arch-own-06e-delete](arch-own-06e-delete.md) | 删除 Bundle / 目录形态 / 概念类型注册表 / 06c 遗留读垫片 [approved] |
-| 06f | [arch-own-06f-sever](arch-own-06f-sever.md) | workspace sheds knowledge vocabulary [approved] |
-| 07 | [arch-own-07-ui](arch-own-07-ui.md) | run-mode, workflow-kind, host-picker, molab-ref and Copilot UX left unowned by 03–06 [approved] |
+| 05a | [arch-own-05a-find-refs](arch-own-05a-find-refs.md) | molab: 引用与 Workspace.find [code-complete] |
+| 05b | [arch-own-05b-artifact-readers](arch-own-05b-artifact-readers.md) | Artifact readers move onto Execution records, execution-relative Artifact.path [code-complete] |
+| 05c | [arch-own-05c-asset-model](arch-own-05c-asset-model.md) | one Asset schema at every scope [code-complete] |
+| 05d | [arch-own-05d-asset-readers](arch-own-05d-asset-readers.md) | move every remaining asset reader onto AssetRepository / Workspace.find [code-complete] |
+| 05e | [arch-own-05e-asset-writers](arch-own-05e-asset-writers.md) | AssetRepository import writers, legacy record rewrite, `molab migrate assets` [code-complete] |
+| 05f | [arch-own-05f-manifest-delete](arch-own-05f-manifest-delete.md) | delete the manifest family and the legacy asset read branches [code-complete] |
+| 06a | [arch-own-06a-walker](arch-own-06a-walker.md) | one walker over workspace host enumeration, with the ranker moved out of Bundle [code-complete] |
+| 06b | [arch-own-06b-verbs](arch-own-06b-verbs.md) | document verbs on Concept, one container rule, hostPath creation/move, CLI/UI off Bundle [code-complete] (gated on drop-harness-ui, D-6) |
+| 06c | [arch-own-06c-refs](arch-own-06c-refs.md) | molab: entity references as the one knowledge link form [code-complete] |
+| 06d | [arch-own-06d-migrate](arch-own-06d-migrate.md) | molab migrate knowledge (opt-in, dry-run, one commit, owner-side writes) [code-complete] |
+| 06e | [arch-own-06e-delete](arch-own-06e-delete.md) | 删除 Bundle / 目录形态 / 概念类型注册表 / 06c 遗留读垫片 [code-complete] |
+| 06f | [arch-own-06f-sever](arch-own-06f-sever.md) | workspace sheds knowledge vocabulary [code-complete] |
+| 07 | [arch-own-07-ui](arch-own-07-ui.md) | run-mode, workflow-kind, host-picker, molab-ref and Copilot UX left unowned by 03–06 [code-complete] |
 | 08 | [arch-own-08-guards](arch-own-08-guards.md) | Guards: boundary, layout, one-writer, one ref composer [approved] |
-| 09 | [arch-own-09-docs](arch-own-09-docs.md) | Documentation alignment (Phase 9) [approved] |
+| 09 | [arch-own-09-docs](arch-own-09-docs.md) | Documentation alignment (Phase 9) [code-complete] |
 
 ## knowledge-crossref (chain)
 
@@ -97,7 +97,7 @@ _Closed 01–08 on `feat/knowledge-unify` (2026-09-20) — Knowledge + six class
 | 07 | knowledge-unify-07-ui | web plugin six classes + generate:api |
 | 08 | knowledge-unify-08-cutover | delete shims, docs, grep-clean |
 
-## persist-one (chain)
+## persist-one (superseded)
 
 _One persist format: JSONL metrics in artifacts/, no ops/ sidecar, no harness.sqlite._
 
@@ -177,7 +177,6 @@ _Closed 01–06 on `feat/close-loop` (2026-08-06) — multi-pillar learning loop
 | Theme | Why deferred |
 |---|---|
 | High-risk ChangeProposal policy table (integration P2.1) | lifecycle/curate gates exist; full policy matrix needs production pain |
-| `assets.scan` scale index | intentional full-manifest scan; revisit on real large workspaces |
 | Multi-agent adversarial plan review (P2.3) | single-auditor StepAuditLoop sufficient for now |
 | Workspace-global event timeline UI | `workspace.events` spine exists; consumer is product polish |
 | Default-on auto-analyze / auto-ingest | cost/noise; keep opt-in only |

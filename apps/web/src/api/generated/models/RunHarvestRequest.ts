@@ -19,7 +19,7 @@ export type RunHarvestRequest = {
      */
     createdBy?: string;
     /**
-     * Optional KnowledgeItem name
+     * Optional knowledge document name
      */
     name?: (string | null);
     /**

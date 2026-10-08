@@ -315,7 +315,7 @@ class RemoteFileSystem:
         """Fetch every small file named in *names* under *root*, in one trip.
 
         The navigation-metadata bulk load: ``run.json`` / ``_ops/run.json`` /
-        ``assets.json`` / ``meta.yaml`` for a whole workspace arrive as one
+        ``meta.yaml`` for a whole workspace arrive as one
         tar stream instead of one round-trip apiece.
 
         Args:

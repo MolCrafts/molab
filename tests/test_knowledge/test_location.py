@@ -6,9 +6,16 @@ from pathlib import Path
 
 import pytest
 
-from molab.knowledge.concept import Concept
-from molab.knowledge.concepts import Finding, Note, Plan
-from molab.knowledge.location import folder
+from molab.knowledge.concept import Concept, Knowledge
+from molab.knowledge.concepts import Finding, Note, Plan, Report
+from molab.knowledge.location import (
+    bare_container,
+    document_slug,
+    enclosing_workspace_root,
+    folder,
+    host_of,
+    is_workspace_root,
+)
 from molab.workspace import Experiment, Workspace
 
 
@@ -31,15 +38,16 @@ class TestFolder:
     def test_a_file_document_class_lands_on_the_markdown_path(self, experiment: Experiment) -> None:
         assert folder(experiment, "Tg Cooling", Note) == _container(experiment) / "tg-cooling.md"
 
-    def test_a_directory_form_class_keeps_the_directory(self, experiment: Experiment) -> None:
-        assert folder(experiment, "records", Concept) == _container(experiment) / "records"
+    def test_a_bare_class_is_not_a_document(self, experiment: Experiment) -> None:
+        with pytest.raises(TypeError, match="not a knowledge document"):
+            folder(experiment, "records", Concept)
 
     def test_the_class_decides_the_form_not_a_suffix_in_the_name(
         self, experiment: Experiment
     ) -> None:
-        # Same host, same name — only ``of`` differs, and that is the whole rule.
         assert folder(experiment, "tg-rise", Finding) == _container(experiment) / "tg-rise.md"
-        assert folder(experiment, "tg-rise", Concept) == _container(experiment) / "tg-rise"
+        with pytest.raises(TypeError, match="not a knowledge document"):
+            folder(experiment, "tg-rise", Concept)
 
     def test_a_str_host_is_used_as_given(self, tmp_path: Path) -> None:
         host = str(tmp_path / "wiki")
@@ -72,15 +80,129 @@ class TestFolder:
             def resolve(self) -> Path:
                 return tmp_path
 
-        with pytest.raises(TypeError, match="_disk"):
+        with pytest.raises(TypeError, match="Folder"):
             folder(Coordinate(), "x", Note)
 
     def test_a_concept_host_is_rejected(self, tmp_path: Path) -> None:
-        # A Concept has resolve() and is not a host: it must never receive a
-        # silently-invented local filesystem.
-        with pytest.raises(TypeError, match="_disk"):
+        # A Concept has resolve() and fs, and is not a Folder host.
+        with pytest.raises(TypeError, match="Folder"):
             folder(Note(tmp_path / "other"), "x", Note)
 
-    def test_a_non_path_object_host_is_rejected(self, tmp_path: Path) -> None:
-        with pytest.raises(TypeError, match="_disk"):
+    def test_a_non_path_object_host_is_rejected(self) -> None:
+        with pytest.raises(TypeError, match="Folder"):
             folder(42, "x", Note)
+
+    def test_a_duck_typed_resolve_and_fs_is_rejected(self, tmp_path: Path) -> None:
+        class Duck:
+            def resolve(self) -> Path:
+                return tmp_path
+
+            @property
+            def fs(self) -> object:
+                return object()
+
+        with pytest.raises(TypeError, match="Folder"):
+            folder(Duck(), "x", Note)
+
+    def test_a_uuid7_suffix_survives_the_slug(self, tmp_path: Path) -> None:
+        name = "failure-analysis-0190f0e2-7c1a-7d4e-9b2a-3c4d5e6f7a8b"
+        assert folder(tmp_path, name, Report).name == f"{name}.md"
+        other = "experiment-record-0190f0e2-7c1a-7d4e-9b2a-3c4d5e6f7a8b"
+        assert folder(tmp_path, other, Report).name == f"{other}.md"
+
+    def test_a_bare_handle_uses_the_one_container_rule(self, tmp_path: Path) -> None:
+        wiki = tmp_path / "wiki"
+        wiki.mkdir()
+        lab = Workspace(root=tmp_path / "lab", name="Lab")
+        lab.materialize()
+        experiment = lab.add_project("p").add_experiment("e")
+
+        assert folder(Knowledge(wiki), "Cooling", Note) == wiki / "cooling.md"
+        assert (
+            folder(Knowledge(lab.root), "Cooling", Note)
+            == Path(lab.root) / "knowledges" / "cooling.md"
+        )
+        with pytest.raises(TypeError, match="inside workspace"):
+            folder(Knowledge(experiment.resolve()), "Cooling", Note)
+
+    def test_a_string_host_still_lands_under_knowledges(self, tmp_path: Path) -> None:
+        assert folder(tmp_path, "Cooling", Note) == tmp_path / "knowledges" / "cooling.md"
+
+
+class TestDocumentSlug:
+    def test_a_long_name_stops_at_200_characters(self) -> None:
+        assert document_slug("a" * 210) == "a" * 200
+
+    def test_a_cjk_name_is_kept(self) -> None:
+        assert document_slug("降温速率") == "降温速率"
+
+
+class TestHostOf:
+    def test_knowledges_files_belong_to_the_grandparent(self, tmp_path: Path) -> None:
+        lab = tmp_path / "lab"
+        experiment = lab / "projects" / "p" / "experiments" / "e"
+        assert host_of(lab / "knowledges" / "x.md") == lab
+        assert host_of(experiment / "knowledges" / "x.md") == experiment
+
+    def test_a_wiki_file_belongs_to_the_wiki(self, tmp_path: Path) -> None:
+        wiki = tmp_path / "wiki"
+        assert host_of(wiki / "x.md") == wiki
+
+
+class TestEnclosingWorkspaceRoot:
+    def test_a_workspace_member_resolves_and_a_wiki_does_not(self, tmp_path: Path) -> None:
+        lab = Workspace(root=tmp_path / "lab", name="Lab")
+        lab.materialize()
+        experiment = lab.add_project("p").add_experiment("e")
+        wiki = tmp_path / "wiki"
+        wiki.mkdir()
+
+        assert enclosing_workspace_root(lab.root, fs=lab.fs) == lab.root
+        assert enclosing_workspace_root(experiment.resolve(), fs=lab.fs) == lab.root
+        assert (
+            enclosing_workspace_root(Path(lab.root) / "knowledges" / "x.md", fs=lab.fs) == lab.root
+        )
+        assert enclosing_workspace_root(wiki, fs=lab.fs) is None
+
+    def test_the_lookup_goes_through_the_workspace_accessor(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        lab = Workspace(root=tmp_path / "lab", name="Lab")
+        lab.materialize()
+        calls: list[object] = []
+        original = Workspace.enclosing_root
+
+        def spy(path: object, *, fs: object = None) -> object:
+            calls.append(path)
+            return original(path, fs=fs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(Workspace, "enclosing_root", staticmethod(spy))
+        assert enclosing_workspace_root(lab.root, fs=lab.fs) == lab.root
+        assert calls == [lab.root]
+
+
+class TestIsWorkspaceRoot:
+    def test_only_the_workspace_root_itself(self, tmp_path: Path) -> None:
+        lab = Workspace(root=tmp_path / "lab", name="Lab")
+        lab.materialize()
+        experiment = lab.add_project("p").add_experiment("e")
+        wiki = tmp_path / "wiki"
+        wiki.mkdir()
+
+        assert is_workspace_root(lab.root, fs=lab.fs) is True
+        assert is_workspace_root(experiment.resolve(), fs=lab.fs) is False
+        assert is_workspace_root(wiki, fs=lab.fs) is False
+
+
+class TestBareContainer:
+    def test_root_wiki_and_inner_directory(self, tmp_path: Path) -> None:
+        lab = Workspace(root=tmp_path / "lab", name="Lab")
+        lab.materialize()
+        experiment = lab.add_project("p").add_experiment("e")
+        wiki = tmp_path / "wiki"
+        wiki.mkdir()
+
+        assert bare_container(lab.root, fs=lab.fs) == Path(lab.root) / "knowledges"
+        assert bare_container(wiki, fs=lab.fs) == wiki
+        with pytest.raises(TypeError, match="inside workspace"):
+            bare_container(experiment.resolve(), fs=lab.fs)

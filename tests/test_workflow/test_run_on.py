@@ -90,3 +90,16 @@ class TestRunOn:
         assert len(runs) == 1
         assert runs[0].status_summary.by_status == {"failed": 1}
         assert runs[0].is_retryable is True
+
+    @pytest.mark.asyncio
+    async def test_failure_message_carries_execution_error(self, tmp_path):
+        """The re-raised RuntimeError quotes the Execution error type and message."""
+        ws = Workspace(root=tmp_path, name="ws")
+        exp = ws.add_project(name="demo").add_experiment(name="failing-exp")
+
+        with pytest.raises(RuntimeError, match=r"failing.*status 'failed'") as exc:
+            await WorkflowRuntime().run_on(_failing_workflow(), exp)
+
+        err = exp.list_runs()[0].executions[-1].error
+        assert err is not None
+        assert f"{err['type']}: {err['message']}" in str(exc.value)

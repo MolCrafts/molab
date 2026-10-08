@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/select";
 import { WorkbenchIconAction, WorkbenchTag } from "@/components/workbench";
 import { knowledgeKeys, useKnowledgeListQuery } from "@/plugins/knowledge/queries";
+import { isTexDocument } from "@/plugins/knowledge/texDocument";
 
 /** Common lifecycle labels offered in the status select; `status` is an open
  * string on the backend, so the current value is always included as an option. */
@@ -90,6 +91,8 @@ export const DocumentControls = ({
       addTag(tagInput);
     }
   };
+
+  if (isTexDocument(relPath)) return null;
 
   if (listQuery.error) {
     const message =

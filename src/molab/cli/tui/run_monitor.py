@@ -208,9 +208,10 @@ class RunMonitor:
             sched_id = executor_info.get("scheduler_job_id")
 
             messages: list[str] = []
-            err = r.metadata.error
+            last = r.executions[-1] if r.executions else None
+            err = last.error if last is not None else None
             if err is not None:
-                messages.append(getattr(err, "message", None) or str(err))
+                messages.append(str(err.get("message") or err))
             reconcile_error = reconcile_errors.get(run_id)
             if reconcile_error is not None:
                 messages.append(reconcile_error[1])

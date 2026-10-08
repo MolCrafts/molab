@@ -115,3 +115,196 @@ class TestExecution:
         data["fresh"] = True
         with pytest.raises(ValidationError):
             Execution.model_validate(data)
+
+
+def _agent() -> Any:
+    from molab.workspace.history import AgentRef
+
+    return AgentRef(id="t", type="system")
+
+
+def _when() -> datetime:
+    return datetime(2026, 1, 1, tzinfo=UTC)
+
+
+class TestAssetScope:
+    def test_project_id_follows_kind(self) -> None:
+        from molab.workspace.domain import AssetScope
+
+        assert AssetScope(kind="experiment", ids=("p1", "e1")).project_id == "p1"
+        assert AssetScope(kind="workspace").project_id is None
+
+
+class TestAsset:
+    def test_dump_omits_scope(self) -> None:
+        from molab.workspace.domain import Asset, AssetScope
+
+        asset = Asset(
+            id="a",
+            scope=AssetScope(kind="project", ids=("p1",)),
+            title="t",
+            created_at=_when(),
+            created_by=_agent(),
+        )
+        assert "scope" not in asset.model_dump()
+
+    def test_project_id_follows_scope(self) -> None:
+        from molab.workspace.domain import Asset, AssetScope
+
+        project = Asset(
+            id="a",
+            scope=AssetScope(kind="project", ids=("p1",)),
+            title="t",
+            created_at=_when(),
+            created_by=_agent(),
+        )
+        workspace = project.model_copy(update={"scope": AssetScope(kind="workspace")})
+        assert project.project_id == "p1"
+        assert workspace.project_id is None
+
+    def test_kind_is_asset_and_not_serialized(self) -> None:
+        from molab.workspace.domain import Asset, AssetScope
+
+        asset = Asset(
+            id="a",
+            scope=AssetScope(kind="project", ids=("p1",)),
+            title="t",
+            created_at=_when(),
+            created_by=_agent(),
+        )
+        assert asset.kind == "asset"
+        assert "kind" not in asset.model_dump()
+
+    def test_persisted_project_id_is_rejected(self) -> None:
+        # arch-own-05f ac-001 restates 05c's coerce-on-read: extra=forbid.
+        from molab.workspace.domain import Asset, AssetScope
+
+        with pytest.raises(ValidationError):
+            Asset.model_validate(
+                {
+                    "id": "a",
+                    "scope": AssetScope(kind="project", ids=("p1",)),
+                    "title": "t",
+                    "created_at": "2026-01-01T00:00:00Z",
+                    "created_by": {"id": "t", "type": "system"},
+                    "project_id": "p1",
+                }
+            )
+
+
+class TestAssetVersion:
+    def test_import_source_artifact_id_is_none_and_content_may_be_absent(self) -> None:
+        from molab.workspace.domain import AssetVersion, ImportOrigin
+
+        version = AssetVersion(
+            id="v",
+            asset_id="a",
+            origin=ImportOrigin(uri="/data/qm9", action="copy"),
+            content=None,
+            version=1,
+            created_at=_when(),
+            created_by=_agent(),
+        )
+        assert version.source_artifact_id is None
+        assert version.content is None
+        assert "path" not in version.model_dump()
+
+    def test_source_artifact_id_projects_artifact_origin(self) -> None:
+        from molab.workspace.domain import ArtifactOrigin, AssetVersion
+
+        version = AssetVersion(
+            id="v",
+            asset_id="a",
+            origin=ArtifactOrigin(
+                artifact_id="a1",
+                ref="molab:experiment/e/run/r/artifact/a1",
+            ),
+            version=1,
+            created_at=_when(),
+            created_by=_agent(),
+        )
+        assert version.source_artifact_id == "a1"
+
+    def test_rejects_pre_origin_shape(self) -> None:
+        from molab.workspace.domain import AssetVersion
+
+        with pytest.raises(ValidationError):
+            AssetVersion.model_validate(
+                {
+                    "id": "v",
+                    "asset_id": "a",
+                    "source_artifact_id": "a1",
+                    "path": "projects/x/assets/m/payload",
+                    "version": 1,
+                    "created_at": "2026-01-01T00:00:00Z",
+                    "created_by": {"id": "t", "type": "system"},
+                }
+            )
+
+
+class TestArtifactOrigin:
+    def test_accepts_matching_ref(self) -> None:
+        from molab.workspace.domain import ArtifactOrigin
+
+        origin = ArtifactOrigin(
+            artifact_id="a1",
+            ref="molab:experiment/e/run/r/artifact/a1",
+        )
+        assert origin.ref.endswith("/artifact/a1")
+
+    def test_rejects_a_different_artifact_id(self) -> None:
+        from molab.workspace.domain import ArtifactOrigin
+
+        with pytest.raises(ValidationError):
+            ArtifactOrigin(artifact_id="a2", ref="molab:experiment/e/run/r/artifact/a1")
+
+    def test_rejects_a_run_only_ref(self) -> None:
+        from molab.workspace.domain import ArtifactOrigin
+
+        with pytest.raises(ValidationError):
+            ArtifactOrigin(artifact_id="a1", ref="molab:experiment/e/run/r")
+
+    def test_ref_is_required(self) -> None:
+        # arch-own-05f ac-001: ref=None is no longer a read path.
+        from molab.workspace.domain import ArtifactOrigin
+
+        with pytest.raises(ValidationError):
+            ArtifactOrigin(artifact_id="a1")  # type: ignore[call-arg]
+
+    def test_accepts_a_molab_ref(self) -> None:
+        from molab.workspace.domain import ArtifactOrigin
+        from molab.workspace.refs import MolabRef
+
+        origin = ArtifactOrigin(
+            artifact_id="a1",
+            ref=str(MolabRef(experiment_id="e", run_id="r", artifact_id="a1")),
+        )
+        assert origin.artifact_id == "a1"
+
+
+class TestImportOrigin:
+    def test_union_round_trip(self) -> None:
+        from pydantic import TypeAdapter
+
+        from molab.workspace.domain import AssetOrigin, ImportOrigin
+
+        origin = ImportOrigin(uri="/data/qm9", action="copy", location="assets/qm9/payload")
+        again = TypeAdapter(AssetOrigin).validate_python(origin.model_dump())
+        assert again == origin
+
+    def test_unknown_action_rejected(self) -> None:
+        from molab.workspace.domain import ImportOrigin
+
+        with pytest.raises(ValidationError):
+            ImportOrigin(uri="/data/qm9", action="ftp")  # type: ignore[arg-type]
+
+
+class TestAssetRefRemoved:
+    def test_symbol_and_property_are_gone(self) -> None:
+        import molab.workspace.domain as domain
+        from molab.workspace.domain import Asset
+
+        gone = "Asset" + "Ref"
+        assert not hasattr(domain, gone)
+        assert gone not in domain.__all__
+        assert not hasattr(Asset, "ref")

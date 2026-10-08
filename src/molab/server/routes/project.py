@@ -5,6 +5,8 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
+from molab.workspace.refs import InvalidRefError
+
 from ..dependencies import get_workspace
 from ..exceptions import AssetNotFoundError, ProjectNotFoundError
 from ..schemas import (
@@ -55,16 +57,6 @@ def delete_project(project_id: str, workspace=Depends(get_workspace)) -> Message
 # ── Project Assets ──────────────────────────────────────────────────────────
 
 
-def _managed_asset_response(project, asset) -> ManagedAssetResponse:  # noqa: ANN001
-    return ManagedAssetResponse(
-        id=asset.id,
-        projectId=asset.project_id,
-        title=asset.title,
-        createdAt=asset.created_at.isoformat(),
-        versionCount=len(project.assets.versions(asset.id)),
-    )
-
-
 @router.get("/{project_id}/assets", response_model=list[ManagedAssetResponse])
 def list_project_assets(
     project_id: str,
@@ -73,7 +65,10 @@ def list_project_assets(
 ) -> list[ManagedAssetResponse]:
     """List long-lived Project data identities."""
     project = workspace.get_project(project_id)
-    return [_managed_asset_response(project, asset) for asset in project.assets.list()[:limit]]
+    return [
+        ManagedAssetResponse.from_model(asset, len(project.assets.versions(asset.id)))
+        for asset in project.assets.list()[:limit]
+    ]
 
 
 @router.get("/{project_id}/assets/{asset_id}", response_model=ManagedAssetResponse)
@@ -87,23 +82,7 @@ def get_project_asset(
         asset = project.assets.get(asset_id)
     except KeyError:
         raise AssetNotFoundError(asset_id) from None
-    return _managed_asset_response(project, asset)
-
-
-def _asset_version_response(version) -> AssetVersionResponse:  # noqa: ANN001
-    return AssetVersionResponse(
-        id=version.id,
-        assetId=version.asset_id,
-        sourceArtifactId=version.source_artifact_id,
-        version=version.version,
-        digest=version.content.digest,
-        size=version.content.size,
-        contentKind=version.content.kind,
-        mediaType=version.media_type,
-        semanticType=version.semantic_type,
-        metadata=version.metadata,
-        createdAt=version.created_at.isoformat(),
-    )
+    return ManagedAssetResponse.from_model(asset, len(project.assets.versions(asset.id)))
 
 
 @router.get(
@@ -121,25 +100,26 @@ def list_project_asset_versions(
         project.assets.get(asset_id)
     except KeyError:
         raise AssetNotFoundError(asset_id) from None
-    return [_asset_version_response(version) for version in project.assets.versions(asset_id)]
+    return [
+        AssetVersionResponse.from_model(version) for version in project.assets.versions(asset_id)
+    ]
 
 
 @router.get("/{project_id}/assets/{asset_id}/download")
 def download_project_asset(project_id: str, asset_id: str, workspace=Depends(get_workspace)):  # noqa: ANN001, ANN201
     project = workspace.get_project(project_id)
     try:
-        project.assets.get(asset_id)
-    except KeyError:
+        payload = project.assets.payload_path(asset_id)
+    except InvalidRefError:
+        raise
+    except (KeyError, ValueError):
         raise AssetNotFoundError(asset_id) from None
-    versions = project.assets.versions(asset_id)
-    if not versions:
-        raise AssetNotFoundError(asset_id)
-    version = versions[-1]
-    payload = workspace.fs.join(workspace.root, version.path) if version.path else ""
     if not payload or not workspace.fs.exists(payload) or workspace.fs.is_dir(payload):
         raise AssetNotFoundError(asset_id)
+    versions = project.assets.versions(asset_id)
+    media_type = versions[-1].media_type if versions else None
     return StreamingResponse(
         workspace.fs.open(payload, "rb"),
-        media_type=version.media_type or "application/octet-stream",
+        media_type=media_type or "application/octet-stream",
         headers={"Content-Disposition": f'attachment; filename="{asset_id}"'},
     )

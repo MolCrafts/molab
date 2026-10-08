@@ -1,88 +1,56 @@
-"""OKF ``Note`` + ``Reference`` Concepts.
+"""The six knowledge classes: one markdown file each.
 
-In OKF a Concept is a **directory** whose path is its identity:
-
-- A :class:`Note` is a Concept whose body is its ``index.md`` and whose
-  citations are markdown links (resolved by :meth:`Concept.out_edges`).
-- A :class:`Literature` is a Knowledge directory whose structured bib record lives in
-  ``meta.json`` (:class:`ReferenceMeta`) and whose human citation text lives in
-  ``index.md``. PDFs are *pointed at* via ``ReferenceMeta.pdf_path`` /
-  ``pdf_asset_id`` — never copied.
-
-Both register via ``@concept_type(...)``, so
-:func:`~molab.knowledge.concept.concept_from_dir` rebuilds the right subclass
-from a directory's ``meta.json`` ``type``.
+A :class:`Note` and a :class:`Literature` are ``knowledges/<name>.md`` files.
+Frontmatter holds the structured fields; the narrative holds the links.
 """
 
 from __future__ import annotations
 
-from typing import ClassVar, cast
+import logging
+from types import MappingProxyType
+from typing import TYPE_CHECKING, ClassVar
 
 from molab.fs import FileSystem, PathArg
 
-from .concept import (
-    META_JSON_FILENAME,
-    Concept,
-    read_text_or_none,
-    register_marker_filenames,
-)
+from .concept import Concept
 from .knowledge_item import SourceRef
-from .naming import KNOWLEDGE_HEAD_FILES
-from .note_meta import NOTE_TYPE, NoteMeta
 from .reference_meta import ReferenceMeta
-from .types import concept_type
 
-NOTE_KIND = NOTE_TYPE
+if TYPE_CHECKING:
+    from molab._typing import JSONValue
+    from molab.workspace.run import Run
+
+NOTE_KIND = "note.note"
 REFERENCE_KIND = "reference.reference"
+_LOG = logging.getLogger(__name__)
 
 
-@concept_type(NOTE_KIND)
 class Note(Concept):
     """A note — ``knowledges/<name>.md`` with ``class: Note`` frontmatter."""
 
     FILE_DOCUMENT: ClassVar[bool] = True
     DEFAULT_TYPE: ClassVar[str] = NOTE_KIND
 
-    # -- typed meta.json (tags / status) ----------------------------------
-
-    def read_note_meta(self) -> NoteMeta:
-        """Load this note's typed document ``meta.json`` as a :class:`NoteMeta`.
-
-        A legacy bare marker (only ``{type, id}``) — or an absent ``meta.json``
-        — reads back with the additive defaults (``tags == []`` /
-        ``status == "active"``), so no migration is needed.
-        """
-        text = read_text_or_none(self._fs.join(str(self.path), META_JSON_FILENAME), fs=self._fs)
-        if text is None:
-            return NoteMeta(type=self._type, id=self.name)
-        return cast("NoteMeta", NoteMeta.from_json(text))
-
-    def write_note_meta(self, meta: NoteMeta) -> None:
-        """Atomically write this note's typed document ``meta.json``.
-
-        ``type`` / ``id`` are stamped by :meth:`Concept.write_meta`, so identity
-        stays path-derived and ``concept_from_dir`` rebuilds a :class:`Note`.
-        Any other keys on *meta* are preserved verbatim (``ConceptMeta`` is
-        ``extra="allow"``).
-        """
-        self.write_meta(meta)
-
-    def tags(self) -> list[str]:
-        """This note's categorical tags (``[]`` when untagged)."""
-        raw = self.frontmatter().get("tags")
-        if isinstance(raw, list):
-            return [str(item) for item in raw]
-        return list(self.read_note_meta().tags)
-
     def status(self) -> str:
         """This note's lifecycle status (``"active"`` by default)."""
         raw = self.frontmatter().get("status")
         if isinstance(raw, str) and raw:
             return raw
-        return self.read_note_meta().status
+        return "active"
+
+    @classmethod
+    def mount(cls, host: object, name: str, *, body: str = "") -> Note:
+        """Idempotently mount this note under *host*.
+
+        A mount materializes the document even with an empty body. A repeat
+        call never truncates an existing body, including a repeat that passes
+        ``body=""``.
+        """
+        from .write import write_knowledge
+
+        return write_knowledge(host, name=name, of=cls, created_by="", text=body)  # ty: ignore[invalid-argument-type, invalid-return-type]
 
 
-@concept_type(REFERENCE_KIND)
 class Literature(Concept):
     """A literature record — bib fields in markdown frontmatter."""
 
@@ -91,11 +59,7 @@ class Literature(Concept):
 
     @property
     def record(self) -> ReferenceMeta:
-        """This literature item's bibliographic record."""
-        return self.read_reference_meta()
-
-    def read_reference_meta(self) -> ReferenceMeta:
-        """Load bibliographic fields from this file's frontmatter."""
+        """This literature item's bibliographic record, from its frontmatter."""
         payload = {
             k: v
             for k, v in self.frontmatter().items()
@@ -109,7 +73,7 @@ class Literature(Concept):
         return ReferenceMeta.model_validate(payload)
 
     def citation(self) -> str:
-        """The human-readable citation text (its ``index.md``)."""
+        """The human-readable citation text."""
         return self.read()
 
 
@@ -117,6 +81,7 @@ class _SourcedKnowledge(Concept):
     """Finding / Report / Plan / Observation — require ``sources`` at construct."""
 
     FILE_DOCUMENT: ClassVar[bool] = True
+    REQUIRES_SOURCES: ClassVar[bool] = True
 
     def __init__(
         self,
@@ -132,16 +97,15 @@ class _SourcedKnowledge(Concept):
 
         Args:
             path: The document's path, or — with *name* given — its host (a
-                ``str`` / :class:`os.PathLike` directory, or a ``Folder``-family
-                object carrying ``_disk()``).
+                ``str`` / :class:`os.PathLike` directory, or a workspace
+                ``Folder``).
             name: A human document name; the host then derives the landed path.
             sources: The :class:`~molab.knowledge.knowledge_item.SourceRef` list
                 this document harvests from; at least one is required.
             declared_type: Legacy spelling of *type*.
             fs: The filesystem to read and write through; defaults to the host's
                 own disk in the *name* form.
-            type: The ``type`` :meth:`~molab.knowledge.concept.Concept.write_meta`
-                stamps.
+            type: Declared type; defaults to :attr:`DEFAULT_TYPE`.
 
         Raises:
             ValueError: If *sources* is empty.
@@ -157,10 +121,67 @@ class _SourcedKnowledge(Concept):
         )
         self._sources = list(sources)
 
+    @classmethod
+    def _from_disk(cls, path: str, *, fs: FileSystem | None = None) -> _SourcedKnowledge:
+        """Open a file that already exists. Constructor sources stay empty.
+
+        The ``sources`` property then reads ``derived_from`` and ``cites``
+        edges only. A frontmatter ``sources:`` row stays opaque. This skips
+        the writer rule that ``sources`` must be non-empty.
+        """
+        self = cls.__new__(cls)
+        Concept.__init__(self, path, fs=fs)
+        self._sources = []
+        return self
+
     @property
     def sources(self) -> list[SourceRef]:
-        """The SourceRef list persisted in the class-named head."""
+        """Edges with role ``derived_from`` or ``cites``.
+
+        A document that is not on disk yet returns the constructor list.
+        Frontmatter ``sources:`` rows are not a second record.
+        """
+        from pathlib import PurePosixPath
+
+        if (
+            self.exists()
+            and self.FILE_DOCUMENT
+            and PurePosixPath(self._path).suffix.lower() in {".md", ".mdx"}
+        ):
+            from molab.workspace.refs import InvalidRefError
+
+            found: list[SourceRef] = []
+            for edge in self.links():
+                if edge.role not in {"derived_from", "cites"}:
+                    continue
+                try:
+                    found.append(SourceRef.from_edge(edge))
+                except InvalidRefError:
+                    _LOG.warning("skipping malformed source edge %s", edge.target)
+            return found
         return list(self._sources)
+
+    @classmethod
+    def harvest(
+        cls,
+        run: Run,
+        *,
+        narrative: str,
+        created_by: str,
+        results: dict[str, JSONValue] | None = None,
+        name: str | None = None,
+    ) -> Concept:
+        """Harvest a terminal *run* into this class under its experiment."""
+        from .harvest import perform
+
+        return perform(
+            cls,
+            run,
+            narrative=narrative,
+            created_by=created_by,
+            results=results,
+            name=name,
+        )
 
 
 class Report(_SourcedKnowledge):
@@ -192,7 +213,17 @@ _PRODUCTS: dict[str, type[Concept]] = {
 }
 
 
-def parse_knowledge_class(name: str) -> type[Concept]:
+HARVEST_TARGETS: MappingProxyType[str, type[_SourcedKnowledge]] = MappingProxyType(
+    {
+        "Finding": Finding,
+        "Observation": Observation,
+        "Report": Report,
+    }
+)
+"""Finding, Observation and Report — the classes a run can be harvested into."""
+
+
+def parse_class(name: str) -> type[Concept]:
     """Map a class name onto a Knowledge subclass (including condemned aliases).
 
     The single class-name entry point on the knowledge side: a config file, a
@@ -217,8 +248,6 @@ def parse_knowledge_class(name: str) -> type[Concept]:
     )
 
 
-register_marker_filenames(*sorted(KNOWLEDGE_HEAD_FILES))
-
 __all__ = [
     "NOTE_KIND",
     "REFERENCE_KIND",
@@ -228,5 +257,5 @@ __all__ = [
     "Observation",
     "Plan",
     "Report",
-    "parse_knowledge_class",
+    "parse_class",
 ]

@@ -1,17 +1,10 @@
-"""Invariant tests for the v2 artifact/asset model.
+"""Invariant tests for emitted artifacts and the scope asset repository.
 
-Covers the emitted-artifact surface (``ArtifactRepository`` + the owning
-``Execution``) plus the retained asset-model classes (``Asset`` hierarchy,
-``parse_asset``, ``DataAssetLibrary``) and their success criteria:
-
-- Artifact records are self-contained (workspace-relative path + content digest).
+- Artifact records travel with the run directory.
 - Emitted payloads hash to the digest recorded for them.
-- Subclass dispatch survives serialization round-trips.
 - The active task id populates ``Artifact.metadata``.
 - Concurrent artifact writes all land on the Execution.
-- The scope-bound ``AssetsView`` filters to its own scope; imports land there.
-
-(Cross-cutting query shapes are owned by ``test_asset_scan.py``.)
+- ``data_assets`` is the scope ``AssetRepository``.
 """
 
 from __future__ import annotations
@@ -19,21 +12,10 @@ from __future__ import annotations
 import json
 import shutil
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
 from pathlib import Path
 
-from molab.workspace import Workspace
+from molab.workspace import Run, Workspace
 from molab.workspace.artifact_repository import ArtifactRepository, content_ref, scan_artifacts
-from molab.workspace.assets import (
-    ArtifactAsset,
-    AssetScope,
-    CheckpointAsset,
-    DataAsset,
-    ErrorTraceAsset,
-    LogAsset,
-    parse_asset,
-    scan,
-)
 from molab.workspace.domain import Artifact
 from molab.workspace.execution_dirs import execution_dir_names
 
@@ -65,6 +47,15 @@ def _repo(ws: Workspace) -> ArtifactRepository:
     return ArtifactRepository(ws.root, fs=ws.fs)
 
 
+def _owning_run(ws: Workspace, artifact: Artifact) -> Run:
+    for project in ws.list_projects():
+        for experiment in project.list_experiments():
+            for run in experiment.list_runs():
+                if run.id == artifact.run_id:
+                    return run
+    raise AssertionError(artifact.run_id)
+
+
 class TestArtifactRecordPortability:
     def test_artifact_records_relocate_with_run_dir(self, tmp_path):
         """A run directory copied elsewhere carries its own artifact records —
@@ -84,7 +75,7 @@ class TestArtifactRecordPortability:
         for record in records:
             # Every product came from one of the attempt's own directories.
             assert record["source_path"].split("/")[0] in execution_dir_names()
-            assert record["path"].startswith("projects/")
+            assert record["path"].startswith("artifacts/")
             assert record["content"]["digest"].startswith("sha256:")
 
 
@@ -95,8 +86,9 @@ class TestArtifactContent:
         assert len(artifacts) == 2 * ARTIFACTS_PER_RUN
         for artifact in artifacts:
             assert artifact.content.digest.startswith("sha256:")
-            payload = ws.fs.join(str(ws.root), artifact.path)
-            assert content_ref(ws.fs, payload) == artifact.content
+            owner = _owning_run(ws, artifact)
+            location = owner.artifact_location(artifact.execution_id, artifact)
+            assert content_ref(ws.fs, location) == artifact.content
 
     def test_parallel_emits_all_land_in_index(self, tmp_path):
         ws = Workspace(tmp_path / "lab", name="Test")
@@ -118,67 +110,6 @@ class TestArtifactContent:
         assert len(run.executions[0].artifacts) == n
 
 
-class TestParseAsset:
-    def test_round_trip_preserves_each_subclass(self):
-        scope = AssetScope(kind="run", ids=("p", "e", "run-1"))
-        now = datetime.now()
-        cases = [
-            ArtifactAsset(
-                asset_id="a1",
-                name="m.json",
-                scope=scope,
-                path=Path("artifacts/m.json"),
-                created_at=now,
-                updated_at=now,
-                mime="application/json",
-                size=10,
-            ),
-            LogAsset(
-                asset_id="l1",
-                name="run",
-                scope=scope,
-                path=Path("executions/ex-1/logs/run.log"),
-                created_at=now,
-                updated_at=now,
-            ),
-            CheckpointAsset(
-                asset_id="c1",
-                name="ckpt1",
-                scope=scope,
-                path=Path(".ckpt/c1.json"),
-                created_at=now,
-                updated_at=now,
-                ckpt_id="ckpt_abc",
-                parent_ckpt_id=None,
-            ),
-            ErrorTraceAsset(
-                asset_id="e1",
-                name="err",
-                scope=scope,
-                path=Path("executions/ex-1/error.txt"),
-                created_at=now,
-                updated_at=now,
-                exception_type="RuntimeError",
-                message="oops",
-                execution_id="ex-1",
-            ),
-            DataAsset(
-                asset_id="d1",
-                name="ds",
-                scope=scope,
-                path=Path("assets/d1/payload"),
-                created_at=now,
-                updated_at=now,
-                source_path="/tmp/ds",
-                import_action="copy",
-            ),
-        ]
-        for asset in cases:
-            revived = parse_asset(json.loads(asset.model_dump_json()))
-            assert type(revived) is type(asset)
-            assert revived.asset_id == asset.asset_id
-
-
 class TestProducer:
     def test_active_task_sets_metadata_task_id(self, tmp_path):
         ws = Workspace(tmp_path / "lab", name="Test")
@@ -189,33 +120,28 @@ class TestProducer:
         assert artifact.metadata.get("task_id") == "train"
 
 
-class TestAssetsView:
-    def test_scope_views_return_only_their_own_scope(self, tmp_path):
-        ws = _seed_workspace(tmp_path / "lab", n_runs=2)
-        proj = ws.list_projects()[0]
-        exp = proj.list_experiments()[0]
+class TestScopeAssets:
+    """``data_assets`` is the scope repository. ``DataAssetLibrary`` is gone."""
 
-        # Emitted artifacts are v2 provenance artifacts, not DataAssets nor
-        # promoted Project Assets — so the data-asset / project views are empty.
-        assert ws.assets.list() == []
-        assert proj.assets.list() == []
-        assert exp.assets.list() == []
+    def test_data_assets_is_the_scope_repository(self, workspace, project, experiment):
+        from molab.workspace.artifact_repository import AssetRepository
 
-        # Every emitted artifact is run-scoped and reachable via the v2 index.
-        for run in exp.list_runs():
-            assert {a.semantic_type for a in _query(ws, run_id=run.id)} == {
-                "artifact",
-                "checkpoint",
-            }
+        for scope in (workspace, project, experiment):
+            assert type(scope.data_assets) is AssetRepository
+            assert scope.data_assets.scope == scope.scope
+            assert not hasattr(scope, "_data_assets")
 
-    def test_imported_data_asset_lands_at_workspace_scope(self, tmp_path):
-        ws = Workspace(tmp_path / "lab", name="Test")
-        src = tmp_path / "input.txt"
-        src.write_text("hello")
-        asset = ws.data_assets.import_asset("greeting", src)
-        assert isinstance(asset, DataAsset)
-        assert asset.scope.kind == "workspace"
+    def test_an_experiment_import_stays_on_that_experiment(self, workspace, experiment, tmp_path):
+        source = tmp_path / "hello.txt"
+        source.write_bytes(b"hello\n")
+        asset = experiment.data_assets.import_asset("d", source)
+        assert asset.id in {item.id for item in experiment.assets.list()}
+        assert asset.id not in {item.id for item in workspace.assets.list()}
 
-        # Visible through both the workspace view and the manifest scanner.
-        assert ws.assets.get(asset.asset_id) is not None
-        assert scan.get_asset(ws.root, asset.asset_id) is not None
+    def test_data_asset_library_is_gone(self):
+        import molab.workspace as workspace
+        import molab.workspace.assets as assets_pkg
+
+        assert not hasattr(workspace, "DataAssetLibrary")
+        data_py = Path(assets_pkg.__file__).resolve().parent / "data.py"
+        assert not data_py.is_file()

@@ -24,8 +24,8 @@ import tempfile
 from pathlib import Path
 
 import molab as me
+from molab.param import GridSpace, UniformSpace
 from molab.workflow import Workflow, WorkflowCompiler
-from molab.workspace.param import GridSpace, UniformSpace
 
 wf = Workflow(name="train")
 

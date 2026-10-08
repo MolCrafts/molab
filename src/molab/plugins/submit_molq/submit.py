@@ -144,6 +144,10 @@ class SubmitHandler:
             one line; a sequence is joined with newlines. When set, the job is
             submitted as an inline script (preamble + ``exec <worker>``) instead
             of a bare ``argv``.
+        python: The interpreter that runs the worker on the compute node.
+            Defaults to this process's ``sys.executable``, which is wrong when
+            the nodes have another architecture or environment than the
+            submitting host (an x86 login node in front of aarch64 GPUs).
     """
 
     def __init__(
@@ -157,8 +161,10 @@ class SubmitHandler:
         target: ComputeTarget | None = None,
         env: dict[str, str] | None = None,
         preamble: str | Sequence[str] | None = None,
+        python: str | None = None,
     ) -> None:
         self._scheduler = scheduler
+        self._python = python or sys.executable
         self._cluster = cluster or DEFAULT_CLUSTER_NAME
         self._res = _strip_none(resources)
         self._sched = _strip_none(scheduling)
@@ -192,7 +198,7 @@ class SubmitHandler:
 
         The attempt is resolved before any transport or scheduler call. With
         no *execution_id* a new QUEUED ``eNN`` is created through
-        ``Run.create_execution`` (``initial`` for the first attempt, else
+        ``Run._create_execution`` (``initial`` for the first attempt, else
         ``rerun`` based on the latest one); with an id, that attempt must
         already exist and still be QUEUED — ids are allocated only by the
         workspace, never here.
@@ -243,9 +249,9 @@ class SubmitHandler:
         # Resolve the attempt before touching any transport or scheduler.
         if execution_id is None:
             prior = mol_run.executions
-            record = mol_run.create_execution(
+            record = mol_run._create_execution(
                 mode=ExecutionMode.RERUN if prior else ExecutionMode.INITIAL,
-                based_on_execution_id=prior[-1].id if prior else None,
+                predecessor=prior[-1].id if prior else None,
                 executor={"backend": "molq", "target": target.name if target else None},
                 environment={"submit_cwd": str(Path.cwd().resolve())},
             )
@@ -254,7 +260,7 @@ class SubmitHandler:
             if record.status is not ExecutionStatus.QUEUED:
                 raise ValueError(
                     f"attempt {record.id!r} of run {mol_run.id!r} is {record.status.value}, "
-                    "not queued; submit a new attempt from Run.create_execution"
+                    "not queued"
                 )
         attempt_id = record.id
         local_exec_dir = run_dir / "executions" / attempt_id
@@ -308,7 +314,7 @@ class SubmitHandler:
                 jobs_dir=jobs_dir,
             ) as submitor:
                 worker_argv = [
-                    sys.executable,
+                    self._python,
                     "-m",
                     "molab.cli",
                     "execute",
@@ -542,6 +548,9 @@ def make_submit_handler(
     resources: dict[str, JSONValue],
     scheduling: dict[str, JSONValue],
     target: ComputeTarget | None = None,
+    preamble: str | Sequence[str] | None = None,
+    python: str | None = None,
+    env: dict[str, str] | None = None,
 ) -> SubmitHandler:
     """Return a :class:`SubmitHandler` configured for the given scheduler.
 
@@ -565,6 +574,9 @@ def make_submit_handler(
         target: Optional :class:`~molab.workspace.ComputeTarget` — when set,
             jobs route through the target's transport + scheduler and the run
             dir is staged in/out across the transport.
+        preamble: Shell lines the job runs before the worker.
+        python: The worker's interpreter on the compute node.
+        env: Extra environment for the worker.
 
     Returns:
         Configured :class:`SubmitHandler` instance.
@@ -575,4 +587,7 @@ def make_submit_handler(
         resources=resources,
         scheduling=scheduling,
         target=target,
+        preamble=preamble,
+        python=python,
+        env=env,
     )

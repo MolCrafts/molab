@@ -29,6 +29,7 @@ SEVERED_MODULES = (
     "molab.workspace.harvest",
     "molab.workspace.doc_embed",
     "molab.workspace.bundle",
+    "molab.workspace.copilot",
 )
 
 # The 9 ``__all__`` names the cut removes, plus the package re-export that was
@@ -43,6 +44,7 @@ SEVERED_NAMES = (
     "Report",
     "SourceKind",
     "SourceRef",
+    "KnowledgeRef",
 )
 SEVERED_REEXPORT = "summarize_entity"
 
@@ -57,13 +59,12 @@ SURVIVING_NAMES = (
     "Run",
     "Folder",
     "Asset",
-    "AssetManifest",
-    "AssetsView",
+    "AssetScope",
+    "AssetVersion",
     "FileStore",
     "Params",
     "ComputeTarget",
     "GitHistory",
-    "KnowledgeRef",
     "ContextFocus",
 )
 
@@ -127,12 +128,10 @@ class TestSeveredKnowledgeSurface:
         for cls in (workspace.Project, workspace.Experiment, workspace.Run):
             assert not hasattr(cls, verb), f"{cls.__name__}.{verb}"
 
-    def test_run_still_declares_its_pruning_contract(self) -> None:
-        from molab.knowledge.types import non_concept_subdirs
+    def test_run_has_no_pruning_contract(self) -> None:
         from molab.workspace import Run
 
-        assert "executions" in Run.NON_CONCEPT_SUBDIRS
-        assert "executions" in non_concept_subdirs("workspace.run")
+        assert not hasattr(Run, "NON_CONCEPT_SUBDIRS")
 
     def test_the_knowledge_route_still_loads(self) -> None:
         # The route reaches knowledge through ``molab.knowledge`` only; if any

@@ -23,12 +23,11 @@ from ._graph_decl import (
     TaskRegistration,
     WorkflowTopology,
 )
-from ._helpers import _callable_name, _stable_workflow_id, _to_snake_case
+from ._helpers import _callable_name, _to_snake_case
 from .binding import default_binding_registry
 from .compiled import CompiledWorkflow
-from .protocols import Streamable, TaskBody, TaskOutput, UserDeps
+from .protocols import Streamable, TaskBody, TaskOutput
 from .snapshot import TaskSnapshot
-from .version import TaskTopologyEntry, WorkflowVersion
 
 if TYPE_CHECKING:
     from .binding import WorkflowBindingRegistry
@@ -55,12 +54,9 @@ def compile_registrations(
     """Lower registrations once and assemble the :class:`CompiledWorkflow`.
 
     Shared by :meth:`WorkflowCompiler.compile` and
-    :meth:`CompiledWorkflow.subgraph`. The ``workflow_id`` is computed
-    before lowering (so it reflects the authored topology), then the CFG
-    lowering runs once (it may inject parallel-join data deps), and the
-    per-task snapshots + version are computed from the lowered tasks — the
-    version reuses each snapshot's ``code_hash`` so the two code-hashers
-    collapse to one.
+    :meth:`CompiledWorkflow.subgraph`. The CFG lowering runs once (it may
+    inject parallel-join data deps). Identity is ``workflow_digest``, derived
+    from the lowered tasks.
     """
     # Resolve each task's serialization slug from the type registry. The slug
     # lives with the task *type* (registered via ``@default_registry.register``),
@@ -72,7 +68,6 @@ def compile_registrations(
         if t.task_type is None:
             t.task_type = default_registry.slug_for(t.fn_or_class)
 
-    workflow_id = _stable_workflow_id(name, tasks)
     topology = WorkflowTopology(
         name=name,
         tasks=tasks,
@@ -87,29 +82,13 @@ def compile_registrations(
     snapshots: dict[str, TaskSnapshot] = {
         t.name: TaskSnapshot.from_task_body(t.name, t.fn_or_class) for t in tasks
     }
-    version = WorkflowVersion(
-        workflow_id=workflow_id,
-        version=version_label,
-        name=name,
-        topology=tuple(
-            TaskTopologyEntry(
-                name=t.name,
-                qualname=type(t.fn_or_class).__qualname__,
-                depends_on=tuple(t.depends_on),
-                code_hash=snapshots[t.name].code_hash,
-            )
-            for t in tasks
-        ),
-    )
 
     compiled = CompiledWorkflow(
         name=name,
-        workflow_id=workflow_id,
         version_label=version_label,
         tasks=tasks,
         graph=graph,
         snapshots=snapshots,
-        version=version,
         mode=mode,
         entries=entries,
         control_edges=control_edges,
@@ -192,7 +171,6 @@ class Workflow:
         *,
         depends_on: list[str] | None = None,
         name: str | None = None,
-        remote: UserDeps = None,
         routes: Mapping[str, str] | None = None,
         next_: str | None = None,
         dependent_params: DependentParamsFn | None = None,
@@ -213,9 +191,6 @@ class Workflow:
                 dependency; declare ``depends_on`` for ordering-only edges.
             name: Task name (defaults to the function name). Must be unique
                 within the workflow.
-            remote: Optional execution deps forwarded to the runtime
-                (e.g. a molq scheduler spec) — execution location is not
-                task identity.
             routes: ``{label: target}`` branch routing — the task returns
                 ``(value, Next(label))`` and control (with ``value``) flows
                 to that target. Mutually exclusive with ``next_``.
@@ -249,7 +224,6 @@ class Workflow:
                     fn_or_class=f,
                     depends_on=depends_on or [],
                     is_actor=False,
-                    remote=remote,
                     dependent_params=dependent_params,
                 )
             )
@@ -301,7 +275,6 @@ class Workflow:
         *,
         depends_on: list[str] | None = None,
         name: str | None = None,
-        remote: UserDeps = None,
         routes: Mapping[str, str] | None = None,
         next_: str | None = None,
         dependent_params: DependentParamsFn | None = None,
@@ -332,7 +305,6 @@ class Workflow:
                 fn_or_class=task,
                 depends_on=depends_on or [],
                 is_actor=isinstance(task, Streamable),
-                remote=remote,
                 dependent_params=dependent_params,
             )
         )

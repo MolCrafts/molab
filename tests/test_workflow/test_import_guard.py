@@ -24,6 +24,10 @@ import ast
 import re
 from pathlib import Path
 
+import pytest
+
+from tests.support.boundary_scan import layout_literal_offenders
+
 WORKFLOW_ROOT = Path(__file__).resolve().parents[2] / "src" / "molab" / "workflow"
 
 FORBIDDEN_PREFIXES: tuple[str, ...] = (
@@ -32,7 +36,14 @@ FORBIDDEN_PREFIXES: tuple[str, ...] = (
     "molab.cli",
     "molab.services",
     "molab.sweep",
+    "molab.entry",
 )
+
+#: Workspace modules workflow must not import. Later guards append to this tuple.
+FORBIDDEN_WORKSPACE_MODULES = ("molab.workspace.naming",)
+
+_LAYOUT_EXACT = frozenset({"executions", "workflow.json"})
+_LAYOUT_ALLOWED = frozenset({("molab.workflow._engine.persistence", "JOURNAL_NAME")})
 
 
 def _iter_workflow_py_files() -> list[Path]:
@@ -55,9 +66,15 @@ def _imports_of(prefix: str, root: Path) -> list[tuple[Path, int, str]]:
                         hits.append((py, node.lineno, alias.name))
                         break
             elif isinstance(node, ast.ImportFrom):
-                module = node.module
-                if module and (module == prefix or module.startswith(prefix + ".")):
-                    hits.append((py, node.lineno, module))
+                module = node.module or ""
+                qualified = [module] if module else []
+                qualified.extend(
+                    f"{module}.{alias.name}" if module else alias.name for alias in node.names
+                )
+                for name in qualified:
+                    if name == prefix or name.startswith(prefix + "."):
+                        hits.append((py, node.lineno, name))
+                        break
     return hits
 
 
@@ -65,6 +82,27 @@ def _format(hits: list[tuple[Path, int, str]]) -> list[str]:
     return [
         f"{path.relative_to(WORKFLOW_ROOT)}:{lineno}: {module}" for path, lineno, module in hits
     ]
+
+
+def _workflow_module_name(path: Path) -> str:
+    parts = list(path.relative_to(WORKFLOW_ROOT).with_suffix("").parts)
+    if parts and parts[-1] == "__init__":
+        parts = parts[:-1]
+    return ".".join(["molab", "workflow", *parts])
+
+
+def test_workflow_imports_no_workspace_naming() -> None:
+    offenders: dict[str, list[str]] = {}
+    for prefix in FORBIDDEN_WORKSPACE_MODULES:
+        hits = _imports_of(prefix, WORKFLOW_ROOT)
+        if hits:
+            offenders[prefix] = _format(hits)
+    assert not offenders, (
+        "molab.workflow must not import molab.workspace.naming; "
+        "the workspace hands it directories.\n"
+        "Offenders:\n  "
+        + "\n  ".join(f"[{prefix}] {hit}" for prefix, lines in offenders.items() for hit in lines)
+    )
 
 
 def test_workflow_forbids_upstream_and_application_layers() -> None:
@@ -120,7 +158,7 @@ def test_workflow_reads_no_workspace_private_members() -> None:
     """``src/molab/workflow`` reaches workspace only through public members.
 
     The runtime reads the attempt from ``run_context.id`` /
-    ``execution_dir`` / ``based_on_execution_id`` and an attempt record from
+    ``execution_dir`` / ``predecessor`` and an attempt record from
     ``run.execution(id)``; no attribute access or ``getattr`` string may name
     the workspace's private execution plumbing.
     """
@@ -136,3 +174,96 @@ def test_workflow_reads_no_workspace_private_members() -> None:
             if name in _WORKSPACE_PRIVATE_MEMBERS:
                 hits.append(f"{py.relative_to(WORKFLOW_ROOT)}:{node.lineno}: {name}")
     assert not hits, "workflow probes private workspace members:\n  " + "\n  ".join(hits)
+
+
+#: Planted sources and the hard-coded offender lists the layout detector must return.
+_PLANTED_LAYOUT_SOURCES: list[tuple[str, str, list[tuple[int, str]]]] = [
+    ('Path(d) / "executions" / eid\n', "molab.workflow.x", [(1, "executions")]),
+    (
+        'f"{d}/executions/{eid}/traceback.txt"\n',
+        "molab.workflow.x",
+        [(1, "executions")],
+    ),
+    ('x = "executions"\n', "molab.workflow.x", [(1, "executions")]),
+    ('"""see executions/e01"""\n', "molab.workflow.x", []),
+    ('JOURNAL_NAME = "workflow.json"\n', "molab.workflow._engine.persistence", []),
+    ('JOURNAL_NAME = "workflow.json"\n', "molab.workflow.x", [(1, "workflow.json")]),
+    ('"coalesced workflow.json flush failed for "\n', "molab.workflow.x", []),
+]
+
+
+class TestWorkflowComposesNoExecutionsPath:
+    """Workflow never composes ``executions/`` or ``workflow.json`` itself.
+
+    The journal file name lives only in ``JOURNAL_NAME`` inside
+    ``_engine/persistence.py``. Docstrings are prose and are not offenders.
+    """
+
+    def test_no_executions_literal(self) -> None:
+        files = _iter_workflow_py_files()
+        assert len(files) > 20
+        persistence = WORKFLOW_ROOT / "_engine" / "persistence.py"
+        tree = ast.parse(persistence.read_text(encoding="utf-8"))
+        assert any(
+            isinstance(stmt, ast.Assign)
+            and any(
+                isinstance(target, ast.Name) and target.id == "JOURNAL_NAME"
+                for target in stmt.targets
+            )
+            for stmt in tree.body
+        )
+        offenders = [
+            f"{path.relative_to(WORKFLOW_ROOT)}:{lineno}: {name}"
+            for path in files
+            for lineno, name in layout_literal_offenders(
+                path.read_text(encoding="utf-8"),
+                _workflow_module_name(path),
+                exact=_LAYOUT_EXACT,
+                allowed=_LAYOUT_ALLOWED,
+            )
+        ]
+        assert not offenders, "workflow composes an execution path:\n  " + "\n  ".join(offenders)
+
+    @pytest.mark.parametrize(
+        ("source", "module_name", "expected"),
+        _PLANTED_LAYOUT_SOURCES,
+        ids=[
+            "path-join",
+            "fstring",
+            "bare-assignment",
+            "module-docstring",
+            "journal-name-allowed",
+            "journal-name-other-module",
+            "prose",
+        ],
+    )
+    def test_planted_source(
+        self,
+        source: str,
+        module_name: str,
+        expected: list[tuple[int, str]],
+    ) -> None:
+        assert (
+            layout_literal_offenders(
+                source,
+                module_name,
+                exact=_LAYOUT_EXACT,
+                allowed=_LAYOUT_ALLOWED,
+            )
+            == expected
+        )
+
+    def test_imports_of_counts_naming_import_forms(self, tmp_path: Path) -> None:
+        (tmp_path / "direct.py").write_text(
+            "from molab.workspace.naming import workspace_root\n",
+            encoding="utf-8",
+        )
+        (tmp_path / "alias.py").write_text(
+            "from molab.workspace import naming\n",
+            encoding="utf-8",
+        )
+        hits = _imports_of("molab.workspace.naming", tmp_path)
+        per_file: dict[str, int] = {}
+        for path, _lineno, _module in hits:
+            per_file[path.name] = per_file.get(path.name, 0) + 1
+        assert per_file == {"alias.py": 1, "direct.py": 1}

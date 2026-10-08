@@ -15,24 +15,21 @@ target) raise — never a silent fallback.
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any
 
 import pytest
 
 from molab.knowledge import Literature, Note, ReferenceMeta
-from molab.knowledge.concept import Concept
 from molab.knowledge.embed import (
     EntitySummary,
-    asset_record_dir,
     default_role_for,
     embed,
     resolve_embed_target,
     summarize_entity,
 )
-from molab.knowledge.write import mount_note
-from molab.workspace.assets.base import Asset
+from molab.workspace.domain import Asset
+from molab.workspace.refs import ref_of
 
 
 @pytest.fixture
@@ -40,37 +37,27 @@ def asset(lab: Any, experiment: Any, tmp_path: Path) -> Asset:
     """A user ``DataAsset`` in the experiment scope, with a real record dir."""
     source = tmp_path / "input.txt"
     source.write_text("payload-bytes")
-    return experiment.data_assets.import_asset("mydata", source)
+    return experiment.assets.import_asset("mydata", source)
 
 
 @pytest.fixture
 def note(experiment: Any) -> Note:
-    return mount_note(experiment, "My Note", body="# My Note\n\nbody")
+    return Note.mount(experiment, "My Note", body="# My Note\n\nbody")
 
 
 class TestResolveEmbedTarget:
-    def test_a_concept_resolves_to_its_own_path(self, note: Note, lab: Any) -> None:
-        assert resolve_embed_target(note, root=lab.root) == note.path
+    def test_a_concept_resolves_to_its_own_path(self, note: Note) -> None:
+        assert resolve_embed_target(note) == str(note.path)
 
-    def test_a_folder_resolves_to_its_own_directory(self, experiment: Any, lab: Any) -> None:
-        assert resolve_embed_target(experiment, root=lab.root) == experiment.resolve()
+    def test_a_folder_resolves_to_its_ref(self, experiment: Any) -> None:
+        assert resolve_embed_target(experiment) == str(ref_of(experiment))
 
-    def test_an_asset_resolves_to_its_record_dir_without_copying(
-        self, asset: Asset, lab: Any
-    ) -> None:
-        record_dir = asset_record_dir(asset, lab.root)
-        before = sorted(p.name for p in Path(record_dir).iterdir())
+    def test_an_asset_resolves_to_its_ref(self, asset: Asset) -> None:
+        assert resolve_embed_target(asset) == str(ref_of(asset))
 
-        resolved = resolve_embed_target(asset, root=lab.root)
-
-        assert resolved == record_dir
-        assert Path(resolved).parent.name == "assets"
-        assert Path(resolved).name == asset.asset_id
-        assert sorted(p.name for p in Path(record_dir).iterdir()) == before
-
-    def test_a_foreign_target_is_rejected(self, lab: Any) -> None:
+    def test_a_foreign_target_is_rejected(self) -> None:
         with pytest.raises(TypeError):
-            resolve_embed_target("not-an-entity", root=lab.root)  # ty: ignore[invalid-argument-type]
+            resolve_embed_target("not-an-entity")  # ty: ignore[invalid-argument-type]
 
 
 class TestDefaultRoleFor:
@@ -96,7 +83,7 @@ class TestSummarizeEntity:
     def test_a_folder_projects_its_id_not_its_directory_name(
         self, run: Any, experiment: Any, lab: Any
     ) -> None:
-        summary = summarize_entity(run, root=lab.root)
+        summary = summarize_entity(run)
 
         assert isinstance(summary, EntitySummary)
         assert (summary.id, summary.kind, summary.title) == (run.id, "workspace.run", "seed=1")
@@ -110,8 +97,8 @@ class TestSummarizeEntity:
         assert (summary.id, summary.kind, summary.title) == ("my-note", "note.note", "My Note")
 
     def test_a_reference_kind_title_comes_from_the_head(self, tmp_path: Path) -> None:
-        document = Concept(tmp_path / "abstract-1", type="reference.reference")
-        document.write_meta({"title": "Head Title"})
+        document = Literature(tmp_path / "abstract-1")
+        document.write(ReferenceMeta(title="Head Title"))
 
         summary = summarize_entity(document)
 
@@ -134,8 +121,8 @@ class TestSummarizeEntity:
         )
 
     def test_a_document_title_falls_back_to_its_h1_then_its_name(self, experiment: Any) -> None:
-        titled = mount_note(experiment, "Titled", body="# A Real Title\n")
-        untitled = mount_note(experiment, "Untitled")
+        titled = Note.mount(experiment, "Titled", body="# A Real Title\n")
+        untitled = Note.mount(experiment, "Untitled")
 
         assert summarize_entity(titled).title == "A Real Title"
         assert summarize_entity(untitled).title == "untitled"
@@ -146,48 +133,39 @@ class TestSummarizeEntity:
         assert summarize_entity(run).title == "Nice Run Title"
 
     def test_an_asset_projects_its_own_fields(self, asset: Asset, lab: Any) -> None:
-        summary = summarize_entity(asset, root=lab.root)
+        summary = summarize_entity(asset)
 
-        assert (summary.id, summary.kind, summary.title) == (asset.asset_id, "data", "mydata")
+        assert (summary.id, summary.kind, summary.title) == (asset.id, "asset", "mydata")
 
     def test_a_foreign_target_is_rejected(self) -> None:
         with pytest.raises(TypeError):
             summarize_entity(object())  # ty: ignore[invalid-argument-type]
 
 
-class TestAssetRecordDir:
-    def test_a_missing_root_is_refused(self, asset: Asset) -> None:
-        with pytest.raises(ValueError):
-            asset_record_dir(asset, None)
+class TestEmbedModule:
+    def test_asset_record_dir_is_gone(self) -> None:
+        import molab.knowledge.embed as embed_mod
 
-    def test_a_missing_record_dir_is_refused(self, asset: Asset, lab: Any) -> None:
-        ghost = asset.model_copy(update={"asset_id": "does-not-exist-0000"})
-
-        with pytest.raises(FileNotFoundError):
-            asset_record_dir(ghost, lab.root)
+        assert hasattr(embed_mod, "asset_record_dir") is False
 
 
 class TestEmbed:
-    def test_one_relative_typed_edge_uses_the_per_kind_default(
-        self, note: Note, run: Any, lab: Any
-    ) -> None:
-        embed(note, run, root=lab.root)
+    def test_one_relative_typed_edge_uses_the_per_kind_default(self, note: Note, run: Any) -> None:
+        embed(note, run)
 
-        assert [(e.target, e.role) for e in note.links()] == [(str(run.resolve()), "records")]
-        relative = os.path.relpath(str(run.resolve()), str(note.path.parent))
-        assert f"]({Path(relative).as_posix()})" in note.path.read_text()
-        assert not Path(relative).is_absolute()
+        assert [(e.target, e.role) for e in note.links()] == [(str(ref_of(run)), "records")]
+        assert f"]({ref_of(run)})" in note.path.read_text()
 
-    def test_an_explicit_role_overrides_the_default(self, note: Note, run: Any, lab: Any) -> None:
-        embed(note, run, root=lab.root, role="derived_from")
+    def test_an_explicit_role_overrides_the_default(self, note: Note, run: Any) -> None:
+        embed(note, run, role="derived_from")
 
-        assert [(e.target, e.role) for e in note.links()] == [(str(run.resolve()), "derived_from")]
+        assert [(e.target, e.role) for e in note.links()] == [(str(ref_of(run)), "derived_from")]
 
     def test_a_concept_target_round_trips_through_its_own_path(
         self, note: Note, experiment: Any
     ) -> None:
-        other = mount_note(experiment, "Background")
+        other = Note.mount(experiment, "Background")
 
-        embed(note, other, root=experiment.resolve(), role="cites")
+        embed(note, other, role="cites")
 
         assert [(Path(e.target).name, e.role) for e in note.links()] == [("background.md", "cites")]

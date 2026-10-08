@@ -120,7 +120,7 @@ def _repo(ws: Workspace, run: Run) -> ExecutionRepository:
 
 def _queued_with_job_id(ws: Workspace, run: Run) -> None:
     """Local QUEUED ``e01`` carrying the scheduler job id molq recorded."""
-    run.create_execution(executor={"backend": "molq", "target": "hpc"})
+    run._create_execution(executor={"backend": "molq", "target": "hpc"})
     _repo(ws, run).update_operational(
         "e01", executor={"backend": "molq", "target": "hpc", "job_id": "j-1"}
     )
@@ -164,7 +164,7 @@ class TestStageIn:
 
     def test_remote_uploads_run_dir_after_mkdir(self, tmp_path: Path) -> None:
         _ws, run = _make_run(tmp_path)
-        run.create_execution()
+        run._create_execution()
         transport = FakeTransport()
 
         stage_in(transport, run, _remote_target(), "e01")
@@ -179,7 +179,7 @@ class TestStageIn:
 
     def test_remote_uploads_run_dir_then_execution_dir(self, tmp_path: Path) -> None:
         _ws, run = _make_run(tmp_path)
-        run.create_execution()
+        run._create_execution()
         transport = FakeTransport()
 
         stage_in(transport, run, _remote_target(), "e01")

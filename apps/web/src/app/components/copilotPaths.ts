@@ -22,10 +22,6 @@ export const pathForNextAction = (
       if (run) return runPath(run.projectId, run.experimentId, run.id);
       return SECTION_PATH.runs;
     }
-    case "answer_open_question": {
-      const path = entityPath({ kind: "knowledge", id: target }, snapshot);
-      return path ?? SECTION_PATH.knowledge;
-    }
     case "review_orphan_artifact": {
       const path = entityPath({ kind: "asset", id: target }, snapshot);
       return path ?? SECTION_PATH.assets;

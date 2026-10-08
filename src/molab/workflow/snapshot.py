@@ -105,6 +105,22 @@ def _normalize_ast(source: str) -> str:
     return ast.dump(tree, annotate_fields=True, include_attributes=False)
 
 
+def _local_deps_digest(fn: object) -> str | None:
+    """Digest of the first-party modules the file defining *fn* imports, or ``None``."""
+    try:
+        source_file = inspect.getsourcefile(fn)  # ty: ignore[invalid-argument-type]
+    except (TypeError, OSError):
+        return None
+    if not source_file:
+        return None
+    from molab.workspace.source_snapshot import local_import_digest
+
+    try:
+        return local_import_digest(source_file)
+    except OSError:
+        return None
+
+
 class TaskSnapshot(BaseModel):
     """Immutable static snapshot of a Task.
 
@@ -135,7 +151,7 @@ class TaskSnapshot(BaseModel):
         ``Actor`` instance, a bare ``async def`` function, or any ``Runnable`` /
         ``Streamable``. It resolves the hashable callable (``execute`` → ``run``
         → the body itself), so the compiler computes one snapshot per task and
-        reuses its ``code_hash`` for the :class:`WorkflowVersion`.
+        reuses its ``code_hash`` inside ``workflow_digest``.
 
         The ``config_hash`` is derived from the task *instance's* construction
         identity — its ``__init__`` arguments (see :func:`task_config_of`), NOT a
@@ -161,10 +177,18 @@ class TaskSnapshot(BaseModel):
             source = inspect.getsource(fn) if callable(fn) else ""
         except (OSError, TypeError):
             source = ""
+        code_hash = cls._hash_callable(fn, identity, task_id)
+        # The AST hash covers the body only. A body that calls into a sibling
+        # helper module (``import analysis`` inside the task) must also change
+        # identity when that module changes, or the node cache serves results
+        # computed by code that no longer exists.
+        deps = _local_deps_digest(fn)
+        if deps is not None:
+            code_hash = hashlib.sha256(f"{code_hash}:{deps}".encode()).hexdigest()[:32]
         return cls(
             task_id=task_id,
             task_type=task_type,
-            code_hash=cls._hash_callable(fn, identity, task_id),
+            code_hash=code_hash,
             config_hash=hashlib.sha256(config_raw.encode()).hexdigest()[:32],
             code_source=source,
             created_at=datetime.now(UTC),

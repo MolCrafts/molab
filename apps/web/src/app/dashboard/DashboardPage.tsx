@@ -1,8 +1,11 @@
-import { Gauge, LayoutDashboard, Play, TriangleAlert } from "lucide-react";
+import { ArrowUpRight, LayoutDashboard, TriangleAlert } from "lucide-react";
 import { type JSX, type ReactNode, useMemo } from "react";
 import { Link } from "react-router-dom";
 
 import {
+  DashboardCanvas,
+  DashboardCard,
+  EntityPage,
   Histogram,
   Schedule,
   type ScheduleItem,
@@ -22,14 +25,12 @@ import { groupForStatus, type StatusGroupId } from "@/app/runs/statusGroups";
 import type { WorkspaceRunRow } from "@/app/runs/types";
 import { useWorkspaceRuns } from "@/app/runs/useWorkspaceRuns";
 import type { WorkspaceSnapshot } from "@/app/types";
-import { PageHeader } from "@/components/layout/PageHeader";
 import {
   WorkbenchIconAction,
   WorkbenchOperationState,
   WorkbenchRetryAction,
 } from "@/components/workbench";
 import { formatDuration, formatRelative } from "@/lib/format-time";
-import { cn } from "@/lib/utils";
 
 interface DashboardPageProps {
   snapshot: WorkspaceSnapshot;
@@ -79,38 +80,12 @@ const runDurationSeconds = (run: WorkspaceRunRow): number | null => {
   return (end - start) / 1000;
 };
 
-const Panel = ({
-  title,
-  meta,
-  children,
-  className,
-}: {
-  title: string;
-  meta?: ReactNode;
-  children: ReactNode;
-  className?: string;
-}): JSX.Element => (
-  <section className={cn("min-w-0 border-t border-border", className)}>
-    <header className="flex h-control-comfortable items-center justify-between gap-3 border-b border-border/70 px-4">
-      <h2 className="text-label font-medium text-foreground">{title}</h2>
-      {meta ? <div className="text-micro text-muted-foreground">{meta}</div> : null}
-    </header>
-    <div className="min-w-0 p-4">{children}</div>
-  </section>
-);
-
 /**
- * Workspace posture: the status mix of every attempt, once. The counts used to
- * be printed twice in this fold — as hero tiles and again as a bar — and the
- * tiles labelled execution counts as runs.
+ * Workspace posture: the status mix of every attempt, once. The page meta
+ * already states the execution total, so the bar does not repeat it.
  */
 const ExecutionStatus = ({ counts }: { counts: ExecutionRollup }): JSX.Element => (
-  <div className="space-y-3">
-    <StatusDistribution counts={counts} />
-    <p className="font-mono text-micro tabular-nums text-muted-foreground">
-      {counts.total} executions
-    </p>
-  </div>
+  <StatusDistribution counts={counts} unit="executions" />
 );
 
 const ACTIVITY_BUCKETS = 12;
@@ -122,7 +97,7 @@ const ACTIVITY_WINDOW_MS = 24 * 60 * 60 * 1000;
  * is busy — a swept experiment creates 200 runs in one second.
  */
 const ActivityPlot = ({ rows }: { rows: WorkspaceRunRow[] }): JSX.Element => {
-  const { points, peak } = useMemo(() => {
+  const { bars, peak } = useMemo(() => {
     const now = Date.now();
     const width = ACTIVITY_WINDOW_MS / ACTIVITY_BUCKETS;
     const values = new Array<number>(ACTIVITY_BUCKETS).fill(0);
@@ -136,31 +111,40 @@ const ActivityPlot = ({ rows }: { rows: WorkspaceRunRow[] }): JSX.Element => {
         }
       }
     }
-    const max = Math.max(1, ...values);
     return {
       peak: Math.max(...values),
-      points: values.map((value, index) => ({
-        x: (index / (values.length - 1)) * 100,
-        y: 34 - (value / max) * 28,
+      bars: values.map((value, index) => ({
+        id: `h${(index - (ACTIVITY_BUCKETS - 1)) * 2}`,
+        value,
       })),
     };
   }, [rows]);
-  const line = points.map((point) => `${point.x},${point.y}`).join(" ");
+
+  if (peak === 0) {
+    return (
+      <p className="text-micro text-muted-foreground">No execution activity in the last 24 hours</p>
+    );
+  }
 
   return (
     <div className="space-y-2">
-      <svg
-        viewBox="0 0 100 36"
+      <div
         role="img"
         aria-label={`Execution starts and finishes per 2 hours over the last day; busiest bucket ${peak}`}
-        className="h-24 w-full"
+        className="flex h-16 items-end gap-hairline"
       >
-        <polygon points={`0,36 ${line} 100,36`} className="fill-accent/15" />
-        <polyline points={line} fill="none" className="stroke-accent/70" strokeWidth="1" />
-      </svg>
-      <div className="flex justify-between font-mono text-micro text-muted-foreground">
+        {bars.map((bar) => (
+          <span
+            key={bar.id}
+            title={`${bar.value} execution events`}
+            className="flex-1 rounded-t-[2px] bg-accent/40"
+            style={{ height: `${Math.max(bar.value > 0 ? 6 : 2, (bar.value / peak) * 100)}%` }}
+          />
+        ))}
+      </div>
+      <div className="flex justify-between font-mono text-micro tabular-nums text-muted-foreground">
         <span>−24h</span>
-        <span>−12h</span>
+        <span>peak {peak}</span>
         <span>now</span>
       </div>
     </div>
@@ -220,6 +204,7 @@ const NeedsAttention = ({ rows }: { rows: WorkspaceRunRow[] }): JSX.Element => {
             <span className="min-w-0 flex-1 truncate text-micro text-status-failed-foreground">
               {run.name || run.id}
             </span>
+            <span className="shrink-0 text-micro text-status-failed-foreground">Failed</span>
             <span className="shrink-0 font-mono text-micro text-muted-foreground">
               {formatRelative(runActivityAt(run))}
             </span>
@@ -263,28 +248,27 @@ export const DashboardPage = ({ snapshot }: DashboardPageProps): JSX.Element => 
     () => rows.map(runDurationSeconds).filter((value): value is number => value !== null),
     [rows],
   );
-  const subtitle = `${rows.length} runs · ${counts.total} executions${
-    activeWorkspace ? ` · ${activeWorkspace.label}` : ""
-  }${lastSyncedAt ? ` · synced ${formatRelative(lastSyncedAt.toISOString())}` : ""}`;
-
   return (
-    <div className="flex h-full min-w-0 flex-1 flex-col overflow-hidden bg-background">
-      <PageHeader
-        icon={LayoutDashboard}
-        title="Dashboard"
-        actions={
-          <WorkbenchIconAction label="Open runs" kind="primary" size="default" asChild>
-            <Link to="/runs">
-              <Play className="size-3.5" />
-            </Link>
-          </WorkbenchIconAction>
-        }
-      />
-      <div className="border-b border-border px-4 py-2 text-micro text-muted-foreground">
-        {subtitle}
-      </div>
-
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+    <EntityPage
+      icon={LayoutDashboard}
+      title="Dashboard"
+      meta={
+        <>
+          <span>{rows.length} runs</span>
+          <span>{counts.total} executions</span>
+          {activeWorkspace ? <span>{activeWorkspace.label}</span> : null}
+          {lastSyncedAt ? <span>synced {formatRelative(lastSyncedAt.toISOString())}</span> : null}
+        </>
+      }
+      actions={
+        <WorkbenchIconAction label="Open runs" kind="primary" size="default" asChild>
+          <Link to="/runs">
+            <ArrowUpRight className="size-3.5" />
+          </Link>
+        </WorkbenchIconAction>
+      }
+    >
+      <div className="min-h-0 flex-1 overflow-y-auto">
         {loading && rows.length === 0 ? (
           <WorkbenchOperationState
             kind="loading"
@@ -302,32 +286,26 @@ export const DashboardPage = ({ snapshot }: DashboardPageProps): JSX.Element => 
           />
         ) : null}
         {truncated ? (
-          <div className="mb-4 flex items-center gap-2 border-y border-status-warning/30 bg-status-warning-soft px-4 py-2 text-micro text-status-warning-foreground">
+          <div className="flex items-center gap-2 border-b border-status-warning/30 bg-status-warning-soft px-4 py-2 text-micro text-status-warning-foreground">
             <TriangleAlert className="size-icon-sm" />
             <span>Run inventory is truncated; open Runs to narrow the dataset.</span>
           </div>
         ) : null}
 
         {rows.length > 0 ? (
-          <div className="min-w-0">
+          <DashboardCanvas>
             <div className="grid min-w-0 lg:grid-cols-2">
-              <Panel
-                title="Execution status"
-                meta={<Gauge className="size-icon-sm" />}
-                className="lg:border-r"
-              >
+              <DashboardCard title="Execution status" className="lg:border-r">
                 <ExecutionStatus counts={counts} />
-              </Panel>
-              <Panel title="Activity" meta="Last 24 hours">
+              </DashboardCard>
+              <DashboardCard title="Activity" description="Last 24 hours">
                 <ActivityPlot rows={rows} />
-              </Panel>
-              <Panel title="Backends" className="lg:border-r">
-                <div className="space-y-3">
-                  <Backends rows={rows} />
-                  <StatusLegend />
-                </div>
-              </Panel>
-              <Panel title="Run duration" meta="Finished runs">
+              </DashboardCard>
+              <DashboardCard title="Backends" className="lg:border-r">
+                <Backends rows={rows} />
+                <StatusLegend className="mt-3" />
+              </DashboardCard>
+              <DashboardCard title="Run duration" description="Finished runs">
                 <Histogram
                   values={durations}
                   format={formatDuration}
@@ -337,22 +315,28 @@ export const DashboardPage = ({ snapshot }: DashboardPageProps): JSX.Element => 
                 {durations.length === 0 ? (
                   <p className="text-micro text-muted-foreground">No finished runs yet</p>
                 ) : null}
-              </Panel>
+              </DashboardCard>
             </div>
-            <Panel title="Schedule" meta="Most recently active">
-              <Schedule
-                items={scheduleItems(rows)}
-                empty={
-                  <p className="text-micro text-muted-foreground">
-                    No run has started yet — nothing to place on a timeline.
-                  </p>
-                }
-              />
-            </Panel>
-            <Panel title="Needs attention" meta="Failed runs">
-              <NeedsAttention rows={rows} />
-            </Panel>
-          </div>
+            <div className="grid min-w-0 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+              <DashboardCard
+                title="Schedule"
+                description="Most recently active"
+                className="lg:border-r"
+              >
+                <Schedule
+                  items={scheduleItems(rows)}
+                  empty={
+                    <p className="text-micro text-muted-foreground">
+                      No run has started yet — nothing to place on a timeline.
+                    </p>
+                  }
+                />
+              </DashboardCard>
+              <DashboardCard title="Needs attention" description="Failed runs">
+                <NeedsAttention rows={rows} />
+              </DashboardCard>
+            </div>
+          </DashboardCanvas>
         ) : !loading && !error ? (
           <WorkbenchOperationState
             kind="empty"
@@ -361,6 +345,6 @@ export const DashboardPage = ({ snapshot }: DashboardPageProps): JSX.Element => 
           />
         ) : null}
       </div>
-    </div>
+    </EntityPage>
   );
 };

@@ -10,26 +10,27 @@ unified workspace folder abstraction: ``kind`` is
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path as _LocalPath
 from typing import TYPE_CHECKING, Any, cast
 
 from molab._typing import JSONValue
-from molab.ids import compute_definition_hash, generate_uuid7
+from molab.ids import generate_uuid7
 from molab.path import Path
 
-from .naming import entity_slug
+from .naming import PROJECT_CONTAINER, entity_slug
 
 if TYPE_CHECKING:
     from .fs import FileSystem
     from .workspace import Workspace
 
 from .artifact_repository import AssetRepository
-from .assets import AssetScope, DataAssetLibrary, ImportAction
 from .base import (
     _load_metadata,
     _reconstruct,
     _save_metadata,
 )
+from .domain import Asset, AssetScope, ImportAction
 from .errors import (
     ExperimentNotFoundError,
     ProjectExistsError,
@@ -101,7 +102,6 @@ class Project(Folder):
         self._children_cache = {}
 
         self._entity_metadata: ProjectMetadata = meta
-        self._data_assets: DataAssetLibrary | None = None
 
     # ── Folder hooks ─────────────────────────────────────────────────────
 
@@ -115,7 +115,7 @@ class Project(Folder):
         Uses :meth:`~Folder.resolve` (not :meth:`~Folder.path`) so listing a
         project never issues a remote ``mkdir`` on the workspace root.
         """
-        return Path(parent._disk().join(parent.resolve(), "projects", derived_id))
+        return Path(parent._disk().join(parent.resolve(), PROJECT_CONTAINER, derived_id))
 
     @classmethod
     def from_disk(cls, child_dir: PathArg, parent: Folder) -> Project:
@@ -134,7 +134,6 @@ class Project(Folder):
             parent, folder_meta, slug=parent._disk().basename(child_dir)
         ) | {
             "_entity_metadata": meta,
-            "_data_assets": None,
         }
         return _reconstruct(cls, attrs)
 
@@ -187,7 +186,7 @@ class Project(Folder):
     @property
     def project_dir(self) -> Path:
         ws_root = self.workspace.resolve()
-        return Path(self._disk().join(ws_root, "projects", self._name))
+        return Path(self._disk().join(ws_root, PROJECT_CONTAINER, self._name))
 
     @property
     def scope(self) -> AssetScope:
@@ -197,17 +196,18 @@ class Project(Folder):
     def assets(self) -> AssetRepository:
         """Long-lived Project Asset registry and Artifact promotion API."""
         return AssetRepository(
-            self.workspace.root,
-            self.id,
+            self.workspace,
+            self.scope,
             self.project_dir,
-            fs=self._disk(),
         )
 
     @property
-    def data_assets(self) -> DataAssetLibrary:
-        if self._data_assets is None:
-            self._data_assets = DataAssetLibrary(self.project_dir, self.scope)
-        return self._data_assets
+    def data_assets(self) -> AssetRepository:
+        """Alias of :attr:`assets`.
+
+        Kept because ``{scope}.data_assets.import_asset`` is a frozen CLAUDE.md contract.
+        """
+        return self.assets
 
     # ── Persistence ─────────────────────────────────────────────────────
 
@@ -249,15 +249,17 @@ class Project(Folder):
         meta_path = self._disk().join(self.project_dir, "project.json")
         _save_metadata(self._entity_metadata, meta_path, fs=self._disk())
 
-    def import_asset(  # noqa: ANN201
+    def import_asset(
         self,
         name: str,
         src: str | _LocalPath,
         action: ImportAction = "copy",
-        meta: dict[str, Any] | None = None,
-    ):
-        """Import a ``DataAsset`` into the project library."""
-        return self.data_assets.import_asset(name, src, action, meta)
+        meta: dict[str, str] | None = None,
+        *,
+        consumed: Sequence[str] | None = None,
+    ) -> Asset:
+        """Import a named asset into this project."""
+        return self.assets.import_asset(name, src, action, meta, consumed=consumed)
 
     # ── Experiment CRUD: add / get / set / del / list ─────────────────────
 
@@ -269,24 +271,35 @@ class Project(Folder):
         params: dict[str, JSONValue] | None = None,
         n_replicas: int = 1,
         seeds: list[int] | None = None,
-        workflow_source: str | None = None,
-        workflow_type: str | None = None,
-        git_commit: str | None = None,
+        workflow_document: dict[str, JSONValue] | None = None,
         description: str = "",
         tags: list[str] | None = None,
-        default_target: str | None = None,
+        target: str | None = None,
     ) -> Experiment:
         """Add an experiment (idempotent on slug: re-add returns same node).
 
         Writes disk scaffold. To **change** fields of an existing experiment,
         use :meth:`set_experiment` (second ``add_experiment`` does not merge
-        new params into an existing record).
+        new params into an existing record). ``workflow_document`` stages a
+        document binding before the directory is created. Re-adding a slug
+        with a different document raises instead of dropping it.
         """
         slug = entity_slug(name, fallback=name)
         if id is None and self.has_folder(slug, cls=Experiment):
-            return self.get_folder(slug, cls=Experiment)
+            existing = self.get_folder(slug, cls=Experiment)
+            if workflow_document is None:
+                return existing
+            if (
+                existing.workflow_kind == "document"
+                and existing.workflow_document == workflow_document
+            ):
+                return existing
+            raise ValueError(
+                f"experiment {existing.name!r} already has a workflow binding; "
+                "use bind_workflow or set_experiment(workflow_document=)"
+            )
         resolved_id = id if id is not None else generate_uuid7()
-        _validate_target_registered(self.workspace, default_target)
+        _validate_target_registered(self.workspace, target)
         child = self._construct_child(
             Experiment,
             name,
@@ -294,13 +307,15 @@ class Project(Folder):
             params=params,
             n_replicas=n_replicas,
             seeds=seeds,
-            workflow_source=workflow_source,
-            workflow_type=workflow_type,
-            git_commit=git_commit,
             description=description,
             tags=tags,
-            default_target=default_target,
+            target=target,
         )
+        if workflow_document is not None:
+            updates, _revise = child._binding_updates(
+                "document", entrypoint=None, document=workflow_document
+            )
+            child._stage_definition(updates, document=workflow_document)
         return self.add_folder(child)
 
     def experiment(self, name: str) -> Experiment:
@@ -329,11 +344,13 @@ class Project(Folder):
         tags: list[str] | None = None,
         n_replicas: int | None = None,
         seeds: list[int] | None = None,
-        workflow_source: str | None = None,
-        workflow_type: str | None = None,
-        default_target: str | None = None,
+        workflow_document: dict[str, JSONValue] | None = None,
+        target: str | None = None,
     ) -> Experiment:
         """Update fields of an existing experiment and write to disk.
+
+        Field changes and a document bind share one revision stamp. An empty
+        update does not save.
 
         Raises:
             ExperimentNotFoundError: Experiment missing.
@@ -350,49 +367,24 @@ class Project(Folder):
             updates["n_replicas"] = n_replicas
         if seeds is not None:
             updates["seeds"] = list(seeds)
-        if workflow_source is not None:
-            updates["workflow_source"] = workflow_source
-        if workflow_type is not None:
-            updates["workflow_type"] = workflow_type
-        if default_target is not None:
-            _validate_target_registered(self.workspace, default_target)
-            updates["default_target"] = default_target
-        if updates:
-            from datetime import UTC, datetime
-
-            next_values = exp.metadata.model_dump(mode="json") | updates
-            scientific_definition = {
-                key: next_values[key]
-                for key in (
-                    "name",
-                    "description",
-                    "tags",
-                    "workflow_source",
-                    "workflow_type",
-                    "parameter_space",
-                    "git_commit",
-                    "n_replicas",
-                    "seeds",
-                    "default_target",
-                )
-            }
-            exp._entity_metadata = exp.metadata.model_copy(
-                update={
-                    **updates,
-                    "revision_id": generate_uuid7(),
-                    "revision": exp.metadata.revision + 1,
-                    "revision_created_at": datetime.now(UTC),
-                    "definition_hash": compute_definition_hash(scientific_definition),
-                }
+        if target is not None:
+            _validate_target_registered(self.workspace, target)
+            updates["default_target"] = target
+        field_changed = bool(updates)
+        if workflow_document is not None:
+            bind_updates, bind_revise = exp._binding_updates(
+                "document", entrypoint=None, document=workflow_document
             )
-            from .scientific_repository import ScientificRepository
-
-            ScientificRepository(self.workspace.root, fs=self._disk()).record_experiment_revision(
-                exp.metadata.model_dump(mode="json"),
-                project_id=self.id,
-                path=exp.experiment_dir,
+            exp._write_workflow_doc(workflow_document)
+            combined = dict(updates)
+            combined.update(bind_updates)
+            exp._apply_definition(
+                combined,
+                revise=field_changed or bind_revise,
+                document=workflow_document,
             )
-            exp.save()
+        elif updates:
+            exp._apply_definition(updates, revise=field_changed)
         return exp
 
     def del_experiment(self, name: str) -> None:

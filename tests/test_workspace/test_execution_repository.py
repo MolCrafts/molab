@@ -20,6 +20,7 @@ arch-own-01 pins two contracts:
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import threading
 from collections.abc import Iterator
@@ -173,6 +174,48 @@ class TestExecutionRepositorySeal:
         assert first.sealed_at is not None
         assert second.sealed_at == first.sealed_at
 
+    def test_seal_evidence_has_no_results_kind(self, run: Run) -> None:
+        with run.start() as ctx:
+            ctx.set_result("k", 1)
+            eid = ctx.id
+        execution = run.execution(eid)
+        kinds = {item.kind for item in execution.evidence}
+        assert "results" not in kinds
+        assert kinds <= {"runtime", "workflow", "stdout", "stderr", "traceback"}
+        assert "stdout" not in kinds
+        assert "stderr" not in kinds
+        assert "traceback" not in kinds
+
+    def test_evidence_excludes_legacy_asset_manifest(self, run: Run) -> None:
+        with run.start() as ctx:
+            attempt = run.execution_dir(ctx.id)
+            (attempt / "assets.json").write_text("{}", encoding="utf-8")
+            (attempt / "run.log").write_text("log\n", encoding="utf-8")
+            eid = ctx.id
+        sealed = run.execution(eid)
+        rels = {item.rel_path for item in sealed.evidence}
+        assert "assets.json" not in rels
+        assert "run.log" in rels
+
+    def test_failed_attempt_evidence_hashes_traceback(self, run: Run) -> None:
+        with run.start() as ctx:
+            eid = ctx.id
+            (run.execution_dir(eid) / "stdout.log").write_bytes(b"out\n")
+            ctx.mark_failed("boom", traceback_text="TB-TEXT\n")
+        execution = run.execution(eid)
+        assert execution.status is ExecutionStatus.FAILED
+        by_kind = {item.kind: item for item in execution.evidence}
+        tb = by_kind["traceback"]
+        assert tb.rel_path == "traceback.txt"
+        assert tb.digest == "sha256:" + hashlib.sha256(b"TB-TEXT\n").hexdigest()
+        assert tb.size == 8
+        out = by_kind["stdout"]
+        assert out.rel_path == "stdout.log"
+        assert out.digest == "sha256:" + hashlib.sha256(b"out\n").hexdigest()
+        assert out.size == 4
+        assert "stderr" not in by_kind
+        assert "results" not in by_kind
+
 
 class TestExecutionRepositoryMarkPruned:
     def test_stamps_pruned_at_and_sorted_dirs(self, tmp_path: Path) -> None:
@@ -252,7 +295,7 @@ class TestExecutionRepositoryMarkPruned:
 # current-schema record through the model. Symbols introduced by 02a are
 # imported inside each test so every test fails for its own reason.
 
-_SCHEMA_V4 = 4
+
 _LEGACY_AGENT = {"id": "molab", "type": "system", "name": "Molab"}
 _LEGACY_CREATED = "2026-09-04T22:09:31.925482Z"
 
@@ -295,7 +338,7 @@ class TestExecutionRepositoryCreate:
     def test_raw_schema_version_is_4(self, run: Run) -> None:
         repo = _run_repo(run)
         repo.create(created_by=_TEST_AGENT)
-        assert _raw_state(repo, "e01")["schema_version"] == _SCHEMA_V4
+        assert _raw_state(repo, "e01")["schema_version"] == MOLAB_SCHEMA_VERSION
 
 
 def _terminal(
@@ -726,7 +769,7 @@ class TestExecutionRepositoryUpdateOperational:
 
         repo.mark_pruned(state.id, ["out"])
 
-        assert _raw_state(repo, state.id)["schema_version"] == _SCHEMA_V4
+        assert _raw_state(repo, state.id)["schema_version"] == MOLAB_SCHEMA_VERSION
 
     def test_immutable_fields_compose_named_sets(self) -> None:
         from molab.workspace.execution_repository import (
@@ -817,7 +860,6 @@ class TestFoldLegacyAttempt:
         ex = fold_legacy_attempt(
             src,
             dst,
-            workspace_root=root,
             seq=1,
             run_id="r1",
             project_id="p1",
@@ -825,7 +867,7 @@ class TestFoldLegacyAttempt:
         )
 
         raw = json.loads((dst / "execution.json").read_text(encoding="utf-8"))
-        assert raw["schema_version"] == MOLAB_SCHEMA_VERSION == _SCHEMA_V4
+        assert raw["schema_version"] == MOLAB_SCHEMA_VERSION
         assert Execution.model_validate(read_versioned_json(dst / "execution.json")) == ex
 
         # hard-coded golden: HEAD 56d5b466 cli/migrate_cmd.py fold rules
@@ -843,8 +885,7 @@ class TestFoldLegacyAttempt:
 
         assert len(ex.artifacts) == 1
         art = ex.artifacts[0]
-        # arch-own-05b changes this to "artifacts/metrics.jsonl".
-        assert art.path == "runs/dp=5/executions/e01/artifacts/metrics.jsonl"
+        assert art.path == "artifacts/metrics.jsonl"
         assert art.execution_id == "e01"
         assert art.run_id == "r1"
         assert art.project_id == "p1"
@@ -860,7 +901,7 @@ class TestFoldLegacyAttempt:
         root = tmp_path / "lab"
         dst = _dst(root)
 
-        ex = fold_legacy_attempt(src, dst, workspace_root=root, seq=2, run_id="r1", project_id="p1")
+        ex = fold_legacy_attempt(src, dst, seq=2, run_id="r1", project_id="p1")
 
         assert ex.status is ExecutionStatus.INTERRUPTED
         assert ex.mode is ExecutionMode.RERUN
@@ -868,7 +909,7 @@ class TestFoldLegacyAttempt:
         assert ex.based_on_execution_id is None
         assert ex.artifacts == ()
         raw = json.loads((dst / "execution.json").read_text(encoding="utf-8"))
-        assert raw["schema_version"] == _SCHEMA_V4
+        assert raw["schema_version"] == MOLAB_SCHEMA_VERSION
 
     def test_rejected_record_writes_nothing(self, tmp_path: Path) -> None:
         from molab.workspace.execution_repository import (
@@ -883,7 +924,7 @@ class TestFoldLegacyAttempt:
         dst = _dst(root)
 
         with pytest.raises(pydantic.ValidationError):
-            fold_legacy_attempt(src, dst, workspace_root=root, seq=1, run_id="r1", project_id="p1")
+            fold_legacy_attempt(src, dst, seq=1, run_id="r1", project_id="p1")
 
         assert (dst / "execution.json").exists() is False
 
@@ -988,7 +1029,7 @@ class TestFoldLegacyAttemptReview:
         root = tmp_path / "lab"
         dst = _dst(root)
 
-        ex = fold_legacy_attempt(src, dst, workspace_root=root, seq=1, run_id="r1", project_id="p1")
+        ex = fold_legacy_attempt(src, dst, seq=1, run_id="r1", project_id="p1")
 
         assert ex.status is ExecutionStatus.INTERRUPTED
         assert ex.sealed_at is None
@@ -1004,7 +1045,6 @@ class TestFoldLegacyAttemptReview:
         ex = fold_legacy_attempt(
             src,
             dst,
-            workspace_root=root,
             seq=1,
             run_id="r1",
             project_id="p1",

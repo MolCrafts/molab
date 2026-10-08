@@ -90,6 +90,7 @@ def open_workspace(
     *,
     require_existing: bool = True,
     prefetch: bool = False,
+    name: str | None = None,
 ) -> tuple[Target, Transport, FileSystem, Workspace]:
     """Resolve *target_str* and open the Workspace on the matching FileSystem.
 
@@ -102,6 +103,7 @@ def open_workspace(
     Args:
         target_str: Target spec (path, ``user@host:path`` or ``@name``).
         require_existing: Fail when the workspace marker is absent.
+        name: Display name used when this call creates the workspace.
         prefetch: Warm the whole navigation tree up front. Commands that are
             about to walk projects/experiments/runs should pass ``True``: on a
             remote workspace that turns a round-trip per node into two for the
@@ -140,7 +142,7 @@ def open_workspace(
             raise FileNotFoundError(
                 f"No workspace found at {root} — run molab init {root} to create one"
             )
-    ws = Workspace(root, fs=fs)
+    ws = Workspace(root, name=name, fs=fs)
     if prefetch:
         _prefetch_tree(fs, ws)
     return target, transport, fs, ws

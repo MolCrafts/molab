@@ -324,12 +324,9 @@ def add_workspace(
             raise HTTPException(status_code=400, detail="local add requires path=")
         sw = _build_local_served(body.path.strip(), create_if_missing=body.create_if_missing)
         if body.create_if_missing and sw.path:
-            # Materialize OKF scaffold only when we just created the directory.
             from molab.workspace import Workspace
 
-            root = Path(sw.path)
-            if not (root / "workspace.json").exists():
-                Workspace(root).materialize()
+            Workspace(Path(sw.path))
     else:
         sw = _build_remote_served(name=body.name, path=body.path)
 

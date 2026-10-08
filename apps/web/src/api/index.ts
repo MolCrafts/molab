@@ -1,4 +1,4 @@
-export { assetsApi } from "@/api/assets";
+export { assetsApi, assetVersionOrigin } from "@/api/assets";
 export { catalogApi } from "@/api/catalog";
 export { experimentsApi } from "@/api/experiments";
 export type { EmbedRole, EmbedTargetKind, EntityCard } from "@/api/knowledge";

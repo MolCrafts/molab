@@ -28,7 +28,10 @@ Design notes:
 
 from __future__ import annotations
 
-from typing import Literal, NamedTuple, cast
+from typing import TYPE_CHECKING, Literal, NamedTuple, cast
+
+if TYPE_CHECKING:
+    from .concept import Concept
 
 EdgeRole = Literal["derived_from", "cites", "supersedes", "records", "references"]
 """A declared relation on an OKF knowledge-graph edge."""
@@ -46,16 +49,51 @@ _ROLE_SIGIL = "@"
 
 
 class Edge(NamedTuple):
-    """A resolved typed out-edge: an in-tree *target* path plus its *role*.
+    """A resolved typed out-edge: a path, a ``molab:`` ref, or an https URL.
 
     Attributes:
-        target: The absolute in-tree path the edge resolves to (same value the
-            path-only :meth:`Concept.out_edges` reports).
+        target: An absolute in-tree path (optionally ``#fragment``), a
+            ``molab:`` reference verbatim, or an https URL.
         role: The declared :data:`EdgeRole` of the edge.
     """
 
     target: str
     role: EdgeRole
+
+    @property
+    def is_ref(self) -> bool:
+        """Whether *target* is a ``molab:`` reference (not a ``molab://`` URI)."""
+        from molab.workspace.refs import is_ref as scheme_is_ref
+
+        return scheme_is_ref(self.target)
+
+
+class Backlink(NamedTuple):
+    """One resolved reverse edge: the source document and the edge's role.
+
+    Attributes:
+        source: The document whose narrative holds the edge.
+        role: The declared :data:`EdgeRole` of that edge.
+    """
+
+    source: Concept
+    role: EdgeRole
+
+
+def link_line(label: str, target: str) -> str:
+    """The one markdown link-line formatter.
+
+    ``SourceRef.link_line`` and ``append_link`` both render through here, so
+    the ``- [label](target)`` spelling cannot drift.
+
+    Args:
+        label: The already-encoded label channel (role sigil included).
+        target: The link target, verbatim.
+
+    Returns:
+        One markdown list item.
+    """
+    return f"- [{label}]({target})"
 
 
 def validate_role(role: str) -> EdgeRole:
@@ -125,6 +163,7 @@ __all__ = [
     "Edge",
     "EdgeRole",
     "encode_label",
+    "link_line",
     "parse_role",
     "validate_role",
 ]

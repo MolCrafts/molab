@@ -64,4 +64,54 @@ describe("feature showcase mock", () => {
     );
     expect(trajectory.content).toContain("frame 1");
   });
+
+  it("creates, moves and deletes a document by hostPath", async () => {
+    const created = await getResponse(
+      handlers,
+      new Request("http://localhost/api/knowledge/doc", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: "X", hostPath: "" }),
+      }),
+    );
+    expect(created?.status).toBe(201);
+
+    const listed = await getJson<{
+      notes: Array<{ relPath: string; hostPath: string }>;
+    }>("/api/knowledge");
+    expect(listed.notes).toContainEqual(
+      expect.objectContaining({ relPath: "knowledges/x.md", hostPath: "" }),
+    );
+
+    const moved = await getResponse(
+      handlers,
+      new Request("http://localhost/api/knowledge/doc?path=knowledges%2Fx.md", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ hostPath: "projects/p" }),
+      }),
+    );
+    expect(moved?.status).toBe(200);
+    const afterMove = await getJson<{
+      notes: Array<{ relPath: string; hostPath: string }>;
+    }>("/api/knowledge");
+    expect(afterMove.notes).toContainEqual(
+      expect.objectContaining({
+        relPath: "projects/p/knowledges/x.md",
+        hostPath: "projects/p",
+      }),
+    );
+
+    const removed = await getResponse(
+      handlers,
+      new Request("http://localhost/api/knowledge/doc?path=projects%2Fp%2Fknowledges%2Fx.md", {
+        method: "DELETE",
+      }),
+    );
+    expect(removed?.status).toBe(200);
+    const afterDelete = await getJson<{ notes: Array<{ relPath: string }> }>("/api/knowledge");
+    expect(afterDelete.notes.some((row) => row.relPath.endsWith("/x.md") || row.relPath === "knowledges/x.md")).toBe(
+      false,
+    );
+  });
 });

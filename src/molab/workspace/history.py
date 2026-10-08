@@ -49,6 +49,15 @@ _TRAILER_AT = "Molab-At"
 
 _COMMIT_LOCK_TIMEOUT = 15.0
 
+MAX_RECORD_BYTES = 1 << 20
+"""Largest file a commit stages. Anything bigger is bulk, whatever its name.
+
+The ignore rules name the common bulk shapes, but a trajectory called
+``traj_seg001.traj`` or a checkpoint called ``model.ckpt-5065000.data-…`` is
+still bulk. A commit therefore leaves every staged file over this size out of
+the index and logs it; the bytes stay on disk and simply are not history.
+"""
+
 _GITIGNORE_HEAD = """\
 # molab workspace history.
 #
@@ -64,8 +73,13 @@ _GITIGNORE_HEAD = """\
 """
 
 _GITIGNORE_BULK = """
-# Trajectories, model weights, restarts, array dumps.
+# Imported asset bytes: the version record is history, the payload is not.
+**/assets/*/payload
+
+# Trajectories, model weights, restarts, array dumps, archives.
 *.data
+*.traj
+*.extxyz
 *.dump
 *.restart
 *.lammpstrj
@@ -81,10 +95,17 @@ _GITIGNORE_BULK = """
 *.pt
 *.pth
 *.ckpt
+*.ckpt-*
+*.ckpt.*
+events.out.tfevents.*
 *.model
 *.bin
 *.zarr/
 *.mrec/
+*.tar
+*.tar.gz
+*.tgz
+*.zip
 
 # Solver logs that grow without bound; the run's own run.log is kept.
 log.lammps
@@ -335,9 +356,12 @@ class GitHistory:
         stage: bool = True,
     ) -> str | None:
         if stage:
-            pathspec = [str(p) for p in paths] or ["."]
+            pathspec = self._stageable(paths)
+            if pathspec is None:
+                return None
             if self._git("add", "-A", "--", *pathspec) is None:
                 return None
+            self._unstage_bulk()
             if not self._git("diff", "--cached", "--name-only"):
                 return None
         stamp = when.astimezone(UTC).isoformat()
@@ -351,6 +375,74 @@ class GitHistory:
         if self._git(*args, env=env) is None:
             return None
         return self._git("rev-parse", "HEAD")
+
+    def _unstage_bulk(self) -> None:
+        """Take every staged file over :data:`MAX_RECORD_BYTES` back out of the index."""
+        left_out: list[tuple[str, int]] = []
+        for status, rel in self._staged(("A", "M")):
+            path = self.root / rel
+            try:
+                size = path.stat().st_size
+            except OSError:
+                continue
+            if size <= MAX_RECORD_BYTES:
+                continue
+            # A new file leaves the index; a tracked one keeps its committed version.
+            if status == "A":
+                self._git("rm", "--cached", "-q", "--", rel)
+            else:
+                self._git("reset", "-q", "--", rel)
+            left_out.append((rel, size))
+        if left_out:
+            total = sum(size for _, size in left_out) / 2**20
+            first = ", ".join(rel for rel, _ in left_out[:3])
+            more = f" and {len(left_out) - 3} more" if len(left_out) > 3 else ""
+            logger.warning(
+                f"history: {len(left_out)} file(s) over {MAX_RECORD_BYTES // 2**20} MiB "
+                f"({total:.0f} MiB) left out of the commit as bulk: {first}{more}"
+            )
+
+    def _staged(self, statuses: tuple[str, ...]) -> list[tuple[str, str]]:
+        out = self._git(
+            "diff",
+            "--cached",
+            "--name-status",
+            "--no-renames",
+            "-z",
+            f"--diff-filter={''.join(statuses)}",
+        )
+        if not out:
+            return []
+        fields = out.split("\0")
+        return [(fields[i], fields[i + 1]) for i in range(0, len(fields) - 1, 2)]
+
+    def _stageable(self, paths: tuple[PathArg, ...]) -> list[str] | None:
+        """Pathspecs ``git add`` can stage, or ``None`` when nothing qualifies.
+
+        An empty *paths* means the whole tree (``"."``). A caller that named
+        paths never widens to that: a path that is neither on disk nor in the
+        index is dropped, and if every named path is dropped there is nothing
+        to record. A tracked deletion stays, because ``git ls-files`` still
+        lists it.
+        """
+        if not paths:
+            return ["."]
+        kept: list[str] = []
+        for raw in paths:
+            absolute, spec = self._pathspec(raw)
+            indexed = self._git("ls-files", "--", spec)
+            if os.path.lexists(absolute) or indexed:
+                kept.append(spec)
+        return kept or None
+
+    def _pathspec(self, raw: PathArg) -> tuple[Path, str]:
+        path = Path(raw)
+        absolute = path if path.is_absolute() else self.root / path
+        try:
+            spec = absolute.relative_to(self.root).as_posix()
+        except ValueError:
+            spec = str(absolute)
+        return absolute, spec
 
     def _git(
         self, *args: str, check: bool = False, env: dict[str, str] | None = None
@@ -438,6 +530,7 @@ def _parse(sha: str, body: str) -> HistoryEntry | None:
 
 
 __all__ = [
+    "MAX_RECORD_BYTES",
     "MOLAB_DIR",
     "SYSTEM_AGENT",
     "AgentRef",

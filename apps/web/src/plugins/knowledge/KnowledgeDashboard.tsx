@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { WorkbenchAction } from "@/components/workbench";
 import { cn } from "@/lib/utils";
 import { KNOWLEDGE_CLASSES, type KnowledgeClass, knowledgeClassOf } from "./knowledgeClass";
+import { isTexDocument } from "./texDocument";
 
 export const KnowledgeDashboard = ({
   notes,
@@ -29,14 +30,21 @@ export const KnowledgeDashboard = ({
       Plan: 0,
       Observation: 0,
     };
-    for (const note of notes) next[knowledgeClassOf(note)] += 1;
+    for (const note of notes) {
+      if (isTexDocument(note.relPath)) continue;
+      next[knowledgeClassOf(note)] += 1;
+    }
     return next;
   }, [notes]);
 
   const needle = query.trim().toLowerCase();
   const rows = useMemo(() => {
     return notes.filter((note) => {
-      if (of && knowledgeClassOf(note) !== of) return false;
+      if (isTexDocument(note.relPath)) {
+        if (of !== null) return false;
+      } else if (of && knowledgeClassOf(note) !== of) {
+        return false;
+      }
       if (!needle) return true;
       const hay =
         `${note.name} ${note.relPath} ${note.excerpt} ${(note.tags ?? []).join(" ")}`.toLowerCase();
@@ -102,8 +110,9 @@ export const KnowledgeDashboard = ({
         ) : (
           <ul className="divide-y divide-border/50 border-y border-border/60">
             {rows.map((note) => {
-              const cls = knowledgeClassOf(note);
-              const Icon = cls === "Literature" ? FileText : NotebookPen;
+              const tex = isTexDocument(note.relPath);
+              const cls = tex ? "TeX" : knowledgeClassOf(note);
+              const Icon = tex || cls === "Literature" ? FileText : NotebookPen;
               return (
                 <li key={note.relPath}>
                   <WorkbenchAction

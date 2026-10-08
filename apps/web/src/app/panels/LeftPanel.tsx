@@ -6,7 +6,8 @@ import type { LeftPanelView, Selection, WorkspaceSnapshot } from "@/app/types";
 import { ExplorerDock } from "@/components/layout/ExplorerShell";
 import { useWorkbenchGeneration } from "@/plugins/contributions/workbench";
 
-const DOCK = { id: "molab-explorer-dock", autoSaveId: "molab.explorerDock" } as const;
+// v2 drops layouts saved while the dock default was ignored (a 50/50 split).
+const DOCK = { id: "molab-explorer-dock", autoSaveId: "molab.explorerDock.v2" } as const;
 
 interface LeftPanelProps {
   view: LeftPanelView;
@@ -82,10 +83,8 @@ export const LeftPanel = ({
     <div className="flex h-full min-h-0">
       <NavigationRail activeId={view} onSelect={onViewChange} />
       {/* The comparison belongs to the panel, not to one explorer: runs are gathered
-          from Projects and Files as readily as from the Runs table, and a
-          staging area that disappears when you leave the section it was born
-          in cannot span the walk between two projects. Rail-only sections have
-          no column to dock it in. DOCK keeps the pre-extraction storage key. */}
+          from Projects and Files as readily as from the Runs table, and a staging
+          area that disappears with its section cannot span two projects. */}
       {contribution.shellMode === "explorer" ? (
         <ExplorerDock {...DOCK} dock={<SelectionPanel snapshot={snapshot} />}>
           {explorerHost}

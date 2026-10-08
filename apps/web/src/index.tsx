@@ -4,11 +4,15 @@ import { createBrowserRouter, RouterProvider } from "react-router-dom";
 import { RouteErrorBoundary } from "@/app/layout/RouteErrorBoundary";
 import { ToastProvider } from "@/components/ui/toast";
 import { createAppQueryClient } from "@/lib/query-client";
+import { applyTextScale } from "@/lib/ui-scale";
 import { bootPlugins } from "@/plugins/runtime";
 import App from "./App";
 import "./styles/tailwind.css";
 
 const queryClient = createAppQueryClient();
+
+// Before the first paint: every token is rem, so this sizes the whole UI.
+applyTextScale();
 
 // A data router (vs. the plain <BrowserRouter>) is required so in-app navigation
 // can be intercepted with `useBlocker` — e.g. to confirm before discarding

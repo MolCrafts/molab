@@ -30,8 +30,8 @@ describe("slicesForView", () => {
     expect(slicesForView("compare")).toEqual(["workspaces", "projectsList"]);
   });
 
-  it("keeps dashboard off the file tree", () => {
-    expect(slicesForView("dashboard")).toEqual(["workspaces"]);
+  it("keeps dashboard off the file tree but lists its projects", () => {
+    expect(slicesForView("dashboard")).toEqual(["workspaces", "projectsList"]);
   });
 });
 

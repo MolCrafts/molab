@@ -20,33 +20,26 @@ outcome is a Finding.
 A path, or a **host plus a name**: ``Note(experiment, "Tg Cooling")`` derives
 ``<experiment>/knowledges/tg-cooling.md`` (and the host's own disk) without
 touching disk; ``folder(experiment, "Tg Cooling", Note)`` is that same
-derivation on its own, returning the ``.md`` path for a ``FILE_DOCUMENT`` class
-and the bare ``<slug>/`` directory otherwise.
+derivation on its own, returning the ``.md`` path.
 
-What lives here: the concept-type registry, the Knowledge handle, the six
-classes, ``SourceRef``, typed edges, the single ``folder(host, name, of)``
-location derivation, BM25F retrieval, named wiki sources, the read-only Zotero
-importer, and the write verbs a workspace host needs — ``write_knowledge`` /
-``mount_note`` / ``normalize_sources`` (the sourced writer and the note mount),
-``harvest_run`` (a terminal Run's outcome as knowledge) and
-``parse_knowledge_class``. Importing this package also imports
-:mod:`molab.knowledge.hooks`, so the ``knowledge.created`` history emitter is
-live from the first import.
+What lives here: the Knowledge handle, the six classes, ``SourceRef``, typed
+edges, the single ``folder(host, name, of)`` location derivation, BM25F
+retrieval, named wiki sources, the read-only Zotero importer, and
+``parse_class``. A document is written on the class:
+``Note.mount(host, name)``, ``Finding.create(host, name, ...)``,
+``Finding.harvest(run, ...)``, ``SourceRef.normalize(sources, default_host=...)``.
+A new document's ``knowledge.created`` history is recorded by
+:func:`molab.knowledge.write.write_knowledge`.
 
 **Dependency direction.** ``molab.knowledge`` depends on ``molab.workspace`` —
-the write verbs take a workspace ``Folder`` host and ``harvest_run`` takes a
-``Run`` — and that dependency is one-way. Every ``molab.workspace`` import lives
+a document's host is a workspace ``Folder``, and ``harvest`` takes a ``Run`` —
+and that dependency is one-way. Every ``molab.workspace`` import lives
 **inside a function body** or in an ``if TYPE_CHECKING:`` block (which never
 executes), because ``molab/__init__.py`` eagerly loads ``molab.workspace``: a
 module-level back-import would make this package import a cycle. A host that
 cannot supply a git history or an id simply observes nothing.
 """
 
-from . import hooks as _hooks
-from .bundle_index import (
-    SearchHit,
-    SearchResult,
-)
 from .concept import Knowledge
 from .concepts import (
     Finding,
@@ -55,14 +48,17 @@ from .concepts import (
     Observation,
     Plan,
     Report,
-    parse_knowledge_class,
+    parse_class,
 )
 from .edges import Edge, EdgeRole
 from .errors import KnowledgeNotFoundError
-from .harvest import harvest_run
 from .knowledge_item import SourceKind, SourceRef
 from .location import folder
 from .reference_meta import ReferenceMeta
+from .search import (
+    SearchHit,
+    SearchResult,
+)
 from .sources import (
     KnowledgeScope,
     KnowledgeSourceStore,
@@ -72,8 +68,7 @@ from .sources import (
     resolve_source,
     search_sources,
 )
-from .write import mount_note, normalize_sources, write_knowledge
-from .zotero import ZoteroItem, read_zotero_items
+from .zotero import ZoteroItem, read_zotero
 
 __all__ = [
     "Edge",
@@ -98,12 +93,8 @@ __all__ = [
     "WikiSource",
     "ZoteroItem",
     "folder",
-    "harvest_run",
-    "mount_note",
-    "normalize_sources",
-    "parse_knowledge_class",
-    "read_zotero_items",
+    "parse_class",
+    "read_zotero",
     "resolve_source",
     "search_sources",
-    "write_knowledge",
 ]

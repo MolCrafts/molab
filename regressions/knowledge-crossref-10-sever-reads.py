@@ -33,9 +33,9 @@ def main() -> None:
         # ── the raw assembler projects no knowledge, on any tree ─────────────
         context = assemble_workspace_context(workspace)
         assert isinstance(context, WorkspaceContext)
-        assert context.knowledge == []
-        assert context.open_questions == []
-        assert context.model_dump()["knowledge"] == []
+        assert not hasattr(context, "knowledge")
+        assert "open_questions" not in context.model_dump()
+        assert "knowledge" not in context.model_dump()
 
         # ── a headless knowledges/ child and a file item are never flagged ───
         knowledges = root / "knowledges"
@@ -55,7 +55,8 @@ def main() -> None:
     assert not hasattr(fs_cached, "_prefetch_knowledge_children")
     assert "_KNOWLEDGE_SKIP_DEFAULT" not in vars(fs_cached)
     assert hasattr(fs_cached, "_prefetch_meta_mounts")
-    assert hasattr(fs_cached, "_META_MOUNT_SKIP")
+    assert hasattr(fs_cached, "_meta_mount_skip")
+    assert not hasattr(fs_cached, "_META_MOUNT_SKIP")
 
 
 if __name__ == "__main__":

@@ -43,7 +43,11 @@ def main() -> None:
         assert index.path.is_file()
         assert not (project.resolve() / "knowledges" / "tg-index").exists()
 
-        finding = Finding(experiment, "Tg Result", sources=[SourceRef(kind="run", ref="run-0001")])
+        finding = Finding(
+            experiment,
+            "Tg Result",
+            sources=[SourceRef(kind="run", ref="molab:experiment/E1/run/R1")],
+        )
         finding_body = "# Tg Result\n\nTg rose with cooling rate.\n"
         finding.write(finding_body)
         assert finding.path == experiment.resolve() / "knowledges" / "tg-result.md"
@@ -58,7 +62,9 @@ def main() -> None:
 
         reopened_finding = Knowledge.open(finding.path)
         assert type(reopened_finding) is Finding
-        assert reopened_finding.read() == finding_body
+        assert reopened_finding.read() == (
+            finding_body + "- [@derived_from R1](molab:experiment/E1/run/R1)\n"
+        )
 
         # ── 3. .ref takes an object or its path; the edge recomputes ──────────
         index.ref(finding)

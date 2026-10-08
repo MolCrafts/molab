@@ -100,11 +100,6 @@ def _iter_dicts(value: JSONValue) -> Iterator[dict[str, JSONValue]]:
                 yield item
 
 
-def _workflow_json_path(run_dir: Path, execution_id: str) -> Path:
-    """Legacy-reader path (``read_node_outputs`` only)."""
-    return run_dir / "executions" / execution_id / JOURNAL_NAME
-
-
 def _now() -> str:
     return datetime.now().isoformat()
 
@@ -273,50 +268,6 @@ def read_resume_seeds(
         compiled,
         execution_id=based_on_execution_id,
     )
-
-
-def read_node_outputs(
-    run_dir: str | os.PathLike[str] | None, execution_id: str | None
-) -> dict[str, TaskOutput]:
-    """Legacy local reader: completed outputs of ``<run_dir>/executions/<id>``.
-
-    Kept for the CLI worker and resume paths until they read through
-    :func:`read_outputs`. Non-raising: ``{}`` for a missing id / run dir /
-    journal, malformed JSON, or a non-object top level.
-    """
-    if run_dir is None or execution_id is None:
-        return {}
-    from molab.fs import LocalFileSystem
-
-    doc = _load(LocalFileSystem(), _workflow_json_path(Path(run_dir), execution_id))
-    return _completed_outputs(doc, execution_id)
-
-
-def last_resumable_execution_id(run: Run) -> str | None:
-    """Return the execution_id of the most recent non-succeeded execution.
-
-    ``resume`` reopens this execution and seeds it with the node outputs already
-    persisted there. Returns ``None`` when the run has no execution to reopen —
-    the caller errors (no fallback to a fresh execution).
-    """
-    for record in reversed(run.executions):
-        if record.status.value != "succeeded":
-            return record.id
-    return None
-
-
-def seed_from_execution(run: Run) -> tuple[str | None, dict[str, TaskOutput] | None]:
-    """Build ``resume`` seeds from *run*'s last resumable execution.
-
-    Returns ``(execution_id, seed_outputs)``; ``(None, None)`` when there is
-    no execution to reopen, ``(execution_id, None)`` when it recorded no
-    completed node. The runtime's seed gate verifies the seeds against the
-    context's ``based_on_execution_id`` journal.
-    """
-    execution_id = last_resumable_execution_id(run)
-    if execution_id is None:
-        return None, None
-    return execution_id, read_node_outputs(run.run_dir, execution_id) or None
 
 
 # ── The seed gate ────────────────────────────────────────────────────────────
@@ -489,6 +440,7 @@ def _initial_document(
     compiled: CompiledWorkflow | None,
     based_on_execution_id: str | None,
 ) -> dict[str, JSONValue]:
+    """Journal header. ``workflow_digest`` is its only identity; the spread IR has none."""
     header: dict[str, JSONValue] = {
         "schema_version": JOURNAL_SCHEMA_VERSION,
         "execution_id": execution_id,
@@ -524,22 +476,6 @@ def _initial_document(
     document["task_configs"] = tasks
     document["links"] = links
     return document
-
-
-def write_initial_workflow_json(
-    journal_dir: Path | None,
-    *,
-    execution_id: str,
-    compiled: CompiledWorkflow | None = None,
-    based_on_execution_id: str | None = None,
-) -> None:
-    """Write a fresh journal into *journal_dir* (no-op when ``None``)."""
-    if journal_dir is None:
-        return
-    _put_journal(
-        Path(journal_dir),
-        _initial_document(execution_id, compiled, based_on_execution_id),
-    )
 
 
 # ── Coalescing execution-document writer ─────────────────────────────────────

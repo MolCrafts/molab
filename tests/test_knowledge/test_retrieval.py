@@ -9,7 +9,12 @@ reason substring search was not good enough.
 
 from __future__ import annotations
 
+from pathlib import Path
+
+from molab.fs import LocalFileSystem
+from molab.knowledge import Knowledge, Note
 from molab.knowledge.retrieval import bm25f_rank, tokenize
+from tests.support.counting_fs import CountingFileSystem
 
 
 class TestTokenize:
@@ -96,3 +101,37 @@ class TestBm25fRank:
     def test_limit_caps_the_result(self) -> None:
         docs = {k: {"body": "alpha"} for k in ("a", "b", "c")}
         assert len(bm25f_rank("alpha", docs, limit=2)) == 2
+
+
+class TestChineseGoldenCase:
+    def test_the_question_finds_the_protocol_note(self, tmp_path: Path) -> None:
+        Note(tmp_path / "tg-protocol").write(
+            "# 降温速率的选择\n\n计算 Tg 的时候, 降温速率以 1 K/ns 降温至 200 K, 取拐点。\n",
+            tags=["tg", "protocol"],
+        )
+        Note(tmp_path / "cluster-usage").write(
+            "# Cluster usage\n\nhow to submit jobs to the scheduler\n"
+        )
+
+        result = Knowledge(tmp_path).search("计算Tg的时候升降温怎么选择")
+
+        assert result.hits[0].entry.path == "tg-protocol.md"
+        assert result.hits[0].snippet is not None
+        assert "降温速率" in result.hits[0].snippet
+        cooled = Knowledge(tmp_path).search("降温速率")
+        assert all(hit.entry.path != "cluster-usage.md" for hit in cooled.hits)
+        opened = Knowledge.open(tmp_path / result.hits[0].entry.path)
+        assert "1 K/ns 降温至 200 K" in opened.read()
+
+
+class TestSearchReadsEachBodyOnce:
+    def test_four_documents_are_read_once_each(self, tmp_path: Path) -> None:
+        for index in range(4):
+            Note(tmp_path / f"n{index}").write(f"# N{index}\n\nalpha body {index}\n")
+        fs = CountingFileSystem(LocalFileSystem())
+        fs.reset()
+
+        Knowledge(tmp_path, fs=fs).search("alpha")
+
+        for index in range(4):
+            assert fs.for_basename(f"n{index}.md", "read_text") == 1

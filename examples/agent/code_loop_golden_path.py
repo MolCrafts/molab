@@ -27,8 +27,8 @@ import tempfile
 from pathlib import Path
 
 import molab as me
+from molab.param import GridSpace
 from molab.workflow import Workflow
-from molab.workspace.param import GridSpace
 
 # Fixed names so tests can assert the on-disk layout contract.
 PROJECT_NAME = "demo"

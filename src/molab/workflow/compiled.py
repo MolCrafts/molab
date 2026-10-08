@@ -7,7 +7,7 @@ compiler derives in one pass:
 - the executable ``graph`` (a layer-private ``ExecutionPlan`` lowered by the
   engine compiler; only the workflow runtime reads it),
 - per-task ``snapshots`` (one :class:`TaskSnapshot` each),
-- the ``version`` (:class:`WorkflowVersion`, reusing the snapshot code-hash),
+- the content identity ``workflow_digest``,
 - the experiment ``binding`` (``WorkflowBinding | None``).
 
 It is a **plain class**, not a ``pydantic.BaseModel``: it holds live task
@@ -41,7 +41,6 @@ if TYPE_CHECKING:
     from .ir import WorkflowGraphIR
     from .registry import TaskTypeRegistry
     from .snapshot import TaskSnapshot
-    from .version import WorkflowVersion
 
 
 class _ExperimentLike(Protocol):
@@ -58,12 +57,10 @@ class CompiledWorkflow:
         self,
         *,
         name: str,
-        workflow_id: str,
         version_label: str,
         tasks: list[TaskRegistration],
         graph: CompiledGraph,
         snapshots: Mapping[str, TaskSnapshot],
-        version: WorkflowVersion,
         mode: str = "batch",
         entries: tuple[str, ...] = (),
         control_edges: tuple[tuple[str, str], ...] = (),
@@ -74,13 +71,11 @@ class CompiledWorkflow:
         binding: WorkflowBinding | None = None,
     ) -> None:
         self.name = name
-        self.workflow_id = workflow_id
         self.version_label = version_label
         self._mode = mode
         # ``graph`` is the layer-private ExecutionPlan; only the runtime reads it.
         self.graph = graph
         self.snapshots = snapshots
-        self.version = version
         self.binding = binding
         # Topology data (subsumes the old Workflow spec) — read by the codec,
         # the full-graph IR exporter, and subgraph extraction.
@@ -288,7 +283,6 @@ class CompiledWorkflow:
                     fn_or_class=t.fn_or_class,
                     depends_on=list(t.depends_on),
                     is_actor=t.is_actor,
-                    remote=t.remote,
                     task_type=t.task_type,
                     dependent_params=t.dependent_params,
                 )

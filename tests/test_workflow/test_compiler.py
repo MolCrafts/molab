@@ -1,16 +1,19 @@
 """Tests for :meth:`molab.workflow.compiler.WorkflowCompiler.compile`.
 
 ``compile()`` lowers the registrations exactly once and emits a single frozen
-:class:`CompiledWorkflow` carrying the executable graph, per-task snapshots, the
-workflow version, and (when an experiment is supplied) an experiment binding.
+:class:`CompiledWorkflow` carrying the executable graph, per-task snapshots,
+and (when an experiment is supplied) an experiment binding. It carries no
+workflow version and no ``workflow_id``.
 """
 
 from __future__ import annotations
 
+import inspect
+
 import pytest
 
 from molab.workflow import CompiledWorkflow, Workflow, WorkflowCompiler
-from molab.workflow.version import WorkflowVersion
+from molab.workflow._graph_decl import TaskRegistration
 
 
 class _Exp:
@@ -38,12 +41,8 @@ class TestWorkflowCompilerCompile:
         # exactly one TaskSnapshot per registered task
         assert set(compiled.snapshots) == {"fetch", "train"}
         assert all(s.code_hash for s in compiled.snapshots.values())
-        # a populated WorkflowVersion
-        assert isinstance(compiled.version, WorkflowVersion)
-        assert {t.name for t in compiled.version.topology} == {"fetch", "train"}
-        # the version reuses the per-task snapshot code-hash (single hasher)
-        for entry in compiled.version.topology:
-            assert entry.code_hash == compiled.snapshots[entry.name].code_hash
+        assert not hasattr(compiled, "version")
+        assert not hasattr(compiled, "workflow_id")
         # a non-None executable graph — the engine's structural ExecutionPlan
         # (one node per task; values-on-edges execution, no pg lowering).
         from molab.workflow._engine.plan import ExecutionPlan
@@ -69,7 +68,10 @@ class TestWorkflowCompilerCompile:
         assert reg.for_experiment(exp) is compiled
         assert compiled.binding is not None
         assert compiled.binding.experiment_id == "exp-001"
-        assert compiled.binding.workflow_id == compiled.workflow_id
+        from molab.workflow.digest import compute_workflow_digest
+
+        assert compiled.binding.workflow_digest == compiled.workflow_digest
+        assert compiled.workflow_digest == compute_workflow_digest(compiled)
 
     @pytest.mark.unit
     def test_compiler_is_not_a_workflow(self):
@@ -89,3 +91,42 @@ class TestWorkflowCompilerCompile:
             WorkflowCompiler().compile()  # type: ignore[call-arg]
         with pytest.raises(TypeError, match="requires a Workflow"):
             WorkflowCompiler().compile(object())  # type: ignore[arg-type]
+
+
+class TestRemoteKwargRemoved:
+    """Authoring ``remote=`` is gone from ``Workflow.task`` / ``add`` / ``TaskRegistration``."""
+
+    @pytest.mark.unit
+    def test_task_and_add_omit_remote_parameter(self) -> None:
+        assert "remote" not in inspect.signature(Workflow.task).parameters
+        assert "remote" not in inspect.signature(Workflow.add).parameters
+
+    @pytest.mark.unit
+    def test_registration_omits_remote_slot(self) -> None:
+        assert "remote" not in TaskRegistration.__slots__
+        assert "remote" not in inspect.signature(TaskRegistration.__init__).parameters
+
+    @pytest.mark.unit
+    def test_task_rejects_remote_kwarg(self) -> None:
+        with pytest.raises(TypeError):
+            Workflow("w").task(lambda x: x, name="a", remote={"queue": "q"})
+
+    @pytest.mark.unit
+    def test_subgraph_registrations_have_no_remote(self) -> None:
+        wf = Workflow(name="chain")
+
+        @wf.task
+        def a() -> int:
+            return 1
+
+        @wf.task(depends_on=["a"])
+        def b(a: int) -> int:
+            return a + 1
+
+        compiled = WorkflowCompiler().compile(wf)
+        sub = compiled.subgraph(["b"])
+        assert isinstance(sub, CompiledWorkflow)
+        registrations = list(sub.registration_by_name.values())
+        assert registrations
+        for reg in registrations:
+            assert not hasattr(reg, "remote")

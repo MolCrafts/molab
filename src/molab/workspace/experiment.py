@@ -33,7 +33,9 @@ from typing import TYPE_CHECKING, Protocol, cast
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
-    from .param import ParamSpace
+    from molab.param import ParamSpace
+
+    from .artifact_repository import AssetRepository
     from .project import Project
     from .runset import RunSet
     from .workspace import Workspace
@@ -42,13 +44,13 @@ from molab._typing import JSONValue
 from molab.ids import compute_definition_hash, generate_uuid7
 from molab.path import Path
 
-from .assets import AssetScope, AssetsView, DataAssetLibrary
 from .base import (
     _load_metadata,
     _reconstruct,
     _save_metadata,
 )
-from .errors import ExperimentExistsError, ExperimentNotFoundError, RunNotFoundError
+from .domain import AssetScope
+from .errors import ExperimentExistsError, ExperimentNotFoundError
 from .folder import (
     WORKSPACE_EXPERIMENT_KIND,
     WORKSPACE_RUN_KIND,
@@ -57,8 +59,8 @@ from .folder import (
     register_entity_class,
 )
 from .fs import PathArg
-from .models import ExperimentMetadata, FolderMetadata
-from .naming import disambiguate, entity_slug, run_slug
+from .models import ExperimentMetadata, FolderMetadata, WorkflowKind
+from .naming import EXPERIMENT_CONTAINER, RUN_CONTAINER, disambiguate, entity_slug, run_slug
 from .run import Run, compute_run_definition_hash
 
 # Default replica seeds — deterministic, well-separated
@@ -98,29 +100,43 @@ def set_workflow_executor(executor: WorkflowExecutor) -> None:
 # and diff the raw IR directly without parsing it out of the metadata file.
 WORKFLOW_DOC_FILENAME = "workflow.ir.json"
 
+#: Sentinel: the caller did not pass a document, so read the current file.
+_CURRENT = object()
 
-def _parse_ir_document(source: str | None) -> dict | None:
-    """Return the parsed IR object if *source* is a JSON document, else ``None``.
 
-    ``workflow_source`` is free-form: it may carry a compiled workflow IR (a
-    JSON object), a path / Python-source string (e.g. ``"train.py"``), or be
-    empty. Only the JSON-object form is externalized to ``workflow.ir.json``;
-    everything else stays embedded in ``experiment.json``.
+def _experiment_definition_hash(
+    values: Mapping[str, object],
+    *,
+    document: dict[str, JSONValue] | None,
+) -> str:
+    """Content digest of an experiment definition.
+
+    Eight keys. A document binding contributes *document*; a code binding and
+    an unbound experiment contribute ``None``. The locator is not an input.
+
+    Args:
+        values: Experiment metadata fields. ``workflow_kind`` selects whether
+            *document* is folded in.
+        document: The IR to fold when ``workflow_kind`` is ``"document"``.
     """
-    if not source:
-        return None
-    try:
-        doc = json.loads(source)
-    except (ValueError, TypeError):
-        return None
-    return doc if isinstance(doc, dict) else None
+    folded = document if values.get("workflow_kind") == "document" else None
+    return compute_definition_hash(
+        {
+            "name": values.get("name"),
+            "description": values.get("description"),
+            "tags": values.get("tags"),
+            "parameter_space": values.get("parameter_space"),
+            "n_replicas": values.get("n_replicas"),
+            "seeds": values.get("seeds"),
+            "default_target": values.get("default_target"),
+            "workflow_document": folded,
+        }
+    )
 
 
 @register_entity_class
 class Experiment(Folder):
     """Repeatable experiment — a parameter-space container.
-
-    Knowledge lives at ``knowledges/<id>/``.
 
     Example::
 
@@ -148,12 +164,9 @@ class Experiment(Folder):
         params: dict[str, JSONValue] | None = None,
         n_replicas: int = 1,
         seeds: list[int] | None = None,
-        workflow_source: str | None = None,
-        workflow_type: str | None = None,
-        git_commit: str | None = None,
         description: str = "",
         tags: list[str] | None = None,
-        default_target: str | None = None,
+        target: str | None = None,
         _entity_metadata: ExperimentMetadata | None = None,
     ) -> None:
         resolved_parent = parent if parent is not None else project
@@ -168,25 +181,27 @@ class Experiment(Folder):
                 name=name,
                 description=description,
                 tags=list(tags) if tags is not None else [],
-                workflow_source=workflow_source,
-                workflow_type=workflow_type,
                 parameter_space=dict(params) if params else {},
-                git_commit=git_commit,
                 n_replicas=n_replicas,
                 seeds=list(seeds) if seeds is not None else None,
-                default_target=default_target,
+                default_target=target,
                 revision_id=generate_uuid7(),
-                definition_hash=compute_definition_hash(
+                definition_hash=_experiment_definition_hash(
                     {
                         "name": name,
                         "description": description,
-                        "parameter_space": params or {},
-                        "workflow_source": workflow_source,
-                        "workflow_type": workflow_type,
-                    }
+                        "tags": list(tags) if tags is not None else [],
+                        "parameter_space": dict(params) if params else {},
+                        "n_replicas": n_replicas,
+                        "seeds": list(seeds) if seeds is not None else None,
+                        "default_target": target,
+                        "workflow_kind": None,
+                    },
+                    document=None,
                 ),
             )
         )
+        self._staged_document: dict[str, JSONValue] | None = None
 
         self._parent = resolved_parent
         self._name = entity_slug(meta.name, fallback=meta.id)
@@ -204,7 +219,6 @@ class Experiment(Folder):
 
         # Entity-specific state
         self._entity_metadata: ExperimentMetadata = meta
-        self._data_assets: DataAssetLibrary | None = None
 
     # ── Folder hooks ─────────────────────────────────────────────────────
 
@@ -215,27 +229,18 @@ class Experiment(Folder):
     def child_dir(cls, parent: Folder, derived_id: str) -> Path:
         """Folder hook — experiments live under ``experiments/<id>/``."""
         # resolve() not path() — pure layout math must not mkdir on remote.
-        return Path(parent._disk().join(parent.resolve(), "experiments", derived_id))
+        return Path(parent._disk().join(parent.resolve(), EXPERIMENT_CONTAINER, derived_id))
 
     @classmethod
     def from_disk(cls, child_dir: PathArg, parent: Folder) -> Experiment:
-        """Load ``experiment.json`` and rebuild entity state. See Folder.from_disk hook docs.
+        """Load ``experiment.json`` and rebuild entity state.
 
-        When a standalone ``workflow.ir.json`` is present it is the canonical home
-        for the compiled IR; its contents are rehydrated into the in-memory
-        ``workflow_source`` field so every downstream reader is unaffected by the
-        externalized on-disk layout.
+        ``workflow.ir.json`` stays on disk. :attr:`workflow_document` reads it;
+        this loader does not copy it into metadata.
         """
         meta = _load_metadata(
             ExperimentMetadata, parent._disk().join(child_dir, "experiment.json"), fs=parent._disk()
         )
-        doc_path = parent._disk().join(child_dir, WORKFLOW_DOC_FILENAME)
-        if not parent._disk().is_file(doc_path):
-            doc_path = parent._disk().join(child_dir, "workflow.json")
-        if parent._disk().is_file(doc_path):
-            with parent._disk().open(doc_path) as fh:
-                ir = json.load(fh)
-            meta = meta.model_copy(update={"workflow_source": json.dumps(ir, sort_keys=True)})
         folder_meta = FolderMetadata(
             id=meta.id,
             name=meta.name,
@@ -247,7 +252,7 @@ class Experiment(Folder):
             parent, folder_meta, slug=parent._disk().basename(child_dir)
         ) | {
             "_entity_metadata": meta,
-            "_data_assets": None,
+            "_staged_document": None,
         }
         return _reconstruct(cls, attrs)
 
@@ -289,8 +294,52 @@ class Experiment(Folder):
         return self._entity_metadata.tags
 
     @property
-    def workflow_source(self) -> str | None:
-        return self._entity_metadata.workflow_source
+    def workflow_kind(self) -> WorkflowKind | None:
+        """``"code"``, ``"document"``, or ``None`` when this experiment is unbound."""
+        return self._entity_metadata.workflow_kind
+
+    @property
+    def workflow_document(self) -> dict[str, JSONValue] | None:
+        """The IR in ``workflow.ir.json``, or ``None`` when the file is absent.
+
+        A non-object payload is ``None``. The document is opaque. This accessor
+        does not read ``experiment.json``.
+        """
+        doc_path = self._disk().join(self.experiment_dir, WORKFLOW_DOC_FILENAME)
+        if not self._disk().is_file(doc_path):
+            return None
+        with self._disk().open(doc_path) as handle:
+            loaded = json.load(handle)
+        return loaded if isinstance(loaded, dict) else None
+
+    def bind_workflow(
+        self,
+        kind: str,
+        *,
+        entrypoint: str | None = None,
+        document: dict[str, JSONValue] | None = None,
+    ) -> None:
+        """Record this experiment's one workflow association and save it.
+
+        A first bind, a code-to-code rebind, and re-binding the same document
+        keep the revision. Editing a document, or converting between code and
+        document, stamps a new revision. Validation failures leave the disk
+        unchanged.
+
+        Args:
+            kind: ``"code"`` or ``"document"``.
+            entrypoint: Locator for a code workflow. Ignored as a clear when
+                *kind* is ``"document"`` and must then be omitted.
+            document: Opaque IR for a document workflow.
+
+        Raises:
+            ValueError: *kind* is unknown, a document is missing its IR, or a
+                document also names an entrypoint.
+            TypeError: *document* is not a dict.
+        """
+        updates, revise = self._binding_updates(kind, entrypoint=entrypoint, document=document)
+        self._write_workflow_doc(document)
+        self._apply_definition(updates, revise=revise, document=document)
 
     @property
     def parameter_space(self) -> dict[str, JSONValue]:
@@ -310,27 +359,45 @@ class Experiment(Folder):
         return self._entity_metadata.seeds
 
     @property
+    def entrypoint(self) -> str | None:
+        """``"<file>:<qualname>"`` of a code workflow, or ``None`` when unbound.
+
+        Written when a code workflow is bound. A document workflow leaves this
+        empty and keeps its IR in :attr:`workflow_document`.
+        """
+        return self._entity_metadata.workflow_entrypoint
+
+    @property
+    def target(self) -> str | None:
+        """Compute target new runs use when none is given."""
+        return self._entity_metadata.default_target
+
+    @property
     def workspace(self) -> Workspace:
         return self.project.workspace
 
     @property
     def experiment_dir(self) -> Path:
-        return Path(self._disk().join(self.project.project_dir, "experiments", self._name))
+        return Path(self._disk().join(self.project.project_dir, EXPERIMENT_CONTAINER, self._name))
 
     @property
     def scope(self) -> AssetScope:
         return AssetScope(kind="experiment", ids=(self.project.id, self.id))
 
     @property
-    def assets(self) -> AssetsView:
-        """Scope-filtered asset view (read-only queries)."""
-        return AssetsView(self.project.workspace.root, self.scope)
+    def assets(self) -> AssetRepository:
+        """Named, versioned assets at this experiment's scope."""
+        from .artifact_repository import AssetRepository
+
+        return AssetRepository(self.project.workspace, self.scope, self.experiment_dir)
 
     @property
-    def data_assets(self) -> DataAssetLibrary:
-        if self._data_assets is None:
-            self._data_assets = DataAssetLibrary(self.experiment_dir, self.scope)
-        return self._data_assets
+    def data_assets(self) -> AssetRepository:
+        """Alias of :attr:`assets`.
+
+        Kept because ``{scope}.data_assets.import_asset`` is a frozen CLAUDE.md contract.
+        """
+        return self.assets
 
     def get_seeds(self) -> list[int]:
         """Return replica seeds (length == ``n_replicas``)."""
@@ -348,6 +415,9 @@ class Experiment(Folder):
         """Create filesystem structure and persist metadata (non-recursive)."""
         d = self.experiment_dir
         self._disk().mkdir(d, parents=True, exist_ok=True)
+        if self._staged_document is not None:
+            self._write_workflow_doc(self._staged_document)
+            self._staged_document = None
         self.save()
         from .scientific_repository import ScientificRepository
 
@@ -370,18 +440,120 @@ class Experiment(Folder):
     def _sync_entity_identity(self) -> None:
         """Mirror the human name into ``experiment.json`` (``move_to`` hook).
 
-        The UUID id (and directory basename) is stable across a move.
+        The UUID id (and directory basename) is stable across a move. The
+        definition digest follows the new name; revision is not bumped and
+        ``workflow.ir.json`` is not written.
         """
-        self._entity_metadata = self._entity_metadata.model_copy(
-            update={"name": self._metadata.name}
-        )
+        self._stage_definition({"name": self._metadata.name})
         self.save()
 
+    def _binding_updates(
+        self,
+        kind: str,
+        *,
+        entrypoint: str | None,
+        document: dict[str, JSONValue] | None,
+    ) -> tuple[dict[str, object], bool]:
+        """Validate a bind and return ``(metadata updates, revise)``.
+
+        Raises:
+            ValueError: The kind and the references disagree.
+            TypeError: *document* is not a dict.
+        """
+        if kind not in ("code", "document"):
+            raise ValueError(f"workflow kind must be 'code' or 'document', got {kind!r}")
+        if document is not None and not isinstance(document, dict):
+            raise TypeError("workflow document must be a dict")
+        if kind == "document":
+            if document is None:
+                raise ValueError("a document workflow requires a document")
+            if entrypoint is not None:
+                raise ValueError("a document workflow cannot also name an entrypoint")
+        prev = self.metadata
+        prev_doc = self.workflow_document
+        had_binding = (
+            prev.workflow_kind is not None or bool(prev.workflow_entrypoint) or prev_doc is not None
+        )
+        prev_was_reference = prev.workflow_kind == "code" or (
+            prev.workflow_kind is None and bool(prev.workflow_entrypoint)
+        )
+        revise = (
+            kind == "document" and had_binding and (prev_was_reference or prev_doc != document)
+        ) or (prev.workflow_kind == "document" and kind != "document")
+        return {
+            "workflow_kind": kind,
+            "workflow_entrypoint": None if kind == "document" else entrypoint,
+        }, revise
+
+    def _stage_definition(
+        self,
+        updates: dict[str, object],
+        *,
+        document: dict[str, JSONValue] | object | None = _CURRENT,
+    ) -> None:
+        """Merge *updates* and recompute ``definition_hash``. No I/O.
+
+        Args:
+            updates: Metadata fields to merge.
+            document: IR to fold into the hash. The default reads the current
+                ``workflow.ir.json`` when the merged kind is ``"document"``.
+                An explicit value is remembered as :attr:`_staged_document` so
+                :meth:`materialize` can write it before ``experiment.json``.
+        """
+        staged = self._entity_metadata.model_copy(update=updates)
+        if document is _CURRENT:
+            folded = self.workflow_document if staged.workflow_kind == "document" else None
+        else:
+            folded = cast(
+                "dict[str, JSONValue] | None",
+                document if isinstance(document, dict) else None,
+            )
+            self._staged_document = folded
+        digest = _experiment_definition_hash(staged.model_dump(), document=folded)
+        self._entity_metadata = staged.model_copy(update={"definition_hash": digest})
+
+    def _apply_definition(
+        self,
+        updates: dict[str, object],
+        *,
+        revise: bool,
+        document: dict[str, JSONValue] | object | None = _CURRENT,
+    ) -> None:
+        """Stage *updates*, optionally stamp a revision, save, then record history.
+
+        Does not write ``workflow.ir.json``. The caller writes that first.
+        Clears :attr:`_staged_document` after the metadata save.
+        """
+        from datetime import UTC, datetime
+
+        self._stage_definition(updates, document=document)
+        if revise:
+            self._entity_metadata = self._entity_metadata.model_copy(
+                update={
+                    "revision_id": generate_uuid7(),
+                    "revision": self._entity_metadata.revision + 1,
+                    "revision_created_at": datetime.now(UTC),
+                }
+            )
+        self.save()
+        self._staged_document = None
+        if revise:
+            from .scientific_repository import ScientificRepository
+
+            ScientificRepository(self.workspace.root, fs=self._disk()).record_experiment_revision(
+                self.metadata.model_dump(mode="json"),
+                project_id=self.project.id,
+                path=self.experiment_dir,
+            )
+
     def save(self) -> None:
-        """Persist current metadata to disk."""
-        disk_meta = self._persist_workflow_doc()
+        """Persist current metadata to ``experiment.json``.
+
+        Does not write or delete ``workflow.ir.json``. That file has one writer,
+        :meth:`_write_workflow_doc`.
+        """
         _save_metadata(
-            disk_meta,
+            self._entity_metadata,
             self._disk().join(self.experiment_dir, "experiment.json"),
             fs=self._disk(),
         )
@@ -391,32 +563,19 @@ class Experiment(Folder):
         """Path of the standalone :data:`WORKFLOW_DOC_FILENAME` IR file."""
         return self._disk().join(self.experiment_dir, WORKFLOW_DOC_FILENAME)
 
-    def _persist_workflow_doc(self) -> ExperimentMetadata:
-        """Externalize an IR ``workflow_source`` and return the metadata for disk.
+    def _write_workflow_doc(self, document: dict[str, JSONValue] | None) -> None:
+        """Write or delete ``workflow.ir.json``. The only writer of that file.
 
-        When the source is a compiled workflow IR, it is written to a standalone
-        ``workflow.ir.json`` (clean, pretty-printed — the molab VSCode preview
-        reads it directly) and stripped from the returned metadata so the IR has
-        a single on-disk home. Non-IR sources (a Python path / source) stay
-        embedded and any stale ``workflow.ir.json`` is removed.
-
-        The in-memory ``self._entity_metadata`` is left untouched so live readers
-        (server responses, run snapshots) keep seeing the full source until the
-        next reload, where :meth:`from_disk` rehydrates it from the file.
+        Args:
+            document: IR object to store, or ``None`` to delete the file when
+                it exists. Does not touch ``experiment.json`` or ``workflow.json``.
         """
-        ir = _parse_ir_document(self._entity_metadata.workflow_source)
         doc_path = self._workflow_doc_path
-        legacy = self._disk().join(self.experiment_dir, "workflow.json")
-        if ir is not None:
-            self._disk().atomic_write_json(doc_path, ir)
-            if self._disk().is_file(legacy):
-                self._disk().remove(legacy)
-            return self._entity_metadata.model_copy(update={"workflow_source": None})
+        if document is not None:
+            self._disk().atomic_write_json(doc_path, document)
+            return
         if self._disk().is_file(doc_path):
             self._disk().remove(doc_path)
-        if self._disk().is_file(legacy):
-            self._disk().remove(legacy)
-        return self._entity_metadata
 
     # ── Run CRUD: typed semantic sugar over generic Folder CRUD ────────────
 
@@ -426,8 +585,7 @@ class Experiment(Folder):
         *,
         id: str | None = None,
         target: str | None = None,
-        workflow_snapshot: dict[str, JSONValue] | None = None,
-        input_asset_ids: tuple[str, ...] = (),
+        inputs: tuple[str, ...] = (),
         config_hash: str | None = None,
     ) -> Run:
         """Add a new logical Run under this Experiment.
@@ -444,7 +602,7 @@ class Experiment(Folder):
         definition_hash = compute_run_definition_hash(
             experiment_revision_id=self.metadata.revision_id,
             parameters=params,
-            input_asset_ids=input_asset_ids,
+            input_asset_ids=inputs,
             config_hash=config_hash,
         )
         resolved_id = id if id is not None else generate_uuid7()
@@ -464,11 +622,10 @@ class Experiment(Folder):
             slug,
             id=resolved_id,
             parameters=params,
-            workflow_snapshot=workflow_snapshot,
             target=resolved_target,
             definition_hash=definition_hash,
             experiment_revision_id=self.metadata.revision_id,
-            input_asset_ids=input_asset_ids,
+            inputs=inputs,
         )
         return self.add_folder(child)
 
@@ -477,7 +634,6 @@ class Experiment(Folder):
         space: ParamSpace,
         *,
         target: str | None = None,
-        workflow_snapshot: dict[str, JSONValue] | None = None,
     ) -> list[Run]:
         """Add one fresh UUID-addressed Run per cell in a ParamSpace."""
         runs: list[Run] = []
@@ -487,7 +643,6 @@ class Experiment(Folder):
                 self.add_run(
                     params=cast("dict[str, JSONValue]", cell_params),
                     target=target,
-                    workflow_snapshot=workflow_snapshot,
                 )
             )
         return runs
@@ -498,13 +653,13 @@ class Experiment(Folder):
         *,
         config_hash: str | None = None,
         target: str | None = None,
-        input_asset_ids: tuple[str, ...] = (),
+        inputs: tuple[str, ...] = (),
     ) -> Run:
         """Return the Run with this definition, creating it if there is none.
 
         The one "find by ``definition_hash`` or create" verb. The hash is
         :func:`~molab.workspace.run.compute_run_definition_hash` over this
-        experiment's revision, ``params``, ``input_asset_ids`` and
+        experiment's revision, ``params``, ``inputs`` and
         ``config_hash``; among existing runs whose ``definition_hash``
         matches, the earliest created (ties broken by run id) is returned. On a miss the run is
         created through :meth:`add_run`, so it gets a fresh UUIDv7 id — there
@@ -524,7 +679,7 @@ class Experiment(Folder):
             params: The run's parameter cell.
             config_hash: Profile configuration hash, or ``None`` for none.
             target: Compute target for a newly created run.
-            input_asset_ids: Declared input asset ids.
+            inputs: Declared input asset ids.
 
         Returns:
             The existing or newly created (and persisted) :class:`Run`.
@@ -533,7 +688,7 @@ class Experiment(Folder):
             params,
             config_hash=config_hash,
             target=target,
-            input_asset_ids=input_asset_ids,
+            inputs=inputs,
             index=self._definition_index(),
         )
         return run
@@ -543,20 +698,20 @@ class Experiment(Folder):
         params: dict[str, JSONValue] | None = None,
         *,
         config_hash: str | None = None,
-        input_asset_ids: tuple[str, ...] = (),
+        inputs: tuple[str, ...] = (),
     ) -> Run | None:
         """Return the Run with this definition, or ``None`` when there is none.
 
         The read-only half of :meth:`ensure_run`: the same
         :func:`~molab.workspace.run.compute_run_definition_hash` over this
-        experiment's revision, ``params``, ``input_asset_ids`` and
+        experiment's revision, ``params``, ``inputs`` and
         ``config_hash``, looked up in the same index (earliest created wins
         among duplicates). It never creates a run.
 
         Args:
             params: The run's parameter cell.
             config_hash: Profile configuration hash, or ``None`` for none.
-            input_asset_ids: Declared input asset ids.
+            inputs: Declared input asset ids.
 
         Returns:
             The existing :class:`Run`, or ``None`` if no run has this definition.
@@ -564,7 +719,7 @@ class Experiment(Folder):
         definition_hash = compute_run_definition_hash(
             experiment_revision_id=self.metadata.revision_id,
             parameters=params,
-            input_asset_ids=input_asset_ids,
+            input_asset_ids=inputs,
             config_hash=config_hash,
         )
         return self._definition_index().get(definition_hash)
@@ -588,7 +743,7 @@ class Experiment(Folder):
         *,
         config_hash: str | None,
         target: str | None,
-        input_asset_ids: tuple[str, ...],
+        inputs: tuple[str, ...],
         index: dict[str, Run],
     ) -> tuple[Run, bool]:
         """Find the run for this definition in *index*, or create and index it.
@@ -599,7 +754,7 @@ class Experiment(Folder):
         definition_hash = compute_run_definition_hash(
             experiment_revision_id=self.metadata.revision_id,
             parameters=params,
-            input_asset_ids=input_asset_ids,
+            input_asset_ids=inputs,
             config_hash=config_hash,
         )
         existing = index.get(definition_hash)
@@ -609,7 +764,7 @@ class Experiment(Folder):
             params,
             config_hash=config_hash,
             target=target,
-            input_asset_ids=input_asset_ids,
+            inputs=inputs,
         )
         index.setdefault(definition_hash, run)
         return run, True
@@ -637,7 +792,7 @@ class Experiment(Folder):
                 cast("dict[str, JSONValue]", dict(cell)),
                 config_hash=None,
                 target=target,
-                input_asset_ids=(),
+                inputs=(),
                 index=index,
             )
             if created:
@@ -658,7 +813,7 @@ class Experiment(Folder):
         Returns:
             ``self`` for chaining (``.list_runs()`` …).
         """
-        from .param import GridSpace, ParamSpace
+        from molab.param import GridSpace, ParamSpace
 
         space = (
             params if isinstance(params, ParamSpace) else GridSpace(dict(params or {}))  # ty: ignore[invalid-argument-type]
@@ -707,13 +862,14 @@ class Experiment(Folder):
             best = summary.min_by("loss")
 
         ``params`` is a ``{axis: [values]}`` grid mapping (auto-upgraded to
-        :class:`~molab.workspace.GridSpace`; every axis must map to a
+        :class:`~molab.param.GridSpace`; every axis must map to a
         *list* of values — a scalar axis fails fast) or any
-        :class:`~molab.workspace.ParamSpace`. ``None`` seeds a single
+        :class:`~molab.param.ParamSpace`. ``None`` seeds a single
         parameter-free run. *workflow* may be an uncompiled
         ``Workflow``; the workflow-layer executor compiles it.
         """
-        from .param import GridSpace, ParamSpace
+        from molab.param import GridSpace, ParamSpace
+
         from .runset import RunSet
 
         if params is None or isinstance(params, ParamSpace):
@@ -765,13 +921,7 @@ class Experiment(Folder):
 
     def get_run(self, run_id: str) -> Run:
         """Get a run by its directory name (its parameters) or its UUIDv7 id."""
-        try:
-            return self.get_folder(run_id, cls=Run)
-        except RunNotFoundError:
-            for run in self.list_runs():
-                if run.id == run_id:
-                    return run
-            raise
+        return self.get_folder(run_id, cls=Run)
 
     def set_run(
         self,
@@ -779,15 +929,14 @@ class Experiment(Folder):
         *,
         params: dict[str, JSONValue] | None = None,
         target: str | None = None,
-        workflow_snapshot: dict[str, JSONValue] | None = None,
     ) -> Run:
         """Reject mutation of a Run's scientific definition.
 
         Schema v2 assigns every Run a stable logical identity. Changes to
-        parameters, inputs, workflow, or target create a new Run.
+        parameters, inputs, or target create a new Run.
         """
         run = self.get_run(run_id)
-        if params is None and target is None and workflow_snapshot is None:
+        if params is None and target is None:
             return run
         raise RuntimeError(
             "Run definitions are immutable in schema v2; create a new Run "
@@ -818,7 +967,7 @@ class Experiment(Folder):
         """
         result: list[Run] = []
         disk = self._disk()
-        runs_dir = disk.join(self.experiment_dir, "runs")
+        runs_dir = disk.join(self.experiment_dir, RUN_CONTAINER)
         if not disk.is_dir(runs_dir):
             return result
         entries = disk.scandir(runs_dir, with_stat=False)

@@ -5,9 +5,9 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Literal, overload
+from typing import Annotated, Literal, overload
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 
 from molab._typing import JSONValue
 
@@ -224,6 +224,10 @@ class ArtifactRef(BaseModel):
     execution_id: str
 
 
+#: Semantic type molab reserves for its own result artifacts.
+RESULT_SEMANTIC_TYPE = "result"
+
+
 class Artifact(BaseModel):
     """Immutable output explicitly emitted by an Execution."""
 
@@ -238,7 +242,12 @@ class Artifact(BaseModel):
     created_at: datetime
     created_by: AgentRef
     path: str
-    """Workspace-relative POSIX path of the bytes — the artifact *is* this file."""
+    """POSIX path relative to the execution directory (``artifacts/<rel>``).
+
+    Records sealed before 05b may still store a workspace-relative path.
+    ``ArtifactRepository.locate`` reads both forever. Sealed ``execution.json``
+    is never rewritten.
+    """
     source_path: str
     """Where inside the Execution workdir it was produced (``work/...``)."""
     media_type: str | None = None
@@ -305,7 +314,7 @@ class Execution(BaseModel):
     fact written by ``ExecutionRepository.start``; always ``None`` on a QUEUED
     record. Its production writers are arch-own-03a (``Run.start`` and
     ``ExecutionContext`` pass it to ``start``) and arch-own-03g
-    (``execute_run`` computes it).
+    (``run.execute`` records it).
     """
     observed_input_ids: tuple[str, ...] = ()
     artifacts: tuple[Artifact, ...] = ()
@@ -346,6 +355,58 @@ class Execution(BaseModel):
                 return artifact
         raise KeyError(f"Artifact {artifact_id!r} not found in Execution {self.id!r}")
 
+    # Set by Run when it hands the record out. Absent on a bare load from disk.
+    _run: object | None = PrivateAttr(default=None)
+
+    def execute(self, workflow: object, /) -> object:
+        """Run *workflow* as this queued attempt.
+
+        Starts the record and returns the workflow result. ``run.execute``
+        allocates an attempt and then runs it the same way; a scheduler that
+        already queued one calls this on ``run.execution(execution_id)``.
+
+        Args:
+            workflow: A compiled workflow, or one to compile.
+
+        Returns:
+            The workflow result. ``.outputs`` maps task name to output.
+
+        Raises:
+            RuntimeError: This record was not read from its Run, or the call
+                is inside a running event loop (await :meth:`aexecute`).
+        """
+        run = self._run
+        if run is None:
+            raise RuntimeError(
+                "execution.execute() needs the Run this attempt belongs to; "
+                "read it with run.execution(id)"
+            )
+        from molab.workspace.run import require_run_executor
+
+        return require_run_executor().execute(run, workflow, execution_id=self.id)  # ty: ignore[invalid-argument-type]
+
+    async def aexecute(self, workflow: object, /) -> object:
+        """Async variant of :meth:`execute` — same attempt, awaitable.
+
+        Args:
+            workflow: A compiled workflow, or one to compile.
+
+        Returns:
+            The workflow result. ``.outputs`` maps task name to output.
+
+        Raises:
+            RuntimeError: This record was not read from its Run.
+        """
+        run = self._run
+        if run is None:
+            raise RuntimeError(
+                "execution.aexecute() needs the Run this attempt belongs to; "
+                "read it with run.execution(id)"
+            )
+        from molab.workspace.run import require_run_executor
+
+        return await require_run_executor().aexecute(run, workflow, execution_id=self.id)  # ty: ignore[invalid-argument-type]
+
     @field_validator(
         "created_at", "started_at", "finished_at", "sealed_at", "pruned_at", mode="after"
     )
@@ -354,29 +415,144 @@ class Execution(BaseModel):
         return _as_utc(value)
 
 
-class AssetRef(BaseModel):
-    """Stable reference to a Project-managed data identity."""
+class AssetScope(BaseModel):
+    """Identifies which scope (workspace/project/experiment/run) owns an asset.
+
+    ``ids`` is the chain of parent IDs ending with the leaf scope's own id.
+    Empty for workspace scope.
+
+    Examples::
+
+        AssetScope(kind="workspace", ids=())
+        AssetScope(kind="project", ids=("qm9",))
+        AssetScope(kind="experiment", ids=("qm9", "baseline"))
+        AssetScope(kind="run", ids=("qm9", "baseline", "run-abc"))
+    """
 
     model_config = ConfigDict(frozen=True)
 
-    id: str
-    project_id: str
+    kind: Literal["workspace", "project", "experiment", "run"]
+    ids: tuple[str, ...] = ()
+
+    @property
+    def urn(self) -> str:
+        """URN fragment: ``workspace`` or ``run/proj/exp/run-id``."""
+        if not self.ids:
+            return self.kind
+        return f"{self.kind}/{'/'.join(self.ids)}"
+
+    @property
+    def scope_id(self) -> str:
+        """Flat identifier used as catalog key.
+
+        For workspace: the constant ``workspace``.  Otherwise the last
+        segment of ``ids`` (the leaf scope's own id).
+        """
+        return self.ids[-1] if self.ids else "workspace"
+
+    @property
+    def project_id(self) -> str | None:
+        """Owning project id, or ``None`` when ``kind`` is ``workspace``.
+
+        Every other kind stores the project as the first id in the chain.
+        """
+        if self.kind == "workspace":
+            return None
+        return self.ids[0]
+
+
+#: How an import materialized its bytes. ``reference`` leaves them at the URI.
+ImportAction = Literal["copy", "move", "symlink", "hardlink", "reference"]
+
+
+class ArtifactOrigin(BaseModel):
+    """Bytes of an asset version that came from one emitted Artifact.
+
+    Attributes:
+        kind: Discriminator, always ``artifact``.
+        artifact_id: Id of the source Artifact.
+        ref: Qualified ``molab:experiment/<e>/run/<r>/artifact/<id>`` reference.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: Literal["artifact"] = "artifact"
+    artifact_id: str
+    ref: str
+
+    @model_validator(mode="after")
+    def _qualified_ref(self) -> ArtifactOrigin:
+        from .refs import InvalidRefError, parse_ref
+
+        try:
+            parsed = parse_ref(self.ref, kind="artifact")
+        except InvalidRefError as exc:
+            raise ValueError(str(exc)) from exc
+        if parsed.artifact_id != self.artifact_id:
+            raise ValueError(
+                f"artifact reference names {parsed.artifact_id}, not {self.artifact_id}"
+            )
+        return self
+
+
+class ImportOrigin(BaseModel):
+    """Bytes of an asset version that were imported from outside an Execution.
+
+    Attributes:
+        kind: Discriminator, always ``import``.
+        uri: Import source, recorded as provenance only.
+        action: How the bytes were materialized.
+        location: POSIX path of the bytes relative to the scope directory,
+            or ``None`` when the bytes stay at ``uri``.
+        input_ids: Upstream asset ids consumed to produce this import.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    kind: Literal["import"] = "import"
+    uri: str
+    action: ImportAction
+    location: str | None = None
+    input_ids: tuple[str, ...] = ()
+
+
+AssetOrigin = Annotated[ArtifactOrigin | ImportOrigin, Field(discriminator="kind")]
+"""Where an :class:`AssetVersion`'s bytes came from."""
 
 
 class Asset(BaseModel):
-    """Long-lived Project data identity with append-only versions."""
+    """Named data identity at one scope, with append-only versions.
+
+    ``scope`` is not persisted. The directory the record lives in is its only
+    owner, and the repository injects the scope when it reads the record.
+
+    Attributes:
+        id: Stable identity. A legacy import keeps its uuid4.
+        scope: Owning scope. Excluded from serialization.
+        title: Display name.
+        created_at: When the identity was created. A naive value is read as UTC.
+        created_by: Who created it.
+        tags: Free-form string tags.
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     id: str
-    project_id: str
+    scope: AssetScope = Field(exclude=True)
     title: str
     created_at: datetime
     created_by: AgentRef
+    tags: dict[str, str] = Field(default_factory=dict)
 
     @property
-    def ref(self) -> AssetRef:
-        return AssetRef(id=self.id, project_id=self.project_id)
+    def project_id(self) -> str | None:
+        """Project id derived from :attr:`scope`, or ``None`` at workspace scope."""
+        return self.scope.project_id
+
+    @property
+    def kind(self) -> str:
+        """Kind label for a named asset. Always ``asset``, and not stored."""
+        return "asset"
 
     @field_validator("created_at", mode="after")
     @classmethod
@@ -385,22 +561,44 @@ class Asset(BaseModel):
 
 
 class AssetVersion(BaseModel):
-    """Immutable Asset version created by promoting an Artifact."""
+    """One immutable version of an :class:`Asset`.
+
+    ``content`` is ``None`` when the import stored no digest (symlink and
+    hardlink). ``source_artifact_id`` is a projection of :attr:`origin`, not
+    a stored field.
+
+    Attributes:
+        id: Version id.
+        asset_id: Asset this version belongs to.
+        origin: Where the bytes came from.
+        content: Digest and size, or ``None`` when the import stored none.
+        version: Monotonic version number, starting at 1.
+        created_at: When this version was created. A naive value is read as UTC.
+        created_by: Who created it.
+        media_type: Optional media type.
+        semantic_type: Optional semantic type.
+        metadata: Free-form metadata.
+    """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     id: str
     asset_id: str
-    source_artifact_id: str
-    content: ContentRef
-    path: str = ""
-    """Workspace-relative POSIX path of the underlying bytes."""
+    origin: AssetOrigin
+    content: ContentRef | None = None
     version: int
     created_at: datetime
     created_by: AgentRef
     media_type: str | None = None
     semantic_type: str | None = None
     metadata: dict[str, JSONValue] = Field(default_factory=dict)
+
+    @property
+    def source_artifact_id(self) -> str | None:
+        """Artifact id when :attr:`origin` is an artifact, else ``None``."""
+        if isinstance(self.origin, ArtifactOrigin):
+            return self.origin.artifact_id
+        return None
 
     @field_validator("created_at", mode="after")
     @classmethod
@@ -411,11 +609,14 @@ class AssetVersion(BaseModel):
 __all__ = [
     "ACTIVE_EXECUTION_STATUSES",
     "FAILED_EXECUTION_STATUSES",
+    "RESULT_SEMANTIC_TYPE",
     "TERMINAL_EXECUTION_STATUSES",
     "Artifact",
+    "ArtifactOrigin",
     "ArtifactRef",
     "Asset",
-    "AssetRef",
+    "AssetOrigin",
+    "AssetScope",
     "AssetVersion",
     "ContentRef",
     "EvidenceRef",
@@ -423,6 +624,8 @@ __all__ = [
     "ExecutionMode",
     "ExecutionStatus",
     "ExperimentRevision",
+    "ImportAction",
+    "ImportOrigin",
     "RunDefinition",
     "RunStatusSummary",
     "SourceFile",

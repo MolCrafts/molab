@@ -18,8 +18,15 @@ from mollog import get_logger
 from molab._typing import JSONValue, TaskOutput
 from molab.profile import ProfileConfig
 
-from .artifact_repository import ArtifactRepository
-from .domain import Artifact, Asset, Execution, ExecutionMode, ExecutionStatus
+from .artifact_repository import RESERVED_ARTIFACT_DIR, ArtifactRepository
+from .domain import (
+    RESULT_SEMANTIC_TYPE,
+    Artifact,
+    Asset,
+    Execution,
+    ExecutionMode,
+    ExecutionStatus,
+)
 from .execution_dirs import (
     ARTIFACTS,
     CHECKPOINTS,
@@ -34,7 +41,6 @@ from .file_store import FileStore
 from .history import AgentRef
 from .metrics_seam import MetricRecord, MetricsSink, create_metrics_writer
 from .run_heartbeat import HEARTBEAT_INTERVAL_SECONDS, touch_alive, unlink_alive
-from .schema_version import read_versioned_json, write_versioned_json
 
 if TYPE_CHECKING:
     from types import TracebackType
@@ -217,6 +223,12 @@ class _CheckpointWriter:
     ) -> Artifact:
         label = name or f"checkpoint-{datetime.now(UTC).strftime('%Y%m%dT%H%M%S%f')}"
         path = self._context.get_dir(CHECKPOINTS.name) / f"{label}.json"
+        recorded_name = f"{label}.json"
+        for existing in self._context._executions.get(self._context.id).artifacts:
+            if existing.semantic_type == "checkpoint" and existing.name == recorded_name:
+                raise ValueError(
+                    f"checkpoint label {label!r} is already recorded by Artifact {existing.id}"
+                )
         path.write_text(
             json.dumps(
                 {
@@ -246,7 +258,7 @@ class ExecutionContext:
     Execution's physical directory.
 
     Constructing the context writes nothing. Entering it creates the QUEUED
-    record through ``Run.create_execution`` (or, with *execution_id*, looks
+    record through ``Run._create_execution`` (or, with *execution_id*, looks
     up the one already created) and then starts it; leaving it seals the
     attempt.
 
@@ -258,13 +270,13 @@ class ExecutionContext:
             or equal the recorded one; a different ``profile`` or
             ``config_hash`` raises ``ValueError`` on entry.
         execution_id: A *preallocated* attempt, i.e. one already created by
-            ``run.create_execution(...)`` (for example by a scheduler
+            ``run._create_execution(...)`` (for example by a scheduler
             submitter) and still QUEUED. Its creation facts are fixed, so
-            passing *mode*, *based_on_execution_id*, *checkpoint_artifact_id*
+            passing *mode*, *predecessor*, *checkpoint*
             or *bypass_cache* alongside it raises ``ValueError``.
         mode: How a newly created attempt relates to earlier ones.
-        based_on_execution_id: The predecessor of a newly created attempt.
-        checkpoint_artifact_id: The checkpoint a newly created ``resume``
+        predecessor: The predecessor of a newly created attempt.
+        checkpoint: The checkpoint a newly created ``resume``
             attempt starts from.
         created_by: Who creates the attempt; defaults to this process.
         bypass_cache: Whether a newly created attempt ignores the workflow
@@ -282,8 +294,8 @@ class ExecutionContext:
         profile_config: ProfileConfig | None = None,
         execution_id: str | None = None,
         mode: ExecutionMode = ExecutionMode.INITIAL,
-        based_on_execution_id: str | None = None,
-        checkpoint_artifact_id: str | None = None,
+        predecessor: str | None = None,
+        checkpoint: str | None = None,
         created_by: AgentRef | None = None,
         bypass_cache: bool = False,
         workflow_digest: str | None = None,
@@ -293,8 +305,8 @@ class ExecutionContext:
                 name
                 for name, given in (
                     ("mode", mode is not ExecutionMode.INITIAL),
-                    ("based_on_execution_id", based_on_execution_id is not None),
-                    ("checkpoint_artifact_id", checkpoint_artifact_id is not None),
+                    ("predecessor", predecessor is not None),
+                    ("checkpoint", checkpoint is not None),
                     ("bypass_cache", bypass_cache),
                 )
                 if given
@@ -303,7 +315,7 @@ class ExecutionContext:
                 raise ValueError(
                     f"Execution {execution_id!r} is preallocated; {', '.join(conflicts)} "
                     "cannot be passed with an explicit execution_id, because "
-                    "run.create_execution(...) fixed them when it created the record"
+                    "they were fixed when the queued attempt was created"
                 )
         self.run = run
         self.run_dir = Path(run.run_dir)
@@ -314,8 +326,8 @@ class ExecutionContext:
         self._explicit_execution_id = execution_id
         self._execution_id: str | None = None
         self._mode = mode
-        self._based_on_execution_id = based_on_execution_id
-        self._checkpoint_artifact_id = checkpoint_artifact_id
+        self._based_on_execution_id = predecessor
+        self._checkpoint_artifact_id = checkpoint
         self._bypass_cache = bypass_cache
         self._workflow_digest = workflow_digest
         self._execution_dir: Path | None = None
@@ -325,6 +337,8 @@ class ExecutionContext:
         self._failure: dict[str, JSONValue] | None = None
         self._workflow_succeeded = False
         self._entered = False
+        self._results: dict[str, TaskOutput] = {}
+        self._emit_lock = threading.Lock()
         self._heartbeat_stop: threading.Event | None = None
         self._heartbeat_thread: threading.Thread | None = None
         self._metrics: MetricsSink | None = None
@@ -360,7 +374,7 @@ class ExecutionContext:
         return self._execution_dir
 
     @property
-    def based_on_execution_id(self) -> str | None:
+    def predecessor(self) -> str | None:
         """Selected predecessor for retry/resume/reproduction provenance."""
         return self._state.based_on_execution_id if self._state is not None else None
 
@@ -503,6 +517,7 @@ class ExecutionContext:
                     media_type="application/x-ndjson",
                     semantic_type="molplot.metrics",
                 )
+        self._emit_results()
         self.log("run").append(
             f"{datetime.now(UTC).isoformat()} execution finished status={status.value}"
         )
@@ -553,6 +568,36 @@ class ExecutionContext:
                 source.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
             else:
                 source.write_text(str(data), encoding="utf-8")
+        return self._emit(
+            source,
+            name=name,
+            media_type=media_type or mime,
+            semantic_type=semantic_type,
+            declaration_id=declaration_id,
+            metadata=metadata,
+            tags=tags,
+            consumed=consumed,
+            reserved=False,
+        )
+
+    def _emit(
+        self,
+        source: Path,
+        *,
+        name: str | None = None,
+        media_type: str | None = None,
+        semantic_type: str | None = None,
+        declaration_id: str | None = None,
+        metadata: dict[str, JSONValue] | None = None,
+        tags: dict[str, str] | None = None,
+        consumed: Sequence[Artifact | Asset | str] | None = None,
+        reserved: bool,
+    ) -> Artifact:
+        """Promote *source* and record it on this attempt, under one lock.
+
+        ``reserved`` is the only caller that may land in ``artifacts/_molab/``
+        or use the result semantic type. The public emit always passes false.
+        """
         inputs = tuple(self._entity_id(item) for item in (consumed or ()))
         combined_metadata: dict[str, JSONValue] = dict(metadata or {})
         if tags:
@@ -561,22 +606,26 @@ class ExecutionContext:
             combined_metadata["task_id"] = self._active_task_id
         if inputs:
             self._executions.add_observed_inputs(self.id, inputs)
-        artifact = self._artifacts.emit(
-            source,
-            execution_dir=self.execution_dir,
-            execution_id=self.id,
-            run_id=self.run.id,
-            project_id=self.run.experiment.project.id,
-            created_by=self._created_by,
-            name=name,
-            media_type=media_type or mime,
-            semantic_type=semantic_type,
-            declaration_id=declaration_id,
-            input_entity_ids=inputs,
-            metadata=combined_metadata,
-        )
-        self._executions.add_artifact(self.id, artifact)
-        return artifact
+        with self._emit_lock:
+            recorded = self._executions.get(self.id).artifacts
+            artifact = self._artifacts.emit(
+                source,
+                execution_dir=self.execution_dir,
+                execution_id=self.id,
+                run_id=self.run.id,
+                project_id=self.run.experiment.project.id,
+                created_by=self._created_by,
+                name=name,
+                media_type=media_type,
+                semantic_type=semantic_type,
+                declaration_id=declaration_id,
+                input_entity_ids=inputs,
+                metadata=combined_metadata,
+                recorded=recorded,
+                reserved=reserved,
+            )
+            self._executions.add_artifact(self.id, artifact)
+            return artifact
 
     def register_metric(
         self,
@@ -589,12 +638,29 @@ class ExecutionContext:
         return self.metrics.scalar(key, value, step, tags=cast("dict[str, JSONValue] | None", tags))
 
     def set_result(self, key: str, value: TaskOutput) -> None:
-        results = self._read_results()
-        results[key] = value
-        write_versioned_json(self.execution_dir / "results.json", {"results": results})
+        """Snapshot one result in memory until this context's ``__exit__``.
+
+        Values persist only when the context exits: ``__exit__`` writes them
+        to the result Artifact ``artifacts/_molab/results.json``. A driver
+        killed before ``__exit__`` loses them. ``ctx.checkpoint`` is the
+        durable path for data that must outlive the process.
+
+        Args:
+            key: Result name. A later call with the same key overwrites.
+            value: A JSON value, snapshotted at the call. ``None`` is a set
+                value. A non-JSON value raises ``TypeError`` from
+                ``json.dumps``.
+
+        Raises:
+            RuntimeError: Called outside an ``ExecutionContext``.
+            TypeError: ``value`` is not JSON-serializable.
+        """
+        if not self._entered:
+            raise RuntimeError("set_result must be called inside an ExecutionContext")
+        self._results[key] = json.loads(json.dumps(value))
 
     def get_result(self, key: str) -> TaskOutput:
-        return self._read_results().get(key)
+        return self._results.get(key)
 
     def mark_failed(self, error: str | None = None, traceback_text: str | None = None) -> None:
         if self._failure is not None:
@@ -606,16 +672,13 @@ class ExecutionContext:
         }
         if traceback_text:
             (self.execution_dir / "traceback.txt").write_text(traceback_text, encoding="utf-8")
-        (self.execution_dir / "exception.json").write_text(
-            json.dumps(self._failure, indent=2, sort_keys=True), encoding="utf-8"
-        )
 
     def mark_succeeded(self) -> None:
         if self._failure is None:
             self._workflow_succeeded = True
 
     def _create(self) -> Execution:
-        """Write this attempt's QUEUED record through ``Run.create_execution``.
+        """Write this attempt's QUEUED record through ``Run._create_execution``.
 
         Start-time facts (host, python, pid) are added by ``start`` in
         ``__enter__``, so both paths record them at the same moment.
@@ -628,10 +691,10 @@ class ExecutionContext:
         Returns:
             The QUEUED record as written.
         """
-        state = self.run.create_execution(
+        state = self.run._create_execution(
             mode=self._mode,
-            based_on_execution_id=self._based_on_execution_id,
-            checkpoint_artifact_id=self._checkpoint_artifact_id,
+            predecessor=self._based_on_execution_id,
+            checkpoint=self._checkpoint_artifact_id,
             bypass_cache=self._bypass_cache,
             profile_config=self._requested_profile_config,
             created_by=self._created_by,
@@ -646,7 +709,7 @@ class ExecutionContext:
         QUEUED. The locked ``start`` re-checks the status authoritatively.
 
         Args:
-            execution_id: The attempt created earlier by ``run.create_execution``.
+            execution_id: The attempt queued earlier for this run.
 
         Returns:
             The QUEUED record.
@@ -660,8 +723,7 @@ class ExecutionContext:
             state = self._executions.get(execution_id)
         except KeyError:
             raise ValueError(
-                f"Execution {execution_id!r} does not exist under Run {self.run.id!r}; "
-                "create it with run.create_execution(...) before starting it"
+                f"Execution {execution_id!r} does not exist under Run {self.run.id!r}"
             ) from None
         if state.status is not ExecutionStatus.QUEUED:
             raise ValueError(
@@ -707,13 +769,31 @@ class ExecutionContext:
         # and it belongs in the attempt's one log.
         self.log("run").append("".join(traceback.format_exception(exc_type, exc_val, exc_tb)))
 
-    def _read_results(self) -> dict[str, TaskOutput]:
-        path = self.execution_dir / "results.json"
-        if not path.exists():
-            return {}
-        raw = read_versioned_json(path)
-        results = raw.get("results")
-        return results if isinstance(results, dict) else {}
+    def _emit_results(self) -> None:
+        """Write in-memory results once, unless the attempt was sealed early.
+
+        A sealed attempt is left untouched: one ``run.log`` line records why,
+        and this method does not raise, so ``__exit__`` can still finish.
+        """
+        if not self._results:
+            return
+        execution = self._executions.get(self.id)
+        if execution.sealed:
+            self.log("run").append(
+                "results not recorded: Execution "
+                f"{self.id} was sealed before exit ({execution.status.value})"
+            )
+            return
+        self.set_active_task(None)
+        path = self.get_dir(WORK.name, RESERVED_ARTIFACT_DIR) / "results.json"
+        path.write_text(json.dumps(self._results, indent=2, sort_keys=True), encoding="utf-8")
+        self._emit(
+            path,
+            name="results.json",
+            media_type="application/json",
+            semantic_type=RESULT_SEMANTIC_TYPE,
+            reserved=True,
+        )
 
     @staticmethod
     def _entity_id(value: Artifact | Asset | str) -> str:

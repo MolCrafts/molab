@@ -4,7 +4,7 @@
 /* eslint-disable */
 import type { KnowledgeSearchRow } from './KnowledgeSearchRow';
 /**
- * ``GET /knowledge/search`` — body-aware retrieval over the bundle.
+ * ``GET /knowledge/search`` — body-aware retrieval over the documents.
  */
 export type KnowledgeSearchResponse = {
     hits: Array<KnowledgeSearchRow>;

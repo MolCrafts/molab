@@ -17,6 +17,7 @@ import type { DataTableColumn, DataTableRowAction } from "@/app/components/entit
 import {
   CopyButton,
   DashboardCanvas,
+  DashboardCard,
   DataTable,
   EMPTY_COPY,
   EmptyState,
@@ -27,24 +28,23 @@ import {
   OverviewSurface,
   ParamChip,
   StatusBreakdown,
-  StatusDonut,
+  StatusDistribution,
   StatusIcon,
   StatusLegend,
 } from "@/app/components/entity";
+import { buildRunListActions, type RunListHandlers } from "@/app/entities/runListActions";
 import {
   countRunStatuses,
   formatDuration,
   formatScalar,
-  statusDonutSegments,
   successRate,
 } from "@/app/renderers/dashboardData";
-
 import {
   buildExperimentWorkbenchData,
   experimentRunCompleteness,
 } from "@/app/renderers/entityWorkbenchData";
-import { buildRunListActions, type RunListHandlers } from "@/app/runs/runListActions";
 import { useRunMultiSelect } from "@/app/runs/useRunMultiSelect";
+import { experimentWorkflowLabel } from "@/app/state/api";
 import { useNavigationState } from "@/app/state/useNavigationState";
 import type { ExperimentView, RunSummary, ScopedRendererProps } from "@/app/types";
 import {
@@ -397,8 +397,6 @@ export const ExperimentViewer = ({
       onSelect: () => action.onSelect(),
     }));
   const experimentSuccessRate = successRate(counts);
-  const donutSegments = statusDonutSegments(counts);
-
   const completedDurationMs = runs.flatMap((run) => {
     if (!run.startedAt || !run.finishedAt) return [];
     const ms = Date.parse(run.finishedAt) - Date.parse(run.startedAt);
@@ -435,6 +433,7 @@ export const ExperimentViewer = ({
     (experiment.workflowFile && !experiment.workflowFile.trim().startsWith("{")
       ? experiment.workflowFile
       : null) ||
+    experiment.workflowEntrypoint ||
     "Workflow";
 
   const runsComplete = experimentRunCompleteness(experiment, runs.length).runsComplete;
@@ -444,52 +443,25 @@ export const ExperimentViewer = ({
   // Conditional `activeTab === … ? content : null` remounted Flowgram on every switch.
   const overviewContent = (
     <OverviewSurface>
-      <DashboardCanvas className="max-w-6xl space-y-8">
-        <section className="grid gap-8 lg:grid-cols-[auto_minmax(0,1fr)] lg:items-start">
-          {counts.total > 0 ? (
-            <StatusDonut
-              segments={donutSegments}
-              size={148}
-              thickness={16}
-              centerValue={counts.total}
-              centerLabel="runs"
-            />
+      <DashboardCanvas>
+        <DashboardCard title="Status">
+          {experimentSuccessRate !== null ? (
+            <p className="mb-3 font-mono text-micro tabular-nums text-muted-foreground">
+              {experimentSuccessRate.toFixed(0)}% of terminal runs succeeded
+            </p>
+          ) : null}
+          {!runsComplete && counts.total === 0 ? (
+            <p className="text-micro text-muted-foreground">Loading runs…</p>
           ) : (
-            <div className="flex size-36 items-center justify-center rounded-full border border-dashed border-border px-4 text-center text-micro leading-relaxed text-muted-foreground">
-              {runsComplete ? "no runs" : "loading runs…"}
-            </div>
+            <StatusDistribution counts={counts} />
           )}
-          <div className="min-w-0 space-y-2">
-            <h2 className="text-label font-medium text-foreground">Run duration</h2>
-            {durationSeconds.length > 0 ? (
-              <Histogram
-                values={durationSeconds}
-                format={formatDurationSeconds}
-                unit="runs"
-                ariaLabel="Distribution of wall-clock duration across finished runs"
-              />
-            ) : (
-              <p className="text-micro text-muted-foreground">
-                {runsComplete ? "No run has finished yet." : "Loading runs…"}
-              </p>
-            )}
-            {experimentSuccessRate !== null && (
-              <p className="font-mono text-micro tabular-nums text-muted-foreground">
-                {experimentSuccessRate.toFixed(0)}% of terminal runs succeeded
-              </p>
-            )}
-          </div>
-        </section>
+        </DashboardCard>
 
         {workbench.axisBreakdowns.length > 0 && (
-          <section className="space-y-4">
-            <div className="flex flex-wrap items-baseline justify-between gap-3">
-              <h2 className="text-body-lg font-medium text-foreground">Sweep outcome</h2>
-              <StatusLegend />
-            </div>
-            <p className="text-micro text-muted-foreground">
-              Status mix along each varying parameter — where the sweep failed, not which runs
-              exist. Open the Runs tab for the inventory.
+          <DashboardCard title="Sweep outcome">
+            <StatusLegend className="mb-3" />
+            <p className="mb-3 text-micro text-muted-foreground">
+              Status mix along each varying parameter. Open the Runs tab for the inventory.
             </p>
             <div className="grid gap-6 lg:grid-cols-2">
               {workbench.axisBreakdowns.map((axis) => (
@@ -504,40 +476,53 @@ export const ExperimentViewer = ({
                 />
               ))}
             </div>
-          </section>
+          </DashboardCard>
         )}
 
+        <DashboardCard title="Run duration" description="Finished runs">
+          {durationSeconds.length > 0 ? (
+            <Histogram
+              values={durationSeconds}
+              format={formatDurationSeconds}
+              unit="runs"
+              ariaLabel="Distribution of wall-clock duration across finished runs"
+            />
+          ) : (
+            <p className="text-micro text-muted-foreground">
+              {runsComplete ? "No run has finished yet." : "Loading runs…"}
+            </p>
+          )}
+        </DashboardCard>
+
         {workbench.fixedAxes.length > 0 && (
-          <section className="space-y-2 border-t border-border pt-6">
-            <h2 className="text-label font-medium text-foreground">Constants</h2>
+          <DashboardCard title="Constants">
             <div className="flex flex-wrap gap-2">
               {workbench.fixedAxes.map((axis) => (
                 <ParamChip key={axis.key} name={axis.key} value={axis.values[0] ?? "—"} />
               ))}
             </div>
-          </section>
+          </DashboardCard>
         )}
 
         {hasWorkflowData && (
-          <section className="flex flex-wrap items-center justify-between gap-4 border-t border-border pt-6">
-            <div className="min-w-0">
-              <h2 className="text-body-lg font-medium text-foreground">Workflow</h2>
-              <p className="mt-1 truncate font-mono text-micro text-muted-foreground">
-                {workflowLabel}
-              </p>
-              <p className="mt-1 text-label text-muted-foreground">
-                {workbench.workflowSummary.taskCount} tasks · {workbench.workflowSummary.linkCount}{" "}
-                dependencies
-              </p>
-            </div>
-            <WorkbenchAction
-              kind="secondary"
-              size="compact"
-              onClick={() => setEntityTab("workflow")}
-            >
-              Open workflow
-            </WorkbenchAction>
-          </section>
+          <DashboardCard
+            title="Workflow"
+            action={
+              <WorkbenchAction
+                kind="secondary"
+                size="compact"
+                onClick={() => setEntityTab("workflow")}
+              >
+                Open workflow
+              </WorkbenchAction>
+            }
+          >
+            <p className="truncate font-mono text-micro text-muted-foreground">{workflowLabel}</p>
+            <p className="mt-1 text-label text-muted-foreground">
+              {workbench.workflowSummary.taskCount} tasks · {workbench.workflowSummary.linkCount}{" "}
+              dependencies
+            </p>
+          </DashboardCard>
         )}
       </DashboardCanvas>
     </OverviewSurface>
@@ -552,7 +537,7 @@ export const ExperimentViewer = ({
           <CreateRunDialog
             projectId={projectId}
             experimentId={experimentId}
-            workflowFile={experiment.workflowFile || ""}
+            workflowFile={experimentWorkflowLabel(experiment)}
             onRunCreated={(runId) => {
               onRefresh();
               navigateToRun(runId);

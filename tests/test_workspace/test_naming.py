@@ -8,12 +8,17 @@ at, and a UUID never leaks back into a path.
 
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 
 import pytest
 
+from molab.workspace import Experiment, Project, Run, Workspace
 from molab.workspace.naming import (
+    EXPERIMENT_CONTAINER,
     MAX_RUN_SLUG,
+    PROJECT_CONTAINER,
+    RUN_CONTAINER,
     disambiguate,
     entity_slug,
     execution_slug,
@@ -110,7 +115,6 @@ class TestSectionNamesComeFromTheDeclaration:
         Docstrings are excluded on purpose: ``get_dir("work")`` in prose is
         documentation, and prose is where these names *should* appear.
         """
-        import ast
 
         tree = ast.parse(path.read_text(encoding="utf-8"))
         docstrings = set()
@@ -144,3 +148,28 @@ class TestSectionNamesComeFromTheDeclaration:
                 f"{module.__name__} hard-codes {sorted(retyped)}; "
                 "import the declaration from execution_dirs instead"
             )
+
+
+class TestNamingHasNoRootFinder:
+    def test_naming_defines_no_workspace_root(self) -> None:
+        import molab.workspace.naming as naming
+
+        assert not hasattr(naming, "workspace_root")
+        assert "workspace_root" not in naming.__all__
+
+
+class TestContainerNames:
+    """Container directory names come from ``naming``."""
+
+    def test_the_three_containers_are_the_plural_child_kinds(self) -> None:
+        assert PROJECT_CONTAINER == "projects"
+        assert EXPERIMENT_CONTAINER == "experiments"
+        assert RUN_CONTAINER == "runs"
+
+    def test_child_dirs_use_the_constants(self, tmp_path: Path) -> None:
+        ws = Workspace(tmp_path / "lab", name="Lab")
+        assert Project.child_dir(ws, "x").parent.name == PROJECT_CONTAINER
+        project = ws.add_project("p")
+        assert Experiment.child_dir(project, "e").parent.name == EXPERIMENT_CONTAINER
+        experiment = project.add_experiment("e")
+        assert Run.child_dir(experiment, "r").parent.name == RUN_CONTAINER

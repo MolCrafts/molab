@@ -4,7 +4,7 @@
 serve deterministic tasks — tasks with side effects would silently not re-run.
 A cache bypass skips cache READS (every body actually runs) while results are
 still written back to the cache. The request has one home: the Execution
-record (``Run.create_execution(bypass_cache=True)`` → ``execution.json``),
+record (``Run._create_execution(bypass_cache=True)`` → ``execution.json``),
 which ``WorkflowRuntime.execute`` reads through ``ctx.bypass_cache``. An
 explicit ``bypass_cache=True`` kwarg is OR-ed in on top.
 """
@@ -85,7 +85,7 @@ class TestBypassCache:
 
         # The bypass is a fact on the pre-allocated record, not a kwarg.
         run3 = _new_run(workspace, "fresh")
-        e = run3.create_execution(bypass_cache=True)
+        e = run3._create_execution(bypass_cache=True)
         assert e.id == "e01"
         with run3.start(execution_id=e.id) as ctx3:
             result = await WorkflowRuntime().execute(compiled, run_context=ctx3, cache=cache)
@@ -108,7 +108,7 @@ class TestBypassCache:
         assert _COUNTERS["step"] == 1
 
         run2 = _new_run(workspace, "queued")
-        e = run2.create_execution()
+        e = run2._create_execution()
         assert e.bypass_cache is False
         with run2.start(execution_id=e.id) as ctx2:
             result = await WorkflowRuntime().execute(compiled, run_context=ctx2, cache=cache)

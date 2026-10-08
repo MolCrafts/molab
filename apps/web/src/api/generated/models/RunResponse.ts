@@ -21,5 +21,6 @@ export type RunResponse = {
     workflowSource?: (string | null);
     executions?: Array<ExecutionResponse>;
     target?: (string | null);
+    ref: string;
 };
 

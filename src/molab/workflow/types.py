@@ -272,11 +272,11 @@ class WorkflowExecution:
     def __init__(
         self,
         execution_id: str | None,
-        workflow_id: str,
+        workflow_digest: str,
         run_id: str | None = None,
     ) -> None:
         self.execution_id = execution_id
-        self.workflow_id = workflow_id
+        self.workflow_digest = workflow_digest
         self.run_id = run_id
 
     async def wait(self) -> WorkflowResult:

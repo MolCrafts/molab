@@ -21,6 +21,7 @@ import {
 } from "@/__fixtures__/api";
 import {
   buildEmptySnapshot,
+  experimentWorkflowLabel,
   mapAssets,
   mapExperiments,
   mapProjects,
@@ -62,6 +63,11 @@ describe("mapProjects", () => {
     expect(results[0].id).toBe("proj-alpha");
     expect(results[1].id).toBe("proj-beta");
   });
+
+  it("maps ref", () => {
+    const [result] = mapProjects([fixtureProject]);
+    expect(result.ref).toBe("molab:project/proj-alpha");
+  });
 });
 
 describe("mapExperiments", () => {
@@ -101,6 +107,52 @@ describe("mapExperiments", () => {
     expect(inline.workflowSource?.startsWith("{")).toBe(true);
     expect(inline.workflowFile.includes("task_configs")).toBe(false);
   });
+
+  it("maps workflowKind and leaves it empty when absent", () => {
+    const [coded] = mapExperiments("proj-alpha", [{ ...fixtureExperiment, workflowKind: "code" }]);
+    expect(coded.workflowKind).toBe("code");
+    const [missing] = mapExperiments("proj-alpha", [fixtureExperiment]);
+    expect(missing.workflowKind == null).toBe(true);
+  });
+
+  it("keeps a code locator off workflowFile", () => {
+    const [coded] = mapExperiments("proj-alpha", [
+      {
+        ...fixtureExperiment,
+        workflow: null,
+        workflowKind: "code",
+        workflowEntrypoint: "/lab/workflow.py:build",
+        ref: "molab:experiment/exp-1",
+      },
+    ]);
+    expect(coded.workflowEntrypoint).toBe("/lab/workflow.py:build");
+    expect(coded.workflowFile).toBe("");
+    expect(coded.ref).toBe("molab:experiment/exp-1");
+  });
+
+  it("maps a document name and a null entrypoint separately", () => {
+    const [document] = mapExperiments("proj-alpha", [
+      {
+        ...fixtureExperiment,
+        workflow: '{"name":"structure-sweep","task_configs":[],"links":[]}',
+        workflowEntrypoint: null,
+      },
+    ]);
+    expect(document.workflowFile).toBe("structure-sweep");
+    expect(document.workflowEntrypoint).toBeNull();
+  });
+});
+
+describe("experimentWorkflowLabel", () => {
+  it("prefers a document name, then a code locator", () => {
+    expect(
+      experimentWorkflowLabel({ workflowFile: "", workflowEntrypoint: "/lab/workflow.py:build" }),
+    ).toBe("/lab/workflow.py:build");
+    expect(
+      experimentWorkflowLabel({ workflowFile: "structure-sweep", workflowEntrypoint: null }),
+    ).toBe("structure-sweep");
+    expect(experimentWorkflowLabel({ workflowFile: "", workflowEntrypoint: undefined })).toBe("");
+  });
 });
 
 describe("mapRuns", () => {
@@ -137,6 +189,7 @@ describe("mapRuns", () => {
     const [result] = mapRuns("p", "e", [fixtureRun]);
     expect(result.definitionHash).toBe("def-run-abc");
     expect(result.experimentRevisionId).toBe("rev-exp-001");
+    expect(result.ref).toBe("molab:experiment/exp-001/run/run-abc");
   });
 });
 

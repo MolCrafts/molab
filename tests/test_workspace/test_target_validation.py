@@ -39,7 +39,7 @@ class TestTargetReferenceValidation:
         add_target(ws, ComputeTarget(name="laptop", scratch_root="/tmp/molab"))
         proj = ws.add_project("p")
         with pytest.raises(ValueError, match="compute target"):
-            proj.add_experiment("bad", default_target="ghost")
+            proj.add_experiment("bad", target="ghost")
 
     def test_freeform_target_allowed_when_registry_empty(self, ws):
         # No targets registered → free-form target accepted (back-compat).

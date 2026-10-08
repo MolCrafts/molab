@@ -34,9 +34,12 @@ class _FakeExecutor:
         resume=False,
         rerun=False,
         fresh=False,
-        checkpoint_artifact_id=None,
+        checkpoint=None,
+        execution_id=None,
     ):
-        self.calls.append(("execute", run, workflow, resume, rerun, fresh, checkpoint_artifact_id))
+        self.calls.append(
+            ("execute", run, workflow, resume, rerun, fresh, checkpoint, execution_id)
+        )
         return "sync"
 
     async def aexecute(
@@ -47,9 +50,12 @@ class _FakeExecutor:
         resume=False,
         rerun=False,
         fresh=False,
-        checkpoint_artifact_id=None,
+        checkpoint=None,
+        execution_id=None,
     ):
-        self.calls.append(("aexecute", run, workflow, resume, rerun, fresh, checkpoint_artifact_id))
+        self.calls.append(
+            ("aexecute", run, workflow, resume, rerun, fresh, checkpoint, execution_id)
+        )
         return "async"
 
     def read_outputs(self, run, execution_id):
@@ -89,8 +95,8 @@ class TestLazyRunExecutor:
         assert asyncio.run(proxy.aexecute(run, None, resume=True)) == "async"  # type: ignore[arg-type]
 
         assert fake.calls == [
-            ("execute", run, wf, False, True, True, None),
-            ("aexecute", run, None, True, False, False, None),
+            ("execute", run, wf, False, True, True, None, None),
+            ("aexecute", run, None, True, False, False, None, None),
         ]
 
     def test_default_loader_imports_workflow_on_first_call(self, tmp_path: Path) -> None:

@@ -1,9 +1,8 @@
-// Shared derivations for the entity-Overview dashboards. Keeps the run-status
-// donut, the status roll-up, and duration formatting in one place so the
-// Experiment / Run / Project overviews report identical numbers and colours.
+// Shared derivations for the entity-Overview dashboards. Keeps the status
+// roll-up and duration formatting in one place so the Experiment / Run /
+// Project overviews report identical numbers.
 
-import type { DonutSegment } from "@/app/components/entity";
-import { groupForStatus, STATUS_GROUPS } from "@/app/runs/statusGroups";
+import { groupForStatus } from "@/app/runs/statusGroups";
 import type { RunSummary } from "@/app/types";
 
 export interface RunStatusCounts {
@@ -31,14 +30,6 @@ export const countRunStatuses = (runs: Pick<RunSummary, "status">[]): RunStatusC
   }
   return counts;
 };
-
-/** Donut segments (one per status group) using the canonical group colours. */
-export const statusDonutSegments = (counts: RunStatusCounts): DonutSegment[] =>
-  STATUS_GROUPS.map((group) => ({
-    label: group.label,
-    value: counts[group.id],
-    color: group.color,
-  }));
 
 /** Success rate over *terminal* runs only (excludes running/pending). */
 export const successRate = (counts: RunStatusCounts): number | null => {

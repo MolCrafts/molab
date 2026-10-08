@@ -2,11 +2,13 @@
 
 Commands open a tree with :class:`molab.knowledge.Knowledge` and read documents
 with :meth:`Knowledge.open`. ``import-zotero`` writes :class:`Literature`
-directories (``literature.json`` + ``index.md``); PDFs are pointed at, never copied.
+markdown files under the workspace's ``knowledges/`` directory; PDFs are
+pointed at, never copied.
 """
 
 from __future__ import annotations
 
+import os
 import sqlite3
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated
@@ -81,19 +83,18 @@ def import_zotero(
 ) -> None:
     """Link a local Zotero library as Literature (read-only import).
 
-    Each Zotero item becomes a ``Literature`` directory under
-    ``<dest>/references/`` — bib fields in ``literature.json``, PDFs pointed at
-    in place (never copied). Re-running is idempotent: an item updates its
-    existing directory instead of duplicating it.
+    Each Zotero item becomes a ``Literature`` markdown file under
+    ``<dest>/knowledges/``. PDFs are pointed at in place (never copied).
+    Re-running merges frontmatter and does not duplicate files.
     """
     from molab.knowledge import Knowledge
 
     db = _resolve_zotero_db(database)
     ws = _load_dest_workspace(dest)
 
-    tree = Knowledge(ws.root)
+    tree = Knowledge(ws.root, fs=ws.fs)
     try:
-        refs = tree.import_zotero(db)
+        refs = tree.import_zotero(db, under=ws)
     except sqlite3.Error as exc:
         if "locked" in str(exc).lower():
             rprint(
@@ -126,14 +127,21 @@ knowledge_app.add_typer(sources_app, name="sources")
 
 
 def _workspace_root(path: Path | None) -> Path | None:
-    """The workspace root to use as the upper config tier, if there is one.
+    """The workspace root to use as the upper config tier, if *path* is one.
 
     A knowledge command must work from anywhere — inside a workspace, or in a
     plain shell asking about the lab wiki — so a missing workspace is a normal
-    condition here, not an error.
+    condition here, not an error. A directory inside a workspace is not
+    promoted to that workspace: the path itself has to be the root.
     """
-    root = (path or Path.cwd()).resolve()
-    return root if (root / "workspace.json").is_file() else None
+    from molab.fs import LocalFileSystem
+    from molab.workspace import Workspace
+
+    root = path or Path.cwd()
+    found = Workspace.enclosing_root(root, fs=LocalFileSystem())
+    if found is None or os.path.normpath(str(found)) != os.path.normpath(str(root)):
+        return None
+    return Path(str(found))
 
 
 @sources_app.command("list")
@@ -203,19 +211,12 @@ def sources_add(
         # Registering a path that is not there yet is legal (a wiki on a share
         # that is not mounted right now), but it is worth saying out loud.
         rprint(f"[yellow]Note:[/yellow] {resolved} does not exist yet.")
-    elif not any(resolved.glob("*/*.json")) and not any(
-        resolved.glob(name)
-        for name in (
-            "note.json",
-            "literature.json",
-            "report.json",
-            "finding.json",
-            "plan.json",
-            "observation.json",
-        )
-    ):
-        rprint(f"[yellow]Note:[/yellow] {resolved} holds no knowledge documents yet.")
-        rprint("Create one with [bold]molab knowledge init[/bold].")
+    else:
+        from molab.knowledge import Knowledge
+
+        if next(iter(Knowledge(resolved).walk()), None) is None:
+            rprint(f"[yellow]Note:[/yellow] {resolved} holds no knowledge documents yet.")
+            rprint("Create one with [bold]molab knowledge init[/bold].")
 
     KnowledgeSourceStore(ws_root).add(source, scope=scope)
     rprint(f"[green]OK[/green] Registered [bold]{name}[/bold] -> {resolved} ({scope})")
@@ -250,23 +251,48 @@ def sources_remove(
 @knowledge_app.command("init")
 def knowledge_init(
     directory: Annotated[Path, typer.Argument(help="Directory to turn into a knowledge tree.")],
-    title: Annotated[str, typer.Option("--title", help="Title for the bundle's index.md.")] = "",
+    title: Annotated[
+        str,
+        typer.Option("--title", help="Note name. A workspace root writes it under knowledges/."),
+    ] = "",
 ) -> None:
     """Create a knowledge tree directory — a group wiki needs no workspace.
 
-    Makes the directory. With ``--title``, writes a child Note (``note.json`` +
-    ``index.md``). Idempotent: an existing tree is left alone.
+    Makes the directory. With ``--title``, writes one Note. A workspace root
+    lands it in ``knowledges/``; a directory outside any workspace keeps it at
+    the tree root. A directory inside a workspace is refused: knowledge there
+    lives on a host. Idempotent: an existing tree is left alone.
     """
+    from molab.fs import LocalFileSystem
     from molab.knowledge import Knowledge, Note
+    from molab.knowledge.location import bare_container
+    from molab.knowledge.write import write_knowledge
 
     target = directory.expanduser().resolve()
     target.mkdir(parents=True, exist_ok=True)
-    if any(True for _ in Knowledge(target).walk()):
+    disk = LocalFileSystem()
+    try:
+        bare_container(target, fs=disk)
+    except TypeError as exc:
+        if "inside workspace" not in str(exc):
+            raise
+        found = str(exc).split("lies inside workspace ", 1)[-1].split(";", 1)[0]
+        rprint(
+            f"[red]Error:[/red] {target} is inside workspace {found}; "
+            "knowledge there lives on a host"
+        )
+        raise typer.Exit(1) from None
+    if any(True for _ in Knowledge(target, fs=disk).walk()):
         rprint(f"[dim]Already a knowledge tree: {target}[/dim]")
         return
     if title:
-        child = Note(target / (title.replace(" ", "-").lower() or target.name))
-        child.write(f"# {title}\n\nNotes in this wiki.\n")
+        write_knowledge(
+            Knowledge(target, fs=disk),
+            name=title,
+            of=Note,
+            created_by="cli",
+            text=f"# {title}\n\nNotes in this wiki.\n",
+        )
     rprint(f"[green]OK[/green] Initialised knowledge tree at [bold]{target}[/bold]")
     rprint(
         "Register it with "
@@ -282,7 +308,11 @@ def knowledge_search(
         typer.Option("--source", help="Restrict to these sources (repeatable)."),
     ] = None,
     concept_type: Annotated[
-        str | None, typer.Option("--type", help="Exact Concept type filter.")
+        str | None,
+        typer.Option(
+            "--type",
+            help="Knowledge class name filter (Note, Literature, Finding, ...).",
+        ),
     ] = None,
     tag: Annotated[str | None, typer.Option("--tag", help="Only concepts with this tag.")] = None,
     limit: Annotated[int, typer.Option("--limit", help="Maximum hits to show.")] = 10,
@@ -386,10 +416,10 @@ def knowledge_read(
         rprint("Find valid refs with [bold]molab knowledge search[/bold].")
         raise typer.Exit(1) from None
 
-    rprint(f"[bold]{ref}[/bold]  [dim]{concept.type()}[/dim]")
+    rprint(f"[bold]{ref}[/bold]  [dim]{type(concept).__name__}[/dim]")
     if tags := concept.tags():
         rprint(f"[dim]tags: {', '.join(tags)}[/dim]")
-    rprint(f"[dim]file: {concept.path / 'index.md'}[/dim]")
+    print(f"file: {concept.path}")
     rprint("")
     # The body is markdown the user wrote; print it verbatim rather than letting
     # rich reinterpret its brackets as markup.

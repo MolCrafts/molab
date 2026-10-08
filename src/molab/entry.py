@@ -47,9 +47,7 @@ from molab.fs import LocalFileSystem
 from molab.workspace.experiment import set_workflow_executor
 
 if TYPE_CHECKING:
-    from molab.workflow import CompiledWorkflow
     from molab.workspace.experiment import Experiment
-    from molab.workspace.run import Run
     from molab.workspace.workspace import Workspace
 
 _registry: list[Workspace] = []
@@ -98,11 +96,12 @@ def _execute_experiment(experiment: Experiment, workflow: object) -> None:
     """Back :meth:`Experiment.run` — the cross-layer workflow association.
 
     Registered into the workspace layer (which must not import workflow) via
-    :func:`~molab.workspace.experiment.set_workflow_executor`. Binds the compiled
-    workflow to *experiment* (so ``molab run`` resolves it through the binding
-    registry), records its IR on the experiment for the server/UI, and registers
-    the owning workspace as a CLI entry. Runs are already seeded by
-    ``Experiment.run`` before this is called.
+    :func:`~molab.workspace.experiment.set_workflow_executor`. Binding goes
+    through :meth:`~molab.workspace.Experiment.bind_workflow` for the code
+    kind (the binding registry still holds this script's compiled object, so
+    ``molab run`` resolves it), and the owning workspace is registered as a
+    CLI entry. Runs are already seeded by ``Experiment.run`` before this is
+    called.
     """
     from molab.workflow import (
         CompiledWorkflow,
@@ -111,6 +110,7 @@ def _execute_experiment(experiment: Experiment, workflow: object) -> None:
         default_binding_registry,
     )
 
+    authored = workflow
     if isinstance(workflow, Workflow):
         workflow = WorkflowCompiler().compile(workflow)
     if not isinstance(workflow, CompiledWorkflow):
@@ -119,26 +119,21 @@ def _execute_experiment(experiment: Experiment, workflow: object) -> None:
             f"got {type(workflow).__name__}."
         )
     default_binding_registry.bind(experiment, workflow)
-    # Record the IR so the server/UI can render the graph, and the entrypoint
-    # so a worker (``molab runs resume|rerun``, a molq job) can rebuild the
-    # graph without re-running this script. Both refresh on every (idempotent)
-    # re-import so script edits take effect next run.
-    #
-    # This is the ONE place a workflow is associated with an experiment — the
-    # CLI, ``sweep``, and the HTTP API all arrive here — so it is the only
-    # writer of the locator. A spec with no module-level name (a promoted
-    # callable, a test fixture) records ``None`` and stays script-driven.
+    # Code-kind binding goes through Experiment.bind_workflow. A spec with no
+    # module-level name (a promoted callable, a test fixture) stores
+    # entrypoint None and stays script-driven. Script edits refresh the
+    # binding on the next (idempotent) re-import.
     from molab.workflow.promote import resolve_spec_entrypoint
 
     try:
-        entrypoint = resolve_spec_entrypoint(workflow)
+        entrypoint = resolve_spec_entrypoint(workflow, authored=authored)
     except (ValueError, OSError, TypeError):
         entrypoint = None
-    ir_json = workflow.to_graph_ir().model_dump_json()
-    experiment.metadata = experiment.metadata.model_copy(
-        update={"workflow_source": ir_json, "workflow_entrypoint": entrypoint}
+    experiment.bind_workflow(
+        "code",
+        entrypoint=entrypoint,
+        document=workflow.to_graph_ir().model_dump(mode="json"),
     )
-    experiment.save()
     entry(experiment.project.workspace)
 
 
@@ -193,39 +188,6 @@ def load_workspaces(script: Path) -> list[Workspace]:
     return list(_registry)
 
 
-def find_workflow_for_run(workspaces: list[Workspace], run: Run) -> CompiledWorkflow | None:
-    """Return the workflow object matching *run*'s project and experiment IDs.
-
-    Searches all registered workspaces returned by :func:`load_workspaces` for
-    an experiment whose ``(project.id, experiment.id)`` pair matches that of
-    *run*.  Returns ``None`` if no match is found.
-
-    Args:
-        workspaces: List of :class:`~molab.Workspace` instances (from
-            :func:`load_workspaces`).
-        run: A workspace ``Run`` whose ``experiment.project.id`` and
-            ``experiment.id`` are used as lookup keys.
-
-    Returns:
-        The matching :class:`~molab.workflow.CompiledWorkflow`, or ``None``.
-    """
-    from molab.workflow import default_binding_registry
-
-    target_project_id = run.experiment.project.id
-    target_exp_id = run.experiment.id
-
-    for ws in workspaces:
-        for proj in ws.list_projects():
-            if proj.id != target_project_id:
-                continue
-            for exp in proj.list_experiments():
-                if exp.id == target_exp_id:
-                    bound = default_binding_registry.for_experiment(exp)
-                    if bound is not None:
-                        return bound
-    return None
-
-
 def clear_registry() -> None:
     """Clear the registry (for tests)."""
     _registry.clear()
@@ -240,10 +202,10 @@ def _import_script(script: Path) -> None:
     bound workflows, which ``molab run`` needs to discover via
     :func:`entry`.
 
-    The worker (``molab execute``) uses a different entry point:
-    :func:`load_workflow_from_entrypoint`, which imports the same file
-    under a *non*-``__main__`` module name so the guard skips and the
-    workspace setup is not re-executed.
+    Recovering a bound workflow from a stored locator is
+    :func:`molab.workflow.loader.load_workflow_from_entrypoint`, which
+    imports the same file under a private module name so this guard does
+    not re-run.
     """
     spec = importlib.util.spec_from_file_location("__main__", script)
     if spec is None or spec.loader is None:
@@ -262,63 +224,3 @@ def _import_script(script: Path) -> None:
     if script_dir not in sys.path:
         sys.path.insert(0, script_dir)
     spec.loader.exec_module(module)  # type: ignore[union-attr]
-
-
-def load_workflow_from_entrypoint(entrypoint: str) -> CompiledWorkflow:
-    """Import the workflow object referenced by *entrypoint*.
-
-    *entrypoint* is the colon-separated form
-    ``"<absolute_file_path>:<qualname>"`` produced when a
-    ``Workflow.bind_to(experiment)`` site recorded an entrypoint on
-    the experiment's snapshot.  The file is imported as a
-    *non*-``__main__`` module so any ``if __name__ == "__main__":``
-    guard skips, leaving only the module-level workflow definition
-    exposed.
-
-    Args:
-        entrypoint: ``"<path>:<qualname>"`` string from
-            ``run.metadata.workflow_snapshot.entrypoint``.
-
-    Returns:
-        The resolved object — typically a
-        :class:`~molab.workflow.CompiledWorkflow`.
-
-    Raises:
-        ValueError: If *entrypoint* is malformed.
-        ImportError: If the file cannot be loaded.
-        AttributeError: If the qualname cannot be resolved inside the
-            imported module.
-    """
-    import functools
-
-    from molab.workflow import CompiledWorkflow as _Workflow
-
-    if ":" not in entrypoint:
-        raise ValueError(
-            f"Invalid workflow entrypoint {entrypoint!r}; expected '<file_path>:<qualname>'."
-        )
-    file_str, qualname = entrypoint.rsplit(":", 1)
-    file_path = Path(file_str)
-    if not file_path.exists():
-        raise ImportError(
-            f"Workflow file not found: {file_path}. "
-            "Did the source move between submission and execution?"
-        )
-    spec = importlib.util.spec_from_file_location("_molab_worker_workflow", file_path)
-    if spec is None or spec.loader is None:
-        raise ImportError(f"Cannot load workflow file: {file_path}")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)  # type: ignore[union-attr]
-    try:
-        # ``functools.reduce`` walks dotted attributes; the resolved value
-        # is the user's bound workflow object — promised to be a
-        # ``Workflow`` by ``bind_to``'s contract.
-        resolved = functools.reduce(getattr, qualname.split("."), module)
-    except AttributeError as exc:
-        raise AttributeError(f"Cannot resolve {qualname!r} in {file_path}: {exc}") from exc
-    if not isinstance(resolved, _Workflow):
-        raise TypeError(
-            f"Entrypoint {entrypoint!r} resolved to {type(resolved).__name__}, "
-            "expected a molab.workflow.CompiledWorkflow instance."
-        )
-    return resolved

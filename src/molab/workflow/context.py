@@ -15,7 +15,7 @@ cannot climb up from its context to the Run, the workspace, or engine
 workflow state. Loop-back and branch-routed values arrive as named task
 parameters (declared ``depends_on`` wins; trigger-carried values reach
 dep-less targets). Engine capabilities that used to be reached through
-``run_context`` — a content-addressed workdir, artifact persistence, running
+``run_context`` — the task output directory, artifact persistence, running
 a sub-workflow — are delivered *as inputs* by the engine, or handled by the
 engine's materialization layer after the body returns.
 

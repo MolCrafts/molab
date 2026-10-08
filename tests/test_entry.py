@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 
 from molab.entry import _registry, clear_registry, entry, load_workspaces
-from molab.workspace import Workspace
+from molab.workspace import Experiment, Workspace
 from molab.workspace.workspace import set_cli_root_override
 
 
@@ -153,3 +153,126 @@ class TestFluentExperimentChain:
         exp = Workspace(tmp_path / "ws", name="ws").add_project("p").add_experiment("e")
         with pytest.raises(RuntimeError, match="workflow layer"):
             exp.define(self._workflow())
+
+
+DOC_A = {
+    "workflow_id": "workflow_00000000",
+    "name": "constant_add",
+    "task_configs": [
+        {"task_id": "a", "task_type": "core.constant", "config": {"value": 2}, "status": "pending"},
+        {"task_id": "b", "task_type": "core.constant", "config": {"value": 3}, "status": "pending"},
+        {"task_id": "c", "task_type": "core.add", "config": {}, "status": "pending"},
+    ],
+    "links": [
+        {"source": "a", "target": "c", "mapping": {}, "status": "pending"},
+        {"source": "b", "target": "c", "mapping": {}, "status": "pending"},
+    ],
+    "metadata": {"label": None, "description": None, "tags": [], "custom": {}},
+}
+
+
+class TestExecuteExperiment:
+    """define() binds kind code through Experiment.bind_workflow."""
+
+    def setup_method(self) -> None:
+        from molab.workflow import default_binding_registry
+
+        default_binding_registry.clear()
+
+    @staticmethod
+    def _compiled() -> object:
+        from molab.workflow import Task, TaskContext, Workflow, WorkflowCompiler
+
+        class Step(Task):
+            async def execute(self, ctx: TaskContext) -> int:
+                return 1
+
+        return WorkflowCompiler().compile(Workflow(name="wf").add(Step(), name="step"))
+
+    @staticmethod
+    def _exp(tmp_path: Path) -> Experiment:
+        return Workspace(tmp_path / "ws", name="ws").add_project("p").add_experiment("e")
+
+    def test_define_binds_code_graph_without_entrypoint(self, tmp_path) -> None:
+        import json
+
+        exp = self._exp(tmp_path).define(self._compiled())
+        document = json.loads((exp.experiment_dir / "workflow.ir.json").read_text())
+        assert exp.workflow_kind == "code"
+        assert "tasks" in document and "edges" in document
+        assert exp.metadata.workflow_entrypoint is None
+
+    def test_define_stores_resolved_entrypoint(self, tmp_path, monkeypatch) -> None:
+        monkeypatch.setattr(
+            "molab.workflow.promote.resolve_spec_entrypoint",
+            lambda _spec, **_kw: "wf.py:build",
+        )
+        exp = self._exp(tmp_path).define(self._compiled())
+        assert exp.metadata.workflow_entrypoint == "wf.py:build"
+
+    def test_define_stores_none_when_entrypoint_resolution_fails(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        def _boom(_spec, **_kw):
+            raise ValueError("no")
+
+        monkeypatch.setattr("molab.workflow.promote.resolve_spec_entrypoint", _boom)
+        exp = self._exp(tmp_path).define(self._compiled())
+        assert exp.workflow_kind == "code"
+        assert exp.metadata.workflow_entrypoint is None
+
+    def test_a_module_level_workflow_is_a_locator_a_worker_can_load(self, tmp_path) -> None:
+        """The documented script shape: ``wf = Workflow(...)`` then ``define(wf)``."""
+        from molab.workflow import load_workflow_from_entrypoint
+
+        script = tmp_path / "scan.py"
+        script.write_text(
+            "import molab as me\n"
+            "from molab.workflow import Workflow\n"
+            "wf = Workflow(name='scan')\n"
+            "@wf.task\n"
+            "def scan(model: str = 'a') -> dict:\n"
+            "    return {'model': model}\n"
+            f"ws = me.Workspace({str(tmp_path / 'ws')!r}, name='ws')\n"
+            "ws.add_project('p').add_experiment('e').define(wf, params={'model': ['a']})\n"
+            "me.entry(ws)\n"
+        )
+        (ws,) = load_workspaces(script)
+        exp = ws.project("p").experiment("e")
+
+        assert exp.metadata.workflow_entrypoint == f"{script.resolve()}:wf"
+        compiled = load_workflow_from_entrypoint(exp.metadata.workflow_entrypoint)
+        assert [task.name for task in compiled._tasks] == ["scan"]
+
+    def test_second_define_keeps_revision_and_run_hash(self, tmp_path) -> None:
+        exp = self._exp(tmp_path)
+        run = exp.add_run(params={"seed": 1})
+        digest = run.metadata.definition_hash
+        revision_id = exp.metadata.revision_id
+        compiled = self._compiled()
+        exp.define(compiled)
+        exp.define(compiled)
+        assert exp.metadata.revision == 1
+        assert exp.metadata.revision_id == revision_id
+        assert exp.get_run(run.id).metadata.definition_hash == digest
+
+    def test_define_registers_the_binding_memo(self, tmp_path) -> None:
+        from molab.workflow import default_binding_registry
+
+        compiled = self._compiled()
+        exp = self._exp(tmp_path).define(compiled)
+        assert default_binding_registry.is_bound(exp, compiled) is True
+
+    def test_define_leaves_document_kind_as_code_revision(self, tmp_path) -> None:
+        import json
+
+        exp = self._exp(tmp_path)
+        exp.bind_workflow("document", document=DOC_A)
+        before = exp.metadata.revision_id
+        exp.define(self._compiled())
+        document = json.loads((exp.experiment_dir / "workflow.ir.json").read_text())
+        assert exp.workflow_kind == "code"
+        assert exp.metadata.revision == 2
+        assert exp.metadata.revision_id != before
+        assert "tasks" in document and "edges" in document
+        assert "task_configs" not in document

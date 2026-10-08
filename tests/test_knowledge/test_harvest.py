@@ -14,7 +14,8 @@ from typing import Any
 
 import pytest
 
-from molab.knowledge import Finding, Knowledge, Observation, Report, harvest_run
+from molab.knowledge import Finding, Knowledge, Observation, Report
+from molab.workspace.refs import ref_of
 
 _NARRATIVE = "Mobility rises monotonically with temperature."
 
@@ -35,7 +36,7 @@ def _harvest(run: Any, **overrides: Any) -> Knowledge:
     of = overrides.pop("of", Observation)
     kwargs: dict[str, Any] = {"narrative": _NARRATIVE, "created_by": "tester"}
     kwargs.update(overrides)
-    return harvest_run(run, of, **kwargs)
+    return of.harvest(run, **kwargs)
 
 
 def _landed(experiment: Any) -> list[str]:
@@ -63,10 +64,12 @@ class TestHarvestRun:
 
         assert isinstance(reopened, Observation)
         assert [(s.kind, s.ref) for s in reopened.sources] == [
-            ("run", run.id),
-            ("experiment", experiment.id),
+            ("run", str(ref_of(run))),
+            ("experiment", str(ref_of(experiment))),
         ]
-        assert "created_by: tester" in item.path.read_text()
+        text = item.path.read_text()
+        assert "created_by: tester" in text
+        assert "\nsources:" not in text
 
     def test_body_renders_narrative_status_params_and_results(self, run: Any) -> None:
         _succeed(run)
@@ -82,9 +85,9 @@ class TestHarvestRun:
     def test_writes_a_derived_from_edge_to_the_run(self, run: Any) -> None:
         _succeed(run)
 
-        edges = _harvest(run).links()
+        edges = [edge for edge in _harvest(run).links() if edge.role == "derived_from"]
 
-        assert [(e.role, Path(e.target).name) for e in edges] == [("derived_from", run.name)]
+        assert [edge.target for edge in edges] == [str(ref_of(run)), str(ref_of(run.experiment))]
 
     def test_the_default_name_re_harvests_in_place(self, experiment: Any, run: Any) -> None:
         _succeed(run)

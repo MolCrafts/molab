@@ -14,7 +14,6 @@ listing tells you what was actually run.
 from __future__ import annotations
 
 import re
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 from molab.ids import slugify
@@ -25,20 +24,17 @@ if TYPE_CHECKING:
 MAX_RUN_SLUG = 96
 """Beyond this a name stops helping; the tail becomes a hash."""
 
+PROJECT_CONTAINER = "projects"
+"""The container subdir holding a level's children is the child kind pluralized."""
+
+EXPERIMENT_CONTAINER = "experiments"
+"""The container subdir holding a level's children is the child kind pluralized."""
+
+RUN_CONTAINER = "runs"
+"""The container subdir holding a level's children is the child kind pluralized."""
+
 _UNSAFE = re.compile(r"[^A-Za-z0-9._=+-]+")
 _COLLAPSE = re.compile(r"_{2,}")
-
-
-def workspace_root(path: Path) -> Path | None:
-    """Walk up from *path* to the directory holding ``workspace.json``.
-
-    Artifact paths are workspace-relative, so anything that resolves one back
-    to bytes needs the root — and only the tree knows where it is.
-    """
-    for candidate in (path, *path.parents):
-        if (candidate / "workspace.json").is_file():
-            return candidate
-    return None
 
 
 def entity_slug(name: str, *, fallback: str) -> str:
@@ -119,11 +115,13 @@ def _short(fallback: str) -> str:
 
 
 __all__ = [
+    "EXPERIMENT_CONTAINER",
     "MAX_RUN_SLUG",
+    "PROJECT_CONTAINER",
+    "RUN_CONTAINER",
     "disambiguate",
     "entity_slug",
     "execution_slug",
     "parse_execution_seq",
     "run_slug",
-    "workspace_root",
 ]

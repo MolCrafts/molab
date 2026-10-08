@@ -20,15 +20,15 @@ Deliberately excluded, because none of them changes what a run computes:
 
 * ``name`` / ``version_label`` — labels for people;
 * ``mode`` — no engine behaviour reads it;
-* ``remote`` / ``max_concurrency`` — where and how wide a task runs is not
-  its identity (the same law as the node cache);
+* ``max_concurrency`` — how wide a task runs is not its identity (the same
+  law as the node cache);
 * ``position`` — editor-canvas metadata.
 
 The digest is computed over the lowered task list (after the CFG lowering has
 injected the ``wf.parallel`` join dependency), so it is a pure function of the
 declarations. Declaration order does not matter; a changed task body does —
-which the topology-only ``workflow_id`` never noticed, since it hashes the
-body's qualname (``"function"`` for every decorator task).
+which a topology-only hash never noticed, since it hashed the body's qualname
+(``"function"`` for every decorator task).
 """
 
 from __future__ import annotations
@@ -85,7 +85,7 @@ def compute_workflow_digest(compiled: CompiledWorkflow) -> str:
     Returns:
         ``"sha256:"`` followed by 64 lowercase hex digits. Equal for two
         workflows that differ only in declaration order, name, version label,
-        mode, remote placement, parallel width or canvas positions.
+        mode, parallel width or canvas positions.
     """
     dependent = compiled.dependent_params_hashes
     tasks = [

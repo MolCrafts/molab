@@ -37,6 +37,18 @@ export class ExperimentsService {
     }
     /**
      * Create Experiment
+     * Create an experiment, or return the existing one when the binding matches.
+     *
+     * ``workflow_source``, when set, is a workflow IR object (a string is 422).
+     * It is compiled before any directory is created; an invalid IR is 400 and
+     * leaves no experiment directory. The normalized IR is stored as a document
+     * binding via ``Project.add_experiment(workflow_document=...)``.
+     *
+     * An existing experiment is returned unchanged when it is already bound to
+     * that same normalized document (idempotent 201, no write). A different
+     * binding, a non-document kind, or a missing document is 409. A legacy
+     * experiment that still needs ``molab migrate workflow-kind`` is 409.
+     * Nothing is written on 409. A missing or unknown ``default_target`` is 422.
      * @param projectId
      * @param requestBody
      * @param molabSession
@@ -182,6 +194,18 @@ export class ExperimentsService {
     }
     /**
      * Create Experiment
+     * Create an experiment, or return the existing one when the binding matches.
+     *
+     * ``workflow_source``, when set, is a workflow IR object (a string is 422).
+     * It is compiled before any directory is created; an invalid IR is 400 and
+     * leaves no experiment directory. The normalized IR is stored as a document
+     * binding via ``Project.add_experiment(workflow_document=...)``.
+     *
+     * An existing experiment is returned unchanged when it is already bound to
+     * that same normalized document (idempotent 201, no write). A different
+     * binding, a non-document kind, or a missing document is 409. A legacy
+     * experiment that still needs ``molab migrate workflow-kind`` is 409.
+     * Nothing is written on 409. A missing or unknown ``default_target`` is 422.
      * @param projectId
      * @param ws
      * @param requestBody

@@ -19,16 +19,15 @@ from molab._typing import JSONValue
 from ._wire import ApiModel
 
 if TYPE_CHECKING:
+    from molab.services.knowledge_context import KnowledgeContext, KnowledgeRef
     from molab.workspace.workspace_context import (
-        ArtifactRef,
+        ContextArtifact,
         ContextFocus,
         ExperimentRef,
         HealthFlag,
-        KnowledgeRef,
         ProjectRef,
         RunRef,
         WorkflowRef,
-        WorkspaceContext,
         WorkspaceRef,
     )
 
@@ -114,7 +113,7 @@ class ArtifactRefResponse(ApiModel):
     taskId: str | None = None
 
     @classmethod
-    def from_ref(cls, ref: ArtifactRef) -> ArtifactRefResponse:
+    def from_ref(cls, ref: ContextArtifact) -> ArtifactRefResponse:
         return cls(
             assetId=ref.asset_id,
             scope=ref.scope,
@@ -177,12 +176,11 @@ class WorkspaceContextResponse(ApiModel):
     runningRuns: list[RunRefResponse] = Field(default_factory=list)
     artifacts: list[ArtifactRefResponse] = Field(default_factory=list)
     knowledge: list[KnowledgeRefResponse] = Field(default_factory=list)
-    openQuestions: list[KnowledgeRefResponse] = Field(default_factory=list)
     staleOrMissing: list[HealthFlagResponse] = Field(default_factory=list)
 
     @classmethod
-    def from_context(cls, ctx: WorkspaceContext) -> WorkspaceContextResponse:
-        """Build the HTTP view from a frozen :class:`WorkspaceContext`."""
+    def from_context(cls, ctx: KnowledgeContext) -> WorkspaceContextResponse:
+        """Build the HTTP view from a frozen :class:`KnowledgeContext`."""
         return cls(
             workspace=WorkspaceRefResponse.from_ref(ctx.workspace),
             focus=ContextFocusResponse.from_focus(ctx.focus),
@@ -194,6 +192,5 @@ class WorkspaceContextResponse(ApiModel):
             runningRuns=[RunRefResponse.from_ref(r) for r in ctx.running_runs],
             artifacts=[ArtifactRefResponse.from_ref(r) for r in ctx.artifacts],
             knowledge=[KnowledgeRefResponse.from_ref(r) for r in ctx.knowledge],
-            openQuestions=[KnowledgeRefResponse.from_ref(r) for r in ctx.open_questions],
             staleOrMissing=[HealthFlagResponse.from_flag(r) for r in ctx.stale_or_missing],
         )

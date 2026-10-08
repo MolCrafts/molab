@@ -1,4 +1,4 @@
-import { ArrowUpRight, Circle, Plus } from "lucide-react";
+import { ArrowUpRight, Circle, FolderOpen } from "lucide-react";
 import type { JSX } from "react";
 import { Link } from "react-router-dom";
 
@@ -65,7 +65,7 @@ export const DashboardExplorer = ({ snapshot }: NavigationExplorerProps): JSX.El
   const actions = (
     <WorkbenchIconAction label="Open projects" asChild>
       <Link to="/projects">
-        <Plus className="size-3.5" />
+        <FolderOpen className="size-3.5" />
       </Link>
     </WorkbenchIconAction>
   );
@@ -94,12 +94,14 @@ export const DashboardExplorer = ({ snapshot }: NavigationExplorerProps): JSX.El
             <SectionLabel>Pinned</SectionLabel>
             {pinnedRuns.map((run) => {
               const group = groupForStatus(runPresentationStatus(run));
+              const statusWord =
+                group === "running" ? "Running" : group === "failed" ? "Failed" : null;
               return (
                 <ExplorerLink
                   key={run.id}
                   to={runPath(run.projectId, run.experimentId, run.id)}
                   title={run.name || run.id}
-                  detail={run.experimentName}
+                  detail={[statusWord, run.experimentName].filter(Boolean).join(" · ")}
                   tone={group === "running" ? "running" : group === "failed" ? "failed" : "default"}
                 />
               );

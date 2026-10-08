@@ -12,14 +12,21 @@ rather than an empty directory. History stays a soft dependency.
 
 from __future__ import annotations
 
+import ast
 from pathlib import Path
 
 import pytest
 
 from molab.ids import compute_content_hash
 from molab.profile import ProfileConfig
-from molab.workspace import Run, Workspace
-from molab.workspace.domain import ExecutionMode, ExecutionStatus, SourceFile, SourceManifest
+from molab.workspace import Project, Run, Workspace
+from molab.workspace.domain import (
+    Artifact,
+    ExecutionMode,
+    ExecutionStatus,
+    SourceFile,
+    SourceManifest,
+)
 from molab.workspace.history import GitHistory
 
 _START_TIME_KEYS = ("host", "pid", "python", "platform")
@@ -56,7 +63,7 @@ class TestRunMaterialize:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         ws = Workspace(tmp_path, name="lab")
-        experiment = ws.add_project("p").add_experiment("e", workflow_source="s.py", params={})
+        experiment = ws.add_project("p").add_experiment("e", params={})
         seen = _spy_history(monkeypatch, "run.json")
 
         experiment.add_run(params={"seed": 1})
@@ -69,7 +76,7 @@ class TestRunCreateExecution:
     """arch-own-02a §4: the one public creation entry records creation-time facts."""
 
     def test_default_records_profile_keys_only(self, run: Run) -> None:
-        rec = run.create_execution()
+        rec = run._create_execution()
 
         assert rec.id == "e01"
         assert rec.status is ExecutionStatus.QUEUED
@@ -79,7 +86,7 @@ class TestRunCreateExecution:
         assert rec.executor == {}
 
     def test_profile_config_and_caller_environment_merge(self, run: Run) -> None:
-        rec = run.create_execution(
+        rec = run._create_execution(
             profile_config=ProfileConfig({"a": 1}, name="cpu"),
             environment={"script": "s.py"},
         )
@@ -90,39 +97,39 @@ class TestRunCreateExecution:
 
     def test_caller_profile_key_is_rejected(self, run: Run) -> None:
         with pytest.raises(ValueError):
-            run.create_execution(environment={"config_hash": "x"})
+            run._create_execution(environment={"config_hash": "x"})
         assert run.executions == []
 
     @pytest.mark.parametrize("key", _START_TIME_KEYS)
     def test_start_time_key_in_environment_is_rejected(self, run: Run, key: str) -> None:
         with pytest.raises(ValueError, match="start-time"):
-            run.create_execution(environment={key: 1})
+            run._create_execution(environment={key: 1})
         assert run.executions == []
 
     @pytest.mark.parametrize("key", _START_TIME_KEYS)
     def test_start_time_key_in_executor_is_rejected(self, run: Run, key: str) -> None:
         with pytest.raises(ValueError, match="start-time"):
-            run.create_execution(executor={key: 1})
+            run._create_execution(executor={key: 1})
         assert run.executions == []
 
     def test_non_start_time_executor_keys_are_accepted(self, run: Run) -> None:
-        rec = run.create_execution(executor={"backend": "molq", "target": None})
+        rec = run._create_execution(executor={"backend": "molq", "target": None})
 
         assert rec.executor == {"backend": "molq", "target": None}
 
     def test_bypass_cache_is_recorded(self, run: Run) -> None:
-        rec = run.create_execution(bypass_cache=True)
+        rec = run._create_execution(bypass_cache=True)
 
         assert rec.bypass_cache is True
         assert run.execution("e01").bypass_cache is True
 
     def test_initial_after_existing_attempt_is_rejected(self, run: Run) -> None:
-        run.create_execution()
+        run._create_execution()
 
         with pytest.raises(ValueError):
-            run.create_execution()
+            run._create_execution()
         run.cancel("e01")
-        rerun = run.create_execution(mode=ExecutionMode.RERUN)
+        rerun = run._create_execution(mode=ExecutionMode.RERUN)
 
         assert rerun.id == "e02"
 
@@ -134,7 +141,7 @@ class TestRunCreateExecution:
             raise RuntimeError("boom")
         e01 = run.execution("e01").environment
 
-        resume = run.create_execution(mode=ExecutionMode.RESUME)
+        resume = run._create_execution(mode=ExecutionMode.RESUME)
 
         assert resume.based_on_execution_id == "e01"
         assert resume.environment["profile"] == "cpu"
@@ -143,7 +150,7 @@ class TestRunCreateExecution:
         assert e01["config_hash"] is not None
 
         run.cancel(resume.id)
-        explicit = run.create_execution(
+        explicit = run._create_execution(
             mode=ExecutionMode.RERUN, profile_config=ProfileConfig({"k": 2}, name=None)
         )
         assert (
@@ -152,7 +159,7 @@ class TestRunCreateExecution:
         assert explicit.environment["config_hash"] != e01["config_hash"]
 
         run.cancel(explicit.id)
-        empty = run.create_execution(
+        empty = run._create_execution(
             mode=ExecutionMode.RERUN, profile_config=ProfileConfig({}, name=None)
         )
         assert empty.environment["config"] == {}
@@ -164,7 +171,7 @@ class TestRunCreateExecution:
             pass
         e01 = run.execution("e01").environment
 
-        rec = run.create_execution(mode=mode)
+        rec = run._create_execution(mode=mode)
 
         assert rec.based_on_execution_id == "e01"
         assert {k: rec.environment[k] for k in _PROFILE_KEYS} == {
@@ -174,7 +181,7 @@ class TestRunCreateExecution:
         }
 
     def test_initial_without_profile_is_empty(self, run: Run) -> None:
-        rec = run.create_execution(mode=ExecutionMode.INITIAL)
+        rec = run._create_execution(mode=ExecutionMode.INITIAL)
 
         assert rec.environment == {"profile": None, "config": {}, "config_hash": None}
 
@@ -188,7 +195,7 @@ class TestRunCreateExecution:
         del raw["environment"]["config_hash"]
         path.write_text(json.dumps(raw), encoding="utf-8")
 
-        rec = run.create_execution(mode=ExecutionMode.RERUN)
+        rec = run._create_execution(mode=ExecutionMode.RERUN)
 
         assert "config_hash" in rec.environment
         assert rec.environment["config_hash"] is None
@@ -201,7 +208,7 @@ class TestRunCreateExecution:
     ) -> None:
         entry = _source_tree(tmp_path_factory)
 
-        rec = run.create_execution(source_entrypoint=entry)
+        rec = run._create_execution(source_entrypoint=entry)
 
         assert rec.id == "e01"
         assert rec.status is ExecutionStatus.QUEUED
@@ -213,7 +220,7 @@ class TestRunCreateExecution:
         assert not (run.run_dir / "source").exists()
 
     def test_without_source_entrypoint_nothing_is_captured(self, run: Run) -> None:
-        rec = run.create_execution()
+        rec = run._create_execution()
 
         assert rec.source is None
         assert not (run.run_dir / "executions" / "e01" / "source").exists()
@@ -243,7 +250,7 @@ class TestRunCreateExecution:
         monkeypatch.setattr("molab.workspace.run.source_manifest", forged_manifest)
 
         with pytest.raises(SourceCaptureError):
-            run.create_execution(source_entrypoint=entry)
+            run._create_execution(source_entrypoint=entry)
 
         last = run.executions[-1]
         assert last.status is ExecutionStatus.FAILED
@@ -257,7 +264,7 @@ class TestRunCreateExecution:
         missing = tmp_path_factory.mktemp("nosrc") / "entry.py"
 
         with pytest.raises(FileNotFoundError):
-            run.create_execution(source_entrypoint=missing)
+            run._create_execution(source_entrypoint=missing)
 
         assert run.executions == []
 
@@ -275,7 +282,7 @@ class TestRunCreateExecution:
         monkeypatch.setattr("molab.workspace.run.copy_sources", interrupted)
 
         with pytest.raises(KeyboardInterrupt):
-            run.create_execution(source_entrypoint=entry)
+            run._create_execution(source_entrypoint=entry)
 
         last = run.executions[-1]
         assert last.status is ExecutionStatus.FAILED
@@ -326,7 +333,7 @@ class TestRunStart:
         assert run.executions[-1].workflow_digest is None
 
     def test_workflow_digest_with_explicit_id(self, run: Run) -> None:
-        rec = run.create_execution()
+        rec = run._create_execution()
         assert rec.workflow_digest is None
 
         with run.start(execution_id=rec.id, workflow_digest=_DIGEST):
@@ -377,7 +384,7 @@ def _fail_then_retry(run: Run) -> None:
     """e01 fails, e02 (a RETRY of e01) succeeds — built through the public API."""
     with pytest.raises(RuntimeError), run.start():
         raise RuntimeError("boom")
-    with run.start(mode=ExecutionMode.RETRY, based_on_execution_id="e01"):
+    with run.start(mode=ExecutionMode.RETRY, predecessor="e01"):
         pass
 
 
@@ -403,7 +410,7 @@ class TestRunStatusLabel:
         assert run.has_failures is True
 
     def test_queued_attempt_reads_queued(self, run: Run) -> None:
-        run.create_execution()
+        run._create_execution()
 
         assert run.status_label == "queued"
         assert run.has_failures is False
@@ -417,7 +424,7 @@ class TestRunFinishedAt:
         with pytest.raises(RuntimeError), run.start():
             raise RuntimeError("boom")
         assert run.executions[0].finished_at is not None
-        run.create_execution(mode=ExecutionMode.RETRY, based_on_execution_id="e01")
+        run._create_execution(mode=ExecutionMode.RETRY, predecessor="e01")
 
         assert run.status_label == "queued"
         assert run.finished_at is None
@@ -434,8 +441,26 @@ class TestRunFinishedAt:
         assert run.finished_at is None
 
 
-def _results_file(run: Run, execution_id: str) -> Path:
-    return Path(str(run.execution_dir(execution_id))) / "results.json"
+def _one_result(run: Run, execution_id: str) -> Artifact:
+    found = [
+        artifact
+        for artifact in run.execution(execution_id).artifacts
+        if artifact.semantic_type == "result"
+    ]
+    assert len(found) == 1
+    return found[0]
+
+
+def _patch_result_bytes(monkeypatch: pytest.MonkeyPatch, payload: bytes) -> None:
+    """Replace ``ArtifactRepository.read_bytes``, the seam ``Run.results`` calls."""
+
+    def read_bytes(self: object, artifact: object, *, execution_dir: object) -> bytes:
+        return payload
+
+    monkeypatch.setattr(
+        "molab.workspace.artifact_repository.ArtifactRepository.read_bytes",
+        read_bytes,
+    )
 
 
 class TestRunResults:
@@ -446,31 +471,6 @@ class TestRunResults:
             eid = ctx.id
         assert run.results(eid) == {"a": 1, "b": [1, 2]}
 
-    def test_empty_without_results_file(self, run: Run) -> None:
-        with run.start() as ctx:
-            eid = ctx.id
-        assert run.results(eid) == {}
-
-    def test_empty_results_file_is_empty(self, run: Run) -> None:
-        with run.start() as ctx:
-            eid = ctx.id
-        _results_file(run, eid).write_text("")
-        assert run.results(eid) == {}
-
-    def test_corrupt_results_file_raises(self, run: Run) -> None:
-        with run.start() as ctx:
-            eid = ctx.id
-        _results_file(run, eid).write_text("{not json")
-        with pytest.raises(ValueError, match=r"results\.json"):
-            run.results(eid)
-
-    def test_non_dict_results_raises(self, run: Run) -> None:
-        with run.start() as ctx:
-            eid = ctx.id
-        _results_file(run, eid).write_text('{"schema_version": 3, "results": [1]}')
-        with pytest.raises(ValueError, match=r"results\.json"):
-            run.results(eid)
-
     def test_returns_a_copy(self, run: Run) -> None:
         with run.start() as ctx:
             ctx.set_result("a", 1)
@@ -480,19 +480,93 @@ class TestRunResults:
         first["b"] = 2
         assert run.results(eid) == {"a": 1}
 
+    def test_empty_without_result_artifact(self, run: Run) -> None:
+        with run.start() as ctx:
+            eid = ctx.id
+        assert run.results(eid) == {}
+
+    def test_unknown_execution_is_empty(self, run: Run) -> None:
+        assert run.results("no-such") == {}
+
+    def test_corrupt_result_artifact_raises(
+        self, run: Run, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        with run.start() as ctx:
+            ctx.set_result("a", 1)
+            eid = ctx.id
+        artifact = _one_result(run, eid)
+        _patch_result_bytes(monkeypatch, b"{not json")
+        with pytest.raises(ValueError) as excinfo:
+            run.results(eid)
+        assert artifact.id in str(excinfo.value)
+
+    def test_non_dict_result_artifact_raises(
+        self, run: Run, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        with run.start() as ctx:
+            ctx.set_result("a", 1)
+            eid = ctx.id
+        artifact = _one_result(run, eid)
+        _patch_result_bytes(monkeypatch, b"[1]")
+        with pytest.raises(ValueError) as excinfo:
+            run.results(eid)
+        assert artifact.id in str(excinfo.value)
+
+    def test_missing_result_bytes_raises(self, run: Run) -> None:
+        with run.start() as ctx:
+            ctx.set_result("a", 1)
+            eid = ctx.id
+        artifact = _one_result(run, eid)
+        (run.execution_dir(eid) / "artifacts" / "_molab" / "results.json").unlink()
+        with pytest.raises(ValueError) as excinfo:
+            run.results(eid)
+        assert artifact.id in str(excinfo.value)
+
+    def test_multiple_result_artifacts_raise(self, run: Run) -> None:
+        import json
+
+        with run.start() as ctx:
+            ctx.set_result("a", 1)
+            eid = ctx.id
+        path = run.execution_dir(eid) / "execution.json"
+        raw = json.loads(path.read_text(encoding="utf-8"))
+        recorded = [item for item in raw["artifacts"] if item.get("semantic_type") == "result"]
+        assert len(recorded) == 1
+        original_id = recorded[0]["id"]
+        assert isinstance(original_id, str)
+        copied = dict(recorded[0])
+        copied["id"] = "copy-result"
+        raw["artifacts"].append(copied)
+        path.write_text(json.dumps(raw), encoding="utf-8")
+
+        with pytest.raises(ValueError) as excinfo:
+            run.results(eid)
+        message = str(excinfo.value)
+        assert original_id in message
+        assert "copy-result" in message
+
+    def test_reads_through_read_bytes(self, run: Run, monkeypatch: pytest.MonkeyPatch) -> None:
+        with run.start() as ctx:
+            ctx.set_result("a", 1)
+            eid = ctx.id
+        _patch_result_bytes(monkeypatch, b'{"x": 1}')
+        assert run.results(eid) == {"x": 1}
+
     def test_reads_through_workspace_fs(self, tmp_path: Path) -> None:
         from molab.workspace.fs_local import LocalFileSystem
         from tests.support.counting_fs import CountingFileSystem
 
         fs = CountingFileSystem(LocalFileSystem())
-        ws = Workspace(tmp_path / "ws", name="lab", fs=fs)  # type: ignore[arg-type]
+        ws = Workspace(tmp_path / "ws", name="lab", fs=fs)
         run = ws.add_project("p").add_experiment("e").add_run(params={"x": 1})
         with run.start() as ctx:
             ctx.set_result("a", 1)
             eid = ctx.id
+        artifact = _one_result(run, eid)
         fs.reset()
         assert run.results(eid) == {"a": 1}
-        assert fs.for_basename("results.json", "open") == 1
+        assert fs.for_basename("results.json", "read_bytes") == 1
+        assert artifact.path.endswith("artifacts/_molab/results.json")
 
 
 class TestRunGetResult:
@@ -545,10 +619,129 @@ class TestRunGetResult:
         stub_executor.outputs[eid] = {"train": 1}
         assert run.get_result("train", execution_id=eid) == 1
 
-    def test_cancel_preserves_driver_results(self, run: Run, stub_executor) -> None:
+    def test_cancel_inside_block_records_no_results(self, run: Run, stub_executor) -> None:
         with run.start() as ctx:
             ctx.set_result("train", "driver-value")
             eid = ctx.id
             run.cancel(eid)
-        assert run.get_result("train", execution_id=eid) == "driver-value"
-        assert run.executions[-1].status is ExecutionStatus.CANCELLED
+        assert run.execution(eid).status is ExecutionStatus.CANCELLED
+        assert run.results(eid) == {}
+        assert run.get_result("train", execution_id=eid) is None
+        assert stub_executor.calls == [(run.id, eid)]
+
+
+def _run_load_ast() -> ast.FunctionDef:
+    """The ``Run.load`` function, and only that function."""
+    path = Path(__file__).resolve().parents[2] / "src" / "molab" / "workspace" / "run.py"
+    tree = ast.parse(path.read_text(encoding="utf-8"))
+    for node in tree.body:
+        if isinstance(node, ast.ClassDef) and node.name == "Run":
+            for item in node.body:
+                if isinstance(item, ast.FunctionDef) and item.name == "load":
+                    return item
+    raise AssertionError("Run.load is missing from src/molab/workspace/run.py")
+
+
+class TestRunLoad:
+    """Identity comes from ``run.json``; the directory name is not parsed."""
+
+    def test_load_roundtrip(self, tmp_path: Path) -> None:
+        ws = Workspace(tmp_path / "lab", name="lab")
+        exp = ws.add_project("p").add_experiment("e")
+        run = exp.add_run(params={"seed": 1}, id="r1")
+        run_dir = run.run_dir
+        loaded = Run.load(run_dir)
+        assert loaded.id == "r1"
+        assert loaded.parameters["seed"] == 1
+        assert loaded.experiment.name == "e"
+
+    def test_renamed_directory_loads_original_id(self, tmp_path: Path) -> None:
+        ws = Workspace(tmp_path / "lab", name="lab")
+        exp = ws.add_project("p").add_experiment("e")
+        run = exp.add_run(params={"seed": 1}, id="r1")
+        renamed = run.run_dir.parent / "run-r2"
+        Path(run.run_dir).rename(renamed)
+
+        loaded = Run.load(renamed)
+
+        assert loaded.id == "r1"
+        assert Path(str(loaded.run_dir)).resolve() == renamed.resolve()
+
+    def test_outside_workspace_raises(self, tmp_path: Path) -> None:
+        with pytest.raises(FileNotFoundError):
+            Run.load(tmp_path / "outside")
+
+    def test_load_finds_root_through_enclosing_root(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import inspect
+
+        ws = Workspace(tmp_path / "lab", name="lab")
+        run = ws.add_project("p").add_experiment("e").add_run(params={"seed": 1})
+        calls: list[object] = []
+        original = Workspace.enclosing_root
+
+        def spy(path: object, *, fs: object = None) -> object:
+            calls.append(path)
+            return original(path, fs=fs)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(Workspace, "enclosing_root", staticmethod(spy))
+
+        assert Run.load(run.run_dir).id == run.id
+        assert calls[0] == Path(run.run_dir).resolve()
+        source = inspect.getsource(Run.load)
+        assert "enclosing_root" in source
+        assert "workspace_root" not in source
+
+    def test_source_has_no_run_prefix_constant_or_parents(self) -> None:
+        fn = _run_load_ast()
+        run_prefix = [
+            node.value
+            for node in ast.walk(fn)
+            if isinstance(node, ast.Constant)
+            and isinstance(node.value, str)
+            and (node.value == "run-" or node.value.startswith("run-"))
+        ]
+        parents = [
+            node.attr
+            for node in ast.walk(fn)
+            if isinstance(node, ast.Attribute) and node.attr == "parents"
+        ]
+        assert run_prefix == []
+        assert parents == []
+
+
+class TestRun:
+    """``Run.artifact_location`` is the bound resolver."""
+
+    def test_artifact_location_is_execution_relative(self, run: Run) -> None:
+        with run.start() as ctx:
+            artifact = ctx.emit_artifact(b"m", name="metrics.json")
+
+        assert run.artifact_location("e01", artifact) == str(
+            run.execution_dir("e01") / "artifacts" / "metrics.json"
+        )
+
+    def test_rejects_other_attempt_and_other_run(self, project: Project) -> None:
+        exp = project.add_experiment("loc")
+        run = exp.add_run()
+        other = exp.add_run(params={"n": 2})
+        with run.start() as ctx:
+            artifact = ctx.emit_artifact(b"m", name="metrics.json")
+
+        with pytest.raises(ValueError):
+            run.artifact_location("e02", artifact)
+        foreign = artifact.model_copy(update={"run_id": other.id})
+        with pytest.raises(ValueError):
+            run.artifact_location("e01", foreign)
+
+    def test_legacy_form_matches_new_form(self, workspace: Workspace, run: Run) -> None:
+        with run.start() as ctx:
+            artifact = ctx.emit_artifact(b"m", name="metrics.json")
+
+        new = run.artifact_location("e01", artifact)
+        legacy_path = (
+            Path(new).resolve().relative_to(Path(str(workspace.root)).resolve()).as_posix()
+        )
+        legacy = artifact.model_copy(update={"path": legacy_path})
+        assert run.artifact_location("e01", legacy) == new

@@ -1,5 +1,6 @@
 import {
   DashboardCanvas,
+  DashboardCard,
   OverviewSurface,
   type StatusCountRollup,
   StatusDistribution,
@@ -62,29 +63,24 @@ export const RunOverview = ({ run, parameters }: RunOverviewProps): JSX.Element 
   const attempts = rollupAttempts(run.statusSummary.byStatus ?? {});
   return (
     <OverviewSurface>
-      <DashboardCanvas className="max-w-4xl space-y-8">
+      <DashboardCanvas>
         {run.summary && (
           <p className="max-w-2xl text-body leading-relaxed text-muted-foreground">{run.summary}</p>
         )}
 
-        <section className="space-y-3">
-          <h2 className="text-body-lg font-medium text-foreground">Attempts</h2>
-          <StatusDistribution counts={attempts} />
-          <p className="font-mono text-micro tabular-nums text-muted-foreground">
-            {run.statusSummary.total} total · {run.statusSummary.active} active
-          </p>
-        </section>
+        <DashboardCard title="Attempts">
+          <StatusDistribution counts={attempts} unit="attempts" />
+        </DashboardCard>
 
-        <section className="space-y-3">
-          <h2 className="text-body-lg font-medium text-foreground">Run definition</h2>
-          <PropertyGrid entries={parameters} />
-          <dl className="grid gap-x-6 gap-y-2 text-label sm:grid-cols-[minmax(0,14rem)_minmax(0,1fr)]">
-            <dt className="text-muted-foreground">Definition hash</dt>
-            <dd className="break-all font-mono">{run.definitionHash || "—"}</dd>
-            <dt className="text-muted-foreground">Experiment revision</dt>
-            <dd className="break-all font-mono">{run.experimentRevisionId || "—"}</dd>
-          </dl>
-        </section>
+        <DashboardCard title="Parameters">
+          <PropertyGrid
+            entries={[
+              ...parameters,
+              ["Definition hash", run.definitionHash || "—"],
+              ["Experiment revision", run.experimentRevisionId || "—"],
+            ]}
+          />
+        </DashboardCard>
 
         <KnowledgeBacklinksCard
           kind="run"

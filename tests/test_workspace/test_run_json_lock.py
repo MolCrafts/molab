@@ -36,8 +36,8 @@ class TestRunMetadataRmw:
         other = _second_handle(tmp_path, run)
 
         run._update_metadata(target="cluster-a")
-        other._update_metadata(workflow_version="v2")  # stale handle, distinct field
+        other._update_metadata(input_asset_ids=("asset-1",))  # stale handle, distinct field
 
         data = _read_run_json(run)
         assert data["target"] == "cluster-a"  # not clobbered by the stale handle
-        assert data["workflow_version"] == "v2"
+        assert data["input_asset_ids"] == ["asset-1"]

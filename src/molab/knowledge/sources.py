@@ -10,8 +10,7 @@ So a *source* is a name bound to a directory. The store is two-tier: **User**
 When a name appears in both, the Workspace entry **fully replaces** the User
 one — no per-field merge.
 
-Deliberately import-cheap — stdlib + pydantic (+ the light ``bundle_index``
-models). ``Knowledge`` is imported inside :func:`open_source` and
+Deliberately import-cheap — stdlib + pydantic. ``Knowledge`` is imported inside :func:`open_source` and
 :func:`search_sources`, so a caller that merely *lists* registered wikis (a CLI
 printing a table) never loads yaml, pathspec or the OKF substrate.
 """
@@ -28,25 +27,22 @@ from typing import TYPE_CHECKING
 
 from pydantic import BaseModel, Field, field_validator
 
-# ``bundle_index`` is re + pydantic only, so importing it eagerly costs nothing;
 # ``SourcedHit`` needs ``SearchHit`` at runtime for pydantic to build its schema.
-# ``bundle`` — which pulls yaml + pathspec — stays lazy.
 from molab._typing import JSONValue
 
-from .bundle_index import SearchHit
+from .search import SearchHit
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
     from molab.fs import PathArg
 
-    from .bundle_index import SearchResult
     from .concept import Knowledge
+    from .search import SearchResult
 
 __all__ = [
     "KIND_PATTERN",
     "KNOWLEDGE_CONFIG_FILENAME",
-    "MOLAB_DIR",
     "KnowledgeScope",
     "KnowledgeSourceStore",
     "SourceNotFoundError",
@@ -59,10 +55,6 @@ __all__ = [
 
 KNOWLEDGE_CONFIG_FILENAME = "knowledge.json"
 """Config basename, used at both scopes."""
-
-MOLAB_DIR = ".molab"
-"""Workspace-local hidden dir — the established home for molab's own state
-(``<root>/.molab/git``, ``<root>/.molab/background``)."""
 
 USER_DIR = Path.home() / ".molab"
 
@@ -165,7 +157,7 @@ class KnowledgeSourceStore:
                 forms the upper tier; ``None`` uses the user tier alone.
             user_dir: Override for ``~/.molab`` (tests).
         """
-        self._workspace_root = Path(os.fspath(workspace_root)) if workspace_root else None
+        self._config_root = Path(os.fspath(workspace_root)) if workspace_root else None
         self._user_dir = Path(os.fspath(user_dir)) if user_dir else USER_DIR
 
     def config_path(self, scope: KnowledgeScope) -> Path:
@@ -176,9 +168,11 @@ class KnowledgeSourceStore:
         """
         if scope is KnowledgeScope.USER:
             return self._user_dir / KNOWLEDGE_CONFIG_FILENAME
-        if self._workspace_root is None:
+        if self._config_root is None:
             raise ValueError("workspace scope requires a workspace_root")
-        return self._workspace_root / MOLAB_DIR / KNOWLEDGE_CONFIG_FILENAME
+        from molab.workspace import Workspace
+
+        return Path(Workspace.machine_dir(self._config_root) / KNOWLEDGE_CONFIG_FILENAME)
 
     def _read(self, scope: KnowledgeScope) -> dict[str, WikiSource]:
         """Parse one tier; a missing or malformed file yields no sources.
@@ -310,12 +304,12 @@ class SourcedHit(BaseModel, frozen=True):
 
     Attributes:
         source: The registered source name (``""`` for the active workspace).
-        hit: The underlying :class:`~molab.knowledge.bundle_index.SearchHit`.
-        abs_path: Absolute path of the document's own file, so a caller can hand
-            it over or open it — and ``None`` when the source has no such file
-            to offer. A bibliographic record with no attached PDF is the honest
-            case: fabricating a path here hands a model something to open that
-            is not there. The ``ref`` always works; this is a convenience.
+        hit: The underlying :class:`~molab.knowledge.search.SearchHit`.
+        abs_path: Absolute path of the document's own markdown file, so a caller
+            can hand it over or open it — and ``None`` when the source has no
+            such file to offer. A bibliographic record with no attached PDF is
+            the honest case: fabricating a path here hands a model something to
+            open that is not there. The ``ref`` always works; this is a convenience.
         rank: 1-based position in the fused ordering.
     """
 
@@ -326,7 +320,7 @@ class SourcedHit(BaseModel, frozen=True):
 
     @property
     def ref(self) -> str:
-        """The portable ``<source>:<bundle-relative-path>`` reference."""
+        """The portable ``<source>:<path>`` reference."""
         return f"{self.source}:{self.hit.entry.path}" if self.source else self.hit.entry.path
 
 
@@ -346,12 +340,12 @@ def search_sources(
     store: KnowledgeSourceStore | None = None,
     workspace_searcher: Callable[[], SearchResult] | None = None,
 ) -> list[SourcedHit]:
-    """Search several registered bundles at once and fuse the results.
+    """Search several registered sources at once and fuse the results.
 
     Each source is searched independently, then the per-source rankings are
     merged by **reciprocal rank fusion** (``1 / (RRF_K + rank)``) rather than by
     raw score. BM25 scores are only comparable within one corpus — IDF is
-    computed against that corpus — so sorting raw scores across bundles would
+    computed against that corpus — so sorting raw scores across sources would
     quietly favour whichever wiki happens to be smaller. Fusing ranks compares
     only each source's own opinion of its documents, which is the part that
     transfers.
@@ -361,24 +355,29 @@ def search_sources(
         sources: Source names to search; ``None`` searches all registered ones.
         workspace_root: The active workspace — supplies the workspace config
             tier and, with *include_workspace*, is itself searched.
-        include_workspace: Also search *workspace_root* as an unnamed bundle.
+        include_workspace: Also search *workspace_root* as an unnamed source.
         limit: Maximum fused hits to return.
-        concept_type: Exact Concept ``type`` filter, applied per source.
+        concept_type: Exact Knowledge class name, applied per source. An
+            unknown name raises ``ValueError``.
         tag: Tag filter, applied per source.
         store: An explicit source store, overriding *workspace_root*'s.
         workspace_searcher: How to search the workspace itself, when given —
-            a host that already holds a scanned index (a server read model)
-            or opens the workspace with its own pruning passes a closure over
-            the same *query* / filters / *limit*; ``None`` opens a plain
-            :class:`~molab.knowledge.bundle.Bundle` over *workspace_root*.
+            a host that already holds a scanned index passes a closure over
+            the same *query* / filters / *limit*. ``None`` searches
+            *workspace_root* through :class:`~molab.knowledge.concept.Knowledge`.
             Registered sources are always searched per query.
 
     Returns:
         The fused hits, best first, each tagged with its source and the absolute
-        path of its ``index.md``.
-    """
-    from .bundle import Bundle
+        path of its markdown file.
 
+    Raises:
+        ValueError: If *concept_type* is not a known Knowledge class name.
+    """
+    from .concept import Knowledge
+    from .concepts import parse_class
+
+    cls = parse_class(concept_type) if concept_type else None
     store = store or KnowledgeSourceStore(workspace_root)
     targets: list[tuple[str, Path]] = []
     if include_workspace and workspace_root is not None:
@@ -396,7 +395,7 @@ def search_sources(
         if name == "" and workspace_searcher is not None:
             result = workspace_searcher()
         else:
-            result = Bundle(root).search(query, concept_type=concept_type, tag=tag, limit=limit)
+            result = Knowledge(root).search(query, of=cls, tag=tag, limit=limit)
         for rank, hit in enumerate(result.hits, start=1):
             key = (name, hit.entry.path)
             fused[key] = (1.0 / (RRF_K + rank), name, hit, root)
@@ -406,7 +405,7 @@ def search_sources(
         SourcedHit(
             source=name,
             hit=hit,
-            abs_path=str(root / hit.entry.path / "index.md"),
+            abs_path=str(root / hit.entry.path),
             rank=position,
         )
         for position, (_key, (_rrf, name, hit, root)) in enumerate(ordered[:limit], start=1)

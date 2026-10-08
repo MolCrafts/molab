@@ -1,7 +1,7 @@
 """``molab.fs`` is a layer-0 primitive: stdlib only, never molq-bound.
 
 The filesystem seam moved to the package root so that **two** bottom layers can
-share it — ``molab.workspace`` and ``molab.knowledge``. A knowledge Bundle
+share it — ``molab.workspace`` and ``molab.knowledge``. A knowledge document
 opened over a plain directory (a group wiki, no workspace anywhere) must not
 drag an SSH transport into the process to read a ``meta.yaml``.
 

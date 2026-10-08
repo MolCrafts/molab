@@ -15,17 +15,10 @@ import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
-from molab.knowledge import (
-    Finding,
-    Knowledge,
-    Observation,
-    SourceRef,
-    harvest_run,
-    mount_note,
-    parse_knowledge_class,
-    write_knowledge,
-)
+from molab.knowledge import Finding, Knowledge, Observation, SourceRef, parse_class
+from molab.knowledge.write import mount_note, write_knowledge
 from molab.workspace import Workspace
+from molab.workspace.refs import ref_of
 
 
 def _refuses(call: Callable[[], object]) -> bool:
@@ -46,22 +39,24 @@ def main() -> None:
 
         # The class-name entry point lives on the knowledge side and returns the
         # very class object a caller imports.
-        assert parse_knowledge_class("Finding") is Finding
+        assert parse_class("Finding") is Finding
 
         # A Knowledge -> Knowledge citation rides the typed edge, role `cites`.
+        # The experiment source is a molab reference, written once as derived_from.
         background = mount_note(experiment, "Background", body="# Background\n")
         finding = write_knowledge(
             experiment,
             name="Finding One",
             of=Finding,
-            sources=[SourceRef(kind="experiment", ref=experiment.id)],
+            sources=[SourceRef.of(experiment)],
             created_by="tester",
             text="# Finding\n\nmobility rises\n",
             cite=[(background, "cites")],
         )
         assert finding.path == knowledges / "finding-one.md"
-        assert [(Path(e.target).name, e.role) for e in finding.links()] == [
-            ("background.md", "cites")
+        assert [(e.target, e.role) for e in finding.links()] == [
+            (str(ref_of(experiment)), "derived_from"),
+            (str(background.path), "cites"),
         ]
 
         # A bare path is linked verbatim -- never through the embed resolver,
@@ -77,7 +72,11 @@ def main() -> None:
             text="# Finding\n",
             cite=[(str(outside), "references")],
         )
-        assert [(e.target, e.role) for e in second.links()] == [(str(outside), "references")]
+        second_edges = [(e.target, e.role) for e in second.links()]
+        assert (str(outside), "references") in second_edges
+        assert any(
+            target.endswith("raw.txt") and role == "derived_from" for target, role in second_edges
+        )
 
         # The mount is idempotent on the slug and keeps its body -- including a
         # repeat that passes an empty body -- and an empty-body mount still
@@ -93,15 +92,14 @@ def main() -> None:
         # a non-terminal run and a blank narrative are refused, never degraded.
         run = experiment.add_run(params={"temperature": 350})
         assert _refuses(
-            lambda: harvest_run(run, Observation, narrative="too early", created_by="tester")
+            lambda: Observation.harvest(run, narrative="too early", created_by="tester")
         )
         with run.start():
             pass
-        assert _refuses(lambda: harvest_run(run, Observation, narrative="   \n", created_by="t"))
+        assert _refuses(lambda: Observation.harvest(run, narrative="   \n", created_by="t"))
 
-        harvested = harvest_run(
+        harvested = Observation.harvest(
             run,
-            Observation,
             narrative="Mobility rises with temperature.",
             created_by="tester",
             results={"mobility": 0.42},
@@ -115,8 +113,8 @@ def main() -> None:
         reopened = Knowledge.open(harvested.path)
         assert isinstance(reopened, Observation)
         assert [(s.kind, s.ref) for s in reopened.sources] == [
-            ("run", run.id),
-            ("experiment", experiment.id),
+            ("run", str(ref_of(run))),
+            ("experiment", str(ref_of(experiment))),
         ]
 
 

@@ -1,4 +1,4 @@
-"""``harvest_run`` — turn a finished Run's outcome into typed knowledge.
+"""Turn a finished Run's outcome into typed knowledge.
 
 The explicit execution→knowledge verb for plain runs: a researcher harvests
 a terminal run into a source-attributed Knowledge document mounted under the
@@ -25,13 +25,12 @@ from molab.ids import slugify
 
 from .concept import Knowledge
 from .knowledge_item import SourceRef
-from .write import write_knowledge
 
 if TYPE_CHECKING:
     from molab._typing import JSONValue
     from molab.workspace.run import Run
 
-__all__ = ["harvest_run"]
+__all__ = ["perform"]
 
 _MAX_VALUE_CHARS = 400
 """Per-value cap in the rendered results table (repr-truncated)."""
@@ -47,28 +46,18 @@ def _last_error(run: Run) -> str | None:
     return None
 
 
-def harvest_run(
+def perform(
+    kind: type[Knowledge],
     run: Run,
-    of: type[Knowledge],
     *,
     narrative: str,
     created_by: str,
     results: dict[str, JSONValue] | None = None,
     name: str | None = None,
 ) -> Knowledge:
-    """Harvest a terminal *run* into sourced Knowledge under its experiment.
+    """Harvest a terminal *run* into *kind* under its experiment.
 
-    Args:
-        run: The terminal run whose outcome is being interpreted.
-        of: Knowledge subclass — this **is** the category.
-        narrative: The interpretation; blank is refused.
-        created_by: Author (person or ``agent:…``).
-        results: Optional result table rendered into the body (values truncated).
-        name: Explicit document name; defaults to ``<kind>-<run id>``, which
-            makes a re-harvest of the same run and kind update in place.
-
-    Returns:
-        The harvested Knowledge document.
+    Called by :meth:`Finding.harvest` (and Report / Plan / Observation).
 
     Raises:
         ValueError: If *run* is not terminal, or *narrative* is blank.
@@ -88,18 +77,13 @@ def harvest_run(
         )
 
     experiment = run.experiment
-    item_name = name or f"{slugify(of.__name__)}-{run.id}"
-    return write_knowledge(
+    item_name = name or f"{slugify(kind.__name__)}-{run.id}"
+    return kind.create(
         experiment,
-        name=item_name,
-        of=of,
-        sources=[
-            SourceRef(kind="run", ref=run.id),
-            SourceRef(kind="experiment", ref=experiment.id),
-        ],
+        item_name,
+        sources=[SourceRef.of(run), SourceRef.of(experiment)],
         created_by=created_by,
-        text=_render_body(run, cls=of, narrative=narrative, results=results),
-        cite=[(run, "derived_from")],
+        text=_render_body(run, cls=kind, narrative=narrative, results=results),
     )
 
 
@@ -120,7 +104,7 @@ def _render_body(
         "",
         f"- status: {status}",
     ]
-    params = run.metadata.parameters
+    params = run.parameters
     if params:
         lines.append(f"- params: {_truncate(repr(params))}")
     error = _last_error(run)

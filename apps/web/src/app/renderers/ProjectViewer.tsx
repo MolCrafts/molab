@@ -15,6 +15,7 @@ import type { DataTableColumn, DataTableRowAction } from "@/app/components/entit
 import {
   CopyButton,
   DashboardCanvas,
+  DashboardCard,
   DataTable,
   EMPTY_COPY,
   EmptyState,
@@ -23,15 +24,15 @@ import {
   OverviewSurface,
   StatusBreakdown,
   StatusDistribution,
-  StatusDonut,
   StatusLegend,
 } from "@/app/components/entity";
-import { statusDonutSegments, successRate } from "@/app/renderers/dashboardData";
+import { successRate } from "@/app/renderers/dashboardData";
 import {
   buildProjectWorkbenchData,
   experimentRunCompleteness,
   projectSnapshotCompleteness,
 } from "@/app/renderers/entityWorkbenchData";
+import { experimentWorkflowLabel } from "@/app/state/api";
 import { projectAssetsQueryOptions } from "@/app/state/entityQueries";
 import { useNavigationState } from "@/app/state/useNavigationState";
 import type {
@@ -391,7 +392,6 @@ export const ProjectViewer = ({
     ? snapshot.experiments.find((experiment) => experiment.id === createRunExperimentId)
     : null;
   const projectSuccessRate = successRate(workbench.counts);
-  const donutSegments = statusDonutSegments(workbench.counts);
   const experimentCountValue =
     completeness.experimentCount ??
     (projectExperiments.length > 0 ? `≥${projectExperiments.length}` : "—");
@@ -417,7 +417,7 @@ export const ProjectViewer = ({
 
   const overviewWithNav = (
     <OverviewSurface>
-      <DashboardCanvas className="max-w-6xl space-y-8">
+      <DashboardCanvas>
         {completeness.experimentsComplete && completeness.experimentCount === 0 ? (
           <EmptyState
             title={EMPTY_COPY.experiments.title}
@@ -425,58 +425,24 @@ export const ProjectViewer = ({
             icon={<FlaskConical className="size-icon-lg" aria-hidden />}
           />
         ) : (
-          <>
-            <section className="grid gap-8 lg:grid-cols-[auto_minmax(0,1fr)] lg:items-start">
-              {completeness.runsComplete && workbench.counts.total > 0 ? (
-                <StatusDonut
-                  segments={donutSegments}
-                  size={148}
-                  thickness={16}
-                  centerValue={workbench.counts.total}
-                  centerLabel="runs"
-                />
-              ) : (
-                <div className="flex size-36 items-center justify-center rounded-full border border-dashed border-border px-4 text-center text-micro leading-relaxed text-muted-foreground">
-                  {completeness.runsComplete
-                    ? "no runs"
-                    : "Run status appears after all experiment runs load"}
-                </div>
-              )}
-              <div className="min-w-0 space-y-3">
-                <div className="flex flex-wrap items-baseline justify-between gap-3">
-                  <h2 className="text-body-lg font-medium text-foreground">Experiments</h2>
-                  <StatusLegend />
-                </div>
-                {experimentGroups.length > 0 ? (
-                  <StatusBreakdown groups={experimentGroups} />
-                ) : (
-                  <p className="text-micro text-muted-foreground">Loading experiments…</p>
-                )}
-                {completeness.runsComplete && projectSuccessRate !== null && (
-                  <p className="font-mono text-micro tabular-nums text-muted-foreground">
-                    {projectSuccessRate.toFixed(0)}% of terminal runs succeeded
-                  </p>
-                )}
-              </div>
-            </section>
-
-            <section className="space-y-2 border-t border-border pt-6">
-              <h2 className="text-label font-medium text-foreground">Assets</h2>
-              {projectAssetsError ? (
-                <WorkbenchOperationState
-                  kind="error"
-                  density="compact"
-                  title="Could not load project assets"
-                  detail={projectAssetsError}
-                  action={<WorkbenchRetryAction onClick={() => void assetsQuery.refetch()} />}
-                />
-              ) : (
-                <p className="font-mono text-micro tabular-nums text-muted-foreground">
-                  {projectAssetsPending ? "loading…" : `${projectAssets.length} registered`}
-                </p>
-              )}
-            </section>
-          </>
+          <DashboardCard title="Experiments">
+            <StatusLegend className="mb-3" />
+            {completeness.runsComplete && projectSuccessRate !== null ? (
+              <p className="mb-3 font-mono text-micro tabular-nums text-muted-foreground">
+                {projectSuccessRate.toFixed(0)}% of terminal runs succeeded
+              </p>
+            ) : null}
+            {!completeness.runsComplete ? (
+              <p className="mb-3 text-micro text-muted-foreground">
+                Run status appears after all experiment runs load
+              </p>
+            ) : null}
+            {experimentGroups.length > 0 ? (
+              <StatusBreakdown groups={experimentGroups} />
+            ) : (
+              <p className="text-micro text-muted-foreground">Loading experiments…</p>
+            )}
+          </DashboardCard>
         )}
       </DashboardCanvas>
     </OverviewSurface>
@@ -487,6 +453,15 @@ export const ProjectViewer = ({
       <EntityPage
         icon={FolderKanban}
         title={project.name}
+        meta={
+          <span>
+            {projectAssetsError
+              ? "assets unavailable"
+              : projectAssetsPending
+                ? "assets …"
+                : `${projectAssets.length} assets`}
+          </span>
+        }
         actions={<CopyButton value={project.id} label="project ID" />}
         activeTab={activeTab}
         onActiveTabChange={setProjectTab}
@@ -598,9 +573,8 @@ export const ProjectViewer = ({
             label: "Settings",
             content: (
               <OverviewSurface>
-                <DashboardCanvas className="max-w-3xl space-y-8">
-                  <section className="space-y-3">
-                    <h3 className="text-body-lg font-medium text-foreground">Project</h3>
+                <DashboardCanvas>
+                  <DashboardCard title="Project">
                     <Table>
                       <TableBody>
                         <TableRow>
@@ -627,10 +601,9 @@ export const ProjectViewer = ({
                         </TableRow>
                       </TableBody>
                     </Table>
-                  </section>
+                  </DashboardCard>
 
-                  <section className="space-y-3">
-                    <h3 className="text-body-lg font-medium text-foreground">Lifecycle</h3>
+                  <DashboardCard title="Lifecycle">
                     <div className="flex flex-wrap items-center justify-between gap-4 rounded-panel border border-border px-4 py-3">
                       <div className="min-w-0">
                         <p className="text-body text-foreground">Delete project</p>
@@ -665,7 +638,7 @@ export const ProjectViewer = ({
                         action={<WorkbenchRetryAction onClick={() => void handleDelete()} />}
                       />
                     )}
-                  </section>
+                  </DashboardCard>
                 </DashboardCanvas>
               </OverviewSurface>
             ),
@@ -676,7 +649,7 @@ export const ProjectViewer = ({
         <CreateRunDialog
           projectId={createRunExperiment.projectId}
           experimentId={createRunExperiment.id}
-          workflowFile={createRunExperiment.workflowFile || ""}
+          workflowFile={experimentWorkflowLabel(createRunExperiment)}
           open
           trigger={null}
           onOpenChange={(nextOpen) => {

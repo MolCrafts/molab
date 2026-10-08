@@ -1,21 +1,6 @@
-"""Class-named knowledge heads: ``Note`` → ``note.json``, never ``meta.json``."""
+"""Knowledge file names: ``knowledges/<stem>.md``."""
 
 from __future__ import annotations
-
-import re
-
-_CAMEL_TO_SNAKE = re.compile(r"(?<!^)(?=[A-Z])")
-
-KNOWLEDGE_HEAD_FILES: frozenset[str] = frozenset(
-    {
-        "note.json",
-        "literature.json",
-        "report.json",
-        "finding.json",
-        "plan.json",
-        "observation.json",
-    }
-)
 
 KNOWLEDGE_MD_SUFFIXES: tuple[str, ...] = (".md", ".mdx")
 KNOWLEDGE_CONTAINER = "knowledges"
@@ -32,9 +17,3 @@ def as_knowledge_file(path: str) -> str:
     if is_knowledge_file(path):
         return path
     return f"{path}.md"
-
-
-def knowledge_filename(cls: type) -> str:
-    """Singular class-named JSON basename (``Note`` → ``note.json``)."""
-    snake = _CAMEL_TO_SNAKE.sub("_", cls.__name__).lower()
-    return f"{snake}.json"

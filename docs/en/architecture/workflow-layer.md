@@ -27,9 +27,9 @@ cli / server    ───────► workflow ───────► works
 
 Concretely the workflow layer reaches downward for:
 
-- `FileCacheStore(run_dir / "cache")` — the run-local content-addressed
+- `FileCacheStore` under `.molab/runs/<run-id>/cache/` — the run-local
   result cache (auto-derived from `run_context`). The user-home
-  `~/.molab/cache/` shortcut is gone; execute does not create a
+  A user-home cache shortcut is gone; execute does not create a
   workspace-root `cache/`.
 - `workspace.atomic_write_json` — used by the execution-document
   writer (`_engine/persistence.py`) to write `workflow.json`
@@ -56,11 +56,11 @@ opaque.
   plus the structural `Runnable` / `Streamable` protocols)
 - task-type registry (`TaskTypeRegistry`) for IR-driven round-trip
 - snapshotting and content-addressed identity (`TaskSnapshot`,
-  `WorkflowVersion`)
+  `workflow_digest`)
 - **caching**: `Caching` orchestrates the cache policy (key
   derivation, format version, LRU eviction) on top of a pluggable
-  `CacheStore` (`FileCacheStore(run_dir / "cache")` for execute;
-  `ws.cache.as_cache_store()` remains opt-in)
+  `CacheStore` (`.molab/runs/<run-id>/cache/` for execute;
+  an explicit `FileCacheStore` remains opt-in)
 - **persistence**: the coalescing execution-document writer
   (`_engine/persistence.py` — `open_execution_document` /
   bounded-staleness flush / mandatory synchronous flush on failures
@@ -113,7 +113,7 @@ from molab.workflow import (
     TaskContext,
     Caching,
     FileCacheStore,
-    WorkflowSnapshotRef,
+    workflow_digest,
 )
 ```
 

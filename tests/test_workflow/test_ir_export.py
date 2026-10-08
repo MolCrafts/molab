@@ -61,7 +61,7 @@ class TestToGraphIR:
 
         assert isinstance(ir, WorkflowGraphIR)
         assert ir.name == "pipeline"
-        assert ir.workflow_id == spec.workflow_id
+        assert {"workflow_id", "workflow_digest"}.isdisjoint(type(ir).model_fields)
 
         by_name = {t.name: t for t in ir.tasks}
         assert [t.name for t in ir.tasks] == ["fetch", "validate", "publish", "rollback", "stream"]

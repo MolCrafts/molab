@@ -12,9 +12,10 @@ import hashlib
 import json
 from pathlib import Path
 
+import pytest
 from rich.console import Console
 
-from molab.cli.tui.rendering import _detail_run
+from molab.cli.tui.rendering import _detail_execution, _detail_experiment, _detail_run
 from molab.cli.tui.tree_model import TreeNode
 from molab.profile import ProfileConfig
 from molab.workspace import Workspace
@@ -32,7 +33,7 @@ def _run_with_record(tmp_path: Path) -> Run:
     ws = Workspace(tmp_path / "lab", name="Lab")
     ws.materialize()
     run = ws.add_project("p").add_experiment("e").add_run(params={"x": 1})
-    run.create_execution(
+    run._create_execution(
         profile_config=ProfileConfig({"nodes": 2}, name="cpu"),
         environment={"script": "/lab/s.py"},
         executor={"backend": "molq", "scheduler": "slurm", "scheduler_job_id": "4242"},
@@ -103,3 +104,66 @@ class TestStateStyleCoversExecutionStatuses:
         ):
             assert _STATE_STYLE.get(status) == _STATE_STYLE[analogue], status
             assert _state_icon(status) == _state_icon(analogue), status
+
+
+class TestDetailExecution:
+    def test_names_execution_dir_not_error_txt(self, tmp_path: Path) -> None:
+        ws = Workspace(tmp_path / "lab", name="Lab")
+        ws.materialize()
+        run = ws.add_project("p").add_experiment("e").add_run(params={"x": 1})
+        with pytest.raises(RuntimeError), run.start():
+            raise RuntimeError("boom")
+        node = TreeNode(
+            kind="execution",
+            node_id=("execution", "e01"),
+            display_label="e01",
+            ref=(run, "e01"),
+        )
+
+        console = Console(record=True, width=200, height=40)
+        for item in _detail_execution(node):
+            console.print(item)
+        text = console.export_text()
+
+        assert str(run.execution_dir("e01")) in text
+        assert "error.txt" not in text
+
+
+class TestDetailExperiment:
+    def test_code_binding_rows(self, tmp_path: Path) -> None:
+        ws = Workspace(tmp_path / "lab", name="Lab")
+        ws.materialize()
+        exp = ws.add_project("p").add_experiment("e")
+        exp.bind_workflow("code", entrypoint="train.py:build")
+        node = TreeNode(
+            kind="experiment",
+            node_id=("project", "p", "experiment", exp.id),
+            display_label=exp.name,
+            ref=exp,
+        )
+        console = Console(record=True, width=200, height=40)
+        for item in _detail_experiment(node):
+            console.print(item)
+        text = console.export_text()
+        assert "workflow_kind" in text
+        assert "code" in text
+        assert "workflow_entrypoint" in text
+        assert "train.py:build" in text
+        assert "task_configs" not in text
+
+    def test_unbound_omits_both_rows(self, tmp_path: Path) -> None:
+        ws = Workspace(tmp_path / "lab", name="Lab")
+        ws.materialize()
+        exp = ws.add_project("p").add_experiment("e")
+        node = TreeNode(
+            kind="experiment",
+            node_id=("project", "p", "experiment", exp.id),
+            display_label=exp.name,
+            ref=exp,
+        )
+        console = Console(record=True, width=200, height=40)
+        for item in _detail_experiment(node):
+            console.print(item)
+        text = console.export_text()
+        assert "workflow_kind" not in text
+        assert "workflow_entrypoint" not in text

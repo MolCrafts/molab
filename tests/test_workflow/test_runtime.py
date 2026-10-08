@@ -2,15 +2,16 @@
 
 Post-rectification the runtime takes an opaque duck-typed ``run_context`` and a
 ``Mapping[str, Any]`` config — never a ``Workspace.Run`` or ``ProfileConfig``
-(the legacy ``run=`` kwarg is gone; ``run_dir=`` accepts a path directly). This
+(the legacy ``run=`` and ``run_dir=`` kwargs are gone). This
 file owns that boundary: failure→status, run_context handling (duck-typed, never
 exposed on the public ``TaskContext``), executions materialization, the bare
 ``Runnable`` protocol body, the ``scratch_root``/``ctx.workdir`` contract, and
 the context contract (the run context names the attempt through ``id`` /
-``execution_dir`` / ``based_on_execution_id``; the journal lands in
+``execution_dir`` / ``predecessor``; the journal lands in
 ``execution_dir`` and nowhere else; an incomplete context is a ``TypeError``;
-``run_dir=`` / ``execution_id=`` without a context, or a mismatched id, is a
-``ValueError``; a bare in-memory run reports ``None`` and writes no journal).
+``execution_id=`` without a context, or a mismatched id, is a ``ValueError``;
+passing ``run_dir=`` is a ``TypeError``; a bare in-memory run reports ``None``
+and writes no journal).
 
 Graph topology (chains, diamonds, dict-merge binding, explicit parallelism) is
 owned by ``test_parallel`` / ``test_by_name_binding`` / ``test_values_on_edges``
@@ -34,7 +35,7 @@ class _RunContextStub:
     """Minimal duck-typed ``run_context`` — what the runtime requires.
 
     Names its attempt through ``id`` / ``execution_dir`` /
-    ``based_on_execution_id`` (the runtime composes no path: the journal goes
+    ``predecessor`` (the runtime composes no path: the journal goes
     to ``execution_dir``), plus ``.run_dir`` / ``.config`` / ``.run`` /
     ``.params`` / ``.bypass_cache``. No ``Workspace`` import.
     """
@@ -52,7 +53,7 @@ class _RunContextStub:
         self.run_dir = run_dir
         self.id = execution_id
         self.execution_dir = execution_dir or run_dir / "slot" / execution_id
-        self.based_on_execution_id = None
+        self.predecessor = None
         self.bypass_cache = False
         self.config = config or {}
         # Root-task params reach the body by name (engine reads run_context.params).
@@ -135,13 +136,13 @@ class TestWorkflowRuntimeExecute:
         assert not (run_dir / "executions").exists()
 
     async def test_legacy_run_dir_and_context_shape(self, tmp_path: Path) -> None:
-        """``run_dir=`` beside a context is accepted but does not locate the
-        journal: it lands at ``run.execution_dir(ctx.id)``."""
+        """The journal lands at the context's execution dir, not a path the
+        runtime composes."""
         ws = Workspace(tmp_path / "ws", name="lab")
         run = ws.add_project("p").add_experiment("e").add_run(params={"x": 1})
         with run.start() as ctx:
             result = await WorkflowRuntime().execute(
-                _ok_workflow(), run_dir=run.run_dir, run_context=ctx, execution_id=ctx.id
+                _ok_workflow(), run_context=ctx, execution_id=ctx.id
             )
         assert result.status == "succeeded"
         assert (run.execution_dir(ctx.id) / "workflow.json").is_file()
@@ -154,7 +155,7 @@ class TestWorkflowRuntimeExecute:
         class _NoDirContext:
             def __init__(self, run_dir: Path) -> None:
                 self.id = "e01"
-                self.based_on_execution_id = None
+                self.predecessor = None
                 self.run_dir = run_dir
                 self.bypass_cache = False
 
@@ -163,13 +164,18 @@ class TestWorkflowRuntimeExecute:
             await WorkflowRuntime().execute(_ok_workflow(), run_context=run_ctx)
         assert list(tmp_path.rglob("workflow.json")) == []
 
-    async def test_run_dir_without_context_raises(self, tmp_path: Path) -> None:
-        """A journal belongs to an Execution: ``run_dir=`` alone is refused and
-        nothing is written."""
-        run_dir = tmp_path / "r"
-        with pytest.raises(ValueError, match="run_context"):
-            await WorkflowRuntime().execute(_ok_workflow(), run_dir=run_dir)
-        assert not run_dir.exists()
+    async def test_run_dir_kwarg_is_gone(self, tmp_path: Path) -> None:
+        """``run_dir`` is not a parameter; passing it is a ``TypeError``."""
+        import dataclasses
+        import inspect
+
+        from molab.workflow._engine.state import WorkflowDeps
+
+        assert "run_dir" not in inspect.signature(WorkflowRuntime.execute).parameters
+        assert "run_dir" not in inspect.signature(WorkflowRuntime.start).parameters
+        assert "run_dir" not in {field.name for field in dataclasses.fields(WorkflowDeps)}
+        with pytest.raises(TypeError):
+            await WorkflowRuntime().execute(_ok_workflow(), run_dir=tmp_path)
 
     async def test_execution_id_without_context_raises(self) -> None:
         with pytest.raises(ValueError, match="run_context"):
@@ -249,11 +255,10 @@ class TestWorkflowRuntimeExecute:
 @pytest.mark.asyncio
 class TestWorkflowRuntimeStart:
     async def test_run_dir_without_context_raises_before_scheduling(self, tmp_path: Path) -> None:
-        """``start`` refuses ``run_dir=`` without a context synchronously — no
-        background task is scheduled and nothing is written."""
+        """``start(run_dir=...)`` is a ``TypeError`` before any task is scheduled."""
         run_dir = tmp_path / "r"
         before = asyncio.all_tasks()
-        with pytest.raises(ValueError, match="run_context"):
+        with pytest.raises(TypeError):
             await WorkflowRuntime().start(_ok_workflow(), run_dir=run_dir)
         assert asyncio.all_tasks() - before == set()
         assert not run_dir.exists()
@@ -269,7 +274,7 @@ class TestWorkflowRuntimeStart:
         assert doc["finished_at"] is not None
 
     async def test_context_without_execution_dir_raises_type_error(self, tmp_path: Path) -> None:
-        run_ctx = SimpleNamespace(id="e01", based_on_execution_id=None, bypass_cache=False)
+        run_ctx = SimpleNamespace(id="e01", predecessor=None, bypass_cache=False)
         with pytest.raises(TypeError, match="execution_dir"):
             await WorkflowRuntime().start(_ok_workflow(), run_context=run_ctx)
 
@@ -277,6 +282,13 @@ class TestWorkflowRuntimeStart:
         """A bare background run reports ``execution_id is None`` and completes."""
         handle = await WorkflowRuntime().start(_ok_workflow())
         assert handle.execution_id is None
+        assert (await handle.wait()).status == "succeeded"
+
+    async def test_bare_start_handle_carries_workflow_digest(self) -> None:
+        compiled = _ok_workflow()
+        handle = await WorkflowRuntime().start(compiled)
+        assert handle.workflow_digest == compiled.workflow_digest
+        assert not hasattr(handle, "workflow_id")
         assert (await handle.wait()).status == "succeeded"
 
 

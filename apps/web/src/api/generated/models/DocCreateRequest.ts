@@ -5,6 +5,6 @@
 export type DocCreateRequest = {
     name: string;
     body?: string;
-    parentPath?: (string | null);
+    hostPath?: (string | null);
 };
 

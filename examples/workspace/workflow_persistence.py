@@ -62,7 +62,7 @@ async def main() -> None:
 
     with run.start(
         mode=ExecutionMode.RETRY,
-        based_on_execution_id=first_execution_id,
+        predecessor=first_execution_id,
         profile_config=cfg,
     ) as ctx:
         result = await WorkflowRuntime().execute(compiled, run_context=ctx)

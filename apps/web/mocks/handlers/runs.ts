@@ -33,6 +33,7 @@ export const runHandlers = [
                 id: runId,
                 name: runName,
                 path: `projects/${projectId}/experiments/${experimentId}/runs/${runName}`,
+                ref: `molab:experiment/${experimentId}/run/${runId}`,
                 projectId: projectId as string,
                 experimentId: experimentId as string,
                 status: "pending",
@@ -559,6 +560,7 @@ export const runHandlers = [
                 name: clonedName,
                 // A rerun is the same intent, so the same directory name.
                 path: `projects/${run.projectId}/experiments/${run.experimentId}/runs/${clonedName}`,
+                ref: `molab:experiment/${run.experimentId}/run/${newRunId}`,
                 projectId: run.projectId,
                 experimentId: run.experimentId,
                 status: "pending",

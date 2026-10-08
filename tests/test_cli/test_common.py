@@ -34,7 +34,7 @@ def _experiment(tmp_path: Path) -> Experiment:
 def _run_with_record(tmp_path: Path) -> Run:
     """A run whose only provenance is the QUEUED e01 execution record."""
     run = _experiment(tmp_path).add_run(params={"x": 1})
-    run.create_execution(
+    run._create_execution(
         profile_config=ProfileConfig({"nodes": 2}, name="cpu"),
         environment={"script": "/lab/s.py"},
         executor={"backend": "molq", "scheduler": "slurm", "scheduler_job_id": "4242"},
@@ -69,9 +69,9 @@ class TestRunEnvironment:
 
         run = _run_with_record(tmp_path)
         run.cancel("e01")
-        run.create_execution(
+        run._create_execution(
             mode=ExecutionMode.RERUN,
-            based_on_execution_id="e01",
+            predecessor="e01",
             profile_config=ProfileConfig({}, name="gpu"),
         )
 

@@ -1,15 +1,14 @@
 /**
- * Run lifecycle — single source for status → allowed verbs.
+ * Run lifecycle — status to allowed verbs, and the four creation modes.
  *
- * Mirrors workspace/server law (three orthogonal verbs + cancel):
+ * `executionModeOptions` mirrors the server rule:
+ *   initial    — only when the run has no attempt
+ *   rerun      — any terminal predecessor, including skipped and succeeded
+ *   resume     — a failed, cancelled, or interrupted predecessor
+ *   reproduce  — a succeeded predecessor; the request always bypasses the cache
+ * An active predecessor (queued, pending, running, finalizing) enables nothing.
  *
- *   pending              → start
- *   running              → cancel
- *   failed | cancelled   → resume | rerun | rerun-fresh
- *   succeeded            → (done; harvest is post-hoc knowledge)
- *
- * Harvest is not a lifecycle verb; it is available on any terminal
- * outcome the backend accepts (succeeded / failed / cancelled).
+ * Harvest is not a creation mode. It is available on succeeded, failed, and cancelled.
  */
 
 export const RETRYABLE_STATUSES = new Set(["failed", "cancelled"]);
@@ -17,7 +16,27 @@ export const RETRYABLE_STATUSES = new Set(["failed", "cancelled"]);
 /** Terminal outcomes that may be interpreted into Knowledge. */
 export const HARVESTABLE_STATUSES = new Set(["succeeded", "failed", "cancelled"]);
 
-export const TERMINAL_STATUSES = new Set(["succeeded", "failed", "cancelled", "skipped"]);
+export const TERMINAL_STATUSES = new Set([
+  "succeeded",
+  "failed",
+  "cancelled",
+  "interrupted",
+  "skipped",
+]);
+
+export const RESUMABLE_STATUSES = new Set(["failed", "cancelled", "interrupted"]);
+
+const ACTIVE_STATUSES = new Set(["queued", "pending", "running", "finalizing"]);
+
+export type ExecutionModeValue = "initial" | "rerun" | "resume" | "reproduce";
+
+export interface ExecutionModeOption {
+  value: ExecutionModeValue;
+  label: string;
+  description: string;
+  enabled: boolean;
+  reason: string | null;
+}
 
 export type RunLifecyclePhase = "pending" | "running" | "retryable" | "succeeded" | "other";
 
@@ -39,11 +58,80 @@ export function canCancel(status: string): boolean {
 }
 
 export function canResume(status: string): boolean {
-  return RETRYABLE_STATUSES.has(status.toLowerCase());
+  return RESUMABLE_STATUSES.has(status.toLowerCase());
 }
 
 export function canRerun(status: string): boolean {
-  return RETRYABLE_STATUSES.has(status.toLowerCase());
+  return TERMINAL_STATUSES.has(status.toLowerCase());
+}
+
+export function canReproduce(status: string): boolean {
+  return status.toLowerCase() === "succeeded";
+}
+
+export function executionModeOptions(input: {
+  attempts: number;
+  basedOnStatus: string | null;
+}): ExecutionModeOption[] {
+  const status = input.basedOnStatus?.toLowerCase() ?? null;
+  const hasAttempt = input.attempts > 0;
+  const active = status !== null && ACTIVE_STATUSES.has(status);
+  const initialReason = hasAttempt ? "This run already has an attempt." : null;
+  const missing = "This run has no attempt yet; start with Initial.";
+  const activeReason = "The predecessor execution is still active; cancel it first.";
+
+  const reasonFor = (enabled: boolean, succeededReason: string | null): string | null => {
+    if (!hasAttempt) return missing;
+    if (active) return activeReason;
+    if (enabled) return null;
+    return succeededReason;
+  };
+
+  return [
+    {
+      value: "initial",
+      label: "Initial",
+      description: "Create an independent first realization.",
+      enabled: !hasAttempt,
+      reason: initialReason,
+    },
+    {
+      value: "rerun",
+      label: "Rerun",
+      description: "Run the same scientific definition again.",
+      enabled: hasAttempt && !active && (status === null || canRerun(status)),
+      reason: reasonFor(hasAttempt && !active && (status === null || canRerun(status)), null),
+    },
+    {
+      value: "resume",
+      label: "Resume",
+      description: "Continue from an optional checkpoint artifact.",
+      enabled: hasAttempt && !active && status !== null && canResume(status),
+      reason: reasonFor(
+        hasAttempt && !active && status !== null && canResume(status),
+        status === "succeeded"
+          ? "A succeeded execution has nothing to resume; use Rerun or Reproduce."
+          : null,
+      ),
+    },
+    {
+      value: "reproduce",
+      label: "Reproduce",
+      description: "Create a reproducibility verification execution.",
+      enabled: hasAttempt && !active && status !== null && canReproduce(status),
+      reason: reasonFor(hasAttempt && !active && status !== null && canReproduce(status), null),
+    },
+  ];
+}
+
+export function defaultExecutionMode(options: ExecutionModeOption[]): ExecutionModeValue {
+  if (options.find((option) => option.value === "initial")?.enabled) return "initial";
+  if (options.find((option) => option.value === "rerun")?.enabled) return "rerun";
+  return options.find((option) => option.enabled)?.value ?? "rerun";
+}
+
+export function bypassCacheFor(mode: ExecutionModeValue, requested: boolean): boolean {
+  return mode === "reproduce" || requested;
 }
 
 export function canHarvest(status: string): boolean {

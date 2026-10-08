@@ -91,26 +91,26 @@ class TestRunMonitorReconcile:
         experiment = _experiment(tmp_path)
 
         queued_molq = experiment.add_run(params={"seed": 1})
-        queued_molq.create_execution(executor=dict(_MOLQ_EXECUTOR))
+        queued_molq._create_execution(executor=dict(_MOLQ_EXECUTOR))
 
         queued_local = experiment.add_run(params={"seed": 2})
-        queued_local.create_execution()
+        queued_local._create_execution()
 
         sealed_molq = experiment.add_run(params={"seed": 3})
-        sealed_molq.create_execution(executor=dict(_MOLQ_EXECUTOR))
+        sealed_molq._create_execution(executor=dict(_MOLQ_EXECUTOR))
         sealed_molq.cancel("e01")
 
         retried_molq = experiment.add_run(params={"seed": 4})
-        retried_molq.create_execution(executor=dict(_MOLQ_EXECUTOR))
+        retried_molq._create_execution(executor=dict(_MOLQ_EXECUTOR))
         retried_molq.cancel("e01")
-        retried_molq.create_execution(
+        retried_molq._create_execution(
             mode=ExecutionMode.RERUN,
-            based_on_execution_id="e01",
+            predecessor="e01",
             executor=dict(_MOLQ_EXECUTOR),
         )
 
         running_molq = experiment.add_run(params={"seed": 5})
-        running_molq.create_execution(executor=dict(_MOLQ_EXECUTOR))
+        running_molq._create_execution(executor=dict(_MOLQ_EXECUTOR))
         _repository(running_molq).start("e01")
 
         never_submitted = experiment.add_run(params={"seed": 6})
@@ -139,9 +139,9 @@ class TestRunMonitorReconcile:
     ) -> None:
         experiment = _experiment(tmp_path)
         local = experiment.add_run(params={"seed": 1})
-        local.create_execution()
+        local._create_execution()
         sealed_molq = experiment.add_run(params={"seed": 2})
-        sealed_molq.create_execution(executor=dict(_MOLQ_EXECUTOR))
+        sealed_molq._create_execution(executor=dict(_MOLQ_EXECUTOR))
         sealed_molq.cancel("e01")
         spy = _install_single_poll(monkeypatch)
 
@@ -208,7 +208,7 @@ def _install_polls(monkeypatch: pytest.MonkeyPatch, polls: int) -> list[Dashboar
 
 def _queued_molq(experiment: Experiment, seed: int) -> Run:
     run = experiment.add_run(params={"seed": seed})
-    run.create_execution(executor=dict(_MOLQ_EXECUTOR))
+    run._create_execution(executor=dict(_MOLQ_EXECUTOR))
     return run
 
 
@@ -302,7 +302,7 @@ def _run_with_record(root: Path) -> Run:
     ws = Workspace(root / "lab", name="Lab")
     ws.materialize()
     run = ws.add_project("p").add_experiment("e").add_run(params={"x": 1})
-    run.create_execution(
+    run._create_execution(
         profile_config=ProfileConfig({"nodes": 2}, name="cpu"),
         environment={"script": "/lab/s.py"},
         executor={"backend": "molq", "scheduler": "slurm", "scheduler_job_id": "4242"},
@@ -393,3 +393,16 @@ class TestRunMonitor:
         assert state.jobs[0].state == "succeeded"
         assert state.done == 1
         assert state.pending == 0
+
+    def test_failed_row_carries_execution_error(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        ws = Workspace(tmp_path / "lab", name="Lab")
+        ws.materialize()
+        run = ws.add_project("p").add_experiment("e").add_run(params={"x": 1})
+        with pytest.raises(RuntimeError), run.start():
+            raise RuntimeError("oom-marker")
+
+        state = _single_state(monkeypatch, [run])
+
+        assert state.jobs[0].message == "oom-marker"

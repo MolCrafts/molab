@@ -77,43 +77,81 @@ class TestValidateWorkspace:
         report = ws.validate()
         assert "concept.marker" not in {v.rule for v in report.errors}
 
-    def test_stray_directory_is_flagged(self, tmp_path: Path) -> None:
-        # A results dir dropped at the root is neither a container nor a Concept.
+    def test_unknown_host_directory_is_not_judged(self, tmp_path: Path) -> None:
         ws = _workspace(tmp_path)
-        (Path(ws.resolve()) / "leftover-run-output").mkdir()
+        root = Path(ws.resolve())
+        (root / "leftover-run-output").mkdir()
+        (root / "projects" / "alpha" / "plan").mkdir()
+        run = next(root.glob("projects/alpha/experiments/sweep/runs/*"))
+        (run / "knowledges").mkdir()
+        (run / "ops").mkdir()
+
+        report = ws.validate()
+
+        assert report.ok, report.violations
+        assert not any(v.rule == "layout.stray" for v in report.violations)
+
+    def test_execution_dir_registered_after_import_is_not_a_stray(self, tmp_path: Path) -> None:
+        from molab.workspace.execution_dirs import ExecutionDir, register_execution_dir
+
+        register_execution_dir(
+            ExecutionDir(
+                name="late", purpose="registered after import", versioned=False, products=False
+            )
+        )
+        ws = _workspace(tmp_path)
+        run = next(Path(ws.resolve()).glob("projects/alpha/experiments/sweep/runs/*"))
+        (run / "executions" / "e01" / "late").mkdir(parents=True)
+        (run / "executions" / "e01" / "leftover").mkdir()
+
+        report = ws.validate()
+        stray = [item for item in report.errors if item.rule == "layout.stray"]
+
+        assert not any(
+            item.path.endswith("/late") or item.path.endswith("e01/late") for item in stray
+        )
+        assert len(stray) == 1
+        assert stray[0].path.endswith("executions/e01/leftover")
+
+    def test_legacy_uuid_attempt_dir_is_a_warning(self, tmp_path: Path) -> None:
+        ws = _workspace(tmp_path)
+        run = next(Path(ws.resolve()).glob("projects/alpha/experiments/sweep/runs/*"))
+        name = "0190f0e2-7c1a-7d4e-9b2a-3c4d5e6f7a8b"
+        (run / "executions" / name).mkdir(parents=True)
+
+        report = ws.validate()
+        legacy = [item for item in report.violations if item.rule == "execution.legacy_name"]
+        named = [item for item in report.violations if item.rule == "execution.name"]
+
+        assert named == []
+        assert len(legacy) == 1
+        assert legacy[0].severity == "warning"
+        assert "molab migrate layout" in legacy[0].detail
+        assert "molab migrate layout" in legacy[0].hint
+        assert report.ok is True
+
+    def test_non_attempt_name_is_flagged(self, tmp_path: Path) -> None:
+        ws = _workspace(tmp_path)
+        run = next(Path(ws.resolve()).glob("projects/alpha/experiments/sweep/runs/*"))
+        (run / "executions" / "attempt-1").mkdir(parents=True)
+
+        report = ws.validate()
+        named = [item for item in report.errors if item.rule == "execution.name"]
+
+        assert len(named) == 1
+        assert "legacy attempt UUID" in named[0].detail
+
+    def test_stray_inside_an_execution_dir_is_flagged(self, tmp_path: Path) -> None:
+        ws = _workspace(tmp_path)
+        root = Path(ws.resolve())
+        run = next(root.glob("projects/alpha/experiments/sweep/runs/*"))
+        (run / "executions" / "e01" / "leftover").mkdir(parents=True)
 
         report = ws.validate()
         stray = [v for v in report.errors if v.rule == "layout.stray"]
-        assert [v.path for v in stray] == ["leftover-run-output"]
 
-    def test_a_concept_mounted_anywhere_is_not_a_stray(self, tmp_path: Path) -> None:
-        # Any Folder subclass may mount at any Folder; the document's own head is
-        # what makes it legitimate, not its name.
-        from molab.knowledge import mount_note
-
-        ws = _workspace(tmp_path)
-        mount_note(ws.get_project("alpha"), "reading")
-
-        report = ws.validate()
-        assert "layout.stray" not in {v.rule for v in report.errors}
-        assert report.ok
-
-    def test_headless_children_of_knowledges_are_never_flagged(self, tmp_path: Path) -> None:
-        # ``knowledges/`` is a container the workspace owns. The container-head
-        # check that used to scan its children is gone: a bare child directory
-        # and a plain file item are both legal, and neither is a stray.
-        ws = _workspace(tmp_path)
-        knowledges = Path(ws.resolve()) / "knowledges"
-        (knowledges / "loose").mkdir(parents=True, exist_ok=True)
-        (knowledges / "lab-note.md").write_text("# lab note\n", encoding="utf-8")
-
-        report = validate_workspace(ws.resolve(), fs=ws.fs)
-
-        assert report.ok, report.violations
-        rules = {v.rule for v in report.violations}
-        assert "layout.container" not in rules
-        assert "layout.stray" not in rules
-        assert not any("loose" in v.path or "lab-note" in v.path for v in report.violations)
+        assert len(stray) == 1
+        assert stray[0].path.endswith("executions/e01/leftover")
 
     def test_validate_takes_no_container_heads_keyword(self, tmp_path: Path) -> None:
         # The container-head check was deleted, not parameterized: no dead knob.
@@ -154,11 +192,13 @@ class TestValidateWorkspace:
 
     def test_error_carries_rule_specific_hint(self, tmp_path: Path) -> None:
         ws = _workspace(tmp_path)
-        (Path(ws.resolve()) / "leftover").mkdir()
+        root = Path(ws.resolve())
+        run = next(root.glob("projects/alpha/experiments/sweep/runs/*"))
+        (run / "executions" / "e01" / "leftover").mkdir(parents=True)
         report = ws.validate()
         stray = next(v for v in report.errors if v.rule == "layout.stray")
         assert stray.hint
-        assert "projects" in stray.hint or "meta.json" in stray.hint
+        assert "execution" in stray.hint
         assert "layout.stray" in report.issues_by_rule()
         assert report.error_count >= 1
         assert report.ok is False

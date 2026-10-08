@@ -49,7 +49,7 @@ cd apps/web
 
 脚本对 100、1000、2000 rows 执行与 Runs list 相同类别的 filter、facet、sort 和 first-page pipeline，并报告 median/p95。
 
-### 2.3 Bundle
+### 2.3 JS bundle 体积
 
 使用 production Rsbuild 输出的 raw/gzip 资产统计。对比点是本轮 internal plugin lazy split 前后的同一工作树检查点；总 bundle 包含异步 WASM/visualization 资产，不能当作首屏下载量。
 
@@ -72,7 +72,7 @@ cd apps/web
 Run detail 使用：
 
 ```text
-/projects/protein-folding/experiments/exp-001/runs/run-001
+/projects/protein-folding/experiments/exp-001/runs/n=8
 ```
 
 结论：当前 mock 数据下没有持续的大型 React commit。Dashboard/Runs 的 steady commit 来自轮询数据；Run detail hydrate 后基本静止。这里没有包含浏览器 layout/paint、网络 RTT、Python 后端 I/O 或 WASM 内部执行时间，因此不能用这些数值声称真实生产 TTI。
@@ -106,7 +106,7 @@ Run detail 在公共 bootstrap 之外只增加两条层级 hydration 请求，�
 
 限制：P3 实施前没有 request-count/Profiler harness，且当前工作树包含其他未提交工作，不能安全回退后生成完全同条件的历史数字。因此 bundle 有直接 before/after 数值；request 与 React 表以当前可复现基线为准，请求优化以代码路径和当前计数记录。后续变更必须用同一 harness 做数值对比。
 
-## 5. Bundle 对比
+## 5. bundle 对比
 
 | Metric | Lazy split 前 | Lazy split 后 | 变化 |
 | --- | ---: | ---: | ---: |

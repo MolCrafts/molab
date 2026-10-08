@@ -2,7 +2,7 @@ import { AlertTriangle, BarChart3, Download } from "lucide-react";
 import { type JSX, useEffect, useMemo, useState } from "react";
 import type { TensorboardScalarSeries, TensorboardScalarsResponse } from "@/api";
 import { TensorboardScalarsError, tensorboardApi } from "@/api";
-import { EmptyState, OverviewSection } from "@/app/components/entity";
+import { DashboardCanvas, EmptyState, OverviewSection } from "@/app/components/entity";
 import type { RendererProps } from "@/app/types";
 import { Input } from "@/components/ui/input";
 import { WorkbenchAction } from "@/components/workbench";
@@ -184,18 +184,11 @@ export const TensorBoardTab = ({ selection, snapshot }: TensorBoardTabProps): JS
   const grouped = groupByPrefix(filtered);
 
   return (
-    <div className="flex-1 overflow-auto bg-background">
-      <div className="mx-auto flex max-w-6xl flex-col gap-6 px-4 py-4 md:px-6">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <BarChart3 className="size-icon text-muted-foreground" />
-            <div className="text-body-lg font-medium text-foreground">TensorBoard</div>
-          </div>
-          <div className="flex flex-wrap items-center gap-3 text-label text-muted-foreground">
-            <span>{data.logdirs.length} logdir</span>
-            <span>{data.series.length} series</span>
-          </div>
-        </div>
+    <div className="min-h-0 flex-1 overflow-auto bg-background">
+      <DashboardCanvas>
+        <p className="font-mono text-micro tabular-nums text-muted-foreground">
+          {data.logdirs.length} logdirs · {data.series.length} series
+        </p>
 
         <div className="flex flex-wrap items-center gap-3 rounded-control border border-border bg-muted/30 px-3 py-2 text-label">
           <Input
@@ -263,7 +256,7 @@ export const TensorBoardTab = ({ selection, snapshot }: TensorBoardTabProps): JS
             </OverviewSection>
           ))
         )}
-      </div>
+      </DashboardCanvas>
     </div>
   );
 };

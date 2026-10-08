@@ -1,6 +1,6 @@
 # TaskContext
 
-`TaskContext` is the execution boundary between a workflow definition and the code inside one task. It is deliberately small: a task declares the runtime values it consumes as **named parameters**, and the only thing it reads off the context object itself is a per-task scratch directory (`ctx.workdir`). A task cannot climb up from its context to the Run, the workspace, or injected services — that is the **pure task context** contract, and it is what makes a task's cache identity (code + config + inputs) complete.
+`TaskContext.workdir` is `out/<task>/`. Results are written when the context exits. Re-emitting a recorded relative artifact path raises `ValueError`, so a checkpoint label is unique within one attempt. `TaskContext` is the execution boundary between a workflow definition and the code inside one task. It is deliberately small: a task declares the runtime values it consumes as **named parameters**, and the only thing it reads off the context object itself is a per-task scratch directory (`ctx.workdir`). A task cannot climb up from its context to the Run, the workspace, or injected services — that is the **pure task context** contract, and it is what makes a task's cache identity (code + config + inputs) complete.
 
 ## How a Task Receives Its Inputs
 

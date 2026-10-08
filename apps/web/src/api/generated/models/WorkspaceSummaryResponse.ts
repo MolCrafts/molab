@@ -17,7 +17,6 @@ export type WorkspaceSummaryResponse = {
     failedRuns?: Array<RunRefResponse>;
     runningRuns?: Array<RunRefResponse>;
     healthFlags?: Array<HealthFlagResponse>;
-    openQuestions?: Array<KnowledgeRefResponse>;
     relevantKnowledge?: Array<KnowledgeRefResponse>;
     nextActions?: Array<NextActionResponse>;
 };

@@ -28,7 +28,8 @@ describe("workbench layout contract", () => {
     const explorer = readWebSource("components/layout/ExplorerShell.tsx");
     const theme = readWebSource("styles/constitution-theme.css");
 
-    expect(shell).toContain('default: "272px"');
+    // 360px: at 272px the project tree truncated most experiment names.
+    expect(shell).toContain('default: "360px"');
     expect(shell).toContain('default: "280px"');
     expect(shell).toContain('className="h-full w-12');
     expect(shell).toContain("Boolean(inspectorSurface || inspectorSelection)");
@@ -66,7 +67,7 @@ describe("workbench layout contract", () => {
     const dock = readWebSource("app/compare/SelectionPanel.tsx");
     const dialog = readWebSource("app/compare/MetricDetailDialog.tsx");
 
-    expect(pane).toContain("EntityHeader");
+    expect(pane).toContain("EntityPage");
     expect(pane).toContain('title="Compare"');
     expect(pane).toContain("flex flex-col overflow-hidden");
     expect(pane).not.toContain("runs from");

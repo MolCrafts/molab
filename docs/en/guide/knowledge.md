@@ -199,13 +199,22 @@ for hit in wiki.search("cooling").hits:
     print(hit.entry.title)
 ```
 
-**Known gap.** A markdown document is walked when it sits under a `knowledges/`
-container — the layout a host workspace gives it. The cross-source search behind
-`molab knowledge search` (`search_sources`, built on `Bundle`) is older than the
-file-document form: it descends directories only and does not see a
-`knowledges/<name>.md` file, so today a wiki of loose `.md` files is best read
-document-by-document with `Knowledge.open(path)` rather than by cross-source
-search.
+`qualify_run_id` stays as the permanent qualifier for a legacy bare run id. A source that is not the workspace uses its registered root as the container.
+If a wiki's documents sit under `<wiki>/knowledges/`, re-register that directory
+as the source root: `molab knowledge sources remove <name>`, then
+`molab knowledge sources add <name> <wiki>/knowledges`.
+
+## Migrating an existing tree
+
+`molab migrate knowledge [WORKSPACE]` is opt-in. It moves legacy documents into `<host>/knowledges/<stem>.md`, keeping the original stem:
+
+- `molab migrate knowledge` reads a host-level `*.md` whose frontmatter `class` names a knowledge class;
+- `molab migrate knowledge` reads `references/<key>.md` and `references/<key>/literature.json` plus `index.md`;
+- `molab migrate knowledge` reads the directory form `knowledges/<id>/<class>.json` plus `index.md`.
+
+Relative links to projects, experiments, runs, executions and artifacts become entity references. A document-to-document link is rebased so it still resolves. Frontmatter `sources:` rows that can be qualified are folded into typed links. A row that is unresolved or ambiguous stays in the frontmatter, and the report names it. A name that is already taken lands as `<stem>-2`, `<stem>-3`, … and both files are kept. Attachments and any other unnamed file stay in place and are listed as leftovers.
+
+`--dry-run` prints the same plan and writes nothing. A real run records one `knowledge.migrated` commit covering only the paths it touched. Run it again and it reports that nothing changed.
 
 ## Next
 

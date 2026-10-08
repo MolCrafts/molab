@@ -10,7 +10,8 @@ export type ExperimentResponse = {
     path: string;
     description?: string;
     workflow?: (string | null);
-    workflowType?: (string | null);
+    workflowKind?: ('code' | 'document' | null);
+    workflowEntrypoint?: (string | null);
     planRunId?: (string | null);
     gitCommit?: (string | null);
     parameterSpace?: Record<string, any>;
@@ -18,5 +19,6 @@ export type ExperimentResponse = {
     created: string;
     runCount?: (number | null);
     runs?: Array<RunSummary>;
+    ref: string;
 };
 

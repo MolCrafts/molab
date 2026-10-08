@@ -1,14 +1,14 @@
 """Workspace: top-level container with project management.
 
 The Workspace is the root of the hierarchy and the only :class:`Folder`
-whose ``parent`` is ``None``. It **owns the disk**
-(:attr:`Workspace.fs`, a :class:`~molab.workspace.fs.FileSystem`).
+whose ``parent`` is ``None``. It holds the disk backend. Every Folder,
+including the Workspace, exposes that disk as :attr:`Folder.fs`.
 Child Folders are locations on that disk; they resolve I/O through
 :meth:`Folder._disk` and expose user writes as :attr:`Folder.files`.
 
-Unlike lower levels, the workspace constructor **does** ensure its root
-directory + ``workspace.json`` exist, because every other level needs a
-materialized workspace as anchor.
+Construction is in memory. A missing ``workspace.json`` gets a new
+UUIDv7 id and is written later, create-if-absent, by ``materialize``
+or the first ``add_project``. A file already on disk is kept.
 
 Child factories (``.add_project(...)``) are idempotent: they load existing
 children from disk or create + materialize new ones.
@@ -16,17 +16,19 @@ children from disk or create + materialize new ones.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from pathlib import Path as _LocalPath
 from typing import TYPE_CHECKING, cast
 
 from molab._typing import JSONValue
+from molab.ids import generate_uuid7
 from molab.path import Path
 
-from .assets import AssetScope, AssetsView, DataAssetLibrary
 from .base import (
     _load_metadata,
     _save_metadata,
 )
+from .domain import AssetScope
 from .errors import ProjectExistsError, ProjectNotFoundError
 from .folder import (
     WORKSPACE_PROJECT_KIND,
@@ -38,12 +40,17 @@ from .folder import (
 from .fs import FileSystem, PathArg
 from .fs_local import LocalFileSystem
 from .models import FolderMetadata, WorkspaceMetadata
+from .naming import EXPERIMENT_CONTAINER, PROJECT_CONTAINER, RUN_CONTAINER
 from .project import Project
-from .utils import slugify
 from .validate import ValidationReport, validate_workspace
 
 if TYPE_CHECKING:
+    from .artifact_repository import AssetRepository
+    from .domain import Artifact, Asset, Execution
+    from .experiment import Experiment
     from .models import ComputeTarget
+    from .refs import MolabRef
+    from .run import Run
     from .workspace_context import ContextFocus, WorkspaceContext
     from .wp import WorkspacePaths
 
@@ -74,6 +81,21 @@ def set_cli_root_override(path: _LocalPath | str | None, *, explicit: bool = Tru
     """
     global _cli_root_override
     _cli_root_override = (_LocalPath(path).resolve(), explicit) if path is not None else None
+
+
+def _lexical_parent(parent: str, current: str) -> bool:
+    """Whether *parent* is the strict lexical parent of *current*.
+
+    ``"."`` is the parent of a relative single segment. ``"/"`` is the parent
+    of every other absolute path. Anything else must be a real path prefix.
+    """
+    if parent == current:
+        return False
+    if parent == "/":
+        return current.startswith("/") and current != "/"
+    if parent == ".":
+        return "/" not in current
+    return current.startswith(parent.rstrip("/") + "/")
 
 
 @register_entity_class
@@ -124,12 +146,13 @@ class Workspace(Folder):
             entity_meta = _load_metadata(WorkspaceMetadata, metadata_path, fs=self.fs)
         else:
             display_name = name if name is not None else self.fs.basename(resolved_raw)
-            entity_meta = WorkspaceMetadata(id=slugify(display_name), name=display_name)
+            entity_meta = WorkspaceMetadata(id=generate_uuid7(), name=display_name)
 
         # Workspace bypasses ``Folder.__init__`` because the human-readable
         # ``name`` may contain characters (e.g. spaces, uppercase) that the
-        # ``_KIND_PATTERN`` validator rejects — the slugified ``id`` is the
-        # kind-safe form persisted in :class:`FolderMetadata`.
+        # ``_KIND_PATTERN`` validator rejects. The id is an owner-minted
+        # UUIDv7 (a legacy workspace keeps the slug already on disk); ``name``
+        # may contain any character.
         self._parent = None
         self._name = entity_meta.id
         self._kind = WORKSPACE_ROOT_KIND
@@ -148,7 +171,6 @@ class Workspace(Folder):
         # genuine-local-I/O sites.
         self.root: Path = self._root_path
         self._entity_metadata: WorkspaceMetadata = entity_meta
-        self._data_assets: DataAssetLibrary | None = None
 
     # ── Folder hooks ─────────────────────────────────────────────────────
 
@@ -169,17 +191,139 @@ class Workspace(Folder):
         """
         return cls(root=child_dir, fs=parent._disk())
 
+    @staticmethod
+    def enclosing_root(path: PathArg, *, fs: FileSystem | None = None) -> Path | None:
+        """Return the nearest ancestor-or-self of *path* that holds the workspace entity file.
+
+        The walk is lexical. This method reads no file, does not resolve
+        symlinks, and ignores the CLI root override. It never constructs a
+        Workspace. A relative path is walked relative to the current directory,
+        and that directory is the last candidate. An empty dirname of an
+        absolute path is the filesystem root, probed once; a parent that is
+        not a strict lexical ancestor stops the walk without being probed.
+        There is exactly one ``is_file`` probe per candidate, up to and
+        including the hit, and no ``open`` / ``read_text`` / ``scandir`` /
+        ``stat`` / ``exists``.
+
+        Args:
+            path: A file or directory, in the caller's spelling.
+            fs: Filesystem to probe. Defaults to a local filesystem.
+
+        Returns:
+            The enclosing root, keeping the caller's spelling, or ``None``.
+        """
+        disk = fs if fs is not None else LocalFileSystem()
+        current = str(path)
+        while True:
+            if disk.is_file(disk.join(current, "workspace.json")):
+                return Path(current)
+            parent = disk.dirname(current)
+            if parent == "" and current.startswith("/"):
+                parent = "/"
+            if parent == current or not _lexical_parent(parent, current):
+                return None
+            current = parent
+
+    @staticmethod
+    def machine_dir(root: PathArg) -> Path:
+        """Machine directory under *root*.
+
+        Locks, caches and other state a person does not open. The caller
+        creates any child path. This does not construct a Workspace, ignores
+        the CLI root override, and does no I/O.
+
+        Args:
+            root: Directory the caller already holds. Its spelling is kept.
+
+        Returns:
+            ``<root>/.molab`` as a :class:`molab.path.Path`.
+        """
+        from .history import MOLAB_DIR
+
+        return Path(str(root)) / MOLAB_DIR
+
+    @staticmethod
+    def list_hosts(root: PathArg, *, fs: FileSystem | None = None) -> Iterator[Path]:
+        """Yield *root*, then each project, experiment and run directory under it.
+
+        Callers pass a root from :meth:`enclosing_root` or a Workspace's
+        ``root``. This method does not check that *root* is a workspace. It
+        calls ``scandir(with_stat=False)`` only and reads no entity JSON. A
+        missing container is skipped. Names starting with ``.`` are skipped.
+        Siblings are sorted by name. A run directory is yielded; nothing
+        inside it is listed. Every yielded path is joined from *root*, so the
+        caller's spelling is kept. The CLI root override is ignored.
+
+        Args:
+            root: Directory to enumerate.
+            fs: Filesystem to list. Defaults to a local filesystem.
+
+        Yields:
+            ``root``, then project, experiment and run directories in pre-order.
+        """
+        disk = fs if fs is not None else LocalFileSystem()
+        root_s = str(root)
+        yield Path(root_s)
+
+        def _child_dirs(container: str) -> list[str]:
+            try:
+                entries = disk.scandir(container, with_stat=False)
+            except OSError:
+                return []
+            return sorted(
+                entry.name for entry in entries if entry.is_dir and not entry.name.startswith(".")
+            )
+
+        for project_name in _child_dirs(disk.join(root_s, PROJECT_CONTAINER)):
+            project_path = disk.join(root_s, PROJECT_CONTAINER, project_name)
+            yield Path(project_path)
+            for experiment_name in _child_dirs(disk.join(project_path, EXPERIMENT_CONTAINER)):
+                experiment_path = disk.join(project_path, EXPERIMENT_CONTAINER, experiment_name)
+                yield Path(experiment_path)
+                for run_name in _child_dirs(disk.join(experiment_path, RUN_CONTAINER)):
+                    yield Path(disk.join(experiment_path, RUN_CONTAINER, run_name))
+
     def _ensure_materialized(self) -> None:
         meta_path = self.fs.join(self.resolve(), "workspace.json")
         if not self.fs.exists(meta_path):
             self.materialize()
+            return
+        self._adopt_entity_metadata(_load_metadata(WorkspaceMetadata, meta_path, fs=self.fs))
+
+    def _adopt_entity_metadata(self, meta: WorkspaceMetadata) -> None:
+        """Take *meta* as this handle's identity (disk won a create race)."""
+        self._entity_metadata = meta
+        self._name = meta.id
+        self._metadata = FolderMetadata(
+            id=meta.id,
+            name=meta.name,
+            kind=WORKSPACE_ROOT_KIND,
+            created_at=meta.created_at,
+            updated_at=meta.created_at,
+        )
+
+    def _create_lock_path(self) -> _LocalPath:
+        from .history import MOLAB_DIR
+
+        lock_dir = self.fs.join(self.resolve(), MOLAB_DIR, "locks")
+        self.fs.mkdir(lock_dir, parents=True, exist_ok=True)
+        return _LocalPath(self.fs.join(lock_dir, "workspace.create.lock"))
+
+    def _persist_if_absent(self) -> None:
+        """Write ``workspace.json`` once. A lost race reloads the winner's id."""
+        from molab.atomicio import file_lock
+
+        meta_path = self.fs.join(self.resolve(), "workspace.json")
+        backend = "flock" if isinstance(self.fs, LocalFileSystem) else "none"
+        with file_lock(self._create_lock_path(), backend=backend):
+            if self.fs.exists(meta_path):
+                self._adopt_entity_metadata(
+                    _load_metadata(WorkspaceMetadata, meta_path, fs=self.fs)
+                )
+                return
+            _save_metadata(self._entity_metadata, meta_path, fs=self.fs)
 
     # ── Properties (entity-specific) ─────────────────────────────────────
-
-    @property
-    def fs(self) -> FileSystem:
-        """The disk this workspace lives on (local, remote, or cached)."""
-        return self._disk()
 
     @property
     def metadata(self) -> WorkspaceMetadata:  # type: ignore[override]
@@ -207,20 +351,55 @@ class Workspace(Folder):
         return self._entity_metadata.created_at
 
     @property
+    def targets(self) -> list[ComputeTarget]:
+        return list(self._entity_metadata.targets)
+
+    @property
     def scope(self) -> AssetScope:
         return AssetScope(kind="workspace", ids=())
 
     @property
-    def assets(self) -> AssetsView:
-        """Scope-filtered asset view (read-only queries)."""
-        return AssetsView(self.root, self.scope)
+    def assets(self) -> AssetRepository:
+        """Named, versioned assets at workspace scope."""
+        from .artifact_repository import AssetRepository
+
+        return AssetRepository(self, self.scope, self.root)
+
+    def assets_at(self, scope: AssetScope) -> AssetRepository:
+        """The repository for *scope*, resolved by id.
+
+        ``workspace`` is this workspace. ``project`` and ``experiment`` reuse
+        the host ``find`` returns. Named assets have no run scope.
+
+        Args:
+            scope: Scope whose repository to return.
+
+        Returns:
+            The repository bound to that host.
+
+        Raises:
+            ValueError: *scope* is a run.
+            RefNotFoundError: The project or experiment does not exist.
+            AmbiguousRefError: The experiment id matches more than one project.
+        """
+        from .experiment import Experiment
+        from .refs import MolabRef
+
+        if scope.kind == "workspace":
+            return self.assets
+        if scope.kind == "project":
+            return cast(Project, self.find(MolabRef(project_id=scope.ids[0]))).assets
+        if scope.kind == "experiment":
+            return cast(Experiment, self.find(MolabRef(experiment_id=scope.ids[1]))).assets
+        raise ValueError("named assets have no run scope")
 
     @property
-    def data_assets(self) -> DataAssetLibrary:
-        """Library for importing ``DataAsset`` inputs."""
-        if self._data_assets is None:
-            self._data_assets = DataAssetLibrary(self.root, self.scope)
-        return self._data_assets
+    def data_assets(self) -> AssetRepository:
+        """Alias of :attr:`assets`.
+
+        Kept because ``{scope}.data_assets.import_asset`` is a frozen CLAUDE.md contract.
+        """
+        return self.assets
 
     # ── Conformance ─────────────────────────────────────────────────────
 
@@ -283,12 +462,108 @@ class Workspace(Folder):
         """Write workspace scaffold to disk."""
         root_str = self.resolve()
         self.fs.mkdir(root_str, parents=True, exist_ok=True)
-        self.save()
+        self._persist_if_absent()
 
     def save(self) -> None:
-        """Persist current metadata to disk (includes OKF ``type``)."""
+        """Persist current metadata to disk (includes OKF ``type``).
+
+        An id already on disk is kept. A missing file is created once, the
+        same way :meth:`materialize` does.
+        """
+        from molab.atomicio import file_lock
+
         meta_path = self.fs.join(self.resolve(), "workspace.json")
-        _save_metadata(self._entity_metadata, meta_path, fs=self.fs)
+        backend = "flock" if isinstance(self.fs, LocalFileSystem) else "none"
+        with file_lock(self._create_lock_path(), backend=backend):
+            if self.fs.exists(meta_path):
+                existing = _load_metadata(WorkspaceMetadata, meta_path, fs=self.fs)
+                self._entity_metadata = self._entity_metadata.model_copy(
+                    update={"id": existing.id, "created_at": existing.created_at}
+                )
+                self._adopt_entity_metadata(self._entity_metadata)
+            _save_metadata(self._entity_metadata, meta_path, fs=self.fs)
+
+    def find(
+        self, ref: MolabRef | str
+    ) -> Project | Experiment | Run | Execution | Artifact | Asset:
+        """Resolve a ``molab:`` reference by walking entity ids.
+
+        Args:
+            ref: A :class:`MolabRef` or its canonical string.
+
+        Returns:
+            The project, experiment, run, execution, artifact, or asset it names.
+
+        Raises:
+            InvalidRefError: *ref* is a string that is not a canonical reference.
+            RefNotFoundError: A segment names nothing in this workspace.
+            AmbiguousRefError: An experiment id exists under more than one
+                project, or an asset id exists in more than one scope.
+        """
+        from .artifact_repository import scan_asset_repositories
+        from .errors import AmbiguousRefError, RefNotFoundError
+        from .experiment import Experiment
+        from .refs import MolabRef, parse_ref
+        from .run import Run
+
+        parsed = parse_ref(ref) if isinstance(ref, str) else ref
+        if parsed.asset_id is not None:
+            hits = []
+            for repository in scan_asset_repositories(self):
+                try:
+                    hits.append(repository.get(parsed.asset_id))
+                except KeyError:
+                    continue
+            if not hits:
+                raise RefNotFoundError(parsed, segment="asset", entity_id=parsed.asset_id)
+            if len(hits) > 1:
+                raise AmbiguousRefError(
+                    parsed.asset_id,
+                    candidates=(),
+                    locations=tuple(hit.scope.urn for hit in hits),
+                )
+            return hits[0]
+        if parsed.project_id is not None:
+            project = self._child_by_id(parsed.project_id, cls=Project)
+            if project is None:
+                raise RefNotFoundError(parsed, "project", parsed.project_id)
+            return project
+
+        assert parsed.experiment_id is not None
+        experiments = [
+            experiment
+            for project in self.list_projects()
+            if (experiment := project._child_by_id(parsed.experiment_id, cls=Experiment))
+            is not None
+        ]
+        if not experiments:
+            raise RefNotFoundError(parsed, "experiment", parsed.experiment_id)
+        if len(experiments) > 1:
+            raise AmbiguousRefError(
+                parsed.experiment_id,
+                tuple(MolabRef(experiment_id=parsed.experiment_id) for _hit in experiments),
+            )
+        experiment = experiments[0]
+        if parsed.run_id is None:
+            return experiment
+
+        run = experiment._child_by_id(parsed.run_id, cls=Run)
+        if run is None:
+            raise RefNotFoundError(parsed, "run", parsed.run_id)
+        if parsed.execution_id is None and parsed.artifact_id is None:
+            return run
+        if parsed.execution_id is not None:
+            for record in run.executions:
+                if record.id == parsed.execution_id:
+                    return record
+            raise RefNotFoundError(parsed, "execution", parsed.execution_id)
+        assert parsed.artifact_id is not None
+        for record in run.executions:
+            try:
+                return record.artifact(parsed.artifact_id)
+            except KeyError:
+                continue
+        raise RefNotFoundError(parsed, "artifact", parsed.artifact_id)
 
     def write_meta(self) -> str:
         """Stamp concept ``type`` on ``workspace.json``."""
@@ -301,38 +576,6 @@ class Workspace(Folder):
         return cast("dict[str, JSONValue]", raw) if raw is not None else {}
 
     # ── Alternative constructors ─────────────────────────────────────────
-
-    @classmethod
-    def create(
-        cls,
-        root: PathArg,
-        name: str | None = None,
-        *,
-        fs: FileSystem | None = None,
-        exist_ok: bool = False,
-    ) -> Workspace:
-        """Create a new workspace directory and write its metadata.
-
-        Args:
-            root: Filesystem path for the lab root.
-            name: Display name (defaults from path basename).
-            fs: Optional filesystem backend.
-            exist_ok: If False (default) and ``workspace.json`` already exists,
-                raise :class:`FileExistsError`. If True, return :meth:`load`.
-
-        Returns:
-            The new (or existing, when *exist_ok*) workspace.
-        """
-        _fs = fs or LocalFileSystem()
-        root_str = str(root)
-        meta_path = _fs.join(root_str, "workspace.json")
-        if _fs.exists(meta_path):
-            if not exist_ok:
-                raise FileExistsError(f"workspace already exists at {root_str}")
-            return cls.load(root, fs=fs)
-        ws = cls(root, name=name, fs=fs)
-        ws.materialize()
-        return ws
 
     @classmethod
     def load(cls, root: PathArg, *, fs: FileSystem | None = None) -> Workspace:

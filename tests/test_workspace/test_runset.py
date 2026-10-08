@@ -55,7 +55,7 @@ class TestRunSetContainer:
             "rs = RunSet(exp.add_runs(GridSpace({'x': [1]})))\n"
             "[record] = rs.execute().to_records()\n"
             "assert record['status'] == 'pending', record\n"
-            "assert record['error'].startswith('RuntimeError: '), record\n"
+            "assert record['error'].startswith('WorkflowRecoveryError: '), record\n"
             "assert 'no workflow bound' in record['error'], record\n"
             "assert 'molab.workflow' in sys.modules\n"
         )
@@ -168,7 +168,7 @@ def _fail_then_retry(run: Run) -> None:
     """e01 fails, e02 (a RETRY of e01) succeeds — built through the public API."""
     with pytest.raises(RuntimeError), run.start():
         raise RuntimeError("boom")
-    with run.start(mode=ExecutionMode.RETRY, based_on_execution_id="e01"):
+    with run.start(mode=ExecutionMode.RETRY, predecessor="e01"):
         pass
 
 
@@ -207,3 +207,11 @@ class TestRunSetResultFailed:
         )
 
         assert [rec.status for rec in result.failed] == ["failed", "cancelled", "interrupted"]
+
+
+class TestRunSetVerbMessages:
+    def test_resume_and_rerun_together_create_a_new_execution(self) -> None:
+        with pytest.raises(ValueError, match="new Execution") as caught:
+            RunSet([]).execute(resume=True, rerun=True)
+
+        assert "reopen" not in str(caught.value)

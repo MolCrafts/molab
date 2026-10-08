@@ -16,12 +16,11 @@ and reuses mirror bytes only when mtime/size still match.
 
 Index files are not special-cased — they are just paths.  The eager
 prefetch helper :func:`prefetch_workspace_indices` walks the workspace by
-``listdir`` plus the per-entity singular metadata files
-(``workspace.json`` / ``project.json`` / ``experiment.json`` / ``run.json``)
-and the plural children indexes (``projects.json`` / ``experiments.json`` /
-``runs.json``) through :meth:`read_text`, so the navigation tree is
+``listdir`` plus the per-entity metadata files
+(``workspace.json`` / ``project.json`` / ``experiment.json`` / ``run.json``
+/ ``execution.json``) through :meth:`read_text`, so the navigation tree is
 populated as a side-effect of caching.  Entity ``*.json`` is the sole
-truth source; plural indexes are derived and rebuildable.
+truth source.
 
 Layer rule: lives in the workspace layer next to ``fs_local.py`` and
 ``fs_remote.py``; reaches only into sibling FS modules and the
@@ -46,6 +45,7 @@ from typing import IO, TYPE_CHECKING, Any
 from .execution_dirs import execution_dir_names
 from .fs import DirEntry, FileSystem, PathArg, StatResult
 from .fs_local import LocalFileSystem
+from .naming import EXPERIMENT_CONTAINER, PROJECT_CONTAINER, RUN_CONTAINER
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
     from .workspace import Workspace
@@ -65,27 +65,26 @@ _DEFAULT_PREFETCH_WORKERS = 8
 
 logger = logging.getLogger(__name__)
 
-INDEX_FILE_NAMES: frozenset[str] = frozenset(
+
+class _IndexFileNames(frozenset[str]):
+    """Files whose basename identifies them as a navigation-index artefact.
+
+    Entity files and the attempt record. ``execution.json`` is listed so
+    ``invalidate(scope="indices")`` — the ``POST /cache/refresh`` path
+    (``server/routes/workspace.py``) — evicts cached attempt records; a refresh
+    never replays a stale run status.
+    """
+
+
+INDEX_FILE_NAMES = _IndexFileNames(
     {
-        # Entity files (singular — on the concept's own directory).
         "workspace.json",
         "project.json",
         "experiment.json",
         "run.json",
-        # Children indexes (plural — on the parent).
-        "projects.json",
-        "experiments.json",
-        "runs.json",
+        "execution.json",
     }
 )
-"""Files whose basename identifies them as a navigation-index artefact.
-
-Singular names are an entity's own metadata (``…/runs/run-<id>/run.json``);
-plural names are derived children indexes on the parent
-(``…/experiments.json``, ``…/runs.json``). Both basenames feed the
-``scope="indices"`` invalidation set so a refresh drops cached navigation
-metadata while sparing log/asset bytes.
-"""
 
 _SIDECAR_FILENAME = "_index.json"
 _SIDECAR_VERSION = 1
@@ -1134,13 +1133,13 @@ def prefetch_workspace_indices(
 
     Levels (each level fully completes before the next — outer → inner):
 
-    1. **Workspace** — ``workspace.json`` + ``projects.json`` index +
-       ``listdir(projects/)``.
-    2. **Projects** — all ``project.json`` in parallel, then per-project
-       experiment indexes + ``listdir(experiments/)`` in parallel.
-    3. **Experiments** — all ``experiment.json`` in parallel, then per-
-       experiment run indexes + ``listdir(runs/)`` in parallel.
-    4. **Runs** — all ``run.json`` in parallel.
+    1. **Workspace** — ``workspace.json`` + the project container listing.
+    2. **Projects** — all ``project.json`` in parallel, then each project's
+       experiment container.
+    3. **Experiments** — all ``experiment.json`` in parallel, then each
+       experiment's run container.
+    4. **Runs** — all ``run.json`` in parallel, then each attempt's
+       ``execution.json``.
 
     Concurrency is per level (default 8 workers; ``MOLAB_PREFETCH_WORKERS``
     or *max_workers*).  When the FS is a :class:`CachedRemoteFileSystem`,
@@ -1178,10 +1177,7 @@ def prefetch_workspace_indices(
         # ── L0: workspace root (serial — tiny) ──────────────────────────
         _safe_read(fs, fs.join(root, "workspace.json"), state, on_file=on_file)
         _prefetch_concept_files(fs, root, state, on_file=on_file)
-        projects_dir = fs.join(root, "projects")
-        _safe_read(
-            fs, fs.join(root, "projects.json"), state, warn_on_missing=False, on_file=on_file
-        )
+        projects_dir = fs.join(root, PROJECT_CONTAINER)
         try:
             project_names = list(fs.listdir(projects_dir))
         except FileNotFoundError:
@@ -1199,7 +1195,11 @@ def prefetch_workspace_indices(
                 _prefetch_concept_files(fs, project_dir, state, on_file=on_file)
                 # Generic Folder mounts on the project (dirs carrying meta.json).
                 _prefetch_meta_mounts(
-                    fs, project_dir, state, on_file=on_file, skip={"experiments", "assets", "cache"}
+                    fs,
+                    project_dir,
+                    state,
+                    on_file=on_file,
+                    skip={EXPERIMENT_CONTAINER, "assets", "cache"},
                 )
             return name if ok else None
 
@@ -1217,14 +1217,7 @@ def prefetch_workspace_indices(
         # ── L1b: listdir experiments/ per project (parallel) ────────────
         def _list_experiments(project_name: str) -> list[tuple[str, str]]:
             project_dir = fs.join(projects_dir, project_name)
-            experiments_dir = fs.join(project_dir, "experiments")
-            _safe_read(
-                fs,
-                fs.join(project_dir, "experiments.json"),
-                state,
-                warn_on_missing=False,
-                on_file=on_file,
-            )
+            experiments_dir = fs.join(project_dir, EXPERIMENT_CONTAINER)
             try:
                 names = fs.listdir(experiments_dir)
             except FileNotFoundError:
@@ -1246,7 +1239,7 @@ def prefetch_workspace_indices(
         # ── L2: experiment.json in parallel ─────────────────────────────
         def _load_experiment(pair: tuple[str, str]) -> tuple[str, str] | None:
             project_name, exp_name = pair
-            experiment_dir = fs.join(projects_dir, project_name, "experiments", exp_name)
+            experiment_dir = fs.join(projects_dir, project_name, EXPERIMENT_CONTAINER, exp_name)
             meta = fs.join(experiment_dir, "experiment.json")
             ok = _safe_read(fs, meta, state, on_file=on_file) is not None
             if ok:
@@ -1256,7 +1249,7 @@ def prefetch_workspace_indices(
                     experiment_dir,
                     state,
                     on_file=on_file,
-                    skip={"runs", "assets", "cache"},
+                    skip={RUN_CONTAINER, "assets", "cache"},
                 )
             return pair if ok else None
 
@@ -1274,15 +1267,8 @@ def prefetch_workspace_indices(
         # ── L2b: listdir runs/ per experiment (parallel) ────────────────
         def _list_runs(pair: tuple[str, str]) -> list[tuple[str, str, str]]:
             project_name, exp_name = pair
-            experiment_dir = fs.join(projects_dir, project_name, "experiments", exp_name)
-            runs_dir = fs.join(experiment_dir, "runs")
-            _safe_read(
-                fs,
-                fs.join(experiment_dir, "runs.json"),
-                state,
-                warn_on_missing=False,
-                on_file=on_file,
-            )
+            experiment_dir = fs.join(projects_dir, project_name, EXPERIMENT_CONTAINER, exp_name)
+            runs_dir = fs.join(experiment_dir, RUN_CONTAINER)
             try:
                 names = fs.listdir(runs_dir)
             except FileNotFoundError:
@@ -1304,28 +1290,44 @@ def prefetch_workspace_indices(
             run_dir = fs.join(
                 projects_dir,
                 project_name,
-                "experiments",
+                EXPERIMENT_CONTAINER,
                 exp_name,
-                "runs",
+                RUN_CONTAINER,
                 run_name,
             )
             meta = fs.join(run_dir, "run.json")
             if _safe_read(fs, meta, state, on_file=on_file) is not None:
                 _prefetch_concept_files(fs, run_dir, state, on_file=on_file)
+                executions = fs.join(run_dir, "executions")
+                try:
+                    entries = fs.scandir(executions, with_stat=False)
+                except FileNotFoundError:
+                    return
+                except Exception as exc:
+                    state.add_warning(executions, str(exc))
+                    return
+                for entry in entries:
+                    if not entry.is_dir:
+                        continue
+                    _safe_read(
+                        fs,
+                        fs.join(run_dir, "executions", entry.name, "execution.json"),
+                        state,
+                        warn_on_missing=False,
+                        on_file=on_file,
+                    )
 
         _parallel_map(_load_run, run_triples, max_workers=workers, force_fetch_fs=force_fs)
 
     return list(state.warnings)
 
 
-# Container / infrastructure dirs that are never ``meta.json`` Concept mounts.
-# The per-attempt ones come from their declarations, so a directory declared
-# later cannot be mistaken for a Concept mount.
-_META_MOUNT_SKIP = execution_dir_names() | frozenset(
+# Fixed container names. Declared execution directories are read at call time.
+_META_MOUNT_FIXED = frozenset(
     {
-        "projects",
-        "experiments",
-        "runs",
+        PROJECT_CONTAINER,
+        EXPERIMENT_CONTAINER,
+        RUN_CONTAINER,
         "assets",
         "cache",
         "executions",
@@ -1337,6 +1339,11 @@ _META_MOUNT_SKIP = execution_dir_names() | frozenset(
         "alive",
     }
 )
+
+
+def _meta_mount_skip() -> frozenset[str]:
+    """Container names plus the execution directories registered right now."""
+    return execution_dir_names() | _META_MOUNT_FIXED
 
 
 def _prefetch_concept_files(
@@ -1367,14 +1374,11 @@ def _prefetch_meta_mounts(
 ) -> None:
     """Prefetch ``meta.json`` / ``index.md`` Concept mounts under *parent_dir*.
 
-    A Concept mount (a directory at the project or
-    experiment level) is a sibling dir carrying ``meta.json`` (plus
-    ``index.md``). Without this, a pin-cached remote walk never sees those
-    mounts and the tree stays empty. A knowledge document under
-    ``knowledges/`` is an ordinary file, not a mount, and needs no per-child
-    prefetch.
+    A mount (a directory at the project or experiment level) is a sibling dir
+    carrying ``meta.json`` (plus ``index.md``). Without this, a pin-cached
+    remote walk never sees those mounts and the tree stays empty.
     """
-    skip_names = set(_META_MOUNT_SKIP)
+    skip_names = set(_meta_mount_skip())
     if skip:
         skip_names |= set(skip)
     try:
@@ -1428,7 +1432,7 @@ def _read_container_children(
     state: _PrefetchState,
     max_workers: int = 1,
 ) -> list[str]:
-    """Warm the children-index, then list the container (optional parallel meta).
+    """Read the optional container file, then list the container (optional parallel meta).
 
     Kept for callers/tests that target a single container.  The main walk
     uses the outside-in levels in :func:`prefetch_workspace_indices`.

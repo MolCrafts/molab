@@ -71,7 +71,7 @@ def cancel_run(
     if not active:
         status = run.status_label
         if status == "pending" and allow_pending:
-            state = run.create_execution(
+            state = run._create_execution(
                 created_by=AgentRef(id="operator", type="person", name="operator")
             )
             run.cancel(state.id)

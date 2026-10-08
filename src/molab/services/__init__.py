@@ -11,8 +11,12 @@ Contents:
 - :mod:`molab.services.run_failure` — failure analysis for a finished run.
 - :mod:`molab.services.auth` — filesystem users + sessions for
   ``molab serve`` HTTP auth (CLI ``molab auth`` and the server share it).
+- :mod:`molab.services.workflow_kind` — legacy workflow-kind classification
+  (one rule for ``molab migrate workflow-kind`` and the server writers' 409 gate).
+- :mod:`molab.services.knowledge_context` — the document read-model and its producer.
+- :mod:`molab.services.copilot` — the deterministic workspace summary.
 
-Layer rules: services may import ``molab.workflow`` / ``molab.workspace``
+Layer rules: services may import ``workflow`` / ``workspace`` / ``knowledge``
 (and cross-layer primitives); it MUST NOT import ``molab.server`` or
 ``molab.cli`` — those application shells sit *above* services and import it,
 never the reverse. Enforced by ``tests/test_services/test_import_guard.py``.

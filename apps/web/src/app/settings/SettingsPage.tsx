@@ -1,15 +1,16 @@
 /**
  * Workspace settings — molvis-style left nav + scroll sections.
  *
- * Sections: Remote workspaces, Compute targets, UI plugins,
+ * Sections: Appearance, Remote workspaces, Compute targets, UI plugins,
  * Users (admin when auth on). Chrome is domain-free
  * (`components/settings`); panels keep their own data.
  */
 
-import { Cpu, Puzzle, Users, Wifi } from "lucide-react";
+import { Cpu, Puzzle, Type, Users, Wifi } from "lucide-react";
 import { useAuth } from "@/app/auth";
 import { type SettingsNavEntry, SettingsSection, SettingsShell } from "@/components/settings";
 import { listSettingsSections, useWorkbenchGeneration } from "@/plugins/contributions/workbench";
+import { AppearancePanel } from "./AppearancePanel";
 import { ComputeTargetsPanel } from "./ComputeTargetsPanel";
 import { RemoteWorkspacesPanel } from "./RemoteWorkspacesPanel";
 import { UiPluginsPanel } from "./UiPluginsPanel";
@@ -21,6 +22,22 @@ export function SettingsPage(): JSX.Element {
   useWorkbenchGeneration();
 
   const entries: SettingsNavEntry[] = [
+    {
+      id: "appearance",
+      label: "Appearance",
+      group: "display",
+      groupLabel: "Display",
+      icon: <Type className="size-icon-sm" aria-hidden />,
+      content: (
+        <SettingsSection
+          id="appearance"
+          title="Appearance"
+          description="How large the interface reads in this browser."
+        >
+          <AppearancePanel />
+        </SettingsSection>
+      ),
+    },
     {
       id: "remote-workspaces",
       label: "Remote workspaces",
@@ -98,10 +115,10 @@ export function SettingsPage(): JSX.Element {
   return (
     <div className="flex h-full min-h-0 flex-col p-3 sm:p-4">
       <SettingsShell
-        title="Workspace settings"
-        description="Manage workspace connections, compute targets, UI plugins, and access."
+        title="Settings"
+        description="Display, workspace connections, compute targets, UI plugins, and access."
         entries={entries}
-        defaultId="remote-workspaces"
+        defaultId="appearance"
         className="h-full"
       />
     </div>

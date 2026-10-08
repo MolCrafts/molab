@@ -38,7 +38,7 @@ def _run(tmp_path):
     ws = Workspace(root=tmp_path, name="lab")
     ws.materialize()
     project = ws.add_project("p")
-    experiment = project.add_experiment("e", workflow_source="s.py", params={})
+    experiment = project.add_experiment("e", params={})
     return experiment.add_run(params={"seed": 1})
 
 

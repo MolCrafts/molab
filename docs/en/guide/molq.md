@@ -22,6 +22,10 @@ If `molq` is not installed, those commands fail fast with the install hint shown
 pip install molq
 ```
 
+## What gets recorded
+
+The plugin creates a QUEUED `eNN` before it submits, and stages `executions/<id>/`. A scheduler RESUME on a remote target recomputes, because the predecessor journal is not staged. A record that stays QUEUED because the scheduler job died is cleared with `molab runs cancel <run-id>…`, which cancels each run's active attempt, QUEUED included.
+
 ## Optional Dependency Boundaries
 
 The core `molab` package is designed so that local workflows, workspace browsing, and most documentation examples do not require any scheduler client. That keeps the base environment small and prevents `import molab` from failing on machines that do not have cluster tooling installed.
@@ -66,6 +70,18 @@ These become scheduler placement settings:
 - `--cluster`
 
 `molab` keeps the frontend flags scheduler-friendly, while `submit_molq` handles the translation into `molq`'s `JobResources`, `JobScheduling`, and `JobExecution` objects.
+
+### Worker environment flags
+
+The job runs `python -m molab.cli execute <run_dir>`. By default `python` is the interpreter that ran `molab run`, which is wrong when the compute nodes have another architecture or environment than the submitting host (an x86 login node in front of aarch64 GPU nodes):
+
+- `--python PATH` — the worker's interpreter on the compute node.
+- `--preamble LINE` (repeatable) — shell lines run before the worker (`module load …`, `export …`); the job becomes an inline script that ends in `exec <worker>`.
+
+```bash
+molab run scan.py --scheduler slurm -A proj-gpu -p gpu --gpus 1 --time 00:30:00 \
+    --python /venvs/aarch64/bin/python --preamble "module load GPU/buildenv-gcccuda"
+```
 
 ## Persisted Scheduler Metadata
 

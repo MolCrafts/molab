@@ -14,8 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from molab.fs import LocalFileSystem
-from molab.knowledge.concept import Concept, concept_from_dir
+from molab.knowledge.concept import Concept, Knowledge
 from molab.knowledge.concepts import Literature, Note
 from molab.knowledge.reference_meta import ReferenceMeta
 
@@ -49,7 +48,7 @@ class TestReferenceMeta:
 
 
 class TestConceptRegistry:
-    """``@concept_type`` registration + ``concept_from_dir`` reconstruction."""
+    """Frontmatter ``class`` is how a file reopens as its subclass."""
 
     def test_mount_writes_the_registered_type_marker(self, tmp_path: Path) -> None:
         note = _mount(Note, tmp_path, "idea")
@@ -60,9 +59,8 @@ class TestConceptRegistry:
     def test_concept_from_dir_rebuilds_typed_subclass(self, tmp_path: Path) -> None:
         note = _mount(Note, tmp_path, "idea")
         ref = _mount(Literature, tmp_path, "smith2024")
-        fs = LocalFileSystem()
-        assert isinstance(concept_from_dir(note.path, fs=fs), Note)
-        assert isinstance(concept_from_dir(ref.path, fs=fs), Literature)
+        assert isinstance(Knowledge.open(note.path), Note)
+        assert isinstance(Knowledge.open(ref.path), Literature)
 
     def test_a_concept_needs_no_workspace(self, tmp_path: Path) -> None:
         # The whole point of the OKF library: a plain file is a Concept.

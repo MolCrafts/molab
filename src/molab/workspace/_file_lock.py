@@ -1,8 +1,7 @@
 """Advisory inter-process file locking — re-export shim.
 
 The implementation moved to the cross-layer primitive
-:mod:`molab.atomicio` (okf-01-01) — a cross-layer primitive shared by
-workspace and knowledge. ``file_lock`` /
+:mod:`molab.atomicio` (okf-01-01). ``file_lock`` /
 ``FileLockTimeoutError`` / ``DEFAULT_LOCK_TIMEOUT_SECONDS`` remain
 importable from ``molab.workspace._file_lock`` (same objects) for
 back-compat; new code may import them from ``molab.atomicio`` directly.

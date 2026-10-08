@@ -515,6 +515,24 @@ class TestCachedRemoteFileSystem:
         assert "/scratch/me/project.json" not in cached.cached_paths()
 
     @pytest.mark.unit
+    def test_invalidate_scope_indices_drops_attempt_records(
+        self, fake: _FakeRemoteFS, tmp_path: Path
+    ) -> None:
+        from molab.workspace.fs_cached import INDEX_FILE_NAMES
+
+        fake.files["/scratch/me/executions/e01/execution.json"] = b"{}"
+        fake.files["/scratch/me/executions/e01/run.log"] = b"log"
+        cached = CachedRemoteFileSystem(fake, mirror_root=tmp_path / "mirror", ttl_seconds=300)
+        cached.read_bytes("/scratch/me/executions/e01/execution.json")
+        cached.read_bytes("/scratch/me/executions/e01/run.log")
+
+        cached.invalidate(scope="indices")
+
+        assert "/scratch/me/executions/e01/execution.json" not in cached.cached_paths()
+        assert "/scratch/me/executions/e01/run.log" in cached.cached_paths()
+        assert 'invalidate(scope="indices")' in (INDEX_FILE_NAMES.__doc__ or "")
+
+    @pytest.mark.unit
     def test_invalidate_scope_all_clears_everything(self, fake: _FakeRemoteFS, tmp_path: Path):
         fake.files["/scratch/me/extra.txt"] = b"x"
         cached = CachedRemoteFileSystem(fake, mirror_root=tmp_path / "mirror", ttl_seconds=300)

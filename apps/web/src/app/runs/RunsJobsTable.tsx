@@ -78,14 +78,18 @@ interface ColumnDef {
   className?: string;
 }
 
+// Fixed layout: an auto table sizes every column to its longest cell, so one
+// long run name pushed Attempts / Duration off the right edge and `truncate`
+// never fired. Run takes what the fixed columns leave (at least ~13rem: the
+// table scrolls sideways before it squeezes run names), and wraps.
 const COLUMNS: ColumnDef[] = [
-  { key: "status", label: "Status", className: "w-32" },
+  { key: "status", label: "Status", className: "w-30" },
   { key: "name", label: "Run" },
-  { key: "project", label: "Project · Experiment" },
-  { key: "backend", label: "Backend" },
-  { key: "attempts", label: "Attempts", align: "right" },
-  { key: "duration", label: "Duration", align: "right" },
-  { key: "submitted", label: "Submitted", align: "right" },
+  { key: "project", label: "Project · Experiment", className: "w-44" },
+  { key: "backend", label: "Backend", className: "w-24" },
+  { key: "attempts", label: "Attempts", align: "right", className: "w-24" },
+  { key: "duration", label: "Duration", align: "right", className: "w-24" },
+  { key: "submitted", label: "Submitted", align: "right", className: "w-26" },
 ];
 
 /**
@@ -135,7 +139,7 @@ export const RunsJobsTable = ({
   return (
     <div className="flex flex-col gap-3">
       <div className="border-y border-border/70">
-        <Table className="w-full text-body">
+        <Table className="w-full min-w-[58rem] table-fixed text-body">
           <TableHeader className="sticky top-0 z-10 border-b border-border/60 bg-background">
             <TableRow className="text-label text-muted-foreground">
               {selection && <TableHead className="w-10" aria-label="Select" />}
@@ -202,7 +206,9 @@ export const RunsJobsTable = ({
                   </Td>
                   <Td className="align-middle">
                     <div className="min-w-0">
-                      <p className="truncate font-medium text-foreground">{run.name || run.id}</p>
+                      <p className="font-medium text-foreground [overflow-wrap:anywhere]">
+                        {run.name || run.id}
+                      </p>
                       <p
                         className="mt-1 truncate font-mono text-micro text-muted-foreground"
                         title={run.id}
@@ -230,7 +236,7 @@ export const RunsJobsTable = ({
                   <Td className="text-right align-middle tabular-nums text-muted-foreground">
                     {run.statusSummary.total}
                   </Td>
-                  <Td className="text-right align-middle font-mono text-label tabular-nums text-muted-foreground">
+                  <Td className="whitespace-nowrap text-right align-middle font-mono text-label tabular-nums text-muted-foreground">
                     {formatDuration(duration)}
                   </Td>
                   <Td className="text-right align-middle text-label text-muted-foreground">

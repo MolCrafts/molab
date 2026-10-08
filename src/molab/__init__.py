@@ -33,11 +33,11 @@ from mollog import Logger, get_logger
 # in any process that imported molab.
 import molab.plugins.metrics as _plugins_metrics
 from molab.entry import entry
-from molab.path import Path
 
 # User-facing hierarchy (all from workspace — single source of truth)
+from molab.param import GridSpace, ParamSpace, UniformSpace
+from molab.path import Path
 from molab.workspace.experiment import Experiment
-from molab.workspace.param import GridSpace, ParamSpace, UniformSpace
 from molab.workspace.project import Project
 from molab.workspace.run import Run, RunContext, RunWorkflowExecutor, set_run_executor
 from molab.workspace.workspace import Workspace
@@ -80,7 +80,8 @@ class _LazyRunExecutor:
         resume: bool = False,
         rerun: bool = False,
         fresh: bool = False,
-        checkpoint_artifact_id: str | None = None,
+        checkpoint: str | None = None,
+        execution_id: str | None = None,
     ) -> object:
         return self._target().execute(
             run,
@@ -88,7 +89,8 @@ class _LazyRunExecutor:
             resume=resume,
             rerun=rerun,
             fresh=fresh,
-            checkpoint_artifact_id=checkpoint_artifact_id,
+            checkpoint=checkpoint,
+            execution_id=execution_id,
         )
 
     async def aexecute(
@@ -99,7 +101,8 @@ class _LazyRunExecutor:
         resume: bool = False,
         rerun: bool = False,
         fresh: bool = False,
-        checkpoint_artifact_id: str | None = None,
+        checkpoint: str | None = None,
+        execution_id: str | None = None,
     ) -> object:
         return await self._target().aexecute(
             run,
@@ -107,7 +110,8 @@ class _LazyRunExecutor:
             resume=resume,
             rerun=rerun,
             fresh=fresh,
-            checkpoint_artifact_id=checkpoint_artifact_id,
+            checkpoint=checkpoint,
+            execution_id=execution_id,
         )
 
     def read_outputs(self, run: Run, execution_id: str) -> dict[str, TaskOutput]:
@@ -159,11 +163,6 @@ _LAZY_WORKFLOW_ATTRS = (
     "WorkflowCompiler",
     "TaskContext",
     "WorkflowRuntime",
-    # The Python one-step API documented in CLAUDE.md as
-    # ``molab.execute_run(wf, run, …)`` — the third face of the same
-    # Execution-mode path the CLI and the server drive.
-    "execute_run",
-    "aexecute_run",
 )
 
 

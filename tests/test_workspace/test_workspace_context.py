@@ -8,6 +8,7 @@ References:
 
 from __future__ import annotations
 
+import json
 import os
 import time
 from datetime import UTC, datetime, timedelta
@@ -15,10 +16,8 @@ from pathlib import Path
 
 import pytest
 
-from molab.knowledge import mount_note
-from molab.server.schemas.workspace_context import WorkspaceContextResponse
-from molab.workspace import KnowledgeRef, Run, Workspace, WorkspaceContext
-from molab.workspace.assets import ArtifactAsset, AssetManifest, AssetScope, Producer
+from molab.knowledge import Note
+from molab.workspace import Run, Workspace, WorkspaceContext
 from molab.workspace.domain import ExecutionMode
 from molab.workspace.workspace_context import (
     ContextFocus,
@@ -40,7 +39,7 @@ def _fail_then_retry(run: Run) -> None:
     """e01 fails, e02 (a RETRY of e01) succeeds — built through the public API."""
     with pytest.raises(RuntimeError), run.start():
         raise RuntimeError("boom")
-    with run.start(mode=ExecutionMode.RETRY, based_on_execution_id="e01"):
+    with run.start(mode=ExecutionMode.RETRY, predecessor="e01"):
         pass
 
 
@@ -56,7 +55,7 @@ class TestAssembleWorkspaceContext:
         r2 = exp.add_run(params={"seed": 2})
         with r2.start() as ctx:
             ctx.emit_artifact({"loss": 0.2}, name="m2.json")
-        note = mount_note(ws, "idea")
+        note = Note.mount(ws, "idea")
         note.write("# Idea\n\nnarrative\n")
 
         c = assemble_workspace_context(ws)
@@ -66,36 +65,17 @@ class TestAssembleWorkspaceContext:
         assert c.experiments[0].project_id == ws.get_project("p").id
         assert len(c.recent_runs) == 2
         assert len(c.artifacts) >= 2
-        # The raw assembler projects no knowledge at all — even with a mounted
-        # document on disk. The only producer is
-        # ``molab.services.knowledge_context.context_with_knowledge``.
-        assert c.knowledge == []
-        assert c.model_dump(mode="json")["knowledge"] == []
+        assert "knowledge" not in c.model_dump()
         # recent_runs ordered by finished/started descending
         ts = [(rr.finished_at or rr.started_at) for rr in c.recent_runs]
         assert ts == sorted(ts, key=lambda t: t or datetime(1970, 1, 1, tzinfo=UTC), reverse=True)
 
-    def test_knowledge_ref_shape_survives_and_the_consumer_reads_empty_knowledge(
-        self, tmp_path: Path
-    ) -> None:
-        # The read-model *shape* stays workspace-owned; only its producer left.
-        ref = KnowledgeRef(path="knowledges/idea.md", type="Note", title="Idea")
-        assert ref.model_dump() == {
-            "path": "knowledges/idea.md",
-            "type": "Note",
-            "title": "Idea",
-            "id": None,
-        }
-
+    def test_the_read_model_has_no_document_fields(self, tmp_path: Path) -> None:
         c = assemble_workspace_context(_ws(tmp_path))
-        assert isinstance(c, WorkspaceContext)
-        assert "knowledge" in WorkspaceContext.model_fields
-        assert "open_questions" in WorkspaceContext.model_fields
 
-        # The server projection of a raw context is well-formed with no rows.
-        response = WorkspaceContextResponse.from_context(c)
-        assert response.knowledge == []
-        assert response.openQuestions == []
+        assert isinstance(c, WorkspaceContext)
+        assert {"knowledge", "open_questions"}.isdisjoint(WorkspaceContext.model_fields)
+        assert "knowledge" not in c.model_dump()
 
     def test_empty_workspace_yields_all_empty_collections(self, tmp_path: Path) -> None:
         c = assemble_workspace_context(_ws(tmp_path))
@@ -106,8 +86,6 @@ class TestAssembleWorkspaceContext:
         assert c.failed_runs == []
         assert c.running_runs == []
         assert c.artifacts == []
-        assert c.knowledge == []
-        assert c.open_questions == []
         assert c.stale_or_missing == []
 
     def test_focus_is_echoed_and_assembly_writes_nothing(self, tmp_path: Path) -> None:
@@ -124,7 +102,12 @@ class TestAssembleWorkspaceContext:
 
         rf = exp.add_run(params={"k": 1})
         with rf.start() as ctx:
+            ctx.emit_artifact(b"{}", name="ghost.json")
             ctx.mark_failed("simulated failure")
+        record = Path(rf.execution_dir("e01")) / "execution.json"
+        raw = json.loads(record.read_text(encoding="utf-8"))
+        raw["artifacts"][0]["run_id"] = "ghost-run"
+        record.write_text(json.dumps(raw), encoding="utf-8")
 
         beat = datetime(2020, 1, 1, tzinfo=UTC)
         rr = exp.add_run(params={"k": 2})
@@ -137,20 +120,6 @@ class TestAssembleWorkspaceContext:
         now = beat + timedelta(minutes=20)
 
         try:
-            # a dangling-producer artifact registered into rf's run-scope manifest
-            AssetManifest(str(rf.run_dir)).register(
-                ArtifactAsset(
-                    asset_id="a-ghost",
-                    name="ghost.json",
-                    scope=AssetScope(kind="run", ids=(rf.id,)),
-                    path=Path("ghost.json"),
-                    created_at=beat,
-                    updated_at=beat,
-                    producer=Producer(run_id="ghost-run"),
-                    content_hash="sha256:00",
-                )
-            )
-
             c = assemble_workspace_context(ws, now=now)
             kinds = {h.kind for h in c.stale_or_missing}
             assert "failed_run" in kinds
@@ -178,7 +147,7 @@ class TestAssembleWorkspaceContext:
         """A QUEUED attempt is active: listed as running, never flagged stale (no alive yet)."""
         ws = _ws(tmp_path)
         run_q = ws.add_project("p").add_experiment("e").add_run(params={"k": 1})
-        run_q.create_execution()
+        run_q._create_execution()
         alive = Path(str(run_q.run_dir)) / "executions" / "e01" / "alive"
         assert not alive.exists()
 
@@ -186,3 +155,43 @@ class TestAssembleWorkspaceContext:
 
         assert any(x.run_id == run_q.id for x in c.running_runs)
         assert not any(h.kind == "stale_running" for h in c.stale_or_missing)
+
+    def test_code_binding_is_a_workflow_and_unbound_is_not(self, tmp_path: Path) -> None:
+        ws = _ws(tmp_path)
+        project = ws.add_project("p")
+        bound = project.add_experiment("bound")
+        bound.bind_workflow("code", entrypoint="train.py:build")
+        bare = project.add_experiment("bare")
+        ctx = assemble_workspace_context(ws)
+        ids = {item.experiment_id for item in ctx.workflows}
+        assert bound.id in ids
+        assert bare.id not in ids
+
+
+class TestArtifactRowsIgnoreNamedAssets:
+    def test_emitted_ids_only_and_a_ghost_manifest_adds_nothing(self, tmp_path: Path) -> None:
+        ws = _ws(tmp_path)
+        run = ws.add_project("p").add_experiment("e").add_run()
+        with run.start() as ctx:
+            artifact = ctx.emit_artifact(b"{}", name="m.json")
+        source = tmp_path / "hello.txt"
+        source.write_bytes(b"hello\n")
+        imported = ws.assets.import_asset("greeting", source, action="copy")
+        (Path(str(ws.root)) / "assets.json").write_text(
+            '{"assets":[{"id":"ghost-manifest-asset"}]}',
+            encoding="utf-8",
+        )
+
+        assembled = assemble_workspace_context(ws)
+
+        assert [row.asset_id for row in assembled.artifacts] == [artifact.id]
+        assert [row.execution_id for row in assembled.artifacts] == ["e01"]
+        assert imported.id not in {row.asset_id for row in assembled.artifacts}
+        flagged = {flag.ref for flag in assembled.stale_or_missing}
+        assert "ghost-manifest-asset" not in flagged
+        assert imported.id not in flagged
+
+    def test_assembler_does_not_name_the_manifest_scanner(self) -> None:
+        source = Path(assemble_workspace_context.__code__.co_filename).read_text(encoding="utf-8")
+        assert "scan_assets" not in source
+        assert "assets.json" not in source

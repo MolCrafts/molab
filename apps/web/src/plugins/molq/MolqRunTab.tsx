@@ -3,7 +3,7 @@
  * Registered as a run tab contribution (value ``molq``); only matched for molq backends.
  */
 
-import { DashboardCanvas, OverviewSurface } from "@/app/components/entity";
+import { DashboardCanvas, DashboardCard, OverviewSurface } from "@/app/components/entity";
 import type { RendererProps } from "@/app/types";
 import {
   Table,
@@ -24,12 +24,11 @@ export const MolqRunTab = ({ selection, snapshot, executionId }: RendererProps):
 
   return (
     <OverviewSurface>
-      <DashboardCanvas className="max-w-4xl space-y-6">
-        <section className="space-y-3">
-          <h3 className="text-body-lg font-medium text-foreground">Molq</h3>
-          <p className="text-label text-muted-foreground">
-            Submission and cluster fields from the selected execution.
-          </p>
+      <DashboardCanvas>
+        <DashboardCard
+          title="Selected execution"
+          description="Submission and cluster fields from the selected execution."
+        >
           {entries.length === 0 ? (
             <p className="py-4 text-label text-muted-foreground">
               {executionId ? "This execution has no Molq metadata." : "Select a Molq execution."}
@@ -56,7 +55,7 @@ export const MolqRunTab = ({ selection, snapshot, executionId }: RendererProps):
               </TableBody>
             </Table>
           )}
-        </section>
+        </DashboardCard>
       </DashboardCanvas>
     </OverviewSurface>
   );

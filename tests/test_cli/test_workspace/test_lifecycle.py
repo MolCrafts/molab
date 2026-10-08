@@ -24,7 +24,7 @@ def _workspace_with_record(tmp_path: Path) -> Workspace:
     ws = Workspace(tmp_path / "lab", name="Lab")
     ws.materialize()
     run = ws.add_project("p").add_experiment("e").add_run(params={"x": 1})
-    run.create_execution(
+    run._create_execution(
         profile_config=ProfileConfig({"nodes": 2}, name="cpu"),
         environment={"script": "/lab/s.py"},
         executor={"backend": "molq", "scheduler": "slurm", "scheduler_job_id": "4242"},

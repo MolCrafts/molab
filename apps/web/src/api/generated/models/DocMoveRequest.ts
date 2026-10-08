@@ -4,6 +4,6 @@
 /* eslint-disable */
 export type DocMoveRequest = {
     name?: (string | null);
-    parentPath?: (string | null);
+    hostPath?: (string | null);
 };
 

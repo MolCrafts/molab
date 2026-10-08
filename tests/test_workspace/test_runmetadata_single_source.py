@@ -1,17 +1,20 @@
-"""``RunMetadata`` is the single source of run hot state (persist-one-02).
+"""``run.json`` holds only a run's logical definition.
 
-``status`` / ownership / ``execution_history`` live on ``run.json``. Heartbeat
-is the run-root ``alive`` mtime — not ``heartbeat_at`` / ``labels``. ``ops/``
-and ``_ops/`` are not written.
+Attempt status, ownership, time, and error live on the Execution record.
+Heartbeat is the per-Execution ``alive`` mtime — not ``heartbeat_at`` /
+``labels``. ``ops/`` and ``_ops/`` are not written.
 """
 
 from __future__ import annotations
 
+import ast
 import json
 from pathlib import Path
 
+import molab.workspace
+import molab.workspace.models as workspace_models
 from molab.workspace.domain import ExecutionStatus
-from molab.workspace.models import RunMetadata, RunStatus
+from molab.workspace.models import RunMetadata
 
 
 def _read_run_json(run) -> dict:
@@ -33,9 +36,38 @@ _PROVENANCE_FIELDS = (
     "executor_info",
 )
 
+_EXECUTION_ERA_FIELDS = frozenset(
+    {"status", "owner_pid", "owner_host", "started_at", "finished_at", "error"}
+)
+
+
+def _execution_era_metadata_reads(source: str) -> list[str]:
+    """``x.metadata.<era>`` and ``getattr(x.metadata, "<era>", ...)`` in *source*."""
+    hits: list[str] = []
+    for node in ast.walk(ast.parse(source)):
+        if (
+            isinstance(node, ast.Attribute)
+            and node.attr in _EXECUTION_ERA_FIELDS
+            and isinstance(node.value, ast.Attribute)
+            and node.value.attr == "metadata"
+        ):
+            hits.append(f"{node.lineno}:{node.attr}")
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "getattr"
+            and len(node.args) >= 2
+            and isinstance(node.args[0], ast.Attribute)
+            and node.args[0].attr == "metadata"
+            and isinstance(node.args[1], ast.Constant)
+            and node.args[1].value in _EXECUTION_ERA_FIELDS
+        ):
+            hits.append(f"{node.lineno}:{node.args[1].value}")
+    return hits
+
 
 class TestRunMetadata:
-    def test_hot_state_fields_are_model_fields(self) -> None:
+    def test_execution_era_fields_are_not_model_fields(self) -> None:
         fields = RunMetadata.model_fields
         for name in (
             "status",
@@ -43,8 +75,9 @@ class TestRunMetadata:
             "owner_host",
             "started_at",
             "finished_at",
+            "error",
         ):
-            assert name in fields, f"{name!r} must live on RunMetadata"
+            assert name not in fields, f"{name!r} lives on the Execution record"
 
     def test_heartbeat_at_and_labels_are_not_model_fields(self) -> None:
         fields = RunMetadata.model_fields
@@ -63,9 +96,51 @@ class TestRunMetadata:
             }
         )
         assert meta.id == "r"
-        assert meta.status == RunStatus.FAILED
+        assert not hasattr(meta, "status")
         assert not hasattr(meta, "heartbeat_at")
         assert not hasattr(meta, "labels")
+
+    def test_legacy_execution_era_dict_is_ignored(self) -> None:
+        meta = RunMetadata.model_validate(
+            {
+                "id": "r",
+                "definition_hash": "h",
+                "experiment_revision_id": "rev",
+                "status": "failed",
+                "owner_pid": 1,
+                "owner_host": "h",
+                "started_at": "2026-01-01T00:00:00",
+                "finished_at": None,
+                "error": {
+                    "type": "X",
+                    "message": "m",
+                    "timestamp": "2026-01-01T00:00:00",
+                },
+            }
+        )
+        assert meta.id == "r"
+        for name in _EXECUTION_ERA_FIELDS:
+            assert not hasattr(meta, name)
+
+    def test_no_reader_of_execution_era_fields(self) -> None:
+        assert _execution_era_metadata_reads("run.metadata.error")
+        assert _execution_era_metadata_reads('getattr(run.metadata, "status", None)')
+        assert _execution_era_metadata_reads("rec.finished_at") == []
+        assert _execution_era_metadata_reads("run.metadata.parameters") == []
+
+        src = Path(__file__).resolve().parents[2] / "src" / "molab"
+        scanned = sorted(path for path in src.rglob("*.py") if "__pycache__" not in path.parts)
+        assert scanned
+        offenders = [
+            f"{path.relative_to(src.parents[1])}:{hit}"
+            for path in scanned
+            for hit in _execution_era_metadata_reads(path.read_text(encoding="utf-8"))
+        ]
+        assert offenders == []
+
+    def test_error_info_is_gone(self) -> None:
+        assert not hasattr(molab.workspace, "ErrorInfo")
+        assert not hasattr(workspace_models, "ErrorInfo")
 
     def test_execution_provenance_fields_are_not_model_fields(self) -> None:
         fields = RunMetadata.model_fields

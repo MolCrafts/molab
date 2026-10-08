@@ -1,22 +1,21 @@
-"""Workflow document write-back route.
+"""Workflow document routes.
 
-A thin HTTP wrapper over :class:`~molab.workflow.codec.WorkflowCodec`: the
-free-layout canvas PUTs an edited workflow IR document, the route validates
-it through ``ir_to_spec`` (so an invalid document surfaces as a structured
-4xx via the workflow-layer ``WorkflowError`` / ``ValueError`` handlers rather
-than a 500), normalizes it through ``spec_to_ir``, and persists it onto the
-experiment's ``workflow_source`` metadata via the atomic ``experiment.save()``.
+``PUT`` compiles an IR and records it with ``Experiment.bind_workflow`` for
+the document kind. A legacy experiment is 409 until ``molab migrate
+workflow-kind`` runs, even when ``convertToDocument`` is set. A code-kind
+experiment is 409 unless the body sets ``convertToDocument``. After a
+successful bind the route drops any in-process binding memo and does not
+install a new one.
 
-The route never re-implements IR parsing — the codec is the single owner.
+``GET`` reads :attr:`Experiment.workflow_document` and returns 404 when the
+experiment has no ``workflow.ir.json``. The codec remains the only IR parser.
 """
 
 from __future__ import annotations
 
-import json
-
 from fastapi import APIRouter, Depends
 
-from molab.workflow import default_codec
+from molab.workflow import default_binding_registry
 from molab.workspace import (
     ExperimentNotFoundError as WorkspaceExperimentNotFoundError,
 )
@@ -25,8 +24,12 @@ from molab.workspace import (
 )
 
 from ..dependencies import get_workspace
-from ..exceptions import ExperimentNotFoundError
+from ..exceptions import ConflictError, ExperimentNotFoundError
 from ..schemas import WorkflowDocumentRequest, WorkflowDocumentResponse
+from ..workflow_documents import (
+    compile_workflow_document,
+    require_migrated_workflow_binding,
+)
 
 router = APIRouter(
     prefix="/projects/{project_id}/experiments/{experiment_id}/workflow",
@@ -46,17 +49,6 @@ def _resolve_experiment(workspace, project_id: str, experiment_id: str):  # noqa
         raise ExperimentNotFoundError(experiment_id) from exc
 
 
-def _normalize(document: dict) -> dict:
-    """Validate + round-trip an IR document through the codec.
-
-    ``ir_to_spec`` raises ``WorkflowError`` (cycles, unknown tasks, …) or
-    ``ValueError`` (malformed IR) on invalid input — both are mapped to a
-    structured 4xx by the registered exception handlers, never a 500.
-    """
-    spec = default_codec.ir_to_spec(document)
-    return dict(default_codec.spec_to_ir(spec))
-
-
 @router.put("", response_model=WorkflowDocumentResponse)
 def put_workflow_document(
     project_id: str,
@@ -64,14 +56,26 @@ def put_workflow_document(
     payload: WorkflowDocumentRequest,
     workspace=Depends(get_workspace),  # noqa: ANN001
 ) -> WorkflowDocumentResponse:
-    """Validate, normalize, and persist an edited workflow IR document."""
-    experiment = _resolve_experiment(workspace, project_id, experiment_id)
-    normalized = _normalize(payload.document)
+    """Bind a normalized workflow IR as the document kind.
 
-    experiment.metadata = experiment.metadata.model_copy(
-        update={"workflow_source": json.dumps(normalized, sort_keys=True)}
-    )
-    experiment.save()
+    Legacy experiments are 409 (migrate first). Code-kind experiments are
+    409 unless ``convertToDocument`` is set. Invalid IR, including an
+    unregistered ``task_type``, is 400. Nothing is written on 409 or 400.
+    """
+    experiment = _resolve_experiment(workspace, project_id, experiment_id)
+    require_migrated_workflow_binding(experiment)
+    _spec, normalized = compile_workflow_document(payload.document)
+    kind = experiment.workflow_kind
+    if kind == "code" and not payload.convert_to_document:
+        raise ConflictError(
+            message=(
+                "experiment is bound as code; convertToDocument is required "
+                "to replace it with a document"
+            ),
+            details={"workflow_kind": kind},
+        )
+    experiment.bind_workflow("document", document=normalized)
+    default_binding_registry.unbind(experiment)
 
     return WorkflowDocumentResponse(
         project_id=project_id,
@@ -88,15 +92,8 @@ def get_workflow_document(
 ) -> WorkflowDocumentResponse:
     """Return the persisted workflow IR document, or 404 if none stored."""
     experiment = _resolve_experiment(workspace, project_id, experiment_id)
-    source = experiment.metadata.workflow_source
-    if not source:
-        raise ExperimentNotFoundError(f"{experiment_id} (no workflow document)")
-    try:
-        document = json.loads(source)
-    except (ValueError, TypeError) as exc:
-        # Stored source is not an IR JSON document (e.g. legacy Python source).
-        raise ExperimentNotFoundError(f"{experiment_id} (no workflow document)") from exc
-    if not isinstance(document, dict):
+    document = experiment.workflow_document
+    if document is None:
         raise ExperimentNotFoundError(f"{experiment_id} (no workflow document)")
 
     return WorkflowDocumentResponse(

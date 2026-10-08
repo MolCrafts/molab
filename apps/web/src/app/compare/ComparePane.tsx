@@ -7,7 +7,7 @@
 
 import { GitCompare, RefreshCw } from "lucide-react";
 import { type JSX, useEffect, useMemo, useState } from "react";
-import { EmptyState, EntityHeader } from "@/app/components/entity";
+import { EmptyState, EntityPage } from "@/app/components/entity";
 import type { NavigationLandingProps } from "@/app/navigation/sections";
 import { WorkbenchIconAction } from "@/components/workbench";
 import { cn } from "@/lib/utils";
@@ -76,24 +76,24 @@ export const ComparePane = ({ snapshot }: NavigationLandingProps): JSX.Element =
   const centered = count === 0 || expandError !== null || selected.length === 0;
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-background">
-      <EntityHeader
-        icon={GitCompare}
-        title="Compare"
-        actions={
-          <WorkbenchIconAction
-            label={metrics.loading ? "Reading metrics" : "Read metrics again"}
-            kind="ghost"
-            onClick={scan}
-            disabled={metrics.loading || selected.length === 0}
-            className="text-muted-foreground hover:text-foreground"
-          >
-            <RefreshCw
-              className={cn("size-icon-sm", metrics.loading && "mol-motion-progress-spin")}
-            />
-          </WorkbenchIconAction>
-        }
-      />
+    <EntityPage
+      icon={GitCompare}
+      title="Compare"
+      meta={count > 0 ? <span>{selected.length} runs</span> : undefined}
+      actions={
+        <WorkbenchIconAction
+          label={metrics.loading ? "Reading metrics" : "Read metrics again"}
+          kind="ghost"
+          onClick={scan}
+          disabled={metrics.loading || selected.length === 0}
+          className="text-muted-foreground hover:text-foreground"
+        >
+          <RefreshCw
+            className={cn("size-icon-sm", metrics.loading && "mol-motion-progress-spin")}
+          />
+        </WorkbenchIconAction>
+      }
+    >
       <div
         className={cn(
           "min-h-0 flex-1",
@@ -116,6 +116,6 @@ export const ComparePane = ({ snapshot }: NavigationLandingProps): JSX.Element =
         perRunAll={metrics.perRunAll}
         onClose={() => setOpenMetric(null)}
       />
-    </div>
+    </EntityPage>
   );
 };

@@ -33,18 +33,8 @@ class RunStatus(StrEnum):
     CANCELLED = "cancelled"
 
 
-class ErrorInfo(BaseModel, frozen=True):
-    """Structured error summary attached to a failed run."""
-
-    type: str
-    message: str
-    timestamp: datetime
-
-
-# ``RunMetadata.workflow_snapshot`` is a read-only legacy dict: workspace
-# keeps its on-disk shape as opaque JSON and defines no typed model for it.
-# The workflow is the experiment's property
-# (``ExperimentMetadata.workflow_entrypoint``); see CLAUDE.md § Layer charters.
+# A Run does not store a workflow. The workflow is the experiment's property
+# (``ExperimentMetadata.workflow_entrypoint`` or ``workflow.ir.json``).
 
 # ── Entity metadata ────────────────────────────────────────────────────────
 #
@@ -171,6 +161,9 @@ class ProjectMetadata(BaseModel, frozen=True):
     created_at: datetime = Field(default_factory=datetime.now)
 
 
+WorkflowKind = Literal["code", "document"]
+
+
 class ExperimentMetadata(BaseModel, frozen=True):
     """Repeatable experiment definition — a parameter-space container.
 
@@ -181,10 +174,10 @@ class ExperimentMetadata(BaseModel, frozen=True):
     Experiment. Replicas under a single Experiment share parameters but
     differ in random seed.
 
-    Workspace does **not** know about workflows; the Experiment-to-
-    Workflow pairing is the caller's concern (typically a user script). The ``workflow_source`` / ``workflow_type`` fields
-    here are advisory free-form strings used by the UI for grouping —
-    workspace itself never interprets them.
+    The Experiment owns its workflow association: ``workflow_kind`` plus
+    exactly one reference, either the ``workflow_entrypoint`` locator or
+    the opaque IR in ``workflow.ir.json``. ``plan_run_id`` is a read-only
+    legacy field.
 
     ``model_config`` ignores extra fields so workspace.json files written
     by older molab versions (which may carry now-removed keys like
@@ -204,10 +197,9 @@ class ExperimentMetadata(BaseModel, frozen=True):
     revision_created_at: datetime = Field(default_factory=datetime.now)
     definition_hash: str
 
-    # Advisory free-form workflow metadata — used by the UI for
-    # grouping; workspace never interprets it.
-    workflow_source: str | None = None
-    workflow_type: str | None = None
+    # Association record. ``None`` is unbound, or a legacy experiment
+    # written before the kind existed. The IR itself stays opaque.
+    workflow_kind: WorkflowKind | None = None
     # THE workflow locator for every Run of this experiment: the
     # ``"<file>:<qualname>"`` coordinate a worker re-imports to rebuild the
     # graph. Written once by the cross-layer workflow-executor seam when a
@@ -222,7 +214,6 @@ class ExperimentMetadata(BaseModel, frozen=True):
     # experiments.
     plan_run_id: str | None = None
     parameter_space: dict[str, JSONValue] = Field(default_factory=dict)
-    git_commit: str | None = None
 
     # Replica configuration
     n_replicas: int = 1
@@ -234,17 +225,12 @@ class ExperimentMetadata(BaseModel, frozen=True):
 
 
 class RunMetadata(BaseModel, frozen=True):
-    """Logical Run definition compatibility model.
+    """Logical definition of a Run.
 
-    Only identity, parameters, definition/revision links, declared inputs,
-    workflow reference, and target hint are written to schema-v2 ``run.json``.
-    Execution-time provenance (script, source, profile, config, executor)
-    lives only on the Execution record (``environment`` / ``source`` /
-    ``executor`` in ``executions/eNN/execution.json``). The execution-era
-    fields still here (``status`` / ``owner_pid`` / ``owner_host`` /
-    ``started_at`` / ``finished_at`` / ``error``) are never persisted by
-    :class:`Run` and are removed by arch-own-03j; ``workflow_snapshot`` /
-    ``workflow_id`` / ``workflow_version`` are removed by arch-own-04e.
+    Attempt status, ownership, time, and error live only on
+    ``executions/eNN/execution.json`` (:class:`Execution`). The workflow
+    belongs to the experiment. An attempt's compiled digest lives on that
+    Execution.
     """
 
     model_config = ConfigDict(extra="ignore", frozen=True)
@@ -256,26 +242,9 @@ class RunMetadata(BaseModel, frozen=True):
     definition_hash: str
     experiment_revision_id: str
     input_asset_ids: tuple[str, ...] = ()
-    status: RunStatus = RunStatus.PENDING
-    owner_pid: int | None = None
-    owner_host: str | None = None
-    started_at: datetime | None = None
-    finished_at: datetime | None = None
-    error: ErrorInfo | None = None
-    # Opaque legacy workflow-snapshot payload, read-only: nothing writes a
-    # per-run copy any more, and there is no typed model for it — workspace
-    # keeps it as a plain dict.
-    workflow_snapshot: dict[str, JSONValue] | None = None
 
     # Intended compute target name (matches a ComputeTarget in the workspace
     # registry).  Captured at run-creation time so the UI can filter and the
     # actual submitter can pick the right SubmitHandler later.  Distinct from
     # the Execution's ``executor``, which is populated post-submit by molq.
     target: str | None = None
-
-    # Workflow versioning — populated by RunContext.bind_workflow_version().
-    # ``workflow_id`` is the deterministic topology hash; ``workflow_version``
-    # is the user-declared label.  Both are ``None`` when the run was started
-    # without a bound Workflow (legacy / ad-hoc runs).
-    workflow_id: str | None = None
-    workflow_version: str | None = None

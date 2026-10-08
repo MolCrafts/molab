@@ -60,15 +60,16 @@ from __future__ import annotations
 import builtins
 import hashlib
 import json
+import shutil
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import UTC, datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import cast
 
 from molab._typing import JSONValue
 
 from ._file_lock import file_lock
-from .artifact_repository import ArtifactRepository
+from .artifact_repository import ArtifactRepository, content_ref
 from .domain import (
     ACTIVE_EXECUTION_STATUSES,
     TERMINAL_EXECUTION_STATUSES,
@@ -80,7 +81,7 @@ from .domain import (
     RunStatusSummary,
     SourceManifest,
 )
-from .execution_dirs import OUT, prunable_dirs
+from .execution_dirs import OUT, execution_dir_names, prunable_dirs
 from .fs import FileSystem, PathArg
 from .fs_local import LocalFileSystem
 from .history import SYSTEM_AGENT, AgentRef, EntityRef, GitHistory, Relation
@@ -190,7 +191,9 @@ _LIFECYCLE_RANK: dict[ExecutionStatus, int] = {
 _EVIDENCE_FILES = {
     "runtime": "run.log",
     "workflow": "workflow.json",
-    "results": "results.json",
+    "stdout": "stdout.log",
+    "stderr": "stderr.log",
+    "traceback": "traceback.txt",
 }
 
 
@@ -293,7 +296,7 @@ class ExecutionRepository:
 
         This is the one place a run's ``eNN`` ids are allocated: the id is
         always the next sequence slug and is never reused. The only caller in
-        ``src`` is ``Run.create_execution``. The record is written QUEUED with
+        ``src`` is ``Run._create_execution``. The record is written QUEUED with
         its creation-time facts only. Every rule below is checked under the
         create lock before anything is written, so a refused creation leaves
         no file and no history commit.
@@ -378,6 +381,142 @@ class ExecutionRepository:
             self._record("ExecutionCreated", state, when=now)
             return state
 
+    def adopt(
+        self,
+        *,
+        status: ExecutionStatus,
+        created_by: AgentRef,
+        started_at: datetime,
+        finished_at: datetime,
+        moves: Sequence[tuple[PathArg, str]] = (),
+        mode: ExecutionMode = ExecutionMode.INITIAL,
+        based_on_execution_id: str | None = None,
+        executor: dict[str, JSONValue] | None = None,
+        environment: dict[str, JSONValue] | None = None,
+        error: dict[str, JSONValue] | None = None,
+        digest: bool = True,
+    ) -> Execution:
+        """Record an attempt that already ran outside molab, sealed in one write.
+
+        The attempt ran under a scheduler or by hand, before this run existed
+        in a workspace. Its bytes are *moved* (renamed; same filesystem only)
+        into the next ``eNN``, and the record is written once, already sealed,
+        with the times the attempt really started and finished. Nothing is
+        ever QUEUED or RUNNING, so no reaper or dashboard sees a live attempt
+        that is not one.
+
+        Each move is ``(source, attempt-relative destination)``. The
+        destination's first component must be a declared attempt directory
+        (``out/nve``, ``jobs/slurm-1.out``) or an evidence file
+        (``run.log``). With *digest*, every moved path is hashed in place and
+        recorded as ``EvidenceRef(kind="adopted")``, so the record proves which
+        bytes it adopted. If any move or hash fails, every completed move is
+        renamed back and the attempt directory removed: a refused adoption
+        leaves the source as it was and writes no record.
+
+        Mode rules are ``create``'s.
+
+        Args:
+            status: The terminal status the attempt ended with.
+            created_by: Who adopts the attempt.
+            started_at: When the attempt started.
+            finished_at: When the attempt ended.
+            moves: ``(source, destination)`` pairs.
+            mode: How this attempt relates to earlier ones.
+            based_on_execution_id: The predecessor, when *mode* needs one.
+            executor: Executor facts (scheduler, job ids, host).
+            environment: Environment facts (python, package versions).
+            error: The failure, for a failed attempt.
+            digest: Whether to hash every moved path into the record.
+
+        Returns:
+            The sealed record as written.
+
+        Raises:
+            ValueError: *status* is not terminal, a destination is not inside
+                a declared attempt directory, or the mode rules refuse.
+            FileExistsError: A destination already exists.
+            FileNotFoundError: A source does not exist.
+            NotImplementedError: The workspace filesystem is not local.
+        """
+        if status not in TERMINAL_EXECUTION_STATUSES:
+            raise ValueError(f"cannot adopt an attempt in non-terminal status {status.value!r}")
+        if not isinstance(self.fs, LocalFileSystem):
+            raise NotImplementedError("adopting an attempt moves local bytes; the disk is remote")
+        planned = [(Path(str(src)), _adopted_destination(dest)) for src, dest in moves]
+        for src, _ in planned:
+            if not src.exists():
+                raise FileNotFoundError(f"cannot adopt {src}: it does not exist")
+        mode = _creation_mode(mode)
+        self.fs.mkdir(self.executions_dir, parents=True, exist_ok=True)
+        with file_lock(self._create_lock()):
+            prior = self.list()
+            predecessor = self._validate_creation(
+                mode,
+                prior,
+                based_on_execution_id=based_on_execution_id,
+                checkpoint_artifact_id=None,
+            )
+            seq = max((item.seq for item in prior), default=0) + 1
+            slug = execution_slug(seq)
+            attempt = Path(self.execution_dir(slug))
+            if attempt.exists():
+                raise FileExistsError(f"Execution {slug!r} already exists")
+            attempt.mkdir(parents=True)
+            done: list[tuple[Path, Path]] = []
+            try:
+                adopted: list[EvidenceRef] = []
+                for src, dest in planned:
+                    target = attempt / dest
+                    if target.exists():
+                        raise FileExistsError(f"{dest} is adopted twice")
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    src.rename(target)
+                    done.append((src, target))
+                    if digest and dest not in _EVIDENCE_FILES.values():
+                        content = content_ref(self.fs, target)
+                        adopted.append(
+                            EvidenceRef(
+                                kind="adopted",
+                                rel_path=dest,
+                                digest=content.digest,
+                                size=content.size,
+                            )
+                        )
+                now = datetime.now(UTC)
+                state = Execution(
+                    id=slug,
+                    seq=seq,
+                    run_id=self.run_id,
+                    project_id=self.project_id,
+                    mode=mode,
+                    status=status,
+                    created_at=started_at,
+                    started_at=started_at,
+                    finished_at=finished_at,
+                    created_by=created_by,
+                    based_on_execution_id=predecessor.id if predecessor else None,
+                    executor=executor or {},
+                    environment=environment or {},
+                    evidence=(*self._collect_evidence(slug), *adopted),
+                    error=error,
+                    sealed_at=now,
+                )
+                self._write_state(state)
+            except BaseException:
+                for src, target in reversed(done):
+                    src.parent.mkdir(parents=True, exist_ok=True)
+                    target.rename(src)
+                shutil.rmtree(attempt, ignore_errors=True)
+                raise
+        commit = self._record("ExecutionAdopted", state, when=now)
+        if commit is None:
+            return state
+        with file_lock(self._state_lock(slug)):
+            stamped = self.get(slug).model_copy(update={"sealed_commit": commit})
+            self._write_state(stamped)
+        return stamped
+
     def resolve_predecessor(
         self,
         mode: ExecutionMode,
@@ -386,7 +525,7 @@ class ExecutionRepository:
         """Resolve the attempt a new attempt of *mode* would be based on.
 
         The one predecessor rule: ``create`` applies it under its lock, and
-        ``Run.create_execution`` applies it to inherit the predecessor's
+        ``Run._create_execution`` applies it to inherit the predecessor's
         config. ``retry`` is treated as ``rerun``.
 
         Args:
@@ -980,7 +1119,7 @@ class ExecutionRepository:
             if checkpoint_artifact_id is not None:
                 predecessor.artifact(checkpoint_artifact_id)
         elif checkpoint_artifact_id is not None:
-            raise ValueError("checkpoint_artifact_id is only valid for resume")
+            raise ValueError("checkpoint is only valid for resume")
         if mode is ExecutionMode.REPRODUCE and predecessor.status is not ExecutionStatus.SUCCEEDED:
             raise ValueError("reproduce requires a succeeded predecessor")
         return predecessor
@@ -1010,6 +1149,27 @@ class ExecutionRepository:
 
     def _write_state(self, state: Execution) -> None:
         _write_execution(self.fs, self.state_path(state.id), state)
+
+
+def _adopted_destination(dest: str) -> str:
+    """Normalize an adopted path's attempt-relative destination, or refuse it.
+
+    Raises:
+        ValueError: *dest* is absolute, escapes the attempt, or does not start
+            with a declared attempt directory or an evidence file name.
+    """
+    rel = PurePosixPath(dest)
+    if rel.is_absolute() or ".." in rel.parts or not rel.parts:
+        raise ValueError(f"adopted destination must be attempt-relative: {dest!r}")
+    head = rel.parts[0]
+    if len(rel.parts) == 1 and head in _EVIDENCE_FILES.values():
+        return rel.as_posix()
+    if len(rel.parts) > 1 and head in execution_dir_names():
+        return rel.as_posix()
+    raise ValueError(
+        f"adopted destination {dest!r} is neither inside a declared attempt directory "
+        f"({sorted(execution_dir_names())}) nor an evidence file ({sorted(_EVIDENCE_FILES.values())})"
+    )
 
 
 def _refuse_immutable_updates(updates: Mapping[str, object]) -> None:
@@ -1086,7 +1246,6 @@ def fold_legacy_attempt(
     src: Path,
     dst: Path,
     *,
-    workspace_root: Path,
     seq: int,
     run_id: str,
     project_id: str,
@@ -1118,8 +1277,9 @@ def fold_legacy_attempt(
       ``finished_at`` (including the defaulted ``interrupted`` one) folds to
       an unsealed record.
     - Each artifact is rebound to this attempt (``execution_id`` / ``run_id``
-      / ``project_id``), its ``path`` becomes workspace-relative, and a
-      missing ``source_path`` defaults to ``out/<name>``.
+      / ``project_id``), its ``path`` is the execution-relative ``out_rel``
+      (``artifacts/<name>``), and a missing ``source_path`` defaults to
+      ``out/<name>``.
     - ``bypass_cache``, ``source`` and ``workflow_digest`` are left at their
       defaults; an old layout recorded none of them.
 
@@ -1129,7 +1289,6 @@ def fold_legacy_attempt(
     Args:
         src: The legacy attempt directory.
         dst: The target attempt directory (``.../executions/e01``).
-        workspace_root: The target workspace root; artifact paths are relative to it.
         seq: The attempt's 1-based sequence number within its Run.
         run_id: The id of the Run the attempt belongs to.
         project_id: The id of the Project the Run belongs to.
@@ -1156,7 +1315,7 @@ def fold_legacy_attempt(
         record = {key: value for key, value in legacy.items() if key != "schema_version"}
         name = str(record.get("name") or Path(out_rel).name)
         record["name"] = name
-        record["path"] = (dst / out_rel).relative_to(workspace_root).as_posix()
+        record["path"] = out_rel
         record.setdefault("source_path", f"{OUT.name}/{Path(name).name}")
         record["execution_id"] = slug
         record["run_id"] = run_id

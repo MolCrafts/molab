@@ -61,20 +61,10 @@ class TestMetricsWriter:
         with run.start() as ctx:
             ctx.metrics.scalar("train/loss", 0.25, step=1)
 
-        from molab.workspace.assets import scan
+        from molab.workspace.artifact_repository import scan_asset_repositories
 
-        root = run.experiment.project.workspace.root
-        assert scan.scan_assets(root, kind="metrics", producer_run=run.id) == []
-
-        manifest_path = _exec_dir(run) / "assets.json"
-        entries: list[dict[str, object]] = []
-        if manifest_path.exists():
-            manifest = json.loads(manifest_path.read_text())
-            entries = list(manifest.get("assets", {}).values())
-        kinds = {entry["kind"] for entry in entries}
-        names = {entry.get("name") for entry in entries}
-        assert "metrics" not in kinds
-        assert "metrics.mlp.jsonl" not in names
+        ws = run.experiment.project.workspace
+        assert all(repo.list() == [] for repo in scan_asset_repositories(ws))
 
     def test_invalid_scalar_value_rejected(self, run):
         with run.start() as ctx, pytest.raises(ValueError, match="scalar metric value"):

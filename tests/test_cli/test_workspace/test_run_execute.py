@@ -1,7 +1,7 @@
 """``molab execute`` — the molq worker entry (``cli/workspace/run.py`` ``execute``).
 
 The worker is what a scheduler job runs: it opens the run from its directory,
-rebuilds the workflow from the experiment's ``workflow_entrypoint`` and
+rebuilds the workflow from the experiment's binding and
 executes it against a pre-created Execution record. Invoked in-process through
 typer's ``CliRunner``; the binding registry holds nothing for the experiment,
 so recovery takes the same path a fresh worker process takes.
@@ -14,19 +14,17 @@ so recovery takes the same path a fresh worker process takes.
 from __future__ import annotations
 
 import json
-from collections.abc import Awaitable, Callable
-from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
 from typer.testing import CliRunner
 
 import molab.cli
-import molab.cli.workspace.run as run_module
 import molab.workflow
 from molab.profile import ProfileConfig
 from molab.workspace import AgentRef, Workspace
 from molab.workspace.domain import ExecutionMode
+from molab.workspace.execution_context import ExecutionContext
 from molab.workspace.execution_repository import ExecutionRepository
 from molab.workspace.project import Project
 from molab.workspace.run import Run
@@ -73,9 +71,7 @@ def _healing_run(tmp_path: Path) -> tuple[Workspace, Project, Run]:
     ws = Workspace(root=tmp_path / "ws", name="worker-lab")
     project = ws.add_project("p")
     exp = project.add_experiment("e")
-    # Hand-written binding (arch-own-04 replaces this with Experiment.bind_workflow).
-    exp.metadata = exp.metadata.model_copy(update={"workflow_entrypoint": f"{wf_file}:workflow"})
-    exp.save()
+    exp.bind_workflow("code", entrypoint=f"{wf_file}:workflow")
     run = exp.add_run(params={"seed": 1})
     run.materialize()
     return ws, project, run
@@ -97,28 +93,36 @@ def _invoke(*args: str) -> tuple[int, str]:
     return result.exit_code, result.output
 
 
-@dataclass
-class _CompiledSpy:
-    """What ``_execute_compiled`` was handed by the worker."""
+def _execute_run_calls(monkeypatch: pytest.MonkeyPatch) -> list[dict[str, object]]:
+    """Delegating spy on ``molab.workflow.execute.execute_run``."""
+    import molab.workflow as workflow_pkg
+    import molab.workflow.execute as execute_mod
 
-    config: ProfileConfig | None = None
-    bypass_cache: list[object] = field(default_factory=list)
+    original = execute_mod.execute_run
+    seen: list[dict[str, object]] = []
+
+    def wrapper(workflow: object, run: object, **kwargs: object) -> object:
+        seen.append(dict(kwargs))
+        return original(workflow, run, **kwargs)
+
+    monkeypatch.setattr(execute_mod, "execute_run", wrapper)
+    monkeypatch.setattr(workflow_pkg, "execute_run", wrapper, raising=False)
+    return seen
 
 
-def _spy_execute_compiled(monkeypatch: pytest.MonkeyPatch) -> _CompiledSpy:
-    spy = _CompiledSpy()
-    original: Callable[..., Awaitable[object]] = run_module._execute_compiled
+def _spy_run_start(monkeypatch: pytest.MonkeyPatch) -> list[ExecutionContext]:
+    """Delegating spy on ``Run.start``; captures the context it returns."""
+    original = Run.start
+    captured: list[ExecutionContext] = []
 
-    async def _wrapper(spec: object, **kwargs: object) -> object:
-        run_context = kwargs["run_context"]
-        config = getattr(run_context, "config", None)
-        assert isinstance(config, ProfileConfig)
-        spy.config = config
-        spy.bypass_cache.append(kwargs.get("bypass_cache"))
-        return await original(spec, **kwargs)
+    def wrapper(self: Run, *args: object, **kwargs: object) -> ExecutionContext:
+        ctx = original(self, *args, **kwargs)
+        assert isinstance(ctx, ExecutionContext)
+        captured.append(ctx)
+        return ctx
 
-    monkeypatch.setattr(run_module, "_execute_compiled", _wrapper)
-    return spy
+    monkeypatch.setattr(Run, "start", wrapper)
+    return captured
 
 
 _TEST_AGENT = AgentRef(id="test", type="person", name="test")
@@ -141,23 +145,19 @@ class TestExecute:
         assert len(run.executions) == 1
         assert (tmp_path / "result.txt").read_text() == "200"
 
-    @pytest.mark.xfail(
-        strict=True,
-        raises=(ValueError, AssertionError),
-        reason="arch-own-03: molab execute on a RESUME record — no checkpoint needed "
-        "and the worker seeds from based_on e01, writing result 4100",
-    )
     def test_resume_record_seeds_from_based_on(self, tmp_path: Path) -> None:
-        ws, project, run = _healing_run(tmp_path)
-        repository = _repository(ws, project, run)
-        repository.create(mode=ExecutionMode.INITIAL, created_by=_TEST_AGENT)
+        _ws, _project, run = _healing_run(tmp_path)
+        # The submitter's record carries profile keys. A missing config_hash
+        # on either side drops every seed, so repository.create (no profile
+        # keys) cannot show that based_on was read.
+        run.create_execution(created_by=_TEST_AGENT)
         assert _worker(run, "e01") == 1
         assert [e.status.value for e in run.executions] == ["failed"]
         # e01 recorded stage_a == 2; the sentinel 41 reaches stage_b only as a
         # seed taken from e01's journal (a recompute yields 2 -> "200").
         poison_node_output(run.run_dir, "e01", "stage_a", 41)
         (tmp_path / "healed").write_text("ok")
-        resume = repository.create(
+        resume = run.create_execution(
             mode=ExecutionMode.RESUME,
             based_on_execution_id="e01",
             created_by=_TEST_AGENT,
@@ -175,7 +175,7 @@ class TestExecute:
     ) -> None:
         _ws, _project, run = _healing_run(tmp_path)
         (tmp_path / "healed").write_text("ok")
-        run.create_execution(
+        run._create_execution(
             environment={"script": str(tmp_path / "missing.py")},
             profile_config=ProfileConfig({"k": 1}, name="cpu"),
         )
@@ -200,31 +200,34 @@ class TestExecute:
     ) -> None:
         _ws, _project, run = _healing_run(tmp_path)
         (tmp_path / "healed").write_text("ok")
-        run.create_execution(profile_config=ProfileConfig({"k": 1}, name="cpu"))
-        spy = _spy_execute_compiled(monkeypatch)
+        run._create_execution(profile_config=ProfileConfig({"k": 1}, name="cpu"))
+        seen = _execute_run_calls(monkeypatch)
+        started = _spy_run_start(monkeypatch)
 
         exit_code = _worker(run, "e01")
 
         assert exit_code == 0
-        assert spy.config is not None
-        assert spy.config.name == "cpu"
-        assert spy.config.to_dict() == {"k": 1}
-        assert spy.config.content_hash() == run.execution("e01").environment["config_hash"]
-        assert "run_dir" not in spy.config.to_dict()
-        assert spy.bypass_cache == [False]
+        assert len(started) == 1
+        config = started[0].config
+        assert config.name == "cpu"
+        assert config.to_dict() == {"k": 1}
+        assert "run_dir" not in config.to_dict()
+        assert config.content_hash() == run.execution("e01").environment["config_hash"]
+        assert seen == [{"execution_id": "e01"}]
 
     def test_bypass_cache_comes_from_the_record(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         _ws, _project, run = _healing_run(tmp_path)
         (tmp_path / "healed").write_text("ok")
-        run.create_execution(bypass_cache=True)
-        spy = _spy_execute_compiled(monkeypatch)
+        run._create_execution(bypass_cache=True)
+        seen = _execute_run_calls(monkeypatch)
 
         exit_code = _worker(run, "e01")
 
         assert exit_code == 0
-        assert spy.bypass_cache == [True]
+        assert run.execution("e01").bypass_cache is True
+        assert seen == [{"execution_id": "e01"}]
 
     @pytest.mark.parametrize("override", ["profile", "config"])
     def test_refuses_config_and_profile_overrides(
@@ -233,7 +236,7 @@ class TestExecute:
         monkeypatch.chdir(tmp_path)
         _ws, _project, run = _healing_run(tmp_path)
         (tmp_path / "healed").write_text("ok")
-        run.create_execution(profile_config=ProfileConfig({"k": 1}, name="cpu"))
+        run._create_execution(profile_config=ProfileConfig({"k": 1}, name="cpu"))
         molcfg = tmp_path / "molcfg.json"
         molcfg.write_text(json.dumps({"profiles": {"cpu": {"k": 2}}}), encoding="utf-8")
         extra = ["--profile", "cpu"] if override == "profile" else ["--config", str(molcfg)]
@@ -254,11 +257,34 @@ class TestExecute:
     def test_unknown_execution_id_exits_1(self, tmp_path: Path) -> None:
         _ws, _project, run = _healing_run(tmp_path)
         (tmp_path / "healed").write_text("ok")
-        run.create_execution()
+        run._create_execution()
         before = len(run.executions)
 
         exit_code, output = _invoke(str(run.run_dir), "--execution-id", "e09")
 
         assert exit_code == 1, output
         assert "e09" in output
+        assert len(run.executions) == before
+
+    def test_failed_attempt_exits_1(self, tmp_path: Path) -> None:
+        _ws, _project, run = _healing_run(tmp_path)
+        run._create_execution()
+
+        exit_code, output = _invoke(str(run.run_dir), "--execution-id", "e01")
+
+        assert exit_code == 1, output
+        assert "FAILED" in output
+        assert run.execution("e01").status.value == "failed"
+
+    def test_non_queued_id_is_refused(self, tmp_path: Path) -> None:
+        _ws, _project, run = _healing_run(tmp_path)
+        (tmp_path / "healed").write_text("ok")
+        run._create_execution()
+        assert _worker(run, "e01") == 0
+        before = len(run.executions)
+
+        exit_code, output = _invoke(str(run.run_dir), "--execution-id", "e01")
+
+        assert exit_code == 1, output
+        assert "Error:" in output
         assert len(run.executions) == before

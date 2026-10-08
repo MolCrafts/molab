@@ -84,6 +84,19 @@ const WorkspaceApp = ({ pathname }: { pathname: string }): JSX.Element => {
     };
   }, [expandExperiment, expandProject, routeExperimentId, routeProjectId]);
 
+  // A Project page summarises the status of every run below it, and refuses to
+  // claim a status mix from a partial snapshot. Experiments load their runs
+  // lazily (on expand), so without this the overview waits forever. Each call
+  // is a no-op once that experiment is loaded.
+  useEffect(() => {
+    if (!routeProjectId || routeExperimentId) return;
+    for (const experiment of snapshot.experiments) {
+      if (experiment.projectId === routeProjectId) {
+        void expandExperiment(routeProjectId, experiment.id);
+      }
+    }
+  }, [expandExperiment, routeExperimentId, routeProjectId, snapshot.experiments]);
+
   useEffect(() => {
     setInspectorTarget(buildDefaultInspectorTarget(selection));
   }, [selection]);

@@ -1,10 +1,13 @@
 import "katex/dist/katex.min.css";
-import type { JSX } from "react";
-import ReactMarkdown from "react-markdown";
+import type { JSX, ReactNode } from "react";
+import { useContext } from "react";
+import ReactMarkdown, { defaultUrlTransform } from "react-markdown";
 import rehypeKatex from "rehype-katex";
 import remarkGfm from "remark-gfm";
 import remarkMath from "remark-math";
 import { prepareMarkdownMath } from "@/lib/markdown-math";
+import { isMolabRef, resolveMolabRef } from "@/lib/molab-ref";
+import { MolabRefIndexContext } from "@/lib/molab-ref-context";
 import { cn } from "@/lib/utils";
 
 /**
@@ -60,6 +63,33 @@ const MARKDOWN_CLASS = [
   "[&_.katex-display]:py-1 [&_.katex]:text-title",
 ].join(" ");
 
+/** A `molab:` link becomes an in-app chip, or muted text when it cannot resolve. */
+const MolabRefLink = ({ href, children }: { href: string; children: ReactNode }): JSX.Element => {
+  const index = useContext(MolabRefIndexContext);
+  const resolved = index ? resolveMolabRef(href, index) : null;
+  if (!resolved) {
+    return (
+      <span
+        data-molab-ref="unresolved"
+        title={href}
+        className="text-muted-foreground underline decoration-dotted underline-offset-2"
+      >
+        {children}
+      </span>
+    );
+  }
+  return (
+    <a
+      href={resolved.path}
+      data-molab-ref={resolved.kind}
+      title={href}
+      className="rounded-control border border-border bg-muted px-1 no-underline"
+    >
+      {children}
+    </a>
+  );
+};
+
 export const MarkdownContent = ({
   text,
   className,
@@ -71,9 +101,12 @@ export const MarkdownContent = ({
     <ReactMarkdown
       remarkPlugins={[remarkGfm, remarkMath]}
       rehypePlugins={[[rehypeKatex, { strict: "ignore" }]]}
+      urlTransform={(url) => (isMolabRef(url) ? url : defaultUrlTransform(url))}
       components={{
         a: ({ children, href }) =>
-          href?.startsWith("/") ? (
+          isMolabRef(href) ? (
+            <MolabRefLink href={href}>{children}</MolabRefLink>
+          ) : href?.startsWith("/") ? (
             // Internal entity link — same-tab navigation.
             <a href={href}>{children}</a>
           ) : (

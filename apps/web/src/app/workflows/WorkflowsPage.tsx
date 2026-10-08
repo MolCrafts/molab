@@ -2,7 +2,7 @@ import { Plus, Workflow as WorkflowIcon } from "lucide-react";
 import type { JSX } from "react";
 import { useState } from "react";
 import { CreateWorkflowDialog } from "@/app/components/CreateWorkflowDialog";
-import { EmptyState, EntityHeader } from "@/app/components/entity";
+import { EmptyState, EntityPage } from "@/app/components/entity";
 import { useNavigationState } from "@/app/state/useNavigationState";
 import type { WorkspaceSnapshot } from "@/app/types";
 import { RunStatusBadge, WorkbenchAction, WorkbenchIconAction } from "@/components/workbench";
@@ -34,8 +34,7 @@ export const WorkflowsPage = ({ snapshot, onRefresh }: WorkflowsPageProps): JSX.
   );
 
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden">
-      <EntityHeader icon={WorkflowIcon} title="Workflows" actions={newWorkflowButton} />
+    <EntityPage icon={WorkflowIcon} title="Workflows" actions={newWorkflowButton}>
       <CreateWorkflowDialog
         projects={snapshot.projects}
         onCreated={handleCreated}
@@ -90,6 +89,6 @@ export const WorkflowsPage = ({ snapshot, onRefresh }: WorkflowsPageProps): JSX.
           </ul>
         )}
       </div>
-    </div>
+    </EntityPage>
   );
 };

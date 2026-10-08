@@ -36,7 +36,7 @@ _TEST_AGENT = AgentRef(id="test", type="person", name="test")
 @pytest.fixture
 def run(tmp_path: Path) -> Run:
     ws = Workspace(root=tmp_path, name="cancel-lab")
-    exp = ws.add_project("p").add_experiment("e", workflow_source="s.py", params={})
+    exp = ws.add_project("p").add_experiment("e", params={})
     new_run = exp.add_run(params={"seed": 1})
     new_run.materialize()
     return new_run
@@ -126,7 +126,7 @@ class TestZombieReapedFirst:
 
 class TestCancelPending:
     def test_pending_cancel_creates_through_run(self, run: Run) -> None:
-        """arch-own-02a §6: the pending-cancel attempt is created by ``Run.create_execution``."""
+        """arch-own-02a §6: pending-cancel allocates the attempt on the run."""
         assert cancel_run(run, allow_pending=True) is None
 
         [execution] = run.executions

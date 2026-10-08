@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { experimentsApi } from "@/api";
 import type { TargetResponse } from "@/api/generated/models/TargetResponse";
 import { TargetsService } from "@/api/generated/services/TargetsService";
+import { parseWorkflowDocumentInput } from "@/app/components/workflowDocumentInput";
 import { AddTargetDialog } from "@/app/settings/AddTargetDialog";
 import {
   Dialog,
@@ -72,13 +73,18 @@ export function CreateExperimentDialog({
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    const parsed = parseWorkflowDocumentInput(workflow);
+    if (!parsed.ok) {
+      setError(parsed.error);
+      return;
+    }
     setIsLoading(true);
     setError(null);
 
     try {
       await experimentsApi.createExperiment(projectId, {
         name,
-        workflowSource: workflow.trim() ? workflow : undefined,
+        workflowSource: parsed.document,
         description,
         parameterSpace: JSON.parse(parameterSpace),
         defaultTarget: defaultTarget === NO_TARGET_VALUE ? null : defaultTarget,
@@ -130,12 +136,12 @@ export function CreateExperimentDialog({
                 required
               />
             </div>
-            <div className="grid grid-cols-4 items-center gap-4">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-4 sm:items-center sm:gap-4">
               <TooltipProvider>
                 <Tooltip>
                   <TooltipTrigger asChild>
-                    <Label htmlFor="exp-workflow" className="text-right">
-                      Workflow
+                    <Label htmlFor="exp-workflow" className="text-left sm:text-right">
+                      Workflow IR (JSON)
                     </Label>
                   </TooltipTrigger>
                   <TooltipContent side="left">
@@ -143,12 +149,12 @@ export function CreateExperimentDialog({
                   </TooltipContent>
                 </Tooltip>
               </TooltipProvider>
-              <Input
+              <Textarea
                 id="exp-workflow"
                 value={workflow}
                 onChange={(e) => setWorkflow(e.target.value)}
-                placeholder="path/to/workflow.yaml"
-                className="col-span-3"
+                className="col-span-3 font-mono text-label"
+                rows={4}
               />
             </div>
             <div className="grid grid-cols-1 gap-2 sm:grid-cols-4 sm:items-center sm:gap-4">

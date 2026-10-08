@@ -175,6 +175,22 @@ molab run train.py --rerun --fresh     # 从头重新执行
 
 <span class="molcrafts-manual-eyebrow">概念</span>
 
+## 定义计算
+
+用脚本描述要算什么。新的 run id 是 UUIDv7，同一定义靠 `definition_hash` 识别。
+
+## 留下记录
+
+一次尝试是一条 Execution。恢复会新建一条 Execution，而不是打开旧的那条。
+
+## 扫描参数
+
+参数扫描为每个取值建一个 run，目录名是参数本身。
+
+## 从终端运行
+
+四种创建模式是 INITIAL、RERUN、RESUME、REPRODUCE。退出码跟随实际跑的那次尝试。
+
 ## 工作原理
 
 每一部分各司其职，松耦合组合。

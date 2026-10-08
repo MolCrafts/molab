@@ -54,7 +54,7 @@ result = await WorkflowRuntime().execute(outer)
 ```
 
 The outer workflow sees `preprocess` as a single task; the inner workflow keeps
-its own topology, `workflow_id`, and compile-time validation. By default
+its own topology, `workflow_digest`, and compile-time validation. By default
 `SubWorkflow` returns the inner spec's single **dependency leaf** (the task no
 other task depends on — `normalize` above). Pass `output="<task_name>"` to
 select a different inner output. If the inner spec has more than one leaf and no

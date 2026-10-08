@@ -268,6 +268,7 @@ export const compareSet = {
   clear: (): void => commit([]),
   reorder: (fromIndex: number, toIndex: number): void =>
     commit(reorderItems(entries, fromIndex, toIndex)),
+  replace: (next: CompareItem[]): void => commit(next),
   setCategory: (key: string, category: string | null): void =>
     commit(setItemCategory(entries, key, category)),
   setExecution: (key: string, executionId: string | null): void =>

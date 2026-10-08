@@ -25,7 +25,7 @@ function NavSeparator({ label }: { label: string }): JSX.Element {
   return (
     <div className="flex items-center gap-2 px-1 pb-1 pt-2">
       <Separator className="min-w-0 flex-1" />
-      <span className="shrink-0 text-[0.65rem] font-medium uppercase tracking-wider text-muted-foreground">
+      <span className="shrink-0 text-micro font-medium uppercase tracking-wider text-muted-foreground">
         {label}
       </span>
       <Separator className="min-w-0 flex-1" />
@@ -98,6 +98,15 @@ export function SettingsShell({
         } else {
           break;
         }
+      }
+      // A short first section sits above the threshold together with the
+      // next one, so the top of the scroll always means the first section and
+      // the bottom the last (it can never scroll up to the threshold).
+      if (root.scrollTop <= 1) {
+        current = nodes[0].dataset.settingsSection ?? nodes[0].id;
+      } else if (root.scrollTop + root.clientHeight >= root.scrollHeight - 1) {
+        const last = nodes[nodes.length - 1];
+        current = last.dataset.settingsSection ?? last.id;
       }
       setActiveId((prev) => (prev === current ? prev : current));
     };

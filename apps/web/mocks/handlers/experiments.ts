@@ -45,13 +45,14 @@ export const experimentHandlers = [
             name: body.name,
             path: `projects/${projectId}/experiments/${slugify(body.name)}`,
             description: body.description || "",
-            workflow: body.workflowSource ?? null,
-            workflowType: "yaml",
+            workflow: body.workflowSource ? JSON.stringify(body.workflowSource) : null,
+            workflowKind: "document",
             gitCommit: null,
             parameterSpace: body.parameterSpace || {},
             runCount: 0,
             runs: [],
             created: new Date().toISOString(),
+            ref: `molab:experiment/${experimentId}`,
         };
 
         setExperiment(newExperiment);

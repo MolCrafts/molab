@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
-import { buildRunListActions, primaryRunVerb } from "@/app/runs/runListActions";
+import { buildRunListActions, primaryRunVerb } from "@/app/entities/runListActions";
 import type { RunSummary } from "@/app/types";
 
 const baseRun = (status: string): RunSummary =>

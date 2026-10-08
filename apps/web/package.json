@@ -16,7 +16,8 @@
     "lint": "biome check .",
     "lint:fix": "biome check --write .",
     "format": "biome format --write .",
-    "generate:api": "npx openapi-typescript-codegen --input ../../openapi.json --output src/api/generated --client fetch && node scripts/patch-generated-api.mjs"
+    "generate:api": "npx openapi-typescript-codegen --input ../../openapi.json --output src/api/generated --client fetch && node scripts/patch-generated-api.mjs",
+    "download:busytex": "node scripts/download-busytex.mjs"
   },
   "dependencies": {
     "@flowgram.ai/free-layout-editor": "1.0.15",
@@ -66,6 +67,7 @@
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
     "tailwind-merge": "^3.6.0",
+    "texlyre-busytex": "1.4.0",
     "vega": "^6.4.0",
     "vega-embed": "^7.2.0",
     "vega-lite": "^6.4.3",

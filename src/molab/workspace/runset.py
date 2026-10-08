@@ -158,8 +158,8 @@ class RunSet(Sequence[Run]):
         verbs mirror the CLI exactly and each acts on a **disjoint** domain:
 
         * no flag — execute every ``pending`` run (first attempt);
-        * ``resume=True`` — reopen each ``failed``/``cancelled`` run's last
-          execution, seeding its completed nodes (``--resume``);
+        * ``resume=True`` — create a new Execution for each ``failed``/``cancelled``
+          run, seeding completed nodes from the latest attempt (``--resume``);
         * ``rerun=True`` — open a fresh attempt for each
           ``failed``/``cancelled`` run (``--rerun``); ``fresh=True``
           additionally bypasses cache reads (requires ``rerun=True``).
@@ -188,7 +188,7 @@ class RunSet(Sequence[Run]):
         if resume and rerun:
             raise ValueError(
                 "resume=True and rerun=True are mutually exclusive verbs — "
-                "resume reopens the last execution, rerun opens a fresh attempt."
+                "resume creates a new Execution, rerun opens a fresh attempt."
             )
         if fresh and not rerun:
             raise ValueError(

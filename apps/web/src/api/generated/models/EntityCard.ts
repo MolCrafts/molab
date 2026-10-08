@@ -3,7 +3,7 @@
 /* tslint:disable */
 /* eslint-disable */
 /**
- * A clickable summary card for an entity a document embeds (05 resolver).
+ * A clickable summary card for an entity a document embeds.
  */
 export type EntityCard = {
     kind: string;
@@ -11,5 +11,7 @@ export type EntityCard = {
     title: string;
     relPath?: (string | null);
     status?: (string | null);
+    ref?: (string | null);
+    missing?: boolean;
 };
 

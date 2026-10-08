@@ -1,6 +1,6 @@
+import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, Network } from "lucide-react";
-import { type JSX, type ReactNode, useEffect, useMemo, useState } from "react";
-import { runsApi } from "@/api";
+import { type JSX, type ReactNode, useMemo } from "react";
 import type { ExecutionOutputsResponse } from "@/api/generated/models/ExecutionOutputsResponse";
 import {
   CopyButton,
@@ -14,6 +14,7 @@ import { listExecutionColumns, listExecutionDetails } from "@/app/registry";
 import { formatDuration } from "@/app/renderers/dashboardData";
 import { RunExecutionOutputs } from "@/app/renderers/run/RunExecutionOutputs";
 import { groupForStatus } from "@/app/runs/statusGroups";
+import { executionJournalQueryOptions, journalRefetchInterval } from "@/app/state/entityQueries";
 import type { ExecutionRecordSummary, RunSummary, WorkflowSummary } from "@/app/types";
 import {
   Table,
@@ -30,7 +31,6 @@ import {
   WorkbenchOperationState,
 } from "@/components/workbench";
 import { normalizeTaskGraph } from "@/components/workflow/flowgram-document";
-import type { TaskGraphJson } from "@/components/workflow/task-graph-ir";
 import { WorkflowGraph } from "@/components/workflow/workflow-graph";
 import type { ExecutionRowData } from "@/lib/contribution-types";
 import { formatDateTime } from "@/lib/datetime";
@@ -172,47 +172,23 @@ export const RunExecutionsPanel = ({
   const selectedIndex = selected
     ? history.findIndex((item) => item.executionId === selected.executionId)
     : -1;
-  const [graph, setGraph] = useState<TaskGraphJson | null>(null);
-  const [graphError, setGraphError] = useState<string | null>(null);
-  // A fetch in flight is not "no snapshot" — the two used to render identically.
-  const [graphLoading, setGraphLoading] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    let interval: ReturnType<typeof setInterval> | null = null;
-    if (!selectedExecutionId) {
-      setGraph(null);
-      setGraphError(null);
-      setGraphLoading(false);
-      return;
-    }
-    const load = (): void => {
-      runsApi
-        .getRunExecution(run.projectId, run.experimentId, run.id, selectedExecutionId)
-        .then((response) => {
-          if (cancelled) return;
-          setGraph(response.workflow ? normalizeTaskGraph(response.workflow) : null);
-          setGraphError(null);
-        })
-        .catch((reason: unknown) => {
-          if (!cancelled)
-            setGraphError(
-              reason instanceof Error ? reason.message : "Failed to load execution workflow",
-            );
-        })
-        .finally(() => {
-          if (!cancelled) setGraphLoading(false);
-        });
-    };
-    setGraphLoading(true);
-    load();
-    if (selected?.status === "queued" || selected?.status === "running")
-      interval = setInterval(load, 1500);
-    return () => {
-      cancelled = true;
-      if (interval) clearInterval(interval);
-    };
-  }, [run.experimentId, run.id, run.projectId, selected?.status, selectedExecutionId]);
+  const journal = useQuery({
+    ...executionJournalQueryOptions(
+      run.projectId,
+      run.experimentId,
+      run.id,
+      selectedExecutionId ?? "",
+    ),
+    enabled: selectedExecutionId !== null,
+    refetchInterval: journalRefetchInterval(selected?.status),
+  });
+  const graph = journal.data ? normalizeTaskGraph(journal.data) : null;
+  const graphError = journal.error
+    ? journal.error instanceof Error
+      ? journal.error.message
+      : "Failed to load execution workflow"
+    : null;
+  const graphLoading = journal.isLoading;
 
   const failedTasks =
     graph?.task_configs.filter((task) => statusKey(task.status) === "failed") ?? [];
@@ -236,7 +212,7 @@ export const RunExecutionsPanel = ({
 
   return (
     <OverviewSurface>
-      <InventoryCanvas className="max-w-6xl space-y-8">
+      <InventoryCanvas>
         <section className="space-y-3">
           <h2 className="text-body-lg font-medium text-foreground">
             Executions
