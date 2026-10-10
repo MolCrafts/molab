@@ -5,10 +5,10 @@ transport or scheduler call, refuses an explicit id that is unknown or not
 QUEUED, seals the attempt FAILED when something breaks before ``submit_job``
 returns, and records the job ids on ``execution.json`` only (no ``job.json``).
 ``reconcile_submission`` is the level-triggered terminal check: it asks molq
-for the job's current state (``Submitor.refresh_job``) and seals a record the
-worker never started once the job has ended. ``molq.Submitor`` is replaced by
-fakes that record what they saw; no scheduler, SSH endpoint or worker process
-is involved.
+for the job's current state (``Submitor.refresh_jobs`` then ``get_job``) and
+seals a record the worker never started once the job has ended.
+``molq.Submitor`` is replaced by fakes that record what they saw; no
+scheduler, SSH endpoint or worker process is involved.
 """
 
 from __future__ import annotations
@@ -512,8 +512,8 @@ class RefreshSpy:
     """What the reconcile-time fake ``Submitor`` saw.
 
     ``clusters`` holds ``(name, scheduler, transport)`` of every ``Cluster``
-    a ``Submitor`` was built for; ``refreshed`` the ids passed to
-    ``refresh_job``.
+    a ``Submitor`` was built for; ``refreshed`` the ids passed to ``get_job``
+    after ``refresh_jobs``.
     """
 
     clusters: list[tuple[str, str, object]] = field(default_factory=list)
@@ -526,12 +526,12 @@ def _install_refreshing_submitor(
     state: JobState = JobState.QUEUED,
     refresh_error: Exception | None = None,
 ) -> RefreshSpy:
-    """Replace ``molq.Submitor`` with a fake whose ``refresh_job`` reports *state*.
+    """Replace ``molq.Submitor`` with a fake whose ``get_job`` reports *state*.
 
     Args:
         monkeypatch: The test's monkeypatch.
-        state: The molq state every ``refresh_job`` call reports.
-        refresh_error: Raised by ``refresh_job`` after the call is recorded.
+        state: The molq state every ``get_job`` call reports.
+        refresh_error: Raised by ``refresh_jobs`` before ``get_job`` runs.
     """
     spy = RefreshSpy()
 
@@ -552,10 +552,12 @@ def _install_refreshing_submitor(
         def close(self) -> None:
             return None
 
-        def refresh_job(self, job_id: str) -> JobRecord:
-            spy.refreshed.append(job_id)
+        def refresh_jobs(self) -> None:
             if refresh_error is not None:
                 raise refresh_error
+
+        def get_job(self, job_id: str) -> JobRecord:
+            spy.refreshed.append(job_id)
             return JobRecord(
                 job_id=job_id,
                 cluster_name=self._cluster.name,

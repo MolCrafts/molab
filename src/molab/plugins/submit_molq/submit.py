@@ -396,10 +396,11 @@ def reconcile_submission(mol_run: Run, execution_id: str) -> ReconcileOutcome:
     """Check a QUEUED molq-submitted attempt against its job and seal it if it never started.
 
     Level-triggered: every call asks molq for the job's state now
-    (``Submitor.refresh_job``) instead of waiting for an event, so any poller
-    (``molab run --block``, ``molab monitor``) can call it repeatedly. Only a
-    QUEUED record can be sealed here, so only a QUEUED record reaches molq: a
-    RUNNING or sealed record, a record not submitted through molq, or one with
+    (``Submitor.refresh_jobs`` then ``get_job``) instead of waiting for an
+    event, so any poller (``molab run --block``, ``molab monitor``) can call
+    it repeatedly. Only a QUEUED record can be sealed here, so only a QUEUED
+    record reaches molq: a RUNNING or sealed record, a record not submitted
+    through molq, or one with
     no recorded ``job_id`` is returned unchanged without contacting molq or a
     transport. A RUNNING record whose worker died is left to the reaper.
 
