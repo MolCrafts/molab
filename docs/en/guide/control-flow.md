@@ -11,15 +11,19 @@ from molab.workflow import Workflow, WorkflowCompiler
 
 wf = Workflow(name="pipeline")
 
+
 @wf.task
 async def fetch() -> dict:
     return {"raw": load()}
 
+
 @wf.task(depends_on=["fetch"])
 async def parse(raw: list) -> list: ...
 
+
 @wf.task(depends_on=["fetch"])
 async def validate(raw: list) -> bool: ...
+
 
 @wf.task(depends_on=["parse", "validate"])
 async def merge(parse: list, validate: bool) -> dict:
@@ -56,17 +60,21 @@ from molab.workflow import Next, Workflow, WorkflowCompiler, WorkflowRuntime
 
 wf = Workflow(name="triage", entry="classify")
 
+
 @wf.task
 async def classify() -> tuple[dict, Next]:
     score = run_model()
     return {"score": score}, Next("accept" if score > 0.5 else "reject")
 
+
 @wf.task
 async def accepted(score: float) -> dict:
-    return {"score": score}         # the routed dict binds by name
+    return {"score": score}  # the routed dict binds by name
+
 
 @wf.task
 async def rejected(score: float) -> None: ...
+
 
 wf.branch("classify", routes={"accept": "accepted", "reject": "rejected"})
 
@@ -99,20 +107,24 @@ from molab.workflow import Next, Workflow, WorkflowCompiler, WorkflowRuntime
 
 wf = Workflow(name="refine", entry="step")
 
+
 @wf.task
 async def step(value: int | None = None) -> int:
     # ``value`` = previous iteration's routed output (None on iteration 1).
     prev = value if isinstance(value, int) else 0
     return prev + 1
 
+
 @wf.task(depends_on=["step"])
 async def check(value: int) -> tuple[int, Next]:
     # The single upstream (``step``) binds positionally to ``value``.
     return value, Next("exit" if value >= 3 else "continue")
 
+
 @wf.task
 async def report(value: int) -> str:
-    return f"final:{value}"          # the exit-edge value binds by name
+    return f"final:{value}"  # the exit-edge value binds by name
+
 
 wf.loop(body=["step"], until="check", max_iters=10, on_exit="report")
 ```
@@ -138,17 +150,21 @@ from molab.workflow import Workflow, WorkflowCompiler
 
 wf = Workflow(name="fan-out", entry="scatter")
 
+
 @wf.task
 async def scatter() -> list[int]:
     return [1, 2, 3, 4]
 
+
 @wf.task
 async def process(value: int) -> int:
-    return value ** 2               # ``value`` is one fan-out element
+    return value**2  # ``value`` is one fan-out element
+
 
 @wf.task
 async def reduce(values: list[int]) -> int:
-    return sum(values)              # collected outputs, one per element, in order
+    return sum(values)  # collected outputs, one per element, in order
+
 
 wf.parallel(map_over="scatter", body="process", join="reduce", max_concurrency=2)
 ```

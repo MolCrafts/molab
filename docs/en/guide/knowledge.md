@@ -48,7 +48,7 @@ ws = Workspace("./lab", name="Lab")
 ws.materialize()
 experiment = ws.add_project("polymer-cg").add_experiment("solvation-sweep")
 
-note = Note(experiment, "Analysis Notes")   # binds the path; touches no disk
+note = Note(experiment, "Analysis Notes")  # binds the path; touches no disk
 note.write("# Analysis Notes\n\nQuench at 10 K/ns.\n")
 ```
 
@@ -68,7 +68,7 @@ which reads the class back from the frontmatter:
 from molab.knowledge import Knowledge, Note
 
 doc = Knowledge.open(experiment.resolve() / "knowledges" / "analysis-notes.md")
-assert type(doc) is Note                      # the `class:` frontmatter is honoured
+assert type(doc) is Note  # the `class:` frontmatter is honoured
 assert doc.read().startswith("# Analysis Notes")
 ```
 
@@ -109,8 +109,8 @@ from molab.knowledge import Finding, SourceRef
 finding = Finding(experiment, "Tg Result", sources=[SourceRef(kind="run", ref="run-0001")])
 finding.write("# Tg Result\n\nTg rose with cooling rate.\n")
 
-note.ref(finding)          # by object…
-note.ref(finding.path)     # …or by path — the same edge either way
+note.ref(finding)  # by object…
+note.ref(finding.path)  # …or by path — the same edge either way
 ```
 
 `.ref` **never** takes a project / experiment / run coordinate: not a `Folder`,
@@ -128,7 +128,7 @@ no separate backlink type:
 
 ```python
 for edge in note.links():
-    print(edge.role, edge.target)     # e.g. references …/knowledges/tg-result.md
+    print(edge.role, edge.target)  # e.g. references …/knowledges/tg-result.md
 ```
 
 `.cite` is the looser sibling: it delegates a Knowledge target to `.ref`, and
@@ -151,7 +151,8 @@ experiment:
 from molab.knowledge import Finding, harvest_run
 
 finding = harvest_run(
-    run, of=Finding,
+    run,
+    of=Finding,
     narrative="Tg rose with cooling rate.",
     created_by="lin",
 )

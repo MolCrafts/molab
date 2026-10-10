@@ -107,9 +107,11 @@ from molab.workflow import Workflow, WorkflowCompiler
 
 wf = Workflow(name="sum")
 
+
 @wf.task
 def fetch(scale: float = 1.0) -> dict:
     return {"values": [1.0, 4.0, 9.0], "scale": scale}
+
 
 @wf.task(depends_on=["fetch"])
 def summarize(values: list[float], scale: float) -> float:
@@ -158,11 +160,7 @@ Collapse the results to plain records and pick the best.
 </div>
 
 ```python
-scan = (
-    ws.add_project("demo")
-    .add_experiment("lr-scan")
-    .sweep(wf, {"scale": [1.0, 2.0, 4.0]})
-)
+scan = ws.add_project("demo").add_experiment("lr-scan").sweep(wf, {"scale": [1.0, 2.0, 4.0]})
 summary = scan.execute()
 best = summary.min_by("summarize")
 ```

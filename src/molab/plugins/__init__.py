@@ -7,7 +7,7 @@ Heavy backends are loaded on demand through this registry so that
 Plugin naming convention: ``{category}_{implementation}`` or the product name
 when the plugin *is* that product's molab adapter:
 
-- ``molpy`` — preview readers + LAMMPS log ingest via molpy's public API
+- ``molpy`` — dataset preview through molpy's per-format readers
 - ``molvis`` — headless snapshots via molvis
 - ``submit_molq`` — job submission via molq schedulers
 - ``gh`` — GitHub API client (GraphQL + REST) backed by httpx

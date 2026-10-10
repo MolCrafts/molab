@@ -136,7 +136,7 @@ def _materialize(resolved: object, entrypoint: str) -> CompiledWorkflow:
     if isinstance(resolved, Workflow):
         return WorkflowCompiler().compile(resolved)
     if callable(resolved):
-        produced = resolved()  # ty: ignore[call-top-callable]
+        produced = resolved()
         if isinstance(produced, CompiledWorkflow):
             return produced
         if isinstance(produced, Workflow):

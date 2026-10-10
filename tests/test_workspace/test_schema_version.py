@@ -54,7 +54,7 @@ class TestSchemaVersionEmitted:
         assert targets, "test seed produced no entity JSON files"
 
         for path in targets:
-            with open(path) as fh:  # noqa: PTH123
+            with open(path, encoding="utf-8") as fh:  # noqa: PTH123
                 data = json.load(fh)
             assert "schema_version" in data, f"missing schema_version: {path}"
             assert data["schema_version"] == MOLAB_SCHEMA_VERSION

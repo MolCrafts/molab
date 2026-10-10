@@ -21,13 +21,16 @@ from molab.workflow import Workflow, WorkflowCompiler
 
 wf = Workflow(name="baseline")
 
+
 @wf.task
 def train(lr: float) -> dict:
     return {"loss": lr * 100}
 
+
 @wf.task(depends_on=["train"])
 def report(loss: float) -> float:
     return loss
+
 
 # Create the hierarchy (add_* is idempotent create-or-get)
 ws = me.Workspace("./lab", name="lab")
@@ -48,7 +51,10 @@ The run's directory now holds `run.json` (logical definition only) and `executio
 
 ```python
 same_run = exp.get_run(run.id)
-print(same_run.executions[-1].status.value, same_run.get_result("report", execution_id=same_run.executions[-1].id))  # succeeded 0.1
+print(
+    same_run.executions[-1].status.value,
+    same_run.get_result("report", execution_id=same_run.executions[-1].id),
+)  # succeeded 0.1
 ```
 
 ## Failure, Resume, Rerun

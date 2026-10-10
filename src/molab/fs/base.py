@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import contextlib
 import os
-from collections.abc import Iterable, Iterator
+from collections.abc import Generator, Iterable
 from dataclasses import dataclass
 from typing import IO, Any, Protocol, runtime_checkable
 
@@ -160,7 +160,7 @@ class FileSystem(Protocol):
 
 
 @contextlib.contextmanager
-def bulk(fs: FileSystem) -> Iterator[None]:
+def bulk(fs: FileSystem) -> Generator[None]:
     """Group many operations on *fs* into one batch, when it supports batching.
 
     ``CachedRemoteFileSystem`` re-serializes its whole index sidecar on every

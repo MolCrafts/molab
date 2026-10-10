@@ -9,6 +9,7 @@ A task body declares the runtime values it consumes as **named parameters**. The
 ```python
 from molab.workflow import Task, TaskContext
 
+
 class Record(Task):
     async def execute(self, ctx: TaskContext, value: int, scale: int = 1) -> int:
         return value * scale
@@ -26,7 +27,7 @@ When present (named `ctx`, or annotated `TaskContext`), the leading parameter re
 
 ```python
 class TaskContext[StateT, InputT]:
-    workdir: Path | None      # content-addressed scratch dir for THIS task
+    workdir: Path | None  # content-addressed scratch dir for THIS task
 ```
 
 `ctx.workdir` is a content-addressed scratch directory derived from the task's content identity — the sanctioned place a task writes intermediate files. It is a bare `pathlib.Path`, stable across runs for identical task content, and `None` when no workspace run is attached. A fan-out body shares one `workdir` across elements, so per-element bodies should sub-namespace it. Include `ctx` in the signature only when the body actually writes there.
@@ -62,14 +63,14 @@ ws = me.Workspace("./lab", name="lab")
 exp = ws.add_project("demo").add_experiment("baseline").run(compiled, params={"lr": [1e-3]})
 run = exp.list_runs()[0]
 
-with run.start() as ctx:                  # run.start(profile_config=cfg) to attach a profile
+with run.start() as ctx:  # run.start(profile_config=cfg) to attach a profile
     execution_id = ctx.id
     result = await WorkflowRuntime().execute(compiled, run_context=ctx)
     ctx.set_result("final_loss", result.outputs["train"])
     ctx.emit_artifact(result.outputs["train"], name="metrics.json")
     ctx.log("runtime").append("done")
 
-print(run.get_result("final_loss", execution_id=execution_id))   # public read-back on the Run entity
+print(run.get_result("final_loss", execution_id=execution_id))  # public read-back on the Run entity
 ```
 
 `ctx.set_result(...)` stores lightweight values on the execution record, `ctx.emit_artifact(...)` emits an `Artifact`, `ctx.log(name)` appends to the execution evidence log, and `ctx.checkpoint(...)` emits a checkpoint `Artifact`. Emitted artifacts carry their `run_id` / `execution_id` automatically; while a task body is executing, the engine tags the active task id into `artifact.metadata["task_id"]`. See the [Artifacts, Assets, and Data Imports](assets.md) guide for the complete picture of artifacts, data imports, and their query paths.
@@ -86,8 +87,8 @@ from molab.workflow import Actor
 
 class Monitor(Actor):
     async def run(self, ctx: TaskContext, source: list[int]):
-        for item in source:            # ``source`` binds the upstream output
-            yield {"seen": item}       # last yield becomes the task output
+        for item in source:  # ``source`` binds the upstream output
+            yield {"seen": item}  # last yield becomes the task output
 ```
 
 There is no inter-task message-passing channel: an earlier `receive()` / `send()` surface was never wired (every path raised `NotImplementedError`) and has been removed. An actor yields its outputs; it does not exchange messages mid-run with peer tasks.

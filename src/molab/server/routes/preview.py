@@ -1,8 +1,8 @@
 """Preview route — render a sidecar-backed dataset under ``/api/assets``.
 
-A dataset asset whose on-disk file has a same-stem ``.py`` sidecar (see
-:mod:`molab.server.preview`) can be previewed without the client knowing
-anything about the loader. The sidecar's reader runs **only** on this explicit
+A dataset asset whose on-disk file has a same-stem ``.py`` sidecar naming its
+reader (see :mod:`molab.server.preview`) can be previewed without the client
+knowing anything about the format. The sidecar's reader runs **only** on this explicit
 request — never during listing or indexing.
 """
 
@@ -65,8 +65,8 @@ def preview_asset(
     Raises:
         AssetNotFoundError: The asset resolved, but its payload is missing (404).
         PreviewSidecarNotFoundError: No sidecar next to the dataset (404).
-        NoReaderInSidecarError / AmbiguousReaderError / PreviewReaderError:
-            The molpy sidecar has no reader / too many / failed (422).
+        NoReaderInSidecarError / PreviewReaderError: The sidecar names no
+            reader, or reading through it failed (422).
     """
     dataset_path = _resolve_dataset_path(workspace, asset_id)
 

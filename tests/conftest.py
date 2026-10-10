@@ -6,8 +6,7 @@ rich/typer help can still embed ANSI (and even split option spellings like
 ``FORCE_COLOR`` / ``CLICOLOR_FORCE`` / a fancy ``TERM``. Normalized HERE, at
 conftest import — before any test module can instantiate a rich ``Console``
 — so ``pytest tests/`` behaves identically in a bare terminal, a colored
-shell, a git hook, and CI. CI also sets the same vars in the workflow env
-block (see ``.github/workflows/ci.yml``).
+shell, a git hook, and CI.
 """
 
 from __future__ import annotations

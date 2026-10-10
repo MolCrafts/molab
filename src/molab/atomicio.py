@@ -22,7 +22,7 @@ import json
 import os
 import tempfile
 import time
-from collections.abc import Iterator
+from collections.abc import Generator
 from pathlib import Path
 from typing import Literal
 
@@ -167,7 +167,7 @@ class FileLockTimeoutError(TimeoutError):
 
 
 @contextlib.contextmanager
-def _o_excl_lock(lock_path: Path, timeout: float) -> Iterator[None]:
+def _o_excl_lock(lock_path: Path, timeout: float) -> Generator[None]:
     """Lock by exclusive file *creation* — the portable fallback.
 
     ``O_CREAT | O_EXCL`` is atomic even on NFS, which is why it is the
@@ -221,7 +221,7 @@ def file_lock(
     *,
     timeout: float = DEFAULT_LOCK_TIMEOUT_SECONDS,
     backend: LockBackend = "flock",
-) -> Iterator[None]:
+) -> Generator[None]:
     """Hold an exclusive advisory lock on *lock_path* for the ``with`` body.
 
     Serializes read-modify-write cycles on a JSON file written by several

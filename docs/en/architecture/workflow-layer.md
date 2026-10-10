@@ -121,8 +121,8 @@ Forbidden outside `molab.workflow`:
 
 ```python
 # docs: skip — illustrates imports forbidden at the boundary (not runnable)
-import pydantic_graph                 # dependency removed — forbidden everywhere in src/
-import molab.workflow._engine        # private subtree
+import pydantic_graph  # dependency removed — forbidden everywhere in src/
+import molab.workflow._engine  # private subtree
 ```
 
 The import-boundary firewall is enforced by

@@ -65,7 +65,7 @@ class TestWorkspace:
     def test_entity_metadata_has_no_child_lists(self, workspace):
         """The entity ``workspace.json`` never embeds the derived child index."""
         workspace.materialize()
-        data = json.loads(Path(workspace.root / "workspace.json").read_text())
+        data = json.loads(Path(workspace.root / "workspace.json").read_text(encoding="utf-8"))
         assert "projects" not in data
 
 

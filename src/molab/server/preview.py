@@ -1,9 +1,11 @@
 """Sidecar-backed dataset preview — host half.
 
 The host finds the same-stem ``.py`` sidecar, imports it under a private
-name, and applies the frame cap. Science lives in plugins:
+name, and caps the frames it reads. Science lives in plugins:
 
-* :mod:`molab.plugins.molpy.preview` — ``BaseTrajectoryReader`` + XYZ
+* :mod:`molab.plugins.molpy.preview` — the sidecar's reader
+  (:class:`~molab.plugins.molpy.preview.FrameReader`, satisfied by molpy's
+  per-format readers) and extended-XYZ encoding
 * :mod:`molab.plugins.molvis.snapshot` — PNG via molvis
 
 When molpy/molvis change, update those plugins — not this module.
@@ -13,32 +15,34 @@ from __future__ import annotations
 
 import importlib.util
 import os
-from collections.abc import Iterable
 from dataclasses import dataclass
-from itertools import islice
 from pathlib import Path
+from types import ModuleType
+from typing import TYPE_CHECKING
 
 from .exceptions import (
-    AmbiguousReaderError,
     MolabError,
     NoReaderInSidecarError,
     PreviewReaderError,
     PreviewSidecarNotFoundError,
 )
 
+if TYPE_CHECKING:
+    from molpy import Frame
+
+    from molab.plugins.molpy.preview import FrameReader
+
 _SIDECAR_MODULE_NAME = "_molab_preview_reader"
 DEFAULT_PREVIEW_LIMIT = 200
 
 __all__ = [
     "DEFAULT_PREVIEW_LIMIT",
-    "AmbiguousReaderError",
     "NoReaderInSidecarError",
     "PreviewReaderError",
     "PreviewSidecarNotFoundError",
     "SidecarInfo",
     "frames_to_extxyz",
     "load_preview",
-    "load_sidecar_reader",
     "preview_frames",
     "resolve_sidecar",
     "snapshot_reader",
@@ -67,7 +71,7 @@ def resolve_sidecar(dataset_path: str | os.PathLike[str]) -> SidecarInfo | None:
     return SidecarInfo(dataset_path=path, sidecar_path=sidecar)
 
 
-def _import_sidecar_module(sidecar_path: Path):  # noqa: ANN202
+def _import_sidecar_module(sidecar_path: Path) -> ModuleType:
     spec = importlib.util.spec_from_file_location(_SIDECAR_MODULE_NAME, sidecar_path)
     if spec is None or spec.loader is None:
         raise PreviewReaderError(str(sidecar_path), "cannot create import spec")
@@ -79,42 +83,35 @@ def _import_sidecar_module(sidecar_path: Path):  # noqa: ANN202
     return module
 
 
-def load_preview(dataset_path: str | os.PathLike[str]) -> Iterable[object]:
-    """Import the sidecar and open its molpy reader (plugin)."""
+def load_preview(dataset_path: str | os.PathLike[str]) -> FrameReader:
+    """Import the sidecar and open the reader it names (molpy plugin)."""
     info = resolve_sidecar(dataset_path)
     if info is None:
         raise PreviewSidecarNotFoundError(str(dataset_path))
     module = _import_sidecar_module(info.sidecar_path)
-    try:
-        from molab.plugins.molpy.preview import open_reader
-    except ImportError as exc:
-        raise PreviewReaderError(str(info.sidecar_path), str(exc)) from exc
+    from molab.plugins.molpy.preview import open_reader
+
     return open_reader(module, info.dataset_path)
-
-
-def load_sidecar_reader(dataset_path: str | os.PathLike[str]) -> Iterable[object]:
-    """Deprecated name for :func:`load_preview`."""
-    return load_preview(dataset_path)
 
 
 def preview_frames(
     dataset_path: str | os.PathLike[str], *, limit: int = DEFAULT_PREVIEW_LIMIT
-) -> list[object]:
-    """Return at most *limit* frames. Cap is host-owned."""
-    stream = load_preview(dataset_path)
+) -> list[Frame]:
+    """Return the first *limit* frames at most. Cap is host-owned."""
+    reader = load_preview(dataset_path)
     try:
-        return list(islice(stream, limit))
+        return [reader.read_frame(index) for index in range(min(limit, reader.n_frames))]
     except MolabError:
         raise
     except Exception as exc:
-        raise PreviewReaderError(str(dataset_path), f"iteration failed: {exc}") from exc
+        raise PreviewReaderError(str(dataset_path), f"reading frames failed: {exc}") from exc
 
 
-def frames_to_extxyz(frames: Iterable[object]) -> bytes:
+def frames_to_extxyz(frames: list[Frame]) -> bytes:
     """Delegate XYZ encoding to the molpy plugin."""
-    from molab.plugins.molpy.preview import frames_to_extxyz as _encode
+    from molab.plugins.molpy.preview import frames_to_extxyz as encode
 
-    return _encode(frames)
+    return encode(frames)
 
 
 def snapshot_reader(

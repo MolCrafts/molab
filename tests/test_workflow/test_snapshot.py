@@ -1,4 +1,4 @@
-"""``snapshot._normalize_ast`` — AST-normalized code hashing (spec P0-2).
+"""``snapshot._normalize_ast`` — AST-normalized code hashing.
 
 The content-addressed cache keys on a hash derived from AST-normalized task
 source. Formatting/comments must be invisible to the hash, but decorators are
@@ -20,7 +20,7 @@ class TestNormalizeAst:
         assert _normalize_ast(plain) == _normalize_ast(noisy)
 
     def test_adding_a_decorator_changes_the_normalized_ast(self) -> None:
-        """A decorated body must differ from the undecorated one (P0-2 bug)."""
+        """A decorated body must differ from the undecorated one."""
         plain = "def f(x):\n    return x + 1\n"
         decorated = "@retry(3)\ndef f(x):\n    return x + 1\n"
         assert _normalize_ast(plain) != _normalize_ast(decorated)

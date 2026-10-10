@@ -3,10 +3,10 @@ mol_project:
   name: molab
   language: mixed
   build:
-    install: 'pip install -e ".[dev]"'
+    install: "uv sync --extra dev"
     check: "ruff format --check src/ tests/ && ruff check src/ tests/ && ty check src/"
-    # Mirrors ci.yml `test` + pre-push pytest hook (quiet + coverage xml).
-    test: "pytest tests/ -q --cov=src/molab --cov-report=xml"
+    # Mirrors test.yml `test / python (ubuntu-latest)` + the pre-push pytest hook.
+    test: "pytest tests/ -q"
     test_single: "pytest {path} -v"
     coverage: "pytest tests/ --cov=src/molab --cov-report=term-missing"
   arch:
@@ -18,7 +18,7 @@ mol_project:
     required: false
   stage: experimental
   ci:
-    config: .github/workflows/ci.yml
+    config: .github/workflows/test.yml
   dev:
     command: "npm run dev:web"
     url: "http://localhost:5173"

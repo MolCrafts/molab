@@ -226,7 +226,7 @@ def run_create(
     if params:
         params_path = Path(params)
         if params_path.exists():
-            parameters = json.loads(params_path.read_text())
+            parameters = json.loads(params_path.read_text(encoding="utf-8"))
         else:
             try:
                 parameters = json.loads(params)

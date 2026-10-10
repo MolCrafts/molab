@@ -11,9 +11,11 @@ from molab.workflow import Workflow, WorkflowCompiler
 
 wf = Workflow(name="pipeline")
 
+
 @wf.task
 def fetch() -> dict:
     return {"value": 42}
+
 
 @wf.task(depends_on=["fetch"])
 def scale(value: int, factor: int = 2) -> int:
@@ -44,7 +46,9 @@ from molab.workflow import WorkflowRuntime
 
 compiled = WorkflowCompiler().compile(wf)
 result = asyncio.run(WorkflowRuntime().execute(compiled))
-print(result.status, result.outputs)  # succeeded {'fetch': ..., 'scale': 84, 'publish': 'published 84'}
+print(
+    result.status, result.outputs
+)  # succeeded {'fetch': ..., 'scale': 84, 'publish': 'published 84'}
 ```
 
 This is useful during early iteration — iterate on task boundaries and data flow without thinking about persistence. When you want a durable record, hand the same `compiled` to a tracked run.
@@ -56,18 +60,19 @@ If you prefer reusable classes over decorators, subclass `Task`:
 ```python
 from molab.workflow import Task, TaskContext
 
+
 class Fetch(Task):
     def execute(self, ctx: TaskContext) -> dict:
         return {"value": 42}
+
 
 class Scale(Task):
     def execute(self, ctx: TaskContext, value: int, factor: int = 2) -> int:
         return value * factor
 
+
 compiled = WorkflowCompiler().compile(
-    Workflow(name="pipeline-oop")
-    .add(Fetch())
-    .add(Scale(), depends_on=["fetch"])
+    Workflow(name="pipeline-oop").add(Fetch()).add(Scale(), depends_on=["fetch"])
 )
 ```
 

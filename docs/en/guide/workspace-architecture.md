@@ -40,8 +40,8 @@ The hierarchy is created from the top down, but not every step has identical ide
 ```python
 import molab as me
 
-ws = me.Workspace("./lab", name="lab")                    # lightweight object; no files yet
-project = ws.add_project("MD Simulations")                # materializes workspace.json and project.json
+ws = me.Workspace("./lab", name="lab")  # lightweight object; no files yet
+project = ws.add_project("MD Simulations")  # materializes workspace.json and project.json
 exp = project.add_experiment(
     "temperature-300K",
     params={"T": 300, "pressure": 1.0},
@@ -51,7 +51,7 @@ exp = project.add_experiment(
 run = exp.add_run(
     {"T": 300, "pressure": 1.0, "seed": 42},
     id="temperature-300K-seed-42",
-)                                                         # materializes run.json
+)  # materializes run.json
 ```
 
 Re-calling `add_project` / `add_experiment` with the same name or id returns the same in-memory object within the current process and loads from disk when needed. Runs only behave that way when the run id is stable.
@@ -69,7 +69,9 @@ class TrainTask(Task):
         return {"loss": lr * 10}
 
 
-compiled = WorkflowCompiler().compile(Workflow(name="train").add(TrainTask()))   # task auto-named "train"
+compiled = WorkflowCompiler().compile(
+    Workflow(name="train").add(TrainTask())
+)  # task auto-named "train"
 exp = project.add_experiment("baseline").define(compiled, params={"lr": [1e-3]})
 
 # Workspace just provides the Run the workflow executes within.

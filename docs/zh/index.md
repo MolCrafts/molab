@@ -101,13 +101,16 @@ from molab.workflow import Workflow, WorkflowCompiler
 
 wf = Workflow(name="sum")
 
+
 @wf.task
 def fetch(scale: float = 1.0) -> dict:
     return {"values": [1.0, 4.0, 9.0], "scale": scale}
 
+
 @wf.task(depends_on=["fetch"])
 def summarize(values: list[float], scale: float = 1.0) -> float:
     return sum(values) * scale
+
 
 ws = me.Workspace("./lab", name="lab")
 run = ws.add_project("demo").add_experiment("sum").add_run(params={"scale": 2.0})
@@ -126,11 +129,7 @@ print(run.executions[-1].status.value, result.outputs["summarize"])  # succeeded
 在实验上声明参数网格。扫描为每个参数组合物化一个内容寻址的运行，并全部执行。
 
 ```python
-scan = (
-    ws.add_project("demo")
-    .add_experiment("lr-scan")
-    .sweep(wf, {"scale": [1.0, 2.0, 4.0]})
-)
+scan = ws.add_project("demo").add_experiment("lr-scan").sweep(wf, {"scale": [1.0, 2.0, 4.0]})
 summary = scan.execute()
 for row in summary.to_records():
     print(row["scale"], row["status"], row["summarize"])

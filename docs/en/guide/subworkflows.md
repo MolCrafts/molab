@@ -27,11 +27,13 @@ from molab.workflow import (
 # Inner pipeline (a Workflow — compiled eagerly when wrapped).
 inner = Workflow(name="preprocess")
 
+
 @inner.task
 async def load(seed: int = 0) -> list[float]:
     # ``seed`` is the forwarded node input — the fan-out element in Pattern 2,
     # or the default 0 when this inner runs standalone.
     return [3.0 + seed, 1.0, 4.0, 1.0, 5.0]
+
 
 @inner.task(depends_on=["load"])
 async def normalize(values: list[float]) -> list[float]:
@@ -39,10 +41,12 @@ async def normalize(values: list[float]) -> list[float]:
     top = max(values)
     return [x / top for x in values]
 
+
 class Train(Task):
     async def execute(self, ctx: TaskContext, values: list[float]) -> float:
         # The SubWorkflow node's terminal output (a list) binds to ``values``.
         return sum(values) / len(values)
+
 
 outer = WorkflowCompiler().compile(
     Workflow(name="train")
@@ -75,16 +79,20 @@ for each element. The compiled task set stays exactly the declared outer tasks
 ```python
 wf = Workflow(name="fanout", entry="enumerate")
 
+
 @wf.task
 async def enumerate() -> list[int]:
     return [0, 1, 2]
 
+
 wf.add(SubWorkflow(inner), name="preprocess")
+
 
 @wf.task
 async def collect(values: list[list[float]]) -> list[list[float]]:
     # The join receives one inner output per element, bound to ``values``.
     return list(values)
+
 
 wf.parallel(map_over="enumerate", body="preprocess", join="collect", max_concurrency=2)
 
@@ -122,9 +130,7 @@ class Augment(Task):
 
 
 baseline = WorkflowCompiler().compile(
-    Workflow(name="baseline")
-    .add(Fetch())
-    .add(Clean(), depends_on=["fetch"])
+    Workflow(name="baseline").add(Fetch()).add(Clean(), depends_on=["fetch"])
 )
 
 augmented = WorkflowCompiler().compile(

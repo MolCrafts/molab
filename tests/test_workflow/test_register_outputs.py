@@ -64,7 +64,7 @@ class TestPromoteRegisterArtifact:
         assert scratch.parent.name == "export"
         assert OUT.name in scratch.parts
         assert "executions" in scratch.parts
-        assert promoted.read_text() == "atoms"
+        assert promoted.read_text(encoding="utf-8") == "atoms"
         # v2 emit_artifact snapshots in place — the promoted path is that file.
         assert promoted == captured["scratch"]
         found = _run_artifacts(run, eid)

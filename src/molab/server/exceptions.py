@@ -384,34 +384,19 @@ class PreviewSidecarNotFoundError(MolabError):
 
 
 class NoReaderInSidecarError(MolabError):
-    """The sidecar defines no concrete ``molpy.io.BaseTrajectoryReader``."""
+    """The sidecar names no reader (no module-level ``READER``)."""
 
     def __init__(self, sidecar_path: str) -> None:
         super().__init__(
-            message=(f"Sidecar defines no molpy.io.BaseTrajectoryReader subclass: {sidecar_path}"),
+            message=f"Sidecar names no reader (module-level READER): {sidecar_path}",
             code="NO_READER_IN_SIDECAR",
             status_code=422,
             details={"sidecar_path": sidecar_path},
         )
 
 
-class AmbiguousReaderError(MolabError):
-    """The sidecar defines more than one ``BaseTrajectoryReader`` subclass."""
-
-    def __init__(self, sidecar_path: str, reader_names: list[str]) -> None:
-        super().__init__(
-            message=(
-                f"Sidecar defines {len(reader_names)} BaseTrajectoryReader subclasses "
-                f"(expected exactly one): {', '.join(reader_names)}"
-            ),
-            code="AMBIGUOUS_READER",
-            status_code=422,
-            details={"sidecar_path": sidecar_path, "readers": reader_names},
-        )
-
-
 class PreviewReaderError(MolabError):
-    """Importing, instantiating, or iterating the sidecar reader failed."""
+    """Importing the sidecar, opening its reader, or reading frames failed."""
 
     def __init__(self, dataset_path: str, reason: str | None = None) -> None:
         detail = f": {reason}" if reason else ""

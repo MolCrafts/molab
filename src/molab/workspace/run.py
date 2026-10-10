@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import contextlib
 import json
-from collections.abc import Iterator, Mapping, Sequence
+from collections.abc import Generator, Mapping, Sequence
 from datetime import datetime
 from os import PathLike
 from pathlib import Path  # local-FS path for RunContext (LLM/worker-local I/O)
@@ -1039,7 +1039,7 @@ class Run(Folder):
 
     def _bound(self, record: Execution) -> Execution:
         """Attach this Run so ``execution.execute`` can start the attempt."""
-        record._run = self  # ty: ignore[invalid-assignment]
+        record._run = self
         return record
 
     def execution(self, execution_id: str) -> Execution:
@@ -1274,7 +1274,7 @@ class Run(Folder):
     # ── Internal (frozen-metadata mutation helpers) ──────────────────────
 
     @contextlib.contextmanager
-    def _metadata_lock(self) -> Iterator[None]:
+    def _metadata_lock(self) -> Generator[None]:
         """Advisory inter-process lock guarding ``run.json`` read-modify-write.
 
         The lock file lives under the workspace's ``.molab/locks/`` — machine

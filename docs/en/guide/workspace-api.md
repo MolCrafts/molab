@@ -62,9 +62,9 @@ At this point you have a Python object, not yet a fully materialized directory t
 That delayed materialization is important if you want to compose workspace objects without leaving empty directories behind. When you do want a strict load-from-disk path, use:
 
 ```python
-ws.materialize()                  # write workspace.json (a first child project also does this)
+ws.materialize()  # write workspace.json (a first child project also does this)
 
-ws = me.Workspace.load("./lab")   # strict: reads what is on disk
+ws = me.Workspace.load("./lab")  # strict: reads what is on disk
 ```
 
 `Workspace.load()` raises if `workspace.json` is missing; use it when you want to fail loud rather than silently create a new workspace.
@@ -76,8 +76,8 @@ Once a workspace exists, its core properties are straightforward. `ws.id` and `w
 Projects are created through the workspace:
 
 ```python
-project = ws.add_project("QM9")      # create-or-get (idempotent on name)
-project = ws.project("QM9")          # strict getter — must already exist
+project = ws.add_project("QM9")  # create-or-get (idempotent on name)
+project = ws.project("QM9")  # strict getter — must already exist
 ```
 
 This operation is idempotent by project slug. If the corresponding directory already exists, Molab loads it. If it does not exist, Molab creates a new `Project`, writes `project.json`, and returns it. Repeated calls with the same project name inside one process return the same in-memory object, which lets later code keep bound state on child objects without accidentally duplicating handles.
@@ -91,7 +91,7 @@ Project lookup works in three styles. `ws.get_project(name)` is the strict gette
 Experiments are created through a project:
 
 ```python
-exp = project.add_experiment(        # create-or-get (idempotent on name)
+exp = project.add_experiment(  # create-or-get (idempotent on name)
     "baseline",
     params={"lr": 1e-3},
     n_replicas=3,
@@ -183,9 +183,9 @@ Every persistent byproduct of an experiment — imported datasets, task artifact
 ```python
 from pathlib import Path
 
-ws.assets.list()                          # assets registered at workspace scope
-ws.assets.query(recursive=True)           # every asset in the workspace, any scope
-exp.assets.query(recursive=True)          # assets under this experiment (its runs included)
+ws.assets.list()  # assets registered at workspace scope
+ws.assets.query(recursive=True)  # every asset in the workspace, any scope
+exp.assets.query(recursive=True)  # assets under this experiment (its runs included)
 
 Path("qm9.csv").write_text("mol,energy\nH2O,-76.4\n")
 ws.data_assets.import_asset("qm9", "qm9.csv")

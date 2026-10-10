@@ -488,7 +488,8 @@ def reconcile_submission(mol_run: Run, execution_id: str) -> ReconcileOutcome:
             ),
             jobs_dir=f"{exec_dir}/jobs",
         ) as submitor:
-            job = submitor.refresh_job(job_id)
+            submitor.refresh_jobs()
+            job = submitor.get_job(job_id)
         if not job.state.is_terminal:
             return ReconcileOutcome(record=record)
 

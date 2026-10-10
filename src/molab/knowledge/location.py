@@ -226,7 +226,7 @@ def _host_fs(host: PathArg | Folder | Concept) -> FileSystem:
 def _lookup_path(host: PathArg | Folder | Concept) -> PathArg:
     """The path passed to the workspace-root accessor for *host*."""
     if isinstance(host, (str, os.PathLike)):
-        return host  # ty: ignore[invalid-return-type]
+        return host
     from molab.workspace import Folder
 
     if isinstance(host, Folder):

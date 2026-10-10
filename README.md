@@ -8,7 +8,7 @@
 <p><strong>A scientific-workflow platform for FAIR research</strong></p>
 
 <p>
-  <a href="https://img.shields.io/github/actions/workflow/status/MolCrafts/molab/ci.yml?style=flat-square&logo=githubactions&logoColor=white&label=CI"><img src="https://img.shields.io/github/actions/workflow/status/MolCrafts/molab/ci.yml?style=flat-square&logo=githubactions&logoColor=white&label=CI" alt="CI"></a>
+  <a href="https://img.shields.io/github/actions/workflow/status/MolCrafts/molab/test.yml?style=flat-square&logo=githubactions&logoColor=white&label=test"><img src="https://img.shields.io/github/actions/workflow/status/MolCrafts/molab/test.yml?style=flat-square&logo=githubactions&logoColor=white&label=test" alt="test"></a>
   <img src="https://img.shields.io/badge/python-3.12%2B-blue?style=flat-square&logo=python&logoColor=white" alt="Python 3.12+">
   <img src="https://img.shields.io/badge/license-BSD--3--Clause-18432B?style=flat-square" alt="License">
   <a href="https://github.com/astral-sh/ruff"><img src="https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/astral-sh/ruff/main/assets/badge/v2.json&style=flat-square" alt="Ruff"></a>
