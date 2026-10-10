@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "molab",
+  "displayName": "molab",
+  "version": "0.1.0",
+  "description": "Interactive molab experiment planner: one step per turn, confirm before every write, ground every API on real source.",
+  "author": {
+    "name": "MolCrafts"
+  },
+  "homepage": "https://github.com/MolCrafts/molab",
+  "repository": "https://github.com/MolCrafts/molab",
+  "license": "MIT",
+  "keywords": [
+    "molab",
+    "experiment-planning",
+    "scientific-workflow",
+    "molcrafts"
+  ]
+}

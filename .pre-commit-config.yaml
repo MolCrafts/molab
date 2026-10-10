@@ -1,8 +1,24 @@
-# Managed by prek: `prek install`
-# CI parity with .github/workflows/ci.yml (UV_NO_SOURCES=1 for path-free installs).
+# Managed by prek: `prek install` (installs both hook types).
+# CI parity: every job in .github/workflows/{lint,test}.yml has a hook here
+# running the same command.
+#
+#   pre-commit  file hygiene, ruff (format + lint) in place; ty in CI's
+#               sibling layout.
+#   pre-push    the commit hooks again on --all-files, the partners check, the
+#               unit suite, and the web gates.
+#
+# ty and the unit suite run in CI's sibling layout
+# (`scripts/partners.py run`): a copy of this working tree next to molpy,
+# molrs, mollog, molcfg and molq at the commits scripts/partners.py resolves
+# (molpy's and molrs's dev, or their branches named like this one), never the
+# developer's own ../molpy or ../molrs. ty and the suite build molrs;
+# scripts/hook-run.sh hands them to $MOLCRAFTS_HOOK_RUNNER (a compute node on
+# the MolCrafts cluster) when set and runs them in place otherwise. Never
+# --no-verify.
 
 default_install_hook_types: [pre-commit, pre-push]
-exclude: '^ui/src/api/generated/'
+default_stages: [pre-commit]
+exclude: '^apps/web/src/api/generated/'
 
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
@@ -19,7 +35,7 @@ repos:
       - id: check-toml
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.12
+    rev: v0.16.10
     hooks:
       - id: ruff-format
       - id: ruff-check
@@ -27,38 +43,55 @@ repos:
 
   - repo: local
     hooks:
-      # Matches the ci.yml lint job and mol_project.build.check. Whole-tree
-      # (not per-file): a type error is usually raised by the *caller* of the
-      # file you edited.
+      # lint.yml `lint / python`. Whole-tree (not per-file): a type error is
+      # usually raised by the *caller* of the file you edited.
       - id: ty
-        name: "ty check src/"
-        entry: uv run ty check src/
+        name: "ty check src/ against the resolved partners (lint.yml)"
+        entry: >-
+          scripts/hook-run.sh python3 scripts/partners.py run --
+          env MATURIN_PEP517_ARGS=--locked
+          uv run --extra dev ty check src/
         language: system
         pass_filenames: false
-        files: '\.py$'
+        files: '\.py$|^pyproject\.toml$|^\.github/partners\.env$'
 
-      # UV_NO_SOURCES=1 reproduces the CI resolution (published deps, no
-      # `[tool.uv.sources]` path overrides). It runs in its OWN environment:
-      # syncing that resolution into .venv would silently replace the editable
-      # sibling checkouts (molpy / molrs) a dev is working against.
-      - id: ci-test
-        name: "CI test (uv sync + pytest, UV_NO_SOURCES=1)"
-        entry: bash -c 'export UV_NO_SOURCES=1 UV_PROJECT_ENVIRONMENT=.venv-ci; uv sync --extra dev && uv run pytest tests/ -q --cov=src/molexp --cov-report=xml'
+      # A commit checks its staged files only. Re-run the commit-time hooks
+      # above over the whole tree, so an untouched file cannot carry a defect.
+      - id: all-files
+        name: commit hooks on --all-files
+        entry: prek run --all-files --hook-stage pre-commit --show-diff-on-failure
         language: system
         pass_filenames: false
         always_run: true
         stages: [pre-push]
 
-      # Mirrors the ci.yml `ui` job command for command. That job is
-      # `continue-on-error` because the UI depends on @molcrafts/molplot and
-      # molvis through `file:../../` paths a CI clone does not have — so this
-      # hook is currently the ONLY place UI regressions are actually caught.
-      # Make the CI job blocking (and drop this note) once those packages are
-      # published.
-      - id: ui-checks
-        name: "CI ui (biome lint + tsc + vitest)"
-        entry: bash -c 'npm run lint && npm run typecheck && npm run test:ui'
+      # lint.yml: every partner resolves, and every path dependency resolves
+      # inside the layout CI checks out.
+      - id: partners
+        name: partners resolve; path sources resolve in CI
+        entry: python3 scripts/partners.py check
         language: system
         pass_filenames: false
-        files: '^ui/'
+        always_run: true
+        stages: [pre-push]
+
+      # test.yml `test / python`: the same command, in CI's layout.
+      - id: pytest
+        name: pytest against the resolved partners (test.yml)
+        entry: >-
+          scripts/hook-run.sh python3 scripts/partners.py run --
+          env MATURIN_PEP517_ARGS=--locked
+          uv run --extra dev pytest tests/ -q
+        language: system
+        pass_filenames: false
+        always_run: true
+        stages: [pre-push]
+
+      # lint.yml `lint / web` and test.yml `test / web`.
+      - id: web-checks
+        name: "CI web (biome lint + tsc + rstest)"
+        entry: scripts/hook-run.sh bash -c 'npm run lint && npm run typecheck && npm run test:web'
+        language: system
+        pass_filenames: false
+        files: '^apps/(web|vsc-ext)/'
         stages: [pre-push]

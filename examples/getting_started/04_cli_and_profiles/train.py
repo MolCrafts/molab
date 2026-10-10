@@ -1,14 +1,14 @@
-"""Script that is meant to be driven by ``molexp run`` — not by ``python``.
+"""Script that is meant to be driven by ``molab run`` — not by ``python``.
 
-Matches ``docs/getting-started/cli-and-profiles.md``.
+Matches ``docs/en/getting-started/cli-and-profiles.md``.
 
 The script declares a workspace, an experiment, and the workflow it runs via
-the fluent chain ``ws.project(...).experiment(...).run(wf, params=...)`` —
+the declaration chain ``ws.add_project(...).add_experiment(...).define(wf, params=...)`` —
 that declaration is what the CLI discovers. Execute it with::
 
-    molexp run examples/getting_started/04_cli_and_profiles/train.py --profile smoke
-    molexp run examples/getting_started/04_cli_and_profiles/train.py --profile prod
-    molexp run examples/getting_started/04_cli_and_profiles/train.py \\
+    molab run examples/getting_started/04_cli_and_profiles/train.py --profile smoke
+    molab run examples/getting_started/04_cli_and_profiles/train.py --profile prod
+    molab run examples/getting_started/04_cli_and_profiles/train.py \\
         --profile smoke --override lr=5e-4
 
 ``molcfg.yaml`` in this directory defines the ``smoke`` and ``prod`` profiles.
@@ -18,13 +18,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import molexp as me
-from molexp.workflow import WorkflowCompiler
+import molab as me
+from molab.workflow import Workflow, WorkflowCompiler
 
-# Workspace lives next to this script so repeated ``molexp run`` calls reuse it.
+# Workspace lives next to this script so repeated ``molab run`` calls reuse it.
 WORKSPACE_ROOT = Path(__file__).resolve().parent / "_workspace"
 
-wf = WorkflowCompiler(name="train")
+wf = Workflow(name="train")
 
 
 @wf.task
@@ -42,7 +42,7 @@ async def train(lr: float = 1e-3, epochs: int = 10) -> dict:
 
 (
     me.Workspace(WORKSPACE_ROOT, name="cli-demo")
-    .project("demo")
-    .experiment("train")
-    .run(wf.compile(), params={"seed": [0]})
+    .add_project("demo")
+    .add_experiment("train")
+    .define(WorkflowCompiler().compile(wf), params={"seed": [0]})
 )

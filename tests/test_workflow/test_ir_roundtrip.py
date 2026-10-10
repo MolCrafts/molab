@@ -12,9 +12,10 @@ from __future__ import annotations
 
 import pytest
 
-from molexp.workflow import (
+from molab.workflow import (
     CompiledWorkflow,
     TaskTypeRegistry,
+    Workflow,
     WorkflowCompiler,
     WorkflowRuntime,
     default_codec,
@@ -77,6 +78,10 @@ class TestFromIR:
         with pytest.raises(ValueError, match="ghost"):
             CompiledWorkflow.from_ir(ir, registry=registry)
 
+    def test_legacy_workflow_id_is_ignored(self, registry: TaskTypeRegistry) -> None:
+        spec = CompiledWorkflow.from_ir(_ir_constant_add(), registry=registry)
+        assert {t.name for t in spec._tasks} == {"a", "b", "c"}
+
     @pytest.mark.asyncio
     async def test_reconstructed_spec_is_runnable(self, registry: TaskTypeRegistry) -> None:
         spec = CompiledWorkflow.from_ir(_ir_constant_add(), registry=registry)
@@ -86,24 +91,25 @@ class TestFromIR:
 
 
 class TestToIR:
-    def test_to_ir_then_from_ir_preserves_workflow_id(self, registry: TaskTypeRegistry) -> None:
+    def test_to_ir_then_from_ir_preserves_workflow_digest(self, registry: TaskTypeRegistry) -> None:
         original = CompiledWorkflow.from_ir(_ir_constant_add(), registry=registry)
         ir = original.to_ir()
         rebuilt = CompiledWorkflow.from_ir(ir, registry=registry)
-        assert rebuilt.workflow_id == original.workflow_id
+        assert rebuilt.workflow_digest == original.workflow_digest
+        assert "workflow_id" not in ir
         assert rebuilt.name == original.name
         assert {t.name for t in rebuilt._tasks} == {t.name for t in original._tasks}
 
     def test_python_built_spec_serializes_with_registry_slugs(
         self, registry: TaskTypeRegistry
     ) -> None:
-        from molexp.workflow.registry import _Add, _Constant
+        from molab.workflow.registry import _Add, _Constant
 
-        wf = WorkflowCompiler(name="py_built")
+        wf = Workflow(name="py_built")
         wf.add(_Constant(value=4), name="four")
         wf.add(_Constant(value=6), name="six")
         wf.add(_Add(), name="sum", depends_on=["four", "six"])
-        spec = wf.compile()
+        spec = WorkflowCompiler().compile(wf)
         ir = spec.to_ir()
         # IR reflects the topology faithfully
         assert ir["name"] == "py_built"
@@ -112,7 +118,7 @@ class TestToIR:
         assert sources_for_sum == ["four", "six"]
 
     def test_to_ir_rejects_unslugged_tasks(self) -> None:
-        from molexp.workflow import Task
+        from molab.workflow import Task
 
         class _Unregistered(Task):
             """A task whose type was never registered → no resolvable slug."""
@@ -120,23 +126,11 @@ class TestToIR:
             async def execute(self, ctx: object) -> int:
                 return 1
 
-        wf = WorkflowCompiler(name="unslugged")
+        wf = Workflow(name="unslugged")
         wf.add(_Unregistered(), name="lonely")  # type not in the registry
-        spec = wf.compile()
+        spec = WorkflowCompiler().compile(wf)
         with pytest.raises(ValueError, match="task_type slug"):
             spec.to_ir()
-
-
-def _ir_excluding_id(spec: CompiledWorkflow) -> dict:
-    """Serialize ``spec`` to wire IR, dropping the topology-hash ``workflow_id``.
-
-    ``workflow_id`` is a content hash recomputed from the (post-lowering)
-    task list, so it legitimately differs across a serialize/reload cycle
-    even when the topology is identical. Everything else must round-trip.
-    """
-    ir = dict(default_codec.spec_to_ir(spec))
-    ir.pop("workflow_id", None)
-    return ir
 
 
 class TestTypedEdgeRoundtrip:
@@ -151,24 +145,24 @@ class TestTypedEdgeRoundtrip:
 
     def _slug(
         self,
-        wf: WorkflowCompiler,
+        wf: Workflow,
         name: str,
         value: int,
         deps: list[str] | None = None,
         **kw: object,
     ) -> None:
-        from molexp.workflow.registry import _Constant
+        from molab.workflow.registry import _Constant
 
         wf.add(_Constant(value=value), name=name, depends_on=deps, **kw)
 
     def test_branch_and_entry_round_trip(self) -> None:
         """A spec with wf.entry + wf.branch — previously rejected — now round-trips."""
-        wf = WorkflowCompiler(name="branchy", entry="fetch")
+        wf = Workflow(name="branchy", entry="fetch")
         self._slug(wf, "fetch", 1)
         self._slug(wf, "validate", 2, deps=["fetch"], routes={"ok": "publish", "fail": "rollback"})
         self._slug(wf, "publish", 3, deps=["validate"])
         self._slug(wf, "rollback", 4, deps=["validate"])
-        spec = wf.compile()
+        spec = WorkflowCompiler().compile(wf)
 
         ir = default_codec.spec_to_ir(spec)  # does not raise
         assert ir["entries"] == ["fetch"]
@@ -183,23 +177,23 @@ class TestTypedEdgeRoundtrip:
         rebuilt = default_codec.ir_to_spec(ir)
         assert tuple(sorted(rebuilt._branch_edges)) == tuple(sorted(spec._branch_edges))
         assert rebuilt._entries == spec._entries
-        assert _ir_excluding_id(rebuilt) == _ir_excluding_id(spec)
+        assert default_codec.spec_to_ir(rebuilt) == default_codec.spec_to_ir(spec)
 
     def test_control_edge_round_trips(self) -> None:
-        wf = WorkflowCompiler(name="cf", entry="a")
+        wf = Workflow(name="cf", entry="a")
         self._slug(wf, "a", 1)
         self._slug(wf, "b", 2)
         wf.control("a", "b")
-        spec = wf.compile()
+        spec = WorkflowCompiler().compile(wf)
 
         ir = default_codec.spec_to_ir(spec)
         assert {link["kind"] for link in ir["links"]} == {"control"}
         rebuilt = default_codec.ir_to_spec(ir)
         assert tuple(rebuilt._control_edges) == tuple(spec._control_edges) == (("a", "b"),)
-        assert _ir_excluding_id(rebuilt) == _ir_excluding_id(spec)
+        assert default_codec.spec_to_ir(rebuilt) == default_codec.spec_to_ir(spec)
 
     def test_loop_and_parallel_round_trip(self) -> None:
-        wf = WorkflowCompiler(name="lp")
+        wf = Workflow(name="lp")
         self._slug(wf, "seed", 0)
         self._slug(wf, "compute", 1, deps=["seed"])
         self._slug(wf, "check_done", 2, deps=["compute"])
@@ -208,7 +202,7 @@ class TestTypedEdgeRoundtrip:
         self._slug(wf, "gather", 5, deps=["items"])
         wf.loop(body=["compute"], until="check_done", max_iters=10)
         wf.parallel(map_over="items", body="process", join="gather", max_concurrency=4)
-        spec = wf.compile()
+        spec = WorkflowCompiler().compile(wf)
 
         ir = default_codec.spec_to_ir(spec)
         assert ir["loops"] == [
@@ -224,7 +218,7 @@ class TestTypedEdgeRoundtrip:
         assert [(p.map_over, p.body, p.join, p.max_concurrency) for p in rebuilt._parallels] == [
             (p.map_over, p.body, p.join, p.max_concurrency) for p in spec._parallels
         ]
-        assert _ir_excluding_id(rebuilt) == _ir_excluding_id(spec)
+        assert default_codec.spec_to_ir(rebuilt) == default_codec.spec_to_ir(spec)
 
 
 class TestNodePosition:

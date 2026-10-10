@@ -1,7 +1,7 @@
 
 __pycache__/
 __pypackages__/
-!src/molexp/dist/.gitkeep
+!src/molab/dist/.gitkeep
 .agent_provider.json
 .cache
 .claude/scheduled_tasks.lock
@@ -88,7 +88,7 @@ __pypackages__/
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
 #  Usually these files are written by a python script from a template
 # .python-version
-# (running `molexp run` from the repo root writes a whole workspace here)
+# (running `molab run` from the repo root writes a whole workspace here)
 # Accidental agent/session materialisation at repo root (never commit)
 # ad-hoc e2e runner left at repo root
 # Agent home: agent/ (sessions + _tasks + .scratch).
@@ -96,7 +96,7 @@ __pypackages__/
 # C extensions
 # Celery stuff
 # Claude Code workflow scratch — in-flight specs, runtime artifacts, worktrees
-# Compiled frontend bundle (populated by `npm run build` in ui/)
+# Compiled frontend bundle (populated by `npm run build:web` from apps/web/)
 # Cython debug symbols
 # Distribution / packaging
 # Django stuff:
@@ -107,7 +107,7 @@ __pypackages__/
 # Jupyter Notebook
 # LSP config files
 # mkdocs documentation
-# molexp workspace artifacts accidentally materialised at the repo root
+# molab workspace artifacts accidentally materialised at the repo root
 # mypy
 # pdm
 # PEP 582; used by e.g. github.com/David-OConnor/pyflow and github.com/pdm-project/pdm
@@ -181,7 +181,9 @@ scripts/live/pe_rg_e2e/.run/
 sdist/
 share/python-wheels/
 sketch
-src/molexp/dist/*
+src/molab/dist/*
+# TeXlyre BusyTeX wasm + TeX Live basic. One-time: npm run download:busytex -w molab-web
+apps/web/public/busytex/
 target/
 thumb
 tmp/

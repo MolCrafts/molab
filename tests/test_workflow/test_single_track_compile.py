@@ -9,7 +9,7 @@ against the compiled registration is the contract.
 
 from __future__ import annotations
 
-from molexp.workflow import Task, TaskContext, WorkflowCompiler
+from molab.workflow import Task, TaskContext, Workflow, WorkflowCompiler
 
 
 class TestCompiledWorkflow:
@@ -19,7 +19,7 @@ class TestCompiledWorkflow:
                 return 42
 
         user_instance = MyTask()
-        spec = WorkflowCompiler(name="identity").add(user_instance, name="my").compile()
+        spec = WorkflowCompiler().compile(Workflow(name="identity").add(user_instance, name="my"))
 
         reg = next(t for t in spec._tasks if t.name == "my")
         assert reg.fn_or_class is user_instance, (

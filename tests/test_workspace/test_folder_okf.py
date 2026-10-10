@@ -1,20 +1,19 @@
 """OKF capabilities on ``workspace.Folder`` (wsokf-01/02/03).
 
-Every Folder gains a narrative ``index.md`` whose markdown links are the
-knowledge graph (``out_edges`` / ``links``) and a ``meta.yaml`` concept marker
-(``type`` → registry) — both additive alongside the authoritative
-``metadata.json``. A ``Run`` additionally carries the hot-state ``_ops/run.json``
-sidecar (``RunOpsState`` via ``read_ops`` / ``write_ops`` / ``update_ops``).
+Every Folder gains a narrative ``index.md``; the markdown links in it are the
+knowledge graph, read and written through ``molab.knowledge`` (``Concept.links``
+/ ``append_link``) — the workspace owns the narrative access, not the edge
+format. Workspace / Project / Experiment / Run stamp ``type`` on their entity
+JSON. Notes and other generic Folders use ``meta.json``. Run hot state lives on
+``run.json`` (not an ``ops/`` sidecar).
 """
 
 from __future__ import annotations
 
-import os
+import json
 from pathlib import Path
 
-from molexp.workspace import Workspace
-from molexp.workspace.models import RunStatus
-from molexp.workspace.run_ops import RunOpsState
+from molab.workspace import Workspace
 
 
 class TestFolderOKF:
@@ -28,50 +27,24 @@ class TestFolderOKF:
         # additive: the project's own metadata is untouched (still listed)
         assert [p.name for p in ws.list_projects()] == ["alpha"]
 
-    def test_out_edges_resolves_in_tree_and_classifies_external(self, tmp_path: Path) -> None:
-        ws = Workspace(root=tmp_path / "lab")
-        ws.materialize()
-        alpha = ws.add_project("alpha")
-        beta = ws.add_project("beta")
-
-        alpha.write_index(
-            "# Alpha\n\n- [to-beta](../beta)\n- [ext](https://example.com)\n- [nowhere](./nope)\n"
-        )
-
-        edges = {os.path.normpath(e) for e in alpha.out_edges()}
-        assert os.path.normpath(str(beta.resolve())) in edges
-
-        scan = alpha.links()
-        assert any("example.com" in e for e in scan.external)
-        assert any("nope" in o for o in scan.other)
-
-    def test_meta_yaml_marks_concept_type_and_id(self, tmp_path: Path) -> None:
+    def test_meta_json_marks_concept_type_path_is_id(self, tmp_path: Path) -> None:
         ws = Workspace(root=tmp_path / "lab")
         ws.materialize()
         proj = ws.add_project("alpha")
         assert ws.read_meta()["type"] == "workspace.root"
         pmeta = proj.read_meta()
         assert pmeta["type"] == "workspace.project"
-        assert pmeta["id"] == "alpha"
+        run = proj.add_experiment("e").add_run()
+        assert json.loads((Path(run.resolve()) / "run.json").read_text())["type"] == "workspace.run"
 
 
-class TestRunOpsSidecar:
-    def test_write_read_round_trip_defaults_pending_and_isolates_file(self, tmp_path: Path) -> None:
+class TestFolderFiles:
+    def test_files_is_store_on_workspace_disk(self, tmp_path: Path) -> None:
         ws = Workspace(root=tmp_path / "lab")
         ws.materialize()
-        run = ws.add_project("p").add_experiment("e").add_run()
-        assert run.read_ops().status == RunStatus.PENDING  # default when absent
-        run.write_ops(RunOpsState(status=RunStatus.RUNNING, owner_pid=7))
-        assert run.read_ops().status == RunStatus.RUNNING
-        assert run.read_ops().owner_pid == 7
-        # hot state lands in _ops/run.json, isolated from run.json
-        assert (Path(run.resolve()) / "_ops" / "run.json").exists()
-
-    def test_update_ops_read_modify_writes(self, tmp_path: Path) -> None:
-        ws = Workspace(root=tmp_path / "lab")
-        ws.materialize()
-        run = ws.add_project("p").add_experiment("e").add_run()
-        run.write_ops(RunOpsState(status=RunStatus.PENDING))
-        out = run.update_ops(lambda s: s.model_copy(update={"status": RunStatus.RUNNING}))
-        assert out.status == RunStatus.RUNNING
-        assert run.read_ops().status == RunStatus.RUNNING
+        proj = ws.add_project("alpha")
+        dest = proj.files.put("note.txt", "hello")
+        assert dest.read_text() == "hello"
+        assert dest.parent == Path(proj.resolve())
+        assert proj._disk() is ws.fs
+        assert proj.fs is ws.fs

@@ -1,4 +1,4 @@
-"""Tests for ``molexp.plugins.gh.GitHubClient``.
+"""Tests for ``molab.plugins.gh.GitHubClient``.
 
 httpx is mocked via ``httpx.MockTransport`` (built-in, zero extra dep).
 Each test installs a request handler that asserts the outbound shape
@@ -16,7 +16,7 @@ import pytest
 
 def _client_with(handler):
     """Build a ``GitHubClient`` whose underlying httpx uses ``handler``."""
-    from molexp.plugins.gh import GitHubClient
+    from molab.plugins.gh import GitHubClient
 
     transport = httpx.MockTransport(handler)
     return GitHubClient(token="t-secret", transport=transport)
@@ -26,7 +26,7 @@ class TestGitHubClient:
     @pytest.mark.asyncio
     async def test_graphql_posts_bearer_auth_and_raises_on_errors(self):
         """POST goes to /graphql with Bearer auth; ``errors`` field surfaces."""
-        from molexp.plugins.gh import GitHubGraphQLError
+        from molab.plugins.gh import GitHubGraphQLError
 
         seen: dict[str, Any] = {}
 
@@ -51,7 +51,7 @@ class TestGitHubClient:
     @pytest.mark.asyncio
     async def test_read_methods_return_typed_models(self):
         """Read methods return pydantic models, not raw dicts."""
-        from molexp.plugins.gh import Issue, PullRequest
+        from molab.plugins.gh import Issue, PullRequest
 
         def handler(request: httpx.Request) -> httpx.Response:
             body = json.loads(request.content)
@@ -132,7 +132,7 @@ class TestGitHubClient:
     @pytest.mark.asyncio
     async def test_write_mutations_accept_input_models(self):
         """create_pull_request / add_issue_comment accept pydantic Input models."""
-        from molexp.plugins.gh import (
+        from molab.plugins.gh import (
             AddIssueCommentInput,
             CreatePullRequestInput,
         )

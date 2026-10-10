@@ -1,6 +1,6 @@
 """Compute targets — LocalTarget, RemoteTarget, and target resolution.
 
-Matches ``docs/guide/workspace-architecture.md``.
+Matches ``docs/en/guide/workspace-architecture.md``.
 
 Demonstrates:
 
@@ -20,16 +20,16 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-import molexp as me
-from molexp.workspace.target import LocalTarget, RemoteTarget
-from molexp.workspace.targets import resolve_compute_target
+import molab as me
+from molab.workspace.target import LocalTarget, RemoteTarget
+from molab.workspace.targets import resolve_compute_target
 
 
 def main() -> None:
-    root = Path(tempfile.mkdtemp(prefix="molexp-targets-"))
+    root = Path(tempfile.mkdtemp(prefix="molab-targets-"))
     ws = me.Workspace(root, name="targets-demo")
 
-    scratch = Path(tempfile.mkdtemp(prefix="molexp-scratch-"))
+    scratch = Path(tempfile.mkdtemp(prefix="molab-scratch-"))
 
     # ── 1. LocalTarget — the default for in-process execution ────────────
     local = LocalTarget(scratch_root=str(scratch))
@@ -45,7 +45,7 @@ def main() -> None:
     print(f"  is_remote:    {remote.is_remote}")
 
     # ── 3. ComputeTarget — the persisted base stored in workspace.json ───
-    from molexp.workspace.target import ComputeTarget
+    from molab.workspace.target import ComputeTarget
 
     ct = ComputeTarget(name="gpu-cluster", host="gpu01.hpc.example.com", scratch_root="/scratch")
     print(f"\nComputeTarget(name='{ct.name}'):")

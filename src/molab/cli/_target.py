@@ -1,0 +1,165 @@
+"""Shared ``-t/--target`` option + resolver for top-level CLI commands.
+
+Replaces the old ``workspace`` group callback's ``ctx.obj`` plumbing: a
+top-level command declares the :data:`TargetOption` parameter and calls
+:func:`resolve_workspace_target` to obtain the same ``(target, transport, fs)``
+triple the callback used to stash on the context. Local is the zero-config
+default (``-t .``); remote is ``-t user@host:/path`` or a registered
+``-t @target-name`` (resolved against the cwd workspace's compute-target
+registry — an improvement over the old callback, which passed no workspace and
+so could not resolve ``@name`` at all).
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Annotated
+
+import typer
+from molq.transport import Transport
+
+from molab.workspace.fs import FileSystem
+from molab.workspace.target import (
+    Target,
+    TargetNeedsResolution,
+    TargetNotFound,
+    resolve_target,
+    target_to_filesystem,
+)
+
+if TYPE_CHECKING:
+    from molab.workspace import Workspace
+
+#: Shared ``--workspace/-ws`` option (``-t/--target`` kept as a hidden,
+#: back-compatible alias). Defaults to the current directory.
+TargetOption = Annotated[
+    str,
+    typer.Option(
+        "--workspace",
+        "-ws",
+        "--target",
+        "-t",
+        help="Workspace: a path, user@host:path, or @target-name (default: cwd).",
+    ),
+]
+
+
+def resolve_workspace_target(target_str: str = ".") -> tuple[Target, Transport, FileSystem]:
+    """Resolve a target string into ``(target, transport, fs)``.
+
+    Wraps :func:`molab.workspace.target.resolve_target` +
+    :func:`target_to_filesystem` so every top-level command shares one
+    local/remote resolution path. ``@name`` targets are looked up in the cwd
+    workspace's compute-target registry.
+
+    Args:
+        target_str: Target spec; ``"."`` (default) -> local cwd workspace,
+            ``user@host:/path`` -> remote, ``@name`` -> registered target.
+
+    Returns:
+        ``(resolved_target, transport, filesystem)``.
+
+    Raises:
+        typer.Exit: code 1 if the target cannot be resolved, after printing
+            the error.
+    """
+    spec = target_str or "."
+
+    ws = None
+    if spec.startswith("@"):
+        # ``@name`` needs a workspace to look up the compute-target registry.
+        from molab.workspace import Workspace
+
+        try:
+            ws = Workspace.load(".")
+        except Exception:
+            ws = None
+
+    try:
+        resolved, transport = resolve_target(spec, ws)
+    except (TargetNotFound, TargetNeedsResolution) as exc:
+        from molab.cli._common import rprint
+
+        rprint(f"[red]{exc}[/red]")
+        raise typer.Exit(1) from exc
+    fs = target_to_filesystem(resolved)
+    return resolved, transport, fs
+
+
+def open_workspace(
+    target_str: str = ".",
+    *,
+    require_existing: bool = True,
+    prefetch: bool = False,
+    name: str | None = None,
+) -> tuple[Target, Transport, FileSystem, Workspace]:
+    """Resolve *target_str* and open the Workspace on the matching FileSystem.
+
+    Local and remote targets share this path; remote roots go through a
+    :class:`~molab.workspace.fs_cached.CachedRemoteFileSystem` so repeated
+    Folder/Run metadata reads hit a local mirror instead of SSH.
+    ``require_existing=True`` (default) fails when ``workspace.json`` is
+    missing; pass ``False`` for ``init``-style create.
+
+    Args:
+        target_str: Target spec (path, ``user@host:path`` or ``@name``).
+        require_existing: Fail when the workspace marker is absent.
+        name: Display name used when this call creates the workspace.
+        prefetch: Warm the whole navigation tree up front. Commands that are
+            about to walk projects/experiments/runs should pass ``True``: on a
+            remote workspace that turns a round-trip per node into two for the
+            entire tree. Commands that touch one known path should not.
+
+    Raises:
+        FileNotFoundError: when *require_existing* and no workspace marker.
+        typer.Exit: when the target string cannot be resolved, or a remote
+            host needs an interactive 2FA login first.
+    """
+    from molab.workspace import Workspace
+    from molab.workspace.target import RemoteTarget
+
+    target, transport, fs = resolve_workspace_target(target_str)
+    root = target.path
+    root_str = str(root)
+
+    if require_existing:
+        marker = fs.join(root_str, "workspace.json")
+        try:
+            present = fs.exists(marker)
+        except Exception as exc:
+            # Surface auth-ish transport errors with a connect hint.
+            from molab.cli._common import rprint
+
+            rprint(f"[red]Error:[/red] cannot reach remote workspace: {exc}")
+            if isinstance(target, RemoteTarget):
+                host = target.host or str(target)
+                rprint(
+                    f"[dim]If the host needs a verification code (2FA), run: "
+                    f"[bold]molab connect -ws {target_str}[/bold] "
+                    f"(or plain [bold]ssh {host}[/bold]), then retry.[/dim]"
+                )
+            raise typer.Exit(1) from exc
+        if not present:
+            raise FileNotFoundError(
+                f"No workspace found at {root} — run molab init {root} to create one"
+            )
+    ws = Workspace(root, name=name, fs=fs)
+    if prefetch:
+        _prefetch_tree(fs, ws)
+    return target, transport, fs, ws
+
+
+def _prefetch_tree(fs: FileSystem, ws: Workspace) -> None:
+    """Warm a cached remote filesystem's navigation tree; no-op otherwise.
+
+    Best-effort: a prefetch failure must not stop a command that would work
+    (more slowly) without it.
+    """
+    prepare = getattr(fs, "prepare", None)
+    if prepare is None:
+        return
+    try:
+        prepare(ws, block_index=True, refresh_on_open=True)
+    except Exception:  # warming is an optimisation, never a gate
+        import logging
+
+        logging.getLogger(__name__).debug("remote prefetch failed; continuing", exc_info=True)

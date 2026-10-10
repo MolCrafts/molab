@@ -1,25 +1,29 @@
 # Control Flow
 
-MolExp's workflow engine handles control flow through the **shape of the DAG**, not through special task types. There is no `IfTask`, `ForLoopTask`, or `MapTask` — parallelism, fan-out, and fan-in are expressed by how you wire `depends_on` edges, plus three compiler declarations: `wf.parallel` (fan out over a runtime-produced list), `wf.branch` (label-routed edges) and `wf.loop` (repeat a body until a condition task exits).
+Molab's workflow engine handles control flow through the **shape of the DAG**, not through special task types. There is no `IfTask`, `ForLoopTask`, or `MapTask` — parallelism, fan-out, and fan-in are expressed by how you wire `depends_on` edges, plus three compiler declarations: `wf.parallel` (fan out over a runtime-produced list), `wf.branch` (label-routed edges) and `wf.loop` (repeat a body until a condition task exits).
 
 ## Automatic Parallelism
 
 Tasks whose dependencies are all satisfied run in parallel automatically. You don't mark anything as "parallel"; you just make sure they share the same set of upstream dependencies.
 
 ```python
-from molexp.workflow import WorkflowCompiler
+from molab.workflow import Workflow, WorkflowCompiler
 
-wf = WorkflowCompiler(name="pipeline")
+wf = Workflow(name="pipeline")
+
 
 @wf.task
 async def fetch() -> dict:
     return {"raw": load()}
 
+
 @wf.task(depends_on=["fetch"])
 async def parse(raw: list) -> list: ...
 
+
 @wf.task(depends_on=["fetch"])
 async def validate(raw: list) -> bool: ...
+
 
 @wf.task(depends_on=["parse", "validate"])
 async def merge(parse: list, validate: bool) -> dict:
@@ -52,25 +56,29 @@ For larger branch-specific pipelines, route between whole tasks with `wf.branch`
 When a decision selects between **whole downstream tasks**, declare label-routed edges with `wf.branch` and return `Next` from the deciding task:
 
 ```python
-from molexp.workflow import Next, WorkflowCompiler, WorkflowRuntime
+from molab.workflow import Next, Workflow, WorkflowCompiler, WorkflowRuntime
 
-wf = WorkflowCompiler(name="triage", entry="classify")
+wf = Workflow(name="triage", entry="classify")
+
 
 @wf.task
 async def classify() -> tuple[dict, Next]:
     score = run_model()
     return {"score": score}, Next("accept" if score > 0.5 else "reject")
 
+
 @wf.task
 async def accepted(score: float) -> dict:
-    return {"score": score}         # the routed dict binds by name
+    return {"score": score}  # the routed dict binds by name
+
 
 @wf.task
 async def rejected(score: float) -> None: ...
 
+
 wf.branch("classify", routes={"accept": "accepted", "reject": "rejected"})
 
-result = await WorkflowRuntime().execute(wf.compile())
+result = await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
 ```
 
 Two declaration forms are equivalent: `wf.branch("src", routes={"l1": "t1", "l2": "t2"})` and the single-edge `wf.branch("src", "label", "target")`. The same routes can also be declared inline on the task — `@wf.task(routes={"accept": "accepted", ...})`. Route to the reserved name `"_end"` to terminate the workflow on that label.
@@ -95,9 +103,10 @@ async def iterate(xs: list[float], iters: int = 10) -> list[float]:
 When each iteration is itself a (multi-task) piece of the graph, declare a workflow-level loop with `wf.loop`:
 
 ```python
-from molexp.workflow import Next, WorkflowCompiler, WorkflowRuntime
+from molab.workflow import Next, Workflow, WorkflowCompiler, WorkflowRuntime
 
-wf = WorkflowCompiler(name="refine", entry="step")
+wf = Workflow(name="refine", entry="step")
+
 
 @wf.task
 async def step(value: int | None = None) -> int:
@@ -105,14 +114,17 @@ async def step(value: int | None = None) -> int:
     prev = value if isinstance(value, int) else 0
     return prev + 1
 
+
 @wf.task(depends_on=["step"])
 async def check(value: int) -> tuple[int, Next]:
     # The single upstream (``step``) binds positionally to ``value``.
     return value, Next("exit" if value >= 3 else "continue")
 
+
 @wf.task
 async def report(value: int) -> str:
-    return f"final:{value}"          # the exit-edge value binds by name
+    return f"final:{value}"  # the exit-edge value binds by name
+
 
 wf.loop(body=["step"], until="check", max_iters=10, on_exit="report")
 ```
@@ -134,21 +146,25 @@ wf.loop(body=["step"], until="check", max_iters=10, on_exit="report")
 Use `wf.parallel` when you need to fan out over a list produced by an upstream task:
 
 ```python
-from molexp.workflow import WorkflowCompiler
+from molab.workflow import Workflow, WorkflowCompiler
 
-wf = WorkflowCompiler(name="fan-out", entry="scatter")
+wf = Workflow(name="fan-out", entry="scatter")
+
 
 @wf.task
 async def scatter() -> list[int]:
     return [1, 2, 3, 4]
 
+
 @wf.task
 async def process(value: int) -> int:
-    return value ** 2               # ``value`` is one fan-out element
+    return value**2  # ``value`` is one fan-out element
+
 
 @wf.task
 async def reduce(values: list[int]) -> int:
-    return sum(values)              # collected outputs, one per element, in order
+    return sum(values)  # collected outputs, one per element, in order
+
 
 wf.parallel(map_over="scatter", body="process", join="reduce", max_concurrency=2)
 ```

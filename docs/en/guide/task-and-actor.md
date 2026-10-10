@@ -1,18 +1,19 @@
 # Task and Actor
 
-`Task` and `Actor` are the atomic units of a MolExp workflow. `Task` runs once and returns a value; `Actor` runs continuously and yields a stream of values. Both have a **protocol** form (zero-import third-party integration) and a **convenience base class** form (`molexp.workflow.Task` / `Actor`).
+`Task` and `Actor` are the atomic units of a Molab workflow. `Task` runs once and returns a value; `Actor` runs continuously and yields a stream of values. Both have a **protocol** form (zero-import third-party integration) and a **convenience base class** form (`molab.workflow.Task` / `Actor`).
 
 ## Task Semantics
 
 A `Task` is a single async function (or class with `async def execute(self, ctx)`) that consumes the typed output of its upstream task and returns a typed output of its own. The compiled graph runs tasks as soon as their dependencies are satisfied — tasks with no unresolved dependency between them run in parallel.
 
-Three equivalent ways to define a task, all on the same `WorkflowCompiler`:
+Three equivalent ways to define a task, all on the same `Workflow`:
 
 ```python
 # 1. Function decorated with @wf.task
-from molexp.workflow import TaskContext, WorkflowCompiler
+from molab.workflow import TaskContext, Workflow, WorkflowCompiler
 
-wf = WorkflowCompiler(name="pipeline")
+wf = Workflow(name="pipeline")
+
 
 @wf.task
 async def fetch(ctx: TaskContext) -> dict:
@@ -21,7 +22,8 @@ async def fetch(ctx: TaskContext) -> dict:
 
 ```python
 # 2. Subclass the convenience base class
-from molexp.workflow import Task, TaskContext
+from molab.workflow import Task, TaskContext
+
 
 class Fetch(Task):
     async def execute(self, ctx: TaskContext) -> dict:
@@ -35,7 +37,7 @@ class ExternalFetch:
         return {"n": 42}
 ```
 
-All three are interchangeable — the last form **requires no `molexp` import**, which is what lets you drop in third-party components unchanged.
+All three are interchangeable — the last form **requires no `molab` import**, which is what lets you drop in third-party components unchanged.
 
 ## Declaring Dependencies
 
@@ -44,7 +46,8 @@ Dependencies are declared **by task name** (not output name). The return value o
 ```python
 @wf.task
 async def square() -> float:
-    return 42.0 ** 2
+    return 42.0**2
+
 
 # ``square``'s output binds to the downstream parameter named after it.
 @wf.task(depends_on=["square"])
@@ -52,15 +55,15 @@ async def add_bias(square: float) -> float:
     return square + 10.0
 ```
 
-For instance registration, chain `.add(...)` calls and finish with `.compile()`:
+For instance registration, chain `.add(...)` calls and compile with `WorkflowCompiler().compile(workflow)`:
 
 ```python
-from molexp.workflow import WorkflowCompiler
+from molab.workflow import WorkflowCompiler
 
 
 class Process(Task):
     async def execute(self, ctx: TaskContext, fetch: dict) -> int:
-        return fetch["n"] * 2                       # upstream output binds by its task name
+        return fetch["n"] * 2  # upstream output binds by its task name
 
 
 class Report(Task):
@@ -68,12 +71,11 @@ class Report(Task):
         return f"n = {process}"
 
 
-compiled = (
-    WorkflowCompiler(name="pipeline")
-    .add(Fetch())                                   # auto-named "fetch"
-    .add(Process(), depends_on=["fetch"])           # name inferred from class
+compiled = WorkflowCompiler().compile(
+    Workflow(name="pipeline")
+    .add(Fetch())  # auto-named "fetch"
+    .add(Process(), depends_on=["fetch"])  # name inferred from class
     .add(Report(), depends_on=["process"], name="report")
-    .compile()
 )
 ```
 
@@ -96,19 +98,21 @@ Plain `Task` (no generics) defaults to `Any` everywhere. Build-time configuratio
 
 ```python
 # Decorator style
-from molexp.workflow import TaskContext, WorkflowCompiler
+from molab.workflow import TaskContext, Workflow, WorkflowCompiler
 
-wf = WorkflowCompiler(name="stream")
+wf = Workflow(name="stream")
+
 
 @wf.actor
 async def monitor(ctx: TaskContext):
     for item in [1, 2, 3]:
-        yield {"seen": item}   # last yield becomes the task output
+        yield {"seen": item}  # last yield becomes the task output
 ```
 
 ```python
 # Subclass Actor
-from molexp.workflow import Actor, TaskContext
+from molab.workflow import Actor, TaskContext
+
 
 class Monitor(Actor):
     async def run(self, ctx: TaskContext):
@@ -116,7 +120,7 @@ class Monitor(Actor):
             yield {"seen": item}
 ```
 
-Any object with `async def run(self, ctx)` returning an async iterator satisfies the `Streamable` protocol and can be added via `WorkflowCompiler.add(obj)` — no molexp import required.
+Any object with `async def run(self, ctx)` returning an async iterator satisfies the `Streamable` protocol and can be added via `Workflow.add(obj)` — no molab import required.
 
 ### Context and output
 
@@ -133,7 +137,7 @@ Not implemented:
 
 - Inter-task message-passing channels (`receive` / `send` / `emit`). An earlier, never-wired channel surface was removed — every path raised `NotImplementedError`. If you need streaming *between* concurrently-running tasks, open an issue; today an actor yields outputs, it does not exchange messages mid-run with peers.
 
-Relevant code: `molexp.workflow.task.Actor`, `molexp.workflow.context.TaskContext`, `molexp.workflow.protocols.Streamable`, and the drain loop in `molexp.workflow._engine.node`.
+Relevant code: `molab.workflow.task.Actor`, `molab.workflow.context.TaskContext`, `molab.workflow.protocols.Streamable`, and the drain loop in `molab.workflow._engine.node`.
 
 ## Task Name Resolution
 
@@ -141,8 +145,8 @@ Relevant code: `molexp.workflow.task.Actor`, `molexp.workflow.context.TaskContex
 |------|-------------|
 | `@wf.task def fetch(...)` | Function name (`fetch`) |
 | `@wf.task(name="X")` | Explicit `name=` |
-| `WorkflowCompiler.add(FetchTask())` | Class name converted to snake_case, minus trailing `_task` / `_actor` → `fetch` |
-| `WorkflowCompiler.add(Fetch(), name="X")` | Explicit `name=` |
+| `Workflow.add(FetchTask())` | Class name converted to snake_case, minus trailing `_task` / `_actor` → `fetch` |
+| `Workflow.add(Fetch(), name="X")` | Explicit `name=` |
 
 `depends_on` values must match one of these resolved names exactly.
 
@@ -151,21 +155,25 @@ Relevant code: `molexp.workflow.task.Actor`, `molexp.workflow.context.TaskContex
 Fan-out over a runtime-produced list is declared with `wf.parallel`:
 
 ```python
-from molexp.workflow import WorkflowCompiler
+from molab.workflow import WorkflowCompiler
 
-wf = WorkflowCompiler(name="fan-out", entry="scatter")
+wf = Workflow(name="fan-out", entry="scatter")
+
 
 @wf.task
 async def scatter() -> list[int]:
     return [1, 2, 3, 4]
 
+
 @wf.task
 async def compute(value: int) -> int:
-    return value ** 2               # one element binds positionally to `value`
+    return value**2  # one element binds positionally to `value`
+
 
 @wf.task
 async def reduce(values: list[int]) -> int:
-    return sum(values)              # the collected results, one per element, in order
+    return sum(values)  # the collected results, one per element, in order
+
 
 wf.parallel(map_over="scatter", body="compute", join="reduce", max_concurrency=2)
 ```

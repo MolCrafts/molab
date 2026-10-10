@@ -1,7 +1,7 @@
 [project]
-site_name = "MolExp Documentation"
-site_url = "https://docs.molcrafts.org/molexp/"
-site_description = "Agent-assisted scientific-workflow platform for FAIR research"
+site_name = "Molab Documentation"
+site_url = "https://docs.molcrafts.org/molab/"
+site_description = "Scientific-workflow platform for FAIR research"
 docs_dir = "docs/en"
 site_dir = "site/en"
 
@@ -19,7 +19,6 @@ nav = [
         { "Overview" = "concept/index.md" },
         { "Workflow Model" = "concept/workflow.md" },
         { "Workspace Model" = "concept/workspace.md" },
-        { "Agent" = "concept/agent.md" },
         { "Assets and Reproducibility" = "concept/assets-and-reproducibility.md" },
         { "Plugins" = "concept/plugins.md" }
     ]},
@@ -38,24 +37,22 @@ nav = [
             { "Parameter Sweeps" = "guide/sweeps.md" },
             { "Workspace Architecture" = "guide/workspace-architecture.md" },
             { "Assets" = "guide/assets.md" },
-            { "Notes and Literature" = "guide/knowledge.md" },
+            { "Knowledge and Cross-References" = "guide/knowledge.md" },
             { "Workflow Persistence" = "guide/workflow-persistence.md" },
             { "Run Profiles" = "guide/run-profiles.md" }
         ]},
         { "Operations" = [
-            { "Plan & Run with the Agent Harness" = "guide/plan-mode.md" },
             { "Server Lifecycle" = "guide/server-lifecycle.md" },
             { "Molq Plugin" = "guide/molq.md" }
         ]}
     ]},
     { "Architecture" = [
         { "Overview" = "architecture/index.md" },
-        { "Agent Layer" = "architecture/agent.md" },
-        { "Plan Mode" = "architecture/plan-mode.md" },
         { "Workflow Layer" = "architecture/workflow-layer.md" }
     ]},
     { "Development" = [
         { "Index" = "development/index.md" },
+        { "Serve and rebuild the UI" = "development/ui-serve.md" },
         { "Compiler" = "development/compiler.md" },
         { "Task Protocols" = "development/task-protocols.md" },
         { "Writing a Plugin" = "plugins.md" }
@@ -67,7 +64,7 @@ name = "molcrafts"
 language = "en"
 
 [project.extra.molcrafts]
-product = "molexp"
+product = "molab"
 # Indigo product accent (主) + soft companion (副) for hover/selection chips.
 accent = "#4f46e5"
 accent_soft = "rgba(79, 70, 229, 0.14)"

@@ -1,149 +1,224 @@
-# Notes and Literature
+# Knowledge and Cross-References
 
-A workspace does not only record what a computation produced — it also records why you ran it, what you concluded, and which papers you built on. In MolExp that knowledge lives in the same directory tree as your projects, experiments, and runs, encoded in the **Open Knowledge Format (OKF)**: plain directories, plain YAML, plain Markdown. There is no separate notes database to keep in sync with the filesystem, because the filesystem *is* the database.
+A project's knowledge is not a bag of independent documents. It is the **index
+of the experiment knowledge beneath it** — the findings, reports, observations
+and notes written under the project's experiments — held together by the
+**plans** (`Plan`) and **summaries** (`Report` / `Finding`) that belong to those
+experiments. The workspace records what was computed and why; knowledge records
+what it *means*.
 
-## The mental model
+There is no second notes database and no central index: the filesystem is the
+database. A document is a markdown file, and its path is its identity.
 
-One paragraph carries the whole design. A note is a directory: its path is its identity, a small `meta.yaml` marks what kind of Concept the directory is (`note.note`, `reference.reference`, ...), and `index.md` holds the narrative. The Markdown links inside `index.md` are not decoration — they **are** the knowledge graph. Every link is a typed edge to another Concept, and reverse lookups (backlinks) are recomputed from those links rather than stored in a second index. Heavy payloads such as PDFs are *pointed at* through a path recorded in metadata — never copied into the workspace.
+## Where a document lives
 
-Because every workspace entity (`Workspace`, `Project`, `Experiment`, `Run`) is itself a `Folder` with a `meta.yaml`, notes and references mount anywhere in the hierarchy and can link to anything in it: a note under an experiment can cite a paper, reference a run, or point at a sibling note, all with the same Markdown-link edge.
-
-The management entry point is the `Bundle` façade. A bundle wraps a root directory (typically the workspace root) and exposes the Concept tree beneath it: `create_note`, `link`, `walk`, `backlinks`, `search`, `import_zotero`.
-
-!!! note "Opening the workspace in Obsidian (or any Markdown editor)"
-    Because notes are plain directories of Markdown, you can open the workspace root as an Obsidian vault and every `index.md` renders and cross-links normally. Two caveats: MolExp's knowledge graph is built from **standard Markdown links** (`[text](../other-concept)`) — Obsidian-style `[[wikilinks]]` are *not* parsed as edges, so write links in standard form (or configure Obsidian to prefer Markdown links) if you want them to count as citations/backlinks. And each Concept's narrative lives in `index.md` inside its own directory — the "folder note" convention — which reads best in Obsidian with a folder-note plugin enabled.
-
-## Write a note on an experiment
-
-Create a note under an experiment by passing the experiment as the note's `parent`. Names are slugified into directory names, and `create_note` is idempotent — calling it again with the same name returns the existing note instead of duplicating it.
-
-```python
-from molexp.workspace import Bundle, Workspace
-
-ws = Workspace("./lab", name="Lab")
-exp = ws.project("polymer-cg").experiment("solvation-sweep")
-
-bundle = Bundle(ws.root)
-note = bundle.create_note(
-    "Analysis Notes",
-    parent=exp,
-    body="# Analysis Notes\n\nThe RDF is converged after 5 ns.\n",
-)
-
-print(bundle.rel_path(note))
-# projects/polymer-cg/experiments/solvation-sweep/analysis-notes
-```
-
-The `body` is the note's `index.md`; read it back with `note.body()` and replace it with `note.set_body(...)`. Structured document metadata — categorical tags and a lifecycle status — lives in the note's `meta.yaml` as a typed `NoteMeta` payload, written with `write_note_meta`:
-
-```python
-from molexp.workspace import NoteMeta
-
-note.write_note_meta(NoteMeta(tags=["analysis", "rdf"], status="draft"))
-
-print(note.tags())    # ['analysis', 'rdf']
-print(note.status())  # draft
-```
-
-On disk the note is an ordinary directory next to the experiment's other contents:
+Built-in knowledge lands as **one markdown file** under a `knowledges/`
+container. A project's index sits beside its experiments; each experiment's
+conclusions sit under the experiment:
 
 ```text
-lab/projects/polymer-cg/experiments/solvation-sweep/
-└── analysis-notes/
-    ├── meta.yaml       # type: note.note — plus tags and status
-    ├── index.md        # the narrative; its links are the graph edges
-    └── metadata.json   # Folder mount bookkeeping (derived)
+lab/projects/polymer-cg/
+├── knowledges/tg-index.md                   ← a project's index of its experiments
+└── experiments/solvation-sweep/
+    └── knowledges/tg-result.md              ← one experiment's finding
 ```
 
-## Attach a literature reference
+`.md` is the form molab writes; a `.mdx` file is accepted on read only.
 
-A reference is its own Concept type, `ReferenceConcept`: one directory per work, with the structured bibliographic record (`ReferenceMeta`) in `meta.yaml` and the human-readable citation text in `index.md`. Mount it wherever it belongs — here, next to the note under the same experiment — using the generic `add_folder` verb every `Folder` supports:
+Everything that is not narrative lives in the file's YAML frontmatter, above all
+the **`class`** that says which Knowledge class the document is:
+
+```yaml
+---
+class: Finding
+tags: [thermal]
+---
+```
+
+## Constructing and finding a document
+
+Construction names a **host** and a **name**; the host is a workspace `Folder`,
+and the class derives its own path from them:
 
 ```python
-from molexp.workspace import ReferenceConcept, ReferenceMeta
+from molab.knowledge import Note
+from molab.workspace import Workspace
 
-ref = exp.add_folder(ReferenceConcept(parent=exp, name="frenkel-smit-2002"))
-ref.write_reference_meta(
-    ReferenceMeta(
-        title="Understanding Molecular Simulation",
-        authors=("Daan Frenkel", "Berend Smit"),
-        year=2002,
-        pdf_path="/home/me/Zotero/storage/ABCD1234/frenkel-smit.pdf",
-    )
+ws = Workspace("./lab", name="Lab")
+ws.materialize()
+experiment = ws.add_project("polymer-cg").add_experiment("solvation-sweep")
+
+note = Note(experiment, "Analysis Notes")  # binds the path; touches no disk
+note.write("# Analysis Notes\n\nQuench at 10 K/ns.\n")
+```
+
+`Note(experiment, "Analysis Notes").path` is
+`<experiment>/knowledges/analysis-notes.md`, and that is where `write` puts the
+bytes. Bind a name and nothing touches disk until the first write.
+
+Always construct a **concrete** class. The `Knowledge` base is a directory-form
+Concept, so `Knowledge(host, name)` would land a directory rather than a markdown
+file.
+
+**A path is only how you find a document.** To open one you already have — from
+a search, from `ls`, from a link in another document — use `Knowledge.open`,
+which reads the class back from the frontmatter:
+
+```python
+from molab.knowledge import Knowledge, Note
+
+doc = Knowledge.open(experiment.resolve() / "knowledges" / "analysis-notes.md")
+assert type(doc) is Note  # the `class:` frontmatter is honoured
+assert doc.read().startswith("# Analysis Notes")
+```
+
+`molab.knowledge.location.folder(host, name, of)` is that same derivation on its
+own — `of` is the class, and the return is the **landed path**:
+
+```python
+from molab.knowledge.location import folder
+
+assert Note(experiment, "Analysis Notes").path == folder(experiment, "Analysis Notes", Note)
+```
+
+## The six classes
+
+Every class lands one markdown file; the `class:` frontmatter names which one:
+
+| Class | `class:` frontmatter | Purpose |
+|---|---|---|
+| `Note` | `class: Note` | A free note |
+| `Literature` | `class: Literature` | A reference; bib fields in frontmatter, PDFs pointed at, never copied |
+| `Report` | `class: Report` | A written-up analysis, including a failed run's |
+| `Finding` | `class: Finding` | A harvested scientific outcome |
+| `Plan` | `class: Plan` | An experiment's or project's plan book |
+| `Observation` | `class: Observation` | A recorded observation or standing choice |
+
+`Report`, `Finding`, `Plan` and `Observation` require at least one `SourceRef`
+at construction — they are sourced documents; `Note` and `Literature` do not.
+
+## Cross-reference is what ties knowledge together
+
+The body of a document is its narrative, and the markdown links in that body
+**are** the knowledge graph. They are written with `.ref`, which takes another
+**Knowledge** — a document object, or the on-disk path that locates one:
+
+```python
+from molab.knowledge import Finding, SourceRef
+
+finding = Finding(experiment, "Tg Result", sources=[SourceRef(kind="run", ref="run-0001")])
+finding.write("# Tg Result\n\nTg rose with cooling rate.\n")
+
+note.ref(finding)  # by object…
+note.ref(finding.path)  # …or by path — the same edge either way
+```
+
+`.ref` **never** takes a project / experiment / run coordinate: not a `Folder`,
+not a run id, not params. Those are not knowledge, and `.ref` rejects them with
+`TypeError`. To point at a run or an experiment, first find the document that
+records it, then `.ref` that document:
+
+```python
+run_record = Knowledge.open(experiment.resolve() / "knowledges" / "run-0001.md")
+note.ref(run_record)
+```
+
+The edges are recomputable from the tree — nothing is stored twice, and there is
+no separate backlink type:
+
+```python
+for edge in note.links():
+    print(edge.role, edge.target)  # e.g. references …/knowledges/tg-result.md
+```
+
+`.cite` is the looser sibling: it delegates a Knowledge target to `.ref`, and
+otherwise links the path it is handed as given.
+
+## Writing into a workspace
+
+Two module-level verbs write knowledge into a workspace tree, both hosted by a
+`Folder`:
+
+- `mount_note(host, name, *, body="")` — idempotently mount a `Note`; a repeat
+  call never truncates an existing body.
+- `write_knowledge(host, *, name, of, sources, created_by, text, cite=(), title="")`
+  — write a sourced document, idempotent on `name`.
+
+`harvest_run` turns a finished run's outcome into knowledge under the run's
+experiment:
+
+```python
+from molab.knowledge import Finding, harvest_run
+
+finding = harvest_run(
+    run,
+    of=Finding,
+    narrative="Tg rose with cooling rate.",
+    created_by="lin",
 )
-ref.set_citation("Frenkel & Smit, *Understanding Molecular Simulation* (2002).\n")
 ```
 
-`ReferenceMeta` also carries `doi`, `venue`, `url`, and provenance fields (`source`, `source_key`); `pdf_path` records where the PDF already lives — the bytes stay in place.
+Only a **terminal** run (`succeeded` / `failed` / `cancelled`) can be harvested,
+and `narrative` must be non-empty — a harvest is an interpretation, not an
+archive; the raw record already lives in `run.json` and the run's artifacts.
+`created_by` is a required keyword argument. `of` is typically `Finding`,
+`Observation` or `Report`.
 
-Citing the reference from the note writes one typed Markdown link into the note's `index.md`:
+## Layering
 
-```python
-note.cite(ref, role="cites")
+`molab.knowledge` depends on `molab.workspace` — a document needs a host folder
+to know where to land — and that dependency is one-way: `molab.workspace` never
+names knowledge.
 
-print(note.body())
-# # Analysis Notes
-#
-# The RDF is converged after 5 ns.
-# - [@cites frenkel-smit-2002](../frenkel-smit-2002)
-```
+## Searching a group wiki
 
-The last line is the whole persistence story: a relative Markdown link, with the edge's role riding in the link label (`@cites ...`). The role vocabulary is fixed — `derived_from`, `cites`, `supersedes`, `records`, `references` — and `references` is the default, so a plain unlabeled link still reads back as a valid edge. `Bundle.link(src, dst, role=...)` writes the same edge between any two Concepts when the source is not a `Note`.
-
-## Query the graph: typed edges and backlinks
-
-Outgoing edges are read straight from a Concept's `index.md`. `typed_out_edges()` returns `Edge` rows pairing the resolved target path with the declared role:
-
-```python
-for edge in note.typed_out_edges():
-    print(edge.role, "->", edge.target)
-# cites -> /.../experiments/solvation-sweep/frenkel-smit-2002
-```
-
-The reverse direction is a derived view. `Bundle.backlinks(concept)` walks the bundle and returns a list of `Backlink` objects — each one a `NamedTuple` wrapper `Backlink(source, role)`, not a bare Concept: `source` is the `Folder` whose `index.md` holds the link, and `role` is that edge's declared role. No reverse index is written to disk; the answer is always recomputed from the Markdown source of truth.
-
-```python
-for backlink in bundle.backlinks(ref):
-    print(f"{bundle.rel_path(backlink.source)} links here (role={backlink.role})")
-# projects/polymer-cg/experiments/solvation-sweep/analysis-notes links here (role=cites)
-```
-
-Typed views over the whole bundle come from the same walk, and `bundle.search(text, concept_type=..., tag=...)` filters a derived index when the tree grows large:
-
-```python
-print([bundle.rel_path(n) for n in bundle.notes()])
-print([bundle.rel_path(r) for r in bundle.references()])
-```
-
-## Import a Zotero library
-
-If your papers already live in Zotero, you do not have to retype them. `molexp knowledge import-zotero` links a local Zotero library into a workspace: it opens Zotero's own `zotero.sqlite` **strictly read-only** and materializes each item as a `ReferenceConcept` under `<workspace>/references/` — bibliographic fields into `meta.yaml`, and each item's PDF pointed at inside Zotero's own `storage/` tree. No bytes are copied, and your Zotero library is never modified.
+Knowledge need not live in a workspace. A lab wiki is a directory of documents;
+register it as a named source and search it by keyword:
 
 ```console
-$ molexp knowledge import-zotero ~/Zotero/zotero.sqlite --dest ./lab
-OK Imported 2 reference(s) into /home/me/lab
-  references/frnkl2002  Understanding Molecular Simulation (2002)
-  references/krmr1990  Dynamics of entangled linear polymer melts (1990)
+$ molab knowledge init /data/group/wiki --title "Lab notes"
+$ molab knowledge sources add lab-wiki /data/group/wiki
+$ molab knowledge search "cooling rate for Tg"
+$ molab knowledge read lab-wiki:tg-index
 ```
 
-The argument is the `zotero.sqlite` file in your Zotero data directory (passing the directory itself also works); `--dest` is the workspace to import into, defaulting to the current directory. Close Zotero before importing — the running application holds a lock on its database, and the command will tell you exactly that rather than fail cryptically. The import is idempotent on the Zotero item key: re-running it updates the existing reference directories instead of duplicating them, and the linked source is recorded in `sources.json` at the workspace root.
+Retrieval is **BM25F** over title, tags, path and body, and hits from several
+sources are fused by reciprocal rank fusion. Chinese text is tokenized into
+unigrams *and* adjacent bigrams — no segmenter, no dictionary, no embeddings.
+This is keyword ranking, not RAG.
 
-If something is wrong, the command says so in plain language and exits non-zero:
-
-```console
-$ molexp knowledge import-zotero ~/Zotero/zotero.sqlite --dest /tmp/scratch
-Error: Destination is not a molexp workspace: /tmp/scratch
-Initialise one first with molexp init /tmp/scratch.
-```
-
-The same import is one call in Python — `Bundle.import_zotero` — so scripts and the CLI share a single code path:
+In Python a registered source opens as a tree handle, whose `walk()` yields its
+documents and whose `search(...)` ranks them:
 
 ```python
-# docs: skip — needs a real Zotero library on the executing machine
-from pathlib import Path
+from molab.knowledge.sources import open_source
 
-refs = bundle.import_zotero(Path.home() / "Zotero" / "zotero.sqlite")
-print(f"linked {len(refs)} Zotero items")
+wiki = open_source("lab-wiki")
+for doc in wiki.walk():
+    print(type(doc).__name__, doc.path)
+for hit in wiki.search("cooling").hits:
+    print(hit.entry.title)
 ```
 
-Once imported, the references are ordinary Concepts: cite them from notes with `note.cite(ref)`, find who cites them with `bundle.backlinks(ref)`, and filter them with `bundle.references()` — exactly as in the sections above.
+`qualify_run_id` stays as the permanent qualifier for a legacy bare run id. A source that is not the workspace uses its registered root as the container.
+If a wiki's documents sit under `<wiki>/knowledges/`, re-register that directory
+as the source root: `molab knowledge sources remove <name>`, then
+`molab knowledge sources add <name> <wiki>/knowledges`.
+
+## Migrating an existing tree
+
+`molab migrate knowledge [WORKSPACE]` is opt-in. It moves legacy documents into `<host>/knowledges/<stem>.md`, keeping the original stem:
+
+- `molab migrate knowledge` reads a host-level `*.md` whose frontmatter `class` names a knowledge class;
+- `molab migrate knowledge` reads `references/<key>.md` and `references/<key>/literature.json` plus `index.md`;
+- `molab migrate knowledge` reads the directory form `knowledges/<id>/<class>.json` plus `index.md`.
+
+Relative links to projects, experiments, runs, executions and artifacts become entity references. A document-to-document link is rebased so it still resolves. Frontmatter `sources:` rows that can be qualified are folded into typed links. A row that is unresolved or ambiguous stays in the frontmatter, and the report names it. A name that is already taken lands as `<stem>-2`, `<stem>-3`, … and both files are kept. Attachments and any other unnamed file stay in place and are listed as leftovers.
+
+`--dry-run` prints the same plan and writes nothing. A real run records one `knowledge.migrated` commit covering only the paths it touched. Run it again and it reports that nothing changed.
+
+## Next
+
+- For the workspace the knowledge lands in, see [Workspace Model](../concept/workspace.md).
+- For the concrete Python API around records and assets, see [Workspace API](workspace-api.md).
+- For reusable data and provenance, see [Assets and Reproducibility](../concept/assets-and-reproducibility.md).

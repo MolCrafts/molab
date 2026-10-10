@@ -1,6 +1,6 @@
 # Workflow Composition
 
-`SubWorkflow` is the **sanctioned composition node** in MolExp. It wraps a
+`SubWorkflow` is the **sanctioned composition node** in Molab. It wraps a
 reusable inner workflow and runs it end-to-end through the engine as a single
 node of an outer workflow — including as the per-element `body` of
 `builder.parallel`.
@@ -15,16 +15,18 @@ helpers keep working against the same workspace / run.
 ## Pattern 1: `SubWorkflow` as one node of a chain
 
 ```python
-from molexp.workflow import (
+from molab.workflow import (
     SubWorkflow,
     Task,
     TaskContext,
+    Workflow,
     WorkflowCompiler,
     WorkflowRuntime,
 )
 
-# Inner pipeline (a WorkflowCompiler — compiled eagerly when wrapped).
-inner = WorkflowCompiler(name="preprocess")
+# Inner pipeline (a Workflow — compiled eagerly when wrapped).
+inner = Workflow(name="preprocess")
+
 
 @inner.task
 async def load(seed: int = 0) -> list[float]:
@@ -32,35 +34,37 @@ async def load(seed: int = 0) -> list[float]:
     # or the default 0 when this inner runs standalone.
     return [3.0 + seed, 1.0, 4.0, 1.0, 5.0]
 
+
 @inner.task(depends_on=["load"])
 async def normalize(values: list[float]) -> list[float]:
     # ``load``'s single upstream list binds positionally to ``values``.
     top = max(values)
     return [x / top for x in values]
 
+
 class Train(Task):
     async def execute(self, ctx: TaskContext, values: list[float]) -> float:
         # The SubWorkflow node's terminal output (a list) binds to ``values``.
         return sum(values) / len(values)
 
-outer = (
-    WorkflowCompiler(name="train")
+
+outer = WorkflowCompiler().compile(
+    Workflow(name="train")
     .add(SubWorkflow(inner), name="preprocess")
     .add(Train(), depends_on=["preprocess"])
-    .compile()
 )
 
 result = await WorkflowRuntime().execute(outer)
 ```
 
 The outer workflow sees `preprocess` as a single task; the inner workflow keeps
-its own topology, `workflow_id`, and compile-time validation. By default
+its own topology, `workflow_digest`, and compile-time validation. By default
 `SubWorkflow` returns the inner spec's single **dependency leaf** (the task no
 other task depends on — `normalize` above). Pass `output="<task_name>"` to
 select a different inner output. If the inner spec has more than one leaf and no
 `output=` is given, `execute` raises a `ValueError` naming the candidates.
 
-`SubWorkflow(inner)` accepts either a `WorkflowCompiler` (compiled on
+`SubWorkflow(inner)` accepts either a `Workflow` (compiled on
 construction) or an already-compiled `CompiledWorkflow`.
 
 ## Pattern 2: `SubWorkflow` as a `parallel` body
@@ -73,22 +77,26 @@ for each element. The compiled task set stays exactly the declared outer tasks
 (no per-element node growth).
 
 ```python
-wf = WorkflowCompiler(name="fanout", entry="enumerate")
+wf = Workflow(name="fanout", entry="enumerate")
+
 
 @wf.task
 async def enumerate() -> list[int]:
     return [0, 1, 2]
 
+
 wf.add(SubWorkflow(inner), name="preprocess")
+
 
 @wf.task
 async def collect(values: list[list[float]]) -> list[list[float]]:
     # The join receives one inner output per element, bound to ``values``.
     return list(values)
 
+
 wf.parallel(map_over="enumerate", body="preprocess", join="collect", max_concurrency=2)
 
-compiled = wf.compile()
+compiled = WorkflowCompiler().compile(wf)
 result = await WorkflowRuntime().execute(compiled)
 # `collect` receives one inner output per element, in iteration order.
 ```
@@ -103,6 +111,9 @@ class can appear in multiple workflows — the lightest form of reuse when you d
 not need a whole sub-pipeline as one node:
 
 ```python
+from molab.workflow import Task, TaskContext, Workflow, WorkflowCompiler
+
+
 class Fetch(Task):
     async def execute(self, ctx: TaskContext) -> list[float]:
         return [3.0, 1.0, 4.0]
@@ -118,19 +129,15 @@ class Augment(Task):
         return clean + [x * 2 for x in clean]
 
 
-baseline = (
-    WorkflowCompiler(name="baseline")
-    .add(Fetch())
-    .add(Clean(), depends_on=["fetch"])
-    .compile()
+baseline = WorkflowCompiler().compile(
+    Workflow(name="baseline").add(Fetch()).add(Clean(), depends_on=["fetch"])
 )
 
-augmented = (
-    WorkflowCompiler(name="augmented")
+augmented = WorkflowCompiler().compile(
+    Workflow(name="augmented")
     .add(Fetch())
     .add(Clean(), depends_on=["fetch"])
     .add(Augment(), depends_on=["clean"])
-    .compile()
 )
 ```
 

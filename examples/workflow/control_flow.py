@@ -1,8 +1,8 @@
 """Fan-out, conditionals, and diamond shapes — all via the DAG.
 
-Matches ``docs/guide/control-flow.md``.
+Matches ``docs/en/guide/control-flow.md``.
 
-MolExp has no ``IfTask`` / ``ForTask``; control flow is expressed by the
+Molab has no ``IfTask`` / ``ForTask``; control flow is expressed by the
 shape of ``depends_on``, by Python inside tasks, and by ``wf.parallel`` for
 runtime-sized fan-out. Every task body reads its inputs through named
 parameters — the engine binds {upstream outputs} | {run params} | {build-time
@@ -23,12 +23,12 @@ from __future__ import annotations
 
 import asyncio
 
-from molexp.workflow import WorkflowCompiler, WorkflowRuntime
+from molab.workflow import Workflow, WorkflowCompiler, WorkflowRuntime
 
 
 # ── 1. Diamond fan-out ─────────────────────────────────────────────────────
 async def diamond_demo() -> None:
-    wf = WorkflowCompiler(name="diamond")
+    wf = Workflow(name="diamond")
 
     @wf.task
     async def fetch() -> dict:
@@ -48,13 +48,13 @@ async def diamond_demo() -> None:
         # Two scalar upstreams bind by their dependency names.
         return {"parsed": parse, "ok": validate}
 
-    result = await WorkflowRuntime().execute(wf.compile())
+    result = await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
     print(f"diamond:     {result.outputs['merge']}")
 
 
 # ── 2. Conditional branch inside a task ────────────────────────────────────
 async def conditional_demo(skip: bool) -> None:
-    wf = WorkflowCompiler(name="conditional")
+    wf = Workflow(name="conditional")
 
     @wf.task
     async def fetch() -> list[int]:
@@ -68,14 +68,16 @@ async def conditional_demo(skip: bool) -> None:
             return items
         return [x for x in items if x >= 0]
 
-    result = await WorkflowRuntime().execute(wf.compile(), config={"skip_cleaning": skip})
+    result = await WorkflowRuntime().execute(
+        WorkflowCompiler().compile(wf), config={"skip_cleaning": skip}
+    )
     tag = "raw    " if skip else "cleaned"
     print(f"conditional {tag}: {result.outputs['maybe_clean']}")
 
 
 # ── 3. Build-time fan-out ──────────────────────────────────────────────────
 async def fanout_demo() -> None:
-    wf = WorkflowCompiler(name="fanout")
+    wf = Workflow(name="fanout")
 
     @wf.task
     async def load() -> list[int]:
@@ -93,7 +95,7 @@ async def fanout_demo() -> None:
     async def total(square_evens: int, square_odds: int) -> int:
         return square_evens + square_odds
 
-    result = await WorkflowRuntime().execute(wf.compile())
+    result = await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
     print(
         f"fan-out:     squares_evens={result.outputs['square_evens']}, "
         f"squares_odds={result.outputs['square_odds']}, total={result.outputs['total']}"
@@ -102,7 +104,7 @@ async def fanout_demo() -> None:
 
 # ── 4. Runtime fan-out — ``wf.parallel`` over an upstream list ─────────────
 async def parallel_demo() -> None:
-    wf = WorkflowCompiler(name="parallel", entry="scatter")
+    wf = Workflow(name="parallel", entry="scatter")
 
     @wf.task
     async def scatter() -> list[int]:
@@ -118,7 +120,7 @@ async def parallel_demo() -> None:
 
     wf.parallel(map_over="scatter", body="square", join="gather", max_concurrency=2)
 
-    result = await WorkflowRuntime().execute(wf.compile())
+    result = await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
     print(f"parallel:    square={result.outputs['square']}, gather={result.outputs['gather']}")
 
 

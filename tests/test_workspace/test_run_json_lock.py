@@ -13,11 +13,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from molexp.workspace import Workspace
+from molab.workspace import Workspace
 
 
 def _read_run_json(run) -> dict:
-    return json.loads(Path(str(run.run_dir / "run.json")).read_text())
+    return json.loads(Path(str(run.run_dir / "run.json")).read_text(encoding="utf-8"))
 
 
 def _second_handle(tmp_path, run):
@@ -35,9 +35,9 @@ class TestRunMetadataRmw:
         run.materialize()
         other = _second_handle(tmp_path, run)
 
-        run._update_metadata(script="train.py")
-        other._update_metadata(target="cluster-a")  # stale handle, distinct field
+        run._update_metadata(target="cluster-a")
+        other._update_metadata(input_asset_ids=("asset-1",))  # stale handle, distinct field
 
         data = _read_run_json(run)
-        assert data["script"] == "train.py"  # not clobbered by the stale handle
-        assert data["target"] == "cluster-a"
+        assert data["target"] == "cluster-a"  # not clobbered by the stale handle
+        assert data["input_asset_ids"] == ["asset-1"]

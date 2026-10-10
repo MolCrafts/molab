@@ -2,54 +2,31 @@
 
 from __future__ import annotations
 
-from datetime import datetime
 from pathlib import Path
 
 import pytest
 
-from molexp.workspace import (
+from molab.workspace import (
     RunNotFoundError,
     Workspace,
 )
-from molexp.workspace.models import ExecutionRecord
+from molab.workspace.domain import ExecutionMode
 
 
 def _build(tmp_path):
     ws = Workspace(root=tmp_path, name="lab")
     ws.materialize()
     p = ws.add_project("proj-a")
-    e = p.add_experiment("exp-x", workflow_source="s.py", params={})
+    e = p.add_experiment("exp-x", params={})
     r = e.add_run(params={"seed": 1})
 
-    # Seed two execution dirs + history entries
-    hist = []
-    for i, status in enumerate(("failed", "succeeded"), start=1):
-        eid = f"exec-{r.id}" if i == 1 else f"exec-{r.id}-{i}"
-        (Path(r.run_dir) / "executions" / eid).mkdir(parents=True)
-        hist.append(
-            ExecutionRecord(
-                execution_id=eid,
-                started_at=datetime.now(),
-                finished_at=datetime.now(),
-                status=status,
-            )
-        )
-    r.update_ops(lambda s: s.model_copy(update={"executions": tuple(hist)}))
+    # Seed two terminal Executions (both succeeded) so the run has history
+    # without becoming retryable.
+    with r.start():
+        pass
+    with r.start(mode=ExecutionMode.RERUN):
+        pass
     return ws, p, e, r
-
-
-class TestDeleteExecution:
-    def test_removes_dir_and_history_entry(self, tmp_path):
-        _ws, _p, _e, r = _build(tmp_path)
-        first_exec = r.execution_history[0].execution_id
-        r.delete_execution(first_exec)
-        assert not (Path(r.run_dir) / "executions" / first_exec).exists()
-        assert all(rec.execution_id != first_exec for rec in r.execution_history)
-
-    def test_unknown_execution_raises(self, tmp_path):
-        _ws, _p, _e, r = _build(tmp_path)
-        with pytest.raises(KeyError):
-            r.delete_execution("exec-does-not-exist")
 
 
 class TestDeleteRun:

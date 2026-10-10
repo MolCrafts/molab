@@ -19,8 +19,8 @@ from __future__ import annotations
 
 import pytest
 
-from molexp.workflow import WorkflowCompiler, WorkflowRuntime
-from molexp.workflow.types import Next
+from molab.workflow import Workflow, WorkflowCompiler, WorkflowRuntime
+from molab.workflow.types import Next
 
 
 class TestValuesOnEdges:
@@ -31,7 +31,7 @@ class TestValuesOnEdges:
         next iteration — no ``ctx.state`` read required (positional bind)."""
         seen_inputs: list[object] = []
 
-        wf = WorkflowCompiler(name="loop-values", entry="head")
+        wf = Workflow(name="loop-values", entry="head")
 
         @wf.task
         async def head(value: int | None = None) -> int:
@@ -47,7 +47,7 @@ class TestValuesOnEdges:
 
         wf.loop(body=["head"], until="check", max_iters=10)
 
-        result = await WorkflowRuntime().execute(wf.compile())
+        result = await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
         assert result.status == "succeeded"
         # Iteration 1 has no incoming value; iterations 2 and 3 receive the
         # previous iteration's routed output through ctx.inputs.
@@ -62,7 +62,7 @@ class TestValuesOnEdges:
         positional loop-back case above."""
         seen: dict[str, object] = {}
 
-        wf = WorkflowCompiler(name="branch-values", entry="route")
+        wf = Workflow(name="branch-values", entry="route")
 
         @wf.task(routes={"go": "dst", "stop": "_end"})
         async def route() -> tuple[dict, Next]:
@@ -73,7 +73,7 @@ class TestValuesOnEdges:
             seen["inputs"] = dict(delivered)
             return delivered
 
-        result = await WorkflowRuntime().execute(wf.compile())
+        result = await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
         assert result.status == "succeeded"
         assert seen["inputs"] == {"payload": 42}, (
             "a branch-routed (value, Next(label)) must arrive at the dep-less target by-name"
@@ -85,7 +85,7 @@ class TestValuesOnEdges:
         shape; the trigger-carried value never overrides the data interface."""
         seen: dict[str, object] = {}
 
-        wf = WorkflowCompiler(name="deps-win", entry="src")
+        wf = Workflow(name="deps-win", entry="src")
 
         @wf.task
         async def base() -> str:
@@ -104,7 +104,7 @@ class TestValuesOnEdges:
 
         wf.entry("base")  # both src (constructor) and base are entries
 
-        result = await WorkflowRuntime().execute(wf.compile())
+        result = await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
         assert result.status == "succeeded"
         assert seen["inputs"] == "base-out"
 
@@ -118,12 +118,17 @@ class TestValuesOnEdges:
 
         class _RunContextStub:
             def __init__(self, work_dir):
-                self.work_dir = work_dir
+                self.run_dir = work_dir
+                # The context names its attempt; the journal lands in execution_dir.
+                self.id = "e01"
+                self.execution_dir = work_dir / "slot"
+                self.predecessor = None
+                self.bypass_cache = False
                 self.params = {"alpha": 7}
                 self.config = {}
                 self.run = type("RunStub", (), {"id": "stub-run", "run_dir": work_dir})()
 
-        wf = WorkflowCompiler(name="loop-root-merge", entry="head")
+        wf = Workflow(name="loop-root-merge", entry="head")
 
         @wf.task
         async def head(n: int | None = None, **rest: object) -> dict:
@@ -149,7 +154,7 @@ class TestValuesOnEdges:
         wf.loop(body=["head"], until="check", max_iters=5)
 
         result = await WorkflowRuntime().execute(
-            wf.compile(), run_context=_RunContextStub(tmp_path / "run")
+            WorkflowCompiler().compile(wf), run_context=_RunContextStub(tmp_path / "run")
         )
         assert result.status == "succeeded"
         assert len(seen_inputs) == 2

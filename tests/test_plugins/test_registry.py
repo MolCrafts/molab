@@ -8,7 +8,7 @@ enum today; tests for retired capabilities were removed with them.
 
 import pytest
 
-from molexp.plugins import (
+from molab.plugins import (
     Capability,
     CapabilityNotAvailable,
     PluginRegistry,

@@ -1,0 +1,48 @@
+name: docs
+
+# Strict Zensical builds of the English and Chinese manuals in every
+# context. Nothing in this repository deploys them.
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [dev, master, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One group per file, workflow, event and ref; only a feature ref cancels its
+# superseded runs. The canonical block: actions/check-workflows.
+concurrency:
+  group: docs-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ !contains(fromJSON('["refs/heads/dev","refs/heads/master","refs/heads/main"]'), github.ref) && !startsWith(github.ref, 'refs/tags/') }}
+
+jobs:
+  # Where this run happens, decided once: MolCrafts/molcrafts-ci/actions/ci-context.
+  context:
+    name: docs / context
+    runs-on: ubuntu-latest
+    outputs:
+      tier: ${{ steps.context.outputs.tier }}
+      upstream: ${{ steps.context.outputs.upstream }}
+      integration: ${{ steps.context.outputs.integration }}
+      skip-pr: ${{ steps.context.outputs.skip-pr }}
+      publish: ${{ steps.context.outputs.publish }}
+    steps:
+      - id: context
+        uses: MolCrafts/molcrafts-ci/actions/ci-context@master
+
+  build:
+    name: docs / build
+    needs: context
+    if: needs.context.outputs.skip-pr != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: MolCrafts/molcrafts-ci/actions/setup-python@master
+      # Resolving the project reads its partners' metadata (nothing builds):
+      # the `docs` group alone is installed, neither molab nor a partner.
+      - uses: MolCrafts/molcrafts-ci/actions/setup-partners@master
+      - run: uv run --only-group docs zensical build --strict -f zensical.toml
+      - run: uv run --only-group docs zensical build --strict -f zensical.zh.toml

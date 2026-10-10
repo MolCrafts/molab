@@ -10,9 +10,9 @@ import io
 import zipfile
 from pathlib import Path
 
-from molexp.workspace.archive import archive_folder_zip
-from molexp.workspace.folder import Folder
-from molexp.workspace.fs_local import LocalFileSystem
+from molab.workspace.archive import archive_folder_zip
+from molab.workspace.folder import Folder
+from molab.workspace.fs_local import LocalFileSystem
 
 
 def _folder_at(path: Path) -> Folder:

@@ -2,7 +2,7 @@
 
 This guide is for the user who wants to create and manage experiments
 from the browser, without writing Python first. You will bring up the
-MolExp server, open the bundled web UI, create a project and an
+Molab server, open the bundled web UI, create a project and an
 experiment through dialogs, launch a run, and then monitor and manage
 that run from the same screens.
 
@@ -17,17 +17,17 @@ The UI presents the same hierarchy the workspace stores on disk:
 
 | Level | What it is |
 |---|---|
-| **Workspace** | A directory MolExp owns. One server can serve several. |
+| **Workspace** | A directory Molab owns. One server can serve several. |
 | **Project** | A container that groups related experiments. |
 | **Experiment** | A workflow plus a parameter space plus an optional default compute target. |
 | **Run** | One immutable execution request: concrete parameters, a status (`pending → running → succeeded / failed / cancelled`). |
-| **Execution** | One physical attempt of a run (`exec-<run_id>[-N]`). A run accumulates attempts when it is resumed or rerun. |
+| **Execution** | One physical attempt of a run (`eNN`). A run accumulates attempts when it is resumed or rerun. |
 
 ## 1. Start the server
 
 ```bash
-pip install molexp
-molexp serve -ws ./lab --port 8000
+pip install git+https://github.com/MolCrafts/molab   # PyPI release pending
+molab serve -ws ./lab --port 8000
 ```
 
 Open <http://localhost:8000>. The wheel ships the production UI build,
@@ -35,26 +35,56 @@ so this one process serves both the REST API and the interface — no
 Node.js required. If `./lab` does not exist or has no `workspace.json`,
 `serve` initializes it automatically.
 
-> **Editable installs / live UI:** from a source checkout
-> (`pip install -e .`), use **one command** for API + HMR frontend:
+> **Checkout / live UI:** from a source tree, one command for API + HMR:
 >
 > ```bash
-> molexp serve --dev -ws ./lab --port 8000
+> molab serve --dev -ws ./lab --port 8000
 > ```
 >
 > Open the printed **Dev UI** URL (default <http://localhost:5173>), not
-> the API port. `npm run dev` proxies `/api` to the API. Requires Node
-> and a one-time `cd ui && npm install`. Override the UI port with
-> `--ui-port`, or the ui path with `MOLEXP_UI_DIR`. See
-> [Server Lifecycle](../guide/server-lifecycle.md).
+> the API port. `--dev` starts `npm run dev:api` (real `/api` proxy).
+> `npm run dev:web` is the MSW mock, not this path. Rebuild the bundled SPA
+> with `npm run build:web` (no `uv pip` reinstall on an editable install);
+> `-C build-web=true` is the wheel path only. Full table:
+> [Serve and rebuild the UI](../development/ui-serve.md). Auth / tunnel /
+> several workspaces: [Server Lifecycle](../guide/server-lifecycle.md).
 
 You can serve several workspaces at once by repeating `-ws`;
 the UI shows each one in the left panel and you switch by clicking into
 its tree.
 
+### Optional: require login
+
+Loopback serves stay open by default. To protect the UI and API with
+filesystem users (under `~/.molab/auth/`):
+
+```bash
+molab auth login -u admin          # first user becomes admin
+molab serve -ws ./lab --auth
+```
+
+The browser shows a sign-in page (default username `admin`). Admins can
+manage accounts under **Settings → Users**. Non-loopback binds
+(`--host 0.0.0.0`) refuse to start without auth. Details:
+[Server Lifecycle](../guide/server-lifecycle.md#http-auth-optional).
+
+### Optional: share a public URL (`--tunnel`)
+
+On a login node, or when a colleague needs the UI, punch a hole while
+the API stays on loopback:
+
+```bash
+molab serve -ws ./lab --tunnel
+```
+
+The public URL is printed on the start banner. Provider, token, and
+binary path come from `--via` / `--tunnel-token` or `molab config`
+(`tunnel.*`) — never from the environment. Details:
+[Server Lifecycle](../guide/server-lifecycle.md#share-ui-with-a-colleague-tunnel).
+
 ## 2. Find your way around
 
-The activity bar on the left switches the panel between six views:
+The activity bar on the left switches the panel between five views:
 
 - **Experiments** — the Project → Experiment → Run tree. This is where
   you create and manage everything; most of this guide lives here.
@@ -67,11 +97,9 @@ The activity bar on the left switches the panel between six views:
   file viewer/editor and "New file / New folder" actions.
 - **Asset** — the asset inventory (artifacts, logs, checkpoints) with
   lineage back to the run and task that produced each one.
-- **Agent Tasks** — LLM-driven sessions; see the
-  [Agent concept](../concept/agent.md) for the loop model behind them.
 
 A command palette and a **Settings** page (remote workspaces, compute
-targets) round out the shell.
+targets, and Users when auth is on) round out the shell.
 
 ## 3. Create a project
 
@@ -127,7 +155,7 @@ takes the run's **Parameters (JSON)**, and lets you pick a **Target**:
   or the CLI:
 
   ```bash
-  molexp run
+  molab run
   ```
 
   Resume / Rerun / **Rerun fresh** (bypass cache) are also on the run
@@ -139,7 +167,7 @@ Click any run in the tree to open the run page:
 
 - **Overview** — run id, project, experiment, parameters, results,
   duration, backend, and execution count.
-- **Executions** — one row per attempt (`exec-<run_id>-N`) with its
+- **Executions** — one row per attempt (`eNN`) with its
   status and timing; selecting an attempt scopes the Logs tab to it.
 - **Logs** — captured stdout/stderr per attempt, with a "view latest"
   shortcut.
@@ -158,29 +186,28 @@ What the tree's context menus offer today:
 | Object | Actions |
 |---|---|
 | Project | Open project · New experiment · Refresh · **Delete project** |
-| Experiment | Open experiment · New run · **Sweep** · Curate · Open workflow · **Delete experiment** |
+| Experiment | Open experiment · New run · **Sweep** · Open workflow · **Delete experiment** |
 | Run | Open run · Start / Resume / Rerun / Rerun fresh · **Cancel run** · Export zip · Harvest · View logs · Copy run ID |
 
 Deletes ask for confirmation and remove the object and its children
 from the workspace. Runs themselves cannot be deleted — a run is the
 immutable record of an execution request; you **cancel** a live
 `running` run instead (`POST …/cancel`, same verb as
-`molexp runs cancel`).
+`molab runs cancel`).
 
 A `failed` or `cancelled` run can be continued — two distinct verbs,
 both keeping the same run id:
 
-- **Resume** — reopen the existing attempt, keep the completed tasks'
+- **Resume** — create a new Execution, keep the completed tasks'
   outputs, recompute only what didn't finish.
-- **Rerun** — open a fresh attempt (`exec-<run_id>-N`) from the top of
+- **Rerun** — open a fresh attempt (`eNN`) from the top of
   the graph; **Rerun fresh** also bypasses content-addressed cache
   reads (`?fresh=true` / CLI `--rerun --fresh`).
 
 **Export** downloads the run directory as a zip. **Harvest** (terminal
-runs only) writes a sourced KnowledgeItem under the experiment from a
-short narrative. Experiment **Sweep** creates one pending run per value
-on a single parameter axis; **Curate** starts an NL curation task
-(approvals via the top-bar bell when suspended).
+runs only) writes a sourced knowledge document — a `Finding`, `Report`,
+`Plan` or `Observation` — under the experiment from a short narrative. Experiment **Sweep** creates one pending run per value
+on a single parameter axis.
 
 Still **TODO**: rename/archive entities; rich multi-axis sweep UI;
 bulk multi-select lifecycle; side-by-side run compare beyond the
@@ -190,45 +217,27 @@ existing Compare / Aggregate views.
 
 **Settings** has two tabs:
 
-- **Remote workspaces** — register another MolExp server's workspace so
-  it appears in your tree (descriptors live in `~/.molexp/`).
+- **Remote workspaces** — register another Molab server's workspace so
+  it appears in your tree (descriptors live in `~/.molab/`).
 - **Compute targets** — register molq execution targets (stored in the
   workspace's `workspace.json`). Targets registered here are what the
   Create Experiment and Launch Run dialogs offer, and the **+ Add new
   target…** link in those dialogs lands in the same registry.
-
-## 10. Where the agent fits
-
-**Agent Tasks** has two different modes:
-
-- **Plan Mode** (`PlanComposer`) — full PlanOrchestrator pipeline (two phases +
-  optional execute), approvals inbox, real artifacts. Configure the model
-  under Agent settings (`agent.model` / provider keys).
-- **Interactive chat** — **read-only** today: search knowledge and read
-  workspace files. It does **not** create projects, start runs, or cancel
-  jobs. Use Run lifecycle buttons or Plan Mode for write operations.
-
-See the [Agent concept](../concept/agent.md) and
-[Plan Mode](../guide/plan-mode.md).
 
 ## Feature status
 
 | Capability | From the UI | Notes |
 |---|---|---|
 | Create project / experiment / run | ✅ | Dialogs in the Experiments panel |
-| Draft a workflow on the canvas | ✅ | Editable graph, ⌘S saves — true science still usually needs Python or Plan |
+| Draft a workflow on the canvas | ✅ | Editable graph, ⌘S saves — true science still usually needs Python |
 | Monitor runs (overview, attempts, logs) | ✅ | Plus the Runs dashboard |
 | Delete project / experiment | ✅ | With confirmation |
-| Cancel a running run | ✅ | `POST …/cancel` — same verb as CLI `molexp runs cancel` |
+| Cancel a running run | ✅ | `POST …/cancel` — same verb as CLI `molab runs cancel` |
 | Start / Resume / Rerun (incl. Rerun fresh) | ✅ | Run header actions; `fresh` bypasses cache reads |
 | Register compute targets / remote workspaces | ✅ | Settings, or inline from dialogs |
 | Assets and lineage browsing | ✅ | Asset panel |
-| Plan Mode + approvals | ✅ | Agent hub; ApprovalsInbox + SSE |
-| Interactive chat (read-only tools) | ✅ | Knowledge + file tools only — not workspace mutation |
-| Agent model / provider settings | ✅ | Agent settings (not Workspace Settings remote/targets tabs) |
-| Export run as ZIP from the run page | ✅ | Uses `archive_folder_zip` |
+| Export run as ZIP from the run page | ✅ | Uses `archive_folder_zip_iter` (streamed) |
 | Harvest run → Knowledge from UI | ✅ | Terminal runs; `POST …/harvest` → `harvest_run` |
-| Curation (NL reorg) from UI | ✅ | Experiment overview CurateComposer + Approvals |
 | Create parameter sweep from UI | ✅ | Single-axis Sweep dialog (full DOE still Python/CLI) |
 | Rename / archive objects | **TODO** | Create + delete only |
 | Bulk multi-select lifecycle | **TODO** | Multi-select mainly for metrics aggregate |

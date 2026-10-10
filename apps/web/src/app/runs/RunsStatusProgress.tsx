@@ -1,0 +1,115 @@
+import type { JSX } from "react";
+import { useMemo } from "react";
+import { WorkbenchAction } from "@/components/workbench";
+
+import { cn } from "@/lib/utils";
+
+import { groupForStatus, STATUS_GROUPS, type StatusGroupSpec } from "./statusGroups";
+import type { WorkspaceRunRow } from "./types";
+
+interface RunsStatusProgressProps {
+  runs: WorkspaceRunRow[];
+  onSelectStatus?: (status: string) => void;
+}
+
+interface SegmentData {
+  spec: StatusGroupSpec;
+  count: number;
+  ratio: number;
+}
+
+export const RunsStatusProgress = ({
+  runs,
+  onSelectStatus,
+}: RunsStatusProgressProps): JSX.Element => {
+  const { segments, total } = useMemo(() => {
+    const counts = new Map<string, number>(STATUS_GROUPS.map((g) => [g.id, 0]));
+    for (const run of runs) {
+      for (const execution of run.executions) {
+        const group = groupForStatus(execution.status);
+        if (group) counts.set(group, (counts.get(group) ?? 0) + 1);
+      }
+    }
+    const executionCount = runs.reduce((sum, run) => sum + run.statusSummary.total, 0);
+    const built: SegmentData[] = STATUS_GROUPS.map((spec) => {
+      const count = counts.get(spec.id) ?? 0;
+      return { spec, count, ratio: executionCount > 0 ? count / executionCount : 0 };
+    });
+    return { segments: built, total: executionCount };
+  }, [runs]);
+
+  if (total === 0) {
+    return (
+      <p className="text-body-lg text-muted-foreground">No executions match the current filters.</p>
+    );
+  }
+
+  const visible = segments.filter((segment) => segment.count > 0);
+
+  return (
+    <div className="space-y-3">
+      <div
+        role="img"
+        aria-label={`Status distribution across ${total} executions`}
+        className="flex h-2 w-full overflow-hidden rounded-full bg-muted"
+      >
+        {visible.map((segment) => {
+          const widthPct = segment.ratio * 100;
+          return (
+            <WorkbenchAction
+              kind="ghost"
+              size="content"
+              key={segment.spec.id}
+              type="button"
+              onClick={onSelectStatus ? () => onSelectStatus(segment.spec.filterValue) : undefined}
+              title={`${segment.spec.label}: ${segment.count} (${(segment.ratio * 100).toFixed(1)}%)`}
+              className={cn(
+                "h-full min-w-hairline transition-opacity hover:opacity-80",
+                onSelectStatus ? "cursor-pointer" : "cursor-default",
+              )}
+              style={{ width: `${widthPct}%`, backgroundColor: segment.spec.color }}
+              aria-label={`${segment.spec.label}: ${segment.count} executions`}
+            />
+          );
+        })}
+      </div>
+      <ul className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3">
+        {segments.map((segment) => {
+          const dimmed = segment.count === 0;
+          const clickable = onSelectStatus !== undefined && !dimmed;
+          return (
+            <li key={segment.spec.id}>
+              <WorkbenchAction
+                kind="ghost"
+                size="content"
+                type="button"
+                onClick={clickable ? () => onSelectStatus(segment.spec.filterValue) : undefined}
+                disabled={!clickable}
+                className={cn(
+                  "flex w-full items-center justify-between gap-2 text-label transition-colors",
+                  clickable ? "cursor-pointer text-foreground hover:text-accent" : "cursor-default",
+                  dimmed && "opacity-40",
+                )}
+              >
+                <span className="inline-flex min-w-0 items-center gap-2 text-muted-foreground">
+                  <span
+                    aria-hidden="true"
+                    className="h-1.5 w-1.5 shrink-0 rounded-full"
+                    style={{ backgroundColor: segment.spec.color }}
+                  />
+                  <span className="truncate">{segment.spec.label}</span>
+                </span>
+                <span className="flex shrink-0 items-center gap-2 tabular-nums">
+                  <span className="font-medium text-foreground">{segment.count}</span>
+                  <span className="w-control text-right text-muted-foreground">
+                    {(segment.ratio * 100).toFixed(0)}%
+                  </span>
+                </span>
+              </WorkbenchAction>
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+};

@@ -1,0 +1,85 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "$id": "https://molab.io/schemas/workflow/task_config.json",
+    "title": "TaskConfig",
+    "description": "Serializable task configuration containing task metadata and config data",
+    "type": "object",
+    "properties": {
+        "task_id": {
+            "type": "string",
+            "description": "Unique task identifier within the workflow (any non-empty identifier-like string)",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_-]*$",
+            "examples": [
+                "build_box",
+                "run_md_a1b2",
+                "analyze"
+            ]
+        },
+        "task_type": {
+            "type": "string",
+            "description": "Registry slug looked up at compile time via TaskTypeRegistry; not a Python FQN",
+            "pattern": "^[A-Za-z_][A-Za-z0-9_.-]*$",
+            "examples": [
+                "core.add",
+                "core.constant",
+                "lammps.run",
+                "molpy.build_box"
+            ]
+        },
+        "config": {
+            "type": "object",
+            "description": "Task-specific configuration parameters",
+            "additionalProperties": true,
+            "examples": [
+                {
+                    "value": 10,
+                    "name": "test"
+                },
+                {
+                    "input_path": "/data/input.csv",
+                    "output_path": "/data/output.csv"
+                }
+            ]
+        },
+        "status": {
+            "type": "string",
+            "description": "Task execution status",
+            "enum": [
+                "pending",
+                "running",
+                "succeeded",
+                "failed",
+                "cancelled"
+            ]
+        },
+        "execution": {
+            "type": "object",
+            "description": "Optional execution policy (deprecated)",
+            "additionalProperties": true
+        },
+        "position": {
+            "type": "object",
+            "description": "Optional free-layout editor coordinate; pure UI metadata, never part of the task content hash.",
+            "properties": {
+                "x": {
+                    "type": "number"
+                },
+                "y": {
+                    "type": "number"
+                }
+            },
+            "required": [
+                "x",
+                "y"
+            ],
+            "additionalProperties": false
+        }
+    },
+    "required": [
+        "task_id",
+        "task_type",
+        "config",
+        "status"
+    ],
+    "additionalProperties": false
+}

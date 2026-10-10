@@ -1,6 +1,6 @@
 """IR export: Mermaid diagrams, JSON IR round-trip, and graph IR for UIs.
 
-Matches ``docs/guide/ir-export.md``.
+Matches ``docs/en/guide/ir-export.md``.
 
 Demonstrates:
 
@@ -18,9 +18,10 @@ from __future__ import annotations
 
 import asyncio
 
-from molexp.workflow import (
+from molab.workflow import (
     Task,
     TaskContext,
+    Workflow,
     WorkflowCompiler,
     WorkflowRuntime,
     default_registry,
@@ -40,8 +41,8 @@ class Summarize(Task):
 
 
 async def main() -> None:
-    compiled = (
-        WorkflowCompiler(name="demo").add(Fetch()).add(Summarize(), depends_on=["fetch"]).compile()
+    compiled = WorkflowCompiler().compile(
+        Workflow(name="demo").add(Fetch()).add(Summarize(), depends_on=["fetch"])
     )
 
     # 1. Data-DAG Mermaid diagram (``flowchart LR``)

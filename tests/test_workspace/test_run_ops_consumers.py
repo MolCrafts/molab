@@ -1,50 +1,46 @@
-"""Run hot-state read accessors resolve from the OKF ``_ops/run.json`` sidecar (wsokf-07).
+"""Run hot-state read accessors derive from Executions, not ``run.json``.
 
-After wsokf-07/10 a Run's hot machine state — status, retryable domain, and
-execution history — is sourced from :class:`molexp.workspace.run_ops.RunOpsState`
-in ``_ops/run.json`` through :meth:`Run.read_ops`, not from ``RunMetadata`` in
-``run.json``. This file owns the **read** side: ``Run.status`` /
-``Run.is_retryable`` / ``Run.execution_history`` consume the sidecar. (The
-lifecycle *write* side + the run.json/_ops split live in
-``test_runmetadata_single_source``; ownership + heartbeat in ``test_run_heartbeat``.)
+``Run.status`` (scalar) is removed in schema v2 — it raises
+``AttributeError``. The query surface is ``run.status_summary`` (a
+:class:`~molab.workspace.domain.RunStatusSummary`) and ``run.executions``
+(a list of :class:`~molab.workspace.domain.ExecutionState`).
+``Run.is_retryable`` and ``Run.execution_history`` (deprecated read alias)
+both read ``run.executions``. There is no ``ops/run.json`` sidecar.
 """
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+import pytest
 
-from molexp.workspace.models import RunStatus
-from molexp.workspace.run_ops import RunOpsState
+from molab.workspace.domain import ExecutionStatus
 
 
-class TestStatusReadsFromOps:
-    def test_status_reads_from_ops_sidecar(self, run) -> None:
-        run.materialize()
-        run.update_ops(lambda s: s.model_copy(update={"status": RunStatus.FAILED}))
-        assert run.status == "failed"
-        assert run.read_ops().status is RunStatus.FAILED
+class TestStatusReadsFromExecutions:
+    def test_scalar_status_is_removed_in_favor_of_summary(self, run) -> None:
+        with pytest.raises(AttributeError):
+            _ = run.status
 
-    def test_is_retryable_reads_from_ops_sidecar(self, run) -> None:
-        run.materialize()
+        summary = run.status_summary
+        assert summary.total == 0
+        assert summary.not_started is True
+        assert summary.by_status == {}
+
+    def test_is_retryable_reads_from_executions(self, run) -> None:
         assert run.is_retryable is False
-        run.update_ops(lambda s: s.model_copy(update={"status": RunStatus.CANCELLED}))
+
+        with pytest.raises(RuntimeError, match="boom"), run.start():
+            raise RuntimeError("boom")
         assert run.is_retryable is True
-        run.update_ops(lambda s: s.model_copy(update={"status": RunStatus.SUCCEEDED}))
-        assert run.is_retryable is False
 
-    def test_execution_history_reads_from_ops_sidecar(self, run) -> None:
-        run.materialize()
-        state = RunOpsState.model_validate(
-            {
-                "status": "failed",
-                "executions": [
-                    {
-                        "execution_id": "exec-a",
-                        "started_at": datetime(2026, 1, 1, tzinfo=UTC).isoformat(),
-                        "status": "failed",
-                    }
-                ],
-            }
-        )
-        run.write_ops(state)
-        assert [r.execution_id for r in run.execution_history] == ["exec-a"]
+        other = run.experiment.add_run(params={"lr": 2e-4})
+        with other.start():
+            pass
+        assert other.is_retryable is False
+
+    def test_execution_history_reads_from_executions(self, run) -> None:
+        with run.start() as ctx:
+            exec_id = ctx.id
+
+        assert [e.id for e in run.execution_history] == [exec_id]
+        assert [e.id for e in run.executions] == [exec_id]
+        assert run.executions[0].status is ExecutionStatus.SUCCEEDED

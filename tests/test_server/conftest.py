@@ -1,105 +1,108 @@
-"""Shared fixtures for server tests."""
+"""Shared server-route fixtures: a served workspace and terminal runs.
+
+``served`` binds the app to one workspace through
+``set_workspace_path_override`` and always resets it on teardown, so a test
+that fails mid-request can no longer leak its workspace into the next test.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable, Iterator
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
-from molexp.server.app import create_app
-from molexp.server.dependencies import get_workspace
-from molexp.workflow import (
-    Task,
-    TaskContext,
-    WorkflowCompiler,
-    default_binding_registry,
-)
-from molexp.workspace import Workspace
+from molab.server.app import create_app
+from molab.server.dependencies import set_workspace_path_override
+from molab.workspace import Experiment, Run, Workspace
+
+ServedFactory = Callable[..., TestClient]
+RunFixture = tuple[Workspace, Experiment, Run]
+IrDocument = dict[str, object]
+
+ECHO_TASK_TYPE = "arch_own_echo"
 
 
-@pytest.fixture(autouse=True)
-def _isolate_workflow_bindings():
-    """Each test gets a fresh process-local workflow-binding registry."""
-    default_binding_registry.clear()
-    yield
-    default_binding_registry.clear()
+@pytest.fixture
+def served() -> Iterator[ServedFactory]:
+    """Factory: ``served(ws, *, raise_server_exceptions=True) -> TestClient``.
 
-
-@pytest.fixture(autouse=True)
-def _isolate_molcrafts_home(tmp_path, monkeypatch):
-    """Redirect molcfg's project-config base to a tmp dir for each test.
-
-    Routes that dispatch through the molq plugin auto-bootstrap a
-    ``JobStore`` via :func:`molq.store.default_jobs_db_path`, which
-    delegates to :func:`molcfg.project_config_dir`. Setting
-    ``MOLCRAFTS_HOME`` redirects the *bootstrap location* (and any
-    other molcfg-managed paths) under ``tmp_path`` so tests don't
-    touch the developer's real ``~/.molcrafts`` tree.
+    The returned client is not yet entered; use it as ``with client: ...`` so
+    the app lifespan runs. The workspace override is reset after the test.
     """
-    fake_home = tmp_path / "_molcrafts_home"
-    fake_home.mkdir(parents=True, exist_ok=True)
-    monkeypatch.setenv("MOLCRAFTS_HOME", str(fake_home))
+
+    def _serve(ws: Workspace, *, raise_server_exceptions: bool = True) -> TestClient:
+        set_workspace_path_override(Path(str(ws.root)))
+        app = create_app(serve_static=False)
+        return TestClient(app, raise_server_exceptions=raise_server_exceptions)
+
+    try:
+        yield _serve
+    finally:
+        set_workspace_path_override(None)
+
+
+def _fresh_run(tmp_path: Path) -> RunFixture:
+    ws = Workspace(tmp_path / "ws", name="lab")
+    ws.materialize()
+    exp = ws.add_project("p").add_experiment("e")
+    run = exp.add_run(params={"x": 1})
+    return ws, exp, run
 
 
 @pytest.fixture
-def workspace(tmp_path):
-    return Workspace(root=tmp_path, name="Test")
+def fresh_run(tmp_path: Path) -> RunFixture:
+    """A run with no attempt yet (``run.executions == []``)."""
+    return _fresh_run(tmp_path)
 
 
 @pytest.fixture
-def project(workspace):
-    return workspace.add_project("test-project")
-
-
-class _NoopTask(Task):
-    """Module-level Task subclass — gives the entrypoint resolver a
-    user-module first task so ``resolve_spec_entrypoint`` can find
-    the spec's module-level binding."""
-
-    async def execute(self, ctx: TaskContext) -> None:
-        return None
-
-
-# Module-level Workflow — explicitly named at module scope so
-# ``resolve_spec_entrypoint`` returns ``<this-file>:_NOOP_SPEC``.
-_NOOP_SPEC = WorkflowCompiler(name="noop").add(_NoopTask(), name="step").compile()
+def terminal_run(tmp_path: Path) -> RunFixture:
+    """A run whose only attempt ``e01`` is sealed ``succeeded``."""
+    ws, exp, run = _fresh_run(tmp_path)
+    with run.start() as ctx:
+        ctx.mark_succeeded()
+    return ws, exp, run
 
 
 @pytest.fixture
-def experiment(project):
-    """Bare experiment: workflow_source label only, no spec bound.
+def failed_run(tmp_path: Path) -> RunFixture:
+    """A run whose only attempt ``e01`` is sealed ``failed``."""
+    ws, exp, run = _fresh_run(tmp_path)
+    with run.start() as ctx:
+        ctx.mark_failed("unique-oom-marker")
+    return ws, exp, run
 
-    Tests that need a dispatch-ready experiment should use
-    :func:`experiment_with_entrypoint` instead.
+
+class _Echo:
+    """Task body for the ``arch_own_echo`` IR task type."""
+
+    def __init__(self, config: dict[str, object]) -> None:
+        self._task_config = dict(config)
+
+    async def execute(self, ctx: object) -> dict[str, bool]:
+        return {"ok": True}
+
+
+def _echo_factory(config: dict[str, object]) -> _Echo:
+    return _Echo(config)
+
+
+@pytest.fixture
+def echo_document() -> IrDocument:
+    """A one-task UI-authored IR document whose task type is registered.
+
+    Registers ``arch_own_echo`` on the default registry only when absent (the
+    registry is process-global), then returns the IR the canvas would PUT.
     """
-    return project.add_experiment(
-        "test-exp",
-        workflow_source="train.py",
-        params={"lr": 1e-4},
-    )
+    from molab.workflow.registry import default_registry
 
-
-@pytest.fixture
-def experiment_with_entrypoint(project):
-    """Experiment with a workflow spec bound through the registry.
-
-    The spec is module-level (``_NOOP_SPEC``) so the server route's
-    ``resolve_spec_entrypoint`` returns a valid ``<file>:<varname>``
-    handle.
-    """
-    exp = project.add_experiment(
-        "test-exp",
-        workflow_source="train.py",
-        params={"lr": 1e-4},
-    )
-    default_binding_registry.bind(exp, _NOOP_SPEC)
-    return exp
-
-
-@pytest.fixture
-def run(experiment):
-    return experiment.add_run(params={"lr": 1e-4})
-
-
-@pytest.fixture
-def client(workspace):
-    app = create_app()
-    app.dependency_overrides[get_workspace] = lambda: workspace
-    return TestClient(app)
+    if not default_registry.has(ECHO_TASK_TYPE):
+        default_registry.register(ECHO_TASK_TYPE, _echo_factory)
+    return {
+        "name": "ui-doc",
+        "task_configs": [{"task_id": "echo", "task_type": ECHO_TASK_TYPE, "config": {}}],
+        "links": [],
+        "metadata": {},
+    }

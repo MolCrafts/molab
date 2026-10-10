@@ -1,58 +1,73 @@
-"""``molexp.workspace.lifecycle_ops.cancel_run`` — the canonical intervene verb.
+"""``molab.workspace.lifecycle_ops.cancel_run`` — the canonical intervene verb.
 
-vision-loop-07 §2: the workspace-layer core the ``molexp.lifecycle.run_cancel``
+vision-loop-07 §2: the workspace-layer core the ``molab.lifecycle.run_cancel``
 capability (and any future CLI/server rewiring) shares. Its own contract, tested
 once here:
 
 * **reap first** — every verb entry reaps (`workspace.run_reaper`): a stale
-  ``running`` run with a dead same-host owner flips to ``failed`` *before* the
+  active Execution with a dead same-host owner flips to ``failed`` *before* the
   verb decides, so a zombie is never "cancelled";
-* **running only** — any non-``running`` status after reaping refuses loudly
+* **running only** — any non-running status after reaping refuses loudly
   (``ValueError``);
-* a genuine cancel flips status to ``cancelled`` and clears the ownership stamp
-  in the ``_ops`` sidecar (the low-level ``Run.cancel`` flip reached through the guard).
+* a genuine cancel seals every active Execution ``cancelled``.
 
-The reaper's own rules (dead-pid clears ownership, cross-host stale-heartbeat) are
-owned by ``tests/test_cli/test_reap_zombie.py``; ``is_retryable`` by
-``test_run_ops_consumers.py`` — not re-tested here.
+Schema v2: a Run is immutable intent, so "cancel" acts on the physical
+:class:`~molab.workspace.domain.ExecutionState` objects.
 """
 
 from __future__ import annotations
 
 import os
 import platform
-from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 
-from molexp.workspace import Workspace
-from molexp.workspace.lifecycle_ops import cancel_run
-from molexp.workspace.models import RunStatus
-from molexp.workspace.run import Run
-from molexp.workspace.run_ops import RunOpsState
+from molab.workspace import Workspace
+from molab.workspace.domain import ExecutionMode, ExecutionStatus
+from molab.workspace.execution_repository import ExecutionRepository
+from molab.workspace.history import AgentRef
+from molab.workspace.lifecycle_ops import cancel_run
+from molab.workspace.run import Run
 
-# ── fixtures ─────────────────────────────────────────────────────────────────
+_TEST_AGENT = AgentRef(id="test", type="person", name="test")
 
 
 @pytest.fixture
 def run(tmp_path: Path) -> Run:
     ws = Workspace(root=tmp_path, name="cancel-lab")
-    exp = ws.add_project("p").add_experiment("e", workflow_source="s.py", params={})
+    exp = ws.add_project("p").add_experiment("e", params={})
     new_run = exp.add_run(params={"seed": 1})
     new_run.materialize()
     return new_run
 
 
-def _mark_running(run: Run, *, pid: int, host: str, heartbeat_at: datetime | None) -> None:
-    run.write_ops(
-        RunOpsState(
-            status="running",
-            owner_pid=pid,
-            owner_host=host,
-            heartbeat_at=heartbeat_at,
-        )
+def _repo(run: Run) -> ExecutionRepository:
+    ws = run.experiment.project.workspace
+    return ExecutionRepository(
+        ws.root,
+        run.run_dir,
+        run_id=run.id,
+        project_id=run.experiment.project.id,
+        fs=ws.fs,
     )
+
+
+def _seed_running(run: Run, *, pid: int, host: str) -> str:
+    state = _repo(run).create(
+        mode=ExecutionMode.INITIAL,
+        created_by=_TEST_AGENT,
+        executor={"kind": "local", "host": host, "pid": pid},
+    )
+    _repo(run).start(state.id)
+    return state.id
+
+
+def _seed_terminal(run: Run, status: ExecutionStatus) -> str:
+    state = _repo(run).create(mode=ExecutionMode.INITIAL, created_by=_TEST_AGENT)
+    _repo(run).start(state.id)
+    _repo(run).seal(state.id, status)
+    return state.id
 
 
 def _dead_pid() -> int:
@@ -65,38 +80,57 @@ def _dead_pid() -> int:
 
 class TestCancelRunning:
     def test_live_running_run_is_cancelled(self, run: Run) -> None:
-        _mark_running(run, pid=os.getpid(), host=platform.node(), heartbeat_at=datetime.now(UTC))
+        execution_id = _seed_running(run, pid=os.getpid(), host=platform.node())
         cancel_run(run)
-        assert run.status == "cancelled"
+        assert _repo(run).get(execution_id).status is ExecutionStatus.CANCELLED
+        assert run.status_summary.active == 0
+        assert run.status_summary.by_status["cancelled"] == 1
 
-    def test_cancel_clears_the_ownership_stamp(self, run: Run) -> None:
-        _mark_running(run, pid=os.getpid(), host=platform.node(), heartbeat_at=datetime.now(UTC))
+    def test_cancel_clears_the_active_attempt(self, run: Run) -> None:
+        execution_id = _seed_running(run, pid=os.getpid(), host=platform.node())
         cancel_run(run)
-        state = run.read_ops()
-        assert state.owner_pid is None
-        assert state.owner_host is None
-        assert state.heartbeat_at is None
+        state = _repo(run).get(execution_id)
+        assert state.status is ExecutionStatus.CANCELLED
+        assert state.finished_at is not None
+        assert run.status_summary.active == 0
 
 
 class TestRefusesNonRunning:
+    def test_pending_run_refuses_and_stays_unstarted(self, run: Run) -> None:
+        with pytest.raises(ValueError, match="pending"):
+            cancel_run(run)
+        assert run.status_summary.not_started is True
+
     @pytest.mark.parametrize(
         "status",
-        [RunStatus.PENDING, RunStatus.SUCCEEDED, RunStatus.FAILED, RunStatus.CANCELLED],
-        ids=["pending", "succeeded", "failed", "cancelled"],
+        [ExecutionStatus.SUCCEEDED, ExecutionStatus.FAILED, ExecutionStatus.CANCELLED],
+        ids=["succeeded", "failed", "cancelled"],
     )
-    def test_non_running_status_refuses_and_preserves_status(
-        self, run: Run, status: RunStatus
+    def test_terminal_run_refuses_and_preserves_status(
+        self, run: Run, status: ExecutionStatus
     ) -> None:
-        run.update_ops(lambda s: s.model_copy(update={"status": status}))
-        with pytest.raises(ValueError, match="running"):
+        execution_id = _seed_terminal(run, status)
+        with pytest.raises(ValueError, match=status.value):
             cancel_run(run)
-        assert run.status == status.value
+        assert _repo(run).get(execution_id).status is status
 
 
 class TestZombieReapedFirst:
     def test_dead_owner_is_reaped_then_refused(self, run: Run) -> None:
         """Same-host dead pid → reap flips to failed → cancel refuses (not running)."""
-        _mark_running(run, pid=_dead_pid(), host=platform.node(), heartbeat_at=datetime.now(UTC))
+        execution_id = _seed_running(run, pid=_dead_pid(), host=platform.node())
         with pytest.raises(ValueError, match="failed"):
             cancel_run(run)
-        assert run.status == "failed"
+        assert _repo(run).get(execution_id).status is ExecutionStatus.FAILED
+
+
+class TestCancelPending:
+    def test_pending_cancel_creates_through_run(self, run: Run) -> None:
+        """arch-own-02a §6: pending-cancel allocates the attempt on the run."""
+        assert cancel_run(run, allow_pending=True) is None
+
+        [execution] = run.executions
+        assert execution.mode is ExecutionMode.INITIAL
+        assert execution.status is ExecutionStatus.CANCELLED
+        assert "config_hash" in execution.environment
+        assert execution.created_by.id == "operator"

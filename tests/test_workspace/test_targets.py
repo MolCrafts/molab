@@ -7,15 +7,8 @@ from pathlib import Path
 import pytest
 from molq.transport import LocalTransport, SshTransport
 
-from molexp.workspace import (
-    ComputeTarget,
-    Workspace,
-    add_target,
-    get_target,
-    list_targets,
-    remove_target,
-    to_transport,
-)
+from molab.workspace import ComputeTarget, Workspace
+from molab.workspace.targets import to_transport
 
 
 class TestComputeTargetValidation:
@@ -37,8 +30,7 @@ class TestRegistry:
         """A registered target survives a fresh ``Workspace`` load unchanged."""
         ws = Workspace(tmp_path)
         ws.materialize()
-        add_target(
-            ws,
+        ws.add_target(
             ComputeTarget(
                 name="hpc",
                 host="me@cluster",
@@ -52,7 +44,7 @@ class TestRegistry:
         )
 
         ws2 = Workspace(tmp_path)  # fresh load
-        t = get_target(ws2, "hpc")
+        t = ws2.get_target("hpc")
         assert t.host == "me@cluster"
         assert t.port == 2222
         assert t.identity_file == "/k"
@@ -63,23 +55,23 @@ class TestRegistry:
     def test_add_duplicate_name_rejected(self, tmp_path: Path) -> None:
         ws = Workspace(tmp_path)
         ws.materialize()
-        add_target(ws, ComputeTarget(name="a", scratch_root="/tmp"))
+        ws.add_target(ComputeTarget(name="a", scratch_root="/tmp"))
         with pytest.raises(ValueError, match="already exists"):
-            add_target(ws, ComputeTarget(name="a", scratch_root="/other"))
+            ws.add_target(ComputeTarget(name="a", scratch_root="/other"))
 
     def test_remove_drops_named_target(self, tmp_path: Path) -> None:
         ws = Workspace(tmp_path)
         ws.materialize()
-        add_target(ws, ComputeTarget(name="a", scratch_root="/tmp"))
-        add_target(ws, ComputeTarget(name="b", scratch_root="/tmp"))
-        remove_target(ws, "a")
-        assert [t.name for t in list_targets(ws)] == ["b"]
+        ws.add_target(ComputeTarget(name="a", scratch_root="/tmp"))
+        ws.add_target(ComputeTarget(name="b", scratch_root="/tmp"))
+        ws.remove_target("a")
+        assert [t.name for t in ws.list_targets()] == ["b"]
 
     def test_get_missing_raises(self, tmp_path: Path) -> None:
         ws = Workspace(tmp_path)
         ws.materialize()
         with pytest.raises(KeyError):
-            get_target(ws, "ghost")
+            ws.get_target("ghost")
 
 
 class TestToTransport:

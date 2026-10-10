@@ -1,6 +1,6 @@
 """Profile inheritance and ``--override`` dot-notation — ``molcfg.yaml`` advanced patterns.
 
-Matches ``docs/guide/run-profiles.md``.
+Matches ``docs/en/guide/run-profiles.md``.
 
 Demonstrates:
 
@@ -14,20 +14,20 @@ each falls back to its declared default when the active profile omits it.
 
 Run with::
 
-    molexp run examples/operations/run_profiles_advanced/train.py --profile smoke
-    molexp run examples/operations/run_profiles_advanced/train.py --profile production --override optimizer.lr=0.0005
+    molab run examples/operations/run_profiles_advanced/train.py --profile smoke
+    molab run examples/operations/run_profiles_advanced/train.py --profile production --override optimizer.lr=0.0005
 """
 
 from __future__ import annotations
 
 from pathlib import Path
 
-import molexp as me
-from molexp.workflow import WorkflowCompiler
+import molab as me
+from molab.workflow import Workflow, WorkflowCompiler
 
 WORKSPACE_ROOT = Path(__file__).resolve().parent / "_workspace"
 
-wf = WorkflowCompiler(name="train")
+wf = Workflow(name="train")
 
 
 @wf.task
@@ -45,7 +45,7 @@ def train(
 
 (
     me.Workspace(WORKSPACE_ROOT, name="profiles-advanced")
-    .project("demo")
-    .experiment("train")
-    .run(wf.compile(), params={"epochs": [3, 10]})
+    .add_project("demo")
+    .add_experiment("train")
+    .define(WorkflowCompiler().compile(wf), params={"epochs": [3, 10]})
 )

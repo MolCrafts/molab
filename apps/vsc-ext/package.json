@@ -1,0 +1,40 @@
+{
+  "name": "molab-workflow-preview",
+  "displayName": "Molab Workflow Preview",
+  "description": "Preview a molab workflow.json IR as an interactive DAG, reusing the molab UI workflow components.",
+  "version": "0.1.0",
+  "publisher": "molcrafts",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": ["Visualization", "Other"],
+  "main": "./dist/extension.js",
+  "activationEvents": [],
+  "contributes": {
+    "customEditors": [
+      {
+        "viewType": "molab.workflowPreview",
+        "displayName": "Molab Workflow Preview",
+        "selector": [
+          { "filenamePattern": "*workflow.json" }
+        ],
+        "priority": "option"
+      }
+    ],
+    "commands": [
+      {
+        "command": "molab.openWorkflowPreview",
+        "title": "Molab: Open Workflow Preview"
+      }
+    ]
+  },
+  "scripts": {
+    "dev": "node build.mjs --watch",
+    "build": "node build.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/vscode": "^1.137.0",
+    "typescript": "^7.0.2"
+  }
+}

@@ -1,0 +1,196 @@
+"""Request-aware workspace resolution (FastAPI dependencies).
+
+Resolves the workspace a request addresses — explicit ``{ws}`` key, query
+param, header, or the active/default workspace — caching instances in the
+``(kind, identifier)``-keyed cache owned by :mod:`.workspace_state`.
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from fastapi import Request
+
+from molab.server.deps.served import _served_by_key
+from molab.server.deps.workspace_state import (
+    _SAFE_METHODS,
+    _active_workspace_key,
+    _workspace_cache,
+)
+from molab.workspace import Workspace
+
+
+def _ensure_remote_ready(workspace: Workspace) -> None:
+    """Prepare a remote workspace for serve / API open.
+
+    On **every link** (this process's first open of the root): connect
+    and **force-refresh** the local pin. The refresh is **async** so the
+    UI can poll ``GET /api/workspace/cache/status`` for a file-count
+    progress bar (count total → fetch). Further requests reuse the
+    in-memory Workspace; ``POST /api/workspace/cache/refresh`` re-pulls.
+
+    Local workspaces are a no-op. Connection failures raise
+    :class:`ConnectionError` / transport errors — callers convert to
+    :class:`RemoteWorkspaceUnreachableError` (soft JSON, no stack spam).
+    """
+    from molab.workspace.fs_cached import CachedRemoteFileSystem
+
+    fs = getattr(workspace, "fs", None)
+    if not isinstance(fs, CachedRemoteFileSystem):
+        return
+    # Async force-refresh on link — progress is polled by the status strip.
+    fs.prepare(workspace, block_index=False, refresh_on_open=True)
+
+
+def _ssh_master_alive_for_target(target: object) -> bool:
+    """True when OpenSSH ControlMaster for *target* is already live.
+
+    Used as a fast preflight so 2FA hosts do not pay a 15s BatchMode
+    timeout (and log ERROR) on every API hit before the user has entered
+    a verification code.
+    """
+    try:
+        from molq.options import SshTransportOptions
+        from molq.transport import SshTransport
+
+        host = getattr(target, "host", None) or ""
+        if not host:
+            return False
+        ssh = SshTransport(
+            options=SshTransportOptions(
+                host=str(host),
+                port=getattr(target, "port", None),
+                identity_file=getattr(target, "identity_file", None),
+                ssh_opts=tuple(getattr(target, "ssh_opts", ()) or ()),
+            )
+        )
+        is_alive = getattr(ssh, "is_master_alive", None)
+        return bool(callable(is_alive) and is_alive())
+    except Exception:
+        return False
+
+
+def _open_remote_workspace(identifier: str, *, served_key: str | None = None) -> Workspace:
+    """Build + prepare a remote Workspace, or soft-raise unreachable.
+
+    *identifier* is the workspace-target name (serve registry key).
+    """
+    from molab.server.deps.served import resolve_served_remote_target
+    from molab.server.exceptions import RemoteWorkspaceUnreachableError
+    from molab.server.workspace_targets import target_to_filesystem_for_workspace_target
+
+    key = served_key or identifier
+    try:
+        target = resolve_served_remote_target(identifier)
+    except KeyError as exc:
+        raise KeyError(f"workspace target {identifier!r} no longer registered") from exc
+
+    # Fast path: no ControlMaster → needs OTP / login. Do not probe SSH
+    # under BatchMode (hangs, then ConnectionError spam + HPM noise).
+    if not _ssh_master_alive_for_target(target):
+        raise RemoteWorkspaceUnreachableError(key, "needs_auth")
+
+    try:
+        fs = target_to_filesystem_for_workspace_target(target)
+        workspace = Workspace(target.root_path, fs=fs)
+        _ensure_remote_ready(workspace)
+        return workspace
+    except RemoteWorkspaceUnreachableError:
+        raise
+    except Exception as exc:
+        # Never surface raw ConnectionError text to logs as uncaught 500.
+        raise RemoteWorkspaceUnreachableError(key, "unreachable") from exc
+
+
+def _workspace_key_from_request(request: Request | None) -> str | None:
+    """Extract an explicit workspace key from a request, if any.
+
+    Resolution order: ``{ws}`` path segment (the aggregate routes) →
+    ``?ws=`` query param → ``X-Molab-Workspace`` header. Returns ``None``
+    when the request addresses the active/default workspace (flat routes).
+    """
+    if request is None:
+        return None
+    return (
+        request.path_params.get("ws")
+        or request.query_params.get("ws")
+        or request.headers.get("x-molab-workspace")
+        or None
+    )
+
+
+def get_workspace(request: Request):  # noqa: ANN201
+    """FastAPI dependency to get a cached Workspace instance.
+
+    When the request carries an explicit workspace key (``{ws}`` path segment,
+    ``?ws=``, or ``X-Molab-Workspace`` header) the named served workspace is
+    resolved via :func:`get_workspace_by_key`. Otherwise the **active/default**
+    workspace is used — the unchanged single-workspace path.
+
+    Mutating requests (non-GET) against a remote workspace are rejected with
+    :class:`RemoteWorkspaceReadOnlyError`.
+    """
+    explicit_key = _workspace_key_from_request(request)
+    if explicit_key is not None:
+        if request.method not in _SAFE_METHODS:
+            sw = _served_by_key(explicit_key)
+            if sw is not None and sw.is_remote:
+                from molab.server.exceptions import RemoteWorkspaceReadOnlyError
+
+                raise RemoteWorkspaceReadOnlyError(explicit_key)
+        return get_workspace_by_key(explicit_key)
+
+    # No explicit workspace key → the active/default workspace, with its
+    # existing semantics unchanged. The remote read-only policy applies to the
+    # aggregate surface only (explicit key / `/workspaces/{ws}`), so the legacy
+    # active-switch surface (e.g. cache invalidation on a switched-to remote)
+    # keeps working.
+    return get_active_workspace()
+
+
+def get_active_workspace():  # noqa: ANN201
+    """Resolve (and cache) the active/default workspace, ignoring any request.
+
+    The cache key is ``(kind, identifier)`` — local-vs-remote workspaces
+    coexist without collision. This is the request-free core used by
+    :func:`get_workspace` and by direct callers that have no request.
+
+    Local roots open without requiring ``workspace.json`` (plain folders are
+    valid; index views stay empty until the layout is present).
+    """
+    kind, identifier = _active_workspace_key()
+    cache_key = (kind, identifier)
+    if cache_key not in _workspace_cache:
+        if kind == "remote":
+            # Soft-fail via RemoteWorkspaceUnreachableError (needs_auth / unreachable).
+            _workspace_cache[cache_key] = _open_remote_workspace(identifier)
+        else:
+            _workspace_cache[cache_key] = Workspace(Path(identifier))
+    return _workspace_cache[cache_key]
+
+
+def get_workspace_by_key(key: str):  # noqa: ANN201
+    """Resolve a served workspace by its stable ``key`` (the ``{ws}`` segment).
+
+    Raises:
+        UnknownWorkspaceError: ``key`` names no served workspace (404).
+        RemoteWorkspaceUnreachableError: the remote transport failed (soft 503).
+    """
+    sw = _served_by_key(key)
+    if sw is None:
+        from molab.server.exceptions import UnknownWorkspaceError
+
+        raise UnknownWorkspaceError(key)
+
+    if sw.is_remote:
+        target_name = sw.target_name or sw.key
+        cache_key = ("remote", target_name)
+        if cache_key not in _workspace_cache:
+            _workspace_cache[cache_key] = _open_remote_workspace(target_name, served_key=sw.key)
+        return _workspace_cache[cache_key]
+
+    assert sw.path is not None  # local always carries a path
+    cache_key = ("local", str(Path(sw.path).resolve()))
+    if cache_key not in _workspace_cache:
+        _workspace_cache[cache_key] = Workspace(Path(sw.path))
+    return _workspace_cache[cache_key]

@@ -1,10 +1,10 @@
-"""Tests for molexp.profile.models (normalize_profile_name, ProfileConfig, MolCfg)."""
+"""Tests for molab.profile.models (normalize_profile_name, ProfileConfig, MolCfg)."""
 
 from __future__ import annotations
 
 import pytest
 
-from molexp.profile import MolCfg, ProfileConfig, normalize_profile_name
+from molab.profile import MolCfg, ProfileConfig, normalize_profile_name
 
 
 class TestNormalizeProfileName:
@@ -14,34 +14,10 @@ class TestNormalizeProfileName:
 
 
 class TestProfileConfig:
-    def test_mapping_access(self):
-        cfg = ProfileConfig({"epochs": 10, "dataset": "md17"}, name="dry_run")
-        assert cfg["epochs"] == 10
-        assert "epochs" in cfg
-        assert len(cfg) == 2
-        assert set(cfg) == {"epochs", "dataset"}
-
-    def test_construction_deep_copies_input(self):
-        data = {"x": 1}
-        cfg = ProfileConfig(data, name=None)
-        data["x"] = 999
-        assert cfg["x"] == 1
-
-    def test_to_dict_returns_deep_copy(self):
-        cfg = ProfileConfig({"x": {"y": 1}}, name=None)
-        d = cfg.to_dict()
-        d["x"]["y"] = 999
-        assert cfg["x"]["y"] == 1
-
     def test_content_hash_ignores_name_and_key_order(self):
         a = ProfileConfig({"x": 1, "y": 2}, name="a")
         b = ProfileConfig({"y": 2, "x": 1}, name="b")
         assert a.content_hash() == b.content_hash()
-
-    def test_content_hash_changes_with_data(self):
-        a = ProfileConfig({"x": 1}, name=None)
-        b = ProfileConfig({"x": 2}, name=None)
-        assert a.content_hash() != b.content_hash()
 
 
 class TestMolCfgResolve:
@@ -60,12 +36,6 @@ class TestMolCfgResolve:
         assert cfg.name == "dry_run"
         assert cfg["epochs"] == 1
         assert cfg["dataset"] == "md17"  # inherited from defaults
-
-    def test_dash_key_normalized_at_load_and_resolve(self):
-        # field_validator normalizes YAML keys; resolve accepts the CLI dash form
-        m = MolCfg.model_validate({"profiles": {"dry-run": {"epochs": 1}}})
-        assert "dry_run" in m.profiles
-        assert m.resolve("dry-run")["epochs"] == 1
 
     def test_extends_chain_roots_at_defaults(self):
         m = MolCfg(

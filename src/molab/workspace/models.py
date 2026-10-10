@@ -1,0 +1,250 @@
+"""Domain models for workspace entities.
+
+This module is the single source of truth for workspace entity schemas.
+The server, CLI, and Python API all derive from these models.
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from enum import StrEnum
+from typing import Literal
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from molab._typing import JSONValue
+
+# ── Shared value objects ────────────────────────────────────────────────────
+
+
+class RunStatus(StrEnum):
+    """Lifecycle state of a run.
+
+    Lives here (the workspace schema source of truth) rather than in
+    ``run.py`` so the run-lifecycle collaborators can import it without a
+    circular ``run.py`` dependency. Re-exported from ``run.py`` for
+    backward compatibility (``from molab.workspace.run import RunStatus``).
+    """
+
+    PENDING = "pending"
+    RUNNING = "running"
+    SUCCEEDED = "succeeded"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
+# A Run does not store a workflow. The workflow is the experiment's property
+# (``ExperimentMetadata.workflow_entrypoint`` or ``workflow.ir.json``).
+
+# ── Entity metadata ────────────────────────────────────────────────────────
+#
+# Design rules:
+#   1. Every model is frozen.  Updates go through model_copy(update={...}).
+#   2. Parents never store child lists.  ``list_projects()`` scans the
+#      filesystem; directory presence is the only truth.
+#   3. No ``updated_at``.  If you need "last modified", read the file mtime.
+#      EXCEPTION: ``FolderMetadata`` (introduced by the
+#      unify-folder-abstraction chain) carries an explicit ``updated_at``
+#      because filesystem ``mtime`` is unreliable across rsync / git
+#      checkout / cross-host copy and can't anchor the global folder
+#      index. The deviation is scoped to the new ``FolderMetadata`` model;
+#      legacy entity metadata above keeps the mtime-based design.
+
+
+class FolderMetadata(BaseModel, frozen=True):
+    """Lifecycle metadata for the unified ``Folder`` abstraction.
+
+    Carries the minimum every folder needs regardless of business
+    semantics: stable id (slugified ``name``), human-readable ``name``,
+    dotted-ASCII ``kind`` for child filtering, and monotonic
+    ``created_at``/``updated_at`` timestamps. The ``extra`` slot lets
+    business subclasses
+    stash custom fields without forking the schema.
+
+    The ``updated_at`` field is a deliberate deviation from rule 3 above
+    — see the comment block preceding this class for the rationale.
+    """
+
+    id: str
+    name: str
+    kind: str
+    created_at: datetime = Field(default_factory=datetime.now)
+    updated_at: datetime = Field(default_factory=datetime.now)
+    extra: dict[str, JSONValue] = Field(default_factory=dict)
+
+
+class ComputeTarget(BaseModel, frozen=True):
+    """A registered execution destination — the cross product of two axes.
+
+    The two-axis cluster model (Transport × Scheduler) treats *where* commands
+    run as orthogonal to *how* jobs are dispatched.  ``host`` is the transport
+    axis: ``None`` means run locally (``LocalTransport``); a non-empty value
+    routes through SSH to that host.  ``scheduler`` is the dispatch axis: one
+    of the molq scheduler names.
+
+    Examples::
+
+        # Today's `--local` path, just named.
+        ComputeTarget(name="laptop", scratch_root="/tmp/molab")
+
+        # Remote SLURM cluster — the canonical HPC use case.
+        ComputeTarget(
+            name="hpc1",
+            host="me@cluster.example.org",
+            scheduler="slurm",
+            scratch_root="/scratch/me/molab",
+        )
+
+        # Run on a remote workstation directly, no batch system.
+        ComputeTarget(
+            name="desk", host="me@desk.lan", scheduler="local", scratch_root="/home/me/molab-runs"
+        )
+    """  # noqa: RUF002
+
+    name: str
+
+    # ── Transport axis (where commands run) ─────────────────────────────────
+    host: str | None = None  # None → LocalTransport, else SshTransport
+    port: int | None = None
+    identity_file: str | None = None
+    ssh_opts: list[str] = Field(default_factory=list)
+
+    # ── Scheduler axis (how jobs are dispatched) ────────────────────────────
+    scheduler: Literal["local", "slurm", "pbs", "lsf"] = "local"
+
+    # ── Working dir + defaults ──────────────────────────────────────────────
+    scratch_root: str
+    default_resources: dict[str, JSONValue] = Field(default_factory=dict)
+    default_scheduling: dict[str, JSONValue] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def _validate_axes(self) -> ComputeTarget:
+        if self.host is None and (self.port is not None or self.identity_file or self.ssh_opts):
+            raise ValueError(
+                "transport options (port, identity_file, ssh_opts) require host to be set"
+            )
+        if not self.scratch_root:
+            raise ValueError("scratch_root is required")
+        return self
+
+    @property
+    def is_remote(self) -> bool:
+        return self.host is not None
+
+
+class WorkspaceMetadata(BaseModel, frozen=True):
+    """Top-level workspace.
+
+    ``type`` is the OKF concept kind. It lives on ``workspace.json``.
+    """
+
+    id: str
+    name: str
+    type: str = "workspace.root"
+    created_at: datetime = Field(default_factory=datetime.now)
+    targets: list[ComputeTarget] = Field(default_factory=list)
+
+
+class ProjectMetadata(BaseModel, frozen=True):
+    """Research project container.
+
+    ``type`` lives on ``project.json``.
+    """
+
+    id: str
+    name: str
+    type: str = "workspace.project"
+    description: str = ""
+    owner: str = ""
+    tags: list[str] = Field(default_factory=list)
+    config: dict[str, JSONValue] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=datetime.now)
+
+
+WorkflowKind = Literal["code", "document"]
+
+
+class ExperimentMetadata(BaseModel, frozen=True):
+    """Repeatable experiment definition — a parameter-space container.
+
+    An Experiment carries a concrete parameter dict (``parameter_space``)
+    plus replica configuration (``n_replicas``, ``seeds``). Parameter
+    combinations are expanded by the user at script level (e.g. via
+    ``for p in GridSpace(...)``); each combination becomes a distinct
+    Experiment. Replicas under a single Experiment share parameters but
+    differ in random seed.
+
+    The Experiment owns its workflow association: ``workflow_kind`` plus
+    exactly one reference, either the ``workflow_entrypoint`` locator or
+    the opaque IR in ``workflow.ir.json``. ``plan_run_id`` is a read-only
+    legacy field.
+
+    ``model_config`` ignores extra fields so workspace.json files written
+    by older molab versions (which may carry now-removed keys like
+    ``workflow``) still load cleanly.
+    """
+
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    id: str
+    name: str
+    type: str = "workspace.experiment"
+    description: str = ""
+    tags: list[str] = Field(default_factory=list)
+    created_at: datetime = Field(default_factory=datetime.now)
+    revision_id: str
+    revision: int = 1
+    revision_created_at: datetime = Field(default_factory=datetime.now)
+    definition_hash: str
+
+    # Association record. ``None`` is unbound, or a legacy experiment
+    # written before the kind existed. The IR itself stays opaque.
+    workflow_kind: WorkflowKind | None = None
+    # THE workflow locator for every Run of this experiment: the
+    # ``"<file>:<qualname>"`` coordinate a worker re-imports to rebuild the
+    # graph. Written once by the cross-layer workflow-executor seam when a
+    # workflow is bound (``Experiment.define`` / ``sweep`` / ``run(wf)``), so
+    # a Run never carries its own copy — the workflow belongs to the
+    # experiment, and duplicating it on every run is what let the CLI and the
+    # HTTP API drift apart. ``None`` when the bound spec has no module-level
+    # name to re-import (a promoted callable, a fixture).
+    workflow_entrypoint: str | None = None
+    # Legacy, read-only: set by the plan pipeline removed in D86; nothing
+    # writes it. Surfaced as ``ExperimentResponse.planRunId`` for existing
+    # experiments.
+    plan_run_id: str | None = None
+    parameter_space: dict[str, JSONValue] = Field(default_factory=dict)
+
+    # Replica configuration
+    n_replicas: int = 1
+    seeds: list[int] | None = None
+
+    # Default compute target for runs created under this experiment.
+    # Validated against ``WorkspaceMetadata.targets`` at write time.
+    default_target: str | None = None
+
+
+class RunMetadata(BaseModel, frozen=True):
+    """Logical definition of a Run.
+
+    Attempt status, ownership, time, and error live only on
+    ``executions/eNN/execution.json`` (:class:`Execution`). The workflow
+    belongs to the experiment. An attempt's compiled digest lives on that
+    Execution.
+    """
+
+    model_config = ConfigDict(extra="ignore", frozen=True)
+
+    id: str
+    type: str = "workspace.run"
+    parameters: dict[str, JSONValue] = Field(default_factory=dict)
+    created_at: datetime = Field(default_factory=datetime.now)
+    definition_hash: str
+    experiment_revision_id: str
+    input_asset_ids: tuple[str, ...] = ()
+
+    # Intended compute target name (matches a ComputeTarget in the workspace
+    # registry).  Captured at run-creation time so the UI can filter and the
+    # actual submitter can pick the right SubmitHandler later.  Distinct from
+    # the Execution's ``executor``, which is populated post-submit by molq.
+    target: str | None = None

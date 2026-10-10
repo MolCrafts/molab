@@ -13,8 +13,8 @@ from typing import IO, Any
 
 import pytest
 
-from molexp.workspace.fs import StatResult
-from molexp.workspace.fs_cached import CachedRemoteFileSystem
+from molab.workspace.fs import StatResult
+from molab.workspace.fs_cached import CachedRemoteFileSystem
 
 
 class _FakeRemoteFS:
@@ -295,13 +295,13 @@ class TestCachedRemoteFileSystem:
         """Positive ttl = pin-until-refresh: age does not force remote I/O."""
         cached = CachedRemoteFileSystem(fake, mirror_root=tmp_path / "mirror", ttl_seconds=10)
         base = time.time()
-        monkeypatch.setattr("molexp.workspace.fs_cached.time.time", lambda: base)
+        monkeypatch.setattr("molab.workspace.fs_cached.time.time", lambda: base)
         cached.connect("/scratch/me")
         cached.read_bytes("/scratch/me/log.txt")
         assert fake.calls["read_bytes"] == 1
 
         # Far past any historical TTL window — still local-only.
-        monkeypatch.setattr("molexp.workspace.fs_cached.time.time", lambda: base + 10_000)
+        monkeypatch.setattr("molab.workspace.fs_cached.time.time", lambda: base + 10_000)
         fake.files["/scratch/me/log.txt"] = b"remote-changed"  # would be visible if revalidated
         fake.calls.clear()
         assert cached.read_bytes("/scratch/me/log.txt") == b"hello"
@@ -324,7 +324,7 @@ class TestCachedRemoteFileSystem:
 
         second = CachedRemoteFileSystem(fake, mirror_root=mirror_root, ttl_seconds=300)
         assert second.indexed is True
-        ws = SimpleNamespace(root="/scratch/me", _fs=second)
+        ws = SimpleNamespace(root="/scratch/me", fs=second)
         fake.calls.clear()
         # Without open-refresh: pure pin, zero remote on prepare + read.
         warnings = second.prepare(
@@ -352,7 +352,7 @@ class TestCachedRemoteFileSystem:
         first.read_bytes("/scratch/me/log.txt")
 
         second = CachedRemoteFileSystem(fake, mirror_root=mirror_root, ttl_seconds=300)
-        ws = SimpleNamespace(root="/scratch/me", _fs=second)
+        ws = SimpleNamespace(root="/scratch/me", fs=second)
         # Pin read works before/during refresh.
         assert second.read_bytes("/scratch/me/log.txt") == b"hello"
         warnings = second.prepare(ws, block_index=False, refresh_on_open=True)  # type: ignore[arg-type]
@@ -373,7 +373,7 @@ class TestCachedRemoteFileSystem:
         fake.files["/scratch/me/workspace.json"] = b'{"name":"ws"}'
         cached = CachedRemoteFileSystem(fake, mirror_root=tmp_path / "mirror", ttl_seconds=300)
         assert cached.indexed is False
-        ws = SimpleNamespace(root="/scratch/me", _fs=cached)
+        ws = SimpleNamespace(root="/scratch/me", fs=cached)
         warnings = cached.prepare(ws, block_index=False)  # type: ignore[arg-type]
         assert warnings == []
         assert cached.connected is True
@@ -403,7 +403,7 @@ class TestCachedRemoteFileSystem:
     @pytest.mark.unit
     def test_force_fetch_propagates_to_parallel_workers(self, fake: _FakeRemoteFS, tmp_path: Path):
         """ThreadPool workers must inherit force_fetch (TLS is not shared)."""
-        from molexp.workspace.fs_cached import _parallel_map
+        from molab.workspace.fs_cached import _parallel_map
 
         cached = CachedRemoteFileSystem(fake, mirror_root=tmp_path / "mirror", ttl_seconds=300)
         cached.connect("/scratch/me")
@@ -513,6 +513,24 @@ class TestCachedRemoteFileSystem:
         assert dropped == 1
         assert "/scratch/me/runs/a/stdout.log" in cached.cached_paths()
         assert "/scratch/me/project.json" not in cached.cached_paths()
+
+    @pytest.mark.unit
+    def test_invalidate_scope_indices_drops_attempt_records(
+        self, fake: _FakeRemoteFS, tmp_path: Path
+    ) -> None:
+        from molab.workspace.fs_cached import INDEX_FILE_NAMES
+
+        fake.files["/scratch/me/executions/e01/execution.json"] = b"{}"
+        fake.files["/scratch/me/executions/e01/run.log"] = b"log"
+        cached = CachedRemoteFileSystem(fake, mirror_root=tmp_path / "mirror", ttl_seconds=300)
+        cached.read_bytes("/scratch/me/executions/e01/execution.json")
+        cached.read_bytes("/scratch/me/executions/e01/run.log")
+
+        cached.invalidate(scope="indices")
+
+        assert "/scratch/me/executions/e01/execution.json" not in cached.cached_paths()
+        assert "/scratch/me/executions/e01/run.log" in cached.cached_paths()
+        assert 'invalidate(scope="indices")' in (INDEX_FILE_NAMES.__doc__ or "")
 
     @pytest.mark.unit
     def test_invalidate_scope_all_clears_everything(self, fake: _FakeRemoteFS, tmp_path: Path):

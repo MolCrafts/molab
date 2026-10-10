@@ -1,19 +1,19 @@
 # Molq Plugin and Cluster Submission
 
-`molexp` can run workflows locally with no optional scheduler dependency. When you need SLURM, PBS, LSF, or another `molq`-supported backend, cluster submission is handled by the optional `submit_molq` plugin.
+`molab` can run workflows locally with no optional scheduler dependency. When you need SLURM, PBS, LSF, or another `molq`-supported backend, cluster submission is handled by the optional `submit_molq` plugin.
 
-This page explains what that plugin is, how it fits into `molexp run`, and what responsibilities stay outside it.
+This page explains what that plugin is, how it fits into `molab run`, and what responsibilities stay outside it.
 
 ## The Plugin's Role
 
-In code, the cluster bridge lives in `molexp.plugins.submit_molq`. It is not a separate workflow system. It is an adapter that turns a `molexp` run into a `molq` job submission.
+In code, the cluster bridge lives in `molab.plugins.submit_molq`. It is not a separate workflow system. It is an adapter that turns a `molab` run into a `molq` job submission.
 
-At runtime, `molexp run` loads this plugin only when you request a scheduler backend:
+At runtime, `molab run` loads this plugin only when you request a scheduler backend:
 
 ```bash
-molexp run train.py --scheduler slurm --partition gpu --gpus 1 --cpus 8
-molexp run train.py --scheduler pbs --queue batch
-molexp run train.py --scheduler lsf --queue short
+molab run train.py --scheduler slurm --partition gpu --gpus 1 --cpus 8
+molab run train.py --scheduler pbs --queue batch
+molab run train.py --scheduler lsf --queue short
 ```
 
 If `molq` is not installed, those commands fail fast with the install hint shown by the CLI:
@@ -22,29 +22,33 @@ If `molq` is not installed, those commands fail fast with the install hint shown
 pip install molq
 ```
 
+## What gets recorded
+
+The plugin creates a QUEUED `eNN` before it submits, and stages `executions/<id>/`. A scheduler RESUME on a remote target recomputes, because the predecessor journal is not staged. A record that stays QUEUED because the scheduler job died is cleared with `molab runs cancel <run-id>…`, which cancels each run's active attempt, QUEUED included.
+
 ## Optional Dependency Boundaries
 
-The core `molexp` package is designed so that local workflows, workspace browsing, and most documentation examples do not require any scheduler client. That keeps the base environment small and prevents `import molexp` from failing on machines that do not have cluster tooling installed.
+The core `molab` package is designed so that local workflows, workspace browsing, and most documentation examples do not require any scheduler client. That keeps the base environment small and prevents `import molab` from failing on machines that do not have cluster tooling installed.
 
 The `submit_molq` plugin exists precisely to keep scheduler integration outside the local core. You only pay that dependency cost when you ask for remote execution.
 
 ## Submission Flow
 
-When `molexp run` is called with a scheduler backend, the control flow stays close to local execution until the point where individual runs are dispatched.
+When `molab run` is called with a scheduler backend, the control flow stays close to local execution until the point where individual runs are dispatched.
 
 The high-level sequence is:
 
-1. `molexp run` imports the workflow script and discovers workspaces via `me.entry(...)`.
+1. `molab run` imports the workflow script and discovers workspaces via `me.entry(...)`.
 2. It resolves the active `molcfg` profile and any `--override` values.
 3. It scans projects and experiments, constructs or reuses eligible runs, and persists run metadata such as profile, config payload, config hash, and script path.
 4. Instead of executing the workflow locally, it calls the `submit_molq` handler for each selected run.
-5. That handler submits a worker command of the form `python -m molexp.cli execute <run_dir>` through `molq`.
+5. That handler submits a worker command of the form `python -m molab.cli execute <run_dir>` through `molq`.
 
 The important takeaway is that the plugin does not invent a second execution model. It only changes where the worker process is launched.
 
 ## CLI Flags Become Scheduler Objects
 
-The plugin turns `molexp` CLI flags into `molq` submission objects.
+The plugin turns `molab` CLI flags into `molq` submission objects.
 
 ### Resource flags
 
@@ -65,11 +69,23 @@ These become scheduler placement settings:
 - `--qos`
 - `--cluster`
 
-`molexp` keeps the frontend flags scheduler-friendly, while `submit_molq` handles the translation into `molq`'s `JobResources`, `JobScheduling`, and `JobExecution` objects.
+`molab` keeps the frontend flags scheduler-friendly, while `submit_molq` handles the translation into `molq`'s `JobResources`, `JobScheduling`, and `JobExecution` objects.
+
+### Worker environment flags
+
+The job runs `python -m molab.cli execute <run_dir>`. By default `python` is the interpreter that ran `molab run`, which is wrong when the compute nodes have another architecture or environment than the submitting host (an x86 login node in front of aarch64 GPU nodes):
+
+- `--python PATH` — the worker's interpreter on the compute node.
+- `--preamble LINE` (repeatable) — shell lines run before the worker (`module load …`, `export …`); the job becomes an inline script that ends in `exec <worker>`.
+
+```bash
+molab run scan.py --scheduler slurm -A proj-gpu -p gpu --gpus 1 --time 00:30:00 \
+    --python /venvs/aarch64/bin/python --preamble "module load GPU/buildenv-gcccuda"
+```
 
 ## Persisted Scheduler Metadata
 
-After submission, `molexp` normalizes executor metadata and writes it back into the run metadata. That normalized payload includes fields such as:
+After submission, `molab` normalizes executor metadata and writes it back into the run metadata. That normalized payload includes fields such as:
 
 - backend name (`molq`)
 - scheduler name
@@ -84,7 +100,7 @@ This matters because the rest of the system should not have to know `molq`'s int
 The submitted job does not reimplement scheduling logic inside the cluster process. It runs:
 
 ```bash
-python -m molexp.cli execute <run_dir>
+python -m molab.cli execute <run_dir>
 ```
 
 That worker command reconstructs the `RunContext` from `run.json`, re-imports the original workflow script, finds the matching workflow binding for the run, rebuilds the `Workflow`, and then executes it against the existing run directory.
@@ -112,9 +128,9 @@ Those responsibilities remain in the workflow layer, workspace layer, and CLI or
 
 ## Relationship to Monitoring and UI
 
-When `molq` is installed, `molexp.plugins.discover_ui_plugins()` also exposes a frontend-facing `molq` UI plugin descriptor. That descriptor tells the UI layer that scheduler-aware run viewers and monitor surfaces are available.
+When `molq` is installed, `molab.plugins.discover_ui_plugins()` also exposes a frontend-facing `molq` UI plugin descriptor. That descriptor tells the UI layer that scheduler-aware run viewers and monitor surfaces are available.
 
-On the CLI side, `molexp run --block` can immediately open the run monitor after submission, and `molexp explore` can later reopen the workspace explorer. Both rely on the normalized executor metadata that the plugin writes into the run metadata.
+On the CLI side, `molab run --block` can immediately open the run monitor after submission, and `molab explore` can later reopen the workspace explorer. Both rely on the normalized executor metadata that the plugin writes into the run metadata.
 
 ## Appropriate Use Cases
 
@@ -122,7 +138,7 @@ Use `submit_molq` when:
 
 - the workflow is already working locally,
 - you want scheduler-backed execution without rewriting the workflow,
-- and you need `molexp` to persist cluster job identity alongside run metadata.
+- and you need `molab` to persist cluster job identity alongside run metadata.
 
 If you are still iterating on basic workflow semantics, local execution is usually the better place to start. Once the workflow shape is stable, the plugin lets you move that same shape onto a scheduler with minimal conceptual overhead.
 

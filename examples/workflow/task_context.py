@@ -1,6 +1,6 @@
 """A tour of ``TaskContext`` — inputs bind by name, ``ctx`` carries the workdir.
 
-Matches ``docs/guide/task-context.md``.
+Matches ``docs/en/guide/task-context.md``.
 
 A task body declares the runtime values it consumes as **named parameters**; the
 engine binds them from the merged map {build-time config} | {upstream outputs |
@@ -33,9 +33,9 @@ import asyncio
 import tempfile
 from pathlib import Path
 
-import molexp as me
-from molexp.profile import ProfileConfig
-from molexp.workflow import Task, TaskContext, WorkflowCompiler, WorkflowRuntime
+import molab as me
+from molab.profile import ProfileConfig
+from molab.workflow import Task, TaskContext, Workflow, WorkflowCompiler, WorkflowRuntime
 
 
 class Seed(Task):
@@ -55,26 +55,29 @@ class Record(Task):
 
 
 # Module scope so the compiled artifact is importable across CLI re-imports.
-compiled = WorkflowCompiler(name="counter").add(Seed()).add(Record(), depends_on=["seed"]).compile()
+compiled = WorkflowCompiler().compile(
+    Workflow(name="counter").add(Seed()).add(Record(), depends_on=["seed"])
+)
 
 
 async def main() -> None:
-    root = Path(tempfile.mkdtemp(prefix="molexp-ctx-"))
+    root = Path(tempfile.mkdtemp(prefix="molab-ctx-"))
     ws = me.Workspace(root, name="ctx-demo")
-    exp = ws.project("demo").experiment("counter").run(compiled, params={"base": [1]})
+    exp = ws.add_project("demo").add_experiment("counter").define(compiled, params={"base": [1]})
 
     run = exp.list_runs()[0]
     cfg = ProfileConfig({"scale": 10}, name="smoke")
     with run.start(profile_config=cfg) as ctx:
+        execution_id = ctx.id
         result = await WorkflowRuntime().execute(compiled, run_context=ctx)
         # Workspace helpers are driver-side, on the RunContext.
         ctx.set_result("record", result.outputs["record"])
-        ctx.artifact.save("record.json", {"value": result.outputs["record"]})
-        ctx.log("record").append(f"value={result.outputs['record']}")
+        ctx.emit_artifact({"value": result.outputs["record"]}, name="record.json")
+        ctx.log("runtime").append(f"value={result.outputs['record']}")
 
     print(f"status:  {result.status}")
     print(f"outputs: {result.outputs}")
-    print(f"result:  {run.get_result('record')}")
+    print(f"result:  {run.get_result('record', execution_id=execution_id)}")
 
 
 if __name__ == "__main__":

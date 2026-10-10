@@ -13,9 +13,9 @@ import pathlib
 
 import pytest
 
-from molexp.workflow import SubWorkflow, WorkflowCompiler, WorkflowRuntime
-from molexp.workflow.context import TaskContext
-from molexp.workspace import Workspace
+from molab.workflow import SubWorkflow, Workflow, WorkflowCompiler, WorkflowRuntime
+from molab.workflow.context import TaskContext
+from molab.workspace import Workspace
 
 
 def _new_run(tmp_path: pathlib.Path, params: dict):
@@ -33,7 +33,7 @@ class TestRootInputInjection:
         run = _new_run(tmp_path, {"mode": "block", "ratio": "r1", "n_litfsi": 54})
         captured: dict[str, object] = {}
 
-        wf = WorkflowCompiler(name="rootinj")
+        wf = Workflow(name="rootinj")
 
         @wf.task
         async def root(ctx: TaskContext, mode: str, n_litfsi: int, **params: object) -> str:
@@ -43,7 +43,9 @@ class TestRootInputInjection:
             return "ok"
 
         with run.start() as ctx:
-            result = await WorkflowRuntime().execute(wf.compile(), run_context=ctx)
+            result = await WorkflowRuntime().execute(
+                WorkflowCompiler().compile(wf), run_context=ctx
+            )
 
         assert result.status == "succeeded"
         assert captured["mode"] == "block"
@@ -57,7 +59,7 @@ class TestRootInputInjection:
         run = _new_run(tmp_path, {"mode": "alt"})
         captured: dict[str, object] = {}
 
-        wf = WorkflowCompiler(name="rootwd")
+        wf = Workflow(name="rootwd")
 
         @wf.task
         async def root(ctx: TaskContext) -> str:
@@ -65,7 +67,9 @@ class TestRootInputInjection:
             return "ok"
 
         with run.start() as ctx:
-            result = await WorkflowRuntime().execute(wf.compile(), run_context=ctx)
+            result = await WorkflowRuntime().execute(
+                WorkflowCompiler().compile(wf), run_context=ctx
+            )
 
         assert result.status == "succeeded"
         workdir = captured["workdir"]
@@ -83,7 +87,7 @@ class TestRootInputInjection:
         run = _new_run(tmp_path, {"mode": "alt"})
         captured: dict[str, object] = {}
 
-        wf = WorkflowCompiler(name="wd-all")
+        wf = Workflow(name="wd-all")
 
         @wf.task
         async def root(ctx: TaskContext) -> int:
@@ -96,7 +100,9 @@ class TestRootInputInjection:
             return 2
 
         with run.start() as ctx:
-            result = await WorkflowRuntime().execute(wf.compile(), run_context=ctx)
+            result = await WorkflowRuntime().execute(
+                WorkflowCompiler().compile(wf), run_context=ctx
+            )
 
         assert result.status == "succeeded"
         assert isinstance(captured["root_workdir"], pathlib.Path)
@@ -113,7 +119,7 @@ class TestRootInputInjection:
         run = _new_run(tmp_path, {"mode": "blk"})
         captured: dict[str, object] = {}
 
-        inner = WorkflowCompiler(name="inner-merge")
+        inner = Workflow(name="inner-merge")
 
         @inner.task
         async def entry(
@@ -128,7 +134,7 @@ class TestRootInputInjection:
             captured["entry_workdir"] = ctx.workdir
             return "ok"
 
-        outer = WorkflowCompiler(name="outer-merge", entry="emit")
+        outer = Workflow(name="outer-merge", entry="emit")
 
         @outer.task
         async def emit(ctx: TaskContext) -> list[dict]:
@@ -143,7 +149,9 @@ class TestRootInputInjection:
         outer.parallel(map_over="emit", body="sub", join="collect", max_concurrency=1)
 
         with run.start() as ctx:
-            result = await WorkflowRuntime().execute(outer.compile(), run_context=ctx)
+            result = await WorkflowRuntime().execute(
+                WorkflowCompiler().compile(outer), run_context=ctx
+            )
 
         assert result.status == "succeeded"
         merged = captured["entry_inputs"]

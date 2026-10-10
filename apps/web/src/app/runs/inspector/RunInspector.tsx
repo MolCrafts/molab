@@ -1,0 +1,184 @@
+import { ExternalLink, Inbox, X } from "lucide-react";
+import type { JSX } from "react";
+import { useState } from "react";
+
+import { EmptyState } from "@/app/components/entity";
+import type { ObjectView, WorkspaceSnapshot } from "@/app/types";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { RunStatusBadge, WorkbenchIconAction } from "@/components/workbench";
+import { cn } from "@/lib/utils";
+import type { WorkspaceRunRow } from "../types";
+import { useRunInspectorLogs } from "../useRunInspectorLogs";
+import { RunInspectorDetails } from "./RunInspectorDetails";
+import { RunInspectorLogs } from "./RunInspectorLogs";
+import { RunPluginActions } from "./RunPluginActions";
+
+type InspectorTab = "details" | "output";
+
+export interface RunInspectorProps {
+  run: WorkspaceRunRow | null;
+  snapshot: WorkspaceSnapshot;
+  selectedExecutionId: string | null;
+  onSelectExecution: (id: string | null) => void;
+  onClear: () => void;
+  onOpenRun: (run: WorkspaceRunRow, view?: ObjectView) => void;
+  className?: string;
+}
+
+export type RunInspectorRegistration = Omit<RunInspectorProps, "className">;
+
+export const RunInspector = ({
+  run,
+  snapshot,
+  selectedExecutionId,
+  onSelectExecution,
+  onClear,
+  onOpenRun,
+  className,
+}: RunInspectorProps): JSX.Element => {
+  const [tab, setTab] = useState<InspectorTab>("details");
+  const logsState = useRunInspectorLogs(run, selectedExecutionId, tab === "output" && run !== null);
+  const selectedExecution = run?.executions.find(
+    (execution) => execution.executionId === selectedExecutionId,
+  );
+
+  if (!run) {
+    return (
+      <aside
+        className={cn(
+          "flex h-full w-full min-w-0 flex-col border-l border-border/60 bg-card",
+          className,
+        )}
+      >
+        <header className="flex items-center justify-between border-b border-border/60 px-4 py-3">
+          <span className="text-body-lg font-medium text-foreground">Inspector</span>
+        </header>
+        <div className="flex flex-1 items-center justify-center px-4">
+          <EmptyState
+            density="compact"
+            icon={<Inbox className="size-icon-lg" />}
+            title="No run selected"
+            description="Pick a row in Jobs to inspect its definition and executions."
+          />
+        </div>
+      </aside>
+    );
+  }
+
+  return (
+    <aside
+      className={cn(
+        "flex h-full w-full min-w-0 flex-col border-l border-border/60 bg-card",
+        className,
+      )}
+    >
+      <header className="flex h-toolbar-compact items-center justify-between gap-2 border-b border-border px-3">
+        <h2 className="text-micro font-medium uppercase tracking-wide text-muted-foreground">
+          Run details
+        </h2>
+        <WorkbenchIconAction
+          label="Close run details"
+          kind="ghost"
+          type="button"
+          onClick={onClear}
+          className="size-6 shrink-0 text-muted-foreground"
+        >
+          <X className="size-icon-sm" />
+        </WorkbenchIconAction>
+      </header>
+
+      <div className="border-b border-border/60 px-3 py-3">
+        <div className="min-w-0 flex-1 space-y-1">
+          <div className="flex items-start justify-between gap-2">
+            <p className="truncate font-mono text-micro text-muted-foreground" title={run.id}>
+              {run.id}
+            </p>
+            {selectedExecution ? (
+              <RunStatusBadge status={selectedExecution.status} size="sm" />
+            ) : (
+              <span className="shrink-0 text-micro text-muted-foreground">
+                {run.statusSummary.total} executions
+              </span>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <p
+              className="min-w-0 truncate text-body-lg font-medium tracking-tight text-foreground"
+              title={run.id}
+            >
+              {run.name || run.id}
+            </p>
+          </div>
+          <p className="truncate text-label text-muted-foreground">
+            {run.projectName}
+            <span className="mx-1 text-border">·</span>
+            {run.experimentName}
+          </p>
+        </div>
+      </div>
+
+      <Tabs
+        value={tab}
+        onValueChange={(next) => setTab(next as InspectorTab)}
+        className="flex min-h-0 flex-1 flex-col"
+      >
+        <div className="border-b border-border/60 px-3">
+          <TabsList
+            variant="line"
+            className="h-control-comfortable w-full justify-start gap-3 rounded-none bg-transparent p-0"
+          >
+            {(
+              [
+                ["details", "Details"],
+                ["output", "Output"],
+              ] as const
+            ).map(([value, label]) => (
+              <TabsTrigger
+                key={value}
+                value={value}
+                className={cn(
+                  "h-control-comfortable flex-none rounded-none border-0 border-b border-transparent px-0 text-label font-medium shadow-none after:hidden",
+                  "data-[state=active]:border-foreground data-[state=active]:bg-transparent data-[state=active]:shadow-none",
+                )}
+              >
+                {label}
+              </TabsTrigger>
+            ))}
+          </TabsList>
+        </div>
+
+        <div className="min-h-0 flex-1 overflow-hidden">
+          <TabsContent value="details" className="m-0 h-full overflow-y-auto">
+            <RunInspectorDetails
+              run={run}
+              selectedExecutionId={selectedExecutionId}
+              onSelectExecution={onSelectExecution}
+            />
+          </TabsContent>
+          <TabsContent value="output" className="m-0 flex h-full min-h-0 flex-col overflow-hidden">
+            <RunInspectorLogs
+              run={run}
+              selectedExecutionId={selectedExecutionId}
+              onSelectExecution={onSelectExecution}
+              logs={logsState.logs}
+              error={logsState.error}
+              loading={logsState.loading}
+              onRefresh={logsState.refresh}
+            />
+          </TabsContent>
+        </div>
+      </Tabs>
+
+      <footer className="flex items-center justify-between gap-2 border-t border-border/60 px-3 py-2">
+        <RunPluginActions
+          run={run}
+          snapshot={snapshot}
+          onOpenTab={(view) => onOpenRun(run, view)}
+        />
+        <WorkbenchIconAction label="Open run detail" onClick={() => onOpenRun(run)}>
+          <ExternalLink className="size-3.5" />
+        </WorkbenchIconAction>
+      </footer>
+    </aside>
+  );
+};

@@ -1,14 +1,11 @@
-"""Agent code-loop golden path — pure Python API, no agent loop.
+"""Code-loop golden path — a minimal public-API workflow script.
 
-This is the **recipe** an agent should reimplement by consulting molmcp
-(for API discovery / scaffold tools), then writing a script and executing
-it. The molexp agent loop does not own create/sweep/plot verbs; it writes
-code that calls these public APIs.
-
-Behavior contract (InteractiveLoop): see
-``DEFAULT_CODE_LOOP_PREAMBLE`` in
-``molexp.agent.loops.interactive.loop`` — consult molmcp → write_file →
-execute_python → read results; plot with ``import molplot``.
+The script walks the whole life of a small parameter scan using only the
+public molab API: it creates a workspace, declares a one-task workflow,
+sweeps it over a parameter grid (one tracked run per grid value), reads
+the results back as flat records, and optionally plots them. Any caller
+that writes and runs a script against molab — a person or a code
+generator — can follow the same recipe.
 
 Shape:
 
@@ -29,9 +26,9 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-import molexp as me
-from molexp.workflow import WorkflowCompiler
-from molexp.workspace.param import GridSpace
+import molab as me
+from molab.param import GridSpace
+from molab.workflow import Workflow
 
 # Fixed names so tests can assert the on-disk layout contract.
 PROJECT_NAME = "demo"
@@ -42,9 +39,9 @@ TASK_NAME = "yy_score"
 FIGURE_REL = Path("figures") / "yy_scan.png"
 
 
-def build_yy_workflow() -> WorkflowCompiler:
+def build_yy_workflow() -> Workflow:
     """Compile a trivial workflow — stand-in for "implement YY" science."""
-    wf = WorkflowCompiler(name="yy")
+    wf = Workflow(name="yy")
 
     @wf.task
     def yy_score(x: float = 0.0) -> float:
@@ -128,7 +125,7 @@ def maybe_plot_records(
 
 
 def main() -> None:
-    workspace_root = Path(tempfile.mkdtemp(prefix="molexp-code-loop-golden-"))
+    workspace_root = Path(tempfile.mkdtemp(prefix="molab-code-loop-golden-"))
     print(f"workspace root: {workspace_root}")
     records = run_code_loop_golden_path(workspace_root)
     print(f"sweep cells: {len(records)}")

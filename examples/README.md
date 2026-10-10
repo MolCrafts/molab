@@ -1,4 +1,4 @@
-# MolExp Examples
+# Molab Examples
 
 Each guide in `docs/guide/` (and each onboarding page in `docs/getting-started/`)
 has a runnable example here. Read the guide for prose, run the example to see
@@ -15,7 +15,7 @@ You can delete these freely; none of them touch `~/` or any system path.
 | [quick-start](../docs/getting-started/quick-start.md) | `getting_started/01_quick_start.py` | End-to-end: workspace + experiment + run + result |
 | [first-workflow](../docs/getting-started/first-workflow.md) | `getting_started/02_first_workflow.py` | A `Workflow` with no workspace attached |
 | [tracked-runs](../docs/getting-started/tracked-runs.md) | `getting_started/03_tracked_run.py` | What appears on disk when a run is tracked |
-| [cli-and-profiles](../docs/getting-started/cli-and-profiles.md) | `getting_started/04_cli_and_profiles/` | `molexp run` + `molcfg.yaml` + `--profile` |
+| [cli-and-profiles](../docs/getting-started/cli-and-profiles.md) | `getting_started/04_cli_and_profiles/` | `molab run` + `molcfg.yaml` + `--profile` |
 
 ## Workflow Authoring
 
@@ -61,39 +61,11 @@ You can delete these freely; none of them touch `~/` or any system path.
 | [run-profiles](../docs/guide/run-profiles.md) | `operations/run_profiles_advanced/` | Profile inheritance (`extends`), `--override` dot notation |
 | [workspace-architecture](../docs/guide/workspace-architecture.md) | `operations/remote_targets.py` | LocalTarget, RemoteTarget, ComputeTarget resolution |
 
-## Agent Layer
-
-The agent examples are **offline-first**: each ships an in-file
-`ScriptedRouter` implementing the SDK-free `molexp.agent.router.Router`
-Protocol and injects it via `AgentRunner(router=...)` — no network, no API
-key, deterministic exit 0, so both files run inside the examples smoke gate
-(`tests/test_examples_smoke.py`) and break loudly on any API drift. Paste a
-key into the `API_KEY` constant to flip the *same* loop to the real model.
+## A Minimal Script End to End
 
 | Example | What it shows |
 |---|---|
-| `agent/chat_loop.py` | Minimum viable agent loop — `ChatLoop` + a named runtime `AgentSession` driven through `AgentRunner`. The offline run proves the persistence contract: two turns on one named session, then `result.messages` carries all four messages rebuilt from `entries.jsonl`. |
-| `agent/interactive_loop.py` | The emergent tool loop — `InteractiveLoop` driving `Router.stream_agentic`. The scripted stream yields a thinking delta, one full tool round, then the streamed answer; the demo asserts the chunk→`AgentEvent` translation (`ToolCallStartedEvent` / `ToolCallCompletedEvent`). The loop behind the `molexp agent` CLI REPL. |
-| `agent/mcp_integration.py` | Agent with MCP toolsets — offline ScriptedRouter simulates tool calls, MCPServerStdio construction pattern (commented), InteractiveLoop tool events. |
-
-> Note: "**Loop**" is the agent-layer LLM-conversation concept (`AgentLoop` → `ChatLoop` / `InteractiveLoop`). "**Mode**" is reserved for the harness orchestration concept below (`harness.Mode` → `PlanMode` / `RunMode`).
->
-> **API keys** — live mode registers the LLM key *in code* via `molexp.config["deepseek_api_key"] = ...` (paste into the `API_KEY` constant at the top of each file). `molexp.config` is a live `molcfg.Config`; molexp reads the key from it, **never from environment variables**.
-
-## Harness Layer
-
-`PlanMode` is the harness `Mode` that turns a short natural-language experiment
-draft into generated, validated, runnable `molexp.workflow` source — running its
-stage pipeline (ExperimentReport → WorkflowIR → BoundWorkflow → workflow source)
-on a `workspace.Run` with full provenance + audit. Its back half, `RunMode`
-(chained on the same Run via `molexp plan --execute`), generates unit tests,
-really runs them with pytest, executes the workflow through an executor
-subprocess on the real engine, and writes the final report + audit trail.
-
-| Example | What it shows |
-|---|---|
-| `harness/experiment_pipeline.py` | **The flagship**: a natural-language experiment goal → `PlanMode` (plan + validated workflow source) → `RunMode` (generated unit tests REALLY run under pytest, the workflow REALLY executes on the `molexp.workflow` engine in an executor subprocess) → extracted `FinalReport` + audit trail. Offline by default via an in-file `CannedGateway` implementing the public `AgentGateway` Protocol — only the LLM is canned; every validator, pytest, and the engine run for real (a seeded 1D random walk whose D = MSD/(2·d·t) ≈ 0.5). Paste a key into `API_KEY` to run the same pipeline against the real DeepSeek API through `RouterBackedAgentGateway`. |
-| `harness/stages_standalone.py` | Harness building blocks in isolation — ToolCapability, InMemoryCapabilityRegistry, CannedGateway pattern for offline stage testing. |
+| `agent/code_loop_golden_path.py` | A minimal public-API workflow script: create a workspace, add a project and an experiment, sweep a one-task workflow over a parameter grid, read the results back with `to_records()`, and (when `molplot` is installed) save a figure under the workspace. The `agent/` directory name is historical; the script uses only the public molab API. |
 
 ## Plugins
 
@@ -105,19 +77,19 @@ subprocess on the real engine, and writes the final report + audit trail.
 
 | Guide | Example | What it shows |
 |---|---|---|
-| [workspace-architecture](../docs/guide/workspace-architecture.md) | `cli/commands.sh` | `molexp init`, `info`, `project`, `experiment`, `runs`, `asset` — full CLI tour |
+| [workspace-architecture](../docs/guide/workspace-architecture.md) | `cli/commands.sh` | `molab init`, `info`, `project`, `experiment`, `runs`, `asset` — full CLI tour |
 
 ## Driving a Run
 
 The sanctioned surface is the fluent chain: declare which workflow an
 experiment runs (this seeds one content-addressed `Run` per parameter cell
-and binds the compiled workflow), then either let `molexp run` drive the
+and binds the compiled workflow), then either let `molab run` drive the
 runs or execute one in-process through `WorkflowRuntime`:
 
 ```python
-from molexp.workflow import WorkflowCompiler, WorkflowRuntime
+from molab.workflow import Workflow, WorkflowCompiler, WorkflowRuntime
 
-compiled = WorkflowCompiler(name="train").add(Train()).compile()
+compiled = WorkflowCompiler().compile(Workflow(name="train").add(Train()))
 
 exp = ws.project("demo").experiment("train").run(compiled, params={"lr": [1e-3]})
 
@@ -128,7 +100,7 @@ with run.start(profile_config=cfg) as ctx:
 ```
 
 `Experiment.run(workflow, params=...)` binds the compiled workflow to the
-experiment in `molexp.workflow.default_binding_registry` (an explicit,
+experiment in `molab.workflow.default_binding_registry` (an explicit,
 injectable `{experiment_id → CompiledWorkflow}` store — the old class-level
 `bind_to` registry was replaced) and registers the workspace for CLI
 discovery, so a separate `me.entry(ws)` call is no longer needed. The
@@ -153,8 +125,8 @@ python examples/getting_started/01_quick_start.py
 ```
 
 Examples under a subdirectory (`04_cli_and_profiles/`, `run_profiles/`) ship
-a matching `molcfg.yaml` and run through the `molexp` CLI:
+a matching `molcfg.yaml` and run through the `molab` CLI:
 
 ```bash
-molexp run examples/getting_started/04_cli_and_profiles/train.py --profile smoke
+molab run examples/getting_started/04_cli_and_profiles/train.py --profile smoke
 ```
