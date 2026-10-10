@@ -279,7 +279,7 @@ class TestEditDoc:
             )
         assert response.status_code == 200, response.text
         assert "$x^2$" in response.json()["body"]
-        assert "$x^2$" in Path(finding.path).read_text()
+        assert "$x^2$" in Path(finding.path).read_text(encoding="utf-8")
 
 
 class TestUpdateDocMeta:

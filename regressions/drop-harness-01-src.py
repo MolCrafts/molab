@@ -40,7 +40,7 @@ from __future__ import annotations
 
 import sys
 
-import molab
+import molab  # noqa: F401
 
 # Golden 1 is checked before anything else is imported, so the probe sees what
 # ``import molab`` alone pulled in.

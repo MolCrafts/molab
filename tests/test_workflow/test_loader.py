@@ -24,7 +24,7 @@ def _timeout[F: Callable[..., object]](fn: F) -> F:
 
 def _write(path: Path, source: str) -> Path:
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(source)
+    path.write_text(source, encoding="utf-8")
     return path
 
 

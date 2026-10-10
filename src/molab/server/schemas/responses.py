@@ -84,7 +84,7 @@ def _read_context_results(run: Run) -> dict[str, Any]:
     if not run_json.exists():
         return {}
     try:
-        with open(run_json) as fh:  # noqa: PTH123
+        with open(run_json, encoding="utf-8") as fh:  # noqa: PTH123
             data = json.load(fh)
     except (OSError, json.JSONDecodeError):
         return {}

@@ -67,7 +67,9 @@ def invert(x: float) -> float:
     return 1.0 / x
 
 
-outcome = ws.add_project("demo").add_experiment("edge-cases").sweep(risky, {"x": [0.0, 2.0]}).execute()
+outcome = (
+    ws.add_project("demo").add_experiment("edge-cases").sweep(risky, {"x": [0.0, 2.0]}).execute()
+)
 for row in outcome.to_records():
     print(row["x"], row["status"], row["error"])
 print(len(outcome.failed), "run(s) failed")

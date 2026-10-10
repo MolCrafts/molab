@@ -16,7 +16,7 @@ import importlib.util
 import tempfile
 from pathlib import Path
 
-import molab.knowledge
+import molab.knowledge  # noqa: F401
 import molab.workspace
 from molab.knowledge.concept import Concept, append_link, marker_filenames
 from molab.workspace.folder import class_for_entity_file, entity_json_names

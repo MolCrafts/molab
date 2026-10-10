@@ -46,7 +46,7 @@ ws = Workspace("./lab", name="Lab")
 ws.materialize()
 experiment = ws.add_project("polymer-cg").add_experiment("solvation-sweep")
 
-note = Note(experiment, "Analysis Notes")   # 只绑定路径，不碰磁盘
+note = Note(experiment, "Analysis Notes")  # 只绑定路径，不碰磁盘
 note.write("# Analysis Notes\n\nQuench at 10 K/ns.\n")
 ```
 
@@ -64,7 +64,7 @@ note.write("# Analysis Notes\n\nQuench at 10 K/ns.\n")
 from molab.knowledge import Knowledge, Note
 
 doc = Knowledge.open(experiment.resolve() / "knowledges" / "analysis-notes.md")
-assert type(doc) is Note                      # `class:` frontmatter 被如实还原
+assert type(doc) is Note  # `class:` frontmatter 被如实还原
 assert doc.read().startswith("# Analysis Notes")
 ```
 
@@ -104,8 +104,8 @@ from molab.knowledge import Finding, SourceRef
 finding = Finding(experiment, "Tg Result", sources=[SourceRef(kind="run", ref="run-0001")])
 finding.write("# Tg Result\n\nTg rose with cooling rate.\n")
 
-note.ref(finding)          # 用对象……
-note.ref(finding.path)     # ……或用路径 —— 两种写法写出同一条边
+note.ref(finding)  # 用对象……
+note.ref(finding.path)  # ……或用路径 —— 两种写法写出同一条边
 ```
 
 `.ref` **绝不**接受 project / experiment / run 的坐标：不是 `Folder`、不是 run id、
@@ -121,7 +121,7 @@ note.ref(run_record)
 
 ```python
 for edge in note.links():
-    print(edge.role, edge.target)     # 例如 references …/knowledges/tg-result.md
+    print(edge.role, edge.target)  # 例如 references …/knowledges/tg-result.md
 ```
 
 `.cite` 是更松的兄弟：知识目标交给 `.ref`；否则按原样把给出的路径链上。
@@ -141,7 +141,8 @@ for edge in note.links():
 from molab.knowledge import Finding, harvest_run
 
 finding = harvest_run(
-    run, of=Finding,
+    run,
+    of=Finding,
     narrative="Tg rose with cooling rate.",
     created_by="lin",
 )

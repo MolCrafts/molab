@@ -35,7 +35,7 @@ class TestTailMode:
 
     def test_whole_file_when_it_fits(self, fs: LocalFileSystem, log: Path) -> None:
         window = read_text_window(fs, log, max_bytes=MAX_TEXT_WINDOW_BYTES)
-        assert window.text == log.read_text()
+        assert window.text == log.read_text(encoding="utf-8")
         assert not window.truncated
         assert (window.start, window.end) == (0, window.total_bytes)
 
@@ -62,7 +62,7 @@ class TestHeadMode:
 class TestIncrementalFollow:
     def test_since_offset_returns_only_new_bytes(self, fs: LocalFileSystem, log: Path) -> None:
         first = read_text_window(fs, log, max_bytes=MAX_TEXT_WINDOW_BYTES)
-        with log.open("a") as fh:
+        with log.open("a", encoding="utf-8") as fh:
             fh.write("line10\n")
 
         second = read_text_window(fs, log, since_offset=first.end)
@@ -92,7 +92,7 @@ class TestIncrementalFollow:
                 break
             seen += window.text
             cursor = window.end
-        assert seen == log.read_text()
+        assert seen == log.read_text(encoding="utf-8")
 
     def test_offset_past_eof_restarts_and_flags_rewound(
         self, fs: LocalFileSystem, log: Path
@@ -100,7 +100,7 @@ class TestIncrementalFollow:
         window = read_text_window(fs, log, since_offset=10**9)
         assert window.rewound
         assert window.start == 0
-        assert window.text == log.read_text()
+        assert window.text == log.read_text(encoding="utf-8")
 
 
 class TestErrors:

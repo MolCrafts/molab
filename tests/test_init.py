@@ -126,7 +126,7 @@ class TestLazyRunExecutor:
         assert protocol_public <= set(dir(molab._LazyRunExecutor))
 
     def test_root_does_not_name_private_workflow_class(self) -> None:
-        assert "_WorkspaceRunExecutor" not in Path(molab.__file__).read_text()
+        assert "_WorkspaceRunExecutor" not in Path(molab.__file__).read_text(encoding="utf-8")
 
     def test_proxy_not_exported(self) -> None:
         assert "_LazyRunExecutor" not in molab.__all__

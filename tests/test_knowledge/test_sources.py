@@ -217,7 +217,7 @@ class TestSearchSources:
         assert hit.abs_path is not None
         assert Path(hit.abs_path).name == "tg.md"
         assert Path(hit.abs_path).is_file()
-        assert "1 K/ns" in Path(hit.abs_path).read_text()
+        assert "1 K/ns" in Path(hit.abs_path).read_text(encoding="utf-8")
 
     def test_concept_type_filters_by_class_name(self, tmp_path: Path) -> None:
         wiki = tmp_path / "wiki"

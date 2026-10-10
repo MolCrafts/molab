@@ -75,11 +75,11 @@ class TestTimestampsStayComparable:
         from pathlib import Path
 
         state_path = Path(repo.state_path("e01"))
-        raw = json.loads(state_path.read_text())
+        raw = json.loads(state_path.read_text(encoding="utf-8"))
         raw["created_at"] = "2026-09-01T12:00:00"
         raw["finished_at"] = "2026-09-01T18:00:00"
         raw["status"] = "failed"
-        state_path.write_text(json.dumps(raw))
+        state_path.write_text(json.dumps(raw), encoding="utf-8")
 
         attempts = repo.list()
         assert [item.id for item in attempts] == ["e01", "e02"]
