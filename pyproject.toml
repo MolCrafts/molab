@@ -18,6 +18,8 @@ dependencies = [
     "typer>=0.9.0",
     "rich>=14.3.4",
     "fastapi>=0.100.0",
+    # File() / UploadFile routes (knowledge doc media) import this at startup.
+    "python-multipart>=0.0.9",
     "uvicorn>=0.23.0",
     "pathspec>=0.12.0",
     # The workflow engine imports anyio directly (CapacityLimiter / task
