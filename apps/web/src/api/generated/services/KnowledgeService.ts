@@ -3,8 +3,10 @@
 /* tslint:disable */
 /* eslint-disable */
 import type { BacklinksResponse } from '../models/BacklinksResponse';
+import type { Body_uploadDocMedia } from '../models/Body_uploadDocMedia';
 import type { DocBodyUpdate } from '../models/DocBodyUpdate';
 import type { DocCreateRequest } from '../models/DocCreateRequest';
+import type { DocMediaResponse } from '../models/DocMediaResponse';
 import type { DocMetaUpdate } from '../models/DocMetaUpdate';
 import type { DocMoveRequest } from '../models/DocMoveRequest';
 import type { EmbedRequest } from '../models/EmbedRequest';
@@ -93,7 +95,7 @@ export class KnowledgeService {
     }
     /**
      * List Knowledge
-     * List every Knowledge document under the workspace via ``Knowledge.walk``.
+     * List every Knowledge document, plus each host's TeX manuscripts.
      * @param tag Only notes carrying this tag.
      * @param status Only notes with this lifecycle status.
      * @param molabSession
@@ -123,6 +125,8 @@ export class KnowledgeService {
     /**
      * Get Note
      * Return one document's full body via ``Knowledge.open``.
+     *
+     * A ``.tex`` / ``.ltx`` path is the file bytes, not a Knowledge document.
      * @param path The document's workspace-relative path (its identity).
      * @param molabSession
      * @returns NoteDetailResponse Successful Response
@@ -148,7 +152,7 @@ export class KnowledgeService {
     }
     /**
      * Create Doc
-     * Create a :class:`Note` under *hostPath* (the workspace root when omitted).
+     * Create one of the six classes under *hostPath* (the workspace root when omitted).
      * @param requestBody
      * @param molabSession
      * @returns NoteSummary Successful Response
@@ -350,7 +354,7 @@ export class KnowledgeService {
     }
     /**
      * Export Doc
-     * Export a document as its narrative markdown.
+     * Export a document as its narrative markdown, or the TeX file itself.
      * @param path The note Concept's workspace-relative document path (its identity).
      * @param molabSession
      * @returns any Successful Response
@@ -368,6 +372,62 @@ export class KnowledgeService {
             },
             query: {
                 'path': path,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * Upload Doc Media
+     * Write one image beside the document, under ``knowledges/figs/``.
+     * @param path The document the figure belongs to.
+     * @param formData
+     * @param molabSession
+     * @returns DocMediaResponse Successful Response
+     * @throws ApiError
+     */
+    public static uploadDocMedia(
+        path: string,
+        formData: Body_uploadDocMedia,
+        molabSession?: (string | null),
+    ): CancelablePromise<DocMediaResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/knowledge/doc/media',
+            cookies: {
+                'molab_session': molabSession,
+            },
+            query: {
+                'path': path,
+            },
+            formData: formData,
+            mediaType: 'multipart/form-data',
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * Export Notebook
+     * Zip one host's markdown documents, the figures they cite, and an embed list.
+     * @param hostPath Workspace-relative host. Empty exports the workspace root's documents.
+     * @param molabSession
+     * @returns any Successful Response
+     * @throws ApiError
+     */
+    public static exportNotebook(
+        hostPath: string = '',
+        molabSession?: (string | null),
+    ): CancelablePromise<any> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/knowledge/export',
+            cookies: {
+                'molab_session': molabSession,
+            },
+            query: {
+                'hostPath': hostPath,
             },
             errors: {
                 422: `Validation Error`,

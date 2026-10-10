@@ -39,7 +39,27 @@ export function isDirty(original: string, current: string): boolean {
   return normalizeMarkdown(original) !== normalizeMarkdown(current);
 }
 
+/**
+ * Put a percent-encoded `molab:` link target back to the scheme the server stores.
+ * Other targets are left as the editor serialized them.
+ */
+export function restoreMolabLinkTargets(markdown: string): string {
+  return markdown.replace(
+    /\]\((<)?([^)\s>]+)(>)?\)/g,
+    (full, open: string | undefined, target: string, close: string | undefined) => {
+      let decoded = target;
+      try {
+        decoded = decodeURIComponent(target);
+      } catch {
+        return full;
+      }
+      if (!decoded.startsWith("molab:") || decoded === target) return full;
+      return `](${open ?? ""}${decoded}${close ?? ""})`;
+    },
+  );
+}
+
 /** Build the normalized update payload sent to the workspace facade. */
 export function buildNoteDocUpdate(path: string, body: string): NoteDocUpdate {
-  return { path, body: normalizeMarkdown(body) };
+  return { path, body: normalizeMarkdown(restoreMolabLinkTargets(body)) };
 }

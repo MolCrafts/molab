@@ -353,6 +353,66 @@ class TestCreateDoc:
         assert response.json()["hostPath"] == ""
         assert (Path(str(ws.root)) / "knowledges" / "root-note.md").is_file()
 
+    def test_finding_without_a_source_is_422(self, served: ServedFactory, lab: RunFixture) -> None:
+        ws, exp, _run = lab
+        host = _experiment_host(ws, exp)
+        with served(ws) as client:
+            response = client.post(
+                "/api/knowledge/doc",
+                json={"name": "Tg", "cls": "Finding", "hostPath": host, "body": "# Tg\n"},
+            )
+        assert response.status_code == 422, response.text
+        assert not (Path(str(exp.resolve())) / "knowledges" / "tg.md").exists()
+
+    def test_finding_records_the_run_source(self, served: ServedFactory, lab: RunFixture) -> None:
+        from molab.workspace.refs import ref_of
+
+        ws, exp, run = lab
+        host = _experiment_host(ws, exp)
+        target = str(ref_of(run))
+        with served(ws) as client:
+            response = client.post(
+                "/api/knowledge/doc",
+                json={
+                    "name": "Tg Result",
+                    "cls": "Finding",
+                    "hostPath": host,
+                    "body": "# Tg rose\n",
+                    "sources": [{"kind": "run", "ref": target}],
+                },
+            )
+        assert response.status_code == 201, response.text
+        body = response.json()
+        assert body["cls"] == "Finding"
+        assert body["relPath"] == f"{host}/knowledges/tg-result.md"
+        text = (Path(str(exp.resolve())) / "knowledges" / "tg-result.md").read_text()
+        assert "class: Finding" in text
+        assert target in text
+
+    def test_literature_stores_bib_fields(self, served: ServedFactory, lab: RunFixture) -> None:
+        from molab.knowledge import Knowledge
+
+        ws, _exp, _run = lab
+        with served(ws) as client:
+            response = client.post(
+                "/api/knowledge/doc",
+                json={
+                    "name": "Glass Paper",
+                    "cls": "Literature",
+                    "title": "Glass transition",
+                    "authors": ["Lin"],
+                    "year": 2020,
+                    "doi": "10.1000/glass",
+                },
+            )
+        assert response.status_code == 201, response.text
+        assert response.json()["cls"] == "Literature"
+        doc = Knowledge.open(Path(str(ws.root)) / "knowledges" / "glass-paper.md")
+        assert doc.record.title == "Glass transition"
+        assert doc.record.authors == ("Lin",)
+        assert doc.record.year == 2020
+        assert doc.record.doi == "10.1000/glass"
+
 
 class TestEmbedDoc:
     """``embed_doc``: one typed link from a document to a live entity."""
@@ -502,6 +562,10 @@ class TestNoteCards:
         assert card["kind"] == "run"
         assert card["id"] == run.id
         assert card["missing"] is False
+        assert card["status"] == run.status_label
+        if run.parameters:
+            assert card["detail"]
+            assert next(iter(sorted(run.parameters))) in card["detail"]
 
     def test_a_missing_run_ref_stays_200(self, served: ServedFactory, lab: RunFixture) -> None:
         from molab.knowledge.concept import append_link
@@ -815,6 +879,7 @@ class TestAssetEmbedResolution:
         assert card["kind"] == "asset"
         assert card["title"] == "mydata"
         assert card["relPath"] is None
+        assert card["detail"] == asset.scope.kind
 
     def test_route_source_does_not_parse_asset_directories(self) -> None:
         source = inspect.getsource(knowledge_routes)
@@ -823,3 +888,74 @@ class TestAssetEmbedResolution:
         resolver = inspect.getsource(knowledge_routes._ref_card)
         for name in ("RefNotFoundError", "AmbiguousRefError", "InvalidRefError"):
             assert name in resolver
+
+
+class TestDocMedia:
+    """``upload_doc_media`` writes a figure beside the document."""
+
+    def test_png_lands_under_figs(self, served: ServedFactory, lab: RunFixture) -> None:
+        ws, _exp, _run = lab
+        png = b"\x89PNG\r\n\x1a\n" + b"x" * 8
+        with served(ws) as client:
+            response = client.post(
+                "/api/knowledge/doc/media",
+                params={"path": "knowledges/idea.md"},
+                files={"file": ("plot.png", png, "image/png")},
+            )
+        assert response.status_code == 201, response.text
+        assert response.json()["path"] == "figs/plot.png"
+        assert (Path(str(ws.root)) / "knowledges" / "figs" / "plot.png").read_bytes() == png
+
+    def test_text_file_is_415(self, served: ServedFactory, lab: RunFixture) -> None:
+        ws, _exp, _run = lab
+        with served(ws) as client:
+            response = client.post(
+                "/api/knowledge/doc/media",
+                params={"path": "knowledges/idea.md"},
+                files={"file": ("notes.txt", b"hello", "text/plain")},
+            )
+        assert response.status_code == 415, response.text
+
+
+class TestExportNotebook:
+    """``export_notebook`` zips one host's documents and the figures they cite."""
+
+    def test_zip_contains_the_document_its_figure_and_the_embed_list(
+        self, served: ServedFactory, lab: RunFixture
+    ) -> None:
+        import io
+        import json
+        import zipfile
+
+        from molab.knowledge.concept import append_link
+        from molab.workspace.refs import ref_of
+
+        ws, _exp, run = lab
+        png = b"\x89PNG\r\n\x1a\n" + b"y" * 4
+        note = Note(Path(str(ws.root)) / "knowledges" / "idea")
+        append_link(note, str(ref_of(run)), role="records")
+        with served(ws) as client:
+            uploaded = client.post(
+                "/api/knowledge/doc/media",
+                params={"path": "knowledges/idea.md"},
+                files={"file": ("plot.png", png, "image/png")},
+            )
+            assert uploaded.status_code == 201, uploaded.text
+            current = Path(str(ws.root)).joinpath("knowledges", "idea.md").read_text()
+            edited = client.put(
+                "/api/knowledge/doc",
+                params={"path": "knowledges/idea.md"},
+                json={"body": current + "\n![plot](figs/plot.png)\n"},
+            )
+            assert edited.status_code == 200, edited.text
+            response = client.get("/api/knowledge/export")
+        assert response.status_code == 200, response.text
+        assert response.headers["content-type"] == "application/zip"
+        archive = zipfile.ZipFile(io.BytesIO(response.content))
+        names = set(archive.namelist())
+        assert "knowledges/idea.md" in names
+        assert "knowledges/figs/plot.png" in names
+        assert archive.read("knowledges/figs/plot.png") == png
+        embeds = json.loads(archive.read("embeds.json"))
+        idea = next(row for row in embeds if row["path"] == "knowledges/idea.md")
+        assert any(card["id"] == run.id for card in idea["cards"])

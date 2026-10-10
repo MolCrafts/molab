@@ -5,8 +5,10 @@ import type { ExecutionAttemptCreateRequest } from "@/api/generated/models/Execu
 import type { TargetResponse } from "@/api/generated/models/TargetResponse";
 import { TargetsService } from "@/api/generated/services/TargetsService";
 import { usePermissions } from "@/app/auth";
+import { HarvestDialog } from "@/app/components/HarvestDialog";
 import {
   bypassCacheFor,
+  canHarvest,
   defaultExecutionMode,
   type ExecutionModeValue,
   executionModeOptions,
@@ -48,6 +50,7 @@ export interface RunToolbarProps {
   onRefresh: () => void;
   onCancel: () => Promise<void>;
   onDispatched?: (executionId: string) => void;
+  onHarvested?: (path: string) => void;
 }
 
 export function RunToolbar({
@@ -56,6 +59,7 @@ export function RunToolbar({
   onRefresh,
   onCancel,
   onDispatched,
+  onHarvested,
 }: RunToolbarProps): JSX.Element {
   const { writeDeniedReason } = usePermissions();
   const selectedExecution = run.executionHistory.find(
@@ -242,6 +246,15 @@ export function RunToolbar({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {canHarvest(run.status) && onHarvested && (
+        <HarvestDialog
+          projectId={run.projectId}
+          experimentId={run.experimentId}
+          runId={run.id}
+          onHarvested={onHarvested}
+        />
+      )}
 
       {canCancelSelected && (
         <WorkbenchIconAction

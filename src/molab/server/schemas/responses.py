@@ -651,6 +651,7 @@ class ManagedAssetResponse(ApiModel):
     title: str
     createdAt: str
     versionCount: int = 0
+    ref: str
 
     @classmethod
     def from_model(cls, asset: Asset, version_count: int) -> ManagedAssetResponse:
@@ -663,12 +664,15 @@ class ManagedAssetResponse(ApiModel):
         Returns:
             The response model.
         """
+        from molab.workspace.refs import ref_of
+
         return cls(
             id=asset.id,
             projectId=asset.project_id or "",
             title=asset.title,
             createdAt=asset.created_at.isoformat(),
             versionCount=version_count,
+            ref=str(ref_of(asset)),
         )
 
 

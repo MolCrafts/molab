@@ -11,6 +11,7 @@ export type EntityCard = {
     title: string;
     relPath?: (string | null);
     status?: (string | null);
+    detail?: (string | null);
     ref?: (string | null);
     missing?: boolean;
 };

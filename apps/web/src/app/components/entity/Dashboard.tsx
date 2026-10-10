@@ -7,9 +7,15 @@ import { WorkbenchAction, WorkbenchIconAction, WorkbenchTag } from "@/components
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { Check, Copy, type LucideIcon } from "lucide-react";
-import { type JSX, type ReactNode, useId, useState } from "react";
+import {
+  type JSX,
+  type ReactNode,
+  type PointerEvent as ReactPointerEvent,
+  useId,
+  useState,
+} from "react";
 
-import { STATUS_GROUPS } from "@/app/runs/statusGroups";
+import { STATUS_GROUPS, type StatusGroupId } from "@/app/runs/statusGroups";
 import { cn } from "@/lib/utils";
 
 /** Minimal status rollup shape (mirrors RunStatusCounts without importing it). */
@@ -179,6 +185,8 @@ interface DashboardCardProps {
   /** Copy payload for the header copy control. */
   copyText?: string;
   copyLabel?: string;
+  /** Drag the header. Buttons in the action slot do not start a drag. */
+  onHeaderPointerDown?: (event: ReactPointerEvent<HTMLElement>) => void;
 }
 
 /**
@@ -197,6 +205,7 @@ export const DashboardCard = ({
   count,
   copyText,
   copyLabel,
+  onHeaderPointerDown,
 }: DashboardCardProps): JSX.Element => {
   const headingId = useId();
   const hasHeader =
@@ -213,7 +222,13 @@ export const DashboardCard = ({
       )}
     >
       {hasHeader && (
-        <header className="flex h-control-compact items-center gap-2 border-b border-border px-3">
+        <header
+          className={cn(
+            "flex h-control-compact items-center gap-2 border-b border-border px-3",
+            onHeaderPointerDown && "cursor-grab touch-none active:cursor-grabbing",
+          )}
+          onPointerDown={onHeaderPointerDown}
+        >
           {Icon != null && (
             <Icon
               className={cn(
@@ -242,7 +257,10 @@ export const DashboardCard = ({
               {description}
             </span>
           )}
-          <div className="ml-auto flex shrink-0 items-center gap-1">
+          <div
+            className="ml-auto flex shrink-0 items-center gap-1"
+            onPointerDown={(event) => event.stopPropagation()}
+          >
             {copyText !== undefined && (
               <CopyButton
                 value={copyText}
@@ -267,6 +285,8 @@ interface StatusDistributionProps {
   legend?: boolean;
   /** Noun for the accessible total. Default "runs". */
   unit?: string;
+  /** Statuses drawn on the bar and in the legend. Default is every group. */
+  groups?: readonly StatusGroupId[];
   className?: string;
 }
 
@@ -275,19 +295,22 @@ export const StatusDistribution = ({
   counts,
   legend = true,
   unit = "runs",
+  groups,
   className,
 }: StatusDistributionProps): JSX.Element => {
-  const empty = counts.total === 0;
+  const specs = groups ? STATUS_GROUPS.filter((group) => groups.includes(group.id)) : STATUS_GROUPS;
+  const total = groups ? specs.reduce((sum, group) => sum + counts[group.id], 0) : counts.total;
+  const empty = total === 0;
 
   return (
     <div className={cn("space-y-2", className)}>
       <div
         className="flex h-1.5 overflow-hidden rounded-control bg-muted"
         role="img"
-        aria-label={empty ? `No ${unit}` : `Status mix across ${counts.total} ${unit}`}
+        aria-label={empty ? `No ${unit}` : `Status mix across ${total} ${unit}`}
       >
         {!empty &&
-          STATUS_GROUPS.map((group) => {
+          specs.map((group) => {
             const value = counts[group.id];
             if (value === 0) return null;
             return (
@@ -296,7 +319,7 @@ export const StatusDistribution = ({
                 title={`${group.label}: ${value}`}
                 className="h-full min-w-hairline transition-[width]"
                 style={{
-                  width: `${(value / counts.total) * 100}%`,
+                  width: `${(value / total) * 100}%`,
                   backgroundColor: group.color,
                 }}
               />
@@ -305,7 +328,7 @@ export const StatusDistribution = ({
       </div>
       {legend && (
         <ul className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3">
-          {STATUS_GROUPS.map((group) => {
+          {specs.map((group) => {
             const value = counts[group.id];
             return (
               <li key={group.id} className="flex items-center justify-between gap-2 text-label">

@@ -15,13 +15,18 @@ remote/read-only served workspace). A missing document is a 404.
 
 from __future__ import annotations
 
+import io
+import json
 import logging
 import os
+import re
+import zipfile
 from pathlib import Path as _StdPath
+from pathlib import PurePosixPath
 from typing import TYPE_CHECKING, Annotated, Literal
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
-from fastapi.responses import PlainTextResponse
+from fastapi import APIRouter, Depends, File, HTTPException, Query, Request, UploadFile, status
+from fastapi.responses import PlainTextResponse, StreamingResponse
 from pydantic import BaseModel
 
 from molab.knowledge.concepts import Note
@@ -81,6 +86,7 @@ class EntityCard(BaseModel):
     title: str
     relPath: str | None = None
     status: str | None = None
+    detail: str | None = None
     ref: str | None = None
     missing: bool = False
 
@@ -113,10 +119,31 @@ class EmbedResponse(BaseModel):
     role: EdgeRole
 
 
+class DocSource(BaseModel):
+    """One source a sourced document is derived from."""
+
+    kind: Literal["run", "experiment", "asset", "project", "reference"]
+    ref: str
+
+
 class DocCreateRequest(BaseModel):
     name: str
     body: str = ""
     hostPath: str | None = None
+    cls: Literal["Note", "Literature", "Report", "Finding", "Plan", "Observation"] = "Note"
+    sources: list[DocSource] = []
+    title: str | None = None
+    authors: list[str] | None = None
+    year: int | None = None
+    doi: str | None = None
+    venue: str | None = None
+    url: str | None = None
+
+
+class DocMediaResponse(BaseModel):
+    """Path of an uploaded figure, relative to the document."""
+
+    path: str
 
 
 class DocBodyUpdate(BaseModel):
@@ -175,25 +202,109 @@ def _host_rel(workspace: Workspace, doc_path: object) -> str:
     return "" if rel == "." else rel
 
 
+def _host_folder(workspace: Workspace, host_path: str | None) -> Folder:
+    """The workspace, project, experiment, or run *host_path* names.
+
+    Raises:
+        HTTPException: 404 when *host_path* is not one of those folders.
+    """
+    wanted = host_path or ""
+    if wanted == "":
+        return workspace
+    root = _StdPath(str(workspace.root))
+    folders: list[Folder] = []
+    for project in workspace.list_projects():
+        folders.append(project)
+        for experiment in project.list_experiments():
+            folders.append(experiment)
+            folders.extend(experiment.list_runs())
+    for folder in folders:
+        try:
+            rel = _StdPath(str(folder.resolve())).relative_to(root).as_posix()
+        except ValueError:
+            continue
+        if rel == wanted:
+            return folder
+    raise HTTPException(status.HTTP_404_NOT_FOUND, f"host {wanted!r} not found")
+
+
 def _resolve_host(workspace: Workspace, host_path: str | None) -> str:
     """Absolute path of *host_path*, or the workspace root when it is empty.
 
     Raises:
-        HTTPException: 404 when *host_path* is not a host ``list_hosts`` yields.
+        HTTPException: 404 when *host_path* is not a host folder.
     """
-    if host_path is None or host_path == "":
-        return str(workspace.root)
-    root = _StdPath(str(workspace.root))
-    for host in Workspace.list_hosts(workspace.root, fs=workspace.fs):
-        try:
-            rel = _StdPath(str(host)).relative_to(root).as_posix()
-        except ValueError:
-            continue
-        if rel == ".":
-            rel = ""
-        if rel == host_path:
-            return workspace.fs.join(str(workspace.root), host_path)
-    raise HTTPException(status.HTTP_404_NOT_FOUND, f"host {host_path!r} not found")
+    return str(_host_folder(workspace, host_path).resolve())
+
+
+def _source_from_request(workspace: Workspace, source: DocSource) -> object:
+    """Turn one create-request source into a :class:`SourceRef`."""
+    from molab.knowledge.knowledge_item import SourceRef
+    from molab.workspace.refs import MolabRef, is_ref, parse_ref
+
+    if source.kind == "reference":
+        text = source.ref.strip()
+        if text.upper().startswith("DOI:"):
+            text = "https://doi.org/" + text.split(":", 1)[1].strip()
+        elif text.startswith("10."):
+            text = "https://doi.org/" + text
+        if not text.startswith(("http://", "https://")):
+            raise HTTPException(
+                status.HTTP_422_UNPROCESSABLE_CONTENT,
+                f"reference {source.ref!r} is not an http(s) URL or a DOI",
+            )
+        return SourceRef(kind="reference", ref=text)
+    if source.kind == "project":
+        ref = (
+            parse_ref(source.ref, kind="project")
+            if is_ref(source.ref)
+            else MolabRef(project_id=source.ref)
+        )
+        return SourceRef.of(workspace.find(ref))
+    return SourceRef.of(_resolve_embed_entity(workspace, source.kind, source.ref))
+
+
+_IMAGE_LINK = re.compile(r"!\[[^\]]*\]\((<)?([^)\s>]+)(>)?\)")
+_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
+_MEDIA_LIMIT = 8 * 1024 * 1024
+
+
+def _image_workspace_rel(doc_rel: str, src: str) -> str | None:
+    """Workspace-relative path of a markdown image, or ``None`` when it is external."""
+    text = src.strip()
+    if not text or text.startswith(("#", "/")):
+        return None
+    if text.startswith(("http://", "https://", "data:", "/api/")):
+        return None
+    parts: list[str] = []
+    for part in (PurePosixPath(doc_rel).parent / text).parts:
+        if part == "..":
+            if not parts:
+                return None
+            parts.pop()
+        elif part not in {"", "."}:
+            parts.append(part)
+    return "/".join(parts) or None
+
+
+def _card_facts(entity: object) -> tuple[str | None, str | None]:
+    """``(status, detail)`` for a resolved card target."""
+    from molab.workspace.domain import Asset
+    from molab.workspace.run import Run
+
+    if isinstance(entity, Note):
+        return entity.status(), None
+    if isinstance(entity, Run):
+        params = entity.parameters
+        detail: str | None = None
+        if params:
+            parts = [f"{key}={params[key]}" for key in sorted(params)]
+            text = ", ".join(parts)
+            detail = text if len(text) <= 160 else text[:157] + "…"
+        return entity.status_label, detail
+    if isinstance(entity, Asset):
+        return None, entity.scope.kind
+    return None, None
 
 
 def _require_writable(request: Request) -> None:
@@ -303,11 +414,14 @@ def _ref_card(workspace: Workspace, target: str) -> EntityCard:
     rel = (
         workspace_relative(workspace.root, entity.resolve()) if isinstance(entity, Folder) else None
     )
+    card_status, detail = _card_facts(entity)
     return EntityCard(
         kind=parsed.kind,
         id=_ref_tail(target),
         title=title,
         relPath=rel,
+        status=card_status,
+        detail=detail,
         ref=target,
         missing=False,
     )
@@ -661,18 +775,37 @@ def create_doc(
     body: DocCreateRequest,
     workspace: Workspace = Depends(get_workspace),
 ) -> NoteSummary:
-    """Create a :class:`Note` under *hostPath* (the workspace root when omitted)."""
+    """Create one of the six classes under *hostPath* (the workspace root when omitted)."""
+    from molab.knowledge.concepts import parse_class
+    from molab.knowledge.reference_meta import ReferenceMeta
     from molab.knowledge.write import write_knowledge
 
+    klass = parse_class(body.cls)
     host = _resolve_host(workspace, body.hostPath)
-    note = write_knowledge(
-        host,
-        name=body.name,
-        of=Note,
-        created_by="ui",
-        text=body.body,
-        fs=workspace.fs,
-    )
+    sources = [_source_from_request(workspace, item) for item in body.sources]
+    record = None
+    if body.cls == "Literature":
+        record = ReferenceMeta(
+            title=body.title,
+            authors=tuple(body.authors or ()),
+            year=body.year,
+            doi=body.doi,
+            venue=body.venue,
+            url=body.url,
+        )
+    try:
+        note = write_knowledge(
+            host,
+            name=body.name,
+            of=klass,
+            sources=sources,
+            created_by="ui",
+            text=body.body,
+            record=record,
+            fs=workspace.fs,
+        )
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(exc)) from exc
     return _note_summary(workspace, note)
 
 
@@ -832,4 +965,101 @@ def export_doc(
         content=markdown,
         media_type="text/markdown",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+def _figure_name(raw: str | None) -> str:
+    """A safe ``figs/`` filename, or 415 when the suffix is not an image."""
+    name = _StdPath(raw or "image").name
+    suffix = _StdPath(name).suffix.lower()
+    if suffix not in _IMAGE_SUFFIXES:
+        raise HTTPException(
+            status.HTTP_415_UNSUPPORTED_MEDIA_TYPE,
+            f"{suffix or 'file'} is not a figure",
+        )
+    stem = re.sub(r"[^A-Za-z0-9._-]+", "-", _StdPath(name).stem).strip(".-")[:80] or "image"
+    return f"{stem}{suffix}"
+
+
+@router.post(
+    "/doc/media",
+    response_model=DocMediaResponse,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(_require_writable)],
+)
+async def upload_doc_media(
+    path: str = Query(..., description="The document the figure belongs to."),
+    file: UploadFile = File(...),
+    workspace: Workspace = Depends(get_workspace),
+) -> DocMediaResponse:
+    """Write one image beside the document, under ``knowledges/figs/``."""
+    _reject_tex(path)
+    doc = _open_doc(workspace, path)
+    filename = _figure_name(file.filename)
+    data = await file.read()
+    if not data:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, "empty figure")
+    if len(data) > _MEDIA_LIMIT:
+        raise HTTPException(status.HTTP_413_CONTENT_TOO_LARGE, "figure exceeds 8 MiB")
+    host = _host_folder(workspace, _host_rel(workspace, doc.path))
+    store = host.files
+    rel = PurePosixPath("knowledges") / "figs" / filename
+    stem, suffix = rel.stem, rel.suffix
+    candidate = rel
+    index = 2
+    while workspace.fs.is_file(str(store.resolve(candidate.as_posix()))):
+        candidate = rel.with_name(f"{stem}-{index}{suffix}")
+        index += 1
+    store.put(candidate.as_posix(), data)
+    return DocMediaResponse(path=f"figs/{candidate.name}")
+
+
+@router.get("/export")
+def export_notebook(
+    hostPath: str = Query(
+        "",
+        description="Workspace-relative host. Empty exports the workspace root's documents.",
+    ),
+    workspace: Workspace = Depends(get_workspace),
+) -> StreamingResponse:
+    """Zip one host's markdown documents, the figures they cite, and an embed list."""
+    from molab.knowledge import Knowledge
+    from molab.knowledge.tex_docs import is_tex_file
+
+    _host_folder(workspace, hostPath or None)
+    wanted = hostPath or ""
+    buffer = io.BytesIO()
+    embeds: list[dict[str, object]] = []
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+        seen: set[str] = set()
+        for item in Knowledge(workspace.root, fs=workspace.fs).walk():
+            rel = _rel(workspace, item.path)
+            if is_tex_file(rel) or _host_rel(workspace, item.path) != wanted:
+                continue
+            text = workspace.fs.read_text(str(item.path))
+            archive.writestr(rel, text)
+            embeds.append(
+                {
+                    "path": rel,
+                    "cards": [card.model_dump() for card in _resolve_cards(workspace, item)],
+                }
+            )
+            for match in _IMAGE_LINK.finditer(text):
+                image_rel = _image_workspace_rel(rel, match.group(2))
+                if image_rel is None or image_rel in seen:
+                    continue
+                if PurePosixPath(image_rel).suffix.lower() not in _IMAGE_SUFFIXES:
+                    continue
+                absolute = workspace.fs.join(str(workspace.root), image_rel)
+                if not workspace.fs.is_file(absolute):
+                    continue
+                seen.add(image_rel)
+                archive.writestr(image_rel, workspace.fs.read_bytes(absolute))
+        archive.writestr("embeds.json", json.dumps(embeds, indent=2) + "\n")
+    payload = buffer.getvalue()
+    label = PurePosixPath(wanted).name if wanted else "workspace"
+    return StreamingResponse(
+        io.BytesIO(payload),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{label}-notebook.zip"'},
     )

@@ -219,6 +219,8 @@ export interface AssetSummary {
   runId?: string;
   /** Scope leaf kind: `workspace` / `project` / `experiment` / `run`. */
   scopeKind?: string;
+  /** Server-composed molab reference. */
+  ref?: string;
 }
 
 export interface WorkflowSummary {
@@ -296,7 +298,7 @@ export type CoreObjectView = "overview" | "executions" | "logs" | "metrics" | "s
 /** Core views plus stable tab values contributed by independently loaded plugins. */
 export type ObjectView = CoreObjectView | (string & {});
 
-export type ExperimentView = "overview" | "workflow" | "runs";
+export type ExperimentView = "overview" | "workflow" | "runs" | "notebook";
 export type ProjectView = "overview" | "experiments" | "assets" | "settings";
 
 export interface ObjectSelection {

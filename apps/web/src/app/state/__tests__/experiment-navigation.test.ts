@@ -56,6 +56,9 @@ describe("experiment navigation", () => {
     expect(experimentPath("p 1", "e/1", "workflow")).toBe(
       "/projects/p%201/experiments/e%2F1/workflow",
     );
+    expect(experimentPath("p 1", "e/1", "notebook")).toBe(
+      "/projects/p%201/experiments/e%2F1/notebook",
+    );
   });
 
   it("redirects legacy compare URLs to /compare", () => {
@@ -71,6 +74,12 @@ describe("experiment navigation", () => {
         new URLSearchParams(),
       ),
     ).toEqual({ objectType: "experiment", objectId: "e/1", experimentView: "workflow" });
+    expect(
+      buildSelectionFromLocation(
+        "/projects/p%201/experiments/e%2F1/notebook",
+        new URLSearchParams(),
+      ),
+    ).toEqual({ objectType: "experiment", objectId: "e/1", experimentView: "notebook" });
   });
 
   it("routes workflow selections into their owning experiment", () => {

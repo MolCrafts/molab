@@ -179,6 +179,7 @@ class TestManagedAssetResponse:
         body = ManagedAssetResponse.from_model(asset, 2)
         assert body.projectId == "p1"
         assert body.versionCount == 2
+        assert body.ref == "molab:asset/a"
 
 
 class TestAssetVersionResponse:

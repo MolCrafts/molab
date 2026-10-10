@@ -42,13 +42,13 @@ describe("workbench layout contract", () => {
 
   it("keeps Dashboard exploratory and Settings rail-only", () => {
     const coreNav = readWebSource("plugins/core/navigation.tsx");
-    const dashboard = readWebSource("app/dashboard/DashboardPage.tsx");
+    const catalog = readWebSource("app/dashboard/layout.ts");
+    const dashboard = readWebSource("app/dashboard/DashboardGrid.tsx");
 
     expect(coreNav).toContain("explorer: DashboardExplorer");
     expect(coreNav).toMatch(/id: "dashboard"[\s\S]*?shellMode: "explorer"/);
     expect(coreNav).toMatch(/id: "settings"[\s\S]*?shellMode: "rail-only"/);
-    // Posture first, one list to click, and no count printed twice: the fold is
-    // encodings, not a KPI wall plus the same numbers as a bar.
+    // The six panels are a catalog the operator can arrange, not a fixed page.
     for (const panel of [
       "Execution status",
       "Activity",
@@ -57,8 +57,9 @@ describe("workbench layout contract", () => {
       "Schedule",
       "Needs attention",
     ]) {
-      expect(dashboard).toContain(panel);
+      expect(catalog).toContain(panel);
     }
+    expect(dashboard).toContain("Arrange");
   });
 
   it("gives Compare a page frame and a single matrix scrollport", () => {

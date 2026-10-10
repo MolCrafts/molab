@@ -44,6 +44,8 @@ import {
   WorkbenchRetryAction,
 } from "@/components/workbench";
 import { cn } from "@/lib/utils";
+import { CreateDocDialog, type CreateDocInput } from "./CreateDocDialog";
+import { runsForHost } from "./docTemplates";
 import { HostPickerDialog } from "./HostPickerDialog";
 import { buildDocTree, type DocTreeNode, KB_GROUP_ID, listHostOptions } from "./knowledgeDocTree";
 import { knowledgeNoteQueryOptions } from "./queries";
@@ -254,6 +256,8 @@ export const DocTree = ({ snapshot, activeId, onSelect }: DocTreeProps): JSX.Ele
     run: () => Promise<void>;
   } | null>(null);
   const [moveTarget, setMoveTarget] = useState<{ path: string; hostPath: string } | null>(null);
+  const [createHost, setCreateHost] = useState<string | null>(null);
+  const [createError, setCreateError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!operationSuccess) return;
@@ -285,15 +289,20 @@ export const DocTree = ({ snapshot, activeId, onSelect }: DocTreeProps): JSX.Ele
     }
   };
 
-  const handleCreate = async (hostPath: string): Promise<void> => {
-    const name = await prompt({
-      title: "New document",
-      label: "Document name",
-      placeholder: "My note",
-      confirmLabel: "Create",
-    });
-    if (!name) return;
-    await guard("Creating document…", "Document created.", () => createDoc(name, hostPath));
+  const handleCreate = (hostPath: string): void => {
+    setCreateError(null);
+    setCreateHost(hostPath);
+  };
+
+  const submitCreate = async (input: CreateDocInput): Promise<void> => {
+    if (createHost === null) return;
+    try {
+      const relPath = await createDoc(input.name, createHost, input);
+      setCreateHost(null);
+      onSelect({ objectType: "knowledge", objectId: relPath });
+    } catch (err) {
+      setCreateError(err instanceof Error ? err.message : "Failed to create document.");
+    }
   };
 
   const handleRename = async (path: string, current: string): Promise<void> => {
@@ -615,6 +624,15 @@ export const DocTree = ({ snapshot, activeId, onSelect }: DocTreeProps): JSX.Ele
       )}
       {promptDialog}
       {confirmDialog}
+      <CreateDocDialog
+        open={createHost !== null}
+        runs={runsForHost(snapshot.runs, createHost ?? "")}
+        error={createError}
+        onOpenChange={(open) => {
+          if (!open) setCreateHost(null);
+        }}
+        onSubmit={submitCreate}
+      />
       <HostPickerDialog
         open={moveTarget !== null}
         onOpenChange={(open) => {

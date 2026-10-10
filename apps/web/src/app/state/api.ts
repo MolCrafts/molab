@@ -251,6 +251,7 @@ export const mapAssets = (
         sizeBytes: null,
         scopeKind: "project",
         projectId: asset.projectId || projectId,
+        ref: asset.ref,
       };
     }
     // ``scopeIds`` is the parent chain ending at the leaf scope: a run-scoped

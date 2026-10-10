@@ -1,6 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, BookOpen, Download, ExternalLink, FileText, NotebookPen } from "lucide-react";
 import { type JSX, useMemo } from "react";
+import { useNavigate } from "react-router-dom";
 import { knowledgeApi } from "@/api";
 import type { NoteDetailResponse } from "@/api/generated/models/NoteDetailResponse";
 import type { ReferenceSummary } from "@/api/generated/models/ReferenceSummary";
@@ -12,6 +13,8 @@ import {
   WorkbenchOperationState,
   WorkbenchRetryAction,
 } from "@/components/workbench";
+import { buildMolabRefIndex } from "@/lib/entity-linkify";
+import { resolveMolabRef } from "@/lib/molab-ref";
 import { DocumentControls } from "@/plugins/knowledge/DocumentControls";
 import { EntityRefCard } from "@/plugins/knowledge/EntityRefCard";
 import { KnowledgeDashboard } from "@/plugins/knowledge/KnowledgeDashboard";
@@ -41,6 +44,8 @@ const formatReference = (ref: ReferenceSummary): string => {
  */
 export const KnowledgeViewer = ({ selection, snapshot }: RendererProps): JSX.Element => {
   const nav = useNavigationState(snapshot);
+  const navigate = useNavigate();
+  const refIndex = useMemo(() => buildMolabRefIndex(snapshot), [snapshot]);
   const queryClient = useQueryClient();
   const listQuery = useKnowledgeListQuery();
   const data = listQuery.data;
@@ -133,7 +138,14 @@ export const KnowledgeViewer = ({ selection, snapshot }: RendererProps): JSX.Ele
               <p className="text-body-lg italic text-muted-foreground">Loading…</p>
             ) : (
               <div className="space-y-4">
-                <NoteEditor note={note} onSaved={handleSaved} />
+                <NoteEditor
+                  note={note}
+                  onSaved={handleSaved}
+                  onOpenHref={(href) => {
+                    const hit = resolveMolabRef(href, refIndex);
+                    if (hit) navigate(hit.path);
+                  }}
+                />
                 {note.cards && note.cards.length > 0 && (
                   <section className="space-y-2 border-t border-border/50 pt-4">
                     <h3 className="text-label font-semibold uppercase tracking-wide text-muted-foreground">

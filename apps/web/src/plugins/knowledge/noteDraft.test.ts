@@ -1,5 +1,10 @@
 import { describe, expect, it } from "@rstest/core";
-import { buildNoteDocUpdate, isDirty, normalizeMarkdown } from "./noteDraft";
+import {
+  buildNoteDocUpdate,
+  isDirty,
+  normalizeMarkdown,
+  restoreMolabLinkTargets,
+} from "./noteDraft";
 
 describe("normalizeMarkdown", () => {
   it("is idempotent (normalize(normalize(x)) === normalize(x))", () => {
@@ -51,9 +56,26 @@ describe("isDirty", () => {
   });
 });
 
+describe("restoreMolabLinkTargets", () => {
+  it("decodes a percent-encoded molab target and leaves other links", () => {
+    const raw = "[run](molab%3Aexperiment%2FE%2Frun%2FR) and [web](https%3A%2F%2Fexample.com)";
+    expect(restoreMolabLinkTargets(raw)).toBe(
+      "[run](molab:experiment/E/run/R) and [web](https%3A%2F%2Fexample.com)",
+    );
+  });
+});
+
 describe("buildNoteDocUpdate", () => {
   it("returns a payload carrying the path and normalized body", () => {
     const update = buildNoteDocUpdate("notes/intro", "hello   \r\nworld\r\n");
     expect(update).toEqual({ path: "notes/intro", body: "hello\nworld" });
+  });
+
+  it("restores a molab link before normalizing", () => {
+    const update = buildNoteDocUpdate(
+      "knowledges/a.md",
+      "See [run](molab%3Aexperiment%2FE%2Frun%2FR)\n",
+    );
+    expect(update.body).toBe("See [run](molab:experiment/E/run/R)");
   });
 });

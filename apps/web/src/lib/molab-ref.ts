@@ -12,7 +12,7 @@ export const isMolabRef = (url: string | undefined): url is `molab:${string}` =>
   typeof url === "string" && url.startsWith(MOLAB_REF_SCHEME);
 
 export interface MolabRefTarget {
-  kind: "project" | "experiment" | "run";
+  kind: "project" | "experiment" | "run" | "asset";
   label: string;
   path: string;
 }

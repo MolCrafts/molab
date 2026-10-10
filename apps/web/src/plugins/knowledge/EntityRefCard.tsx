@@ -75,6 +75,7 @@ export const EntityRefCard = ({
         </span>
         <span className="block truncate text-micro uppercase tracking-wide text-muted-foreground">
           {card.kind}
+          {card.detail ? ` · ${card.detail}` : ""}
         </span>
       </span>
       {card.status && <StatusBadge status={card.status} size="sm" />}

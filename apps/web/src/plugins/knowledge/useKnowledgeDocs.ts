@@ -1,6 +1,8 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
 import { knowledgeApi } from "@/api";
+import type { DocCreateRequest } from "@/api/generated/models/DocCreateRequest";
+import type { DocSource } from "@/api/generated/models/DocSource";
 import type { NoteSummary } from "@/api/generated/models/NoteSummary";
 import {
   type KnowledgeListFilters,
@@ -23,7 +25,21 @@ export interface UseKnowledgeDocs {
   loading: boolean;
   error: string | null;
   reload: () => Promise<void>;
-  createDoc: (name: string, hostPath?: string | null) => Promise<void>;
+  createDoc: (
+    name: string,
+    hostPath?: string | null,
+    options?: {
+      body?: string;
+      cls?: DocCreateRequest.cls;
+      sources?: DocSource[];
+      title?: string | null;
+      authors?: string[] | null;
+      year?: number | null;
+      doi?: string | null;
+      venue?: string | null;
+      url?: string | null;
+    },
+  ) => Promise<string>;
   renameDoc: (path: string, name: string) => Promise<void>;
   moveDoc: (path: string, hostPath: string) => Promise<void>;
   deleteDoc: (path: string) => Promise<void>;
@@ -47,9 +63,17 @@ export const useKnowledgeDocs = (filters: KnowledgeDocFilters = {}): UseKnowledg
   }, [queryClient]);
 
   const createDoc = useCallback(
-    async (name: string, hostPath?: string | null): Promise<void> => {
-      await knowledgeApi.createDoc(name, { hostPath: hostPath ?? null });
+    async (
+      name: string,
+      hostPath?: string | null,
+      options?: Parameters<UseKnowledgeDocs["createDoc"]>[2],
+    ): Promise<string> => {
+      const created = await knowledgeApi.createDoc(name, {
+        hostPath: hostPath ?? null,
+        ...options,
+      });
       await invalidateLists();
+      return created.relPath;
     },
     [invalidateLists],
   );

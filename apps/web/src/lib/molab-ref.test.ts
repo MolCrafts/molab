@@ -48,6 +48,14 @@ describe("resolveMolabRef", () => {
     expect(hit?.rest).toBe("");
   });
 
+  it("resolves an asset ref from the index", () => {
+    const withAsset = new Map(index);
+    withAsset.set("molab:asset/A1", { kind: "asset", label: "traj", path: "/assets/A1" });
+    const hit = resolveMolabRef("molab:asset/A1", withAsset);
+    expect(hit?.kind).toBe("asset");
+    expect(hit?.path).toBe("/assets/A1");
+  });
+
   it("rejects a suffix that is not under a known run", () => {
     expect(resolveMolabRef("molab:experiment/E1/run/R9", index)).toBeNull();
     expect(resolveMolabRef("molab:experiment/E1/extra", index)).toBeNull();

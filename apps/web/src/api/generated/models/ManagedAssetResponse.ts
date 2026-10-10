@@ -8,5 +8,6 @@ export type ManagedAssetResponse = {
     title: string;
     createdAt: string;
     versionCount?: number;
+    ref: string;
 };
 

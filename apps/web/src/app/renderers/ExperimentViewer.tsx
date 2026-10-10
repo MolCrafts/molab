@@ -63,6 +63,7 @@ import { formatDateTime } from "@/lib/datetime";
 import { formatDuration as formatDurationSeconds } from "@/lib/format-time";
 import { getWorkspaceFs } from "@/lib/workspace-fs";
 import { formatQualifiedPath, runWorkspaceRelativePath } from "@/lib/workspace-path";
+import { ExperimentNotebook } from "@/plugins/knowledge/ExperimentNotebook";
 import { isPluginEnabled, usePluginPreferencesGeneration } from "@/plugins/preferences";
 
 const WorkflowGraphViewer = lazy(() =>
@@ -141,7 +142,7 @@ export const ExperimentViewer = ({
   const setEntityTab = useCallback(
     (value: string) => {
       const experimentView: ExperimentView =
-        value === "workflow" || value === "runs" ? value : "overview";
+        value === "workflow" || value === "runs" || value === "notebook" ? value : "overview";
       setSelection({ objectType: "experiment", objectId: experimentId, experimentView });
     },
     [experimentId, setSelection],
@@ -698,6 +699,19 @@ export const ExperimentViewer = ({
               </InventoryCanvas>
             </OverviewSurface>
           ),
+        },
+        {
+          value: "notebook",
+          label: "Notebook",
+          content: experiment ? (
+            <OverviewSurface surfaceClassName="flex min-h-0 flex-col overflow-hidden">
+              <ExperimentNotebook
+                hostPath={experiment.path}
+                runs={snapshot.runs}
+                onOpen={setSelection}
+              />
+            </OverviewSurface>
+          ) : null,
         },
       ]}
     />

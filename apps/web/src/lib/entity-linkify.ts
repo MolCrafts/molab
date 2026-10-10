@@ -1,13 +1,14 @@
 /** Index of server `ref` strings for in-app markdown links. */
 
 import { experimentPath, projectPath, runPath } from "@/app/entities/paths";
-import type { ExperimentSummary, ProjectSummary, RunSummary } from "@/app/types";
+import type { AssetSummary, ExperimentSummary, ProjectSummary, RunSummary } from "@/app/types";
 import type { MolabRefTarget } from "@/lib/molab-ref";
 
 export const buildMolabRefIndex = (snapshot: {
   projects: ProjectSummary[];
   experiments: ExperimentSummary[];
   runs: RunSummary[];
+  assets?: AssetSummary[];
 }): Map<string, MolabRefTarget> => {
   const index = new Map<string, MolabRefTarget>();
   for (const project of snapshot.projects) {
@@ -32,6 +33,14 @@ export const buildMolabRefIndex = (snapshot: {
       kind: "run",
       label: run.name,
       path: runPath(run.projectId, run.experimentId, run.id),
+    });
+  }
+  for (const asset of snapshot.assets ?? []) {
+    if (!asset.ref) continue;
+    index.set(asset.ref, {
+      kind: "asset",
+      label: asset.name,
+      path: `/assets/${encodeURIComponent(asset.id)}`,
     });
   }
   return index;

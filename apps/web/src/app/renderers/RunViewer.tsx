@@ -1,3 +1,4 @@
+import { useQueryClient } from "@tanstack/react-query";
 import { FileQuestion, PlayCircle } from "lucide-react";
 import { useMemo } from "react";
 import { useCompareSet } from "@/app/compare";
@@ -14,6 +15,7 @@ import type { RendererProps } from "@/app/types";
 import { WorkbenchAction } from "@/components/workbench";
 import { pluginTabLabel } from "@/lib/plugin-tab-label";
 import { usePluginTabBadgeCounts } from "@/lib/use-plugin-tab-badge-counts";
+import { knowledgeKeys } from "@/plugins/knowledge/queries";
 
 export const RunViewer = (props: RunRendererProps): JSX.Element => {
   const {
@@ -37,6 +39,7 @@ export const RunViewer = (props: RunRendererProps): JSX.Element => {
   } = useRunViewer(props);
 
   const compare = useCompareSet();
+  const queryClient = useQueryClient();
   const project = props.snapshot.projects.find((p) => p.id === run?.projectId);
   const experiment = props.snapshot.experiments.find((e) => e.id === run?.experimentId);
   const compareWorkspace = activeWorkspace(props.snapshot.workspaces);
@@ -189,6 +192,10 @@ export const RunViewer = (props: RunRendererProps): JSX.Element => {
               selectedExecutionId={selectedExecutionId}
               onRefresh={props.onRefresh}
               onCancel={handleCancelRun}
+              onHarvested={(path) => {
+                void queryClient.invalidateQueries({ queryKey: knowledgeKeys.lists() });
+                if (path) setSelection({ objectType: "knowledge", objectId: path });
+              }}
               onDispatched={(executionId) => {
                 setSelectedExecutionId(executionId);
                 setActiveTab("executions");

@@ -219,7 +219,7 @@ export class RunsService {
     }
     /**
      * Get Execution Outputs
-     * Separate stdio, managed Artifacts, evidence, and unregistered work files.
+     * Separate stdio, managed Artifacts, evidence, and unregistered product files.
      * @param projectId
      * @param experimentId
      * @param runId
@@ -920,7 +920,7 @@ export class RunsService {
     }
     /**
      * Get Execution Outputs
-     * Separate stdio, managed Artifacts, evidence, and unregistered work files.
+     * Separate stdio, managed Artifacts, evidence, and unregistered product files.
      * @param projectId
      * @param experimentId
      * @param runId
