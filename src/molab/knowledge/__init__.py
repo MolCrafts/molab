@@ -27,7 +27,8 @@ edges, the single ``folder(host, name, of)`` location derivation, BM25F
 retrieval, named wiki sources, the read-only Zotero importer, and
 ``parse_class``. A document is written on the class:
 ``Note.mount(host, name)``, ``Finding.create(host, name, ...)``,
-``Finding.harvest(run, ...)``, ``SourceRef.normalize(sources, default_host=...)``.
+``Finding.harvest(run, ...)``, ``GeneratedParts.view(run, ...)``,
+``SourceRef.normalize(sources, default_host=...)``.
 A new document's ``knowledge.created`` history is recorded by
 :func:`molab.knowledge.write.write_knowledge`.
 
@@ -54,6 +55,7 @@ from .edges import Edge, EdgeRole
 from .errors import KnowledgeNotFoundError
 from .knowledge_item import SourceKind, SourceRef
 from .location import folder
+from .parts import GeneratedPart, GeneratedParts
 from .reference_meta import ReferenceMeta
 from .search import (
     SearchHit,
@@ -74,6 +76,8 @@ __all__ = [
     "Edge",
     "EdgeRole",
     "Finding",
+    "GeneratedPart",
+    "GeneratedParts",
     "Knowledge",
     "KnowledgeNotFoundError",
     "KnowledgeScope",

@@ -164,6 +164,40 @@ archive; the raw record already lives in `run.json` and the run's artifacts.
 `created_by` is a required keyword argument. `of` is typically `Finding`,
 `Observation` or `Report`.
 
+## Viewing generated image parts
+
+Harvest inlines truncated result text. It does not show the images a run
+emitted. `GeneratedParts.list` lists those artifacts (media type `image/*`,
+or a `part` tag; `result` and `checkpoint` artifacts are skipped).
+`GeneratedParts.view` writes a Report under the experiment. Each part is a
+`records` link to its `molab:` artifact ref, and an image part is also a
+relative `![]()` so a markdown preview can show the file. A `molab:` URL is
+not itself an image.
+
+```python
+from molab.knowledge import GeneratedParts
+
+for part in GeneratedParts.list(run):
+    print(part.part, part.path)
+
+report = GeneratedParts.view(
+    run,
+    narrative="The portrait split into hair, eyes, clothes, and mouth.",
+    created_by="lin",
+)
+```
+
+The same preconditions as harvest apply. A task body cannot call it:
+`TaskContext` has no path up to the Run. After `molab run`, store the Report
+with `molab knowledge parts --write`.
+
+From a workspace root:
+
+```console
+$ molab knowledge parts <run-id> --path .
+$ molab knowledge parts <run-id> --path . --write
+```
+
 ## Layering
 
 `molab.knowledge` depends on `molab.workspace` — a document needs a host folder
