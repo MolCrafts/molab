@@ -1,5 +1,5 @@
 import { WorkspaceService } from "@/api/generated/services/WorkspaceService";
-import type { ServedWorkspaceSummary } from "@/app/types";
+import type { ServeScope, ServedWorkspaceSummary } from "@/app/types";
 
 /** Wire node for `mapWorkspaceTree` (HTTP listing adapted via WorkspaceFs). */
 export interface WorkspaceFileNode {
@@ -25,6 +25,13 @@ export interface WorkspaceFilesResponse {
 /** Active workspace (`/api/workspace/*`): info, open, files, cache. */
 export const workspaceApi = {
   getWorkspaceInfo: () => WorkspaceService.getWorkspaceInfo(),
+  getServeScope: async (): Promise<ServeScope> => {
+    const response = await fetch("/api/workspace/scope");
+    if (!response.ok) {
+      throw new Error(`Request failed: ${response.status} ${response.statusText}`);
+    }
+    return (await response.json()) as ServeScope;
+  },
   openWorkspace: (path: string, createIfMissing = false) =>
     WorkspaceService.openWorkspace({
       kind: "local",

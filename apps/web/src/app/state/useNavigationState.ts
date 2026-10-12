@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { experimentPath, legacyCompareRedirect, projectPath } from "@/app/entities/paths";
+import { experimentPath, legacyCompareRedirect, projectPath, runPath } from "@/app/entities/paths";
 import { getNavigationContribution, leftPanelViewFromPath } from "@/app/navigation/sections";
 import type {
   ExperimentView,
@@ -62,6 +62,65 @@ export const buildSelectionFromLocation = (
   searchParams: URLSearchParams,
 ): Selection | null => {
   const objectView = parseObjectView(searchParams.get("tab"));
+
+  const loneTaskMatch = pathname.match(/^\/run\/([^/]+)\/tasks\/([^/]+)$/);
+  if (loneTaskMatch) {
+    return {
+      objectType: "task",
+      taskId: decodeURIComponent(loneTaskMatch[2]),
+      runId: decodeURIComponent(loneTaskMatch[1]),
+      objectId: decodeURIComponent(loneTaskMatch[2]),
+    };
+  }
+
+  const loneRunMatch = pathname.match(/^\/run\/([^/]+)$/);
+  if (loneRunMatch) {
+    return {
+      objectType: "run",
+      objectId: decodeURIComponent(loneRunMatch[1]),
+      objectView,
+    };
+  }
+
+  const scopedTaskMatch = pathname.match(
+    /^\/experiments\/([^/]+)\/runs\/([^/]+)\/tasks\/([^/]+)$/,
+  );
+  if (scopedTaskMatch) {
+    return {
+      objectType: "task",
+      taskId: decodeURIComponent(scopedTaskMatch[3]),
+      runId: decodeURIComponent(scopedTaskMatch[2]),
+      objectId: decodeURIComponent(scopedTaskMatch[3]),
+    };
+  }
+
+  const scopedRunMatch = pathname.match(/^\/experiments\/([^/]+)\/runs\/([^/]+)$/);
+  if (scopedRunMatch) {
+    return {
+      objectType: "run",
+      objectId: decodeURIComponent(scopedRunMatch[2]),
+      objectView,
+    };
+  }
+
+  const scopedExperimentViewMatch = pathname.match(
+    /^\/experiments\/([^/]+)\/(workflow|runs|notebook)$/,
+  );
+  if (scopedExperimentViewMatch) {
+    return {
+      objectType: "experiment",
+      objectId: decodeURIComponent(scopedExperimentViewMatch[1]),
+      experimentView: parseExperimentView(scopedExperimentViewMatch[2]),
+    };
+  }
+
+  const scopedExperimentMatch = pathname.match(/^\/experiments\/([^/]+)$/);
+  if (scopedExperimentMatch) {
+    return {
+      objectType: "experiment",
+      objectId: decodeURIComponent(scopedExperimentMatch[1]),
+    };
+  }
 
   const taskMatch = pathname.match(
     /^\/projects\/([^/]+)\/experiments\/([^/]+)\/runs\/([^/]+)\/tasks\/([^/]+)$/,
@@ -180,19 +239,15 @@ export const getSelectionPath = (
       if (!run) {
         return "/projects";
       }
-      const path = `/projects/${encodeURIComponent(run.projectId)}/experiments/${encodeURIComponent(run.experimentId)}/runs/${encodeURIComponent(run.id)}`;
-      if (!selection.objectView) {
-        return path;
-      }
-      const params = new URLSearchParams({ tab: selection.objectView });
-      return `${path}?${params.toString()}`;
+      const path = runPath(run.projectId, run.experimentId, run.id, selection.objectView);
+      return path;
     }
     case "task": {
       const run = snapshot.runs.find((item) => item.id === selection.runId);
       if (!run) {
         return "/projects";
       }
-      return `/projects/${encodeURIComponent(run.projectId)}/experiments/${encodeURIComponent(run.experimentId)}/runs/${encodeURIComponent(run.id)}/tasks/${encodeURIComponent(selection.taskId)}`;
+      return `${runPath(run.projectId, run.experimentId, run.id)}/tasks/${encodeURIComponent(selection.taskId)}`;
     }
     case "workflow": {
       const workflow = snapshot.workflows.find((item) => item.id === selection.workflowId);
@@ -238,6 +293,16 @@ export interface HierarchyRouteContext {
  * catalog has loaded, so direct links can hydrate their parent chain.
  */
 export const hierarchyRouteContextFromPath = (pathname: string): HierarchyRouteContext | null => {
+  const scopedExperiment = pathname.match(/^\/experiments\/([^/]+)/);
+  if (scopedExperiment) {
+    return {
+      projectId: "",
+      experimentId: decodeURIComponent(scopedExperiment[1]),
+    };
+  }
+  if (pathname.startsWith("/run/")) {
+    return { projectId: "", experimentId: null };
+  }
   const match = pathname.match(/^\/projects\/([^/]+)(?:\/experiments\/([^/]+))?(?:\/|$)/);
   if (!match) return null;
   return {

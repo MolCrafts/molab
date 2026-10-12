@@ -278,6 +278,13 @@ export interface ServedWorkspaceSummary {
   needsAuth?: boolean;
 }
 
+/** Kind of the directory `molab serve` opened (`GET /api/workspace/scope`). */
+export interface ServeScope {
+  kind: string;
+  id: string;
+  name: string;
+}
+
 export interface WorkspaceSnapshot {
   /**
    * The set of served workspaces (empty or single in the unchanged
@@ -285,6 +292,8 @@ export interface WorkspaceSnapshot {
    * a per-workspace header.
    */
   workspaces: ServedWorkspaceSummary[];
+  /** Null until the scope request returns. `workspace.root` keeps the full tree. */
+  serveScope: ServeScope | null;
   projects: ProjectSummary[];
   experiments: ExperimentSummary[];
   runs: RunSummary[];

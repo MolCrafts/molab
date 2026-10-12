@@ -29,6 +29,7 @@ export type { WorkspaceFilesResponse } from "@/api/workspace";
 export const buildEmptySnapshot = (): WorkspaceSnapshot => {
   return {
     workspaces: [],
+    serveScope: null,
     projects: [],
     experiments: [],
     runs: [],
@@ -105,7 +106,7 @@ export const mapExperiments = (
       summary: experiment.description || "",
       workflowFile,
       updatedAt: experiment.created,
-      projectId,
+      projectId: experiment.projectId || projectId,
       parameterSpace: (experiment.parameterSpace ?? {}) as Record<string, unknown>,
       workflowSource,
       workflowKind: experiment.workflowKind,
@@ -179,8 +180,8 @@ export const mapRuns = (
         ? "Not executed"
         : `${run.statusSummary?.total ?? executions.length} execution${(run.statusSummary?.total ?? executions.length) === 1 ? "" : "s"}`,
       updatedAt: run.finished ?? run.created,
-      projectId,
-      experimentId,
+      projectId: run.projectId || projectId,
+      experimentId: run.experimentId || experimentId,
       definitionHash: run.definitionHash ?? "",
       experimentRevisionId: run.experimentRevisionId ?? "",
       statusSummary: run.statusSummary ?? {

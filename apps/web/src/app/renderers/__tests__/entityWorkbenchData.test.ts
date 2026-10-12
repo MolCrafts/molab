@@ -82,6 +82,7 @@ const workflow: WorkflowSummary = {
 
 const snapshot: WorkspaceSnapshot = {
   workspaces: [],
+  serveScope: null,
   projects: [project],
   experiments: [
     experiment("series", { mode: ["block", "random"], ratio: [1, 2], salt: [54, 108] }),

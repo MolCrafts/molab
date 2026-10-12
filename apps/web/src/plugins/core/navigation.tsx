@@ -93,7 +93,10 @@ export const CORE_NAVIGATION: readonly NavigationContribution[] = [
       description: "Choose a project, experiment, or run from the explorer to open its workspace.",
     },
     retainSelectionFor: ["project", "experiment", "run"],
-    matches: (pathname) => pathname.startsWith("/projects"),
+    matches: (pathname) =>
+      pathname.startsWith("/projects") ||
+      pathname.startsWith("/experiments") ||
+      pathname.startsWith("/run/"),
   },
   {
     id: "runs",

@@ -57,28 +57,35 @@ router = APIRouter(
 
 
 def _get_experiment(workspace, project_id: str, experiment_id: str):  # noqa: ANN001, ANN202
-    """Strict-getter chain — returns ``Experiment`` or ``None``.
+    """The experiment inside the serve root, or ``None``.
 
-    Translates the workspace-layer ``*NotFoundError`` exceptions to a
-    boolean miss so the existing ``if not experiment:`` callers continue
-    to map missing entities onto their HTTP 404 responses.
+    Ids above the served directory are ignored. A miss stays ``None`` so
+    callers keep mapping it to HTTP 404.
     """
+    from molab.workspace.experiment import Experiment
+    from molab.workspace.scope import as_folder, resolve_in_scope
+
     try:
-        project = workspace.get_project(project_id)
-    except WorkspaceProjectNotFoundError:
+        node = resolve_in_scope(as_folder(workspace), project_id, experiment_id)
+    except (WorkspaceProjectNotFoundError, WorkspaceExperimentNotFoundError):
         return None
-    try:
-        return project.get_experiment(experiment_id)
-    except WorkspaceExperimentNotFoundError:
-        return None
+    return node if isinstance(node, Experiment) else None
 
 
-def _get_run_or_none(experiment, run_id: str):  # noqa: ANN001, ANN202
-    """Wrap ``experiment.get_run(run_id)`` to map ``RunNotFoundError`` → ``None``."""
+def _get_scoped_run(workspace, project_id: str, experiment_id: str, run_id: str):  # noqa: ANN001, ANN202
+    """The run inside the serve root, including when the root is that run."""
+    from molab.workspace.run import Run
+    from molab.workspace.scope import as_folder, resolve_in_scope
+
     try:
-        return experiment.get_run(run_id)
-    except WorkspaceRunNotFoundError:
+        node = resolve_in_scope(as_folder(workspace), project_id, experiment_id, run_id)
+    except (
+        WorkspaceProjectNotFoundError,
+        WorkspaceExperimentNotFoundError,
+        WorkspaceRunNotFoundError,
+    ):
         return None
+    return node if isinstance(node, Run) else None
 
 
 def _execution_repository(workspace, run) -> ExecutionRepository:  # noqa: ANN001
@@ -86,7 +93,7 @@ def _execution_repository(workspace, run) -> ExecutionRepository:  # noqa: ANN00
         workspace.root,
         run.run_dir,
         run_id=run.id,
-        project_id=run.experiment.project.id,
+        project_id=run.ancestor_id("workspace.project"),
         fs=workspace.fs,
     )
 
@@ -202,10 +209,7 @@ def get_run(
     run_id: str,
     workspace=Depends(get_workspace),  # noqa: ANN001
 ) -> RunResponse:
-    experiment = _get_experiment(workspace, project_id, experiment_id)
-    if not experiment:
-        raise RunNotFoundError(project_id, experiment_id, run_id)
-    run = _get_run_or_none(experiment, run_id)
+    run = _get_scoped_run(workspace, project_id, experiment_id, run_id)
     if not run:
         raise RunNotFoundError(project_id, experiment_id, run_id)
     return RunResponse.from_model(run)
@@ -224,10 +228,7 @@ def create_execution(
     workspace=Depends(get_workspace),  # noqa: ANN001
 ) -> ExecutionResponse:
     """Create one queued physical attempt without mutating the Run."""
-    experiment = _get_experiment(workspace, project_id, experiment_id)
-    if not experiment:
-        raise RunNotFoundError(project_id, experiment_id, run_id)
-    run = _get_run_or_none(experiment, run_id)
+    run = _get_scoped_run(workspace, project_id, experiment_id, run_id)
     if not run:
         raise RunNotFoundError(project_id, experiment_id, run_id)
     target = None
@@ -280,8 +281,7 @@ def list_executions(
     caller that wants the attempts alone, and the GET counterpart of the POST
     on the same path.
     """
-    experiment = _get_experiment(workspace, project_id, experiment_id)
-    run = _get_run_or_none(experiment, run_id) if experiment else None
+    run = _get_scoped_run(workspace, project_id, experiment_id, run_id)
     if run is None:
         raise RunNotFoundError(project_id, experiment_id, run_id)
     return [_execution_response(state) for state in _execution_repository(workspace, run).list()]
@@ -298,8 +298,7 @@ def get_execution_record(
     execution_id: str,
     workspace=Depends(get_workspace),  # noqa: ANN001
 ) -> ExecutionResponse:
-    experiment = _get_experiment(workspace, project_id, experiment_id)
-    run = _get_run_or_none(experiment, run_id) if experiment else None
+    run = _get_scoped_run(workspace, project_id, experiment_id, run_id)
     if run is None:
         raise RunNotFoundError(project_id, experiment_id, run_id)
     try:
@@ -320,8 +319,7 @@ def get_execution_outputs(
     workspace=Depends(get_workspace),  # noqa: ANN001
 ) -> ExecutionOutputsResponse:
     """Separate stdio, managed Artifacts, evidence, and unregistered product files."""
-    experiment = _get_experiment(workspace, project_id, experiment_id)
-    run = _get_run_or_none(experiment, run_id) if experiment else None
+    run = _get_scoped_run(workspace, project_id, experiment_id, run_id)
     if run is None:
         raise RunNotFoundError(project_id, experiment_id, run_id)
     repo = _execution_repository(workspace, run)
@@ -405,8 +403,7 @@ def promote_artifact(
     body: ArtifactPromoteRequest,
     workspace=Depends(get_workspace),  # noqa: ANN001
 ) -> ArtifactPromotionResponse:
-    experiment = _get_experiment(workspace, project_id, experiment_id)
-    run = _get_run_or_none(experiment, run_id) if experiment else None
+    run = _get_scoped_run(workspace, project_id, experiment_id, run_id)
     if run is None:
         raise RunNotFoundError(project_id, experiment_id, run_id)
     try:
@@ -441,8 +438,7 @@ def download_artifact_content(
     workspace=Depends(get_workspace),  # noqa: ANN001
 ) -> StreamingResponse:
     """Stream one Execution Artifact's bytes."""
-    experiment = _get_experiment(workspace, project_id, experiment_id)
-    run = _get_run_or_none(experiment, run_id) if experiment else None
+    run = _get_scoped_run(workspace, project_id, experiment_id, run_id)
     if run is None:
         raise RunNotFoundError(project_id, experiment_id, run_id)
     try:
@@ -522,10 +518,7 @@ def get_run_execution_logs(
     workspace=Depends(get_workspace),  # noqa: ANN001
 ) -> RunLogsResponse:
     """Return stdout/stderr for a specific execution attempt."""
-    experiment = _get_experiment(workspace, project_id, experiment_id)
-    if not experiment:
-        raise RunNotFoundError(project_id, experiment_id, run_id)
-    run = _get_run_or_none(experiment, run_id)
+    run = _get_scoped_run(workspace, project_id, experiment_id, run_id)
     if not run:
         raise RunNotFoundError(project_id, experiment_id, run_id)
     return _read_execution_logs(run, execution_id)
@@ -548,10 +541,7 @@ def get_run_file_text(
     Routes through ``workspace.fs`` — same path as workspace file reads —
     so remote workspaces resolve correctly.
     """
-    experiment = _get_experiment(workspace, project_id, experiment_id)
-    if not experiment:
-        raise RunNotFoundError(project_id, experiment_id, run_id)
-    run = _get_run_or_none(experiment, run_id)
+    run = _get_scoped_run(workspace, project_id, experiment_id, run_id)
     if not run:
         raise RunNotFoundError(project_id, experiment_id, run_id)
 
@@ -595,10 +585,7 @@ def get_run_execution(
     ``molab.workflow.read_journal``; ``status`` is the Execution record's
     status. ``workflow`` is null while the attempt has no journal yet.
     """
-    experiment = _get_experiment(workspace, project_id, experiment_id)
-    if not experiment:
-        raise RunNotFoundError(project_id, experiment_id, run_id)
-    run = _get_run_or_none(experiment, run_id)
+    run = _get_scoped_run(workspace, project_id, experiment_id, run_id)
     if not run:
         raise RunNotFoundError(project_id, experiment_id, run_id)
 
@@ -632,10 +619,7 @@ def get_run_files(
     activate plugins the same way as local ones. Catalog enrichment is
     best-effort for local asset scans only.
     """
-    experiment = _get_experiment(workspace, project_id, experiment_id)
-    if not experiment:
-        raise RunNotFoundError(project_id, experiment_id, run_id)
-    run = _get_run_or_none(experiment, run_id)
+    run = _get_scoped_run(workspace, project_id, experiment_id, run_id)
     if not run:
         raise RunNotFoundError(project_id, experiment_id, run_id)
 
@@ -716,8 +700,7 @@ def cancel_execution(
     workspace=Depends(get_workspace),  # noqa: ANN001
 ) -> ExecutionResponse:
     """Cancel one explicit Execution; Run has no cancellable scalar state."""
-    experiment = _get_experiment(workspace, project_id, experiment_id)
-    run = _get_run_or_none(experiment, run_id) if experiment else None
+    run = _get_scoped_run(workspace, project_id, experiment_id, run_id)
     if run is None:
         raise RunNotFoundError(project_id, experiment_id, run_id)
     repo = _execution_repository(workspace, run)
@@ -749,10 +732,7 @@ def export_run(
     workspace=Depends(get_workspace),  # noqa: ANN001
 ) -> StreamingResponse:
     """Stream a zip archive of the run directory (artifacts, logs, metadata)."""
-    experiment = _get_experiment(workspace, project_id, experiment_id)
-    if not experiment:
-        raise RunNotFoundError(project_id, experiment_id, run_id)
-    run = _get_run_or_none(experiment, run_id)
+    run = _get_scoped_run(workspace, project_id, experiment_id, run_id)
     if not run:
         raise RunNotFoundError(project_id, experiment_id, run_id)
 
@@ -783,10 +763,7 @@ def harvest_run_route(
     from molab.knowledge.concepts import HARVEST_TARGETS
 
     harvest_ok = HARVEST_TARGETS
-    experiment = _get_experiment(workspace, project_id, experiment_id)
-    if not experiment:
-        raise RunNotFoundError(project_id, experiment_id, run_id)
-    run = _get_run_or_none(experiment, run_id)
+    run = _get_scoped_run(workspace, project_id, experiment_id, run_id)
     if not run:
         raise RunNotFoundError(project_id, experiment_id, run_id)
     if body.cls not in harvest_ok:
@@ -827,10 +804,7 @@ def ingest_run_metrics(
     """
     from molab.plugins.metrics_ingest import ingest_run
 
-    experiment = _get_experiment(workspace, project_id, experiment_id)
-    if not experiment:
-        raise RunNotFoundError(project_id, experiment_id, run_id)
-    run = _get_run_or_none(experiment, run_id)
+    run = _get_scoped_run(workspace, project_id, experiment_id, run_id)
     if not run:
         raise RunNotFoundError(project_id, experiment_id, run_id)
     execution_dir = _execution_repository(workspace, run).execution_dir(execution_id)
@@ -871,10 +845,7 @@ def analyze_run_failure_route(
     """
     from molab.services.run_failure import analyze_run_failure
 
-    experiment = _get_experiment(workspace, project_id, experiment_id)
-    if not experiment:
-        raise RunNotFoundError(project_id, experiment_id, run_id)
-    run = _get_run_or_none(experiment, run_id)
+    run = _get_scoped_run(workspace, project_id, experiment_id, run_id)
     if not run:
         raise RunNotFoundError(project_id, experiment_id, run_id)
     try:

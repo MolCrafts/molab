@@ -5,16 +5,19 @@ from __future__ import annotations
 import io
 import mimetypes
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from molab.server.deps.scope_root import ScopeRoot
 from molab.services.auth import AuthError, AuthUser, get_auth_service, is_auth_enabled
-from molab.workspace import ContextFocus, Workspace
+from molab.workspace import ContextFocus, Run
+from molab.workspace.folder import WORKSPACE_EXPERIMENT_KIND, WORKSPACE_PROJECT_KIND
 from molab.workspace.fs_cached import CachedRemoteFileSystem, prefetch_workspace_indices
 from molab.workspace.fs_local import LocalFileSystem
+from molab.workspace.scope import as_folder, descendants, display_name, open_serve_root
 
 from ..dependencies import (
     get_remote_fs_factory,
@@ -108,6 +111,29 @@ def resolve_workspace_path_via_fs(workspace, path_str: str) -> str:  # noqa: ANN
     return candidate
 
 
+class ServeScopeResponse(BaseModel):
+    """The directory ``molab serve`` opened. Navigation stops here."""
+
+    kind: str
+    id: str
+    name: str
+
+
+def _scope_payload(workspace: object) -> ServeScopeResponse:
+    folder = as_folder(workspace)
+    return ServeScopeResponse(
+        kind=folder.kind,
+        id=str(getattr(folder, "id", folder.metadata.id)),
+        name=display_name(folder),
+    )
+
+
+@router.get("/scope", response_model=ServeScopeResponse)
+def get_serve_scope(workspace=Depends(get_workspace)) -> ServeScopeResponse:  # noqa: ANN001
+    """Kind of the served directory. The UI uses this instead of guessing."""
+    return _scope_payload(workspace)
+
+
 @router.get("/info", response_model=WorkspaceInfoResponse)
 def get_workspace_info(workspace=Depends(get_workspace)) -> WorkspaceInfoResponse:  # noqa: ANN001
     """Get workspace information."""
@@ -183,34 +209,34 @@ def list_workspace_runs(
     """
 
     rows: list[WorkspaceRunRow] = []
-    for project in workspace.list_projects():
-        if project_id and project.id != project_id:
+    for node in descendants(as_folder(workspace), Run):
+        if not isinstance(node, Run):
             continue
-        project_name = project.name
-        for experiment in project.list_experiments():
-            if experiment_id and experiment.id != experiment_id:
-                continue
-            experiment_name = experiment.name
-            for run in experiment.list_runs():
-                row = WorkspaceRunRow.from_run(
-                    run,
-                    project_name=project_name,
-                    experiment_name=experiment_name,
-                )
-                if backend and not any(
-                    (execution.backend or "").lower() == backend.lower()
-                    for execution in row.executions
-                ):
-                    continue
-                if status and (
-                    (status.lower() == "not_started" and not row.statusSummary.notStarted)
-                    or (
-                        status.lower() != "not_started"
-                        and row.statusSummary.byStatus.get(status.lower(), 0) == 0
-                    )
-                ):
-                    continue
-                rows.append(row)
+        run = node
+        project = run.ancestor(WORKSPACE_PROJECT_KIND)
+        experiment = run.ancestor(WORKSPACE_EXPERIMENT_KIND)
+        if project_id and run.ancestor_id(WORKSPACE_PROJECT_KIND) != project_id:
+            continue
+        if experiment_id and run.ancestor_id(WORKSPACE_EXPERIMENT_KIND) != experiment_id:
+            continue
+        row = WorkspaceRunRow.from_run(
+            run,
+            project_name=display_name(project),
+            experiment_name=display_name(experiment),
+        )
+        if backend and not any(
+            (execution.backend or "").lower() == backend.lower() for execution in row.executions
+        ):
+            continue
+        if status and (
+            (status.lower() == "not_started" and not row.statusSummary.notStarted)
+            or (
+                status.lower() != "not_started"
+                and row.statusSummary.byStatus.get(status.lower(), 0) == 0
+            )
+        ):
+            continue
+        rows.append(row)
 
     rows.sort(key=lambda r: r.createdAt, reverse=True)
     total = len(rows)
@@ -410,6 +436,43 @@ def read_workspace_file_blob(
     return StreamingResponse(io.BytesIO(data), media_type=media_type)
 
 
+def _asset_count(root: object) -> int:
+    """How many assets ``root`` lists. A serve root forwards ``assets``."""
+    assets = getattr(root, "assets", None)
+    list_assets = getattr(assets, "list", None)
+    if not callable(list_assets):
+        return 0
+    found = list_assets()
+    return len(found) if isinstance(found, list) else 0
+
+
+def _reject_outside_served(path: Path | None, remote_name: str | None) -> None:
+    """Refuse to leave the directories ``molab serve`` was started with.
+
+    An empty served set (tests and a bare API) stays open. Switching among
+    the served keys stays allowed. A non-empty set is a hard boundary, including
+    for an admin session.
+    """
+    served = get_served_workspaces()
+    if not served:
+        return
+    if path is not None:
+        resolved = path.resolve()
+        allowed = {Path(item.path).resolve() for item in served if item.path}
+        if resolved not in allowed:
+            raise HTTPException(status_code=403, detail="path is outside the served root")
+        return
+    if remote_name is None:
+        return
+    names: set[str] = set()
+    for item in served:
+        names.add(item.key)
+        if item.target_name:
+            names.add(item.target_name)
+    if remote_name not in names:
+        raise HTTPException(status_code=403, detail="path is outside the served root")
+
+
 def _assert_open_workspace_allowed(
     request: WorkspaceOpenRequest,
     user: AuthUser | None,
@@ -472,18 +535,18 @@ def open_workspace(
     _assert_open_workspace_allowed(request, user)
     if isinstance(request, WorkspaceOpenLocalRequest):
         path = Path(request.path).expanduser().resolve()
+        _reject_outside_served(path, None)
         if not path.exists():
             if not request.create_if_missing:
                 raise HTTPException(status_code=404, detail="Workspace path not found")
             path.mkdir(parents=True, exist_ok=True)
 
         set_workspace_path_override(path)
-        # Constructor writes workspace.json when the marker is absent.
-        workspace = Workspace(path)
+        root = ScopeRoot(open_serve_root(path))
         return WorkspaceInfoResponse(
-            root=str(workspace.root),
-            projectCount=len(workspace.list_projects()),
-            assetCount=len(workspace.assets.list()),
+            root=str(root.root),
+            projectCount=len(root.list_projects()),
+            assetCount=_asset_count(root),
         )
 
     # Remote branch — CLI ``-ws host:path`` injects an inline ServedWorkspace
@@ -504,15 +567,20 @@ def open_workspace(
                 detail=f"workspace target {request.name!r} not found",
             ) from exc
 
+    _reject_outside_served(None, request.name)
     fs = target_to_filesystem_for_workspace_target(target)
     set_active_workspace_descriptor(target.name)
-    workspace = Workspace(target.root_path, fs=fs)
+    workspace = ScopeRoot(open_serve_root(target.root_path, fs=fs))
+    # ScopeRoot forwards the folder surface those helpers read (.root, .fs, listings).
+    from molab.workspace import Workspace as WorkspaceEntity
+
+    host = cast(WorkspaceEntity, workspace)
     # Linking a remote always force-refreshes (async). UI polls
     # GET /api/workspace/cache/status for the file-count progress bar.
     if isinstance(fs, CachedRemoteFileSystem):
-        warnings = fs.prepare(workspace, block_index=False, refresh_on_open=True)
+        warnings = fs.prepare(host, block_index=False, refresh_on_open=True)
         project_count = len(workspace.list_projects()) if fs.indexed else 0
-        asset_count = len(workspace.assets.list()) if fs.indexed else 0
+        asset_count = _asset_count(workspace) if fs.indexed else 0
         return WorkspaceInfoResponse(
             root=str(workspace.root),
             projectCount=project_count,
@@ -523,11 +591,11 @@ def open_workspace(
             ready=fs.ready,
         )
 
-    warnings = prefetch_workspace_indices(workspace)
+    warnings = prefetch_workspace_indices(host)
     return WorkspaceInfoResponse(
         root=str(workspace.root),
         projectCount=len(workspace.list_projects()),
-        assetCount=len(workspace.assets.list()),
+        assetCount=_asset_count(workspace),
         warnings=[f"{w.path}: {w.reason}" for w in warnings],
     )
 

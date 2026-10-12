@@ -103,6 +103,7 @@ const snapshot: WorkspaceSnapshot = {
   workspaceRoot: null,
   consoleEntries: [],
   workspaces: [],
+  serveScope: null,
 };
 
 const groupRefs = (relations: ReturnType<typeof resolveRelations>, relation: string): string[] =>
@@ -139,6 +140,8 @@ describe("resolveRelations", () => {
 describe("entityPath / runPath", () => {
   it("builds the canonical run URL via runPath", () => {
     expect(runPath("p1", "e1", "r1")).toBe("/projects/p1/experiments/e1/runs/r1");
+    expect(runPath("", "e1", "r1")).toBe("/experiments/e1/runs/r1");
+    expect(runPath("-", "-", "r1")).toBe("/run/r1");
     expect(entityPath({ kind: "run", id: "r1" }, snapshot)).toBe(
       "/projects/p1/experiments/e1/runs/r1",
     );

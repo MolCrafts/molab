@@ -118,7 +118,7 @@ class ProjectResponse(ApiModel):
             id=project.id,
             name=project.name,
             ref=str(ref_of(project)),
-            path=workspace_relative(project.workspace.resolve(), project.path),
+            path=workspace_relative(project.scope_root_path(), project.path),
             description=project.description,
             owner=project.owner,
             tags=project.tags,
@@ -190,11 +190,13 @@ class ExperimentResponse(ApiModel):
             git_commit = _latest_source_commit(
                 execution for run in run_objs for execution in run.executions
             )
+        from molab.workspace.folder import WORKSPACE_PROJECT_KIND
+
         return cls(
             id=experiment.id,
-            projectId=experiment.project.id,
+            projectId=experiment.ancestor_id(WORKSPACE_PROJECT_KIND),
             name=experiment.name,
-            path=workspace_relative(experiment.project.workspace.resolve(), experiment.path),
+            path=workspace_relative(experiment.scope_root_path(), experiment.path),
             description=experiment.description,
             workflow=workflow,
             workflowKind=experiment.workflow_kind,
@@ -273,8 +275,8 @@ def workspace_relative(root: object, full: object) -> str:
 
 
 def _workspace_relative(run: Run) -> str:
-    """A run's directory, relative to the workspace root."""
-    return workspace_relative(run.experiment.project.workspace.resolve(), run.run_dir)
+    """A run's directory, relative to the serve root."""
+    return workspace_relative(run.scope_root_path(), run.run_dir)
 
 
 class RunResponse(ApiModel):
@@ -305,14 +307,19 @@ class RunResponse(ApiModel):
 
     @classmethod
     def from_model(cls, run: Run) -> RunResponse:
+        from molab.workspace.experiment import Experiment
+        from molab.workspace.folder import (
+            WORKSPACE_EXPERIMENT_KIND,
+            WORKSPACE_PROJECT_KIND,
+        )
         from molab.workspace.refs import ref_of
 
-        experiment = run.experiment
-        document = experiment.workflow_document
+        experiment = run.parent if isinstance(run.parent, Experiment) else None
+        document = None if experiment is None else experiment.workflow_document
         wf_source = json.dumps(document, sort_keys=True) if document is not None else None
-        kind = experiment.workflow_kind
+        kind = None if experiment is None else experiment.workflow_kind
         wf_snap = None
-        if kind is not None:
+        if kind is not None and experiment is not None:
             entrypoint = experiment.metadata.workflow_entrypoint
             if entrypoint:
                 source = entrypoint
@@ -352,8 +359,8 @@ class RunResponse(ApiModel):
             id=run.id,
             name=run.name,
             path=_workspace_relative(run),
-            projectId=run.experiment.project.id,
-            experimentId=run.experiment.id,
+            projectId=run.ancestor_id(WORKSPACE_PROJECT_KIND),
+            experimentId=run.ancestor_id(WORKSPACE_EXPERIMENT_KIND),
             definitionHash=run.metadata.definition_hash,
             experimentRevisionId=run.metadata.experiment_revision_id,
             statusSummary=RunStatusSummaryResponse(

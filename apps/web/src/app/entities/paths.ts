@@ -11,17 +11,26 @@ import type { ExperimentView, ObjectView, ProjectView, WorkspaceSnapshot } from 
 
 const enc = encodeURIComponent;
 
+/** An ancestor id the serve root does not have. The URL omits that segment. */
+const omittedId = (id: string | null | undefined): boolean => !id || id === "-";
+
 /** Canonical run URL, built from ids the caller already holds. This is the one
  *  place the run route shape is defined — both ``entityPath`` (snapshot lookup)
  *  and callers that already have the parent ids (e.g. the runs dashboard, whose
- *  poller rows may include runs not in the view snapshot) route through it. */
+ *  poller rows may include runs not in the view snapshot) route through it.
+ *  Empty ancestor ids drop the segments above the served directory. */
 export const runPath = (
   projectId: string,
   experimentId: string,
   runId: string,
   view?: ObjectView,
 ): string => {
-  const base = `/projects/${enc(projectId)}/experiments/${enc(experimentId)}/runs/${enc(runId)}`;
+  const base =
+    omittedId(projectId) && omittedId(experimentId)
+      ? `/run/${enc(runId)}`
+      : omittedId(projectId)
+        ? `/experiments/${enc(experimentId)}/runs/${enc(runId)}`
+        : `/projects/${enc(projectId)}/experiments/${enc(experimentId)}/runs/${enc(runId)}`;
   return view && view !== "overview" ? `${base}?${new URLSearchParams({ tab: view })}` : base;
 };
 
@@ -32,7 +41,9 @@ export const experimentPath = (
   experimentId: string,
   view: ExperimentView = "overview",
 ): string => {
-  const base = `/projects/${enc(projectId)}/experiments/${enc(experimentId)}`;
+  const base = omittedId(projectId)
+    ? `/experiments/${enc(experimentId)}`
+    : `/projects/${enc(projectId)}/experiments/${enc(experimentId)}`;
   return view === "overview" ? base : `${base}/${view}`;
 };
 

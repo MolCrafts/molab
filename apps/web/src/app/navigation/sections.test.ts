@@ -61,6 +61,9 @@ describe("navigation contributions", () => {
   it("matches canonical and compatibility paths", () => {
     expect(leftPanelViewFromPath("/")).toBe("dashboard");
     expect(leftPanelViewFromPath("/projects/p/experiments/e/workflow")).toBe("projects");
+    expect(leftPanelViewFromPath("/experiments/e")).toBe("projects");
+    expect(leftPanelViewFromPath("/experiments/e/runs/r")).toBe("projects");
+    expect(leftPanelViewFromPath("/run/r")).toBe("projects");
     expect(leftPanelViewFromPath("/runs?view=timeline")).toBe("runs");
     expect(leftPanelViewFromPath("/activity/extra")).toBe("activity");
     expect(leftPanelViewFromPath("/workflows/legacy")).toBe("workflow");

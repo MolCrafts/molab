@@ -6,6 +6,10 @@ from shutil import rmtree
 
 from fastapi import APIRouter, Depends
 
+from molab.workspace.experiment import Experiment
+from molab.workspace.folder import _registered_targets
+from molab.workspace.scope import as_folder, entities, resolve_in_scope
+
 from ..dependencies import get_workspace
 from ..exceptions import ConflictError
 from ..schemas import (
@@ -28,8 +32,9 @@ def list_experiments(
     project_id: str,
     workspace=Depends(get_workspace),  # noqa: ANN001
 ) -> list[ExperimentResponse]:
-    project = workspace.get_project(project_id)
-    return [ExperimentResponse.from_model(e) for e in project.list_experiments()]
+    node = resolve_in_scope(as_folder(workspace), project_id)
+    found = [node] if isinstance(node, Experiment) else entities(node, Experiment)
+    return [ExperimentResponse.from_model(e) for e in found if isinstance(e, Experiment)]
 
 
 @router.get("/{experiment_id}", response_model=ExperimentResponse)
@@ -38,8 +43,7 @@ def get_experiment(
     experiment_id: str,
     workspace=Depends(get_workspace),  # noqa: ANN001
 ) -> ExperimentResponse:
-    project = workspace.get_project(project_id)
-    experiment = project.get_experiment(experiment_id)
+    experiment = _experiment_in_scope(workspace, project_id, experiment_id)
     return ExperimentResponse.from_model(experiment, runs=experiment.list_runs())
 
 
@@ -108,7 +112,16 @@ def create_experiment(
 
 
 def _target_exists(workspace, name: str) -> bool:  # noqa: ANN001
-    return any(t.name == name for t in workspace.metadata.targets)
+    return any(getattr(target, "name", None) == name for target in _registered_targets(workspace))
+
+
+def _experiment_in_scope(workspace, project_id: str, experiment_id: str) -> Experiment:  # noqa: ANN001
+    from ..exceptions import ExperimentNotFoundError
+
+    node = resolve_in_scope(as_folder(workspace), project_id, experiment_id)
+    if not isinstance(node, Experiment):
+        raise ExperimentNotFoundError(project_id, experiment_id)
+    return node
 
 
 @router.get("/{experiment_id}/comparison", response_model=ExperimentComparisonResponse)
@@ -122,8 +135,7 @@ def get_experiment_comparison(
     Execution outcomes are intentionally absent: callers must select explicit
     Execution identities before comparing observed metrics or results.
     """
-    project = workspace.get_project(project_id)
-    experiment = project.get_experiment(experiment_id)
+    experiment = _experiment_in_scope(workspace, project_id, experiment_id)
 
     runs = experiment.list_runs()
     rows: list[ComparisonRunRow] = []
@@ -151,7 +163,7 @@ def get_experiment_comparison(
 
     return ExperimentComparisonResponse(
         experimentId=experiment_id,
-        projectId=project_id,
+        projectId=experiment.ancestor_id("workspace.project"),
         paramKeys=sorted(param_keys),
         runs=rows,
     )
@@ -163,7 +175,6 @@ def delete_experiment(
     experiment_id: str,
     workspace=Depends(get_workspace),  # noqa: ANN001
 ) -> MessageResponse:
-    project = workspace.get_project(project_id)
-    experiment = project.get_experiment(experiment_id)
-    rmtree(experiment.experiment_dir)
+    experiment = _experiment_in_scope(workspace, project_id, experiment_id)
+    rmtree(str(experiment.experiment_dir))
     return MessageResponse(message="Experiment deleted")

@@ -185,8 +185,11 @@ class Project(Folder):
 
     @property
     def project_dir(self) -> Path:
-        ws_root = self.workspace.resolve()
-        return Path(self._disk().join(ws_root, PROJECT_CONTAINER, self._name))
+        if self._parent is None:
+            if self._root_path is None:
+                raise RuntimeError("Project is unmounted")
+            return Path(self._root_path)
+        return Path(self._disk().join(self.workspace.resolve(), PROJECT_CONTAINER, self._name))
 
     @property
     def scope(self) -> AssetScope:
@@ -196,7 +199,7 @@ class Project(Folder):
     def assets(self) -> AssetRepository:
         """Long-lived Project Asset registry and Artifact promotion API."""
         return AssetRepository(
-            self.workspace,
+            cast("Workspace", self.asset_host()),
             self.scope,
             self.project_dir,
         )
@@ -218,9 +221,10 @@ class Project(Folder):
         self.save()
         from .scientific_repository import ScientificRepository
 
-        ScientificRepository(self.workspace.root, fs=self._disk()).record_project(
+        host = self.asset_host()
+        ScientificRepository(host.resolve(), fs=self._disk()).record_project(
             self.metadata.model_dump(mode="json"),
-            workspace_id=self.workspace.metadata.id,
+            workspace_id=host.metadata.id,
             path=self.project_dir,
         )
 
@@ -299,7 +303,7 @@ class Project(Folder):
                 "use bind_workflow or set_experiment(workflow_document=)"
             )
         resolved_id = id if id is not None else generate_uuid7()
-        _validate_target_registered(self.workspace, target)
+        _validate_target_registered(self, target)
         child = self._construct_child(
             Experiment,
             name,
@@ -368,7 +372,7 @@ class Project(Folder):
         if seeds is not None:
             updates["seeds"] = list(seeds)
         if target is not None:
-            _validate_target_registered(self.workspace, target)
+            _validate_target_registered(self, target)
             updates["default_target"] = target
         field_changed = bool(updates)
         if workflow_document is not None:

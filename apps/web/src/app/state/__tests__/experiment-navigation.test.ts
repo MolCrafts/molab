@@ -9,6 +9,7 @@ import type { WorkspaceSnapshot } from "@/app/types";
 
 const snapshot: WorkspaceSnapshot = {
   workspaces: [],
+  serveScope: null,
   projects: [
     {
       id: "p 1",

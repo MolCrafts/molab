@@ -34,9 +34,23 @@ LOCAL_TARGET_NAME = "local"
 # ---------------------------------------------------------------------------
 
 
+def _target_list(ws: object) -> list[ComputeTarget]:
+    """Targets on *ws*, or on a real parent workspace when this node has none."""
+    current: object | None = ws
+    seen = 0
+    while current is not None and seen < 8:
+        metadata = getattr(current, "metadata", None)
+        found = getattr(metadata, "targets", None) or ()
+        if found:
+            return list(found)
+        current = getattr(current, "_parent", None)
+        seen += 1
+    return []
+
+
 def list_targets(ws: Workspace) -> list[ComputeTarget]:
     """All compute targets registered on *ws*."""
-    return list(ws.metadata.targets)
+    return _target_list(ws)
 
 
 def get_target(ws: Workspace, name: str) -> ComputeTarget:
@@ -45,15 +59,15 @@ def get_target(ws: Workspace, name: str) -> ComputeTarget:
     Raises:
         KeyError: if no target with this name is registered.
     """
-    for t in ws.metadata.targets:
-        if t.name == name:
-            return t
+    for target in _target_list(ws):
+        if target.name == name:
+            return target
     raise KeyError(f"no compute target named {name!r}")
 
 
 def has_target(ws: Workspace, name: str) -> bool:
     """True if a target with *name* is registered."""
-    return any(t.name == name for t in ws.metadata.targets)
+    return any(target.name == name for target in _target_list(ws))
 
 
 def add_target(ws: Workspace, target: ComputeTarget) -> None:

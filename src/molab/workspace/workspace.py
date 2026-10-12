@@ -165,6 +165,7 @@ class Workspace(Folder):
             updated_at=entity_meta.created_at,
         )
         self._children_cache = {}
+        self._serve_boundary = False
 
         # Entity-specific state — ``root`` is :class:`molab.Path` for both
         # local and remote workspaces; wrap with :class:`pathlib.Path` at

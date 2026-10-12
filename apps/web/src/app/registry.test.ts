@@ -45,6 +45,7 @@ const emptySnapshot = {
   workspaceRoot: null,
   consoleEntries: [],
   workspaces: [],
+  serveScope: null,
 } satisfies WorkspaceSnapshot;
 
 // ---------------------------------------------------------------------------
@@ -180,6 +181,7 @@ describe("resolveRenderer", () => {
       workspaceRoot: null,
       consoleEntries: [],
       workspaces: [],
+      serveScope: null,
     } satisfies WorkspaceSnapshot;
 
     expect(

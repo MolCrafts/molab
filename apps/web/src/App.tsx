@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
+import { experimentPath, projectPath, runPath } from "@/app/entities/paths";
 import { workspaceApi } from "@/api";
 import { AuthGate, AuthProvider, LoginPage } from "@/app/auth";
 import { AppShell } from "@/app/layout/AppShell";
@@ -33,6 +34,7 @@ const buildDefaultInspectorTarget = (selection: Selection | null): InspectorTarg
 // Workspace-backed app tree. Kept as a separate component so its hooks only
 // mount on non-login routes.
 const WorkspaceApp = ({ pathname }: { pathname: string }): JSX.Element => {
+  const navigate = useNavigate();
   const activeView = getLeftPanelViewFromPath(pathname);
   const {
     snapshot,
@@ -57,6 +59,21 @@ const WorkspaceApp = ({ pathname }: { pathname: string }): JSX.Element => {
   const [inspectorTarget, setInspectorTarget] = useState<InspectorTarget>(
     buildDefaultInspectorTarget(selection),
   );
+
+  useEffect(() => {
+    const scope = snapshot.serveScope;
+    if (!scope || scope.kind === "workspace.root") return;
+    if (pathname !== "/" && pathname !== "/projects") return;
+    const target =
+      scope.kind === "workspace.project"
+        ? projectPath(scope.id)
+        : scope.kind === "workspace.experiment"
+          ? experimentPath("", scope.id)
+          : scope.kind === "workspace.run"
+            ? runPath("", "", scope.id)
+            : null;
+    if (target && target !== pathname) navigate(target, { replace: true });
+  }, [navigate, pathname, snapshot.serveScope]);
 
   useEffect(() => {
     prefetchPrimaryNavigationOnIdle();

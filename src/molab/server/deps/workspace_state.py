@@ -11,19 +11,16 @@ hold across both import paths (this module and the
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 from molab.server.deps.config import get_settings
-
-if TYPE_CHECKING:
-    from molab.workspace import Workspace
 
 _SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
 # Cache key is ``(kind, identifier)`` — for ``kind == "local"`` the identifier
 # is the resolved absolute path; for ``kind == "remote"`` it is the
 # ``WorkspaceTarget`` name (registered via the workspace-targets registry).
-_workspace_cache: dict[tuple[str, str], Workspace] = {}
+# Values are ``ScopeRoot`` (a folder the request treats as the workspace).
+_workspace_cache: dict[tuple[str, str], object] = {}
 
 _workspace_path_override: Path | None = None
 _workspace_descriptor_override: str | None = None

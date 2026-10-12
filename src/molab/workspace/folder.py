@@ -192,6 +192,25 @@ def _validate_name_to_id(name: str) -> str:
     return derived
 
 
+def _registered_targets(node: object) -> tuple[object, ...]:
+    """Compute targets visible from *node*, walking real parents.
+
+    A served project or experiment keeps its on-disk parent when one exists.
+    The registry still lives on that workspace. An empty registry does not
+    stop the walk. A parentless mount has nowhere to look and returns ().
+    """
+    current: object | None = node
+    seen = 0
+    while current is not None and seen < 8:
+        metadata = getattr(current, "metadata", None)
+        found = getattr(metadata, "targets", None) or ()
+        if found:
+            return tuple(found)
+        current = getattr(current, "_parent", None)
+        seen += 1
+    return ()
+
+
 def _validate_target_registered(workspace: object, target: str | None) -> None:
     """Reject a *target* that is not in the workspace's compute-target registry.
 
@@ -203,10 +222,9 @@ def _validate_target_registered(workspace: object, target: str | None) -> None:
     """
     if target is None:
         return
-    metadata = getattr(workspace, "metadata", None)
-    registered = getattr(metadata, "targets", ()) or ()
+    registered = _registered_targets(workspace)
     if registered and not any(getattr(t, "name", None) == target for t in registered):
-        names = sorted(getattr(t, "name", "?") for t in registered)
+        names = sorted(str(getattr(t, "name", "?")) for t in registered)
         raise ValueError(
             f"unknown compute target {target!r}: not in the workspace target "
             f"registry {names}; register it first (e.g. `molab target add`)."
@@ -257,6 +275,7 @@ class Folder:
             self._disk_backend = None
         self._metadata = FolderMetadata(id=derived_id, name=name, kind=kind)
         self._children_cache: dict[str, Folder] = {}
+        self._serve_boundary = False
 
     # ── Properties ───────────────────────────────────────────────────────
 
@@ -334,8 +353,59 @@ class Folder:
                     f"folder {self._name!r} (kind={self._kind!r}) is unmounted — "
                     "construct via parent.add_folder(child) or pass root_path="
                 )
+            # A parentless serve root IS the directory it was opened from.
+            # Nested folders still join ``_root_path / name``.
+            if getattr(self, "_serve_boundary", False):
+                return Path(self._root_path)
             return Path(self._disk().join(self._root_path, self._name))
         return Path(self._disk().join(self._parent.resolve(), self._name))
+
+    def scope_top(self) -> Folder:
+        """Nearest serve boundary, or the parentless root when none is set.
+
+        Children stay mounted on their real parents. The boundary is the
+        directory ``molab serve`` opened; ancestors above it are not part of
+        the application.
+        """
+        node: Folder = self
+        while node._parent is not None and not getattr(node, "_serve_boundary", False):
+            node = node._parent
+        return node
+
+    def scope_root_path(self) -> Path:
+        """Directory that bounds navigation and relative API paths."""
+        return Path(self.scope_top().resolve())
+
+    def asset_host(self) -> Folder:
+        """Disk root for asset and history writes.
+
+        Walks through a serve boundary so a project opened inside a real
+        workspace still records history on that workspace. A parentless mount
+        is its own host.
+        """
+        node: Folder = self
+        while node._parent is not None:
+            node = node._parent
+        return node
+
+    def ancestor(self, kind: str) -> Folder | None:
+        """The folder of *kind* at or above ``self``, stopping above the serve boundary."""
+        node: Folder | None = self
+        while node is not None:
+            if node.kind == kind:
+                return node
+            if getattr(node, "_serve_boundary", False):
+                return None
+            node = node._parent
+        return None
+
+    def ancestor_id(self, kind: str) -> str:
+        """Id of :meth:`ancestor`, or ``""`` when that level is outside the serve root."""
+        found = self.ancestor(kind)
+        if found is None:
+            return ""
+        ident = getattr(found, "id", None)
+        return str(ident) if ident else found.metadata.id
 
     # ── Index filename ───────────────────────────────────────────────────
     #

@@ -8,19 +8,21 @@ param, header, or the active/default workspace — caching instances in the
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 
 from fastapi import Request
 
+from molab.server.deps.scope_root import ScopeRoot
 from molab.server.deps.served import _served_by_key
 from molab.server.deps.workspace_state import (
     _SAFE_METHODS,
     _active_workspace_key,
     _workspace_cache,
 )
-from molab.workspace import Workspace
+from molab.workspace.scope import open_serve_root
 
 
-def _ensure_remote_ready(workspace: Workspace) -> None:
+def _ensure_remote_ready(workspace: ScopeRoot) -> None:
     """Prepare a remote workspace for serve / API open.
 
     On **every link** (this process's first open of the root): connect
@@ -39,7 +41,9 @@ def _ensure_remote_ready(workspace: Workspace) -> None:
     if not isinstance(fs, CachedRemoteFileSystem):
         return
     # Async force-refresh on link — progress is polled by the status strip.
-    fs.prepare(workspace, block_index=False, refresh_on_open=True)
+    from molab.workspace import Workspace as WorkspaceEntity
+
+    fs.prepare(cast(WorkspaceEntity, workspace), block_index=False, refresh_on_open=True)
 
 
 def _ssh_master_alive_for_target(target: object) -> bool:
@@ -70,7 +74,7 @@ def _ssh_master_alive_for_target(target: object) -> bool:
         return False
 
 
-def _open_remote_workspace(identifier: str, *, served_key: str | None = None) -> Workspace:
+def _open_remote_workspace(identifier: str, *, served_key: str | None = None) -> ScopeRoot:
     """Build + prepare a remote Workspace, or soft-raise unreachable.
 
     *identifier* is the workspace-target name (serve registry key).
@@ -92,9 +96,10 @@ def _open_remote_workspace(identifier: str, *, served_key: str | None = None) ->
 
     try:
         fs = target_to_filesystem_for_workspace_target(target)
-        workspace = Workspace(target.root_path, fs=fs)
-        _ensure_remote_ready(workspace)
-        return workspace
+        folder = open_serve_root(target.root_path, fs=fs)
+        root = ScopeRoot(folder)
+        _ensure_remote_ready(root)
+        return root
     except RemoteWorkspaceUnreachableError:
         raise
     except Exception as exc:
@@ -165,8 +170,8 @@ def get_active_workspace():  # noqa: ANN201
             # Soft-fail via RemoteWorkspaceUnreachableError (needs_auth / unreachable).
             _workspace_cache[cache_key] = _open_remote_workspace(identifier)
         else:
-            _workspace_cache[cache_key] = Workspace(Path(identifier))
-    return _workspace_cache[cache_key]
+            _workspace_cache[cache_key] = ScopeRoot(open_serve_root(Path(identifier)))
+    return _as_scope_root(_workspace_cache[cache_key])
 
 
 def get_workspace_by_key(key: str):  # noqa: ANN201
@@ -187,10 +192,21 @@ def get_workspace_by_key(key: str):  # noqa: ANN201
         cache_key = ("remote", target_name)
         if cache_key not in _workspace_cache:
             _workspace_cache[cache_key] = _open_remote_workspace(target_name, served_key=sw.key)
-        return _workspace_cache[cache_key]
+        return _as_scope_root(_workspace_cache[cache_key])
 
     assert sw.path is not None  # local always carries a path
     cache_key = ("local", str(Path(sw.path).resolve()))
     if cache_key not in _workspace_cache:
-        _workspace_cache[cache_key] = Workspace(Path(sw.path))
-    return _workspace_cache[cache_key]
+        _workspace_cache[cache_key] = ScopeRoot(open_serve_root(Path(sw.path)))
+    return _as_scope_root(_workspace_cache[cache_key])
+
+
+def _as_scope_root(cached: object) -> ScopeRoot:
+    """Return *cached* when it is already a serve root, else wrap a folder."""
+    if isinstance(cached, ScopeRoot):
+        return cached
+    from molab.workspace.folder import Folder
+
+    if isinstance(cached, Folder):
+        return ScopeRoot(cached)
+    raise TypeError(f"workspace cache holds {type(cached).__name__}, not a folder")

@@ -148,7 +148,13 @@ const PRODUCT_ROUTE_FALLBACK: ReadonlyArray<{
   matches: (pathname: string) => boolean;
 }> = [
   { id: "dashboard", matches: (pathname) => pathname === "/" || pathname.startsWith("/dashboard") },
-  { id: "projects", matches: (pathname) => pathname.startsWith("/projects") },
+  {
+    id: "projects",
+    matches: (pathname) =>
+      pathname.startsWith("/projects") ||
+      pathname.startsWith("/experiments") ||
+      pathname.startsWith("/run/"),
+  },
   { id: "runs", matches: (pathname) => pathname.startsWith("/runs") },
   {
     id: "compare",

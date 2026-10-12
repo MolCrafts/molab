@@ -84,6 +84,17 @@ def _unique_key(base: str, used: set[str]) -> str:
     return key
 
 
+def _served_kind_label(entry: object) -> str:
+    """Folder kind for a local root. Remote roots stay ``remote``."""
+    is_remote = bool(getattr(entry, "is_remote", False))
+    path = getattr(entry, "path", None)
+    if is_remote or not path:
+        return "remote"
+    from molab.workspace.scope import open_serve_root
+
+    return open_serve_root(path).kind
+
+
 def _local_served(resolved: Path, used_keys: set[str]) -> ServedWorkspace:
     """Build a local :class:`ServedWorkspace` for an existing-or-created dir."""
     from molab.server.dependencies import ServedWorkspace
@@ -664,13 +675,13 @@ def serve(
     set_served_workspaces(served)
 
     if len(served) == 1:
-        kind = "remote" if served[0].is_remote else "local"
+        kind = _served_kind_label(served[0])
         rprint(f"[bold]Serving root:[/bold] {served[0].label} [dim]({kind})[/dim]")
     else:
         rprint(f"[bold]Serving {len(served)} roots[/bold] (switch in the UI):")
         for w in served:
             mark = "[green]*[/green]" if w is primary else " "
-            kind = "remote" if w.is_remote else "local"
+            kind = _served_kind_label(w)
             rprint(f"  {mark} [cyan]{w.key}[/cyan] [dim]({kind})[/dim] {w.label}")
 
     from molab.server.app import _find_bundled_webapp, create_app

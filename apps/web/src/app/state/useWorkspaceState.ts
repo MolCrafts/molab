@@ -19,6 +19,7 @@ import { pulseSync } from "@/app/state/syncPulse";
 import type {
   LeftPanelView,
   ProjectSummary,
+  ServeScope,
   WorkspaceSnapshot,
   WorkspaceTreeNode,
 } from "@/app/types";
@@ -129,6 +130,40 @@ const fetchWorkspaces = async (): Promise<WorkspaceSnapshot["workspaces"]> => {
   }
 };
 
+const fetchServeScope = async (): Promise<ServeScope | null> => {
+  try {
+    return await workspaceApi.getServeScope();
+  } catch {
+    return null;
+  }
+};
+
+/** Experiments and runs that live at a serve root below a project. */
+const fetchScopeDescendants = async (
+  scope: ServeScope | null,
+): Promise<Partial<WorkspaceSnapshot>> => {
+  if (!scope || scope.kind === "workspace.root" || scope.kind === "workspace.project") {
+    return {};
+  }
+  if (scope.kind === "workspace.experiment") {
+    const raw = await experimentsApi.listExperiments("-");
+    const experiments = mapExperiments("", raw);
+    const runs = (
+      await Promise.all(
+        experiments.map(async (experiment) =>
+          mapRuns("", experiment.id, await runsApi.listRuns("-", experiment.id)),
+        ),
+      )
+    ).flat();
+    return { experiments, runs, workflows: mapWorkflows(experiments, raw) };
+  }
+  if (scope.kind === "workspace.run") {
+    const raw = await runsApi.getRun("-", "-", scope.id);
+    return { runs: mapRuns("", "", [raw]) };
+  }
+  return {};
+};
+
 const fetchProjectsList = async (
   workspaces: WorkspaceSnapshot["workspaces"],
 ): Promise<ProjectSummary[]> => {
@@ -189,8 +224,17 @@ const applySlicePatch = async (
       return { workspaces: await fetchWorkspaces() };
     case "workspaceTree":
       return { workspaceRoot: await fetchWorkspaceTree() };
-    case "projectsList":
-      return { projects: await fetchProjectsList(current.workspaces) };
+    case "projectsList": {
+      const serveScope = await fetchServeScope();
+      const projects = await fetchProjectsList(current.workspaces);
+      let descendants: Partial<WorkspaceSnapshot> = {};
+      try {
+        descendants = await fetchScopeDescendants(serveScope);
+      } catch (err) {
+        console.warn("Serve-scope descendants unavailable:", err);
+      }
+      return { serveScope, projects, ...descendants };
+    }
     case "assets":
       return { assets: await fetchAllAssets(activeWorkspaceProjects(current)) };
   }

@@ -227,6 +227,14 @@ function computeMockStats(rows: MockRunRow[]): {
 }
 
 export const workspaceHandlers = [
+    http.get(`${API_BASE}/workspace/scope`, () => {
+        return HttpResponse.json({
+            kind: "workspace.root",
+            id: "mock-workspace",
+            name: "Mock workspace",
+        });
+    }),
+
     // GET /api/workspace/info - Get workspace metadata
     http.get(`${API_BASE}/workspace/info`, () => {
         const projects = getAllProjects();

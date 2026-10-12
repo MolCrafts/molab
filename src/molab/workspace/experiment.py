@@ -53,6 +53,7 @@ from .domain import AssetScope
 from .errors import ExperimentExistsError, ExperimentNotFoundError
 from .folder import (
     WORKSPACE_EXPERIMENT_KIND,
+    WORKSPACE_PROJECT_KIND,
     WORKSPACE_RUN_KIND,
     Folder,
     _validate_target_registered,
@@ -378,18 +379,26 @@ class Experiment(Folder):
 
     @property
     def experiment_dir(self) -> Path:
+        if self._parent is None:
+            if self._root_path is None:
+                raise RuntimeError("Experiment is unmounted")
+            return Path(self._root_path)
         return Path(self._disk().join(self.project.project_dir, EXPERIMENT_CONTAINER, self._name))
 
     @property
     def scope(self) -> AssetScope:
-        return AssetScope(kind="experiment", ids=(self.project.id, self.id))
+        project_id = self.ancestor_id(WORKSPACE_PROJECT_KIND)
+        ids = (project_id, self.id) if project_id else (self.id,)
+        return AssetScope(kind="experiment", ids=ids)
 
     @property
     def assets(self) -> AssetRepository:
         """Named, versioned assets at this experiment's scope."""
         from .artifact_repository import AssetRepository
 
-        return AssetRepository(self.project.workspace, self.scope, self.experiment_dir)
+        return AssetRepository(
+            cast("Workspace", self.asset_host()), self.scope, self.experiment_dir
+        )
 
     @property
     def data_assets(self) -> AssetRepository:
@@ -421,9 +430,9 @@ class Experiment(Folder):
         self.save()
         from .scientific_repository import ScientificRepository
 
-        ScientificRepository(self.workspace.root, fs=self._disk()).record_experiment(
+        ScientificRepository(self.asset_host().resolve(), fs=self._disk()).record_experiment(
             self.metadata.model_dump(mode="json"),
-            project_id=self.project.id,
+            project_id=self.ancestor_id(WORKSPACE_PROJECT_KIND),
             path=self.experiment_dir,
         )
 
@@ -540,9 +549,11 @@ class Experiment(Folder):
         if revise:
             from .scientific_repository import ScientificRepository
 
-            ScientificRepository(self.workspace.root, fs=self._disk()).record_experiment_revision(
+            ScientificRepository(
+                self.asset_host().resolve(), fs=self._disk()
+            ).record_experiment_revision(
                 self.metadata.model_dump(mode="json"),
-                project_id=self.project.id,
+                project_id=self.ancestor_id(WORKSPACE_PROJECT_KIND),
                 path=self.experiment_dir,
             )
 
@@ -607,7 +618,7 @@ class Experiment(Folder):
         )
         resolved_id = id if id is not None else generate_uuid7()
         resolved_target = target if target is not None else self._entity_metadata.default_target
-        _validate_target_registered(self.workspace, resolved_target)
+        _validate_target_registered(self, resolved_target)
         siblings = self.list_runs()
         if id is not None:
             for sibling in siblings:

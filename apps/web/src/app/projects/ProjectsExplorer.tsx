@@ -601,6 +601,62 @@ const buildWorkspaceGroupedNodes = (
   });
 };
 
+const SERVE_ANCHOR = "__serve_root__";
+
+/** Tree rooted at the served directory. A project is the project row. An
+ * experiment or run drops the levels above it. */
+export const buildServedRootNodes = (
+  snapshot: WorkspaceSnapshot,
+  actions: ProjectTreeActions,
+  searchQuery: string,
+): TreeNode[] => {
+  const scope = snapshot.serveScope;
+  if (!scope || scope.kind === "workspace.root" || scope.kind === "workspace.project") {
+    return buildProjectNodes(snapshot, actions, searchQuery);
+  }
+  if (scope.kind === "workspace.run") {
+    const run = snapshot.runs.find((item) => item.id === scope.id) ?? snapshot.runs[0];
+    if (!run) return [];
+    return [
+      {
+        id: run.id,
+        selectionKey: itemKey({
+          kind: "run",
+          workspaceKey: actions.workspaceKey,
+          projectId: run.projectId,
+          experimentId: run.experimentId,
+          runId: run.id,
+        }),
+        label: run.name || run.id,
+        labelClassName: statusTextClass(run.status),
+        icon: PlayCircle,
+        iconClassName: "text-muted-foreground",
+        onSelect: () => actions.onOpenRunView(run),
+        actions: buildRunActions(run, actions),
+      },
+    ];
+  }
+  const stamped: WorkspaceSnapshot = {
+    ...snapshot,
+    projects: [
+      {
+        id: SERVE_ANCHOR,
+        name: scope.name,
+        path: "",
+        status: "active",
+        summary: "",
+        updatedAt: "",
+      },
+    ],
+    experiments: snapshot.experiments.map((experiment) => ({
+      ...experiment,
+      projectId: experiment.projectId || SERVE_ANCHOR,
+    })),
+  };
+  const [wrapped] = buildProjectNodes(stamped, actions, searchQuery);
+  return wrapped?.children ?? [];
+};
+
 export const buildProjectExpandPath = (
   snapshot: WorkspaceSnapshot,
   activeId: string | undefined,
@@ -803,8 +859,10 @@ export const ProjectsExplorer = ({
     }
   };
 
-  const nodes =
-    snapshot.workspaces.length >= 1
+  const workspaceScoped =
+    !snapshot.serveScope || snapshot.serveScope.kind === "workspace.root";
+  const nodes = workspaceScoped
+    ? snapshot.workspaces.length >= 1
       ? buildWorkspaceGroupedNodes(
           snapshot,
           actions,
@@ -812,27 +870,32 @@ export const ProjectsExplorer = ({
           activateWorkspace,
           (workspace) => void removeWorkspace(workspace),
         )
-      : buildProjectNodes(snapshot, actions, searchQuery);
+      : buildProjectNodes(snapshot, actions, searchQuery)
+    : buildServedRootNodes(snapshot, actions, searchQuery);
 
   const backgroundActions: TreeNodeAction[] = [
-    gateTreeWrite(
-      {
-        id: "add-folder",
-        label: "Add Folder to Workspace…",
-        icon: FolderPlus,
-        onSelect: () => setAddWorkspaceOpen(true),
-      },
-      writeDeniedReason,
-    ),
-    gateTreeWrite(
-      {
-        id: "new-project",
-        label: "New Project…",
-        icon: Plus,
-        onSelect: () => setCreateProjectOpen(true),
-      },
-      writeDeniedReason,
-    ),
+    ...(workspaceScoped
+      ? [
+          gateTreeWrite(
+            {
+              id: "add-folder",
+              label: "Add Folder to Workspace…",
+              icon: FolderPlus,
+              onSelect: () => setAddWorkspaceOpen(true),
+            },
+            writeDeniedReason,
+          ),
+          gateTreeWrite(
+            {
+              id: "new-project",
+              label: "New Project…",
+              icon: Plus,
+              onSelect: () => setCreateProjectOpen(true),
+            },
+            writeDeniedReason,
+          ),
+        ]
+      : []),
     {
       id: "refresh",
       label: "Refresh Explorer",
@@ -843,25 +906,29 @@ export const ProjectsExplorer = ({
   ];
   const headerActions = (
     <>
-      <WorkbenchIconAction
-        label="Add Folder to Workspace"
-        kind="ghost"
-        deniedReason={writeDeniedReason}
-        onClick={() => setAddWorkspaceOpen(true)}
-        title="Add Folder to Workspace"
-      >
-        <FolderPlus className="size-icon" />
-      </WorkbenchIconAction>
+      {workspaceScoped ? (
+        <WorkbenchIconAction
+          label="Add Folder to Workspace"
+          kind="ghost"
+          deniedReason={writeDeniedReason}
+          onClick={() => setAddWorkspaceOpen(true)}
+          title="Add Folder to Workspace"
+        >
+          <FolderPlus className="size-icon" />
+        </WorkbenchIconAction>
+      ) : null}
       <WorkbenchIconAction label="Refresh projects" kind="ghost" onClick={onRefresh}>
         <RefreshCw className="size-4" />
       </WorkbenchIconAction>
-      <CreateProjectDialog
-        onProjectCreated={onRefresh}
-        writeDeniedReason={writeDeniedReason}
-        open={createProjectOpen}
-        onOpenChange={setCreateProjectOpen}
-        showTrigger
-      />
+      {workspaceScoped ? (
+        <CreateProjectDialog
+          onProjectCreated={onRefresh}
+          writeDeniedReason={writeDeniedReason}
+          open={createProjectOpen}
+          onOpenChange={setCreateProjectOpen}
+          showTrigger
+        />
+      ) : null}
     </>
   );
   const expandPath = useMemo(
@@ -875,7 +942,7 @@ export const ProjectsExplorer = ({
   return (
     <>
       <LeftExplorer
-        title="Projects"
+        title={workspaceScoped ? "Projects" : (snapshot.serveScope?.name ?? "Projects")}
         actions={headerActions}
         blankMenu={<TreeMenuItems actions={backgroundActions} />}
       >

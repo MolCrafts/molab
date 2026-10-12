@@ -29,7 +29,7 @@ from .base import (
     _reconstruct,
 )
 from .errors import RunExistsError, RunNotFoundError
-from .folder import WORKSPACE_RUN_KIND, Folder, register_entity_class
+from .folder import WORKSPACE_EXPERIMENT_KIND, WORKSPACE_RUN_KIND, Folder, register_entity_class
 from .fs import PathArg
 from .models import FolderMetadata, RunMetadata, RunStatus
 from .naming import RUN_CONTAINER, run_slug
@@ -337,6 +337,10 @@ class Run(Folder):
     # ── Folder hooks ─────────────────────────────────────────────────────
 
     def resolve(self) -> MolabPath:
+        if self._parent is None:
+            if self._root_path is None:
+                raise RuntimeError("Run is unmounted")
+            return MolabPath(self._root_path)
         return MolabPath(
             self._disk().join(self.experiment.experiment_dir, RUN_CONTAINER, self._name)
         )
@@ -590,9 +594,9 @@ class Run(Folder):
         self.save()
         from .scientific_repository import ScientificRepository
 
-        ScientificRepository(self.experiment.project.workspace.root, fs=self._disk()).record_run(
+        ScientificRepository(self.asset_host().resolve(), fs=self._disk()).record_run(
             self._definition_record(),
-            experiment_id=self.experiment.id,
+            experiment_id=self.ancestor_id(WORKSPACE_EXPERIMENT_KIND),
             path=self.run_dir,
         )
 

@@ -12,6 +12,7 @@ from pydantic import Field
 from molab._typing import JSONValue
 from molab.workspace import Run
 from molab.workspace.domain import ACTIVE_EXECUTION_STATUSES, Execution
+from molab.workspace.folder import WORKSPACE_EXPERIMENT_KIND, WORKSPACE_PROJECT_KIND
 
 from ._wire import ApiModel
 from .molq import MolqJobSummary  # noqa: F401  (preserve import surface)
@@ -75,10 +76,10 @@ class WorkspaceRunRow(ApiModel):
         return cls(
             id=run.id,
             name=run.name,
-            path=workspace_relative(run.experiment.project.workspace.resolve(), run.run_dir),
-            projectId=run.experiment.project.id,
+            path=workspace_relative(run.scope_root_path(), run.run_dir),
+            projectId=run.ancestor_id(WORKSPACE_PROJECT_KIND),
             projectName=project_name,
-            experimentId=run.experiment.id,
+            experimentId=run.ancestor_id(WORKSPACE_EXPERIMENT_KIND),
             experimentName=experiment_name,
             definitionHash=run.metadata.definition_hash,
             experimentRevisionId=run.metadata.experiment_revision_id,
