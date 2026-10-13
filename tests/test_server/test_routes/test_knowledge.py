@@ -11,7 +11,7 @@ from typing import get_args
 import pytest
 from fastapi.testclient import TestClient
 
-from molab.knowledge import Knowledge, Note
+from molab.knowledge import Note
 from molab.server.routes import knowledge as knowledge_routes
 from molab.workspace import Experiment, Run, Workspace
 from molab.workspace.domain import Asset
@@ -69,7 +69,7 @@ class TestKnowledgeRouteRedirect:
             assert gone not in src, gone
 
     def test_knowledge_symbols_import(self) -> None:
-        from molab.knowledge.concepts import Note, parse_class
+        from molab.knowledge.concepts import Note, _product
         from molab.knowledge.edges import EdgeRole
         from molab.knowledge.embed import default_role_for, resolve_embed_target, summarize_entity
         from molab.knowledge.errors import ConceptNotFoundError
@@ -79,13 +79,13 @@ class TestKnowledgeRouteRedirect:
             callable(obj)
             for obj in (
                 extract_title,
-                parse_class,
+                _product,
                 default_role_for,
                 resolve_embed_target,
                 summarize_entity,
             )
         )
-        assert parse_class("Note") is Note
+        assert _product("Note") is Note
         assert issubclass(ConceptNotFoundError, LookupError)
         assert set(get_args(EdgeRole)) == {
             "derived_from",
@@ -101,7 +101,8 @@ class TestKnowledgeRouteRedirect:
     def test_search_parses_class_through_knowledge(self) -> None:
         src = inspect.getsource(knowledge_routes.search_knowledge)
         assert "molab.knowledge" in src
-        assert "parse_class" in src
+        assert "_product" in src
+        assert "Knowledge.parse" not in src
         assert "molab.workspace.knowledge" not in src
 
     def test_embeddoc_delegates_knowledge_edge_writer(self) -> None:
@@ -299,7 +300,7 @@ class TestUpdateDocMeta:
         body = response.json()
         assert body["relPath"] == "knowledges/idea.md"
         assert body["tags"] == ["glass"]
-        assert Knowledge.open(Path(str(ws.root)) / "knowledges" / "idea.md").tags() == ["glass"]
+        assert Note(Path(str(ws.root)) / "knowledges" / "idea.md").tags() == ["glass"]
 
 
 def _experiment_host(ws: Workspace, exp: Experiment) -> str:
@@ -390,7 +391,7 @@ class TestCreateDoc:
         assert target in text
 
     def test_literature_stores_bib_fields(self, served: ServedFactory, lab: RunFixture) -> None:
-        from molab.knowledge import Knowledge
+        from molab.knowledge import Literature
 
         ws, _exp, _run = lab
         with served(ws) as client:
@@ -407,7 +408,7 @@ class TestCreateDoc:
             )
         assert response.status_code == 201, response.text
         assert response.json()["cls"] == "Literature"
-        doc = Knowledge.open(Path(str(ws.root)) / "knowledges" / "glass-paper.md")
+        doc = Literature(Path(str(ws.root)) / "knowledges" / "glass-paper.md")
         assert doc.record.title == "Glass transition"
         assert doc.record.authors == ("Lin",)
         assert doc.record.year == 2020

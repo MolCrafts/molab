@@ -4,10 +4,10 @@ The rewritten guide claims a project's knowledge is the index of the experiment
 knowledge beneath it, tied by ``.ref`` cross-reference rather than by
 composition. Hard-coded, so the doc cannot drift from the code: a concrete
 ``Note(host, name)`` lands exactly ``<host>/knowledges/<name>.md`` (project and
-experiment), a sourced ``Finding`` lands a ``.md`` file too, ``Knowledge.open``
-reads the class and body back, ``.ref`` accepts a Knowledge object and its
-on-disk path and refuses a Folder / a bare run-directory coordinate, the
-locator ``folder(host, name, Note)`` returns that same file, and no
+experiment), a sourced ``Finding`` lands a ``.md`` file too, the concrete
+constructor reads the body back, ``.ref`` accepts a Knowledge object and its
+on-disk path and refuses a Folder / a bare run-directory coordinate, and
+``Note(host, name).path`` is that same file. No
 workspace-side knowledge verb writes a document. Uses ``molab.knowledge`` (and
 ``molab.workspace`` to build the host tree) only — no third-party runtime.
 """
@@ -18,7 +18,7 @@ import tempfile
 from pathlib import Path
 
 import molab.workspace
-from molab.knowledge import Finding, Knowledge, Note, SourceRef, folder
+from molab.knowledge import Finding, Knowledge, Note, SourceRef
 
 
 def main() -> None:
@@ -54,13 +54,13 @@ def main() -> None:
         assert finding.path.is_file()
         assert not (experiment.resolve() / "knowledges" / "tg-result").exists()
 
-        # ── 2. Knowledge.open reads the class and the body back ───────────────
-        reopened = Knowledge.open(index.path)
+        # ── 2. the concrete constructor reads the class and the body back ─────
+        reopened = Note(index.path)
         assert type(reopened) is Note
         assert reopened.path == index.path
         assert reopened.read() == index_body
 
-        reopened_finding = Knowledge.open(finding.path)
+        reopened_finding = Finding(finding.path)
         assert type(reopened_finding) is Finding
         assert reopened_finding.read() == (
             finding_body + "- [@derived_from R1](molab:experiment/E1/run/R1)\n"
@@ -87,9 +87,8 @@ def main() -> None:
             else:
                 raise AssertionError(f".ref accepted a {type(coordinate).__name__}")
 
-        # ── 4. the locator names the landed file, not its container ───────────
-        assert Note(project, "Tg Index").path == folder(project, "Tg Index", Note)
-        assert folder(project, "Tg Index", Note) == index.path
+        # ── 4. the constructor names the landed file, not its container ───────
+        assert Note(project, "Tg Index").path == index.path
 
         # ── 5. no workspace-side knowledge verb writes a document ─────────────
         for cls in (molab.workspace.Project, molab.workspace.Experiment, molab.workspace.Run):

@@ -10,7 +10,8 @@ import os
 import tempfile
 from pathlib import Path
 
-from molab.knowledge import Knowledge, KnowledgeNotFoundError, Note
+from molab.knowledge import Finding, Knowledge, KnowledgeNotFoundError, Note
+from molab.knowledge.concepts import _open_document
 from molab.workspace import Workspace
 
 _RETIRED = tuple(
@@ -39,7 +40,7 @@ def main() -> None:
         (legacy / "note.json").write_text("{}\n", encoding="utf-8")
         (legacy / "index.md").write_text("# Old\n\nquench\n", encoding="utf-8")
 
-        opened = Knowledge.open(knowledges / "tg-cooling.md")
+        opened = Note(knowledges / "tg-cooling.md")
         print(f"open: {type(opened).__name__} {opened.type()}")
 
         hits = Knowledge(root).search("quench").hits
@@ -52,12 +53,12 @@ def main() -> None:
         )
         print(f"walk: {walked}")
 
-        frontmatter_only = len(Knowledge.open(knowledges / "finding-a.md").sources)
-        linked = len(Knowledge.open(knowledges / "finding-b.md").sources)
+        frontmatter_only = len(Finding(knowledges / "finding-a.md").sources)
+        linked = len(Finding(knowledges / "finding-b.md").sources)
         print(f"sources: frontmatter-only={frontmatter_only} linked={linked}")
 
         try:
-            Knowledge.open(legacy)
+            _open_document(legacy)
         except KnowledgeNotFoundError:
             print("legacy-dir: KnowledgeNotFoundError")
         else:

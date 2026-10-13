@@ -10,7 +10,7 @@ import logging
 from types import MappingProxyType
 from typing import TYPE_CHECKING, ClassVar
 
-from molab.fs import FileSystem, PathArg
+from molab.fs import FileSystem, LocalFileSystem, PathArg
 
 from .concept import Concept
 from .knowledge_item import SourceRef
@@ -78,7 +78,11 @@ class Literature(Concept):
 
 
 class _SourcedKnowledge(Concept):
-    """Finding / Report / Plan / Observation — require ``sources`` at construct."""
+    """Finding / Report / Plan / Observation.
+
+    ``sources`` is required when the document is created by name. An existing
+    file reopens with ``Finding(path)`` and reads its sources from edges.
+    """
 
     FILE_DOCUMENT: ClassVar[bool] = True
     REQUIRES_SOURCES: ClassVar[bool] = True
@@ -108,11 +112,24 @@ class _SourcedKnowledge(Concept):
             type: Declared type; defaults to :attr:`DEFAULT_TYPE`.
 
         Raises:
-            ValueError: If *sources* is empty.
+            ValueError: If *sources* is empty and this is not a file already on
+                disk. ``Finding(path)`` reopens that file; ``Finding(host, name)``
+                still requires sources.
             TypeError: If *name* is given and *path* is not a recognised host.
         """
         if not sources:
-            raise ValueError(f"{self.__class__.__name__} requires at least one SourceRef")
+            if name is not None:
+                raise ValueError(f"{self.__class__.__name__} requires at least one SourceRef")
+            super().__init__(
+                path,
+                None,
+                type=declared_type if declared_type is not None else type,
+                fs=fs,
+            )
+            if not self.exists():
+                raise ValueError(f"{self.__class__.__name__} requires at least one SourceRef")
+            self._sources = []
+            return
         super().__init__(
             path,
             name,
@@ -120,19 +137,6 @@ class _SourcedKnowledge(Concept):
             fs=fs,
         )
         self._sources = list(sources)
-
-    @classmethod
-    def _from_disk(cls, path: str, *, fs: FileSystem | None = None) -> _SourcedKnowledge:
-        """Open a file that already exists. Constructor sources stay empty.
-
-        The ``sources`` property then reads ``derived_from`` and ``cites``
-        edges only. A frontmatter ``sources:`` row stays opaque. This skips
-        the writer rule that ``sources`` must be non-empty.
-        """
-        self = cls.__new__(cls)
-        Concept.__init__(self, path, fs=fs)
-        self._sources = []
-        return self
 
     @property
     def sources(self) -> list[SourceRef]:
@@ -213,6 +217,80 @@ _PRODUCTS: dict[str, type[Concept]] = {
 }
 
 
+def _product(name: str) -> type[Concept]:
+    """The document class *name* spells. Does not construct it.
+
+    Raises:
+        ValueError: *name* is not one of the six classes. The message lists them.
+    """
+    if name in _PRODUCTS:
+        return _PRODUCTS[name]
+    raise ValueError(
+        f"unknown knowledge class {name!r}; expected one of: {', '.join(sorted(_PRODUCTS))}"
+    )
+
+
+def _open_document(path: PathArg, *, fs: FileSystem | None = None) -> Concept:
+    """Open the markdown file at *path* as the class named in its frontmatter.
+
+    A ``.md`` / ``.mdx`` path is opened as written. A suffix-less path is the
+    same file with ``.md`` appended. A directory is not a document. An unknown
+    ``class`` opens as :class:`Note`. This function lives beside the six
+    classes. :class:`~molab.knowledge.concept.Concept` does not construct them.
+
+    Raises:
+        KnowledgeNotFoundError: The file is absent.
+    """
+    from .concept import read_text_or_none
+    from .errors import KnowledgeNotFoundError
+    from .frontmatter import split_frontmatter
+    from .naming import as_knowledge_file, is_knowledge_file
+
+    disk = fs if fs is not None else LocalFileSystem()
+    raw = str(path)
+    if not is_knowledge_file(raw):
+        md = as_knowledge_file(raw)
+        if not disk.is_file(md):
+            raise KnowledgeNotFoundError(str(path))
+        raw = md
+    text = read_text_or_none(raw, fs=disk)
+    if text is None:
+        raise KnowledgeNotFoundError(raw)
+    meta, _body = split_frontmatter(text)
+    class_name = str(meta.get("class") or "Note")
+    klass = _PRODUCTS.get(class_name, Note)
+    return klass(raw, fs=disk)
+
+
+def _write_document(path: PathArg, text: str, *, fs: FileSystem | None = None) -> Concept:
+    """Persist *text* verbatim. The class comes from its frontmatter ``class``.
+
+    A sourced class is bound without constructor sources, so a legacy
+    ``sources:`` row is never passed into a constructor that requires them.
+    The file need not exist yet. :class:`~molab.knowledge.concept.Concept`
+    does not choose or construct the subclass.
+
+    Raises:
+        ValueError: Frontmatter has no ``class``, or the name is unknown.
+    """
+    from .frontmatter import split_frontmatter
+
+    meta, _body = split_frontmatter(text)
+    class_name = meta.get("class")
+    if not isinstance(class_name, str) or class_name == "":
+        raise ValueError("knowledge document requires a frontmatter class")
+    klass = _product(class_name)
+    disk = fs if fs is not None else LocalFileSystem()
+    if issubclass(klass, _SourcedKnowledge):
+        handle = klass.__new__(klass)
+        Concept.__init__(handle, str(path), fs=disk)
+        handle._sources = []
+    else:
+        handle = klass(path, fs=disk)
+    handle.write(text, replace=True)
+    return handle
+
+
 HARVEST_TARGETS: MappingProxyType[str, type[_SourcedKnowledge]] = MappingProxyType(
     {
         "Finding": Finding,
@@ -221,31 +299,6 @@ HARVEST_TARGETS: MappingProxyType[str, type[_SourcedKnowledge]] = MappingProxyTy
     }
 )
 """Finding, Observation and Report — the classes a run can be harvested into."""
-
-
-def parse_class(name: str) -> type[Concept]:
-    """Map a class name onto a Knowledge subclass (including condemned aliases).
-
-    The single class-name entry point on the knowledge side: a config file, a
-    CLI flag or an agent-tool payload spells a Knowledge class by name, and this
-    turns that name into the class object it denotes.
-
-    Args:
-        name: A class name — ``"Note"`` / ``"Literature"`` / ``"Report"`` /
-            ``"Finding"`` / ``"Plan"`` / ``"Observation"``.
-
-    Returns:
-        The Knowledge subclass *name* denotes.
-
-    Raises:
-        ValueError: If *name* matches none of the six classes; the message lists
-            the candidates.
-    """
-    if name in _PRODUCTS:
-        return _PRODUCTS[name]
-    raise ValueError(
-        f"unknown knowledge class {name!r}; expected one of: {', '.join(sorted(_PRODUCTS))}"
-    )
 
 
 __all__ = [
@@ -257,5 +310,4 @@ __all__ = [
     "Observation",
     "Plan",
     "Report",
-    "parse_class",
 ]

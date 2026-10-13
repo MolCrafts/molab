@@ -6,7 +6,7 @@ import tempfile
 from pathlib import Path
 
 from molab.knowledge import Knowledge, Note
-from molab.knowledge.sources import KnowledgeSourceStore, WikiSource, search_sources
+from molab.knowledge.sources import KnowledgeSourceStore, WikiSource
 from molab.workspace import Workspace
 
 
@@ -55,16 +55,15 @@ def main() -> None:
         assert [item.name for item in Knowledge(wiki).walk()] == ["tg"]
         store = KnowledgeSourceStore(root, user_dir=tmp / "user")
         store.add(WikiSource(name="w", root=str(wiki)))
-        [hit] = search_sources("tg", sources=["w"], include_workspace=False, store=store)
+        [hit] = store.search("tg", sources=["w"], include_workspace=False)
         assert hit.ref == "w:tg.md"
         assert hit.abs_path == str(wiki / "tg.md")
         assert (
-            search_sources(
+            store.search(
                 "tg",
                 sources=["w"],
                 include_workspace=False,
                 concept_type="Finding",
-                store=store,
             )
             == []
         )

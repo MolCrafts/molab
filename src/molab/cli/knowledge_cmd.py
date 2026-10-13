@@ -1,7 +1,7 @@
 """``molab knowledge`` — notes and literature from the CLI.
 
-Commands open a tree with :class:`molab.knowledge.Knowledge` and read documents
-with :meth:`Knowledge.open`. ``import-zotero`` writes :class:`Literature`
+Commands open a tree with :class:`molab.knowledge.Knowledge` and read one file
+as the class named in its frontmatter. ``import-zotero`` writes :class:`Literature`
 markdown files under the workspace's ``knowledges/`` directory; PDFs are
 pointed at, never copied.
 """
@@ -330,10 +330,10 @@ def knowledge_search(
     from rich.table import Table
 
     from molab.knowledge import Knowledge
-    from molab.knowledge.sources import search_sources
+    from molab.knowledge.sources import KnowledgeSourceStore
 
     ws_root = _workspace_root(path)
-    hits = search_sources(
+    hits = KnowledgeSourceStore(ws_root).search(
         query,
         sources=source or None,
         workspace_root=ws_root,
@@ -392,7 +392,8 @@ def knowledge_read(
     ] = None,
 ) -> None:
     """Print one knowledge document in full — its metadata, body and edges."""
-    from molab.knowledge import Knowledge, KnowledgeNotFoundError
+    from molab.knowledge import KnowledgeNotFoundError
+    from molab.knowledge.concepts import _open_document
     from molab.knowledge.sources import KnowledgeSourceStore, SourceNotFoundError
 
     ws_root = _workspace_root(path)
@@ -410,7 +411,7 @@ def knowledge_read(
         raise typer.Exit(1)
 
     try:
-        concept = Knowledge.open(root / rel if rel else root)
+        concept = _open_document(root / rel if rel else root)
     except (KnowledgeNotFoundError, FileNotFoundError):
         rprint(f"[red]Error:[/red] no knowledge concept at {ref!r}.")
         rprint("Find valid refs with [bold]molab knowledge search[/bold].")
@@ -486,7 +487,7 @@ def knowledge_parts(
     if not isinstance(run, Run):
         raise typer.Exit(1)
     try:
-        parts = GeneratedParts.list(run)
+        parts = GeneratedParts(run).list()
     except ValueError as exc:
         rprint(f"[red]Error:[/red] {exc}")
         raise typer.Exit(1) from None
@@ -498,7 +499,7 @@ def knowledge_parts(
         return
     text = narrative.strip() or "Generated image parts of this run."
     try:
-        report = GeneratedParts.view(run, narrative=text, created_by=created_by, name=name)
+        report = GeneratedParts(run).view(narrative=text, created_by=created_by, name=name)
     except ValueError as exc:
         rprint(f"[red]Error:[/red] {exc}")
         raise typer.Exit(1) from None

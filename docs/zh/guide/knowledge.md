@@ -54,27 +54,20 @@ note.write("# Analysis Notes\n\nQuench at 10 K/ns.\n")
 `<experiment>/knowledges/analysis-notes.md`，`write` 就是把字节写到那里。绑定名字
 时不会碰磁盘，直到第一次 `write` 才落盘。
 
-构造一律使用**具体类**。`Knowledge` 基类是目录形态的概念，用 `Knowledge(host, name)`
-构造会落下一个目录，而不是一个 markdown 文件。
+构造一律使用**具体类**。`Knowledge(host, name)` 会抛出 `TypeError`：基类不是文档，
+也不会去构造子类。
 
-**路径只是「怎么找到它」。** 要打开一份已经存在的文档 —— 来自检索、来自 `ls`、来自
-另一份文档里的链接 —— 用 `Knowledge.open`，它会从 frontmatter 把类读回来：
+**路径就是同一个构造函数。** 已经在磁盘上的文件 —— 来自检索、来自 `ls`、来自另一份
+文档里的链接 —— 知道它是笔记就写 `Note(path)`。已经落盘的有出处文档写
+`Finding(path)`，不必再传 sources。基类不会读 `class:` 再返回另一种类型。
 
 ```python
-from molab.knowledge import Knowledge, Note
+from molab.knowledge import Note
 
-doc = Knowledge.open(experiment.resolve() / "knowledges" / "analysis-notes.md")
-assert type(doc) is Note  # `class:` frontmatter 被如实还原
+doc = Note(experiment.resolve() / "knowledges" / "analysis-notes.md")
+assert type(doc) is Note
 assert doc.read().startswith("# Analysis Notes")
-```
-
-`molab.knowledge.location.folder(host, name, of)` 就是这条推导本身 —— `of` 是知识
-类，返回值是**落盘路径**：
-
-```python
-from molab.knowledge.location import folder
-
-assert Note(experiment, "Analysis Notes").path == folder(experiment, "Analysis Notes", Note)
+assert Note(experiment, "Analysis Notes").path == doc.path
 ```
 
 ## 六个类
@@ -113,7 +106,7 @@ note.ref(finding.path)  # ……或用路径 —— 两种写法写出同一条�
 experiment，先找到记录它的那份文档，再 `.ref` 那份文档：
 
 ```python
-run_record = Knowledge.open(experiment.resolve() / "knowledges" / "run-0001.md")
+run_record = Note(experiment.resolve() / "knowledges" / "run-0001.md")
 note.ref(run_record)
 ```
 
@@ -177,9 +170,9 @@ $ molab knowledge read lab-wiki:tg-index
 `search(...)` 对它们排序：
 
 ```python
-from molab.knowledge.sources import open_source
+from molab.knowledge.sources import KnowledgeSourceStore
 
-wiki = open_source("lab-wiki")
+wiki = KnowledgeSourceStore().open("lab-wiki")
 for doc in wiki.walk():
     print(type(doc).__name__, doc.path)
 for hit in wiki.search("cooling").hits:

@@ -11,7 +11,7 @@ the class (``class: Finding``), the rest is the narrative. Path is identity::
 
     note = Note("/data/group/wiki/cooling")
     note.write("# Cooling\n")
-    Knowledge.open("/data/group/wiki/cooling")
+    Note("/data/group/wiki/cooling.md")
 
 The six subclasses are ``Note``, ``Literature``, ``Report``, ``Finding``,
 ``Plan``, ``Observation``. Failure analysis is a Report; harvest of a scientific
@@ -19,16 +19,17 @@ outcome is a Finding.
 
 A path, or a **host plus a name**: ``Note(experiment, "Tg Cooling")`` derives
 ``<experiment>/knowledges/tg-cooling.md`` (and the host's own disk) without
-touching disk; ``folder(experiment, "Tg Cooling", Note)`` is that same
-derivation on its own, returning the ``.md`` path.
+touching disk. ``.path`` is that file. The base class does not construct a
+subclass, and it has no ``folder`` or ``parse`` method.
 
 What lives here: the Knowledge handle, the six classes, ``SourceRef``, typed
-edges, the single ``folder(host, name, of)`` location derivation, BM25F
-retrieval, named wiki sources, the read-only Zotero importer, and
-``parse_class``. A document is written on the class:
-``Note.mount(host, name)``, ``Finding.create(host, name, ...)``,
-``Finding.harvest(run, ...)``, ``GeneratedParts.view(run, ...)``,
-``SourceRef.normalize(sources, default_host=...)``.
+edges, BM25F retrieval, named wiki sources, and the read-only Zotero importer.
+Construct the document you mean: ``Note(host, name)``,
+``Finding(host, name, sources=...)``. ``Finding.harvest(run, ...)`` and
+``GeneratedParts(run).view(...)`` write one.
+``ZoteroLibrary(path).items()`` reads a library.
+``KnowledgeSourceStore(root).search(query)`` and
+``SourceRef.normalize(sources, default_host=...)`` stay.
 A new document's ``knowledge.created`` history is recorded by
 :func:`molab.knowledge.write.write_knowledge`.
 
@@ -49,12 +50,10 @@ from .concepts import (
     Observation,
     Plan,
     Report,
-    parse_class,
 )
 from .edges import Edge, EdgeRole
 from .errors import KnowledgeNotFoundError
 from .knowledge_item import SourceKind, SourceRef
-from .location import folder
 from .parts import GeneratedPart, GeneratedParts
 from .reference_meta import ReferenceMeta
 from .search import (
@@ -67,10 +66,8 @@ from .sources import (
     SourcedHit,
     SourceNotFoundError,
     WikiSource,
-    resolve_source,
-    search_sources,
 )
-from .zotero import ZoteroItem, read_zotero
+from .zotero import ZoteroItem
 
 __all__ = [
     "Edge",
@@ -96,9 +93,4 @@ __all__ = [
     "SourcedHit",
     "WikiSource",
     "ZoteroItem",
-    "folder",
-    "parse_class",
-    "read_zotero",
-    "resolve_source",
-    "search_sources",
 ]

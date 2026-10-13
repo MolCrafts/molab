@@ -35,6 +35,48 @@ class ZoteroItem(BaseModel, frozen=True):
     pdf_path: str | None = None
 
 
+class ZoteroLibrary:
+    """A local ``zotero.sqlite``, opened read-only."""
+
+    def __init__(self, path: str | PathLike[str]) -> None:
+        """Bind the database file. Nothing is read until :meth:`items`."""
+        self.path = Path(path)
+
+    def items(self) -> list[ZoteroItem]:
+        """Non-attachment, non-note items.
+
+        Each regular item's PDF (if any) is resolved to
+        ``<db_dir>/storage/<attachment_key>/<filename>`` without touching the file.
+        """
+        db = self.path
+        storage_root = db.parent / "storage"
+        conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
+        try:
+            rows = conn.execute(
+                "SELECT i.itemID, i.key FROM items i "
+                "JOIN itemTypes it ON i.itemTypeID = it.itemTypeID "
+                "WHERE it.typeName NOT IN ('attachment', 'note') "
+                "ORDER BY i.itemID"
+            ).fetchall()
+            items: list[ZoteroItem] = []
+            for item_id, key in rows:
+                fields = _item_fields(conn, item_id)
+                items.append(
+                    ZoteroItem(
+                        key=key,
+                        title=fields.get("title"),
+                        authors=_item_authors(conn, item_id),
+                        year=_parse_year(fields.get("date")),
+                        doi=fields.get("DOI"),
+                        url=fields.get("url"),
+                        pdf_path=_item_pdf(conn, item_id, storage_root),
+                    )
+                )
+            return items
+        finally:
+            conn.close()
+
+
 def _parse_year(date_value: str | None) -> int | None:
     if not date_value:
         return None
@@ -79,46 +121,4 @@ def _item_pdf(conn: sqlite3.Connection, item_id: int, storage_root: Path) -> str
     return str(storage_root / attachment_key / filename)
 
 
-def read_zotero(path: str | PathLike[str]) -> list[ZoteroItem]:
-    """Parse a ``zotero.sqlite`` (read-only) into :class:`ZoteroItem` records.
-
-    Attachments and notes are excluded; each regular item's PDF (if any) is
-    resolved to ``<db_dir>/storage/<attachment_key>/<filename>`` without
-    touching the file.
-
-    Args:
-        path: Path to the ``zotero.sqlite`` database.
-
-    Returns:
-        One :class:`ZoteroItem` per non-attachment, non-note library item.
-    """
-    db = Path(path)
-    storage_root = db.parent / "storage"
-    conn = sqlite3.connect(f"file:{db}?mode=ro", uri=True)
-    try:
-        rows = conn.execute(
-            "SELECT i.itemID, i.key FROM items i "
-            "JOIN itemTypes it ON i.itemTypeID = it.itemTypeID "
-            "WHERE it.typeName NOT IN ('attachment', 'note') "
-            "ORDER BY i.itemID"
-        ).fetchall()
-        items: list[ZoteroItem] = []
-        for item_id, key in rows:
-            fields = _item_fields(conn, item_id)
-            items.append(
-                ZoteroItem(
-                    key=key,
-                    title=fields.get("title"),
-                    authors=_item_authors(conn, item_id),
-                    year=_parse_year(fields.get("date")),
-                    doi=fields.get("DOI"),
-                    url=fields.get("url"),
-                    pdf_path=_item_pdf(conn, item_id, storage_root),
-                )
-            )
-        return items
-    finally:
-        conn.close()
-
-
-__all__ = ["ZoteroItem", "read_zotero"]
+__all__ = ["ZoteroItem", "ZoteroLibrary"]

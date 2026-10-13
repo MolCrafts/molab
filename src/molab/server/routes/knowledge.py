@@ -443,12 +443,12 @@ def _document_card(workspace: Workspace, document: Concept) -> EntityCard:
 
 def _path_card(workspace: Workspace, target: str) -> EntityCard | None:
     """A path edge: a document, a missing document, a legacy directory, or nothing."""
-    from molab.knowledge import Knowledge
+    from molab.knowledge.concepts import _open_document
     from molab.knowledge.errors import KnowledgeNotFoundError
 
     path = target.split("#", 1)[0]
     try:
-        document = Knowledge.open(path, fs=workspace.fs)
+        document = _open_document(path, fs=workspace.fs)
     except (KnowledgeNotFoundError, FileNotFoundError, OSError, ValueError):
         document = None
     else:
@@ -503,10 +503,11 @@ def _resolve_embed_entity(
 
 def _open_doc(workspace: Workspace, path: str) -> Concept:
     """Open any of the six Knowledge classes at *path* (404 on miss)."""
-    from molab.knowledge import Knowledge, KnowledgeNotFoundError
+    from molab.knowledge import KnowledgeNotFoundError
+    from molab.knowledge.concepts import _open_document
 
     try:
-        return Knowledge.open(workspace.fs.join(str(workspace.root), path), fs=workspace.fs)
+        return _open_document(workspace.fs.join(str(workspace.root), path), fs=workspace.fs)
     except (KnowledgeNotFoundError, FileNotFoundError, OSError) as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, f"note {path!r} not found") from exc
 
@@ -655,9 +656,9 @@ def search_knowledge(
 ) -> KnowledgeSearchResponse:
     """Search the workspace knowledge tree — wraps ``Knowledge.search``."""
     from molab.knowledge import Knowledge
-    from molab.knowledge.concepts import parse_class
+    from molab.knowledge.concepts import _product
 
-    cls = parse_class(type) if type else None
+    cls = _product(type) if type else None
     result = Knowledge(workspace.root, fs=workspace.fs).search(q, of=cls, tag=tag)
     return KnowledgeSearchResponse(
         hits=[
@@ -750,7 +751,7 @@ def get_note(
     path: str = Query(..., description="The document's workspace-relative path (its identity)."),
     workspace: Workspace = Depends(get_workspace),
 ) -> NoteDetailResponse:
-    """Return one document's full body via ``Knowledge.open``.
+    """Return one document's full body.
 
     A ``.tex`` / ``.ltx`` path is the file bytes, not a Knowledge document.
     """
@@ -776,11 +777,11 @@ def create_doc(
     workspace: Workspace = Depends(get_workspace),
 ) -> NoteSummary:
     """Create one of the six classes under *hostPath* (the workspace root when omitted)."""
-    from molab.knowledge.concepts import parse_class
+    from molab.knowledge.concepts import _product
     from molab.knowledge.reference_meta import ReferenceMeta
     from molab.knowledge.write import write_knowledge
 
-    klass = parse_class(body.cls)
+    klass = _product(body.cls)
     host = _resolve_host(workspace, body.hostPath)
     sources = [_source_from_request(workspace, item) for item in body.sources]
     record = None

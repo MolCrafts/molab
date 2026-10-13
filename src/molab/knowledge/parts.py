@@ -21,7 +21,6 @@ from molab.ids import slugify
 from .concepts import Report
 from .edges import encode_label, link_line
 from .knowledge_item import SourceRef, _relative_posix
-from .location import folder
 
 if TYPE_CHECKING:
     from molab.workspace.domain import Artifact, Execution
@@ -58,14 +57,16 @@ class GeneratedPart(NamedTuple):
 class GeneratedParts:
     """The image parts one run emitted.
 
-    ``list`` reads one attempt. ``view`` writes the Report, the same way
-    ``Finding.harvest`` writes a Finding. Call either as a class method.
+    ``GeneratedParts(run).list()`` reads one attempt.
+    ``GeneratedParts(run).view(...)`` writes the Report.
     """
 
-    @classmethod
+    def __init__(self, run: Run) -> None:
+        """Bind the run whose image parts this object lists and views."""
+        self._run = run
+
     def list(
-        cls,
-        run: Run,
+        self,
         *,
         execution_id: str | None = None,
     ) -> builtins.list[GeneratedPart]:
@@ -79,6 +80,7 @@ class GeneratedParts:
         Raises:
             ValueError: The run has no attempt, or *execution_id* is unknown.
         """
+        run = self._run
         execution = _execution(run, execution_id)
         found: list[GeneratedPart] = []
         for artifact in execution.artifacts:
@@ -99,10 +101,8 @@ class GeneratedParts:
         found.sort(key=lambda item: item.name)
         return found
 
-    @classmethod
     def view(
-        cls,
-        run: Run,
+        self,
         *,
         narrative: str,
         created_by: str,
@@ -124,6 +124,9 @@ class GeneratedParts:
         """
         from molab.workspace.run import TERMINAL_STATUSES
 
+        from .write import write_knowledge
+
+        run = self._run
         status = run.status_label
         if status not in TERMINAL_STATUSES:
             raise ValueError(
@@ -137,15 +140,21 @@ class GeneratedParts:
                 "run's artifacts"
             )
 
-        parts = cls.list(run, execution_id=execution_id)
+        parts = self.list(execution_id=execution_id)
         experiment = run.experiment
         item_name = name or f"parts-{slugify(run.id) or run.id}"
-        doc_path = folder(experiment, item_name, Report)
-        body = _render_body(narrative, parts, base_dir=str(doc_path.parent))
-        written = Report.create(
-            experiment,
+        sources = [SourceRef.of(run), SourceRef.of(experiment)]
+        doc_path = Report(
+            experiment,  # ty: ignore[invalid-argument-type]
             item_name,
-            sources=[SourceRef.of(run), SourceRef.of(experiment)],
+            sources=sources,
+        ).path
+        body = _render_body(narrative, parts, base_dir=str(doc_path.parent))
+        written = write_knowledge(
+            experiment,
+            name=item_name,
+            of=Report,
+            sources=sources,
             created_by=created_by,
             text=body,
             title=item_name,

@@ -1054,7 +1054,7 @@ def asset_promote(
     ws = _open_ws(target_spec)
     run = _find_run(ws, run_id)
     try:
-        parts = GeneratedParts.list(run)
+        parts = GeneratedParts(run).list()
     except ValueError as exc:
         rprint(f"[red]Error:[/red] {exc}")
         raise typer.Exit(1) from None

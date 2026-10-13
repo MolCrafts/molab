@@ -11,7 +11,7 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-from molab.knowledge import Knowledge, Literature, Note
+from molab.knowledge import Literature, Note
 from molab.workspace.folder import Folder
 
 
@@ -30,7 +30,9 @@ def main() -> None:
 
         # The path form: a Knowledge read back off disk is what a caller holds,
         # and its .path is what .ref must accept.
-        opened = Knowledge.open(smith.path)
+        from molab.knowledge.concepts import _open_document
+
+        opened = _open_document(smith.path)
         assert type(opened) is Literature
         review = Note(root / "review")
         review.ref(opened.path, role="cites")

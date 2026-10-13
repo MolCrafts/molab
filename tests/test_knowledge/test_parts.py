@@ -1,4 +1,4 @@
-"""GeneratedParts.list reads image artifacts; GeneratedParts.view writes a Report."""
+"""GeneratedParts(run).list reads image artifacts; .view writes a Report."""
 
 from __future__ import annotations
 
@@ -44,7 +44,7 @@ def _succeed_with_parts(run: Any) -> None:
 def test_lists_images_and_tagged_parts_and_skips_the_rest(run: Any) -> None:
     _succeed_with_parts(run)
 
-    parts = GeneratedParts.list(run)
+    parts = GeneratedParts(run).list()
 
     assert [part.name for part in parts] == ["eyes.png", "hair.png", "label.json"]
     assert [part.part for part in parts] == ["eyes", "hair", "label"]
@@ -58,11 +58,11 @@ def test_lists_images_and_tagged_parts_and_skips_the_rest(run: Any) -> None:
 def test_view_parts_writes_a_report_with_a_ref_and_a_relative_image(run: Any) -> None:
     _succeed_with_parts(run)
 
-    report = GeneratedParts.view(run, narrative=_NARRATIVE, created_by="tester")
+    report = GeneratedParts(run).view(narrative=_NARRATIVE, created_by="tester")
 
     assert isinstance(report, Report)
     body = report.read()
-    hair = next(part for part in GeneratedParts.list(run) if part.part == "hair")
+    hair = next(part for part in GeneratedParts(run).list() if part.part == "hair")
     assert _NARRATIVE in body
     assert f"[@records hair]({hair.ref})" in body
     assert "![hair](" in body
@@ -78,9 +78,9 @@ def test_refuses_a_live_run_and_a_blank_narrative(run: Any) -> None:
     import pytest
 
     with pytest.raises(ValueError, match="terminal"):
-        GeneratedParts.view(run, narrative=_NARRATIVE, created_by="tester")
+        GeneratedParts(run).view(narrative=_NARRATIVE, created_by="tester")
 
     with run.start():
         pass
     with pytest.raises(ValueError, match="narrative"):
-        GeneratedParts.view(run, narrative="  ", created_by="tester")
+        GeneratedParts(run).view(narrative="  ", created_by="tester")

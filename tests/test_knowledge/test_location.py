@@ -1,4 +1,4 @@
-"""``location.folder`` — the one derivation of where a document lands."""
+"""``Note(host, name).path`` — the one derivation of where a document lands."""
 
 from __future__ import annotations
 
@@ -8,11 +8,11 @@ import pytest
 
 from molab.knowledge.concept import Concept, Knowledge
 from molab.knowledge.concepts import Finding, Note, Plan, Report
+from molab.knowledge.knowledge_item import SourceRef
 from molab.knowledge.location import (
     bare_container,
     document_slug,
     enclosing_workspace_root,
-    folder,
     host_of,
     is_workspace_root,
 )
@@ -28,48 +28,56 @@ def experiment(tmp_path: Path) -> Experiment:
 
 
 def _container(host: Experiment) -> Path:
-    """``<host>/knowledges`` — the container *folder* lands documents in."""
+    """``<host>/knowledges`` — the container a document class lands documents in."""
     return Path(str(host.resolve())) / "knowledges"
 
 
+def _sourced() -> list[SourceRef]:
+    """One dummy source so a sourced class can be constructed for its path."""
+    return [SourceRef(kind="file", ref="x")]
+
+
 class TestFolder:
-    """One host + one name + the Knowledge class ⇒ that document's own path."""
+    """One host + one name + the concrete class ⇒ that document's own path."""
 
     def test_a_file_document_class_lands_on_the_markdown_path(self, experiment: Experiment) -> None:
-        assert folder(experiment, "Tg Cooling", Note) == _container(experiment) / "tg-cooling.md"
+        assert Note(experiment, "Tg Cooling").path == _container(experiment) / "tg-cooling.md"
 
     def test_a_bare_class_is_not_a_document(self, experiment: Experiment) -> None:
         with pytest.raises(TypeError, match="not a knowledge document"):
-            folder(experiment, "records", Concept)
+            Concept(experiment, "records")
 
     def test_the_class_decides_the_form_not_a_suffix_in_the_name(
         self, experiment: Experiment
     ) -> None:
-        assert folder(experiment, "tg-rise", Finding) == _container(experiment) / "tg-rise.md"
+        assert (
+            Finding(experiment, "tg-rise", sources=_sourced()).path
+            == _container(experiment) / "tg-rise.md"
+        )
         with pytest.raises(TypeError, match="not a knowledge document"):
-            folder(experiment, "tg-rise", Concept)
+            Concept(experiment, "tg-rise")
 
     def test_a_str_host_is_used_as_given(self, tmp_path: Path) -> None:
         host = str(tmp_path / "wiki")
-        assert folder(host, "x", Note) == Path(host) / "knowledges" / "x.md"
+        assert Note(host, "x").path == Path(host) / "knowledges" / "x.md"
 
     def test_a_path_host_with_a_dotdot_segment_is_returned_verbatim(self, tmp_path: Path) -> None:
         # Proof the path host is not resolved: a Folder would collapse it.
         host = tmp_path / "wiki" / ".." / "wiki"
 
-        landed = folder(host, "plan-book", Plan)
+        landed = Plan(host, "plan-book", sources=_sourced()).path
 
         assert landed == Path(str(host)) / "knowledges" / "plan-book.md"
         assert ".." in landed.parts
 
     def test_a_non_ascii_name_falls_back_to_the_raw_name(self, experiment: Experiment) -> None:
-        assert folder(experiment, "冷却", Note) == _container(experiment) / "冷却.md"
+        assert Note(experiment, "冷却").path == _container(experiment) / "冷却.md"
 
     def test_an_already_slugged_name_is_idempotent(self, experiment: Experiment) -> None:
-        assert folder(experiment, "My Idea", Note) == folder(experiment, "my-idea", Note)
+        assert Note(experiment, "My Idea").path == Note(experiment, "my-idea").path
 
     def test_the_derivation_is_pure(self, tmp_path: Path) -> None:
-        folder(tmp_path, "x", Note)
+        Note(tmp_path, "x")
 
         assert not (tmp_path / "knowledges").exists()
 
@@ -81,16 +89,16 @@ class TestFolder:
                 return tmp_path
 
         with pytest.raises(TypeError, match="Folder"):
-            folder(Coordinate(), "x", Note)
+            Note(Coordinate(), "x")
 
     def test_a_concept_host_is_rejected(self, tmp_path: Path) -> None:
         # A Concept has resolve() and fs, and is not a Folder host.
         with pytest.raises(TypeError, match="Folder"):
-            folder(Note(tmp_path / "other"), "x", Note)
+            Note(Note(tmp_path / "other"), "x")
 
     def test_a_non_path_object_host_is_rejected(self) -> None:
         with pytest.raises(TypeError, match="Folder"):
-            folder(42, "x", Note)
+            Note(42, "x")
 
     def test_a_duck_typed_resolve_and_fs_is_rejected(self, tmp_path: Path) -> None:
         class Duck:
@@ -102,13 +110,13 @@ class TestFolder:
                 return object()
 
         with pytest.raises(TypeError, match="Folder"):
-            folder(Duck(), "x", Note)
+            Note(Duck(), "x")
 
     def test_a_uuid7_suffix_survives_the_slug(self, tmp_path: Path) -> None:
         name = "failure-analysis-0190f0e2-7c1a-7d4e-9b2a-3c4d5e6f7a8b"
-        assert folder(tmp_path, name, Report).name == f"{name}.md"
+        assert Report(tmp_path, name, sources=_sourced()).path.name == f"{name}.md"
         other = "experiment-record-0190f0e2-7c1a-7d4e-9b2a-3c4d5e6f7a8b"
-        assert folder(tmp_path, other, Report).name == f"{other}.md"
+        assert Report(tmp_path, other, sources=_sourced()).path.name == f"{other}.md"
 
     def test_a_bare_handle_uses_the_one_container_rule(self, tmp_path: Path) -> None:
         wiki = tmp_path / "wiki"
@@ -117,16 +125,16 @@ class TestFolder:
         lab.materialize()
         experiment = lab.add_project("p").add_experiment("e")
 
-        assert folder(Knowledge(wiki), "Cooling", Note) == wiki / "cooling.md"
+        assert Note(Knowledge(wiki), "Cooling").path == wiki / "cooling.md"
         assert (
-            folder(Knowledge(lab.root), "Cooling", Note)
+            Note(Knowledge(lab.root), "Cooling").path
             == Path(lab.root) / "knowledges" / "cooling.md"
         )
         with pytest.raises(TypeError, match="inside workspace"):
-            folder(Knowledge(experiment.resolve()), "Cooling", Note)
+            Note(Knowledge(experiment.resolve()), "Cooling")
 
     def test_a_string_host_still_lands_under_knowledges(self, tmp_path: Path) -> None:
-        assert folder(tmp_path, "Cooling", Note) == tmp_path / "knowledges" / "cooling.md"
+        assert Note(tmp_path, "Cooling").path == tmp_path / "knowledges" / "cooling.md"
 
 
 class TestDocumentSlug:
