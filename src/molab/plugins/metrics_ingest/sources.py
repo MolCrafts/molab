@@ -30,7 +30,7 @@ from typing import TYPE_CHECKING
 from molab._typing import JSONValue
 
 from .detect import _iter_files
-from .readers import ReadRequest, sniff
+from .readers import ReadProgress, ReadRequest, sniff
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
@@ -60,11 +60,21 @@ class SourceRead:
 
     source: MetricSource
     records: list[dict[str, JSONValue]] = field(default_factory=list)
-    cursor: int = 0
-    """Records consumed so far. Pass back as *since* to continue.
+    cursor: int | None = 0
+    """Raw records consumed so far. Pass back as *since* to continue.
 
-    Counted in *delivered* records, so it stays meaningful under a stride:
-    resuming asks the reader to skip what the viewer already has."""
+    Counted in the reader's *raw* stream — the one ``since`` indexes, before
+    the type/key filters and the stride — because a count of delivered
+    records lands elsewhere in it once anything is dropped. When the limit
+    cut the read short it points at the next record the read would have
+    delivered, so one series' stride keeps its phase across pages. One
+    integer cannot carry the phase of several series: a page that ends
+    mid-row restarts it for the series after it — nothing is delivered twice,
+    but the samples are not those of one long read.
+
+    ``None`` when the reader does not report its raw position (see
+    :class:`~molab.plugins.metrics_ingest.readers.ReadProgress`): no resume
+    point is known, and only a read from the start is safe."""
 
     exhausted: bool = True
     """False when the limit cut the read short."""
@@ -114,7 +124,7 @@ def read_source(
     source: MetricSource,
     *,
     since: int = 0,
-    limit: int = DEFAULT_LIMIT,
+    limit: int | None = DEFAULT_LIMIT,
     stride: int = 1,
     metric_type: str | None = None,
     key: str | None = None,
@@ -124,7 +134,8 @@ def read_source(
     Args:
         source: What :func:`discover_sources` found.
         since: Records already consumed; resume after them.
-        limit: Stop after this many records are collected.
+        limit: Stop after this many records are collected; ``None`` reads to
+            the end.
         stride: Keep every *stride*-th sample **of each series**. Records
             arrive interleaved by column, so striding the flat stream would
             land on the same column every time and drop the others entirely;
@@ -142,39 +153,42 @@ def read_source(
 
     reader = reader_for(source.format)
     if reader is None:
-        return SourceRead(source=source, error=f"no reader for {source.format!r}")
+        return SourceRead(source=source, cursor=since, error=f"no reader for {source.format!r}")
 
     # The viewer's policy travels down; the reader decides how cheaply to
     # honour it. Ask for one more than the limit so an exhausted source is
-    # distinguishable from one the limit cut short.
+    # distinguishable from one the limit cut short — and so the cursor can
+    # stop right before that next record, keeping a stride's phase.
+    progress = ReadProgress()
     request = ReadRequest(
         since=since,
         stride=stride,
         limit=None if limit is None else limit + 1,
         metric_type=metric_type,
         keys=(key,) if key else (),
+        progress=progress,
     )
     records: list[dict[str, JSONValue]] = []
+    resume: int | None = since
     exhausted = True
     try:
         for record in reader.read(source.path, source=source.rel_path, request=request):
             if limit is not None and len(records) >= limit:
                 exhausted = False
+                resume = progress.position
                 break
             records.append(record)
+            resume = None if progress.position is None else progress.position + 1
+        else:
+            resume = progress.position
     except (ImportError, OSError, ValueError) as exc:
         return SourceRead(
             source=source,
             records=records,
-            cursor=since + len(records),
+            cursor=resume,
             error=f"{type(exc).__name__}: {exc}",
         )
-    return SourceRead(
-        source=source,
-        records=records,
-        cursor=since + len(records),
-        exhausted=exhausted,
-    )
+    return SourceRead(source=source, records=records, cursor=resume, exhausted=exhausted)
 
 
 def read_sources(

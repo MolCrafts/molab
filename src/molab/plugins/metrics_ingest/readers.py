@@ -47,6 +47,28 @@ ENTRY_POINT_GROUP = "molcrafts.metric_readers"
 """Where a package that owns a format declares its reader."""
 
 
+@dataclass(slots=True)
+class ReadProgress:
+    """Where a reader stands in its raw stream. The reader writes; the caller reads.
+
+    The raw stream is every record the reader can produce, in its fixed order,
+    before any filter or sampling — the stream :attr:`ReadRequest.since`
+    indexes. A cursor counted in *delivered* records would land somewhere else
+    in it as soon as a filter or a stride drops anything, so a caller that
+    pages a source resumes from this instead.
+    """
+
+    position: int | None = None
+    """Raw index of the record the reader has just yielded, while the caller
+    holds it; once the read ends, the raw index it stopped before.
+
+    So a caller resumes at ``position + 1`` after keeping a record, at
+    ``position`` when it stops before keeping the one in hand, and at
+    ``position`` after the read ends. It never drops below ``since``.
+    ``None`` until the reader reports — a reader that never does leaves the
+    caller unable to resume anywhere but the start."""
+
+
 @dataclass(frozen=True, slots=True)
 class ReadRequest:
     """What the viewer wants back. The reader honours it however it can.
@@ -62,7 +84,9 @@ class ReadRequest:
     """
 
     since: int = 0
-    """Records already consumed from this source; resume after them."""
+    """Raw records already consumed from this source; resume after them.
+
+    A raw index: skipped before the type/key filters and before striding."""
 
     stride: int = 1
     """Keep every *stride*-th sample **of each series**, not of the flat
@@ -70,13 +94,18 @@ class ReadRequest:
     would land on one column every time and drop the rest."""
 
     limit: int | None = None
-    """Stop after this many records are yielded."""
+    """Stop after this many records are yielded; ``0`` or less yields nothing."""
 
     metric_type: str | None = None
     """Keep only this record type (``scalar``, ``histogram``, …)."""
 
     keys: tuple[str, ...] = field(default_factory=tuple)
     """Keep only these series keys. Empty means every series."""
+
+    progress: ReadProgress | None = field(default=None, compare=False)
+    """Where the reader reports its raw position, for a caller that pages.
+
+    A reader that cannot report leaves it untouched."""
 
     def wants(self, record: dict[str, JSONValue]) -> bool:
         """True when *record* passes the type/key filters (not the sampling)."""
@@ -133,29 +162,45 @@ class MetricReader(Protocol):
 def apply(
     request: ReadRequest, records: Iterable[dict[str, JSONValue]]
 ) -> Iterator[dict[str, JSONValue]]:
-    """Enforce *request* over a raw record stream.
+    """Enforce *request* over a raw record stream, reporting its raw position.
 
     The fallback for a reader that cannot push sampling into its parser. A
     reader that *can* should do so instead and skip this — the point of
-    handing the request down is to avoid building what will be thrown away.
+    handing the request down is to avoid building what will be thrown away —
+    but must still report :attr:`ReadRequest.progress` the way this does.
+
+    The semantics match molpy's ``apply_request``: ``since`` is a raw index,
+    ``stride`` counts per series among the records that pass the filters, and
+    a ``limit`` of ``0`` or less yields nothing.
     """
+    progress = request.progress
+    since = max(0, request.since)
+    if progress is not None:
+        progress.position = since
+    if request.limit is not None and request.limit <= 0:
+        return
+    stride = max(1, request.stride)
     seen_per_series: dict[object, int] = {}
     kept = 0
+    end = 0
     for index, record in enumerate(records):
-        if index < request.since:
+        end = index + 1
+        if index < since or not request.wants(record):
             continue
-        if not request.wants(record):
-            continue
-        if request.stride > 1:
+        if stride > 1:
             key = record.get("k")
             position = seen_per_series.get(key, 0)
             seen_per_series[key] = position + 1
-            if position % request.stride:
+            if position % stride:
                 continue
+        if progress is not None:
+            progress.position = index
         yield record
         kept += 1
         if request.limit is not None and kept >= request.limit:
-            return
+            break
+    if progress is not None:
+        progress.position = max(since, end)
 
 
 _LOCK = threading.Lock()
@@ -248,6 +293,7 @@ def _load_entry_points() -> None:
 __all__ = [
     "ENTRY_POINT_GROUP",
     "MetricReader",
+    "ReadProgress",
     "ReadRequest",
     "apply",
     "describe_readers",
