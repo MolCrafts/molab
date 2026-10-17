@@ -12,7 +12,8 @@ can parse is one line::
 
 A dataset in a format of its own names a class with ``n_frames`` and
 ``read_frame(index)`` instead; it can wrap a per-format reader, or build its
-frames with ``molpy.Frame``. Either way molab never parses a dataset itself.
+frames with ``molpy.Frame``. molpy's own readers are sequences (``len`` and
+an index). Either way molab never parses a dataset itself.
 
 This module tracks molpy's public surface; the host
 (:mod:`molab.server.preview`) only finds the sidecar and caps the frames.
@@ -20,7 +21,7 @@ This module tracks molpy's public surface; the host
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from types import ModuleType
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
@@ -39,18 +40,32 @@ class FrameReader(Protocol):
     """What a preview reads frames through.
 
     molpy's per-format readers (``mp.io.xyz.XyzReader``,
-    ``mp.io.lammps.LammpsDumpReader``, ``mp.io.pdb.PdbReader``, …) satisfy it
-    as they are.
+    ``mp.io.lammps.LammpsDumpReader``, ``mp.io.pdb.PdbReader``, …) are
+    sequences. A sidecar that still exposes ``n_frames`` and ``read_frame``
+    is adapted onto this shape.
     """
 
-    @property
-    def n_frames(self) -> int:
+    def __len__(self) -> int:
         """Number of frames in the dataset."""
         ...
 
-    def read_frame(self, index: int) -> Frame:
+    def __getitem__(self, index: int) -> Frame:
         """The frame at *index*."""
         ...
+
+
+class _CallReader:
+    """``n_frames`` / ``read_frame`` viewed as a sequence."""
+
+    def __init__(self, count: int, read: Callable[[int], Frame]) -> None:
+        self._count = count
+        self._read = read
+
+    def __len__(self) -> int:
+        return self._count
+
+    def __getitem__(self, index: int) -> Frame:
+        return self._read(index)
 
 
 def open_reader(sidecar: ModuleType, dataset_path: Path) -> FrameReader:
@@ -73,13 +88,21 @@ def open_reader(sidecar: ModuleType, dataset_path: Path) -> FrameReader:
         reader = reader_factory(dataset_path)
     except Exception as exc:
         raise PreviewReaderError(str(dataset_path), f"opening the reader failed: {exc}") from exc
-    if not isinstance(reader, FrameReader):
+    if isinstance(reader, (str, bytes, bytearray)):
         raise PreviewReaderError(
             str(dataset_path),
-            f"{SIDECAR_READER} returned a {type(reader).__name__}, "
-            "which has no n_frames / read_frame(index)",
+            f"{SIDECAR_READER} returned a {type(reader).__name__}, which has no frame index",
         )
-    return reader
+    if isinstance(reader, FrameReader):
+        return reader
+    count = getattr(reader, "n_frames", None)
+    read = getattr(reader, "read_frame", None)
+    if isinstance(count, int) and callable(read):
+        return _CallReader(count, read)
+    raise PreviewReaderError(
+        str(dataset_path),
+        f"{SIDECAR_READER} returned a {type(reader).__name__}, which has no frame index",
+    )
 
 
 def frames_to_extxyz(frames: Sequence[Frame]) -> bytes:
