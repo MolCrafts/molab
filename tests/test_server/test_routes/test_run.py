@@ -621,6 +621,21 @@ class TestPromoteArtifact:
         assert body["version"]["digest"] == artifact.content.digest
         assert body["asset"]["versionCount"] == 1
 
+    def test_promote_again_returns_the_same_asset(
+        self, served: ServedFactory, fresh_run: RunFixture
+    ) -> None:
+        ws, exp, run = fresh_run
+        artifact = _emit_metrics(run)
+        url = f"{_run_url(exp, run)}/executions/e01/artifacts/{artifact.id}/promote"
+        with served(ws) as client:
+            first = client.post(url, json={})
+            second = client.post(url, json={})
+        assert first.status_code == 201, first.text
+        assert second.status_code == 201, second.text
+        assert second.json()["asset"]["id"] == first.json()["asset"]["id"]
+        assert second.json()["version"]["id"] == first.json()["version"]["id"]
+        assert second.json()["asset"]["versionCount"] == 1
+
     def test_promote_returns_origin(self, served: ServedFactory, fresh_run: RunFixture) -> None:
         ws, exp, run = fresh_run
         artifact = _emit_metrics(run)

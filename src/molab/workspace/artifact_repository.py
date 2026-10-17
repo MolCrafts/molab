@@ -441,6 +441,13 @@ class LegacyAssetMigration(BaseModel):
     commit: str | None
 
 
+def _same_content(held: ContentRef | None, incoming: ContentRef | None) -> bool:
+    """True when both sides name the same non-empty content digest."""
+    if held is None or incoming is None:
+        return False
+    return bool(held.digest) and held.digest == incoming.digest
+
+
 class AssetRepository:
     """Long-term data identities and immutable versions at one scope.
 
@@ -487,7 +494,35 @@ class AssetRepository:
         into_asset_id: str | None = None,
         metadata: dict[str, JSONValue] | None = None,
     ) -> tuple[Asset, AssetVersion]:
-        """Register an Artifact as a new Asset, or as the next version of one."""
+        """Register an Artifact as a new Asset, or as the next version of one.
+
+        The decision runs under the scope lock. An artifact id that is already
+        an origin is returned as filed. An explicit *title* binds to the one
+        asset with that title, or creates it; two assets with that title raise
+        ``ValueError``. *into_asset_id* selects the target directly. With
+        neither, an asset whose latest version already has this content digest
+        is returned, and otherwise a new asset is created under the artifact's
+        name. When the chosen asset's latest version has the same content
+        digest, that version is returned and nothing is written.
+
+        Args:
+            artifact: The emitted artifact. A ref or a bare id is refused.
+            created_by: Agent recorded on a version this call actually writes.
+            title: Display title that selects or names the asset.
+            into_asset_id: Asset to version. Wins over *title*.
+            metadata: Stored on a version this call writes.
+
+        Returns:
+            The asset and the version that holds this artifact, or the
+            existing version when this call did not write one.
+
+        Raises:
+            TypeError: *artifact* is not an :class:`Artifact`.
+            ValueError: The artifact belongs to another project, *title*
+                matches more than one asset, or the content digest is the
+                latest version of more than one asset.
+            KeyError: *into_asset_id* is not in this scope.
+        """
         if not isinstance(artifact, Artifact):
             raise TypeError(
                 "promote() needs the Artifact itself — read it from the Execution "
@@ -791,21 +826,45 @@ class AssetRepository:
         into_asset_id: str | None,
         metadata: dict[str, JSONValue] | None,
     ) -> tuple[Asset, AssetVersion]:
+        filed = self._promotion_of(source.id)
+        if filed is not None:
+            return filed
+
         now = datetime.now(UTC)
-        if into_asset_id is None:
+        if into_asset_id is not None:
+            asset = self.get(into_asset_id)
+            slug = self._slug_of(into_asset_id)
+        elif title:
+            bound = self._asset_by_title(title)
+            if bound is None:
+                asset = Asset(
+                    id=generate_uuid7(),
+                    scope=self.scope,
+                    title=title,
+                    created_at=now,
+                    created_by=created_by,
+                )
+                slug = self._free_slug(asset.title)
+            else:
+                asset = bound
+                slug = self._slug_of(asset.id)
+        else:
+            same_bytes = self._latest_with_digest(source.content)
+            if same_bytes is not None:
+                return same_bytes
             asset = Asset(
                 id=generate_uuid7(),
                 scope=self.scope,
-                title=title or source.name,
+                title=source.name,
                 created_at=now,
                 created_by=created_by,
             )
             slug = self._free_slug(asset.title)
-        else:
-            asset = self.get(into_asset_id)
-            slug = self._slug_of(into_asset_id)
 
         prior = self.versions(asset.id)
+        if prior and _same_content(prior[-1].content, source.content):
+            return asset, prior[-1]
+
         qualified = self._qualify_artifact(source.id, self.scope.project_id)
         version = AssetVersion(
             id=generate_uuid7(),
@@ -845,6 +904,55 @@ class AssetRepository:
             occurred_at=now,
         )
         return asset, version
+
+    def _promotion_of(self, artifact_id: str) -> tuple[Asset, AssetVersion] | None:
+        """The version whose origin is *artifact_id*, if this scope has one."""
+        for asset in self.list():
+            for version in self.versions(asset.id):
+                origin = version.origin
+                if isinstance(origin, ArtifactOrigin) and origin.artifact_id == artifact_id:
+                    return asset, version
+        return None
+
+    def _asset_by_title(self, title: str) -> Asset | None:
+        """The one asset titled *title*, or ``None`` when the scope has none.
+
+        Raises:
+            ValueError: More than one asset has this display title.
+        """
+        matches = [item for item in self.list() if item.title == title]
+        if not matches:
+            return None
+        if len(matches) > 1:
+            ids = ", ".join(item.id for item in matches)
+            raise ValueError(f"Asset title {title!r} matches more than one asset ({ids})")
+        return matches[0]
+
+    def _latest_with_digest(self, content: ContentRef | None) -> tuple[Asset, AssetVersion] | None:
+        """The asset whose latest version has *content*'s digest.
+
+        Raises:
+            ValueError: More than one asset's latest version has that digest.
+        """
+        digest = content.digest if content is not None and content.digest else None
+        if digest is None:
+            return None
+        found: list[tuple[Asset, AssetVersion]] = []
+        for asset in self.list():
+            versions = self.versions(asset.id)
+            if not versions:
+                continue
+            latest = versions[-1]
+            if latest.content is not None and latest.content.digest == digest:
+                found.append((asset, latest))
+        if not found:
+            return None
+        if len(found) > 1:
+            ids = ", ".join(asset.id for asset, _version in found)
+            raise ValueError(
+                f"Content digest {digest} is the latest version of more than one asset ({ids})"
+            )
+        return found[0]
 
     def payload_path(self, asset_id: str, version: int | None = None) -> str:
         """Absolute path of one version's bytes on the workspace filesystem.

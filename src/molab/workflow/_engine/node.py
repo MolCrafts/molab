@@ -345,6 +345,8 @@ def _promote_outputs(
                     mime=marker.mime,
                     consumed=list(consumed) or None,
                 )
+                if marker.asset:
+                    _register_project_asset(run_context, artifact, marker.asset)
                 source_path = getattr(artifact, "source_path", None)
                 execution_dir = getattr(run_context, "execution_dir", None)
                 if execution_dir is not None and source_path is not None:
@@ -376,6 +378,26 @@ def _promote_outputs(
             for key, value in output.items()
         }
     return output
+
+
+def _register_project_asset(run_context: object, artifact: object, title: str) -> None:
+    """File *artifact* in the project asset library under *title*.
+
+    :meth:`AssetRepository.promote` decides, under its lock, whether *title*
+    is a new asset, the next version of the one asset with that title, or
+    already current. The task body never sees the workspace. A missing
+    project library leaves the run artifact as it is. A library error
+    propagates, so the task fails in the open.
+    """
+    run = getattr(run_context, "run", None)
+    experiment = getattr(run, "experiment", None) if run is not None else None
+    project = getattr(experiment, "project", None) if experiment is not None else None
+    repo = getattr(project, "assets", None) if project is not None else None
+    if repo is None:
+        return
+    from molab.workspace.history import SYSTEM_AGENT
+
+    repo.promote(artifact, created_by=SYSTEM_AGENT, title=title)
 
 
 class MissingTaskInputError(TypeError):

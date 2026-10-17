@@ -993,20 +993,13 @@ def _find_run(ws: object, run_id: str) -> Run:
     return found
 
 
-def _artifact_ids(repo: object) -> dict[str, str]:
-    """Map an already-promoted artifact id to the asset id that holds it."""
+def _version_ids(repo: object) -> set[str]:
+    """Every asset-version id currently in *repo*."""
     from molab.workspace.artifact_repository import AssetRepository
-    from molab.workspace.domain import ArtifactOrigin
 
     if not isinstance(repo, AssetRepository):
         raise TypeError(f"expected an AssetRepository, got {type(repo).__name__}")
-    found: dict[str, str] = {}
-    for asset in repo.list():
-        for version in repo.versions(asset.id):
-            origin = version.origin
-            if isinstance(origin, ArtifactOrigin):
-                found.setdefault(origin.artifact_id, asset.id)
-    return found
+    return {version.id for asset in repo.list() for version in repo.versions(asset.id)}
 
 
 @asset_app.command("import")
@@ -1046,7 +1039,10 @@ def asset_promote(
     """Promote a run's generated images into its project asset library.
 
     Image parts are the artifacts ``molab knowledge parts`` lists whose media
-    type starts with ``image/``. An artifact that is already an asset is skipped.
+    type starts with ``image/``. The project repository files each one under
+    the part name: a new asset, or the next version of the one asset with
+    that title. An artifact or the same bytes already in the library are
+    left as they are.
     """
     from molab.knowledge import GeneratedParts
     from molab.workspace.history import SYSTEM_AGENT
@@ -1063,17 +1059,19 @@ def asset_promote(
         print(f"No generated image parts on run {run.id}.")
         return
     repo = run.experiment.project.data_assets
-    already = _artifact_ids(repo)
+    known = _version_ids(repo)
     for part in images:
-        held = already.get(part.artifact_id)
-        if held is not None:
-            print(f"present\t{part.part}\t{held}")
-            continue
         artifact = run.execution(part.execution_id).artifact(part.artifact_id)
-        asset, _version = repo.promote(
-            artifact,
-            created_by=SYSTEM_AGENT,
-            title=part.part,
-            metadata={"part": part.part},
-        )
-        print(f"promoted\t{part.part}\t{asset.id}")
+        try:
+            asset, version = repo.promote(
+                artifact,
+                created_by=SYSTEM_AGENT,
+                title=part.part,
+                metadata={"part": part.part},
+            )
+        except ValueError as exc:
+            rprint(f"[red]Error:[/red] {exc}")
+            raise typer.Exit(1) from None
+        label = "present" if version.id in known else "promoted"
+        print(f"{label}\t{part.part}\t{asset.id}")
+        known.add(version.id)
