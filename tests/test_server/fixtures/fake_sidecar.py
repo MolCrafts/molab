@@ -25,15 +25,14 @@ if _IMPORT_SENTINEL:
 class TwoAtomReader:
     """A fixed number of two-atom frames, the second atom at x = frame index."""
 
-    def __init__(self, path: Path, *, n_frames: int = 5) -> None:
+    def __init__(self, path: Path, *, count: int = 5) -> None:
         self.path = path
-        self._n_frames = n_frames
+        self._count = count
 
-    @property
-    def n_frames(self) -> int:
-        return self._n_frames
+    def __len__(self) -> int:
+        return self._count
 
-    def read_frame(self, index: int) -> Frame:
+    def __getitem__(self, index: int) -> Frame:
         frame = Frame()
         frame["atoms"] = Block(
             {
