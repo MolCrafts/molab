@@ -1,12 +1,12 @@
-"""``bypass_cache`` / fresh-execution escape hatch (run-recovery bug 4).
+"""``bypass_cache`` — the fresh-execution escape hatch (run-recovery bug 4).
 
 ``--rerun`` opens a new execution but the content-addressed cache may still
 serve deterministic tasks — tasks with side effects would silently not re-run.
-``WorkflowRuntime.execute(bypass_cache=True)`` skips cache READS (every body
-actually runs) while results are still written back to the cache. The same
-request survives a process boundary as a persisted marker
-(``executions/<exec_id>/fresh.json`` via ``request_fresh_execution``), which
-the runtime picks up when it executes that execution id.
+A cache bypass skips cache READS (every body actually runs) while results are
+still written back to the cache. The request has one home: the Execution
+record (``Run._create_execution(bypass_cache=True)`` → ``execution.json``),
+which ``WorkflowRuntime.execute`` reads through ``ctx.bypass_cache``. An
+explicit ``bypass_cache=True`` kwarg is OR-ed in on top.
 """
 
 from __future__ import annotations
@@ -15,15 +15,14 @@ from pathlib import Path
 
 import pytest
 
-from molexp.workflow import (
+from molab.workflow import (
     Caching,
     TaskContext,
+    Workflow,
     WorkflowCompiler,
     WorkflowRuntime,
-    fresh_requested,
-    request_fresh_execution,
 )
-from molexp.workspace import Workspace
+from molab.workspace import Workspace
 
 _COUNTERS: dict[str, int] = {}
 
@@ -52,23 +51,26 @@ def _new_run(workspace: Workspace, name: str):
 
 
 def _counted_workflow():
-    wf = WorkflowCompiler(name="counted-fresh")
+    wf = Workflow(name="counted-fresh")
 
     @wf.task
     async def step(ctx: TaskContext) -> int:
         _bump("step")
         return 42
 
-    return wf.compile()
+    return WorkflowCompiler().compile(wf)
 
 
 class TestBypassCache:
     @pytest.mark.asyncio
-    async def test_bypass_cache_reruns_body_despite_warm_cache(self, workspace: Workspace) -> None:
-        """A warm cache would normally serve the body; ``bypass_cache=True``
-        forces it to run again (the control run proves the cache is warm)."""
+    async def test_recorded_bypass_reruns_body_despite_warm_cache(
+        self, workspace: Workspace, tmp_path: Path
+    ) -> None:
+        """A warm cache would normally serve the body; an Execution recorded
+        with ``bypass_cache=True`` forces it to run again with no runtime kwarg
+        (the control run proves the cache is warm)."""
         compiled = _counted_workflow()
-        cache = Caching(store=workspace.cache.as_cache_store())
+        cache = Caching(store_dir=tmp_path / "cache")
 
         run1 = _new_run(workspace, "warm")
         with run1.start() as ctx1:
@@ -81,20 +83,67 @@ class TestBypassCache:
             await WorkflowRuntime().execute(compiled, run_context=ctx2, cache=cache)
         assert _COUNTERS["step"] == 1
 
-        # bypass_cache=True: the body MUST run again despite the warm cache.
+        # The bypass is a fact on the pre-allocated record, not a kwarg.
         run3 = _new_run(workspace, "fresh")
-        with run3.start() as ctx3:
+        e = run3._create_execution(bypass_cache=True)
+        assert e.id == "e01"
+        with run3.start(execution_id=e.id) as ctx3:
+            result = await WorkflowRuntime().execute(compiled, run_context=ctx3, cache=cache)
+        assert result.outputs["step"] == 42
+        assert result.execution_id == "e01"
+        assert _COUNTERS["step"] == 2
+
+    @pytest.mark.asyncio
+    async def test_recorded_default_keeps_cache_reads(
+        self, workspace: Workspace, tmp_path: Path
+    ) -> None:
+        """A pre-allocated Execution with the default ``bypass_cache=False`` is
+        served from a warm cache — the body does not run again."""
+        compiled = _counted_workflow()
+        cache = Caching(store_dir=tmp_path / "cache")
+
+        run1 = _new_run(workspace, "warm")
+        with run1.start() as ctx1:
+            await WorkflowRuntime().execute(compiled, run_context=ctx1, cache=cache)
+        assert _COUNTERS["step"] == 1
+
+        run2 = _new_run(workspace, "queued")
+        e = run2._create_execution()
+        assert e.bypass_cache is False
+        with run2.start(execution_id=e.id) as ctx2:
+            result = await WorkflowRuntime().execute(compiled, run_context=ctx2, cache=cache)
+        assert result.outputs["step"] == 42
+        assert _COUNTERS["step"] == 1
+
+    @pytest.mark.asyncio
+    async def test_explicit_kwarg_bypasses_warm_cache(
+        self, workspace: Workspace, tmp_path: Path
+    ) -> None:
+        """The explicit ``bypass_cache=True`` kwarg still forces the body to run
+        even when the attempt's record does not ask for a bypass."""
+        compiled = _counted_workflow()
+        cache = Caching(store_dir=tmp_path / "cache")
+
+        run1 = _new_run(workspace, "warm")
+        with run1.start() as ctx1:
+            await WorkflowRuntime().execute(compiled, run_context=ctx1, cache=cache)
+        assert _COUNTERS["step"] == 1
+
+        run2 = _new_run(workspace, "kwarg")
+        with run2.start() as ctx2:
             result = await WorkflowRuntime().execute(
-                compiled, run_context=ctx3, cache=cache, bypass_cache=True
+                compiled, run_context=ctx2, cache=cache, bypass_cache=True
             )
         assert result.outputs["step"] == 42
         assert _COUNTERS["step"] == 2
 
     @pytest.mark.asyncio
-    async def test_bypass_cache_still_writes_result_to_cache(self, workspace: Workspace) -> None:
+    async def test_bypass_cache_still_writes_result_to_cache(
+        self, workspace: Workspace, tmp_path: Path
+    ) -> None:
         """Bypass skips the READ only — the fresh result still lands in the cache."""
         compiled = _counted_workflow()
-        cache = Caching(store=workspace.cache.as_cache_store())
+        cache = Caching(store_dir=tmp_path / "cache")
 
         run1 = _new_run(workspace, "seed")
         with run1.start() as ctx1:
@@ -108,31 +157,3 @@ class TestBypassCache:
         with run2.start() as ctx2:
             await WorkflowRuntime().execute(compiled, run_context=ctx2, cache=cache)
         assert _COUNTERS["step"] == 1
-
-    @pytest.mark.asyncio
-    async def test_fresh_marker_forces_bypass_across_process_boundary(
-        self, workspace: Workspace
-    ) -> None:
-        """A persisted ``fresh.json`` marker requests the same bypass — the channel
-        the server rerun endpoint / molq worker path uses (no explicit kwarg)."""
-        compiled = _counted_workflow()
-        cache = Caching(store=workspace.cache.as_cache_store())
-
-        run1 = _new_run(workspace, "warm")
-        with run1.start() as ctx1:
-            await WorkflowRuntime().execute(compiled, run_context=ctx1, cache=cache)
-        assert _COUNTERS["step"] == 1
-
-        run2 = _new_run(workspace, "marked")
-        run_dir = Path(str(run2.run_dir))
-        execution_id = f"exec-{run2.id}"
-        marker = request_fresh_execution(run_dir, execution_id)
-        assert marker.exists()
-        assert fresh_requested(run_dir, execution_id)
-
-        with run2.start(execution_id=execution_id) as ctx2:
-            await WorkflowRuntime().execute(
-                compiled, run_context=ctx2, cache=cache, execution_id=execution_id
-            )
-        # No explicit kwarg — the marker alone must force the body to re-run.
-        assert _COUNTERS["step"] == 2

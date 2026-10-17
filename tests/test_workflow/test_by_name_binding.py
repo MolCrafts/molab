@@ -12,16 +12,16 @@ from __future__ import annotations
 
 import asyncio
 
-from molexp.workflow import WorkflowCompiler, WorkflowRuntime
+from molab.workflow import Workflow, WorkflowCompiler, WorkflowRuntime
 
 
-def _run(wf: WorkflowCompiler):
-    return asyncio.run(WorkflowRuntime().execute(wf.compile()))
+def _run(wf: Workflow):
+    return asyncio.run(WorkflowRuntime().execute(WorkflowCompiler().compile(wf)))
 
 
 class TestByNameBinding:
     def test_single_upstream_dict_binds_present_keys_by_name(self) -> None:
-        wf = WorkflowCompiler(name="byname")
+        wf = Workflow(name="byname")
 
         @wf.task
         async def produce(ctx) -> dict:
@@ -38,7 +38,7 @@ class TestByNameBinding:
 
     def test_multi_upstream_dicts_merge_by_name(self) -> None:
         """``c(**a_out, **b_out)``: two upstream dicts merge into c's params; no ctx."""
-        wf = WorkflowCompiler(name="merge")
+        wf = Workflow(name="merge")
 
         @wf.task
         async def a(ctx) -> dict:
@@ -57,7 +57,7 @@ class TestByNameBinding:
         assert result.outputs["c"] == {"r": 3}
 
     def test_var_keyword_param_absorbs_all_inputs(self) -> None:
-        wf = WorkflowCompiler(name="kw")
+        wf = Workflow(name="kw")
 
         @wf.task
         async def src(ctx) -> dict:
@@ -71,7 +71,7 @@ class TestByNameBinding:
         assert result.outputs["sink"] == {"keys": ["a", "b"]}
 
     def test_default_used_when_named_input_absent(self) -> None:
-        wf = WorkflowCompiler(name="default")
+        wf = Workflow(name="default")
 
         @wf.task
         async def src(ctx) -> dict:
@@ -85,7 +85,7 @@ class TestByNameBinding:
         assert result.outputs["sink"] == {"out": 2.0}
 
     def test_missing_required_input_fails_the_run(self) -> None:
-        wf = WorkflowCompiler(name="missing")
+        wf = Workflow(name="missing")
 
         @wf.task
         async def src(ctx) -> dict:

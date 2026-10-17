@@ -1,6 +1,6 @@
 """Workspace exception hierarchy + strict-getter refusal.
 
-The two typed families in ``molexp.workspace.errors`` back the server's
+The two typed families in ``molab.workspace.errors`` back the server's
 404 / 409 mapping: ``*NotFoundError`` are ``LookupError`` subclasses (strict
 getter miss → 404) and ``*ExistsError`` are ``ValueError`` subclasses (strict
 create collision → 409). A strict ``get_*`` raises the typed ``*NotFoundError``
@@ -14,7 +14,7 @@ from __future__ import annotations
 
 import pytest
 
-from molexp.workspace import (
+from molab.workspace import (
     ExperimentExistsError,
     ExperimentNotFoundError,
     ProjectExistsError,

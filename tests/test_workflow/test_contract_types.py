@@ -1,15 +1,15 @@
-"""Tests for :mod:`molexp.workflow.contract` value types.
+"""Tests for :mod:`molab.workflow.contract` value types.
 
-The frozen-pydantic types (`WorkflowContract`, `TaskIO`, …) carry no molexp
+The frozen-pydantic types (`WorkflowContract`, `TaskIO`, …) carry no molab
 behavior beyond pydantic's own frozen / extra-forbid config, so the sole
-molexp-owned invariant here is that the baseline check set is *complete*:
+molab-owned invariant here is that the baseline check set is *complete*:
 :func:`default_validation_checks` must ship a default for every
 :class:`ValidationCheckId` member (a new id without a default would be caught).
 """
 
 from __future__ import annotations
 
-from molexp.workflow.contract import (
+from molab.workflow.contract import (
     ValidationCheckId,
     default_validation_checks,
 )

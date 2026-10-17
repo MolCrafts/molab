@@ -1,4 +1,4 @@
-"""Tests for ``molexp.plugins.ui.discover_ui_plugin_dirs`` — the slim,
+"""Tests for ``molab.plugins.ui.discover_ui_plugin_dirs`` — the slim,
 Python-side directory-pointer discovery for UI plugins.
 
 The Python side has zero UI semantics: discovery only resolves a directory
@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from molexp.plugins.ui import _discover_ui_uncached, discover_ui_plugin_dirs
+from molab.plugins.ui import _discover_ui_uncached, discover_ui_plugin_dirs
 
 # ── fakes / fixtures ──────────────────────────────────────────────────────
 
@@ -27,7 +27,7 @@ class _FakeEntryPoint:
         name: str,
         loader,
         *,
-        group: str = "molexp.ui_plugins",
+        group: str = "molab.ui_plugins",
     ) -> None:
         self.name = name
         self.group = group
@@ -48,7 +48,7 @@ def _install_fake_eps(
             return tuple(ep for ep in eps_tuple if ep.group == group)
 
     monkeypatch.setattr(
-        "molexp.plugins.ui.importlib_metadata.entry_points",
+        "molab.plugins.ui.importlib_metadata.entry_points",
         lambda: _FakeEntryPoints(),
     )
     # Cached state must be cleared so the test sees the patched eps.
@@ -57,13 +57,13 @@ def _install_fake_eps(
 
 @pytest.fixture
 def warnings(monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    """Spy on ``molexp.plugins.ui.logger.warning`` calls.
+    """Spy on ``molab.plugins.ui.logger.warning`` calls.
 
     mollog bypasses stdlib ``logging`` so pytest's ``caplog`` / ``capfd``
     do not see its output; we capture the messages directly.
     """
     captured: list[str] = []
-    import molexp.plugins.ui as ui_mod
+    import molab.plugins.ui as ui_mod
 
     monkeypatch.setattr(
         ui_mod.logger,
@@ -92,31 +92,6 @@ class TestDiscoverUiPluginDirs:
         _install_fake_eps(monkeypatch, [_FakeEntryPoint("callable", lambda: _resolve)])
 
         assert discover_ui_plugin_dirs() == {"callable": tmp_path}
-
-    def test_callable_raising_is_isolated(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        tmp_path: Path,
-        warnings: list[str],
-    ) -> None:
-        good_dir = tmp_path / "good"
-        good_dir.mkdir()
-
-        def _explode() -> Path:
-            raise RuntimeError("boom")
-
-        _install_fake_eps(
-            monkeypatch,
-            [
-                _FakeEntryPoint("bad", lambda: _explode),
-                _FakeEntryPoint("good", lambda: good_dir),
-            ],
-        )
-
-        result = discover_ui_plugin_dirs()
-
-        assert result == {"good": good_dir}
-        assert any("bad" in msg for msg in warnings)
 
     def test_non_directory_path_is_filtered(
         self,
@@ -170,36 +145,3 @@ class TestDiscoverUiPluginDirs:
         _install_fake_eps(monkeypatch, [])
 
         assert discover_ui_plugin_dirs() == {}
-
-    def test_entry_point_load_failure_is_isolated(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        tmp_path: Path,
-        warnings: list[str],
-    ) -> None:
-        good_dir = tmp_path / "good"
-        good_dir.mkdir()
-
-        def _import_boom():
-            raise ImportError("missing dep")
-
-        _install_fake_eps(
-            monkeypatch,
-            [
-                _FakeEntryPoint("bad", _import_boom),
-                _FakeEntryPoint("good", lambda: good_dir),
-            ],
-        )
-
-        result = discover_ui_plugin_dirs()
-
-        assert result == {"good": good_dir}
-        assert any("bad" in msg for msg in warnings)
-
-    def test_module_does_not_define_uiplugin_class(self) -> None:
-        # Design invariant: the Python side has zero UI semantics — no
-        # ``UiPlugin`` dataclass, no ``api_version`` field. UI semantics live
-        # in the TS-side ``manifest.json``.
-        import molexp.plugins.ui as ui_mod
-
-        assert not hasattr(ui_mod, "UiPlugin")

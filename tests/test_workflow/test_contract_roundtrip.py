@@ -1,5 +1,5 @@
 """Round-trip + safety tests for the YAML / contract surface of
-:class:`molexp.workflow.codec.WorkflowCodec`.
+:class:`molab.workflow.codec.WorkflowCodec`.
 
 The plain IR↔Python↔spec surfaces live in ``test_codec.py``; this file owns the
 YAML surface and the contract sidecar it carries:
@@ -16,8 +16,8 @@ from __future__ import annotations
 import pytest
 import yaml
 
-from molexp.workflow.codec import default_codec
-from molexp.workflow.contract import (
+from molab.workflow.codec import default_codec
+from molab.workflow.contract import (
     ArtifactDecl,
     TaskInputSpec,
     TaskIO,
@@ -30,7 +30,7 @@ from molexp.workflow.contract import (
 
 def _sample_contract() -> WorkflowContract:
     return WorkflowContract(
-        workflow_id="workflow_00000000",
+        workflow_digest="workflow_00000000",
         task_io=(
             TaskIO(
                 task_id="A",
@@ -66,9 +66,9 @@ class TestWorkflowCodecYamlRoundTrip:
 
     def test_spec_survives_yaml_round_trip_through_ir(self) -> None:
         """``spec_to_yaml`` ⇄ ``yaml_to_spec`` is IR-stable (slugged tasks only)."""
-        from molexp.workflow.compiler import WorkflowCompiler
-        from molexp.workflow.registry import default_registry
-        from molexp.workflow.task import Task
+        from molab.workflow.compiler import Workflow, WorkflowCompiler
+        from molab.workflow.registry import default_registry
+        from molab.workflow.task import Task
 
         class Inert(Task):
             async def execute(self, ctx):  # type: ignore[no-untyped-def, override]
@@ -77,11 +77,8 @@ class TestWorkflowCodecYamlRoundTrip:
         if not default_registry.has("test.inert_yaml_rt"):
             default_registry.register("test.inert_yaml_rt", Inert)
 
-        spec = (
-            WorkflowCompiler(name="rt")
-            .add(Inert(), name="A")
-            .add(Inert(), name="B", depends_on=["A"])
-            .compile()
+        spec = WorkflowCompiler().compile(
+            Workflow(name="rt").add(Inert(), name="A").add(Inert(), name="B", depends_on=["A"])
         )
         text = default_codec.spec_to_yaml(spec)
         spec2 = default_codec.yaml_to_spec(text)
@@ -90,8 +87,8 @@ class TestWorkflowCodecYamlRoundTrip:
     def test_old_ir_without_contract_stays_contract_free(self) -> None:
         """An IR JSON with no ``workflow_contract`` key must not gain one
         across ``ir_to_spec`` → ``spec_to_ir``."""
-        from molexp.workflow.registry import default_registry
-        from molexp.workflow.task import Task
+        from molab.workflow.registry import default_registry
+        from molab.workflow.task import Task
 
         class Echo(Task):
             async def execute(self, ctx):  # type: ignore[no-untyped-def, override]
@@ -122,6 +119,8 @@ class TestWorkflowCodecYamlRoundTrip:
         spec = default_codec.ir_to_spec(ir_in)
         ir_out = default_codec.spec_to_ir(spec)
         assert "workflow_contract" not in ir_out
+        assert "workflow_id" not in ir_out
+        assert "workflow_digest" not in ir_out
 
 
 class TestWorkflowCodecYamlSafety:

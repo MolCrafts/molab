@@ -1,19 +1,21 @@
 # Your First Workflow
 
-Before MolExp becomes a workspace or a CLI tool, it is a workflow system. A workflow is just a compiled graph of computation steps. You can build and run that graph without creating a workspace at all.
+Before Molab becomes a workspace or a CLI tool, it is a workflow system. A workflow is just a compiled graph of computation steps. You can build and run that graph without creating a workspace at all.
 
 ## Define Tasks
 
 A task is an ordinary function. It declares the data it needs as named parameters. The engine binds values by name from upstream outputs.
 
 ```python
-from molexp.workflow import WorkflowCompiler
+from molab.workflow import Workflow, WorkflowCompiler
 
-wf = WorkflowCompiler(name="pipeline")
+wf = Workflow(name="pipeline")
+
 
 @wf.task
 def fetch() -> dict:
     return {"value": 42}
+
 
 @wf.task(depends_on=["fetch"])
 def scale(value: int, factor: int = 2) -> int:
@@ -36,15 +38,17 @@ The two styles mix freely in one graph.
 
 ## Compile and Run (No Workspace)
 
-`wf.compile()` freezes the definition into a `CompiledWorkflow`. You can run it purely in memory — no projects, experiments, or directories:
+`WorkflowCompiler().compile(wf)` freezes the definition into a `CompiledWorkflow`. You can run it purely in memory — no projects, experiments, or directories:
 
 ```python
 import asyncio
-from molexp.workflow import WorkflowRuntime
+from molab.workflow import WorkflowRuntime
 
-compiled = wf.compile()
+compiled = WorkflowCompiler().compile(wf)
 result = asyncio.run(WorkflowRuntime().execute(compiled))
-print(result.status, result.outputs)  # succeeded {'fetch': ..., 'scale': 84, 'publish': 'published 84'}
+print(
+    result.status, result.outputs
+)  # succeeded {'fetch': ..., 'scale': 84, 'publish': 'published 84'}
 ```
 
 This is useful during early iteration — iterate on task boundaries and data flow without thinking about persistence. When you want a durable record, hand the same `compiled` to a tracked run.
@@ -54,21 +58,21 @@ This is useful during early iteration — iterate on task boundaries and data fl
 If you prefer reusable classes over decorators, subclass `Task`:
 
 ```python
-from molexp.workflow import Task, TaskContext
+from molab.workflow import Task, TaskContext
+
 
 class Fetch(Task):
     def execute(self, ctx: TaskContext) -> dict:
         return {"value": 42}
 
+
 class Scale(Task):
     def execute(self, ctx: TaskContext, value: int, factor: int = 2) -> int:
         return value * factor
 
-compiled = (
-    WorkflowCompiler(name="pipeline-oop")
-    .add(Fetch())
-    .add(Scale(), depends_on=["fetch"])
-    .compile()
+
+compiled = WorkflowCompiler().compile(
+    Workflow(name="pipeline-oop").add(Fetch()).add(Scale(), depends_on=["fetch"])
 )
 ```
 

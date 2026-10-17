@@ -1,17 +1,22 @@
-"""Failure-recovery correctness of the run lifecycle (run-recovery bugs 1-3).
+"""Execution-level recovery semantics (run-recovery bugs 1-3, v2).
 
-Bug 1 — an *empty* ``with run.start(): pass`` on a failed run must never flip
-the run to ``succeeded``: success is a positive signal (workflow status or new
-results), never the default. A signal-less attempt on a failed/cancelled run
-is a no-op: the run keeps its prior status and the execution record is closed
-as ``"aborted"``.
+A Run has no scalar status; every physical Execution is sealed independently
+as SUCCEEDED / FAILED / INTERRUPTED / CANCELLED and is immutable once sealed.
+Recovery is a *new* Execution (RERUN, based on a terminal predecessor; a
+RETRY request is stored as RERUN since arch-own-03a) — it never mutates the
+failed attempt.
 
-Bug 2 — a genuinely successful attempt must clear the stale ``metadata.error``
-so the canonical record stops describing a failure that no longer exists.
+Bug 1 (v2) — a failed Execution is immutable: a subsequent attempt is a new
+Execution and never flips the failed one back to ``succeeded``. There is no
+``"aborted"`` status in v2.
+
+Bug 2 (v2) — a new (retry) Execution is born with no error; the stale error
+stays attached only to the failed Execution that produced it.
 
 Bug 3 — the common failure path (engine swallows the task exception and
-resolves the run to FAILED via ``mark_failed``; nothing propagates out of the
-``with`` block) must still persist ``executions/<exec_id>/error.txt``.
+resolves the Execution to FAILED via ``mark_failed``; nothing propagates out
+of the ``with`` block) must still persist failure evidence under
+``executions/<exec_id>/`` (the Execution's ``error``).
 """
 
 from __future__ import annotations
@@ -20,8 +25,8 @@ from pathlib import Path
 
 import pytest
 
-from molexp.workspace import Workspace
-from molexp.workspace.run import RunStatus
+from molab.workspace import Workspace
+from molab.workspace.domain import ExecutionMode, ExecutionStatus
 
 
 @pytest.fixture
@@ -31,129 +36,133 @@ def run(tmp_path):
     return exp.add_run(params={"i": 0})
 
 
-def _fail_once(run) -> None:
-    """Drive *run* to FAILED through the real lifecycle (exception path)."""
-    with pytest.raises(RuntimeError), run.start():
+def _fail_once(run) -> str:
+    """Drive *run* to one FAILED Execution through the real exception path."""
+    with pytest.raises(RuntimeError), run.start() as ctx:
+        failed_id = ctx.id
         raise RuntimeError("boom")
-    assert run.status == RunStatus.FAILED
+    assert run.executions[-1].status is ExecutionStatus.FAILED
+    return failed_id
 
 
-# ── Bug 1: no-op attempts never default to success ──────────────────────────
+# ── Bug 1: failed Executions are immutable; recovery is a new Execution ─────
 
 
 class TestNoOpAttemptKeepsPriorStatus:
-    def test_empty_start_on_failed_run_stays_failed(self, run):
-        _fail_once(run)
+    def test_failed_execution_stays_failed_after_retry(self, run):
+        failed_id = _fail_once(run)
 
-        with run.start():
-            pass  # nothing ran, no signal — must NOT become succeeded
+        with run.start(mode=ExecutionMode.RERUN, predecessor=failed_id):
+            pass  # clean retry — a NEW Execution, must not flip the failed one
 
-        assert run.status == RunStatus.FAILED
+        states = {s.id: s for s in run.executions}
+        assert states[failed_id].status is ExecutionStatus.FAILED
+        assert run.status_summary.total == 2
 
-    def test_empty_start_on_failed_run_keeps_error(self, run):
-        _fail_once(run)
-        assert run.metadata.error is not None
+    def test_failed_execution_keeps_error(self, run):
+        failed_id = _fail_once(run)
+        state = run._execution_repository().get(failed_id)
+        assert state.error is not None
+        assert state.error["type"] == "RuntimeError"
+        assert state.error["message"] == "boom"
 
-        with run.start():
+        with run.start(mode=ExecutionMode.RERUN, predecessor=failed_id):
             pass
 
-        err = run.metadata.error
-        assert err is not None
-        assert err.type == "RuntimeError"
-        assert err.message == "boom"
+        # The retry must not clear the failed Execution's error.
+        assert run._execution_repository().get(failed_id).error is not None
 
-    def test_noop_execution_record_is_aborted_not_succeeded(self, run):
-        _fail_once(run)
+    def test_retry_is_new_execution_not_aborted(self, run):
+        failed_id = _fail_once(run)
 
-        with run.start():
+        with run.start(mode=ExecutionMode.RERUN, predecessor=failed_id):
             pass
 
-        records = run.execution_history
-        assert len(records) == 2
-        assert records[-1].status == "aborted"
+        executions = run.executions
+        assert len(executions) == 2
+        assert executions[-1].status is ExecutionStatus.SUCCEEDED  # v2 has no "aborted"
 
-    def test_empty_start_on_cancelled_run_stays_cancelled(self, run):
-        run.materialize()
-        run.cancel()
-        assert run.status == RunStatus.CANCELLED
+    def test_cancelled_execution_stays_cancelled(self, run):
+        with run.start() as ctx:
+            exec_id = ctx.id
+            run.cancel(exec_id)
 
-        with run.start():
-            pass
-
-        assert run.status == RunStatus.CANCELLED
+        assert run.executions[-1].status is ExecutionStatus.CANCELLED
 
     def test_new_results_are_a_positive_signal(self, run):
-        """A reattempt that records new results is real work — it succeeds."""
-        _fail_once(run)
+        """A retry that records new results is real work — it succeeds."""
+        failed_id = _fail_once(run)
 
-        with run.start() as ctx:
+        with run.start(mode=ExecutionMode.RERUN, predecessor=failed_id) as ctx:
             ctx.set_result("train", {"loss": 0.1})
+            retry_id = ctx.id
 
-        assert run.status == RunStatus.SUCCEEDED
+        assert run.executions[-1].status is ExecutionStatus.SUCCEEDED
+        assert run.get_result("train", execution_id=retry_id) == {"loss": 0.1}
 
     def test_mark_succeeded_is_a_positive_signal(self, run):
-        """The workflow runtime's success signal flips a failed run back."""
-        _fail_once(run)
+        """A clean retry resolves to SUCCEEDED (the workflow runtime's signal)."""
+        failed_id = _fail_once(run)
 
-        with run.start() as ctx:
+        with run.start(mode=ExecutionMode.RERUN, predecessor=failed_id) as ctx:
             ctx.mark_succeeded()
 
-        assert run.status == RunStatus.SUCCEEDED
+        assert run.executions[-1].status is ExecutionStatus.SUCCEEDED
 
     def test_mark_failed_wins_over_mark_succeeded(self, run):
         with run.start() as ctx:
             ctx.mark_failed("task X blew up")
             ctx.mark_succeeded()  # must not override a recorded failure
 
-        assert run.status == RunStatus.FAILED
+        assert run.executions[-1].status is ExecutionStatus.FAILED
 
     def test_plain_first_attempt_still_succeeds(self, run):
-        """Legacy contract: a clean exception-free attempt on a run that was
-        never failed keeps resolving to SUCCEEDED (documented manual-driver
-        pattern; artifact-only attempts carry no explicit signal)."""
+        """A clean exception-free first attempt seals SUCCEEDED."""
         with run.start():
             pass
-        assert run.status == RunStatus.SUCCEEDED
+        assert run.executions[-1].status is ExecutionStatus.SUCCEEDED
 
 
-# ── Bug 2: success clears the stale error ────────────────────────────────────
+# ── Bug 2: a retry Execution is born with no error ──────────────────────────
 
 
 class TestSuccessClearsStaleError:
-    def test_error_cleared_on_disk_not_only_in_memory(self, run):
-        _fail_once(run)
-        with run.start() as ctx:
+    def test_retry_execution_has_no_error_on_disk(self, run):
+        failed_id = _fail_once(run)
+
+        with run.start(mode=ExecutionMode.RERUN, predecessor=failed_id) as ctx:
             ctx.mark_succeeded()
+            retry_id = ctx.id
 
         # Reload from disk through the parent experiment.
         reloaded = run.experiment.get_run(run.id)
-        assert reloaded.metadata.error is None
-        assert reloaded.status == RunStatus.SUCCEEDED
+        states = {s.id: s for s in reloaded.executions}
+        assert states[retry_id].error is None
+        assert states[retry_id].status is ExecutionStatus.SUCCEEDED
 
 
-# ── Bug 3: engine-swallowed failures still write error.txt ──────────────────
+# ── Bug 3: engine-swallowed failures still write failure evidence ───────────
 
 
 class TestErrorTxtOnSwallowedFailure:
-    def test_mark_failed_path_writes_error_txt(self, run):
-        """The engine catches task exceptions and resolves the run to FAILED
-        via mark_failed — no exception reaches the ``with`` exit. error.txt
-        must still land in the execution directory."""
+    def test_mark_failed_records_error_on_execution(self, run):
+        """The engine catches task exceptions and resolves the Execution to
+        FAILED via mark_failed — no exception reaches the ``with`` exit.
+        The error lands on the Execution record, not an ``exception.json`` sidecar."""
         with run.start() as ctx:
             ctx.mark_failed("ZeroDivisionError: division by zero")
-            exec_id = ctx._execution_id
+            exec_id = ctx.id
 
-        assert run.status == RunStatus.FAILED
-        error_txt = Path(str(run.run_dir)) / "executions" / exec_id / "error.txt"
-        assert error_txt.exists()
-        content = error_txt.read_text()
-        assert "ZeroDivisionError" in content
-        assert "division by zero" in content
+        assert run.executions[-1].status is ExecutionStatus.FAILED
+        err = run.executions[-1].error
+        assert err is not None
+        assert err["message"] == "ZeroDivisionError: division by zero"
+        assert not (run.execution_dir(exec_id) / "exception.json").exists()
 
-    def test_mark_failed_traceback_lands_in_error_txt(self, run):
+    def test_mark_failed_traceback_lands_in_traceback_txt(self, run):
         """The workflow runtime forwards the formatted task traceback through
         ``mark_failed(..., traceback_text=…)``; the lifecycle must persist it
-        into error.txt instead of the no-traceback placeholder."""
+        into traceback.txt instead of dropping it."""
         tb = (
             "Traceback (most recent call last):\n"
             '  File "wf.py", line 3, in explode\n'
@@ -162,10 +171,10 @@ class TestErrorTxtOnSwallowedFailure:
         )
         with run.start() as ctx:
             ctx.mark_failed("ZeroDivisionError: division by zero", traceback_text=tb)
-            exec_id = ctx._execution_id
+            exec_id = ctx.id
 
-        error_txt = Path(str(run.run_dir)) / "executions" / exec_id / "error.txt"
-        content = error_txt.read_text()
+        traceback_txt = Path(str(run.run_dir)) / "executions" / exec_id / "traceback.txt"
+        content = traceback_txt.read_text()
         assert "Traceback (most recent call last):" in content
         assert "raise ZeroDivisionError" in content
         assert "No Python traceback was captured" not in content

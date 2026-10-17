@@ -10,7 +10,7 @@ Computational scientists and research engineers running FAIR experiments: planni
 
 ## Product Purpose
 
-molexp is an agent-assisted scientific-workflow platform. The UI is the operator console for the workspace hierarchy **project → experiment → run → execution**: browse structure, act on lifecycle verbs (run / resume / rerun / cancel), read logs and metrics, and connect results to knowledge. Success looks like a tool that disappears into the experiment — dense when needed, calm when idle, never ornamental.
+molab is an agent-assisted scientific-workflow platform. The UI is the operator console for the workspace hierarchy **project → experiment → run → execution**: browse structure, act on lifecycle verbs (run / resume / rerun / cancel), read logs and metrics, and connect results to knowledge. Success looks like a tool that disappears into the experiment — dense when needed, calm when idle, never ornamental.
 
 ## Brand Personality
 

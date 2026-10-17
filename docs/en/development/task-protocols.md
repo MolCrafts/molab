@@ -1,6 +1,6 @@
 # Task Protocols
 
-MolExp uses two structural protocols (`typing.Protocol`, `@runtime_checkable`) to integrate user or third-party classes into a workflow **without requiring a molexp import**. Any object whose method signature matches the protocol qualifies — no inheritance, no registration, no configuration.
+Molab uses two structural protocols (`typing.Protocol`, `@runtime_checkable`) to integrate user or third-party classes into a workflow **without requiring a molab import**. Any object whose method signature matches the protocol qualifies — no inheritance, no registration, no configuration.
 
 ```python
 from typing import Protocol, AsyncIterator, runtime_checkable
@@ -9,20 +9,22 @@ from typing import Protocol, AsyncIterator, runtime_checkable
 @runtime_checkable
 class Runnable(Protocol):
     """Batch task: produces a single value per execution."""
+
     async def execute(self, ctx) -> "Any": ...
 
 
 @runtime_checkable
 class Streamable(Protocol):
     """Streaming actor: yields a series of values."""
+
     async def run(self, ctx) -> AsyncIterator["Any"]: ...
 ```
 
-These live in `molexp.workflow.protocols`.
+These live in `molab.workflow.protocols`.
 
 ## Why Structural (Not Nominal)?
 
-The `ctx` argument is deliberately typed as `Any` so third-party code need not import molexp to satisfy the protocol. At runtime, molexp passes the same concrete `TaskContext` to batch and streaming bodies; a third-party object can treat `ctx` as carrying only `ctx.workdir`, while the runtime values it operates on arrive as the body's own named parameters (bound by name from upstream outputs, run params, and build-time config).
+The `ctx` argument is deliberately typed as `Any` so third-party code need not import molab to satisfy the protocol. At runtime, molab passes the same concrete `TaskContext` to batch and streaming bodies; a third-party object can treat `ctx` as carrying only `ctx.workdir`, while the runtime values it operates on arrive as the body's own named parameters (bound by name from upstream outputs, run params, and build-time config).
 
 This makes it easy to drop in existing library components (e.g. data-pipeline nodes from another molcrafts package) without writing adapters:
 
@@ -32,16 +34,18 @@ class ExternalProcessor:
         # runtime values arrive as the body's own named parameters, not off ctx
         return {"processed": records}
 
-from molexp.workflow import WorkflowCompiler
-compiled = WorkflowCompiler(name="pipeline").add(ExternalProcessor()).compile()
+
+from molab.workflow import Workflow, WorkflowCompiler
+
+compiled = WorkflowCompiler().compile(Workflow(name="pipeline").add(ExternalProcessor()))
 ```
 
 ## Relationship to `Task` / `Actor`
 
-`molexp.workflow.Task` and `molexp.workflow.Actor` are **convenience base classes** that implement these protocols with helpful generics (`StateT`, `InputT`, `OutputT`). Using them is optional but recommended when you want:
+`molab.workflow.Task` and `molab.workflow.Actor` are **convenience base classes** that implement these protocols with helpful generics (`StateT`, `InputT`, `OutputT`). Using them is optional but recommended when you want:
 
 - Static type-checking of the body's named parameters.
-- An explicit declaration that this class is "meant as a molexp task".
+- An explicit declaration that this class is "meant as a molab task".
 
 At runtime, the compiler treats a `Task` subclass and a third-party `Runnable` object identically.
 
@@ -55,7 +59,7 @@ At runtime, the compiler treats a `Task` subclass and a third-party `Runnable` o
 
 Workflows are **authored in Python and re-imported on each execution** — there is no JSON IR or on-disk workflow schema. Identity is captured at two levels:
 
-- `CompiledWorkflow.workflow_id` — deterministic topology hash (`name + task dependencies`).
+- `CompiledWorkflow.workflow_digest` — sha256 of the compiled workflow. The document itself carries no identity.
 - `TaskSnapshot` — per-task AST-normalized code hash + config hash.
 
-Use `WorkflowSnapshotRef(source="train.py", git_commit="...")` (stored on `Experiment`) plus `config_hash` on `RunMetadata` to trace which code and config produced a run. The full replay path is: re-import `source`, recompile the workflow, activate the same molcfg profile.
+Trace a run by `workflow_digest` on the Execution and the journal header, plus the content-only profile `config_hash`. The replay path is: re-import the script, recompile the workflow, and activate the same molcfg profile.

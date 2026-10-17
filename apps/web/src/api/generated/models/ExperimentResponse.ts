@@ -1,0 +1,24 @@
+/* generated using openapi-typescript-codegen -- do not edit */
+/* istanbul ignore file */
+/* tslint:disable */
+/* eslint-disable */
+import type { RunSummary } from './RunSummary';
+export type ExperimentResponse = {
+    id: string;
+    projectId: string;
+    name: string;
+    path: string;
+    description?: string;
+    workflow?: (string | null);
+    workflowKind?: ('code' | 'document' | null);
+    workflowEntrypoint?: (string | null);
+    planRunId?: (string | null);
+    gitCommit?: (string | null);
+    parameterSpace?: Record<string, any>;
+    defaultTarget?: (string | null);
+    created: string;
+    runCount?: (number | null);
+    runs?: Array<RunSummary>;
+    ref: string;
+};
+

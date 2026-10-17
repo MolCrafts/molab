@@ -2,10 +2,16 @@
 
 Post-rectification the runtime takes an opaque duck-typed ``run_context`` and a
 ``Mapping[str, Any]`` config — never a ``Workspace.Run`` or ``ProfileConfig``
-(the legacy ``run=`` kwarg is gone; ``run_dir=`` accepts a path directly). This
+(the legacy ``run=`` and ``run_dir=`` kwargs are gone). This
 file owns that boundary: failure→status, run_context handling (duck-typed, never
 exposed on the public ``TaskContext``), executions materialization, the bare
-``Runnable`` protocol body, and the ``scratch_root``/``ctx.workdir`` contract.
+``Runnable`` protocol body, the ``scratch_root``/``ctx.workdir`` contract, and
+the context contract (the run context names the attempt through ``id`` /
+``execution_dir`` / ``predecessor``; the journal lands in
+``execution_dir`` and nowhere else; an incomplete context is a ``TypeError``;
+``execution_id=`` without a context, or a mismatched id, is a ``ValueError``;
+passing ``run_dir=`` is a ``TypeError``; a bare in-memory run reports ``None``
+and writes no journal).
 
 Graph topology (chains, diamonds, dict-merge binding, explicit parallelism) is
 owned by ``test_parallel`` / ``test_by_name_binding`` / ``test_values_on_edges``
@@ -14,49 +20,72 @@ owned by ``test_parallel`` / ``test_by_name_binding`` / ``test_values_on_edges``
 
 from __future__ import annotations
 
+import asyncio
+import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
-from molexp.workflow import TaskContext, WorkflowCompiler, WorkflowRuntime
+from molab.workflow import TaskContext, Workflow, WorkflowCompiler, WorkflowRuntime, read_journal
+from molab.workspace import Workspace
 
 
 class _RunContextStub:
-    """Minimal duck-typed ``run_context`` — what the runtime now requires.
+    """Minimal duck-typed ``run_context`` — what the runtime requires.
 
-    Exposes ``.work_dir`` / ``.config`` / ``.run`` so the runtime can extract a
-    run dir and forward the value to its private channel. No ``Workspace`` import.
+    Names its attempt through ``id`` / ``execution_dir`` /
+    ``predecessor`` (the runtime composes no path: the journal goes
+    to ``execution_dir``), plus ``.run_dir`` / ``.config`` / ``.run`` /
+    ``.params`` / ``.bypass_cache``. No ``Workspace`` import.
     """
 
     def __init__(
         self,
         *,
-        work_dir: Path,
+        run_dir: Path,
+        execution_dir: Path | None = None,
         config: dict | None = None,
         run_id: str | None = None,
         params: dict | None = None,
+        execution_id: str = "e01",
     ):
-        self.work_dir = work_dir
+        self.run_dir = run_dir
+        self.id = execution_id
+        self.execution_dir = execution_dir or run_dir / "slot" / execution_id
+        self.predecessor = None
+        self.bypass_cache = False
         self.config = config or {}
         # Root-task params reach the body by name (engine reads run_context.params).
         self.params = params or {}
         self.run = type(
             "RunStub",
             (),
-            {"id": run_id or "stub-run", "run_dir": work_dir},
+            {"id": run_id or "stub-run", "run_dir": run_dir},
         )()
+
+
+def _ok_workflow():
+    """A one-task workflow that always succeeds."""
+    wf = Workflow(name="ok")
+
+    @wf.task
+    async def step(ctx: TaskContext) -> str:
+        return "ok"
+
+    return WorkflowCompiler().compile(wf)
 
 
 @pytest.mark.asyncio
 class TestWorkflowRuntimeExecute:
     async def test_task_failure_propagates_to_failed_status(self):
-        wf = WorkflowCompiler(name="fail")
+        wf = Workflow(name="fail")
 
         @wf.task
         async def boom(ctx):
             raise RuntimeError("oops")
 
-        result = await WorkflowRuntime().execute(wf.compile())
+        result = await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
         assert result.status == "failed"
 
     async def test_external_runnable_protocol_body_executes(self):
@@ -66,7 +95,7 @@ class TestWorkflowRuntimeExecute:
             async def execute(self, ctx) -> int:
                 return 99
 
-        spec = WorkflowCompiler(name="ext").add(External(), name="ext").compile()
+        spec = WorkflowCompiler().compile(Workflow(name="ext").add(External(), name="ext"))
         result = await WorkflowRuntime().execute(spec)
         assert result.outputs["ext"] == 99
 
@@ -74,10 +103,10 @@ class TestWorkflowRuntimeExecute:
         # Pure-task-context contract: run_context is NOT forwarded to the public
         # TaskContext. A task accessing ctx.run_context raises AttributeError; the
         # engine still drives the run via its private channel.
-        wf = WorkflowCompiler(name="no-run-context")
+        wf = Workflow(name="no-run-context")
 
         run_ctx = _RunContextStub(
-            work_dir=tmp_path / "run",
+            run_dir=tmp_path / "run",
             config={"epochs": 1, "dataset": "md17"},
         )
 
@@ -86,30 +115,101 @@ class TestWorkflowRuntimeExecute:
             assert not hasattr(ctx, "run_context")
             return True
 
-        result = await WorkflowRuntime().execute(wf.compile(), run_context=run_ctx)
+        result = await WorkflowRuntime().execute(
+            WorkflowCompiler().compile(wf), run_context=run_ctx
+        )
         assert result.status == "succeeded"
         assert result.outputs["inspect"] is True
 
-    async def test_duck_typed_run_context_needs_no_workspace_and_writes_executions(self, tmp_path):
-        """The runtime drives a workflow with a stub run_context that has no
-        Workspace ancestry whatsoever, and materializes workflow.json under
-        run_dir/executions/<execution_id>/."""
-        wf = WorkflowCompiler(name="duck")
+    async def test_journal_lands_at_the_context_execution_dir(self, tmp_path: Path) -> None:
+        """The runtime writes the journal only where the context points — it
+        builds no ``executions/<id>`` path under ``run_dir`` itself."""
+        run_dir = tmp_path / "stub-run"
+        slot = tmp_path / "any" / "slot"
+        run_ctx = _RunContextStub(run_dir=run_dir, execution_dir=slot)
 
-        run_ctx = _RunContextStub(work_dir=tmp_path / "stub-run")
+        result = await WorkflowRuntime().execute(_ok_workflow(), run_context=run_ctx)
 
-        @wf.task
-        async def step(ctx: TaskContext) -> str:
-            return "ok"
-
-        result = await WorkflowRuntime().execute(wf.compile(), run_context=run_ctx)
         assert result.status == "succeeded"
-        assert result.outputs["step"] == "ok"
+        assert result.execution_id == "e01"
+        assert (slot / "workflow.json").is_file()
+        assert not (run_dir / "executions").exists()
 
-        executions = run_ctx.work_dir / "executions"
-        assert executions.exists(), "runtime must materialize executions/ under run_dir"
-        wf_jsons = list(executions.rglob("workflow.json"))
-        assert wf_jsons, "workflow.json must be written under run_dir/executions/<id>/"
+    async def test_legacy_run_dir_and_context_shape(self, tmp_path: Path) -> None:
+        """The journal lands at the context's execution dir, not a path the
+        runtime composes."""
+        ws = Workspace(tmp_path / "ws", name="lab")
+        run = ws.add_project("p").add_experiment("e").add_run(params={"x": 1})
+        with run.start() as ctx:
+            result = await WorkflowRuntime().execute(
+                _ok_workflow(), run_context=ctx, execution_id=ctx.id
+            )
+        assert result.status == "succeeded"
+        assert (run.execution_dir(ctx.id) / "workflow.json").is_file()
+        assert read_journal(run, ctx.id)["execution_id"] == ctx.id
+        assert len(list(Path(run.run_dir).rglob("workflow.json"))) == 1
+
+    async def test_context_without_execution_dir_raises_type_error(self, tmp_path: Path) -> None:
+        """A context that does not name its attempt's directory is refused."""
+
+        class _NoDirContext:
+            def __init__(self, run_dir: Path) -> None:
+                self.id = "e01"
+                self.predecessor = None
+                self.run_dir = run_dir
+                self.bypass_cache = False
+
+        run_ctx = _NoDirContext(tmp_path / "run")
+        with pytest.raises(TypeError, match="execution_dir"):
+            await WorkflowRuntime().execute(_ok_workflow(), run_context=run_ctx)
+        assert list(tmp_path.rglob("workflow.json")) == []
+
+    async def test_run_dir_kwarg_is_gone(self, tmp_path: Path) -> None:
+        """``run_dir`` is not a parameter; passing it is a ``TypeError``."""
+        import dataclasses
+        import inspect
+
+        from molab.workflow._engine.state import WorkflowDeps
+
+        assert "run_dir" not in inspect.signature(WorkflowRuntime.execute).parameters
+        assert "run_dir" not in inspect.signature(WorkflowRuntime.start).parameters
+        assert "run_dir" not in {field.name for field in dataclasses.fields(WorkflowDeps)}
+        with pytest.raises(TypeError):
+            await WorkflowRuntime().execute(_ok_workflow(), run_dir=tmp_path)
+
+    async def test_execution_id_without_context_raises(self) -> None:
+        with pytest.raises(ValueError, match="run_context"):
+            await WorkflowRuntime().execute(_ok_workflow(), execution_id="e01")
+
+    async def test_mismatched_execution_id_raises(self, tmp_path: Path) -> None:
+        """An explicit ``execution_id=`` must be the context's own attempt."""
+        run_ctx = _RunContextStub(run_dir=tmp_path / "r")
+        with pytest.raises(ValueError, match="e99"):
+            await WorkflowRuntime().execute(_ok_workflow(), run_context=run_ctx, execution_id="e99")
+        assert list(tmp_path.rglob("workflow.json")) == []
+
+    async def test_persist_false_writes_no_journal(self, tmp_path: Path) -> None:
+        """``persist=False`` (SubWorkflow inner runs) writes no journal."""
+        run_ctx = _RunContextStub(run_dir=tmp_path / "r")
+        result = await WorkflowRuntime().execute(_ok_workflow(), run_context=run_ctx, persist=False)
+        assert result.status == "succeeded"
+        assert list(tmp_path.rglob("workflow.json")) == []
+
+    async def test_bare_execute_has_no_execution_id(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A bare in-memory run is not an Execution: its id is ``None`` and it
+        writes no journal anywhere."""
+        monkeypatch.chdir(tmp_path)
+        result = await WorkflowRuntime().execute(_ok_workflow())
+        assert result.status == "succeeded"
+        assert result.execution_id is None
+        assert list(tmp_path.rglob("workflow.json")) == []
+
+    async def test_runtime_exposes_no_id_minter_or_fresh_marker(self) -> None:
+        """The runtime neither mints execution ids nor writes fresh markers."""
+        assert hasattr(WorkflowRuntime, "make_execution_id") is False
+        assert hasattr(WorkflowRuntime, "request_fresh_execution") is False
 
     async def test_scratch_root_gives_every_task_a_workdir(self, tmp_path: Path) -> None:
         """``scratch_root=`` closes the ctx.workdir contract for bare executions.
@@ -119,7 +219,7 @@ class TestWorkflowRuntimeExecute:
         scratch files. ``scratch_root`` mounts the content-addressed materialization
         store at an explicit location so ``ctx.workdir`` is never ``None``.
         """
-        wf = WorkflowCompiler(name="scratch-demo")
+        wf = Workflow(name="scratch-demo")
 
         @wf.task
         async def write_report(ctx: TaskContext) -> dict:
@@ -129,7 +229,9 @@ class TestWorkflowRuntimeExecute:
             return {"report": str(path)}
 
         scratch = tmp_path / "scratch"
-        result = await WorkflowRuntime().execute(wf.compile(), scratch_root=scratch)
+        result = await WorkflowRuntime().execute(
+            WorkflowCompiler().compile(wf), scratch_root=scratch
+        )
         assert result.status == "succeeded"
         report = Path(result.outputs["write_report"]["report"])
         assert report.exists()
@@ -139,12 +241,106 @@ class TestWorkflowRuntimeExecute:
         """No silent default: a bare execution that mounts no scratch_root keeps
         ``ctx.workdir`` as ``None`` (embedders must opt in explicitly — a cwd
         default would litter every caller's working directory)."""
-        wf = WorkflowCompiler(name="no-scratch")
+        wf = Workflow(name="no-scratch")
 
         @wf.task
         async def probe(ctx: TaskContext) -> dict:
             return {"workdir": ctx.workdir}
 
-        result = await WorkflowRuntime().execute(wf.compile())
+        result = await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
         assert result.status == "succeeded"
         assert result.outputs["probe"]["workdir"] is None
+
+
+@pytest.mark.asyncio
+class TestWorkflowRuntimeStart:
+    async def test_run_dir_without_context_raises_before_scheduling(self, tmp_path: Path) -> None:
+        """``start(run_dir=...)`` is a ``TypeError`` before any task is scheduled."""
+        run_dir = tmp_path / "r"
+        before = asyncio.all_tasks()
+        with pytest.raises(TypeError):
+            await WorkflowRuntime().start(_ok_workflow(), run_dir=run_dir)
+        assert asyncio.all_tasks() - before == set()
+        assert not run_dir.exists()
+
+    async def test_journal_lands_at_the_context_execution_dir(self, tmp_path: Path) -> None:
+        slot = tmp_path / "any" / "slot"
+        run_ctx = _RunContextStub(run_dir=tmp_path / "r", execution_dir=slot)
+        handle = await WorkflowRuntime().start(_ok_workflow(), run_context=run_ctx)
+        assert handle.execution_id == "e01"
+        assert (await handle.wait()).status == "succeeded"
+        doc = json.loads((slot / "workflow.json").read_text())
+        assert doc["execution_id"] == "e01"
+        assert doc["finished_at"] is not None
+
+    async def test_context_without_execution_dir_raises_type_error(self, tmp_path: Path) -> None:
+        run_ctx = SimpleNamespace(id="e01", predecessor=None, bypass_cache=False)
+        with pytest.raises(TypeError, match="execution_dir"):
+            await WorkflowRuntime().start(_ok_workflow(), run_context=run_ctx)
+
+    async def test_bare_start_handle_has_no_execution_id(self) -> None:
+        """A bare background run reports ``execution_id is None`` and completes."""
+        handle = await WorkflowRuntime().start(_ok_workflow())
+        assert handle.execution_id is None
+        assert (await handle.wait()).status == "succeeded"
+
+    async def test_bare_start_handle_carries_workflow_digest(self) -> None:
+        compiled = _ok_workflow()
+        handle = await WorkflowRuntime().start(compiled)
+        assert handle.workflow_digest == compiled.workflow_digest
+        assert not hasattr(handle, "workflow_id")
+        assert (await handle.wait()).status == "succeeded"
+
+
+class TestAutoCacheFromRunContext:
+    """The auto node cache lives in the run's machine dir, or nowhere."""
+
+    def test_real_run_uses_machine_dir_cache(self, tmp_path: Path) -> None:
+        from molab.workflow._engine.runtime import _auto_cache_from_run_context
+        from molab.workflow.protocols import RunLike
+
+        ws = Workspace(tmp_path / "lab")
+        run = ws.add_project(name="p").add_experiment(name="e").add_run(params={"x": 1})
+        assert isinstance(run, RunLike)
+        with run.start() as ctx:
+            cache = _auto_cache_from_run_context(ctx)
+        assert cache is not None
+        assert cache.store.store_dir == run.machine_dir() / "cache"
+        assert not (run.machine_dir() / "cache").exists()  # created on first put only
+
+    def test_none_returns_none(self) -> None:
+        from molab.workflow._engine.runtime import _auto_cache_from_run_context
+
+        assert _auto_cache_from_run_context(None) is None
+
+    def test_stub_without_machine_dir_returns_none(self, tmp_path: Path) -> None:
+        from molab.workflow._engine.runtime import _auto_cache_from_run_context
+
+        run_ctx = _RunContextStub(run_dir=tmp_path / "r")
+        assert _auto_cache_from_run_context(run_ctx) is None
+        result = asyncio.run(WorkflowRuntime().execute(_ok_workflow(), run_context=run_ctx))
+        assert result.status == "succeeded"
+        assert not (tmp_path / "r" / ".cache").exists()
+
+    def test_machine_dir_raising_disables_cache(self, tmp_path: Path) -> None:
+        from molab.workflow._engine.runtime import _auto_cache_from_run_context
+
+        def broken() -> Path:
+            raise OSError("unreachable workspace")
+
+        run_ctx = SimpleNamespace(run=SimpleNamespace(machine_dir=broken))
+        assert _auto_cache_from_run_context(run_ctx) is None
+
+    def test_runtime_module_composes_no_cache_path(self) -> None:
+        import ast
+        import inspect
+
+        from molab.workflow._engine import runtime
+
+        assert not hasattr(runtime, "_cache_dir")
+        tree = ast.parse(inspect.getsource(runtime))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                assert node.module != "molab.workspace.naming"
+            if isinstance(node, ast.Constant):
+                assert node.value not in {".cache", ".molab"}

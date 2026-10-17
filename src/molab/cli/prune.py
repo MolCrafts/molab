@@ -1,0 +1,288 @@
+"""``molab runs prune`` — interactive hierarchical cleanup.
+
+Walks project → experiment → run → execution step-by-step, letting the user
+pick which executions (attempts at a run) to prune. Once the run is chosen,
+its zombie attempts are reaped before the attempts are listed. A zombie is an
+attempt still recorded as ``running`` after its owning process has died, and
+reaping seals it as ``failed``. Pruning removes bulk directories only
+(``out/``, ``work/``, ``jobs/``, ``checkpoints/``) and keeps every execution
+record: ``execution.json`` and the ``executions/<id>/`` directory itself stay.
+The selection UI lives here. The pruning itself goes through the two-phase
+core (:func:`molab.workspace.prune.plan_execution_prune` →
+:func:`~molab.workspace.prune.apply_execution_prune`). Only the CLI prunes;
+the server has no prune route.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Sequence
+from pathlib import Path
+from typing import Annotated
+
+import typer
+from rich.table import Table
+
+from molab.workspace.run import Run
+
+from ._common import console, reap_zombie_run, rprint, status_color
+
+
+def _select_one(
+    title: str,
+    rows: Sequence[tuple[str, ...]],
+    headers: tuple[str, ...],
+) -> int | None:
+    """Render a numbered table and prompt for a single choice.
+
+    Returns the zero-based index of the chosen row, or ``None`` if the
+    user aborted with empty input.
+    """
+    if not rows:
+        rprint(f"[yellow]{title}: nothing to select.[/yellow]")
+        return None
+
+    table = Table(title=title)
+    table.add_column("#", style="cyan", justify="right")
+    for h in headers:
+        table.add_column(h)
+    for idx, row in enumerate(rows, start=1):
+        table.add_row(str(idx), *row)
+    console.print(table)
+
+    raw = typer.prompt("Enter # (empty to abort)", default="", show_default=False)
+    raw = raw.strip()
+    if not raw:
+        return None
+    if not raw.isdigit() or not (1 <= int(raw) <= len(rows)):
+        rprint(f"[red]Invalid choice:[/red] {raw!r}")
+        return None
+    return int(raw) - 1
+
+
+def _select_many(
+    title: str,
+    rows: Sequence[tuple[str, ...]],
+    headers: tuple[str, ...],
+    *,
+    status_values: Sequence[str] | None = None,
+) -> list[int]:
+    """Multi-select prompt.
+
+    Accepts comma-separated numbers, ranges ``a-b``, ``all``, or
+    status keywords (``failed``/``cancelled``/...) matched against
+    ``status_values`` — plain, un-coloured status strings the caller
+    supplies alongside the rendered rows.  Returns zero-based indices.
+    """
+    if not rows:
+        rprint(f"[yellow]{title}: nothing to select.[/yellow]")
+        return []
+
+    table = Table(title=title)
+    table.add_column("#", style="cyan", justify="right")
+    for h in headers:
+        table.add_column(h)
+    for idx, row in enumerate(rows, start=1):
+        table.add_row(str(idx), *row)
+    console.print(table)
+
+    rprint("[dim]Formats: 1,3,5  |  2-4  |  all  |  failed,cancelled[/dim]")
+    raw = typer.prompt(
+        "Select executions to prune (empty to abort)",
+        default="",
+        show_default=False,
+    )
+    raw = raw.strip().lower()
+    if not raw:
+        return []
+
+    if raw == "all":
+        return list(range(len(rows)))
+
+    keyword_map = {"failed", "cancelled", "running", "succeeded", "pending"}
+    tokens = [t.strip() for t in raw.split(",") if t.strip()]
+    if status_values and tokens and all(t in keyword_map for t in tokens):
+        return [i for i, sv in enumerate(status_values) if sv.lower() in tokens]
+
+    chosen: set[int] = set()
+    for tok in tokens:
+        if "-" in tok:
+            a, _, b = tok.partition("-")
+            if a.isdigit() and b.isdigit():
+                lo, hi = int(a), int(b)
+                if lo > hi:
+                    lo, hi = hi, lo
+                chosen.update(range(lo - 1, hi))
+                continue
+        if tok.isdigit() and 1 <= int(tok) <= len(rows):
+            chosen.add(int(tok) - 1)
+            continue
+        rprint(f"[red]Ignoring invalid token:[/red] {tok!r}")
+
+    return sorted(i for i in chosen if 0 <= i < len(rows))
+
+
+def _execution_rows(run: Run) -> list[tuple[str, ...]]:
+    rows: list[tuple[str, ...]] = []
+    for rec in run.executions:
+        finished = rec.finished_at.strftime("%Y-%m-%d %H:%M") if rec.finished_at else "—"
+        started = rec.started_at.strftime("%Y-%m-%d %H:%M") if rec.started_at else "—"
+        status = rec.status or "running"
+        rows.append(
+            (
+                rec.id,
+                status,
+                started,
+                finished,
+            )
+        )
+    return rows
+
+
+def prune_runs(
+    path: Annotated[
+        Path | None,
+        typer.Option("--path", "-p", help="Workspace path (default: cwd)."),
+    ] = None,
+) -> None:
+    """Interactively prune bulk directories of a run's executions; records are kept.
+
+    Descends project → experiment → run → executions, letting the user
+    pick at each step. After the run is picked, its zombie attempts are
+    reaped: an attempt still ``running`` after its owner process died is
+    sealed as ``failed``. The attempts are listed only after that. The
+    plan step refuses any attempt that is not sealed, and it exits with
+    code 1 when it does. After a ``y`` confirmation, only the prunable bulk
+    directories of the selected executions are removed: ``out/``,
+    ``work/``, ``jobs/`` and ``checkpoints/``, which include solver logs and
+    scheduler stdout/stderr. The records are kept. That means
+    ``execution.json``, the node journal ``workflow.json``, ``run.log`` and
+    ``artifacts/``. Each pruned record is stamped ``pruned_at`` /
+    ``pruned_dirs``.
+    """
+    from . import _common
+
+    ws = _common.get_workspace(path)
+
+    # Layer 1: project
+    projects = ws.list_projects()
+    if not projects:
+        rprint("[yellow]Workspace has no projects.[/yellow]")
+        raise typer.Exit(0)
+    proj_rows = [(p.id, p.metadata.name, f"{len(p.list_experiments())} exp") for p in projects]
+    i = _select_one("Projects", proj_rows, ("ID", "Name", "Exp count"))
+    if i is None:
+        rprint("[dim]Aborted.[/dim]")
+        raise typer.Exit(0)
+    project = projects[i]
+
+    # Layer 2: experiment
+    experiments = project.list_experiments()
+    if not experiments:
+        rprint(f"[yellow]Project {project.id!r} has no experiments.[/yellow]")
+        raise typer.Exit(0)
+    exp_rows = [(e.id, e.metadata.name, f"{len(e.list_runs())} runs") for e in experiments]
+    i = _select_one(
+        f"Experiments in {project.id!r}",
+        exp_rows,
+        ("ID", "Name", "Run count"),
+    )
+    if i is None:
+        rprint("[dim]Aborted.[/dim]")
+        raise typer.Exit(0)
+    experiment = experiments[i]
+
+    # Layer 3: run
+    runs = experiment.list_runs()
+    if not runs:
+        rprint(f"[yellow]Experiment {experiment.id!r} has no runs.[/yellow]")
+        raise typer.Exit(0)
+
+    run_rows: list[tuple[str, ...]] = []
+    for r in runs:
+        status = r.status_label
+        n_exec = len(r.executions)
+        run_rows.append(
+            (
+                r.id,
+                status,
+                str(n_exec),
+                r.metadata.created_at.strftime("%Y-%m-%d %H:%M"),
+            )
+        )
+    i = _select_one(
+        f"Runs in {project.id}/{experiment.id}",
+        run_rows,
+        ("Run ID", "Status", "# exec", "Created"),
+    )
+    if i is None:
+        rprint("[dim]Aborted.[/dim]")
+        raise typer.Exit(0)
+    run = runs[i]
+    # The prune core refuses any active record, so a dead owner's stale
+    # ``running`` Execution must be reaped before listing — callers reap first.
+    reap_zombie_run(run)
+
+    # Layer 4: execution records
+    rows = _execution_rows(run)
+    if not rows:
+        rprint(f"[yellow]Run {run.id!r} has no execution history.[/yellow]")
+        raise typer.Exit(0)
+
+    colored = [
+        (
+            rec_id,
+            f"[{status_color(status)}]{status}[/{status_color(status)}]",
+            started,
+            finished,
+        )
+        for rec_id, status, started, finished in rows
+    ]
+    indices = _select_many(
+        f"Executions of {run.id}",
+        colored,
+        ("Execution ID", "Status", "Started", "Finished"),
+        status_values=[status for _, status, _, _ in rows],
+    )
+    if not indices:
+        rprint("[dim]Nothing selected — aborted.[/dim]")
+        raise typer.Exit(0)
+
+    # Two-phase core: plan (where the live-record refusal lives) → confirm → apply.
+    from molab.workspace import LivePruneRefusedError
+    from molab.workspace.prune import apply_execution_prune, plan_execution_prune
+
+    history = run.executions
+    selected_ids = [history[i].id for i in indices]
+    try:
+        plan = plan_execution_prune(run, execution_ids=selected_ids)
+    except LivePruneRefusedError as exc:
+        rprint(f"[red]Refusing:[/red] {exc}")
+        raise typer.Exit(1) from exc
+
+    confirm = typer.prompt(
+        f"Prune bulk of {len(plan.entries)} execution(s) from run {run.id!r}? "
+        "Records are kept. [y/N]",
+        default="N",
+        show_default=False,
+    )
+    if confirm.strip().lower() not in ("y", "yes"):
+        rprint("[dim]Aborted.[/dim]")
+        raise typer.Exit(0)
+
+    for entry in plan.entries:
+        if not entry.dirs:
+            rprint(f"  [dim]skip[/dim]  {entry.execution_id} (no bulk directories)")
+        for name in entry.dirs:
+            rprint(f"  [green]OK[/green] removed executions/{entry.execution_id}/{name}")
+    removed_dirs = apply_execution_prune(run, plan)
+
+    remaining = len(run.executions)
+    rprint(
+        f"[green]Done.[/green] Removed {removed_dirs} dir(s) from "
+        f"{len(plan.entries)} execution(s); records are kept. "
+        f"{remaining} record(s) remain."
+    )
+
+
+def register(run_app: typer.Typer) -> None:
+    run_app.command("prune")(prune_runs)

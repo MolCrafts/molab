@@ -7,10 +7,9 @@ repository. Its contents outlive any single feature or spec.
 |---|---|
 | `notes.md` | Evolving architectural decisions, captured by `/mol:note`. Stable entries are promoted to `CLAUDE.md` and pruned here. |
 | `architecture.md` | Project blueprint — modules, public surfaces, layer roles. Built/refreshed by `/mol:map`; consumed by the `librarian` agent at spec time. |
-| `harness-goal.md` | North-star spec for the provenance-first scientific-workflow harness (internals). |
-| `integration.md` | Layer-integration & AI-assisted operation spec — how Workspace / Workflow / Experiment / Run / Artifact / Knowledge / Agent cooperate. Companion to `harness-goal.md`. |
+| `integration.md` | Cross-layer coordination contracts (WorkspaceContext, events, provenance); §7.1 is the Workspace Copilot charter. |
 | `open-questions.md` | Uncertainties recorded over time; resolved as answers become clear. |
-| `vision-gap-2026-07.md` | Snapshot of vision ↔ code gaps (July 2026); passive reference, not a live spec. |
+| `ui-serve.md` | UI serve / rebuild command table (`--dev` vs `npm run build:web` vs `-C build-web`). |
 
 ## What does *not* belong here
 

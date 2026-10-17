@@ -1,0 +1,85 @@
+name: lint
+
+# Same jobs in every context (feature branch or dev/master, fork or
+# upstream); see "CI and release" in docs/en/development/index.md.
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [dev, master, main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# One group per file, workflow, event and ref; only a feature ref cancels its
+# superseded runs. The canonical block: actions/check-workflows.
+concurrency:
+  group: lint-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: ${{ !contains(fromJSON('["refs/heads/dev","refs/heads/master","refs/heads/main"]'), github.ref) && !startsWith(github.ref, 'refs/tags/') }}
+
+# molab is built against its partners (.github/partners.env) at the commits
+# scripts/partners.py resolves -- molpy's and molrs's dev, or their branches
+# named like this one -- checked out as siblings, the layout the
+# [tool.uv.sources] path dependencies expect. The pre-commit hooks resolve them
+# the same way (`partners.py run`), so a local gate and CI judge one commit.
+env:
+  # uv builds molrs through maturin's PEP 517 hook; this makes that cargo
+  # build --locked as well.
+  MATURIN_PEP517_ARGS: --locked
+
+jobs:
+  # Where this run happens, decided once: MolCrafts/molcrafts-ci/actions/ci-context.
+  context:
+    name: lint / context
+    runs-on: ubuntu-latest
+    outputs:
+      tier: ${{ steps.context.outputs.tier }}
+      upstream: ${{ steps.context.outputs.upstream }}
+      integration: ${{ steps.context.outputs.integration }}
+      skip-pr: ${{ steps.context.outputs.skip-pr }}
+      publish: ${{ steps.context.outputs.publish }}
+    steps:
+      - id: context
+        uses: MolCrafts/molcrafts-ci/actions/ci-context@master
+
+  python:
+    name: lint / python
+    needs: context
+    if: needs.context.outputs.skip-pr != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: MolCrafts/molcrafts-ci/actions/setup-python@master
+      - uses: MolCrafts/molcrafts-ci/actions/setup-partners@master
+      # molrs/rust-toolchain.toml pins the compiler that builds the molrs wheel.
+      - uses: MolCrafts/molcrafts-ci/actions/setup-rust@master
+        with:
+          toolchain-dir: ../molrs
+          cache: molrs-python
+          workspaces: ../molrs/molrs-python -> ../target
+      - run: python3 scripts/partners.py check
+      - run: uv sync --extra dev
+      - run: uv run ruff format --check src/ tests/
+      - run: uv run ruff check src/ tests/
+      - run: uv run ty check src/
+
+  web:
+    name: lint / web
+    needs: context
+    if: needs.context.outputs.skip-pr != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: MolCrafts/molcrafts-ci/actions/setup-node@master
+      - run: npm run lint
+      - run: npm run typecheck
+
+  workflows:
+    name: lint / workflows
+    needs: context
+    if: needs.context.outputs.skip-pr != 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: MolCrafts/molcrafts-ci/actions/check-workflows@master

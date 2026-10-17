@@ -4,12 +4,13 @@ build-backend = "setup"
 backend-path = ["."]
 
 [project]
-name = "molexp"
-version = "0.0.2"
-description = "Agent-assisted scientific-workflow platform for FAIR research"
+name = "molcrafts-molab"
+# Keep in sync with src/molab/__init__.py::__version__ (one bump, two sites).
+version = "0.1.0"
+description = "Scientific-workflow platform for FAIR research"
 authors = [{name = "molcrafts"}]
 license = {text = "BSD-3-Clause"}
-requires-python = ">=3.14"
+requires-python = ">=3.12"
 
 dependencies = [
     "pydantic>=2.10",
@@ -17,72 +18,77 @@ dependencies = [
     "typer>=0.9.0",
     "rich>=14.3.4",
     "fastapi>=0.100.0",
+    # File() / UploadFile routes (knowledge doc media) import this at startup.
+    "python-multipart>=0.0.9",
     "uvicorn>=0.23.0",
     "pathspec>=0.12.0",
+    # The workflow engine imports anyio directly (CapacityLimiter / task
+    # groups in molab.workflow._engine); do not rely on it arriving via FastAPI.
+    "anyio>=4.0",
+    "argon2-cffi>=23.1.0",
     "molcrafts-mollog>=1.0.0",
     "molcrafts-molcfg>=1.2.0",
     "molcrafts-molq>=0.2.0",
-    # molpy is a hard dependency (Frame/Block and the io readers); molrs is
-    # reached ONLY through molpy — never import molrs directly.
-    "molcrafts-molpy>=0.11.2",
-    "tidewave[fastapi]",
+    # Science plugins (molab.plugins.molpy / molvis / submit_molq) import
+    # these products directly. molrs is reached only through molpy.
+    "molcrafts-molpy>=0.16.0",
+    "zarr>=3",
+    # molrec is a protocol, not a library — never a runtime dependency.
+    # A conformance suite, if added, is a test-only extra (not imported from src/).
 ]
 
 [project.optional-dependencies]
-# pydantic-ai >=1.105: first line verified with the shared retries={"output": N}
-# spelling (the legacy output_retries= kwarg is removed in 2.0). No upper cap —
-# molexp tracks latest; the router's preflight() catches a constructor-level
-# incompatibility BEFORE any workspace write if a future major breaks Agent(...).
-# pytest + pytest-asyncio are RUNTIME dependencies of `molexp plan`: step 7
-# (ExecuteTests) runs the generated per-task tests as a subprocess of the same
-# interpreter, and molexp task bodies are async-first, so the generated tests
-# routinely carry @pytest.mark.asyncio.
-agent = ["pydantic-ai>=1.105", "pytest>=7.0", "pytest-asyncio>=0.21"]
 tensorboard = ["tensorboard>=2.15"]
-all = ["molexp[agent,tensorboard]"]
+all = ["molcrafts-molab[tensorboard]"]
 dev = [
-    "molexp[all]",
+    "molcrafts-molab[all]",
     "pytest>=7.0",
     "pytest-asyncio>=0.21",
     "pytest-cov>=4.0",
     "pytest-mock>=3.10",
     "httpx>=0.24",
     "psutil>=5.9.0",
-    # Match .pre-commit-config.yaml ruff-pre-commit rev (v0.15.12) so
-    # META.build.check / bare `ruff` on PATH agrees with the commit hooks.
-    "ruff==0.15.12",
-    "ty==0.0.60",
+    # tests/test_workflow/test_codec.py validates the link schema; it used to
+    # arrive only transitively, through the removed agent extra.
+    "jsonschema>=4.0",
+    # Match .pre-commit-config.yaml's ruff-pre-commit rev, so `uv run ruff`
+    # agrees with the commit hooks. Keep both at latest.
+    "ruff==0.16.10",
+    "ty==0.0.85",
     "tox>=4.23",
-    # Build binding only. molrs is molpy's dependency, not molexp's API — no
-    # molexp module may `import molrs` (Frame/Block come from molpy). It is
+    # Build binding only. molrs is molpy's dependency, not molab's API — no
+    # molab module may `import molrs` (Frame/Block come from molpy). It is
     # named here solely because `[tool.uv.sources]` path overrides apply to a
     # project's OWN requirements, not to transitive ones: without this line the
     # local editable molpy resolves against the published molrs instead of the
-    # matching-minor sibling checkout. Under CI's UV_NO_SOURCES=1 it resolves
-    # from the index like any other package.
+    # matching-minor sibling checkout.
     "molcrafts-molrs",
 ]
+
+[project.scripts]
+molab = "molab.cli:app"
+
+[dependency-groups]
+# The manual's build tools only: docs.yml installs this group alone
+# (`uv run --only-group docs`), so building the site never builds molab or
+# its partners.
 docs = [
     "zensical>=0.0.45",
     "molcrafts-zensical-theme>=0.2.2",
 ]
 
 [tool.uv.sources]
-molcrafts-mollog = { path = "../mollog", editable = true }
-molcrafts-molcfg = { path = "../molcfg", editable = true }
+molcrafts-mollog = { path = "../mollog" }
+molcrafts-molcfg = { path = "../molcfg" }
 molcrafts-molq = { path = "../molq", editable = true }
 molcrafts-molpy = { path = "../molpy", editable = true }
-molcrafts-molrs = { path = "../molrs/molrs-python", editable = true }
-
-[project.scripts]
-molexp = "molexp.cli:app"
+molcrafts-molrs = { path = "../molrs/molrs-python" }
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 markers = [
     "unit: fast standalone tests for a single function/class",
     "integration: tests that exercise multi-component flows (FastAPI, workspace)",
-    "perf: event-loop responsiveness / performance regression guards (stdlib timing)",
 ]
 
 [tool.ruff]
@@ -91,8 +97,8 @@ line-length = 100
 # (3.12) cannot parse — PEP 758 `except A, B:` slipped in exactly this way.
 target-version = "py312"
 extend-exclude = [
-    "src/molexp/dist",
-    "ui",
+    "src/molab/dist",
+    "apps",
     "build",
     "dist",
     "site",
@@ -101,10 +107,10 @@ extend-exclude = [
 ]
 
 [tool.ruff.lint]
-# Strict ruleset for the molexp Python codebase.
+# Strict ruleset for the molab Python codebase.
 #   E, W, F, I  — pycodestyle / pyflakes / isort baseline
 #   B           — flake8-bugbear
-#   UP          — pyupgrade (modern py314 syntax)
+#   UP          — pyupgrade (modern py312+ syntax)
 #   SIM         — flake8-simplify
 #   RUF         — ruff-specific rules
 #   ANN         — flake8-annotations (drives ANN401: ban `Any`)
@@ -114,15 +120,21 @@ extend-exclude = [
 #   PIE         — flake8-pie
 #   RET         — flake8-return
 #   C4          — flake8-comprehensions
+#   PLW1514     — text-mode I/O names its encoding (a preview rule;
+#                 explicit-preview-rules keeps every other preview rule off).
+#                 Unnamed, Python decodes with the locale -- cp1252 on Windows.
+preview = true
+explicit-preview-rules = true
 select = [
     "E", "W", "F", "I",
     "B", "UP", "SIM", "RUF",
     "ANN", "ARG", "PTH",
     "PIE", "RET", "C4",
+    "PLW1514",
 ]
 ignore = [
     "E501",     # line-length — handled by ruff-format, not the linter
-    "B008",     # function call in default arg — pydantic-ai / typer rely on this
+    "B008",     # function call in default arg — FastAPI Depends / typer options rely on this
     "SIM108",   # ternary noise — judgement call, often less readable
     "RET504",   # unnecessary assignment before return — local naming aids debugging
 ]
@@ -135,8 +147,11 @@ ignore = [
 "examples/**" = ["ANN001", "ANN201", "ANN202", "ANN204", "ANN401", "ARG001", "ARG002"]
 # `__init__.py` re-export modules don't need annotations on `__all__` etc.
 "**/__init__.py" = ["F401"]
+# The top-level names in __all__ are served lazily by a module __getattr__
+# (`import molab` stays light), which F822 cannot see.
+"src/molab/__init__.py" = ["F822"]
 # CLI entry-points use typer-style decorators with implicit return types.
-"src/molexp/cli/**" = ["ANN201", "ANN202"]
+"src/molab/cli/**" = ["ANN201", "ANN202"]
 
 [tool.ruff.lint.flake8-annotations]
 # ANN401 (`Any` is not allowed) is in the default `ANN` selection.
@@ -152,15 +167,15 @@ docstring-code-format = true
 [tool.ty.environment]
 # Pin resolution to the project venv: a monorepo shell often exports
 # VIRTUAL_ENV=<root>/.venv, and without this pin ty resolves third-party
-# imports against the wrong environment (pydantic_ai etc. show up as
+# imports against the wrong environment (third-party packages show up as
 # unresolved-import even though `uv run` imports them fine).
 python = "./.venv"
 
 [tool.ty.src]
 include = ["src", "tests", "examples"]
 exclude = [
-    "src/molexp/dist",
-    "ui",
+    "src/molab/dist",
+    "apps",
     "build",
     "dist",
     "site",
@@ -184,12 +199,10 @@ include-package-data = true
 where = ["src"]
 
 [tool.setuptools.package-data]
-molexp = [
+molab = [
     "openapi.json",
     "dist/**",
-    "harness/prompts/contracts/*.yaml",
 ]
-
 # Isolated gates — prek + CI: uv run --extra dev tox -e lint|py
 [tool.tox]
 requires = ["tox>=4.23"]
@@ -198,10 +211,10 @@ env_list = ["lint", "py"]
 [tool.tox.env.lint]
 description = "CI lint"
 skip_install = true
-base_python = ["python3.14"]
+base_python = ["python3.12"]
 deps = [
-  "ruff==0.15.12",
-  "ty==0.0.60",
+  "ruff==0.16.10",
+  "ty==0.0.85",
 ]
 commands = [
   ["ruff", "check", "."],
@@ -209,7 +222,7 @@ commands = [
 
 [tool.tox.env.py]
 description = "CI test (non-editable package when package=wheel)"
-base_python = ["python3.14"]
+base_python = ["python3.12"]
 pass_env = [
   "HOME",
   "PATH",
@@ -228,5 +241,5 @@ commands_pre = [
   ],
 ]
 commands = [
-  ["{envpython}", "-m", "pytest", "tests/", "-q", "--cov=src/molexp", "--cov-report=xml"],
+  ["{envpython}", "-m", "pytest", "tests/", "-q", "--cov=src/molab", "--cov-report=xml"],
 ]

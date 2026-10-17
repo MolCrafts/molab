@@ -1,13 +1,13 @@
 ---
-title: MolExp
-description: Agent-assisted scientific-workflow platform for FAIR research
+title: Molab
+description: Scientific-workflow platform for FAIR research
 hide:
   - navigation
   - toc
 hero:
   kicker: Manual
-  title: MolExp
-  description: Build reproducible scientific workflows in Python. Define tasks as plain functions, let the engine handle the graph, and keep every run tracked on disk — with an optional LLM agent that plans, generates, and drives experiments.
+  title: Molab
+  description: Build reproducible scientific workflows in Python. Define tasks as plain functions, let the engine handle the graph, and keep every run tracked on disk — with the knowledge it produced written beside it.
   actions:
     - label: Get started
       href: "#start-here"
@@ -17,20 +17,17 @@ hero:
     - label: Guides
       href: "guide/"
   install:
-    label: Install
+    label: Install (PyPI release pending)
     methods:
-      - { label: pip, command: pip install molexp }
-      - { label: uv, command: uv add molexp }
+      - { label: pip, command: pip install git+https://github.com/MolCrafts/molab }
+      - { label: uv, command: uv pip install git+https://github.com/MolCrafts/molab }
   badges:
-    - img: https://img.shields.io/pypi/v/molexp
-      href: https://pypi.org/project/molexp/
-      alt: PyPI version
     - img: https://img.shields.io/badge/python-3.12%2B-blue
-      href: https://pypi.org/project/molexp/
+      href: https://github.com/MolCrafts/molab
       alt: Python 3.12+
 ---
 
-<h1 class="molcrafts-sr-only">MolExp</h1>
+<h1 class="molcrafts-sr-only">Molab</h1>
 
 <div class="molcrafts-manual-home" markdown>
 
@@ -65,7 +62,7 @@ Use this page as an index into the manual, not a marketing overview.
   <a href="getting-started/cli-and-profiles/">
     <span>04</span>
     <strong>Use the CLI and profiles</strong>
-    <em>Replace asyncio.run() with molexp run. Add molcfg.yaml for execution variants.</em>
+    <em>Replace asyncio.run() with molab run. Add molcfg.yaml for execution variants.</em>
   </a>
   <a href="getting-started/start-from-ui/">
     <span>05</span>
@@ -106,13 +103,15 @@ runs independent tasks in parallel, and caches by content.
 </div>
 
 ```python
-from molexp.workflow import WorkflowCompiler
+from molab.workflow import Workflow, WorkflowCompiler
 
-wf = WorkflowCompiler(name="sum")
+wf = Workflow(name="sum")
+
 
 @wf.task
 def fetch(scale: float = 1.0) -> dict:
     return {"values": [1.0, 4.0, 9.0], "scale": scale}
+
 
 @wf.task(depends_on=["fetch"])
 def summarize(values: list[float], scale: float) -> float:
@@ -135,14 +134,14 @@ parameters, status, and outputs — nothing lives only in memory.
 </div>
 
 ```python
-import molexp as me
+import molab as me
 
 ws = me.Workspace("./lab", name="lab")
-exp = ws.project("demo").experiment("sum")
+exp = ws.add_project("demo").add_experiment("sum")
 run = exp.add_run(params={"scale": 2.0})
 
 result = run.execute(wf)
-print(run.status, result.outputs["summarize"])  # succeeded 28.0
+print(run.executions[-1].status.value, result.outputs["summarize"])  # succeeded 28.0
 ```
 
 </section>
@@ -161,11 +160,7 @@ Collapse the results to plain records and pick the best.
 </div>
 
 ```python
-scan = (
-    ws.project("demo")
-    .experiment("lr-scan")
-    .sweep(wf, {"scale": [1.0, 2.0, 4.0]})
-)
+scan = ws.add_project("demo").add_experiment("lr-scan").sweep(wf, {"scale": [1.0, 2.0, 4.0]})
 summary = scan.execute()
 best = summary.min_by("summarize")
 ```
@@ -180,22 +175,22 @@ best = summary.min_by("summarize")
 
 ## Run from the terminal
 
-Register the experiment once, then let `molexp run` own discovery, profiles, resume /
+Register the experiment once, then let `molab run` own discovery, profiles, resume /
 rerun, and scheduler-backed execution.
 
 </div>
 
 ```python
 # train.py — register the experiment once
-ws.project("demo").experiment("sum").run(
-    wf.compile(), params={"scale": [1.0, 2.0]}
+ws.add_project("demo").add_experiment("sum").define(
+    WorkflowCompiler().compile(wf), params={"scale": [1.0, 2.0]}
 )
 ```
 
 ```bash
-molexp run train.py --profile smoke
-molexp run train.py --resume          # continue a failed run
-molexp run train.py --rerun --fresh   # re-execute from scratch
+molab run train.py --profile smoke
+molab run train.py --resume          # continue a failed run
+molab run train.py --rerun --fresh   # re-execute from scratch
 ```
 
 </section>
@@ -208,7 +203,7 @@ molexp run train.py --rerun --fresh   # re-execute from scratch
 
 ## How it works
 
-Four layers, each with a single job. They compose without coupling.
+Each piece has a single job. They compose without coupling.
 
 </div>
 
@@ -222,12 +217,8 @@ Four layers, each with a single job. They compose without coupling.
     <dd>Persistent hierarchy: Workspace → Project → Experiment → Run. Every run is a durable record with parameters, status, and outputs.</dd>
   </div>
   <div>
-    <dt>Agent</dt>
-    <dd>LLM conversation layer. Plan experiments, generate workflow code, and drive runs through tool calls — all recorded in a session on disk.</dd>
-  </div>
-  <div>
-    <dt>Harness</dt>
-    <dd>Experiment orchestrator. Draft specs → resolve capabilities → generate workflow code → compile → test → review. Nine auditable steps.</dd>
+    <dt>Knowledge</dt>
+    <dd>What a result means. Notes, plans, reports, and findings are markdown files beside the experiments they describe; their links form the project's knowledge graph.</dd>
   </div>
   <div>
     <dt>Assets</dt>
@@ -249,25 +240,25 @@ Four layers, each with a single job. They compose without coupling.
 
 ## Extends outward, stays light
 
-`import molexp` stays lightweight — heavy integrations load only when you reach for
+`import molab` stays lightweight — heavy integrations load only when you reach for
 them. The core features connect to the wider molcrafts stack through optional extras
-(`molexp[agent]`, `molexp[tensorboard]`) and to your own code through two independent
-plugin channels.
+(such as `molab[tensorboard]`) and to your own code through three independent
+plugin channels (CLI, server, UI).
 
 </div>
 
 <div class="molcrafts-manual-grid molcrafts-manual-grid--cols-3">
   <a href="guide/molq/">
     <strong>molq · scheduler bridge</strong>
-    <em>Powers <code>molexp run</code> on the cluster: the same run submits to Slurm, PBS, or LSF. Only the transport changes — workflow and record stay identical.</em>
+    <em>Powers <code>molab run</code> on the cluster: the same run submits to Slurm, PBS, or LSF. Only the transport changes — workflow and record stay identical.</em>
   </a>
   <a href="getting-started/cli-and-profiles/">
     <strong>molcfg · run profiles</strong>
     <em>Backs the profile system. <code>molcfg.yaml</code> holds execution variants, switched with one <code>--profile</code> flag.</em>
   </a>
-  <a href="architecture/plan-mode/">
-    <strong>molmcp · capabilities</strong>
-    <em>Grounds the agent harness. PlanOrchestrator discovers the full toolchain through molmcp, then binds the minimal subset an experiment needs.</em>
+  <a href="plugins/">
+    <strong>Server plugins</strong>
+    <em>Serve your own routes on the same <code>/api</code> origin and session via the <code>molab.server_plugins</code> entry point.</em>
   </a>
   <a href="concept/plugins/">
     <strong>molvis · visualization</strong>
@@ -275,11 +266,11 @@ plugin channels.
   </a>
   <a href="plugins/">
     <strong>CLI plugins</strong>
-    <em>Ship <code>molexp &lt;yourcmd&gt;</code> subcommands from any pip package via the <code>molexp.cli_plugins</code> entry point.</em>
+    <em>Ship <code>molab &lt;yourcmd&gt;</code> subcommands from any pip package via the <code>molab.cli_plugins</code> entry point.</em>
   </a>
   <a href="plugins/">
     <strong>UI plugins</strong>
-    <em>Contribute a dynamically-imported React bundle to the SPA via the independent <code>molexp.ui_plugins</code> channel.</em>
+    <em>Contribute a dynamically-imported React bundle to the SPA via the independent <code>molab.ui_plugins</code> channel.</em>
   </a>
 </div>
 
@@ -305,15 +296,15 @@ compact table of contents for returning users.
   </section>
   <section>
     <h3><a href="concept/">Concepts</a></h3>
-    <p>Workflow and workspace models, agent layer, asset reproducibility, and plugin architecture.</p>
+    <p>Workflow and workspace models, knowledge, asset reproducibility, and plugin architecture.</p>
   </section>
   <section>
     <h3><a href="guide/">Guides</a></h3>
-    <p>Task authoring, control flow, sweeps, workspace API, persistence, profiles, plan mode, server lifecycle, and scheduler bridge.</p>
+    <p>Task authoring, control flow, sweeps, workspace API, persistence, profiles, knowledge, server lifecycle, and scheduler bridge.</p>
   </section>
   <section>
     <h3><a href="architecture/">Architecture</a></h3>
-    <p>Layer boundaries, import rules, agent firewall, plan-mode pipeline, and workflow engine design.</p>
+    <p>Layer boundaries, import rules, and workflow engine design.</p>
   </section>
 </div>
 
@@ -327,7 +318,7 @@ compact table of contents for returning users.
 
 ## Three pillars
 
-MolExp is not a grab-bag of features. Every subsystem serves one of these goals.
+Molab is not a grab-bag of features. Every subsystem serves one of these goals.
 
 </div>
 
@@ -340,9 +331,9 @@ MolExp is not a grab-bag of features. Every subsystem serves one of these goals.
     <strong>Durable records</strong>
     <em>Every run is a directory with parameters, provenance, outputs, and execution history. Nothing lives only in memory.</em>
   </a>
-  <a href="concept/agent/">
-    <strong>Agent-assisted science</strong>
-    <em>An LLM agent plans experiments, generates code, and drives runs. Every decision is auditable — the agent's session is a first-class workspace object.</em>
+  <a href="guide/knowledge/">
+    <strong>Linked knowledge</strong>
+    <em>Findings, reports, and notes live beside the runs that produced them, cite their sources, and link into one knowledge graph — plain markdown files you can read without molab.</em>
   </a>
 </div>
 
@@ -381,9 +372,9 @@ Common entry points you will reach for most often.
     <strong>Sweep · RunSet</strong>
     <em>Grid-search parameters, execute in parallel, summarize with to_records().</em>
   </a>
-  <a href="guide/plan-mode/">
-    <strong>PlanOrchestrator</strong>
-    <em>Nine-step agent-driven experiment pipeline: draft → spec → code → test → review.</em>
+  <a href="guide/knowledge/">
+    <strong>Knowledge</strong>
+    <em>Write findings, reports, and notes as markdown beside the experiment; the links between them are the graph.</em>
   </a>
 </div>
 

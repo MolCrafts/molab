@@ -8,12 +8,16 @@ obey this contract; a PR that violates it gets the test deleted, not merged.
 **A behavior is tested exactly once, in the layer that owns it.**
 
 The layer DAG (`CLAUDE.md`) decides ownership: run semantics → `test_workspace`,
-graph execution → `test_workflow`, LLM loops/sessions → `test_agent`, pipeline
-orchestration → `test_harness`, shared application verbs → `test_services`.
+graph execution → `test_workflow`, shared application verbs → `test_services`.
 `test_server` and `test_cli` test **shells only**: route registration, status-code
 domains, request validation/aliases, wire shapes, flag parsing, exit codes —
 never domain outcomes (those are already owned below; CLI and server share one
 services code path by law, so re-asserting the outcome twice tests nothing).
+
+**molab stands alone.** The Python agent layer was deleted (D86), and molab
+registers no plugin of its own. `test_import_direction.py` pins that the
+package stays gone and that molab boots, serves and runs science with every
+`molab.*` plugin entry-point group empty.
 
 ## Always keep
 
@@ -29,8 +33,7 @@ services code path by law, so re-asserting the outcome twice tests nothing).
   lock owns that), "constructor stores its args", copy/docstring text.
 - Cosmetic input permutations of one code path — keep the strongest case plus
   the boundary; parametrize only when the table is the point.
-- Re-tests of dependencies (pydantic validation mechanics, pydantic-ai retries,
-  stdlib behavior) or of lower layers from upper suites.
+- Re-tests of dependencies (pydantic validation mechanics, stdlib behavior) or of lower layers from upper suites.
 - Timing/threshold tests (flaky by construction; performance belongs in a
   dedicated bench repo, not this suite).
 - More than one test per deprecation alias.

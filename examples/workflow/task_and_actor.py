@@ -1,6 +1,6 @@
 """The three equivalent ways to define a workflow task, plus a streaming actor.
 
-Matches ``docs/guide/task-and-actor.md``.
+Matches ``docs/en/guide/task-and-actor.md``.
 
 Demonstrates:
 
@@ -19,12 +19,12 @@ from __future__ import annotations
 
 import asyncio
 
-from molexp.workflow import Task, TaskContext, WorkflowCompiler, WorkflowRuntime
+from molab.workflow import Task, TaskContext, Workflow, WorkflowCompiler, WorkflowRuntime
 
 
 # ── 1. Decorator style ─────────────────────────────────────────────────────
 async def functional_demo() -> None:
-    wf = WorkflowCompiler(name="functional")
+    wf = Workflow(name="functional")
 
     @wf.task
     async def load() -> list[int]:
@@ -35,7 +35,7 @@ async def functional_demo() -> None:
     async def square(load: list[int]) -> list[int]:
         return [x * x for x in load]
 
-    result = await WorkflowRuntime().execute(wf.compile())
+    result = await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
     print(f"functional: {result.outputs}")
 
 
@@ -52,25 +52,26 @@ class Sum(Task):
 
 
 async def oop_demo() -> None:
-    compiled = WorkflowCompiler(name="oop").add(Load()).add(Sum(), depends_on=["load"]).compile()
+    compiled = WorkflowCompiler().compile(
+        Workflow(name="oop").add(Load()).add(Sum(), depends_on=["load"])
+    )
     result = await WorkflowRuntime().execute(compiled)
     print(f"oop:        {result.outputs}")
 
 
-# ── 3. Protocol form — third-party object, no molexp import needed ─────────
+# ── 3. Protocol form — third-party object, no molab import needed ─────────
 class ExternalDoubler:
-    """Matches :class:`~molexp.workflow.protocols.Runnable` structurally."""
+    """Matches :class:`~molab.workflow.protocols.Runnable` structurally."""
 
     async def execute(self, ctx, load: list[int]) -> int:
         return sum(load) * 2
 
 
 async def protocol_demo() -> None:
-    compiled = (
-        WorkflowCompiler(name="external")
+    compiled = WorkflowCompiler().compile(
+        Workflow(name="external")
         .add(Load())
         .add(ExternalDoubler(), name="double", depends_on=["load"])
-        .compile()
     )
     result = await WorkflowRuntime().execute(compiled)
     print(f"protocol:   {result.outputs}")
@@ -78,7 +79,7 @@ async def protocol_demo() -> None:
 
 # ── 4. Streaming actor — async generator driven to exhaustion ──────────────
 async def actor_demo() -> None:
-    wf = WorkflowCompiler(name="stream")
+    wf = Workflow(name="stream")
 
     @wf.task
     async def source() -> list[int]:
@@ -93,7 +94,7 @@ async def actor_demo() -> None:
         for item in source:
             yield {"seen": item}  # last yield becomes the task output
 
-    result = await WorkflowRuntime().execute(wf.compile())
+    result = await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
     print(f"actor:      {result.outputs}")
 
 

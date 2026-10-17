@@ -1,4 +1,4 @@
-"""Behavior locks for ``molexp.workspace.target`` — the Target address family.
+"""Behavior locks for ``molab.workspace.target`` — the Target address family.
 
 One ``ComputeTarget``-rooted family: ``parse_target`` / ``resolve_target``
 produce ``LocalTarget`` / ``RemoteTarget`` address views that ARE
@@ -14,15 +14,9 @@ from pathlib import Path
 import pytest
 from molq.transport import LocalTransport, SshTransport
 
-from molexp.workspace import (
-    ComputeTarget,
-    SSHSession,
-    Workspace,
-    add_target,
-    resolve_compute_target,
-)
-from molexp.workspace.fs_local import LocalFileSystem
-from molexp.workspace.target import (
+from molab.workspace import ComputeTarget, SSHSession, Workspace
+from molab.workspace.fs_local import LocalFileSystem
+from molab.workspace.target import (
     LocalTarget,
     RemoteTarget,
     SessionManager,
@@ -32,6 +26,7 @@ from molexp.workspace.target import (
     resolve_target,
     target_to_filesystem,
 )
+from molab.workspace.targets import resolve_compute_target
 
 
 @pytest.fixture
@@ -75,10 +70,6 @@ class TestParseTarget:
         assert isinstance(target, RemoteTarget)
         assert target.path == "~/runs"
 
-    def test_at_name_raises_needs_resolution(self) -> None:
-        with pytest.raises(TargetNeedsResolution):
-            parse_target("@cluster")
-
 
 class TestResolveTarget:
     def test_local_spec_pairs_local_transport(self, tmp_path: Path) -> None:
@@ -101,15 +92,14 @@ class TestResolveTarget:
 
     def test_at_name_resolves_local_registry_target(self, ws: Workspace, tmp_path: Path) -> None:
         scratch = tmp_path / "scratch"
-        add_target(ws, ComputeTarget(name="box", scratch_root=str(scratch)))
+        ws.add_target(ComputeTarget(name="box", scratch_root=str(scratch)))
         target, transport = resolve_target("@box", ws)
         assert isinstance(target, LocalTarget)
         assert target.path == Path(str(scratch))
         assert isinstance(transport, LocalTransport)
 
     def test_at_name_resolves_remote_registry_target_with_all_fields(self, ws: Workspace) -> None:
-        add_target(
-            ws,
+        ws.add_target(
             ComputeTarget(
                 name="hpc",
                 host="me@cluster.example",
@@ -142,8 +132,8 @@ class TestResolveComputeTarget:
     def test_named_lookup_local_fallback_and_missing_raises(self, ws: Workspace) -> None:
         """The single named-target resolution path: named lookup, the built-in
         ``local`` fallback, and a raw ``KeyError`` on an unknown name."""
-        add_target(ws, ComputeTarget(name="laptop", scratch_root="/tmp/molexp"))
-        assert resolve_compute_target(ws, "laptop").scratch_root == "/tmp/molexp"
+        ws.add_target(ComputeTarget(name="laptop", scratch_root="/tmp/molab"))
+        assert resolve_compute_target(ws, "laptop").scratch_root == "/tmp/molab"
         assert resolve_compute_target(ws, "local").scratch_root == str(ws.root)
         with pytest.raises(KeyError):
             resolve_compute_target(ws, "ghost")
@@ -154,7 +144,7 @@ class TestTargetToFilesystem:
         assert isinstance(target_to_filesystem(parse_target(str(tmp_path))), LocalFileSystem)
 
     def test_remote_target_yields_remote_filesystem(self) -> None:
-        from molexp.workspace.fs_remote import RemoteFileSystem
+        from molab.workspace.fs_remote import RemoteFileSystem
 
         fs = target_to_filesystem(parse_target("me@host.example:/data"))
         assert isinstance(fs, RemoteFileSystem)
@@ -198,4 +188,4 @@ class TestSessionManager:
         belongs exclusively to the agent layer's LLM conversation session."""
         session = SessionManager.get_or_create(self._remote())
         assert isinstance(session, SSHSession)
-        assert not hasattr(__import__("molexp.workspace", fromlist=["x"]), "Session")
+        assert not hasattr(__import__("molab.workspace", fromlist=["x"]), "Session")

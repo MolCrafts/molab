@@ -1,0 +1,91 @@
+"""Run-lifecycle operation cores for the CLI.
+
+Workspace-layer homes for the CLI's verb bodies. Each op enforces the frozen
+verb law itself — a caller adds gating, never semantics.
+
+Known debt: the server does not call this module. Its cancel route
+(``molab.server.routes.run.cancel_execution``) is a separate
+implementation that seals one explicit Execution without reaping first and
+without signalling the executor.
+
+Schema v2: a :class:`Run` is immutable intent, so ``cancel`` intervenes on the
+active physical :class:`~molab.workspace.domain.Execution` objects —
+never on a scalar run status.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from .run import Run
+
+__all__ = ["cancel_run"]
+
+
+def cancel_run(
+    run: Run,
+    *,
+    signal_executor: Callable[[Run], str | None] | None = None,
+    allow_pending: bool = False,
+) -> str | None:
+    """Cancel the actively-running Executions of *run* — the intervene verb.
+
+    The cancel body of the CLI (``molab runs cancel``) only; the server's
+    cancel route is a separate implementation (see the module docstring).
+    Reaps first (every verb entry reaps — a stale active Execution with a dead owner flips to
+    ``failed`` before the verb decides), then refuses anything outside the
+    domain loudly: there is nothing to intervene on.
+
+    Args:
+        run: The run to cancel.
+        signal_executor: Optional hook that signals the live executor
+            (molq scheduler job / local worker pid) before the status flip.
+            It returns ``None`` on success or a warning string (never raises
+            for caller-actionable reasons). Workspace stays scheduler-agnostic;
+            the shells inject the plugin hook.
+        allow_pending: Also cancel a ``pending`` run — record a CANCELLED
+            initial Execution so plain ``run`` never starts it (bulk-cancel
+            CLI semantics). The default keeps the strict intervene domain:
+            ``running`` only.
+
+    Returns:
+        ``None`` on a clean cancel, or the executor-signal warning (the
+        workspace state is flipped to ``cancelled`` regardless, so the
+        recorded state always reflects the user's intent).
+
+    Raises:
+        ValueError: The run has no active Execution after reaping. The message
+            names the actual status and the verb that owns it (``resume`` /
+            ``rerun`` for failed/cancelled; nothing for succeeded; plain
+            ``run`` for pending unless ``allow_pending``).
+    """
+    from .domain import ACTIVE_EXECUTION_STATUSES
+    from .history import AgentRef
+    from .run_reaper import reap_zombie_run
+
+    reap_zombie_run(run)
+    active = [state for state in run.executions if state.status in ACTIVE_EXECUTION_STATUSES]
+    if not active:
+        status = run.status_label
+        if status == "pending" and allow_pending:
+            state = run._create_execution(
+                created_by=AgentRef(id="operator", type="person", name="operator")
+            )
+            run.cancel(state.id)
+            return None
+        owner = {
+            "pending": "it has not started — `molab run` owns pending runs",
+            "failed": "it already stopped — resume/rerun own failed runs",
+            "cancelled": "it is already cancelled — resume/rerun own cancelled runs",
+            "interrupted": "it is already interrupted — resume owns interrupted runs",
+            "succeeded": "it finished — read its results instead",
+        }.get(status, "only a running run can be cancelled")
+        raise ValueError(f"run {run.id} is {status!r}, not running; {owner}")
+
+    warning = signal_executor(run) if signal_executor is not None else None
+    for state in active:
+        run.cancel(state.id)
+    return warning
