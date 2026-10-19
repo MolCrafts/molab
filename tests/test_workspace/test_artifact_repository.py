@@ -470,6 +470,83 @@ class TestAssetRepositoryPromote:
         )
         assert Path(project.assets.payload_path(_asset.id)).read_bytes() == b"hi"
 
+    def test_the_same_artifact_is_returned_as_filed(self, project: Project, run: Run) -> None:
+        artifact = _hello_artifact(run)
+        actor = AgentRef(id="t", type="system")
+        asset, version = project.assets.promote(artifact, created_by=actor, title="hello")
+        again, again_version = project.assets.promote(artifact, created_by=actor, title="hello")
+        assert again.id == asset.id
+        assert again_version.id == version.id
+        assert len(project.assets.versions(asset.id)) == 1
+
+    def test_same_title_and_same_bytes_do_not_add_a_version(
+        self, project: Project, run: Run
+    ) -> None:
+        actor = AgentRef(id="t", type="system")
+        first = _hello_artifact(run)
+        with run.start(mode=ExecutionMode.RERUN) as ctx:
+            path = ctx.get_dir("work") / "hello.txt"
+            path.write_bytes(HELLO)
+            second = ctx.emit_artifact(path, name="hello.txt")
+        asset, version = project.assets.promote(first, created_by=actor, title="hello")
+        again, again_version = project.assets.promote(second, created_by=actor, title="hello")
+        assert again.id == asset.id
+        assert again_version.id == version.id
+        assert [item.version for item in project.assets.versions(asset.id)] == [1]
+
+    def test_same_title_and_new_bytes_add_a_version(self, project: Project, run: Run) -> None:
+        actor = AgentRef(id="t", type="system")
+        first = _hello_artifact(run)
+        with run.start(mode=ExecutionMode.RERUN) as ctx:
+            path = ctx.get_dir("work") / "next.txt"
+            path.write_bytes(b"changed\n")
+            second = ctx.emit_artifact(path, name="next.txt")
+        asset, _version = project.assets.promote(first, created_by=actor, title="hello")
+        project.assets.promote(second, created_by=actor, title="hello")
+        versions = project.assets.versions(asset.id)
+        assert [item.version for item in versions] == [1, 2]
+        assert isinstance(versions[-1].origin, ArtifactOrigin)
+        assert versions[-1].origin.artifact_id == second.id
+
+    def test_omitted_title_reuses_the_asset_with_these_bytes(
+        self, project: Project, run: Run
+    ) -> None:
+        actor = AgentRef(id="t", type="system")
+        first = _hello_artifact(run)
+        asset, version = project.assets.promote(first, created_by=actor, title="portrait")
+        with run.start(mode=ExecutionMode.RERUN) as ctx:
+            path = ctx.get_dir("work") / "portrait.png"
+            path.write_bytes(HELLO)
+            second = ctx.emit_artifact(path, name="portrait.png")
+        again, again_version = project.assets.promote(second, created_by=actor)
+        assert again.id == asset.id
+        assert again_version.id == version.id
+        assert [item.title for item in project.assets.list()] == ["portrait"]
+
+    def test_a_different_title_stays_a_different_asset(self, project: Project, run: Run) -> None:
+        actor = AgentRef(id="t", type="system")
+        first = _hello_artifact(run)
+        project.assets.promote(first, created_by=actor, title="c001")
+        with run.start(mode=ExecutionMode.RERUN) as ctx:
+            path = ctx.get_dir("work") / "hair.png"
+            path.write_bytes(HELLO)
+            second = ctx.emit_artifact(path, name="hair.png")
+        project.assets.promote(second, created_by=actor, title="hair")
+        assert {item.title for item in project.assets.list()} == {"c001", "hair"}
+
+    def test_a_title_shared_by_two_assets_raises(
+        self, project: Project, run: Run, tmp_path: Path
+    ) -> None:
+        src = tmp_path / "greeting.txt"
+        src.write_bytes(b"hi")
+        project.assets.import_asset("greeting", src)
+        project.assets.import_asset("greeting", src)
+        artifact = _hello_artifact(run)
+        with pytest.raises(ValueError, match="more than one asset"):
+            project.assets.promote(
+                artifact, created_by=AgentRef(id="t", type="system"), title="greeting"
+            )
+
     def test_second_experiment_qualifies_that_experiment(self, project: Project) -> None:
         project.add_experiment("one")
         exp2 = project.add_experiment("two")

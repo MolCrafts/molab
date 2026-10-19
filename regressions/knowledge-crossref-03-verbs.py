@@ -4,7 +4,7 @@ Hard-coded: the ``cites`` edge role on a Knowledge → Knowledge citation, a
 bare-path cite that must survive (the branch a resolver would ``TypeError`` on
 and drop), the ``body=""`` remount that keeps its body, the harvested body
 carrying ``succeeded`` and the result ``0.42``, the two ``ValueError``
-preconditions, and ``parse_knowledge_class("Finding") is Finding``. Uses
+preconditions. The base class does not vend a subclass. Uses
 ``molab.workspace``'s public surface plus the new ``molab.knowledge`` verbs —
 no third-party runtime.
 """
@@ -15,7 +15,8 @@ import tempfile
 from collections.abc import Callable
 from pathlib import Path
 
-from molab.knowledge import Finding, Knowledge, Observation, SourceRef, parse_class
+from molab.knowledge import Finding, Observation, SourceRef
+from molab.knowledge.concepts import _open_document
 from molab.knowledge.write import mount_note, write_knowledge
 from molab.workspace import Workspace
 from molab.workspace.refs import ref_of
@@ -36,10 +37,6 @@ def main() -> None:
         workspace.materialize()
         experiment = workspace.add_project("p").add_experiment("e")
         knowledges = Path(str(experiment.resolve())) / "knowledges"
-
-        # The class-name entry point lives on the knowledge side and returns the
-        # very class object a caller imports.
-        assert parse_class("Finding") is Finding
 
         # A Knowledge -> Knowledge citation rides the typed edge, role `cites`.
         # The experiment source is a molab reference, written once as derived_from.
@@ -110,7 +107,7 @@ def main() -> None:
         assert "succeeded" in body
         assert "0.42" in body
         assert "Mobility rises with temperature." in body
-        reopened = Knowledge.open(harvested.path)
+        reopened = _open_document(harvested.path)
         assert isinstance(reopened, Observation)
         assert [(s.kind, s.ref) for s in reopened.sources] == [
             ("run", str(ref_of(run))),

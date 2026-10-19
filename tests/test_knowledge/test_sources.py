@@ -13,8 +13,6 @@ from molab.knowledge.sources import (
     KnowledgeSourceStore,
     SourceNotFoundError,
     WikiSource,
-    open_source,
-    search_sources,
 )
 from molab.workspace import Workspace
 
@@ -211,7 +209,7 @@ class TestSearchSources:
         store = KnowledgeSourceStore(tmp_path / "ws", user_dir=tmp_path / "user")
         store.add(WikiSource(name="wiki-a", root=str(wiki)))
 
-        [hit] = search_sources("quench", sources=["wiki-a"], include_workspace=False, store=store)
+        [hit] = store.search("quench", sources=["wiki-a"], include_workspace=False)
 
         assert hit.ref == "wiki-a:tg.md"
         assert hit.abs_path is not None
@@ -226,30 +224,27 @@ class TestSearchSources:
         store = KnowledgeSourceStore(tmp_path / "ws", user_dir=tmp_path / "user")
         store.add(WikiSource(name="wiki-a", root=str(wiki)))
 
-        notes = search_sources(
+        notes = store.search(
             "quench",
             sources=["wiki-a"],
             include_workspace=False,
             concept_type="Note",
-            store=store,
         )
-        findings = search_sources(
+        findings = store.search(
             "quench",
             sources=["wiki-a"],
             include_workspace=False,
             concept_type="Finding",
-            store=store,
         )
 
         assert [hit.ref for hit in notes] == ["wiki-a:tg.md"]
         assert findings == []
         with pytest.raises(ValueError, match="unknown knowledge class"):
-            search_sources(
+            store.search(
                 "quench",
                 sources=["wiki-a"],
                 include_workspace=False,
                 concept_type="Bogus",
-                store=store,
             )
 
     def test_an_unnamed_workspace_hit_is_the_document_path(self, tmp_path: Path) -> None:
@@ -258,7 +253,7 @@ class TestSearchSources:
         Note(ws, "local").write("# Local\n\nhello local\n")
         store = KnowledgeSourceStore(ws.root, user_dir=tmp_path / "user")
 
-        [hit] = search_sources("local", workspace_root=ws.root, store=store)
+        [hit] = store.search("local", workspace_root=ws.root)
 
         assert hit.ref == "knowledges/local.md"
 
@@ -267,7 +262,7 @@ class TestOpenBundle:
     def test_opening_an_unregistered_name_raises(self, tmp_path: Path) -> None:
         store = KnowledgeSourceStore(tmp_path / "ws", user_dir=tmp_path / "user")
         with pytest.raises(SourceNotFoundError):
-            open_source("nope", store=store)
+            store.open("nope")
 
     def test_opening_a_registered_wiki_walks_its_markdown(self, tmp_path: Path) -> None:
         wiki = tmp_path / "wiki"
@@ -276,4 +271,4 @@ class TestOpenBundle:
         store = KnowledgeSourceStore(tmp_path / "ws", user_dir=tmp_path / "user")
         store.add(WikiSource(name="w", root=str(wiki)))
 
-        assert [item.name for item in open_source("w", store=store).walk()] == ["n"]
+        assert [item.name for item in store.open("w").walk()] == ["n"]

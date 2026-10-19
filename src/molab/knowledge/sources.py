@@ -10,9 +10,10 @@ So a *source* is a name bound to a directory. The store is two-tier: **User**
 When a name appears in both, the Workspace entry **fully replaces** the User
 one — no per-field merge.
 
-Deliberately import-cheap — stdlib + pydantic. ``Knowledge`` is imported inside :func:`open_source` and
-:func:`search_sources`, so a caller that merely *lists* registered wikis (a CLI
-printing a table) never loads yaml, pathspec or the OKF substrate.
+Deliberately import-cheap — stdlib + pydantic. ``Knowledge`` is imported inside
+:meth:`KnowledgeSourceStore.open` and :meth:`KnowledgeSourceStore.search`, so a
+caller that merely *lists* registered wikis (a CLI printing a table) never loads
+yaml, pathspec or the OKF substrate.
 """
 
 from __future__ import annotations
@@ -48,9 +49,6 @@ __all__ = [
     "SourceNotFoundError",
     "SourcedHit",
     "WikiSource",
-    "open_source",
-    "resolve_source",
-    "search_sources",
 ]
 
 KNOWLEDGE_CONFIG_FILENAME = "knowledge.json"
@@ -262,41 +260,104 @@ class KnowledgeSourceStore:
         del sources[name]
         self._write(scope, sources)
 
+    def resolve(self, name: str) -> Path:
+        """The directory registered as *name*.
 
-def resolve_source(
-    name: str,
-    *,
-    workspace_root: PathArg | None = None,
-    store: KnowledgeSourceStore | None = None,
-) -> Path:
-    """The directory registered as *name*.
+        Raises:
+            SourceNotFoundError: If the name is not registered.
+        """
+        return self.get(name).path()
 
-    Args:
-        name: The registered source name.
-        workspace_root: Workspace supplying the upper config tier.
-        store: An explicit store, overriding *workspace_root* — lets a caller
-            point at a different config root (tests, a sandboxed host).
+    def open(self, name: str) -> Knowledge:
+        """Open the registered source *name* as a :class:`Knowledge` tree.
 
-    Raises:
-        SourceNotFoundError: If the name is not registered.
-    """
-    return (store or KnowledgeSourceStore(workspace_root)).get(name).path()
+        Raises:
+            SourceNotFoundError: If the name is not registered.
+        """
+        from .concept import Knowledge
 
+        return Knowledge(self.resolve(name))
 
-def open_source(
-    name: str,
-    *,
-    workspace_root: PathArg | None = None,
-    store: KnowledgeSourceStore | None = None,
-) -> Knowledge:
-    """Open the registered source *name* as a :class:`Knowledge` tree.
+    def search(
+        self,
+        query: str,
+        *,
+        sources: builtins.list[str] | None = None,
+        workspace_root: PathArg | None = None,
+        include_workspace: bool = True,
+        limit: int = 10,
+        concept_type: str | None = None,
+        tag: str | None = None,
+        workspace_searcher: Callable[[], SearchResult] | None = None,
+    ) -> builtins.list[SourcedHit]:
+        """Search the registered sources and, optionally, the bound workspace.
 
-    Raises:
-        SourceNotFoundError: If the name is not registered.
-    """
-    from .concept import Knowledge
+        Each source is searched independently, then the per-source rankings are
+        merged by **reciprocal rank fusion** (``1 / (RRF_K + rank)``) rather than
+        by raw score. BM25 scores are only comparable within one corpus — IDF is
+        computed against that corpus — so sorting raw scores across sources would
+        quietly favour whichever wiki happens to be smaller. Fusing ranks compares
+        only each source's own opinion of its documents, which is the part that
+        transfers.
 
-    return Knowledge(resolve_source(name, workspace_root=workspace_root, store=store))
+        Args:
+            query: The search text.
+            sources: Source names to search; ``None`` searches all registered ones.
+            workspace_root: Corpus searched as the unnamed workspace source.
+                ``None`` skips that source even when *include_workspace* is set.
+            include_workspace: Also search *workspace_root* as an unnamed source.
+            limit: Maximum fused hits to return.
+            concept_type: Exact Knowledge class name, applied per source. An
+                unknown name raises ``ValueError``.
+            tag: Tag filter, applied per source.
+            workspace_searcher: How to search the workspace itself, when given —
+                a host that already holds a scanned index passes a closure over
+                the same *query* / filters / *limit*. ``None`` searches
+                *workspace_root* through :class:`~molab.knowledge.concept.Knowledge`.
+                Registered sources are always searched per query.
+
+        Returns:
+            The fused hits, best first, each tagged with its source and the
+            absolute path of its markdown file.
+
+        Raises:
+            ValueError: If *concept_type* is not a known Knowledge class name.
+        """
+        from .concept import Knowledge
+        from .concepts import _product
+
+        cls = _product(concept_type) if concept_type else None
+        targets: list[tuple[str, Path]] = []
+        if include_workspace and workspace_root is not None:
+            targets.append(("", Path(os.fspath(workspace_root))))
+        wanted = set(sources) if sources is not None else None
+        for source, _scope in self.list():
+            if wanted is not None and source.name not in wanted:
+                continue
+            targets.append((source.name, source.path()))
+
+        fused: dict[tuple[str, str], tuple[float, str, SearchHit, Path]] = {}
+        for name, root in targets:
+            if not root.is_dir():
+                continue  # a registered wiki that is not mounted today is not an error
+            if name == "" and workspace_searcher is not None:
+                result = workspace_searcher()
+            else:
+                result = Knowledge(root).search(query, of=cls, tag=tag, limit=limit)
+            for rank, hit in enumerate(result.hits, start=1):
+                key = (name, hit.entry.path)
+                fused[key] = (1.0 / (RRF_K + rank), name, hit, root)
+
+        ordered = sorted(fused.items(), key=lambda kv: (-kv[1][0], kv[0][0], kv[0][1]))
+        return [
+            SourcedHit(
+                source=name,
+                hit=hit,
+                abs_path=str(root / hit.entry.path),
+                rank=position,
+            )
+            for position, (_key, (_rrf, name, hit, root)) in enumerate(ordered[:limit], start=1)
+        ]
 
 
 class SourcedHit(BaseModel, frozen=True):
@@ -326,87 +387,3 @@ class SourcedHit(BaseModel, frozen=True):
 
 #: Reciprocal-rank-fusion constant. The same value molmcp uses for the same job.
 RRF_K = 60
-
-
-def search_sources(
-    query: str,
-    *,
-    sources: list[str] | None = None,
-    workspace_root: PathArg | None = None,
-    include_workspace: bool = True,
-    limit: int = 10,
-    concept_type: str | None = None,
-    tag: str | None = None,
-    store: KnowledgeSourceStore | None = None,
-    workspace_searcher: Callable[[], SearchResult] | None = None,
-) -> list[SourcedHit]:
-    """Search several registered sources at once and fuse the results.
-
-    Each source is searched independently, then the per-source rankings are
-    merged by **reciprocal rank fusion** (``1 / (RRF_K + rank)``) rather than by
-    raw score. BM25 scores are only comparable within one corpus — IDF is
-    computed against that corpus — so sorting raw scores across sources would
-    quietly favour whichever wiki happens to be smaller. Fusing ranks compares
-    only each source's own opinion of its documents, which is the part that
-    transfers.
-
-    Args:
-        query: The search text.
-        sources: Source names to search; ``None`` searches all registered ones.
-        workspace_root: The active workspace — supplies the workspace config
-            tier and, with *include_workspace*, is itself searched.
-        include_workspace: Also search *workspace_root* as an unnamed source.
-        limit: Maximum fused hits to return.
-        concept_type: Exact Knowledge class name, applied per source. An
-            unknown name raises ``ValueError``.
-        tag: Tag filter, applied per source.
-        store: An explicit source store, overriding *workspace_root*'s.
-        workspace_searcher: How to search the workspace itself, when given —
-            a host that already holds a scanned index passes a closure over
-            the same *query* / filters / *limit*. ``None`` searches
-            *workspace_root* through :class:`~molab.knowledge.concept.Knowledge`.
-            Registered sources are always searched per query.
-
-    Returns:
-        The fused hits, best first, each tagged with its source and the absolute
-        path of its markdown file.
-
-    Raises:
-        ValueError: If *concept_type* is not a known Knowledge class name.
-    """
-    from .concept import Knowledge
-    from .concepts import parse_class
-
-    cls = parse_class(concept_type) if concept_type else None
-    store = store or KnowledgeSourceStore(workspace_root)
-    targets: list[tuple[str, Path]] = []
-    if include_workspace and workspace_root is not None:
-        targets.append(("", Path(os.fspath(workspace_root))))
-    wanted = set(sources) if sources is not None else None
-    for source, _scope in store.list():
-        if wanted is not None and source.name not in wanted:
-            continue
-        targets.append((source.name, source.path()))
-
-    fused: dict[tuple[str, str], tuple[float, str, SearchHit, Path]] = {}
-    for name, root in targets:
-        if not root.is_dir():
-            continue  # a registered wiki that is not mounted today is not an error
-        if name == "" and workspace_searcher is not None:
-            result = workspace_searcher()
-        else:
-            result = Knowledge(root).search(query, of=cls, tag=tag, limit=limit)
-        for rank, hit in enumerate(result.hits, start=1):
-            key = (name, hit.entry.path)
-            fused[key] = (1.0 / (RRF_K + rank), name, hit, root)
-
-    ordered = sorted(fused.items(), key=lambda kv: (-kv[1][0], kv[0][0], kv[0][1]))
-    return [
-        SourcedHit(
-            source=name,
-            hit=hit,
-            abs_path=str(root / hit.entry.path),
-            rank=position,
-        )
-        for position, (_key, (_rrf, name, hit, root)) in enumerate(ordered[:limit], start=1)
-    ]

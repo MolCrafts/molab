@@ -962,3 +962,107 @@ def asset_lineage(
         _render("ancestors", "<-", asset_lineage_mod.ancestors(ws, asset_id))
     if direction in ("descendants", "both"):
         _render("descendants", "->", asset_lineage_mod.descendants(ws, asset_id))
+
+
+def _find_run(ws: object, run_id: str) -> Run:
+    """Resolve a bare run id or a ``molab:`` ref inside an open workspace."""
+    from molab.workspace.errors import AmbiguousRefError, RefNotFoundError
+    from molab.workspace.refs import InvalidRefError, is_ref, qualify_run_id
+    from molab.workspace.workspace import Workspace
+
+    if not isinstance(ws, Workspace):
+        raise TypeError(f"expected a Workspace, got {type(ws).__name__}")
+    try:
+        ref = run_id if is_ref(run_id) else qualify_run_id(ws, run_id)
+        found = ws.find(ref)
+    except (InvalidRefError, RefNotFoundError, AmbiguousRefError) as exc:
+        rprint(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(1) from None
+    if not isinstance(found, Run):
+        rprint(f"[red]Error:[/red] {run_id!r} is not a run.")
+        raise typer.Exit(1)
+    return found
+
+
+def _version_ids(repo: object) -> set[str]:
+    """Every asset-version id currently in *repo*."""
+    from molab.workspace.artifact_repository import AssetRepository
+
+    if not isinstance(repo, AssetRepository):
+        raise TypeError(f"expected an AssetRepository, got {type(repo).__name__}")
+    return {version.id for asset in repo.list() for version in repo.versions(asset.id)}
+
+
+@asset_app.command("import")
+def asset_import(
+    name: Annotated[str, typer.Argument(help="Asset title.")],
+    src: Annotated[
+        Path,
+        typer.Argument(help="File or directory to copy into the project.", exists=True),
+    ],
+    project: Annotated[str, typer.Option("--project", help="Project that owns the asset.")],
+    target_spec: TargetOption = ".",
+) -> None:
+    """Copy a file in as a project asset. An existing title is left as it is."""
+    ws = _open_ws(target_spec)
+    try:
+        owner = ws.project(project)
+    except Exception as exc:
+        rprint(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(1) from None
+    existing = next((asset for asset in owner.data_assets.list() if asset.title == name), None)
+    if existing is not None:
+        print(f"present\t{existing.title}\t{existing.id}")
+        return
+    try:
+        asset = owner.data_assets.import_asset(name, src, meta={"role": "import"})
+    except (FileNotFoundError, ValueError, OSError) as exc:
+        rprint(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(1) from None
+    print(f"imported\t{asset.title}\t{asset.id}")
+
+
+@asset_app.command("promote")
+def asset_promote(
+    run_id: Annotated[str, typer.Argument(help="Run id, or a molab:experiment/.../run/... ref.")],
+    target_spec: TargetOption = ".",
+) -> None:
+    """Promote a run's generated images into its project asset library.
+
+    Image parts are the artifacts ``molab knowledge parts`` lists whose media
+    type starts with ``image/``. The project repository files each one under
+    the part name: a new asset, or the next version of the one asset with
+    that title. An artifact or the same bytes already in the library are
+    left as they are.
+    """
+    from molab.knowledge import GeneratedParts
+    from molab.workspace.history import SYSTEM_AGENT
+
+    ws = _open_ws(target_spec)
+    run = _find_run(ws, run_id)
+    try:
+        parts = GeneratedParts(run).list()
+    except ValueError as exc:
+        rprint(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(1) from None
+    images = [part for part in parts if (part.media_type or "").startswith("image/")]
+    if not images:
+        print(f"No generated image parts on run {run.id}.")
+        return
+    repo = run.experiment.project.data_assets
+    known = _version_ids(repo)
+    for part in images:
+        artifact = run.execution(part.execution_id).artifact(part.artifact_id)
+        try:
+            asset, version = repo.promote(
+                artifact,
+                created_by=SYSTEM_AGENT,
+                title=part.part,
+                metadata={"part": part.part},
+            )
+        except ValueError as exc:
+            rprint(f"[red]Error:[/red] {exc}")
+            raise typer.Exit(1) from None
+        label = "present" if version.id in known else "promoted"
+        print(f"{label}\t{part.part}\t{asset.id}")
+        known.add(version.id)

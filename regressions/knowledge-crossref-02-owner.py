@@ -12,7 +12,7 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-from molab.knowledge import Finding, Knowledge, Note, SourceRef, folder
+from molab.knowledge import Finding, Knowledge, Note, SourceRef
 from molab.workspace import Workspace
 from molab.workspace.refs import ref_of
 
@@ -25,10 +25,18 @@ def main() -> None:
 
         knowledges = Path(str(experiment.resolve())) / "knowledges"
 
-        # The one derivation: the class decides the landed form.
-        assert folder(experiment, "Tg Cooling", Note) == knowledges / "tg-cooling.md"
-        assert folder(experiment, "Tg Rise", Finding) == knowledges / "tg-rise.md"
-        assert folder(experiment, "records", Knowledge) == knowledges / "records"
+        # The one derivation: the constructor decides the landed form.
+        assert Note(experiment, "Tg Cooling").path == knowledges / "tg-cooling.md"
+        assert (
+            Finding(experiment, "Tg Rise", sources=[SourceRef(kind="file", ref="x")]).path
+            == knowledges / "tg-rise.md"
+        )
+        try:
+            Knowledge(experiment, "records")
+        except TypeError as exc:
+            assert "not a knowledge document" in str(exc)
+        else:
+            raise AssertionError("a bare Knowledge handle is not a document")
 
         # Host construction derives path and disk, and writes nothing.
         cooling = Note(experiment, "Tg Cooling")
@@ -46,7 +54,7 @@ def main() -> None:
         assert "@cites" in cooling.path.read_text()
 
         # The host is not retained: the handle is still path-identity.
-        twin = Knowledge(folder(experiment, "Tg Cooling", Note))
+        twin = Knowledge(Note(experiment, "Tg Cooling").path)
         assert cooling == twin
         assert hash(cooling) == hash(twin)
         assert not hasattr(cooling, "_host")

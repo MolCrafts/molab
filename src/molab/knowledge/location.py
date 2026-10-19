@@ -2,8 +2,8 @@
 
 A document has exactly one place under its host:
 ``<host>/knowledges/<slug>.md``. A bare :class:`Concept` is not a document
-class and :func:`folder` raises ``TypeError``. This module owns that
-derivation.
+class and ``Knowledge(host, name)`` raises ``TypeError``. This module owns
+that derivation; callers use the constructor, ``Note(host, name).path``.
 
 **The host protocol is fixed.** A ``str`` / :class:`os.PathLike` host is used
 as given — never resolved, so ``..`` survives. A workspace
@@ -40,7 +40,6 @@ __all__ = [
     "bare_container",
     "document_slug",
     "enclosing_workspace_root",
-    "folder",
     "host_of",
     "is_workspace_root",
 ]
@@ -121,7 +120,7 @@ def bare_container(root: PathArg, *, fs: FileSystem) -> Path:
 
 
 def host_of(doc_path: PathArg) -> Path:
-    """The host directory of a document path — the inverse of :func:`folder`.
+    """The host directory of a document path — the inverse of ``Note(host, name)``.
 
     A file under ``knowledges/`` belongs to the grandparent. Any other file
     belongs to its parent (the container root).
@@ -138,7 +137,7 @@ def host_of(doc_path: PathArg) -> Path:
     return path.parent
 
 
-def folder(host: PathArg | Folder | Concept, name: str, of: type[Concept]) -> Path:
+def _folder(host: PathArg | Folder | Concept, name: str, of: type[Concept]) -> Path:
     """The landed path of the *of* document named *name* under *host*.
 
     Args:

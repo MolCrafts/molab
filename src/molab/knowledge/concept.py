@@ -3,7 +3,7 @@
 A product document is one markdown file, ``knowledges/<name>.md``. YAML
 frontmatter names the class; the narrative's markdown links are the graph.
 A bare :class:`Concept` is only a root handle for ``walk`` / ``search`` /
-``open`` / ``import_zotero``.
+``import_zotero``. It does not construct a subclass.
 
 **Path is identity.** A ``Concept`` holds an absolute path and a
 :class:`~molab.fs.FileSystem`. It has no parent pointer and composes no path
@@ -96,11 +96,11 @@ class Concept:
                 file. With *name* given, *path* is instead the **host**: a
                 ``str`` / :class:`os.PathLike` directory used as given, or a
                 workspace ``Folder``.
-            name: A human document name. When given, the path is derived by
-                :func:`~molab.knowledge.location.folder` as
-                ``folder(path, name, self.__class__)``. A document class lands
-                at ``<host>/knowledges/<slug>.md``. Nothing touches disk; the
-                first :meth:`write` / :meth:`ref` lands the bytes.
+            name: A human document name. When given, the path is
+                ``Note(path, name).path``: a document class lands at
+                ``<host>/knowledges/<slug>.md``. Nothing touches disk; the first
+                :meth:`write` / :meth:`ref` lands the bytes. A bare
+                :class:`Concept` is not a document and raises ``TypeError``.
             type: Declared type; defaults to :attr:`DEFAULT_TYPE`.
             fs: The filesystem to read and write through; defaults to the
                 host's own disk (never the local one) in the *name* form, and
@@ -112,11 +112,11 @@ class Concept:
                 that is not a Folder is rejected.
         """
         if name is not None:
-            from .location import _host_fs, folder
+            from .location import _folder, _host_fs
 
             # ``self.__class__``, not ``type(self)``: the *type* kwarg below
             # shadows the builtin.
-            raw = str(folder(path, name, self.__class__))
+            raw = str(_folder(path, name, self.__class__))
             disk = fs if fs is not None else _host_fs(path)
         else:
             raw = str(path)
@@ -192,53 +192,9 @@ class Concept:
         """Refuse a document verb on a bare root handle."""
         if not type(self).FILE_DOCUMENT:
             raise TypeError(
-                "a Knowledge root handle is not a document; open one with "
-                f"Knowledge.open(path) or use Note/Literature/… ({verb})"
+                "a Knowledge root handle is not a document; construct one with "
+                f"Note(path) or Note(host, name) ({verb})"
             )
-
-    @classmethod
-    def open(
-        cls,
-        directory: PathArg,
-        *,
-        fs: FileSystem | None = None,
-    ) -> Concept:
-        """Open the markdown document at *directory*.
-
-        A ``.md`` / ``.mdx`` path is opened as written. A suffix-less path is
-        the same file with ``.md`` appended. A directory is not a document.
-
-        Raises:
-            KnowledgeNotFoundError: The file is absent.
-        """
-        from .errors import KnowledgeNotFoundError
-        from .naming import as_knowledge_file, is_knowledge_file
-
-        disk = fs if fs is not None else LocalFileSystem()
-        raw = str(directory)
-        if is_knowledge_file(raw):
-            return cls._open_markdown(raw, disk)
-        md = as_knowledge_file(raw)
-        if disk.is_file(md):
-            return cls._open_markdown(md, disk)
-        raise KnowledgeNotFoundError(str(directory))
-
-    @classmethod
-    def _open_markdown(cls, path: str, disk: FileSystem) -> Concept:
-        """Open a ``.md`` / ``.mdx`` Knowledge file from its frontmatter ``class``."""
-        from .concepts import _PRODUCTS, Note, _SourcedKnowledge
-        from .errors import KnowledgeNotFoundError
-        from .frontmatter import split_frontmatter
-
-        text = read_text_or_none(path, fs=disk)
-        if text is None:
-            raise KnowledgeNotFoundError(path)
-        meta, _body = split_frontmatter(text)
-        class_name = str(meta.get("class") or "Note")
-        klass = _PRODUCTS.get(class_name, Note)
-        if issubclass(klass, _SourcedKnowledge):
-            return klass._from_disk(path, fs=disk)
-        return klass(path, fs=disk)
 
     def _document_paths(self) -> Iterator[str]:
         """Yield each markdown file this handle walks, in listing order.
@@ -288,11 +244,12 @@ class Concept:
             One opened document per markdown file. A file that cannot be
             opened is skipped.
         """
+        from .concepts import _open_document
         from .errors import KnowledgeNotFoundError
 
         for path in self._document_paths():
             try:
-                yield type(self).open(path, fs=self._fs)
+                yield _open_document(path, fs=self._fs)
             except KnowledgeNotFoundError:
                 continue
 
@@ -402,8 +359,7 @@ class Concept:
         """Cross-reference another Knowledge document — the strict spelling of :meth:`cite`.
 
         *ref* must denote a Knowledge: a :class:`Concept` subclass instance
-        other than the bare base class, or a path :meth:`Concept.open` locates
-        such a subclass at.
+        other than the bare base class, or a path whose markdown file names one.
         A workspace ``Folder``, an ``Asset``, a bare coordinate or any other
         object is a programming error, never an edge.
 
@@ -519,11 +475,11 @@ class Concept:
             ValueError: If *stem* is empty, contains ``/``, or is ``.`` / ``..``,
                 or *within* is omitted and cannot be derived.
         """
-        from .location import folder
-
         if stem is not None and (stem == "" or "/" in stem or stem in {".", ".."}):
             raise ValueError(f"stem {stem!r} is not a single path segment")
-        planned = str(folder(host, self.name, type(self)))  # ty: ignore[invalid-argument-type]
+        from .location import _folder
+
+        planned = str(_folder(host, self.name, type(self)))  # ty: ignore[invalid-argument-type]
         dst = planned if stem is None else self._fs.join(self._fs.dirname(planned), f"{stem}.md")
         if self._norm(dst) == self._norm(self._path):
             return
@@ -697,46 +653,6 @@ class Concept:
         body, _appended = append_source_links(narrative or "", sources, base_dir=parent)
         self._fs.atomic_write_text(self._path, dump_frontmatter(merged, body))
 
-    @classmethod
-    def write_document(
-        cls,
-        path: PathArg,
-        text: str,
-        *,
-        fs: FileSystem | None = None,
-    ) -> Concept:
-        """Offline migration writer: persists a composed document verbatim, with no source invariant; ``write_knowledge`` is the create path.
-
-        The class comes from *text*'s frontmatter ``class``. A sourced class
-        is opened through its disk constructor, so legacy ``sources:`` rows
-        are never passed to a constructor that requires them.
-
-        Args:
-            path: The markdown file to persist.
-            text: The whole file, including frontmatter.
-            fs: Filesystem to write through. Defaults to the local one.
-
-        Returns:
-            The document handle for *path*.
-
-        Raises:
-            ValueError: Frontmatter has no ``class``, or the name is unknown.
-            TypeError: *text* is not a ``str``.
-        """
-        from .concepts import parse_class
-        from .frontmatter import split_frontmatter
-
-        meta, _body = split_frontmatter(text)
-        class_name = meta.get("class")
-        if not isinstance(class_name, str) or class_name == "":
-            raise ValueError("knowledge document requires a frontmatter class")
-        klass = parse_class(class_name)
-        disk = fs if fs is not None else LocalFileSystem()
-        opener = getattr(klass, "_from_disk", None)
-        handle = opener(str(path), fs=disk) if opener is not None else klass(path, fs=disk)
-        handle.write(text, replace=True)
-        return handle
-
     def links(self) -> list[Edge]:
         """The documents this one cites — typed markdown links in the narrative."""
         return self.scan_links(self.read()).typed_concepts
@@ -825,12 +741,12 @@ class Concept:
         from .concepts import Literature
         from .reference_meta import ReferenceMeta
         from .write import write_knowledge
-        from .zotero import read_zotero
+        from .zotero import ZoteroLibrary
 
         _ = now
         host: object = self if under is None else under
         refs: list[Literature] = []
-        for item in read_zotero(path):
+        for item in ZoteroLibrary(path).items():
             written = write_knowledge(
                 host,  # ty: ignore[invalid-argument-type]
                 name=item.key,
@@ -859,9 +775,9 @@ def _knowledge_target(ref: object, *, fs: FileSystem) -> Concept:
     Shared by :meth:`Concept.ref` (which propagates the error) and
     :meth:`Concept.cite` (which falls back to its loose path branch): an object
     denotes a Knowledge when its class is a :class:`Concept` subclass other than
-    the bare base class, and a path denotes one when :meth:`Concept.open`
-    locates such a subclass there. A run / project / experiment directory fails
-    both — ``Concept.open`` finds no markdown document there.
+    the bare base class, and a path denotes one when the markdown file there
+    names a subclass. A run / project / experiment directory fails both — it
+    is not a markdown document.
 
     Args:
         ref: The candidate — a Concept, a path, or anything else.
@@ -884,11 +800,12 @@ def _knowledge_target(ref: object, *, fs: FileSystem) -> Concept:
             )
         return ref
     if isinstance(ref, (str, os.PathLike)):
+        from .concepts import _open_document
         from .errors import KnowledgeNotFoundError
 
         path = str(ref)
         try:
-            located = Concept.open(path, fs=fs)
+            located = _open_document(path, fs=fs)
         except KnowledgeNotFoundError as exc:
             raise TypeError(f"{path!r} locates no Knowledge document") from exc
         if type(located) is Concept:

@@ -68,8 +68,8 @@ class TestKnowledgeRead:
         from molab.cli import knowledge_cmd
 
         read_src = inspect.getsource(knowledge_cmd.knowledge_read)
-        assert "Knowledge.open" in read_src
-        assert "open(root / rel" in read_src
+        assert "_open_document" in read_src
+        assert "_open_document(root / rel" in read_src
 
     def test_read_prints_note_body(self, tmp_path: Path) -> None:
         from molab.workspace import Workspace

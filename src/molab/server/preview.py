@@ -100,7 +100,7 @@ def preview_frames(
     """Return the first *limit* frames at most. Cap is host-owned."""
     reader = load_preview(dataset_path)
     try:
-        return [reader.read_frame(index) for index in range(min(limit, reader.n_frames))]
+        return [reader[index] for index in range(min(limit, len(reader)))]
     except MolabError:
         raise
     except Exception as exc:

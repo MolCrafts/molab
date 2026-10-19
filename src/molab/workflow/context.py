@@ -90,19 +90,31 @@ class TaskContext[StateT, InputT]:
         name: str | None = None,
         mime: str | None = None,
         tags: dict[str, str] | None = None,
+        asset: str | None = None,
     ) -> RegisterArtifact:
         """Record intent to publish *data* as a run artifact.
 
         Does **not** touch the Run. The engine promotes the returned
         :class:`RegisterArtifact` after the body returns. In-memory payloads
         are written under :attr:`workdir` first (``name`` required).
+
+        Args:
+            asset: Title in the project asset library. When the body ran, the
+                engine asks the repository to file the artifact under that
+                title: a new asset, or the next version of the one asset that
+                already has it. The same bytes do not add a version. A title
+                shared by two assets fails the task. A cache hit re-emits the
+                run artifact and leaves the library as it is. Blank is the
+                same as omitting it.
         """
         path = data if isinstance(data, Path) else self._write_pending_file(data, name)
+        title = asset.strip() if isinstance(asset, str) else ""
         marker = RegisterArtifact(
             path,
             name=name if name is not None else path.name,
             tags=tags,
             mime=mime,
+            asset=title or None,
         )
         self._pending.append(marker)
         return marker

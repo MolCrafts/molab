@@ -1,6 +1,6 @@
 """Tests for read-only Zotero import → ``Literature`` records.
 
-Covers ``molab.knowledge.zotero`` (``ZoteroItem`` / ``read_zotero``)
+Covers ``molab.knowledge.zotero`` (``ZoteroLibrary.items``)
 and its concept-producing consumer ``Concept.import_zotero``. A minimal
 ``zotero.sqlite`` is built in-place (the real schema subset the reader touches),
 then imported through a knowledge root handle. PDFs are
@@ -13,7 +13,7 @@ import sqlite3
 from pathlib import Path
 
 from molab.knowledge.concept import Concept
-from molab.knowledge.zotero import ZoteroItem, read_zotero
+from molab.knowledge.zotero import ZoteroItem, ZoteroLibrary
 
 
 def _make_zotero_db(data_dir: Path) -> Path:
@@ -83,11 +83,11 @@ def _make_zotero_db(data_dir: Path) -> Path:
 
 
 class TestReadZoteroItems:
-    """``read_zotero`` — parse a ``zotero.sqlite`` into ``ZoteroItem`` records."""
+    """``ZoteroLibrary.items`` — parse a ``zotero.sqlite`` into records."""
 
     def test_parses_bib_fields_and_resolves_pdf_pointer(self, tmp_path: Path) -> None:
         db = _make_zotero_db(tmp_path)
-        items = {i.key: i for i in read_zotero(db)}
+        items = {i.key: i for i in ZoteroLibrary(db).items()}
         assert set(items) == {"AAAA", "BBBB"}  # attachment item excluded
 
         a = items["AAAA"]
@@ -105,7 +105,7 @@ class TestReadZoteroItems:
     def test_opens_database_read_only(self, tmp_path: Path) -> None:
         db = _make_zotero_db(tmp_path)
         before = db.read_bytes()
-        read_zotero(db)
+        ZoteroLibrary(db).items()
         assert db.read_bytes() == before  # opened read-only, never mutated
 
 

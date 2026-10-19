@@ -15,7 +15,6 @@ from molab.knowledge.concept import (
 )
 from molab.knowledge.concepts import Literature, Note
 from molab.knowledge.errors import KnowledgeNotFoundError
-from molab.knowledge.location import folder
 from molab.workspace import Experiment, Workspace
 from molab.workspace.workspace import set_cli_root_override
 
@@ -247,7 +246,7 @@ class TestHostConstruction:
 
     def test_the_host_is_not_retained(self, experiment: Experiment) -> None:
         note = Note(experiment, "x")
-        twin = Knowledge(folder(experiment, "x", Note))
+        twin = Knowledge(Note(experiment, "x").path)
 
         assert not hasattr(note, "_host")
         assert note == twin
@@ -681,7 +680,9 @@ class TestConceptWrite:
         path = tmp_path / "old.md"
         path.write_text("---\nclass: Finding\nsources:\n- kind: run\n  ref: R1\n---\n\n# Old\n")
 
-        opened = Knowledge.open(path)
+        from molab.knowledge.concepts import Finding
+
+        opened = Finding(path)
         opened.write(tags=["t"])
 
         assert "sources:" in path.read_text()
@@ -890,7 +891,7 @@ class TestConceptWriteReplace:
 
         path = tmp_path / "f.md"
         path.write_text("---\nclass: Finding\nsources:\n- kind: run\n  ref: R1\n---\n\n# F\n")
-        finding = Finding._from_disk(str(path))
+        finding = Finding(path)
         text = "---\nclass: Finding\n---\n\n# F\n"
 
         finding.write(text, replace=True)
@@ -903,7 +904,7 @@ class TestConceptWriteReplace:
         path = tmp_path / "f.md"
         original = "---\nclass: Finding\n---\n\n# F\n"
         path.write_text(original)
-        finding = Finding._from_disk(str(path))
+        finding = Finding(path)
 
         with pytest.raises(ValueError):
             finding.write("---\nclass: Note\n---\n\n# N\n", replace=True)
@@ -918,7 +919,7 @@ class TestConceptWriteReplace:
         path = tmp_path / "f.md"
         text = "---\nclass: Finding\n---\n\n# F\n"
         path.write_text(text)
-        finding = Finding._from_disk(str(path))
+        finding = Finding(path)
         before = path.stat().st_mtime_ns
 
         finding.write(text, replace=True)
@@ -928,22 +929,26 @@ class TestConceptWriteReplace:
 
 class TestConceptWriteDocument:
     def test_a_legacy_observation_is_persisted_verbatim(self, tmp_path: Path) -> None:
+        from molab.knowledge.concepts import _write_document
+
         text = "---\nclass: Observation\nsources:\n- kind: run\n  ref: R\n---\n\n# obs\n"
         path = tmp_path / "knowledges" / "obs-1.md"
 
-        handle = Concept.write_document(path, text)
+        handle = _write_document(path, text)
 
         assert type(handle).__name__ == "Observation"
         assert path.read_text(encoding="utf-8") == text
 
     def test_a_missing_or_unknown_class_writes_nothing(self, tmp_path: Path) -> None:
+        from molab.knowledge.concepts import _write_document
+
         missing = tmp_path / "missing.md"
         unknown = tmp_path / "unknown.md"
 
         with pytest.raises(ValueError):
-            Concept.write_document(missing, "# hi\n")
+            _write_document(missing, "# hi\n")
         with pytest.raises(ValueError):
-            Concept.write_document(unknown, "---\nclass: Widget\n---\n\n")
+            _write_document(unknown, "---\nclass: Widget\n---\n\n")
 
         assert not missing.exists()
         assert not unknown.exists()
@@ -1013,34 +1018,42 @@ class TestRemoveLegacyFiles:
 
 class TestConceptOpen:
     def test_a_directory_is_not_a_document(self, tmp_path: Path) -> None:
+        from molab.knowledge.concepts import _open_document
+
         directory = tmp_path / "note"
         directory.mkdir()
         (directory / "note.json").write_text("{}\n")
         (directory / "index.md").write_text("# Old\n")
 
         with pytest.raises(KnowledgeNotFoundError):
-            Knowledge.open(directory)
+            _open_document(directory)
 
     def test_frontmatter_class_selects_the_subclass(self, tmp_path: Path) -> None:
+        from molab.knowledge.concepts import _open_document
+
         path = tmp_path / "knowledges" / "f.md"
         path.parent.mkdir()
         path.write_text("---\nclass: Finding\n---\n\n# F\n")
 
-        assert type(Knowledge.open(path)).__name__ == "Finding"
+        assert type(_open_document(path)).__name__ == "Finding"
 
     def test_an_unknown_class_opens_as_note(self, tmp_path: Path) -> None:
+        from molab.knowledge.concepts import _open_document
+
         path = tmp_path / "knowledges" / "x.md"
         path.parent.mkdir()
         path.write_text("---\nclass: Widget\n---\n\n# X\n")
 
-        assert type(Knowledge.open(path)).__name__ == "Note"
+        assert type(_open_document(path)).__name__ == "Note"
 
     def test_a_suffixless_path_opens_the_markdown_file(self, tmp_path: Path) -> None:
+        from molab.knowledge.concepts import _open_document
+
         path = tmp_path / "knowledges" / "f.md"
         path.parent.mkdir()
         path.write_text("---\nclass: Note\n---\n\n# F\n")
 
-        opened = Knowledge.open(path.with_suffix(""))
+        opened = _open_document(path.with_suffix(""))
 
         assert opened.path == path
 

@@ -48,14 +48,19 @@ class RegisterArtifact:
         path: The file the body wrote, typically under ``ctx.workdir``.
         name: Filename under the run's ``artifacts/`` directory
             (defaults to ``path.name``).
-        tags: Free-form metadata attached to the registered asset.
+        tags: Free-form metadata attached to the registered artifact.
         mime: Optional MIME hint (e.g. ``"chemical/x-xyz"``).
+        asset: Project-asset title. When set, a body run also files the
+            artifact in the project asset library under this title. The
+            repository versions the one asset with that title, and the same
+            bytes do not add a version. ``None`` leaves it a run artifact.
     """
 
     path: Path
     name: str | None = None
     tags: dict[str, str] | None = None
     mime: str | None = None
+    asset: str | None = None
 
 
 @dataclass(frozen=True)

@@ -2,7 +2,7 @@
 
 Three behaviors are load-bearing here and each has its own guard below:
 
-- the destination comes from :func:`molab.knowledge.location.folder` and the
+- the destination comes from ``Finding(host, name).path`` and the
   bytes land through ``Concept.write`` (one derivation, one persistence path);
 - the **cite channel keeps all three branches** — a Knowledge document through
   ``.ref``, a ``Folder``/``Asset`` through the embed resolver, and a bare path
@@ -20,7 +20,6 @@ from typing import Any
 import pytest
 
 from molab.knowledge import Finding, Knowledge, Literature, Note, SourceRef
-from molab.knowledge.location import folder
 from molab.workspace.domain import Asset
 from molab.workspace.folder import Folder
 
@@ -45,7 +44,10 @@ class TestWriteKnowledge:
 
         assert isinstance(item, Finding)
         assert not isinstance(item, Folder)
-        assert item.path == folder(experiment, "finding-demo", Finding)
+        assert (
+            item.path
+            == Finding(experiment, "finding-demo", sources=[SourceRef.of(experiment)]).path
+        )
         assert Path(item.path).name == "finding-demo.md"
         assert Path(item.path).parent == Path(str(experiment.resolve())) / "knowledges"
         assert item.exists()
@@ -54,7 +56,7 @@ class TestWriteKnowledge:
     def test_sources_and_author_round_trip_through_the_head(self, experiment: Any) -> None:
         item = _write(experiment)
 
-        reopened = Knowledge.open(item.path)
+        reopened = Finding(item.path)
 
         assert isinstance(reopened, Finding)
         from molab.workspace.refs import ref_of
@@ -69,7 +71,7 @@ class TestWriteKnowledge:
         second = _write(experiment, text="second\n")
 
         assert "second" in second.read()
-        assert "first" not in Knowledge.open(second.path).read()
+        assert "first" not in Finding(second.path).read()
         landed = sorted(p.name for p in (Path(str(experiment.resolve())) / "knowledges").iterdir())
         assert landed == ["finding-demo.md"]
 
@@ -150,7 +152,7 @@ class TestMountNote:
         note = Note.mount(experiment, "An Idea")
 
         assert isinstance(note, Note)
-        assert note.path == folder(experiment, "An Idea", Note)
+        assert note.path == Note(experiment, "An Idea").path
         assert note.exists(), "an empty-body mount must still materialize the document"
         assert note.read() == ""
 
@@ -230,7 +232,7 @@ class TestNormalizeSources:
         )
 
         assert Path(lit.path).name == "smith-2024.md"
-        assert Knowledge.open(lit.path).read().startswith("# Smith 2024")
+        assert Literature(lit.path).read().startswith("# Smith 2024")
 
 
 class TestWriteKnowledgePath:

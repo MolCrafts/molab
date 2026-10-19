@@ -1,7 +1,7 @@
 """``molab knowledge`` — notes and literature from the CLI.
 
-Commands open a tree with :class:`molab.knowledge.Knowledge` and read documents
-with :meth:`Knowledge.open`. ``import-zotero`` writes :class:`Literature`
+Commands open a tree with :class:`molab.knowledge.Knowledge` and read one file
+as the class named in its frontmatter. ``import-zotero`` writes :class:`Literature`
 markdown files under the workspace's ``knowledges/`` directory; PDFs are
 pointed at, never copied.
 """
@@ -330,10 +330,10 @@ def knowledge_search(
     from rich.table import Table
 
     from molab.knowledge import Knowledge
-    from molab.knowledge.sources import search_sources
+    from molab.knowledge.sources import KnowledgeSourceStore
 
     ws_root = _workspace_root(path)
-    hits = search_sources(
+    hits = KnowledgeSourceStore(ws_root).search(
         query,
         sources=source or None,
         workspace_root=ws_root,
@@ -392,7 +392,8 @@ def knowledge_read(
     ] = None,
 ) -> None:
     """Print one knowledge document in full — its metadata, body and edges."""
-    from molab.knowledge import Knowledge, KnowledgeNotFoundError
+    from molab.knowledge import KnowledgeNotFoundError
+    from molab.knowledge.concepts import _open_document
     from molab.knowledge.sources import KnowledgeSourceStore, SourceNotFoundError
 
     ws_root = _workspace_root(path)
@@ -410,7 +411,7 @@ def knowledge_read(
         raise typer.Exit(1)
 
     try:
-        concept = Knowledge.open(root / rel if rel else root)
+        concept = _open_document(root / rel if rel else root)
     except (KnowledgeNotFoundError, FileNotFoundError):
         rprint(f"[red]Error:[/red] no knowledge concept at {ref!r}.")
         rprint("Find valid refs with [bold]molab knowledge search[/bold].")
@@ -428,3 +429,78 @@ def knowledge_read(
         rprint("[dim]links:[/dim]")
         for edge in edges:
             rprint(f"  [dim][{edge.role}][/dim] {edge.target}")
+
+
+def _load_run(run_id: str, path: Path | None) -> object:
+    """Resolve a bare run id or a ``molab:`` ref inside the workspace at *path*."""
+    from molab.workspace import Workspace
+    from molab.workspace.errors import AmbiguousRefError, RefNotFoundError
+    from molab.workspace.refs import InvalidRefError, is_ref, qualify_run_id
+    from molab.workspace.run import Run
+
+    root = path or Path.cwd()
+    try:
+        workspace = Workspace.load(root)
+    except FileNotFoundError:
+        rprint(f"[red]Error:[/red] not a molab workspace: {root}")
+        rprint(f"Initialise one first with [bold]molab init {root}[/bold].")
+        raise typer.Exit(1) from None
+    try:
+        ref = run_id if is_ref(run_id) else qualify_run_id(workspace, run_id)
+        found = workspace.find(ref)
+    except (InvalidRefError, RefNotFoundError, AmbiguousRefError) as exc:
+        rprint(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(1) from None
+    if not isinstance(found, Run):
+        rprint(f"[red]Error:[/red] {run_id!r} is not a run.")
+        raise typer.Exit(1)
+    return found
+
+
+@knowledge_app.command("parts")
+def knowledge_parts(
+    run_id: Annotated[str, typer.Argument(help="Run id, or a molab:experiment/.../run/... ref.")],
+    path: Annotated[
+        Path | None, typer.Option("--path", help="Workspace root; defaults to cwd.")
+    ] = None,
+    write: Annotated[
+        bool,
+        typer.Option("--write", help="Write a Report that shows every generated image part."),
+    ] = False,
+    narrative: Annotated[
+        str,
+        typer.Option("--narrative", help="Interpretation stored with --write."),
+    ] = "",
+    created_by: Annotated[
+        str, typer.Option("--created-by", help="Author recorded on the Report.")
+    ] = "molab",
+    name: Annotated[
+        str | None,
+        typer.Option("--name", help="Report name. Defaults to parts-<run id>."),
+    ] = None,
+) -> None:
+    """List image parts a run emitted. --write stores them as a Report."""
+    from molab.knowledge import GeneratedParts
+    from molab.workspace.run import Run
+
+    run = _load_run(run_id, path)
+    if not isinstance(run, Run):
+        raise typer.Exit(1)
+    try:
+        parts = GeneratedParts(run).list()
+    except ValueError as exc:
+        rprint(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(1) from None
+    if not parts:
+        print(f"No generated image parts on run {run.id}.")
+    for part in parts:
+        print(f"{part.part}\t{part.ref}\t{part.path}")
+    if not write:
+        return
+    text = narrative.strip() or "Generated image parts of this run."
+    try:
+        report = GeneratedParts(run).view(narrative=text, created_by=created_by, name=name)
+    except ValueError as exc:
+        rprint(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(1) from None
+    print(f"report: {report.path}")

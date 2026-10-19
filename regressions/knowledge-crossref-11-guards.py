@@ -16,7 +16,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from molab.knowledge import Knowledge, Note, folder
+from molab.knowledge import Knowledge, Note
 
 
 def main() -> None:
@@ -37,8 +37,8 @@ def main() -> None:
         assert (host / "knowledges" / "tg-cooling.md").is_file()
         # A file item, not a directory: the layout marks a document by its .md.
         assert not (host / "knowledges" / "tg-cooling").exists()
-        assert folder(host, "Tg Cooling", Note) == host / "knowledges" / "tg-cooling.md"
-        assert Knowledge.open(doc.path).name == "tg-cooling"
+        assert Note(host, "Tg Cooling").path == host / "knowledges" / "tg-cooling.md"
+        assert Note(doc.path).name == "tg-cooling"
 
     # ── the one-way law: a bare workspace import never reaches knowledge ─────
     code = (

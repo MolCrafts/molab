@@ -8,7 +8,6 @@ import pytest
 
 from molab.knowledge import (
     Finding,
-    Knowledge,
     KnowledgeNotFoundError,
     Literature,
     Note,
@@ -68,25 +67,31 @@ class TestWrite:
 
 
 class TestFromDir:
-    """``Knowledge.open`` rebuilds the subclass from frontmatter ``class``."""
+    """Opening a file reads ``class`` beside the six classes, not on the base."""
 
     def test_from_dir_returns_note(self, tmp_path: Path) -> None:
+        from molab.knowledge.concepts import _open_document
+
         path = tmp_path / "idea.md"
         path.write_text("---\nclass: Note\n---\n\n# Hi\n")
-        rebuilt = Knowledge.open(path)
+        rebuilt = _open_document(path)
         assert isinstance(rebuilt, Note)
         assert rebuilt.read().startswith("# Hi")
 
     def test_from_dir_returns_literature(self, tmp_path: Path) -> None:
+        from molab.knowledge.concepts import _open_document
+
         path = tmp_path / "lecun2015.md"
         path.write_text("---\nclass: Literature\ntitle: Deep Learning\nyear: 2015\n---\n")
-        rebuilt = Knowledge.open(path)
+        rebuilt = _open_document(path)
         assert isinstance(rebuilt, Literature)
 
     def test_missing_six_class_files_raises(self, tmp_path: Path) -> None:
+        from molab.knowledge.concepts import _open_document
+
         (tmp_path / "empty").mkdir()
         with pytest.raises(KnowledgeNotFoundError):
-            Knowledge.open(tmp_path / "empty")
+            _open_document(tmp_path / "empty")
 
 
 class TestCite:

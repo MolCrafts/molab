@@ -10,7 +10,7 @@ import tempfile
 from pathlib import Path
 
 from molab.cli.migrate_cmd import migrate_knowledge
-from molab.knowledge import Knowledge
+from molab.knowledge.concepts import _open_document
 from molab.workspace import Workspace
 
 
@@ -62,7 +62,7 @@ def main() -> None:
         assert report.ambiguous == []
         assert "../../../../../knowledges/cooling-rate.md" in body
         assert "sources:" not in body.split("---", 2)[1]
-        assert type(Knowledge.open(obs_path)).__name__ == "Observation"
+        assert type(_open_document(obs_path)).__name__ == "Observation"
         assert migrate_knowledge(root).changed is False
 
     print("arch-own-06d-migrate: ok")

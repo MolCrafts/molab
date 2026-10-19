@@ -20,6 +20,8 @@ from molab.workflow import (
 )
 from molab.workflow.cache import Caching
 from molab.workspace import Workspace
+from molab.workspace.artifact_repository import AssetRepository
+from molab.workspace.domain import ArtifactOrigin, ExecutionMode
 from molab.workspace.execution_dirs import ARTIFACTS, OUT
 
 
@@ -189,3 +191,83 @@ class TestPromoteRegisterArtifact:
         assert r1.outputs["export"] == r2.outputs["export"] == 7
         found = _run_artifacts(run2, run2.executions[-1].id)
         assert any(a.name == "cached.txt" for a in found)
+
+    @pytest.mark.asyncio
+    async def test_asset_title_lands_in_the_project_library(self, tmp_path: Path) -> None:
+        wf = Workflow(name="asset")
+
+        @wf.task
+        async def export(ctx: TaskContext) -> dict:
+            out = ctx.workdir / "portrait.png"
+            out.write_bytes(b"png")
+            return {"file": ctx.register_artifact(out, mime="image/png", asset="portrait")}
+
+        run = _new_run(tmp_path)
+        with run.start() as ctx:
+            result = await WorkflowRuntime().execute(
+                WorkflowCompiler().compile(wf), run_context=ctx
+            )
+
+        assert result.status == "succeeded"
+        assets = run.experiment.project.assets.list()
+        assert [asset.title for asset in assets] == ["portrait"]
+        origin = run.experiment.project.assets.versions(assets[0].id)[-1].origin
+        assert isinstance(origin, ArtifactOrigin)
+        assert Path(result.outputs["export"]["file"]).name == "portrait.png"
+        recorded = _run_artifacts(run, run.executions[-1].id)
+        assert all("asset" not in artifact.metadata for artifact in recorded)
+
+    @pytest.mark.asyncio
+    async def test_cache_hit_and_fresh_rerun_keep_one_library_version(self, tmp_path: Path) -> None:
+        counters = {"export": 0}
+        wf = Workflow(name="asset-cache")
+
+        @wf.task
+        async def export(ctx: TaskContext) -> dict:
+            counters["export"] += 1
+            out = ctx.workdir / "portrait.png"
+            out.write_bytes(b"png")
+            return {"file": ctx.register_artifact(out, mime="image/png", asset="portrait")}
+
+        compiled = WorkflowCompiler().compile(wf)
+        run = _new_run(tmp_path)
+        with run.start() as ctx:
+            await WorkflowRuntime().execute(compiled, run_context=ctx)
+        with run.start(mode=ExecutionMode.RERUN) as ctx:
+            hit = await WorkflowRuntime().execute(compiled, run_context=ctx)
+        with run.start(mode=ExecutionMode.RERUN, bypass_cache=True) as ctx:
+            fresh = await WorkflowRuntime().execute(compiled, run_context=ctx)
+
+        assert hit.status == fresh.status == "succeeded"
+        assert counters["export"] == 2
+        assets = run.experiment.project.assets.list()
+        assert [asset.title for asset in assets] == ["portrait"]
+        assert [item.version for item in run.experiment.project.assets.versions(assets[0].id)] == [
+            1
+        ]
+
+    @pytest.mark.asyncio
+    async def test_library_failure_fails_the_task(self, tmp_path: Path, monkeypatch) -> None:
+        def boom(self, artifact: object, **kwargs: object) -> None:
+            del self, artifact, kwargs
+            raise RuntimeError("library down")
+
+        monkeypatch.setattr(AssetRepository, "promote", boom)
+        wf = Workflow(name="asset-fail")
+
+        @wf.task
+        async def export(ctx: TaskContext) -> dict:
+            out = ctx.workdir / "portrait.png"
+            out.write_bytes(b"png")
+            return {"file": ctx.register_artifact(out, mime="image/png", asset="portrait")}
+
+        run = _new_run(tmp_path)
+        with run.start() as ctx:
+            result = await WorkflowRuntime().execute(
+                WorkflowCompiler().compile(wf), run_context=ctx
+            )
+
+        assert result.status == "failed"
+        assert run.experiment.project.assets.list() == []
+        found = _run_artifacts(run, run.executions[-1].id)
+        assert any(artifact.name == "portrait.png" for artifact in found)

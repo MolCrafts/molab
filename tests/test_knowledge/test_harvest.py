@@ -60,7 +60,7 @@ class TestHarvestRun:
         _succeed(run)
 
         item = _harvest(run)
-        reopened = Knowledge.open(item.path)
+        reopened = Observation(item.path)
 
         assert isinstance(reopened, Observation)
         assert [(s.kind, s.ref) for s in reopened.sources] == [

@@ -14,7 +14,7 @@ from pathlib import Path
 
 import pytest
 
-from molab.knowledge.concept import Concept, Knowledge
+from molab.knowledge.concept import Concept
 from molab.knowledge.concepts import Literature, Note
 from molab.knowledge.reference_meta import ReferenceMeta
 
@@ -23,7 +23,7 @@ def _mount[C: Concept](cls: type[C], root: Path, name: str) -> C:
     """Materialize a Concept of *cls* named *name* directly under *root*.
 
     A Knowledge is one file: writing it stamps the ``class`` frontmatter marker
-    ``Concept.open`` reconstructs the subclass from.
+    ``_open_document`` reads the subclass from. The base class does not.
     """
     concept = cls(root / name)
     concept.write()
@@ -59,8 +59,10 @@ class TestConceptRegistry:
     def test_concept_from_dir_rebuilds_typed_subclass(self, tmp_path: Path) -> None:
         note = _mount(Note, tmp_path, "idea")
         ref = _mount(Literature, tmp_path, "smith2024")
-        assert isinstance(Knowledge.open(note.path), Note)
-        assert isinstance(Knowledge.open(ref.path), Literature)
+        from molab.knowledge.concepts import _open_document
+
+        assert isinstance(_open_document(note.path), Note)
+        assert isinstance(_open_document(ref.path), Literature)
 
     def test_a_concept_needs_no_workspace(self, tmp_path: Path) -> None:
         # The whole point of the OKF library: a plain file is a Concept.

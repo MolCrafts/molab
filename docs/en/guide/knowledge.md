@@ -56,29 +56,21 @@ note.write("# Analysis Notes\n\nQuench at 10 K/ns.\n")
 `<experiment>/knowledges/analysis-notes.md`, and that is where `write` puts the
 bytes. Bind a name and nothing touches disk until the first write.
 
-Always construct a **concrete** class. The `Knowledge` base is a directory-form
-Concept, so `Knowledge(host, name)` would land a directory rather than a markdown
-file.
+Always construct a **concrete** class. `Knowledge(host, name)` raises
+`TypeError`: the base is not a document, and it does not construct a subclass.
 
-**A path is only how you find a document.** To open one you already have — from
-a search, from `ls`, from a link in another document — use `Knowledge.open`,
-which reads the class back from the frontmatter:
+**A path is the same constructor.** A file you already have — from a search,
+from `ls`, from a link — is `Note(path)` when you know it is a note. A sourced
+file that is already on disk is `Finding(path)` (no sources argument). The
+base class does not read `class:` and return a different type.
 
 ```python
-from molab.knowledge import Knowledge, Note
+from molab.knowledge import Note
 
-doc = Knowledge.open(experiment.resolve() / "knowledges" / "analysis-notes.md")
-assert type(doc) is Note  # the `class:` frontmatter is honoured
+doc = Note(experiment.resolve() / "knowledges" / "analysis-notes.md")
+assert type(doc) is Note
 assert doc.read().startswith("# Analysis Notes")
-```
-
-`molab.knowledge.location.folder(host, name, of)` is that same derivation on its
-own — `of` is the class, and the return is the **landed path**:
-
-```python
-from molab.knowledge.location import folder
-
-assert Note(experiment, "Analysis Notes").path == folder(experiment, "Analysis Notes", Note)
+assert Note(experiment, "Analysis Notes").path == doc.path
 ```
 
 ## The six classes
@@ -119,7 +111,7 @@ not a run id, not params. Those are not knowledge, and `.ref` rejects them with
 records it, then `.ref` that document:
 
 ```python
-run_record = Knowledge.open(experiment.resolve() / "knowledges" / "run-0001.md")
+run_record = Note(experiment.resolve() / "knowledges" / "run-0001.md")
 note.ref(run_record)
 ```
 
@@ -164,6 +156,40 @@ archive; the raw record already lives in `run.json` and the run's artifacts.
 `created_by` is a required keyword argument. `of` is typically `Finding`,
 `Observation` or `Report`.
 
+## Viewing generated image parts
+
+Harvest inlines truncated result text. It does not show the images a run
+emitted. `GeneratedParts(run).list()` lists those artifacts (media type `image/*`,
+or a `part` tag; `result` and `checkpoint` artifacts are skipped).
+`GeneratedParts(run).view(...)` writes a Report under the experiment. Each part is a
+`records` link to its `molab:` artifact ref, and an image part is also a
+relative `![]()` so a markdown preview can show the file. A `molab:` URL is
+not itself an image.
+
+```python
+from molab.knowledge import GeneratedParts
+
+parts = GeneratedParts(run)
+for part in parts.list():
+    print(part.part, part.path)
+
+report = parts.view(
+    narrative="The portrait split into hair, eyes, clothes, and mouth.",
+    created_by="lin",
+)
+```
+
+The same preconditions as harvest apply. A task body cannot call it:
+`TaskContext` has no path up to the Run. After `molab run`, store the Report
+with `molab knowledge parts --write`.
+
+From a workspace root:
+
+```console
+$ molab knowledge parts <run-id> --path .
+$ molab knowledge parts <run-id> --path . --write
+```
+
 ## Layering
 
 `molab.knowledge` depends on `molab.workspace` — a document needs a host folder
@@ -191,9 +217,9 @@ In Python a registered source opens as a tree handle, whose `walk()` yields its
 documents and whose `search(...)` ranks them:
 
 ```python
-from molab.knowledge.sources import open_source
+from molab.knowledge.sources import KnowledgeSourceStore
 
-wiki = open_source("lab-wiki")
+wiki = KnowledgeSourceStore().open("lab-wiki")
 for doc in wiki.walk():
     print(type(doc).__name__, doc.path)
 for hit in wiki.search("cooling").hits:

@@ -120,7 +120,7 @@ class TestChineseGoldenCase:
         assert "降温速率" in result.hits[0].snippet
         cooled = Knowledge(tmp_path).search("降温速率")
         assert all(hit.entry.path != "cluster-usage.md" for hit in cooled.hits)
-        opened = Knowledge.open(tmp_path / result.hits[0].entry.path)
+        opened = Note(tmp_path / result.hits[0].entry.path)
         assert "1 K/ns 降温至 200 K" in opened.read()
 
 

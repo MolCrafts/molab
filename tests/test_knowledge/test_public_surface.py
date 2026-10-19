@@ -18,15 +18,14 @@ import molab.knowledge as knowledge
 from molab.knowledge import Knowledge, Note
 from molab.knowledge.search import ConceptIndexEntry, SearchHit
 from molab.knowledge.sources import (
+    KnowledgeSourceStore,
     SourcedHit,
-    search_sources,
 )
 from molab.workspace import Workspace
 
 #: ``module path`` → the attribute a caller imports from it.
 MOLMCP_IMPORTS: tuple[tuple[str, str], ...] = (
     ("molab.knowledge.sources", "KnowledgeSourceStore"),
-    ("molab.knowledge.sources", "search_sources"),
     ("molab.knowledge.sources", "SourceNotFoundError"),
     ("molab.knowledge", "Knowledge"),
     ("molab.knowledge.errors", "KnowledgeNotFoundError"),
@@ -39,6 +38,8 @@ REQUIRED_PUBLIC: tuple[str, ...] = (
     "Literature",
     "Report",
     "Finding",
+    "GeneratedPart",
+    "GeneratedParts",
     "Plan",
     "Observation",
     "SourceRef",
@@ -52,6 +53,8 @@ PINNED_ALL: frozenset[str] = frozenset(
         "Edge",
         "EdgeRole",
         "Finding",
+        "GeneratedPart",
+        "GeneratedParts",
         "Knowledge",
         "KnowledgeNotFoundError",
         "KnowledgeScope",
@@ -70,11 +73,6 @@ PINNED_ALL: frozenset[str] = frozenset(
         "SourcedHit",
         "WikiSource",
         "ZoteroItem",
-        "folder",
-        "parse_class",
-        "read_zotero",
-        "resolve_source",
-        "search_sources",
     }
 )
 
@@ -103,7 +101,7 @@ def wiki(tmp_path: Path) -> Path:
 
 def _workspace_hits(root: Path, query: str):
     """The workspace searched through the seam a host with its own scan passes."""
-    return search_sources(
+    return KnowledgeSourceStore(root).search(
         query,
         workspace_root=root,
         include_workspace=True,
@@ -130,7 +128,7 @@ class TestTheRefFormat:
 
     def test_a_named_source_prefixes_its_name(self) -> None:
         # Pinned at ``SourcedHit.ref`` — the one place the format is defined.
-        # Not driven end-to-end: ``search_sources`` searches a *registered*
+        # Not driven end-to-end: ``KnowledgeSourceStore.search`` searches a *registered*
         # source through the old walker, which descends directories only and so
         # cannot see a ``knowledges/<slug>.md`` file document (the structural
         # gap the document-as-file migration left; owned by no member of this

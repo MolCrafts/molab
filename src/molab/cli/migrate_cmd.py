@@ -997,13 +997,13 @@ def _knowledge_frontmatter(text: str) -> tuple[dict[str, object], str | None]:
 
 def _knowledge_class_name(meta: dict[str, object]) -> str | None:
     """A frontmatter ``class`` that names a knowledge class, else ``None``."""
-    from molab.knowledge import parse_class
+    from molab.knowledge.concepts import _product
 
     name = meta.get("class")
     if not isinstance(name, str) or name == "":
         return None
     try:
-        parse_class(name)
+        _product(name)
     except ValueError:
         return None
     return name
@@ -1651,7 +1651,8 @@ def _knowledge_apply(
     Returns the files this run wrote or removed. A directory that still holds
     an attachment is not included, so a later commit cannot stage it.
     """
-    from molab.knowledge.concept import Concept, remove_legacy_files
+    from molab.knowledge.concept import remove_legacy_files
+    from molab.knowledge.concepts import _open_document, _write_document
 
     fs = workspace.fs
     root = Path(workspace.root)
@@ -1660,12 +1661,12 @@ def _knowledge_apply(
         if doc.dest is None:
             continue
         if doc.form in {"a", "b"}:
-            handle = Concept.open(doc.old, fs=fs)
+            handle = _open_document(doc.old, fs=fs)
             handle.move_to(doc.host, stem=doc.stem, relink=False)
-            Concept.write_document(handle.path, doc.final, fs=fs)
+            _write_document(handle.path, doc.final, fs=fs)
             touched.extend((doc.dest, doc.old))
         elif doc.form in {"c", "d"}:
-            Concept.write_document(doc.dest, doc.final, fs=fs)
+            _write_document(doc.dest, doc.final, fs=fs)
             names = [name for name in (doc.head_name, _LEGACY_INDEX) if name]
             left = remove_legacy_files(doc.old, names, fs=fs)
             touched.append(doc.dest)
@@ -1673,7 +1674,7 @@ def _knowledge_apply(
             if left:
                 report.leftovers.append(_knowledge_rel(root, doc.old))
         elif doc.final != doc.original:
-            Concept.write_document(doc.dest, doc.final, fs=fs)
+            _write_document(doc.dest, doc.final, fs=fs)
             touched.append(doc.dest)
     marker_name = _LEGACY_REFERENCES_MARKER[0]
     for refs in markers:
