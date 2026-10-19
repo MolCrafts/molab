@@ -79,4 +79,4 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: MolCrafts/molcrafts-ci/actions/check-workflows@master
+      - uses: MolCrafts/molcrafts-ci/actions/check-workflows@8c2f7db652ebddbd6acf4df270300e2b086d599d

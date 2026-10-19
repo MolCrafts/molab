@@ -84,14 +84,10 @@ def open_reader(sidecar: ModuleType, dataset_path: Path) -> FrameReader:
 
 
 def frames_to_extxyz(frames: Sequence[Frame]) -> bytes:
-    """Encode *frames* as one extended-XYZ trajectory (``molpy.io.xyz.XyzWriter``)."""
-    from molpy.io.xyz import XyzWriter
+    """Encode *frames* as one extended-XYZ trajectory via molpy's public writer."""
+    from molpy.io import write_xyz_str
 
-    sink = bytearray()
     try:
-        with XyzWriter(sink) as writer:
-            for frame in frames:
-                writer.write(frame)
+        return "".join(write_xyz_str(frame) for frame in frames).encode("utf-8")
     except Exception as exc:
-        raise PreviewReaderError("<frames>", f"XyzWriter failed: {exc}") from exc
-    return bytes(sink)
+        raise PreviewReaderError("<frames>", f"XYZ encoding failed: {exc}") from exc

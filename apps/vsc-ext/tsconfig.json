@@ -12,7 +12,9 @@
     "resolveJsonModule": true,
     "types": ["node", "vscode", "react", "react-dom"],
     "paths": {
-      "@/*": ["./../web/src/*"]
+      "@/*": ["./../web/src/*"],
+      "@molcrafts/ui-vega-lite": ["../../../molcrafts-ui/packages/vega-lite/src/index.tsx"],
+      "@molcrafts/ui-vega": ["../../../molcrafts-ui/packages/vega/src/index.tsx"]
     }
   },
   "include": [
