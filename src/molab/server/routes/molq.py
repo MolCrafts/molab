@@ -9,12 +9,14 @@ from __future__ import annotations
 import json
 from collections.abc import AsyncGenerator
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
-from molq import JobNotFoundError
+from molq import MolqError
+from pydantic import BaseModel
 
 from molab.plugins.submit_molq import dashboard
 
+from ..deps.auth import require_registry_access
 from ..schemas import (
     MolqJobDetailResponse,
     MolqJobsResponse,
@@ -22,9 +24,34 @@ from ..schemas import (
     MolqTargetSummary,
 )
 
-router = APIRouter(prefix="/plugins/molq", tags=["molq"])
+router = APIRouter(
+    prefix="/plugins/molq", tags=["molq"], dependencies=[Depends(require_registry_access)]
+)
 
 _SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
+
+
+class DestinationSummary(BaseModel):
+    id: str
+    name: str
+    scheduler: str
+
+
+class DestinationsResponse(BaseModel):
+    registryId: str
+    destinations: list[DestinationSummary]
+
+
+@router.get("/destinations", response_model=DestinationsResponse)
+def list_destinations() -> DestinationsResponse:
+    """List registered destinations without contacting schedulers or SSH hosts."""
+    from molab.workspace.connection import get_client
+
+    client = get_client()
+    return DestinationsResponse(
+        registryId=client.rpc("molq.hello")["registry_id"],
+        destinations=[DestinationSummary(**item) for item in client.clusters.list()],
+    )
 
 
 @router.get("/targets", response_model=MolqTargetListResponse)
@@ -66,7 +93,9 @@ def get_job(
         detail = dashboard.get_job(target, job_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except JobNotFoundError as exc:
+    except MolqError as exc:
+        if exc.kind not in {"NOT_FOUND", "JOB_NOT_FOUND"}:
+            raise
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return MolqJobDetailResponse.from_dataclass(detail)
 
@@ -88,7 +117,9 @@ async def stream_logs(
         dashboard.get_job(target, job_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    except JobNotFoundError as exc:
+    except MolqError as exc:
+        if exc.kind not in {"NOT_FOUND", "JOB_NOT_FOUND"}:
+            raise
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
     async def _generate() -> AsyncGenerator[str]:

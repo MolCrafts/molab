@@ -23,6 +23,7 @@ import {
   WorkflowNodeRenderer,
 } from "@flowgram.ai/free-layout-editor";
 import "@flowgram.ai/free-layout-editor/index.css";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@molcrafts/ui";
 import { Layers, Maximize2, Minus, Plus, Redo2, Undo2 } from "lucide-react";
 import {
   createContext,
@@ -36,7 +37,6 @@ import {
 } from "react";
 import { type StatusKey, statusKey } from "@/app/components/entity";
 import { canonicalStatusFor } from "@/app/components/entity/status";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { WorkbenchIconAction, WorkflowNode } from "@/components/workbench";
 import {
   buildFlowgramDocument,
@@ -103,7 +103,6 @@ const NodeCard = ({ onNodeClick }: { onNodeClick?: (taskId: string) => void }): 
         taskType={data.taskType ?? data.subtitle ?? null}
         status={status}
         canvasRole={role}
-        parallel={parallel}
         subworkflow={Boolean(subworkflow)}
         error={error}
         density="compact"

@@ -32,6 +32,24 @@ export default defineConfig(({ command }) => {
     resolve: {
       alias: {
         '@molcrafts/molrs': resolveMolrs(),
+        '@molcrafts/ui/file-tree': path.resolve(
+          __dirname,
+          '../../../molcrafts-ui/packages/ui/src/lib/file-tree.ts',
+        ),
+        '@molcrafts/ui-vega-lite': path.resolve(
+          __dirname,
+          '../../../molcrafts-ui/packages/vega-lite/src/index.tsx',
+        ),
+        '@molcrafts/ui-vega': path.resolve(
+          __dirname,
+          '../../../molcrafts-ui/packages/vega/src/index.tsx',
+        ),
+        react: path.resolve(__dirname, '../../node_modules/react'),
+        'react-dom': path.resolve(__dirname, '../../node_modules/react-dom'),
+        // Dynamic import("vega") inside the wrapper must use this app's copy.
+        // Resolve the entry file: the package does not export ./package.json.
+        vega: createRequire(import.meta.url).resolve('vega'),
+        'vega-lite': createRequire(import.meta.url).resolve('vega-lite'),
         '@schemas': path.resolve(__dirname, '../../src/molab/schemas'),
         '@molcrafts/molab-plugin/ui': path.resolve(__dirname, '../plugin/src/ui'),
         '@molcrafts/molab-plugin/testing': path.resolve(__dirname, '../plugin/src/testing.ts'),
@@ -124,7 +142,10 @@ export default defineConfig(({ command }) => {
         radix: {
           test: /[\\/]node_modules[\\/]@radix-ui[\\/]/,
           name: 'lib-radix',
-          chunks: 'all',
+          // `all` pulls these modules into an initial chunk whose ids the
+          // dev server then rewrites while a lazy explorer is loading.
+          // The in-flight require calls a factory that is no longer there.
+          chunks: 'async',
           priority: 10,
         },
       },

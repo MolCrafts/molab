@@ -25,9 +25,6 @@ target_app = typer.Typer(
 )
 
 
-_VALID_SCHEDULERS = ("local", "slurm", "pbs", "lsf")
-
-
 def _open_workspace(path: Path):
     """Load the workspace at *path*, exiting 1 with a helpful message on failure."""
     from molab.workspace import Workspace
@@ -55,11 +52,8 @@ def list_cmd(
         rprint("[dim]No compute targets registered.[/dim]")
         return
     for t in targets:
-        host = t.host or "(local)"
-        rprint(
-            f"  [bold]{t.name}[/bold]  scheduler={t.scheduler}  "
-            f"host={host}  scratch={t.scratch_root}"
-        )
+        destination = t.cluster_id or "(local)"
+        rprint(f"  [bold]{t.name}[/bold]  destination={destination}  scratch={t.scratch_root}")
 
 
 @target_app.command("add")
@@ -68,49 +62,27 @@ def add_cmd(
     scratch: Annotated[
         str, typer.Option("--scratch", help="Scratch root on the target's filesystem")
     ],
-    scheduler: Annotated[
-        str,
-        typer.Option(
-            "--scheduler",
-            help=f"One of: {', '.join(_VALID_SCHEDULERS)}",
-        ),
-    ] = "local",
-    host: Annotated[
-        str | None,
-        typer.Option("--host", help="SSH host (omit for local target)"),
-    ] = None,
-    port: Annotated[
-        int | None,
-        typer.Option("--port", help="SSH port"),
-    ] = None,
-    identity_file: Annotated[
-        str | None,
-        typer.Option("--identity-file", help="SSH identity file"),
-    ] = None,
+    cluster: Annotated[
+        str, typer.Option("--cluster", help="Registered molq destination name or ID")
+    ],
     path: Annotated[
         Path,
         typer.Option("--path", "-p", help="Workspace path"),
     ] = Path.cwd(),
 ) -> None:
     """Register a new compute target on the workspace."""
-    if scheduler not in _VALID_SCHEDULERS:
-        rprint(
-            f"[red]Invalid scheduler {scheduler!r}.[/red] "
-            f"Must be one of: {', '.join(_VALID_SCHEDULERS)}"
-        )
-        # exit code 2 matches typer's "invalid usage" convention; tests rely on it
-        raise typer.Exit(2)
-
     from molab.workspace.models import ComputeTarget
     from molab.workspace.targets import add_target
 
     ws = _open_workspace(path)
+    from molab.workspace.connection import get_client
+
+    client = get_client()
+    definition = client.cluster(cluster).definition()
     target = ComputeTarget(
         name=name,
-        host=host,
-        port=port,
-        identity_file=identity_file,
-        scheduler=scheduler,
+        registry_id=client.rpc("molq.hello")["registry_id"],
+        cluster_id=definition["id"],
         scratch_root=scratch,
     )
     try:
@@ -121,10 +93,7 @@ def add_cmd(
         raise typer.Exit(1) from exc
 
     rprint(
-        f"[green]OK[/green] Added target {name}  "
-        f"scheduler={target.scheduler}  "
-        f"host={target.host or '(local)'}  "
-        f"scratch={target.scratch_root}"
+        f"[green]OK[/green] Added target {name}  destination={definition['name']}  scratch={scratch}"
     )
 
 
@@ -157,55 +126,24 @@ def test_cmd(
         typer.Option("--path", "-p", help="Workspace path"),
     ] = Path.cwd(),
 ) -> None:
-    """Probe a target: command exec → scratch mkdir → file round-trip.
-
-    Runs three minimal smoke checks against the target's transport, and
-    reports each one as ``ok <step>`` / ``fail <step>: <reason>``.
-    """
+    """Check destination access with a file round trip under its scratch root."""
     import uuid
 
-    from molab.workspace.targets import get_target, to_transport
+    from molab.workspace.targets import get_target, to_filesystem
 
     ws = _open_workspace(path)
     try:
         target = get_target(ws, name)
-    except KeyError as exc:
-        rprint(f"[red]No target named {name!r}[/red]")
+        fs = to_filesystem(target)
+        fs.mkdir(target.scratch_root, parents=True, exist_ok=True)
+        probe = fs.join(target.scratch_root, f".molab-probe-{uuid.uuid4().hex}")
+        try:
+            fs.write_text(probe, "molab target probe\n")
+            if fs.read_text(probe) != "molab target probe\n":
+                raise OSError("File round-trip payload mismatch")
+        finally:
+            fs.remove(probe)
+    except (KeyError, ValueError, OSError) as exc:
+        rprint(f"[red]Target check failed:[/red] {exc}")
         raise typer.Exit(1) from exc
-
-    transport = to_transport(target)
-
-    # Step 1: command execution
-    try:
-        result = transport.run(["echo", "molab-target-test"])
-        if result.returncode != 0:
-            rprint(f"[red]fail command execution:[/red] returncode={result.returncode}")
-            raise typer.Exit(1)
-        rprint("[green]ok command execution[/green]")
-    except Exception as exc:
-        rprint(f"[red]fail command execution:[/red] {exc}")
-        raise typer.Exit(1) from exc
-
-    # Step 2: scratch mkdir
-    try:
-        transport.mkdir(target.scratch_root, parents=True, exist_ok=True)
-        rprint(f"[green]ok mkdir[/green] {target.scratch_root}")
-    except Exception as exc:
-        rprint(f"[red]fail mkdir:[/red] {exc}")
-        raise typer.Exit(1) from exc
-
-    # Step 3: write → read round-trip under scratch
-    probe_name = f".molab-target-probe-{uuid.uuid4().hex[:8]}"
-    probe_path = target.scratch_root.rstrip("/") + "/" + probe_name
-    payload = "molab target probe\n"
-    try:
-        transport.write_text(probe_path, payload)
-        got = transport.read_text(probe_path)
-        transport.remove(probe_path)
-        if got != payload:
-            rprint("[red]fail file round-trip:[/red] payload mismatch")
-            raise typer.Exit(1)
-        rprint("[green]ok file round-trip[/green]")
-    except Exception as exc:
-        rprint(f"[red]fail file round-trip:[/red] {exc}")
-        raise typer.Exit(1) from exc
+    rprint("[green]ok file round-trip[/green]")

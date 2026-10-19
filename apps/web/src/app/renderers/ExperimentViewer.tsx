@@ -1,11 +1,25 @@
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@molcrafts/ui";
+import {
   Check,
   Copy,
   FileQuestion,
   FlaskConical,
   Grid3x3,
+  ListChecks,
+  ListPlus,
   MoreHorizontal,
+  SlidersHorizontal,
   Trash2,
+  X,
 } from "lucide-react";
 import { lazy, Suspense, useCallback, useMemo, useState } from "react";
 import { experimentsApi } from "@/api";
@@ -17,50 +31,52 @@ import type { DataTableColumn, DataTableRowAction } from "@/app/components/entit
 import {
   CopyButton,
   DashboardCanvas,
-  DashboardCard,
   DataTable,
+  DurationStrip,
   EMPTY_COPY,
   EmptyState,
   EntityPage,
-  Histogram,
+  Figure,
+  formatSpan,
+  Gauge,
   InventoryCanvas,
   MagnitudeBar,
+  OverviewList,
+  OverviewSheet,
   OverviewSurface,
-  ParamChip,
-  StatusBreakdown,
-  StatusDistribution,
+  quantile,
   StatusIcon,
-  StatusLegend,
+  StatusLedger,
+  SweepMatrix,
 } from "@/app/components/entity";
+import { runPath } from "@/app/entities/paths";
 import { buildRunListActions, type RunListHandlers } from "@/app/entities/runListActions";
-import {
-  countRunStatuses,
-  formatDuration,
-  formatScalar,
-  successRate,
-} from "@/app/renderers/dashboardData";
+import { countRunStatuses, formatDuration, formatScalar } from "@/app/renderers/dashboardData";
 import {
   buildExperimentWorkbenchData,
   experimentRunCompleteness,
 } from "@/app/renderers/entityWorkbenchData";
+import {
+  durationPoints,
+  latestFailure,
+  sweepAxes,
+  unrunValueCount,
+} from "@/app/renderers/overview/gaugeData";
+import { ConstantsNote, ExtremesNote, FailureNote } from "@/app/renderers/overview/MarginNotes";
 import { useRunMultiSelect } from "@/app/runs/useRunMultiSelect";
 import { experimentWorkflowLabel } from "@/app/state/api";
 import { useNavigationState } from "@/app/state/useNavigationState";
 import type { ExperimentView, RunSummary, ScopedRendererProps } from "@/app/types";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { toast } from "@/components/ui/toast";
-import { WorkbenchAction, WorkbenchIconAction } from "@/components/workbench";
+import {
+  WorkbenchAction,
+  WorkbenchIconAction,
+  WorkbenchOperationState,
+  WorkbenchRetryAction,
+} from "@/components/workbench";
 import { parseWorkflowIr } from "@/components/workflow/workflow-graph";
 import { useContributionGeneration } from "@/lib/contribution-runtime";
-import { formatDateTime } from "@/lib/datetime";
-import { formatDuration as formatDurationSeconds } from "@/lib/format-time";
+import { formatRelative } from "@/lib/format-time";
 import { getWorkspaceFs } from "@/lib/workspace-fs";
 import { formatQualifiedPath, runWorkspaceRelativePath } from "@/lib/workspace-path";
 import { ExperimentNotebook } from "@/plugins/knowledge/ExperimentNotebook";
@@ -77,20 +93,36 @@ const ParametersCell = ({ run, keys }: { run: RunSummary; keys: string[] }): JSX
     .map((key) => [key, run.parameters?.[key]] as const)
     .filter(([, value]) => value !== undefined);
   if (entries.length === 0) return <span className="text-label text-muted-foreground">—</span>;
-  const visible = entries.slice(0, 3);
+  const visible = entries.slice(0, 2);
   return (
-    <div className="flex max-w-80 flex-wrap items-center gap-1">
+    <div className="flex max-w-56 flex-nowrap items-center gap-1 overflow-hidden">
       {visible.map(([key, value]) => (
-        <ParamChip key={key} name={key} value={formatScalar(value)} />
+        <span
+          key={key}
+          className="min-w-0 truncate text-label text-muted-foreground"
+          title={`${key}=${formatScalar(value)}`}
+        >
+          <span className="text-foreground">
+            {key}={formatScalar(value)}
+          </span>
+        </span>
       ))}
       {entries.length > visible.length && (
         <Popover>
           <PopoverTrigger asChild>
-            <WorkbenchAction kind="ghost" size="compact" className="h-6 px-2 text-micro">
-              +{entries.length - visible.length}
-            </WorkbenchAction>
+            <WorkbenchIconAction
+              label={`View all ${entries.length} parameters`}
+              onClick={(event) => event.stopPropagation()}
+            >
+              <SlidersHorizontal aria-hidden />
+            </WorkbenchIconAction>
           </PopoverTrigger>
-          <PopoverContent side="bottom" align="start" className="max-h-80 w-72 overflow-auto p-3">
+          <PopoverContent
+            side="bottom"
+            align="start"
+            className="max-h-80 w-72 overflow-auto p-3"
+            onClick={(event) => event.stopPropagation()}
+          >
             <dl className="space-y-2">
               {entries.map(([key, value]) => (
                 <div
@@ -263,6 +295,17 @@ export const ExperimentViewer = ({
     );
   }
 
+  if (experiment.runsError) {
+    return (
+      <WorkbenchOperationState
+        kind="error"
+        title="Could not load runs"
+        detail={experiment.runsError}
+        action={<WorkbenchRetryAction onClick={onRefresh} />}
+      />
+    );
+  }
+
   const workflow = snapshot.workflows.find((item) => item.experimentId === experiment.id);
   const workflowGraph = workflow?.graph ?? parseWorkflowIr(experiment.workflowSource);
   const workbench = buildExperimentWorkbenchData(
@@ -277,14 +320,17 @@ export const ExperimentViewer = ({
       header: "Run",
       width: "w-44",
       cell: (run) => (
-        <div className="min-w-0">
-          <div className="truncate text-body-lg font-medium text-foreground">
-            {run.name || run.id}
-          </div>
-          <div className="flex items-center gap-hairline font-mono text-micro text-muted-foreground">
-            <span className="truncate">{run.id.substring(0, 12)}</span>
-            <CopyButton value={run.id} label="run ID" className="size-4-lg" />
-          </div>
+        <div
+          className="flex min-w-0 items-center gap-1"
+          title={`${run.name || run.id}
+${run.id}`}
+        >
+          <span className="min-w-0 flex-1 truncate text-body">{run.name || run.id}</span>
+          <CopyButton
+            value={run.id}
+            label="run ID"
+            className="size-5 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100"
+          />
         </div>
       ),
     },
@@ -297,7 +343,7 @@ export const ExperimentViewer = ({
     {
       key: "parameters",
       header: "Parameters",
-      width: "w-90",
+      width: "w-48",
       cell: (run) => (
         <ParametersCell
           run={run}
@@ -313,8 +359,8 @@ export const ExperimentViewer = ({
       key: "executions",
       header: "Executions",
       cell: (run) => (
-        <span className="font-mono text-label text-muted-foreground">
-          {run.statusSummary.total} total · {run.statusSummary.active} active
+        <span className="whitespace-nowrap text-label tabular-nums text-muted-foreground">
+          {run.statusSummary.total} ({run.statusSummary.active} active)
         </span>
       ),
     },
@@ -341,10 +387,10 @@ export const ExperimentViewer = ({
     {
       key: "updated",
       header: "Updated",
-      width: "w-40",
+      width: "w-32",
       cell: (run) => (
         <span className="text-label text-muted-foreground" title={run.updatedAt}>
-          {formatDateTime(run.updatedAt)}
+          {formatRelative(run.updatedAt)}
         </span>
       ),
     },
@@ -397,12 +443,15 @@ export const ExperimentViewer = ({
       title: action.title,
       onSelect: () => action.onSelect(),
     }));
-  const experimentSuccessRate = successRate(counts);
-  const completedDurationMs = runs.flatMap((run) => {
-    if (!run.startedAt || !run.finishedAt) return [];
-    const ms = Date.parse(run.finishedAt) - Date.parse(run.startedAt);
-    return Number.isFinite(ms) && ms >= 0 ? [ms] : [];
-  });
+  const runHref = (run: RunSummary): string => runPath(projectId, experimentId, run.id);
+  const durations = durationPoints(runs, runHref);
+  const medianSeconds = quantile(
+    durations.map((point) => point.seconds).sort((left, right) => left - right),
+    0.5,
+  );
+  const sweep = sweepAxes(workbench.axisBreakdowns);
+  const unrun = unrunValueCount(sweep);
+  const failure = latestFailure(runs);
   const workflowPluginEnabled = isPluginEnabled("workflow");
   const hasWorkflowData = Boolean(
     workflowPluginEnabled && workflow && workbench.workflowSummary.exists,
@@ -429,102 +478,80 @@ export const ExperimentViewer = ({
     </Suspense>
   ) : null;
 
-  const workflowLabel =
-    workflow?.name ||
-    (experiment.workflowFile && !experiment.workflowFile.trim().startsWith("{")
-      ? experiment.workflowFile
-      : null) ||
-    experiment.workflowEntrypoint ||
-    "Workflow";
-
   const runsComplete = experimentRunCompleteness(experiment, runs.length).runsComplete;
-  const durationSeconds = completedDurationMs.map((ms) => ms / 1000);
 
   // Always pass full tab bodies (EntityTabContent hides inactive with CSS).
   // Conditional `activeTab === … ? content : null` remounted Flowgram on every switch.
   const overviewContent = (
     <OverviewSurface>
       <DashboardCanvas>
-        <DashboardCard title="Status">
-          {experimentSuccessRate !== null ? (
-            <p className="mb-3 font-mono text-micro tabular-nums text-muted-foreground">
-              {experimentSuccessRate.toFixed(0)}% of terminal runs succeeded
-            </p>
-          ) : null}
-          {!runsComplete && counts.total === 0 ? (
-            <p className="text-micro text-muted-foreground">Loading runs…</p>
-          ) : (
-            <StatusDistribution counts={counts} />
-          )}
-        </DashboardCard>
-
-        {workbench.axisBreakdowns.length > 0 && (
-          <DashboardCard title="Sweep outcome">
-            <StatusLegend className="mb-3" />
-            <p className="mb-3 text-micro text-muted-foreground">
-              Status mix along each varying parameter. Open the Runs tab for the inventory.
-            </p>
-            <div className="grid gap-6 lg:grid-cols-2">
-              {workbench.axisBreakdowns.map((axis) => (
-                <StatusBreakdown
-                  key={axis.key}
-                  caption={axis.key}
-                  groups={axis.buckets.map((bucket) => ({
-                    id: `${axis.key}=${bucket.value}`,
-                    label: bucket.value,
-                    counts: bucket.counts,
-                  }))}
-                />
-              ))}
-            </div>
-          </DashboardCard>
-        )}
-
-        <DashboardCard title="Run duration" description="Finished runs">
-          {durationSeconds.length > 0 ? (
-            <Histogram
-              values={durationSeconds}
-              format={formatDurationSeconds}
-              unit="runs"
-              ariaLabel="Distribution of wall-clock duration across finished runs"
-            />
-          ) : (
-            <p className="text-micro text-muted-foreground">
-              {runsComplete ? "No run has finished yet." : "Loading runs…"}
-            </p>
-          )}
-        </DashboardCard>
-
-        {workbench.fixedAxes.length > 0 && (
-          <DashboardCard title="Constants">
-            <div className="flex flex-wrap gap-2">
-              {workbench.fixedAxes.map((axis) => (
-                <ParamChip key={axis.key} name={axis.key} value={axis.values[0] ?? "—"} />
-              ))}
-            </div>
-          </DashboardCard>
-        )}
-
-        {hasWorkflowData && (
-          <DashboardCard
-            title="Workflow"
-            action={
-              <WorkbenchAction
-                kind="secondary"
-                size="compact"
-                onClick={() => setEntityTab("workflow")}
-              >
-                Open workflow
-              </WorkbenchAction>
+        {counts.total > 0 ? (
+          <OverviewSheet
+            lead={<StatusLedger counts={counts} partial={!runsComplete} />}
+            main={
+              <>
+                {sweep.length > 0 ? (
+                  <details className="min-w-0 border-t border-border pt-3">
+                    <summary className="cursor-pointer text-body font-medium text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
+                      Parameters{" "}
+                      <span className="ml-3 text-label font-normal text-muted-foreground">
+                        {sweep.length} varying{unrun > 0 ? ` · ${unrun} values not run` : ""}
+                      </span>
+                    </summary>
+                    <SweepMatrix axes={sweep} />
+                  </details>
+                ) : null}
+                {durations.length > 0 ? (
+                  <Gauge
+                    title="Run duration"
+                    readout={
+                      <>
+                        median <Figure>{formatSpan(medianSeconds)}</Figure> across{" "}
+                        <Figure>{durations.length}</Figure> finished
+                      </>
+                    }
+                  >
+                    <DurationStrip series={[{ id: experiment.id, points: durations }]} />
+                  </Gauge>
+                ) : null}
+              </>
             }
-          >
-            <p className="truncate font-mono text-micro text-muted-foreground">{workflowLabel}</p>
-            <p className="mt-1 text-label text-muted-foreground">
-              {workbench.workflowSummary.taskCount} tasks · {workbench.workflowSummary.linkCount}{" "}
-              dependencies
-            </p>
-          </DashboardCard>
-        )}
+            margin={
+              failure || durations.length > 1 || workbench.fixedAxes.length > 0 ? (
+                <>
+                  {failure ? <FailureNote run={failure} href={runHref(failure)} /> : null}
+                  <ExtremesNote points={durations} />
+                  <ConstantsNote
+                    constants={workbench.fixedAxes.map((axis) => ({
+                      key: axis.key,
+                      value: axis.values[0] ?? "",
+                    }))}
+                  />
+                </>
+              ) : undefined
+            }
+          />
+        ) : null}
+        <OverviewList title="Runs">
+          {!runsComplete && runs.length === 0 ? (
+            <p className="text-label text-muted-foreground">Loading runs…</p>
+          ) : (
+            <DataTable
+              columns={runColumns}
+              data={runs}
+              getRowKey={(run) => run.id}
+              getRowLabel={(run) => `Open run ${run.name || run.id}`}
+              onRowActivate={(run) => navigateToRun(run.id)}
+              rowActions={runRowActions}
+              empty={
+                <EmptyState
+                  title={EMPTY_COPY.runs.title}
+                  description={EMPTY_COPY.runs.description}
+                />
+              }
+            />
+          )}
+        </OverviewList>
       </DashboardCanvas>
     </OverviewSurface>
   );
@@ -628,6 +655,8 @@ export const ExperimentViewer = ({
                 <div className="flex min-h-0 flex-1 flex-col">
                   <div className="mb-3 flex flex-wrap items-center gap-2">
                     <WorkbenchAction
+                      icon={<ListChecks aria-hidden />}
+                      aria-pressed={multi.enabled}
                       kind={multi.enabled ? "secondary" : "ghost"}
                       size="compact"
                       type="button"
@@ -643,6 +672,7 @@ export const ExperimentViewer = ({
                         <WorkbenchAction
                           kind="secondary"
                           size="compact"
+                          icon={<ListPlus aria-hidden />}
                           type="button"
                           disabled={multi.selected.size === 0 || !compareScope}
                           deniedReason={
@@ -655,6 +685,7 @@ export const ExperimentViewer = ({
                         <WorkbenchAction
                           kind="ghost"
                           size="compact"
+                          icon={<X aria-hidden />}
                           type="button"
                           disabled={multi.selected.size === 0}
                           onClick={multi.clear}

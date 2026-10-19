@@ -1,21 +1,17 @@
-import { AlertTriangle, BarChart3, Download } from "lucide-react";
-import { type JSX, useEffect, useMemo, useState } from "react";
-import type { TensorboardScalarSeries, TensorboardScalarsResponse } from "@/api";
-import { TensorboardScalarsError, tensorboardApi } from "@/api";
+import { Input } from "@molcrafts/ui";
+import { useSuspenseQuery } from "@tanstack/react-query";
+import { BarChart3 } from "lucide-react";
+import { type JSX, useMemo, useState } from "react";
+import type { TensorboardScalarSeries } from "@/api";
+import { tensorboardApi } from "@/api";
 import { DashboardCanvas, EmptyState, OverviewSection } from "@/app/components/entity";
+import { runKeys } from "@/app/state/entityQueries";
 import type { RendererProps } from "@/app/types";
-import { Input } from "@/components/ui/input";
 import { WorkbenchAction } from "@/components/workbench";
 import { MolplotLineChart } from "@/plugins/molplot";
 import type { DiscoveredFile } from "@/plugins/types";
 
 type TensorBoardTabProps = RendererProps & { discoveredFiles?: DiscoveredFile[] };
-
-type LoadState =
-  | { kind: "loading" }
-  | { kind: "missingDep"; message: string }
-  | { kind: "error"; message: string }
-  | { kind: "ready"; data: TensorboardScalarsResponse };
 
 const formatValue = (value: number): string => {
   if (!Number.isFinite(value)) return "—";
@@ -92,92 +88,29 @@ const groupByPrefix = (
 };
 
 export const TensorBoardTab = ({ selection, snapshot }: TensorBoardTabProps): JSX.Element => {
-  const run = useMemo(
-    () => snapshot.runs.find((r) => r.id === selection.objectId) ?? null,
-    [snapshot.runs, selection.objectId],
+  const run = snapshot.runs.find((r) => r.id === selection.objectId);
+  if (!run) return <EmptyState title="Run not found" />;
+  return (
+    <TensorBoardScalars projectId={run.projectId} experimentId={run.experimentId} runId={run.id} />
   );
-  const [state, setState] = useState<LoadState>({ kind: "loading" });
+};
+
+const TensorBoardScalars = ({
+  projectId,
+  experimentId,
+  runId,
+}: {
+  projectId: string;
+  experimentId: string;
+  runId: string;
+}): JSX.Element => {
+  const { data } = useSuspenseQuery({
+    queryKey: runKeys.tensorboard(projectId, experimentId, runId),
+    queryFn: () => tensorboardApi.getRunTensorboardScalars(projectId, experimentId, runId),
+  });
   const [search, setSearch] = useState("");
   const [xMode, setXMode] = useState<"step" | "wall">("step");
   const [yScale, setYScale] = useState<"linear" | "log">("linear");
-
-  useEffect(() => {
-    if (!run) {
-      setState({ kind: "error", message: "Run not found" });
-      return;
-    }
-    let cancelled = false;
-    setState({ kind: "loading" });
-    tensorboardApi
-      .getRunTensorboardScalars(run.projectId, run.experimentId, run.id)
-      .then((data) => {
-        if (cancelled) return;
-        setState({ kind: "ready", data });
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return;
-        if (err instanceof TensorboardScalarsError) {
-          setState({
-            kind: err.status === 503 ? "missingDep" : "error",
-            message: err.message,
-          });
-        } else {
-          setState({
-            kind: "error",
-            message: err instanceof Error ? err.message : "Failed to load scalars",
-          });
-        }
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [run]);
-
-  if (!run) {
-    return (
-      <div className="flex h-full items-center justify-center bg-background">
-        <EmptyState
-          icon={<AlertTriangle className="h-6 w-6" />}
-          title="Run not found"
-          description="It may have been deleted or not yet synced."
-        />
-      </div>
-    );
-  }
-
-  if (state.kind === "loading") {
-    return (
-      <div className="flex h-full items-center justify-center bg-background text-body-lg text-muted-foreground">
-        Loading TensorBoard scalars…
-      </div>
-    );
-  }
-
-  if (state.kind === "missingDep") {
-    return (
-      <div className="flex h-full items-center justify-center bg-background">
-        <EmptyState
-          icon={<Download className="h-6 w-6" />}
-          title="TensorBoard not installed"
-          description={state.message}
-        />
-      </div>
-    );
-  }
-
-  if (state.kind === "error") {
-    return (
-      <div className="flex h-full items-center justify-center bg-background">
-        <EmptyState
-          icon={<AlertTriangle className="h-6 w-6" />}
-          title="Cannot read scalars"
-          description={state.message}
-        />
-      </div>
-    );
-  }
-
-  const { data } = state;
   const filtered = search
     ? data.series.filter((s) => s.tag.toLowerCase().includes(search.toLowerCase()))
     : data.series;
@@ -190,7 +123,7 @@ export const TensorBoardTab = ({ selection, snapshot }: TensorBoardTabProps): JS
           {data.logdirs.length} logdirs · {data.series.length} series
         </p>
 
-        <div className="flex flex-wrap items-center gap-3 rounded-control border border-border bg-muted/30 px-3 py-2 text-label">
+        <div className="flex flex-wrap items-center gap-3 border-b border-border py-2 text-label">
           <Input
             type="search"
             value={search}

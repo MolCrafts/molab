@@ -72,7 +72,7 @@ export const MolqJobInspector = ({ job }: MolqJobInspectorProps): JSX.Element =>
           </h4>
           <div className="divide-y divide-border/40">
             <Field label="Target">{job.target}</Field>
-            <Field label="Backend">{job.scheduler ?? "—"}</Field>
+            <Field label="Scheduler">{job.scheduler ?? "—"}</Field>
             <Field label="Cluster">{job.clusterName ?? "—"}</Field>
             <Field label="Submitted">{formatTimestamp(job.submittedAt)}</Field>
             <Field label="Started">{formatTimestamp(job.startedAt)}</Field>

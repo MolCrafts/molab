@@ -1,6 +1,3 @@
-import type { ReactNode } from "react";
-import { useCallback, useState } from "react";
-
 import {
   AlertDialog,
   AlertDialogAction,
@@ -10,7 +7,11 @@ import {
   AlertDialogFooter,
   AlertDialogHeader,
   AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+} from "@molcrafts/ui";
+import { Check, X } from "lucide-react";
+import type { ReactNode } from "react";
+import { useCallback, useState } from "react";
+import { WorkbenchIconAction } from "@/components/workbench";
 import { cn } from "@/lib/utils";
 
 export interface ConfirmOptions {
@@ -65,17 +66,33 @@ export const useConfirm = (): UseConfirmReturn => {
           )}
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogCancel onClick={() => close(false)}>
-            {state?.cancelLabel ?? "Cancel"}
+          <AlertDialogCancel
+            className="size-control-compact bg-transparent p-0 text-foreground hover:bg-interactive"
+            asChild
+          >
+            <WorkbenchIconAction
+              label={state?.cancelLabel ?? "Cancel"}
+              onClick={() => close(false)}
+            >
+              <X aria-hidden />
+            </WorkbenchIconAction>
           </AlertDialogCancel>
           <AlertDialogAction
             className={cn(
-              state?.destructive &&
-                "bg-destructive text-destructive-foreground hover:bg-destructive/90 focus-visible:ring-destructive/20",
+              "size-control-compact bg-transparent p-0 hover:bg-interactive",
+              state?.destructive
+                ? "text-destructive hover:text-destructive"
+                : "text-foreground hover:text-foreground",
             )}
-            onClick={() => close(true)}
+            asChild
           >
-            {state?.confirmLabel ?? "Confirm"}
+            <WorkbenchIconAction
+              label={state?.confirmLabel ?? "Confirm"}
+              kind={state?.destructive ? "danger" : "ghost"}
+              onClick={() => close(true)}
+            >
+              <Check aria-hidden />
+            </WorkbenchIconAction>
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
@@ -135,8 +152,13 @@ export const useAlert = (): UseAlertReturn => {
           )}
         </AlertDialogHeader>
         <AlertDialogFooter>
-          <AlertDialogAction onClick={() => close()}>
-            {state?.confirmLabel ?? "OK"}
+          <AlertDialogAction
+            className="size-control-compact bg-transparent p-0 text-foreground hover:bg-interactive hover:text-foreground"
+            asChild
+          >
+            <WorkbenchIconAction label={state?.confirmLabel ?? "OK"} onClick={() => close()}>
+              <Check aria-hidden />
+            </WorkbenchIconAction>
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

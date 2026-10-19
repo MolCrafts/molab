@@ -1,7 +1,7 @@
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@molcrafts/ui";
 import { ArrowLeft, FileQuestion, RefreshCw, ServerCrash, WifiOff } from "lucide-react";
 import type { ComponentType, ReactNode } from "react";
 import { isRouteErrorResponse, useRouteError } from "react-router-dom";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { WorkbenchAction } from "@/components/workbench";
 
 /**
@@ -98,24 +98,22 @@ export function RouteErrorBoundary(): ReactNode {
         <div className="mt-6 flex flex-col items-center justify-center gap-3 sm:flex-row">
           {retryable && (
             <WorkbenchAction
+              icon={<RefreshCw aria-hidden />}
               kind="primary"
               size="default"
               onClick={() => window.location.reload()}
-              className="w-full sm:w-auto"
             >
-              <RefreshCw className="size-icon" />
               Try again
             </WorkbenchAction>
           )}
           <WorkbenchAction
+            icon={<ArrowLeft aria-hidden />}
             kind="secondary"
             size="default"
             onClick={() => {
               window.location.href = "/";
             }}
-            className="w-full sm:w-auto"
           >
-            <ArrowLeft className="size-icon" />
             Back to workspace
           </WorkbenchAction>
         </div>

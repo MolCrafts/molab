@@ -1,4 +1,4 @@
-import { http, HttpResponse } from "msw";
+import { HttpResponse, http } from "msw";
 
 /**
  * Mock auth is always off so offline ``npm run dev:web`` boots without a login wall.

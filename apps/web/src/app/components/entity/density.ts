@@ -1,5 +1,5 @@
 export const ROW_PADDING_DEFAULT = "px-3 py-2";
-export const ROW_PADDING_DENSE = "px-3 py-row-pad";
+export const ROW_PADDING_DENSE = "px-3 py-1";
 export const ROW_PADDING_COMPACT = "px-2 py-row-pad";
 
 export const DIVIDE_Y = "divide-y divide-border/50";

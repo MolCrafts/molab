@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from fastapi.responses import StreamingResponse
 
+from molab.fs.window import iter_file_chunks
 from molab.workspace.refs import InvalidRefError
 
 from ..dependencies import get_workspace
@@ -119,7 +120,7 @@ def download_project_asset(project_id: str, asset_id: str, workspace=Depends(get
     versions = project.assets.versions(asset_id)
     media_type = versions[-1].media_type if versions else None
     return StreamingResponse(
-        workspace.fs.open(payload, "rb"),
+        iter_file_chunks(workspace.fs, payload, size=workspace.fs.getsize(payload)),
         media_type=media_type or "application/octet-stream",
         headers={"Content-Disposition": f'attachment; filename="{asset_id}"'},
     )

@@ -1,7 +1,5 @@
+import { Badge, ProgressSpinner } from "@molcrafts/ui";
 import type { JSX } from "react";
-
-import { Badge } from "@/components/ui/badge";
-import { ProgressSpinner } from "@/components/ui/progress-spinner";
 import { cn } from "@/lib/utils";
 
 import { type CanonicalStatus, canonicalStatusFor } from "./status";

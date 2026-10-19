@@ -1,9 +1,7 @@
-import { RotateCcw } from "lucide-react";
+import { Checkbox, Label } from "@molcrafts/ui";
+import { ChevronDown, ChevronUp, RotateCcw } from "lucide-react";
 import type { JSX } from "react";
 import { useId, useMemo, useState } from "react";
-
-import { Checkbox } from "@/components/ui/checkbox";
-import { Label } from "@/components/ui/label";
 import { WorkbenchAction, WorkbenchIconAction } from "@/components/workbench";
 import { cn } from "@/lib/utils";
 
@@ -78,14 +76,6 @@ export const RunsFacetPanel = ({
         facetKey="status"
         options={facets.status}
         labels={STATUS_LABELS}
-        filters={filters}
-        onFiltersChange={onFiltersChange}
-      />
-
-      <CheckboxFacetGroup
-        title="Backend"
-        facetKey="backend"
-        options={facets.backend}
         filters={filters}
         onFiltersChange={onFiltersChange}
       />
@@ -236,10 +226,12 @@ const CheckboxFacetGroup = ({
         ))}
         {merged.length > COLLAPSE_THRESHOLD && (
           <WorkbenchAction
-            kind="link"
+            icon={expanded ? <ChevronUp aria-hidden /> : <ChevronDown aria-hidden />}
+            aria-expanded={expanded}
+            kind="ghost"
             size="compact"
             onClick={() => setExpanded((prev) => !prev)}
-            className="ml-1 mt-1 h-auto px-0 text-label text-muted-foreground hover:text-foreground"
+            className="ml-1 mt-1 text-muted-foreground"
           >
             {expanded ? "Show fewer" : `Show ${merged.length - COLLAPSE_THRESHOLD} more`}
           </WorkbenchAction>

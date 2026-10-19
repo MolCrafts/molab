@@ -23,6 +23,7 @@ const seedExperiment = (id: string, projectId: string): ApiExperimentResponse =>
   const experiment: ApiExperimentResponse = {
     id,
     projectId,
+    path: `projects/${projectId}/experiments/${id}`,
     name: id,
     description: "",
     workflow: null,
@@ -39,14 +40,11 @@ const seedExperiment = (id: string, projectId: string): ApiExperimentResponse =>
 };
 
 const putRequest = (projectId: string, experimentId: string): Request =>
-  new Request(
-    `http://localhost/api/projects/${projectId}/experiments/${experimentId}/workflow`,
-    {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ document: EMPTY_IR }),
-    },
-  );
+  new Request(`http://localhost/api/projects/${projectId}/experiments/${experimentId}/workflow`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ document: EMPTY_IR }),
+  });
 
 describe("PUT /api/projects/:projectId/experiments/:experimentId/workflow mock", () => {
   it("returns the WorkflowDocumentResponse shape for the empty-IR seed", async () => {

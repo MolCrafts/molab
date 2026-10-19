@@ -15,9 +15,10 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import Annotated, Any, Literal
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException
+from molq import Cluster
 from pydantic import BaseModel, Field
 
 from molab.server.dependencies import (
@@ -47,7 +48,7 @@ class ServedWorkspaceResponse(BaseModel):
     """One workspace the server is hosting."""
 
     key: str = Field(..., description="Stable switch handle, unique per server process")
-    label: str = Field(..., description="Human-facing label (path or user@host:/path)")
+    label: str = Field(..., description="Human-facing label (path or cluster:/path)")
     isRemote: bool = Field(..., description="True for an SSH-backed remote workspace")
     path: str | None = Field(default=None, description="Absolute local root, null when remote")
     active: bool = Field(
@@ -60,10 +61,7 @@ class ServedWorkspaceResponse(BaseModel):
     )
     needsAuth: bool = Field(
         default=False,
-        description=(
-            "True when the remote is unreachable and likely needs an interactive "
-            "verification code (2FA/OTP). The UI should show a connect dialog."
-        ),
+        description="True when the destination reports that SSH authentication is required.",
     )
 
 
@@ -76,22 +74,15 @@ class WorkspaceConnectRequest(BaseModel):
         max_length=128,
         description="One-time verification code / OTP from the authenticator app or SMS",
     )
-    force: bool = Field(
-        default=False,
-        description="Re-authenticate even when a ControlMaster is already alive",
-    )
 
 
 class WorkspaceConnectResponse(BaseModel):
-    """Result of an interactive / OTP SSH login."""
+    """Result of a bounded authentication attempt."""
 
     ok: bool
     key: str
-    host: str
-    masterAlive: bool = Field(
-        ...,
-        description="True when OpenSSH ControlMaster is accepting clients after login",
-    )
+    destination: str
+    authenticated: bool
     message: str = ""
 
 
@@ -100,11 +91,11 @@ class WorkspaceAddRequest(BaseModel):
 
     kind: Literal["local", "remote"] = Field(
         default="local",
-        description="``local`` path or ``remote`` (registered target or Host:/path)",
+        description="``local`` path or ``remote`` (registered target or cluster:/path)",
     )
     path: str | None = Field(
         default=None,
-        description="Local absolute path (kind=local) or SCP Host:/abs (kind=remote)",
+        description="Local absolute path (kind=local) or SCP cluster:/abs (kind=remote)",
     )
     name: str | None = Field(
         default=None,
@@ -153,6 +144,7 @@ def _build_local_served(path: str, *, create_if_missing: bool) -> ServedWorkspac
 def _build_remote_served(*, name: str | None, path: str | None) -> ServedWorkspace:
     from molab.server.deps.targets import get_workspace_target_registry
     from molab.server.workspace_targets import WorkspaceTarget
+    from molab.workspace.connection import get_client
     from molab.workspace.target import LocalTarget, RemoteTarget, parse_target
 
     if name:
@@ -163,7 +155,8 @@ def _build_remote_served(*, name: str | None, path: str | None) -> ServedWorkspa
                 status_code=404, detail=f"workspace target {name!r} not found"
             ) from exc
         key = _unique_key(_slug(f"remote-{target.name}"))
-        label = f"{target.host}:{target.root_path}"
+        cluster = get_client(target.registry_id).cluster(target.cluster_id).definition()
+        label = f"{cluster['name']}:{target.root_path}"
         return ServedWorkspace(
             key=key,
             label=label,
@@ -175,7 +168,7 @@ def _build_remote_served(*, name: str | None, path: str | None) -> ServedWorkspa
     if not path:
         raise HTTPException(
             status_code=400,
-            detail="remote add requires name= (registry) or path= (Host:/abs)",
+            detail="remote add requires name= (registry) or path= (cluster:/abs)",
         )
     raw = path.strip()
     if raw.startswith("@"):
@@ -188,21 +181,20 @@ def _build_remote_served(*, name: str | None, path: str | None) -> ServedWorkspa
             detail="path looks local; use kind=local",
         )
     assert isinstance(parsed, RemoteTarget)
-    host_part = f"{parsed.user}@{parsed.host}" if parsed.user else (parsed.host or "remote")
+    assert parsed.registry_id is not None and parsed.cluster_id is not None
+    host_part = parsed.cluster_id
     root = parsed.path
     target_name = _slug(f"{host_part}-{Path(root).name or 'ws'}")
     wt = WorkspaceTarget(
         name=_unique_key(target_name),
-        host=host_part,
-        port=parsed.port,
-        identity_file=parsed.identity_file,
-        ssh_opts=tuple(parsed.ssh_opts) if parsed.ssh_opts else (),
+        registry_id=parsed.registry_id,
+        cluster_id=parsed.cluster_id,
         root_path=root,
     )
     key = _unique_key(_slug(f"remote-{wt.name}"))
     return ServedWorkspace(
         key=key,
-        label=str(parsed),
+        label=f"{parsed.name}:{root}",
         is_remote=True,
         target_name=wt.name,
         remote_target=wt,
@@ -210,7 +202,14 @@ def _build_remote_served(*, name: str | None, path: str | None) -> ServedWorkspa
 
 
 def _to_response(sw: ServedWorkspace, *, active_key: str | None) -> ServedWorkspaceResponse:
-    unreachable = _is_unreachable(sw.key) if sw.is_remote else False
+    unreachable = False
+    needs_auth = False
+    if sw.is_remote:
+        try:
+            get_workspace_by_key(sw.key)
+        except RemoteWorkspaceUnreachableError as exc:
+            unreachable = True
+            needs_auth = exc.details.get("reason") == "needs_auth"
     return ServedWorkspaceResponse(
         key=sw.key,
         label=sw.label,
@@ -218,54 +217,21 @@ def _to_response(sw: ServedWorkspace, *, active_key: str | None) -> ServedWorksp
         path=sw.path,
         active=sw.key == active_key,
         unreachable=unreachable,
-        needsAuth=unreachable and sw.is_remote,
+        needsAuth=needs_auth,
     )
 
 
-def _is_unreachable(key: str) -> bool:
-    """Probe a remote workspace; True when its transport fails.
-
-    Local workspaces are always reachable. Reachable remotes are cached by
-    :func:`get_workspace_by_key`, so a successful probe is paid once; a failed
-    probe is retried on each list call (no negative cache in v1).
-    """
-    try:
-        get_workspace_by_key(key)
-        return False
-    except RemoteWorkspaceUnreachableError:
-        return True
-
-
-def _ssh_transport_for_served_key(key: str) -> tuple[Any, str]:
-    """Build an :class:`~molq.transport.SshTransport` for a served remote key.
-
-    Returns ``(transport, host_label)``.
-    """
-    from molq.options import SshTransportOptions
-    from molq.transport import SshTransport
-
+def _cluster_for_served_key(key: str) -> tuple[Cluster, str]:
     from molab.server.deps.served import resolve_served_remote_target
+    from molab.workspace.connection import get_client
 
     sw = _served_by_key(key)
     if sw is None:
         raise UnknownWorkspaceError(key)
     if not sw.is_remote:
-        raise HTTPException(
-            status_code=400,
-            detail=f"workspace {key!r} is local — nothing to connect",
-        )
-    target_name = sw.target_name or sw.key
-    target = resolve_served_remote_target(target_name)
-    host = target.host
-    transport = SshTransport(
-        options=SshTransportOptions(
-            host=host,
-            port=target.port,
-            identity_file=target.identity_file,
-            ssh_opts=tuple(target.ssh_opts),
-        )
-    )
-    return transport, host
+        raise HTTPException(status_code=400, detail="Workspace uses the local filesystem")
+    target = resolve_served_remote_target(sw.target_name or sw.key)
+    return get_client(target.registry_id).cluster(target.cluster_id), target.cluster_id
 
 
 def _list_visible(
@@ -299,8 +265,8 @@ def list_workspaces(
 
     A remote workspace whose transport is currently unreachable is still
     listed, flagged ``unreachable`` so the UI can degrade gracefully rather
-    than failing the whole list.  ``needsAuth`` is true for unreachable
-    remotes so the UI can open a verification-code dialog.
+    than failing the whole list. ``needsAuth`` identifies authentication failures;
+    network failures do not trigger a verification-code dialog.
 
     When auth is enabled, the list is filtered by the user's workspace allowlist.
     """
@@ -315,7 +281,7 @@ def add_workspace(
     """VS Code ``Add Folder to Workspace`` — append a root to the live served set.
 
     Accepts a local absolute path (``kind=local``) or a remote descriptor
-    (``kind=remote`` with registry ``name`` / ``@name`` / ``Host:/abs`` path).
+    (``kind=remote`` with registry ``name`` / ``@name`` / ``cluster:/abs`` path).
     Optional ``activate`` switches the active workspace to the new root.
     """
     del user  # auth allowlist for dynamic roots is process-scoped in v1
@@ -375,54 +341,43 @@ def connect_workspace(
     body: WorkspaceConnectRequest,
     user: Annotated[AuthUser | None, Depends(get_optional_user)] = None,
 ) -> WorkspaceConnectResponse:
-    """Submit a verification code and open an SSH ControlMaster for *key*.
-
-    Headless path for 2FA hosts: the server process has no TTY, so it feeds
-    *code* to OpenSSH via ``SSH_ASKPASS``.  After success, BatchMode ops
-    reuse the multiplex socket (see ``ControlPersist`` in ``~/.ssh/config``).
-
-    The in-process workspace cache is cleared so the next API call re-probes
-    the remote root with the live master.
-    """
+    """Authenticate through molq, then reopen the workspace with the same connection settings."""
     if is_auth_enabled() and user is not None:
         allowed = get_auth_service().filter_workspaces(user, [key])
         if key not in allowed:
             raise HTTPException(status_code=403, detail=f"workspace {key!r} not allowed")
 
     try:
-        transport, host = _ssh_transport_for_served_key(key)
+        cluster, destination = _cluster_for_served_key(key)
     except UnknownWorkspaceError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    login_with_code = getattr(transport, "login_with_code", None)
-    if not callable(login_with_code):
-        raise HTTPException(
-            status_code=500,
-            detail="SSH transport does not support login_with_code — upgrade molq",
-        )
+    from molq import MolqError
 
     try:
-        login_with_code(body.code, force=body.force)
-    except Exception:
-        # Opaque status only — UI maps 401 → "Incorrect code". No stack dump.
-        raise HTTPException(status_code=401, detail="auth") from None
+        cluster.authenticate(body.code)
+    except MolqError as exc:
+        status = {"AUTH_REQUIRED": 401, "CONNECTION_TIMEOUT": 504}.get(exc.kind, 502)
+        detail = {401: "auth", 504: "timeout"}.get(
+            status, f"Authentication connection failed: {exc.context.get('diagnostic') or exc}"
+        )
+        raise HTTPException(status_code=status, detail=detail) from None
 
     # Drop any prior failed Workspace so the next probe re-opens cleanly.
     reset_workspace_cache()
 
-    is_alive = getattr(transport, "is_master_alive", None)
-    master = bool(is_alive()) if callable(is_alive) else False
-    # Eager probe — warm the cache while the master is hot.
+    # Probe actual access; authentication success alone does not prove the root is readable.
     try:
         get_workspace_by_key(key)
-    except RemoteWorkspaceUnreachableError:
-        if not master:
-            raise HTTPException(status_code=502, detail="unreachable") from None
+    except RemoteWorkspaceUnreachableError as exc:
+        raise HTTPException(
+            status_code=502, detail=f"Connected, but cannot read this root: {exc.__cause__ or exc}"
+        ) from exc
 
     return WorkspaceConnectResponse(
         ok=True,
         key=key,
-        host=host,
-        masterAlive=master,
+        destination=destination,
+        authenticated=True,
         message="ok",
     )

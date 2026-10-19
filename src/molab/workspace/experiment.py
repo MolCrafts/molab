@@ -976,12 +976,18 @@ class Experiment(Folder):
         Returns:
             The runs, ordered by directory name.
         """
+        from .fs_cached import CachedRemoteFileSystem
+
         result: list[Run] = []
         disk = self._disk()
         runs_dir = disk.join(self.experiment_dir, RUN_CONTAINER)
         if not disk.is_dir(runs_dir):
             return result
         entries = disk.scandir(runs_dir, with_stat=False)
+        if isinstance(disk, CachedRemoteFileSystem):
+            disk.read_many(
+                [disk.join(runs_dir, entry.name, "run.json") for entry in entries if entry.is_dir]
+            )
         for entry in sorted(entries, key=lambda e: e.name):
             if not entry.is_dir:
                 continue

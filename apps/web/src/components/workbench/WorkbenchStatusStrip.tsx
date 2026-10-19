@@ -1,17 +1,12 @@
-/**
- * Persistent bottom status bar — MolVis chrome:
- * ``h-statusbar`` + ``border-t border-border/80 bg-background``,
- * heartbeat lamp + activity line + **always-visible progress while loading**.
- *
- * Heartbeat click opens a connection-status popover (workspace identity +
- * link state). Manual refresh lives on the ContextBar / left-panel header —
- * not on the lamp.
- */
+/** Persistent connection, activity and progress status for the workbench. */
 
+import { Button, Popover, PopoverContent, PopoverTrigger } from "@molcrafts/ui";
+import { useQuery } from "@tanstack/react-query";
 import {
   AlertCircle,
   AlertTriangle,
   Check,
+  ChevronsLeftRight,
   CloudOff,
   HardDrive,
   Info,
@@ -21,21 +16,16 @@ import {
   X,
 } from "lucide-react";
 import { type JSX, type ReactNode, useEffect, useRef, useState } from "react";
-
-import { pulseSync, useSyncPulse } from "@/app/state/syncPulse";
+import { getWorkspaceQueryScope } from "@/app/state/workspaceSwitchEvents";
 import type { ServedWorkspaceSummary } from "@/app/types";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { useStatusMessage } from "@/hooks/useStatusMessage";
 import { reportStatus, type StatusReportType } from "@/lib/status-report";
 import { cn } from "@/lib/utils";
-import { shortWorkspaceLabel } from "@/lib/workspace-path";
+import { parseHostQualifiedLabel } from "@/lib/workspace-path";
 import { WorkbenchIconAction } from "./WorkbenchAction";
-import { WorkbenchHeartbeat } from "./WorkbenchHeartbeat";
 
 export interface WorkbenchStatusStripProps {
   className?: string;
-  /** Override the pulse generation (tests / storybook). Defaults to global sync pulse. */
-  beat?: number;
   isRefreshing?: boolean;
   /**
    * Called once when a remote index walk finishes (phase → done) so the
@@ -49,7 +39,7 @@ export interface WorkbenchStatusStripProps {
    * the connection popover — no label text.
    */
   onReconnect?: () => void;
-  /** Plugin status-bar items (right-aligned, before Local/Remote). */
+  /** Right-aligned plugin status-bar items. */
   extras?: ReactNode;
 }
 
@@ -140,10 +130,18 @@ function isRemoteIndexing(body: CacheStatus | null): boolean {
   return body.phase === "counting" || body.phase === "fetching" || body.indexing === true;
 }
 
-function connectionHeadline(args: { busy: boolean; unreachable: boolean; hasWorkspace: boolean }): {
+function connectionHeadline(args: {
+  busy: boolean;
+  unreachable: boolean;
+  needsAuth: boolean;
+  hasWorkspace: boolean;
+}): {
   label: string;
   tone: string;
 } {
+  if (args.needsAuth) {
+    return { label: "Verification code", tone: "text-status-warning-foreground" };
+  }
   if (args.unreachable) {
     return { label: "Unreachable", tone: "text-status-failed-foreground" };
   }
@@ -158,117 +156,55 @@ function connectionHeadline(args: { busy: boolean; unreachable: boolean; hasWork
 
 export const WorkbenchStatusStrip = ({
   className,
-  beat: beatProp,
   isRefreshing = false,
   onRemoteIndexReady,
   activeWorkspace = null,
   onReconnect,
   extras,
 }: WorkbenchStatusStripProps): JSX.Element => {
-  const pulse = useSyncPulse();
-  const beat = beatProp ?? pulse;
   const { activity, dismissActivity } = useStatusMessage();
-  const [cacheStatus, setCacheStatus] = useState<CacheStatus | null>(null);
+  const cacheQuery = useQuery({
+    queryKey: ["remote-cache-status", getWorkspaceQueryScope(), activeWorkspace?.key],
+    enabled: Boolean(activeWorkspace?.isRemote && !activeWorkspace.unreachable),
+    queryFn: async ({ signal }) => {
+      const response = await fetch("/api/workspace/cache/status", { signal });
+      if (!response.ok) throw new Error(`Remote index unavailable (${response.status})`);
+      return (await response.json()) as CacheStatus;
+    },
+    refetchInterval: (query) =>
+      query.state.status !== "error" && isRemoteIndexing(query.state.data ?? null) ? 200 : 2000,
+    refetchIntervalInBackground: false,
+  });
+  const cacheStatus =
+    !cacheQuery.isError && !activeWorkspace?.unreachable && cacheQuery.data?.cached
+      ? cacheQuery.data
+      : null;
   const [statusOpen, setStatusOpen] = useState(false);
   const wasIndexing = useRef(false);
   const lastReportedPhase = useRef<string>("");
 
-  // Poll remote index progress only when the remote is actually linked.
-  // Unreachable / needs-auth remotes must not hammer /cache/status (that
-  // used to 502 → HPM error spam every 2s).
+  // Only reporting is an effect; Query owns fetching, cancellation and visibility.
   useEffect(() => {
-    let cancelled = false;
-    let timer: number | null = null;
-
-    const schedule = (ms: number) => {
-      timer = window.setTimeout(() => {
-        void tick();
-      }, ms);
-    };
-
-    const tick = async (): Promise<void> => {
-      if (activeWorkspace?.isRemote && activeWorkspace.unreachable) {
-        setCacheStatus(null);
-        schedule(5000);
-        return;
+    const body = cacheStatus;
+    const active = isRemoteIndexing(body) && !cacheQuery.isError && !activeWorkspace?.unreachable;
+    if (active && body) {
+      const percent = body.percent ?? (body.total > 0 ? (100 * body.done) / body.total : 0);
+      const signature = `${body.phase}:${body.done}:${body.total}:${percent}`;
+      if (signature !== lastReportedPhase.current) {
+        lastReportedPhase.current = signature;
+        reportStatus(body.message || "Syncing remote tree…", "info", percent);
       }
-      try {
-        const res = await fetch("/api/workspace/cache/status");
-        if (cancelled) return;
-        if (!res.ok) {
-          setCacheStatus(null);
-          // Soft: no console — 503 needs_auth is expected pre-login.
-          schedule(activeWorkspace?.isRemote ? 5000 : 2000);
-          return;
-        }
-        const body = (await res.json()) as CacheStatus;
-        if (cancelled) return;
-
-        const active = isRemoteIndexing(body);
-        setCacheStatus(body.cached ? body : null);
-
-        // Whether this tick should flash the heartbeat lamp.
-        // Idle polls (2s) always breathe; the 200ms active loop would thrash
-        // the 280ms ack animation, so while indexing we only pulse when
-        // phase/progress moves (continuous running CSS covers the rest).
-        let shouldPulse = !active;
-
-        // Mirror remote progress onto the status bus so the line + bar stay in
-        // lockstep (and so other consumers see the same tip).
-        if (body.cached && active) {
-          // counting → progress 0 keeps the tip sticky (no auto-clear); the
-          // strip treats 0 as indeterminate so the bar never freezes at 0%.
-          // fetching → determinate percent from done/total (still coerce 0 →
-          // indeterminate until the first file lands).
-          const pct: number =
-            body.phase === "counting"
-              ? 0
-              : body.percent != null && Number.isFinite(body.percent)
-                ? body.percent
-                : body.total > 0
-                  ? (100 * body.done) / body.total
-                  : 0;
-          const msg =
-            body.message ||
-            (body.phase === "counting"
-              ? "Counting remote files…"
-              : body.total > 0
-                ? `Syncing remote tree (${body.done}/${body.total})…`
-                : "Syncing remote tree…");
-          // Re-report when phase/progress moves so the bar stays live.
-          const sig = `${body.phase}:${body.done}:${body.total}:${Math.round(pct)}`;
-          if (sig !== lastReportedPhase.current) {
-            lastReportedPhase.current = sig;
-            reportStatus(msg, "info", pct);
-            shouldPulse = true;
-          }
-        } else if (wasIndexing.current && body.phase === "done") {
-          lastReportedPhase.current = "done";
-          reportStatus("Remote index ready", "success");
-          onRemoteIndexReady?.();
-          shouldPulse = true;
-        }
-
-        wasIndexing.current = active;
-        // Drive the status-strip heartbeat (same contract as runs / workspace
-        // snapshot polls — see syncPulse.ts).
-        if (shouldPulse) pulseSync();
-        schedule(active ? 200 : 2000);
-      } catch {
-        if (!cancelled) {
-          setCacheStatus(null);
-          pulseSync();
-        }
-        schedule(2500);
+    } else if (wasIndexing.current) {
+      lastReportedPhase.current = "";
+      if (body?.phase === "done" && !cacheQuery.isError) {
+        reportStatus("Remote index ready", "success");
+        onRemoteIndexReady?.();
+      } else {
+        reportStatus(body?.message || "Remote indexing stopped", "warning");
       }
-    };
-
-    void tick();
-    return () => {
-      cancelled = true;
-      if (timer != null) window.clearTimeout(timer);
-    };
-  }, [onRemoteIndexReady, activeWorkspace?.isRemote, activeWorkspace?.unreachable]);
+    }
+    wasIndexing.current = active;
+  }, [cacheStatus, cacheQuery.isError, activeWorkspace?.unreachable, onRemoteIndexReady]);
 
   // Generic workspace bootstrap / manual refresh — keep the strip busy for the
   // full fetch. progress=0 is sticky in the status bus; the strip maps 0 →
@@ -296,16 +232,6 @@ export const WorkbenchStatusStrip = ({
       // would also wipe an unrelated warning/error that landed mid-refresh.
       reportStatus("Workspace ready", "success");
     }
-  }, [isRefreshing, cacheStatus]);
-
-  // While a long refresh is in flight, keep the heartbeat lamp breathing even
-  // when cache/status is idle (local workspace — no remote index ticks).
-  useEffect(() => {
-    if (!isRefreshing || isRemoteIndexing(cacheStatus)) return;
-    const id = window.setInterval(() => {
-      pulseSync();
-    }, 1200);
-    return () => window.clearInterval(id);
   }, [isRefreshing, cacheStatus]);
 
   const remoteBusy = isRemoteIndexing(cacheStatus);
@@ -339,7 +265,7 @@ export const WorkbenchStatusStrip = ({
             : "Syncing remote tree…")
       : showSyncing
         ? "Loading workspace…"
-        : "Workspace ready";
+        : "";
 
   const lineType: StatusReportType = hasBusActivity
     ? activity.type
@@ -364,32 +290,50 @@ export const WorkbenchStatusStrip = ({
   const isAlert = hasBusActivity && (activity.type === "error" || activity.type === "warning");
   const busy = Boolean(isRefreshing || remoteBusy);
   const unreachable = Boolean(activeWorkspace?.unreachable);
+  const needsAuth = Boolean(activeWorkspace?.needsAuth);
   const connection = connectionHeadline({
     busy,
     unreachable,
+    needsAuth,
     hasWorkspace: Boolean(activeWorkspace),
   });
   const WorkspaceIcon = unreachable ? CloudOff : activeWorkspace?.isRemote ? Server : HardDrive;
 
+  const host = activeWorkspace ? parseHostQualifiedLabel(activeWorkspace.label)?.host : null;
+  const connectionLabel = activeWorkspace?.isRemote
+    ? `SSH: ${host ?? "Remote"}`
+    : activeWorkspace
+      ? "Local"
+      : "Open folder";
+
   return (
     <div
       className={cn(
-        "flex h-statusbar shrink-0 items-center bg-statusbar text-statusbar-foreground",
+        "flex h-6 shrink-0 items-center border-t border-border bg-statusbar text-statusbar-foreground",
         className,
       )}
     >
-      <div className="flex h-full shrink-0 items-center px-1">
+      <div className="flex h-full min-w-0 shrink-0 items-center">
         <Popover open={statusOpen} onOpenChange={setStatusOpen}>
           <PopoverTrigger asChild>
-            <WorkbenchHeartbeat
-              beat={beat}
-              label={busy ? "Syncing — click for connection status" : "Connection status"}
-              running={busy}
-              className="text-statusbar-foreground hover:bg-statusbar-foreground/15 hover:text-statusbar-foreground [&>span]:text-statusbar-foreground"
-            />
+            <Button
+              variant="ghost"
+              className="h-full max-w-52 gap-2 rounded-none border-0 bg-accent px-2 text-micro text-accent-foreground hover:bg-accent-hover hover:text-accent-foreground"
+              aria-label={`${connectionLabel} — ${connection.label}. Connection status`}
+              title={`${connectionLabel} — ${connection.label}`}
+            >
+              {unreachable ? (
+                <CloudOff className="size-3.5 shrink-0" aria-hidden />
+              ) : activeWorkspace?.isRemote ? (
+                <ChevronsLeftRight className="size-3.5 shrink-0" aria-hidden />
+              ) : (
+                <HardDrive className="size-3.5 shrink-0" aria-hidden />
+              )}
+              <span className="truncate">{connectionLabel}</span>
+              {needsAuth ? <AlertTriangle className="size-3 shrink-0" aria-hidden /> : null}
+            </Button>
           </PopoverTrigger>
           <PopoverContent side="top" align="start" sideOffset={8} className="w-64 p-2">
-            {/* One row: host · status · reconnect — no Kind/Path/Key essays. */}
             <div className="flex min-w-0 items-center gap-2">
               <WorkspaceIcon
                 className={cn(
@@ -403,17 +347,16 @@ export const WorkbenchStatusStrip = ({
                 aria-hidden
               />
               <div className="min-w-0 flex-1">
-                <p
-                  className="truncate font-mono text-micro text-foreground"
-                  title={activeWorkspace?.label}
-                >
-                  {activeWorkspace ? shortWorkspaceLabel(activeWorkspace.label) : "No workspace"}
+                <p className="truncate text-xs text-foreground" title={activeWorkspace?.label}>
+                  {connectionLabel}
                 </p>
-                <p className={cn("font-mono text-micro", connection.tone)}>{connection.label}</p>
+                <p className={cn("text-micro", connection.tone)}>{connection.label}</p>
               </div>
               {onReconnect ? (
                 <WorkbenchIconAction
-                  label={unreachable ? "Reconnect" : "Reload"}
+                  label={
+                    needsAuth ? "Enter verification code" : unreachable ? "Reconnect" : "Reload"
+                  }
                   onClick={() => {
                     setStatusOpen(false);
                     onReconnect();
@@ -423,13 +366,14 @@ export const WorkbenchStatusStrip = ({
                 </WorkbenchIconAction>
               ) : null}
             </div>
+            {activeWorkspace ? (
+              <p className="mt-2 break-all border-t border-border pt-2 text-micro text-muted-foreground">
+                {parseHostQualifiedLabel(activeWorkspace.label)?.root ?? activeWorkspace.label}
+              </p>
+            ) : null}
           </PopoverContent>
         </Popover>
-        <span className="max-w-40 truncate font-mono text-micro text-statusbar-foreground/90">
-          {activeWorkspace ? shortWorkspaceLabel(activeWorkspace.label) : "No workspace"}
-        </span>
       </div>
-      <span className="mx-1 h-3.5 w-px shrink-0 bg-statusbar-foreground/30" aria-hidden />
       <div
         role="status"
         aria-live={lineType === "error" ? "assertive" : "polite"}
@@ -492,11 +436,6 @@ export const WorkbenchStatusStrip = ({
         ) : null}
       </div>
       {extras ? <div className="flex shrink-0 items-center gap-1 px-1">{extras}</div> : null}
-      <div className="hidden shrink-0 items-center gap-2 px-2 font-mono text-micro text-statusbar-foreground/90 sm:flex">
-        <span>{activeWorkspace?.isRemote ? "Remote" : "Local"}</span>
-        <span aria-hidden>·</span>
-        <span>{unreachable ? "API unavailable" : "API connected"}</span>
-      </div>
     </div>
   );
 };

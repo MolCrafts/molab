@@ -1,6 +1,3 @@
-import type { ReactNode } from "react";
-import { useCallback, useEffect, useState } from "react";
-
 import {
   Dialog,
   DialogContent,
@@ -8,9 +5,12 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+  Input,
+  Label,
+} from "@molcrafts/ui";
+import { Check, X } from "lucide-react";
+import type { ReactNode } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { WorkbenchAction } from "@/components/workbench";
 
 export interface PromptOptions {
@@ -90,6 +90,7 @@ export const usePrompt = (): UsePromptReturn => {
           </div>
           <DialogFooter>
             <WorkbenchAction
+              icon={<X aria-hidden />}
               kind="secondary"
               size="default"
               type="button"
@@ -97,7 +98,12 @@ export const usePrompt = (): UsePromptReturn => {
             >
               {state?.cancelLabel ?? "Cancel"}
             </WorkbenchAction>
-            <WorkbenchAction kind="primary" size="default" type="submit">
+            <WorkbenchAction
+              icon={<Check aria-hidden />}
+              kind="primary"
+              size="default"
+              type="submit"
+            >
               {state?.confirmLabel ?? "OK"}
             </WorkbenchAction>
           </DialogFooter>

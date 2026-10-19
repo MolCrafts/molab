@@ -8,20 +8,20 @@
 // a wall of hero numbers — those are the two shapes an overview gets wrong.
 //
 // Colour has exactly two jobs here. Run state uses the fixed status ramp and is
-// always paired with a label or a glyph, never colour alone. Magnitude
-// (duration, counts) is one accent hue at one step — it is not run state and
-// must never borrow the status ramp.
+// always paired with a label, never colour alone. A magnitude, including a
+// duration histogram, uses the accent. It does not borrow the status ramp.
 // ─────────────────────────────────────────────────────────────────────────────
 
 import { type JSX, type ReactNode, useId } from "react";
 
 import { STATUS_GROUPS, type StatusGroupId } from "@/app/runs/statusGroups";
 import { WorkbenchAction } from "@/components/workbench";
-import { formatDurationCompact } from "@/lib/format-time";
 import { cn } from "@/lib/utils";
 
 import type { StatusCountRollup } from "./Dashboard";
 import { StatusDistribution } from "./Dashboard";
+import { formatSpan } from "./gauges/scale";
+import { BarInstrument } from "./InstrumentChart";
 
 // ── MagnitudeBar ─────────────────────────────────────────────────────────────
 
@@ -75,6 +75,8 @@ interface HistogramProps {
   unit: string;
   ariaLabel: string;
   className?: string;
+  /** Pixel height of the columns. Omit for the shared default. */
+  height?: number;
 }
 
 export interface HistogramBucket {
@@ -121,8 +123,7 @@ const quantile = (sorted: number[], fraction: number): number => {
 
 /**
  * Distribution of a measured quantity. A median alone changes no decision; the
- * spread does — a bimodal duration histogram is how a degraded backend shows up
- * before anything has failed.
+ * spread does. Drawn by Vega-Lite, not a hand-built bar.
  */
 export const Histogram = ({
   values,
@@ -131,6 +132,7 @@ export const Histogram = ({
   unit,
   ariaLabel,
   className,
+  height,
 }: HistogramProps): JSX.Element | null => {
   if (values.length === 0) return null;
 
@@ -139,31 +141,32 @@ export const Histogram = ({
   const max = sorted[sorted.length - 1] ?? 0;
   const median = quantile(sorted, 0.5);
   const buckets = histogramBuckets(sorted, bins);
-  const peak = Math.max(...buckets.map((bucket) => bucket.count), 1);
+  const mid = Math.floor((buckets.length - 1) / 2);
+  const tick = (value: number): string => format(value).replace(/ /g, "\u00a0");
+  const minLabel = tick(min);
+  const maxLabel = tick(max);
+  const medianLabel = tick(median);
+  const showMedian = medianLabel !== minLabel && medianLabel !== maxLabel;
 
   return (
-    <div className={cn("space-y-2", className)}>
-      <div role="img" aria-label={ariaLabel} className="flex h-16 items-end gap-hairline">
-        {buckets.map((bucket) => (
-          <span
-            key={`${bucket.from}-${bucket.to}`}
-            title={`${format(bucket.from)} – ${format(bucket.to)}: ${bucket.count} ${unit}`}
-            className="flex-1 rounded-t-[2px] bg-accent/40"
-            style={{
-              height: `${Math.max(bucket.count > 0 ? 6 : 2, (bucket.count / peak) * 100)}%`,
-            }}
-          />
-        ))}
-      </div>
-      <div className="flex items-baseline justify-between gap-2 font-mono text-micro tabular-nums text-muted-foreground">
-        <span>{format(min)}</span>
-        <span className="text-foreground">median {format(median)}</span>
-        <span>{format(max)}</span>
-      </div>
-      <p className="text-micro text-muted-foreground">
-        {sorted.length} {unit}
-      </p>
-    </div>
+    <BarInstrument
+      className={className}
+      height={height}
+      label={`${ariaLabel}. Median ${format(median)}, ${sorted.length} ${unit}.`}
+      bars={buckets.map((bucket, index) => ({
+        id: `${bucket.from}-${bucket.to}`,
+        value: bucket.count,
+        label:
+          index === 0
+            ? minLabel
+            : index === buckets.length - 1 && maxLabel !== minLabel
+              ? maxLabel
+              : index === mid && showMedian
+                ? medianLabel
+                : "",
+        tooltip: `${format(bucket.from)} to ${format(bucket.to)}: ${bucket.count} ${unit}`,
+      }))}
+    />
   );
 };
 
@@ -182,7 +185,7 @@ export interface ScheduleItem {
   render?: (children: ReactNode) => ReactNode;
 }
 
-const SCHEDULE_LABEL = "minmax(0,16rem)";
+const SCHEDULE_COLUMNS = "minmax(0,15rem) minmax(0,1fr) 3.5rem";
 
 const pad2 = (value: number): string => value.toString().padStart(2, "0");
 
@@ -212,6 +215,7 @@ interface ScheduleProps {
 /**
  * When work ran, on one shared axis. Answers "did the retry get further, and
  * was it slower?" — a question a column of timestamps makes the reader compute.
+ * One line per item; the clock sits on top and a rule marks now.
  */
 export const Schedule = ({ items, empty, className }: ScheduleProps): ReactNode => {
   const now = Date.now();
@@ -219,56 +223,75 @@ export const Schedule = ({ items, empty, className }: ScheduleProps): ReactNode 
   if (starts.length === 0) return empty ?? null;
 
   const min = Math.min(...starts);
-  const max = Math.max(...items.map((item) => item.end ?? now), min + 1);
+  const max = Math.max(now, ...items.map((item) => item.end ?? now), min + 1);
   const span = Math.max(1, max - min);
+  const ticks = [0, 1 / 3, 2 / 3].map((fraction) => min + span * fraction);
+  const pct = (ms: number): string => `${(((ms - min) / span) * 100).toFixed(3)}%`;
 
   return (
     <div className={className}>
-      <ol className="divide-y divide-border/50 border-y border-border/70">
+      <div
+        aria-hidden
+        className="grid items-end gap-3 px-2 pb-1 font-mono text-micro tabular-nums text-muted-foreground"
+        style={{ gridTemplateColumns: SCHEDULE_COLUMNS }}
+      >
+        <span />
+        <span className="relative block h-4">
+          {ticks.map((tick) => (
+            <span key={tick} className="absolute bottom-0" style={{ left: pct(tick) }}>
+              {formatScheduleAxis(tick, span)}
+            </span>
+          ))}
+          <span className="absolute right-0 bottom-0 text-foreground">now</span>
+        </span>
+        <span />
+      </div>
+      <ol className="divide-y divide-border/50 border-t border-border">
         {items.map((item) => {
           const start = item.start;
           const end = item.end ?? now;
           const left = start === null ? 0 : ((start - min) / span) * 100;
-          const width = start === null ? 0 : Math.max(1.5, ((end - start) / span) * 100);
+          const width = start === null ? 0 : Math.max(0.8, ((end - start) / span) * 100);
           const fill = item.status ? STATUS_FILL[item.status] : "bg-muted-foreground/40";
-          const duration =
-            start === null ? "" : formatDurationCompact(Math.max(0, end - start) / 1000);
-          const detail = [
-            item.detail,
-            duration,
-            item.end === null && start !== null ? "running" : null,
-          ]
+          const duration = start === null ? "" : formatSpan(Math.max(0, end - start) / 1000);
+          const statusWord = STATUS_GROUPS.find((group) => group.id === item.status)?.label ?? null;
+          const title = [item.label, item.detail, statusWord, duration]
             .filter((part) => part != null && part !== "")
             .join(" · ");
           const row = (
             <span
               className="grid min-w-0 items-center gap-3 px-2 py-2"
-              style={{ gridTemplateColumns: `${SCHEDULE_LABEL} minmax(0,1fr)` }}
+              style={{ gridTemplateColumns: SCHEDULE_COLUMNS }}
+              title={title}
             >
-              <span className="min-w-0">
-                <span className="flex min-w-0 items-center gap-2">
-                  <span aria-hidden className={cn("size-1.5 shrink-0 rounded-full", fill)} />
-                  <span className="truncate text-micro font-medium text-foreground">
-                    {item.label}
-                  </span>
-                </span>
-                {detail !== "" && (
-                  <span className="block truncate pl-3 text-micro text-muted-foreground">
-                    {detail}
-                  </span>
-                )}
-              </span>
-              <span className="relative h-4 border-x border-border/60">
-                {start !== null && (
+              <span className="min-w-0 truncate text-body text-foreground">{item.label}</span>
+              <span className="relative h-3">
+                {ticks.slice(1).map((tick) => (
+                  <span
+                    key={tick}
+                    aria-hidden
+                    className="absolute inset-y-0 w-px bg-border/60"
+                    style={{ left: pct(tick) }}
+                  />
+                ))}
+                <span aria-hidden className="absolute inset-y-0 right-0 w-px bg-foreground/40" />
+                {start !== null ? (
                   <span
                     className={cn(
-                      "absolute top-1/2 h-1.5 -translate-y-1/2 rounded-control",
+                      "absolute top-1/2 h-2 -translate-y-1/2 rounded-hairline",
                       fill,
-                      item.end === null && "opacity-70",
+                      item.end === null && "mol-motion-progress-pulse",
                     )}
                     style={{ left: `${left}%`, width: `${Math.min(100 - left, width)}%` }}
                   />
+                ) : (
+                  <span className="absolute inset-y-0 left-0 flex items-center text-micro text-muted-foreground">
+                    {statusWord ?? "not started"}
+                  </span>
                 )}
+              </span>
+              <span className="text-right font-mono text-label tabular-nums text-muted-foreground">
+                {duration}
               </span>
             </span>
           );
@@ -279,16 +302,6 @@ export const Schedule = ({ items, empty, className }: ScheduleProps): ReactNode 
           );
         })}
       </ol>
-      <div
-        className="grid items-center gap-3 px-2 pt-1 font-mono text-micro tabular-nums text-muted-foreground"
-        style={{ gridTemplateColumns: `${SCHEDULE_LABEL} minmax(0,1fr)` }}
-      >
-        <span />
-        <span className="flex justify-between">
-          <span>{formatScheduleAxis(min, span)}</span>
-          <span>{formatScheduleAxis(max, span)}</span>
-        </span>
-      </div>
     </div>
   );
 };
@@ -299,7 +312,7 @@ export const Schedule = ({ items, empty, className }: ScheduleProps): ReactNode 
 export const StatusLegend = ({ className }: { className?: string }): JSX.Element => (
   <ul className={cn("flex flex-wrap items-center gap-x-4 gap-y-1", className)}>
     {STATUS_GROUPS.map((group) => (
-      <li key={group.id} className="flex items-center gap-2 text-micro text-muted-foreground">
+      <li key={group.id} className="flex items-center gap-2 text-label text-muted-foreground">
         <span
           aria-hidden
           className="size-1.5 rounded-full"
@@ -341,10 +354,7 @@ export const StatusBreakdown = ({
   return (
     <div className={cn("space-y-2", className)}>
       {caption != null && (
-        <p
-          id={captionId}
-          className="font-mono text-micro uppercase tracking-wider text-muted-foreground"
-        >
+        <p id={captionId} className="text-label text-muted-foreground">
           {caption}
         </p>
       )}
@@ -360,14 +370,26 @@ export const StatusBreakdown = ({
                   </span>
                 )}
               </span>
-              <StatusDistribution counts={group.counts} legend={false} className="min-w-0" />
-              <span className="text-right font-mono text-label tabular-nums text-muted-foreground">
+              <StatusDistribution counts={group.counts} variant="meter" className="justify-end" />
+              <span className="text-right font-mono text-label tabular-nums text-foreground">
                 {group.counts.total}
+              </span>
+              <span
+                className={cn(
+                  "text-right font-mono text-label tabular-nums",
+                  group.counts.failed > 0
+                    ? "text-status-failed-foreground"
+                    : "text-muted-foreground",
+                )}
+              >
+                {group.counts.failed > 0
+                  ? `${Math.round((group.counts.failed / group.counts.total) * 100)}% failed`
+                  : "none failed"}
               </span>
             </>
           );
           const layout =
-            "grid grid-cols-[minmax(6rem,9rem)_minmax(0,1fr)_2.5rem] items-center gap-3";
+            "grid grid-cols-[fit-content(10rem)_minmax(6rem,1fr)_2rem_5.5rem] items-center gap-3";
           return (
             <li key={group.id} className="min-w-0">
               {group.onSelect ? (
@@ -375,12 +397,12 @@ export const StatusBreakdown = ({
                   kind="ghost"
                   size="content"
                   onClick={group.onSelect}
-                  className={cn(layout, "w-full rounded-control px-1 py-1 text-left")}
+                  className={cn(layout, "w-full rounded-control py-1 text-left")}
                 >
                   {body}
                 </WorkbenchAction>
               ) : (
-                <span className={cn(layout, "px-1 py-1")}>{body}</span>
+                <span className={cn(layout, "py-1")}>{body}</span>
               )}
             </li>
           );

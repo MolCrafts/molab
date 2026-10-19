@@ -10,6 +10,7 @@ from typing import Any
 
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from molq import MolqError
 
 from molab.workflow.types import WorkflowError
 from molab.workspace.errors import AmbiguousRefError, RefNotFoundError, UnmigratedAssetError
@@ -59,23 +60,48 @@ def register_exception_handlers(app: FastAPI) -> None:
             content=exc.to_dict(),
         )
 
-    @app.exception_handler(ConnectionError)
-    async def connection_error_handler(
-        request: Request,  # noqa: ARG001
-        exc: ConnectionError,  # noqa: ARG001
-    ) -> JSONResponse:
-        """SSH/transport soft-fail — never 500 / traceback noise.
+    @app.exception_handler(MolqError)
+    async def molq_error_handler(request: Request, exc: MolqError) -> JSONResponse:
+        """Preserve native error classification and uncertain mutation outcomes."""
+        if exc.kind == "AUTH_REQUIRED":
+            from .deps.resolution import _workspace_key_from_request
+            from .deps.served import active_served_key
 
-        Remote 2FA hosts raise ConnectionError on BatchMode probe before
-        login; map to the same envelope as RemoteWorkspaceUnreachableError.
-        """
+            failure = RemoteWorkspaceUnreachableError(
+                _workspace_key_from_request(request) or active_served_key() or "", "needs_auth"
+            )
+            return JSONResponse(status_code=failure.status_code, content=failure.to_dict())
+        status = {"CONNECTION_TIMEOUT": 504, "REGISTRY_MISMATCH": 409}.get(exc.kind, 502)
+        if exc.outcome == "unknown":
+            status = 409
+        return JSONResponse(
+            status_code=status,
+            content={
+                "error": {
+                    "code": exc.kind,
+                    "message": str(exc),
+                    "outcome": exc.outcome,
+                    "details": exc.context,
+                }
+            },
+        )
+
+    @app.exception_handler(PermissionError)
+    async def permission_error_handler(request: Request, exc: PermissionError) -> JSONResponse:  # noqa: ARG001
+        return JSONResponse(
+            status_code=403, content={"error": {"code": "FORBIDDEN", "message": str(exc)}}
+        )
+
+    @app.exception_handler(ConnectionError)
+    async def connection_error_handler(request: Request, exc: ConnectionError) -> JSONResponse:  # noqa: ARG001
+        """A connection failure alone does not prove authentication is required."""
         return JSONResponse(
             status_code=503,
             content={
                 "error": {
                     "code": "REMOTE_WORKSPACE_UNREACHABLE",
-                    "message": "needs_auth",
-                    "details": {"reason": "needs_auth"},
+                    "message": "unreachable",
+                    "details": {"reason": "unreachable"},
                 }
             },
         )

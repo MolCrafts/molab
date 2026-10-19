@@ -3,10 +3,6 @@
  * for consistency with the Compute targets flow.
  */
 
-import type { ReactNode } from "react";
-import { useState } from "react";
-
-import type { WorkspaceTargetResponse } from "@/api/generated/models/WorkspaceTargetResponse";
 import {
   Dialog,
   DialogContent,
@@ -14,7 +10,10 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from "@/components/ui/dialog";
+} from "@molcrafts/ui";
+import type { ReactNode } from "react";
+import { useState } from "react";
+import type { WorkspaceTargetResponse } from "@/api/generated/models/WorkspaceTargetResponse";
 
 import { AddRemoteWorkspaceForm } from "./AddRemoteWorkspaceForm";
 

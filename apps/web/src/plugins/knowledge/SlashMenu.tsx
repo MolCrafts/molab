@@ -1,4 +1,16 @@
 import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  CommandSeparator,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@molcrafts/ui";
+import {
   Archive,
   ChevronLeft,
   Code2,
@@ -22,16 +34,6 @@ import type { EmbedTargetKind } from "@/api";
 import { knowledgeApi } from "@/api";
 import type { EmbedResponse } from "@/api/generated/models/EmbedResponse";
 import type { RendererSnapshot } from "@/app/types";
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-  CommandSeparator,
-} from "@/components/ui/command";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { WorkbenchIconAction } from "@/components/workbench";
 import { cn } from "@/lib/utils";
 import { buildEmbedGroups } from "./embedGroups";

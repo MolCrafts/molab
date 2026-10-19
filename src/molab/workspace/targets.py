@@ -3,7 +3,7 @@
 A :class:`~molab.workspace.models.ComputeTarget` is a value object stored on
 the workspace's ``WorkspaceMetadata.targets`` list.  This module exposes thin
 helpers around that list (list/get/add/remove) and the bridge functions
-:func:`to_transport` and :func:`target_run_dir` that turn a target into the
+:func:`to_filesystem` and :func:`target_run_dir` that turn a target into the
 molq objects used at submission time.
 
 The workspace itself is the source of truth — these functions read and write
@@ -12,11 +12,10 @@ The workspace itself is the source of truth — these functions read and write
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING
 
-from molq.options import SshTransportOptions
-from molq.transport import LocalTransport, SshTransport, Transport
-
+from .fs import FileSystem
 from .models import ComputeTarget
 
 if TYPE_CHECKING:
@@ -142,23 +141,24 @@ def resolve_compute_target(ws: Workspace, name: str) -> ComputeTarget:
 # ---------------------------------------------------------------------------
 
 
-def to_transport(target: ComputeTarget) -> Transport:
-    """Build the molq Transport implied by *target*'s host axis.
+def target_definition(target: ComputeTarget) -> dict[str, object]:
+    """Resolve the one molq destination used by files and scheduling."""
+    from .connection import get_client
 
-    ``host is None`` → :class:`~molq.transport.LocalTransport`.
-    Anything else → :class:`~molq.transport.SshTransport` configured from the
-    target's ssh options.
-    """
-    if target.host is None:
-        return LocalTransport()
-    return SshTransport(
-        options=SshTransportOptions(
-            host=target.host,
-            port=target.port,
-            identity_file=target.identity_file,
-            ssh_opts=tuple(target.ssh_opts),
-        ),
-    )
+    if target.cluster_id is None:
+        raise ValueError("A submitted target requires an explicit molq destination")
+    return get_client(target.registry_id).cluster(target.cluster_id).definition()
+
+
+def to_filesystem(target: ComputeTarget) -> FileSystem:
+    """Create the existing FileSystem adapter over the registered destination."""
+    from .connection import get_client
+    from .fs_local import LocalFileSystem
+    from .fs_remote import RemoteFileSystem
+
+    if target.cluster_id is None:
+        return LocalFileSystem()
+    return RemoteFileSystem(get_client(target.registry_id), target.cluster_id, target.scratch_root)
 
 
 def target_run_dir(target: ComputeTarget, ws: Workspace, run: Run) -> str:
@@ -172,12 +172,16 @@ def target_run_dir(target: ComputeTarget, ws: Workspace, run: Run) -> str:
 
     For **remote targets**, return an absolute path under
     ``target.scratch_root`` namespaced by workspace / project / experiment /
-    run ids so concurrent runs on the same target don't collide.
+    run ids so concurrent runs on the same target don't collide. Within that
+    namespace retain the workspace-relative hierarchy, so the standard Run
+    loader can reconstruct the staged worker context.
     """
     if not target.is_remote:
         return str(run.run_dir)
     project = run.experiment.project
     experiment = run.experiment
-    return (
+    relative = Path(str(run.run_dir)).relative_to(Path(str(ws.root))).as_posix()
+    namespace = (
         f"{target.scratch_root.rstrip('/')}/{ws.metadata.id}/{project.id}/{experiment.id}/{run.id}"
     )
+    return f"{namespace}/{relative}"

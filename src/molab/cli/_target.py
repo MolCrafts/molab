@@ -1,21 +1,10 @@
-"""Shared ``-t/--target`` option + resolver for top-level CLI commands.
-
-Replaces the old ``workspace`` group callback's ``ctx.obj`` plumbing: a
-top-level command declares the :data:`TargetOption` parameter and calls
-:func:`resolve_workspace_target` to obtain the same ``(target, transport, fs)``
-triple the callback used to stash on the context. Local is the zero-config
-default (``-t .``); remote is ``-t user@host:/path`` or a registered
-``-t @target-name`` (resolved against the cwd workspace's compute-target
-registry — an improvement over the old callback, which passed no workspace and
-so could not resolve ``@name`` at all).
-"""
+"""Shared workspace address resolution and CLI error presentation."""
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Annotated
 
 import typer
-from molq.transport import Transport
 
 from molab.workspace.fs import FileSystem
 from molab.workspace.target import (
@@ -23,7 +12,6 @@ from molab.workspace.target import (
     TargetNeedsResolution,
     TargetNotFound,
     resolve_target,
-    target_to_filesystem,
 )
 
 if TYPE_CHECKING:
@@ -38,25 +26,24 @@ TargetOption = Annotated[
         "-ws",
         "--target",
         "-t",
-        help="Workspace: a path, user@host:path, or @target-name (default: cwd).",
+        help="Workspace: a path, cluster:path, or @target-name (default: cwd).",
     ),
 ]
 
 
-def resolve_workspace_target(target_str: str = ".") -> tuple[Target, Transport, FileSystem]:
-    """Resolve a target string into ``(target, transport, fs)``.
+def resolve_workspace_target(target_str: str = ".") -> tuple[Target, FileSystem]:
+    """Resolve a target string into ``(target, fs)``.
 
-    Wraps :func:`molab.workspace.target.resolve_target` +
-    :func:`target_to_filesystem` so every top-level command shares one
+    Uses :func:`molab.workspace.target.resolve_target` so commands share one
     local/remote resolution path. ``@name`` targets are looked up in the cwd
     workspace's compute-target registry.
 
     Args:
         target_str: Target spec; ``"."`` (default) -> local cwd workspace,
-            ``user@host:/path`` -> remote, ``@name`` -> registered target.
+            ``cluster:/path`` -> remote, ``@name`` -> registered target.
 
     Returns:
-        ``(resolved_target, transport, filesystem)``.
+        ``(resolved_target, filesystem)``.
 
     Raises:
         typer.Exit: code 1 if the target cannot be resolved, after printing
@@ -75,14 +62,13 @@ def resolve_workspace_target(target_str: str = ".") -> tuple[Target, Transport, 
             ws = None
 
     try:
-        resolved, transport = resolve_target(spec, ws)
+        resolved, fs = resolve_target(spec, ws)
     except (TargetNotFound, TargetNeedsResolution) as exc:
         from molab.cli._common import rprint
 
         rprint(f"[red]{exc}[/red]")
         raise typer.Exit(1) from exc
-    fs = target_to_filesystem(resolved)
-    return resolved, transport, fs
+    return resolved, fs
 
 
 def open_workspace(
@@ -91,17 +77,15 @@ def open_workspace(
     require_existing: bool = True,
     prefetch: bool = False,
     name: str | None = None,
-) -> tuple[Target, Transport, FileSystem, Workspace]:
+) -> tuple[Target, FileSystem, Workspace]:
     """Resolve *target_str* and open the Workspace on the matching FileSystem.
 
-    Local and remote targets share this path; remote roots go through a
-    :class:`~molab.workspace.fs_cached.CachedRemoteFileSystem` so repeated
-    Folder/Run metadata reads hit a local mirror instead of SSH.
+    Local and remote targets share this path and explicitly bind their filesystem.
     ``require_existing=True`` (default) fails when ``workspace.json`` is
     missing; pass ``False`` for ``init``-style create.
 
     Args:
-        target_str: Target spec (path, ``user@host:path`` or ``@name``).
+        target_str: Target spec (path, ``cluster:path`` or ``@name``).
         require_existing: Fail when the workspace marker is absent.
         name: Display name used when this call creates the workspace.
         prefetch: Warm the whole navigation tree up front. Commands that are
@@ -117,7 +101,7 @@ def open_workspace(
     from molab.workspace import Workspace
     from molab.workspace.target import RemoteTarget
 
-    target, transport, fs = resolve_workspace_target(target_str)
+    target, fs = resolve_workspace_target(target_str)
     root = target.path
     root_str = str(root)
 
@@ -131,11 +115,9 @@ def open_workspace(
 
             rprint(f"[red]Error:[/red] cannot reach remote workspace: {exc}")
             if isinstance(target, RemoteTarget):
-                host = target.host or str(target)
                 rprint(
                     f"[dim]If the host needs a verification code (2FA), run: "
-                    f"[bold]molab connect -ws {target_str}[/bold] "
-                    f"(or plain [bold]ssh {host}[/bold]), then retry.[/dim]"
+                    f"[bold]molab connect -ws {target_str}[/bold], then retry.[/dim]"
                 )
             raise typer.Exit(1) from exc
         if not present:
@@ -145,7 +127,7 @@ def open_workspace(
     ws = Workspace(root, name=name, fs=fs)
     if prefetch:
         _prefetch_tree(fs, ws)
-    return target, transport, fs, ws
+    return target, fs, ws
 
 
 def _prefetch_tree(fs: FileSystem, ws: Workspace) -> None:
@@ -158,7 +140,7 @@ def _prefetch_tree(fs: FileSystem, ws: Workspace) -> None:
     if prepare is None:
         return
     try:
-        prepare(ws, block_index=True, refresh_on_open=True)
+        prepare(ws, block_index=True, refresh_on_open=False)
     except Exception:  # warming is an optimisation, never a gate
         import logging
 

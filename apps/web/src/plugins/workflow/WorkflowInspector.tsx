@@ -1,7 +1,7 @@
+import { Skeleton } from "@molcrafts/ui";
 import { useMemo } from "react";
 import { buildMetadataFields, type MetadataField } from "@/app/renderers/metadata";
 import type { RendererProps } from "@/app/types";
-import { Skeleton } from "@/components/ui/skeleton";
 import { NodeInspector, NodeInspectorRow, NodeInspectorSection } from "@/components/workbench";
 import type { TaskNodeJson } from "@/components/workflow/task-graph-ir";
 

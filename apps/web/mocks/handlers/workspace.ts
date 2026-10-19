@@ -2,19 +2,20 @@
  * Mock handlers for Workspace API endpoints
  */
 
-import { http, HttpResponse } from "msw";
-import {
-    createDirectory,
-    deleteFile,
-    getAllAssets,
-    getAllProjects,
-    getExperimentsByProject,
-    getFile,
-    getFileTree,
-    getRunsByExperiment,
-    writeFile,
-} from "../db";
+import { HttpResponse, http } from "msw";
 import type { FileNode } from "../db";
+import {
+  createDirectory,
+  deleteFile,
+  getAllAssets,
+  getAllProjects,
+  getExperimentsByProject,
+  getFile,
+  getFileTree,
+  getRunsByExperiment,
+  writeFile,
+} from "../db";
+import { workspaceRoute } from "./workspaceRoute";
 
 const API_BASE = "/api";
 
@@ -24,446 +25,373 @@ const API_BASE = "/api";
 const knownWorkspacePaths = new Set<string>(["/mock-workspace"]);
 
 /**
- * Build a synthetic LAMMPS log for mock mode so the molvis plugin can parse
- * thermo output without needing a real run on disk. Used by the workspace
- * file-text endpoint; the ``/lammps-log`` route mocks pre-parsed thermo
- * directly (see runs.ts).
- */
-function synthesizeLammpsLog(): string {
-    const STEPS = 50;
-    const lines: string[] = [
-        "LAMMPS (29 Sep 2021)",
-        "Step Temp PotEng KinEng TotEng Press",
-    ];
-    for (let i = 0; i <= STEPS; i += 1) {
-        const t = i / STEPS;
-        const step = i * 1000;
-        const temp = 300 - 100 * Math.exp(-3 * t) + (Math.random() - 0.5) * 5;
-        const peng = -1500 + 600 * Math.exp(-2 * t) + (Math.random() - 0.5) * 8;
-        const keng = (3 / 2) * temp;
-        const teng = peng + keng;
-        const press = 1.0 - 0.4 * Math.exp(-2.5 * t) + (Math.random() - 0.5) * 0.05;
-        lines.push(
-            `${step} ${temp.toFixed(4)} ${peng.toFixed(4)} ${keng.toFixed(4)} ${teng.toFixed(4)} ${press.toFixed(4)}`,
-        );
-    }
-    lines.push(`Loop time of 1.234 on 1 procs for ${STEPS * 1000} steps with 1000 atoms`);
-    return lines.join("\n");
-}
-
-/**
  * Build nested file tree from flat file map
  */
 function buildNestedTree(path: string): { path: string; children: FileNode[] } {
-    if (path === "/" || path === "") {
-        // Root level
-        const rootFiles = getFileTree();
-        return {
-            path: "/",
-            children: rootFiles,
-        };
-    }
-
-    // Find the requested node
-    const node = getFile(path);
-    if (!node) {
-        return { path, children: [] };
-    }
-
-    if (node.type === "file") {
-        return { path, children: [] };
-    }
-
+  if (path === "/" || path === "") {
+    // Root level
+    const rootFiles = getFileTree();
     return {
-        path,
-        children: node.children || [],
+      path: "/",
+      children: rootFiles,
     };
+  }
+
+  // Find the requested node
+  const node = getFile(path);
+  if (!node) {
+    return { path, children: [] };
+  }
+
+  if (node.type === "file") {
+    return { path, children: [] };
+  }
+
+  return {
+    path,
+    children: node.children || [],
+  };
 }
 
-interface MockExecutionRow {
-    executionId: string;
-    runId: string;
-    status: string;
-    startedAt: string;
-    finishedAt: string | null;
-    durationSeconds: number | null;
-    schedulerJobId: string | null;
-    backend: string | null;
-    metadata: Record<string, string>;
-    backendMetadata: Record<string, string>;
-}
-
-interface MockRunRow {
-    id: string;
-    name: string;
-    projectId: string;
-    projectName: string;
-    experimentId: string;
-    experimentName: string;
-    status: string;
-    backend: string | null;
-    cluster: string | null;
-    scheduler: string | null;
-    profile: string | null;
-    parameters: Record<string, unknown>;
-    createdAt: string;
-    finishedAt: string | null;
-    executionCount: number;
-    latestSchedulerJobId: string | null;
-    executions: MockExecutionRow[];
-}
-
-function buildMockWorkspaceRuns(): MockRunRow[] {
-    return getAllProjects().flatMap((project) =>
-        getExperimentsByProject(project.id).flatMap((experiment) =>
-            getRunsByExperiment(experiment.id).map((run) => {
-                const backend = String(run.executorInfo?.backend ?? "local");
-                const cluster = run.executorInfo?.cluster_name
-                    ? String(run.executorInfo.cluster_name)
-                    : null;
-                const scheduler = run.executorInfo?.scheduler
-                    ? String(run.executorInfo.scheduler)
-                    : backend === "local"
-                      ? "local"
-                      : null;
-                const executions = (run.executionHistory ?? []).map((execution) => {
-                    const started = Date.parse(execution.startedAt);
-                    const finished = execution.finishedAt
-                        ? Date.parse(execution.finishedAt)
-                        : Number.NaN;
-                    const durationSeconds =
-                        Number.isFinite(started) && Number.isFinite(finished)
-                            ? Math.max(0, (finished - started) / 1000)
-                            : null;
-                    const metadata: Record<string, string> = {};
-                    if (cluster) metadata.cluster_name = cluster;
-                    if (scheduler) metadata.scheduler = scheduler;
-                    if (execution.schedulerJobId) {
-                        metadata.scheduler_job_id = execution.schedulerJobId;
-                    }
-                    return {
-                        executionId: execution.executionId,
-                        runId: run.id,
-                        status: execution.status,
-                        startedAt: execution.startedAt,
-                        finishedAt: execution.finishedAt ?? null,
-                        durationSeconds,
-                        schedulerJobId: execution.schedulerJobId ?? null,
-                        backend,
-                        metadata,
-                        backendMetadata: metadata,
-                    } satisfies MockExecutionRow;
-                });
-                const latestSchedulerJobId =
-                    executions
-                        .slice()
-                        .reverse()
-                        .find((execution) => execution.schedulerJobId)?.schedulerJobId ?? null;
-                const status = run.status ?? (
-                    (run.statusSummary?.active ?? 0) > 0
-                        ? "running"
-                        : (run.statusSummary?.byStatus?.succeeded ?? 0) > 0
-                          ? "succeeded"
-                          : (run.statusSummary?.byStatus?.failed ?? 0) > 0
-                            ? "failed"
-                            : "pending"
-                );
-
-                return {
-                    id: run.id,
-                    name: run.id,
-                    projectId: project.id,
-                    projectName: project.name,
-                    experimentId: experiment.id,
-                    experimentName: experiment.name,
-                    status,
-                    backend,
-                    cluster,
-                    scheduler,
-                    profile: run.profile ?? null,
-                    parameters: run.parameters ?? {},
-                    createdAt: run.created,
-                    finishedAt: run.finished ?? null,
-                    executionCount: executions.length,
-                    latestSchedulerJobId,
-                    executions,
-                } satisfies MockRunRow;
-            }),
-        ),
-    );
-}
-
-function computeMockStats(rows: MockRunRow[]): {
-    total: number;
-    running: number;
-    pending: number;
-    failed: number;
-    succeeded: number;
-} {
-    const stats = { total: rows.length, running: 0, pending: 0, failed: 0, succeeded: 0 };
-    for (const row of rows) {
-        switch (row.status) {
-            case "running":
-                stats.running += 1;
-                break;
-            case "pending":
-            case "queued":
-            case "submitted":
-            case "created":
-                stats.pending += 1;
-                break;
-            case "failed":
-            case "cancelled":
-            case "timed_out":
-            case "lost":
-                stats.failed += 1;
-                break;
-            case "succeeded":
-                stats.succeeded += 1;
-                break;
-        }
-    }
-    return stats;
+/** Derive dashboard rows from the exact attempts returned by the run detail API. */
+function buildMockWorkspaceRuns() {
+  return getAllProjects().flatMap((project) =>
+    getExperimentsByProject(project.id).flatMap((experiment) =>
+      getRunsByExperiment(experiment.id).map((run) => ({
+        id: run.id,
+        name: run.name,
+        path: run.path,
+        projectId: project.id,
+        projectName: project.name,
+        experimentId: experiment.id,
+        experimentName: experiment.name,
+        definitionHash: run.definitionHash,
+        experimentRevisionId: run.experimentRevisionId,
+        inputAssetIds: [],
+        targetHint: run.target ?? null,
+        statusSummary: run.statusSummary,
+        parameters: run.parameters ?? {},
+        createdAt: run.created,
+        executions: (run.executions ?? []).map((e) => ({
+          executionId: e.id,
+          runId: run.id,
+          mode: e.mode,
+          status: e.status,
+          createdAt: e.createdAt,
+          startedAt: e.startedAt,
+          finishedAt: e.finishedAt,
+          basedOnExecutionId: e.basedOnExecutionId,
+          checkpointArtifactId: e.checkpointArtifactId,
+          durationSeconds:
+            e.startedAt && e.finishedAt
+              ? (Date.parse(e.finishedAt) - Date.parse(e.startedAt)) / 1000
+              : null,
+          schedulerJobId: e.executor?.scheduler_job_id ?? null,
+          backend: e.executor?.backend ?? "local",
+          backendMetadata: e.executor ?? {},
+        })),
+      })),
+    ),
+  );
 }
 
 export const workspaceHandlers = [
-    http.get(`${API_BASE}/workspace/scope`, () => {
-        return HttpResponse.json({
-            kind: "workspace.root",
-            id: "mock-workspace",
-            name: "Mock workspace",
-        });
+  http.get(workspaceRoute(`${API_BASE}/workspace/scope`), () => {
+    return HttpResponse.json({
+      kind: "workspace.root",
+      id: "mock-workspace",
+      name: "Mock workspace",
+    });
+  }),
+
+  http.get(workspaceRoute(`${API_BASE}/workspace/cache/status`), () =>
+    HttpResponse.json({
+      cached: false,
+      connected: true,
+      indexed: true,
+      ready: true,
+      indexing: false,
+      phase: "idle",
+      message: "Local example ready",
     }),
-
-    // GET /api/workspace/info - Get workspace metadata
-    http.get(`${API_BASE}/workspace/info`, () => {
-        const projects = getAllProjects();
-        const assets = getAllAssets();
-
-        return HttpResponse.json({
-            root: "/mock-workspace",
-            projectCount: projects.length,
-            assetCount: assets.length,
-        });
+  ),
+  http.get(workspaceRoute(`${API_BASE}/workspace/context`), () =>
+    HttpResponse.json({
+      workspace: { id: "mock-workspace", name: "Feature showcase", path: "/mock-workspace" },
+      projects: getAllProjects(),
+      mock: true,
     }),
+  ),
+  http.post(workspaceRoute(`${API_BASE}/workspace/file/upload`), async ({ request }) => {
+    const path = new URL(request.url).searchParams.get("path") ?? "";
+    if (!path || path.split("/").includes(".."))
+      return HttpResponse.json({ detail: "Invalid upload path" }, { status: 400 });
+    writeFile(path, new Uint8Array(await request.arrayBuffer()));
+    return HttpResponse.json({ path }, { status: 201 });
+  }),
+  http.get(workspaceRoute(`${API_BASE}/history`), ({ request }) => {
+    const url = new URL(request.url);
+    const entity = url.searchParams.get("entity");
+    const event = url.searchParams.get("event");
+    const facts = getAllProjects()
+      .flatMap((project) =>
+        getExperimentsByProject(project.id).flatMap((experiment) =>
+          getRunsByExperiment(experiment.id).flatMap((run) =>
+            (run.executions ?? []).map((e) => ({
+              commit: `mock-${e.id}-${run.id}`,
+              event: `execution.${e.status}`,
+              subjectType: "execution",
+              subjectId: e.id,
+              summary: `${experiment.name} · ${run.name} · ${e.status}`,
+              occurredAt: e.finishedAt ?? e.createdAt,
+            })),
+          ),
+        ),
+      )
+      .filter((f) => (!entity || f.subjectId === entity) && (!event || f.event === event));
+    return HttpResponse.json(
+      facts
+        .sort((a, b) => b.occurredAt.localeCompare(a.occurredAt))
+        .slice(0, Number(url.searchParams.get("limit") ?? 50)),
+    );
+  }),
+  http.post(workspaceRoute(`${API_BASE}/history/sync`), () => HttpResponse.json({ commit: null })),
+  http.post(workspaceRoute(`${API_BASE}/history/push`), () => HttpResponse.json({ commit: null })),
 
-    // GET /api/workspace/runs - Cross-experiment runs aggregator
-    http.get(`${API_BASE}/workspace/runs`, ({ request }) => {
-        const url = new URL(request.url);
-        const projectFilter = url.searchParams.get("projectId");
-        const experimentFilter = url.searchParams.get("experimentId");
-        const backendFilter = url.searchParams.get("backend");
-        const statusFilter = url.searchParams.get("status");
-        const offset = Math.max(0, Number(url.searchParams.get("offset") ?? 0));
-        const limit = Math.max(1, Number(url.searchParams.get("limit") ?? 500));
+  // GET /api/workspace/info - Get workspace metadata
+  http.get(workspaceRoute(`${API_BASE}/workspace/info`), () => {
+    const projects = getAllProjects();
+    const assets = getAllAssets();
 
-        const allRuns = buildMockWorkspaceRuns();
-        const filtered = allRuns.filter((row) => {
-            if (projectFilter && row.projectId !== projectFilter) return false;
-            if (experimentFilter && row.experimentId !== experimentFilter) return false;
-            if (backendFilter && (row.backend ?? "") !== backendFilter) return false;
-            if (statusFilter && row.status !== statusFilter) return false;
-            return true;
-        });
+    return HttpResponse.json({
+      root: "/mock-workspace",
+      projectCount: projects.length,
+      assetCount: assets.length,
+    });
+  }),
 
-        const page = filtered.slice(offset, offset + limit);
-        return HttpResponse.json({
-            runs: page,
-            stats: computeMockStats(filtered),
-            total: filtered.length,
-            truncated: offset + page.length < filtered.length,
-        });
-    }),
+  // GET /api/workspace/runs - Cross-experiment runs aggregator
+  http.get(workspaceRoute(`${API_BASE}/workspace/runs`), ({ request }) => {
+    const url = new URL(request.url);
+    const projectFilter = url.searchParams.get("projectId");
+    const experimentFilter = url.searchParams.get("experimentId");
+    const backendFilter = url.searchParams.get("backend");
+    const statusFilter = url.searchParams.get("status");
+    const offset = Math.max(0, Number(url.searchParams.get("offset") ?? 0));
+    const limit = Math.max(1, Number(url.searchParams.get("limit") ?? 500));
 
-    // GET /api/workspace/files - List workspace files
-    http.get(`${API_BASE}/workspace/files`, ({ request }) => {
-        const url = new URL(request.url);
-        const path = url.searchParams.get("path") || "/";
+    const allRuns = buildMockWorkspaceRuns();
+    const filtered = allRuns.filter((row) => {
+      if (projectFilter && row.projectId !== projectFilter) return false;
+      if (experimentFilter && row.experimentId !== experimentFilter) return false;
+      if (backendFilter && !row.executions.some((e) => e.backend === backendFilter)) return false;
+      if (statusFilter && !(row.statusSummary?.byStatus?.[statusFilter] ?? 0)) return false;
+      return true;
+    });
 
-        const tree = buildNestedTree(path);
-        return HttpResponse.json(tree);
-    }),
+    const page = filtered.slice(offset, offset + limit);
+    return HttpResponse.json({
+      runs: page,
+      stats: {
+        totalRuns: filtered.length,
+        totalExecutions: filtered.reduce((sum, r) => sum + r.executions.length, 0),
+        activeExecutions: filtered.reduce((sum, r) => sum + (r.statusSummary?.active ?? 0), 0),
+        byStatus: filtered
+          .flatMap((r) => r.executions)
+          .reduce<Record<string, number>>((counts, e) => {
+            counts[e.status] = (counts[e.status] ?? 0) + 1;
+            return counts;
+          }, {}),
+      },
+      total: filtered.length,
+      truncated: offset + page.length < filtered.length,
+    });
+  }),
 
-    // GET /api/workspace/file - Read file content (text)
-    http.get(`${API_BASE}/workspace/file`, ({ request }) => {
-        const url = new URL(request.url);
-        const path = url.searchParams.get("path") || "";
+  // GET /api/workspace/files - List workspace files
+  http.get(workspaceRoute(`${API_BASE}/workspace/files`), ({ request }) => {
+    const url = new URL(request.url);
+    const path = `/${(url.searchParams.get("path") ?? "").replace(/^\/+/, "")}`;
 
-        if (path.endsWith("log.lammps") || path.endsWith(".lammps.log")) {
-            return HttpResponse.json({ content: synthesizeLammpsLog() });
-        }
+    const tree = buildNestedTree(path);
+    const maxDepth = Math.max(
+      1,
+      Number(url.searchParams.get("max_depth") ?? url.searchParams.get("maxDepth") ?? 1),
+    );
+    const trim = (node: FileNode, depth: number): FileNode => {
+      const { content: _content, bytes: _bytes, children, ...entry } = node;
+      return {
+        ...entry,
+        ...(children && depth > 1 ? { children: children.map((n) => trim(n, depth - 1)) } : {}),
+      };
+    };
+    return HttpResponse.json({ path, children: tree.children.map((n) => trim(n, maxDepth)) });
+  }),
 
-        const file = getFile(path);
-        if (!file || file.type !== "file") {
-            return HttpResponse.json(
-                { message: "File not found" },
-                { status: 404 }
-            );
-        }
+  // GET /api/workspace/file - Read file content (text)
+  http.get(workspaceRoute(`${API_BASE}/workspace/file`), ({ request }) => {
+    const url = new URL(request.url);
+    const path = url.searchParams.get("path") || "";
 
-        return HttpResponse.json({
-            content: file.content || "",
-        });
-    }),
+    const file = getFile(path);
+    if (file?.type !== "file") {
+      return HttpResponse.json({ message: "File not found" }, { status: 404 });
+    }
 
-    // GET /api/files - Compatibility endpoint used by document resolvers
-    http.get(`${API_BASE}/files`, ({ request }) => {
-        const url = new URL(request.url);
-        const path = url.searchParams.get("path") || "";
-        const file = getFile(path);
+    return HttpResponse.json({
+      content: file.content || "",
+    });
+  }),
 
-        if (!file || file.type !== "file") {
-            return HttpResponse.json({ message: "File not found" }, { status: 404 });
-        }
+  // GET /api/files - Compatibility endpoint used by document resolvers
+  http.get(workspaceRoute(`${API_BASE}/files`), ({ request }) => {
+    const url = new URL(request.url);
+    const path = url.searchParams.get("path") || "";
+    const file = getFile(path);
 
-        const content = file.content || "";
-        const trimmed = content.trim();
+    if (file?.type !== "file") {
+      return HttpResponse.json({ message: "File not found" }, { status: 404 });
+    }
 
-        if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
-            try {
-                return HttpResponse.json(JSON.parse(content));
-            } catch {
-                return HttpResponse.json({ content });
-            }
-        }
+    const content = file.content || "";
+    const trimmed = content.trim();
 
+    if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
+      try {
+        return HttpResponse.json(JSON.parse(content));
+      } catch {
         return HttpResponse.json({ content });
-    }),
+      }
+    }
 
-    // GET /api/workspace/file/blob - Read file content (binary)
-    http.get(`${API_BASE}/workspace/file/blob`, ({ request }) => {
-        const url = new URL(request.url);
-        const path = url.searchParams.get("path") || "";
+    return HttpResponse.json({ content });
+  }),
 
-        const file = getFile(path);
-        if (!file || file.type !== "file") {
-            return HttpResponse.json(
-                { message: "File not found" },
-                { status: 404 }
-            );
-        }
+  // GET /api/workspace/file/blob - Read file content (binary)
+  http.get(workspaceRoute(`${API_BASE}/workspace/file/blob`), ({ request }) => {
+    const url = new URL(request.url);
+    const path = url.searchParams.get("path") || "";
 
-        const lowerPath = path.toLowerCase();
-        const isImage =
-            lowerPath.endsWith(".png") || lowerPath.endsWith(".jpg") || lowerPath.endsWith(".jpeg");
+    const file = getFile(path);
+    if (file?.type !== "file") {
+      return HttpResponse.json({ message: "File not found" }, { status: 404 });
+    }
 
-        return new HttpResponse(new Blob([file.content || ""]), {
-            headers: {
-                "Content-Type": isImage ? "image/png" : "application/octet-stream",
-            },
-        });
-    }),
+    const lowerPath = path.toLowerCase();
+    const isImage =
+      lowerPath.endsWith(".png") || lowerPath.endsWith(".jpg") || lowerPath.endsWith(".jpeg");
 
-    // POST /api/workspace/open - Set workspace path (discriminated: local | remote)
-    http.post(`${API_BASE}/workspace/open`, async ({ request }) => {
-        const body = (await request.json()) as Record<string, unknown>;
-        const kind = (body.kind as string | undefined) ?? "local";
+    return new HttpResponse(new Blob([file.bytes ?? file.content ?? ""]), {
+      headers: {
+        "Content-Type": isImage ? "image/png" : "application/octet-stream",
+      },
+    });
+  }),
 
-        if (kind === "remote") {
-            const name = String(body.name ?? "");
-            // Defer to the workspace-target mock store registered in
-            // workspace_targets.ts.  We import lazily to avoid a circular
-            // module load.
-            const { mockWorkspaceTargetsMap } = await import("./workspace_targets");
-            const target = mockWorkspaceTargetsMap.get(name);
-            if (!target) {
-                return HttpResponse.json(
-                    { detail: `workspace target ${name} not found` },
-                    { status: 404 },
-                );
-            }
-            // For dev:mock, a remote workspace exposes its own empty
-            // project/asset set — distinguishable from the local mock store.
-            return HttpResponse.json({
-                root: target.rootPath,
-                projectCount: 0,
-                assetCount: 0,
-                warnings: [],
-            });
-        }
+  // POST /api/workspace/open - Set workspace path (discriminated: local | remote)
+  http.post(workspaceRoute(`${API_BASE}/workspace/open`), async ({ request }) => {
+    const body = (await request.json()) as Record<string, unknown>;
+    const kind = (body.kind as string | undefined) ?? "local";
 
-        const path = String(body.path ?? "");
-        if (!knownWorkspacePaths.has(path)) {
-            if (body.create_if_missing !== true) {
-                return HttpResponse.json(
-                    { detail: "Workspace path not found" },
-                    { status: 404 },
-                );
-            }
-            knownWorkspacePaths.add(path);
-        }
-        const projects = getAllProjects();
-        const assets = getAllAssets();
-        return HttpResponse.json({
-            root: path,
-            projectCount: projects.length,
-            assetCount: assets.length,
-            warnings: [],
-        });
-    }),
+    if (kind === "remote") {
+      const name = String(body.name ?? "");
+      // Defer to the workspace-target mock store registered in
+      // workspace_targets.ts.  We import lazily to avoid a circular
+      // module load.
+      const { mockWorkspaceTargetsMap } = await import("./workspace_targets");
+      const target = mockWorkspaceTargetsMap.get(name);
+      if (!target) {
+        return HttpResponse.json({ detail: `workspace target ${name} not found` }, { status: 404 });
+      }
+      // For dev:mock, a remote workspace exposes its own empty
+      // project/asset set — distinguishable from the local mock store.
+      return HttpResponse.json({
+        root: target.rootPath,
+        projectCount: 0,
+        assetCount: 0,
+        warnings: [],
+      });
+    }
 
-    // POST /api/workspace/cache/invalidate — drops cache entries on the
-    // active workspace's CachedRemoteFileSystem.  Mock always responds
-    // success because dev:mock has no real cache layer; production paths
-    // 409 when the active workspace is local.
-    http.post(`${API_BASE}/workspace/cache/invalidate`, async ({ request }) => {
-        const body = (await request.json().catch(() => ({}))) as {
-            path?: string | null;
-            scope?: string;
-        };
-        const scope = body.scope ?? "all";
-        // Pretend we dropped one entry per "indices", more for "all".
-        const dropped = body.path ? 1 : scope === "indices" ? 3 : 7;
-        return HttpResponse.json({ dropped, warnings: [] });
-    }),
+    const path = String(body.path ?? "");
+    if (!knownWorkspacePaths.has(path)) {
+      if (body.create_if_missing !== true) {
+        return HttpResponse.json({ detail: "Workspace path not found" }, { status: 404 });
+      }
+      knownWorkspacePaths.add(path);
+    }
+    const projects = getAllProjects();
+    const assets = getAllAssets();
+    return HttpResponse.json({
+      root: path,
+      projectCount: projects.length,
+      assetCount: assets.length,
+      warnings: [],
+    });
+  }),
 
-    // POST /api/workspace/cache/refresh — invalidate + re-prefetch.
-    http.post(`${API_BASE}/workspace/cache/refresh`, async ({ request }) => {
-        const body = (await request.json().catch(() => ({}))) as {
-            path?: string | null;
-            scope?: string;
-        };
-        const scope = body.scope ?? "all";
-        const dropped = body.path ? 1 : scope === "indices" ? 3 : 7;
-        return HttpResponse.json({ dropped, warnings: [] });
-    }),
+  // POST /api/workspace/cache/invalidate — drops cache entries on the
+  // active workspace's CachedRemoteFileSystem.  Mock always responds
+  // success because dev:mock has no real cache layer; production paths
+  // 409 when the active workspace is local.
+  http.post(workspaceRoute(`${API_BASE}/workspace/cache/invalidate`), async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as {
+      path?: string | null;
+      scope?: string;
+    };
+    const scope = body.scope ?? "all";
+    // Pretend we dropped one entry per "indices", more for "all".
+    const dropped = body.path ? 1 : scope === "indices" ? 3 : 7;
+    return HttpResponse.json({ dropped, warnings: [] });
+  }),
 
-    // POST /api/workspace/directories - Create directory
-    http.post(`${API_BASE}/workspace/directories`, async ({ request }) => {
-        const body = (await request.json()) as { folder_id: string; path: string };
+  // POST /api/workspace/cache/refresh — invalidate + re-prefetch.
+  http.post(workspaceRoute(`${API_BASE}/workspace/cache/refresh`), async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as {
+      path?: string | null;
+      scope?: string;
+    };
+    const scope = body.scope ?? "all";
+    const dropped = body.path ? 1 : scope === "indices" ? 3 : 7;
+    return HttpResponse.json({ dropped, warnings: [] });
+  }),
 
-        createDirectory(body.path);
+  // POST /api/workspace/directories - Create directory
+  http.post(workspaceRoute(`${API_BASE}/workspace/directories`), async ({ request }) => {
+    const body = (await request.json()) as { folder_id: string; path: string };
 
-        return HttpResponse.json({
-            path: body.path,
-        });
-    }),
+    createDirectory(body.path);
 
-    // PUT /api/workspace/files - Write file content
-    http.put(`${API_BASE}/workspace/files`, async ({ request }) => {
-        const body = (await request.json()) as {
-            folder_id: string;
-            path: string;
-            content: string;
-        };
+    return HttpResponse.json({
+      path: body.path,
+    });
+  }),
 
-        writeFile(body.path, body.content);
+  // PUT /api/workspace/files - Write file content
+  http.put(workspaceRoute(`${API_BASE}/workspace/files`), async ({ request }) => {
+    const body = (await request.json()) as {
+      folder_id: string;
+      path: string;
+      content: string;
+    };
 
-        return HttpResponse.json({
-            path: body.path,
-        });
-    }),
+    writeFile(body.path, body.content);
 
-    // DELETE /api/workspace/files - Optional file deletion used by explorer actions
-    http.delete(`${API_BASE}/workspace/files`, ({ request }) => {
-        const url = new URL(request.url);
-        const path = url.searchParams.get("path") || "";
-        const deleted = deleteFile(path);
+    return HttpResponse.json({
+      path: body.path,
+    });
+  }),
 
-        if (!deleted) {
-            return HttpResponse.json({ message: "File not found" }, { status: 404 });
-        }
+  // DELETE /api/workspace/files - Optional file deletion used by explorer actions
+  http.delete(workspaceRoute(`${API_BASE}/workspace/files`), ({ request }) => {
+    const url = new URL(request.url);
+    const path = url.searchParams.get("path") || "";
+    const deleted = deleteFile(path);
 
-        return HttpResponse.json({ path });
-    }),
+    if (!deleted) {
+      return HttpResponse.json({ message: "File not found" }, { status: 404 });
+    }
+
+    return HttpResponse.json({ path });
+  }),
 ];

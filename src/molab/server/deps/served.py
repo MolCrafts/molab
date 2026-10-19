@@ -28,13 +28,13 @@ class ServedWorkspace:
 
     Attributes:
         key: Stable slug, unique within this server process — the switch handle.
-        label: Human-facing description (a path, or ``user@host:/path``).
+        label: Human-facing description (a path, or ``cluster:/path``).
         is_remote: True for an SSH-backed remote workspace.
         path: Absolute local root, or ``None`` when remote.
         target_name: Workspace-target name used as the remote active-workspace
             identifier (registry name or process-scoped slug from CLI SCP).
         remote_target: Optional inline :class:`WorkspaceTarget` for CLI
-            ``-ws user@host:/path`` so serve does not have to persist into
+            ``-ws cluster:/path`` so serve does not have to persist into
             ``~/.molab/workspace_targets.json``. When set, resolution prefers
             this over the on-disk registry.
     """
@@ -106,7 +106,7 @@ def _served_by_key(key: str) -> ServedWorkspace | None:
 def resolve_served_remote_target(identifier: str) -> WorkspaceTarget:
     """Resolve a remote :class:`WorkspaceTarget` by active-workspace id.
 
-    Prefers an inline descriptor on the served set (CLI ``-ws user@host:/path``)
+    Prefers an inline descriptor on the served set (CLI ``-ws cluster:/path``)
     so serve need not write the on-disk registry. Accepts the served ``key``,
     ``target_name``, or the target's own ``name`` (UI activate may send any of
     these). Falls back to the process :class:`WorkspaceTargetRegistry`.

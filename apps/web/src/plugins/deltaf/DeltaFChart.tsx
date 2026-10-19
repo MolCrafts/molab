@@ -1,7 +1,8 @@
 import type { BarChartConfig } from "@molcrafts/molplot";
+import { useSuspenseQuery } from "@tanstack/react-query";
 import type { JSX } from "react";
-import { useEffect, useMemo, useState } from "react";
-import { runsApi } from "@/api";
+import { useMemo } from "react";
+import { runFileTextQueryOptions } from "@/app/state/entityQueries";
 import type { RendererProps } from "@/app/types";
 import { DELTA_F_GROUP_COLORS } from "@/lib/chart-tokens";
 import { MolplotBarChart } from "@/plugins/molplot";
@@ -76,49 +77,37 @@ export const DeltaFChart = ({
   discoveredFiles,
   executionId,
 }: DeltaFTabProps): JSX.Element => {
-  const run = snapshot.runs.find((item) => item.id === selection.objectId) ?? null;
-  // Depend on the stable string ids, NOT the `run` object: snapshot/SSE updates
-  // hand back a fresh `run` reference every parent render, which would re-fire
-  // the fetch → setReport → new config → MolplotBarChart dispose+recreate
-  // (visible flicker). Strings are value-stable, so this fetches exactly once.
-  const projectId = run?.projectId ?? null;
-  const experimentId = run?.experimentId ?? null;
-  const runId = run?.id ?? null;
-  const relPath = discoveredFiles?.[0]?.relPath ?? "phase1_df_report.json";
+  const run = snapshot.runs.find((item) => item.id === selection.objectId);
+  if (!run || !executionId)
+    return <div className="p-4 text-label text-muted-foreground">Select an execution.</div>;
+  return (
+    <DeltaFReportChart
+      projectId={run.projectId}
+      experimentId={run.experimentId}
+      runId={run.id}
+      executionId={executionId}
+      path={discoveredFiles?.[0]?.relPath ?? "phase1_df_report.json"}
+    />
+  );
+};
 
-  const [report, setReport] = useState<DeltaFReport | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    if (!projectId || !experimentId || !runId || !executionId) {
-      return;
-    }
-    let cancelled = false;
-    void (async () => {
-      try {
-        const res = await runsApi.getRunFileText(
-          projectId,
-          experimentId,
-          runId,
-          executionId,
-          relPath,
-        );
-        if (cancelled) {
-          return;
-        }
-        setReport(JSON.parse(res.content) as DeltaFReport);
-        setError(null);
-      } catch (loadError) {
-        if (!cancelled) {
-          setError(loadError instanceof Error ? loadError.message : "failed to load ΔF report");
-        }
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [executionId, projectId, experimentId, runId, relPath]);
-
+const DeltaFReportChart = ({
+  projectId,
+  experimentId,
+  runId,
+  executionId,
+  path,
+}: {
+  projectId: string;
+  experimentId: string;
+  runId: string;
+  executionId: string;
+  path: string;
+}): JSX.Element => {
+  const { data: report } = useSuspenseQuery({
+    ...runFileTextQueryOptions(projectId, experimentId, runId, executionId, path),
+    select: (content) => JSON.parse(content) as DeltaFReport,
+  });
   const config = useMemo<BarChartConfig | null>(() => {
     if (!report?.deltaF) {
       return null;
@@ -154,14 +143,12 @@ export const DeltaFChart = ({
     };
   }, [report]);
 
-  if (!runId) {
-    return <div className="p-4 text-body-lg text-muted-foreground">No run selected.</div>;
-  }
-  if (error) {
-    return <div className="p-4 text-body-lg text-status-failed-foreground">ΔF report: {error}</div>;
-  }
   if (!config) {
-    return <div className="p-4 text-body-lg text-muted-foreground">Loading ΔF report…</div>;
+    return (
+      <div className="p-4 text-body-lg text-muted-foreground">
+        The ΔF report contains no decomposition.
+      </div>
+    );
   }
   return (
     <div className="flex flex-col gap-2 p-4">

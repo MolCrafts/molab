@@ -23,7 +23,6 @@ export {
   type WorkbenchRetryActionProps,
   WorkbenchToggleAction,
 } from "./WorkbenchAction";
-export { WorkbenchHeartbeat, type WorkbenchHeartbeatProps } from "./WorkbenchHeartbeat";
 export {
   type WorkbenchOperationKind,
   WorkbenchOperationState,
@@ -39,5 +38,4 @@ export {
   WorkflowNode,
   type WorkflowNodeCanvasRole,
   type WorkflowNodeProps,
-  type WorkflowNodeRole,
 } from "./WorkflowNode";

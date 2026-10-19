@@ -29,11 +29,7 @@ export function SettingsPage(): JSX.Element {
       groupLabel: "Display",
       icon: <Type className="size-icon-sm" aria-hidden />,
       content: (
-        <SettingsSection
-          id="appearance"
-          title="Appearance"
-          description="How large the interface reads in this browser."
-        >
+        <SettingsSection id="appearance" title="Appearance">
           <AppearancePanel />
         </SettingsSection>
       ),
@@ -45,11 +41,7 @@ export function SettingsPage(): JSX.Element {
       groupLabel: "Workspace",
       icon: <Wifi className="size-icon-sm" aria-hidden />,
       content: (
-        <SettingsSection
-          id="remote-workspaces"
-          title="Remote workspaces"
-          description="SSH-backed roots the server can open as the active workspace."
-        >
+        <SettingsSection id="remote-workspaces" title="Remote workspaces">
           <RemoteWorkspacesPanel />
         </SettingsSection>
       ),
@@ -61,11 +53,7 @@ export function SettingsPage(): JSX.Element {
       groupLabel: "Workspace",
       icon: <Cpu className="size-icon-sm" aria-hidden />,
       content: (
-        <SettingsSection
-          id="compute-targets"
-          title="Compute targets"
-          description="Named execution backends for runs (local / remote schedulers)."
-        >
+        <SettingsSection id="compute-targets" title="Compute targets">
           <ComputeTargetsPanel />
         </SettingsSection>
       ),
@@ -77,11 +65,7 @@ export function SettingsPage(): JSX.Element {
       groupLabel: "Workspace",
       icon: <Puzzle className="size-icon-sm" aria-hidden />,
       content: (
-        <SettingsSection
-          id="ui-plugins"
-          title="UI plugins"
-          description="Turn panel plugins on or off. Disabled plugins stop contributing tabs, viewers, and inspector surfaces until re-enabled."
-        >
+        <SettingsSection id="ui-plugins" title="UI plugins">
           <UiPluginsPanel />
         </SettingsSection>
       ),
@@ -113,14 +97,8 @@ export function SettingsPage(): JSX.Element {
   ];
 
   return (
-    <div className="flex h-full min-h-0 flex-col p-3 sm:p-4">
-      <SettingsShell
-        title="Settings"
-        description="Display, workspace connections, compute targets, UI plugins, and access."
-        entries={entries}
-        defaultId="appearance"
-        className="h-full"
-      />
+    <div className="flex h-full min-h-0 flex-col">
+      <SettingsShell title="Settings" entries={entries} defaultId="appearance" className="h-full" />
     </div>
   );
 }

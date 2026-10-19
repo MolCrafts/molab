@@ -135,11 +135,9 @@ export function RemoteWorkspacesPanel(): JSX.Element {
         : null;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-2">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-body text-muted-foreground">
-          {targets.length} {targets.length === 1 ? "connection is" : "connections are"} registered.
-        </p>
+        <p className="text-body text-muted-foreground">{targets.length} connections</p>
         {writeDeniedReason ? (
           <WorkbenchIconAction label="Add remote workspace" deniedReason={writeDeniedReason}>
             <Plus className="size-3.5" />
@@ -160,7 +158,7 @@ export function RemoteWorkspacesPanel(): JSX.Element {
         <p className="text-body-lg text-muted-foreground">Loading…</p>
       ) : targets.length === 0 ? (
         <p className="bg-surface/60 px-4 py-8 text-center text-body text-muted-foreground">
-          No remote workspaces registered. Add one to mount a workspace hosted on an HPC node.
+          No connections. Use + to add a workspace.
         </p>
       ) : (
         <ul className="space-y-1">
@@ -169,19 +167,17 @@ export function RemoteWorkspacesPanel(): JSX.Element {
             return (
               <li
                 key={t.name}
-                className={`flex flex-col gap-3 px-3 py-3 transition-colors sm:flex-row sm:items-center ${
+                className={`flex flex-col gap-2 px-2 py-1 transition-colors sm:flex-row sm:items-center ${
                   isActive ? "bg-accent-muted/60" : "bg-surface/60 hover:bg-surface"
                 }`}
               >
-                <div className="min-w-0 flex-1">
+                <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-1">
                   <div className="flex items-center gap-2">
-                    <span className="truncate font-mono text-body font-medium">{t.name}</span>
-                    <WorkbenchTag meaning={isActive ? "selection" : "metadata"}>
-                      {isActive ? "Active" : "Inactive"}
-                    </WorkbenchTag>
+                    <span className="truncate text-body font-medium">{t.name}</span>
+                    {isActive && <WorkbenchTag meaning="selection">Active</WorkbenchTag>}
                   </div>
-                  <div className="mt-1 truncate font-mono text-micro text-muted-foreground">
-                    {t.host} → {t.rootPath}
+                  <div className="min-w-0 flex-1 truncate font-mono text-label text-muted-foreground">
+                    {t.rootPath}
                   </div>
                 </div>
                 <div className="flex flex-none flex-wrap items-center justify-end gap-1">

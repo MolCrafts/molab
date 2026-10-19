@@ -2,17 +2,18 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
-/**
- * Wire form for a :class:`WorkspaceTarget`.
- */
 export type WorkspaceTargetResponse = {
     name: string;
-    host: string;
+    registryId: string;
+    clusterId: string;
     rootPath: string;
-    port?: (number | null);
-    identityFile?: (string | null);
-    sshOpts?: Array<string>;
     cacheDir?: (string | null);
-    cacheTtlSeconds?: number;
+    cacheMode?: WorkspaceTargetResponse.cacheMode;
 };
+export namespace WorkspaceTargetResponse {
+    export enum cacheMode {
+        PINNED = 'pinned',
+        STRICT = 'strict',
+    }
+}
 

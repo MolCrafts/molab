@@ -8,14 +8,13 @@ warning string and the caller falls back to skipping the delete.
 
 Three outcomes:
 
-- ``("molq", cluster_name, molq_job_id)`` — cancel via ``molq.Submitor``
+- ``("molq", cluster_name, molq_job_id)`` — cancel via ``molq.Molq.job``
 - ``("local", pid)`` — send ``SIGTERM`` on the same host
 - ``("none", reason)`` — cannot cancel; caller should warn, not delete
 """
 
 from __future__ import annotations
 
-import contextlib
 import os
 import platform
 import signal
@@ -84,19 +83,8 @@ def classify(run: Run) -> CancelPlan:
     return CancelPlan(kind="none", detail=reason)
 
 
-def try_cancel(
-    run: Run,
-    *,
-    fallback_scheduler: str = "local",
-    fallback_cluster: str = "default",
-) -> str | None:
-    """Attempt to cancel *run*.  Return ``None`` on success, a warning
-    message otherwise.  Never raises for caller-actionable reasons.
-
-    ``fallback_scheduler`` / ``fallback_cluster`` fill in when the run's
-    recorded executor_info lacks them (the CLI forwards its ``--scheduler`` /
-    ``--cluster`` flags here).
-    """
+def try_cancel(run: Run) -> str | None:
+    """Cancel using the execution's recorded destination; return an actionable warning."""
     plan = classify(run)
     if plan.kind == "none":
         return f"cannot cancel {run.id[:6]}: {plan.detail}"
@@ -119,22 +107,19 @@ def try_cancel(
         return None
 
     # plan.kind == "molq"
-    from molq import Cluster, Submitor
+    from molq import MolqError
 
-    scheduler = plan.scheduler or fallback_scheduler
-    cluster = plan.cluster or fallback_cluster
-    submitor = Submitor(Cluster(name=cluster, scheduler=scheduler))
+    from molab.workspace.connection import get_client
+
+    from .submit import decode_job_ref
+
+    ref = decode_job_ref(plan.job_id) if plan.job_id else None
+    if ref is None:
+        native = plan.scheduler_job_id or plan.job_id or ""
+        return f"cannot cancel {run.id[:6]}: scheduler id {native} has no molq job ref"
     try:
-        if plan.job_id is not None:
-            submitor.cancel_job(plan.job_id)
-        elif plan.scheduler_job_id is not None:
-            submitor._scheduler_impl.cancel(plan.scheduler_job_id)
-        else:  # pragma: no cover — classify() guarantees one of the two ids
-            return f"cannot cancel {run.id[:6]}: no molq job metadata"
-    except Exception as exc:  # molq raises a hierarchy, but surface all
+        get_client(ref["registry_id"]).job(ref).cancel()
+    except MolqError as exc:
         return f"molq cancel failed for {run.id[:6]}: {exc}"
-    finally:
-        with contextlib.suppress(Exception):
-            submitor.close()
     run.cancel(active.id)
     return None

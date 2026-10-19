@@ -3,16 +3,9 @@
  * Registered as a run tab contribution (value ``molq``); only matched for molq backends.
  */
 
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@molcrafts/ui";
 import { DashboardCanvas, DashboardCard, OverviewSurface } from "@/app/components/entity";
 import type { RendererProps } from "@/app/types";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 
 const formatExecutorLabel = (key: string): string =>
   key.replace(/_/g, " ").replace(/\b\w/g, (match) => match.toUpperCase());

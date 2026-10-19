@@ -180,8 +180,8 @@ Restructuring an older workspace into this layout is `molab migrate layout <old>
 
 Python install and UI compile are **separate jobs**. Default `pip` / `uv pip` / `python -m build` **never** invoke npm.
 
-- **Daily (checkout):** `molab serve --dev -ws ./lab` — open the printed **Dev UI** (`:5173`), not the API port. That starts `npm run dev:api` (real `/api` proxy). `npm run dev:web` is the MSW mock, not this path.
-- **Bundled preview:** `npm run build:web` then `molab serve -ws ./lab` — open `:8000`. Editable installs read in-tree `src/molab/dist/`; **do not reinstall Python**.
+- **Daily (checkout):** `molab serve ./lab --dev` — open the printed **Dev UI** (`:5173`), not the API port. That starts `npm run dev:api` (real `/api` proxy). `npm run dev:web` is the MSW mock, not this path.
+- **Bundled preview:** `npm run build:web` then `molab serve ./lab` — open `:8000`. Editable installs read in-tree `src/molab/dist/`; **do not reinstall Python**.
 - **Wheel:** `uv pip install . -C build-web=true` (never `-C build-ui=true` / `npm run build:ui`). Empty `dist/` → API-only.
 
 ```

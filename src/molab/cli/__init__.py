@@ -59,9 +59,7 @@ app.add_typer(history_app, name="history")
 app.add_typer(migrate_app, name="migrate")
 
 # ── session + config groups ──────────────────────────────────────────────────
-from molab.cli.session_cmd import session_app  # noqa: E402
 
-app.add_typer(session_app, name="session")
 
 from molab.cli.config_cmd import config_app  # noqa: E402
 

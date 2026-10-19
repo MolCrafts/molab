@@ -1,12 +1,14 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
-import { experimentPath, projectPath, runPath } from "@/app/entities/paths";
 import { workspaceApi } from "@/api";
 import { AuthGate, AuthProvider, LoginPage } from "@/app/auth";
+import { useWorkspaceTabVisible } from "@/app/dashboard/useWorkspaceTab";
+import { experimentPath, projectPath, runPath } from "@/app/entities/paths";
 import { AppShell } from "@/app/layout/AppShell";
 import { ErrorBoundary } from "@/app/layout/ErrorBoundary";
 import { RouteProfiler } from "@/app/layout/RouteProfiler";
 import { prefetchPrimaryNavigationOnIdle } from "@/app/navigation/prefetch";
+import { navigationVisibleAtScope } from "@/app/navigation/sections";
 import { prefetchRenderer } from "@/app/renderers/lazyRenderers";
 import { useWorkspaceRuns } from "@/app/runs/useWorkspaceRuns";
 import {
@@ -15,6 +17,7 @@ import {
   useNavigationState,
 } from "@/app/state/useNavigationState";
 import { useWorkspaceState } from "@/app/state/useWorkspaceState";
+import { getWorkspaceQueryScope, onWorkspaceSwitching } from "@/app/state/workspaceSwitchEvents";
 import type { InspectorTarget, Selection } from "@/app/types";
 import { prefetchMarkdown } from "@/components/ui/markdown";
 import { prefetchOnIdle } from "@/lib/lazy-with-prefetch";
@@ -48,11 +51,13 @@ const WorkspaceApp = ({ pathname }: { pathname: string }): JSX.Element => {
     isProjectExpanded,
     isExperimentExpanded,
   } = useWorkspaceState(activeView);
+  const workspaceTab = useWorkspaceTabVisible(snapshot);
   // Subscribe to the runs poller only when the user is on an operational runs surface; the
   // hook still gives us a refresh handle even when disabled so manual refresh
   // works regardless of polling state.
   const runs = useWorkspaceRuns({ enabled: activeView === "runs" || activeView === "dashboard" });
   const { leftPanelView, selection, setLeftPanelView, setSelection } = useNavigationState(snapshot);
+  const panelView = leftPanelView === "dashboard" && !workspaceTab ? "projects" : leftPanelView;
   const hierarchyRoute = hierarchyRouteContextFromPath(pathname);
   const routeProjectId = hierarchyRoute?.projectId ?? null;
   const routeExperimentId = hierarchyRoute?.experimentId ?? null;
@@ -62,8 +67,7 @@ const WorkspaceApp = ({ pathname }: { pathname: string }): JSX.Element => {
 
   useEffect(() => {
     const scope = snapshot.serveScope;
-    if (!scope || scope.kind === "workspace.root") return;
-    if (pathname !== "/" && pathname !== "/projects") return;
+    if (!scope || navigationVisibleAtScope(leftPanelView, scope.kind)) return;
     const target =
       scope.kind === "workspace.project"
         ? projectPath(scope.id)
@@ -73,7 +77,13 @@ const WorkspaceApp = ({ pathname }: { pathname: string }): JSX.Element => {
             ? runPath("", "", scope.id)
             : null;
     if (target && target !== pathname) navigate(target, { replace: true });
-  }, [navigate, pathname, snapshot.serveScope]);
+  }, [leftPanelView, navigate, pathname, snapshot.serveScope]);
+
+  useEffect(() => {
+    if (leftPanelView === "dashboard" && !workspaceTab && pathname !== "/projects") {
+      navigate("/projects", { replace: true });
+    }
+  }, [leftPanelView, navigate, pathname, workspaceTab]);
 
   useEffect(() => {
     prefetchPrimaryNavigationOnIdle();
@@ -101,19 +111,6 @@ const WorkspaceApp = ({ pathname }: { pathname: string }): JSX.Element => {
     };
   }, [expandExperiment, expandProject, routeExperimentId, routeProjectId]);
 
-  // A Project page summarises the status of every run below it, and refuses to
-  // claim a status mix from a partial snapshot. Experiments load their runs
-  // lazily (on expand), so without this the overview waits forever. Each call
-  // is a no-op once that experiment is loaded.
-  useEffect(() => {
-    if (!routeProjectId || routeExperimentId) return;
-    for (const experiment of snapshot.experiments) {
-      if (experiment.projectId === routeProjectId) {
-        void expandExperiment(routeProjectId, experiment.id);
-      }
-    }
-  }, [expandExperiment, routeExperimentId, routeProjectId, snapshot.experiments]);
-
   useEffect(() => {
     setInspectorTarget(buildDefaultInspectorTarget(selection));
   }, [selection]);
@@ -134,10 +131,6 @@ const WorkspaceApp = ({ pathname }: { pathname: string }): JSX.Element => {
       experimentView: "workflow",
     });
   }, [selection, setSelection, snapshot.experiments, snapshot.workflows]);
-
-  if (error) {
-    throw error;
-  }
 
   const handleSelectionChange = (nextSelection: Selection): void => {
     setSelection(nextSelection);
@@ -164,13 +157,7 @@ const WorkspaceApp = ({ pathname }: { pathname: string }): JSX.Element => {
   // The toolbar refresh button targets only the data the active view actually
   // reads — runs view pulls from the runs poller; everything else reads from
   // the workspace snapshot.
-  const handleActiveRefresh = useCallback((): void => {
-    if (activeView === "runs" || activeView === "dashboard") {
-      runs.refresh();
-      return;
-    }
-    refresh();
-  }, [activeView, refresh, runs]);
+  const handleActiveRefresh = refresh;
 
   const isRefreshing =
     activeView === "runs" || activeView === "dashboard" ? runs.loading : status === "loading";
@@ -180,11 +167,12 @@ const WorkspaceApp = ({ pathname }: { pathname: string }): JSX.Element => {
   return (
     <ErrorBoundary>
       <AppShell
-        leftPanelView={leftPanelView}
+        leftPanelView={panelView}
         selection={selection}
         snapshot={snapshot}
         inspectorTarget={inspectorTarget}
         isRefreshing={isRefreshing}
+        loadError={error}
         onLeftPanelViewChange={setLeftPanelView}
         onSelectionChange={handleSelectionChange}
         onInspectorTargetChange={setInspectorTarget}
@@ -212,13 +200,18 @@ const WorkspaceApp = ({ pathname }: { pathname: string }): JSX.Element => {
 
 const App = (): JSX.Element => {
   const location = useLocation();
+  const workspaceScope = useSyncExternalStore(
+    onWorkspaceSwitching,
+    getWorkspaceQueryScope,
+    getWorkspaceQueryScope,
+  );
   const content = (
     <AuthProvider>
       {location.pathname === "/login" ? (
         <LoginPage />
       ) : (
         <AuthGate>
-          <WorkspaceApp pathname={location.pathname} />
+          <WorkspaceApp key={workspaceScope} pathname={location.pathname} />
         </AuthGate>
       )}
     </AuthProvider>

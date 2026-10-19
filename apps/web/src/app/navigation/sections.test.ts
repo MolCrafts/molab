@@ -8,6 +8,7 @@ import {
   leftPanelViewFromPath,
   managementNavigationContribution,
   navigationContributions,
+  navigationVisibleAtScope,
   railNavigationContributions,
 } from "./sections";
 
@@ -56,6 +57,36 @@ describe("navigation contributions", () => {
     );
     expect(getNavigationContribution("asset").emptySelection?.title).toBe("No asset selected");
     expect(getNavigationContribution("workspace").emptySelection?.title).toBe("No file selected");
+  });
+
+  it("hides rail sections above the served directory and keeps the rest", () => {
+    expect(railNavigationContributions("workspace.root").map(({ id }) => id)).toEqual([
+      "dashboard",
+      "projects",
+      "runs",
+      "knowledge",
+      "asset",
+      "workspace",
+    ]);
+    expect(railNavigationContributions("workspace.project").map(({ id }) => id)).toEqual([
+      "projects",
+      "runs",
+      "knowledge",
+      "asset",
+      "workspace",
+    ]);
+    expect(railNavigationContributions("workspace.experiment").map(({ id }) => id)).toEqual([
+      "runs",
+      "knowledge",
+      "asset",
+      "workspace",
+    ]);
+    expect(railNavigationContributions("workspace.run").map(({ id }) => id)).toEqual([
+      "knowledge",
+      "asset",
+      "workspace",
+    ]);
+    expect(navigationVisibleAtScope("settings", "workspace.run")).toBe(true);
   });
 
   it("matches canonical and compatibility paths", () => {

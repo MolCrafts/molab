@@ -1,24 +1,22 @@
-import { ArrowDown, ArrowUp, ArrowUpDown, ChevronLeft, ChevronRight, Table2 } from "lucide-react";
-import type { JSX, ReactNode } from "react";
-import { useEffect, useMemo } from "react";
-import { EmptyState } from "@/app/components/entity";
-import { ROW_PADDING_DEFAULT } from "@/app/components/entity/density";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
+  Checkbox,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import {
   Table,
   TableBody,
   TableCell,
   TableHead,
   TableHeader,
   TableRow,
-} from "@/components/ui/table";
+} from "@molcrafts/ui";
+import { ArrowDown, ArrowUp, ArrowUpDown, ChevronLeft, ChevronRight, Table2 } from "lucide-react";
+import type { JSX, ReactNode } from "react";
+import { useEffect, useMemo } from "react";
+import { EmptyState } from "@/app/components/entity";
+import { ROW_PADDING_DEFAULT } from "@/app/components/entity/density";
 import { RunStatusBadge, WorkbenchIconAction } from "@/components/workbench";
 import { formatDuration, formatRelative } from "@/lib/format-time";
 import { cn } from "@/lib/utils";
@@ -31,6 +29,7 @@ import {
   PAGE_SIZE_OPTIONS,
   paginate,
   sortJobs,
+  workspaceRunKey,
 } from "./jobsTable";
 import { runExecutorFacetLabel, runPresentationStatus } from "./projections";
 import type { WorkspaceRunRow } from "./types";
@@ -86,7 +85,7 @@ const COLUMNS: ColumnDef[] = [
   { key: "status", label: "Status", className: "w-30" },
   { key: "name", label: "Run" },
   { key: "project", label: "Project · Experiment", className: "w-44" },
-  { key: "backend", label: "Backend", className: "w-24" },
+  { key: "cluster", label: "Cluster", className: "w-32" },
   { key: "attempts", label: "Attempts", align: "right", className: "w-24" },
   { key: "duration", label: "Duration", align: "right", className: "w-24" },
   { key: "submitted", label: "Submitted", align: "right", className: "w-26" },
@@ -109,7 +108,7 @@ export const RunsJobsTable = ({
   onPageSizeChange,
 }: RunsJobsTableProps): JSX.Element => {
   const sorted = useMemo(() => sortJobs(rows, sort), [rows, sort]);
-  const sortedIds = useMemo(() => sorted.map((run) => run.id), [sorted]);
+  const sortedIds = useMemo(() => sorted.map(workspaceRunKey), [sorted]);
   const sortedIndex = useMemo(
     () => new Map(sortedIds.map((id, index) => [id, index] as const)),
     [sortedIds],
@@ -156,14 +155,13 @@ export const RunsJobsTable = ({
           </TableHeader>
           <TableBody className="divide-y divide-border/50">
             {slice.items.map((run) => {
-              const isSelected = run.id === selectedRunId;
+              const isSelected = workspaceRunKey(run) === selectedRunId;
               const duration = computeRunDurationSeconds(run);
               const presentationStatus = runPresentationStatus(run);
-              const backend = runExecutorFacetLabel(run, "backend");
               const cluster = runExecutorFacetLabel(run, "cluster_name");
               return (
                 <TableRow
-                  key={run.id}
+                  key={workspaceRunKey(run)}
                   tabIndex={0}
                   aria-label={`Open run ${run.name || run.id}`}
                   aria-selected={isSelected}
@@ -187,16 +185,20 @@ export const RunsJobsTable = ({
                     <Td className="align-middle">
                       {/* Stop propagation: ticking gathers, it does not open. */}
                       <Checkbox
-                        checked={selection.selected.has(run.id)}
+                        checked={selection.selected.has(workspaceRunKey(run))}
                         aria-label={`${
-                          selection.selected.has(run.id) ? "Remove" : "Add"
+                          selection.selected.has(workspaceRunKey(run)) ? "Remove" : "Add"
                         } run ${run.name || run.id}`}
                         onClick={(event) => {
                           event.stopPropagation();
-                          selection.selectAt(sortedIndex.get(run.id) ?? 0, sortedIds, {
-                            shift: event.shiftKey,
-                            meta: !event.shiftKey,
-                          });
+                          selection.selectAt(
+                            sortedIndex.get(workspaceRunKey(run)) ?? 0,
+                            sortedIds,
+                            {
+                              shift: event.shiftKey,
+                              meta: !event.shiftKey,
+                            },
+                          );
                         }}
                       />
                     </Td>
@@ -224,14 +226,9 @@ export const RunsJobsTable = ({
                     </div>
                   </Td>
                   <Td className="align-middle text-muted-foreground">
-                    {backend ? (
-                      <div className="min-w-0">
-                        <p className="truncate text-foreground">{backend}</p>
-                        {cluster && <p className="truncate font-mono text-micro">{cluster}</p>}
-                      </div>
-                    ) : (
-                      <span>—</span>
-                    )}
+                    <p className="truncate font-mono text-label" title={cluster ?? undefined}>
+                      {cluster ?? "—"}
+                    </p>
                   </Td>
                   <Td className="text-right align-middle tabular-nums text-muted-foreground">
                     {run.statusSummary.total}

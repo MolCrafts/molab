@@ -7,6 +7,9 @@ export const DASHBOARD_COLUMNS = 12;
 
 export const DASHBOARD_ROW_PX = 72;
 
+/** Space between cells. A span includes the gaps between its rows. */
+export const DASHBOARD_GAP_PX = 16;
+
 const LAYOUT_VERSION = 1;
 
 const MAX_HEIGHT = 16;
@@ -27,6 +30,11 @@ export type DashboardWidgetKind =
   | "schedule"
   | "needs-attention";
 
+/**
+ * Each widget draws the one gauge its data has a shape for — a ledger for a
+ * status mix, mirrored columns for events in time — so none offers a choice
+ * of chart mark. A stored `mark` from an older layout is dropped on read.
+ */
 export interface ExecutionStatusOptions {
   statuses: StatusGroupId[];
 }
@@ -86,16 +94,16 @@ export const WIDGET_CATALOG: readonly WidgetSpec[] = [
     kind: "execution-status",
     title: "Execution status",
     description: "Attempts by status",
-    defaultW: 6,
-    defaultH: 4,
-    minW: 4,
-    minH: 3,
+    defaultW: 12,
+    defaultH: 2,
+    minW: 6,
+    minH: 2,
   },
   {
     kind: "activity",
     title: "Activity",
     description: "Starts and finishes",
-    defaultW: 6,
+    defaultW: 12,
     defaultH: 3,
     minW: 4,
     minH: 2,
@@ -105,7 +113,7 @@ export const WIDGET_CATALOG: readonly WidgetSpec[] = [
     title: "Backends",
     description: "Status mix per backend",
     defaultW: 6,
-    defaultH: 4,
+    defaultH: 3,
     minW: 4,
     minH: 3,
   },
@@ -114,7 +122,7 @@ export const WIDGET_CATALOG: readonly WidgetSpec[] = [
     title: "Run duration",
     description: "Wall-clock spread",
     defaultW: 6,
-    defaultH: 4,
+    defaultH: 3,
     minW: 4,
     minH: 3,
   },
@@ -122,7 +130,7 @@ export const WIDGET_CATALOG: readonly WidgetSpec[] = [
     kind: "schedule",
     title: "Schedule",
     description: "Recently active runs",
-    defaultW: 8,
+    defaultW: 12,
     defaultH: 5,
     minW: 5,
     minH: 3,
@@ -131,8 +139,8 @@ export const WIDGET_CATALOG: readonly WidgetSpec[] = [
     kind: "needs-attention",
     title: "Needs attention",
     description: "Failed and cancelled runs",
-    defaultW: 4,
-    defaultH: 5,
+    defaultW: 5,
+    defaultH: 3,
     minW: 3,
     minH: 3,
   },
@@ -145,6 +153,8 @@ const specFor = (kind: DashboardWidgetKind): WidgetSpec => {
 };
 
 export const widgetTitle = (kind: DashboardWidgetKind): string => specFor(kind).title;
+
+export const widgetDescription = (kind: DashboardWidgetKind): string => specFor(kind).description;
 
 const clamp = (value: number, min: number, max: number): number =>
   Math.min(max, Math.max(min, value));
@@ -236,14 +246,62 @@ const place = (
   return widget as DashboardWidget;
 };
 
+/**
+ * The composed default. The status ledger sits in the page lead, not here.
+ * Column edges stagger row to row (8|4, then 7|5) so the sheet does not read
+ * as one ruled grid of matching tiles.
+ */
 export const defaultWidgets = (): DashboardWidget[] => [
-  place("execution-status", "execution-status", 0, 0, 6, 4, defaultOptions("execution-status")),
-  place("activity", "activity", 6, 0, 6, 3, defaultOptions("activity")),
-  place("backends", "backends", 0, 4, 6, 4, defaultOptions("backends")),
-  place("run-duration", "run-duration", 6, 3, 6, 5, defaultOptions("run-duration")),
-  place("schedule", "schedule", 0, 8, 8, 5, defaultOptions("schedule")),
-  place("needs-attention", "needs-attention", 8, 8, 4, 5, defaultOptions("needs-attention")),
+  place("activity", "activity", 0, 0, 8, 3, defaultOptions("activity")),
+  place("needs-attention", "needs-attention", 8, 0, 4, 3, defaultOptions("needs-attention")),
+  place("run-duration", "run-duration", 0, 3, 7, 3, defaultOptions("run-duration")),
+  place("backends", "backends", 7, 3, 5, 3, defaultOptions("backends")),
+  place("schedule", "schedule", 0, 6, 12, 5, defaultOptions("schedule")),
 ];
+
+type Footprint = { kind: DashboardWidgetKind; x: number; y: number; w: number; h: number };
+
+/**
+ * Mosaics this page shipped as its default before. An operator who never
+ * moved a widget still has one of these in local storage; reading it back
+ * adopts the current default instead of freezing the old one.
+ */
+const LEGACY_DEFAULTS: readonly (readonly Footprint[])[] = [
+  [
+    { kind: "execution-status", x: 0, y: 0, w: 6, h: 4 },
+    { kind: "activity", x: 6, y: 0, w: 6, h: 3 },
+    { kind: "backends", x: 0, y: 4, w: 6, h: 4 },
+    { kind: "run-duration", x: 6, y: 3, w: 6, h: 5 },
+    { kind: "schedule", x: 0, y: 8, w: 8, h: 5 },
+    { kind: "needs-attention", x: 8, y: 8, w: 4, h: 5 },
+  ],
+  [
+    { kind: "execution-status", x: 0, y: 0, w: 7, h: 3 },
+    { kind: "needs-attention", x: 7, y: 0, w: 5, h: 3 },
+    { kind: "activity", x: 0, y: 3, w: 12, h: 3 },
+    { kind: "backends", x: 0, y: 6, w: 6, h: 3 },
+    { kind: "run-duration", x: 6, y: 6, w: 6, h: 3 },
+    { kind: "schedule", x: 0, y: 9, w: 12, h: 5 },
+  ],
+];
+
+/** Same footprint, ids still the kind names: nobody arranged this layout. */
+const isUntouchedLegacyLayout = (widgets: readonly DashboardWidget[]): boolean =>
+  LEGACY_DEFAULTS.some(
+    (legacy) =>
+      widgets.length === legacy.length &&
+      legacy.every((expected) =>
+        widgets.some(
+          (widget) =>
+            widget.kind === expected.kind &&
+            widget.id === expected.kind &&
+            widget.x === expected.x &&
+            widget.y === expected.y &&
+            widget.w === expected.w &&
+            widget.h === expected.h,
+        ),
+      ),
+  );
 
 const isKind = (value: unknown): value is DashboardWidgetKind =>
   WIDGET_CATALOG.some((item) => item.kind === value);
@@ -280,7 +338,8 @@ export const parseLayout = (raw: string | null): DashboardWidget[] => {
       ids.add(widget.id);
       return true;
     });
-    return unique.length > 0 ? compactWidgets(unique) : defaultWidgets();
+    if (unique.length === 0 || isUntouchedLegacyLayout(unique)) return defaultWidgets();
+    return compactWidgets(unique);
   } catch {
     return defaultWidgets();
   }
@@ -389,6 +448,7 @@ export const addWidget = (
   kind: DashboardWidgetKind,
   id: string,
 ): DashboardWidget[] => {
+  if (widgets.some((widget) => widget.kind === kind)) return [...widgets];
   const spec = specFor(kind);
   const y = widgets.reduce((max, widget) => Math.max(max, widget.y + widget.h), 0);
   return [...widgets, place(kind, id, 0, y, spec.defaultW, spec.defaultH, defaultOptions(kind))];

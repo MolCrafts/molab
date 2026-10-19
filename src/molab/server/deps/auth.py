@@ -91,3 +91,18 @@ def auth_error_http(exc: AuthError) -> HTTPException:
     if exc.code in {"not_empty", "user_error"}:
         return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=exc.message)
     return HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=exc.message)
+
+
+def require_registry_access(
+    user: Annotated[AuthUser | None, Depends(require_user_if_enabled)],
+) -> None:
+    """Registry-wide jobs/logs are available only to unrestricted users.
+
+    Jobs need not belong to a served workspace, so a workspace-scoped session
+    cannot safely address this global surface. Auth-disabled local use passes.
+    """
+    if user is not None:
+        try:
+            get_auth_service().assert_workspace_access(user, "*")
+        except AuthError as exc:
+            raise auth_error_http(exc) from exc

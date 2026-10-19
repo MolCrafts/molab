@@ -1,6 +1,3 @@
-import { Plus } from "lucide-react";
-import { useState } from "react";
-import { projectsApi } from "@/api";
 import {
   Dialog,
   DialogContent,
@@ -9,9 +6,12 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+  Input,
+  Label,
+} from "@molcrafts/ui";
+import { Check, Plus } from "lucide-react";
+import { useState } from "react";
+import { projectsApi } from "@/api";
 import { WorkbenchAction, WorkbenchIconAction } from "@/components/workbench";
 
 interface CreateProjectDialogProps {
@@ -89,7 +89,7 @@ export function CreateProjectDialog({
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Create Project</DialogTitle>
-          <DialogDescription>Create a new project to organize your experiments.</DialogDescription>
+          <DialogDescription className="sr-only">Create a project.</DialogDescription>
         </DialogHeader>
         <form onSubmit={(e) => void handleSubmit(e)}>
           <div className="grid gap-4 py-4">
@@ -112,7 +112,13 @@ export function CreateProjectDialog({
             )}
           </div>
           <DialogFooter>
-            <WorkbenchAction kind="primary" size="default" type="submit" disabled={isLoading}>
+            <WorkbenchAction
+              icon={<Check aria-hidden />}
+              kind="primary"
+              size="default"
+              type="submit"
+              disabled={isLoading}
+            >
               {isLoading ? "Creating..." : "Create Project"}
             </WorkbenchAction>
           </DialogFooter>

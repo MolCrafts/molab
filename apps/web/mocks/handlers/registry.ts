@@ -9,7 +9,7 @@
  * ``GET /api/plugins/<id>/manifest.json``.
  */
 
-import { http, HttpResponse } from "msw";
+import { HttpResponse, http } from "msw";
 
 const API_BASE = "/api";
 
@@ -27,6 +27,17 @@ const MOCK_BUNDLES: MockBundle[] = [
     version: "0.0.1",
     capabilities: ["example_renderer"],
   },
+];
+
+const taskTypes = [
+  { slug: "dataset.prepare", description: "Validate and prepare input data" },
+  { slug: "model.alphafold", description: "Predict protein structures" },
+  { slug: "simulation.gromacs", description: "Run molecular dynamics" },
+  { slug: "simulation.lammps", description: "Run a LAMMPS simulation" },
+  { slug: "simulation.dft", description: "Compute electronic structure" },
+  { slug: "structure.prepare", description: "Prepare a simulation structure" },
+  { slug: "metrics.evaluate", description: "Evaluate scientific observables" },
+  { slug: "artifact.publish", description: "Register output artifacts" },
 ];
 
 export const registryHandlers = [
@@ -85,24 +96,11 @@ export default plugin;
     });
   }),
 
-  http.get(`${API_BASE}/tasks`, () => {
-    return HttpResponse.json(
-      {
-        error: "not_implemented",
-        message: "Task registry is being re-implemented in Phase 3.",
-        tasks: [],
-      },
-      { status: 501 },
-    );
-  }),
-
+  http.get(`${API_BASE}/tasks`, () => HttpResponse.json({ taskTypes, total: taskTypes.length })),
   http.get(`${API_BASE}/tasks/:nodeId`, ({ params }) => {
-    return HttpResponse.json(
-      {
-        error: "not_implemented",
-        message: `Task registry is being re-implemented in Phase 3. Task '${params.nodeId}' not found.`,
-      },
-      { status: 501 },
-    );
+    const task = taskTypes.find((task) => task.slug === params.nodeId);
+    return task
+      ? HttpResponse.json(task)
+      : HttpResponse.json({ detail: "Task not found" }, { status: 404 });
   }),
 ];

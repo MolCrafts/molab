@@ -16,9 +16,11 @@ import hashlib
 import importlib.util
 import sys
 import threading
+from collections.abc import Callable
 from functools import reduce
 from pathlib import Path
 from types import ModuleType
+from typing import cast
 
 from molab.workflow.compiled import CompiledWorkflow
 from molab.workflow.compiler import Workflow, WorkflowCompiler
@@ -99,7 +101,17 @@ def _load_file(path: Path, key: str) -> ModuleType:
         raise ImportError(f"Cannot load workflow file: {path}")
     module = importlib.util.module_from_spec(spec)
     sys.modules[key] = module
-    spec.loader.exec_module(module)  # type: ignore[union-attr]
+    siblings = {p.stem for p in path.parent.glob("*.py") if p != path}
+    before = {name: sys.modules.pop(name) for name in siblings if name in sys.modules}
+    search_path = list(sys.path)
+    sys.path.insert(0, str(path.parent))
+    try:
+        spec.loader.exec_module(module)  # type: ignore[union-attr]
+    finally:
+        sys.path[:] = search_path
+        for name in siblings:
+            sys.modules.pop(name, None)
+        sys.modules.update(before)
     return module
 
 
@@ -136,7 +148,7 @@ def _materialize(resolved: object, entrypoint: str) -> CompiledWorkflow:
     if isinstance(resolved, Workflow):
         return WorkflowCompiler().compile(resolved)
     if callable(resolved):
-        produced = resolved()
+        produced = cast(Callable[[], object], resolved)()
         if isinstance(produced, CompiledWorkflow):
             return produced
         if isinstance(produced, Workflow):

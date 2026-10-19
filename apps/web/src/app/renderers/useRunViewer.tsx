@@ -12,6 +12,7 @@
  * callers can still early-return their own "run not found" chrome afterwards.
  */
 
+import { Code as InlineCode } from "@molcrafts/ui";
 import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { runsApi } from "@/api";
@@ -19,12 +20,11 @@ import type { ExecutionOutputsResponse } from "@/api/generated/models/ExecutionO
 import { listEntityTabs } from "@/app/registry";
 import { formatDuration } from "@/app/renderers/dashboardData";
 import { canCancel, canHarvest, isTerminalStatus } from "@/app/runs/runLifecycle";
-import { executionOutputsQueryOptions } from "@/app/state/entityQueries";
+import { executionOutputsQueryOptions, journalRefetchInterval } from "@/app/state/entityQueries";
 import { useInspectedTask } from "@/app/state/inspectedTask";
 import { useNavigationState } from "@/app/state/useNavigationState";
 import type { RendererSnapshot, ScopedRendererProps, WorkspaceSnapshot } from "@/app/types";
 import { useAlert, useConfirm } from "@/components/ConfirmDialog";
-import { Code as InlineCode } from "@/components/ui/code";
 import { useContributionGeneration } from "@/lib/contribution-runtime";
 import { usePluginPreferencesGeneration } from "@/plugins/preferences";
 
@@ -124,6 +124,11 @@ export const useRunViewer = (props: RunRendererProps): UseRunViewer => {
       selectedExecutionId ?? "",
     ),
     enabled: Boolean(runId && runProjectId && runExperimentId && selectedExecutionId),
+    refetchInterval: journalRefetchInterval(
+      run?.executionHistory.find((execution) => execution.executionId === selectedExecutionId)
+        ?.status,
+    ),
+    refetchIntervalInBackground: false,
   });
   const outputs = outputsQuery.data ?? null;
   const logs: RunLogs = outputs ? { stdout: outputs.stdout, stderr: outputs.stderr } : null;
@@ -135,11 +140,9 @@ export const useRunViewer = (props: RunRendererProps): UseRunViewer => {
 
   const latestExecutionId = defaultExecutionId(run?.executionHistory);
   useEffect(() => {
-    // Derived from the run, so switching runs re-fires this. Two runs whose
-    // latest attempt is both `e01` set the same value and skip the effect —
-    // harmless, because the file coordinates carry the run id as well.
-    setSelectedExecutionId(latestExecutionId);
-  }, [latestExecutionId]);
+    // The selected attempt belongs to this run; reset when its identity changes.
+    setSelectedExecutionId(runId ? latestExecutionId : null);
+  }, [latestExecutionId, runId]);
 
   const project = run ? snapshot.projects.find((item) => item.id === run.projectId) : undefined;
   const experiment = run

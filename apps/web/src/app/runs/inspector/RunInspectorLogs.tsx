@@ -1,13 +1,7 @@
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@molcrafts/ui";
 import { RefreshCw, Terminal } from "lucide-react";
 import type { JSX } from "react";
 import { useEffect, useRef } from "react";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   WorkbenchIconAction,
   WorkbenchOperationState,

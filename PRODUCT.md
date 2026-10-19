@@ -28,10 +28,14 @@ Voice is operational and short. Prefer verb + object labels. No marketing cadenc
 ## Design Principles
 
 1. **Hierarchy over decoration** — one clear primary surface per view; secondary panels support, never compete
-2. **One component vocabulary** — shadcn primitives (Card, Badge, Button, Separator, Tabs) everywhere entity dashboards appear
-3. **Status is semantic, not colorful chrome** — color only for state (success / fail / running / pending)
+2. **One component vocabulary** — reuse shared workbench controls, connected tabs, quiet dashboard sections, and settings rows; avoid card scaffolding around every entity section
+3. **Status is semantic, not colorful chrome** — use status color for state (success / fail / running / pending), with restrained blue for selection and focus
 4. **Same shape at every level** — project, experiment, run, and execution overviews share layout, density, and typography
 5. **Empty states teach the next action** — never a blank void or a shrug
+
+## Standing Visual Preference
+
+VS Code Compact: light by default with a dark switch, higher information density, borderless icon action buttons, and short operational copy. Dashboard, workspace, and settings share this system. Keep necessary text for navigation, data choices, status, and scientific meaning; action icons retain accessible names and hover titles. See DESIGN.md for the implemented visual system.
 
 ## Accessibility & Inclusion
 

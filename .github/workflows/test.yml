@@ -5,17 +5,21 @@ name: test
 #
 #   fast  a feature-branch push to MolCrafts: the unit suite on Linux, the
 #         web tests.
-#   full  every push to a fork (proven before its pull request), dev, master
-#         and main on MolCrafts, pull requests, tags and dispatches:
+#   full  every push to a fork (proven before its pull request), dev and
+#         master on MolCrafts, pull requests, tags and dispatches:
 #         + pytest on macOS.
 #
 # Windows is not a target (termios, process groups).
-on:
+'on':
   push:
-    branches: ["**"]
+    branches:
+    - '**'
   pull_request:
-    branches: [dev, master, main]
-  workflow_dispatch:
+    branches:
+    - dev
+    - master
+    - main
+  workflow_dispatch: null
 
 permissions:
   contents: read
@@ -36,17 +40,10 @@ env:
 jobs:
   # Where this run happens, decided once: MolCrafts/molcrafts-ci/actions/ci-context.
   context:
+    permissions:
+      contents: read
     name: test / context
-    runs-on: ubuntu-latest
-    outputs:
-      tier: ${{ steps.context.outputs.tier }}
-      upstream: ${{ steps.context.outputs.upstream }}
-      integration: ${{ steps.context.outputs.integration }}
-      skip-pr: ${{ steps.context.outputs.skip-pr }}
-      publish: ${{ steps.context.outputs.publish }}
-    steps:
-      - id: context
-        uses: MolCrafts/molcrafts-ci/actions/ci-context@master
+    uses: MolCrafts/molcrafts-ci/.github/workflows/context.yml@master
 
   python:
     name: test / python (${{ matrix.os }})
@@ -59,10 +56,10 @@ jobs:
         os: ${{ fromJSON(needs.context.outputs.tier == 'full' && '["ubuntu-latest","macos-latest"]' || '["ubuntu-latest"]') }}
     steps:
       - uses: actions/checkout@v7
-      - uses: MolCrafts/molcrafts-ci/actions/setup-python@master
-      - uses: MolCrafts/molcrafts-ci/actions/setup-partners@master
+      - uses: MolCrafts/molcrafts-ci/actions/setup-python@8c2f7db652ebddbd6acf4df270300e2b086d599d
+      - uses: MolCrafts/molcrafts-ci/actions/setup-partners@8c2f7db652ebddbd6acf4df270300e2b086d599d
       # molrs/rust-toolchain.toml pins the compiler that builds the molrs wheel.
-      - uses: MolCrafts/molcrafts-ci/actions/setup-rust@master
+      - uses: MolCrafts/molcrafts-ci/actions/setup-rust@8c2f7db652ebddbd6acf4df270300e2b086d599d
         with:
           toolchain-dir: ../molrs
           cache: molrs-python
@@ -76,5 +73,5 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: MolCrafts/molcrafts-ci/actions/setup-node@master
+      - uses: MolCrafts/molcrafts-ci/actions/setup-node@8c2f7db652ebddbd6acf4df270300e2b086d599d
       - run: npm run test:web

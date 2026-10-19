@@ -1,14 +1,18 @@
 """``molab serve`` — start FastAPI server + bundled UI.
 
-Serves one or more roots. The first ``--workspace`` is active at startup; the
-full set is exposed at ``GET /api/workspaces`` so the UI can switch between
-them (``POST /api/workspace/open``).
+Serves one or more directories. The first positional path is active at
+startup; the full set is exposed at ``GET /api/workspaces`` so the UI can
+switch between them (``POST /api/workspace/open``).
 
-A root may be:
+The kind is not a flag. Molab reads the entity file in the directory:
+``workspace.json`` (or none) is a workspace, ``project.json`` a project,
+``experiment.json`` an experiment, ``run.json`` a run.
+
+A directory may be:
 
 * a local path (any directory — plain folders open without writing
   ``workspace.json``; missing dirs are created empty)
-* an SCP remote ``user@host:/path`` (lazy-download mirror via
+* an SCP remote ``cluster:/path`` (lazy-download mirror via
   :class:`~molab.workspace.fs_cached.CachedRemoteFileSystem`)
 * a registered workspace target ``@name`` (from
   ``~/.molab/workspace_targets.json``)
@@ -131,14 +135,15 @@ def _remote_served(
 
 
 def _resolve_served(spec: str | Path, used_keys: set[str]) -> ServedWorkspace:
-    """Resolve one ``--workspace`` spec into a :class:`ServedWorkspace`.
+    """Resolve one directory spec into a :class:`ServedWorkspace`.
 
-    Accepts local paths, SCP ``user@host:/path``, and registered
+    Accepts local paths, SCP ``cluster:/path``, and registered
     ``@workspace-target`` names. Never writes ``workspace.json`` for local
     roots; missing local directories are created empty.
     """
     from molab.server.deps.targets import get_workspace_target_registry
     from molab.server.workspace_targets import WorkspaceTarget
+    from molab.workspace.connection import get_client
     from molab.workspace.target import (
         LocalTarget,
         RemoteTarget,
@@ -163,9 +168,10 @@ def _resolve_served(spec: str | Path, used_keys: set[str]) -> ServedWorkspace:
                 f"(register via Settings / POST /api/workspace/targets)"
             )
             raise typer.Exit(1) from exc
+        cluster = get_client(target.registry_id).cluster(target.cluster_id).definition()
         return _remote_served(
             name=target.name,
-            label=f"{target.host}:{target.root_path}",
+            label=f"{cluster['name']}:{target.root_path}",
             used_keys=used_keys,
             remote_target=target,
         )
@@ -182,47 +188,21 @@ def _resolve_served(spec: str | Path, used_keys: set[str]) -> ServedWorkspace:
         return _local_served(resolved, used_keys)
 
     assert isinstance(parsed, RemoteTarget)
-    host_part = f"{parsed.user}@{parsed.host}" if parsed.user else (parsed.host or "remote")
+    assert parsed.registry_id is not None and parsed.cluster_id is not None
+    host_part = parsed.cluster_id
     root = parsed.path
     # target_name is process-stable for the active-workspace descriptor; the
     # ServedWorkspace.key is separately uniquified by _remote_served.
     target_name = _slug(f"{host_part}-{Path(root).name or 'ws'}")
     wt = WorkspaceTarget(
         name=target_name,
-        host=host_part,
-        port=parsed.port,
-        identity_file=parsed.identity_file,
-        ssh_opts=tuple(parsed.ssh_opts) if parsed.ssh_opts else (),
+        registry_id=parsed.registry_id,
+        cluster_id=parsed.cluster_id,
         root_path=root,
     )
-    # Soft preflight for 2FA hosts: if ControlMaster is down, BatchMode
-    # serve calls cannot answer an OTP prompt.  Key-only hosts establish a
-    # master on first op automatically — the check is advisory only.
-    try:
-        from molq.options import SshTransportOptions
-        from molq.transport import SshTransport
-
-        ssh = SshTransport(
-            options=SshTransportOptions(
-                host=parsed.host or host_part,
-                port=parsed.port,
-                identity_file=parsed.identity_file,
-                ssh_opts=tuple(parsed.ssh_opts) if parsed.ssh_opts else (),
-            )
-        )
-        is_alive = getattr(ssh, "is_master_alive", None)
-        if callable(is_alive) and not is_alive():
-            rprint(
-                f"[dim]Tip:[/dim] no SSH ControlMaster for [bold]{host_part}[/bold]. "
-                f"If this host needs a verification code, run "
-                f"[bold]molab connect -ws {raw}[/bold] first."
-            )
-    except Exception:
-        pass
-
     return _remote_served(
         name=target_name,
-        label=str(parsed),
+        label=f"{parsed.name}:{root}",
         used_keys=used_keys,
         remote_target=wt,
     )
@@ -508,16 +488,14 @@ def _print_access_banner(
 
 @app.command()
 def serve(
-    workspaces: Annotated[
+    directories: Annotated[
         list[str] | None,
-        typer.Option(
-            "--workspace",
-            "-ws",
+        typer.Argument(
             help=(
-                "Root to serve: local path, user@host:/path, or @workspace-target. "
-                "Repeat for several (first is active at startup). "
-                "Plain folders open without writing workspace.json; missing "
-                "local dirs are created empty. Default: cwd."
+                "Directory to open. Molab reads its entity file and serves "
+                "that level: workspace, project, experiment, or run. "
+                "Local path, cluster:/path, or @name. "
+                "Repeat to serve several; the first is active. Default: cwd."
             ),
         ),
     ] = None,
@@ -660,7 +638,9 @@ def serve(
         )
     configure_serve_auth(host=host, auth_flag=auth, require_user=user)
 
-    specs: list[str] = list(workspaces) if workspaces else [str(Path.cwd())]
+    specs = list(directories or [])
+    if not specs:
+        specs = [str(Path.cwd())]
     used_keys: set[str] = set()
     served = [_resolve_served(s, used_keys) for s in specs]
 

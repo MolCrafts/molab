@@ -1,4 +1,4 @@
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, RefreshCw } from "lucide-react";
 import type { ErrorInfo, ReactNode } from "react";
 import { Component } from "react";
 import { WorkbenchAction } from "@/components/workbench";
@@ -57,7 +57,11 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
               {this.state.error.message}
             </pre>
           )}
-          <WorkbenchAction kind="secondary" onClick={this.handleReload}>
+          <WorkbenchAction
+            icon={<RefreshCw aria-hidden />}
+            kind="secondary"
+            onClick={this.handleReload}
+          >
             Reload Workspace
           </WorkbenchAction>
         </section>

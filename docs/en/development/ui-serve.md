@@ -12,7 +12,7 @@ HMR against a real API. Rebuild neither the wheel nor `dist/`.
 npm install                         # repo root, once
 uv pip install -e ".[dev]"          # Python, once (reinstall only when Python deps change)
 
-molab serve --dev -ws ./lab --port 8000
+molab serve ./lab --dev --port 8000
 ```
 
 Open the printed **Dev UI** URL (default <http://localhost:5173>), not the
@@ -29,7 +29,7 @@ What a wheel user sees: one process, no Node at runtime.
 
 ```bash
 npm run build:web                   # writes src/molab/dist/
-molab serve -ws ./lab --port 8000  # open http://localhost:8000
+molab serve ./lab --port 8000  # open http://localhost:8000
 ```
 
 An editable install reads the in-tree `src/molab/dist/`. After
@@ -58,7 +58,7 @@ From GitHub, a published wheel already contains the UI — no Node required:
 
 ```bash
 uv pip install git+https://github.com/MolCrafts/molab
-molab serve -ws ./lab --port 8000
+molab serve ./lab --port 8000
 ```
 
 ## Spellings

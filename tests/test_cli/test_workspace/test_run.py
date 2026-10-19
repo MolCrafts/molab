@@ -992,45 +992,38 @@ class SchedulerFixture:
 def _install_fake_submitor(monkeypatch: pytest.MonkeyPatch, run: Run) -> SubmitSpy:
     spy = SubmitSpy()
 
-    class _FakeEventBus:
-        def on(self, evt: object, handler: object) -> None:
-            del evt, handler
-
     class _FakeJob:
-        job_id = "fake-job-id"
-        scheduler_job_id = "fake-sched-id"
+        def __init__(self) -> None:
+            self.ref = {
+                "registry_id": "reg",
+                "cluster_id": "default",
+                "native_id": "fake-sched-id",
+                "incarnation": "1",
+            }
 
-    class FakeSubmitor:
-        def __init__(self, _cluster: object, *, jobs_dir: str) -> None:
-            del jobs_dir
-            self._event_bus = _FakeEventBus()
-
-        def __enter__(self) -> FakeSubmitor:
-            return self
-
-        def __exit__(self, *_exc: object) -> bool:
-            return False
-
-        def submit_job(
-            self,
-            *,
-            resources: object,
-            scheduling: object,
-            execution: object,
-            metadata: dict[str, str],
-            argv: list[str] | None = None,
-            script: object | None = None,
+    class _FakeCluster:
+        def submit(
+            self, spec: object, *, argv: object = None, request_key: object = None
         ) -> _FakeJob:
-            del resources, scheduling, execution, argv, script
+            del argv, request_key
+            env = dict(getattr(getattr(spec, "execution", None), "env", None) or {})
             spy.submits += 1
-            spy.execution_id = metadata["execution_id"]
+            spy.execution_id = env.get("MOLAB_EXECUTION_ID")
             try:
-                spy.record_at_submit = run.execution(metadata["execution_id"])
+                spy.record_at_submit = run.execution(spy.execution_id or "")
             except KeyError as exc:
-                spy.record_error = f"no record for {metadata['execution_id']!r}: {exc}"
+                spy.record_error = f"no record for {spy.execution_id!r}: {exc}"
             return _FakeJob()
 
-    monkeypatch.setattr("molq.Submitor", FakeSubmitor)
+    class _FakeMolq:
+        def cluster(self, name: str) -> _FakeCluster:
+            del name
+            return _FakeCluster()
+
+    def _session(_registry_id=None):
+        return _FakeMolq()
+
+    monkeypatch.setattr("molab.workspace.connection.get_client", _session)
     return spy
 
 
@@ -1091,7 +1084,7 @@ class TestSubmitToScheduler:
             explicit_ws=True,
             selected_target=None,
             selected_scheduler="local",
-            cluster=None,
+            cluster="registered-local",
             resources={},
             scheduling={},
             block=False,
@@ -1130,7 +1123,7 @@ class TestSubmitToScheduler:
             explicit_ws=True,
             selected_target=None,
             selected_scheduler="slurm",
-            cluster=None,
+            cluster="registered-local",
             resources={},
             scheduling={},
             block=False,

@@ -1,11 +1,3 @@
-import { Plus } from "lucide-react";
-import type { ReactNode } from "react";
-import { useCallback, useEffect, useState } from "react";
-import { experimentsApi } from "@/api";
-import type { TargetResponse } from "@/api/generated/models/TargetResponse";
-import { TargetsService } from "@/api/generated/services/TargetsService";
-import { parseWorkflowDocumentInput } from "@/app/components/workflowDocumentInput";
-import { AddTargetDialog } from "@/app/settings/AddTargetDialog";
 import {
   Dialog,
   DialogContent,
@@ -14,18 +6,27 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
+  Input,
+  Label,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+  Textarea,
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@molcrafts/ui";
+import { Check, Plus } from "lucide-react";
+import type { ReactNode } from "react";
+import { useCallback, useEffect, useState } from "react";
+import { experimentsApi } from "@/api";
+import type { TargetResponse } from "@/api/generated/models/TargetResponse";
+import { TargetsService } from "@/api/generated/services/TargetsService";
+import { parseWorkflowDocumentInput } from "@/app/components/workflowDocumentInput";
+import { AddTargetDialog } from "@/app/settings/AddTargetDialog";
 import { WorkbenchAction, WorkbenchIconAction } from "@/components/workbench";
 
 const NO_TARGET_VALUE = "__none__";
@@ -118,9 +119,7 @@ export function CreateExperimentDialog({
       <DialogContent className="sm:max-w-dialog-lg">
         <DialogHeader>
           <DialogTitle>Create Experiment</DialogTitle>
-          <DialogDescription>
-            Defines a computable experiment within project {projectId}.
-          </DialogDescription>
+          <DialogDescription className="sr-only">Create an experiment.</DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit}>
           <div className="grid gap-4 py-4">
@@ -212,7 +211,13 @@ export function CreateExperimentDialog({
             )}
           </div>
           <DialogFooter>
-            <WorkbenchAction kind="primary" size="default" type="submit" disabled={isLoading}>
+            <WorkbenchAction
+              icon={<Check aria-hidden />}
+              kind="primary"
+              size="default"
+              type="submit"
+              disabled={isLoading}
+            >
               {isLoading ? "Creating..." : "Create Experiment"}
             </WorkbenchAction>
           </DialogFooter>

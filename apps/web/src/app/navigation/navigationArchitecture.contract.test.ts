@@ -55,6 +55,14 @@ describe("navigation contribution boundary", () => {
     expect(explorer).toContain("writeFilterParams");
   });
 
+  it("does not start a workspace inventory scan just to decide rail visibility", () => {
+    const visibility = readAppSource("dashboard/useWorkspaceTab.ts");
+    const app = readAppSource("../App.tsx");
+    expect(visibility).toContain("useWorkspaceRuns({ enabled: false })");
+    expect(app).toContain('enabled: activeView === "runs" || activeView === "dashboard"');
+    expect(app).not.toContain("for (const experiment of snapshot.experiments)");
+  });
+
   it("mounts the Knowledge tree from the Knowledge feature", () => {
     const leftPanel = readAppSource("panels/LeftPanel.tsx");
     const explorer = readAppSource("../plugins/knowledge/KnowledgeExplorer.tsx");

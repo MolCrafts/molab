@@ -5,10 +5,10 @@ transport or scheduler call, refuses an explicit id that is unknown or not
 QUEUED, seals the attempt FAILED when something breaks before ``submit_job``
 returns, and records the job ids on ``execution.json`` only (no ``job.json``).
 ``reconcile_submission`` is the level-triggered terminal check: it asks molq
-for the job's current state (``Submitor.refresh_jobs`` then ``get_job``) and
-seals a record the worker never started once the job has ended.
-``molq.Submitor`` is replaced by fakes that record what they saw; no
-scheduler, SSH endpoint or worker process is involved.
+for the job's current snapshot (``Job.status``) and seals a record the worker
+never started once the job has ended. the application client is replaced by fakes
+that record what they saw; no scheduler, SSH endpoint or worker process is
+involved.
 """
 
 from __future__ import annotations
@@ -17,12 +17,16 @@ import json
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import pytest
-from molq import Cluster, JobNotFoundError, JobRecord, JobState
-from molq.transport import CommandResult, TransportError
+from molq import MolqError
 
-from molab.plugins.submit_molq.submit import SubmitHandler, make_submit_handler
+from molab.plugins.submit_molq.submit import (
+    SubmitHandler,
+    encode_job_ref,
+    make_submit_handler,
+)
 from molab.workspace import ComputeTarget, Workspace
 from molab.workspace.domain import Execution, ExecutionStatus
 from molab.workspace.execution_repository import ExecutionRepository
@@ -39,10 +43,10 @@ type SubmitHook = Callable[[], None]
 
 @dataclass
 class SubmitSpy:
-    """What the fake ``Submitor`` saw.
+    """What the fake molq session saw.
 
-    ``record_at_submit`` is the Execution named by ``metadata["execution_id"]``
-    read inside ``submit_job``; ``record_error`` holds the lookup failure
+    ``record_at_submit`` is the Execution named by ``MOLAB_EXECUTION_ID``
+    read inside ``submit``; ``record_error`` holds the lookup failure
     instead, so a missing record surfaces as an assertion, not a crash.
     """
 
@@ -51,11 +55,16 @@ class SubmitSpy:
     metadata: dict[str, str] | None = None
     record_at_submit: Execution | None = None
     record_error: str | None = None
+    spec: Any = None
 
 
-class _FakeJob:
-    job_id = "fake-job-id"
-    scheduler_job_id = "fake-sched-id"
+_FAKE_REF = {
+    "registry_id": "reg",
+    "cluster_id": "hpc",
+    "native_id": "fake-sched-id",
+    "incarnation": "1",
+}
+_JOB_ID = encode_job_ref(_FAKE_REF)
 
 
 def _install_fake_submitor(
@@ -64,50 +73,38 @@ def _install_fake_submitor(
     *,
     on_submit: SubmitHook | None = None,
     submit_error: Exception | None = None,
-    exit_error: Exception | None = None,
 ) -> SubmitSpy:
-    """Replace ``molq.Submitor`` with a recording fake.
+    """Replace the application client with a recording fake.
 
     Args:
         monkeypatch: The test's monkeypatch.
         run: The run whose record is captured at submit time.
-        on_submit: Runs inside ``submit_job`` after the capture (a fast worker);
+        on_submit: Runs inside ``submit`` after the capture (a fast worker);
             a ``KeyError`` from it (no record to start) lands in ``record_error``.
-        submit_error: Raised by ``submit_job`` after the capture.
-        exit_error: Raised by ``__exit__`` (after ``submit_job`` returned).
+        submit_error: Raised by ``submit`` after the capture.
     """
     spy = SubmitSpy()
 
-    class FakeSubmitor:
-        def __init__(self, _cluster: object, *, jobs_dir: str) -> None:
-            del jobs_dir
+    class _FakeJob:
+        def __init__(self) -> None:
+            self.ref = dict(_FAKE_REF)
 
-        def __enter__(self) -> FakeSubmitor:
-            return self
-
-        def __exit__(self, *_exc: object) -> bool:
-            if exit_error is not None:
-                raise exit_error
-            return False
-
-        def submit_job(
-            self,
-            *,
-            resources: object,
-            scheduling: object,
-            execution: object,
-            metadata: dict[str, str],
-            argv: list[str] | None = None,
-            script: object | None = None,
+    class _FakeCluster:
+        def submit(
+            self, spec: Any, *, argv: list[str] | None = None, request_key: str | None = None
         ) -> _FakeJob:
-            del resources, scheduling, execution, script
+            del argv, request_key
             spy.submits += 1
-            spy.argv = list(argv) if argv is not None else None
-            spy.metadata = dict(metadata)
+            spy.spec = spec
+            unit = spec.execution.units[0]
+            command = unit.command
+            spy.argv = list(command["argv"]) if command.get("kind") == "argv" else None
+            spy.metadata = dict(spec.execution.env or {})
+            execution_id = spy.metadata.get("MOLAB_EXECUTION_ID")
             try:
-                spy.record_at_submit = run.execution(metadata["execution_id"])
+                spy.record_at_submit = run.execution(execution_id or "")
             except KeyError as exc:
-                spy.record_error = f"no record for {metadata.get('execution_id')!r}: {exc}"
+                spy.record_error = f"no record for {execution_id!r}: {exc}"
             if submit_error is not None:
                 raise submit_error
             if on_submit is not None:
@@ -117,7 +114,18 @@ def _install_fake_submitor(
                     spy.record_error = f"fast worker found no record: {exc}"
             return _FakeJob()
 
-    monkeypatch.setattr("molq.Submitor", FakeSubmitor)
+    class _FakeMolq:
+        def cluster(self, name: str) -> _FakeCluster:
+            del name
+            return _FakeCluster()
+
+    def _session(_registry_id=None) -> _FakeMolq:
+        return _FakeMolq()
+
+    monkeypatch.setattr("molab.workspace.connection.get_client", _session)
+    monkeypatch.setattr(
+        "molab.workspace.targets.target_definition", lambda _t: {"id": "hpc", "scheduler": "slurm"}
+    )
     return spy
 
 
@@ -135,23 +143,11 @@ class RecordingTransport:
     downloads: list[tuple[str, str]] = field(default_factory=list)
     mkdirs: list[str] = field(default_factory=list)
 
-    def run(
-        self,
-        argv: list[str],
-        *,
-        cwd: str | None = None,
-        env: dict[str, str] | None = None,
-        input: str | None = None,
-        timeout: float | None = None,
-    ) -> CommandResult:
-        del cwd, env, input, timeout
-        return CommandResult(argv=tuple(argv), returncode=0, stdout="", stderr="")
-
     def read_text(self, path: str) -> str:
         for suffix, text in self.texts.items():
             if path.endswith(suffix):
                 return text
-        raise TransportError("no such remote file", remote=path)
+        raise OSError("no such remote file")
 
     def read_bytes(self, path: str) -> bytes:
         return self.read_text(path).encode()
@@ -206,8 +202,8 @@ def _make_run(tmp_path: Path) -> tuple[Workspace, Project, Experiment, Run]:
 def _remote_target() -> ComputeTarget:
     return ComputeTarget(
         name="hpc",
-        host="me@cluster",
-        scheduler="slurm",
+        registry_id="reg",
+        cluster_id="hpc",
         scratch_root="/scratch/me/molab",
     )
 
@@ -215,7 +211,7 @@ def _remote_target() -> ComputeTarget:
 def _handler(target: ComputeTarget | None = None) -> SubmitHandler:
     return make_submit_handler(
         scheduler="local",
-        cluster=None,
+        cluster="local",
         resources={},
         scheduling={},
         target=target,
@@ -266,7 +262,7 @@ class TestSubmitHandler:
         assert record.executor == {"backend": "molq", "target": None}
         assert record.environment.get("submit_cwd") == str(tmp_path.resolve())
         assert spy.metadata is not None
-        assert spy.metadata["execution_id"] == "e01"
+        assert spy.metadata["MOLAB_EXECUTION_ID"] == "e01"
         assert spy.argv is not None
         flag = spy.argv.index("--execution-id")
         assert spy.argv[flag : flag + 2] == ["--execution-id", "e01"]
@@ -279,7 +275,7 @@ class TestSubmitHandler:
         spy = _install_fake_submitor(monkeypatch, run)
         handler = make_submit_handler(
             scheduler="local",
-            cluster=None,
+            cluster="local",
             resources={},
             scheduling={},
             python="/venvs/aarch64/bin/python",
@@ -307,7 +303,7 @@ class TestSubmitHandler:
         _handler()(None, run, experiment, project)
 
         executor = run.execution("e01").executor
-        assert executor["job_id"] == "fake-job-id"
+        assert executor["job_id"] == _JOB_ID
         assert executor["backend"] == "molq"
         assert executor["scheduler"] == "local"
         assert not (Path(run.run_dir) / "executions" / "e01" / "job.json").exists()
@@ -390,24 +386,29 @@ class TestSubmitHandler:
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         _ws, project, experiment, run = _make_run(tmp_path)
-        transport = RecordingTransport(upload_error=TransportError("down", remote="x"))
-        monkeypatch.setattr("molab.workspace.targets.to_transport", lambda _t: transport)
+        transport = RecordingTransport(upload_error=OSError("down"))
+        monkeypatch.setattr("molab.workspace.targets.to_filesystem", lambda _t: transport)
         spy = _install_fake_submitor(monkeypatch, run)
 
-        with pytest.raises(TransportError):
+        with pytest.raises(OSError):
             _handler(_remote_target())(None, run, experiment, project)
 
         e01 = run.execution("e01")
         assert e01.status.value == "failed"
         assert e01.error is not None
-        assert e01.error["type"] == "TransportError"
+        assert e01.error["type"] == "OSError"
         assert spy.submits == 0
 
     def test_error_after_submit_does_not_seal(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         _ws, project, experiment, run = _make_run(tmp_path)
-        _install_fake_submitor(monkeypatch, run, exit_error=RuntimeError("late"))
+        _install_fake_submitor(monkeypatch, run)
+
+        def fail_update(*_args: object, **_kwargs: object) -> None:
+            raise RuntimeError("late")
+
+        monkeypatch.setattr(ExecutionRepository, "update_operational", fail_update)
 
         with pytest.raises(RuntimeError, match="late"):
             _handler()(None, run, experiment, project)
@@ -438,7 +439,7 @@ class TestSubmitHandler:
         assert executor["backend"] == "molq"
         assert "target" in executor
         assert executor["target"] is None
-        assert executor["job_id"] == "fake-job-id"
+        assert executor["job_id"] == _JOB_ID
         assert executor["scheduler_job_id"] == "fake-sched-id"
 
     def test_fast_worker_sealed_before_submit_returns(
@@ -468,7 +469,7 @@ class TestSubmitHandler:
         assert e01.executor["pid"] == 9
         assert "job_id" not in e01.executor
         err = capsys.readouterr().err
-        assert "job fake-job-id submitted for run" in err
+        assert "job fake-sched-id submitted for run" in err
         assert "attempt e01" in err
         assert "already succeeded" in err
 
@@ -496,76 +497,54 @@ class TestSubmitHandler:
 # reconcile_submission — level-triggered terminal handling (spec §1e-prime)
 
 
-_JOB_ID = _FakeJob.job_id
-
+_TERMINAL = frozenset({"failed", "succeeded", "cancelled", "timed_out"})
 _TERMINAL_TO_STATUS = [
-    (JobState.FAILED, "failed"),
-    (JobState.SUCCEEDED, "failed"),
-    (JobState.CANCELLED, "cancelled"),
-    (JobState.TIMED_OUT, "failed"),
-    (JobState.LOST, "failed"),
+    ("failed", "failed"),
+    ("succeeded", "failed"),
+    ("cancelled", "cancelled"),
+    ("timed_out", "failed"),
 ]
 
 
 @dataclass
 class RefreshSpy:
-    """What the reconcile-time fake ``Submitor`` saw.
+    """Job refs ``Job.status`` was asked about."""
 
-    ``clusters`` holds ``(name, scheduler, transport)`` of every ``Cluster``
-    a ``Submitor`` was built for; ``refreshed`` the ids passed to ``get_job``
-    after ``refresh_jobs``.
-    """
-
-    clusters: list[tuple[str, str, object]] = field(default_factory=list)
-    refreshed: list[str] = field(default_factory=list)
+    queried: list[str] = field(default_factory=list)
 
 
 def _install_refreshing_submitor(
     monkeypatch: pytest.MonkeyPatch,
     *,
-    state: JobState = JobState.QUEUED,
+    state: str = "queued",
     refresh_error: Exception | None = None,
 ) -> RefreshSpy:
-    """Replace ``molq.Submitor`` with a fake whose ``get_job`` reports *state*.
-
-    Args:
-        monkeypatch: The test's monkeypatch.
-        state: The molq state every ``get_job`` call reports.
-        refresh_error: Raised by ``refresh_jobs`` before ``get_job`` runs.
-    """
+    """Replace the application client with a fake whose ``status`` reports *state*."""
     spy = RefreshSpy()
 
-    class RefreshingSubmitor:
-        def __init__(
-            self, cluster: Cluster, *, jobs_dir: str | Path | None = None, **_kw: object
-        ) -> None:
-            del jobs_dir
-            self._cluster = cluster
-            spy.clusters.append((cluster.name, cluster.scheduler, cluster.transport))
+    class _Job:
+        def __init__(self, ref: dict[str, str]) -> None:
+            self.ref = ref
 
-        def __enter__(self) -> RefreshingSubmitor:
-            return self
-
-        def __exit__(self, *_exc: object) -> bool:
-            return False
-
-        def close(self) -> None:
-            return None
-
-        def refresh_jobs(self) -> None:
+        def status(self, **_kw: object) -> dict[str, object]:
             if refresh_error is not None:
                 raise refresh_error
+            spy.queried.append(encode_job_ref(self.ref))
+            return {
+                "snapshots": [{"ref": self.ref, "state": state, "terminal": state in _TERMINAL}]
+            }
 
-        def get_job(self, job_id: str) -> JobRecord:
-            spy.refreshed.append(job_id)
-            return JobRecord(
-                job_id=job_id,
-                cluster_name=self._cluster.name,
-                scheduler=self._cluster.scheduler,
-                state=state,
-            )
+    class _Molq:
+        def job(self, ref: dict[str, str]) -> _Job:
+            return _Job(ref)
 
-    monkeypatch.setattr("molq.Submitor", RefreshingSubmitor)
+    def _session(_registry_id=None) -> _Molq:
+        return _Molq()
+
+    monkeypatch.setattr("molab.workspace.connection.get_client", _session)
+    monkeypatch.setattr(
+        "molab.workspace.targets.target_definition", lambda _t: {"id": "hpc", "scheduler": "slurm"}
+    )
     return spy
 
 
@@ -589,7 +568,7 @@ def _submit_remote(
     target = _remote_target()
     ws.add_target(target)
     transport = RecordingTransport()
-    monkeypatch.setattr("molab.workspace.targets.to_transport", lambda _t: transport)
+    monkeypatch.setattr("molab.workspace.targets.to_filesystem", lambda _t: transport)
     spy = _install_fake_submitor(monkeypatch, run)
     _handler(target)(None, run, experiment, project)
     assert _submitted_record(spy).id == "e01"
@@ -603,7 +582,7 @@ class TestReconcileSubmission:
         self,
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
-        state: JobState,
+        state: str,
         expected: str,
     ) -> None:
         from molab.plugins.submit_molq.submit import reconcile_submission
@@ -613,13 +592,13 @@ class TestReconcileSubmission:
 
         returned = reconcile_submission(run, "e01")
 
-        assert spy.refreshed == [_JOB_ID]
+        assert spy.queried == [_JOB_ID]
         e01 = run.execution("e01")
         assert e01.status.value == expected
         assert e01.sealed_at is not None
         assert e01.error is not None
         assert e01.error["type"] == "SchedulerJobEndedBeforeStart"
-        assert state.value in str(e01.error["message"]).lower()
+        assert state in str(e01.error["message"]).lower()
         assert returned.record == e01
         assert returned.error is None
 
@@ -630,18 +609,15 @@ class TestReconcileSubmission:
 
         _ws, _project, run = _submit_local(monkeypatch, tmp_path)
         executor = run.execution("e01").executor
-        spy = _install_refreshing_submitor(monkeypatch, state=JobState.RUNNING)
+        spy = _install_refreshing_submitor(monkeypatch, state="running")
 
         reconcile_submission(run, "e01")
 
-        assert [(name, scheduler) for name, scheduler, _t in spy.clusters] == [
-            (executor["cluster_name"], executor["scheduler"])
-        ]
-        assert spy.refreshed == [executor["job_id"]]
+        assert spy.queried == [executor["job_id"]]
 
-    @pytest.mark.parametrize("state", [JobState.RUNNING, JobState.SUBMITTED, JobState.QUEUED])
+    @pytest.mark.parametrize("state", ["running", "queued"])
     def test_non_terminal_job_leaves_record_unchanged(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, state: JobState
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path, state: str
     ) -> None:
         from molab.plugins.submit_molq.submit import reconcile_submission
 
@@ -651,7 +627,7 @@ class TestReconcileSubmission:
 
         returned = reconcile_submission(run, "e01")
 
-        assert spy.refreshed == [_JOB_ID]
+        assert spy.queried == [_JOB_ID]
         assert _record_bytes(run, "e01") == before
         assert returned.record.status.value == "queued"
         assert returned.record.sealed_at is None
@@ -664,11 +640,11 @@ class TestReconcileSubmission:
 
         ws, project, run = _submit_local(monkeypatch, tmp_path)
         _repository(ws, project, run).start("e01")
-        spy = _install_refreshing_submitor(monkeypatch, state=JobState.FAILED)
+        spy = _install_refreshing_submitor(monkeypatch, state="failed")
 
         returned = reconcile_submission(run, "e01")
 
-        assert spy.refreshed == []
+        assert spy.queried == []
         e01 = run.execution("e01")
         assert e01.status.value == "running"
         assert e01.sealed_at is None
@@ -683,12 +659,11 @@ class TestReconcileSubmission:
         _ws, _project, run = _submit_local(monkeypatch, tmp_path)
         run.cancel("e01")
         before = _record_bytes(run, "e01")
-        spy = _install_refreshing_submitor(monkeypatch, state=JobState.FAILED)
+        spy = _install_refreshing_submitor(monkeypatch, state="failed")
 
         returned = reconcile_submission(run, "e01")
 
-        assert spy.refreshed == []
-        assert spy.clusters == []
+        assert spy.queried == []
         assert _record_bytes(run, "e01") == before
         assert returned.record == run.execution("e01")
         assert returned.error is None
@@ -702,11 +677,11 @@ class TestReconcileSubmission:
         _ws, _project, _experiment, run = _make_run(tmp_path)
         run._create_execution()
         before = _record_bytes(run, "e01")
-        spy = _install_refreshing_submitor(monkeypatch, state=JobState.FAILED)
+        spy = _install_refreshing_submitor(monkeypatch, state="failed")
 
         returned = reconcile_submission(run, "e01")
 
-        assert spy.refreshed == []
+        assert spy.queried == []
         assert _record_bytes(run, "e01") == before
         assert returned.record.status.value == "queued"
         assert returned.error is None
@@ -719,11 +694,11 @@ class TestReconcileSubmission:
         _ws, _project, _experiment, run = _make_run(tmp_path)
         run._create_execution(executor={"backend": "molq", "target": None})
         before = _record_bytes(run, "e01")
-        spy = _install_refreshing_submitor(monkeypatch, state=JobState.FAILED)
+        spy = _install_refreshing_submitor(monkeypatch, state="failed")
 
         returned = reconcile_submission(run, "e01")
 
-        assert spy.refreshed == []
+        assert spy.queried == []
         assert _record_bytes(run, "e01") == before
         assert returned.record.status.value == "queued"
         assert returned.error is None
@@ -734,7 +709,7 @@ class TestReconcileSubmission:
         from molab.plugins.submit_molq.submit import reconcile_submission
 
         _ws, _project, run = _submit_local(monkeypatch, tmp_path)
-        spy = _install_refreshing_submitor(monkeypatch, state=JobState.FAILED)
+        spy = _install_refreshing_submitor(monkeypatch, state="failed")
 
         first = reconcile_submission(run, "e01")
         after_first = _record_bytes(run, "e01")
@@ -745,7 +720,7 @@ class TestReconcileSubmission:
         assert first.error is None
         assert second.error is None
         assert _record_bytes(run, "e01") == after_first
-        assert spy.refreshed == [_JOB_ID]
+        assert spy.queried == [_JOB_ID]
 
     def test_remote_unreadable_record_stays_queued(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -753,13 +728,12 @@ class TestReconcileSubmission:
         from molab.plugins.submit_molq.submit import reconcile_submission
 
         run, transport = _submit_remote(monkeypatch, tmp_path)
-        spy = _install_refreshing_submitor(monkeypatch, state=JobState.FAILED)
+        spy = _install_refreshing_submitor(monkeypatch, state="failed")
 
         returned = reconcile_submission(run, "e01")
 
-        assert spy.refreshed == [_JOB_ID]
-        assert [(name, scheduler) for name, scheduler, _t in spy.clusters] == [("default", "slurm")]
-        assert spy.clusters[0][2] is transport
+        assert spy.queried == [_JOB_ID]
+        assert transport.downloads, "a terminal remote job still stages out"
         e01 = run.execution("e01")
         assert e01.status.value == "queued"
         assert e01.sealed_at is None
@@ -775,7 +749,7 @@ class TestReconcileSubmission:
         transport.texts["/executions/e01/execution.json"] = json.dumps(
             {"schema_version": 4, **run.execution("e01").model_dump(mode="json")}
         )
-        _install_refreshing_submitor(monkeypatch, state=JobState.FAILED)
+        _install_refreshing_submitor(monkeypatch, state="failed")
 
         returned = reconcile_submission(run, "e01")
 
@@ -789,7 +763,10 @@ class TestReconcileSubmission:
 
     @pytest.mark.parametrize(
         "refresh_error",
-        [TransportError("scheduler unreachable"), JobNotFoundError(_JOB_ID, "default")],
+        [
+            OSError("scheduler unreachable"),
+            MolqError("JOB_NOT_FOUND", "missing"),
+        ],
         ids=["transport-error", "job-not-found"],
     )
     def test_refresh_failure_reported_and_record_left_alone(
@@ -834,12 +811,11 @@ class TestReconcileOutcome:
         ws, project, run = _submit_local(monkeypatch, tmp_path)
         _repository(ws, project, run).start("e01")
         before = _record_bytes(run, "e01")
-        spy = _install_refreshing_submitor(monkeypatch, state=JobState.FAILED)
+        spy = _install_refreshing_submitor(monkeypatch, state="failed")
 
         outcome = reconcile_submission(run, "e01")
 
-        assert spy.refreshed == []
-        assert spy.clusters == []
+        assert spy.queried == []
         assert _record_bytes(run, "e01") == before
         assert outcome.record == run.execution("e01")
         assert outcome.record.status.value == "running"
@@ -851,7 +827,7 @@ class TestReconcileOutcome:
         from molab.plugins.submit_molq.submit import reconcile_submission
 
         _ws, _project, run = _submit_local(monkeypatch, tmp_path)
-        _install_refreshing_submitor(monkeypatch, state=JobState.FAILED)
+        _install_refreshing_submitor(monkeypatch, state="failed")
 
         outcome = reconcile_submission(run, "e01")
 
@@ -861,7 +837,10 @@ class TestReconcileOutcome:
 
     @pytest.mark.parametrize(
         "refresh_error",
-        [TransportError("scheduler unreachable"), JobNotFoundError(_JOB_ID, "default")],
+        [
+            OSError("scheduler unreachable"),
+            MolqError("JOB_NOT_FOUND", "missing"),
+        ],
         ids=["transport-error", "job-not-found"],
     )
     def test_expected_failure_returned_as_error_not_printed(
@@ -900,3 +879,43 @@ class TestReconcileOutcome:
 
         with pytest.raises(TypeError, match="a bug"):
             reconcile_submission(run, "e01")
+
+
+def test_unknown_submission_is_not_sealed_or_automatically_repeated(monkeypatch, tmp_path):
+    from molq import MolqError
+
+    _, project, experiment, run = _make_run(tmp_path)
+    spy = _install_fake_submitor(
+        monkeypatch,
+        run,
+        submit_error=MolqError("OUTCOME_UNKNOWN", "Lost response", outcome="unknown"),
+    )
+    with pytest.raises(MolqError):
+        _handler()(None, run, experiment, project)
+    assert spy.submits == 1
+    record = run.execution("e01")
+    assert record.status.value == "queued" and record.executor["submission_outcome"] == "unknown"
+
+
+def test_reconcile_uses_the_recorded_destination_and_stops_after_uncertain_transfer(
+    monkeypatch, tmp_path
+):
+    from molq import MolqError
+
+    from molab.plugins.submit_molq.submit import reconcile_submission
+
+    run, transport = _submit_remote(monkeypatch, tmp_path)
+    ws = run.experiment.project.workspace
+    ws.remove_target("hpc")
+    _install_refreshing_submitor(monkeypatch, state="succeeded")
+    seen = []
+
+    def uncertain_download(*args: object, **_kwargs: object):
+        seen.append(args)
+        raise MolqError("OUTCOME_UNKNOWN", "Lost transfer response", outcome="unknown")
+
+    transport.download = uncertain_download
+    first = reconcile_submission(run, "e01")
+    second = reconcile_submission(run, "e01")
+    assert first.error and second.error and len(seen) == 1
+    assert run.execution("e01").executor["transfer_outcome"] == "unknown"

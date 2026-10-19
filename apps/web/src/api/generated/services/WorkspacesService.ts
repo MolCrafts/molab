@@ -16,8 +16,8 @@ export class WorkspacesService {
      *
      * A remote workspace whose transport is currently unreachable is still
      * listed, flagged ``unreachable`` so the UI can degrade gracefully rather
-     * than failing the whole list.  ``needsAuth`` is true for unreachable
-     * remotes so the UI can open a verification-code dialog.
+     * than failing the whole list. ``needsAuth`` identifies authentication failures;
+     * network failures do not trigger a verification-code dialog.
      *
      * When auth is enabled, the list is filtered by the user's workspace allowlist.
      * @param molabSession
@@ -43,7 +43,7 @@ export class WorkspacesService {
      * VS Code ``Add Folder to Workspace`` — append a root to the live served set.
      *
      * Accepts a local absolute path (``kind=local``) or a remote descriptor
-     * (``kind=remote`` with registry ``name`` / ``@name`` / ``Host:/abs`` path).
+     * (``kind=remote`` with registry ``name`` / ``@name`` / ``cluster:/abs`` path).
      * Optional ``activate`` switches the active workspace to the new root.
      * @param requestBody
      * @param molabSession
@@ -98,14 +98,7 @@ export class WorkspacesService {
     }
     /**
      * Connect Workspace
-     * Submit a verification code and open an SSH ControlMaster for *key*.
-     *
-     * Headless path for 2FA hosts: the server process has no TTY, so it feeds
-     * *code* to OpenSSH via ``SSH_ASKPASS``.  After success, BatchMode ops
-     * reuse the multiplex socket (see ``ControlPersist`` in ``~/.ssh/config``).
-     *
-     * The in-process workspace cache is cleared so the next API call re-probes
-     * the remote root with the live master.
+     * Authenticate through molq, then reopen the workspace with the same connection settings.
      * @param key
      * @param requestBody
      * @param molabSession

@@ -4,9 +4,6 @@
  * to leave their current task to register a new compute target.
  */
 
-import type { ReactNode } from "react";
-import { useState } from "react";
-import type { TargetResponse } from "@/api/generated/models/TargetResponse";
 import {
   Dialog,
   DialogContent,
@@ -14,7 +11,10 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from "@/components/ui/dialog";
+} from "@molcrafts/ui";
+import type { ReactNode } from "react";
+import { useState } from "react";
+import type { TargetResponse } from "@/api/generated/models/TargetResponse";
 
 import { AddTargetForm } from "./AddTargetForm";
 

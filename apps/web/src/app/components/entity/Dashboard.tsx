@@ -8,6 +8,7 @@ import { WorkbenchAction, WorkbenchIconAction, WorkbenchTag } from "@/components
 
 import { Check, Copy, type LucideIcon } from "lucide-react";
 import {
+  Children,
   type JSX,
   type ReactNode,
   type PointerEvent as ReactPointerEvent,
@@ -17,6 +18,8 @@ import {
 
 import { STATUS_GROUPS, type StatusGroupId } from "@/app/runs/statusGroups";
 import { cn } from "@/lib/utils";
+
+import { StatusBarChart } from "./InstrumentChart";
 
 /** Minimal status rollup shape (mirrors RunStatusCounts without importing it). */
 export interface StatusCountRollup {
@@ -82,7 +85,7 @@ export const MetaField = ({
   copyValue,
 }: MetaFieldProps): JSX.Element => (
   <div className={cn("min-w-0", className)}>
-    <dt className="font-mono text-micro uppercase tracking-wider text-muted-foreground">{label}</dt>
+    <dt className="text-label text-muted-foreground">{label}</dt>
     <dd
       className={cn(
         "mt-1 flex min-w-0 items-center gap-1 text-body text-foreground",
@@ -134,9 +137,7 @@ export const DashboardCanvas = ({
   children: ReactNode;
   className?: string;
 }): JSX.Element => (
-  <div className={cn("mx-auto w-full max-w-6xl space-y-6 px-4 py-4 md:px-6", className)}>
-    {children}
-  </div>
+  <div className={cn("mx-auto w-full max-w-none space-y-4 px-4 py-3", className)}>{children}</div>
 );
 
 /**
@@ -156,13 +157,36 @@ export const InventoryCanvas = ({
   <div
     className={cn(
       fill
-        ? "flex h-full min-h-0 w-full flex-col px-4 pt-4 md:px-6 md:pt-4"
-        : "mx-auto w-full max-w-6xl space-y-6 px-6 py-6 md:px-8 md:py-8",
+        ? "flex h-full min-h-0 w-full flex-col px-3 pt-2"
+        : "mx-auto w-full max-w-none space-y-4 px-4 py-3",
       className,
     )}
   >
     {children}
   </div>
+);
+
+/** Instrument row on an Overview. Empty slots are dropped, so a quiet scope does not draw a hollow gauge. */
+export const OverviewInstruments = ({ children }: { children: ReactNode }): JSX.Element | null => {
+  const items = Children.toArray(children);
+  if (items.length === 0) return null;
+  return (
+    <div className="grid items-start gap-x-4 gap-y-4 md:grid-cols-2 xl:grid-cols-3">{items}</div>
+  );
+};
+
+/** The inventory that follows the instruments. */
+export const OverviewList = ({
+  title,
+  children,
+}: {
+  title: string;
+  children: ReactNode;
+}): JSX.Element => (
+  <section className="min-w-0">
+    <h3 className="mb-2 text-label font-medium text-foreground">{title}</h3>
+    {children}
+  </section>
 );
 
 // ── DashboardCard ────────────────────────────────────────────────────────────
@@ -224,7 +248,7 @@ export const DashboardCard = ({
       {hasHeader && (
         <header
           className={cn(
-            "flex h-control-compact items-center gap-2 border-b border-border px-3",
+            "flex h-control-compact items-center gap-2 px-3",
             onHeaderPointerDown && "cursor-grab touch-none active:cursor-grabbing",
           )}
           onPointerDown={onHeaderPointerDown}
@@ -241,6 +265,7 @@ export const DashboardCard = ({
           {title != null && (
             <h3
               id={headingId}
+              title={typeof title === "string" ? title : undefined}
               className={cn(
                 "min-w-0 truncate text-label font-medium text-foreground",
                 variant === "destructive" && "text-status-failed-foreground",
@@ -253,7 +278,10 @@ export const DashboardCard = ({
             <span className="font-mono text-micro tabular-nums text-muted-foreground">{count}</span>
           )}
           {description != null && (
-            <span className="hidden min-w-0 truncate text-micro text-muted-foreground sm:inline">
+            <span
+              title={typeof description === "string" ? description : undefined}
+              className="hidden min-w-0 truncate text-label text-muted-foreground sm:inline"
+            >
               {description}
             </span>
           )}
@@ -281,80 +309,69 @@ export const DashboardCard = ({
 
 interface StatusDistributionProps {
   counts: StatusCountRollup;
-  /** Show the legend list under the bar. Default true. */
+  /** Draw the status bars. Default true. Ignored by meter and bar. */
   legend?: boolean;
   /** Noun for the accessible total. Default "runs". */
   unit?: string;
-  /** Statuses drawn on the bar and in the legend. Default is every group. */
+  /** Statuses drawn on the face. Default is every group. */
   groups?: readonly StatusGroupId[];
+  /**
+   * bars: one horizontal bar per status.
+   * meter: a thin stacked track, for a row of mixes.
+   * bar: the same track, for a table cell.
+   * Default is bars, or bar when `legend` is false.
+   */
+  variant?: "bars" | "meter" | "bar";
   className?: string;
+  /** Pixel height of the bar chart. Ignored by meter and bar. */
+  height?: number;
 }
 
-/** Segmented status bar + optional legend — shared by project / experiment. */
+/**
+ * Status as a chart. The overview is one horizontal bar per status.
+ * `variant="bar"` and `variant="meter"` (also `legend={false}`) stay a thin
+ * stacked track for a table cell or a row of small multiples.
+ */
 export const StatusDistribution = ({
   counts,
   legend = true,
   unit = "runs",
   groups,
+  variant,
   className,
+  height,
 }: StatusDistributionProps): JSX.Element => {
   const specs = groups ? STATUS_GROUPS.filter((group) => groups.includes(group.id)) : STATUS_GROUPS;
   const total = groups ? specs.reduce((sum, group) => sum + counts[group.id], 0) : counts.total;
   const empty = total === 0;
+  const occupied = specs.filter((group) => counts[group.id] > 0);
+  const label = empty ? `No ${unit}` : `Status mix across ${total} ${unit}`;
+  const face = variant ?? (legend ? "bars" : "bar");
 
-  return (
-    <div className={cn("space-y-2", className)}>
+  if (face === "bar" || face === "meter") {
+    return (
       <div
-        className="flex h-1.5 overflow-hidden rounded-control bg-muted"
+        className={cn("flex h-1.5 w-full overflow-hidden rounded-control bg-muted", className)}
         role="img"
-        aria-label={empty ? `No ${unit}` : `Status mix across ${total} ${unit}`}
+        aria-label={label}
       >
         {!empty &&
-          specs.map((group) => {
-            const value = counts[group.id];
-            if (value === 0) return null;
-            return (
-              <div
-                key={group.id}
-                title={`${group.label}: ${value}`}
-                className="h-full min-w-hairline transition-[width]"
-                style={{
-                  width: `${(value / total) * 100}%`,
-                  backgroundColor: group.color,
-                }}
-              />
-            );
-          })}
+          occupied.map((group) => (
+            <div
+              key={group.id}
+              title={`${group.label}: ${counts[group.id]}`}
+              className="h-full min-w-hairline"
+              style={{
+                width: `${(counts[group.id] / total) * 100}%`,
+                backgroundColor: group.color,
+              }}
+            />
+          ))}
       </div>
-      {legend && (
-        <ul className="grid grid-cols-2 gap-x-4 gap-y-2 sm:grid-cols-3">
-          {specs.map((group) => {
-            const value = counts[group.id];
-            return (
-              <li key={group.id} className="flex items-center justify-between gap-2 text-label">
-                <span className="inline-flex min-w-0 items-center gap-2 text-muted-foreground">
-                  <span
-                    aria-hidden="true"
-                    className="h-1.5 w-1.5 shrink-0 rounded-full"
-                    style={{ backgroundColor: group.color }}
-                  />
-                  <span className="truncate">{group.label}</span>
-                </span>
-                <span
-                  className={cn(
-                    "font-medium tabular-nums text-foreground",
-                    value === 0 && "text-muted-foreground/50",
-                  )}
-                >
-                  {value}
-                </span>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </div>
-  );
+    );
+  }
+
+  return <StatusBarChart counts={counts} groups={groups} label={label} height={height} />;
 };
 
 // ── Breadcrumb trail (inline entity path) ────────────────────────────────────

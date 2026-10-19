@@ -33,7 +33,7 @@ def _run_url(exp: Experiment, run: Run) -> str:
 def _add_hpc_target(ws: Workspace) -> None:
     add_target(
         ws,
-        ComputeTarget(name="hpc", host="me@h", scheduler="slurm", scratch_root="/scratch"),
+        ComputeTarget(name="hpc", registry_id="reg", cluster_id="hpc", scratch_root="/scratch"),
     )
 
 
@@ -436,7 +436,9 @@ class TestDispatchToMolq:
         exp.bind_workflow("document", document=_CONSTANT_ADD)
         _MolqRecorder.calls = []
         monkeypatch.setattr(run_routes, "SubmitHandler", _MolqRecorder)
-        target = ComputeTarget(name="hpc", host="me@h", scheduler="slurm", scratch_root="/scratch")
+        target = ComputeTarget(
+            name="hpc", registry_id="reg", cluster_id="hpc", scratch_root="/scratch"
+        )
 
         run_routes._dispatch_to_molq(target, run)
 
@@ -452,7 +454,9 @@ class TestDispatchToMolq:
         path.write_text(json.dumps(payload), encoding="utf-8")
         _MolqRecorder.calls = []
         monkeypatch.setattr(run_routes, "SubmitHandler", _MolqRecorder)
-        target = ComputeTarget(name="hpc", host="me@h", scheduler="slurm", scratch_root="/scratch")
+        target = ComputeTarget(
+            name="hpc", registry_id="reg", cluster_id="hpc", scratch_root="/scratch"
+        )
 
         with pytest.raises(HTTPException) as excinfo:
             run_routes._dispatch_to_molq(target, run)

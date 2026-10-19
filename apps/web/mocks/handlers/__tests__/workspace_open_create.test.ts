@@ -25,7 +25,10 @@ const openRequest = (body: Record<string, unknown>): Request =>
 
 describe("POST /api/workspace/open — create_if_missing semantics", () => {
   it("404s an unknown path when create_if_missing is omitted", async () => {
-    const response = await getResponse(workspaceHandlers, openRequest({ path: "/unknown/omitted" }));
+    const response = await getResponse(
+      workspaceHandlers,
+      openRequest({ path: "/unknown/omitted" }),
+    );
     expect(response?.status).toBe(404);
     const body = (await response?.json()) as { detail?: string };
     expect(body.detail).toBe("Workspace path not found");
@@ -54,7 +57,10 @@ describe("POST /api/workspace/open — create_if_missing semantics", () => {
       workspaceHandlers,
       openRequest({ path: "/unknown/persisted", create_if_missing: true }),
     );
-    const reopen = await getResponse(workspaceHandlers, openRequest({ path: "/unknown/persisted" }));
+    const reopen = await getResponse(
+      workspaceHandlers,
+      openRequest({ path: "/unknown/persisted" }),
+    );
     expect(reopen?.status).toBe(200);
   });
 

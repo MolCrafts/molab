@@ -555,11 +555,21 @@ class ExecutionRepository:
         return state
 
     def list(self) -> builtins.list[Execution]:
+        from .fs_cached import CachedRemoteFileSystem
+
         if not self.fs.exists(self.executions_dir):
             return []
+        paths = [
+            self.fs.join(self.executions_dir, entry.name, "execution.json")
+            for entry in self.fs.scandir(self.executions_dir, with_stat=False)
+            if entry.is_dir
+        ]
+        if isinstance(self.fs, CachedRemoteFileSystem):
+            self.fs.read_many(paths)
         states = [
             Execution.model_validate(read_versioned_json(path, fs=self.fs))
-            for path in sorted(self.fs.glob(self.executions_dir, "*/execution.json"))
+            for path in sorted(paths)
+            if self.fs.exists(path)
         ]
         return sorted(states, key=lambda item: item.seq)
 

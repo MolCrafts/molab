@@ -1,6 +1,7 @@
-import { ListChecks, RefreshCw } from "lucide-react";
+import { ListChecks, ListPlus, RefreshCw, X } from "lucide-react";
 import { type JSX, lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { workspaceApi } from "@/api";
 import { useCompareSet } from "@/app/compare";
 import { itemFromWorkspaceRunRow } from "@/app/compare/entries";
 import { EntityPage } from "@/app/components/entity";
@@ -15,6 +16,7 @@ import {
   WorkbenchRetryAction,
 } from "@/components/workbench";
 import { formatRelative } from "@/lib/format-time";
+import { reportStatus } from "@/lib/status-report";
 import { cn } from "@/lib/utils";
 import { applyFilters } from "./aggregates";
 import { parseFilterParams, toggleArrayFilter, writeFilterParams } from "./filterParams";
@@ -26,6 +28,7 @@ import {
   parseJobsSort,
   parsePage,
   parsePageSize,
+  workspaceRunKey,
 } from "./jobsTable";
 import { RunsJobsTable } from "./RunsJobsTable";
 import { RunsStatusProgress } from "./RunsStatusProgress";
@@ -123,7 +126,9 @@ export const RunsPage = ({ snapshot, onInspectorChange }: RunsPageProps): JSX.El
   );
 
   const addSelectedToCompare = useCallback(() => {
-    const picked = filteredRuns.filter((run) => compareSelection.selected.has(run.id));
+    const picked = filteredRuns.filter((run) =>
+      compareSelection.selected.has(workspaceRunKey(run)),
+    );
     compare.addMany(
       picked.map((run) =>
         itemFromWorkspaceRunRow(run, {
@@ -136,7 +141,8 @@ export const RunsPage = ({ snapshot, onInspectorChange }: RunsPageProps): JSX.El
   }, [compare, compareSelection.selected, filteredRuns, workspaceLabels]);
 
   const selectedRun = useMemo<WorkspaceRunRow | null>(
-    () => (selectedRunId ? (rows.find((row) => row.id === selectedRunId) ?? null) : null),
+    () =>
+      selectedRunId ? (rows.find((row) => workspaceRunKey(row) === selectedRunId) ?? null) : null,
     [rows, selectedRunId],
   );
 
@@ -178,9 +184,12 @@ export const RunsPage = ({ snapshot, onInspectorChange }: RunsPageProps): JSX.El
 
   const selectRun = useCallback(
     (run: WorkspaceRunRow): void => {
-      setSearchParams((prev) => writeRunsParams(prev, { runId: run.id, executionId: null }), {
-        replace: true,
-      });
+      setSearchParams(
+        (prev) => writeRunsParams(prev, { runId: workspaceRunKey(run), executionId: null }),
+        {
+          replace: true,
+        },
+      );
     },
     [setSearchParams],
   );
@@ -200,9 +209,16 @@ export const RunsPage = ({ snapshot, onInspectorChange }: RunsPageProps): JSX.El
 
   const navigateToRun = useCallback(
     (run: WorkspaceRunRow, view?: ObjectView): void => {
-      navigate(runPath(run.projectId, run.experimentId, run.id, view));
+      const workspace = snapshot.workspaces.find((item) => item.key === run.workspaceKey);
+      const open = async () => {
+        if (workspace && !workspace.active) await workspaceApi.activate(workspace);
+        navigate(runPath(run.projectId, run.experimentId, run.id, view));
+      };
+      void open().catch((error) =>
+        reportStatus(error instanceof Error ? error.message : "Could not open workspace", "error"),
+      );
     },
-    [navigate],
+    [navigate, snapshot.workspaces],
   );
 
   useEffect(() => {
@@ -212,10 +228,10 @@ export const RunsPage = ({ snapshot, onInspectorChange }: RunsPageProps): JSX.El
     }
 
     onInspectorChange({
-      id: `runs:${selectedRun.id}`,
+      id: `runs:${workspaceRunKey(selectedRun)}`,
       render: ({ className }) => (
         <SurfaceErrorBoundary
-          resetKey={`runs-inspector:${selectedRun.id}`}
+          resetKey={`runs-inspector:${workspaceRunKey(selectedRun)}`}
           fallback={(error) => (
             <WorkbenchOperationState
               kind="error"
@@ -332,10 +348,16 @@ export const RunsPage = ({ snapshot, onInspectorChange }: RunsPageProps): JSX.El
             <span className="text-label text-muted-foreground">
               {compareSelection.selected.size} selected
             </span>
-            <WorkbenchAction kind="secondary" size="compact" onClick={addSelectedToCompare}>
+            <WorkbenchAction
+              icon={<ListPlus aria-hidden />}
+              kind="secondary"
+              size="compact"
+              onClick={addSelectedToCompare}
+            >
               Add to selection
             </WorkbenchAction>
             <WorkbenchAction
+              icon={<X aria-hidden />}
               kind="ghost"
               size="compact"
               onClick={() => setCompareSelection({ selected: new Set<string>(), anchor: null })}

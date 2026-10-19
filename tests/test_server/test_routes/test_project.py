@@ -164,3 +164,42 @@ class TestLegacyProjectAsset:
         assert any(item["id"] == LEGACY_ID for item in listed.json())
         assert downloaded.status_code == 200, downloaded.text
         assert downloaded.content == HELLO
+
+
+def test_asset_download_reads_bounded_ranges(served, fresh_run, tmp_path, monkeypatch):
+    ws, exp, run = fresh_run
+    payload = b"\xff\x00" * 400000
+    source = tmp_path / "binary.dat"
+    source.write_bytes(payload)
+    asset = exp.project.assets.import_asset("binary", source, action="copy")
+    with run.start() as ctx:
+        path = ctx.get_dir("work") / "binary.dat"
+        path.write_bytes(payload)
+        artifact = ctx.emit_artifact(path, name="binary.dat")
+    ranges = []
+    original = ws.fs.read_range
+
+    def bounded(path, offset, length):
+        assert length <= 262144
+        ranges.append(length)
+        return original(path, offset, length)
+
+    open_original = ws.fs.open
+
+    def no_buffer(*args: object, **kwargs: object):
+        if len(args) < 2 or args[1] != "rb":
+            return open_original(*args, **kwargs)
+        raise AssertionError("download must not call open")
+
+    monkeypatch.setattr(type(ws.fs), "read_range", staticmethod(bounded))
+    monkeypatch.setattr(type(ws.fs), "open", staticmethod(no_buffer))
+    with served(ws) as client:
+        urls = [
+            f"/api/projects/{exp.project.id}/assets/{asset.id}/download",
+            f"/api/projects/{exp.project.id}/experiments/{exp.id}/runs/{run.id}/executions/e01/artifacts/{artifact.id}/content",
+        ]
+        for url in urls:
+            response = client.get(url)
+            assert response.status_code == 200, response.text
+            assert response.content == payload
+    assert len(ranges) >= 8

@@ -13,6 +13,35 @@ Every persistent byproduct — imported data, task artifacts, logs, checkpoints,
 
 Workspace is the bottom of the molab dependency DAG. It owns filesystem layout, atomic JSON, content-addressed assets, and generic per-kind subsystem storage — and **does not know about workflows or knowledge**. Upstream layers (workflow, knowledge, services, cli, server) reach *down* into workspace's public surface; the inverse is forbidden by the import-guard test.
 
+## Remote destinations
+
+molq's registry owns destination definitions, including SSH aliases, authentication,
+transport and scheduler configuration. A molab compute target stores only its name,
+registry ID, cluster ID and scratch root. Register a destination in molq first,
+then reference it from molab:
+
+```bash
+molab target add hpc --cluster registered-hpc --scratch /scratch/service/lab --path ./lab
+```
+
+Remote addresses use `registered-hpc:/path/to/workspace`; the prefix must name a
+registered molq destination. The Web service owns a local molq stdio client, and
+all browser access goes through molab's workspace authorization. Shared deployments
+use a preconfigured service account. The connection dialog accepts one verification
+code through molq's authentication API.
+
+molq supplies generic scoped file operations and bounded transfers. molab selects
+workspace, project, experiment, run and execution metadata through those APIs.
+Stage-in, submission, reconciliation, cancellation and stage-out use the execution's
+recorded destination identity. An uncertain write outcome is retained for inspection;
+it does not trigger an automatic resend.
+
+Remote caches are separated by registry, cluster and workspace root. `pinned` keeps
+fetched content until explicit refresh. `strict` fetches content on each read, even
+when size and modification time are unchanged. Uploads stage on disk with an 8 GiB
+HTTP limit; attachment downloads read bounded chunks. Real SSH/HPC and OTP acceptance
+is still pending, and fixture tests do not establish live-host behavior.
+
 ## Hierarchy Levels
 
 | Level | Directory | Metadata file | Purpose |

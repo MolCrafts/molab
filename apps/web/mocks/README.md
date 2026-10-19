@@ -1,232 +1,49 @@
-# MSW Mock Layer
+# Offline feature showcase
 
-This directory contains the MSW (Mock Service Worker) API mocking layer for the molab frontend.
+Run `npm run dev:web` from the repository root. The default project is Protein Folding. The mock is opt-in (`MOLAB_USE_MOCK=true`), uses MSW, and needs no Python server, SSH session, or user credentials. `npm run dev:api` continues to use the real API.
 
-## Architecture Overview
+All content and job activity are synthetic. Refreshing the tab resets edits and actions. Dates are relative to startup so the dashboard's recent activity and schedule stay populated.
 
-The mock layer is organized into three main components:
+## What to explore
 
-### 1. Database (`db/`)
-- **In-memory storage** for workspace data (projects, experiments, runs, assets, files)
-- **Session-scoped persistence**: Data survives across requests within a browser tab or test file
-- **Reset utilities**: `resetDatabase()` for test isolation
+| Entry | Example | Features |
+| --- | --- | --- |
+| Dashboard `/` | 21 runs across three projects | Arc status instrument, recent activity, attention list, durations, backend breakdown, schedule |
+| Projects `/projects/protein-folding` | AlphaFold Baseline, Structure Sweep | Experiment inventory, workflow graph and source, typed parameters, create run, project settings |
+| Projects `/projects/nve-drift` | Integrator Benchmark | 12 driver × ensemble × timestep combinations, distinct numerical results, comparison and sweep instruments |
+| Same project | Thermostat Validation | Empty experiment and unbound-workflow state |
+| Runs `/runs` | Local and Molq executions | Filters, pagination, selection and cross-run comparison; queued, running, finalizing, succeeded, failed, interrupted and cancelled examples; one unexecuted run |
+| Run `/projects/protein-folding/experiments/exp-001/runs/run-001` | Completed showcase | Executions, outputs, registered artifacts, evidence, journal graph, MolPlot scalars and Vega-Lite plot, Molq job details, TensorBoard, ΔF, MolVis discovery |
+| Run `run-002` in the same experiment | Failed attempt followed by an active retry | Attempt timeline, per-attempt logs, cancellation |
+| Run `run-003` in the same experiment | Failed attempt | Traceback, retry/resume/reproduce controls, harvest/failure-report flows |
+| Assets `/assets` | Protein Folding → alphafold.pt | Two immutable version records, origin metadata, download; artifact promotion appends versions |
+| Assets → NVE Drift | Water trajectory | XYZ bytes from the same execution file |
+| Files `/workspace` | `projects`, `data`, `workflows`, `manuscript`, `managed-assets`, `knowledges` | Lazy folders, text/code/CSV/JSON, actual execution files, upload, byte-exact download, create and delete |
+| Knowledge `/knowledge` | Eight documents | All six knowledge classes, Markdown editing, tags/status/search, entity links, missing-reference example, create/move/delete, media upload, Markdown and notebook ZIP export |
+| Knowledge → Integrator benchmark.tex | Manuscript source and results table | BusyTeX source/preview entry |
+| Settings `/settings` | Appearance, targets, remote descriptors, plugins | Theme/text-size controls, target and descriptor CRUD, test success/failure states, plugin preferences |
 
-### 2. Handlers (`handlers/`)
-- **API-centric organization**: One file per domain (projects, experiments, runs, assets, workspace, execution, registry)
-- **Data-driven**: Handlers read from and write to the database, not hardcoded responses
-- **Stateful**: Supports read and write operations (create project, update file, set run status)
+For comparison, add two or more runs to the selection from Runs or their individual pages. Expand an execution to inspect its products. Opening `run-001` discovers its plugin tabs from file names, just as a real workspace does.
 
-### 3. Utilities (`utils/`)
-- **Seed functions**: `seedWorkspace(config)` to initialize custom data
-- **File operations**: `writeFile()`, `readFile()`, `deleteFile()`
-- **Entity creation**: `addProject()`, `addExperiment()`, `addRun()`
-- **Run management**: `setRunStatus()`
+## Fixture ownership
 
-## Directory Structure
+- `db/index.ts` owns projects, experiments, logical runs, canonical execution records, managed assets/versions, files and logs. Entity paths use display-name directories; IDs come from definitions rather than path parsing.
+- Domain handlers implement the current generated API. `execution.ts` owns attempt operations and reads products from the same file tree the explorer uses. The old mock-only run execution, pre-parsed LAMMPS and rerun endpoints are removed.
+- `workspaceRoute.ts` composes MSW's public `matchRequestUrl` with the explicit `/api/workspaces/feature-showcase/…` prefix, so comparisons and flat reads share resolvers and data.
+- `workspace.ts` derives dashboard execution statistics from those canonical records. `molq.ts` derives queue jobs from the same Molq attempts; it does not maintain a second job fixture list.
+- `feature_showcase.ts` owns document operations and the cross-domain read models. Unknown API operations still return an explicit 501 so missing coverage is visible.
+- `fflate` is a development-only dependency used for real ZIP exports; exports contain the file bytes shown by previews.
 
-```
-ui/mocks/
-├── db/
-│   └── index.ts          # In-memory database with seed data
-├── handlers/
-│   ├── projects.ts       # Project CRUD operations
-│   ├── experiments.ts    # Experiment management
-│   ├── runs.ts           # Run lifecycle
-│   ├── assets.ts         # Asset management
-│   ├── workspace.ts      # File tree, read/write operations
-│   ├── execution.ts      # Run execution (placeholder)
-│   ├── registry.ts       # Task registry (placeholder)
-│   └── index.ts          # Central export
-├── utils/
-│   └── index.ts          # Helper functions
-├── browser.ts            # MSW browser worker setup
-├── node.ts               # MSW Node server setup
-└── README.md             # This file
-```
+The TensorBoard file is explicitly a synthetic discovery marker; the offline scalar endpoint serves deterministic samples, rather than claiming the marker is a parsed event file. Example model/data payloads are small illustrative files, not usable model weights or full scientific datasets.
 
-## Development Usage
+## Limits
 
-| Root script | Leaf (`cd ui`) | Mode |
-|-------------|----------------|------|
-| `npm run dev:web` | `npm run dev` | MSW mock + open seeded Protein Folding project |
-| `npm run dev:api` | `npm run dev:api` | Real API proxy (no MSW) |
+- MolVis's data and discovery routes are covered, but rendering still encounters the previously recorded external molvis/molrs export mismatch (`Cell` / `readStl`). This task does not modify those sibling packages.
+- BusyTeX compilation requires its optional browser runtime assets; the seeded TeX source does not install that runtime.
+- A physical attempt can be created and cancelled, but no scientific computation, scheduler submission or automatic progress is performed. Outputs of seeded attempts are fixed examples.
+- The one served workspace is `/mock-workspace`. Adding another served root returns an explanation. Remote descriptors and tests are simulated configuration examples; authentication, SSH, HPC, real authorization and multi-workspace isolation require the real server. Auth is disabled in mock mode.
+- Browser download and upload handlers preserve bytes, including binary data. Example initial payloads are intentionally small.
 
-```bash
-# From repo root
-npm run dev:web
-```
+## Checks
 
-Console logs are prefixed with `[MSW]`. To hit a real backend, use `npm run dev:api` (or `molab serve --dev`) instead.
-
-## Test Usage
-
-### Basic Test Setup
-
-Tests can use MSW through a shared setup file wired into `Rstest`:
-
-```typescript
-import { beforeAll, afterEach, afterAll } from '@rstest/core';
-import { server } from './mocks/node';
-import { resetDatabase } from './mocks/db';
-
-beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
-afterEach(() => {
-  server.resetHandlers();
-  resetDatabase();
-});
-afterAll(() => server.close());
-```
-
-### Seeding Custom Data
-
-```typescript
-import { seedWorkspace } from '../../../mocks/utils';
-
-describe('ProjectList', () => {
-  it('renders projects from mock API', async () => {
-    seedWorkspace({
-      projects: [
-        { id: 'test-1', name: 'Test Project 1' },
-        { id: 'test-2', name: 'Test Project 2' },
-      ],
-    });
-
-    render(<ProjectList />);
-
-    expect(await screen.findByText('Test Project 1')).toBeInTheDocument();
-  });
-});
-```
-
-### Overriding Handlers for Specific Tests
-
-```typescript
-import { server } from '../../../mocks/node';
-import { http, HttpResponse } from 'msw';
-
-it('handles API errors', async () => {
-  server.use(
-    http.get('/api/projects', () => {
-      return HttpResponse.json(
-        { message: 'Internal server error' },
-        { status: 500 }
-      );
-    })
-  );
-
-  render(<ProjectList />);
-
-  expect(await screen.findByText('Error loading projects')).toBeInTheDocument();
-});
-```
-
-## API Coverage
-
-The mock layer covers all API endpoints used by the frontend:
-
-### Projects
-- `GET /api/projects` - List all projects
-- `GET /api/projects/:id` - Get project by ID
-- `POST /api/projects` - Create new project
-- `DELETE /api/projects/:id` - Delete project
-
-### Experiments
-- `GET /api/projects/:projectId/experiments` - List experiments for a project
-
-### Runs
-- `GET /api/projects/:projectId/experiments/:experimentId/runs` - List runs for an experiment
-
-### Assets
-- `GET /api/assets` - List all assets
-
-### Workspace Files
-- `GET /api/workspace/info` - Get workspace metadata
-- `GET /api/workspace/files?path=...` - List files in directory
-- `GET /api/workspace/file?path=...` - Read file content (text)
-- `GET /api/workspace/file/blob?path=...` - Read file content (binary)
-- `POST /api/workspace/open` - Set workspace path
-- `POST /api/workspace/directories` - Create directory
-- `PUT /api/workspace/files` - Write file content
-
-### Execution (Placeholder)
-- `POST /api/execute` - Trigger run execution
-- `GET /api/runs/:id/status` - Poll run status
-
-### Plugins / Registry
-- `GET /api/plugins` - List available UI plugins
-- `GET /api/tasks` - Task registry placeholder
-- `GET /api/tasks/:id` - Task detail placeholder
-
-## Maintenance
-
-### When the API Changes
-
-1. **Update handlers**: Modify the corresponding handler file in `handlers/`
-2. **Update database schema**: If new fields are added, update the seed data in `db/index.ts`
-3. **Update types**: Ensure TypeScript types in `src/app/types.ts` match the API
-
-### Adding New Endpoints
-
-1. Create or update the appropriate handler file in `handlers/`
-2. Add the handler to the exports in `handlers/index.ts`
-3. If needed, add database accessors in `db/index.ts`
-
-### Example: Adding a New Endpoint
-
-```typescript
-// handlers/projects.ts
-export const projectHandlers = [
-  // ... existing handlers
-
-  // PATCH /api/projects/:id - Update project
-  http.patch(`${API_BASE}/projects/:id`, async ({ params, request }) => {
-    const { id } = params;
-    const updates = await request.json();
-
-    const project = getProject(id as string);
-    if (!project) {
-      return HttpResponse.json(
-        { message: `Project ${id} not found` },
-        { status: 404 }
-      );
-    }
-
-    const updated = { ...project, ...updates };
-    setProject(updated);
-
-    return HttpResponse.json(updated);
-  }),
-];
-```
-
-## Troubleshooting
-
-### Mocks not working in development
-- Check that the dev server was started with `--mock`
-- Look for `[MSW]` logs in browser console
-- Verify the service worker is registered in DevTools → Application → Service Workers
-
-### Tests failing with network errors
-- Ensure `setupTests.ts` is properly configured
-- Check that `server.listen()` is called in `beforeAll`
-- Verify handlers are reset in `afterEach`
-
-### Mock data not persisting
-- Database is session-scoped (browser tab or test file)
-- Use `seedWorkspace()` to initialize data for each test
-- Call `resetDatabase()` in `afterEach` for test isolation
-
-## Why Mocks are Outside `src/`
-
-Mock files are placed in `apps/web/mocks/` (parallel to `apps/web/src/`) to:
-- **Separate concerns**: Test infrastructure is distinct from production code
-- **Avoid pollution**: Mocks don't appear in production bundles
-- **Clear organization**: Easy to identify and maintain test-only code
-
-The production app imports mocks dynamically only when the mock flag is enabled:
-```typescript
-// apps/web/src/index.tsx
-if (__USE_MOCK__) {
-  await import("../mocks/browser").then(m => m.start());
-}
-```
+`npm run test:web` exercises fixtures through MSW's public `getResponse`, including scoped reads, every seeded attempt/product, binary round-trips, ZIP contents, retry/cancel consistency, asset versions, knowledge export and linked queue jobs. `npm run typecheck:web` includes the mock database and handlers to catch drift against generated contracts.

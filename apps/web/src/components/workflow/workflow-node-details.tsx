@@ -7,8 +7,8 @@
  * (or `null`) and renders its id / type / status / static config.
  */
 
+import { ScrollArea } from "@molcrafts/ui";
 import type { JSX } from "react";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   NodeInspector,
   NodeInspectorRow,

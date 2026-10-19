@@ -35,31 +35,25 @@ describe("workbench motion contract", () => {
     expect(css).toContain(".mol-motion-progress-pulse");
     expect(css).toContain(".mol-progress-spinner");
     // Essential busy affordance must survive the nuclear reduced-motion kill
-    // (spinners + status-strip track + heartbeat lamp). Selector may wrap.
+    // (spinners + status-strip track). Selector may wrap.
     expect(css).toContain(":not(.mol-status-progress-indeterminate)");
-    expect(css).toContain(":not(.mol-heartbeat-idle)");
-    expect(css).toMatch(/:not\(\s*\.mol-heartbeat-pulse\s*\)/);
     expect(css).toContain("animation: molab-progress-spin 0.85s linear infinite !important");
     expect(css).toContain(".workflow-port-render .bg-circle");
     expect(readSource("plugins/workflow/flowgram-canvas-impl.tsx")).toContain("useReducedMotion()");
   });
 
-  it("gives every overlay family an implemented product motion primitive", () => {
-    const overlaySources = {
-      "components/ui/alert-dialog.tsx": ["mol-motion-overlay", "mol-motion-dialog"],
-      "components/ui/context-menu.tsx": ["mol-motion-popup"],
-      "components/ui/dialog.tsx": ["mol-motion-overlay", "mol-motion-dialog"],
-      "components/ui/dropdown-menu.tsx": ["mol-motion-popup"],
-      "components/ui/popover.tsx": ["mol-motion-popup"],
-      "components/ui/select.tsx": ["mol-motion-popup"],
-      "components/ui/sheet.tsx": ["mol-motion-overlay", "mol-motion-sheet"],
-      "components/ui/tooltip.tsx": ["mol-motion-popup"],
-    } as const;
-
-    for (const [path, classes] of Object.entries(overlaySources)) {
-      const source = readSource(path);
-      for (const className of classes) expect(source, path).toContain(className);
+  it("styles the motion classes consumed by the shared UI library", () => {
+    // The library owns overlay implementations; molab owns their product motion CSS.
+    const css = readSource("styles/tailwind.css");
+    for (const className of [
+      ".mol-motion-overlay",
+      ".mol-motion-dialog",
+      ".mol-motion-popup",
+      ".mol-motion-sheet",
+    ]) {
+      expect(css).toContain(className);
     }
+    expect(css).toContain('@source "../../../../node_modules/@molcrafts/ui/dist"');
   });
 
   it("does not fall back to decorative framework motion", () => {

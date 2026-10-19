@@ -2,8 +2,10 @@ import { Suspense, useEffect, useState } from "react";
 import { workspaceApi } from "@/api";
 import type { RendererProps } from "@/app/types";
 import { WorkbenchOperationState, WorkbenchRetryAction } from "@/components/workbench";
+import { useUiTheme } from "@/lib/ui-theme";
 import { MonacoEditor } from "@/plugins/editor";
 export const WorkflowSourceViewer = ({ selection, snapshot }: RendererProps): JSX.Element => {
+  const theme = useUiTheme();
   const [content, setContent] = useState<string>("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -146,7 +148,7 @@ export const WorkflowSourceViewer = ({ selection, snapshot }: RendererProps): JS
           height="100%"
           language="yaml"
           value={content}
-          theme="light"
+          theme={theme === "dark" ? "vs-dark" : "light"}
           options={{
             readOnly: true,
             minimap: { enabled: false },

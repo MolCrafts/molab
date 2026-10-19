@@ -1,10 +1,19 @@
-import { ArrowUpRight, LayoutDashboard, TriangleAlert } from "lucide-react";
-import { type JSX, useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { ListTodo, PanelsTopLeft, TriangleAlert } from "lucide-react";
+import { type JSX, useEffect, useMemo, useState } from "react";
+import { Link, Navigate } from "react-router-dom";
 
-import { DashboardCanvas, EntityPage } from "@/app/components/entity";
+import { DashboardCanvas, StatusLedger } from "@/app/components/entity";
+import { DashboardAttention } from "@/app/dashboard/DashboardAttention";
 import { DashboardGrid, DashboardToolbar } from "@/app/dashboard/DashboardGrid";
-import { DashboardWidgetBody } from "@/app/dashboard/dashboardWidgets";
+import {
+  buildDashboardModel,
+  hasMeasurableExecutions,
+  isInventoryBlocked,
+  showDashboardGrid,
+  showDashboardSkeleton,
+  showTruncationStrip,
+} from "@/app/dashboard/dashboardModel";
+import { DashboardWidgetBody, rollupExecutions } from "@/app/dashboard/dashboardWidgets";
 import {
   DASHBOARD_LAYOUT_KEY,
   type DashboardWidget,
@@ -12,18 +21,10 @@ import {
   parseLayout,
   serializeLayout,
 } from "@/app/dashboard/layout";
+import { useWorkspaceTabVisible } from "@/app/dashboard/useWorkspaceTab";
+import type { NavigationLandingProps } from "@/app/navigation/sections";
 import { useWorkspaceRuns } from "@/app/runs/useWorkspaceRuns";
-import type { WorkspaceSnapshot } from "@/app/types";
-import {
-  WorkbenchIconAction,
-  WorkbenchOperationState,
-  WorkbenchRetryAction,
-} from "@/components/workbench";
-import { formatRelative } from "@/lib/format-time";
-
-interface DashboardPageProps {
-  snapshot: WorkspaceSnapshot;
-}
+import { WorkbenchIconAction, WorkbenchOperationState } from "@/components/workbench";
 
 const useWideDashboard = (): boolean => {
   const query = "(min-width: 1024px)";
@@ -45,49 +46,53 @@ const readLayout = (): DashboardWidget[] => {
   return parseLayout(window.localStorage.getItem(DASHBOARD_LAYOUT_KEY));
 };
 
-export const DashboardPage = ({ snapshot }: DashboardPageProps): JSX.Element => {
-  const { rows, loading, error, lastSyncedAt, refresh, truncated } = useWorkspaceRuns();
-  const activeWorkspace =
-    snapshot.workspaces.find((workspace) => workspace.active) ?? snapshot.workspaces[0];
+export const DashboardPage = ({ snapshot }: NavigationLandingProps): JSX.Element => {
+  const { rows, loading, error, refresh, truncated, unreachable, lastSyncedAt } =
+    useWorkspaceRuns();
   const [widgets, setWidgets] = useState<DashboardWidget[]>(readLayout);
   const [arranging, setArranging] = useState(false);
   const wide = useWideDashboard();
-  const executions = rows.reduce((sum, run) => sum + run.executions.length, 0);
+  const blocked = isInventoryBlocked(snapshot, {
+    runsError: error,
+    unreachableKeys: unreachable,
+  });
+  const model = useMemo(
+    () =>
+      buildDashboardModel(snapshot, rows, {
+        runsError: error,
+        truncated,
+        unreachableKeys: unreachable,
+      }),
+    [snapshot, rows, error, truncated, unreachable],
+  );
+  const skeleton = showDashboardSkeleton({
+    loading,
+    rowCount: rows.length,
+    synced: lastSyncedAt !== null,
+    blocked,
+  });
+  const workspaceTab = useWorkspaceTabVisible(snapshot);
+  const instruments = showDashboardGrid(blocked, rows.length) && hasMeasurableExecutions(rows);
 
   useEffect(() => {
     window.localStorage.setItem(DASHBOARD_LAYOUT_KEY, serializeLayout(widgets));
   }, [widgets]);
 
+  useEffect(() => {
+    if (!wide || !instruments) setArranging(false);
+  }, [wide, instruments]);
+
+  if (!workspaceTab) {
+    return <Navigate to="/projects" replace />;
+  }
+
+  const quiet = !skeleton && !instruments && !blocked;
+  const counts = rollupExecutions(rows);
+
   return (
-    <EntityPage
-      icon={LayoutDashboard}
-      title="Dashboard"
-      meta={
-        <>
-          <span>{rows.length} runs</span>
-          <span>{executions} executions</span>
-          {activeWorkspace ? <span>{activeWorkspace.label}</span> : null}
-          {lastSyncedAt ? <span>synced {formatRelative(lastSyncedAt.toISOString())}</span> : null}
-        </>
-      }
-      actions={
-        <>
-          <DashboardToolbar
-            arranging={arranging}
-            widgets={widgets}
-            onArranging={setArranging}
-            onWidgets={setWidgets}
-          />
-          <WorkbenchIconAction label="Open runs" kind="primary" size="default" asChild>
-            <Link to="/runs">
-              <ArrowUpRight className="size-3.5" />
-            </Link>
-          </WorkbenchIconAction>
-        </>
-      }
-    >
+    <div className="flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-background">
       <div className="min-h-0 flex-1 overflow-y-auto">
-        {loading && rows.length === 0 ? (
+        {skeleton ? (
           <WorkbenchOperationState
             kind="loading"
             title="Loading workspace status"
@@ -95,33 +100,73 @@ export const DashboardPage = ({ snapshot }: DashboardPageProps): JSX.Element => 
           />
         ) : (
           <>
-            {error ? (
-              <WorkbenchOperationState
-                kind="error"
-                density="compact"
-                title="Could not load dashboard runs"
-                detail={error}
-                action={<WorkbenchRetryAction onClick={refresh} />}
-              />
-            ) : null}
-            {truncated ? (
-              <div className="flex items-center gap-2 border-b border-status-warning/30 bg-status-warning-soft px-4 py-2 text-micro text-status-warning-foreground">
-                <TriangleAlert className="size-icon-sm" />
-                <span>Run inventory is truncated; open Runs to narrow the dataset.</span>
+            <DashboardAttention
+              items={model.operational}
+              overflow={model.operationalOverflow}
+              retrying={loading}
+              onRetry={refresh}
+            />
+            {showTruncationStrip(truncated, error) ? (
+              <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2 border-b border-status-warning/30 bg-status-warning-soft px-6 py-2 text-label text-status-warning-foreground">
+                <TriangleAlert className="size-icon-sm shrink-0" aria-hidden />
+                <p className="min-w-0 flex-1 basis-48 break-words">
+                  Partial results. Filter runs to see more.
+                </p>
+                <WorkbenchIconAction label="Open runs" asChild>
+                  <Link to="/runs">
+                    <ListTodo aria-hidden />
+                  </Link>
+                </WorkbenchIconAction>
               </div>
             ) : null}
-            <DashboardCanvas>
-              <DashboardGrid
-                widgets={widgets}
-                arranging={arranging}
-                wide={wide}
-                onWidgets={setWidgets}
-                renderWidget={(widget) => <DashboardWidgetBody widget={widget} rows={rows} />}
-              />
-            </DashboardCanvas>
+            <header className="sticky top-0 z-10 flex flex-wrap items-center justify-between min-h-8 gap-x-3 gap-y-1 border-b border-border bg-background px-4 py-1">
+              <h1 className="min-w-0 text-body font-medium text-foreground">Dashboard</h1>
+              {instruments ? (
+                <DashboardToolbar
+                  arranging={arranging}
+                  wide={wide}
+                  widgets={widgets}
+                  onArranging={setArranging}
+                  onWidgets={setWidgets}
+                />
+              ) : null}
+            </header>
+            {quiet ? (
+              <div className="px-6 py-8">
+                <p className="max-w-[65ch] text-body text-foreground">No executions yet.</p>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <WorkbenchIconAction label="Open projects" asChild>
+                    <Link to="/projects">
+                      <PanelsTopLeft aria-hidden />
+                    </Link>
+                  </WorkbenchIconAction>
+                  <WorkbenchIconAction label="Open runs" asChild>
+                    <Link to="/runs">
+                      <ListTodo aria-hidden />
+                    </Link>
+                  </WorkbenchIconAction>
+                </div>
+              </div>
+            ) : null}
+            {instruments ? (
+              <div id="dashboard-charts">
+                <DashboardCanvas className="max-w-none space-y-4 px-4 py-3">
+                  <StatusLedger counts={counts} unit={["execution", "executions"]} />
+                  <DashboardGrid
+                    widgets={widgets}
+                    arranging={arranging}
+                    wide={wide}
+                    onWidgets={setWidgets}
+                    renderWidget={(widget) => (
+                      <DashboardWidgetBody widget={widget} rows={rows} inventoryBlocked={blocked} />
+                    )}
+                  />
+                </DashboardCanvas>
+              </div>
+            ) : null}
           </>
         )}
       </div>
-    </EntityPage>
+    </div>
   );
 };

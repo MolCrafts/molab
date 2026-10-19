@@ -28,15 +28,15 @@ export function PageHeader({
 }: PageHeaderProps): JSX.Element {
   return (
     <header className={cn("bg-surface", className)} data-slot="page-header">
-      <div className="flex min-h-toolbar min-w-0 items-center gap-2 px-2 py-1">
+      <div className="flex min-h-8 min-w-0 items-center gap-2 px-2 py-1">
         {Icon ? (
-          <div className="hidden size-7 flex-none items-center justify-center text-accent sm:flex">
+          <div className="hidden size-7 flex-none items-center justify-center text-muted-foreground sm:flex">
             <Icon className="size-icon" aria-hidden />
           </div>
         ) : null}
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
           <h1
-            className="truncate text-title font-semibold tracking-tight text-foreground"
+            className="truncate text-body font-medium text-foreground"
             title={titleTooltip ?? title}
           >
             {title}

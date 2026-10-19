@@ -1,12 +1,14 @@
 /**
  * VS Code "Add Folder to Workspace" quick-input.
- * Accepts a local absolute path, remote `Host:/abs`, or `@registry-name`.
+ * Accepts a local absolute path, remote `cluster:/abs`, or `@registry-name`.
  */
+
+import { Dialog, DialogContent, DialogDescription, DialogTitle, Input } from "@molcrafts/ui";
 import { Loader2 } from "lucide-react";
 import { type JSX, useCallback, useEffect, useId, useState } from "react";
 import { workspacesApi } from "@/api";
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
+import { requestRemoteAuth } from "@/app/layout/remoteAuthPrompt";
+import type { ServedWorkspaceSummary } from "@/app/types";
 import { cn } from "@/lib/utils";
 export interface AddWorkspaceDialogProps {
   open: boolean;
@@ -14,11 +16,11 @@ export interface AddWorkspaceDialogProps {
   onAdded: () => void;
 }
 
-/** Heuristic: remote if Host:/path, user@host:/path, or @registry-name. */
+/** Heuristic: remote if cluster:/path, cluster:/path, or @registry-name. */
 const detectKind = (raw: string): "local" | "remote" => {
   const s = raw.trim();
   if (s.startsWith("@")) return "remote";
-  // SCP-style host:path (not Windows drive like C:\ or C:/ alone without host)
+  // SCP-style cluster:path (not Windows drive like C:\ or C:/ alone without host)
   if (/^[A-Za-z0-9._-]+@[^:]+:\//.test(s)) return "remote";
   if (/^[A-Za-z0-9._-]+:\//.test(s) && !/^[A-Za-z]:[/\\]/.test(s)) return "remote";
   return "local";
@@ -64,15 +66,16 @@ export const AddWorkspaceDialog = ({
     setHint(null);
     try {
       const kind = detectKind(raw);
+      let added: ServedWorkspaceSummary;
       if (kind === "remote") {
         if (raw.startsWith("@")) {
-          await workspacesApi.addWorkspace({
+          added = await workspacesApi.addWorkspace({
             kind: "remote",
             name: raw.slice(1),
             activate: true,
           });
         } else {
-          await workspacesApi.addWorkspace({
+          added = await workspacesApi.addWorkspace({
             kind: "remote",
             path: raw,
             activate: true,
@@ -80,7 +83,7 @@ export const AddWorkspaceDialog = ({
         }
       } else {
         try {
-          await workspacesApi.addWorkspace({
+          added = await workspacesApi.addWorkspace({
             kind: "local",
             path: raw,
             createIfMissing: false,
@@ -90,7 +93,7 @@ export const AddWorkspaceDialog = ({
           const msg = first instanceof Error ? first.message : String(first);
           if (msg.toLowerCase().includes("not found")) {
             // Offer create on second submit only when path missing — mirror Open Workspace.
-            await workspacesApi.addWorkspace({
+            added = await workspacesApi.addWorkspace({
               kind: "local",
               path: raw,
               createIfMissing: true,
@@ -102,6 +105,9 @@ export const AddWorkspaceDialog = ({
         }
       }
       onOpenChange(false);
+      if (added.isRemote && (added.needsAuth || added.unreachable)) {
+        requestRemoteAuth(added, "gesture");
+      }
       onAdded();
     } catch (err) {
       setHint(shortFailure(err instanceof Error ? err.message : String(err)));
@@ -122,13 +128,13 @@ export const AddWorkspaceDialog = ({
       >
         <DialogTitle className="sr-only">Add Folder to Workspace</DialogTitle>
         <DialogDescription className="sr-only">
-          Enter a local path, Host:/path, or @registry-name
+          Enter a local path, cluster:/path, or @registry-name
         </DialogDescription>
 
         <div className="border-b border-border/80 bg-muted/40 px-3 py-row-pad">
           <p className="truncate font-mono text-micro text-muted-foreground">
             Add Folder to Workspace
-            <span className="text-foreground/50"> · path or Host:/path</span>
+            <span className="text-foreground/50"> · path or cluster:/path</span>
           </p>
         </div>
 
@@ -149,7 +155,7 @@ export const AddWorkspaceDialog = ({
             disabled={busy}
             autoComplete="off"
             spellCheck={false}
-            placeholder="/path/to/workspace  or  Host:/abs/path"
+            placeholder="/path/to/workspace  or  cluster:/abs/path"
             className="h-control-comfortable rounded-none border-0 bg-transparent px-3 font-mono text-body shadow-none focus-visible:ring-0"
             onChange={(e) => {
               setValue(e.target.value);
@@ -167,7 +173,7 @@ export const AddWorkspaceDialog = ({
           </p>
         ) : (
           <p className="border-t border-border/40 px-3 py-row-pad text-micro text-muted-foreground">
-            Enter ↵ · Esc cancel · remote: Host:/path or @name
+            Enter ↵ · Esc cancel · remote: cluster:/path or @name
           </p>
         )}
       </DialogContent>

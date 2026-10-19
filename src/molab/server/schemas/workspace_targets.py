@@ -10,7 +10,7 @@ are re-imported from ``.targets`` rather than duplicated.
 
 from __future__ import annotations
 
-from pydantic import Field
+from typing import Literal
 
 from molab.server.workspace_targets import WorkspaceTarget
 
@@ -19,57 +19,20 @@ from .targets import TargetTestCheck, TargetTestResponse
 
 
 class WorkspaceTargetCreateRequest(ApiModel):
-    """Payload for ``POST /api/workspace/targets``."""
-
-    name: str = Field(..., description="Unique slug-shaped identifier")
-    host: str = Field(..., description="``user@host`` or bare hostname for SSH")
-    root_path: str = Field(..., description="Absolute POSIX path on the remote host")
-    port: int | None = Field(default=None, description="SSH port")
-    identity_file: str | None = Field(
-        default=None,
-        description="Absolute path to an SSH identity file",
-    )
-    ssh_opts: list[str] = Field(
-        default_factory=list,
-        description="Extra ``ssh`` argv tokens",
-    )
-    cache_dir: str | None = Field(
-        default=None,
-        description="Override local mirror root (defaults to ~/.molab/remote_cache/<name>)",
-    )
-    cache_ttl_seconds: int = Field(
-        default=300,
-        ge=0,
-        description=(
-            "Mirror pin policy: >0 pin until user refresh; 0 = re-stat remote on every read"
-        ),
-    )
-
-
-class WorkspaceTargetResponse(ApiModel):
-    """Wire form for a :class:`WorkspaceTarget`."""
+    """One workspace root and its molq destination identity."""
 
     name: str
-    host: str
+    registry_id: str
+    cluster_id: str
     root_path: str
-    port: int | None = None
-    identity_file: str | None = None
-    ssh_opts: list[str] = Field(default_factory=list)
     cache_dir: str | None = None
-    cache_ttl_seconds: int = 300
+    cache_mode: Literal["pinned", "strict"] = "pinned"
 
+
+class WorkspaceTargetResponse(WorkspaceTargetCreateRequest):
     @classmethod
     def from_model(cls, target: WorkspaceTarget) -> WorkspaceTargetResponse:
-        return cls(
-            name=target.name,
-            host=target.host,
-            root_path=target.root_path,
-            port=target.port,
-            identity_file=target.identity_file,
-            ssh_opts=list(target.ssh_opts),
-            cache_dir=target.cache_dir,
-            cache_ttl_seconds=target.cache_ttl_seconds,
-        )
+        return cls(**target.model_dump())
 
 
 class WorkspaceTargetListResponse(ApiModel):

@@ -11,14 +11,21 @@
  * overflow box and clips headers against `h-control`.
  */
 
+import {
+  Checkbox,
+  Input,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@molcrafts/ui";
 import { ArrowUpDown, Equal, GitCompareArrows, ListFilter } from "lucide-react";
 import { type JSX, type PointerEvent, useMemo, useState } from "react";
-
 import { EmptyState } from "@/app/components/entity";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Input } from "@/components/ui/input";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   WorkbenchIconAction,
   WorkbenchOperationState,

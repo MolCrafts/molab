@@ -1,5 +1,7 @@
+import { ApiError } from "@/api/generated/core/ApiError";
 import { WorkspaceService } from "@/api/generated/services/WorkspaceService";
-import type { ServeScope, ServedWorkspaceSummary } from "@/app/types";
+import { emitWorkspaceSwitching } from "@/app/state/workspaceSwitchEvents";
+import type { ServedWorkspaceSummary, ServeScope } from "@/app/types";
 
 /** Wire node for `mapWorkspaceTree` (HTTP listing adapted via WorkspaceFs). */
 export interface WorkspaceFileNode {
@@ -32,18 +34,20 @@ export const workspaceApi = {
     }
     return (await response.json()) as ServeScope;
   },
-  openWorkspace: (path: string, createIfMissing = false) =>
-    WorkspaceService.openWorkspace({
-      kind: "local",
-      path,
-      createIfMissing,
-    }),
-  activate: (workspace: ServedWorkspaceSummary) =>
-    WorkspaceService.openWorkspace(
+  openWorkspace: async (path: string, createIfMissing = false) => {
+    const info = await WorkspaceService.openWorkspace({ kind: "local", path, createIfMissing });
+    emitWorkspaceSwitching({ activeDescriptor: path });
+    return info;
+  },
+  activate: async (workspace: ServedWorkspaceSummary) => {
+    const info = await WorkspaceService.openWorkspace(
       workspace.isRemote
         ? { kind: "remote", name: workspace.key }
         : { kind: "local", path: workspace.path ?? "" },
-    ),
+    );
+    emitWorkspaceSwitching({ activeDescriptor: workspace.key });
+    return info;
+  },
   createDirectory: async (path: string): Promise<void> => {
     await WorkspaceService.createDirectory({ folder_id: "workspace", path });
   },
@@ -61,6 +65,40 @@ export const workspaceApi = {
       throw new Error(`Request failed: ${response.status} ${response.statusText}`);
     }
     return response.blob();
+  },
+  uploadFile: async (path: string, file: File, workspace?: string): Promise<void> => {
+    const query = new URLSearchParams({ path });
+    if (workspace) query.set("ws", workspace);
+    const url = `/api/workspace/file/upload?${query}`;
+    const uncertain =
+      "Upload result could not be confirmed. Check the destination before uploading again.";
+    let response: Response;
+    try {
+      response = await fetch(url, { method: "POST", body: file });
+    } catch {
+      throw new Error(uncertain);
+    }
+    if (!response.ok) {
+      const body = await response.json().catch(() => null);
+      const error = body?.error;
+      const message =
+        error?.outcome === "unknown" ||
+        (response.status >= 500 &&
+          error?.outcome !== "not_applied" &&
+          error?.details?.reason !== "needs_auth")
+          ? uncertain
+          : error?.message || body?.detail || `Upload rejected (${response.status})`;
+      throw new ApiError(
+        { method: "POST", url },
+        { url, ok: false, status: response.status, statusText: response.statusText, body },
+        message,
+      );
+    }
+  },
+  downloadUrl: (path: string, workspace?: string): string => {
+    const query = new URLSearchParams({ path, download: "true" });
+    if (workspace) query.set("ws", workspace);
+    return `/api/workspace/file/blob?${query}`;
   },
   getWorkspaceTree: async (
     options: { path?: string; maxDepth?: number; includeCatalog?: boolean } = {},

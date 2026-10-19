@@ -6,10 +6,9 @@
  * on and never listed. Preferences persist in localStorage.
  */
 
+import { Label, Switch } from "@molcrafts/ui";
 import { Puzzle } from "lucide-react";
 import type { JSX } from "react";
-import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import { listToggleablePlugins } from "@/plugins/catalog";
 import {
   isPluginEnabled,
@@ -36,8 +35,8 @@ export function UiPluginsPanel(): JSX.Element {
         const enabled = isPluginEnabled(plugin.id);
         const switchId = `ui-plugin-${plugin.id}`;
         return (
-          <li key={plugin.id} className="flex items-start gap-3 px-3 py-3 sm:items-center sm:px-4">
-            <div className="mt-1 flex size-8 shrink-0 items-center justify-center rounded-control bg-surface-subtle text-muted-foreground">
+          <li key={plugin.id} className="flex items-start gap-3 px-2 py-2 sm:items-center">
+            <div className="flex size-4 shrink-0 items-center justify-center text-muted-foreground">
               <Puzzle className="size-icon-sm" aria-hidden />
             </div>
             <div className="min-w-0 flex-1 space-y-1">
@@ -48,7 +47,12 @@ export function UiPluginsPanel(): JSX.Element {
                 {plugin.name}
               </Label>
               {plugin.description ? (
-                <p className="text-label text-muted-foreground">{plugin.description}</p>
+                <p
+                  className="line-clamp-1 text-label text-muted-foreground"
+                  title={plugin.description}
+                >
+                  {plugin.description}
+                </p>
               ) : null}
             </div>
             <Switch

@@ -9,6 +9,8 @@ interface LazySurfaceProps {
   errorTitle?: string;
   className?: string;
   children: ReactNode;
+  /** Let the enclosing workbench retain its current view during a tab transition. */
+  suspense?: boolean;
 }
 
 /** Local failure/loading isolation for route chunks and lazy plugin surfaces. */
@@ -18,6 +20,7 @@ export const LazySurface = ({
   errorTitle = "Could not load this view",
   className,
   children,
+  suspense = true,
 }: LazySurfaceProps): JSX.Element => (
   <SurfaceErrorBoundary
     resetKey={resetKey}
@@ -37,14 +40,18 @@ export const LazySurface = ({
       </div>
     )}
   >
-    <Suspense
-      fallback={
-        <div className={cn("flex h-full items-center justify-center p-6", className)}>
-          <WorkbenchOperationState kind="loading" title={loadingTitle} />
-        </div>
-      }
-    >
-      {children}
-    </Suspense>
+    {suspense ? (
+      <Suspense
+        fallback={
+          <span className="sr-only" role="status">
+            {loadingTitle}
+          </span>
+        }
+      >
+        {children}
+      </Suspense>
+    ) : (
+      children
+    )}
   </SurfaceErrorBoundary>
 );

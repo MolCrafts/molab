@@ -60,7 +60,7 @@ export const ChartWorkbench = ({
   return (
     <div className={cn("flex min-h-0 flex-1 overflow-hidden bg-background", className)}>
       {isOpen ? (
-        <aside className="mol-motion-enter-from-left flex w-60 shrink-0 flex-col gap-4 overflow-y-auto border-r border-border bg-muted/20 px-4 py-4">
+        <aside className="mol-motion-enter-from-left flex w-60 shrink-0 flex-col gap-4 overflow-y-auto border-r border-border bg-background px-4 py-4">
           <div className="flex items-center justify-between gap-2">
             <span className="min-w-0 truncate text-body-lg font-medium text-foreground">
               {settingsTitle}
@@ -77,7 +77,7 @@ export const ChartWorkbench = ({
           ) : null}
         </aside>
       ) : (
-        <div className="flex w-10 shrink-0 flex-col items-center border-r border-border bg-muted/20 pt-3">
+        <div className="flex w-10 shrink-0 flex-col items-center border-r border-border bg-background pt-3">
           <WorkbenchIconAction label="Show display settings" onClick={() => setOpen(true)}>
             <PanelLeftOpen className="size-4" />
           </WorkbenchIconAction>

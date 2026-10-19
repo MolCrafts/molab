@@ -3,18 +3,17 @@
  * Visual mapping lives here; call sites pass domain field descriptors only.
  */
 
-import { type JSX, useId } from "react";
-
-import { Checkbox } from "@/components/ui/checkbox";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import {
+  Checkbox,
+  Input,
+  Label,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
+} from "@molcrafts/ui";
+import { type JSX, useId } from "react";
 import { cn } from "@/lib/utils";
 
 export interface ParameterFieldDescriptor {

@@ -10,16 +10,17 @@ from __future__ import annotations
 
 import json
 import re
+import shutil
+import subprocess
+import sys
 from dataclasses import dataclass, field
 from fnmatch import fnmatch
 from pathlib import Path
 from typing import Any
 
 import pytest
-from molq.transport import CommandResult, LocalTransport
-from typer.testing import CliRunner
 
-import molab.cli
+from molab.plugins.submit_molq.submit import encode_job_ref
 from molab.workspace import AgentRef, ComputeTarget, Workspace
 from molab.workspace.domain import ExecutionMode
 from molab.workspace.execution_repository import ExecutionRepository
@@ -37,10 +38,6 @@ class RecordingTransport:
 
     def _record(self, method: str, args: tuple, kwargs: dict) -> None:
         self.calls.append((method, args, kwargs))
-
-    def run(self, argv, *, cwd=None, env=None, input=None, timeout=None):
-        self._record("run", (tuple(argv),), {"cwd": cwd, "env": env, "input": input})
-        return CommandResult(argv=tuple(argv), returncode=0, stdout="", stderr="")
 
     def read_text(self, path: str) -> str:
         return ""
@@ -108,8 +105,8 @@ def _make_run(tmp_path: Path):
 def _remote_target() -> ComputeTarget:
     return ComputeTarget(
         name="hpc",
-        host="me@cluster",
-        scheduler="slurm",
+        registry_id="reg",
+        cluster_id="hpc",
         scratch_root="/scratch/me/molab",
     )
 
@@ -119,7 +116,7 @@ def _remote_handler():
 
     return make_submit_handler(
         scheduler="ignored-when-target-set",
-        cluster=None,
+        cluster="local",
         resources={},
         scheduling={},
         target=_remote_target(),
@@ -136,39 +133,46 @@ def _precreate_e01(ws: Workspace, project, run) -> None:
     )
 
 
-def _install_fake_submitor(monkeypatch: pytest.MonkeyPatch, run) -> dict[str, Any]:
-    """Replace ``molq.Submitor``; record what ``submit_job`` saw.
+_FAKE_REF = {
+    "registry_id": "reg",
+    "cluster_id": "hpc",
+    "native_id": "fake-sched-id",
+    "incarnation": "1",
+}
+_JOB_ID = encode_job_ref(_FAKE_REF)
 
-    ``records_at_submit`` snapshots ``(id, status)`` of every Execution on disk
-    at the moment ``submit_job`` is called.
-    """
-    captured: dict[str, Any] = {}
 
-    class FakeJob:
-        job_id = "fake-job-id"
-        scheduler_job_id = "fake-sched-id"
+def _install_fake_session(monkeypatch: pytest.MonkeyPatch, run, captured: dict[str, Any]) -> None:
+    """Replace the application client and record the submitted spec."""
 
-    class FakeSubmitor:
-        def __init__(self, target, *, jobs_dir):
-            captured["scheduler"] = target.scheduler
-            captured["jobs_dir"] = jobs_dir
-            self._event_bus = type("EB", (), {"on": lambda *_a, **_kw: None})()
+    class _FakeJob:
+        def __init__(self) -> None:
+            self.ref = dict(_FAKE_REF)
 
-        def __enter__(self):
-            return self
+    class _FakeCluster:
+        def __init__(self, name: str) -> None:
+            captured["cluster"] = name
 
-        def __exit__(self, *a):  # noqa: ANN002
-            return False
-
-        def submit_job(self, *, argv, resources, scheduling, execution, metadata):
-            captured["submit_argv"] = argv
-            captured["submit_cwd"] = execution.cwd
-            captured["submit_metadata"] = metadata
+        def submit(self, spec, *, argv=None, request_key=None):
+            del argv, request_key
+            unit = spec.execution.units[0]
+            captured["submit_argv"] = list(unit.command.get("argv") or [])
+            captured["submit_cwd"] = unit.cwd
+            captured["submit_env"] = dict(spec.execution.env or {})
             captured["records_at_submit"] = [(e.id, e.status.value) for e in run.executions]
-            return FakeJob()
+            return _FakeJob()
 
-    monkeypatch.setattr("molq.Submitor", FakeSubmitor)
-    return captured
+    class _FakeMolq:
+        def cluster(self, name: str) -> _FakeCluster:
+            return _FakeCluster(name)
+
+    def _session(_registry_id=None):
+        return _FakeMolq()
+
+    monkeypatch.setattr("molab.workspace.connection.get_client", _session)
+    monkeypatch.setattr(
+        "molab.workspace.targets.target_definition", lambda _t: {"id": "hpc", "scheduler": "slurm"}
+    )
 
 
 class TestSubmitHandler:
@@ -178,48 +182,22 @@ class TestSubmitHandler:
         _ws, project, experiment, run = _make_run(tmp_path)
         target = ComputeTarget(
             name="hpc",
-            host="me@cluster",
-            scheduler="slurm",
+            registry_id="reg",
+            cluster_id="hpc",
             scratch_root="/scratch/me/molab",
         )
 
         transport = RecordingTransport()
-        monkeypatch.setattr("molab.workspace.targets.to_transport", lambda _t: transport)
+        monkeypatch.setattr("molab.workspace.targets.to_filesystem", lambda _t: transport)
 
         captured_submitor: dict[str, Any] = {}
-
-        class FakeJob:
-            job_id = "fake-job-id"
-            scheduler_job_id = "fake-sched-id"
-
-        class FakeSubmitor:
-            def __init__(self, target, *, jobs_dir):
-                captured_submitor["cluster_name"] = target.name
-                captured_submitor["scheduler"] = target.scheduler
-                captured_submitor["jobs_dir"] = jobs_dir
-                captured_submitor["transport"] = target.transport
-                self._event_bus = type("EB", (), {"on": lambda *_a, **_kw: None})()
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *a):  # noqa: ANN002
-                return False
-
-            def submit_job(self, *, argv, resources, scheduling, execution, metadata):
-                captured_submitor["submit_argv"] = argv
-                captured_submitor["submit_cwd"] = execution.cwd
-                captured_submitor["submit_metadata"] = metadata
-                return FakeJob()
-
-        # Submitor is imported lazily from ``molq`` inside __call__.
-        monkeypatch.setattr("molq.Submitor", FakeSubmitor)
+        _install_fake_session(monkeypatch, run, captured_submitor)
 
         from molab.plugins.submit_molq.submit import make_submit_handler
 
         handler = make_submit_handler(
             scheduler="ignored-when-target-set",
-            cluster=None,
+            cluster="local",
             resources={},
             scheduling={},
             target=target,
@@ -228,18 +206,20 @@ class TestSubmitHandler:
 
         # Stage-in happened: the run dir, then the one attempt's directory.
         uploads = [c for c in transport.calls if c[0] == "upload"]
-        assert len(uploads) == 2
+        assert len(uploads) == 5
         src, dst = uploads[0][1]
         assert src == str(Path(run.run_dir).resolve())
         assert dst.startswith("/scratch/me/molab/")
+        assert run.execution("e01").executor["remote_run_dir"] == dst
         exec_src, exec_dst = uploads[1][1]
         assert exec_src.endswith("/executions/e01")
         assert exec_dst.startswith("/scratch/me/molab/")
         assert exec_dst.endswith("/executions/e01")
 
-        # Submitor was constructed with the target's scheduler + transport.
-        assert captured_submitor["scheduler"] == "slurm"
-        assert captured_submitor["transport"] is transport
+        # The registered cluster is the handler default; the target's scheduler
+        # is recorded on the attempt, not passed into molq.
+        assert captured_submitor["cluster"] == "hpc"
+        assert run.execution("e01").executor["scheduler"] == "slurm"
         # The worker is told to chdir into the remote exec dir.
         assert captured_submitor["submit_cwd"].startswith("/scratch/me/molab/")
         assert "executions/" in captured_submitor["submit_cwd"]
@@ -248,54 +228,27 @@ class TestSubmitHandler:
         assert "molab.cli" in argv and "execute" in argv
         assert any(a.startswith("/scratch/me/molab/") for a in argv)
 
-    def test_without_target_falls_back_to_local_transport(
+    def test_without_target_submits_the_local_attempt_dir(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        """No-target path: transport=None on the handler → Cluster falls back
-        to ``LocalTransport`` and no staging happens."""
+        """No-target path does not stage; the worker cwd is the local attempt dir."""
         _, project, experiment, run = _make_run(tmp_path)
-
         captured: dict[str, Any] = {}
-
-        class FakeJob:
-            job_id = "x"
-            scheduler_job_id = "y"
-
-        class FakeSubmitor:
-            def __init__(self, target, *, jobs_dir):
-                captured["transport"] = target.transport
-                captured["jobs_dir"] = jobs_dir
-                self._event_bus = type("EB", (), {"on": lambda *_a, **_kw: None})()
-
-            def __enter__(self):
-                return self
-
-            def __exit__(self, *a):  # noqa: ANN002
-                return False
-
-            def submit_job(self, *, argv, resources, scheduling, execution, metadata):
-                captured["cwd"] = execution.cwd
-                return FakeJob()
-
-        monkeypatch.setattr("molq.Submitor", FakeSubmitor)
+        _install_fake_session(monkeypatch, run, captured)
 
         from molab.plugins.submit_molq.submit import make_submit_handler
 
         handler = make_submit_handler(
-            scheduler="local",
-            cluster=None,
+            scheduler="shell",
+            cluster="local",
             resources={},
             scheduling={},
             target=None,
         )
         handler(None, run, experiment, project)
 
-        # No target → Cluster gets transport=None and falls back to LocalTransport.
-        from molq.transport import LocalTransport
-
-        assert isinstance(captured["transport"], LocalTransport)
-        # jobs_dir lives under the LOCAL run dir, not a remote scratch path.
-        assert captured["jobs_dir"].startswith(str(run.run_dir))
+        assert captured["submit_cwd"].startswith(str(run.run_dir))
+        assert captured["submit_cwd"].endswith("/executions/e01")
 
     def test_precreated_execution_id_is_submitted_unchanged(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -304,20 +257,21 @@ class TestSubmitHandler:
         ws, project, experiment, run = _make_run(tmp_path)
         _precreate_e01(ws, project, run)
         transport = RecordingTransport()
-        monkeypatch.setattr("molab.workspace.targets.to_transport", lambda _t: transport)
-        captured = _install_fake_submitor(monkeypatch, run)
+        monkeypatch.setattr("molab.workspace.targets.to_filesystem", lambda _t: transport)
+        captured: dict[str, Any] = {}
+        _install_fake_session(monkeypatch, run, captured)
 
         handler = _remote_handler()
         handler(None, run, experiment, project, execution_id="e01")
 
-        assert captured["submit_metadata"]["execution_id"] == "e01"
+        assert captured["submit_env"]["MOLAB_EXECUTION_ID"] == "e01"
         assert captured["submit_cwd"].endswith("/executions/e01")
         argv = captured["submit_argv"]
         flag = argv.index("--execution-id")
         assert argv[flag : flag + 2] == ["--execution-id", "e01"]
         assert [e.id for e in run.executions] == ["e01"]
         (e01,) = run.executions
-        assert e01.executor["job_id"] == "fake-job-id"
+        assert e01.executor["job_id"] == _JOB_ID
         assert e01.executor["scheduler"] == "slurm"
 
     def test_cli_path_submits_a_precreated_enn_execution(
@@ -326,13 +280,14 @@ class TestSubmitHandler:
         """The CLI path passes no id; the attempt must still be a workspace ``eNN``."""
         _ws, project, experiment, run = _make_run(tmp_path)
         transport = RecordingTransport()
-        monkeypatch.setattr("molab.workspace.targets.to_transport", lambda _t: transport)
-        captured = _install_fake_submitor(monkeypatch, run)
+        monkeypatch.setattr("molab.workspace.targets.to_filesystem", lambda _t: transport)
+        captured: dict[str, Any] = {}
+        _install_fake_session(monkeypatch, run, captured)
 
         handler = _remote_handler()
         handler(None, run, experiment, project)
 
-        execution_id = captured["submit_metadata"]["execution_id"]
+        execution_id = captured["submit_env"]["MOLAB_EXECUTION_ID"]
         assert re.fullmatch(r"e\d{2,}", execution_id)
         assert (execution_id, "queued") in captured["records_at_submit"]
 
@@ -343,8 +298,8 @@ class TestSubmitHandler:
         ws, project, experiment, run = _make_run(tmp_path)
         _precreate_e01(ws, project, run)
         transport = RecordingTransport()
-        monkeypatch.setattr("molab.workspace.targets.to_transport", lambda _t: transport)
-        _install_fake_submitor(monkeypatch, run)
+        monkeypatch.setattr("molab.workspace.targets.to_filesystem", lambda _t: transport)
+        _install_fake_session(monkeypatch, run, {})
 
         handler = _remote_handler()
         handler(None, run, experiment, project, execution_id="e01")
@@ -352,6 +307,47 @@ class TestSubmitHandler:
         record = Path(run.run_dir) / "executions" / "e01" / "execution.json"
         assert record.is_file()
         assert _uploads_cover(transport.calls, record)
+
+
+class _CopyTransport:
+    """Copies a tree on the local disk, honoring ``exclude`` name patterns."""
+
+    def mkdir(self, path: str, *, parents: bool = True, exist_ok: bool = True) -> None:
+        Path(path).mkdir(parents=parents, exist_ok=exist_ok)
+
+    def upload(
+        self,
+        local: str,
+        remote: str,
+        *,
+        recursive: bool = False,
+        exclude: tuple[str, ...] = (),
+    ) -> None:
+        del recursive
+        src = Path(local)
+        dst = Path(remote)
+
+        def _ignore(_directory: str, names: list[str]) -> list[str]:
+            return [name for name in names if any(fnmatch(name, pattern) for pattern in exclude)]
+
+        if src.is_dir():
+            shutil.copytree(src, dst, dirs_exist_ok=True, ignore=_ignore)
+        else:
+            dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src, dst)
+
+    def download(
+        self,
+        remote: str,
+        local: str,
+        *,
+        recursive: bool = False,
+        exclude: tuple[str, ...] = (),
+    ) -> None:
+        self.upload(remote, local, recursive=recursive, exclude=exclude)
+
+    def read_text(self, path: str) -> str:
+        return Path(path).read_text(encoding="utf-8")
 
 
 _HEALED_MODULE = """\
@@ -375,16 +371,8 @@ workflow = WorkflowCompiler().compile(wf)
 
 
 class TestRemoteWorkerOpensStagedAttempt:
-    @pytest.mark.xfail(
-        strict=True,
-        raises=AssertionError,
-        reason=(
-            "unowned-remote-worker: molab execute on a remote target — the staged attempt "
-            "must be openable and its workflow resolvable without the local workspace tree "
-            "(found by arch-own-02c; needs a new spec for remote worker layout)"
-        ),
-    )
-    def test_worker_runs_from_a_staged_only_layout(self, tmp_path: Path) -> None:
+    @pytest.mark.parametrize("entry_kind", ["file", "package", "captured"])
+    def test_worker_runs_from_a_staged_only_layout(self, tmp_path: Path, entry_kind: str) -> None:
         """The worker must run from exactly what ``stage_in`` uploads.
 
         The remote host holds ``<scratch_root>/<ws>/<project>/<exp>/<run>`` —
@@ -395,39 +383,80 @@ class TestRemoteWorkerOpensStagedAttempt:
         from molab.workspace.targets import target_run_dir
 
         wf_file = tmp_path / "staged_wf.py"
-        wf_file.write_text(_HEALED_MODULE, encoding="utf-8")
+        helper = tmp_path / "staged_helper.py"
+        helper.write_text("def increment(value):\n    return value + 1\n", encoding="utf-8")
+        wf_file.write_text(
+            "from staged_helper import increment\n"
+            + _HEALED_MODULE.replace("return seed + 1", "return increment(seed)"),
+            encoding="utf-8",
+        )
         ws = Workspace(root=tmp_path / "ws", name="remote-lab")
         project = ws.add_project("p")
         experiment = project.add_experiment("e")
         # Hand-written binding (arch-own-04 replaces this with Experiment.bind_workflow).
-        experiment.metadata = experiment.metadata.model_copy(
-            update={"workflow_entrypoint": f"{wf_file}:workflow"}
-        )
-        experiment.save()
+        entrypoint = wf_file
+        if entry_kind == "package":
+            entrypoint = tmp_path / "staged_package"
+            entrypoint.mkdir()
+            (entrypoint / "step.py").write_text(helper.read_text(), encoding="utf-8")
+            (entrypoint / "__init__.py").write_text(
+                "from staged_package.step import increment\n"
+                + _HEALED_MODULE.replace("return seed + 1", "return increment(seed)"),
+                encoding="utf-8",
+            )
+        experiment.bind_workflow("code", entrypoint=f"{entrypoint}:workflow")
         run = experiment.add_run(params={"seed": 1})
         run.materialize()
-        queued = run._create_execution()
+        queued = run._create_execution(
+            source_entrypoint=wf_file if entry_kind == "captured" else None
+        )
+        if entry_kind == "captured":
+            wf_file.write_text("raise RuntimeError('changed after queueing')", encoding="utf-8")
         assert queued.id == "e01"
 
         # The "remote host": a scratch tree disjoint from the workspace, filled by
         # the production stage_in through a local-copy transport.
         target = ComputeTarget(
             name="hpc",
-            host="me@cluster",
-            scheduler="slurm",
+            registry_id="reg",
+            cluster_id="hpc",
             scratch_root=str(tmp_path / "scratch"),
         )
-        stage_in(LocalTransport(), run, target, "e01")
+        original_experiment = (
+            Path(str(experiment.experiment_dir)) / "experiment.json"
+        ).read_bytes()
+        stage_in(_CopyTransport(), run, target, "e01")
+        assert (
+            Path(str(experiment.experiment_dir)) / "experiment.json"
+        ).read_bytes() == original_experiment
         staged_run_dir = Path(target_run_dir(target, ws, run))
         staged_record = staged_run_dir / "executions" / "e01" / "execution.json"
         assert (staged_run_dir / "run.json").is_file()
         assert staged_record.is_file()
-        assert not any((d / "workspace.json").exists() for d in staged_run_dir.parents)
+        assert any((d / "workspace.json").exists() for d in staged_run_dir.parents)
+        # Remove all original context and source: a memo or shared source path cannot hide a missing input.
+        shutil.rmtree(ws.root)
+        wf_file.unlink()
+        helper.unlink()
+        if entry_kind == "package":
+            shutil.rmtree(entrypoint)
 
-        result = CliRunner().invoke(
-            molab.cli.app, ["execute", str(staged_run_dir), "--execution-id", "e01"]
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "molab.cli",
+                "execute",
+                str(staged_run_dir),
+                "--execution-id",
+                "e01",
+            ],
+            cwd=tmp_path,
+            capture_output=True,
+            text=True,
+            timeout=30,
         )
 
-        assert result.exit_code == 0, result.output
+        assert result.returncode == 0, result.stdout + result.stderr
         record = json.loads(staged_record.read_text(encoding="utf-8"))
         assert record["status"] == "succeeded"

@@ -6,11 +6,12 @@
  */
 
 import type { VegaLiteSpec } from "@molcrafts/molplot";
+import { useSuspenseQuery } from "@tanstack/react-query";
 import { BarChart3, FileText } from "lucide-react";
 import type { JSX } from "react";
-import { useEffect, useMemo, useState } from "react";
-import { runsApi } from "@/api";
+import { useMemo, useState } from "react";
 import { EmptyState } from "@/app/components/entity";
+import { runFileTextQueryOptions } from "@/app/state/entityQueries";
 import type { RendererProps } from "@/app/types";
 import { WorkbenchAction } from "@/components/workbench";
 import type { DiscoveredFile } from "@/plugins/types";
@@ -23,9 +24,6 @@ export const MolplotObservablesTab = ({
   executionId,
 }: RendererProps & { discoveredFiles: DiscoveredFile[] }): JSX.Element => {
   const [selected, setSelected] = useState(discoveredFiles[0]?.relPath ?? "");
-  const [spec, setSpec] = useState<VegaLiteSpec | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
 
   const run = useMemo(
     () => snapshot.runs.find((item) => item.id === selection.objectId) ?? null,
@@ -34,52 +32,9 @@ export const MolplotObservablesTab = ({
 
   const file = discoveredFiles.find((f) => f.relPath === selected) ?? discoveredFiles[0];
 
-  useEffect(() => {
-    if (!file && discoveredFiles[0]) setSelected(discoveredFiles[0].relPath);
-  }, [file, discoveredFiles]);
-
-  useEffect(() => {
-    if (!file || !run || !executionId) return;
-    let cancelled = false;
-    setSpec(null);
-    setError(null);
-    setLoading(false);
-
-    if (!file.name.toLowerCase().endsWith(".mlp.vl.json")) {
-      setError(
-        "Not a molplot Vega-Lite artifact (expected *.mlp.vl.json). Host metrics curves use *.mlp.jsonl via the Metrics tab.",
-      );
-      return;
-    }
-
-    setLoading(true);
-    runsApi
-      .getRunFileText(run.projectId, run.experimentId, run.id, executionId, file.relPath)
-      .then((response) => {
-        if (cancelled) return;
-        const parsed: unknown = JSON.parse(response.content);
-        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-          throw new Error("The plot artifact is not a Vega-Lite object.");
-        }
-        setSpec(parsed as VegaLiteSpec);
-      })
-      .catch((reason: unknown) => {
-        if (!cancelled) {
-          setError(reason instanceof Error ? reason.message : "Failed to load plot artifact");
-        }
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [executionId, file, run]);
-
   return (
     <div className="flex min-h-0 flex-1">
-      <aside className="flex w-56 flex-none flex-col border-r border-border bg-surface-subtle">
+      <aside className="flex w-56 flex-none flex-col border-r border-border bg-background">
         <div className="flex h-toolbar-compact items-center gap-2 border-b border-border px-3">
           <BarChart3 className="size-icon text-accent" aria-hidden />
           <span className="text-label font-medium text-foreground">MolPlot</span>
@@ -118,24 +73,51 @@ export const MolplotObservablesTab = ({
             </span>
           </div>
         )}
-        {loading && <p className="text-body text-muted-foreground">Loading plot…</p>}
-        {error && (
-          <EmptyState
-            density="compact"
-            icon={<BarChart3 className="size-icon-lg" />}
-            title="Cannot render this plot"
-            description="This file could not be opened as a chart."
+        {file && run && executionId ? (
+          <PlotArtifact
+            projectId={run.projectId}
+            experimentId={run.experimentId}
+            runId={run.id}
+            executionId={executionId}
+            path={file.relPath}
           />
-        )}
-        {spec && (
-          <div className="min-h-96">
-            <MolplotRawChart
-              spec={{ spec }}
-              style={{ width: "100%", height: "var(--spacing-chart-lg)" }}
-            />
-          </div>
+        ) : (
+          <EmptyState title="Select a plot" />
         )}
       </main>
+    </div>
+  );
+};
+
+/** A cached artifact read suspends the tab transition until the chart data is ready. */
+const PlotArtifact = ({
+  projectId,
+  experimentId,
+  runId,
+  executionId,
+  path,
+}: {
+  projectId: string;
+  experimentId: string;
+  runId: string;
+  executionId: string;
+  path: string;
+}): JSX.Element => {
+  const { data: spec } = useSuspenseQuery({
+    ...runFileTextQueryOptions(projectId, experimentId, runId, executionId, path),
+    select: (content): VegaLiteSpec => {
+      const parsed: unknown = JSON.parse(content);
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed))
+        throw new Error("The plot artifact is not a Vega-Lite object.");
+      return parsed as VegaLiteSpec;
+    },
+  });
+  return (
+    <div className="min-h-96">
+      <MolplotRawChart
+        spec={{ spec }}
+        style={{ width: "100%", height: "var(--spacing-chart-lg)" }}
+      />
     </div>
   );
 };

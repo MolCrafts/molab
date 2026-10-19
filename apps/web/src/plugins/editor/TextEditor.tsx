@@ -1,12 +1,13 @@
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@molcrafts/ui";
 import { Save } from "lucide-react";
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { workspaceApi } from "@/api";
 import { LazySurface } from "@/app/layout/LazySurface";
 import type { RendererProps } from "@/app/types";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { WorkbenchIconAction, WorkbenchOperationState } from "@/components/workbench";
 import { useContributionGeneration } from "@/lib/contribution-runtime";
 import { filePreviewPluginRegistry } from "@/lib/file-preview-plugins";
+import { useUiTheme } from "@/lib/ui-theme";
 import { MonacoEditor } from "./MonacoEditor";
 /**
  * Monaco-backed text editor for workspace files.
@@ -23,6 +24,7 @@ import { MonacoEditor } from "./MonacoEditor";
  * …); this editor only owns the hosting surface.
  */
 export const TextEditor = ({ selection }: RendererProps): JSX.Element => {
+  const theme = useUiTheme();
   const [value, setValue] = useState<string>("");
   const [status, setStatus] = useState<"idle" | "loading" | "saving" | "error">("idle");
   const [error, setError] = useState<string | null>(null);
@@ -141,7 +143,7 @@ export const TextEditor = ({ selection }: RendererProps): JSX.Element => {
                   height="100%"
                   language={language}
                   value={value}
-                  theme="light"
+                  theme={theme === "dark" ? "vs-dark" : "light"}
                   onChange={(nextValue) => {
                     setValue(nextValue ?? "");
                   }}

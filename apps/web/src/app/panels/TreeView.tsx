@@ -7,14 +7,14 @@ export interface TreeClickModifiers {
   meta: boolean;
 }
 
-import { EMPTY_COPY, EmptyState } from "@/app/components/entity";
 import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
   ContextMenuTrigger,
-} from "@/components/ui/context-menu";
+} from "@molcrafts/ui";
+import { EMPTY_COPY, EmptyState } from "@/app/components/entity";
 import { WorkbenchAction, WorkbenchIconAction } from "@/components/workbench";
 
 export interface TreeNodeAction {
@@ -187,7 +187,7 @@ const TreeRow = ({
       kind="ghost"
       size="content"
       type="button"
-      className={`group flex h-control-compact min-w-0 flex-1 items-center gap-2 overflow-hidden rounded-hairline px-2 text-left text-body-lg transition-colors ${
+      className={`group flex h-control-compact min-w-0 flex-1 items-center gap-2 overflow-hidden rounded-hairline px-2 text-left text-body transition-colors ${
         // Soft lavender wash — solid bg-accent is for buttons, too dark on day mode rows.
         isActive
           ? "bg-accent-muted text-accent-muted-foreground"

@@ -1,6 +1,7 @@
-import { useSyncExternalStore } from "react";
+import { queryOptions, useQuery } from "@tanstack/react-query";
 import { workspacesApi } from "@/api/workspaces";
 import { pulseSync } from "@/app/state/syncPulse";
+import { getWorkspaceQueryScope } from "@/app/state/workspaceSwitchEvents";
 
 import { workspaceRunsApi } from "./api";
 import type { WorkspaceRunRow, WorkspaceRunsResponse, WorkspaceRunsStats } from "./types";
@@ -18,17 +19,6 @@ interface UseWorkspaceRunsResult {
   refresh: () => void;
 }
 
-interface StoreSnapshot {
-  rows: WorkspaceRunRow[];
-  unreachable: string[];
-  stats: WorkspaceRunsStats;
-  total: number;
-  truncated: boolean;
-  loading: boolean;
-  error: string | null;
-  lastSyncedAt: Date | null;
-}
-
 export const POLL_INTERVAL_MS = 3_000;
 const FETCH_LIMIT = 1000;
 
@@ -42,36 +32,7 @@ const EMPTY_STATS: WorkspaceRunsStats = {
   byStatus: {},
 };
 
-const EMPTY_SNAPSHOT: StoreSnapshot = {
-  rows: [],
-  unreachable: [],
-  stats: EMPTY_STATS,
-  total: 0,
-  truncated: false,
-  loading: false,
-  error: null,
-  lastSyncedAt: null,
-};
-
-// Module-level singleton: one fetch loop shared across all hook consumers
-// (LeftPanel facet counts + RunsPage dashboard) so the API is hit once per
-// poll instead of once per mounted component.
-let snapshot: StoreSnapshot = EMPTY_SNAPSHOT;
-let lastResponseSignature: string | null = null;
-const subscribers = new Set<() => void>();
-let intervalId: ReturnType<typeof setInterval> | null = null;
-let inflight: Promise<void> | null = null;
-
-const notify = (): void => {
-  for (const fn of subscribers) fn();
-};
-
-const sameResponse = (response: WorkspaceRunsResponse): boolean => {
-  const next = JSON.stringify(response);
-  if (next === lastResponseSignature) return true;
-  lastResponseSignature = next;
-  return false;
-};
+const EMPTY_ROWS: WorkspaceRunRow[] = [];
 
 /**
  * Merge one page of runs per served workspace into a single response.
@@ -99,17 +60,25 @@ export const mergeWorkspaceRuns = (
     }
     // Stamp the workspace here: this is the only point that knows which one
     // was asked, and every consumer downstream needs it to address the run.
-    for (const run of response.runs) rows.push({ ...run, workspaceKey: key });
-    totalExecutions += response.stats.totalExecutions;
-    activeExecutions += response.stats.activeExecutions;
-    for (const [status, count] of Object.entries(response.stats.byStatus)) {
-      byStatus[status] = (byStatus[status] ?? 0) + count;
+    // A partial payload must not throw: Object.entries(undefined) is the
+    // "Cannot convert undefined or null to object" that blanks the dashboard.
+    const incoming = Array.isArray(response.runs) ? response.runs : [];
+    for (const run of incoming) rows.push({ ...run, workspaceKey: key });
+    const stats = response.stats;
+    totalExecutions += stats?.totalExecutions ?? 0;
+    activeExecutions += stats?.activeExecutions ?? 0;
+    const statusCounts = stats?.byStatus;
+    if (statusCounts != null && typeof statusCounts === "object") {
+      for (const [status, count] of Object.entries(statusCounts)) {
+        if (typeof count !== "number") continue;
+        byStatus[status] = (byStatus[status] ?? 0) + count;
+      }
     }
-    total += response.total;
-    truncated = truncated || response.truncated;
+    total += response.total ?? 0;
+    truncated = truncated || Boolean(response.truncated);
   }
 
-  rows.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  rows.sort((a, b) => (b.createdAt ?? "").localeCompare(a.createdAt ?? ""));
 
   return {
     runs: rows,
@@ -130,14 +99,7 @@ export const mergeWorkspaceRuns = (
  * up without a reload.
  */
 const fetchAllWorkspaces = async (): Promise<WorkspaceRunsResponse & { unreachable: string[] }> => {
-  let served: Awaited<ReturnType<typeof workspacesApi.listWorkspaces>>;
-  try {
-    served = await workspacesApi.listWorkspaces();
-  } catch {
-    // No served-set endpoint (older server, or it is down): fall back to the
-    // active workspace, which is what this hook did before it fanned out.
-    served = [];
-  }
+  const served = await workspacesApi.listWorkspaces();
 
   if (served.length === 0) {
     const response = await workspaceRunsApi.listRuns({ limit: FETCH_LIMIT });
@@ -160,89 +122,36 @@ const fetchAllWorkspaces = async (): Promise<WorkspaceRunsResponse & { unreachab
   return mergeWorkspaceRuns(results);
 };
 
-const fetchOnce = async (silent: boolean): Promise<void> => {
-  if (!silent && !snapshot.loading) {
-    snapshot = { ...snapshot, loading: true };
-    notify();
-  }
-  try {
-    const response = await fetchAllWorkspaces();
-    if (sameResponse(response)) {
-      // Preserve row/stats array refs so downstream useMemo deps stay stable
-      // (Plotly charts won't re-render). Only loading/error need to clear.
-      if (snapshot.loading || snapshot.error !== null || snapshot.lastSyncedAt === null) {
-        snapshot = {
-          ...snapshot,
-          loading: false,
-          error: null,
-          lastSyncedAt: snapshot.lastSyncedAt ?? new Date(),
-        };
-        notify();
-      }
-      // Poll completed even when payload is unchanged — still breathe.
+export const workspaceRunsQueryOptions = () =>
+  queryOptions({
+    queryKey: ["workspace-runs", getWorkspaceQueryScope()],
+    queryFn: async () => {
+      const response = await fetchAllWorkspaces();
       pulseSync();
-      return;
-    }
-    snapshot = {
-      rows: response.runs,
-      stats: response.stats,
-      total: response.total,
-      truncated: response.truncated,
-      unreachable: response.unreachable,
-      loading: false,
-      error: null,
-      lastSyncedAt: new Date(),
-    };
-    notify();
-    pulseSync();
-  } catch (err) {
-    const message = err instanceof Error ? err.message : "Unknown error";
-    snapshot = { ...snapshot, loading: false, error: message };
-    notify();
-    pulseSync();
-  }
-};
-
-const triggerFetch = (silent: boolean): void => {
-  if (inflight) return;
-  inflight = fetchOnce(silent).finally(() => {
-    inflight = null;
+      return response;
+    },
+    refetchInterval: POLL_INTERVAL_MS,
+    refetchIntervalInBackground: false,
   });
-};
-
-const subscribe = (fn: () => void): (() => void) => {
-  if (subscribers.size === 0) {
-    triggerFetch(false);
-    intervalId = setInterval(() => triggerFetch(true), POLL_INTERVAL_MS);
-  }
-  subscribers.add(fn);
-  return () => {
-    subscribers.delete(fn);
-    if (subscribers.size === 0 && intervalId !== null) {
-      clearInterval(intervalId);
-      intervalId = null;
-    }
-  };
-};
-
-const getSnapshot = (): StoreSnapshot => snapshot;
-
-// No-op subscribe used when the caller asks us to stand down (e.g. when the
-// active left-panel view isn't "runs"). Keeps the Rules of Hooks intact while
-// letting subscriber count fall to zero so the poll loop stops.
-const noopSubscribe = (): (() => void) => (): void => undefined;
 
 export interface UseWorkspaceRunsOptions {
-  /** When false, the hook returns the cached snapshot but does not subscribe
-   *  or trigger fetches. Use to gate polling by active view. Defaults to true. */
   enabled?: boolean;
 }
 
 export const useWorkspaceRuns = (options: UseWorkspaceRunsOptions = {}): UseWorkspaceRunsResult => {
-  const { enabled = true } = options;
-  const data = useSyncExternalStore(enabled ? subscribe : noopSubscribe, getSnapshot, getSnapshot);
+  const query = useQuery({ ...workspaceRunsQueryOptions(), enabled: options.enabled ?? true });
+  const response = query.data;
   return {
-    ...data,
-    refresh: () => triggerFetch(false),
+    rows: response?.runs ?? EMPTY_ROWS,
+    unreachable: response?.unreachable ?? [],
+    stats: response?.stats ?? EMPTY_STATS,
+    total: response?.total ?? 0,
+    truncated: response?.truncated ?? false,
+    loading: query.isFetching,
+    error: query.error?.message ?? null,
+    lastSyncedAt: query.dataUpdatedAt ? new Date(query.dataUpdatedAt) : null,
+    refresh: () => {
+      void query.refetch();
+    },
   };
 };

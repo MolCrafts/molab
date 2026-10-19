@@ -4,12 +4,13 @@ from __future__ import annotations
 
 from typing import Any
 
+#: Schedulers molq 0.9 registers on a cluster. ``shell`` is the local backend.
+SUPPORTED_SCHEDULERS = ("shell", "slurm", "pbs", "lsf")
+
 
 def supported_schedulers() -> tuple[str, ...]:
     """Return scheduler backends supported by the installed ``molq``."""
-    from molq.options import OPTIONS_TYPE_MAP
-
-    return tuple(OPTIONS_TYPE_MAP.keys())
+    return SUPPORTED_SCHEDULERS
 
 
 def build_executor_info(

@@ -545,8 +545,12 @@ def replay_history(source: Path, target: Path) -> int:
         agent_raw = event.get("agent") or {}
         agent_type = str(agent_raw.get("type", "system"))
         agent = (
-            AgentRef(
-                id=str(agent_raw.get("id", "molab")), type=agent_type, name=agent_raw.get("name")
+            AgentRef.model_validate(
+                {
+                    "id": str(agent_raw.get("id", "molab")),
+                    "type": agent_type,
+                    "name": agent_raw.get("name"),
+                }
             )
             if agent_type in {"person", "software", "workflow", "executor", "system"}
             else AgentRef(id=str(agent_raw.get("id", "molab")), type="system")
@@ -1502,7 +1506,7 @@ def _knowledge_qualify_row(
         return _knowledge_qualify_artifact(workspace, ref, span, doc_rel, by_id, by_digest, report)
     if kind in {"reference", "file", "agent_action", "decision"}:
         try:
-            source = SourceRef(kind=kind, ref=ref, span=span)
+            source = SourceRef.model_validate({"kind": kind, "ref": ref, "span": span})
             source.link_target(new_dir)
         except (ValueError, ValidationError):
             report.unresolved.append((doc_rel, label))

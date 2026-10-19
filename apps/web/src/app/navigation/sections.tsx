@@ -131,9 +131,46 @@ export const getNavigationContribution = (id: LeftPanelView): NavigationContribu
   return fallback;
 };
 
-export const railNavigationContributions = (): NavigationContribution[] =>
+/** Hierarchy rank of a served directory. Unknown kinds keep the full rail. */
+export const serveScopeRank = (kind: string | null | undefined): number => {
+  switch (kind) {
+    case "workspace.root":
+      return 0;
+    case "workspace.project":
+      return 1;
+    case "workspace.experiment":
+      return 2;
+    case "workspace.run":
+      return 3;
+    default:
+      return 0;
+  }
+};
+
+/**
+ * Rail sections that *are* a hierarchy level. A served directory hides every
+ * section above it and keeps its own level and everything below. Files,
+ * assets, knowledge, and settings are not levels, so they stay.
+ */
+const NAV_LEVEL: Partial<Record<LeftPanelView, number>> = {
+  dashboard: 0,
+  projects: 1,
+  runs: 2,
+};
+
+export const navigationVisibleAtScope = (
+  id: LeftPanelView,
+  kind: string | null | undefined,
+): boolean => {
+  const level = NAV_LEVEL[id];
+  if (level === undefined) return true;
+  return level >= serveScopeRank(kind);
+};
+
+export const railNavigationContributions = (kind?: string | null): NavigationContribution[] =>
   listNavigationContributions()
     .filter(({ placement }) => placement === "primary" || placement === "secondary")
+    .filter(({ id }) => navigationVisibleAtScope(id, kind))
     .sort((left, right) => left.order - right.order);
 
 export const managementNavigationContribution = (): NavigationContribution | undefined =>

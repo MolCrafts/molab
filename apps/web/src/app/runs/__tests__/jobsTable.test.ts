@@ -125,6 +125,24 @@ describe("sortJobs", () => {
 });
 
 describe("parse / format jobs sort", () => {
+  it("sorts by destination when all executions share molq", () => {
+    const runs = [
+      baseRun({
+        id: "a",
+        executions: [exec({ backend: "molq", backendMetadata: { cluster_name: "Zeta" } })],
+      }),
+      baseRun({
+        id: "z",
+        executions: [exec({ backend: "molq", backendMetadata: { cluster_name: "Arrhenius" } })],
+      }),
+    ];
+    expect(sortJobs(runs, { key: "cluster", dir: "asc" }).map((run) => run.id)).toEqual(["z", "a"]);
+    expect(parseJobsSort(formatJobsSort({ key: "cluster", dir: "asc" }))).toEqual({
+      key: "cluster",
+      dir: "asc",
+    });
+  });
+
   it("round-trips", () => {
     expect(parseJobsSort(formatJobsSort({ key: "status", dir: "asc" }))).toEqual({
       key: "status",

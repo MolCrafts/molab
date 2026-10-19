@@ -3,6 +3,7 @@ import { ApiError } from "@/api/generated/core/ApiError";
 import type { ServedWorkspaceResponse } from "@/api/generated/models/ServedWorkspaceResponse";
 import { WorkspaceAddRequest } from "@/api/generated/models/WorkspaceAddRequest";
 import { WorkspacesService } from "@/api/generated/services/WorkspacesService";
+import { emitWorkspaceSwitching } from "@/app/state/workspaceSwitchEvents";
 import type { ServedWorkspaceSummary } from "@/app/types";
 
 const toSummary = (row: ServedWorkspaceResponse): ServedWorkspaceSummary => ({
@@ -20,9 +21,11 @@ const connectFailure = (err: unknown): Error => {
     const status = err.status;
     if (status === 401 || status === 403) return new Error("auth");
     if (status === 408 || status === 504) return new Error("timeout");
-    if (status === 502 || status === 503) return new Error("unreachable");
+    if (status === 502 || status === 503) {
+      return new Error(apiErrorMessage(err, "unreachable"));
+    }
   }
-  return new Error("failed");
+  return new Error(apiErrorMessage(err, "Connection request failed"));
 };
 
 /** The served-workspace set (`/api/workspaces`), not the active-workspace tree. */
@@ -49,28 +52,30 @@ export const workspacesApi = {
         create_if_missing: input.createIfMissing ?? false,
         activate: input.activate ?? true,
       });
+      if (input.activate ?? true) emitWorkspaceSwitching({ activeDescriptor: row.key });
       return toSummary(row);
     } catch (err) {
       throw new Error(apiErrorMessage(err, "Failed to add workspace"));
     }
   },
   removeWorkspace: async (key: string): Promise<void> => {
-    await WorkspacesService.removeWorkspace(key);
+    const remaining = await WorkspacesService.removeWorkspace(key);
+    emitWorkspaceSwitching({
+      activeDescriptor: remaining.find((workspace) => workspace.active)?.key ?? null,
+    });
   },
   connectWorkspace: async (
     key: string,
     code: string,
-    options?: { force?: boolean },
-  ): Promise<{ ok: boolean; masterAlive: boolean; host: string }> => {
+  ): Promise<{ ok: boolean; authenticated: boolean; destination: string }> => {
     try {
       const body = await WorkspacesService.connectWorkspace(key, {
         code,
-        force: options?.force ?? false,
       });
       return {
         ok: body.ok,
-        masterAlive: body.masterAlive,
-        host: body.host,
+        authenticated: body.authenticated,
+        destination: body.destination,
       };
     } catch (err) {
       throw connectFailure(err);

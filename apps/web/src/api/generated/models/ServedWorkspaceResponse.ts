@@ -11,7 +11,7 @@ export type ServedWorkspaceResponse = {
      */
     key: string;
     /**
-     * Human-facing label (path or user@host:/path)
+     * Human-facing label (path or cluster:/path)
      */
     label: string;
     /**
@@ -31,7 +31,7 @@ export type ServedWorkspaceResponse = {
      */
     unreachable?: boolean;
     /**
-     * True when the remote is unreachable and likely needs an interactive verification code (2FA/OTP). The UI should show a connect dialog.
+     * True when the destination reports that SSH authentication is required.
      */
     needsAuth?: boolean;
 };

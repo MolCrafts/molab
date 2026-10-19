@@ -32,11 +32,11 @@ def explore(
     Navigate with arrows / Enter to expand, Space to select,
     a/A to select all/clear, d to open delete confirmation.
 
-    Works for local and remote (``-ws host:/path``) workspaces — tree data
+    Works for local and remote (``-ws cluster:/path``) workspaces — tree data
     is loaded through the target FileSystem.
     """
     try:
-        _target, _transport, _fs, ws = open_workspace(target_spec, prefetch=True)
+        _target, _fs, ws = open_workspace(target_spec, prefetch=True)
     except FileNotFoundError as exc:
         rprint(f"[red]Error:[/red] {exc}")
         rprint("  Run [bold]molab init[/bold] to create one.")

@@ -11,10 +11,13 @@ import time
 import urllib.error
 import urllib.request
 from collections.abc import Iterator
+from importlib import import_module
 from pathlib import Path
+from types import ModuleType
 
+psutil: ModuleType | None
 try:
-    import psutil  # optional dev dependency
+    psutil = import_module("psutil")  # optional dev dependency
 except ImportError:
     psutil = None
 

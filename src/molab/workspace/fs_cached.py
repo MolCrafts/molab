@@ -6,13 +6,13 @@ for :class:`~molab.workspace.fs_remote.RemoteFileSystem`) and maintains
 a server-side mirror under ``<mirror_root>/files/...``.
 
 **Pin-until-refresh policy** (default): once a path is in the local
-index/mirror it is trusted forever.  Age / ``ttl_seconds`` does **not**
+index/mirror it is trusted until explicitly refreshed. Age does **not**
 trigger automatic revalidation — the operator refreshes via
 ``POST /api/workspace/cache/refresh`` (or ``invalidate``).  Cache misses
 still go to the remote FS and populate the mirror.
 
-``ttl_seconds=0`` is an opt-in strict mode: every read re-stats the remote
-and reuses mirror bytes only when mtime/size still match.
+``cache_mode="strict"`` fetches content on every read, including when size
+and mtime are unchanged.
 
 Index files are not special-cased — they are just paths.  The eager
 prefetch helper :func:`prefetch_workspace_indices` walks the workspace by
@@ -30,6 +30,7 @@ Layer rule: lives in the workspace layer next to ``fs_local.py`` and
 from __future__ import annotations
 
 import contextlib
+import io
 import json
 import logging
 import os
@@ -41,6 +42,8 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import IO, TYPE_CHECKING, Any
+
+from molab.atomicio import atomic_write_bytes, atomic_write_json
 
 from .execution_dirs import execution_dir_names
 from .fs import DirEntry, FileSystem, PathArg, StatResult
@@ -149,13 +152,13 @@ class IndexProgress:
 class CachedRemoteFileSystem:
     """Lazy-download mirror over any :class:`FileSystem`.
 
-    **Default (``ttl_seconds > 0``)**: pin-until-refresh.  Any path present
+    **Default (``cache_mode="pinned"``)**: pin-until-refresh.  Any path present
     in the sidecar/mirror is served locally with **zero** remote I/O until
     the operator invalidates/refreshes.  Mutations still go to the inner
     FS and invalidate the affected entry.
 
-    **Strict (``ttl_seconds == 0``)**: every read re-stats the remote and
-    reuses mirror bytes only when mtime/size match (no silent pin).
+    **Strict (``cache_mode="strict"``)**: every read fetches remote content;
+    equal metadata never proves content freshness.
 
     The mirror layout reflects the remote path verbatim (leading ``/``
     stripped) under ``<mirror_root>/files/``, so a remote path
@@ -167,8 +170,8 @@ class CachedRemoteFileSystem:
         inner: The :class:`FileSystem` to cache.
         mirror_root: Local directory holding the mirror.  Created on
             first write.
-        ttl_seconds: ``>0`` (default) = pin-until-refresh.  ``0`` =
-            revalidate via remote ``stat`` on every read.
+        cache_mode: ``pinned`` reuses content until explicit refresh;
+            ``strict`` fetches content on every read.
     """
 
     def __init__(
@@ -176,15 +179,15 @@ class CachedRemoteFileSystem:
         inner: FileSystem,
         *,
         mirror_root: Path | str,
-        ttl_seconds: int = 300,
+        cache_mode: str = "pinned",
     ) -> None:
-        if ttl_seconds < 0:
-            raise ValueError("ttl_seconds must be >= 0")
+        if cache_mode not in {"pinned", "strict"}:
+            raise ValueError("cache_mode must be pinned or strict")
         self._inner = inner
         self._local = LocalFileSystem()
         self._mirror_root = Path(mirror_root)
         self._files_root = self._mirror_root / "files"
-        self._ttl_seconds = ttl_seconds
+        self._cache_mode = cache_mode
         self._index: dict[str, _Entry] = {}
         self._dir_index: dict[str, _DirEntry] = {}
         self._sidecar = self._mirror_root / _SIDECAR_FILENAME
@@ -192,7 +195,7 @@ class CachedRemoteFileSystem:
         # ``batched()``), per-op writes only mark ``_sidecar_dirty`` and the
         # full serialization happens once on batch exit — turning a bulk walk
         # (e.g. ``prefetch_workspace_indices``) from O(records²) into O(records).
-        self._defer_persist = False
+        self._defer_persist = 0
         self._sidecar_dirty = False
         # Lifecycle flags — a brand-new remote root has no sidecar; that is
         # normal. ``connect`` / ``index`` (or ``prepare``) flip these once
@@ -201,6 +204,7 @@ class CachedRemoteFileSystem:
         self._indexed = False
         self._remote_root: str | None = None
         self._lock = threading.RLock()
+        self._generation = 0
         self._index_thread: threading.Thread | None = None
         self._indexing = False
         self._progress = IndexProgress()
@@ -227,8 +231,8 @@ class CachedRemoteFileSystem:
         return self._mirror_root
 
     @property
-    def ttl_seconds(self) -> int:
-        return self._ttl_seconds
+    def cache_mode(self) -> str:
+        return self._cache_mode
 
     @property
     def connected(self) -> bool:
@@ -289,7 +293,8 @@ class CachedRemoteFileSystem:
 
     def cached_paths(self) -> list[str]:
         """Snapshot of cached file/dir/missing paths — handy in tests."""
-        return list(self._index.keys())
+        with self._lock:
+            return list(self._index.keys())
 
     # ── Connect / index lifecycle ───────────────────────────────────────
 
@@ -324,9 +329,8 @@ class CachedRemoteFileSystem:
         try:
             reachable = self._inner.exists(root) or self._inner.is_dir(root)
         except Exception:
-            # Soft: no long chain text — server maps this to needs_auth / 503.
             self._connected = False
-            raise ConnectionError("unreachable") from None
+            raise
         if not reachable:
             self._connected = False
             raise FileNotFoundError(f"remote root not found: {root}")
@@ -349,66 +353,6 @@ class CachedRemoteFileSystem:
         finally:
             self._tls.force_fetch = prev
 
-    def count_remote_files(self, root: str, *, timeout: float = 8.0) -> int:
-        """Best-effort file count under *root* for progress denominators only.
-
-        Remote: one ``find | wc -l`` with a hard *timeout* (never a BFS —
-        per-entry SSH RTT can hang for minutes and stuck the UI on
-        "Counting remote files…").  Local / no-transport: lightweight BFS.
-        Returns 0 on any failure (indeterminate progress).
-        """
-        inner = self._inner
-        transport = getattr(inner, "_t", None)
-        if transport is not None and hasattr(transport, "run"):
-            import shlex
-
-            try:
-                cmd = f"find {shlex.quote(root)} -type f 2>/dev/null | wc -l"
-                result = transport.run(
-                    ["bash", "-lc", cmd],
-                    timeout=timeout,
-                )
-                out = getattr(result, "stdout", None)
-                if out is None:
-                    out = result if isinstance(result, (str, bytes, int)) else ""
-                if isinstance(out, bytes):
-                    out = out.decode("utf-8", errors="replace")
-                text = str(out).strip().splitlines()
-                if text:
-                    return max(0, int(text[-1].strip()))
-            except Exception as exc:
-                logger.debug("remote find|wc skipped for %s: %s", root, exc)
-            return 0
-
-        # Local-only BFS (cheap Path ops). Cap depth of work so a huge tree
-        # never blocks prepare.
-        total = 0
-        stack = [root]
-        visited = 0
-        max_visits = 50_000
-        while stack and visited < max_visits:
-            cur = stack.pop()
-            visited += 1
-            try:
-                if not self._inner.is_dir(cur):
-                    if self._inner.is_file(cur):
-                        total += 1
-                    continue
-                for name in self._inner.listdir(cur):
-                    if name.startswith("."):
-                        continue
-                    child = self._inner.join(cur, name)
-                    try:
-                        if self._inner.is_dir(child):
-                            stack.append(child)
-                        elif self._inner.is_file(child):
-                            total += 1
-                    except Exception:
-                        continue
-            except Exception:
-                continue
-        return total
-
     def index(self, workspace: Workspace) -> list[PrefetchWarning]:
         """Actively refresh navigation metadata from remote (blocking).
 
@@ -426,16 +370,8 @@ class CachedRemoteFileSystem:
             self.connect(str(workspace.root))
         root = str(workspace.root)
 
-        # Optional quick count for a determinate bar. Hard-capped; on timeout
-        # or miss we stay indeterminate (total grows with on_file ticks).
-        # Never show a long-lived "Counting…" phase — that is what hung the UI.
+        # The semantic walk supplies progress; avoid a separate traversal of all payloads.
         total = 0
-        try:
-            total = self.count_remote_files(root, timeout=5.0)
-        except Exception as exc:
-            logger.debug("count_remote_files skipped: %s", exc)
-            total = 0
-
         self._set_progress(
             phase="fetching",
             total=max(total, 0),
@@ -531,8 +467,8 @@ class CachedRemoteFileSystem:
         * **Cold**: probe SSH first, then the same refresh path.
         """
         self._remote_root = str(workspace.root)
-        if not refresh_on_open:
-            # Pure pin serve — no probe, no walk (tests / warm passive reopen).
+        if not refresh_on_open and self._indexed:
+            # A warm pin is read without replacing previously cached content.
             return []
         if not self._connected:
             self.connect(str(workspace.root))
@@ -566,33 +502,42 @@ class CachedRemoteFileSystem:
     # ── Existence / type ────────────────────────────────────────────────
 
     def exists(self, path: PathArg) -> bool:
-        key = self.resolve(path)
-        entry = self._pinned_entry(key)
-        if entry is not None:
-            return entry.kind != "missing"
+        with self._lock:
+            key = self.resolve(path)
+            entry = self._pinned_entry(key)
+            if entry is not None:
+                return entry.kind != "missing"
+        with self._lock:
+            generation = self._generation
         self._ensure_connected()
         result = self._inner.exists(key)
         if not result:
             # Negative cache: future ``exists`` returns False without SSH.
-            self._record(key, kind="missing", size=0, mtime=0.0)
+            self._record(key, generation=generation, kind="missing", size=0, mtime=0.0)
         return result
 
     def is_dir(self, path: PathArg) -> bool:
-        key = self.resolve(path)
-        entry = self._pinned_entry(key)
-        if entry is not None:
-            return entry.kind == "dir"
+        with self._lock:
+            key = self.resolve(path)
+            entry = self._pinned_entry(key)
+            if entry is not None:
+                return entry.kind == "dir"
+        with self._lock:
+            generation = self._generation
         self._ensure_connected()
         result = self._inner.is_dir(key)
         if result:
-            self._record(key, kind="dir", size=0, mtime=time.time())
+            self._record(key, generation=generation, kind="dir", size=0, mtime=time.time())
         return result
 
     def is_file(self, path: PathArg) -> bool:
-        key = self.resolve(path)
-        entry = self._pinned_entry(key)
-        if entry is not None:
-            return entry.kind == "file"
+        with self._lock:
+            key = self.resolve(path)
+            entry = self._pinned_entry(key)
+            if entry is not None:
+                return entry.kind == "file"
+        with self._lock:
+            generation = self._generation
         self._ensure_connected()
         result = self._inner.is_file(key)
         if result:
@@ -601,6 +546,7 @@ class CachedRemoteFileSystem:
             if stat_value is not None:
                 self._record(
                     key,
+                    generation=generation,
                     kind="file",
                     size=stat_value.size,
                     mtime=stat_value.mtime,
@@ -611,18 +557,22 @@ class CachedRemoteFileSystem:
 
     def mkdir(self, path: PathArg, *, parents: bool = True, exist_ok: bool = True) -> None:
         key = self.resolve(path)
-        self._inner.mkdir(key, parents=parents, exist_ok=exist_ok)
-        self._record(key, kind="dir", size=0, mtime=time.time())
-        self._invalidate_dir(self._inner.dirname(key))
+        with self._mutation(key, recursive=False):
+            self._inner.mkdir(key, parents=parents, exist_ok=exist_ok)
 
     def listdir(self, path: PathArg) -> list[str]:
-        key = self.resolve(path)
-        cached = self._pinned_dir(key)
-        if cached is not None:
-            return list(cached.names)
+        with self._lock:
+            key = self.resolve(path)
+            cached = self._pinned_dir(key)
+            if cached is not None:
+                return list(cached.names)
+        with self._lock:
+            generation = self._generation
         self._ensure_connected()
         names = self._inner.listdir(key)
         with self._lock:
+            if generation != self._generation:
+                return names
             self._dir_index[key] = _DirEntry(names=tuple(names), fetched_at=time.time())
             self._persist_sidecar()
         return names
@@ -635,9 +585,13 @@ class CachedRemoteFileSystem:
         following ``listdir`` is served locally.
         """
         key = self.resolve(path)
+        with self._lock:
+            generation = self._generation
         self._ensure_connected()
         entries = self._inner.scandir(key, with_stat=with_stat)
         with self._lock:
+            if generation != self._generation:
+                return entries
             self._dir_index[key] = _DirEntry(
                 names=tuple(e.name for e in entries), fetched_at=time.time()
             )
@@ -669,107 +623,162 @@ class CachedRemoteFileSystem:
             raise ValueError(f"read_range needs non-negative offset/length, got {offset}/{length}")
         if length == 0:
             return b""
-        key = self.resolve(path)
-        mirror_path = self._mirror_for(key)
-        entry = self._pinned_entry(key)
-        if entry is not None and entry.kind == "missing":
-            raise FileNotFoundError(key)
-        if entry is not None and entry.kind == "file" and self._local.exists(mirror_path):
-            return self._local.read_range(mirror_path, offset, length)
+        with self._lock:
+            key = self.resolve(path)
+            mirror_path = self._mirror_for(key)
+            entry = self._pinned_entry(key)
+            if entry is not None and entry.kind == "missing":
+                raise FileNotFoundError(key)
+            if entry is not None and entry.kind == "file" and self._local.exists(mirror_path):
+                return self._local.read_range(mirror_path, offset, length)
         self._ensure_connected()
         return self._inner.read_range(key, offset, length)
 
     def read_bytes(self, path: PathArg) -> bytes:
-        key = self.resolve(path)
-        mirror_path = self._mirror_for(key)
-        entry = self._pinned_entry(key)
-        if entry is not None and entry.kind == "file" and self._local.exists(mirror_path):
-            return self._local.read_bytes(mirror_path)
-        if entry is not None and entry.kind == "missing":
-            raise FileNotFoundError(key)
-        # Strict mode (ttl=0): revalidate via stat; serve mirror if unchanged.
-        known = self._index.get(key)
-        if (
-            self._ttl_seconds == 0
-            and known is not None
-            and known.kind == "file"
-            and self._local.exists(mirror_path)
-        ):
-            self._ensure_connected()
-            if self._revalidate_file_entry(key, known):
+        with self._lock:
+            key = self.resolve(path)
+            mirror_path = self._mirror_for(key)
+            entry = self._pinned_entry(key)
+            if entry is not None and entry.kind == "file" and self._local.exists(mirror_path):
                 return self._local.read_bytes(mirror_path)
-        # Miss (or strict revalidation failed) — fetch from remote.
+            if entry is not None and entry.kind == "missing":
+                raise FileNotFoundError(key)
+            # Strict reads always fetch content, including equal-size same-second changes.
+        with self._lock:
+            generation = self._generation
         self._ensure_connected()
         try:
             data = self._inner.read_bytes(key)
         except FileNotFoundError:
-            self._record(key, kind="missing", size=0, mtime=0.0)
+            self._record(key, generation=generation, kind="missing", size=0, mtime=0.0)
             raise
         stat_value = self._safe_stat(key)
         size = len(data) if stat_value is None else stat_value.size
         mtime = time.time() if stat_value is None else stat_value.mtime
-        self._write_mirror(mirror_path, data)
-        self._record(key, kind="file", size=size, mtime=mtime)
+        with self._lock:
+            if generation == self._generation:
+                self._write_mirror(mirror_path, data)
+                self._record(key, kind="file", size=size, mtime=mtime)
         return data
 
-    def open(self, path: PathArg, mode: str = "r", encoding: str = "utf-8") -> IO[Any]:  # noqa: ARG002 — `mode` kept to mirror RemoteFileSystem.open's signature
-        # Mirror RemoteFileSystem's behaviour: read-only string buffer.
-        import io
+    def read_many(
+        self, paths: Sequence[str], *, max_bytes: int = 262144
+    ) -> dict[str, bytes | Exception]:
+        """Prime semantic metadata in target-side batches while respecting cache policy."""
+        result: dict[str, bytes | Exception] = {}
+        missing: list[str] = []
+        with self._lock:
+            for path in paths:
+                key = self.resolve(path)
+                entry = self._pinned_entry(key)
+                mirror = self._mirror_for(key)
+                if entry is not None and entry.kind == "file" and self._local.exists(mirror):
+                    result[path] = self._local.read_bytes(mirror)
+                elif entry is not None and entry.kind == "missing":
+                    result[path] = FileNotFoundError(path)
+                else:
+                    missing.append(path)
+        if missing:
+            with self._lock:
+                generation = self._generation
+            self._ensure_connected()
+            read_many = getattr(self._inner, "read_many", None)
+            batch: dict[str, bytes | Exception] = {}
+            if callable(read_many):
+                batch = read_many(missing, max_bytes=max_bytes)
+            else:
+                for path in missing:
+                    try:
+                        batch[path] = self._inner.read_bytes(path)
+                    except OSError as exc:
+                        batch[path] = exc
+            with self._lock, self.batched():
+                for path, value in batch.items():
+                    key = self.resolve(path)
+                    result[path] = value
+                    if generation != self._generation:
+                        continue
+                    if isinstance(value, bytes):
+                        self._write_mirror(self._mirror_for(key), value)
+                        self._record(key, kind="file", size=len(value), mtime=0)
+                    elif isinstance(value, FileNotFoundError):
+                        self._record(key, kind="missing", size=0, mtime=0)
+        return result
 
-        return io.StringIO(self.read_text(path, encoding=encoding))
+    def upload(
+        self, local: str, remote: str, *, recursive: bool = False, exclude: Sequence[str] = ()
+    ) -> None:
+        """Transfer a staged upload and invalidate its cached destination."""
+        with self._mutation(self.resolve(remote), recursive=True):
+            upload = getattr(self._inner, "upload", None)
+            if callable(upload):
+                upload(local, remote, recursive=recursive, exclude=exclude)
+            else:
+                self._inner.copy(local, remote)
+
+    def open(self, path: PathArg, mode: str = "r", encoding: str = "utf-8") -> IO[Any]:
+        if mode not in {"r", "rt", "rb"}:
+            raise ValueError("Remote open supports read-only buffers")
+        return (
+            io.BytesIO(self.read_bytes(path))
+            if mode == "rb"
+            else io.StringIO(self.read_text(path, encoding))
+        )
 
     # ── Write ───────────────────────────────────────────────────────────
 
     def write_text(self, path: PathArg, content: str, *, mode: int = 0o600) -> None:
         key = self.resolve(path)
-        self._invalidate(key)
-        self._inner.write_text(key, content, mode=mode)
+        with self._mutation(key, recursive=False):
+            self._inner.write_text(key, content, mode=mode)
 
     def write_bytes(self, path: PathArg, content: bytes, *, mode: int = 0o600) -> None:
         key = self.resolve(path)
-        self._invalidate(key)
-        self._inner.write_bytes(key, content, mode=mode)
+        with self._mutation(key, recursive=False):
+            self._inner.write_bytes(key, content, mode=mode)
 
     # ── Mutations ───────────────────────────────────────────────────────
 
     def rename(self, src: PathArg, dst: PathArg) -> None:
         src_key = self.resolve(src)
         dst_key = self.resolve(dst)
-        self._invalidate(src_key)
-        self._invalidate(dst_key)
-        self._inner.rename(src_key, dst_key)
+        with self._mutation(src_key, dst_key, recursive=True):
+            self._inner.rename(src_key, dst_key)
 
     def remove(self, path: PathArg, *, recursive: bool = False) -> None:
         key = self.resolve(path)
-        self._invalidate(key, recursive=recursive)
-        self._inner.remove(key, recursive=recursive)
+        with self._mutation(key, recursive=recursive):
+            self._inner.remove(key, recursive=recursive)
 
     def copy(self, src: PathArg, dst: PathArg) -> None:
         dst_key = self.resolve(dst)
-        self._invalidate(dst_key)
-        self._inner.copy(src, dst_key)
+        with self._mutation(dst_key, recursive=True):
+            self._inner.copy(src, dst_key)
 
     def copytree(self, src: PathArg, dst: PathArg, *, dirs_exist_ok: bool = False) -> None:
         dst_key = self.resolve(dst)
-        self._invalidate(dst_key, recursive=True)
-        self._inner.copytree(src, dst_key, dirs_exist_ok=dirs_exist_ok)
+        with self._mutation(dst_key, recursive=True):
+            self._inner.copytree(src, dst_key, dirs_exist_ok=dirs_exist_ok)
 
     # ── Metadata ────────────────────────────────────────────────────────
 
     def stat(self, path: PathArg) -> StatResult:
-        key = self.resolve(path)
-        entry = self._pinned_entry(key)
-        if entry is not None and entry.kind != "missing":
-            return StatResult(
-                size=entry.size,
-                mtime=entry.mtime,
-                is_dir=entry.kind == "dir",
-                is_file=entry.kind == "file",
-            )
+        with self._lock:
+            key = self.resolve(path)
+            entry = self._pinned_entry(key)
+            if entry is not None and entry.kind != "missing" and entry.mtime != 0:
+                return StatResult(
+                    size=entry.size,
+                    mtime=entry.mtime,
+                    is_dir=entry.kind == "dir",
+                    is_file=entry.kind == "file",
+                )
+        with self._lock:
+            generation = self._generation
         self._ensure_connected()
         result = self._inner.stat(key)
         kind = "dir" if result.is_dir else "file" if result.is_file else "missing"
-        self._record(key, kind=kind, size=result.size, mtime=result.mtime)
+        self._record(key, generation=generation, kind=kind, size=result.size, mtime=result.mtime)
         return result
 
     def lstat(self, path: PathArg) -> StatResult:
@@ -777,11 +786,12 @@ class CachedRemoteFileSystem:
 
     def touch(self, path: PathArg) -> None:
         key = self.resolve(path)
-        self._invalidate(key)
-        self._inner.touch(key)
+        with self._mutation(key, recursive=False):
+            self._inner.touch(key)
 
     def chmod(self, path: PathArg, mode: int) -> None:
-        self._inner.chmod(path, mode)
+        with self._mutation(self.resolve(path), recursive=False):
+            self._inner.chmod(path, mode)
 
     def getsize(self, path: PathArg) -> int:
         return self.stat(path).size
@@ -790,20 +800,20 @@ class CachedRemoteFileSystem:
 
     def symlink(self, src: PathArg, dst: PathArg) -> None:
         dst_key = self.resolve(dst)
-        self._invalidate(dst_key)
-        self._inner.symlink(src, dst_key)
+        with self._mutation(dst_key, recursive=True):
+            self._inner.symlink(src, dst_key)
 
     # ── Atomic I/O ──────────────────────────────────────────────────────
 
     def atomic_write_json(self, path: PathArg, data: object) -> None:
         key = self.resolve(path)
-        self._invalidate(key)
-        self._inner.atomic_write_json(key, data)
+        with self._mutation(key, recursive=False):
+            self._inner.atomic_write_json(key, data)
 
     def atomic_write_text(self, path: PathArg, content: str, *, encoding: str = "utf-8") -> None:
         key = self.resolve(path)
-        self._invalidate(key)
-        self._inner.atomic_write_text(key, content, encoding=encoding)
+        with self._mutation(key, recursive=False):
+            self._inner.atomic_write_text(key, content, encoding=encoding)
 
     # ── Cache control ───────────────────────────────────────────────────
 
@@ -815,8 +825,9 @@ class CachedRemoteFileSystem:
         pins are not — a folder listed before children existed stays "Empty"
         in the UI until this pin is cleared.
         """
-        key = self.resolve(path)
         with self._lock:
+            self._generation += 1
+            key = self.resolve(path)
             self._dir_index.pop(key, None)
             self._persist_sidecar()
 
@@ -837,78 +848,65 @@ class CachedRemoteFileSystem:
                 refresh navigation without throwing away cached log
                 bytes).
         """
-        if path is not None:
-            key = self.resolve(path)
-            return self._invalidate(key, recursive=True)
-        if scope == "indices":
-            keys = [k for k in self._index if self._inner.basename(k) in INDEX_FILE_NAMES]
-            for key in keys:
-                self._invalidate(key)
-            # Dir listings are part of navigation — drop them so refresh
-            # re-lists containers instead of replaying a pinned tree.
-            dir_count = len(self._dir_index)
-            self._dir_index.clear()
-            self._indexed = False
-            self._persist_sidecar()
-            return len(keys) + dir_count
-        if scope == "all":
-            count = len(self._index)
-            self._index.clear()
-            self._dir_index.clear()
-            if self._files_root.exists():
-                with contextlib.suppress(OSError):
-                    shutil.rmtree(self._files_root)
-            # Index is gone — caller must re-run ``index()`` / ``prepare``.
-            self._indexed = False
-            self._ensure_mirror_dirs()
-            self._persist_sidecar()
-            return count
-        raise ValueError(f"unknown scope {scope!r}")
+        with self._lock:
+            self._generation += 1
+            if path is not None:
+                key = self.resolve(path)
+                return self._invalidate(key, recursive=True)
+            if scope == "indices":
+                keys = [k for k in self._index if self._inner.basename(k) in INDEX_FILE_NAMES]
+                for key in keys:
+                    self._invalidate(key)
+                # Dir listings are part of navigation — drop them so refresh
+                # re-lists containers instead of replaying a pinned tree.
+                dir_count = len(self._dir_index)
+                self._dir_index.clear()
+                self._indexed = False
+                self._persist_sidecar()
+                return len(keys) + dir_count
+            if scope == "all":
+                count = len(self._index)
+                self._index.clear()
+                self._dir_index.clear()
+                if self._files_root.exists():
+                    with contextlib.suppress(OSError):
+                        shutil.rmtree(self._files_root)
+                # Index is gone — caller must re-run ``index()`` / ``prepare``.
+                self._indexed = False
+                self._ensure_mirror_dirs()
+                self._persist_sidecar()
+                return count
+            raise ValueError(f"unknown scope {scope!r}")
 
     # ── Internals ───────────────────────────────────────────────────────
 
     def _pinned_entry(self, key: str) -> _Entry | None:
         """Return a trusted local entry, or None if we must touch remote.
 
-        Pin mode (``ttl_seconds > 0``): any recorded entry wins until an
+        Pin mode (``cache_mode="pinned"``): any recorded entry wins until an
         **active** refresh (``force_fetch`` / open / user Refresh).
-        Strict mode (``ttl_seconds == 0``): never pin.
+        Strict mode (``cache_mode="strict"``): never pin.
         Active refresh thread sets ``_tls.force_fetch`` so it always hits remote.
         """
         if getattr(self._tls, "force_fetch", False):
             return None
-        if self._ttl_seconds == 0:
+        if self._cache_mode == "strict":
             return None
         return self._index.get(key)
 
     def _pinned_dir(self, key: str) -> _DirEntry | None:
         if getattr(self._tls, "force_fetch", False):
             return None
-        if self._ttl_seconds == 0:
+        if self._cache_mode == "strict":
             return None
         return self._dir_index.get(key)
 
-    def _revalidate_file_entry(self, key: str, entry: _Entry) -> bool:
-        """Return True when remote file is unchanged; refresh ``fetched_at``.
-
-        Used only in strict mode (``ttl_seconds==0``) when the local mirror
-        still has bytes. A single remote ``stat`` is cheaper than re-
-        downloading navigation metadata over SSH.
-        """
-        remote_stat = self._safe_stat(key)
-        if remote_stat is None or not remote_stat.is_file:
-            return False
-        if remote_stat.size != entry.size:
-            return False
-        # Float mtimes from SSH can differ at sub-second precision across
-        # serialisations; treat near-equality as a match.
-        if abs(remote_stat.mtime - entry.mtime) > 1e-3:
-            return False
-        self._record(key, kind="file", size=entry.size, mtime=entry.mtime)
-        return True
-
-    def _record(self, key: str, *, kind: str, size: int, mtime: float) -> None:
+    def _record(
+        self, key: str, *, kind: str, size: int, mtime: float, generation: int | None = None
+    ) -> None:
         with self._lock:
+            if generation is not None and generation != self._generation:
+                return
             self._index[key] = _Entry(
                 size=size,
                 mtime=mtime,
@@ -917,35 +915,59 @@ class CachedRemoteFileSystem:
             )
             self._persist_sidecar()
 
-    def _invalidate(self, key: str, *, recursive: bool = False) -> int:
-        dropped = 0
-        if key in self._index:
-            del self._index[key]
-            dropped += 1
-        if recursive:
-            prefix = key.rstrip("/") + "/"
-            for k in list(self._index):
-                if k.startswith(prefix):
-                    del self._index[k]
-                    dropped += 1
-            for k in list(self._dir_index):
-                if k == key or k.startswith(prefix):
-                    del self._dir_index[k]
-        # Always invalidate the parent dir listing.
-        self._invalidate_dir(self._inner.dirname(key))
-        # Best-effort mirror eviction.
-        mirror_path = self._mirror_for(key)
-        if self._local.exists(mirror_path):
-            with contextlib.suppress(OSError):
-                if recursive and self._local.is_dir(mirror_path):
-                    shutil.rmtree(mirror_path)
-                else:
-                    self._local.remove(mirror_path)
-        self._persist_sidecar()
-        return dropped
+    @contextlib.contextmanager
+    def _mutation(self, *keys: str, recursive: bool = False) -> Generator[None]:
+        """Fence cache observations without holding the mirror lock during remote I/O."""
+        with self._lock:
+            for key in keys:
+                self._invalidate(key, recursive=recursive)
+        try:
+            yield
+        finally:
+            # Includes failures with an uncertain outcome: never retain a pin
+            # fetched while the remote mutation may have been in progress.
+            with self._lock:
+                for key in keys:
+                    self._invalidate(key, recursive=recursive)
 
-    def _invalidate_dir(self, dir_key: str) -> None:
-        self._dir_index.pop(dir_key, None)
+    def _invalidate(self, key: str, *, recursive: bool = False) -> int:
+        with self._lock:
+            self._generation += 1
+            dropped = 0
+            if key in self._index:
+                del self._index[key]
+                dropped += 1
+            if recursive:
+                prefix = key.rstrip("/") + "/"
+                for k in list(self._index):
+                    if k.startswith(prefix):
+                        del self._index[k]
+                        dropped += 1
+                for k in list(self._dir_index):
+                    if k == key or k.startswith(prefix):
+                        del self._dir_index[k]
+            # Parent-creating operations may have replaced any negative ancestor
+            # pin. Evict those observations and their listings up to our root.
+            parent = self._inner.dirname(key)
+            boundary = self.resolve(self._remote_root) if self._remote_root else None
+            seen: set[str] = set()
+            while parent not in seen:
+                seen.add(parent)
+                self._dir_index.pop(parent, None)
+                self._index.pop(parent, None)
+                if parent == boundary or parent in {"", ".", "/"}:
+                    break
+                parent = self._inner.dirname(parent)
+            # Best-effort mirror eviction.
+            mirror_path = self._mirror_for(key)
+            if self._local.exists(mirror_path):
+                with contextlib.suppress(OSError):
+                    if recursive and self._local.is_dir(mirror_path):
+                        shutil.rmtree(mirror_path)
+                    else:
+                        self._local.remove(mirror_path)
+            self._persist_sidecar()
+            return dropped
 
     def mirror_path(self, path: PathArg) -> Path:
         """Local mirror path for *path* (may not exist yet).
@@ -962,10 +984,7 @@ class CachedRemoteFileSystem:
         return self._files_root / relative
 
     def _write_mirror(self, mirror_path: Path, data: bytes) -> None:
-        mirror_path.parent.mkdir(parents=True, exist_ok=True)
-        tmp = mirror_path.with_suffix(mirror_path.suffix + ".tmp")
-        tmp.write_bytes(data)
-        os.replace(tmp, mirror_path)  # noqa: PTH105
+        atomic_write_bytes(mirror_path, data)
 
     def _safe_stat(self, key: str) -> StatResult | None:
         try:
@@ -1012,71 +1031,46 @@ class CachedRemoteFileSystem:
 
     @contextlib.contextmanager
     def batched(self) -> Generator[None]:
-        """Defer sidecar writes for the duration of a bulk operation.
-
-        Per-op cache records/invalidations only mark the sidecar dirty; the
-        full serialization runs once on exit. Use around bulk walks (e.g.
-        :func:`prefetch_workspace_indices`) to avoid O(records²) rewrites.
-        Re-entrant: nested ``batched()`` flush only at the outermost exit.
-        """
-        if self._defer_persist:
-            yield  # already batching — inner block is a no-op wrapper
-            return
-        self._defer_persist = True
+        """Defer sidecar serialization until all overlapping batches finish."""
+        with self._lock:
+            self._defer_persist += 1
         try:
             yield
         finally:
-            self._defer_persist = False
-            self.flush()
+            with self._lock:
+                self._defer_persist -= 1
+                if not self._defer_persist:
+                    self.flush()
 
     def flush(self) -> None:
-        """Write the sidecar if it has pending (deferred) changes."""
-        if self._sidecar_dirty:
-            self._write_sidecar()
+        """Write pending changes under the cache publication lock."""
+        with self._lock:
+            if self._sidecar_dirty:
+                self._write_sidecar()
 
     def _write_sidecar(self) -> None:
-        """Atomically persist ``_index.json``. Missing parent dirs are recreated.
-
-        External ``rm -rf`` of the mirror mid-flight (or a brand-new remote
-        open with no prior sidecar) must not leave the cache permanently
-        mute — we re-mkdir and retry once before warning.
-        """
-        payload = {
-            "version": _SIDECAR_VERSION,
-            "ttl_seconds": self._ttl_seconds,
-            "entries": {k: asdict(v) for k, v in self._index.items()},
-            "dirs": {
-                k: {"names": list(v.names), "fetched_at": v.fetched_at}
-                for k, v in self._dir_index.items()
-            },
-        }
-        text = json.dumps(payload, indent=2, sort_keys=True)
-        tmp = self._sidecar.with_suffix(self._sidecar.suffix + ".tmp")
-
-        def _attempt() -> None:
-            self._ensure_mirror_dirs()
-            tmp.write_text(text, encoding="utf-8")
-            os.replace(tmp, self._sidecar)  # noqa: PTH105
-
-        try:
-            _attempt()
-            self._sidecar_dirty = False
-        except OSError:
-            # Parent may have vanished between mkdir and replace (e.g. another
-            # process wiped ``~/.molab/remote_cache/<name>``). Retry once.
-            with contextlib.suppress(OSError):
-                tmp.unlink(missing_ok=True)
+        with self._lock:
+            payload = {
+                "version": _SIDECAR_VERSION,
+                "cache_mode": self._cache_mode,
+                "entries": {k: asdict(v) for k, v in self._index.items()},
+                "dirs": {
+                    k: {"names": list(v.names), "fetched_at": v.fetched_at}
+                    for k, v in self._dir_index.items()
+                },
+            }
             try:
-                _attempt()
-                self._sidecar_dirty = False
+                atomic_write_json(self._sidecar, payload)
             except OSError as exc:
+                self._sidecar_dirty = True
                 logger.warning("cache sidecar write failed at %s: %s", self._sidecar, exc)
-                with contextlib.suppress(OSError):
-                    tmp.unlink(missing_ok=True)
+            else:
+                self._sidecar_dirty = False
 
 
 @dataclass
 class _PrefetchState:
+    prefetched: dict[str, bytes | Exception] = field(default_factory=dict)
     warnings: list[PrefetchWarning] = field(default_factory=list)
     lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -1101,6 +1095,7 @@ def _parallel_map[T, R](
     *,
     max_workers: int,
     force_fetch_fs: CachedRemoteFileSystem | None = None,
+    prepare: Callable[[Sequence[T]], None] | None = None,
 ) -> list[R]:
     """Map *fn* over *items*, parallel when ``max_workers > 1`` and |items| > 1.
 
@@ -1110,6 +1105,15 @@ def _parallel_map[T, R](
     """
     if not items:
         return []
+    if prepare is not None:
+        result: list[R] = []
+        for start in range(0, len(items), 128):
+            chunk = items[start : start + 128]
+            prepare(chunk)
+            result.extend(
+                _parallel_map(fn, chunk, max_workers=max_workers, force_fetch_fs=force_fetch_fs)
+            )
+        return result
     if max_workers <= 1 or len(items) == 1:
         return [fn(item) for item in items]
     workers = min(max_workers, len(items))
@@ -1171,8 +1175,14 @@ def prefetch_workspace_indices(
         if hasattr(fs, "batched")
         else contextlib.nullcontext()
     )
+
     # Callers that already entered force_fetch (index/refresh) keep it;
     # bare prefetch still benefits from parallel structure on any FS.
+    def prime(paths: list[str]) -> None:
+        read_many = getattr(fs, "read_many", None)
+        if callable(read_many) and paths:
+            state.prefetched.update(read_many(paths))
+
     with batch:
         # ── L0: workspace root (serial — tiny) ──────────────────────────
         _safe_read(fs, fs.join(root, "workspace.json"), state, on_file=on_file)
@@ -1208,6 +1218,9 @@ def prefetch_workspace_indices(
             for n in _parallel_map(
                 _load_project,
                 project_names,
+                prepare=lambda names: prime(
+                    [fs.join(projects_dir, name, "project.json") for name in names]
+                ),
                 max_workers=workers,
                 force_fetch_fs=force_fs,
             )
@@ -1258,6 +1271,12 @@ def prefetch_workspace_indices(
             for p in _parallel_map(
                 _load_experiment,
                 exp_pairs,
+                prepare=lambda pairs: prime(
+                    [
+                        fs.join(projects_dir, p, EXPERIMENT_CONTAINER, e, "experiment.json")
+                        for p, e in pairs
+                    ]
+                ),
                 max_workers=workers,
                 force_fetch_fs=force_fs,
             )
@@ -1285,7 +1304,8 @@ def prefetch_workspace_indices(
             run_triples.extend(triples)
 
         # ── L3: run.json in parallel (innermost — usually the bulk) ─────
-        def _load_run(triple: tuple[str, str, str]) -> None:
+
+        def _load_run(triple: tuple[str, str, str]) -> list[str]:
             project_name, exp_name, run_name = triple
             run_dir = fs.join(
                 projects_dir,
@@ -1302,22 +1322,40 @@ def prefetch_workspace_indices(
                 try:
                     entries = fs.scandir(executions, with_stat=False)
                 except FileNotFoundError:
-                    return
+                    return []
                 except Exception as exc:
                     state.add_warning(executions, str(exc))
-                    return
-                for entry in entries:
-                    if not entry.is_dir:
-                        continue
-                    _safe_read(
-                        fs,
-                        fs.join(run_dir, "executions", entry.name, "execution.json"),
-                        state,
-                        warn_on_missing=False,
-                        on_file=on_file,
-                    )
+                    return []
+                return [
+                    fs.join(executions, entry.name, "execution.json")
+                    for entry in entries
+                    if entry.is_dir
+                ]
+            return []
 
-        _parallel_map(_load_run, run_triples, max_workers=workers, force_fetch_fs=force_fs)
+        execution_paths = [
+            path
+            for paths in _parallel_map(
+                _load_run,
+                run_triples,
+                max_workers=workers,
+                force_fetch_fs=force_fs,
+                prepare=lambda triples: prime(
+                    [
+                        fs.join(
+                            projects_dir, p, EXPERIMENT_CONTAINER, e, RUN_CONTAINER, r, "run.json"
+                        )
+                        for p, e, r in triples
+                    ]
+                ),
+            )
+            for path in paths
+        ]
+        for start in range(0, len(execution_paths), 128):
+            chunk = execution_paths[start : start + 128]
+            prime(chunk)
+            for path in chunk:
+                _safe_read(fs, path, state, warn_on_missing=False, on_file=on_file)
 
     return list(state.warnings)
 
@@ -1409,7 +1447,13 @@ def _safe_read(
     on_file: Callable[[str], None] | None = None,
 ) -> str | None:
     try:
-        text = fs.read_text(path)
+        if path in state.prefetched:
+            value = state.prefetched.pop(path)
+            if isinstance(value, Exception):
+                raise value
+            text = value.decode("utf-8")
+        else:
+            text = fs.read_text(path)
     except FileNotFoundError as exc:
         if warn_on_missing:
             state.add_warning(path, f"not found: {exc}")
@@ -1421,33 +1465,3 @@ def _safe_read(
         with contextlib.suppress(Exception):
             on_file(path)
     return text
-
-
-def _read_container_children(
-    fs: FileSystem,
-    *,
-    container_dir: str,
-    index_path: str,
-    per_child_metadata: str,
-    state: _PrefetchState,
-    max_workers: int = 1,
-) -> list[str]:
-    """Read the optional container file, then list the container (optional parallel meta).
-
-    Kept for callers/tests that target a single container.  The main walk
-    uses the outside-in levels in :func:`prefetch_workspace_indices`.
-    """
-    _safe_read(fs, index_path, state, warn_on_missing=False)
-    try:
-        names = list(fs.listdir(container_dir))
-    except FileNotFoundError:
-        return []
-    except Exception as exc:
-        state.add_warning(container_dir, str(exc))
-        return []
-
-    def _one(name: str) -> str | None:
-        meta_path = fs.join(container_dir, name, per_child_metadata)
-        return name if _safe_read(fs, meta_path, state) is not None else None
-
-    return [n for n in _parallel_map(_one, names, max_workers=max_workers) if n]

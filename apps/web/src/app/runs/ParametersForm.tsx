@@ -9,9 +9,9 @@
  * dialog open) when the initial value changes.
  */
 
+import { Input } from "@molcrafts/ui";
 import { Plus, X } from "lucide-react";
 import { type JSX, useState } from "react";
-import { Input } from "@/components/ui/input";
 import { WorkbenchIconAction } from "@/components/workbench";
 
 interface Row {

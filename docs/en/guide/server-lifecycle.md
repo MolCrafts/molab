@@ -14,7 +14,7 @@ This page covers auth, tunnels, several workspaces, and `ServerManager`.
 ## `molab serve` (foreground CLI)
 
 ```bash
-molab serve -ws ./lab --port 8000 --host localhost
+molab serve ./lab --port 8000 --host localhost
 ```
 
 ### HTTP auth (optional)
@@ -26,9 +26,9 @@ By default the API is open on loopback. To require login for the UI and
 # Bootstrap the default admin (password via prompt or MOLAB_AUTH_PASSWORD)
 molab auth login -u admin
 
-molab serve -ws ./lab --auth
+molab serve ./lab --auth
 # optional: require a specific account to exist
-molab serve -ws ./lab --auth -u admin
+molab serve ./lab --auth -u admin
 ```
 
 CLI surface mirrors `gh auth`: `login` / `logout` / `status` / `switch` /
@@ -61,18 +61,18 @@ without `--dev` it targets the API port (bundled UI).
 
 ```bash
 # Cloudflare quick tunnel. Missing client → [y/N/path], y → ~/.local/bin/
-molab serve -ws ./lab --tunnel
+molab serve ./lab --tunnel
 
 # zrok hosted frontend (enable the account once after the binary is there)
 ~/.local/bin/zrok enable <account-token>
-molab serve -ws ./lab --tunnel --via zrok
+molab serve ./lab --tunnel --via zrok
 
 # Persist, then just --tunnel
 molab config set tunnel.via zrok
-molab serve -ws ./lab --tunnel
+molab serve ./lab --tunnel
 
 # Named Cloudflare tunnel
-molab serve -ws ./lab --tunnel --via cloudflared \
+molab serve ./lab --tunnel --via cloudflared \
   --tunnel-mode named --tunnel-token … --tunnel-hostname lab.example.com
 ```
 
@@ -90,7 +90,7 @@ available on compute nodes. Air-gapped: copy the binary and
   This is not multi-tenant isolation — it publishes the same workspace the
   server is serving.
 
-- Resolves each `-ws` as a local path, an SCP spec (`user@host:/path`), or
+- Resolves each `-ws` as a local path, a molq destination path (`cluster:/path`), or
   a registered `@workspace-target`. Missing local directories are created
   empty; plain folders open without writing `workspace.json`.
 - Activates the first workspace through the server's path override without
@@ -101,8 +101,8 @@ available on compute nodes. Air-gapped: copy the binary and
 
 ### Serving several workspaces
 
-`molab serve` accepts repeated `-ws` / `--workspace` options. The first
-workspace is active at startup; the full served set is exposed at
+`molab serve` takes one or more directories. The first
+is active at startup; the full served set is exposed at
 `GET /api/workspaces`, and the UI can switch the active workspace through
 `POST /api/workspace/open`.
 
@@ -122,7 +122,7 @@ workspace so single-workspace clients keep working unchanged.
 
 Compute-target aliases (`-t`) stay an execution concern and are configured
 independently. `-ws` still accepts a local path, an SCP spec
-(`user@host:/path`), or a registered `@workspace-target`.
+(`cluster:/path`), or a registered `@workspace-target`.
 
 ### Watching run progress
 
@@ -131,7 +131,7 @@ For a long-running workspace such as
 run the workflow in another terminal:
 
 ```bash
-molab serve -ws /Users/roykid/work/molcrafts/polymer_electrolyte --port 8000
+molab serve /Users/roykid/work/molcrafts/polymer_electrolyte --port 8000
 ```
 
 ```bash
@@ -157,7 +157,7 @@ to pick up frontend edits. Bundled preview is `npm run build:web` then
 [Serve and rebuild the UI](../development/ui-serve.md).
 
 ```bash
-molab serve --dev -ws ./lab --port 8000
+molab serve ./lab --dev --port 8000
 # optional: --ui-port 5173
 ```
 
@@ -242,7 +242,7 @@ Pass a custom `config_dir=Path("./.local")` to the constructor to relocate them.
 
 | Scenario | Pattern |
 |----------|---------|
-| Local dev | `molab serve --dev -ws ./lab` (API + UI HMR); or two terminals without `--dev` |
+| Local dev | `molab serve ./lab --dev` (API + UI HMR); or two terminals without `--dev` |
 | Production (long-lived) | `manager.start(background=True, kill_on_exit=False)` from a deploy script |
 | Tests (auto-cleanup) | `manager.start(background=True, kill_on_exit=True)` |
 | Embedded tooling | Run `molab.server.app:create_app()` directly in your own ASGI host |

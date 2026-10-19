@@ -139,12 +139,12 @@ export const NoteEditor = ({
     <div className="min-h-[24rem]">
       <div className="mb-2 flex items-center gap-2">
         <WorkbenchAction
+          icon={<ImagePlus aria-hidden />}
           kind="ghost"
           size="compact"
           type="button"
           onClick={() => fileRef.current?.click()}
         >
-          <ImagePlus className="size-icon-sm" />
           Insert image
         </WorkbenchAction>
         <input

@@ -3,11 +3,9 @@
  * loading · empty · error · running · success · disabled
  */
 
+import { ProgressSpinner, Skeleton } from "@molcrafts/ui";
 import { AlertCircle, CheckCircle2 } from "lucide-react";
 import type { ReactNode } from "react";
-import { ProgressSpinner } from "@/components/ui/progress-spinner";
-
-import { Skeleton } from "@/components/ui/skeleton";
 import { cn } from "@/lib/utils";
 
 export type WorkbenchOperationKind =

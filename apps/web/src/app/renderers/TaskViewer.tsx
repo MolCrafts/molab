@@ -1,8 +1,8 @@
+import { Code as InlineCode } from "@molcrafts/ui";
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp } from "lucide-react";
 import { useMemo } from "react";
 import { useInspectedTask } from "@/app/state/inspectedTask";
 import type { ScopedRendererProps, TaskSelection } from "@/app/types";
-import { Code as InlineCode } from "@/components/ui/code";
 import { WorkbenchIconAction, WorkbenchTag } from "@/components/workbench";
 
 /**

@@ -468,7 +468,7 @@ class AssetRepository:
             history: History writer. Defaults to the workspace history.
         """
         self.workspace = workspace
-        self.root = str(workspace.root)
+        self.root = str(workspace.resolve())
         self.scope = scope
         self.scope_dir = str(scope_dir)
         self.fs = workspace.fs
@@ -919,12 +919,12 @@ class AssetRepository:
     def _reject_legacy_asset(self, raw: dict[str, object], path: str) -> None:
         reason = _legacy_asset_reason(raw)
         if reason is not None:
-            raise UnmigratedAssetError(path, reason, workspace_root=str(self.workspace.root))
+            raise UnmigratedAssetError(path, reason, workspace_root=self.root)
 
     def _reject_legacy_version(self, raw: dict[str, object], path: str) -> None:
         reason = _legacy_version_reason(raw)
         if reason is not None:
-            raise UnmigratedAssetError(path, reason, workspace_root=str(self.workspace.root))
+            raise UnmigratedAssetError(path, reason, workspace_root=self.root)
 
     def _read_asset(self, directory: str) -> Asset:
         path = self.fs.join(directory, "asset.json")

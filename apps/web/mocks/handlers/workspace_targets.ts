@@ -7,7 +7,7 @@
  * The dev:mock store is in-memory — refreshing the page resets it.
  */
 
-import { http, HttpResponse } from "msw";
+import { HttpResponse, http } from "msw";
 
 import type { TargetTestResponse } from "@/api/generated/models/TargetTestResponse";
 import type { WorkspaceTargetCreateRequest } from "@/api/generated/models/WorkspaceTargetCreateRequest";
@@ -23,22 +23,18 @@ const seed = (t: WorkspaceTargetResponse): void => {
 
 seed({
   name: "lab",
-  host: "me@lab.example.org",
+  registryId: "mock-registry",
+  clusterId: "mock-hpc",
   rootPath: "/scratch/me/molab-lab",
-  port: null,
-  identityFile: null,
-  sshOpts: [],
 });
 seed({
   name: "hpc-allegro",
-  host: "me@allegro.hpc.example.org",
+  registryId: "mock-registry",
+  clusterId: "mock-hpc",
   rootPath: "/scratch/me/allegro",
-  port: 22,
-  identityFile: "~/.ssh/id_ed25519",
-  sshOpts: ["-o", "StrictHostKeyChecking=accept-new"],
 });
 
-let activeDescriptor: string | null = null;
+const activeDescriptor: string | null = null;
 
 export const workspaceTargetsHandlers = [
   http.get(`${API_BASE}/workspace/targets`, () => {
@@ -52,17 +48,16 @@ export const workspaceTargetsHandlers = [
     const body = (await request.json()) as WorkspaceTargetCreateRequest;
     if (targets.has(body.name)) {
       return HttpResponse.json(
-        { detail: `workspace target ${body.name!} already exists` },
+        { detail: `workspace target ${body.name} already exists` },
         { status: 409 },
       );
     }
     const created: WorkspaceTargetResponse = {
       name: body.name,
-      host: body.host,
+      registryId: body.registryId,
+      clusterId: body.clusterId,
       rootPath: body.rootPath,
-      port: body.port ?? null,
-      identityFile: body.identityFile ?? null,
-      sshOpts: body.sshOpts ?? [],
+      cacheMode: body.cacheMode,
     };
     targets.set(created.name, created);
     return HttpResponse.json(created, { status: 201 });
@@ -71,10 +66,7 @@ export const workspaceTargetsHandlers = [
   http.delete(`${API_BASE}/workspace/targets/:name`, ({ params }) => {
     const name = String(params.name);
     if (!targets.has(name)) {
-      return HttpResponse.json(
-        { detail: `workspace target ${name} not found` },
-        { status: 404 },
-      );
+      return HttpResponse.json({ detail: `workspace target ${name} not found` }, { status: 404 });
     }
     targets.delete(name);
     return new HttpResponse(null, { status: 204 });
@@ -83,10 +75,7 @@ export const workspaceTargetsHandlers = [
   http.post(`${API_BASE}/workspace/targets/:name/test`, ({ params }) => {
     const name = String(params.name);
     if (!targets.has(name)) {
-      return HttpResponse.json(
-        { detail: `workspace target ${name} not found` },
-        { status: 404 },
-      );
+      return HttpResponse.json({ detail: `workspace target ${name} not found` }, { status: 404 });
     }
     // Deterministic happy/fail seeded by name: anything containing "fail" fails.
     const ok = !name.toLowerCase().includes("fail");
@@ -114,7 +103,6 @@ export const workspaceTargetsHandlers = [
         };
     return HttpResponse.json(body);
   }),
-
 ];
 
 export const mockWorkspaceTargetsMap = targets;

@@ -1,3 +1,17 @@
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+  CommandSeparator,
+  Code as InlineCode,
+  Input,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@molcrafts/ui";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   Blocks,
@@ -24,18 +38,6 @@ import { TreeView } from "@/app/panels/TreeView";
 import type { Selection, WorkspaceSnapshot } from "@/app/types";
 import { useConfirm } from "@/components/ConfirmDialog";
 import { usePrompt } from "@/components/PromptDialog";
-import { Code as InlineCode } from "@/components/ui/code";
-import {
-  Command,
-  CommandEmpty,
-  CommandGroup,
-  CommandInput,
-  CommandItem,
-  CommandList,
-  CommandSeparator,
-} from "@/components/ui/command";
-import { Input } from "@/components/ui/input";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   WorkbenchAction,
   WorkbenchDismissAction,

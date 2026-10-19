@@ -16,10 +16,17 @@ export interface WorkspaceSwitchingDetail {
   activeDescriptor: string | null;
 }
 
+let queryScope = "active:0";
+let generation = 0;
+
+/** UI connection identity, including reopen/switch generation. No server data. */
+export const getWorkspaceQueryScope = (): string => queryScope;
+
 export function emitWorkspaceSwitching(detail: WorkspaceSwitchingDetail): void {
   if (typeof window === "undefined") {
     return;
   }
+  queryScope = `${detail.activeDescriptor ?? "active"}:${++generation}`;
   window.dispatchEvent(new CustomEvent(EVENT_NAME, { detail }));
 }
 

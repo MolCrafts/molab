@@ -111,7 +111,7 @@ export const CenterPanel = ({
     <div className="flex h-full flex-col">
       {renderers.map((renderer) => (
         <LazySurface
-          key={renderer.id}
+          key={`${renderer.id}:${selection.objectId}`}
           resetKey={`renderer:${renderer.id}:${selection.objectId}`}
           loadingTitle={`Loading ${renderer.title}…`}
           errorTitle={`Could not load ${renderer.title}`}

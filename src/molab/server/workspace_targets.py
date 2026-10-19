@@ -21,9 +21,9 @@ import builtins
 import json
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 from molab.workspace.base import atomic_write_json
 from molab.workspace.fs import FileSystem
@@ -46,71 +46,15 @@ _NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
 class WorkspaceTarget(BaseModel):
-    """Frozen descriptor for a remote workspace root.
+    """A semantic root on a molq-owned destination."""
 
-    The descriptor is purely declarative — no live connection is held by
-    a :class:`WorkspaceTarget` instance.  Conversion to a usable
-    :class:`~molab.workspace.fs.FileSystem` happens at the route
-    boundary through :func:`target_to_filesystem_for_workspace_target`.
-    """
-
-    model_config = ConfigDict(frozen=True, str_strip_whitespace=False)
-
-    name: str = Field(..., description="Unique slug-shaped identifier")
-    host: str = Field(..., description="``user@host`` or bare hostname for SSH")
-    port: int | None = Field(default=None, description="SSH port (default ssh config)")
-    identity_file: str | None = Field(
-        default=None,
-        description="Absolute path to an SSH identity file",
-    )
-    ssh_opts: tuple[str, ...] = Field(
-        default=(),
-        description="Extra ``ssh`` argv tokens (kept as a tuple so the model stays hashable)",
-    )
-    root_path: str = Field(
-        ...,
-        description=(
-            "Absolute POSIX path on the remote host that is the workspace root. "
-            "Not converted to :class:`pathlib.Path` because local resolution would "
-            "rewrite tildes / case to the local host's conventions."
-        ),
-    )
-    cache_dir: str | None = Field(
-        default=None,
-        description=(
-            "Override the local mirror root used by "
-            ":class:`~molab.workspace.fs_cached.CachedRemoteFileSystem`. "
-            "``None`` resolves to ``~/.molab/remote_cache/<name>``."
-        ),
-    )
-    cache_ttl_seconds: int = Field(
-        default=300,
-        ge=0,
-        description=(
-            "Cache pin policy for the local mirror. ``>0`` (default): pin "
-            "until the operator refreshes via the cache API — age is ignored. "
-            "``0``: strict mode — every read re-stats the remote and reuses "
-            "mirror bytes only when mtime/size still match."
-        ),
-    )
-
-    @field_validator("name")
-    @classmethod
-    def _validate_name(cls, v: str) -> str:
-        if not _NAME_RE.fullmatch(v):
-            raise ValueError(
-                f"WorkspaceTarget.name must be a slug (alphanumerics + . _ -); got {v!r}"
-            )
-        return v
-
-    @field_validator("ssh_opts", mode="before")
-    @classmethod
-    def _coerce_ssh_opts(cls, v: object) -> tuple[str, ...]:
-        if v is None:
-            return ()
-        if isinstance(v, (list, tuple)):
-            return tuple(str(item) for item in v)
-        raise TypeError("ssh_opts must be a sequence of strings")
+    model_config = ConfigDict(frozen=True, extra="forbid")
+    name: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
+    registry_id: str
+    cluster_id: str
+    root_path: str = Field(min_length=1)
+    cache_dir: str | None = None
+    cache_mode: Literal["pinned", "strict"] = "pinned"
 
 
 def default_workspace_targets_path() -> Path:
@@ -120,11 +64,8 @@ def default_workspace_targets_path() -> Path:
 
 # JSON envelope version — bumps if the on-disk shape ever changes.
 #
-# v1 → v2 (2026-05-19): added ``cache_dir`` and ``cache_ttl_seconds`` for
-# the remote-workspace lazy-download mirror. v1 files load cleanly because
-# the new fields have defaults — the reader does not gate on this number;
-# it tags new writes.
-_STORE_FORMAT_VERSION = 2
+# Descriptor payloads use the current destination-reference schema.
+_STORE_FORMAT_VERSION = 3
 
 
 class WorkspaceTargetRegistry:
@@ -221,38 +162,21 @@ def default_remote_cache_dir(target_name: str) -> Path:
 
 
 def target_to_filesystem_for_workspace_target(target: WorkspaceTarget) -> FileSystem:
-    """Build a cached :class:`RemoteFileSystem` for a :class:`WorkspaceTarget`.
+    """Bind the cache adapter to the explicit registry/cluster/root identity."""
+    import hashlib
 
-    Parallels :func:`molab.workspace.target.target_to_filesystem` but
-    works on the server-process descriptor type rather than the
-    workspace-scoped ``Target`` sum.  Importing :class:`SshTransport` /
-    :class:`SshTransportOptions` is deferred to keep
-    ``molab.server.workspace_targets`` cheap to import.
-
-    Wraps the live :class:`RemoteFileSystem` in
-    :class:`~molab.workspace.fs_cached.CachedRemoteFileSystem` so the
-    server-side mirror is in effect for every remote workspace — the
-    cache directory and TTL come from the descriptor.
-    """
-    from molq.options import SshTransportOptions
-    from molq.transport import SshTransport
-
+    from molab.workspace.connection import get_client
     from molab.workspace.fs_cached import CachedRemoteFileSystem
     from molab.workspace.fs_remote import RemoteFileSystem
 
-    options = SshTransportOptions(
-        host=target.host,
-        port=target.port,
-        identity_file=target.identity_file,
-        ssh_opts=tuple(target.ssh_opts),
-    )
-    transport = SshTransport(options=options)
-    inner = RemoteFileSystem(transport)
+    client = get_client(target.registry_id)
+    inner = RemoteFileSystem(client, target.cluster_id, target.root_path)
+    identity = hashlib.sha256(
+        f"{target.registry_id}\0{target.cluster_id}\0{target.root_path}".encode()
+    ).hexdigest()
     mirror_root = (
-        Path(target.cache_dir) if target.cache_dir else default_remote_cache_dir(target.name)
+        Path(target.cache_dir).expanduser() / identity
+        if target.cache_dir
+        else default_remote_cache_dir(identity)
     )
-    return CachedRemoteFileSystem(
-        inner,
-        mirror_root=mirror_root,
-        ttl_seconds=target.cache_ttl_seconds,
-    )
+    return CachedRemoteFileSystem(inner, mirror_root=mirror_root, cache_mode=target.cache_mode)

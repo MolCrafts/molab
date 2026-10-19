@@ -1,4 +1,3 @@
-import type { JSX } from "react";
 import {
   Command,
   CommandEmpty,
@@ -6,14 +5,13 @@ import {
   CommandInput,
   CommandItem,
   CommandList,
-} from "@/components/ui/command";
-import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
+} from "@molcrafts/ui";
+import type { JSX } from "react";
 import type { HostOption } from "./knowledgeDocTree";
 
 const GROUPS = [

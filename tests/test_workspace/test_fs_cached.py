@@ -191,7 +191,7 @@ def fake() -> _FakeRemoteFS:
 
 @pytest.fixture
 def cached(fake: _FakeRemoteFS, tmp_path: Path) -> CachedRemoteFileSystem:
-    return CachedRemoteFileSystem(fake, mirror_root=tmp_path / "mirror", ttl_seconds=300)
+    return CachedRemoteFileSystem(fake, mirror_root=tmp_path / "mirror", cache_mode="pinned")
 
 
 class TestCachedRemoteFileSystem:
@@ -255,21 +255,19 @@ class TestCachedRemoteFileSystem:
     # ── TTL expiry ───────────────────────────────────────────────────────
 
     @pytest.mark.unit
-    def test_ttl_zero_revalidates_via_stat_not_redownload(
-        self, fake: _FakeRemoteFS, tmp_path: Path
-    ):
-        """ttl=0 is strict mode: re-stat every read; reuse mirror when mtime matches."""
-        cached = CachedRemoteFileSystem(fake, mirror_root=tmp_path / "mirror", ttl_seconds=0)
+    def test_strict_reads_same_size_same_mtime_changes(self, fake: _FakeRemoteFS, tmp_path: Path):
+        """Strict fetches content even though this fake's metadata is unchanged."""
+        cached = CachedRemoteFileSystem(fake, mirror_root=tmp_path / "mirror", cache_mode="strict")
         cached.connect("/scratch/me")
-        cached.read_bytes("/scratch/me/log.txt")
-        fake.calls.clear()
         assert cached.read_bytes("/scratch/me/log.txt") == b"hello"
-        assert fake.calls["stat"] >= 1
-        assert fake.calls["read_bytes"] == 0
+        fake.files["/scratch/me/log.txt"] = b"world"
+        fake.calls.clear()
+        assert cached.read_bytes("/scratch/me/log.txt") == b"world"
+        assert fake.calls["read_bytes"] == 1
 
     @pytest.mark.unit
     def test_ttl_zero_redownloads_when_mtime_changes(self, fake: _FakeRemoteFS, tmp_path: Path):
-        cached = CachedRemoteFileSystem(fake, mirror_root=tmp_path / "mirror", ttl_seconds=0)
+        cached = CachedRemoteFileSystem(fake, mirror_root=tmp_path / "mirror", cache_mode="strict")
         cached.connect("/scratch/me")
         cached.read_bytes("/scratch/me/log.txt")
         fake.files["/scratch/me/log.txt"] = b"goodbye"
@@ -293,7 +291,7 @@ class TestCachedRemoteFileSystem:
         self, fake: _FakeRemoteFS, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ):
         """Positive ttl = pin-until-refresh: age does not force remote I/O."""
-        cached = CachedRemoteFileSystem(fake, mirror_root=tmp_path / "mirror", ttl_seconds=10)
+        cached = CachedRemoteFileSystem(fake, mirror_root=tmp_path / "mirror", cache_mode="pinned")
         base = time.time()
         monkeypatch.setattr("molab.workspace.fs_cached.time.time", lambda: base)
         cached.connect("/scratch/me")
@@ -318,11 +316,11 @@ class TestCachedRemoteFileSystem:
         mirror_root = tmp_path / "mirror"
         fake.dirs.add("/scratch/me")
         fake.dirs.add("/scratch/me/projects")
-        first = CachedRemoteFileSystem(fake, mirror_root=mirror_root, ttl_seconds=300)
+        first = CachedRemoteFileSystem(fake, mirror_root=mirror_root, cache_mode="pinned")
         first.connect("/scratch/me")
         first.read_bytes("/scratch/me/log.txt")
 
-        second = CachedRemoteFileSystem(fake, mirror_root=mirror_root, ttl_seconds=300)
+        second = CachedRemoteFileSystem(fake, mirror_root=mirror_root, cache_mode="pinned")
         assert second.indexed is True
         ws = SimpleNamespace(root="/scratch/me", fs=second)
         fake.calls.clear()
@@ -347,11 +345,11 @@ class TestCachedRemoteFileSystem:
         fake.dirs.add("/scratch/me")
         fake.dirs.add("/scratch/me/projects")
         fake.files["/scratch/me/workspace.json"] = b"{}"
-        first = CachedRemoteFileSystem(fake, mirror_root=mirror_root, ttl_seconds=300)
+        first = CachedRemoteFileSystem(fake, mirror_root=mirror_root, cache_mode="pinned")
         first.connect("/scratch/me")
         first.read_bytes("/scratch/me/log.txt")
 
-        second = CachedRemoteFileSystem(fake, mirror_root=mirror_root, ttl_seconds=300)
+        second = CachedRemoteFileSystem(fake, mirror_root=mirror_root, cache_mode="pinned")
         ws = SimpleNamespace(root="/scratch/me", fs=second)
         # Pin read works before/during refresh.
         assert second.read_bytes("/scratch/me/log.txt") == b"hello"
@@ -371,7 +369,7 @@ class TestCachedRemoteFileSystem:
         fake.dirs.add("/scratch/me")
         fake.dirs.add("/scratch/me/projects")
         fake.files["/scratch/me/workspace.json"] = b'{"name":"ws"}'
-        cached = CachedRemoteFileSystem(fake, mirror_root=tmp_path / "mirror", ttl_seconds=300)
+        cached = CachedRemoteFileSystem(fake, mirror_root=tmp_path / "mirror", cache_mode="pinned")
         assert cached.indexed is False
         ws = SimpleNamespace(root="/scratch/me", fs=cached)
         warnings = cached.prepare(ws, block_index=False)  # type: ignore[arg-type]
@@ -383,7 +381,7 @@ class TestCachedRemoteFileSystem:
 
     @pytest.mark.unit
     def test_force_fetch_bypasses_pin_for_refresh_thread(self, fake: _FakeRemoteFS, tmp_path: Path):
-        cached = CachedRemoteFileSystem(fake, mirror_root=tmp_path / "mirror", ttl_seconds=300)
+        cached = CachedRemoteFileSystem(fake, mirror_root=tmp_path / "mirror", cache_mode="pinned")
         cached.connect("/scratch/me")
         cached.read_bytes("/scratch/me/log.txt")
         fake.files["/scratch/me/log.txt"] = b"updated"
@@ -405,7 +403,7 @@ class TestCachedRemoteFileSystem:
         """ThreadPool workers must inherit force_fetch (TLS is not shared)."""
         from molab.workspace.fs_cached import _parallel_map
 
-        cached = CachedRemoteFileSystem(fake, mirror_root=tmp_path / "mirror", ttl_seconds=300)
+        cached = CachedRemoteFileSystem(fake, mirror_root=tmp_path / "mirror", cache_mode="pinned")
         cached.connect("/scratch/me")
         for i in range(4):
             path = f"/scratch/me/p{i}.json"
@@ -425,7 +423,7 @@ class TestCachedRemoteFileSystem:
     def test_sidecar_ancient_fetched_at_still_pinned(self, fake: _FakeRemoteFS, tmp_path: Path):
         """Prior-session wall-clock ages must not force SSH on next open."""
         mirror_root = tmp_path / "mirror"
-        first = CachedRemoteFileSystem(fake, mirror_root=mirror_root, ttl_seconds=10)
+        first = CachedRemoteFileSystem(fake, mirror_root=mirror_root, cache_mode="pinned")
         first.connect("/scratch/me")
         first.read_bytes("/scratch/me/log.txt")
         import json as _json
@@ -438,7 +436,7 @@ class TestCachedRemoteFileSystem:
             payload["fetched_at"] = 1.0
         sidecar.write_text(_json.dumps(raw), encoding="utf-8")
 
-        second = CachedRemoteFileSystem(fake, mirror_root=mirror_root, ttl_seconds=10)
+        second = CachedRemoteFileSystem(fake, mirror_root=mirror_root, cache_mode="pinned")
         fake.calls.clear()
         assert second.read_bytes("/scratch/me/log.txt") == b"hello"
         assert fake.calls["read_bytes"] == 0
@@ -449,11 +447,11 @@ class TestCachedRemoteFileSystem:
     @pytest.mark.unit
     def test_sidecar_round_trip_across_instances(self, fake: _FakeRemoteFS, tmp_path: Path):
         mirror_root = tmp_path / "mirror"
-        first = CachedRemoteFileSystem(fake, mirror_root=mirror_root, ttl_seconds=300)
+        first = CachedRemoteFileSystem(fake, mirror_root=mirror_root, cache_mode="pinned")
         first.read_bytes("/scratch/me/log.txt")
         assert fake.calls["read_bytes"] == 1
 
-        second = CachedRemoteFileSystem(fake, mirror_root=mirror_root, ttl_seconds=300)
+        second = CachedRemoteFileSystem(fake, mirror_root=mirror_root, cache_mode="pinned")
         # Cached_paths should include the entry from the first instance.
         assert "/scratch/me/log.txt" in second.cached_paths()
         fake.calls.clear()
@@ -467,7 +465,7 @@ class TestCachedRemoteFileSystem:
         """A brand-new remote has no _index.json — connect materialises one."""
         mirror_root = tmp_path / "fresh-mirror"
         fake.dirs.add("/scratch/me")
-        cached = CachedRemoteFileSystem(fake, mirror_root=mirror_root, ttl_seconds=300)
+        cached = CachedRemoteFileSystem(fake, mirror_root=mirror_root, cache_mode="pinned")
         # Init creates mirror dirs but does not invent a sidecar until connect/write.
         assert mirror_root.is_dir()
         assert cached.connected is False
@@ -484,7 +482,7 @@ class TestCachedRemoteFileSystem:
         import shutil
 
         mirror_root = tmp_path / "mirror"
-        cached = CachedRemoteFileSystem(fake, mirror_root=mirror_root, ttl_seconds=300)
+        cached = CachedRemoteFileSystem(fake, mirror_root=mirror_root, cache_mode="pinned")
         cached.read_bytes("/scratch/me/log.txt")
         assert (mirror_root / "_index.json").is_file()
 
@@ -505,7 +503,7 @@ class TestCachedRemoteFileSystem:
     ):
         fake.files["/scratch/me/project.json"] = b'{"items":[]}'
         fake.files["/scratch/me/runs/a/stdout.log"] = b"log bytes"
-        cached = CachedRemoteFileSystem(fake, mirror_root=tmp_path / "mirror", ttl_seconds=300)
+        cached = CachedRemoteFileSystem(fake, mirror_root=tmp_path / "mirror", cache_mode="pinned")
         cached.read_bytes("/scratch/me/project.json")
         cached.read_bytes("/scratch/me/runs/a/stdout.log")
 
@@ -522,7 +520,7 @@ class TestCachedRemoteFileSystem:
 
         fake.files["/scratch/me/executions/e01/execution.json"] = b"{}"
         fake.files["/scratch/me/executions/e01/run.log"] = b"log"
-        cached = CachedRemoteFileSystem(fake, mirror_root=tmp_path / "mirror", ttl_seconds=300)
+        cached = CachedRemoteFileSystem(fake, mirror_root=tmp_path / "mirror", cache_mode="pinned")
         cached.read_bytes("/scratch/me/executions/e01/execution.json")
         cached.read_bytes("/scratch/me/executions/e01/run.log")
 
@@ -535,7 +533,7 @@ class TestCachedRemoteFileSystem:
     @pytest.mark.unit
     def test_invalidate_scope_all_clears_everything(self, fake: _FakeRemoteFS, tmp_path: Path):
         fake.files["/scratch/me/extra.txt"] = b"x"
-        cached = CachedRemoteFileSystem(fake, mirror_root=tmp_path / "mirror", ttl_seconds=300)
+        cached = CachedRemoteFileSystem(fake, mirror_root=tmp_path / "mirror", cache_mode="pinned")
         cached.read_bytes("/scratch/me/log.txt")
         cached.read_bytes("/scratch/me/extra.txt")
 
@@ -551,7 +549,7 @@ class TestCachedRemoteFileSystem:
     @pytest.mark.unit
     def test_invalidate_specific_path(self, fake: _FakeRemoteFS, tmp_path: Path):
         fake.files["/scratch/me/extra.txt"] = b"x"
-        cached = CachedRemoteFileSystem(fake, mirror_root=tmp_path / "mirror", ttl_seconds=300)
+        cached = CachedRemoteFileSystem(fake, mirror_root=tmp_path / "mirror", cache_mode="pinned")
         cached.read_bytes("/scratch/me/log.txt")
         cached.read_bytes("/scratch/me/extra.txt")
 
@@ -580,10 +578,188 @@ class TestCachedRemoteFileSystem:
 
     @pytest.mark.unit
     def test_path_ops_delegate_to_inner_without_io(self, fake: _FakeRemoteFS, tmp_path: Path):
-        cached = CachedRemoteFileSystem(fake, mirror_root=tmp_path / "mirror", ttl_seconds=300)
+        cached = CachedRemoteFileSystem(fake, mirror_root=tmp_path / "mirror", cache_mode="pinned")
         cached.join("/a", "b", "c")
         cached.dirname("/a/b/c")
         cached.basename("/a/b/c")
         cached.resolve("/a/b/c")
         # None of these trigger remote I/O.
         assert sum(fake.calls.values()) == 0
+
+
+def test_open_preserves_binary_and_rejects_writes(cached, fake):
+    fake.files["/binary"] = b"\xff\x00\xfe"
+    with cached.open("/binary", "rb") as stream:
+        assert stream.read() == b"\xff\x00\xfe"
+    with pytest.raises(ValueError):
+        cached.open("/binary", "w")
+
+
+def test_connect_preserves_authentication_failure(cached, fake, monkeypatch):
+    from molq import MolqError
+
+    error = MolqError("AUTH_REQUIRED", "authenticate first")
+
+    def denied(_path):
+        raise error
+
+    monkeypatch.setattr(fake, "exists", denied)
+    with pytest.raises(MolqError) as caught:
+        cached.connect("/scratch/me")
+    assert caught.value is error
+
+
+def test_old_read_cannot_repin_after_write(cached, fake, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    started, release = Event(), Event()
+    original = fake.read_bytes
+
+    def delayed(path):
+        content = original(path)
+        started.set()
+        assert release.wait(5)
+        return content
+
+    monkeypatch.setattr(fake, "read_bytes", delayed)
+    with ThreadPoolExecutor() as pool:
+        pending = pool.submit(cached.read_bytes, "/scratch/me/log.txt")
+        assert started.wait(5)
+        try:
+            cached.write_bytes("/scratch/me/log.txt", b"new")
+        finally:
+            release.set()
+        assert pending.result() == b"hello"
+    monkeypatch.setattr(fake, "read_bytes", original)
+    assert cached.read_bytes("/scratch/me/log.txt") == b"new"
+
+
+def test_directory_rename_evicts_descendants(cached, fake, monkeypatch):
+    fake.files["/old/child"] = b"old"
+    cached.read_bytes("/old/child")
+
+    def move(src, dst):
+        fake.files[dst + "/child"] = fake.files.pop(src + "/child")
+
+    monkeypatch.setattr(fake, "rename", move)
+    cached.rename("/old", "/new")
+    with pytest.raises(FileNotFoundError):
+        cached.read_bytes("/old/child")
+    assert cached.read_bytes("/new/child") == b"old"
+
+
+@pytest.mark.parametrize("operation", ["exists", "listdir"])
+def test_mkdir_rejects_observations_started_before_creation(cached, fake, monkeypatch, operation):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    entered, release = Event(), Event()
+    original = getattr(fake, operation)
+    target = "/scratch/me/new" if operation == "exists" else "/scratch/me"
+
+    def delayed(path):
+        result = original(path)
+        entered.set()
+        assert release.wait(5)
+        return result
+
+    monkeypatch.setattr(fake, operation, delayed)
+    with ThreadPoolExecutor() as pool:
+        pending = pool.submit(getattr(cached, operation), target)
+        assert entered.wait(5)
+        try:
+            cached.mkdir("/scratch/me/new")
+        finally:
+            release.set()
+        pending.result()
+    monkeypatch.setattr(fake, operation, original)
+    assert cached.exists("/scratch/me/new")
+    assert "new" in cached.listdir("/scratch/me")
+
+
+def test_mkdir_does_not_resurrect_parent_listing_on_reopen(cached, fake):
+    assert "new" not in cached.listdir("/scratch/me")
+    cached.mkdir("/scratch/me/new")
+    reopened = CachedRemoteFileSystem(fake, mirror_root=cached.mirror_root)
+    assert "new" in reopened.listdir("/scratch/me")
+
+
+def test_pinned_batch_and_write_do_not_race_mirror_eviction(cached, fake, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from concurrent.futures import TimeoutError as FutureTimeout
+    from threading import Event
+
+    key = "/scratch/me/log.txt"
+    cached.read_bytes(key)
+    entered, release = Event(), Event()
+    original = cached._local.read_bytes
+
+    def delayed(path):
+        entered.set()
+        assert release.wait(5)
+        return original(path)
+
+    monkeypatch.setattr(cached._local, "read_bytes", delayed)
+    with ThreadPoolExecutor() as pool:
+        reader = pool.submit(cached.read_many, [key])
+        assert entered.wait(5)
+        writer = pool.submit(cached.write_bytes, key, b"new")
+        try:
+            import contextlib
+
+            with contextlib.suppress(FutureTimeout):
+                writer.result(timeout=0.1)
+        finally:
+            release.set()
+        assert reader.result()[key] == b"hello"
+        writer.result()
+    assert cached.read_bytes(key) == b"new"
+
+
+def test_observation_during_write_is_evicted_after_commit(cached, fake, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Event
+
+    entered, release = Event(), Event()
+    original = fake.write_bytes
+    key = "/scratch/me/log.txt"
+
+    def delayed(path, content, *, mode=0o600):
+        entered.set()
+        assert release.wait(5)
+        original(path, content, mode=mode)
+
+    monkeypatch.setattr(fake, "write_bytes", delayed)
+    with ThreadPoolExecutor() as pool:
+        writer = pool.submit(cached.write_bytes, key, b"new")
+        assert entered.wait(5)
+        try:
+            # A slow remote mutation must not block mirror readers globally.
+            reader = pool.submit(cached.read_bytes, key)
+            assert reader.result(timeout=2) == b"hello"
+        finally:
+            release.set()
+        writer.result()
+    assert cached.read_bytes(key) == b"new"
+
+
+@pytest.mark.parametrize("operation", ["mkdir", "atomic_write_text"])
+def test_parent_creation_evicts_ancestor_negative_pins(tmp_path, operation):
+    from molab.workspace.fs_local import LocalFileSystem
+
+    root = tmp_path / "remote"
+    root.mkdir()
+    fs = CachedRemoteFileSystem(LocalFileSystem(), mirror_root=tmp_path / "mirror")
+    parent = root / "new"
+    assert not fs.exists(parent)
+    assert fs.listdir(root) == []
+    if operation == "mkdir":
+        fs.mkdir(parent / "deep", parents=True)
+    else:
+        fs.atomic_write_text(parent / "deep" / "file", "data")
+    assert fs.exists(parent)
+    assert fs.listdir(root) == ["new"]
+    reopened = CachedRemoteFileSystem(LocalFileSystem(), mirror_root=fs.mirror_root)
+    assert reopened.exists(parent)
+    assert reopened.listdir(root) == ["new"]

@@ -6,8 +6,9 @@ from shutil import rmtree
 
 from fastapi import APIRouter, Depends
 
-from molab.workspace.experiment import Experiment
+from molab.workspace.experiment import WORKFLOW_DOC_FILENAME, Experiment
 from molab.workspace.folder import _registered_targets
+from molab.workspace.fs_cached import CachedRemoteFileSystem
 from molab.workspace.scope import as_folder, entities, resolve_in_scope
 
 from ..dependencies import get_workspace
@@ -34,7 +35,14 @@ def list_experiments(
 ) -> list[ExperimentResponse]:
     node = resolve_in_scope(as_folder(workspace), project_id)
     found = [node] if isinstance(node, Experiment) else entities(node, Experiment)
-    return [ExperimentResponse.from_model(e) for e in found if isinstance(e, Experiment)]
+    experiments = [e for e in found if isinstance(e, Experiment)]
+    # Prime only this level's workflow documents, including missing files, in
+    # one target-side batch rather than one SSH probe per experiment.
+    if isinstance(workspace.fs, CachedRemoteFileSystem):
+        workspace.fs.read_many(
+            [workspace.fs.join(e.experiment_dir, WORKFLOW_DOC_FILENAME) for e in experiments]
+        )
+    return [ExperimentResponse.from_model(e) for e in experiments]
 
 
 @router.get("/{experiment_id}", response_model=ExperimentResponse)

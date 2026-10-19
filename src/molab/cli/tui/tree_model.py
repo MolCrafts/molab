@@ -97,6 +97,7 @@ def build_tree(
     *,
     project_filter: str | None = None,
     experiment_filter: str | None = None,
+    run_ids: frozenset[str] | None = None,
 ) -> TreeNode:
     """Walk *workspace* and return a fresh tree.
 
@@ -115,12 +116,14 @@ def build_tree(
     for project in projects:
         if project_filter and project.id != project_filter and project.name != project_filter:
             continue
-        root.children.append(_build_project_node(project, experiment_filter))
+        root.children.append(_build_project_node(project, experiment_filter, run_ids))
     _fold_status(root)
     return root
 
 
-def _build_project_node(project: Project, experiment_filter: str | None) -> TreeNode:
+def _build_project_node(
+    project: Project, experiment_filter: str | None, run_ids: frozenset[str] | None = None
+) -> TreeNode:
     node = TreeNode(
         kind="project",
         node_id=("project", project.id),
@@ -133,7 +136,7 @@ def _build_project_node(project: Project, experiment_filter: str | None) -> Tree
     for exp in experiments:
         if experiment_filter and exp.id != experiment_filter and exp.name != experiment_filter:
             continue
-        child = _build_experiment_node(exp, project.id)
+        child = _build_experiment_node(exp, project.id, run_ids)
         node.children.append(child)
         run_count += sum(1 for _ in child.children)
     exp_n = len(node.children)
@@ -141,7 +144,9 @@ def _build_project_node(project: Project, experiment_filter: str | None) -> Tree
     return node
 
 
-def _build_experiment_node(exp: Experiment, project_id: str) -> TreeNode:
+def _build_experiment_node(
+    exp: Experiment, project_id: str, run_ids: frozenset[str] | None = None
+) -> TreeNode:
     node = TreeNode(
         kind="experiment",
         node_id=("project", project_id, "experiment", exp.id),
@@ -149,6 +154,8 @@ def _build_experiment_node(exp: Experiment, project_id: str) -> TreeNode:
         ref=exp,
     )
     runs: list[Run] = exp.list_runs()
+    if run_ids is not None:
+        runs = [run for run in runs if run.id in run_ids]
     runs.sort(key=lambda r: r.id)
     for run in runs:
         node.children.append(_build_run_node(run, project_id, exp.id))

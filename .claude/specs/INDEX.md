@@ -4,6 +4,8 @@ One line per **live** spec. `/mol:spec` adds entries; `/mol:impl` ticks the spec
 
 ## Open
 
+- [molq-remote-access](molq-remote-access.md) — implemented: generic remote I/O in molq; semantic workspace access in molab; Web bundle and real-host acceptance pending.
+
 ## drop-harness (chain)
 
 _User decisions D85/D86 (2026-09-27; see arch-own.decisions.md): delete the Python harness (UI later); molq plugin becomes a thin pure-submit adapter (follow-up spec). Grill D-1..D-6 in drop-harness-01-src §0._

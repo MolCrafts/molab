@@ -9,6 +9,10 @@
 @import "tailwindcss";
 @import "./constitution-theme.css";
 @import "./constitution-base.css";
+/* Class names live in the library build; generate them against this product's tokens. */
+@source "../../../../node_modules/@molcrafts/ui/dist";
+@source "../../../../../molcrafts-ui/packages/ui/src";
+@source "../../../../../molcrafts-ui/packages/markdown/src";
 
 @theme inline {
   /* Workbench surfaces */
@@ -26,7 +30,7 @@
   --color-statusbar: var(--molab-statusbar);
   --color-statusbar-foreground: var(--molab-statusbar-foreground);
 
-  /* Product accent — shadcn blue. VS Code informs layout, not the palette. */
+  /* Workbench accent — selection and focus, never decorative chrome. */
   --color-accent: var(--molab-accent);
   --color-accent-hover: var(--molab-accent-hover);
   --color-accent-foreground: var(--molab-accent-foreground);
@@ -150,26 +154,26 @@
     /* Surfaces — light default (workbench) */
     --molab-background: #ffffff;
     --molab-surface: #ffffff;
-    --molab-surface-subtle: #f8fafc;
+    --molab-surface-subtle: #f3f3f3;
     --molab-canvas: #ffffff;
-    --molab-muted: #f1f5f9;
-    --molab-foreground: #0f172a;
-    --molab-muted-foreground: #64748b;
-    --molab-subtle-foreground: #94a3b8;
-    --molab-border: #e2e8f0;
-    --molab-input: #e2e8f0;
+    --molab-muted: #eeeeee;
+    --molab-foreground: #242424;
+    --molab-muted-foreground: #616161;
+    --molab-subtle-foreground: #6b6b6b;
+    --molab-border: #e5e5e5;
+    --molab-input: #cecece;
     --molab-overlay-scrim: oklch(0.12 0.01 255 / 50%);
 
-    --molab-accent: #2563eb;
-    --molab-accent-hover: #1d4ed8;
+    --molab-accent: #005fb8;
+    --molab-accent-hover: #004f9a;
     --molab-accent-foreground: #ffffff;
-    --molab-accent-muted: #eff6ff;
-    --molab-accent-muted-foreground: #1e40af;
-    --molab-interactive: #f1f5f9;
+    --molab-accent-muted: #e8f1fb;
+    --molab-accent-muted-foreground: #004f9a;
+    --molab-interactive: #e8e8e8;
     --molab-interactive-foreground: var(--molab-foreground);
     --molab-on-fill: #ffffff;
-    --molab-statusbar: #007acc;
-    --molab-statusbar-foreground: #ffffff;
+    --molab-statusbar: #f3f3f3;
+    --molab-statusbar-foreground: var(--molab-foreground);
 
     /* Soft status washes on product surface (base roles from constitution). */
     --constitution-surface: var(--molab-surface);
@@ -248,14 +252,14 @@
   :where(.dark, :host(.dark)) {
     color-scheme: dark;
 
-    --molab-background: oklch(0.16 0.008 255);
-    --molab-surface: oklch(0.2 0.01 255);
-    --molab-surface-subtle: oklch(0.23 0.01 255);
-    --molab-canvas: oklch(0.14 0.008 255);
-    --molab-muted: oklch(0.24 0.01 255);
-    --molab-foreground: oklch(0.93 0.01 255);
-    --molab-muted-foreground: oklch(0.68 0.015 255);
-    --molab-subtle-foreground: oklch(0.6 0.014 255);
+    --molab-background: #1f1f1f;
+    --molab-surface: #1f1f1f;
+    --molab-surface-subtle: #181818;
+    --molab-canvas: #1f1f1f;
+    --molab-muted: #292929;
+    --molab-foreground: #cccccc;
+    --molab-muted-foreground: #a6a6a6;
+    --molab-subtle-foreground: #999999;
     --molab-border: oklch(1 0 0 / 10%);
     --molab-input: oklch(1 0 0 / 12%);
     --molab-overlay-scrim: oklch(0.04 0.01 255 / 66%);
@@ -265,11 +269,11 @@
     --molab-accent-foreground: #0f172a;
     --molab-accent-muted: #172554;
     --molab-accent-muted-foreground: #dbeafe;
-    --molab-interactive: oklch(0.26 0.012 255);
+    --molab-interactive: #303030;
     --molab-interactive-foreground: var(--molab-foreground);
     --molab-on-fill: oklch(0.985 0.003 255);
-    --molab-statusbar: #0e639c;
-    --molab-statusbar-foreground: #ffffff;
+    --molab-statusbar: #181818;
+    --molab-statusbar-foreground: var(--molab-foreground);
 
     --status-ready-foreground: oklch(0.78 0.02 255);
     --status-running-foreground: oklch(0.76 0.13 250);
@@ -296,6 +300,20 @@
   :where(body, :host) {
     @apply bg-background text-foreground font-sans text-body;
     font-feature-settings: "tnum" 1;
+  }
+
+  ::selection {
+    background: var(--molab-accent-muted);
+    color: var(--molab-foreground);
+  }
+
+  :where(input, textarea) {
+    caret-color: var(--molab-accent);
+  }
+
+  :where(:root, :host) {
+    scrollbar-color: color-mix(in srgb, var(--molab-foreground) 24%, transparent) transparent;
+    scrollbar-width: thin;
   }
 
   /* Coarse pointer: expand interactive targets to 44px */
@@ -327,17 +345,14 @@
      * previously froze every spinner and looked like a hang.
      * WCAG allows essential status motion (running).
      *
-     * Also exclude the status-strip indeterminate track and ambient heartbeat:
-     * those are the only "alive" cues while workspace load / remote index runs.
+     * Also exclude the status-strip indeterminate track while loading.
      * :not() specificity beat a later class-only restore, so exclusion here is
      * required (not just a second !important rule).
      */
     :where(:root, :host)
       *:not(.mol-motion-progress-spin):not(.mol-motion-progress-pulse):not(
         .mol-progress-spinner
-      ):not(.mol-status-progress-indeterminate):not(.mol-heartbeat-idle):not(
-        .mol-heartbeat-pulse
-      ),
+      ):not(.mol-status-progress-indeterminate),
     :where(:root, :host) *::before,
     :where(:root, :host) *::after {
       animation: none !important;
@@ -362,10 +377,7 @@
       animation-play-state: running !important;
     }
 
-    :where(:root, :host) .mol-heartbeat-idle {
-      animation: molab-heartbeat-idle 3.6s ease-in-out infinite !important;
-      animation-play-state: running !important;
-    }
+
   }
 }
 
@@ -700,45 +712,6 @@
   }
 }
 
-/* One-shot acknowledgement flash after a completed poll / click. */
-@keyframes molab-heartbeat-pulse {
-  0% {
-    opacity: 0.45;
-    transform: scale(1);
-  }
-  40% {
-    opacity: 1;
-    transform: scale(1.12);
-  }
-  100% {
-    opacity: 0.7;
-    transform: scale(1);
-  }
-}
-
-/* Soft ambient pulse so the idle lamp is never "missing" on a quiet status bar. */
-@keyframes molab-heartbeat-idle {
-  0%,
-  100% {
-    opacity: 0.5;
-  }
-  50% {
-    opacity: 0.85;
-  }
-}
-
-.mol-heartbeat-pulse {
-  display: inline-flex;
-  animation: molab-heartbeat-pulse 280ms var(--motion-ease) both;
-  will-change: opacity, transform;
-}
-
-.mol-heartbeat-idle {
-  display: inline-flex;
-  animation: molab-heartbeat-idle 2.4s var(--motion-ease) infinite;
-  will-change: opacity;
-}
-
 /* Indeterminate status-bar track (counting / generic load). */
 @keyframes mol-status-progress-indeterminate {
   0% {
@@ -782,15 +755,6 @@
   .mol-motion-progress-pulse {
     animation: molab-progress-pulse 1.6s linear infinite !important;
     animation-play-state: running !important;
-  }
-
-  .mol-heartbeat-pulse {
-    animation: none !important;
-    opacity: 1;
-  }
-
-  .mol-heartbeat-idle {
-    animation: molab-heartbeat-idle 3.6s ease-in-out infinite !important;
   }
 
   .mol-status-progress-indeterminate {

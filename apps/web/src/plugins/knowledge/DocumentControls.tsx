@@ -1,16 +1,16 @@
-import { useQueryClient } from "@tanstack/react-query";
-import { Plus, Tag, X } from "lucide-react";
-import { type JSX, type KeyboardEvent, useEffect, useMemo, useState } from "react";
-import { knowledgeApi } from "@/api";
-import { StatusBadge } from "@/app/components/entity";
-import { Input } from "@/components/ui/input";
 import {
+  Input,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
+} from "@molcrafts/ui";
+import { useQueryClient } from "@tanstack/react-query";
+import { Plus, Tag, X } from "lucide-react";
+import { type JSX, type KeyboardEvent, useEffect, useMemo, useState } from "react";
+import { knowledgeApi } from "@/api";
+import { StatusBadge } from "@/app/components/entity";
 import { WorkbenchIconAction, WorkbenchTag } from "@/components/workbench";
 import { knowledgeKeys, useKnowledgeListQuery } from "@/plugins/knowledge/queries";
 import { isTexDocument } from "@/plugins/knowledge/texDocument";

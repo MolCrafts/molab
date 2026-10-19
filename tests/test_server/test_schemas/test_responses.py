@@ -99,6 +99,22 @@ class TestExperimentResponse:
 
 
 class TestRunResponse:
+    def test_response_uses_one_execution_snapshot(self, tmp_path, monkeypatch):
+        ws = _ws(tmp_path)
+        exp = ws.add_project("p").add_experiment("e")
+        exp.bind_workflow("document", document=IR)
+        run = exp.add_run(params={"seed": 1})
+        calls = []
+        original = ExecutionRepository.list
+
+        def counted(repository):
+            calls.append(repository.run_id)
+            return original(repository)
+
+        monkeypatch.setattr(ExecutionRepository, "list", counted)
+        RunResponse.from_model(run)
+        assert calls == [run.id]
+
     def test_ref_is_the_run_reference(self, tmp_path: Path) -> None:
         from molab.workspace.refs import ref_of
 

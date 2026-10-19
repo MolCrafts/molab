@@ -95,6 +95,19 @@ describe("mergeWorkspaceRuns", () => {
     expect(merged.stats.totalRuns).toBe(2);
   });
 
+  it("keeps the rows when stats omit byStatus", () => {
+    const broken = {
+      runs: [row("a", "2026-01-01T00:00:00Z")],
+      stats: { totalRuns: 1, totalExecutions: 1, activeExecutions: 0 },
+      total: 1,
+      truncated: false,
+    } as WorkspaceRunsResponse;
+    const merged = mergeWorkspaceRuns([{ key: "w", response: broken }]);
+    expect(merged.runs.map((run) => run.id)).toEqual(["a"]);
+    expect(merged.stats.byStatus).toEqual({});
+    expect(merged.stats.totalExecutions).toBe(1);
+  });
+
   it("returns an empty set, not a throw, when every workspace failed", () => {
     const merged = mergeWorkspaceRuns([
       { key: "w1", response: null },

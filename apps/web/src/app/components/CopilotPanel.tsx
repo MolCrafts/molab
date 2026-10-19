@@ -5,6 +5,8 @@
  * lifecycle verbs; high-risk actions show a "needs approval" badge.
  */
 
+import { Badge } from "@molcrafts/ui";
+import { RefreshCw } from "lucide-react";
 import type { JSX } from "react";
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -13,9 +15,8 @@ import type { WorkspaceSummaryResponse } from "@/api/generated/models/WorkspaceS
 import { WorkspaceService } from "@/api/generated/services/WorkspaceService";
 import { pathForNextAction } from "@/app/components/copilotPaths";
 import type { WorkspaceSnapshot } from "@/app/types";
-import { Badge } from "@/components/ui/badge";
 import { toast } from "@/components/ui/toast";
-import { WorkbenchAction } from "@/components/workbench";
+import { WorkbenchAction, WorkbenchIconAction, WorkbenchRetryAction } from "@/components/workbench";
 
 export { pathForNextAction } from "@/app/components/copilotPaths";
 
@@ -141,9 +142,7 @@ export const CopilotPanel = ({ snapshot, refreshKey = 0 }: CopilotPanelProps): J
         <p className="mt-2 text-label text-destructive" role="alert">
           {error}
         </p>
-        <WorkbenchAction kind="ghost" size="content" type="button" onClick={load} className="mt-2">
-          Retry
-        </WorkbenchAction>
+        <WorkbenchRetryAction onClick={load} className="mt-2" />
       </section>
     );
   }
@@ -170,15 +169,13 @@ export const CopilotPanel = ({ snapshot, refreshKey = 0 }: CopilotPanelProps): J
         <h3 className="text-micro font-semibold uppercase tracking-wide text-muted-foreground">
           Copilot
         </h3>
-        <WorkbenchAction
-          kind="ghost"
-          size="content"
-          type="button"
+        <WorkbenchIconAction
+          label="Refresh summary"
           onClick={load}
-          className="text-micro text-muted-foreground"
+          className="text-muted-foreground"
         >
-          Refresh
-        </WorkbenchAction>
+          <RefreshCw aria-hidden />
+        </WorkbenchIconAction>
       </div>
       <p className="px-2 pb-2 text-label text-foreground">{data.headline}</p>
       <div className="flex flex-wrap gap-2 px-2 pb-2 text-micro tabular-nums text-muted-foreground">

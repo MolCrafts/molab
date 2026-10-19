@@ -64,7 +64,7 @@ from .prune import ExecutionPruneEntry, ExecutionPrunePlan, LivePruneRefusedErro
 from .refs import InvalidRefError
 from .run import RETRYABLE_STATUSES, TERMINAL_STATUSES, Run, RunContext, RunStatus
 from .runset import RunRecord, RunSet, RunSetResult
-from .target import LocalTarget, RemoteTarget, SessionManager, SSHSession, Target, TargetNotFound
+from .target import LocalTarget, RemoteTarget, Target, TargetNotFound
 from .targets import LOCAL_TARGET_NAME
 from .validate import ValidationReport, Violation
 from .workspace import Workspace
@@ -136,8 +136,6 @@ __all__ = [
     "RunSet",
     "RunSetResult",
     "RunStatus",
-    "SSHSession",
-    "SessionManager",
     "Target",
     "TargetNotFound",
     "UniformSpace",

@@ -11,7 +11,8 @@ import platform
 
 import pytest
 
-from molab.plugins.submit_molq.cancel import classify
+from molab.plugins.submit_molq.cancel import classify, try_cancel
+from molab.plugins.submit_molq.submit import encode_job_ref
 from molab.workspace import Workspace
 from molab.workspace.domain import ACTIVE_EXECUTION_STATUSES, ExecutionMode, ExecutionStatus
 from molab.workspace.execution_repository import ExecutionRepository
@@ -105,3 +106,44 @@ class TestClassify:
     def test_no_pid_or_scheduler_info_is_uncancellable(self, running_run):
         plan = classify(running_run)
         assert plan.kind == "none"
+
+
+def test_cancel_uses_the_recorded_registry_and_job_ref(start_run, monkeypatch):
+    ref = {
+        "registry_id": "recorded-registry",
+        "cluster_id": "recorded-cluster",
+        "native_id": "88001",
+        "incarnation": "1",
+    }
+    run = start_run(backend="molq", job_id=encode_job_ref(ref))
+    calls = []
+
+    class Client:
+        def job(self, actual_ref):
+            calls.append(actual_ref)
+            return self
+
+        def cancel(self):
+            calls.append("cancel")
+
+    def get_client(registry_id):
+        calls.append(registry_id)
+        return Client()
+
+    monkeypatch.setattr("molab.workspace.connection.get_client", get_client)
+
+    assert try_cancel(run) is None
+    assert calls == [ref["registry_id"], ref, "cancel"]
+    assert run.executions[-1].status == ExecutionStatus.CANCELLED
+
+
+def test_cancel_without_a_job_ref_does_not_guess_a_destination(start_run, monkeypatch):
+    run = start_run(backend="molq", scheduler_job_id="88001")
+
+    def get_client(_registry_id=None):
+        pytest.fail("Cancellation must not open a default destination")
+
+    monkeypatch.setattr("molab.workspace.connection.get_client", get_client)
+
+    assert "no molq job ref" in try_cancel(run)
+    assert run.executions[-1].status == ExecutionStatus.RUNNING

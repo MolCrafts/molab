@@ -3,47 +3,12 @@
 /* tslint:disable */
 /* eslint-disable */
 /**
- * Payload for ``POST /api/targets``.
+ * A semantic target referencing the molq destination registry.
  */
 export type TargetCreateRequest = {
-    /**
-     * Unique target name within the workspace
-     */
     name: string;
-    /**
-     * Absolute scratch root on the target's filesystem
-     */
     scratchRoot: string;
-    /**
-     * Dispatch axis
-     */
-    scheduler?: TargetCreateRequest.scheduler;
-    /**
-     * user@host for SSH; omit for local
-     */
-    host?: (string | null);
-    /**
-     * SSH port
-     */
-    port?: (number | null);
-    /**
-     * Path to SSH identity file
-     */
-    identityFile?: (string | null);
-    /**
-     * Extra ssh argv tokens
-     */
-    sshOpts?: Array<string>;
+    registryId?: (string | null);
+    clusterId?: (string | null);
 };
-export namespace TargetCreateRequest {
-    /**
-     * Dispatch axis
-     */
-    export enum scheduler {
-        LOCAL = 'local',
-        SLURM = 'slurm',
-        PBS = 'pbs',
-        LSF = 'lsf',
-    }
-}
 

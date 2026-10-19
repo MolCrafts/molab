@@ -20,19 +20,20 @@
  * paragraph under the plot.
  */
 
-import { AlertTriangle, RotateCcw, X } from "lucide-react";
-import { type JSX, useMemo, useRef, useState } from "react";
-
-import { EmptyState } from "@/app/components/entity";
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import {
+  Dialog,
+  DialogContent,
+  DialogTitle,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import { Slider } from "@/components/ui/slider";
+  Slider,
+} from "@molcrafts/ui";
+import { AlertTriangle, RotateCcw, X } from "lucide-react";
+import { type JSX, useMemo, useRef, useState } from "react";
+import { EmptyState } from "@/app/components/entity";
 import { WorkbenchIconAction } from "@/components/workbench";
 import type { AggregateOp, MolplotLineChartHandle } from "@/plugins/molplot";
 import {

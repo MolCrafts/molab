@@ -1,7 +1,25 @@
+import {
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@molcrafts/ui";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { GlobalCommandPalette } from "@/app/entities/GlobalCommandPalette";
 import { ContextBar } from "@/app/layout/ContextBar";
 import { RemoteConnectDialog } from "@/app/layout/RemoteConnectDialog";
+import {
+  dismissRemoteAuth,
+  noteRemoteAuthState,
+  remoteNeedsCode,
+  requestRemoteAuth,
+  setRemoteAuthFallback,
+  subscribeRemoteAuth,
+} from "@/app/layout/remoteAuthPrompt";
 import { getNavigationContribution } from "@/app/navigation/sections";
 import { CenterPanel } from "@/app/panels/CenterPanel";
 import type { InspectorSurfaceRegistration } from "@/app/panels/inspectorSurface";
@@ -9,16 +27,18 @@ import { LeftPanel } from "@/app/panels/LeftPanel";
 import { RightPanel } from "@/app/panels/RightPanel";
 import { resolveRenderersForSelection } from "@/app/registry";
 import { type InspectedTask, InspectedTaskContext } from "@/app/state/inspectedTask";
-import type { InspectorTarget, LeftPanelView, Selection, WorkspaceSnapshot } from "@/app/types";
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
+import type {
+  InspectorTarget,
+  LeftPanelView,
+  Selection,
+  ServedWorkspaceSummary,
+  WorkspaceSnapshot,
+} from "@/app/types";
 import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-} from "@/components/ui/sheet";
-import { WorkbenchStatusStrip } from "@/components/workbench";
+  WorkbenchOperationState,
+  WorkbenchRetryAction,
+  WorkbenchStatusStrip,
+} from "@/components/workbench";
 import { useIsMobile } from "@/hooks/use-is-mobile";
 import { useContributionGeneration } from "@/lib/contribution-runtime";
 import { buildMolabRefIndex } from "@/lib/entity-linkify";
@@ -35,6 +55,7 @@ interface AppShellProps {
   snapshot: WorkspaceSnapshot;
   inspectorTarget: InspectorTarget;
   isRefreshing: boolean;
+  loadError?: Error | null;
   onLeftPanelViewChange: (view: LeftPanelView) => void;
   onSelectionChange: (selection: Selection) => void;
   onInspectorTargetChange: (target: InspectorTarget) => void;
@@ -62,6 +83,7 @@ export const AppShell = ({
   snapshot,
   inspectorTarget,
   isRefreshing,
+  loadError,
   onLeftPanelViewChange,
   onSelectionChange,
   onInspectorTargetChange,
@@ -170,43 +192,56 @@ export const AppShell = ({
     [snapshot.workspaces],
   );
 
-  // Auto-open the OTP dialog when the active remote workspace is unreachable.
+  // Verification-code prompt. Probes open it; Esc dismisses until the host
+  // is healthy again. A reconnect gesture always opens it. Do not close it
+  // just because a later snapshot has not caught up yet.
+  const [connectWorkspace, setConnectWorkspace] = useState<ServedWorkspaceSummary | null>(null);
   const [connectOpen, setConnectOpen] = useState(false);
+  useEffect(
+    () =>
+      subscribeRemoteAuth((workspace) => {
+        setConnectWorkspace(workspace);
+        setConnectOpen(true);
+      }),
+    [],
+  );
   useEffect(() => {
-    const key = activeWorkspace?.key;
-    if (
-      key &&
-      activeWorkspace?.isRemote &&
-      (activeWorkspace.unreachable || activeWorkspace.needsAuth)
-    ) {
-      setConnectOpen(true);
-    } else {
-      setConnectOpen(false);
-    }
+    setRemoteAuthFallback(activeWorkspace);
+    if (activeWorkspace) noteRemoteAuthState(activeWorkspace);
   }, [
+    activeWorkspace,
     activeWorkspace?.key,
     activeWorkspace?.isRemote,
     activeWorkspace?.unreachable,
     activeWorkspace?.needsAuth,
   ]);
+  useEffect(() => {
+    if (!connectOpen || !connectWorkspace || !remoteNeedsCode(connectWorkspace)) return;
+    const current = snapshot.workspaces.find((workspace) => workspace.key === connectWorkspace.key);
+    if (current?.isRemote && !remoteNeedsCode(current)) {
+      setConnectOpen(false);
+    }
+  }, [connectOpen, connectWorkspace, snapshot.workspaces]);
 
   /** Heartbeat / palette: re-auth if remote needs it, else hard reload. */
   const handleReconnect = useCallback(() => {
     if (activeWorkspace?.isRemote) {
-      setConnectOpen(true);
+      requestRemoteAuth(activeWorkspace, "gesture");
       return;
     }
     onWorkspaceRefresh();
-  }, [activeWorkspace?.isRemote, onWorkspaceRefresh]);
+  }, [activeWorkspace, onWorkspaceRefresh]);
 
   useLayoutEffect(() => {
     setHostActions({
       reloadWindow: onWorkspaceRefresh,
       reloadActiveView: onActiveRefresh,
-      reconnectRemote: () => setConnectOpen(true),
+      reconnectRemote: () => {
+        if (activeWorkspace?.isRemote) requestRemoteAuth(activeWorkspace, "gesture");
+      },
       isRemote: () => Boolean(activeWorkspace?.isRemote),
     });
-  }, [activeWorkspace?.isRemote, onWorkspaceRefresh, onActiveRefresh]);
+  }, [activeWorkspace, onWorkspaceRefresh, onActiveRefresh]);
 
   const statusBarExtras = listStatusBarItems();
 
@@ -241,21 +276,30 @@ export const AppShell = ({
   const centerContent = (
     <div className="flex h-full min-h-0 flex-col">
       <div className="min-h-0 flex-1 overflow-hidden bg-canvas">
-        <CenterPanel
-          selection={selection}
-          snapshot={snapshot}
-          leftPanelView={leftPanelView}
-          inspectorTarget={inspectorTarget}
-          onInspectorTargetChange={onInspectorTargetChange}
-          onInspectorChange={handleInspectorSurfaceChange}
-          onRefresh={onWorkspaceRefresh}
-        />
+        {loadError ? (
+          <WorkbenchOperationState
+            kind="error"
+            title="Could not load workspace"
+            detail={loadError.message}
+            action={<WorkbenchRetryAction onClick={onWorkspaceRefresh} />}
+          />
+        ) : (
+          <CenterPanel
+            selection={selection}
+            snapshot={snapshot}
+            leftPanelView={leftPanelView}
+            inspectorTarget={inspectorTarget}
+            onInspectorTargetChange={onInspectorTargetChange}
+            onInspectorChange={handleInspectorSurfaceChange}
+            onRefresh={onWorkspaceRefresh}
+          />
+        )}
       </div>
     </div>
   );
 
   const inspectorContent = inspectorSurface ? (
-    inspectorSurface.render({ className: "border-l-0 bg-surface-subtle" })
+    inspectorSurface.render({ className: "border-l-0 bg-background" })
   ) : (
     <RightPanel
       selection={inspectorSelection}
@@ -287,7 +331,7 @@ export const AppShell = ({
             <SheetTitle>Inspector</SheetTitle>
             <SheetDescription>Details for the selected object</SheetDescription>
           </SheetHeader>
-          <div className="h-full overflow-hidden bg-surface-subtle">{inspectorContent}</div>
+          <div className="h-full overflow-hidden bg-background">{inspectorContent}</div>
         </SheetContent>
       </Sheet>
     </div>
@@ -333,7 +377,7 @@ export const AppShell = ({
                 minSize={INSPECTOR_SIZE.min}
                 maxSize={INSPECTOR_SIZE.max}
               >
-                <div className="mol-motion-enter-from-right h-full overflow-hidden border-l border-border bg-surface-subtle">
+                <div className="mol-motion-enter-from-right h-full overflow-hidden border-l border-border bg-background">
                   {inspectorContent}
                 </div>
               </ResizablePanel>
@@ -376,9 +420,12 @@ export const AppShell = ({
             />
           </main>
           <RemoteConnectDialog
-            workspace={activeWorkspace}
+            workspace={connectWorkspace ?? activeWorkspace}
             open={connectOpen}
             onOpenChange={setConnectOpen}
+            onDismiss={() => {
+              if (connectWorkspace) dismissRemoteAuth(connectWorkspace.key);
+            }}
             onConnected={onWorkspaceRefresh}
           />
         </div>

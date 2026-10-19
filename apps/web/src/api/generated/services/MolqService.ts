@@ -2,6 +2,7 @@
 /* istanbul ignore file */
 /* tslint:disable */
 /* eslint-disable */
+import type { DestinationsResponse } from '../models/DestinationsResponse';
 import type { MolqJobDetailResponse } from '../models/MolqJobDetailResponse';
 import type { MolqJobsResponse } from '../models/MolqJobsResponse';
 import type { MolqTargetListResponse } from '../models/MolqTargetListResponse';
@@ -9,6 +10,27 @@ import type { CancelablePromise } from '../core/CancelablePromise';
 import { OpenAPI } from '../core/OpenAPI';
 import { request as __request } from '../core/request';
 export class MolqService {
+    /**
+     * List Destinations
+     * List registered destinations without contacting schedulers or SSH hosts.
+     * @param molabSession
+     * @returns DestinationsResponse Successful Response
+     * @throws ApiError
+     */
+    public static listDestinations(
+        molabSession?: (string | null),
+    ): CancelablePromise<DestinationsResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/plugins/molq/destinations',
+            cookies: {
+                'molab_session': molabSession,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
     /**
      * List Targets
      * List configured molq targets (one per profile in ``~/.molq/config.yaml``).

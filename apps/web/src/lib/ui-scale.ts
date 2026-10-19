@@ -26,7 +26,7 @@ export const TEXT_SCALES: readonly TextScaleOption[] = [
   { id: "largest", label: "Largest", percent: 150 },
 ];
 
-export const DEFAULT_TEXT_SCALE = "default";
+export const DEFAULT_TEXT_SCALE = "compact";
 
 const subscribers = new Set<() => void>();
 
@@ -45,7 +45,7 @@ const load = (): string => {
 let current: string = typeof window === "undefined" ? DEFAULT_TEXT_SCALE : load();
 
 const percentOf = (id: string): number =>
-  TEXT_SCALES.find((option) => option.id === id)?.percent ?? 112.5;
+  TEXT_SCALES.find((option) => option.id === id)?.percent ?? 100;
 
 /** Set `<html>` font size from the stored choice. Call once before rendering. */
 export const applyTextScale = (id: string = current): void => {

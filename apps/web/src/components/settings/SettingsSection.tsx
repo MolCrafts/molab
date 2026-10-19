@@ -4,8 +4,8 @@
  * Domain-free block — shared via molcrafts-ui registry.
  */
 
+import { Tooltip, TooltipContent, TooltipTrigger } from "@molcrafts/ui";
 import type { JSX, ReactNode } from "react";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 interface SettingsSectionProps {
@@ -34,7 +34,7 @@ export function SettingsSection({
     <section id={id} className={cn("scroll-mt-3 space-y-3", className)} data-settings-section={id}>
       <header className="space-y-1">
         <div className="flex items-center justify-between gap-2">
-          <h3 className="text-sm font-semibold tracking-tight text-foreground">{title}</h3>
+          <h3 className="text-body font-medium text-foreground">{title}</h3>
           {trailing}
         </div>
         {description ? <p className="text-micro text-muted-foreground">{description}</p> : null}
@@ -65,7 +65,7 @@ export function SettingsRow({
         className,
       )}
     >
-      <label htmlFor={htmlFor} className="shrink-0 text-micro text-muted-foreground">
+      <label htmlFor={htmlFor} className="shrink-0 text-label text-foreground">
         {label}
       </label>
       <div className="flex min-w-0 flex-wrap items-center justify-end gap-2">{children}</div>

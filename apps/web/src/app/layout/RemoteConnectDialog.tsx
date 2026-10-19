@@ -1,34 +1,37 @@
 /**
  * VS Code quick-input style: top-centered, one line of chrome, enter to submit.
  */
+
+import { Dialog, DialogContent, DialogDescription, DialogTitle, Input } from "@molcrafts/ui";
 import { Loader2 } from "lucide-react";
 import { type JSX, useCallback, useEffect, useId, useState } from "react";
 import { workspacesApi } from "@/api";
 import type { ServedWorkspaceSummary } from "@/app/types";
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { shortWorkspaceLabel } from "@/lib/workspace-path";
+import { parseHostQualifiedLabel } from "@/lib/workspace-path";
 export interface RemoteConnectDialogProps {
   workspace: ServedWorkspaceSummary | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** User pressed Esc. Distinct from the dialog closing after a successful login. */
+  onDismiss?: () => void;
   onConnected: () => void;
 }
 
 const shortFailure = (raw: string): string => {
   const t = raw.toLowerCase();
-  if (t === "auth" || t.includes("auth")) return "Incorrect code";
-  if (t === "timeout" || t.includes("timeout")) return "Timed out";
-  if (t === "unreachable" || t.includes("unreachable")) return "Host unavailable";
+  if (t === "auth") return "Authentication rejected";
+  if (t === "timeout") return "Timed out";
+  if (t === "unreachable") return "Host unavailable";
   if (t.includes("empty")) return "Enter a code";
-  return "Couldn't connect";
+  return raw || "Couldn't connect";
 };
 
 export const RemoteConnectDialog = ({
   workspace,
   open,
   onOpenChange,
+  onDismiss,
   onConnected,
 }: RemoteConnectDialogProps): JSX.Element => {
   const inputId = useId();
@@ -67,7 +70,7 @@ export const RemoteConnectDialog = ({
     }
   }, [workspace, code, busy, onOpenChange, onConnected]);
 
-  const host = workspace ? shortWorkspaceLabel(workspace.label) : "remote";
+  const host = workspace ? (parseHostQualifiedLabel(workspace.label)?.host ?? "remote") : "remote";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -79,6 +82,13 @@ export const RemoteConnectDialog = ({
           "rounded-md shadow-lg sm:max-w-xl",
         )}
         onOpenAutoFocus={(e) => e.preventDefault()}
+        onInteractOutside={(e) => e.preventDefault()}
+        onPointerDownOutside={(e) => e.preventDefault()}
+        onEscapeKeyDown={(e) => {
+          e.preventDefault();
+          onDismiss?.();
+          onOpenChange(false);
+        }}
       >
         <DialogTitle className="sr-only">Connect to {host}</DialogTitle>
         <DialogDescription className="sr-only">
@@ -111,12 +121,6 @@ export const RemoteConnectDialog = ({
             onChange={(e) => {
               setCode(e.target.value);
               if (hint) setHint(null);
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "Escape") {
-                e.preventDefault();
-                onOpenChange(false);
-              }
             }}
             className={cn(
               "h-10 w-full rounded-none border-0 bg-transparent px-3 font-mono tracking-widest",

@@ -31,6 +31,16 @@ export const countRunStatuses = (runs: Pick<RunSummary, "status">[]): RunStatusC
   return counts;
 };
 
+/** Wall-clock seconds of runs that have both a start and a finish. */
+export const finishedDurationSeconds = (
+  runs: readonly Pick<RunSummary, "startedAt" | "finishedAt">[],
+): number[] =>
+  runs.flatMap((run) => {
+    if (!run.startedAt || !run.finishedAt) return [];
+    const ms = Date.parse(run.finishedAt) - Date.parse(run.startedAt);
+    return Number.isFinite(ms) && ms >= 0 ? [ms / 1000] : [];
+  });
+
 /** Success rate over *terminal* runs only (excludes running/pending). */
 export const successRate = (counts: RunStatusCounts): number | null => {
   const terminal = counts.succeeded + counts.failed + counts.cancelled;

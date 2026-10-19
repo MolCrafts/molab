@@ -11,9 +11,9 @@ describe("workbench layout contract", () => {
   it("keeps the global bar compact and free of persistent search", () => {
     const contextBar = readWebSource("app/layout/ContextBar.tsx");
 
-    // The band is the constitution's own 40px region band, not a literal and
-    // not a product-invented token. It was 35px until 2026-09-07, below § 2.
-    expect(contextBar).toContain("h-toolbar-compact");
+    // Explicit Compact workbench request: use the shared 32px spacing step;
+    // the constitution's default toolbar token remains unchanged.
+    expect(contextBar).toContain("h-8");
     expect(readWebSource("styles/constitution-theme.css")).toContain(
       "--spacing-toolbar-compact: 2.5rem",
     );

@@ -74,62 +74,26 @@ class FolderMetadata(BaseModel, frozen=True):
 
 
 class ComputeTarget(BaseModel, frozen=True):
-    """A registered execution destination — the cross product of two axes.
+    """A semantic run destination referring to the molq-owned cluster."""
 
-    The two-axis cluster model (Transport × Scheduler) treats *where* commands
-    run as orthogonal to *how* jobs are dispatched.  ``host`` is the transport
-    axis: ``None`` means run locally (``LocalTransport``); a non-empty value
-    routes through SSH to that host.  ``scheduler`` is the dispatch axis: one
-    of the molq scheduler names.
-
-    Examples::
-
-        # Today's `--local` path, just named.
-        ComputeTarget(name="laptop", scratch_root="/tmp/molab")
-
-        # Remote SLURM cluster — the canonical HPC use case.
-        ComputeTarget(
-            name="hpc1",
-            host="me@cluster.example.org",
-            scheduler="slurm",
-            scratch_root="/scratch/me/molab",
-        )
-
-        # Run on a remote workstation directly, no batch system.
-        ComputeTarget(
-            name="desk", host="me@desk.lan", scheduler="local", scratch_root="/home/me/molab-runs"
-        )
-    """  # noqa: RUF002
-
+    model_config = ConfigDict(frozen=True, extra="forbid")
     name: str
-
-    # ── Transport axis (where commands run) ─────────────────────────────────
-    host: str | None = None  # None → LocalTransport, else SshTransport
-    port: int | None = None
-    identity_file: str | None = None
-    ssh_opts: list[str] = Field(default_factory=list)
-
-    # ── Scheduler axis (how jobs are dispatched) ────────────────────────────
-    scheduler: Literal["local", "slurm", "pbs", "lsf"] = "local"
-
-    # ── Working dir + defaults ──────────────────────────────────────────────
+    registry_id: str | None = None
+    cluster_id: str | None = None
     scratch_root: str
-    default_resources: dict[str, JSONValue] = Field(default_factory=dict)
-    default_scheduling: dict[str, JSONValue] = Field(default_factory=dict)
 
     @model_validator(mode="after")
-    def _validate_axes(self) -> ComputeTarget:
-        if self.host is None and (self.port is not None or self.identity_file or self.ssh_opts):
-            raise ValueError(
-                "transport options (port, identity_file, ssh_opts) require host to be set"
-            )
+    def _validate_reference(self) -> ComputeTarget:
+        if bool(self.registry_id) != bool(self.cluster_id):
+            raise ValueError("registry_id and cluster_id must be supplied together")
         if not self.scratch_root:
             raise ValueError("scratch_root is required")
         return self
 
     @property
     def is_remote(self) -> bool:
-        return self.host is not None
+        """Whether file access uses an explicitly registered molq destination."""
+        return self.cluster_id is not None
 
 
 class WorkspaceMetadata(BaseModel, frozen=True):

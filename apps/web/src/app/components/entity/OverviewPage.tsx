@@ -15,13 +15,13 @@ export const OverviewPage = ({ children, aside, className }: OverviewPageProps):
     <div className={cn("flex-1 overflow-auto", className)}>
       <div
         className={cn(
-          "grid min-h-full gap-x-8 gap-y-8 p-4 md:p-6",
+          "grid min-h-full gap-x-4 gap-y-4 p-4",
           aside && "xl:grid-cols-(--overview-grid-columns)",
         )}
       >
-        <div className="min-w-0 space-y-6">{children}</div>
+        <div className="min-w-0 space-y-4">{children}</div>
         {aside && (
-          <aside className="min-w-0 space-y-6 border-t border-border/60 pt-6 xl:border-l xl:border-t-0 xl:pl-8 xl:pt-0">
+          <aside className="min-w-0 space-y-4 border-t border-border/60 pt-4 xl:border-l xl:border-t-0 xl:pl-4 xl:pt-0">
             {aside}
           </aside>
         )}

@@ -9,7 +9,7 @@ behaviour differs on each:
   is a network round-trip, ``flock`` may be unsupported (Lustre without
   ``-o flock`` fails ``ENOSYS``, which the caller must not mistake for
   contention), and WAL's shared-memory file is unsafe.
-* **remote-ssh** — reached through a molq transport. Every call is an SSH
+* **remote-ssh** — reached through the public molq file APIs. Every call is an SSH
   round-trip, so listings must be batched and cached aggressively; advisory
   locks and a local SQLite event log are not meaningful at all.
 

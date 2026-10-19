@@ -59,10 +59,13 @@ export interface ParameterAxisSummary {
   count: number;
 }
 
-/** One value of a swept parameter, with the status mix of the runs that used it. */
+/** One value of a swept parameter, with the runs that used it and their status mix. */
 export interface AxisBucketSummary {
   value: string;
+  /** Runs that never set the parameter. Filed apart, never as a value named "-". */
+  unset: boolean;
   counts: RunStatusCounts;
+  runs: RunSummary[];
 }
 
 /** A varying parameter and the outcome of the sweep along it. */
@@ -275,17 +278,40 @@ export const buildAxisBreakdowns = (
     .filter((axis) => axis.count > 1 && axis.count <= MAX_AXIS_BUCKETS)
     .map((axis) => {
       const byValue = new Map<string, RunSummary[]>(axis.values.map((value) => [value, []]));
+      const unsetRuns: RunSummary[] = [];
       for (const run of runs) {
-        const value = stringifyAxisValue(run.parameters?.[axis.key]);
+        const raw = run.parameters?.[axis.key];
+        if (raw === undefined) {
+          unsetRuns.push(run);
+          continue;
+        }
+        const value = stringifyAxisValue(raw);
         const bucket = byValue.get(value);
         if (bucket) bucket.push(run);
         else byValue.set(value, [run]);
       }
+      const buckets: AxisBucketSummary[] = [...byValue.entries()]
+        .sort(([left], [right]) => compareAxisValues(left, right))
+        .map(([value, bucketRuns]) => ({
+          value,
+          unset: false,
+          counts: countRunStatuses(bucketRuns),
+          runs: bucketRuns,
+        }));
       return {
         key: axis.key,
-        buckets: [...byValue.entries()]
-          .sort(([left], [right]) => compareAxisValues(left, right))
-          .map(([value, bucketRuns]) => ({ value, counts: countRunStatuses(bucketRuns) })),
+        buckets:
+          unsetRuns.length === 0
+            ? buckets
+            : [
+                ...buckets,
+                {
+                  value: "unset",
+                  unset: true,
+                  counts: countRunStatuses(unsetRuns),
+                  runs: unsetRuns,
+                },
+              ],
       };
     });
 

@@ -1,10 +1,9 @@
+import { Check } from "lucide-react";
 /**
  * Minimal sweep create: one param axis × values → N runs.
  * Opened from a parent menu / button (controlled dialog, no built-in trigger).
  */
 
-import { useState } from "react";
-import { runsApi } from "@/api";
 import {
   Dialog,
   DialogContent,
@@ -12,9 +11,11 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+  Input,
+  Label,
+} from "@molcrafts/ui";
+import { useState } from "react";
+import { runsApi } from "@/api";
 import { toast } from "@/components/ui/toast";
 import { WorkbenchAction } from "@/components/workbench";
 
@@ -100,6 +101,7 @@ export function CreateSweepDialog({
         </div>
         <DialogFooter>
           <WorkbenchAction
+            icon={<Check aria-hidden />}
             kind="primary"
             size="default"
             disabled={busy}

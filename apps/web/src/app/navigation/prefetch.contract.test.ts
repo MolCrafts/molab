@@ -28,7 +28,7 @@ describe("intent prefetch", () => {
     const pkg = JSON.parse(read("../package.json"));
     expect(rsbuild).toContain("molrs-wasm/.x86_64");
     expect(rsbuild).toContain("resolveMolrs");
-    expect(pkg.dependencies["@molcrafts/molrs"]).toBe("^0.13.2");
+    expect(pkg.dependencies["@molcrafts/molrs"]).toBe("^0.18.0");
   });
 
   it("keeps KaTeX markdown off the initial graph", () => {

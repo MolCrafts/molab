@@ -1,7 +1,6 @@
 import { type JSX, useMemo } from "react";
-import { EmptyState } from "@/app/components/entity";
+import { EmptyState, EntityTabBar, EntityTabContent, EntityTabs } from "@/app/components/entity";
 import type { RendererProps } from "@/app/types";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import type { DiscoveredFile } from "@/plugins/types";
 import { MolplotObservablesTab } from "./MolplotObservablesTab";
 import { RunMetricsTab } from "./RunMetricsTab";
@@ -32,23 +31,19 @@ export const MolplotRunTab = (props: Props): JSX.Element => {
     return <MolplotObservablesTab {...props} discoveredFiles={plotFiles} />;
   if (plotFiles.length === 0) return <RunMetricsTab {...props} discoveredFiles={scalarFiles} />;
   return (
-    <Tabs defaultValue="scalars" className="flex h-full min-h-0 flex-col">
-      <div className="flex h-toolbar-compact items-center border-b border-border bg-surface-subtle px-3">
-        <TabsList variant="line" className="h-full gap-4 rounded-none bg-transparent p-0">
-          <TabsTrigger value="scalars" className="h-full rounded-none px-0">
-            Scalars
-          </TabsTrigger>
-          <TabsTrigger value="plots" className="h-full rounded-none px-0">
-            Plots
-          </TabsTrigger>
-        </TabsList>
-      </div>
-      <TabsContent value="scalars" className="m-0 min-h-0 flex-1">
+    <EntityTabs defaultValue="scalars" className="h-full min-h-0">
+      <EntityTabBar
+        tabs={[
+          { value: "scalars", label: "Scalars" },
+          { value: "plots", label: "Plots" },
+        ]}
+      />
+      <EntityTabContent value="scalars" className="m-0 min-h-0 flex-1">
         <RunMetricsTab {...props} discoveredFiles={scalarFiles} />
-      </TabsContent>
-      <TabsContent value="plots" className="m-0 min-h-0 flex-1">
+      </EntityTabContent>
+      <EntityTabContent value="plots" className="m-0 min-h-0 flex-1">
         <MolplotObservablesTab {...props} discoveredFiles={plotFiles} />
-      </TabsContent>
-    </Tabs>
+      </EntityTabContent>
+    </EntityTabs>
   );
 };

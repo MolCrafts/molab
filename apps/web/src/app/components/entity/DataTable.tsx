@@ -1,21 +1,19 @@
-import type { ComponentType, JSX, ReactNode } from "react";
-import { Fragment } from "react";
 import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
   ContextMenuSeparator,
   ContextMenuTrigger,
-} from "@/components/ui/context-menu";
-import {
   Table,
   TableBody,
   TableCell,
   TableHead,
   TableHeader,
   TableRow,
-} from "@/components/ui/table";
-import { ROW_PADDING_DENSE } from "./density";
+} from "@molcrafts/ui";
+import type { ComponentType, JSX, ReactNode } from "react";
+import { Fragment } from "react";
+import { ROW_PADDING_DENSE, TABLE_HEADER } from "./density";
 
 export interface DataTableColumn<T> {
   key: string;
@@ -133,9 +131,9 @@ export const DataTable = <T,>({
 
   return (
     <div className="flex-1 overflow-auto">
-      <Table className="w-full text-left text-body">
-        <TableHeader className="sticky top-0 z-10 border-b border-border bg-background text-micro font-medium uppercase tracking-wide text-muted-foreground">
-          <TableRow>
+      <Table className="w-full text-left text-body [&_td]:max-w-72 [&_td]:overflow-hidden [&_th]:h-7">
+        <TableHeader className={`${TABLE_HEADER} z-10 text-label font-medium`}>
+          <TableRow className="hover:bg-transparent">
             {columns.map((col) => (
               <TableHead
                 key={col.key}

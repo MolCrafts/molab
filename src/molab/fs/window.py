@@ -16,6 +16,7 @@ the server routes.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal
 
@@ -176,3 +177,16 @@ __all__ = [
     "TextWindow",
     "read_text_window",
 ]
+
+
+def iter_file_chunks(fs: FileSystem, path: PathArg, *, size: int) -> Iterator[bytes]:
+    """Read a fixed file extent in bounded ranges, rejecting premature EOF."""
+    if size < 0:
+        raise ValueError("File extent must be non-negative")
+    offset = 0
+    while offset < size:
+        data = fs.read_range(path, offset, min(DEFAULT_TEXT_WINDOW_BYTES, size - offset))
+        if not data:
+            raise OSError("File ended before the requested download completed")
+        offset += len(data)
+        yield data

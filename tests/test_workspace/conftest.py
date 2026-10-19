@@ -64,3 +64,25 @@ def stub_executor():
         yield stub
     finally:
         set_run_executor(prev)
+
+
+@pytest.fixture
+def molq_destination(tmp_path, monkeypatch):
+    """A real stdio service with an explicitly bound local-files destination."""
+    from molq import Molq
+
+    root = tmp_path / "remote"
+    root.mkdir()
+    with Molq(registry=tmp_path / "molq.db") as client:
+        cluster = client.clusters.register(
+            name="files", scheduler="shell", target_root=str(tmp_path / "jobs")
+        )
+        registry = client.rpc("molq.hello")["registry_id"]
+
+        def owned(expected=None):
+            if expected is not None and expected != registry:
+                raise ValueError("Registry mismatch")
+            return client
+
+        monkeypatch.setattr("molab.workspace.connection.get_client", owned)
+        yield client, registry, cluster.name, root

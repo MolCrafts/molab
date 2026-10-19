@@ -9,9 +9,8 @@
 #
 # ty and the unit suite run in CI's sibling layout
 # (`scripts/partners.py run`): a copy of this working tree next to molpy,
-# molrs, mollog, molcfg and molq at the commits scripts/partners.py resolves
-# (molpy's and molrs's dev, or their branches named like this one), never the
-# developer's own ../molpy or ../molrs. ty and the suite build molrs;
+# molrs, mollog, molcfg and molq at the commits .github/partners.env pins,
+# never the developer's own ../molpy or ../molrs. ty and the suite build molrs;
 # scripts/hook-run.sh hands them to $MOLCRAFTS_HOOK_RUNNER (a compute node on
 # the MolCrafts cluster) when set and runs them in place otherwise. Never
 # --no-verify.

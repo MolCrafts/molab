@@ -505,7 +505,9 @@ def _parse(sha: str, body: str) -> HistoryEntry | None:
             kind, _, rest = value.partition(" ")
             ident, _, display = rest.partition(" ")
             if kind in {"person", "software", "workflow", "executor", "system"}:
-                agent = AgentRef(id=ident, type=kind, name=display or None)
+                agent = AgentRef.model_validate(
+                    {"id": ident, "type": kind, "name": display or None}
+                )
         elif key == _TRAILER_REL:
             predicate, _, rest = value.partition(" ")
             kind, _, ident = rest.partition(" ")

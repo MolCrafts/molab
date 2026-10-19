@@ -28,7 +28,7 @@ def init(
     path: Annotated[
         str | None,
         typer.Argument(
-            help="Workspace path (local path, host:/path, or user@host:/path; default: cwd)"
+            help="Workspace path (local path, cluster:/path, or cluster:/path; default: cwd)"
         ),
     ] = None,
     name: Annotated[
@@ -44,7 +44,7 @@ def init(
     spec = path if path is not None else "."
     rprint(f"[bold]Initializing workspace at:[/bold] {spec}")
     try:
-        _target, _transport, _fs, ws = open_workspace(spec, require_existing=False, name=name)
+        _target, _fs, ws = open_workspace(spec, require_existing=False, name=name)
         ws.materialize()
         if isinstance(ws.fs, LocalFileSystem):
             GitHistory(ws.root).init()

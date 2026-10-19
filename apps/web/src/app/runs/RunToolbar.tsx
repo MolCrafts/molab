@@ -1,4 +1,25 @@
-import { Ban, Copy, Download, MoreHorizontal, Play, Plus } from "lucide-react";
+import {
+  Checkbox,
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  Input,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@molcrafts/ui";
+import { Ban, Check, Copy, Download, MoreHorizontal, Play, Plus } from "lucide-react";
 import { type JSX, useEffect, useMemo, useState } from "react";
 import { runsApi } from "@/api";
 import type { ExecutionAttemptCreateRequest } from "@/api/generated/models/ExecutionAttemptCreateRequest";
@@ -14,31 +35,6 @@ import {
   executionModeOptions,
 } from "@/app/runs/runLifecycle";
 import type { RunSummary } from "@/app/types";
-import { Checkbox } from "@/components/ui/checkbox";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { toast } from "@/components/ui/toast";
 import { WorkbenchAction, WorkbenchIconAction } from "@/components/workbench";
 
@@ -237,6 +233,8 @@ export function RunToolbar({
           </div>
           <DialogFooter>
             <WorkbenchAction
+              icon={<Check aria-hidden />}
+              aria-busy={busy}
               kind="primary"
               disabled={busy || !selectedMode?.enabled}
               onClick={() => void createExecution()}

@@ -6,7 +6,6 @@ import type { LeftPanelView, Selection, WorkspaceSnapshot } from "@/app/types";
 import { ExplorerDock } from "@/components/layout/ExplorerShell";
 import { useWorkbenchGeneration } from "@/plugins/contributions/workbench";
 
-// v2 drops layouts saved while the dock default was ignored (a 50/50 split).
 const DOCK = { id: "molab-explorer-dock", autoSaveId: "molab.explorerDock.v2" } as const;
 
 interface LeftPanelProps {
@@ -28,10 +27,7 @@ interface LeftPanelProps {
   dataEpoch?: number;
 }
 
-/**
- * Navigation adapter only. Product metadata lives in sections.tsx; each
- * feature contribution owns its explorer surface, queries, actions, and dialogs.
- */
+/** Navigation adapter. Each feature owns its explorer, queries, and dialogs. */
 export const LeftPanel = ({
   view,
   selection,
@@ -81,7 +77,12 @@ export const LeftPanel = ({
 
   return (
     <div className="flex h-full min-h-0">
-      <NavigationRail activeId={view} onSelect={onViewChange} />
+      <NavigationRail
+        activeId={view}
+        scopeKind={snapshot.serveScope?.kind}
+        snapshot={snapshot}
+        onSelect={onViewChange}
+      />
       {/* The comparison belongs to the panel, not to one explorer: runs are gathered
           from Projects and Files as readily as from the Runs table, and a staging
           area that disappears with its section cannot span two projects. */}

@@ -3,16 +3,13 @@
 /* tslint:disable */
 /* eslint-disable */
 /**
- * Result of an interactive / OTP SSH login.
+ * Result of a bounded authentication attempt.
  */
 export type WorkspaceConnectResponse = {
     ok: boolean;
     key: string;
-    host: string;
-    /**
-     * True when OpenSSH ControlMaster is accepting clients after login
-     */
-    masterAlive: boolean;
+    destination: string;
+    authenticated: boolean;
     message?: string;
 };
 

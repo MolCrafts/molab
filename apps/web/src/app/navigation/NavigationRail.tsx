@@ -1,4 +1,5 @@
-import type { LeftPanelView } from "@/app/types";
+import { useWorkspaceTabVisible } from "@/app/dashboard/useWorkspaceTab";
+import type { LeftPanelView, WorkspaceSnapshot } from "@/app/types";
 import { LeftIconRail } from "@/components/layout/ExplorerShell";
 import { useWorkbenchGeneration } from "@/plugins/contributions/workbench";
 import { prefetchNavigationView } from "./prefetch";
@@ -6,13 +7,24 @@ import { managementNavigationContribution, railNavigationContributions } from ".
 
 export interface NavigationRailProps {
   activeId: LeftPanelView;
+  /** Served directory kind. Levels above it drop off the rail. */
+  scopeKind?: string | null;
+  snapshot: WorkspaceSnapshot;
   onSelect: (id: LeftPanelView) => void;
 }
 
 /** Molab adapter from product section metadata to the shared icon rail. */
-export const NavigationRail = ({ activeId, onSelect }: NavigationRailProps): JSX.Element => {
+export const NavigationRail = ({
+  activeId,
+  scopeKind,
+  snapshot,
+  onSelect,
+}: NavigationRailProps): JSX.Element => {
   useWorkbenchGeneration();
-  const items = railNavigationContributions();
+  const workspaceTab = useWorkspaceTabVisible(snapshot);
+  const items = railNavigationContributions(scopeKind).filter(
+    (item) => item.id !== "dashboard" || workspaceTab,
+  );
   const footer = managementNavigationContribution() ?? null;
   return (
     <LeftIconRail

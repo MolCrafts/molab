@@ -2,6 +2,7 @@ import {
   Archive,
   Blocks,
   Copy,
+  Download,
   ExternalLink,
   FilePlus,
   FileText,
@@ -11,9 +12,12 @@ import {
   FolderPlus,
   PlayCircle,
   RefreshCw,
+  Upload,
 } from "lucide-react";
 import type { ComponentType } from "react";
+import { useRef, useState } from "react";
 import { ApiError } from "@/api/generated";
+import { workspaceApi } from "@/api/workspace";
 import { usePermissions, withWriteGate } from "@/app/auth";
 import { EMPTY_COPY } from "@/app/components/entity";
 import type { NavigationExplorerProps } from "@/app/navigation/sections";
@@ -76,6 +80,7 @@ interface WorkspaceSemantic {
 }
 
 interface WorkspaceTreeActions {
+  onDownload?: (path: string) => void;
   onSelect: (selection: Selection) => void;
   onIntentEntity?: (type: WorkspaceSemantic["type"], id: string) => void;
   onIntentDirectory?: (dirPath: string) => void;
@@ -201,6 +206,16 @@ export const buildFilesExplorerNodes = (
               icon: ExternalLink,
               onSelect: () => actions.onSelect(fileSelection),
             },
+            ...(actions.onDownload
+              ? [
+                  {
+                    id: "download",
+                    label: "Download file",
+                    icon: Download,
+                    onSelect: () => actions.onDownload?.(node.path),
+                  },
+                ]
+              : []),
             {
               id: "copy-path",
               label: "Copy path",
@@ -272,6 +287,8 @@ type FilesExplorerProps = Pick<
 
 export const FilesExplorer = (props: FilesExplorerProps): JSX.Element => {
   const { fileSystem } = props;
+  const uploadInput = useRef<HTMLInputElement>(null);
+  const [uploading, setUploading] = useState(false);
   const { writeDeniedReason } = usePermissions();
   const { prompt, dialog: promptDialog } = usePrompt();
   const { confirm, dialog: confirmDialog } = useConfirm();
@@ -345,6 +362,8 @@ export const FilesExplorer = (props: FilesExplorerProps): JSX.Element => {
 
   const nodes = buildFilesExplorerNodes(props.snapshot, {
     onSelect: props.onSelect,
+    onDownload: (path) =>
+      window.location.assign(workspaceApi.downloadUrl(path, activeWorkspace?.key)),
     onIntentDirectory: fileSystem.onExpandDirectory,
     onCreateDirectory: (path) => void createDirectory(path),
     onCreateFile: (path) => void createFile(path),
@@ -379,6 +398,15 @@ export const FilesExplorer = (props: FilesExplorerProps): JSX.Element => {
       >
         <FolderPlus className="size-icon" />
       </WorkbenchIconAction>
+      <WorkbenchIconAction
+        label="Upload file"
+        kind="ghost"
+        disabled={uploading}
+        deniedReason={writeDeniedReason}
+        onClick={() => uploadInput.current?.click()}
+      >
+        <Upload className="size-icon" />
+      </WorkbenchIconAction>
       <WorkbenchIconAction label="Refresh files" kind="ghost" onClick={props.onRefresh}>
         <RefreshCw className="size-4" />
       </WorkbenchIconAction>
@@ -387,6 +415,33 @@ export const FilesExplorer = (props: FilesExplorerProps): JSX.Element => {
 
   return (
     <>
+      <input
+        type="file"
+        ref={uploadInput}
+        hidden
+        aria-label="Choose a file to upload"
+        onChange={async (event) => {
+          const file = event.currentTarget.files?.[0];
+          event.currentTarget.value = "";
+          if (!file) return;
+          const path = await prompt({
+            title: "Upload file",
+            label: "Destination path",
+            defaultValue: file.name,
+            confirmLabel: "Upload",
+          });
+          if (!path) return;
+          setUploading(true);
+          try {
+            await workspaceApi.uploadFile(path, file, activeWorkspace?.key);
+            props.onRefresh();
+          } catch (error) {
+            await alert({ title: "Upload failed", description: errorDetail(error) });
+          } finally {
+            setUploading(false);
+          }
+        }}
+      />
       <LeftExplorer title="Files" actions={actions}>
         <TreeView
           nodes={nodes}

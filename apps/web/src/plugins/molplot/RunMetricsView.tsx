@@ -1,17 +1,22 @@
-import { Activity, AlertTriangle, Maximize2 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
-import { DashboardCanvas, EmptyState, OverviewSection } from "@/app/components/entity";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
 import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  Label,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import { Slider } from "@/components/ui/slider";
-import { Switch } from "@/components/ui/switch";
+  Slider,
+  Switch,
+} from "@molcrafts/ui";
+import { useSuspenseQuery } from "@tanstack/react-query";
+import { Activity, AlertTriangle, Maximize2 } from "lucide-react";
+import { useMemo, useState } from "react";
+import { DashboardCanvas, EmptyState, OverviewSection } from "@/app/components/entity";
+import { journalRefetchInterval, runKeys } from "@/app/state/entityQueries";
 import { WorkbenchAction, WorkbenchIconAction } from "@/components/workbench";
 import { CHART_SERIES_PALETTE } from "@/lib/chart-tokens";
 import type { MetricRecordSample as MetricRecord } from "@/lib/contribution-types";
@@ -22,7 +27,7 @@ import {
   ChartWorkbench,
   MolplotLineChart,
 } from "@/plugins/molplot";
-import { readExecutionMetrics, type SourceRead } from "@/plugins/molplot/read-metrics";
+import { readExecutionMetrics } from "@/plugins/molplot/read-metrics";
 import { STEP_INTERVAL } from "@/plugins/molplot/resolution";
 import {
   DEFAULT_SCALAR_FORMAT,
@@ -43,7 +48,6 @@ import { filterSpikes, smoothEma } from "@/plugins/molplot/smoothing";
  * The pure builders (`buildScalarSeries`, `groupSeries`, `buildLineChartConfig`)
  * are exported for unit testing under the repo's node test environment.
  */
-const POLL_INTERVAL_MS = 1500;
 
 type XMode = "step" | "wall";
 type YScale = "linear" | "log";
@@ -62,6 +66,7 @@ export interface ScalarSeries {
 }
 
 export interface RunMetricsViewProps {
+  status?: string;
   projectId: string;
   experimentId: string;
   runId: string;
@@ -561,11 +566,21 @@ export const RunMetricsView = ({
   experimentId,
   runId,
   executionId,
+  status,
 }: RunMetricsViewProps): JSX.Element => {
-  const [records, setRecords] = useState<MetricRecord[]>([]);
-  const [sources, setSources] = useState<SourceRead[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const {
+    data: { records, sources },
+    error,
+  } = useSuspenseQuery({
+    queryKey: runKeys.metrics(projectId, experimentId, runId, executionId),
+    queryFn: () =>
+      readExecutionMetrics(
+        { projectId, experimentId, runId, executionId },
+        { stepInterval: STEP_INTERVAL },
+      ),
+    refetchInterval: journalRefetchInterval(status),
+    refetchIntervalInBackground: false,
+  });
   const [panelOpen, setPanelOpen] = useState(false);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [cardSettings, setCardSettings] = useState<Record<string, CardSettings>>({});
@@ -574,76 +589,13 @@ export const RunMetricsView = ({
   const grouped = useMemo(() => groupSeries(scalarSeries), [scalarSeries]);
   const selectedSeries = scalarSeries.find((item) => item.key === selectedKey) ?? null;
 
-  // What was read last time, so a poll that finds nothing new can skip the
-  // work. Held in a ref rather than a dependency: keying the effect on it
-  // would tear down the interval after every successful read and collapse
-  // POLL_INTERVAL_MS into a tight loop.
-  const lastRevisionsRef = useRef<string>("");
-
-  // The fetch effect re-keys on the run coords; callers also mount this view
-  // with `key={runId}` so a run switch remounts it with fresh state (cursor +
-  // accumulator), rather than threading a manual reset effect.
-  useEffect(() => {
-    let cancelled = false;
-
-    const fetchMetrics = async (): Promise<void> => {
-      try {
-        // The server lists the attempt's files and hands back bytes; every
-        // decision about what is plottable and what the numbers mean happens
-        // here, through whichever reader claimed the file.
-        const read = await readExecutionMetrics(
-          { projectId, experimentId, runId, executionId },
-          { stepInterval: STEP_INTERVAL },
-        );
-        if (cancelled) {
-          return;
-        }
-        // A finished log re-reads to the same bytes; only re-render when a
-        // source actually moved.
-        const revisions = read.sources.map((item) => `${item.path}@${item.revision}`).join("|");
-        if (revisions !== lastRevisionsRef.current) {
-          lastRevisionsRef.current = revisions;
-          setRecords(read.records);
-          setSources(read.sources);
-        }
-        setError(null);
-      } catch (metricsError) {
-        if (!cancelled) {
-          setError(metricsError instanceof Error ? metricsError.message : "Failed to load metrics");
-        }
-      } finally {
-        if (!cancelled) {
-          setLoading(false);
-        }
-      }
-    };
-
-    void fetchMetrics();
-    const intervalId = window.setInterval(() => {
-      void fetchMetrics();
-    }, POLL_INTERVAL_MS);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(intervalId);
-    };
-  }, [executionId, projectId, experimentId, runId]);
-
-  if (loading && records.length === 0) {
-    return (
-      <div className="flex h-full items-center justify-center bg-background text-body-lg text-muted-foreground">
-        Loading metrics...
-      </div>
-    );
-  }
-
   if (error && records.length === 0) {
     return (
       <div className="flex h-full items-center justify-center bg-background">
         <EmptyState
           icon={<AlertTriangle className="h-6 w-6" />}
           title="Metrics unavailable"
-          description={error}
+          description={error instanceof Error ? error.message : "Failed to read metrics"}
         />
       </div>
     );

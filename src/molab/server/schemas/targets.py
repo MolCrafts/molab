@@ -7,8 +7,6 @@ pbs / lsf).  These models are the wire format for ``/api/targets``.
 
 from __future__ import annotations
 
-from typing import Any, Literal
-
 from pydantic import Field
 
 from molab.workspace.models import ComputeTarget
@@ -17,58 +15,25 @@ from ._wire import ApiModel
 
 
 class TargetCreateRequest(ApiModel):
-    """Payload for ``POST /api/targets``."""
-
-    name: str = Field(..., description="Unique target name within the workspace")
-    scratch_root: str = Field(
-        ...,
-        alias="scratchRoot",
-        description="Absolute scratch root on the target's filesystem",
-    )
-    scheduler: Literal["local", "slurm", "pbs", "lsf"] = Field(
-        default="local", description="Dispatch axis"
-    )
-    host: str | None = Field(default=None, description="user@host for SSH; omit for local")
-    port: int | None = Field(default=None, description="SSH port")
-    identity_file: str | None = Field(
-        default=None,
-        alias="identityFile",
-        description="Path to SSH identity file",
-    )
-    ssh_opts: list[str] = Field(
-        default_factory=list,
-        alias="sshOpts",
-        description="Extra ssh argv tokens",
-    )
-
-
-class TargetResponse(ApiModel):
-    """Wire form for a :class:`ComputeTarget`."""
+    """A semantic target referencing the molq destination registry."""
 
     name: str
-    scratch_root: str = Field(..., alias="scratchRoot")
-    scheduler: Literal["local", "slurm", "pbs", "lsf"]
-    host: str | None = None
-    port: int | None = None
-    identity_file: str | None = Field(default=None, alias="identityFile")
-    ssh_opts: list[str] = Field(default_factory=list, alias="sshOpts")
-    is_remote: bool = Field(..., alias="isRemote")
-    default_resources: dict[str, Any] = Field(default_factory=dict, alias="defaultResources")
-    default_scheduling: dict[str, Any] = Field(default_factory=dict, alias="defaultScheduling")
+    scratch_root: str = Field(alias="scratchRoot")
+    registry_id: str | None = Field(default=None, alias="registryId")
+    cluster_id: str | None = Field(default=None, alias="clusterId")
+
+
+class TargetResponse(TargetCreateRequest):
+    is_remote: bool = Field(alias="isRemote")
 
     @classmethod
     def from_model(cls, target: ComputeTarget) -> TargetResponse:
         return cls(
             name=target.name,
             scratchRoot=target.scratch_root,
-            scheduler=target.scheduler,
-            host=target.host,
-            port=target.port,
-            identityFile=target.identity_file,
-            sshOpts=list(target.ssh_opts),
+            registryId=target.registry_id,
+            clusterId=target.cluster_id,
             isRemote=target.is_remote,
-            defaultResources=dict(target.default_resources),
-            defaultScheduling=dict(target.default_scheduling),
         )
 
 

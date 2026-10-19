@@ -1,23 +1,22 @@
-import { type JSX, useEffect, useRef, useState } from "react";
-import type { DocCreateRequest } from "@/api/generated/models/DocCreateRequest";
-import { DocSource } from "@/api/generated/models/DocSource";
 import {
   Dialog,
   DialogContent,
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
+  Input,
+  Label,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
+  Textarea,
+} from "@molcrafts/ui";
+import { Check } from "lucide-react";
+import { type JSX, useEffect, useRef, useState } from "react";
+import type { DocCreateRequest } from "@/api/generated/models/DocCreateRequest";
+import { DocSource } from "@/api/generated/models/DocSource";
 import { WorkbenchAction } from "@/components/workbench";
 import { DOC_SKELETON, type HostRun, isSourcedClass } from "./docTemplates";
 import { KNOWLEDGE_CLASSES, type KnowledgeClass } from "./knowledgeClass";
@@ -232,6 +231,8 @@ export const CreateDocDialog = ({
         </div>
         <DialogFooter>
           <WorkbenchAction
+            icon={<Check aria-hidden />}
+            aria-busy={busy}
             kind="primary"
             type="button"
             disabled={busy || (sourced && runs.length === 0)}

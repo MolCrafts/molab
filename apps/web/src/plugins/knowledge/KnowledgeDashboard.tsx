@@ -1,9 +1,9 @@
+import { Input } from "@molcrafts/ui";
 import { BookOpen, FileText, NotebookPen } from "lucide-react";
 import { type JSX, useMemo, useState } from "react";
 import type { NoteSummary } from "@/api/generated/models/NoteSummary";
 import type { ReferenceSummary } from "@/api/generated/models/ReferenceSummary";
 import { EmptyState } from "@/app/components/entity";
-import { Input } from "@/components/ui/input";
 import { WorkbenchAction } from "@/components/workbench";
 import { cn } from "@/lib/utils";
 import { KNOWLEDGE_CLASSES, type KnowledgeClass, knowledgeClassOf } from "./knowledgeClass";

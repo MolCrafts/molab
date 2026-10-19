@@ -24,9 +24,8 @@
  * would say nothing.
  */
 
+import { Tooltip, TooltipContent, TooltipTrigger } from "@molcrafts/ui";
 import type { JSX } from "react";
-
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { CHART_SERIES_PALETTE } from "@/lib/chart-tokens";
 import { cn } from "@/lib/utils";
 

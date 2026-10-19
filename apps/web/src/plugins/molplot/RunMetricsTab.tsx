@@ -43,6 +43,7 @@ export const RunMetricsTab = ({
       experimentId={run.experimentId}
       runId={run.id}
       executionId={executionId}
+      status={run.executionHistory.find((e) => e.executionId === executionId)?.status}
     />
   );
 };

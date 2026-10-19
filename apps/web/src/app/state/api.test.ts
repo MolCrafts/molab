@@ -53,9 +53,9 @@ describe("mapProjects", () => {
     expect(result.updatedAt).toBe(fixtureProject.created);
   });
 
-  it("falls back to 'No description' when description is absent", () => {
+  it("leaves summary empty when description is absent", () => {
     const [result] = mapProjects([fixtureProjectNoDescription]);
-    expect(result.summary).toBe("No description");
+    expect(result.summary).toBe("");
   });
 
   it("preserves order of multiple projects", () => {

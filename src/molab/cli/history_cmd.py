@@ -27,7 +27,7 @@ def _remote_only(verb: str) -> NoReturn:
 
 
 def _history(target_spec: str) -> GitHistory:
-    target, _transport, _fs = resolve_workspace_target(target_spec)
+    target, _fs = resolve_workspace_target(target_spec)
     if not isinstance(target, LocalTarget):
         _remote_only("history")
     ws = get_workspace(target.path if target.path != Path.cwd() else None)

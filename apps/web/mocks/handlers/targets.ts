@@ -4,45 +4,32 @@
  * The dev:mock store is in-memory — refreshing the page resets it.
  */
 
-import { http, HttpResponse } from "msw";
+import { HttpResponse, http } from "msw";
 import type { TargetCreateRequest } from "@/api/generated/models/TargetCreateRequest";
-import { TargetResponse } from "@/api/generated/models/TargetResponse";
+import type { TargetResponse } from "@/api/generated/models/TargetResponse";
 
 const API_BASE = "/api";
 
 const targets = new Map<string, TargetResponse>();
 
-const seed = (t: Omit<TargetResponse, "isRemote" | "defaultResources" | "defaultScheduling">) => {
-  targets.set(t.name, {
-    ...t,
-    isRemote: t.host != null,
-    defaultResources: {},
-    defaultScheduling: {},
-  });
-};
-
-seed({
-  name: "laptop",
-  scratchRoot: "/tmp/molab",
-  scheduler: TargetResponse.scheduler.LOCAL,
-  host: null,
-  port: null,
-  identityFile: null,
-  sshOpts: [],
-});
-seed({
+targets.set("laptop", { name: "laptop", scratchRoot: "/tmp/molab", isRemote: false });
+targets.set("hpc-slurm", {
   name: "hpc-slurm",
   scratchRoot: "/scratch/me/molab",
-  scheduler: TargetResponse.scheduler.SLURM,
-  host: "me@hpc.example.org",
-  port: null,
-  identityFile: null,
-  sshOpts: [],
+  isRemote: true,
+  registryId: "mock-registry",
+  clusterId: "mock-hpc",
 });
 
 const toResponse = (t: TargetResponse) => t;
 
 export const targetsHandlers = [
+  http.get(`${API_BASE}/plugins/molq/destinations`, () =>
+    HttpResponse.json({
+      registryId: "mock-registry",
+      destinations: [{ id: "mock-hpc", name: "hpc-slurm", scheduler: "slurm" }],
+    }),
+  ),
   http.get(`${API_BASE}/targets`, () => {
     const list = Array.from(targets.values()).map(toResponse);
     return HttpResponse.json({ targets: list, total: list.length });
@@ -59,14 +46,9 @@ export const targetsHandlers = [
     const created: TargetResponse = {
       name: body.name,
       scratchRoot: body.scratchRoot,
-      scheduler: (body.scheduler ?? TargetResponse.scheduler.LOCAL) as TargetResponse.scheduler,
-      host: body.host ?? null,
-      port: body.port ?? null,
-      identityFile: body.identityFile ?? null,
-      sshOpts: body.sshOpts ?? [],
-      isRemote: !!body.host,
-      defaultResources: {},
-      defaultScheduling: {},
+      registryId: body.registryId,
+      clusterId: body.clusterId,
+      isRemote: body.clusterId != null,
     };
     targets.set(created.name, created);
     return HttpResponse.json(created, { status: 201 });
@@ -75,10 +57,7 @@ export const targetsHandlers = [
   http.delete(`${API_BASE}/targets/:name`, ({ params }) => {
     const name = String(params.name);
     if (!targets.has(name)) {
-      return HttpResponse.json(
-        { detail: `no compute target named '${name}'` },
-        { status: 404 },
-      );
+      return HttpResponse.json({ detail: `no compute target named '${name}'` }, { status: 404 });
     }
     targets.delete(name);
     return new HttpResponse(null, { status: 204 });
@@ -88,19 +67,14 @@ export const targetsHandlers = [
     const name = String(params.name);
     const target = targets.get(name);
     if (!target) {
-      return HttpResponse.json(
-        { detail: `no compute target named '${name}'` },
-        { status: 404 },
-      );
+      return HttpResponse.json({ detail: `no compute target named '${name}'` }, { status: 404 });
     }
     if (target.isRemote) {
       return HttpResponse.json({
         name,
         ok: false,
         error: "mock environment cannot reach remote hosts",
-        checks: [
-          { label: "command execution", ok: false, detail: "ssh disabled in mock" },
-        ],
+        checks: [{ label: "command execution", ok: false, detail: "ssh disabled in mock" }],
       });
     }
     return HttpResponse.json({

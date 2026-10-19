@@ -1,7 +1,3 @@
-import type { ReactNode } from "react";
-import { useState } from "react";
-import { experimentsApi, workflowApi } from "@/api";
-import type { ProjectSummary } from "@/app/types";
 import {
   Dialog,
   DialogContent,
@@ -9,16 +5,19 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
+  Input,
+  Label,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
+} from "@molcrafts/ui";
+import { Check } from "lucide-react";
+import type { ReactNode } from "react";
+import { useState } from "react";
+import { experimentsApi, workflowApi } from "@/api";
+import type { ProjectSummary } from "@/app/types";
 import { WorkbenchAction } from "@/components/workbench";
 
 /** Wire IR seeded onto a brand-new workflow so the canvas opens empty. */
@@ -120,7 +119,12 @@ export function CreateWorkflowDialog({
             )}
           </div>
           <DialogFooter>
-            <WorkbenchAction kind="primary" type="submit" disabled={isLoading || !projectId}>
+            <WorkbenchAction
+              icon={<Check aria-hidden />}
+              kind="primary"
+              type="submit"
+              disabled={isLoading || !projectId}
+            >
               {isLoading ? "Creating..." : "Create"}
             </WorkbenchAction>
           </DialogFooter>

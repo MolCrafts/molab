@@ -1,3 +1,4 @@
+import { Code as InlineCode } from "@molcrafts/ui";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   Blocks,
@@ -38,7 +39,7 @@ import { TreeMenuItems, type TreeNode, type TreeNodeAction, TreeView } from "@/a
 import { prefetchRenderer } from "@/app/renderers/lazyRenderers";
 import { defaultExecutionId } from "@/app/renderers/useRunViewer";
 import { experimentWorkflowLabel } from "@/app/state/api";
-import { executionOutputsQueryOptions, projectAssetsQueryOptions } from "@/app/state/entityQueries";
+import { executionOutputsQueryOptions } from "@/app/state/entityQueries";
 import type {
   ExperimentSummary,
   ObjectView,
@@ -51,7 +52,6 @@ import type {
 } from "@/app/types";
 import { useAlert, useConfirm } from "@/components/ConfirmDialog";
 import { LeftExplorer } from "@/components/layout/ExplorerShell";
-import { Code as InlineCode } from "@/components/ui/code";
 import { WorkbenchIconAction } from "@/components/workbench";
 import { countLabel } from "@/lib/count-label";
 import { getWorkspaceFs } from "@/lib/workspace-fs";
@@ -76,7 +76,7 @@ const statusTextClass = (status: SemanticStatus): string => {
     case "active":
     case "approved":
     case "succeeded":
-      return "font-medium text-success";
+      return "text-foreground";
     case "failed":
     case "rejected":
       return "font-medium text-destructive";
@@ -261,7 +261,7 @@ export const buildProjectNodes = (
         </CompactCount>
       ),
       onPrefetch: () => {
-        actions.onExpandProject?.(project.id);
+        if (!actions.pathContext.workspace?.isRemote) actions.onExpandProject?.(project.id);
         actions.onIntentProject?.(project.id);
       },
       onSelect: () => {
@@ -315,8 +315,14 @@ export const buildProjectNodes = (
           actions.writeDeniedReason,
         ),
       ],
-      // Always an array so the chevron shows; empty until expand loads experiments.
-      emptyChildLabel: projectExpanded ? EMPTY_COPY.entries.title : "Loading…",
+      // Chevron stays because children is always an array. The placeholder is
+      // only for the in-flight expand; a loaded project with no experiments
+      // shows nothing under the row.
+      emptyChildLabel: project.experimentsError
+        ? "Could not load experiments"
+        : projectExpanded
+          ? undefined
+          : "Loading…",
       children: project.experiments.map((experiment) => {
         const dataLoaded =
           actions.isExperimentExpanded?.(project.id, experiment.id) ?? experiment.runs.length > 0;
@@ -336,10 +342,16 @@ export const buildProjectNodes = (
           labelClassName: statusTextClass(experiment.status),
           icon: FlaskConical,
           iconClassName: "text-muted-foreground",
-          right: <CompactCount>{hasRunCount ? countLabel(runCount, "run") : "…"}</CompactCount>,
+          right: (
+            <CompactCount>
+              {experiment.runsError ? "!" : hasRunCount ? countLabel(runCount, "run") : "…"}
+            </CompactCount>
+          ),
           onPrefetch: () => {
-            actions.onExpandProject?.(project.id);
-            actions.onExpandExperiment?.(project.id, experiment.id);
+            if (!actions.pathContext.workspace?.isRemote) {
+              actions.onExpandProject?.(project.id);
+              actions.onExpandExperiment?.(project.id, experiment.id);
+            }
             actions.onIntentExperiment?.(project.id, experiment.id);
           },
           onSelect: () => {
@@ -404,7 +416,11 @@ export const buildProjectNodes = (
             ),
           ],
           // Tree open + data not loaded yet → "Loading…"; loaded empty → "No runs".
-          emptyChildLabel: dataLoaded ? EMPTY_COPY.runs.title : "Loading…",
+          emptyChildLabel: experiment.runsError
+            ? "Could not load runs · Refresh to retry"
+            : dataLoaded
+              ? EMPTY_COPY.runs.title
+              : "Loading…",
           children: experiment.runs.map((run) => ({
             id: run.id,
             selectionKey: itemKey({
@@ -807,9 +823,8 @@ export const ProjectsExplorer = ({
     onAddWorkspace: () => setAddWorkspaceOpen(true),
     onExpandProject,
     onExpandExperiment,
-    onIntentProject: (projectId) => {
+    onIntentProject: () => {
       prefetchRenderer("project");
-      void queryClient.prefetchQuery(projectAssetsQueryOptions(projectId));
     },
     onIntentExperiment: () => {
       prefetchRenderer("experiment");
@@ -859,8 +874,7 @@ export const ProjectsExplorer = ({
     }
   };
 
-  const workspaceScoped =
-    !snapshot.serveScope || snapshot.serveScope.kind === "workspace.root";
+  const workspaceScoped = !snapshot.serveScope || snapshot.serveScope.kind === "workspace.root";
   const nodes = workspaceScoped
     ? snapshot.workspaces.length >= 1
       ? buildWorkspaceGroupedNodes(
@@ -942,7 +956,7 @@ export const ProjectsExplorer = ({
   return (
     <>
       <LeftExplorer
-        title={workspaceScoped ? "Projects" : (snapshot.serveScope?.name ?? "Projects")}
+        title="Projects"
         actions={headerActions}
         blankMenu={<TreeMenuItems actions={backgroundActions} />}
       >

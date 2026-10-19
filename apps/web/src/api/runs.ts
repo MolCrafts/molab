@@ -45,6 +45,13 @@ export const runsApi = {
     artifactId: string,
     data: ArtifactPromoteRequest,
   ) => RunsService.promoteArtifact(projectId, experimentId, runId, executionId, artifactId, data),
+  getRunExecutionLogsWs: (
+    ws: string,
+    projectId: string,
+    experimentId: string,
+    runId: string,
+    executionId: string,
+  ) => RunsService.getRunExecutionLogsWs(projectId, experimentId, runId, executionId, ws),
   getRunExecutionLogs: (
     projectId: string,
     experimentId: string,

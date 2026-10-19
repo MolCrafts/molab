@@ -56,7 +56,6 @@ export const RunInspectorDetails = ({
       {selectedExecution && (
         <Section title="Selected execution">
           <Field label="Mode" value={selectedExecution.mode} />
-          <Field label="Backend" value={selectedExecution.backend ?? "—"} />
           <Field label="Cluster" value={selectedExecution.backendMetadata.cluster_name ?? "—"} />
           <Field label="Scheduler" value={selectedExecution.backendMetadata.scheduler ?? "—"} />
           <Field label="Profile" value={selectedExecution.backendMetadata.profile ?? "—"} />

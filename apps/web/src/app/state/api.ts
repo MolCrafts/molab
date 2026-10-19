@@ -49,7 +49,7 @@ export const mapProjects = (
     name: project.name,
     path: project.path,
     status: "active",
-    summary: project.description || "No description",
+    summary: project.description?.trim() ?? "",
     updatedAt: project.created,
     experimentCount: project.experimentCount ?? null,
     ref: project.ref,

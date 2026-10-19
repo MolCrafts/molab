@@ -82,9 +82,7 @@ export const buildSelectionFromLocation = (
     };
   }
 
-  const scopedTaskMatch = pathname.match(
-    /^\/experiments\/([^/]+)\/runs\/([^/]+)\/tasks\/([^/]+)$/,
-  );
+  const scopedTaskMatch = pathname.match(/^\/experiments\/([^/]+)\/runs\/([^/]+)\/tasks\/([^/]+)$/);
   if (scopedTaskMatch) {
     return {
       objectType: "task",

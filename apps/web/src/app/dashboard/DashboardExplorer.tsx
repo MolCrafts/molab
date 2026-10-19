@@ -2,18 +2,74 @@ import { ArrowUpRight, Circle, FolderOpen } from "lucide-react";
 import type { JSX } from "react";
 import { Link } from "react-router-dom";
 
-import { runPath } from "@/app/entities/paths";
+import { projectPath, runPath } from "@/app/entities/paths";
 import type { NavigationExplorerProps } from "@/app/navigation/sections";
-import { runPresentationStatus } from "@/app/runs/projections";
+import { runActivityAt, runPresentationStatus } from "@/app/runs/projections";
 import { groupForStatus } from "@/app/runs/statusGroups";
+import type { WorkspaceRunRow } from "@/app/runs/types";
 import { useWorkspaceRuns } from "@/app/runs/useWorkspaceRuns";
 import { LeftExplorer } from "@/components/layout/ExplorerShell";
 import { WorkbenchIconAction } from "@/components/workbench";
 import { cn } from "@/lib/utils";
 
-const SectionLabel = ({ children }: { children: string }): JSX.Element => (
-  <h3 className="px-1 pb-1 pt-3 text-micro font-medium uppercase tracking-wide text-muted-foreground">
-    {children}
+/** Sample size for the explorer shortcut. The heading count is the full set. */
+export const RUNNING_FAILED_LIMIT = 3;
+export const PROJECT_LIMIT = 6;
+
+const activityValue = (run: WorkspaceRunRow): number => {
+  const parsed = Date.parse(runActivityAt(run));
+  return Number.isNaN(parsed) ? 0 : parsed;
+};
+
+/**
+ * Running and failed runs, failed first, then newest activity.
+ * This is a sample, not a user pin list.
+ */
+export const selectRunningAndFailed = (
+  rows: readonly WorkspaceRunRow[],
+): { visible: WorkspaceRunRow[]; total: number } => {
+  const ranked = rows
+    .filter((run) => {
+      const group = groupForStatus(runPresentationStatus(run));
+      return group === "running" || group === "failed";
+    })
+    .map((run) => ({
+      run,
+      failed: groupForStatus(runPresentationStatus(run)) === "failed",
+      at: activityValue(run),
+    }))
+    .sort(
+      (left, right) =>
+        Number(right.failed) - Number(left.failed) ||
+        right.at - left.at ||
+        left.run.id.localeCompare(right.run.id),
+    );
+  return {
+    visible: ranked.slice(0, RUNNING_FAILED_LIMIT).map(({ run }) => run),
+    total: ranked.length,
+  };
+};
+
+const moreLabel = (hidden: number, noun: "run" | "project"): string => {
+  const word = hidden === 1 ? noun : `${noun}s`;
+  return `View ${hidden} more ${word}`;
+};
+
+export const projectDetail = (
+  summary: string,
+  experimentCount: number | null | undefined,
+): string => {
+  if (summary) return summary;
+  if (experimentCount == null) return "";
+  if (experimentCount === 1) return "1 experiment";
+  if (experimentCount === 0) return "No experiments yet";
+  return `${experimentCount} experiments`;
+};
+
+const SectionLabel = ({ children, count }: { children: string; count: number }): JSX.Element => (
+  <h3 className="flex items-baseline justify-between gap-2 px-1 pt-3 pb-1 text-label font-medium text-foreground">
+    <span className="min-w-0 text-balance">{children}</span>
+    <span className="shrink-0 tabular-nums text-muted-foreground">{count}</span>
   </h3>
 );
 
@@ -44,23 +100,34 @@ const ExplorerLink = ({
       )}
     />
     <span className="min-w-0 flex-1">
-      <span className="block truncate text-label font-medium text-foreground">{title}</span>
-      <span className="block truncate text-micro text-muted-foreground">{detail}</span>
+      <span className="block truncate text-body font-medium text-foreground" title={title}>
+        {title}
+      </span>
+      {detail ? (
+        <span className="block truncate text-label text-muted-foreground" title={detail}>
+          {detail}
+        </span>
+      ) : null}
     </span>
-    <ArrowUpRight className="mt-1 size-3 shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100" />
+    <ArrowUpRight className="mt-1 size-3 shrink-0 text-muted-foreground opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100" />
+  </Link>
+);
+
+const MoreLink = ({ to, children }: { to: string; children: string }): JSX.Element => (
+  <Link
+    to={to}
+    className="block min-w-0 truncate rounded-control px-1 py-1 text-label text-foreground outline-none hover:underline focus-visible:ring-1 focus-visible:ring-ring"
+  >
+    {children}
   </Link>
 );
 
 export const DashboardExplorer = ({ snapshot }: NavigationExplorerProps): JSX.Element => {
   const { rows } = useWorkspaceRuns();
-  const activeWorkspace = snapshot.workspaces.find((workspace) => workspace.active) ??
-    snapshot.workspaces[0] ?? { label: "Workspace", unreachable: false, isRemote: false };
-  const pinnedRuns = rows
-    .filter((run) => {
-      const group = groupForStatus(runPresentationStatus(run));
-      return group === "running" || group === "failed";
-    })
-    .slice(0, 3);
+  const runs = selectRunningAndFailed(rows);
+  const hiddenRuns = runs.total - runs.visible.length;
+  const projects = snapshot.projects.slice(0, PROJECT_LIMIT);
+  const hiddenProjects = snapshot.projects.length - projects.length;
 
   const actions = (
     <WorkbenchIconAction label="Open projects" asChild>
@@ -73,51 +140,42 @@ export const DashboardExplorer = ({ snapshot }: NavigationExplorerProps): JSX.El
   return (
     <LeftExplorer title="Workspace" actions={actions}>
       <div className="space-y-1">
-        <div className="border-b border-border/70 px-1 pb-2">
-          <p className="truncate text-label font-medium text-foreground">{activeWorkspace.label}</p>
-          <p
-            className={cn(
-              "mt-1 flex items-center gap-2 text-micro",
-              activeWorkspace.unreachable
-                ? "text-status-failed-foreground"
-                : "text-status-completed-foreground",
-            )}
-          >
-            <span className="size-1.5 rounded-full bg-current" aria-hidden />
-            {activeWorkspace.isRemote ? "Remote workspace" : "Local workspace"} ·{" "}
-            {activeWorkspace.unreachable ? "unavailable" : "connected"}
-          </p>
-        </div>
-
-        {pinnedRuns.length > 0 ? (
+        {runs.total > 0 ? (
           <>
-            <SectionLabel>Pinned</SectionLabel>
-            {pinnedRuns.map((run) => {
+            <SectionLabel count={runs.total}>Running and failed</SectionLabel>
+            {runs.visible.map((run) => {
               const group = groupForStatus(runPresentationStatus(run));
-              const statusWord =
-                group === "running" ? "Running" : group === "failed" ? "Failed" : null;
+              const statusWord = group === "running" ? "Running" : "Failed";
               return (
                 <ExplorerLink
-                  key={run.id}
+                  key={`${run.workspaceKey}:${run.id}`}
                   to={runPath(run.projectId, run.experimentId, run.id)}
                   title={run.name || run.id}
                   detail={[statusWord, run.experimentName].filter(Boolean).join(" · ")}
-                  tone={group === "running" ? "running" : group === "failed" ? "failed" : "default"}
+                  tone={group === "running" ? "running" : "failed"}
                 />
               );
             })}
+            {hiddenRuns > 0 ? <MoreLink to="/runs">{moreLabel(hiddenRuns, "run")}</MoreLink> : null}
           </>
         ) : null}
 
-        <SectionLabel>Projects</SectionLabel>
-        {snapshot.projects.slice(0, 6).map((project) => (
-          <ExplorerLink
-            key={project.id}
-            to={`/projects/${encodeURIComponent(project.id)}`}
-            title={project.name}
-            detail={project.summary || `${project.experimentCount ?? 0} experiments`}
-          />
-        ))}
+        <SectionLabel count={snapshot.projects.length}>Projects</SectionLabel>
+        {projects.length === 0 ? (
+          <p className="px-1 text-label text-muted-foreground">No projects yet.</p>
+        ) : (
+          projects.map((project) => (
+            <ExplorerLink
+              key={project.id}
+              to={projectPath(project.id)}
+              title={project.name}
+              detail={projectDetail(project.summary, project.experimentCount)}
+            />
+          ))
+        )}
+        {hiddenProjects > 0 ? (
+          <MoreLink to="/projects">{moreLabel(hiddenProjects, "project")}</MoreLink>
+        ) : null}
       </div>
     </LeftExplorer>
   );

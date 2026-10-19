@@ -1,3 +1,4 @@
+import { Table, TableBody, TableCell, TableRow } from "@molcrafts/ui";
 import { useQuery } from "@tanstack/react-query";
 import {
   Archive,
@@ -6,6 +7,7 @@ import {
   FlaskConical,
   FolderKanban,
   Play,
+  Trash2,
   Workflow,
 } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
@@ -22,26 +24,27 @@ import {
   EntityPage,
   InventoryCanvas,
   OverviewSurface,
-  StatusBreakdown,
   StatusDistribution,
-  StatusLegend,
+  StatusLedger,
 } from "@/app/components/entity";
-import { successRate } from "@/app/renderers/dashboardData";
+import { DashboardWidgetBody, rollupExecutions } from "@/app/dashboard/dashboardWidgets";
+import { defaultWidgets, widgetTitle } from "@/app/dashboard/layout";
 import {
   buildProjectWorkbenchData,
   experimentRunCompleteness,
   projectSnapshotCompleteness,
 } from "@/app/renderers/entityWorkbenchData";
+import { workspaceRunsApi } from "@/app/runs/api";
 import { experimentWorkflowLabel } from "@/app/state/api";
 import { projectAssetsQueryOptions } from "@/app/state/entityQueries";
 import { useNavigationState } from "@/app/state/useNavigationState";
+import { getWorkspaceQueryScope } from "@/app/state/workspaceSwitchEvents";
 import type {
   ApiAssetResponse,
   ExperimentSummary,
   ProjectView,
   ScopedRendererProps,
 } from "@/app/types";
-import { Table, TableBody, TableCell, TableRow } from "@/components/ui/table";
 import {
   WorkbenchAction,
   WorkbenchIconAction,
@@ -71,10 +74,20 @@ export const ProjectViewer = ({
 
   const projectId = selection.objectId;
   const project = snapshot.projects.find((p) => p.id === projectId);
+  const requestedView: ProjectView =
+    selection.objectType === "project" ? (selection.projectView ?? "overview") : "overview";
+  const activeTab: ProjectView = requestedView;
   const assetsQuery = useQuery({
     ...projectAssetsQueryOptions(projectId),
-    enabled: Boolean(projectId),
+    enabled: Boolean(projectId) && activeTab === "assets",
   });
+  const overviewRuns = useQuery({
+    queryKey: ["project-activity", getWorkspaceQueryScope(), projectId],
+    queryFn: () => workspaceRunsApi.listRuns({ limit: 1000 }),
+    enabled: Boolean(projectId) && activeTab === "overview",
+    staleTime: 30_000,
+  });
+  const overviewRows = (overviewRuns.data?.runs ?? []).filter((run) => run.projectId === projectId);
   const projectAssets = assetsQuery.data ?? [];
   const projectAssetsPending = assetsQuery.isPending;
   const projectAssetsError = assetsQuery.error
@@ -82,8 +95,6 @@ export const ProjectViewer = ({
       ? assetsQuery.error.message
       : "Failed to load project assets"
     : null;
-  const activeTab: ProjectView =
-    selection.objectType === "project" ? (selection.projectView ?? "overview") : "overview";
   const setProjectTab = useCallback(
     (value: string): void => {
       const projectView: ProjectView =
@@ -238,43 +249,30 @@ export const ProjectViewer = ({
   const experimentColumns: DataTableColumn<ExperimentSummary>[] = [
     {
       key: "name",
-      header: "Experiment",
+      header: "Name",
       cell: (exp) => (
-        <div className="flex items-center gap-3">
-          <div className="flex h-control-compact w-control-compact items-center justify-center text-muted-foreground">
-            <FlaskConical className="size-icon-sm" />
-          </div>
-          <div className="min-w-0">
-            <div className="truncate text-body-lg font-medium text-foreground">{exp.name}</div>
-            <div className="flex items-center gap-hairline font-mono text-micro text-muted-foreground">
-              <span className="truncate">{exp.id.substring(0, 12)}</span>
-              <CopyButton value={exp.id} label="experiment ID" className="size-4-lg" />
-            </div>
-          </div>
+        <div className="flex min-w-0 items-center gap-2" title={`${exp.name} · ${exp.id}`}>
+          <FlaskConical className="size-icon-sm shrink-0 text-muted-foreground" />
+          <span className="truncate text-body font-medium text-foreground">{exp.name}</span>
         </div>
       ),
     },
     {
       key: "runs",
       header: "Runs",
-      width: "w-56",
+      width: "w-40",
       cell: (exp) => {
         const rollup = workbench.experiments.find((item) => item.experiment.id === exp.id);
         const loadedRunCount = rollup?.counts.total ?? 0;
         const { runCount, runsComplete } = experimentRunCompleteness(exp, loadedRunCount);
-        if (runsComplete && runCount === 0) {
-          return <span className="text-label text-muted-foreground">No runs</span>;
-        }
-        if (!runsComplete) {
+        if (!runsComplete || runCount === 0) {
           return (
-            <div className="flex items-baseline gap-2">
-              <span className="font-medium tabular-nums text-foreground">
-                {runCount ?? (loadedRunCount > 0 ? `≥${loadedRunCount}` : "—")}
-              </span>
-              <span className="text-micro text-muted-foreground">
-                {runCount === null ? "loaded so far" : "status loads on open"}
-              </span>
-            </div>
+            <span
+              className="tabular-nums text-foreground"
+              title={runCount === null ? "Loaded runs; total unknown" : undefined}
+            >
+              {runCount ?? (loadedRunCount > 0 ? `≥${loadedRunCount}` : "—")}
+            </span>
           );
         }
         return (
@@ -292,12 +290,12 @@ export const ProjectViewer = ({
     {
       key: "workflow",
       header: "Tasks",
-      width: "w-24",
+      width: "w-20",
+      align: "right",
       cell: (exp) => {
         const rollup = workbench.experiments.find((item) => item.experiment.id === exp.id);
         return (
-          <span className="inline-flex items-center gap-2 text-label tabular-nums text-muted-foreground">
-            <Workflow className="size-icon-sm" />
+          <span className="text-label tabular-nums text-muted-foreground">
             {rollup?.workflowSummary.exists ? rollup.workflowSummary.taskCount : "—"}
           </span>
         );
@@ -308,7 +306,10 @@ export const ProjectViewer = ({
       header: "Updated",
       width: "w-40",
       cell: (exp) => (
-        <span className="text-label text-muted-foreground" title={exp.updatedAt}>
+        <span
+          className="whitespace-nowrap text-label tabular-nums text-muted-foreground"
+          title={exp.updatedAt}
+        >
           {formatDateTime(exp.updatedAt)}
         </span>
       ),
@@ -391,77 +392,17 @@ export const ProjectViewer = ({
   const createRunExperiment = createRunExperimentId
     ? snapshot.experiments.find((experiment) => experiment.id === createRunExperimentId)
     : null;
-  const projectSuccessRate = successRate(workbench.counts);
   const experimentCountValue =
     completeness.experimentCount ??
     (projectExperiments.length > 0 ? `≥${projectExperiments.length}` : "—");
   const runCountValue =
     completeness.runCount ?? (projectRuns.length > 0 ? `≥${projectRuns.length}` : "—");
 
-  // The fold answers "which experiment needs me": one status mix per experiment,
-  // read as shape. The Experiments tab keeps the full inventory and row actions.
-  // Status posture is only claimed once every child run is loaded — a partial
-  // snapshot must never look complete.
-  const experimentGroups = workbench.experiments.map((rollup) => ({
-    id: rollup.experiment.id,
-    label: rollup.experiment.name,
-    detail: [
-      rollup.workflowSummary.exists ? `${rollup.workflowSummary.taskCount} tasks` : "no workflow",
-      rollup.experiment.updatedAt ? formatDateTime(rollup.experiment.updatedAt) : null,
-    ]
-      .filter(Boolean)
-      .join(" · "),
-    counts: rollup.counts,
-    onSelect: () => navigateToExperiment(rollup.experiment.id),
-  }));
-
-  const overviewWithNav = (
-    <OverviewSurface>
-      <DashboardCanvas>
-        {completeness.experimentsComplete && completeness.experimentCount === 0 ? (
-          <EmptyState
-            title={EMPTY_COPY.experiments.title}
-            description={EMPTY_COPY.experiments.description}
-            icon={<FlaskConical className="size-icon-lg" aria-hidden />}
-          />
-        ) : (
-          <DashboardCard title="Experiments">
-            <StatusLegend className="mb-3" />
-            {completeness.runsComplete && projectSuccessRate !== null ? (
-              <p className="mb-3 font-mono text-micro tabular-nums text-muted-foreground">
-                {projectSuccessRate.toFixed(0)}% of terminal runs succeeded
-              </p>
-            ) : null}
-            {!completeness.runsComplete ? (
-              <p className="mb-3 text-micro text-muted-foreground">
-                Run status appears after all experiment runs load
-              </p>
-            ) : null}
-            {experimentGroups.length > 0 ? (
-              <StatusBreakdown groups={experimentGroups} />
-            ) : (
-              <p className="text-micro text-muted-foreground">Loading experiments…</p>
-            )}
-          </DashboardCard>
-        )}
-      </DashboardCanvas>
-    </OverviewSurface>
-  );
-
   return (
     <>
       <EntityPage
         icon={FolderKanban}
         title={project.name}
-        meta={
-          <span>
-            {projectAssetsError
-              ? "assets unavailable"
-              : projectAssetsPending
-                ? "assets …"
-                : `${projectAssets.length} assets`}
-          </span>
-        }
         actions={<CopyButton value={project.id} label="project ID" />}
         activeTab={activeTab}
         onActiveTabChange={setProjectTab}
@@ -469,7 +410,59 @@ export const ProjectViewer = ({
           {
             value: "overview",
             label: "Overview",
-            content: overviewWithNav,
+            content: (
+              <OverviewSurface>
+                <DashboardCanvas>
+                  <p className="text-label text-muted-foreground">
+                    <span className="tabular-nums text-foreground">{experimentCountValue}</span>{" "}
+                    experiments
+                    <span className="mx-2" aria-hidden>
+                      ·
+                    </span>
+                    <span className="tabular-nums text-foreground">{runCountValue}</span> runs
+                  </p>
+                  {overviewRuns.error ? (
+                    <WorkbenchOperationState
+                      kind="error"
+                      density="compact"
+                      title="Could not load project activity"
+                      detail={overviewRuns.error.message}
+                      action={<WorkbenchRetryAction onClick={() => void overviewRuns.refetch()} />}
+                    />
+                  ) : overviewRuns.isPending ? (
+                    <WorkbenchOperationState
+                      kind="loading"
+                      density="compact"
+                      title="Loading project activity…"
+                      skeletonRows={3}
+                    />
+                  ) : (
+                    <>
+                      <StatusLedger
+                        counts={rollupExecutions(overviewRows)}
+                        unit={["execution", "executions"]}
+                        partial={overviewRuns.data?.truncated}
+                      />
+                      <div className="grid min-w-0 gap-4 lg:grid-cols-2">
+                        {defaultWidgets()
+                          .filter((widget) =>
+                            ["run-duration", "needs-attention"].includes(widget.kind),
+                          )
+                          .map((widget) => (
+                            <DashboardCard key={widget.id} title={widgetTitle(widget.kind)}>
+                              <DashboardWidgetBody
+                                widget={widget}
+                                rows={overviewRows}
+                                inventoryBlocked={overviewRuns.data?.truncated}
+                              />
+                            </DashboardCard>
+                          ))}
+                      </div>
+                    </>
+                  )}
+                </DashboardCanvas>
+              </OverviewSurface>
+            ),
           },
           {
             value: "experiments",
@@ -478,12 +471,9 @@ export const ProjectViewer = ({
                 ? `Experiments (${completeness.experimentCount ?? projectExperiments.length})`
                 : "Experiments",
             content: (
-              <OverviewSurface surfaceClassName="flex min-h-0 flex-col overflow-hidden">
-                <InventoryCanvas fill className="min-h-0 flex-1">
-                  <div
-                    className="flex min-h-0 flex-1 flex-col"
-                    aria-busy={deletingExperimentId !== null}
-                  >
+              <OverviewSurface>
+                <InventoryCanvas>
+                  <div aria-busy={deletingExperimentId !== null}>
                     {deletingExperimentId && (
                       <WorkbenchOperationState
                         kind="running"
@@ -507,7 +497,22 @@ export const ProjectViewer = ({
                         }
                       />
                     )}
-                    <div className="min-h-0 flex-1 overflow-auto">
+                    {project?.experimentsError ? (
+                      <WorkbenchOperationState
+                        kind="error"
+                        title="Could not load experiments"
+                        detail={project.experimentsError}
+                        action={<WorkbenchRetryAction onClick={onRefresh} />}
+                      />
+                    ) : !completeness.experimentsComplete &&
+                      projectExperiments.length === 0 &&
+                      (completeness.experimentCount ?? 0) > 0 ? (
+                      <WorkbenchOperationState
+                        kind="loading"
+                        title="Loading experiments…"
+                        skeletonRows={3}
+                      />
+                    ) : (
                       <DataTable
                         columns={experimentColumns}
                         data={projectExperiments}
@@ -522,7 +527,7 @@ export const ProjectViewer = ({
                           />
                         }
                       />
-                    </div>
+                    )}
                   </div>
                 </InventoryCanvas>
               </OverviewSurface>
@@ -612,6 +617,7 @@ export const ProjectViewer = ({
                         </p>
                       </div>
                       <WorkbenchAction
+                        icon={<Trash2 aria-hidden />}
                         kind="danger"
                         size="compact"
                         onClick={handleDelete}

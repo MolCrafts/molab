@@ -30,15 +30,14 @@ const activity = (id: string, x: number, y: number, w = 4, h = 2): DashboardWidg
 });
 
 describe("dashboard layout", () => {
-  it("starts from the six workspace panels", () => {
+  it("starts from five panels; the status ledger leads the page instead", () => {
     const widgets = defaultWidgets();
     expect(widgets.map((widget) => widget.kind)).toEqual([
-      "execution-status",
       "activity",
-      "backends",
-      "run-duration",
-      "schedule",
       "needs-attention",
+      "run-duration",
+      "backends",
+      "schedule",
     ]);
     expect(widgets.some((left) => widgets.some((right) => overlaps(left, right)))).toBe(false);
   });
@@ -53,6 +52,38 @@ describe("dashboard layout", () => {
     expect(
       parseLayout(JSON.stringify({ version: 2, widgets: [] })).map((widget) => widget.id),
     ).toEqual(defaultWidgets().map((widget) => widget.id));
+  });
+
+  it("keeps edited options and drops a chart mark an older layout stored", () => {
+    const kept = parseLayout(
+      JSON.stringify({
+        version: 1,
+        widgets: [
+          {
+            id: "execution-status",
+            kind: "execution-status",
+            x: 0,
+            y: 0,
+            w: 12,
+            h: 2,
+            options: { statuses: ["failed"], mark: "bar" },
+          },
+          {
+            id: "activity",
+            kind: "activity",
+            x: 0,
+            y: 3,
+            w: 12,
+            h: 3,
+            options: { window: "7d", events: "starts", mark: "plot" },
+          },
+        ],
+      }),
+    );
+    const status = kept.find((widget) => widget.id === "execution-status");
+    const activityWidget = kept.find((widget) => widget.id === "activity");
+    expect(status?.options).toEqual({ statuses: ["failed"] });
+    expect(activityWidget?.options).toEqual({ window: "7d", events: "starts" });
   });
 
   it("keeps a valid widget and repairs its options", () => {
@@ -116,6 +147,73 @@ describe("dashboard layout", () => {
     });
     expect(removeWidget(added, "a").map((widget) => widget.id)).toEqual(["extra"]);
     expect(removeWidget(added, "a")[0]?.y).toBe(0);
+  });
+
+  it("refuses a second widget of the same kind", () => {
+    const start = [activity("a", 0, 0, 6, 3)];
+    const added = addWidget(start, "schedule", "extra");
+    const again = addWidget(added, "schedule", "again");
+    expect(again.map((widget) => widget.id)).toEqual(["a", "extra"]);
+  });
+
+  it("adopts the composed default over the previous shipped default", () => {
+    const previous = {
+      version: 1,
+      widgets: [
+        ["execution-status", 0, 0, 7, 3],
+        ["needs-attention", 7, 0, 5, 3],
+        ["activity", 0, 3, 12, 3],
+        ["backends", 0, 6, 6, 3],
+        ["run-duration", 6, 6, 6, 3],
+        ["schedule", 0, 9, 12, 5],
+      ].map(([kind, x, y, w, h]) => ({ id: kind, kind, x, y, w, h, options: {} })),
+    };
+    const widgets = parseLayout(JSON.stringify(previous));
+    expect(widgets.map((widget) => [widget.kind, widget.x, widget.y, widget.w, widget.h])).toEqual(
+      defaultWidgets().map((widget) => [widget.kind, widget.x, widget.y, widget.w, widget.h]),
+    );
+  });
+
+  it("adopts the composed default when storage still has the untouched mosaic", () => {
+    const legacy = {
+      version: 1,
+      widgets: [
+        { id: "execution-status", kind: "execution-status", x: 0, y: 0, w: 6, h: 4, options: {} },
+        {
+          id: "activity",
+          kind: "activity",
+          x: 6,
+          y: 0,
+          w: 6,
+          h: 3,
+          options: { window: "24h", events: "both" },
+        },
+        { id: "backends", kind: "backends", x: 0, y: 4, w: 6, h: 4, options: { limit: 6 } },
+        {
+          id: "run-duration",
+          kind: "run-duration",
+          x: 6,
+          y: 3,
+          w: 6,
+          h: 5,
+          options: { scope: "finished" },
+        },
+        { id: "schedule", kind: "schedule", x: 0, y: 8, w: 8, h: 5, options: { limit: 8 } },
+        {
+          id: "needs-attention",
+          kind: "needs-attention",
+          x: 8,
+          y: 8,
+          w: 4,
+          h: 5,
+          options: { statuses: ["failed"], limit: 6 },
+        },
+      ],
+    };
+    const widgets = parseLayout(JSON.stringify(legacy));
+    expect(widgets.map((widget) => [widget.kind, widget.x, widget.y, widget.w, widget.h])).toEqual(
+      defaultWidgets().map((widget) => [widget.kind, widget.x, widget.y, widget.w, widget.h]),
+    );
   });
 
   it("round-trips through storage json", () => {

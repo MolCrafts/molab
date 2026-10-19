@@ -28,7 +28,7 @@ dependencies = [
     "argon2-cffi>=23.1.0",
     "molcrafts-mollog>=1.0.0",
     "molcrafts-molcfg>=1.2.0",
-    "molcrafts-molq>=0.2.0",
+    "molcrafts-molq>=0.9.0",
     # Science plugins (molab.plugins.molpy / molvis / submit_molq) import
     # these products directly. molrs is reached only through molpy.
     "molcrafts-molpy>=0.16.0",

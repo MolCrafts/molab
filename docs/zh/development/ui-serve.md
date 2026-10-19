@@ -11,7 +11,7 @@ Python 安装和 UI 编译是两件事。默认的 `pip` / `uv pip` / `python -m
 npm install                         # 仓库根目录，只需一次
 uv pip install -e ".[dev]"          # Python 也只需一次（依赖变了才重装）
 
-molab serve --dev -ws ./lab --port 8000
+molab serve ./lab --dev --port 8000
 ```
 
 打开打印出来的 **Dev UI**（默认 <http://localhost:5173>），不要打开 API
@@ -26,7 +26,7 @@ molab serve --dev -ws ./lab --port 8000
 
 ```bash
 npm run build:web                   # 写入 src/molab/dist/
-molab serve -ws ./lab --port 8000  # 打开 http://localhost:8000
+molab serve ./lab --port 8000  # 打开 http://localhost:8000
 ```
 
 可编辑安装读的就是源码树里的 `src/molab/dist/`。跑完
@@ -55,7 +55,7 @@ apps/web/src/  →  npm run build:web  →  src/molab/dist/  →  setuptools  �
 
 ```bash
 uv pip install git+https://github.com/MolCrafts/molab
-molab serve -ws ./lab --port 8000
+molab serve ./lab --port 8000
 ```
 
 ## 用词

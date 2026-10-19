@@ -230,8 +230,30 @@ describe("buildExperimentWorkbenchData", () => {
     );
     expect(data.axisBreakdowns.map((axis) => axis.key)).toEqual(["mode"]);
     expect(data.axisBreakdowns[0]?.buckets).toEqual([
-      { value: "block", counts: expect.objectContaining({ total: 1, succeeded: 1 }) },
-      { value: "random", counts: expect.objectContaining({ total: 1, failed: 1 }) },
+      expect.objectContaining({
+        value: "block",
+        unset: false,
+        counts: expect.objectContaining({ total: 1, succeeded: 1 }),
+      }),
+      expect.objectContaining({
+        value: "random",
+        unset: false,
+        counts: expect.objectContaining({ total: 1, failed: 1 }),
+      }),
+    ]);
+  });
+
+  it("files a run that never set a swept parameter under unset, not as a value", () => {
+    const data = buildExperimentWorkbenchData(
+      experiment("declared", { lr: [0.001, 0.0005] }),
+      [run("run-a", "failed", { batch: 16 }), run("run-b", "succeeded", { batch: 32 })],
+      workflow,
+    );
+    const lr = data.axisBreakdowns.find((axis) => axis.key === "lr");
+    expect(lr?.buckets.map((bucket) => [bucket.value, bucket.unset, bucket.runs.length])).toEqual([
+      ["0.0005", false, 0],
+      ["0.001", false, 0],
+      ["unset", true, 2],
     ]);
   });
 });

@@ -354,9 +354,11 @@ class TreeMonitor:
         *,
         project_filter: str | None = None,
         experiment_filter: str | None = None,
+        run_ids: frozenset[str] | None = None,
         refresh_interval: float = 2.0,
         console: Console | None = None,
     ) -> None:
+        self._run_ids = run_ids
         self._project_filter = project_filter
         self._experiment_filter = experiment_filter
         self._refresh_interval = refresh_interval
@@ -372,6 +374,7 @@ class TreeMonitor:
                 workspace,
                 project_filter=self._project_filter,
                 experiment_filter=self._experiment_filter,
+                run_ids=self._run_ids,
             )
             ids_present: set[NodePath] = set()
 

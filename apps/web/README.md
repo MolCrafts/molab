@@ -14,7 +14,7 @@ Daily UI against a real molab API is **one command** from the repo root
 (after `uv pip install -e ".[dev]"`):
 
 ```bash
-molab serve --dev -ws ./lab --port 8000
+molab serve ./lab --dev --port 8000
 ```
 
 Open the printed **Dev UI** (`:5173`), not the API port. Full three-path

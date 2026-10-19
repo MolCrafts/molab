@@ -1,4 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  type QueryClient,
+  queryOptions,
+  useQueries,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
+import { useCallback, useMemo, useState } from "react";
 import {
   experimentsApi,
   projectsApi,
@@ -15,14 +22,8 @@ import {
   mapRuns,
   mapWorkflows,
 } from "@/app/state/api";
-import { pulseSync } from "@/app/state/syncPulse";
-import type {
-  LeftPanelView,
-  ProjectSummary,
-  ServeScope,
-  WorkspaceSnapshot,
-  WorkspaceTreeNode,
-} from "@/app/types";
+import type { LeftPanelView, ProjectSummary, ServeScope, WorkspaceSnapshot } from "@/app/types";
+import { reportStatus } from "@/lib/status-report";
 import {
   direntsToTreeNodes,
   getWorkspaceFs,
@@ -31,6 +32,7 @@ import {
   treeRootFromListing,
 } from "@/lib/workspace-fs";
 import type { WorkspacePath } from "@/lib/workspace-path";
+import { getWorkspaceQueryScope } from "./workspaceSwitchEvents";
 export type WorkspaceStatus = "idle" | "loading" | "ready" | "error";
 
 export interface WorkspaceState {
@@ -84,59 +86,18 @@ export const slicesForView = (view: LeftPanelView | undefined): readonly Snapsho
 
 const WORKSPACE_TREE_BOOTSTRAP_DEPTH = 2;
 
-const expKey = (projectId: string, experimentId: string): string => `${projectId}/${experimentId}`;
-
 const fetchWorkspaceTree = async (): Promise<WorkspaceSnapshot["workspaceRoot"]> => {
-  try {
-    try {
-      const info = await workspaceApi.getWorkspaceInfo();
-      if (info.root) {
-        setWorkspaceFsRoot(info.root);
-      }
-    } catch {
-      // optional
-    }
-    const fs = getWorkspaceFs();
-    const children = await fs.listdir("", {
-      maxDepth: WORKSPACE_TREE_BOOTSTRAP_DEPTH,
-      // Catalog enrichment scans every run/execution for assets.json — seconds
-      // on a real lab, and depth-2 from the workspace root has no asset files.
-    });
-    return treeRootFromListing(fs.root ?? "/", children);
-  } catch (err) {
-    console.warn("Workspace tree unavailable:", err);
-    return null;
-  }
+  const info = await workspaceApi.getWorkspaceInfo();
+  if (info.root) setWorkspaceFsRoot(info.root);
+  const fs = getWorkspaceFs();
+  return treeRootFromListing(
+    fs.root ?? "/",
+    await fs.listdir("", { maxDepth: WORKSPACE_TREE_BOOTSTRAP_DEPTH }),
+  );
 };
 
-const findTreeNode = (root: WorkspaceTreeNode, path: string): WorkspaceTreeNode | null => {
-  if (root.path === path) return root;
-  for (const child of root.children) {
-    if (child.path === path) return child;
-    if (child.kind === "directory" && path.startsWith(`${child.path}/`)) {
-      const hit = findTreeNode(child, path);
-      if (hit) return hit;
-    }
-  }
-  return null;
-};
-
-const fetchWorkspaces = async (): Promise<WorkspaceSnapshot["workspaces"]> => {
-  try {
-    return await workspacesApi.listWorkspaces();
-  } catch {
-    // Soft: list endpoint failed (backend down). Empty set; no console spam.
-    return [];
-  }
-};
-
-const fetchServeScope = async (): Promise<ServeScope | null> => {
-  try {
-    return await workspaceApi.getServeScope();
-  } catch {
-    return null;
-  }
-};
+const fetchWorkspaces = () => workspacesApi.listWorkspaces();
+const fetchServeScope = () => workspaceApi.getServeScope();
 
 /** Experiments and runs that live at a serve root below a project. */
 const fetchScopeDescendants = async (
@@ -175,21 +136,12 @@ const fetchProjectsList = async (
   if (workspaces.length === 1) {
     const ws = workspaces[0];
     if (ws.unreachable) return [];
-    try {
-      // Prefer flat /api/projects (active workspace) — same data, one RTT.
-      return mapProjects(await projectsApi.listProjects(), ws.key);
-    } catch {
-      return [];
-    }
+    return mapProjects(await projectsApi.listProjects(), ws.key);
   }
   const perWorkspace = await Promise.all(
     workspaces.map(async (ws) => {
       if (ws.unreachable) return [];
-      try {
-        return mapProjects(await projectsWsApi.listProjects(ws.key), ws.key);
-      } catch {
-        return [];
-      }
+      return mapProjects(await projectsWsApi.listProjects(ws.key), ws.key);
     }),
   );
   return perWorkspace.flat();
@@ -204,12 +156,7 @@ const activeWorkspaceProjects = (snapshot: WorkspaceSnapshot): ProjectSummary[] 
 const fetchAllAssets = async (projects: ProjectSummary[]): Promise<WorkspaceSnapshot["assets"]> => {
   const projectAssets = await Promise.all(
     projects.map(async (project) => {
-      try {
-        return mapAssets(await projectsApi.listProjectAssets(project.id), project.id);
-      } catch (err) {
-        console.warn(`Failed to fetch assets for project ${project.id}:`, err);
-        return [];
-      }
+      return mapAssets(await projectsApi.listProjectAssets(project.id), project.id);
     }),
   );
   return Array.from(new Map(projectAssets.flat().map((item) => [item.id, item])).values());
@@ -227,12 +174,7 @@ const applySlicePatch = async (
     case "projectsList": {
       const serveScope = await fetchServeScope();
       const projects = await fetchProjectsList(current.workspaces);
-      let descendants: Partial<WorkspaceSnapshot> = {};
-      try {
-        descendants = await fetchScopeDescendants(serveScope);
-      } catch (err) {
-        console.warn("Serve-scope descendants unavailable:", err);
-      }
+      const descendants = await fetchScopeDescendants(serveScope);
       return { serveScope, projects, ...descendants };
     }
     case "assets":
@@ -261,21 +203,9 @@ export const fetchSlices = async (
 ): Promise<WorkspaceSnapshot> => {
   let next = current;
 
-  const loadSafe = async (
-    snapshot: WorkspaceSnapshot,
-    slice: SnapshotSlice,
-  ): Promise<Partial<WorkspaceSnapshot>> => {
-    try {
-      return await loadSlice(snapshot, slice);
-    } catch (err) {
-      console.warn(`Snapshot slice "${slice}" failed:`, err);
-      return {};
-    }
-  };
-
   const independent = INDEPENDENT_SLICES.filter((slice) => slices.includes(slice));
   if (independent.length > 0) {
-    const patches = await Promise.all(independent.map((slice) => loadSafe(next, slice)));
+    const patches = await Promise.all(independent.map((slice) => loadSlice(next, slice)));
     const merged = { ...next };
     for (const patch of patches) Object.assign(merged, patch);
     next = merged;
@@ -283,280 +213,225 @@ export const fetchSlices = async (
   }
 
   if (slices.includes("projectsList")) {
-    next = { ...next, ...(await loadSafe(next, "projectsList")) };
+    next = { ...next, ...(await loadSlice(next, "projectsList")) };
     onProgress?.(next);
   }
 
   if (slices.includes("assets")) {
-    next = { ...next, ...(await loadSafe(next, "assets")) };
+    next = { ...next, ...(await loadSlice(next, "assets")) };
     onProgress?.(next);
   }
 
   return next;
 };
 
+export const servedWorkspacesQueryOptions = (scope: string) =>
+  queryOptions({
+    queryKey: ["workspaces", scope],
+    queryFn: fetchWorkspaces,
+    staleTime: 30_000,
+  });
+
+export const workspaceCatalogQueryOptions = (client: QueryClient, scope: string) =>
+  queryOptions({
+    queryKey: ["workspace", scope, "catalog"],
+    queryFn: async () => {
+      // fetchQuery joins any in-flight refresh and honors invalidation; a captured
+      // workspaces.data value would race a concurrent served-set refresh.
+      const workspaces = await client.fetchQuery(servedWorkspacesQueryOptions(scope));
+      const { projects, serveScope, experiments, runs, workflows } = await fetchSlices(
+        { ...buildEmptySnapshot(), workspaces },
+        ["projectsList"],
+      );
+      return { projects, serveScope, experiments, runs, workflows };
+    },
+  });
+
 export const useWorkspaceState = (activeView?: LeftPanelView): WorkspaceState => {
-  const [snapshot, setSnapshot] = useState<WorkspaceSnapshot>(buildEmptySnapshot());
-  const [status, setStatus] = useState<WorkspaceStatus>("idle");
-  const [error, setError] = useState<Error | null>(null);
-  const inflightRef = useRef(false);
-  const queuedSlicesRef = useRef<SnapshotSlice[]>([]);
-  const loadedSlicesRef = useRef(new Set<SnapshotSlice>());
-  const snapshotRef = useRef(snapshot);
-  snapshotRef.current = snapshot;
-
-  // On-demand load tracking (entity tree). Cleared on full refresh, then
-  // re-populated by re-expanding whatever was open.
-  const projectsLoadedRef = useRef(new Set<string>());
-  const experimentsLoadedRef = useRef(new Set<string>());
-  // In-flight guards so a stuck "Loading…" re-trigger (TreeView still open
-  // after refresh) does not fan out duplicate remote requests.
-  const projectsLoadingRef = useRef(new Set<string>());
-  const experimentsLoadingRef = useRef(new Set<string>());
-  const assetsLoadedForViewRef = useRef(false);
-  // Force re-render when expand sets flip without snapshot change shape.
-  const [, bump] = useState(0);
+  const client = useQueryClient();
+  const scope = getWorkspaceQueryScope();
+  const baseKey = useMemo(() => ["workspace", scope] as const, [scope]);
+  const slices = slicesForView(activeView);
+  // These are user expansion choices. Server payloads live exclusively in Query.
+  const [projectIds, setProjectIds] = useState<string[]>([]);
+  const [experimentIds, setExperimentIds] = useState<[string, string][]>([]);
   const [dataEpoch, setDataEpoch] = useState(0);
-
-  const runFetch = useCallback(
-    (slices: readonly SnapshotSlice[], silent: boolean, force = false): Promise<void> => {
-      const needed = force
-        ? [...slices]
-        : slices.filter((slice) => !loadedSlicesRef.current.has(slice));
-      if (needed.length === 0) return Promise.resolve();
-      if (inflightRef.current) {
-        for (const slice of needed) {
-          if (!queuedSlicesRef.current.includes(slice)) queuedSlicesRef.current.push(slice);
-        }
-        return Promise.resolve();
+  const workspaces = useQuery(servedWorkspacesQueryOptions(scope));
+  const catalogOptions = workspaceCatalogQueryOptions(client, scope);
+  const catalog = useQuery({
+    ...catalogOptions,
+    enabled: slices.includes("projectsList") && workspaces.isSuccess,
+  });
+  const treeKey = [...baseKey, "tree"];
+  const tree = useQuery({
+    queryKey: treeKey,
+    queryFn: fetchWorkspaceTree,
+    enabled: slices.includes("workspaceTree"),
+  });
+  const assets = useQuery({
+    queryKey: [...baseKey, "assets"],
+    queryFn: async () => {
+      const freshCatalog = await client.fetchQuery(workspaceCatalogQueryOptions(client, scope));
+      const served = await client.fetchQuery(servedWorkspacesQueryOptions(scope));
+      return fetchAllAssets(
+        activeWorkspaceProjects({ ...buildEmptySnapshot(), ...freshCatalog, workspaces: served }),
+      );
+    },
+    enabled: activeView === "asset" && catalog.isSuccess,
+  });
+  const projectOptions = useCallback(
+    (id: string) => ({
+      queryKey: [...baseKey, "project", id],
+      queryFn: () => experimentsApi.listExperiments(id),
+    }),
+    [baseKey],
+  );
+  const experimentOptions = useCallback(
+    (projectId: string, experimentId: string) => ({
+      queryKey: [...baseKey, "experiment", projectId, experimentId],
+      queryFn: () => runsApi.listRuns(projectId, experimentId),
+    }),
+    [baseKey],
+  );
+  const projects = useQueries({
+    queries: projectIds.map(projectOptions),
+    combine: (results) => results.map((query) => ({ data: query.data, error: query.error })),
+  });
+  const experiments = useQueries({
+    queries: experimentIds.map(([projectId, experimentId]) => ({
+      ...experimentOptions(projectId, experimentId),
+      refetchInterval: (query: {
+        state: { data?: Awaited<ReturnType<typeof runsApi.listRuns>> };
+      }) => (query.state.data?.some((run) => (run.statusSummary?.active ?? 0) > 0) ? 3000 : false),
+      refetchIntervalInBackground: false,
+    })),
+    combine: (results) => results.map((query) => ({ data: query.data, error: query.error })),
+  });
+  const snapshot = useMemo(() => {
+    const next: WorkspaceSnapshot = {
+      ...buildEmptySnapshot(),
+      ...catalog.data,
+      workspaces: workspaces.data ?? [],
+      workspaceRoot: tree.data ?? null,
+      assets: assets.data ?? [],
+    };
+    projectIds.forEach((id, index) => {
+      const query = projects[index];
+      const ws = next.workspaces.find((item) => item.active)?.key;
+      if (query?.data) {
+        const mapped = mapExperiments(id, query.data, ws);
+        next.experiments = [...next.experiments.filter((item) => item.projectId !== id), ...mapped];
+        next.workflows = [
+          ...next.workflows.filter((item) => item.projectId !== id),
+          ...mapWorkflows(mapped, query.data),
+        ];
       }
-      inflightRef.current = true;
-      if (!silent) setStatus("loading");
-
-      const drain = async (): Promise<void> => {
-        let batch = needed;
-        try {
-          while (batch.length > 0) {
-            const nextSnapshot = await fetchSlices(snapshotRef.current, batch, (partial) => {
-              snapshotRef.current = partial;
-              setSnapshot(partial);
-              if (!silent) pulseSync();
-            });
-            snapshotRef.current = nextSnapshot;
-            setSnapshot(nextSnapshot);
-            for (const slice of batch) loadedSlicesRef.current.add(slice);
-            batch = queuedSlicesRef.current.splice(0);
-            if (!force) {
-              batch = batch.filter((slice) => !loadedSlicesRef.current.has(slice));
+      next.projects = next.projects.map((item) =>
+        item.id === id && (!ws || item.workspaceKey === ws)
+          ? {
+              ...item,
+              experimentCount: query?.data?.length ?? item.experimentCount,
+              experimentsError: query?.error?.message,
             }
-          }
-          setStatus("ready");
-          setError(null);
-        } catch (err) {
-          setError(err instanceof Error ? err : new Error(String(err)));
-          setStatus((prev) => (prev === "ready" ? "ready" : "error"));
-        } finally {
-          inflightRef.current = false;
-          pulseSync();
-        }
-      };
-      return drain();
-    },
-    [],
-  );
-
-  const expandDirectory = useCallback(async (dirPath: WorkspacePath): Promise<void> => {
-    const root = snapshotRef.current.workspaceRoot;
-    if (!root) return;
-    const node = findTreeNode(root, dirPath);
-    if (node?.kind !== "directory") return;
-    // Skip only when we already have a non-empty listing. An empty
-    // ``childrenLoaded`` folder may be a stale remote pin (UI shows "Empty"
-    // forever if we refuse to re-listdir).
-    if (node.childrenLoaded && node.children.length > 0) return;
-
-    try {
-      const fs = getWorkspaceFs();
-      const children = await fs.listdir(dirPath, { maxDepth: 1 });
-      const childNodes = direntsToTreeNodes(children);
-      const nextRoot = mergeTreeChildren(root, dirPath, childNodes);
-      const next = { ...snapshotRef.current, workspaceRoot: nextRoot };
-      snapshotRef.current = next;
-      setSnapshot(next);
-    } catch (err) {
-      console.warn(`expandDirectory(${dirPath}) failed:`, err);
-    }
-  }, []);
-
-  const expandProject = useCallback(
-    async (projectId: string, options?: { force?: boolean }): Promise<void> => {
-      // force=true: re-fetch while keeping current children on screen (SWR).
-      if (!options?.force && projectsLoadedRef.current.has(projectId)) return;
-      if (projectsLoadingRef.current.has(projectId)) return;
-      projectsLoadingRef.current.add(projectId);
-      try {
-        const raw = await experimentsApi.listExperiments(projectId);
-        const workspaceKey = snapshotRef.current.projects.find(
-          (p) => p.id === projectId,
-        )?.workspaceKey;
-        const mapped = mapExperiments(projectId, raw, workspaceKey);
-        // Workflows for just these experiments (IR if present on the wire).
-        const workflows = mapWorkflows(mapped, raw);
-        projectsLoadedRef.current.add(projectId);
-        setSnapshot((prev) => {
-          const otherExps = prev.experiments.filter((e) => e.projectId !== projectId);
-          const otherWfs = prev.workflows.filter((w) => w.projectId !== projectId);
-          const next: WorkspaceSnapshot = {
-            ...prev,
-            experiments: [...otherExps, ...mapped],
-            workflows: [...otherWfs, ...workflows],
-            // Keep project chip in sync once we know the true exp count.
-            projects: prev.projects.map((p) =>
-              p.id === projectId ? { ...p, experimentCount: mapped.length } : p,
-            ),
-          };
-          snapshotRef.current = next;
-          return next;
-        });
-        bump((n) => n + 1);
-      } catch (err) {
-        console.warn(`expandProject(${projectId}) failed:`, err);
-        // Fail closed as "loaded" so the row leaves "Loading…" rather than
-        // spinning forever; a later refresh re-attempts via force.
-        projectsLoadedRef.current.add(projectId);
-        bump((n) => n + 1);
-      } finally {
-        projectsLoadingRef.current.delete(projectId);
-      }
-    },
-    [],
-  );
-
-  const expandExperiment = useCallback(
-    async (
-      projectId: string,
-      experimentId: string,
-      options?: { force?: boolean },
-    ): Promise<void> => {
-      const key = expKey(projectId, experimentId);
-      if (!options?.force && experimentsLoadedRef.current.has(key)) return;
-      if (experimentsLoadingRef.current.has(key)) return;
-      experimentsLoadingRef.current.add(key);
-      try {
-        const raw = await runsApi.listRuns(projectId, experimentId);
-        const workspaceKey =
-          snapshotRef.current.experiments.find(
-            (experiment) => experiment.id === experimentId && experiment.projectId === projectId,
-          )?.workspaceKey ??
-          snapshotRef.current.projects.find((p) => p.id === projectId)?.workspaceKey;
-        const mapped = mapRuns(projectId, experimentId, raw, workspaceKey);
-        // Mark loaded only after success — so emptyChildLabel stays "Loading…"
-        // rather than "No runs" while the remote fetch is in flight (first open).
-        experimentsLoadedRef.current.add(key);
-        setSnapshot((prev) => {
-          const other = prev.runs.filter(
-            (r) => !(r.projectId === projectId && r.experimentId === experimentId),
-          );
-          // Stamp runCount so the right-side chip flips from "…" to "N run".
-          const experiments = prev.experiments.map((e) =>
-            e.projectId === projectId && e.id === experimentId
-              ? { ...e, runCount: mapped.length }
-              : e,
-          );
-          const next: WorkspaceSnapshot = {
-            ...prev,
-            experiments,
-            runs: [...other, ...mapped],
-          };
-          snapshotRef.current = next;
-          return next;
-        });
-        bump((n) => n + 1);
-      } catch (err) {
-        console.warn(`expandExperiment(${key}) failed:`, err);
-        experimentsLoadedRef.current.add(key);
-        bump((n) => n + 1);
-      } finally {
-        experimentsLoadingRef.current.delete(key);
-      }
-    },
-    [],
-  );
-
-  const refresh = useCallback((): void => {
-    // Stale-while-revalidate for the entity tree:
-    // keep experiments / runs / workflows on screen, re-fetch open folders in
-    // the background, then swap rows in place. Wiping first caused a visible
-    // "Loading…" flash even when data came back quickly.
-    const reopenProjects = [...projectsLoadedRef.current];
-    const reopenExperiments = [...experimentsLoadedRef.current];
-    const hadAssets = assetsLoadedForViewRef.current;
-    assetsLoadedForViewRef.current = false;
-    // Clear in-flight so a stuck load does not block the forced re-fetch.
-    projectsLoadingRef.current.clear();
-    experimentsLoadingRef.current.clear();
-    // Help any open row still on empty/"Loading…" (never successfully loaded).
-    setDataEpoch((n) => n + 1);
-
-    const refreshSlices: SnapshotSlice[] = [
-      ...new Set([...loadedSlicesRef.current, ...slicesForView(activeView)]),
-    ];
-    void runFetch(refreshSlices, false, true).then(() => {
-      const reloads: Promise<void>[] = [
-        ...reopenProjects.map((projectId) => expandProject(projectId, { force: true })),
-        ...reopenExperiments.map((key) => {
-          const slash = key.indexOf("/");
-          if (slash <= 0) return Promise.resolve();
-          const projectId = key.slice(0, slash);
-          const experimentId = key.slice(slash + 1);
-          if (!projectId || !experimentId) return Promise.resolve();
-          return expandExperiment(projectId, experimentId, { force: true });
-        }),
-      ];
-      if (hadAssets || activeView === "asset") {
-        assetsLoadedForViewRef.current = true;
-        reloads.push(runFetch(["assets"], true));
-      }
-      void Promise.all(reloads);
+          : item,
+      );
     });
-  }, [runFetch, expandProject, expandExperiment, activeView]);
+    experimentIds.forEach(([projectId, experimentId], index) => {
+      const query = experiments[index];
+      const ws = next.workspaces.find((item) => item.active)?.key;
+      if (query?.data)
+        next.runs = [
+          ...next.runs.filter(
+            (item) => item.projectId !== projectId || item.experimentId !== experimentId,
+          ),
+          ...mapRuns(projectId, experimentId, query.data, ws),
+        ];
+      next.experiments = next.experiments.map((item) =>
+        item.id === experimentId && item.projectId === projectId
+          ? {
+              ...item,
+              runCount: query?.data?.length ?? item.runCount,
+              runsError: query?.error?.message,
+            }
+          : item,
+      );
+    });
+    return next;
+  }, [
+    catalog.data,
+    workspaces.data,
+    tree.data,
+    assets.data,
+    projectIds,
+    projects,
+    experimentIds,
+    experiments,
+  ]);
 
-  const isProjectExpanded = useCallback(
-    (projectId: string): boolean => projectsLoadedRef.current.has(projectId),
-    // `bump` re-renders consumers; the callback reads the live ref.
-    [],
-  );
-
-  const isExperimentExpanded = useCallback(
-    (projectId: string, experimentId: string): boolean =>
-      experimentsLoadedRef.current.has(expKey(projectId, experimentId)),
-    [],
-  );
-
-  // First paint: only the current view. Switching views fills in the rest.
-  useEffect(() => {
-    const silent = loadedSlicesRef.current.size > 0;
-    void runFetch(slicesForView(activeView), silent);
-  }, [activeView, runFetch]);
-
-  // Assets: load once when entering the asset view (not on every poll).
-  useEffect(() => {
-    if (activeView !== "asset") return;
-    if (assetsLoadedForViewRef.current) return;
-    assetsLoadedForViewRef.current = true;
-    void runFetch(["assets"], true);
-  }, [activeView, runFetch]);
-
+  const expandProject = async (id: string): Promise<void> => {
+    setProjectIds((ids) => (ids.includes(id) ? ids : [...ids, id]));
+    // Query stores the failure for rendering and permits an explicit retry.
+    const state = client.getQueryState(projectOptions(id).queryKey);
+    if (state?.status === "error" || (state?.status === "success" && !state.isInvalidated)) return;
+    await client.fetchQuery(projectOptions(id)).catch(() => undefined);
+  };
+  const expandExperiment = async (projectId: string, experimentId: string): Promise<void> => {
+    setExperimentIds((ids) =>
+      ids.some(([p, e]) => p === projectId && e === experimentId)
+        ? ids
+        : [...ids, [projectId, experimentId]],
+    );
+    const state = client.getQueryState(experimentOptions(projectId, experimentId).queryKey);
+    if (state?.status === "error" || (state?.status === "success" && !state.isInvalidated)) return;
+    await client.fetchQuery(experimentOptions(projectId, experimentId)).catch(() => undefined);
+  };
+  const expandDirectory = async (path: WorkspacePath): Promise<void> => {
+    try {
+      const directoryKey = [...baseKey, "directory", path];
+      const state = client.getQueryState(directoryKey);
+      if ((state?.status === "error" || state?.status === "success") && !state.isInvalidated)
+        return;
+      const children = await client.fetchQuery({
+        queryKey: directoryKey,
+        queryFn: () => getWorkspaceFs().listdir(path, { maxDepth: 1 }),
+        staleTime: 0,
+      });
+      if (scope !== getWorkspaceQueryScope()) return;
+      client.setQueryData<WorkspaceSnapshot["workspaceRoot"]>(treeKey, (root) =>
+        root ? mergeTreeChildren(root, path, direntsToTreeNodes(children)) : root,
+      );
+    } catch (error) {
+      reportStatus(error instanceof Error ? error.message : "Could not read directory", "error");
+    }
+  };
+  const refresh = useCallback(() => {
+    setDataEpoch((epoch) => epoch + 1);
+    void client.cancelQueries().then(() => client.invalidateQueries());
+  }, [client]);
+  const required = [
+    workspaces,
+    ...(slices.includes("projectsList") ? [catalog] : []),
+    ...(slices.includes("workspaceTree") ? [tree] : []),
+    ...(activeView === "asset" ? [assets] : []),
+  ];
   return {
     snapshot,
-    status,
-    error,
+    status: required.some((query) => query.isError)
+      ? "error"
+      : required.some((query) => query.isPending || query.isFetching)
+        ? "loading"
+        : "ready",
+    error: required.find((query) => query.error)?.error ?? null,
     refresh,
     dataEpoch,
     expandDirectory,
-    expandProject,
-    expandExperiment,
-    isProjectExpanded,
-    isExperimentExpanded,
+    expandProject: useCallback(expandProject, [client, projectOptions]),
+    expandExperiment: useCallback(expandExperiment, [client, experimentOptions]),
+    isProjectExpanded: (id) =>
+      client.getQueryState(projectOptions(id).queryKey)?.status !== "pending" &&
+      client.getQueryState(projectOptions(id).queryKey) !== undefined,
+    isExperimentExpanded: (p, e) =>
+      client.getQueryState(experimentOptions(p, e).queryKey)?.status !== "pending" &&
+      client.getQueryState(experimentOptions(p, e).queryKey) !== undefined,
   };
 };

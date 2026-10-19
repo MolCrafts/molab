@@ -27,7 +27,7 @@ The UI presents the same hierarchy the workspace stores on disk:
 
 ```bash
 pip install git+https://github.com/MolCrafts/molab   # PyPI release pending
-molab serve -ws ./lab --port 8000
+molab serve ./lab --port 8000
 ```
 
 Open <http://localhost:8000>. The wheel ships the production UI build,
@@ -38,7 +38,7 @@ Node.js required. If `./lab` does not exist or has no `workspace.json`,
 > **Checkout / live UI:** from a source tree, one command for API + HMR:
 >
 > ```bash
-> molab serve --dev -ws ./lab --port 8000
+> molab serve ./lab --dev --port 8000
 > ```
 >
 > Open the printed **Dev UI** URL (default <http://localhost:5173>), not
@@ -49,7 +49,7 @@ Node.js required. If `./lab` does not exist or has no `workspace.json`,
 > [Serve and rebuild the UI](../development/ui-serve.md). Auth / tunnel /
 > several workspaces: [Server Lifecycle](../guide/server-lifecycle.md).
 
-You can serve several workspaces at once by repeating `-ws`;
+You can serve several directories at once by listing them;
 the UI shows each one in the left panel and you switch by clicking into
 its tree.
 
@@ -60,7 +60,7 @@ filesystem users (under `~/.molab/auth/`):
 
 ```bash
 molab auth login -u admin          # first user becomes admin
-molab serve -ws ./lab --auth
+molab serve ./lab --auth
 ```
 
 The browser shows a sign-in page (default username `admin`). Admins can
@@ -74,7 +74,7 @@ On a login node, or when a colleague needs the UI, punch a hole while
 the API stays on loopback:
 
 ```bash
-molab serve -ws ./lab --tunnel
+molab serve ./lab --tunnel
 ```
 
 The public URL is printed on the start banner. Provider, token, and

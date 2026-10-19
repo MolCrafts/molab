@@ -1266,13 +1266,13 @@ class Run(Folder):
         self._execution_repository().seal(execution_id, ExecutionStatus.CANCELLED)
 
     def _execution_repository(self) -> ExecutionRepository:
-        workspace = self.experiment.project.workspace
+        host = self.asset_host()
         return ExecutionRepository(
-            workspace.root,
+            host.resolve(),
             self.run_dir,
             run_id=self.id,
             project_id=self.experiment.project.id,
-            fs=workspace.fs,
+            fs=self._disk(),
         )
 
     # ── Internal (frozen-metadata mutation helpers) ──────────────────────

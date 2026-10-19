@@ -1,10 +1,9 @@
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@molcrafts/ui";
 import { ExternalLink, Inbox, X } from "lucide-react";
 import type { JSX } from "react";
 import { useState } from "react";
-
 import { EmptyState } from "@/app/components/entity";
 import type { ObjectView, WorkspaceSnapshot } from "@/app/types";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { RunStatusBadge, WorkbenchIconAction } from "@/components/workbench";
 import { cn } from "@/lib/utils";
 import type { WorkspaceRunRow } from "../types";

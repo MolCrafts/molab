@@ -188,7 +188,7 @@ def scripted(tmp_path: Path):
     fs = _ScriptedFS()
     root = "/scratch/me/workspace"
     _seed_workspace(fs, root)
-    cached = CachedRemoteFileSystem(fs, mirror_root=tmp_path / "mirror", ttl_seconds=300)
+    cached = CachedRemoteFileSystem(fs, mirror_root=tmp_path / "mirror", cache_mode="pinned")
     # Synthesize a Workspace-shaped object with just the attributes prefetch needs.
     ws = SimpleNamespace(root=root, fs=cached)
     return ws, cached, fs
@@ -274,7 +274,7 @@ class TestPrefetchWorkspaceIndices:
         fs.files[f"{root}/projects/alpha/researcher/index.md"] = b"# researcher\n"
         fs.dirs.add(f"{root}/projects/alpha/researcher")
 
-        cached = CachedRemoteFileSystem(fs, mirror_root=tmp_path / "mirror", ttl_seconds=300)
+        cached = CachedRemoteFileSystem(fs, mirror_root=tmp_path / "mirror", cache_mode="pinned")
         ws = SimpleNamespace(root=root, fs=cached)
 
         warnings = prefetch_workspace_indices(ws)
@@ -317,7 +317,7 @@ class TestPrefetchWorkspaceIndices:
         fs.dirs.add(f"{root}/projects")
         fs.dirs.add(f"{root}/projects/gamma")
 
-        cached = CachedRemoteFileSystem(fs, mirror_root=tmp_path / "mirror", ttl_seconds=300)
+        cached = CachedRemoteFileSystem(fs, mirror_root=tmp_path / "mirror", cache_mode="pinned")
         ws = SimpleNamespace(root=root, fs=cached)
 
         warnings = prefetch_workspace_indices(ws)
@@ -354,7 +354,7 @@ class TestPrefetchWorkspaceIndices:
 
         # Observe the prefetch through a fresh cached remote FS over the same disk.
         cached = CachedRemoteFileSystem(
-            LocalFileSystem(), mirror_root=tmp_path / "mirror", ttl_seconds=300
+            LocalFileSystem(), mirror_root=tmp_path / "mirror", cache_mode="pinned"
         )
         nav = SimpleNamespace(root=str(root), fs=cached)
         warnings = prefetch_workspace_indices(nav)

@@ -39,8 +39,8 @@ _API_ONLY_PAGE = """<!doctype html>
 <p>From a source checkout:</p>
 <pre>npm install
 npm run build:web
-molab serve -ws … --tunnel</pre>
-<p>Or live-reload: <code>molab serve --dev -ws …</code>. With <code>--tunnel</code> the public URL punches the Dev UI (Rsbuild), not this API-only page.</p>
+molab serve … --tunnel</pre>
+<p>Or live-reload: <code>molab serve … --dev</code>. With <code>--tunnel</code> the public URL punches the Dev UI (Rsbuild), not this API-only page.</p>
 </body></html>"""
 
 
@@ -77,7 +77,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:  # noqa: ARG001
     from molab.plugins import discover_server_plugins, signal_shutdown_server_plugins
 
     plugins = discover_server_plugins()
+    from starlette.concurrency import run_in_threadpool
 
+    from molab.workspace.connection import get_client
+
+    await run_in_threadpool(get_client)
     for plugin in plugins:
         await _run_plugin_hook(plugin, "startup")
     logger.info("Molab server starting up")
@@ -91,6 +95,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:  # noqa: ARG001
         # 2) Cancel in-flight background work owned by this process.
         for plugin in plugins:
             await _run_plugin_hook(plugin, "shutdown")
+        from molab.workspace.connection import close_client
+
+        close_client()
         logger.info("Molab server shutting down")
 
 

@@ -24,7 +24,7 @@ interface FileListProps {
 
 const FileList = ({ files, active, onSelect }: FileListProps): JSX.Element => {
   return (
-    <aside className="flex w-56 flex-none flex-col border-r border-border bg-surface-subtle">
+    <aside className="flex w-56 flex-none flex-col border-r border-border bg-background">
       <div className="flex h-toolbar-compact items-center gap-2 border-b border-border px-3">
         <Atom className="size-icon text-accent" />
         <span className="text-label font-medium text-foreground">MolVis</span>

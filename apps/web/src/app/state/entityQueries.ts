@@ -1,25 +1,62 @@
 import { queryOptions } from "@tanstack/react-query";
 import { assetsApi, projectsApi, runsApi, workspaceApi } from "@/api";
+import { getWorkspaceQueryScope } from "./workspaceSwitchEvents";
 
 export const projectKeys = {
   all: ["projects"] as const,
-  assets: (projectId: string) => [...projectKeys.all, projectId, "assets"] as const,
+  assets: (projectId: string) =>
+    [...projectKeys.all, getWorkspaceQueryScope(), projectId, "assets"] as const,
 };
 
 export const assetKeys = {
   all: ["assets"] as const,
   detail: (projectId: string, assetId: string) =>
-    [...assetKeys.all, projectId, assetId, "detail"] as const,
+    [...assetKeys.all, getWorkspaceQueryScope(), projectId, assetId, "detail"] as const,
   versions: (projectId: string, assetId: string) =>
-    [...assetKeys.all, projectId, assetId, "versions"] as const,
+    [...assetKeys.all, getWorkspaceQueryScope(), projectId, assetId, "versions"] as const,
 };
 
 export const runKeys = {
   all: ["runs"] as const,
+  metrics: (projectId: string, experimentId: string, runId: string, executionId: string) =>
+    [
+      ...runKeys.all,
+      getWorkspaceQueryScope(),
+      projectId,
+      experimentId,
+      runId,
+      executionId,
+      "metrics",
+    ] as const,
+  tensorboard: (projectId: string, experimentId: string, runId: string) =>
+    [
+      ...runKeys.all,
+      getWorkspaceQueryScope(),
+      projectId,
+      experimentId,
+      runId,
+      "tensorboard",
+    ] as const,
   outputs: (projectId: string, experimentId: string, runId: string, executionId: string) =>
-    [...runKeys.all, projectId, experimentId, runId, executionId, "outputs"] as const,
+    [
+      ...runKeys.all,
+      getWorkspaceQueryScope(),
+      projectId,
+      experimentId,
+      runId,
+      executionId,
+      "outputs",
+    ] as const,
   journal: (projectId: string, experimentId: string, runId: string, executionId: string) =>
-    [...runKeys.all, projectId, experimentId, runId, executionId, "journal"] as const,
+    [
+      ...runKeys.all,
+      getWorkspaceQueryScope(),
+      projectId,
+      experimentId,
+      runId,
+      executionId,
+      "journal",
+    ] as const,
   artifactContent: (
     projectId: string,
     experimentId: string,
@@ -29,6 +66,7 @@ export const runKeys = {
   ) =>
     [
       ...runKeys.all,
+      getWorkspaceQueryScope(),
       projectId,
       experimentId,
       runId,
@@ -43,14 +81,34 @@ export const runKeys = {
     runId: string,
     executionId: string,
     path: string,
-  ) => [...runKeys.all, projectId, experimentId, runId, executionId, "files", path] as const,
+  ) =>
+    [
+      ...runKeys.all,
+      getWorkspaceQueryScope(),
+      projectId,
+      experimentId,
+      runId,
+      executionId,
+      "files",
+      path,
+    ] as const,
   fileBlob: (
     projectId: string,
     experimentId: string,
     runId: string,
     executionId: string,
     path: string,
-  ) => [...runKeys.all, projectId, experimentId, runId, executionId, "blob", path] as const,
+  ) =>
+    [
+      ...runKeys.all,
+      getWorkspaceQueryScope(),
+      projectId,
+      experimentId,
+      runId,
+      executionId,
+      "blob",
+      path,
+    ] as const,
 };
 
 const ARTIFACT_PREVIEW_CAP = 300_000;

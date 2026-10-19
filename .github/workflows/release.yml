@@ -4,10 +4,11 @@ name: release
 # bundled (src/molab/dist) and publishes them to PyPI (trusted publishing,
 # release.yml and the `pypi` environment). workflow_dispatch is a dry run
 # anywhere: the same build, kept as a workflow artifact, and no environment.
-on:
+'on':
   push:
-    tags: ["v*"]
-  workflow_dispatch:
+    tags:
+    - v*
+  workflow_dispatch: null
 
 permissions:
   contents: read
@@ -21,27 +22,20 @@ concurrency:
 jobs:
   # Where this run happens, decided once: MolCrafts/molcrafts-ci/actions/ci-context.
   context:
+    permissions:
+      contents: read
     name: release / context
-    runs-on: ubuntu-latest
-    outputs:
-      tier: ${{ steps.context.outputs.tier }}
-      upstream: ${{ steps.context.outputs.upstream }}
-      integration: ${{ steps.context.outputs.integration }}
-      skip-pr: ${{ steps.context.outputs.skip-pr }}
-      publish: ${{ steps.context.outputs.publish }}
-    steps:
-      - id: context
-        uses: MolCrafts/molcrafts-ci/actions/ci-context@master
+    uses: MolCrafts/molcrafts-ci/.github/workflows/context.yml@master
 
   build:
     name: release / build
     needs: context
-    if: github.event_name == 'workflow_dispatch' || needs.context.outputs.upstream == 'true'
+    if: needs.context.outputs.skip-pr != 'true' && (github.event_name == 'workflow_dispatch' || needs.context.outputs.upstream == 'true')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: MolCrafts/molcrafts-ci/actions/setup-node@master
-      - uses: MolCrafts/molcrafts-ci/actions/setup-python@master
+      - uses: MolCrafts/molcrafts-ci/actions/setup-node@8c2f7db652ebddbd6acf4df270300e2b086d599d
+      - uses: MolCrafts/molcrafts-ci/actions/setup-python@8c2f7db652ebddbd6acf4df270300e2b086d599d
       - run: npm run build:web
       - run: test -s src/molab/dist/index.html
       - run: uv build --out-dir dist

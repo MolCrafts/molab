@@ -2,12 +2,16 @@ name: lint
 
 # Same jobs in every context (feature branch or dev/master, fork or
 # upstream); see "CI and release" in docs/en/development/index.md.
-on:
+'on':
   push:
-    branches: ["**"]
+    branches:
+    - '**'
   pull_request:
-    branches: [dev, master, main]
-  workflow_dispatch:
+    branches:
+    - dev
+    - master
+    - main
+  workflow_dispatch: null
 
 permissions:
   contents: read
@@ -18,11 +22,11 @@ concurrency:
   group: lint-${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: ${{ !contains(fromJSON('["refs/heads/dev","refs/heads/master","refs/heads/main"]'), github.ref) && !startsWith(github.ref, 'refs/tags/') }}
 
-# molab is built against its partners (.github/partners.env) at the commits
-# scripts/partners.py resolves -- molpy's and molrs's dev, or their branches
-# named like this one -- checked out as siblings, the layout the
-# [tool.uv.sources] path dependencies expect. The pre-commit hooks resolve them
-# the same way (`partners.py run`), so a local gate and CI judge one commit.
+# molab is built against the commits pinned in .github/partners.env.
+# scripts/partners.py bootstraps molcrafts_ci.partners at CI_REF and checks
+# those commits out as siblings, the layout the [tool.uv.sources] path
+# dependencies expect. The git hooks resolve them the same way
+# (`partners.py run`), so a local gate and CI judge the same inputs.
 env:
   # uv builds molrs through maturin's PEP 517 hook; this makes that cargo
   # build --locked as well.
@@ -31,17 +35,10 @@ env:
 jobs:
   # Where this run happens, decided once: MolCrafts/molcrafts-ci/actions/ci-context.
   context:
+    permissions:
+      contents: read
     name: lint / context
-    runs-on: ubuntu-latest
-    outputs:
-      tier: ${{ steps.context.outputs.tier }}
-      upstream: ${{ steps.context.outputs.upstream }}
-      integration: ${{ steps.context.outputs.integration }}
-      skip-pr: ${{ steps.context.outputs.skip-pr }}
-      publish: ${{ steps.context.outputs.publish }}
-    steps:
-      - id: context
-        uses: MolCrafts/molcrafts-ci/actions/ci-context@master
+    uses: MolCrafts/molcrafts-ci/.github/workflows/context.yml@master
 
   python:
     name: lint / python
@@ -50,10 +47,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: MolCrafts/molcrafts-ci/actions/setup-python@master
-      - uses: MolCrafts/molcrafts-ci/actions/setup-partners@master
+      - uses: MolCrafts/molcrafts-ci/actions/setup-python@8c2f7db652ebddbd6acf4df270300e2b086d599d
+      - uses: MolCrafts/molcrafts-ci/actions/setup-partners@8c2f7db652ebddbd6acf4df270300e2b086d599d
       # molrs/rust-toolchain.toml pins the compiler that builds the molrs wheel.
-      - uses: MolCrafts/molcrafts-ci/actions/setup-rust@master
+      - uses: MolCrafts/molcrafts-ci/actions/setup-rust@8c2f7db652ebddbd6acf4df270300e2b086d599d
         with:
           toolchain-dir: ../molrs
           cache: molrs-python
@@ -71,7 +68,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: MolCrafts/molcrafts-ci/actions/setup-node@master
+      - uses: MolCrafts/molcrafts-ci/actions/setup-node@8c2f7db652ebddbd6acf4df270300e2b086d599d
       - run: npm run lint
       - run: npm run typecheck
 

@@ -62,7 +62,7 @@ def main() -> None:
     print()
     print("  class MySubmitHandler(SubmitHandler):")
     print("      def submit(self, execution, target):")
-    print("          print(f'Submitting {execution.id} to {target.host}')")
+    print("          print(f'Submitting {execution.id} to {target.cluster_id}')")
     print("          return JobRef(id='job-123')")
     print()
     print("  plugin = CliPlugin(name='custom', handler=MySubmitHandler())")

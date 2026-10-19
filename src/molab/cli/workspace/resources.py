@@ -32,7 +32,7 @@ _console = Console()
 def _open_ws(target_spec: str):
     """Open a local or remote workspace; exit 1 if missing."""
     try:
-        _target, _transport, _fs, ws = open_workspace(target_spec, prefetch=True)
+        _target, _fs, ws = open_workspace(target_spec, prefetch=True)
     except FileNotFoundError as exc:
         rprint(f"[red]Error:[/red] {exc}")
         rprint("  Run [bold]molab init[/bold] to create one.")
@@ -353,12 +353,6 @@ def run_cancel(
             "--status", help="Comma-separated statuses to filter (e.g. 'pending,running')."
         ),
     ] = None,
-    scheduler: Annotated[
-        str, typer.Option("--scheduler", help="Fallback molq scheduler backend.")
-    ] = "slurm",
-    cluster: Annotated[
-        str | None, typer.Option("--cluster", help="molq cluster name (default: 'default').")
-    ] = None,
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation prompt.")] = False,
     target_spec: TargetOption = ".",
 ) -> None:
@@ -452,7 +446,7 @@ def run_cancel(
         table.add_row(
             r.id,
             r.status_label,
-            executor_info.get("scheduler") or scheduler,
+            executor_info.get("scheduler") or "—",
             executor_info.get("job_id") or "—",
             executor_info.get("scheduler_job_id") or "—",
         )
@@ -478,14 +472,11 @@ def run_cancel(
     from molab.plugins.submit_molq.cancel import try_cancel
     from molab.workspace.lifecycle_ops import cancel_run as cancel_core
 
-    def _signal(run: Run) -> str | None:
-        return try_cancel(run, fallback_scheduler=scheduler, fallback_cluster=cluster or "default")
-
     cancelled = 0
     errors = 0
     for r in target_runs:
         try:
-            warning = cancel_core(r, signal_executor=_signal, allow_pending=True)
+            warning = cancel_core(r, signal_executor=try_cancel, allow_pending=True)
         except ValueError as exc:
             rprint(f"  [yellow]Skipping[/yellow] {r.id} — {exc}")
             continue

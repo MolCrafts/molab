@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
-import io
+import contextlib
 import mimetypes
-from pathlib import Path
+import shutil
+import tempfile
+import uuid
+from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Annotated, Any, cast
+from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
+from molab.fs.window import iter_file_chunks
 from molab.server.deps.scope_root import ScopeRoot
 from molab.services.auth import AuthError, AuthUser, get_auth_service, is_auth_enabled
 from molab.workspace import ContextFocus, Run
@@ -96,6 +101,9 @@ def resolve_workspace_path_via_fs(workspace, path_str: str) -> str:  # noqa: ANN
     if isinstance(fs, LocalFileSystem):
         resolved = resolve_workspace_path(Path(root).resolve(), path_str)
         return str(resolved)
+
+    if ".." in PurePosixPath(path_str).parts:
+        raise HTTPException(status_code=400, detail="Path is outside workspace root")
 
     normalized_root = root.rstrip("/") or "/"
     if not path_str or path_str in {"/", "."}:
@@ -413,6 +421,7 @@ def read_workspace_file(
 
 @router.get("/file/blob")
 def read_workspace_file_blob(
+    download: bool = Query(False, description="Download as an attachment instead of previewing"),
     path: str = Query("", description="Workspace-relative path to read"),
     workspace=Depends(get_workspace),  # noqa: ANN001
 ) -> StreamingResponse:
@@ -428,12 +437,54 @@ def read_workspace_file_blob(
 
     name = fs.basename(target)
     suffix = ("." + name.rsplit(".", 1)[-1]).lower() if "." in name else ""
-    if suffix not in BINARY_PREVIEW_EXTENSIONS:
+    if not download and suffix not in BINARY_PREVIEW_EXTENSIONS:
         raise HTTPException(status_code=400, detail="Unsupported binary preview type")
 
     media_type = mimetypes.guess_type(name)[0] or "application/octet-stream"
-    data = fs.read_bytes(target)
-    return StreamingResponse(io.BytesIO(data), media_type=media_type)
+    size = fs.getsize(target)
+
+    headers = {"Content-Length": str(size)}
+    if download:
+        headers["Content-Disposition"] = f"attachment; filename*=UTF-8''{quote(name, safe='')}"
+    return StreamingResponse(
+        iter_file_chunks(fs, target, size=size), media_type=media_type, headers=headers
+    )
+
+
+@router.post("/file/upload", status_code=204)
+async def upload_workspace_file(
+    request: Request,
+    path: str = Query(
+        ..., description="Workspace-relative destination; request body is raw file bytes"
+    ),
+    workspace=Depends(get_workspace),  # noqa: ANN001
+) -> None:
+    """Stage a bounded HTTP stream on disk, then publish through the workspace filesystem."""
+    from molq import MolqError
+    from starlette.concurrency import run_in_threadpool
+
+    target = resolve_workspace_path_via_fs(workspace, path)
+    fs = workspace.fs
+    staged = fs.join(fs.dirname(target), f".molab-upload-{uuid.uuid4().hex}")
+    with tempfile.TemporaryDirectory(prefix="molab-upload-") as directory:
+        local = Path(directory) / "payload"
+        received = 0
+        with local.open("wb") as output:
+            async for chunk in request.stream():
+                received += len(chunk)
+                if received > 8 * 1024**3:
+                    raise HTTPException(status_code=413, detail="Upload exceeds 8 GiB")
+                await run_in_threadpool(output.write, chunk)
+        try:
+            upload = getattr(fs, "upload", None)
+            if callable(upload):
+                await run_in_threadpool(upload, str(local), staged)
+            else:
+                await run_in_threadpool(shutil.copyfile, local, staged)
+            await run_in_threadpool(fs.rename, staged, target)
+        finally:
+            with contextlib.suppress(OSError, MolqError):
+                await run_in_threadpool(fs.remove, staged)
 
 
 def _asset_count(root: object) -> int:
@@ -549,7 +600,7 @@ def open_workspace(
             assetCount=_asset_count(root),
         )
 
-    # Remote branch — CLI ``-ws host:path`` injects an inline ServedWorkspace
+    # Remote branch — CLI ``-ws cluster:path`` injects an inline ServedWorkspace
     # target (not the on-disk registry). Prefer that resolver so open accepts
     # the served key *or* target_name the UI may send.
     from molab.server.deps.served import resolve_served_remote_target
@@ -609,11 +660,9 @@ def create_directory(
     if request.folder_id != "workspace":
         raise HTTPException(status_code=400, detail="Only workspace folder is supported")
 
-    root = Path(workspace.root).resolve()
-    target = resolve_workspace_path(root, request.path)
-
-    target.mkdir(parents=True, exist_ok=True)
-    return {"path": str(target)}
+    target = resolve_workspace_path_via_fs(workspace, request.path)
+    workspace.fs.mkdir(target, parents=True, exist_ok=True)
+    return {"path": target}
 
 
 @router.put("/files")
@@ -625,14 +674,13 @@ def write_file(
     if request.folder_id != "workspace":
         raise HTTPException(status_code=400, detail="Only workspace folder is supported")
 
-    root = Path(workspace.root).resolve()
-    target = resolve_workspace_path(root, request.path)
-
-    target.parent.mkdir(parents=True, exist_ok=True)
-    if target.exists() and target.is_dir():
+    target = resolve_workspace_path_via_fs(workspace, request.path)
+    fs = workspace.fs
+    fs.mkdir(fs.dirname(target), parents=True, exist_ok=True)
+    if fs.exists(target) and fs.is_dir(target):
         raise HTTPException(status_code=400, detail="Path is a directory")
-    target.write_text(request.content, encoding="utf-8")
-    return {"path": str(target)}
+    fs.atomic_write_text(target, request.content)
+    return {"path": target}
 
 
 # ============================================================================
@@ -659,16 +707,7 @@ def create_workspace_target(
     registry=Depends(get_workspace_target_registry),  # noqa: ANN001
 ) -> WorkspaceTargetResponse:
     try:
-        target = WorkspaceTarget(
-            name=payload.name,
-            host=payload.host,
-            root_path=payload.root_path,
-            port=payload.port,
-            identity_file=payload.identity_file,
-            ssh_opts=tuple(payload.ssh_opts),
-            cache_dir=payload.cache_dir,
-            cache_ttl_seconds=payload.cache_ttl_seconds,
-        )
+        target = WorkspaceTarget(**payload.model_dump())
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 

@@ -8,12 +8,10 @@ thin adapter on top of :mod:`molab.workspace.targets`.
 
 from __future__ import annotations
 
-import shutil
-
 from fastapi import APIRouter, Depends, HTTPException
 
 from molab.workspace import ComputeTarget, Workspace
-from molab.workspace.targets import effective_targets, to_transport
+from molab.workspace.targets import effective_targets, to_filesystem
 
 from ..dependencies import get_workspace
 from ..schemas import (
@@ -44,18 +42,10 @@ def create_target_endpoint(
 ) -> TargetResponse:
     """Register a new compute target.
 
-    Mirrors ``molab target add NAME --scratch ... [--host ...] [--scheduler ...]``.
+    Mirrors ``molab target add NAME --scratch ... --cluster ...``.
     """
     try:
-        target = ComputeTarget(
-            name=payload.name,
-            host=payload.host,
-            port=payload.port,
-            identity_file=payload.identity_file,
-            ssh_opts=list(payload.ssh_opts),
-            scheduler=payload.scheduler,
-            scratch_root=payload.scratch_root,
-        )
+        target = ComputeTarget(**payload.model_dump())
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -95,77 +85,11 @@ def test_target_endpoint(
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
 
-    checks: list[TargetTestCheck] = []
-
-    if target.is_remote:
-        if shutil.which("ssh") is None:
-            return TargetTestResponse(
-                name=name,
-                ok=False,
-                checks=[],
-                error="ssh binary not found in PATH on the server",
-            )
-        if shutil.which("rsync") is None:
-            return TargetTestResponse(
-                name=name,
-                ok=False,
-                checks=[],
-                error="rsync binary not found in PATH on the server",
-            )
-
-    transport = to_transport(target)
-
-    # 1. trivial command.
     try:
-        result = transport.run(["true"], timeout=15)
-        if result.returncode != 0:
-            checks.append(
-                TargetTestCheck(
-                    label="command execution",
-                    ok=False,
-                    detail=f"exit={result.returncode}: {result.stderr}",
-                )
-            )
-            return TargetTestResponse(
-                name=name, ok=False, checks=checks, error="command execution failed"
-            )
-        checks.append(TargetTestCheck(label="command execution", ok=True))
-    except Exception as exc:
+        fs = to_filesystem(target)
+        present = fs.is_dir(target.scratch_root)
         return TargetTestResponse(
-            name=name, ok=False, checks=checks, error=f"transport.run failed: {exc}"
+            name=name, ok=present, checks=[TargetTestCheck(label="Destination root", ok=present)]
         )
-
-    # 2. mkdir scratch.
-    try:
-        transport.mkdir(target.scratch_root, parents=True, exist_ok=True)
-        checks.append(TargetTestCheck(label=f"mkdir {target.scratch_root}", ok=True))
     except Exception as exc:
-        checks.append(
-            TargetTestCheck(
-                label=f"mkdir {target.scratch_root}",
-                ok=False,
-                detail=str(exc),
-            )
-        )
-        return TargetTestResponse(name=name, ok=False, checks=checks, error=f"mkdir failed: {exc}")
-
-    # 3. file round-trip.
-    probe = f"{target.scratch_root.rstrip('/')}/.molab-target-test"
-    try:
-        transport.write_text(probe, "x")
-        if transport.read_text(probe) != "x":
-            checks.append(
-                TargetTestCheck(label="file round-trip", ok=False, detail="content mismatch")
-            )
-            return TargetTestResponse(
-                name=name, ok=False, checks=checks, error="file round-trip mismatch"
-            )
-        transport.remove(probe)
-        checks.append(TargetTestCheck(label="file round-trip", ok=True))
-    except Exception as exc:
-        checks.append(TargetTestCheck(label="file round-trip", ok=False, detail=str(exc)))
-        return TargetTestResponse(
-            name=name, ok=False, checks=checks, error=f"round-trip failed: {exc}"
-        )
-
-    return TargetTestResponse(name=name, ok=True, checks=checks, error=None)
+        return TargetTestResponse(name=name, ok=False, checks=[], error=str(exc))

@@ -2,8 +2,6 @@
  * Harvest a terminal run into Knowledge — Dialog form (replaces window.prompt).
  */
 
-import { BookMarked } from "lucide-react";
-import { type JSX, useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -11,16 +9,16 @@ import {
   DialogHeader,
   DialogTitle,
   DialogTrigger,
-} from "@/components/ui/dialog";
-import { Label } from "@/components/ui/label";
-import {
+  Label,
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
+  Textarea,
+} from "@molcrafts/ui";
+import { BookMarked, Check, X } from "lucide-react";
+import { type JSX, useState } from "react";
 import { toast } from "@/components/ui/toast";
 import { WorkbenchAction, WorkbenchIconAction } from "@/components/workbench";
 
@@ -137,6 +135,7 @@ export function HarvestDialog({
         </div>
         <DialogFooter>
           <WorkbenchAction
+            icon={<X aria-hidden />}
             kind="ghost"
             size="compact"
             disabled={busy}
@@ -145,6 +144,7 @@ export function HarvestDialog({
             Cancel
           </WorkbenchAction>
           <WorkbenchAction
+            icon={<Check aria-hidden />}
             kind="primary"
             size="compact"
             disabled={busy || !narrative.trim()}

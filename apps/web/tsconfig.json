@@ -25,6 +25,15 @@
       "@/*": [
         "./src/*"
       ],
+      "@molcrafts/ui/file-tree": [
+        "../../../molcrafts-ui/packages/ui/src/lib/file-tree.ts"
+      ],
+      "@molcrafts/ui-vega-lite": [
+        "../../../molcrafts-ui/packages/vega-lite/src/index.tsx"
+      ],
+      "@molcrafts/ui-vega": [
+        "../../../molcrafts-ui/packages/vega/src/index.tsx"
+      ],
       "@schemas/*": [
         "../src/molab/workflow/schema/*"
       ],
@@ -43,6 +52,8 @@
     }
   },
   "include": [
-    "src"
+    "src",
+    "mocks/db",
+    "mocks/handlers"
   ]
 }

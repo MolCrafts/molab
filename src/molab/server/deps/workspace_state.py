@@ -10,7 +10,9 @@ hold across both import paths (this module and the
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
+from threading import RLock
 
 from molab.server.deps.config import get_settings
 
@@ -19,16 +21,27 @@ _SAFE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 # Cache key is ``(kind, identifier)`` — for ``kind == "local"`` the identifier
 # is the resolved absolute path; for ``kind == "remote"`` it is the
 # ``WorkspaceTarget`` name (registered via the workspace-targets registry).
-# Values are ``ScopeRoot`` (a folder the request treats as the workspace).
+# Values are ``ScopeRoot`` or a bounded remote-open failure below.
 _workspace_cache: dict[tuple[str, str], object] = {}
+_workspace_cache_lock = RLock()
+
+
+@dataclass(frozen=True)
+class _RemoteOpenFailure:
+    """A failed root probe; retain no exception traceback or request body."""
+
+    reason: str
+    retry_at: float
+
 
 _workspace_path_override: Path | None = None
 _workspace_descriptor_override: str | None = None
 
 
 def reset_workspace_cache() -> None:
-    """Clear the workspace cache (for testing or workspace switching)."""
-    _workspace_cache.clear()
+    """Clear roots and failed probes after authentication or workspace switching."""
+    with _workspace_cache_lock:
+        _workspace_cache.clear()
 
 
 def set_workspace_path_override(path: Path | None) -> None:

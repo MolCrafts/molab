@@ -10,6 +10,7 @@ import typer
 from molab.cli._app import app
 from molab.cli._common import rprint
 from molab.cli._target import TargetOption, resolve_workspace_target
+from molab.workspace.fs_remote import RemoteFileSystem
 from molab.workspace.target import LocalTarget
 
 
@@ -23,7 +24,7 @@ def sync(
         bool,
         typer.Option("--pull", help="Pull remote → local (default: push local → remote)."),
     ] = False,
-    delete: Annotated[  # noqa: ARG001
+    delete: Annotated[
         bool,
         typer.Option("--delete", help="Delete dest files not in source."),
     ] = False,
@@ -37,25 +38,27 @@ def sync(
 
     Default direction is push (local → remote). Use --pull to reverse.
     """
-    target, transport, _fs = resolve_workspace_target(target_spec)
+    target, transport = resolve_workspace_target(target_spec)
 
     if isinstance(target, LocalTarget):
         rprint("[yellow]Sync is only meaningful for remote targets.[/yellow]")
         rprint("Local workspace files are already on disk.")
         return
 
+    assert isinstance(transport, RemoteFileSystem)
     local_path = Path(source).resolve() if source else Path.cwd()
     remote_path = target.path
 
     if dry_run:
         direction = "pull remote → local" if pull else "push local → remote"
         rprint(f"[dim]Would {direction}:[/dim] {local_path} ↔ {target}:{remote_path}")
-        return
 
     if pull:
         rprint(f"[dim]Pulling {target}:{remote_path} → {local_path}...[/dim]")
         try:
-            transport.download(remote_path, str(local_path), recursive=True)
+            transport.download(
+                remote_path, str(local_path), recursive=True, delete=delete, dry_run=dry_run
+            )
         except Exception as exc:
             rprint(f"[red]Download failed:[/red] {exc}")
             raise typer.Exit(1) from exc
@@ -63,7 +66,9 @@ def sync(
     else:
         rprint(f"[dim]Pushing {local_path} → {target}:{remote_path}...[/dim]")
         try:
-            transport.upload(str(local_path), remote_path, recursive=True)
+            transport.upload(
+                str(local_path), remote_path, recursive=True, delete=delete, dry_run=dry_run
+            )
         except Exception as exc:
             rprint(f"[red]Upload failed:[/red] {exc}")
             raise typer.Exit(1) from exc
@@ -82,12 +87,13 @@ def push(
     target_spec: TargetOption = ".",
 ) -> None:
     """Upload a file or directory to the remote workspace."""
-    target, transport, _fs = resolve_workspace_target(target_spec)
+    target, transport = resolve_workspace_target(target_spec)
 
     if isinstance(target, LocalTarget):
         rprint("[yellow]push is only meaningful for remote targets.[/yellow]")
         return
 
+    assert isinstance(transport, RemoteFileSystem)
     local_path = Path(local).expanduser().resolve()
     if not local_path.exists():
         rprint(f"[red]Error:[/red] Local path not found: {local_path}")
@@ -117,13 +123,15 @@ def pull(
     target_spec: TargetOption = ".",
 ) -> None:
     """Download a file or directory from the remote workspace."""
-    target, transport, _fs = resolve_workspace_target(target_spec)
+    target, transport = resolve_workspace_target(target_spec)
 
     if isinstance(target, LocalTarget):
         rprint("[yellow]pull is only meaningful for remote targets.[/yellow]")
         return
 
+    assert isinstance(transport, RemoteFileSystem)
     remote_path = remote if remote.startswith("/") else f"{target.path.rstrip('/')}/{remote}"
+    assert isinstance(transport, RemoteFileSystem)
     local_path = str(Path(local).expanduser().resolve()) if local else str(Path.cwd())
 
     rprint(f"[dim]Downloading {target}:{remote_path} → {local_path}...[/dim]")

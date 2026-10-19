@@ -73,8 +73,8 @@ Three jobs — do not mix them. Full table: [Serve and rebuild the UI](docs/en/d
 
 | Job | Command | Open |
 |-----|---------|------|
-| Daily checkout (HMR) | `uv pip install -e ".[dev]"` once, then `molab serve --dev -ws ./lab` | printed **Dev UI** (`:5173`) |
-| Bundled SPA preview | `npm run build:web` then `molab serve -ws ./lab` | `:8000` |
+| Daily checkout (HMR) | `uv pip install -e ".[dev]"` once, then `molab serve ./lab --dev` | printed **Dev UI** (`:5173`) |
+| Bundled SPA preview | `npm run build:web` then `molab serve ./lab` | `:8000` |
 | Wheel with UI | `uv pip install . -C build-web=true` | then `molab serve` on `:8000` |
 
 `--dev` starts `npm run dev:api` (real `/api` proxy). `npm run dev:web` is the MSW mock, not that path. After `npm run build:web` on an editable install, do **not** reinstall Python. The old flag `-C build-ui=true` is rejected.

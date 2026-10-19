@@ -2,8 +2,6 @@
  * FlowgramCanvasToolbar — save / discard chrome for the editable workflow canvas.
  */
 
-import { RotateCcw, Save } from "lucide-react";
-import type { JSX } from "react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -14,7 +12,9 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
   AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
+} from "@molcrafts/ui";
+import { RotateCcw, Save } from "lucide-react";
+import type { JSX } from "react";
 import { WorkbenchIconAction } from "@/components/workbench";
 
 export interface FlowgramCanvasToolbarProps {

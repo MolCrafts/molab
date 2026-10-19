@@ -2,12 +2,16 @@ name: docs
 
 # Strict Zensical builds of the English and Chinese manuals in every
 # context. Nothing in this repository deploys them.
-on:
+'on':
   push:
-    branches: ["**"]
+    branches:
+    - '**'
   pull_request:
-    branches: [dev, master, main]
-  workflow_dispatch:
+    branches:
+    - dev
+    - master
+    - main
+  workflow_dispatch: null
 
 permissions:
   contents: read
@@ -21,17 +25,10 @@ concurrency:
 jobs:
   # Where this run happens, decided once: MolCrafts/molcrafts-ci/actions/ci-context.
   context:
+    permissions:
+      contents: read
     name: docs / context
-    runs-on: ubuntu-latest
-    outputs:
-      tier: ${{ steps.context.outputs.tier }}
-      upstream: ${{ steps.context.outputs.upstream }}
-      integration: ${{ steps.context.outputs.integration }}
-      skip-pr: ${{ steps.context.outputs.skip-pr }}
-      publish: ${{ steps.context.outputs.publish }}
-    steps:
-      - id: context
-        uses: MolCrafts/molcrafts-ci/actions/ci-context@master
+    uses: MolCrafts/molcrafts-ci/.github/workflows/context.yml@master
 
   build:
     name: docs / build
@@ -40,9 +37,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: MolCrafts/molcrafts-ci/actions/setup-python@master
+      - uses: MolCrafts/molcrafts-ci/actions/setup-python@8c2f7db652ebddbd6acf4df270300e2b086d599d
       # Resolving the project reads its partners' metadata (nothing builds):
       # the `docs` group alone is installed, neither molab nor a partner.
-      - uses: MolCrafts/molcrafts-ci/actions/setup-partners@master
+      - uses: MolCrafts/molcrafts-ci/actions/setup-partners@8c2f7db652ebddbd6acf4df270300e2b086d599d
       - run: uv run --only-group docs zensical build --strict -f zensical.toml
       - run: uv run --only-group docs zensical build --strict -f zensical.zh.toml

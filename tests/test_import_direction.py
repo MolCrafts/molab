@@ -176,3 +176,27 @@ class TestMolabBootsWithoutPlugins:
             "print('ok', summary)\n"
         )
         assert result.returncode == 0, result.stderr
+
+
+def test_remote_operations_only_use_the_public_molq_api():
+    """molab owns workspace semantics; molq owns SSH, rsync and native file I/O."""
+    import ast
+
+    root = Path(__file__).resolve().parents[1] / "src" / "molab"
+    violations = []
+    for path in root.rglob("*.py"):
+        tree = ast.parse(path.read_text())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom) and (node.module or "").startswith("molq."):
+                violations.append(f"{path}:{node.lineno}: internal molq import")
+            if isinstance(node, ast.Import) and any(
+                alias.name.startswith("molq.") for alias in node.names
+            ):
+                violations.append(f"{path}:{node.lineno}: internal molq import")
+            if isinstance(node, ast.Call):
+                for argument in node.args[:1]:
+                    if isinstance(argument, (ast.List, ast.Tuple)) and argument.elts:
+                        command = argument.elts[0]
+                        if isinstance(command, ast.Constant) and command.value in {"ssh", "rsync"}:
+                            violations.append(f"{path}:{node.lineno}: direct remote command")
+    assert not violations, "\n".join(violations)

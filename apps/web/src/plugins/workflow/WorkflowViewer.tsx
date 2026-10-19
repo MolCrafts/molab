@@ -1,99 +1,113 @@
 import { Workflow } from "lucide-react";
 import { useState } from "react";
 import {
+  BarInstrument,
+  DashboardCanvas,
+  DashboardCard,
+  DataTable,
+  EmptyState,
   EntityPage,
-  KeyValueGrid,
-  OverviewHighlight,
-  OverviewHighlightGrid,
-  OverviewPage,
-  OverviewSection,
+  OverviewInstruments,
+  OverviewList,
+  OverviewSurface,
+  type StatusCountRollup,
+  StatusDistribution,
 } from "@/app/components/entity";
-import { useNavigationState } from "@/app/state/useNavigationState";
+import { groupForStatus } from "@/app/runs/statusGroups";
 import type { RendererProps } from "@/app/types";
-import { WorkbenchAction } from "@/components/workbench";
-import { formatDateTime } from "@/lib/datetime";
+import type { TaskNodeJson } from "@/components/workflow/task-graph-ir";
 import { WorkflowGraphViewer } from "@/plugins/workflow/WorkflowGraphViewer";
 import { WorkflowSourceViewer } from "@/plugins/workflow/WorkflowSourceViewer";
 
+const taskStatusCounts = (tasks: readonly TaskNodeJson[]): StatusCountRollup => {
+  const counts: StatusCountRollup = {
+    total: 0,
+    running: 0,
+    pending: 0,
+    succeeded: 0,
+    failed: 0,
+    cancelled: 0,
+  };
+  for (const task of tasks) {
+    const group = groupForStatus(task.status);
+    if (!group) continue;
+    counts.total += 1;
+    counts[group] += 1;
+  }
+  return counts;
+};
+
+const taskTypeCounts = (tasks: readonly TaskNodeJson[]): { type: string; count: number }[] => {
+  const counts = new Map<string, number>();
+  for (const task of tasks) {
+    const type = task.type || "task";
+    counts.set(type, (counts.get(type) ?? 0) + 1);
+  }
+  return [...counts.entries()]
+    .map(([type, count]) => ({ type, count }))
+    .sort((left, right) => right.count - left.count || left.type.localeCompare(right.type));
+};
+
 const WorkflowOverviewBody = ({ selection, snapshot }: RendererProps): JSX.Element | null => {
   const workflow = snapshot.workflows.find((w) => w.id === selection.objectId);
-  const { setSelection } = useNavigationState(snapshot);
   if (!workflow) return null;
 
-  const project = snapshot.projects.find((item) => item.id === workflow.projectId);
-  const experiment = snapshot.experiments.find((item) => item.id === workflow.experimentId);
-  const nodeCount = workflow.graph?.task_configs.length ?? 0;
-  const edgeCount = workflow.graph?.links.length ?? 0;
+  const tasks = workflow.graph?.task_configs ?? [];
+  const statuses = taskStatusCounts(tasks);
+  const types = taskTypeCounts(tasks);
 
   return (
-    <OverviewPage
-      aside={
-        <>
-          <OverviewSection title="Highlights">
-            <OverviewHighlightGrid>
-              <OverviewHighlight label="Status" value={workflow.status} />
-              <OverviewHighlight label="Nodes" value={nodeCount} />
-              <OverviewHighlight label="Edges" value={edgeCount} />
-              <OverviewHighlight label="Updated" value={formatDateTime(workflow.updatedAt)} />
-            </OverviewHighlightGrid>
-          </OverviewSection>
-
-          <OverviewSection title="Relationships">
-            <div className="flex flex-wrap gap-2">
-              <WorkbenchAction
-                kind="secondary"
-                size="compact"
-                className="h-control-compact px-2 text-label"
-                onClick={() =>
-                  setSelection({ objectType: "project", objectId: workflow.projectId })
-                }
-              >
-                Project: {project?.name || workflow.projectId}
-              </WorkbenchAction>
-              <WorkbenchAction
-                kind="secondary"
-                size="compact"
-                className="h-control-compact px-2 text-label"
-                onClick={() =>
-                  setSelection({ objectType: "experiment", objectId: workflow.experimentId })
-                }
-              >
-                Experiment: {experiment?.name || workflow.experimentId}
-              </WorkbenchAction>
-            </div>
-          </OverviewSection>
-        </>
-      }
-    >
-      <OverviewSection title="Summary">
-        <p className="max-w-3xl text-body-lg leading-6 text-foreground">
-          {workflow.summary || <span className="text-muted-foreground">No summary provided.</span>}
-        </p>
-      </OverviewSection>
-
-      <OverviewSection title="Metadata">
-        <KeyValueGrid
-          items={[
-            {
-              label: "Workflow ID",
-              value: <span className="font-mono text-label">{workflow.id}</span>,
-            },
-            {
-              label: "Project ID",
-              value: <span className="font-mono text-label">{workflow.projectId}</span>,
-            },
-            {
-              label: "Experiment ID",
-              value: <span className="font-mono text-label">{workflow.experimentId}</span>,
-            },
-            {
-              label: "Last Updated",
-              value: <span title={workflow.updatedAt}>{formatDateTime(workflow.updatedAt)}</span>,
-            },
-          ]}
-        />
-      </OverviewSection>
-    </OverviewPage>
+    <OverviewSurface>
+      <DashboardCanvas>
+        {workflow.summary ? (
+          <p className="max-w-2xl text-body text-muted-foreground">{workflow.summary}</p>
+        ) : null}
+        <OverviewInstruments>
+          {statuses.total > 0 ? (
+            <DashboardCard title="Task status">
+              <StatusDistribution counts={statuses} unit="tasks" />
+            </DashboardCard>
+          ) : null}
+          {types.length > 0 ? (
+            <DashboardCard title="Task types">
+              <BarInstrument
+                label="Task types"
+                bars={types.map((item) => ({
+                  id: item.type,
+                  value: item.count,
+                  label: item.type,
+                  tooltip: `${item.type}: ${item.count}`,
+                }))}
+              />
+            </DashboardCard>
+          ) : null}
+        </OverviewInstruments>
+        <OverviewList title="Tasks">
+          <DataTable
+            columns={[
+              {
+                key: "task",
+                header: "Task",
+                cell: (task) => (
+                  <span className="text-body text-foreground">{task.label || task.id}</span>
+                ),
+              },
+              {
+                key: "type",
+                header: "Type",
+                cell: (task) => (
+                  <span className="font-mono text-label text-muted-foreground">{task.type}</span>
+                ),
+              },
+            ]}
+            data={tasks}
+            getRowKey={(task) => task.id}
+            getRowLabel={(task) => task.label || task.id}
+            empty={<EmptyState title="No tasks yet" />}
+          />
+        </OverviewList>
+      </DashboardCanvas>
+    </OverviewSurface>
   );
 };
 

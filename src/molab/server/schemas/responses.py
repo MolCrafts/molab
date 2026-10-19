@@ -20,7 +20,14 @@ from molab.workspace import (
     Run,
     WorkflowKind,
 )
-from molab.workspace.domain import ArtifactOrigin, Asset, AssetVersion, ImportOrigin
+from molab.workspace.domain import (
+    ACTIVE_EXECUTION_STATUSES,
+    ArtifactOrigin,
+    Asset,
+    AssetVersion,
+    ImportOrigin,
+    RunStatusSummary,
+)
 from molab.workspace.execution_dirs import ExecutionDir, list_execution_dirs
 from molab.workspace.experiment import WORKFLOW_DOC_FILENAME
 
@@ -155,8 +162,8 @@ class ExperimentResponse(ApiModel):
     def from_model(
         cls, experiment: Experiment, runs: list[Run] | None = None
     ) -> ExperimentResponse:
-        # Always expose runCount so the nav shows "2 runs" before expand.
-        # Full run rows are only included when *runs* is passed (detail GET).
+        # Listing experiments is shallow: do not traverse every run just to
+        # render their parent. Detail requests supply runs and their exact count.
         git_commit = None
         if runs is not None:
             run_objs = runs
@@ -178,7 +185,7 @@ class ExperimentResponse(ApiModel):
             run_count = len(run_objs)
         else:
             run_list = []
-            run_count = len(experiment.list_runs())
+            run_count = None
         from molab.workspace.refs import ref_of
 
         document = experiment.workflow_document
@@ -318,6 +325,7 @@ class RunResponse(ApiModel):
         document = None if experiment is None else experiment.workflow_document
         wf_source = json.dumps(document, sort_keys=True) if document is not None else None
         kind = None if experiment is None else experiment.workflow_kind
+        records = run.executions
         wf_snap = None
         if kind is not None and experiment is not None:
             entrypoint = experiment.metadata.workflow_entrypoint
@@ -327,10 +335,10 @@ class RunResponse(ApiModel):
                 source = WORKFLOW_DOC_FILENAME
             else:
                 source = kind
-            latest = _latest_execution(run.executions)
+            latest = _latest_execution(records)
             wf_snap = WorkflowSnapshotResponse(
                 source=source,
-                gitCommit=_latest_source_commit(run.executions),
+                gitCommit=_latest_source_commit(records),
                 codeHash=None if latest is None else latest.workflow_digest,
                 configHash=(
                     None if latest is None else _str_or_none(latest.environment.get("config_hash"))
@@ -352,9 +360,14 @@ class RunResponse(ApiModel):
                 artifactIds=list(rec.artifact_ids),
                 error=rec.error,
             )
-            for rec in run.executions
+            for rec in records
         ]
-        summary = run.status_summary
+        summary = RunStatusSummary.from_executions(records)
+        finished = (
+            records[-1].finished_at
+            if records and records[-1].status not in ACTIVE_EXECUTION_STATUSES
+            else None
+        )
         return cls(
             id=run.id,
             name=run.name,
@@ -370,7 +383,7 @@ class RunResponse(ApiModel):
                 byStatus=summary.by_status,
             ),
             created=run.metadata.created_at.isoformat(),
-            finished=run.finished_at.isoformat() if run.finished_at else None,
+            finished=finished.isoformat() if finished else None,
             parameters=run.parameters,
             workflow=wf_snap,
             workflowSource=wf_source,

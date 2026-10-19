@@ -1,7 +1,3 @@
-import { type FormEvent, useEffect, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
-import { useAuth } from "@/app/auth/AuthContext";
-import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -9,9 +5,14 @@ import {
   CardFooter,
   CardHeader,
   CardTitle,
-} from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+  Input,
+  Label,
+} from "@molcrafts/ui";
+import { LogIn } from "lucide-react";
+import { type FormEvent, useEffect, useState } from "react";
+import { useNavigate, useSearchParams } from "react-router-dom";
+import { useAuth } from "@/app/auth/AuthContext";
+import { WorkbenchAction } from "@/components/workbench";
 
 /** Default username matches CLI ``molab auth login`` bootstrap. */
 const DEFAULT_USERNAME = "admin";
@@ -91,9 +92,14 @@ export function LoginPage(): JSX.Element {
             ) : null}
           </CardContent>
           <CardFooter>
-            <Button type="submit" className="w-full" disabled={submitting}>
+            <WorkbenchAction
+              icon={<LogIn aria-hidden />}
+              type="submit"
+              disabled={submitting}
+              aria-busy={submitting}
+            >
               {submitting ? "Signing in…" : "Sign in"}
-            </Button>
+            </WorkbenchAction>
           </CardFooter>
         </form>
       </Card>

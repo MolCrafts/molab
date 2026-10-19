@@ -244,7 +244,12 @@ def open_serve_root(path: object, *, fs: FileSystem | None = None) -> Folder:
         return Workspace(directory, fs=disk)
 
     cls = _class_for_filename(found_name)
-    enclosing = Workspace.enclosing_root(directory, fs=disk)
+    try:
+        enclosing = Workspace.enclosing_root(directory, fs=disk)
+    except PermissionError:
+        # An authorized project/experiment/run can be mounted without access
+        # to its ancestors. Reuse the parentless loader below at that boundary.
+        enclosing = None
     if enclosing is not None and str(enclosing).rstrip("/") != directory.rstrip("/"):
         workspace = Workspace(enclosing, fs=disk)
         located = _locate(workspace, directory)

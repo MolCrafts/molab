@@ -1,17 +1,27 @@
-import { Grip, Plus, RotateCcw, SlidersHorizontal, X } from "lucide-react";
+import {
+  Checkbox,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@molcrafts/ui";
+import { Grip, Plus, RotateCcw, Scaling, SlidersHorizontal, X } from "lucide-react";
 import {
   type JSX,
   type ReactNode,
   type PointerEvent as ReactPointerEvent,
+  useId,
   useRef,
   useState,
 } from "react";
-
-import { DashboardCard } from "@/app/components/entity";
 import {
   type ActivityOptions,
   addWidget,
   DASHBOARD_COLUMNS,
+  DASHBOARD_GAP_PX,
   DASHBOARD_ROW_PX,
   type DashboardWidget,
   defaultWidgets,
@@ -21,18 +31,12 @@ import {
   resizeWidget,
   STATUS_CHOICES,
   WIDGET_CATALOG,
+  widgetDescription,
   widgetId,
   widgetTitle,
 } from "@/app/dashboard/layout";
 import { STATUS_GROUPS, type StatusGroupId } from "@/app/runs/statusGroups";
-import { Checkbox } from "@/components/ui/checkbox";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { useConfirm } from "@/components/ConfirmDialog";
 import { WorkbenchAction, WorkbenchIconAction } from "@/components/workbench";
 import { cn } from "@/lib/utils";
 
@@ -56,26 +60,79 @@ interface Gesture {
 const clamp = (value: number, min: number, max: number): number =>
   Math.min(max, Math.max(min, value));
 
-const descriptionFor = (widget: DashboardWidget): string => {
-  switch (widget.kind) {
-    case "execution-status":
-      return "Attempts by status";
-    case "activity":
-      return widget.options.window === "24h" ? "Last 24 hours" : "Last 7 days";
-    case "backends":
-      return "Status mix per backend";
-    case "run-duration":
-      return widget.options.scope === "finished" ? "Finished runs" : "Succeeded runs";
-    case "schedule":
-      return "Most recently active";
-    case "needs-attention":
-      if (widget.options.statuses.length === 2) return "Failed and cancelled";
-      return widget.options.statuses[0] === "cancelled" ? "Cancelled runs" : "Failed runs";
-  }
-};
-
 const replaceWidget = (widgets: DashboardWidget[], next: DashboardWidget): DashboardWidget[] =>
   widgets.map((widget) => (widget.id === next.id && widget.kind === next.kind ? next : widget));
+
+const SCROLLING_KINDS = new Set<DashboardWidget["kind"]>([
+  "schedule",
+  "needs-attention",
+  "backends",
+]);
+
+const InstrumentFrame = ({
+  widget,
+  wide,
+  interactive,
+  action,
+  onMove,
+  children,
+}: {
+  widget: DashboardWidget;
+  wide: boolean;
+  interactive: boolean;
+  action: ReactNode;
+  onMove?: (event: ReactPointerEvent<HTMLElement>) => void;
+  children: ReactNode;
+}): JSX.Element => {
+  const headingId = useId();
+  const title = widgetTitle(widget.kind);
+  const description = widgetDescription(widget.kind);
+  return (
+    <section
+      aria-labelledby={headingId}
+      className={cn(
+        "flex min-h-0 min-w-0 flex-col border-t border-border",
+        wide ? "h-full" : "py-6",
+        interactive && "rounded-panel border-t-0 ring-1 ring-inset ring-border",
+      )}
+    >
+      <header
+        className={cn(
+          "flex shrink-0 items-baseline gap-3 pt-2 pb-2",
+          interactive && "cursor-grab touch-none px-3 pt-3 active:cursor-grabbing",
+        )}
+        onPointerDown={onMove}
+      >
+        <h2
+          id={headingId}
+          title={`${title} · ${description}`}
+          className="shrink-0 text-label font-medium text-foreground"
+        >
+          {title}
+        </h2>
+        <span className="flex-1" />
+        {action != null ? (
+          <div
+            className="flex shrink-0 items-center gap-1 self-center"
+            onPointerDown={(event) => event.stopPropagation()}
+          >
+            {action}
+          </div>
+        ) : null}
+      </header>
+      <div
+        className={cn(
+          "min-h-0",
+          wide && "flex-1",
+          SCROLLING_KINDS.has(widget.kind) ? "overflow-auto" : "overflow-hidden",
+          interactive && "px-3 pb-8",
+        )}
+      >
+        {children}
+      </div>
+    </section>
+  );
+};
 
 const Choice = ({
   selected,
@@ -104,7 +161,7 @@ const WidgetOptions = ({
     const selected: readonly StatusGroupId[] = widget.options.statuses;
     return (
       <fieldset className="space-y-2">
-        <legend className="text-micro text-muted-foreground">Show</legend>
+        <legend className="text-label text-muted-foreground">Show</legend>
         {allowed.map((status) => {
           const spec = STATUS_GROUPS.find((group) => group.id === status);
           const checked = selected.includes(status);
@@ -121,7 +178,10 @@ const WidgetOptions = ({
                   if (next.length === 0) return;
                   const ordered = allowed.filter((item) => next.includes(item));
                   if (widget.kind === "execution-status") {
-                    onChange({ ...widget, options: { statuses: [...ordered] } });
+                    onChange({
+                      ...widget,
+                      options: { statuses: [...ordered] },
+                    });
                   } else {
                     onChange({
                       ...widget,
@@ -256,55 +316,89 @@ const LimitChoices = <T extends number>({
 
 export const DashboardToolbar = ({
   arranging,
+  wide,
   widgets,
   onArranging,
   onWidgets,
 }: {
   arranging: boolean;
+  wide: boolean;
   widgets: DashboardWidget[];
   onArranging: (arranging: boolean) => void;
   onWidgets: (widgets: DashboardWidget[]) => void;
-}): JSX.Element => (
-  <>
-    <WorkbenchAction
-      kind={arranging ? "primary" : "secondary"}
-      size="compact"
-      icon={<Grip className="size-3.5" />}
-      onClick={() => onArranging(!arranging)}
-    >
-      {arranging ? "Done" : "Arrange"}
-    </WorkbenchAction>
-    {arranging ? (
-      <>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <WorkbenchAction kind="secondary" size="compact" icon={<Plus className="size-3.5" />}>
-              Add
-            </WorkbenchAction>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            {WIDGET_CATALOG.map((item) => (
-              <DropdownMenuItem
-                key={item.kind}
-                onSelect={() => onWidgets(addWidget(widgets, item.kind, widgetId()))}
+}): JSX.Element => {
+  const { confirm, dialog } = useConfirm();
+  const missing = WIDGET_CATALOG.filter(
+    (item) => !widgets.some((widget) => widget.kind === item.kind),
+  );
+
+  const resetLayout = (): void => {
+    void confirm({
+      title: "Reset layout",
+      description: "The custom chart layout is replaced by the default six charts.",
+      confirmLabel: "Reset layout",
+      cancelLabel: "Keep layout",
+      destructive: true,
+    }).then((accepted) => {
+      if (accepted) onWidgets(defaultWidgets());
+    });
+  };
+
+  return (
+    <>
+      {dialog}
+      {wide ? (
+        <div className="flex shrink-0 items-center gap-1">
+          <WorkbenchAction
+            aria-pressed={arranging}
+            className={arranging ? "bg-interactive" : undefined}
+            kind="ghost"
+            size="compact"
+            icon={<Grip className="size-3.5" />}
+            onClick={() => onArranging(!arranging)}
+          >
+            {arranging ? "Done" : "Arrange"}
+          </WorkbenchAction>
+          {arranging ? (
+            <>
+              {missing.length > 0 ? (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <WorkbenchAction
+                      kind="secondary"
+                      size="compact"
+                      icon={<Plus className="size-3.5" />}
+                    >
+                      Add chart
+                    </WorkbenchAction>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    {missing.map((item) => (
+                      <DropdownMenuItem
+                        key={item.kind}
+                        onSelect={() => onWidgets(addWidget(widgets, item.kind, widgetId()))}
+                      >
+                        {item.title}
+                      </DropdownMenuItem>
+                    ))}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              ) : null}
+              <WorkbenchAction
+                kind="ghost"
+                size="compact"
+                icon={<RotateCcw className="size-3.5" />}
+                onClick={resetLayout}
               >
-                {item.title}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
-        <WorkbenchAction
-          kind="ghost"
-          size="compact"
-          icon={<RotateCcw className="size-3.5" />}
-          onClick={() => onWidgets(defaultWidgets())}
-        >
-          Reset
-        </WorkbenchAction>
-      </>
-    ) : null}
-  </>
-);
+                Reset layout
+              </WorkbenchAction>
+            </>
+          ) : null}
+        </div>
+      ) : null}
+    </>
+  );
+};
 
 export const DashboardGrid = ({
   widgets,
@@ -390,12 +484,14 @@ export const DashboardGrid = ({
   return (
     <div
       ref={gridRef}
-      className={cn("min-w-0", wide ? "grid gap-2" : "flex flex-col gap-2")}
+      className={cn("min-w-0", wide ? "grid" : "flex flex-col")}
       style={
         wide
           ? {
               gridTemplateColumns: `repeat(${DASHBOARD_COLUMNS}, minmax(0, 1fr))`,
               gridAutoRows: `${DASHBOARD_ROW_PX}px`,
+              columnGap: DASHBOARD_GAP_PX,
+              rowGap: DASHBOARD_GAP_PX,
             }
           : undefined
       }
@@ -403,7 +499,10 @@ export const DashboardGrid = ({
       {shown.map((widget) => (
         <div
           key={widget.id}
-          className="relative min-h-0 min-w-0"
+          className={cn(
+            "relative min-h-0 min-w-0",
+            !wide && "border-b border-border last:border-b-0",
+          )}
           style={
             wide
               ? {
@@ -413,14 +512,13 @@ export const DashboardGrid = ({
               : undefined
           }
         >
-          <DashboardCard
-            title={widgetTitle(widget.kind)}
-            description={descriptionFor(widget)}
-            className="h-full overflow-hidden border border-border bg-background"
-            bodyClassName="min-h-0 flex-1 overflow-auto px-3 py-2"
-            onHeaderPointerDown={interactive ? (event) => begin(widget, "move", event) : undefined}
+          <InstrumentFrame
+            widget={widget}
+            wide={wide}
+            interactive={interactive}
+            onMove={interactive ? (event) => begin(widget, "move", event) : undefined}
             action={
-              arranging ? (
+              interactive ? (
                 <>
                   <Popover>
                     <PopoverTrigger asChild>
@@ -446,17 +544,18 @@ export const DashboardGrid = ({
             }
           >
             {renderWidget(widget)}
-          </DashboardCard>
+          </InstrumentFrame>
           {interactive ? (
-            <button
-              type="button"
-              aria-label={`Resize ${widgetTitle(widget.kind)}`}
-              className="absolute bottom-0 right-0 size-4 cursor-nwse-resize"
+            <WorkbenchIconAction
+              label={`Resize ${widgetTitle(widget.kind)}`}
+              className="absolute right-1 bottom-1 cursor-nwse-resize"
               onPointerDown={(event) => {
                 event.stopPropagation();
                 begin(widget, "resize", event);
               }}
-            />
+            >
+              <Scaling className="size-3.5" aria-hidden />
+            </WorkbenchIconAction>
           ) : null}
         </div>
       ))}

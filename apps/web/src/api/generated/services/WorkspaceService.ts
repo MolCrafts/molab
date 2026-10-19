@@ -8,6 +8,7 @@ import type { CacheStatusResponse } from '../models/CacheStatusResponse';
 import type { DirectoryCreateRequest } from '../models/DirectoryCreateRequest';
 import type { FileContentResponse } from '../models/FileContentResponse';
 import type { FileContentUpdateRequest } from '../models/FileContentUpdateRequest';
+import type { ServeScopeResponse } from '../models/ServeScopeResponse';
 import type { TargetTestResponse } from '../models/TargetTestResponse';
 import type { WorkspaceContextResponse } from '../models/WorkspaceContextResponse';
 import type { WorkspaceInfoResponse } from '../models/WorkspaceInfoResponse';
@@ -22,6 +23,27 @@ import type { CancelablePromise } from '../core/CancelablePromise';
 import { OpenAPI } from '../core/OpenAPI';
 import { request as __request } from '../core/request';
 export class WorkspaceService {
+    /**
+     * Get Serve Scope
+     * Kind of the served directory. The UI uses this instead of guessing.
+     * @param molabSession
+     * @returns ServeScopeResponse Successful Response
+     * @throws ApiError
+     */
+    public static getServeScope(
+        molabSession?: (string | null),
+    ): CancelablePromise<ServeScopeResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/workspace/scope',
+            cookies: {
+                'molab_session': molabSession,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
     /**
      * Get Workspace Info
      * Get workspace information.
@@ -259,18 +281,47 @@ export class WorkspaceService {
      *
      * Routes through ``workspace.fs`` so remote workspaces (and the
      * :class:`CachedRemoteFileSystem` mirror) take effect.
+     * @param download Download as an attachment instead of previewing
      * @param path Workspace-relative path to read
      * @param molabSession
      * @returns any Successful Response
      * @throws ApiError
      */
     public static readWorkspaceFileBlob(
+        download: boolean = false,
         path: string = '',
         molabSession?: (string | null),
     ): CancelablePromise<any> {
         return __request(OpenAPI, {
             method: 'GET',
             url: '/api/workspace/file/blob',
+            cookies: {
+                'molab_session': molabSession,
+            },
+            query: {
+                'download': download,
+                'path': path,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * Upload Workspace File
+     * Stage a bounded HTTP stream on disk, then publish through the workspace filesystem.
+     * @param path Workspace-relative destination; request body is raw file bytes
+     * @param molabSession
+     * @returns void
+     * @throws ApiError
+     */
+    public static uploadWorkspaceFile(
+        path: string,
+        molabSession?: (string | null),
+    ): CancelablePromise<void> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/workspace/file/upload',
             cookies: {
                 'molab_session': molabSession,
             },

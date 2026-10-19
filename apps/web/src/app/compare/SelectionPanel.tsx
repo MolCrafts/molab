@@ -6,17 +6,17 @@
  * display names when the snapshot knows the entity.
  */
 
-import { ArrowUpRight, ChevronDown, ChevronUp, GitCompare, Trash2 } from "lucide-react";
+import { ArrowUpRight, ListX, X } from "lucide-react";
 import { type JSX, useMemo } from "react";
 import { Link } from "react-router-dom";
 
 import type { WorkspaceSnapshot } from "@/app/types";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import { WorkbenchIconAction } from "@/components/workbench";
 
-import { buildCategoryGroups, hydrateComparisonTree } from "./comparisonTree";
+import { hydrateComparisonTree } from "./comparisonTree";
+import { compareEntriesForWorkspaces } from "./servedSelection";
 import { type CompareItem, itemKey } from "./types";
-import { compareSet, reorderItems, setItemCategory, useCompareSet } from "./useCompareSet";
+import { useCompareSet } from "./useCompareSet";
 
 const entryLabel = (entry: CompareItem, tree: ReturnType<typeof hydrateComparisonTree>): string => {
   const project = tree.find(
@@ -33,96 +33,69 @@ const entryLabel = (entry: CompareItem, tree: ReturnType<typeof hydrateCompariso
   return entry.runName || entry.ref.runId;
 };
 
-const assignCategory = (entries: readonly CompareItem[], key: string, raw: string): void => {
-  const trimmed = raw.trim();
-  compareSet.replace(setItemCategory(entries, key, trimmed.length === 0 ? null : trimmed));
-};
+export const SelectionPanel = ({
+  snapshot,
+}: {
+  snapshot: WorkspaceSnapshot;
+}): JSX.Element | null => {
+  const { entries, remove, clear } = useCompareSet();
+  const visible = compareEntriesForWorkspaces(
+    entries,
+    snapshot.workspaces.map((workspace) => workspace.key),
+  );
+  const tree = useMemo(() => hydrateComparisonTree(visible, snapshot), [visible, snapshot]);
 
-export const SelectionPanel = ({ snapshot }: { snapshot: WorkspaceSnapshot }): JSX.Element => {
-  const { entries, count, remove, clear } = useCompareSet();
-  const tree = useMemo(() => hydrateComparisonTree(entries, snapshot), [entries, snapshot]);
-  const groups = useMemo(() => buildCategoryGroups(entries), [entries]);
+  if (visible.length === 0) return null;
 
   return (
     <section
-      className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden border-t border-border bg-surface"
-      aria-label="Selection"
+      className="overflow-hidden border-t border-border px-2 py-2"
+      aria-label="Compare selection"
     >
-      <header className="flex h-toolbar-compact shrink-0 items-center gap-1 px-2">
-        <GitCompare className="size-icon-sm shrink-0 text-muted-foreground" />
-        <span className="min-w-0 flex-1 truncate text-label font-medium text-muted-foreground">
-          Selection
-        </span>
-        <span className="shrink-0 font-mono text-micro text-muted-foreground tabular-nums">
-          {count}
-        </span>
-        <WorkbenchIconAction label="Compare" kind={count > 0 ? "primary" : "ghost"} asChild>
-          <Link to="/compare">
-            <ArrowUpRight className="size-icon-sm" />
-          </Link>
-        </WorkbenchIconAction>
+      <div className="flex items-center gap-2">
+        <Link
+          to="/compare"
+          className="inline-flex min-w-0 items-center gap-1 text-label text-foreground hover:underline"
+        >
+          Compare
+          <span className="font-mono text-micro tabular-nums text-muted-foreground">
+            {visible.length}
+          </span>
+          <ArrowUpRight className="size-3.5 shrink-0" aria-hidden />
+        </Link>
         <WorkbenchIconAction
-          label="Remove every selected item"
-          disabled={count === 0}
+          label="Clear selection"
+          className="ml-auto text-muted-foreground"
           onClick={clear}
         >
-          <Trash2 className="size-icon-sm" />
+          <ListX aria-hidden />
         </WorkbenchIconAction>
-      </header>
-
-      {count === 0 ? null : (
-        <ScrollArea className="min-h-0 min-w-0 flex-1">
-          <div className="min-w-0 space-y-2 pb-2">
-            {groups.map((group) => (
-              <div key={group.category ?? ""}>
-                <p className="px-2 pt-1 font-mono text-micro text-muted-foreground">
-                  {group.category ?? "Ungrouped"}
-                </p>
-                {group.items.map((entry) => {
-                  const key = itemKey(entry.ref);
-                  const index = entries.findIndex((item) => itemKey(item.ref) === key);
-                  const label = entryLabel(entry, tree);
-                  return (
-                    <div
-                      key={key}
-                      className="flex min-w-0 items-center gap-hairline px-1 py-row-pad"
-                    >
-                      <WorkbenchIconAction
-                        label="Move up"
-                        disabled={index <= 0}
-                        onClick={() => compareSet.replace(reorderItems(entries, index, index - 1))}
-                      >
-                        <ChevronUp className="size-icon-sm" />
-                      </WorkbenchIconAction>
-                      <WorkbenchIconAction
-                        label="Move down"
-                        disabled={index < 0 || index >= entries.length - 1}
-                        onClick={() => compareSet.replace(reorderItems(entries, index, index + 1))}
-                      >
-                        <ChevronDown className="size-icon-sm" />
-                      </WorkbenchIconAction>
-                      <span className="min-w-0 flex-1 truncate font-mono text-label" title={label}>
-                        {label}
-                      </span>
-                      <input
-                        aria-label={`Category for ${label}`}
-                        defaultValue={entry.category ?? ""}
-                        key={`${key}:${entry.category ?? ""}`}
-                        placeholder="Category"
-                        className="h-control-compact w-16 rounded-control border border-border bg-transparent px-1 font-mono text-micro"
-                        onBlur={(event) => assignCategory(entries, key, event.target.value)}
-                      />
-                      <WorkbenchIconAction label={`Remove ${label}`} onClick={() => remove(key)}>
-                        <Trash2 className="size-icon-sm" />
-                      </WorkbenchIconAction>
-                    </div>
-                  );
-                })}
-              </div>
-            ))}
-          </div>
-        </ScrollArea>
-      )}
+      </div>
+      <ul className="mt-1 space-y-1">
+        {visible.map((entry) => {
+          const key = itemKey(entry.ref);
+          const label = entryLabel(entry, tree);
+          return (
+            <li key={key} className="flex min-w-0 items-center gap-1">
+              <span className="min-w-0 flex-1 truncate text-label" title={label}>
+                {label}
+                {entry.category ? (
+                  <span className="ml-1 font-mono text-micro text-muted-foreground">
+                    {entry.category}
+                  </span>
+                ) : null}
+              </span>
+              <WorkbenchIconAction
+                label={`Remove ${label}`}
+                kind="ghost"
+                onClick={() => remove(key)}
+              >
+                <X className="size-3.5" />
+              </WorkbenchIconAction>
+            </li>
+          );
+        })}
+      </ul>
     </section>
   );
 };

@@ -1,14 +1,14 @@
-import { LogOut } from "lucide-react";
-import { useAuth } from "@/app/auth/AuthContext";
-import { Button } from "@/components/ui/button";
 import {
+  Button,
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
+} from "@molcrafts/ui";
+import { LogOut } from "lucide-react";
+import { useAuth } from "@/app/auth/AuthContext";
 
 /** Header control: only renders when auth is enabled and a user is signed in. */
 export function UserMenu(): JSX.Element | null {

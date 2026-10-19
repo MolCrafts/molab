@@ -1,4 +1,20 @@
-import { Plus } from "lucide-react";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+  Input,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@molcrafts/ui";
+import { Check, Plus } from "lucide-react";
 import type { ReactNode } from "react";
 import { useCallback, useEffect, useState } from "react";
 import { runsApi } from "@/api";
@@ -13,24 +29,6 @@ import {
   schemaDefaults,
 } from "@/app/runs/SchemaForm";
 import { AddTargetDialog } from "@/app/settings/AddTargetDialog";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { WorkbenchAction, WorkbenchIconAction } from "@/components/workbench";
 
 const NO_TARGET_VALUE = "__none__";
@@ -197,7 +195,12 @@ export function CreateRunDialog({
             )}
           </div>
           <DialogFooter>
-            <WorkbenchAction kind="primary" type="submit" disabled={isLoading}>
+            <WorkbenchAction
+              icon={<Check aria-hidden />}
+              kind="primary"
+              type="submit"
+              disabled={isLoading}
+            >
               {isLoading ? "…" : "Create"}
             </WorkbenchAction>
           </DialogFooter>

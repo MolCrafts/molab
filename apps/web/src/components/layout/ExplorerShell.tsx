@@ -4,12 +4,17 @@
  * Products own navigation descriptors and explorer content. This block owns
  * only shared chrome, accessibility, and layout behavior.
  */
+import {
+  Button,
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuTrigger,
+  ResizableHandle,
+  ResizablePanel,
+  ResizablePanelGroup,
+  ScrollArea,
+} from "@molcrafts/ui";
 import type { ComponentType, JSX, ReactNode, SVGProps } from "react";
-import { Button } from "@/components/ui/button";
-import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/components/ui/context-menu";
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 
 export interface LeftIconRailItem {
@@ -43,56 +48,50 @@ export const LeftIconRail = ({
   const itemButton = (item: LeftIconRailItem): JSX.Element => {
     const Icon = item.icon;
     return (
-      <Tooltip key={item.id}>
-        <TooltipTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            aria-label={item.label}
-            aria-pressed={activeId === item.id}
-            title={item.label}
-            className={cn(
-              "relative size-8 rounded-control text-muted-foreground",
-              "after:absolute after:-left-2 after:inset-y-1 after:w-0.5 after:rounded-full after:bg-transparent",
-              activeId === item.id &&
-                "bg-background text-foreground after:bg-accent hover:bg-background",
-            )}
-            onClick={() => onSelect(item.id)}
-            onPointerEnter={() => item.onIntent?.()}
-            onFocus={() => item.onIntent?.()}
-          >
-            <Icon className="size-icon" />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent side="right">{item.label}</TooltipContent>
-      </Tooltip>
+      <Button
+        key={item.id}
+        type="button"
+        variant="ghost"
+        size="icon"
+        title={item.label}
+        aria-label={item.label}
+        aria-pressed={activeId === item.id}
+        className={cn(
+          "relative size-8 rounded-control text-muted-foreground",
+          "after:absolute after:-left-1 after:inset-y-1 after:w-px after:rounded-full after:bg-transparent",
+          activeId === item.id &&
+            "bg-background text-foreground after:bg-accent hover:bg-background",
+        )}
+        onClick={() => onSelect(item.id)}
+        onPointerEnter={() => item.onIntent?.()}
+        onFocus={() => item.onIntent?.()}
+      >
+        <Icon className="size-icon" />
+      </Button>
     );
   };
 
   return (
-    <TooltipProvider>
-      <nav
-        className={cn(
-          "flex w-12 shrink-0 flex-col items-center gap-1 border-r border-border bg-muted py-3",
-          className,
-        )}
-        aria-label={ariaLabel}
-      >
-        {items.map((item) => (
-          <div
-            key={item.id}
-            className={cn(
-              "flex flex-col items-center",
-              item.separatorBefore && "mt-1 border-t border-border pt-2",
-            )}
-          >
-            {itemButton(item)}
-          </div>
-        ))}
-        {footer ? <div className="mt-auto">{itemButton(footer)}</div> : null}
-      </nav>
-    </TooltipProvider>
+    <nav
+      className={cn(
+        "flex w-12 shrink-0 flex-col items-center gap-1 border-r border-border bg-surface-subtle py-1",
+        className,
+      )}
+      aria-label={ariaLabel}
+    >
+      {items.map((item) => (
+        <div
+          key={item.id}
+          className={cn(
+            "flex flex-col items-center",
+            item.separatorBefore && "mt-1 border-t border-border pt-2",
+          )}
+        >
+          {itemButton(item)}
+        </div>
+      ))}
+      {footer ? <div className="mt-auto">{itemButton(footer)}</div> : null}
+    </nav>
   );
 };
 export interface LeftExplorerProps {
@@ -125,11 +124,9 @@ export const LeftExplorer = ({
         className,
       )}
     >
-      <header className="flex h-toolbar-compact shrink-0 items-center border-b border-border px-2">
+      <header className="flex h-8 shrink-0 items-center border-b border-border px-2">
         <div className="flex min-w-0 flex-1 items-center justify-between gap-2">
-          <h2 className="min-w-0 truncate text-label font-semibold uppercase tracking-wide text-muted-foreground">
-            {title}
-          </h2>
+          <h2 className="min-w-0 truncate text-label font-medium text-foreground">{title}</h2>
           {actions ? (
             <div className="flex shrink-0 items-center gap-hairline">{actions}</div>
           ) : null}
@@ -140,7 +137,7 @@ export const LeftExplorer = ({
       {/* Radix wraps the body in display:table, which sizes rows to their
           content and defeats truncate; block keeps rows at the column width. */}
       <ScrollArea className="min-h-0 flex-1 [&_[data-radix-scroll-area-viewport]>div]:!block">
-        <div className={cn("min-h-full px-2 py-row-pad", bodyClassName)}>{children}</div>
+        <div className={cn("min-h-full px-1 py-row-pad", bodyClassName)}>{children}</div>
       </ScrollArea>
     </div>
   );

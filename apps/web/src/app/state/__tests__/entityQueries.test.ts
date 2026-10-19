@@ -1,10 +1,12 @@
 import { describe, expect, it } from "@rstest/core";
 import { artifactPreviewText, journalRefetchInterval, runKeys } from "@/app/state/entityQueries";
+import { getWorkspaceQueryScope } from "../workspaceSwitchEvents";
 
 describe("runKeys.journal", () => {
   it("keys one execution journal", () => {
     expect(runKeys.journal("p", "e", "r", "e01")).toEqual([
       "runs",
+      getWorkspaceQueryScope(),
       "p",
       "e",
       "r",
@@ -18,6 +20,7 @@ describe("runKeys.artifactContent", () => {
   it("keys one artifact's bytes", () => {
     expect(runKeys.artifactContent("p", "e", "r", "e01", "a1")).toEqual([
       "runs",
+      getWorkspaceQueryScope(),
       "p",
       "e",
       "r",

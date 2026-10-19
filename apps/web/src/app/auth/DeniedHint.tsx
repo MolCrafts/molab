@@ -3,8 +3,8 @@
  * explains why (native `title` on disabled buttons is unreliable).
  */
 
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@molcrafts/ui";
 import type { ReactNode } from "react";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
 export function DeniedHint({
   reason,

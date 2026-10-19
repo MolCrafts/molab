@@ -72,4 +72,66 @@ describe("Projects explorer", () => {
 
     expect(buildProjectExpandPath(snapshot, "project-1", "")).toEqual(["project-1"]);
   });
+
+  it("shows a failed experiment load instead of an indefinite loading row", () => {
+    const snapshot = buildEmptySnapshot();
+    snapshot.projects = [
+      {
+        id: "project-1",
+        name: "Catalyst search",
+        path: "projects/catalyst-search",
+        status: "active",
+        summary: "",
+        updatedAt: "",
+        experimentCount: 16,
+        experimentsError: "Connection timed out",
+      },
+    ];
+    const [node] = buildProjectNodes(
+      snapshot,
+      projectActions(() => undefined),
+      "",
+    );
+    expect(node?.emptyChildLabel).toBe("Could not load experiments");
+  });
+
+  it("does not scan remote runs when the pointer passes over an experiment", () => {
+    const snapshot = buildEmptySnapshot();
+    snapshot.projects = [
+      { id: "p", name: "Project", path: "p", status: "active", summary: "", updatedAt: "" },
+    ];
+    snapshot.experiments = [
+      {
+        id: "e",
+        name: "Experiment",
+        path: "p/e",
+        status: "active",
+        summary: "",
+        workflowFile: "",
+        updatedAt: "",
+        projectId: "p",
+        parameterSpace: {},
+        workflowSource: null,
+      },
+    ];
+    const actions = projectActions(() => undefined);
+    actions.pathContext.workspace = { label: "Arrhenius:/lab", path: null, isRemote: true };
+    let scans = 0;
+    let intents = 0;
+    actions.onExpandProject = () => {
+      scans += 1;
+    };
+    actions.onExpandExperiment = () => {
+      scans += 1;
+    };
+    actions.onIntentExperiment = () => {
+      intents += 1;
+    };
+    const [project] = buildProjectNodes(snapshot, actions, "");
+    project?.children?.[0]?.onPrefetch?.();
+    expect(scans).toBe(0);
+    expect(intents).toBe(1);
+    project?.children?.[0]?.onSelect?.();
+    expect(scans).toBe(2);
+  });
 });

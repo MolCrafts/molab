@@ -1,10 +1,32 @@
+import { WorkbenchIconAction } from "@/components/workbench";
 /**
  * Settings → Users — admin-only filesystem user management.
  * Data via TanStack Query (list + mutations); chrome via shared SettingsSection.
  */
 
+import {
+  Badge,
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  Input,
+  Label,
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@molcrafts/ui";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, Trash2 } from "lucide-react";
+import { Check, Plus, Trash2, X } from "lucide-react";
 import { useState } from "react";
 import { useAuth } from "@/app/auth/AuthContext";
 import * as authApi from "@/app/auth/api";
@@ -13,32 +35,6 @@ import { authKeys } from "@/app/auth/keys";
 import type { AuthRole, AuthUser } from "@/app/auth/types";
 import { usePermissions } from "@/app/auth/usePermissions";
 import { SettingsSection } from "@/components/settings";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 
 const ROLES: AuthRole[] = ["admin", "operator", "viewer"];
 
@@ -116,14 +112,13 @@ export function UsersSection({ sectionId = "users" }: { sectionId?: string }): J
       description="Filesystem accounts under ~/.molab/auth/ (CLI: molab auth users …)."
       trailing={
         <DeniedHint reason={usersDeniedReason}>
-          <Button
-            size="sm"
+          <WorkbenchIconAction
+            label="Add user"
             onClick={() => setCreateOpen(true)}
             disabled={Boolean(usersDeniedReason)}
           >
-            <Plus className="size-icon" />
-            Add user
-          </Button>
+            <Plus aria-hidden />
+          </WorkbenchIconAction>
         </DeniedHint>
       }
     >
@@ -185,10 +180,8 @@ export function UsersSection({ sectionId = "users" }: { sectionId?: string }): J
                     )}
                   </TableCell>
                   <TableCell>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      aria-label={`Delete ${u.username}`}
+                    <WorkbenchIconAction
+                      label={`Delete ${u.username}`}
                       disabled={deleteMutation.isPending || u.username === me?.username}
                       onClick={() => {
                         if (window.confirm(`Delete user ${u.username}? This cannot be undone.`)) {
@@ -197,7 +190,7 @@ export function UsersSection({ sectionId = "users" }: { sectionId?: string }): J
                       }}
                     >
                       <Trash2 className="size-icon" />
-                    </Button>
+                    </WorkbenchIconAction>
                   </TableCell>
                 </TableRow>
               ))}
@@ -265,10 +258,11 @@ export function UsersSection({ sectionId = "users" }: { sectionId?: string }): J
             ) : null}
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setCreateOpen(false)}>
-              Cancel
-            </Button>
-            <Button
+            <WorkbenchIconAction label="Cancel" onClick={() => setCreateOpen(false)}>
+              <X aria-hidden />
+            </WorkbenchIconAction>
+            <WorkbenchIconAction
+              label={createMutation.isPending ? "Creating user…" : "Create user"}
               disabled={createMutation.isPending || !formUser.trim() || !formPassword}
               onClick={() => {
                 setFormError(null);
@@ -284,8 +278,8 @@ export function UsersSection({ sectionId = "users" }: { sectionId?: string }): J
                 });
               }}
             >
-              {createMutation.isPending ? "Creating…" : "Create"}
-            </Button>
+              <Check aria-hidden />
+            </WorkbenchIconAction>
           </DialogFooter>
         </DialogContent>
       </Dialog>

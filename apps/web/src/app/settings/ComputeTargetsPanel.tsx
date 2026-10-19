@@ -6,22 +6,12 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, FlaskConical, Plus, Trash2, X } from "lucide-react";
 import { useState } from "react";
-import { TargetCreateRequest } from "@/api/generated/models/TargetCreateRequest";
 import type { TargetTestResponse } from "@/api/generated/models/TargetTestResponse";
 import { TargetsService } from "@/api/generated/services/TargetsService";
 import { usePermissions } from "@/app/auth";
 import { WorkbenchIconAction, WorkbenchTag } from "@/components/workbench";
 import { AddTargetDialog } from "./AddTargetDialog";
 import { settingsKeys } from "./settingsKeys";
-
-type Scheduler = TargetCreateRequest.scheduler;
-
-const schedulerLabel: Record<Scheduler, string> = {
-  [TargetCreateRequest.scheduler.LOCAL]: "Local shell",
-  [TargetCreateRequest.scheduler.SLURM]: "SLURM",
-  [TargetCreateRequest.scheduler.PBS]: "PBS",
-  [TargetCreateRequest.scheduler.LSF]: "LSF",
-};
 
 export function ComputeTargetsPanel(): JSX.Element {
   const { writeDeniedReason } = usePermissions();
@@ -83,11 +73,9 @@ export function ComputeTargetsPanel(): JSX.Element {
         : null;
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-2">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <p className="text-body text-muted-foreground">
-          {targets.length} {targets.length === 1 ? "target is" : "targets are"} registered.
-        </p>
+        <p className="text-body text-muted-foreground">{targets.length} targets</p>
         {writeDeniedReason ? (
           <WorkbenchIconAction label="Add compute target" deniedReason={writeDeniedReason}>
             <Plus className="size-3.5" />
@@ -110,25 +98,21 @@ export function ComputeTargetsPanel(): JSX.Element {
           <p className="text-body-lg text-muted-foreground">Loading…</p>
         ) : targets.length === 0 ? (
           <p className="bg-surface/60 px-4 py-8 text-center text-body text-muted-foreground">
-            No targets registered. Runs use in-process local execution until you add one.
+            No compute targets. Runs execute locally.
           </p>
         ) : (
           <ul className="space-y-1">
             {targets.map((t) => (
               <li
                 key={t.name}
-                className="flex flex-col gap-3 bg-surface/60 px-3 py-3 transition-colors hover:bg-surface sm:flex-row sm:items-center"
+                className="flex flex-col gap-2 bg-surface/60 px-2 py-1 transition-colors hover:bg-surface sm:flex-row sm:items-center"
               >
-                <div className="min-w-0 flex-1">
+                <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-4 gap-y-1">
                   <div className="flex items-center gap-2">
-                    <span className="truncate font-mono text-body font-medium">{t.name}</span>
-                    <WorkbenchTag>{t.isRemote ? "ssh" : "local"}</WorkbenchTag>
-                    <WorkbenchTag meaning="metadata">
-                      {schedulerLabel[t.scheduler as unknown as Scheduler]}
-                    </WorkbenchTag>
+                    <span className="truncate text-body font-medium">{t.name}</span>
+                    <WorkbenchTag>{t.isRemote ? "Remote" : "Local"}</WorkbenchTag>
                   </div>
-                  <div className="mt-1 truncate font-mono text-micro text-muted-foreground">
-                    {t.host ? `${t.host} → ` : ""}
+                  <div className="min-w-0 flex-1 truncate font-mono text-label text-muted-foreground">
                     {t.scratchRoot}
                   </div>
                 </div>

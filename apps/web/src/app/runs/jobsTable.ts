@@ -3,6 +3,7 @@
  * Kept free of React so sort/page rules are unit-testable.
  */
 
+import { refKey } from "@/app/compare/types";
 import { runExecutorFacetLabel, runFinishedAt, runPresentationStatus } from "./projections";
 import type { WorkspaceRunRow } from "./types";
 
@@ -10,7 +11,7 @@ export type JobsSortKey =
   | "status"
   | "name"
   | "project"
-  | "backend"
+  | "cluster"
   | "attempts"
   | "duration"
   | "submitted";
@@ -26,7 +27,7 @@ export const JOBS_SORT_KEYS: readonly JobsSortKey[] = [
   "status",
   "name",
   "project",
-  "backend",
+  "cluster",
   "attempts",
   "duration",
   "submitted",
@@ -71,8 +72,8 @@ const sortValue = (run: WorkspaceRunRow, key: JobsSortKey): string | number | nu
       return run.name || run.id;
     case "project":
       return `${run.projectName}\0${run.experimentName}`;
-    case "backend":
-      return runExecutorFacetLabel(run, "backend") ?? "";
+    case "cluster":
+      return runExecutorFacetLabel(run, "cluster_name") ?? "";
     case "attempts":
       return run.statusSummary.total;
     case "duration":
@@ -172,3 +173,12 @@ export const nextJobsSort = (current: JobsSort, key: JobsSortKey): JobsSort => {
     key === "submitted" || key === "duration" || key === "attempts" ? "desc" : "asc";
   return { key, dir };
 };
+
+/** One selectable row, even when workspaces contain cloned entity IDs. */
+export const workspaceRunKey = (run: WorkspaceRunRow): string =>
+  refKey({
+    workspaceKey: run.workspaceKey,
+    projectId: run.projectId,
+    experimentId: run.experimentId,
+    runId: run.id,
+  });

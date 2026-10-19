@@ -10,9 +10,5 @@ export type WorkspaceConnectRequest = {
      * One-time verification code / OTP from the authenticator app or SMS
      */
     code: string;
-    /**
-     * Re-authenticate even when a ControlMaster is already alive
-     */
-    force?: boolean;
 };
 

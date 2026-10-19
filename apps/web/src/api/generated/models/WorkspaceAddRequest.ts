@@ -7,11 +7,11 @@
  */
 export type WorkspaceAddRequest = {
     /**
-     * ``local`` path or ``remote`` (registered target or Host:/path)
+     * ``local`` path or ``remote`` (registered target or cluster:/path)
      */
     kind?: WorkspaceAddRequest.kind;
     /**
-     * Local absolute path (kind=local) or SCP Host:/abs (kind=remote)
+     * Local absolute path (kind=local) or SCP cluster:/abs (kind=remote)
      */
     path?: (string | null);
     /**
@@ -29,7 +29,7 @@ export type WorkspaceAddRequest = {
 };
 export namespace WorkspaceAddRequest {
     /**
-     * ``local`` path or ``remote`` (registered target or Host:/path)
+     * ``local`` path or ``remote`` (registered target or cluster:/path)
      */
     export enum kind {
         LOCAL = 'local',

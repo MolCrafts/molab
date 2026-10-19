@@ -1,5 +1,6 @@
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@molcrafts/ui";
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, Network } from "lucide-react";
+import { Network } from "lucide-react";
 import { type JSX, type ReactNode, useMemo } from "react";
 import type { ExecutionOutputsResponse } from "@/api/generated/models/ExecutionOutputsResponse";
 import {
@@ -8,7 +9,6 @@ import {
   InventoryCanvas,
   OverviewSurface,
   StatusIcon,
-  statusKey,
 } from "@/app/components/entity";
 import { listExecutionColumns, listExecutionDetails } from "@/app/registry";
 import { formatDuration } from "@/app/renderers/dashboardData";
@@ -17,16 +17,7 @@ import { groupForStatus } from "@/app/runs/statusGroups";
 import { executionJournalQueryOptions, journalRefetchInterval } from "@/app/state/entityQueries";
 import type { ExecutionRecordSummary, RunSummary, WorkflowSummary } from "@/app/types";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
   RunStatusBadge,
-  WorkbenchAction,
   WorkbenchIconAction,
   WorkbenchOperationState,
 } from "@/components/workbench";
@@ -190,8 +181,6 @@ export const RunExecutionsPanel = ({
     : null;
   const graphLoading = journal.isLoading;
 
-  const failedTasks =
-    graph?.task_configs.filter((task) => statusKey(task.status) === "failed") ?? [];
   const attemptSpan = attemptWindow(history);
   const row = selected ? executionRow(selected, run.id) : null;
   const columns = useMemo(() => listExecutionColumns(row?.backend), [row?.backend]);
@@ -229,7 +218,6 @@ export const RunExecutionsPanel = ({
                 <TableHead className="w-24">Mode</TableHead>
                 <TableHead className="w-40">Started</TableHead>
                 <TableHead className="w-52">Timeline</TableHead>
-                <TableHead className="w-32">Backend</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -279,9 +267,6 @@ export const RunExecutionsPanel = ({
                     <TableCell>
                       <AttemptBar execution={execution} window={attemptSpan} />
                     </TableCell>
-                    <TableCell className="font-mono text-label text-muted-foreground">
-                      {backendOf(execution)}
-                    </TableCell>
                   </TableRow>
                 );
               })}
@@ -325,7 +310,6 @@ export const RunExecutionsPanel = ({
                     label: "End",
                     value: selected.finishedAt ? formatDateTime(selected.finishedAt) : "—",
                   },
-                  { label: "Backend", value: backendOf(selected) },
                   ...(selected.basedOnExecutionId
                     ? [{ label: "Based on", value: selected.basedOnExecutionId }]
                     : []),
@@ -373,26 +357,7 @@ export const RunExecutionsPanel = ({
             </section>
 
             <section className="space-y-3">
-              <h2 className="text-body-lg font-medium text-foreground">Observed workflow</h2>
-              {failedTasks.length > 0 && (
-                <div className="border-y border-status-failed/25 bg-status-failed-soft px-3 py-3 text-label text-status-failed-foreground">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <AlertTriangle className="size-icon-sm" />
-                    Failed at
-                    {failedTasks.map((task) => (
-                      <WorkbenchAction
-                        key={task.id}
-                        kind="ghost"
-                        size="content"
-                        className="font-mono underline-offset-2 hover:underline"
-                        onClick={() => onInspectTask(task.id, run.id)}
-                      >
-                        {task.id}
-                      </WorkbenchAction>
-                    ))}
-                  </div>
-                </div>
-              )}
+              <h2 className="text-body-lg font-medium text-foreground">Workflow</h2>
               {graph ? (
                 <div className="overflow-hidden border border-border bg-canvas">
                   <WorkflowGraph
@@ -405,20 +370,18 @@ export const RunExecutionsPanel = ({
                 <WorkbenchOperationState
                   kind="error"
                   density="compact"
-                  title="Could not load the observed workflow"
+                  title="Could not load workflow"
                   detail={graphError}
                 />
               ) : graphLoading ? (
                 <WorkbenchOperationState
                   kind="loading"
                   density="compact"
-                  title="Loading observed workflow…"
+                  title="Loading workflow…"
                   skeletonRows={3}
                 />
               ) : (
-                <p className="py-6 text-label text-muted-foreground">
-                  No observed workflow snapshot for this execution.
-                </p>
+                <p className="py-6 text-label text-muted-foreground">No workflow snapshot.</p>
               )}
             </section>
           </>

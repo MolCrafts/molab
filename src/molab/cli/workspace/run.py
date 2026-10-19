@@ -875,7 +875,16 @@ def _select_backend(
             rprint(f"[red]{exc}[/red] — see `molab target list`.")
             raise typer.Exit(1) from exc
 
-    selected_scheduler = selected_target.scheduler if selected_target is not None else scheduler
+    if selected_target is not None:
+        from molab.workspace.targets import target_definition
+
+        selected_scheduler = (
+            str(target_definition(selected_target)["scheduler"])
+            if selected_target.cluster_id
+            else None
+        )
+    else:
+        selected_scheduler = scheduler
     is_local = selected_scheduler is None and selected_target is None
     return selected_target, selected_scheduler, is_local
 
@@ -909,7 +918,7 @@ def _run_dry_run(
     )
     if runs:
         watch_arg = _watch_path_for(target_path, runs)
-        rprint(f"[dim]Preview with: molab serve -ws {watch_arg}[/dim]")
+        rprint(f"[dim]Preview with: molab serve {watch_arg}[/dim]")
     elif n == 0:
         rprint("[dim]No runnable bound experiments found.[/dim]")
 
@@ -1126,7 +1135,7 @@ def run(
         str | None,
         typer.Option(
             "--scheduler",
-            help="molq scheduler backend (local, slurm, pbs, lsf).",
+            help="molq scheduler backend (shell, slurm, pbs, lsf).",
             rich_help_panel="Execution Backend",
         ),
     ] = None,
@@ -1264,11 +1273,11 @@ def run(
     # An explicit -ws/--workspace flag (anything other than the "." cwd default)
     # is a strong root override; absence means infer the script's directory.
     explicit_ws = target_spec != "."
-    target, _transport, _fs = resolve_workspace_target(target_spec)
+    target, _fs = resolve_workspace_target(target_spec)
     if not isinstance(target, LocalTarget):
         # ``molab run`` drives a workflow *in this process* against a local
         # workspace root.  Opening/managing a remote workspace (info, list,
-        # cancel, …) is supported via ``-ws host:/path``; executing a local
+        # cancel, …) is supported via ``-ws cluster:/path``; executing a local
         # script against a remote root still needs a remote-side driver
         # (submit / exec).  Keep the split explicit.
         rprint(
@@ -1277,8 +1286,8 @@ def run(
         )
         rprint(
             "  To work with a remote workspace use "
-            "[bold]molab info/project/runs … -ws host:/path[/bold], "
-            "or [bold]molab exec/shell -ws host:/path[/bold] to drive commands on the host."
+            "[bold]molab info/project/runs … -ws cluster:/path[/bold], "
+            "or [bold]molab exec -ws cluster:/path[/bold] to drive commands on the host."
         )
         raise typer.Exit(1)
 
@@ -1375,7 +1384,7 @@ def exec_cmd(
     target_spec: TargetOption = ".",
 ) -> None:
     """Execute a command on the workspace target (local or remote transport)."""
-    target, transport, _fs = resolve_workspace_target(target_spec)
+    target, _fs = resolve_workspace_target(target_spec)
 
     cmd: list[str] = list(command) if command else []
     if not cmd:
@@ -1389,42 +1398,53 @@ def exec_cmd(
 
     rprint(f"[dim]{'[' + str(target) + ']'} {' '.join(cmd)}[/dim]")
     try:
-        result = transport.run(cmd, cwd=remote_cwd, timeout=timeout)
-    except Exception as exc:
+        if isinstance(target, RemoteTarget):
+            from molq import Execution, ExecutionUnit, JobSpec
+
+            from molab.workspace.connection import get_client
+
+            assert target.cluster_id is not None
+            job = (
+                get_client(target.registry_id)
+                .cluster(target.cluster_id)
+                .submit(
+                    JobSpec(execution=Execution((ExecutionUnit.argv("main", cmd),), cwd=remote_cwd))
+                )
+            )
+            observation = job.wait(timeout=timeout or 3600)
+            for stream in ("stdout", "stderr"):
+                offset = 0
+                while True:
+                    chunk = job.logs(stream=stream, offset=offset)
+                    if chunk["text"]:
+                        rprint(chunk["text"], end="")
+                    if not chunk["bytes_read"]:
+                        break
+                    offset = chunk["next_offset"]
+            if observation["snapshots"][0]["state"] != "succeeded":
+                raise typer.Exit(1)
+        else:
+            import subprocess
+
+            result = subprocess.run(cmd, cwd=remote_cwd, timeout=timeout, check=False)
+            if result.returncode:
+                raise typer.Exit(result.returncode)
+    except (OSError, ValueError) as exc:
         rprint(f"[red]Error:[/red] {exc}")
         raise typer.Exit(1) from exc
-
-    if result.stdout:
-        rprint(result.stdout, end="")
-    if result.stderr:
-        from rich import print as _rprint
-
-        _rprint(f"[yellow]{result.stderr}[/yellow]", end="")
-    if result.returncode != 0:
-        raise typer.Exit(result.returncode)
 
 
 @app.command()
 def shell(target_spec: TargetOption = ".") -> None:
     """Open an interactive shell on the target (SSH for remote, $SHELL for local)."""
-    target, _transport, _fs = resolve_workspace_target(target_spec)
+    target, _fs = resolve_workspace_target(target_spec)
 
     if isinstance(target, RemoteTarget):
-        import subprocess
+        rprint(
+            "[red]Interactive remote shells are unavailable. Use molab exec for a scheduled command.[/red]"
+        )
+        raise typer.Exit(1)
+    import subprocess
 
-        if not target.host:
-            rprint("[red]Error:[/red] remote target has no host to ssh into")
-            raise typer.Exit(1)
-        user_host = f"{target.user}@{target.host}" if target.user else target.host
-        ssh_cmd = ["ssh", "-t", user_host, f"cd {target.path} && exec ${{SHELL:-bash}}"]
-        if target.port:
-            ssh_cmd.insert(1, "-p")
-            ssh_cmd.insert(2, str(target.port))
-        rprint(f"[dim]Opening shell to {user_host}...[/dim]")
-        subprocess.run(ssh_cmd)
-    else:
-        import subprocess
-
-        shell_bin = os.environ.get("SHELL", "bash")
-        rprint(f"[dim]Opening shell in {target.path}...[/dim]")
-        subprocess.run([shell_bin], cwd=str(target.path))
+    shell_bin = os.environ.get("SHELL", "bash")
+    subprocess.run([shell_bin], cwd=str(target.path), check=False)

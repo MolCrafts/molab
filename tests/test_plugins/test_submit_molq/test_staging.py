@@ -17,13 +17,15 @@ import json
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
 import pytest
-from molq.transport import CommandResult, TransportError
 
 from molab.plugins.submit_molq import staging as staging_mod
-from molab.plugins.submit_molq.staging import _RSYNC_EXCLUDES, stage_in, stage_out
+from molab.plugins.submit_molq.staging import (
+    _RSYNC_EXCLUDES,
+    stage_in,
+    stage_out,
+)
 from molab.workspace import ComputeTarget, Run, Workspace
 from molab.workspace.execution_repository import ExecutionRepository
 from molab.workspace.targets import target_run_dir
@@ -42,12 +44,9 @@ class FakeTransport:
     raise_on_download: set[str] = field(default_factory=set)
     texts: dict[str, str] = field(default_factory=dict)
 
-    def run(self, *_a: Any, **_kw: Any) -> CommandResult:
-        return CommandResult(argv=(), returncode=0, stdout="", stderr="")
-
     def read_text(self, path: str) -> str:
         if path not in self.texts:
-            raise TransportError("no such file", remote=path)
+            raise OSError("no such file")
         return self.texts[path]
 
     def read_bytes(self, path: str) -> bytes:
@@ -90,7 +89,7 @@ class FakeTransport:
         exclude: Sequence[str] = (),
     ) -> None:
         if remote in self.raise_on_download:
-            raise TransportError("simulated", remote=remote)
+            raise OSError("simulated")
         self.downloads.append((remote, local, recursive, tuple(exclude)))
 
 
@@ -105,7 +104,7 @@ def _make_run(tmp_path: Path) -> tuple[Workspace, Run]:
 
 
 def _remote_target() -> ComputeTarget:
-    return ComputeTarget(name="hpc", host="me@h", scheduler="slurm", scratch_root="/scratch")
+    return ComputeTarget(name="hpc", registry_id="reg", cluster_id="hpc", scratch_root="/scratch")
 
 
 def _repo(ws: Workspace, run: Run) -> ExecutionRepository:
@@ -172,7 +171,7 @@ class TestStageIn:
         src, dst, recursive, _exclude = transport.uploads[0]
         assert src == str(Path(run.run_dir).resolve())
         assert dst.startswith("/scratch/")
-        assert dst.endswith(f"/{run.id}")
+        assert dst.endswith(Path(str(run.run_dir)).relative_to(Path(str(_ws.root))).as_posix())
         assert recursive is True
         # Ensures the target dir was created before upload.
         assert dst in transport.mkdirs
@@ -184,7 +183,7 @@ class TestStageIn:
 
         stage_in(transport, run, _remote_target(), "e01")
 
-        assert len(transport.uploads) == 2
+        assert len(transport.uploads) == 5
         src, dst, recursive, exclude = transport.uploads[0]
         assert recursive is True
         assert "executions" in exclude
@@ -239,10 +238,7 @@ class TestStageOut:
         _ws, run = _make_run(tmp_path)
         ws = run.experiment.project.workspace
         transport = FakeTransport(
-            raise_on_download={
-                f"/scratch/{ws.metadata.id}/{run.experiment.project.id}/"
-                f"{run.experiment.id}/{run.id}/executions/exec-x"
-            }
+            raise_on_download={f"{target_run_dir(_remote_target(), ws, run)}/executions/exec-x"}
         )
         result = stage_out(transport, run, _remote_target(), "exec-x")  # must not raise
 
@@ -277,3 +273,36 @@ class TestStageOut:
 
         assert run.execution("e01") == before
         assert result is False
+
+
+def test_stage_out_uses_execution_destination_after_local_layout_changes(tmp_path, monkeypatch):
+    ws, run = _make_run(tmp_path)
+    run._create_execution()
+    destination = "/scratch/frozen/worker-run"
+    _repo(ws, run).update_operational("e01", executor={"remote_run_dir": destination})
+
+    def changed_layout(*_args: object):
+        raise AssertionError("Must use the execution's resolved destination")
+
+    monkeypatch.setattr(staging_mod, "target_run_dir", changed_layout)
+    transport = FakeTransport()
+    # Missing remote record leaves the local attempt untouched, but the pull
+    # must still use exactly the path the submitter froze before submission.
+    assert stage_out(transport, run, _remote_target(), "e01") is False
+    assert transport.downloads[0][0] == destination + "/executions/e01"
+
+
+def test_stage_in_refuses_tampered_execution_source(tmp_path):
+    import pytest
+
+    from molab.workspace.source_snapshot import SourceCaptureError
+
+    _ws, run = _make_run(tmp_path / "workspace")
+    script = tmp_path / "workflow.py"
+    script.write_text("workflow = None", encoding="utf-8")
+    run.experiment.bind_workflow("code", entrypoint=f"{script}:workflow")
+    run._create_execution(source_entrypoint=script)
+    captured = Path(str(run.execution_dir("e01"))) / "source" / script.name
+    captured.write_text("tampered", encoding="utf-8")
+    with pytest.raises(SourceCaptureError, match="Captured source changed"):
+        stage_in(FakeTransport(), run, _remote_target(), "e01")

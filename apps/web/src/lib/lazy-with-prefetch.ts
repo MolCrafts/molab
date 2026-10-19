@@ -16,7 +16,10 @@ export const lazyWithPrefetch = <T extends ComponentType<any>>(
 ): PrefetchableComponent<T> => {
   let pending: Promise<{ default: T }> | undefined;
   const load = (): Promise<{ default: T }> => {
-    pending ??= factory();
+    pending ??= factory().catch((error: unknown) => {
+      pending = undefined;
+      throw error;
+    });
     return pending;
   };
   const Component = lazy(load) as PrefetchableComponent<T>;

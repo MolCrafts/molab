@@ -35,7 +35,7 @@ export class TargetsService {
      * Create Target Endpoint
      * Register a new compute target.
      *
-     * Mirrors ``molab target add NAME --scratch ... [--host ...] [--scheduler ...]``.
+     * Mirrors ``molab target add NAME --scratch ... --cluster ...``.
      * @param requestBody
      * @param molabSession
      * @returns TargetResponse Successful Response

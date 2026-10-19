@@ -1,10 +1,10 @@
-import { Download, NotebookPen, Plus } from "lucide-react";
+import { Download, NotebookPen, Pencil, Plus } from "lucide-react";
 import { type JSX, useState } from "react";
 import { knowledgeApi } from "@/api";
 import { EmptyState } from "@/app/components/entity";
 import type { RunSummary, Selection } from "@/app/types";
 import { usePrompt } from "@/components/PromptDialog";
-import { WorkbenchAction } from "@/components/workbench";
+import { WorkbenchAction, WorkbenchIconAction } from "@/components/workbench";
 import { CreateDocDialog, type CreateDocInput } from "./CreateDocDialog";
 import { runsForHost } from "./docTemplates";
 import { knowledgeClassOf } from "./knowledgeClass";
@@ -58,16 +58,20 @@ export const ExperimentNotebook = ({
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3 p-4">
       <div className="flex flex-wrap items-center gap-2">
-        <WorkbenchAction kind="primary" size="compact" type="button" onClick={() => setOpen(true)}>
-          <Plus className="size-icon-sm" />
+        <WorkbenchAction
+          icon={<Plus aria-hidden />}
+          kind="primary"
+          size="compact"
+          type="button"
+          onClick={() => setOpen(true)}
+        >
           New document
         </WorkbenchAction>
-        <WorkbenchAction kind="ghost" size="compact" type="button" asChild>
+        <WorkbenchIconAction label="Download notebook" asChild>
           <a href={knowledgeApi.notebookExportUrl(hostPath)}>
-            <Download className="size-icon-sm" />
-            Download
+            <Download aria-hidden />
           </a>
-        </WorkbenchAction>
+        </WorkbenchIconAction>
       </div>
       {error && <p className="text-label text-destructive">{error}</p>}
       {loading && docs.length === 0 ? (
@@ -100,6 +104,7 @@ export const ExperimentNotebook = ({
                 )}
               </button>
               <WorkbenchAction
+                icon={<Pencil aria-hidden />}
                 kind="ghost"
                 size="compact"
                 type="button"

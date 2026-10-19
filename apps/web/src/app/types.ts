@@ -136,11 +136,14 @@ export interface ProjectSummary {
   workspaceKey?: string;
   /** Server-reported count when list is shallow (experiments not loaded yet). */
   experimentCount?: number | null;
+  /** Failure from the most recent lazy experiment-list request. */
+  experimentsError?: string;
   /** Server-composed molab reference. */
   ref?: string;
 }
 
 export interface ExperimentSummary {
+  runsError?: string;
   id: string;
   name: string;
   /** Workspace-relative directory, as the server reported it — never composed. */

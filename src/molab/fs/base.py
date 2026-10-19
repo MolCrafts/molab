@@ -1,7 +1,7 @@
 """FileSystem abstraction — the workspace layer speaks this, never raw pathlib.
 
 Two implementations: LocalFileSystem (wraps pathlib/os/shutil) and
-RemoteFileSystem (wraps molq Transport + shell commands for missing ops).
+RemoteFileSystem (uses the public molq file and transfer APIs).
 
 All path arguments are interpreted on this filesystem.  ``str`` and any
 :class:`os.PathLike[str]` (notably :class:`molab.Path` /
@@ -62,7 +62,7 @@ class DirEntry:
 class FileSystem(Protocol):
     """Where files and directories actually live.
 
-    Implementations: LocalFileSystem (stdlib), RemoteFileSystem (SSH via molq Transport).
+    Implementations: LocalFileSystem (stdlib), RemoteFileSystem (the public molq SDK).
     Third-party plugins may implement this Protocol without importing workspace internals.
     """
 

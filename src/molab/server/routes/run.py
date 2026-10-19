@@ -8,6 +8,7 @@ from pathlib import Path
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
+from molab.fs.window import iter_file_chunks
 from molab.plugins.submit_molq.submit import SubmitHandler
 from molab.workflow import read_journal
 from molab.workspace import (
@@ -167,10 +168,10 @@ def _dispatch_to_molq(target, run, execution_id: str | None = None) -> None:  # 
         )
 
     handler = SubmitHandler(
-        scheduler=target.scheduler,
-        cluster=None,
-        resources=target.default_resources,
-        scheduling=target.default_scheduling,
+        scheduler="",
+        cluster=target.cluster_id,
+        resources={},
+        scheduling={},
         target=target,
     )
     handler(None, run, run.experiment, run.experiment.project, execution_id=execution_id)
@@ -453,7 +454,7 @@ def download_artifact_content(
         raise HTTPException(status_code=404, detail="artifact payload not found")
     filename = Path(artifact.name).name
     return StreamingResponse(
-        workspace.fs.open(location, "rb"),
+        iter_file_chunks(workspace.fs, location, size=workspace.fs.getsize(location)),
         media_type=artifact.media_type or "application/octet-stream",
         headers={"Content-Disposition": f'inline; filename="{filename}"'},
     )

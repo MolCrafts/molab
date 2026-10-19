@@ -5,6 +5,7 @@
 //   ⌘⇧P / Ctrl+Shift+P → Commands (reload, reconnect, …)  — same as molvis
 // ─────────────────────────────────────────────────────────────────────────────
 
+import { Dialog, DialogContent, Input } from "@molcrafts/ui";
 import { Search, Terminal } from "lucide-react";
 import { type JSX, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
@@ -12,10 +13,7 @@ import { StatusBadge } from "@/app/components/entity";
 import { buildCatalog, searchCatalog } from "@/app/entities/catalog";
 import { entityMeta } from "@/app/entities/kinds";
 import { entityPath } from "@/app/entities/paths";
-
 import type { SemanticStatus, WorkspaceSnapshot } from "@/app/types";
-import { Dialog, DialogContent } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
 import {
   WorkbenchAction,
   WorkbenchOperationState,

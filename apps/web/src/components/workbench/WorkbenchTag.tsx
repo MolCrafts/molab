@@ -4,9 +4,8 @@
  * Feature code names the meaning; the base Badge treatment stays private.
  */
 
+import { Badge } from "@molcrafts/ui";
 import type { HTMLAttributes, JSX } from "react";
-
-import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 
 export type WorkbenchTagMeaning =

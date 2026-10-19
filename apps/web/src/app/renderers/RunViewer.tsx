@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query";
-import { FileQuestion, PlayCircle } from "lucide-react";
+import { FileQuestion, ListChecks, ListPlus, PlayCircle } from "lucide-react";
 import { useMemo } from "react";
 import { useCompareSet } from "@/app/compare";
 import { activeWorkspace, itemFromRunSummary } from "@/app/compare/entries";
@@ -130,16 +130,16 @@ export const RunViewer = (props: RunRendererProps): JSX.Element => {
       return {
         value: tab.value,
         label: tab.label,
-        content:
-          activeTab === tab.value ? (
-            <LazySurface
-              key={`${selectedRunId}:${selectedExecutionId ?? "none"}`}
-              resetKey={`run-tab:${tab.id}:${selectedRunId}:${selectedExecutionId ?? "none"}`}
-              loadingTitle={`Loading ${tab.label}…`}
-            >
-              <TabComponent {...pluginRendererProps} />
-            </LazySurface>
-          ) : null,
+        content: (
+          <LazySurface
+            suspense={false}
+            key={`${selectedRunId}:${selectedExecutionId ?? "none"}`}
+            resetKey={`run-tab:${tab.id}:${selectedRunId}:${selectedExecutionId ?? "none"}`}
+            loadingTitle={`Loading ${tab.label}…`}
+          >
+            <TabComponent {...pluginRendererProps} />
+          </LazySurface>
+        ),
       };
     }),
     ...discoveredPlugins.map(({ contribution, files }) => {
@@ -152,16 +152,16 @@ export const RunViewer = (props: RunRendererProps): JSX.Element => {
           Boolean(contribution.resolveTabBadgeCount),
           tabBadgeCounts[contribution.value],
         ),
-        content:
-          activeTab === contribution.value ? (
-            <LazySurface
-              key={`${selectedRunId}:${selectedExecutionId}`}
-              resetKey={`run-file-tab:${contribution.id}:${selectedRunId}:${selectedExecutionId}`}
-              loadingTitle={`Loading ${contribution.label}…`}
-            >
-              <PluginComponent {...pluginRendererProps} discoveredFiles={files} />
-            </LazySurface>
-          ) : null,
+        content: (
+          <LazySurface
+            suspense={false}
+            key={`${selectedRunId}:${selectedExecutionId}`}
+            resetKey={`run-file-tab:${contribution.id}:${selectedRunId}:${selectedExecutionId}`}
+            loadingTitle={`Loading ${contribution.label}…`}
+          >
+            <PluginComponent {...pluginRendererProps} discoveredFiles={files} />
+          </LazySurface>
+        ),
       };
     }),
   ];
@@ -175,6 +175,8 @@ export const RunViewer = (props: RunRendererProps): JSX.Element => {
           <>
             {compareEntry && (
               <WorkbenchAction
+                icon={inCompareSet ? <ListChecks aria-hidden /> : <ListPlus aria-hidden />}
+                aria-pressed={inCompareSet}
                 kind={inCompareSet ? "ghost" : "secondary"}
                 size="compact"
                 type="button"
@@ -184,7 +186,7 @@ export const RunViewer = (props: RunRendererProps): JSX.Element => {
                     : compare.add(compareEntry)
                 }
               >
-                {inCompareSet ? "In selection" : "Add to selection"}
+                {inCompareSet ? "Remove from selection" : "Add to selection"}
               </WorkbenchAction>
             )}
             <RunToolbar

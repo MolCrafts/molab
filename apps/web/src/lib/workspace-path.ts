@@ -128,7 +128,7 @@ export const toApiPath = (path: WorkspacePath, workspaceRoot?: WorkspacePath): s
 
 /** Active served workspace slice used when qualifying remote paths. */
 export interface PathDisplayWorkspace {
-  /** Serve label: local abs path, or ``Host:/abs`` / ``user@host:/abs``. */
+  /** Serve label: local abs path, or ``cluster:/abs`` / ``cluster:/abs``. */
   label: string;
   isRemote: boolean;
   /** Absolute local root when local; null for remote. */
@@ -143,7 +143,7 @@ export interface PathDisplayContext {
 }
 
 /**
- * Parse ``host:/absolute`` (or ``user@host:/absolute``) from a serve label.
+ * Parse ``host:/absolute`` (or ``cluster:/absolute``) from a serve label.
  * Returns null when the label is not host-qualified.
  */
 export const parseHostQualifiedLabel = (label: string): { host: string; root: string } | null => {

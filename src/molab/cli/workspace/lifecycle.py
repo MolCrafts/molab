@@ -17,7 +17,7 @@ from molab.workspace.domain import ExecutionStatus
 def info(target_spec: TargetOption = ".") -> None:
     """Show workspace statistics."""
     try:
-        target, _transport, _fs, ws = open_workspace(target_spec, prefetch=True)
+        target, _fs, ws = open_workspace(target_spec, prefetch=True)
     except FileNotFoundError as exc:
         rprint(f"[red]Error:[/red] {exc}")
         raise typer.Exit(1) from exc
@@ -94,7 +94,7 @@ def validate(
     import json
 
     try:
-        target, _transport, _fs, ws = open_workspace(target_spec)
+        target, _fs, ws = open_workspace(target_spec)
     except FileNotFoundError as exc:
         rprint(f"[red]Error:[/red] {exc}")
         raise typer.Exit(1) from exc

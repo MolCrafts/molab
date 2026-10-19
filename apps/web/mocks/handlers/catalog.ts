@@ -1,85 +1,43 @@
-/**
- * Mock handlers for catalog reverse-lookup endpoints.
- *
- * Implements `GET /api/catalog/by-path` so the unified file tree can ask
- * "who produced this file" for any node — without a live backend.
- */
-
-import { http, HttpResponse } from "msw";
-
-const API_BASE = "/api";
-
-interface PathScope {
-    kind: "workspace" | "project" | "experiment" | "run";
-    projectId: string | null;
-    experimentId: string | null;
-    runId: string | null;
-}
-
-function deriveScopeFromPath(rel: string): PathScope {
-    const parts = rel.split("/").filter(Boolean);
-    if (parts[0] !== "projects") {
-        return { kind: "workspace", projectId: null, experimentId: null, runId: null };
-    }
-
-    const projectId = parts[1] ?? null;
-    let experimentId: string | null = null;
-    let runId: string | null = null;
-    if (parts[2] === "experiments" && parts[3]) experimentId = parts[3];
-    if (parts[4] === "runs" && parts[5]) {
-        runId = parts[5].startsWith("run-") ? parts[5].slice(4) : parts[5];
-    }
-
-    let kind: PathScope["kind"] = "workspace";
-    if (runId) kind = "run";
-    else if (experimentId) kind = "experiment";
-    else if (projectId) kind = "project";
-
-    return { kind, projectId, experimentId, runId };
-}
-
-function isUnderArtifacts(rel: string): boolean {
-    return rel.includes("/artifacts/") || rel.includes("/logs/") || rel.includes("/checkpoints/");
-}
+/** Resolve known files through entity definitions; directory names are never treated as IDs. */
+import { HttpResponse, http } from "msw";
+import { getAllAssets, getAllProjects, getExperimentsByProject, getRunsByExperiment } from "../db";
+import { workspaceRoute } from "./workspaceRoute";
 
 export const catalogHandlers = [
-    // GET /api/catalog/by-path
-    http.get(`${API_BASE}/catalog/by-path`, ({ request }) => {
-        const url = new URL(request.url);
-        const rel = (url.searchParams.get("path") ?? "").replace(/^\/+/, "");
-        const scope = deriveScopeFromPath(rel);
-
-        // Pretend any path inside artifacts/logs/checkpoints is a registered asset.
-        const matched = isUnderArtifacts(rel);
-        const segments = rel.split("/");
-        const taskId = scope.runId ? "train" : null;
-        const assetKind = rel.includes("/logs/")
-            ? "log"
-            : rel.includes("/checkpoints/")
-                ? "checkpoint"
-                : "artifact";
-
-        const siblings = matched
-            ? [
-                  {
-                      assetId: `${scope.runId}-sibling-1`,
-                      name: "metrics.json",
-                      kind: "artifact",
-                      relPath: "artifacts/metrics.json",
-                  },
-              ]
-            : [];
-
-        return HttpResponse.json({
-            matched,
-            workspaceRelPath: rel,
-            assetId: matched ? `mock-${segments[segments.length - 1]}` : null,
-            assetKind: matched ? assetKind : null,
-            producer: matched
-                ? { runId: scope.runId, taskId, executionId: null }
-                : null,
-            scope,
-            siblings,
-        });
-    }),
+  http.get(workspaceRoute("/api/catalog/by-path"), ({ request }) => {
+    const rel = (new URL(request.url).searchParams.get("path") ?? "").replace(/^\/+/, "");
+    const projects = getAllProjects();
+    const project = projects.find((p) => rel === p.path || rel.startsWith(`${p.path}/`));
+    const experiment = project
+      ? getExperimentsByProject(project.id).find(
+          (e) => rel === e.path || rel.startsWith(`${e.path}/`),
+        )
+      : undefined;
+    const run = experiment
+      ? getRunsByExperiment(experiment.id).find(
+          (r) => rel === r.path || rel.startsWith(`${r.path}/`),
+        )
+      : undefined;
+    const asset = getAllAssets().find((a) => rel === `managed-assets/${a.id}/payload`);
+    return HttpResponse.json({
+      matched: Boolean(asset),
+      workspaceRelPath: rel,
+      assetId: asset?.id ?? null,
+      assetKind: asset?.kind ?? null,
+      producer: asset?.producer
+        ? {
+            runId: asset.producer.run_id ?? null,
+            taskId: asset.producer.task_id ?? null,
+            executionId: asset.producer.executionId ?? null,
+          }
+        : null,
+      scope: {
+        kind: run ? "run" : experiment ? "experiment" : project ? "project" : "workspace",
+        projectId: project?.id ?? null,
+        experimentId: experiment?.id ?? null,
+        runId: run?.id ?? null,
+      },
+      siblings: [],
+    });
+  }),
 ];
