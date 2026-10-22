@@ -906,11 +906,8 @@ def prune_run_route(
         plan_execution_prune,
     )
 
-    experiment = _get_experiment(workspace, project_id, experiment_id)
-    if not experiment:
-        raise RunNotFoundError(project_id, experiment_id, run_id)
-    run = _get_run_or_none(experiment, run_id)
-    if not run:
+    run = _get_scoped_run(workspace, project_id, experiment_id, run_id)
+    if run is None:
         raise RunNotFoundError(project_id, experiment_id, run_id)
     try:
         plan = plan_execution_prune(
