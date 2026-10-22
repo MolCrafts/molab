@@ -465,18 +465,20 @@ def run_cancel(
             rprint("[dim]Aborted.[/dim]")
             raise typer.Exit(0)
 
-    # The workspace cancel core (reap → domain check → executor signal →
-    # status flip) with the molq signal hook injected. CLI only: the server's
-    # cancel route is a separate implementation (known debt, see
-    # molab.workspace.lifecycle_ops).
+    # The one cancel core (reap → domain check → executor signal → status
+    # flip). The server route calls the same function. The hook only signals;
+    # cancel_run seals.
     from molab.plugins.submit_molq.cancel import try_cancel
     from molab.workspace.lifecycle_ops import cancel_run as cancel_core
+
+    def _signal(run: Run) -> str | None:
+        return try_cancel(run, seal=False)
 
     cancelled = 0
     errors = 0
     for r in target_runs:
         try:
-            warning = cancel_core(r, signal_executor=try_cancel, allow_pending=True)
+            warning = cancel_core(r, signal_executor=_signal, allow_pending=True)
         except ValueError as exc:
             rprint(f"  [yellow]Skipping[/yellow] {r.id} — {exc}")
             continue
@@ -665,8 +667,15 @@ def run_ingest_metrics(
         rprint(f"[red]Error:[/red] {exc}")
         raise typer.Exit(1) from None
 
-    hits = detect_log_formats(run.run_dir)
-    result = ingest_run(run.run_dir)
+    # The same directory the server route passes: one attempt, not the run root.
+    # The metrics WAL is written under that attempt.
+    attempts = run.executions
+    if not attempts:
+        rprint(f"[red]Error:[/red] run {run.id} has no execution to ingest.")
+        raise typer.Exit(1)
+    attempt_dir = run.execution_dir(attempts[-1].id)
+    hits = detect_log_formats(attempt_dir)
+    result = ingest_run(attempt_dir)
     rprint(
         f"[green]OK[/green] ingest-metrics run={run.id} "
         f"records={result.records} hits={len(hits)} skips={len(result.skipped)}"

@@ -180,6 +180,7 @@ class TestSearchKnowledge:
         src = inspect.getsource(knowledge_routes.search_knowledge)
         assert "Knowledge(" in src
         assert ".search(" in src
+        assert "KnowledgeSourceStore" in src
         assert ("Bun" + "dle") + ".search" not in src
         assert "_bundle(workspace).search" not in src
 

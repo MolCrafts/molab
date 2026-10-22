@@ -50,6 +50,7 @@ from ..schemas import (
     RunLogsResponse,
     RunResponse,
 )
+from ..schemas._wire import ApiModel
 
 router = APIRouter(
     prefix="/projects/{project_id}/experiments/{experiment_id}/runs",
@@ -700,29 +701,30 @@ def cancel_execution(
     execution_id: str,
     workspace=Depends(get_workspace),  # noqa: ANN001
 ) -> ExecutionResponse:
-    """Cancel one explicit Execution; Run has no cancellable scalar state."""
+    """Cancel one explicit Execution.
+
+    The intervene verb is :func:`molab.workspace.lifecycle_ops.cancel_run`,
+    the same function ``molab runs cancel`` calls. This route names one
+    execution; the CLI names the run and cancels every active attempt.
+    """
+    from molab.plugins.submit_molq.cancel import try_cancel
+    from molab.workspace.lifecycle_ops import cancel_run
+    from molab.workspace.run import Run
+
     run = _get_scoped_run(workspace, project_id, experiment_id, run_id)
     if run is None:
         raise RunNotFoundError(project_id, experiment_id, run_id)
-    repo = _execution_repository(workspace, run)
+
+    def _signal(target: Run) -> str | None:
+        return try_cancel(target, seal=False)
+
     try:
-        state = repo.get(execution_id)
+        cancel_run(run, signal_executor=_signal, execution_id=execution_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    if state.status.value not in {"queued", "running"}:
-        raise HTTPException(
-            status_code=409,
-            detail=f"Execution {execution_id!r} is already {state.status.value}",
-        )
-    # Executor-specific signalling belongs to the Execution adapter. Until all
-    # adapters expose a common cancel hook, refuse to claim a running process
-    # was cancelled when no signal can be proven.
-    if state.status.value == "running" and state.executor.get("backend"):
-        raise HTTPException(
-            status_code=409,
-            detail="executor cancellation is unavailable for this active Execution",
-        )
-    return _execution_response(repo.seal(execution_id, ExecutionStatus.CANCELLED))
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    return _execution_response(run.execution(execution_id))
 
 
 @router.get("/{run_id}/export")
@@ -808,14 +810,12 @@ def ingest_run_metrics(
     run = _get_scoped_run(workspace, project_id, experiment_id, run_id)
     if not run:
         raise RunNotFoundError(project_id, experiment_id, run_id)
-    execution_dir = _execution_repository(workspace, run).execution_dir(execution_id)
     try:
         _execution_repository(workspace, run).get(execution_id)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    # Read from the whole attempt; the WAL is written to the attempt root, so
-    # it lands in ``out/metrics.mlp.jsonl`` where the metrics reader looks.
-    result = ingest_run(Path(execution_dir))
+    # Same directory ``molab runs ingest-metrics`` passes: this attempt.
+    result = ingest_run(run.execution_dir(execution_id))
     return {
         "runId": run.id,
         "records": result.records,
@@ -864,3 +864,74 @@ def analyze_run_failure_route(
     except Exception:
         rel = item.name
     return {"name": item.name, "path": rel}
+
+
+class RunPruneRequest(ApiModel):
+    """Select attempts to prune. ``apply`` false returns the plan and deletes nothing."""
+
+    execution_ids: list[str] | None = None
+    statuses: list[str] | None = None
+    apply: bool = False
+
+
+class RunPruneEntryResponse(ApiModel):
+    execution_id: str
+    status: str
+    dirs: list[str]
+
+
+class RunPruneResponse(ApiModel):
+    run_id: str
+    removed: int | None = None
+    entries: list[RunPruneEntryResponse]
+
+
+@router.post("/{run_id}/prune", response_model=RunPruneResponse)
+def prune_run_route(
+    project_id: str,
+    experiment_id: str,
+    run_id: str,
+    body: RunPruneRequest,
+    workspace=Depends(get_workspace),  # noqa: ANN001
+) -> RunPruneResponse:
+    """Plan or apply an execution prune.
+
+    The same two functions as ``molab runs prune``:
+    :func:`molab.workspace.prune.plan_execution_prune` and
+    :func:`molab.workspace.prune.apply_execution_prune`.
+    """
+    from molab.workspace.prune import (
+        LivePruneRefusedError,
+        apply_execution_prune,
+        plan_execution_prune,
+    )
+
+    experiment = _get_experiment(workspace, project_id, experiment_id)
+    if not experiment:
+        raise RunNotFoundError(project_id, experiment_id, run_id)
+    run = _get_run_or_none(experiment, run_id)
+    if not run:
+        raise RunNotFoundError(project_id, experiment_id, run_id)
+    try:
+        plan = plan_execution_prune(
+            run,
+            execution_ids=body.execution_ids,
+            statuses=body.statuses,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except LivePruneRefusedError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    removed = apply_execution_prune(run, plan) if body.apply else None
+    return RunPruneResponse(
+        run_id=plan.run_id,
+        removed=removed,
+        entries=[
+            RunPruneEntryResponse(
+                execution_id=entry.execution_id,
+                status=entry.status,
+                dirs=list(entry.dirs),
+            )
+            for entry in plan.entries
+        ],
+    )

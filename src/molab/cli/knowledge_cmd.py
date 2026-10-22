@@ -330,9 +330,15 @@ def knowledge_search(
     from rich.table import Table
 
     from molab.knowledge import Knowledge
+    from molab.knowledge.concepts import _product
     from molab.knowledge.sources import KnowledgeSourceStore
 
     ws_root = _workspace_root(path)
+    try:
+        cls = _product(concept_type) if concept_type else None
+    except ValueError as exc:
+        rprint(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(1) from None
     hits = KnowledgeSourceStore(ws_root).search(
         query,
         sources=source or None,
@@ -342,7 +348,7 @@ def knowledge_search(
         concept_type=concept_type,
         tag=tag,
         workspace_searcher=(
-            (lambda: Knowledge(ws_root).search(query, tag=tag, limit=limit))
+            (lambda: Knowledge(ws_root).search(query, of=cls, tag=tag, limit=limit))
             if ws_root is not None
             else None
         ),
@@ -429,6 +435,190 @@ def knowledge_read(
         rprint("[dim]links:[/dim]")
         for edge in edges:
             rprint(f"  [dim][{edge.role}][/dim] {edge.target}")
+
+
+def _require_workspace(path: Path | None) -> Workspace:
+    """Load the workspace at *path* (cwd when omitted)."""
+    from molab.workspace import Workspace
+
+    root = path or Path.cwd()
+    try:
+        return Workspace.load(root)
+    except FileNotFoundError:
+        rprint(f"[red]Error:[/red] not a molab workspace: {root}")
+        rprint(f"Initialise one first with [bold]molab init {root}[/bold].")
+        raise typer.Exit(1) from None
+
+
+def _host(workspace: Workspace, on: str | None) -> object:
+    """The folder ``--on`` names: the workspace, a ref, a run id, or a relative path."""
+    if on is None or on in {"", "."}:
+        return workspace
+    from molab.workspace.errors import AmbiguousRefError, RefNotFoundError
+    from molab.workspace.folder import Folder
+    from molab.workspace.refs import InvalidRefError, is_ref, qualify_run_id
+
+    if is_ref(on):
+        try:
+            found = workspace.find(on)
+        except (InvalidRefError, RefNotFoundError, AmbiguousRefError) as exc:
+            rprint(f"[red]Error:[/red] {exc}")
+            raise typer.Exit(1) from None
+        if not isinstance(found, Folder):
+            rprint(f"[red]Error:[/red] {on!r} is not a project, experiment, or run.")
+            raise typer.Exit(1)
+        return found
+    if "/" not in on:
+        try:
+            return workspace.find(qualify_run_id(workspace, on))
+        except (InvalidRefError, RefNotFoundError, AmbiguousRefError):
+            pass
+    return Path(str(workspace.root)) / on
+
+
+def _document(workspace: Workspace, ref: str) -> object:
+    """Open one workspace-relative knowledge document."""
+    from molab.knowledge import KnowledgeNotFoundError
+    from molab.knowledge.concepts import _open_document
+
+    try:
+        return _open_document(Path(str(workspace.root)) / ref)
+    except (KnowledgeNotFoundError, FileNotFoundError):
+        rprint(f"[red]Error:[/red] no knowledge document at {ref!r}.")
+        raise typer.Exit(1) from None
+
+
+def _rel_to_workspace(workspace: Workspace, doc_path: object) -> str:
+    return Path(str(doc_path)).relative_to(Path(str(workspace.root))).as_posix()
+
+
+@knowledge_app.command("write")
+def knowledge_write(
+    name: Annotated[str, typer.Argument(help="Document name.")],
+    text: Annotated[str, typer.Argument(help="Narrative.")] = "",
+    on: Annotated[
+        str | None,
+        typer.Option(
+            "--on",
+            help="Host: run id, molab: ref, or workspace-relative path. Default: the workspace.",
+        ),
+    ] = None,
+    doc_class: Annotated[
+        str,
+        typer.Option(
+            "--class",
+            help="Note, Literature, Report, Finding, Plan, or Observation.",
+        ),
+    ] = "Note",
+    path: Annotated[
+        Path | None, typer.Option("--path", help="Workspace root; defaults to cwd.")
+    ] = None,
+) -> None:
+    """Write one knowledge document. The same verb as ``write_knowledge``."""
+    from molab.knowledge.concepts import _product
+    from molab.knowledge.write import normalize_sources, write_knowledge
+
+    workspace = _require_workspace(path)
+    host = _host(workspace, on)
+    try:
+        cls = _product(doc_class)
+    except ValueError as exc:
+        rprint(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(1) from None
+    sources = (
+        normalize_sources(None, default_host=host)
+        if getattr(cls, "REQUIRES_SOURCES", False)
+        else ()
+    )
+    try:
+        item = write_knowledge(
+            host,  # ty: ignore[invalid-argument-type]
+            name=name,
+            of=cls,
+            sources=sources,
+            created_by="cli",
+            text=text,
+            fs=workspace.fs,
+        )
+    except (TypeError, ValueError) as exc:
+        rprint(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(1) from None
+    rprint(f"[green]OK[/green] {type(item).__name__} {_rel_to_workspace(workspace, item.path)}")
+
+
+@knowledge_app.command("list")
+def knowledge_list(
+    path: Annotated[
+        Path | None, typer.Option("--path", help="Workspace root; defaults to cwd.")
+    ] = None,
+) -> None:
+    """List knowledge documents and TeX manuscripts. The same walk as ``GET /knowledge``."""
+    from molab.knowledge import Knowledge
+    from molab.knowledge.tex_docs import TEX_CLASS, iter_tex_documents
+
+    workspace = _require_workspace(path)
+    rows: list[tuple[str, str]] = []
+    for item in Knowledge(workspace.root, fs=workspace.fs).walk():
+        rows.append((type(item).__name__, _rel_to_workspace(workspace, item.path)))
+    for absolute in iter_tex_documents(workspace.root, workspace.fs):
+        rows.append((TEX_CLASS, _rel_to_workspace(workspace, absolute)))
+    if not rows:
+        rprint("[dim]No knowledge documents.[/dim]")
+        return
+    for kind, rel in sorted(rows, key=lambda row: row[1]):
+        print(f"{kind}\t{rel}")
+
+
+@knowledge_app.command("rename")
+def knowledge_rename(
+    ref: Annotated[str, typer.Argument(help="Workspace-relative document path.")],
+    name: Annotated[str, typer.Argument(help="New document name.")],
+    path: Annotated[
+        Path | None, typer.Option("--path", help="Workspace root; defaults to cwd.")
+    ] = None,
+) -> None:
+    """Rename one document. The same verb as ``Concept.rename``."""
+    workspace = _require_workspace(path)
+    doc = _document(workspace, ref)
+    try:
+        doc.rename(name, within=workspace.root)  # ty: ignore[unresolved-attribute]
+    except FileExistsError as exc:
+        rprint(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(1) from None
+    rprint(f"[green]OK[/green] {_rel_to_workspace(workspace, doc.path)}")  # ty: ignore[unresolved-attribute]
+
+
+@knowledge_app.command("move")
+def knowledge_move(
+    ref: Annotated[str, typer.Argument(help="Workspace-relative document path.")],
+    on: Annotated[str, typer.Option("--on", help="Destination host: run id, ref, or path.")],
+    path: Annotated[
+        Path | None, typer.Option("--path", help="Workspace root; defaults to cwd.")
+    ] = None,
+) -> None:
+    """Move one document onto another host. The same verb as ``Concept.move_to``."""
+    workspace = _require_workspace(path)
+    doc = _document(workspace, ref)
+    try:
+        doc.move_to(_host(workspace, on), within=workspace.root)  # ty: ignore[unresolved-attribute]
+    except (FileExistsError, TypeError, ValueError) as exc:
+        rprint(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(1) from None
+    rprint(f"[green]OK[/green] {_rel_to_workspace(workspace, doc.path)}")  # ty: ignore[unresolved-attribute]
+
+
+@knowledge_app.command("delete")
+def knowledge_delete(
+    ref: Annotated[str, typer.Argument(help="Workspace-relative document path.")],
+    path: Annotated[
+        Path | None, typer.Option("--path", help="Workspace root; defaults to cwd.")
+    ] = None,
+) -> None:
+    """Delete one document. The same verb as ``Concept.delete``."""
+    workspace = _require_workspace(path)
+    doc = _document(workspace, ref)
+    doc.delete()  # ty: ignore[unresolved-attribute]
+    rprint(f"[green]OK[/green] deleted {ref}")
 
 
 def _load_run(run_id: str, path: Path | None) -> object:

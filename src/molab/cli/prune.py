@@ -9,8 +9,8 @@ reaping seals it as ``failed``. Pruning removes bulk directories only
 record: ``execution.json`` and the ``executions/<id>/`` directory itself stay.
 The selection UI lives here. The pruning itself goes through the two-phase
 core (:func:`molab.workspace.prune.plan_execution_prune` →
-:func:`~molab.workspace.prune.apply_execution_prune`). Only the CLI prunes;
-the server has no prune route.
+:func:`~molab.workspace.prune.apply_execution_prune`). ``POST …/runs/{id}/prune``
+calls those same two functions.
 """
 
 from __future__ import annotations

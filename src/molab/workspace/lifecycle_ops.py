@@ -1,12 +1,8 @@
-"""Run-lifecycle operation cores for the CLI.
+"""Run-lifecycle operation cores shared by the CLI and the server.
 
-Workspace-layer homes for the CLI's verb bodies. Each op enforces the frozen
-verb law itself — a caller adds gating, never semantics.
-
-Known debt: the server does not call this module. Its cancel route
-(``molab.server.routes.run.cancel_execution``) is a separate
-implementation that seals one explicit Execution without reaping first and
-without signalling the executor.
+Each op enforces the frozen verb law itself — a caller adds gating, never
+semantics. ``molab runs cancel`` and ``POST …/executions/{id}/cancel`` both
+call :func:`cancel_run`.
 
 Schema v2: a :class:`Run` is immutable intent, so ``cancel`` intervenes on the
 active physical :class:`~molab.workspace.domain.Execution` objects —
@@ -30,26 +26,29 @@ def cancel_run(
     *,
     signal_executor: Callable[[Run], str | None] | None = None,
     allow_pending: bool = False,
+    execution_id: str | None = None,
 ) -> str | None:
     """Cancel the actively-running Executions of *run* — the intervene verb.
 
-    The cancel body of the CLI (``molab runs cancel``) only; the server's
-    cancel route is a separate implementation (see the module docstring).
-    Reaps first (every verb entry reaps — a stale active Execution with a dead owner flips to
-    ``failed`` before the verb decides), then refuses anything outside the
-    domain loudly: there is nothing to intervene on.
+    Called by ``molab runs cancel`` and by the server cancel route. Reaps
+    first (every verb entry reaps — a stale active Execution with a dead
+    owner flips to ``failed`` before the verb decides), then refuses anything
+    outside the domain loudly: there is nothing to intervene on.
 
     Args:
         run: The run to cancel.
         signal_executor: Optional hook that signals the live executor
             (molq scheduler job / local worker pid) before the status flip.
             It returns ``None`` on success or a warning string (never raises
-            for caller-actionable reasons). Workspace stays scheduler-agnostic;
-            the shells inject the plugin hook.
+            for caller-actionable reasons). It must not seal the attempt;
+            this function seals. Workspace stays scheduler-agnostic; the
+            shells inject the plugin hook.
         allow_pending: Also cancel a ``pending`` run — record a CANCELLED
             initial Execution so plain ``run`` never starts it (bulk-cancel
             CLI semantics). The default keeps the strict intervene domain:
-            ``running`` only.
+            ``running`` only. Ignored when *execution_id* is set.
+        execution_id: Cancel this attempt only. ``None`` cancels every active
+            attempt of the run, which is the CLI's run-scoped cancel.
 
     Returns:
         ``None`` on a clean cancel, or the executor-signal warning (the
@@ -57,16 +56,28 @@ def cancel_run(
         recorded state always reflects the user's intent).
 
     Raises:
-        ValueError: The run has no active Execution after reaping. The message
-            names the actual status and the verb that owns it (``resume`` /
-            ``rerun`` for failed/cancelled; nothing for succeeded; plain
-            ``run`` for pending unless ``allow_pending``).
+        KeyError: *execution_id* names no attempt of this run.
+        ValueError: The run has no active Execution after reaping, or
+            *execution_id* is not active. The message names the actual status
+            and the verb that owns it (``resume`` / ``rerun`` for
+            failed/cancelled; nothing for succeeded; plain ``run`` for pending
+            unless ``allow_pending``).
     """
     from .domain import ACTIVE_EXECUTION_STATUSES
     from .history import AgentRef
     from .run_reaper import reap_zombie_run
 
     reap_zombie_run(run)
+    if execution_id is not None:
+        state = run.execution(execution_id)
+        if state.status not in ACTIVE_EXECUTION_STATUSES:
+            raise ValueError(
+                f"execution {execution_id!r} of run {run.id} is {state.status.value!r}, not running"
+            )
+        warning = signal_executor(run) if signal_executor is not None else None
+        run.cancel(execution_id)
+        return warning
+
     active = [state for state in run.executions if state.status in ACTIVE_EXECUTION_STATUSES]
     if not active:
         status = run.status_label

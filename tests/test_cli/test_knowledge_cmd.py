@@ -98,6 +98,54 @@ class TestKnowledgeRead:
         assert "index.md" not in result.stdout
 
 
+class TestKnowledgeWrite:
+    def test_write_lands_a_note_on_the_run(self, tmp_path: Path) -> None:
+        from molab.workspace import Workspace
+
+        ws = Workspace(tmp_path / "lab", name="lab")
+        ws.materialize()
+        run = ws.add_project("p").add_experiment("e").add_run(params={"seed": 1})
+        result = CliRunner().invoke(
+            knowledge_app,
+            [
+                "write",
+                "rdf",
+                "5 ns later the RDF converged",
+                "--on",
+                run.id,
+                "--path",
+                str(ws.root),
+            ],
+        )
+        assert result.exit_code == 0, result.output
+        landed = Path(str(run.resolve())) / "knowledges" / "rdf.md"
+        assert landed.is_file()
+        assert "RDF converged" in landed.read_text(encoding="utf-8")
+        assert "knowledges/rdf.md" in result.stdout
+
+    def test_list_rename_and_delete(self, tmp_path: Path) -> None:
+        from molab.workspace import Workspace
+
+        ws = Workspace(tmp_path / "lab", name="lab")
+        ws.materialize()
+        root = str(ws.root)
+        wrote = CliRunner().invoke(knowledge_app, ["write", "idea", "cooling", "--path", root])
+        assert wrote.exit_code == 0, wrote.output
+        listed = CliRunner().invoke(knowledge_app, ["list", "--path", root])
+        assert listed.exit_code == 0, listed.output
+        assert "Note\tknowledges/idea.md" in listed.stdout
+        renamed = CliRunner().invoke(
+            knowledge_app, ["rename", "knowledges/idea.md", "cooling", "--path", root]
+        )
+        assert renamed.exit_code == 0, renamed.output
+        assert (Path(root) / "knowledges" / "cooling.md").is_file()
+        deleted = CliRunner().invoke(
+            knowledge_app, ["delete", "knowledges/cooling.md", "--path", root]
+        )
+        assert deleted.exit_code == 0, deleted.output
+        assert not (Path(root) / "knowledges" / "cooling.md").exists()
+
+
 class TestSourcesAdd:
     def test_a_legacy_directory_holds_no_documents(self, tmp_path: Path, monkeypatch) -> None:
         monkeypatch.setattr("molab.knowledge.sources.USER_DIR", tmp_path / "user")

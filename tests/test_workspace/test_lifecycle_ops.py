@@ -124,6 +124,23 @@ class TestZombieReapedFirst:
         assert _repo(run).get(execution_id).status is ExecutionStatus.FAILED
 
 
+class TestCancelOneExecution:
+    def test_named_attempt_is_the_only_one_cancelled(self, run: Run) -> None:
+        execution_id = _seed_running(run, pid=os.getpid(), host=platform.node())
+        assert cancel_run(run, execution_id=execution_id) is None
+        assert _repo(run).get(execution_id).status is ExecutionStatus.CANCELLED
+
+    def test_terminal_attempt_refuses(self, run: Run) -> None:
+        execution_id = _seed_terminal(run, ExecutionStatus.SUCCEEDED)
+        with pytest.raises(ValueError, match="succeeded"):
+            cancel_run(run, execution_id=execution_id)
+        assert _repo(run).get(execution_id).status is ExecutionStatus.SUCCEEDED
+
+    def test_unknown_attempt_raises_key_error(self, run: Run) -> None:
+        with pytest.raises(KeyError):
+            cancel_run(run, execution_id="e99")
+
+
 class TestCancelPending:
     def test_pending_cancel_creates_through_run(self, run: Run) -> None:
         """arch-own-02a §6: pending-cancel allocates the attempt on the run."""

@@ -198,6 +198,69 @@ class TestAnalyzeRunFailureRoute:
         assert item.name.startswith("failure-analysis-")
 
 
+class TestCancelAndPruneUseTheCores:
+    def test_cancel_calls_cancel_run(self) -> None:
+        src = inspect.getsource(run_routes.cancel_execution)
+        assert "cancel_run" in src
+        assert "repo.seal" not in src
+
+    def test_cancel_queued_attempt(self, served: ServedFactory, fresh_run: RunFixture) -> None:
+        ws, exp, run = fresh_run
+        with served(ws) as client:
+            created = client.post(f"{_run_url(exp, run)}/executions", json={})
+            assert created.status_code == 201, created.text
+            execution_id = created.json()["id"]
+            response = client.post(f"{_run_url(exp, run)}/executions/{execution_id}/cancel")
+        assert response.status_code == 200, response.text
+        assert response.json()["status"] == "cancelled"
+
+    def test_cancel_terminal_attempt_is_409(
+        self, served: ServedFactory, terminal_run: RunFixture
+    ) -> None:
+        ws, exp, run = terminal_run
+        with served(ws) as client:
+            response = client.post(f"{_run_url(exp, run)}/executions/e01/cancel")
+        assert response.status_code == 409
+
+    def test_cancel_missing_attempt_is_404(
+        self, served: ServedFactory, fresh_run: RunFixture
+    ) -> None:
+        ws, exp, run = fresh_run
+        with served(ws) as client:
+            response = client.post(f"{_run_url(exp, run)}/executions/e99/cancel")
+        assert response.status_code == 404
+
+    def test_prune_calls_the_core(self) -> None:
+        src = inspect.getsource(run_routes.prune_run_route)
+        assert "plan_execution_prune" in src
+        assert "apply_execution_prune" in src
+
+    def test_prune_plan_of_a_sealed_attempt(
+        self, served: ServedFactory, terminal_run: RunFixture
+    ) -> None:
+        ws, exp, run = terminal_run
+        with served(ws) as client:
+            response = client.post(f"{_run_url(exp, run)}/prune", json={})
+        assert response.status_code == 200, response.text
+        body = response.json()
+        assert body["runId"] == run.id
+        assert body["removed"] is None
+        assert body["entries"][0]["executionId"] == "e01"
+
+    def test_prune_refuses_a_live_attempt(
+        self, served: ServedFactory, fresh_run: RunFixture
+    ) -> None:
+        ws, exp, run = fresh_run
+        with served(ws) as client:
+            created = client.post(f"{_run_url(exp, run)}/executions", json={})
+            assert created.status_code == 201, created.text
+            response = client.post(
+                f"{_run_url(exp, run)}/prune",
+                json={"executionIds": ["e01"]},
+            )
+        assert response.status_code == 409, response.text
+
+
 class TestCreateExecution:
     """``create_execution``: one queued attempt, optionally handed to molq."""
 

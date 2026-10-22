@@ -638,6 +638,7 @@ class KnowledgeSearchRow(BaseModel):
     type: str
     tags: list[str] = []
     snippet: str | None = None
+    source: str = ""
 
 
 class KnowledgeSearchResponse(BaseModel):
@@ -654,24 +655,47 @@ def search_knowledge(
     tag: Annotated[str | None, Query(description="Only documents carrying this tag.")] = None,
     workspace: Workspace = Depends(get_workspace),
 ) -> KnowledgeSearchResponse:
-    """Search the workspace knowledge tree — wraps ``Knowledge.search``."""
+    """Search registered wikis and this workspace — the CLI's ``knowledge search``.
+
+    The workspace corpus goes through ``Knowledge.search`` on the workspace
+    disk. Registered sources are fused by :meth:`KnowledgeSourceStore.search`,
+    which is the same function the CLI calls.
+    """
     from molab.knowledge import Knowledge
     from molab.knowledge.concepts import _product
+    from molab.knowledge.sources import KnowledgeSourceStore
 
     cls = _product(type) if type else None
-    result = Knowledge(workspace.root, fs=workspace.fs).search(q, of=cls, tag=tag)
+    truncated = False
+
+    def workspace_searcher():  # noqa: ANN202
+        nonlocal truncated
+        result = Knowledge(workspace.root, fs=workspace.fs).search(q, of=cls, tag=tag)
+        truncated = result.truncated
+        return result
+
+    hits = KnowledgeSourceStore(workspace.root).search(
+        q,
+        workspace_root=workspace.root,
+        include_workspace=True,
+        tag=tag,
+        concept_type=type,
+        limit=50,
+        workspace_searcher=workspace_searcher,
+    )
     return KnowledgeSearchResponse(
         hits=[
             KnowledgeSearchRow(
-                path=hit.entry.path,
-                title=hit.entry.title or hit.entry.path,
-                type=hit.entry.type,
-                tags=list(hit.entry.tags),
-                snippet=hit.snippet,
+                path=hit.hit.entry.path,
+                title=hit.hit.entry.title or hit.hit.entry.path,
+                type=hit.hit.entry.type,
+                tags=list(hit.hit.entry.tags),
+                snippet=hit.hit.snippet,
+                source=hit.source,
             )
-            for hit in result.hits
+            for hit in hits
         ],
-        truncated=result.truncated,
+        truncated=truncated or len(hits) >= 50,
     )
 
 
