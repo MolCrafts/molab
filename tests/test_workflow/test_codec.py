@@ -1,4 +1,4 @@
-"""Tests for :class:`molexp.workflow.codec.WorkflowCodec`.
+"""Tests for :class:`molab.workflow.codec.WorkflowCodec`.
 
 The codec converts between four equivalent surfaces: IR (dict, the wire
 format), a runnable Python script (IR-as-literal), a :class:`CompiledWorkflow`
@@ -17,7 +17,7 @@ from pathlib import Path
 import jsonschema
 import pytest
 
-from molexp.workflow.codec import default_codec
+from molab.workflow.codec import default_codec
 
 _GOLDEN = Path(__file__).parent / "golden"
 
@@ -35,7 +35,7 @@ def _sample_ir() -> dict:
 
 
 def _register_golden_task_types() -> None:
-    from molexp.workflow.registry import default_registry
+    from molab.workflow.registry import default_registry
 
     class _Noop:
         async def execute(self, ctx):
@@ -119,11 +119,65 @@ class TestWorkflowCodec:
         spec = default_codec.ir_to_spec(ir)
         assert spec.to_ir() == default_codec.spec_to_ir(spec)
 
+    @pytest.mark.unit
+    def test_spec_to_ir_matches_golden(self) -> None:
+        _register_golden_task_types()
+        ir = json.loads((_GOLDEN / "sample_ir.json").read_text())
+        spec = default_codec.ir_to_spec(ir)
+        rendered = json.dumps(default_codec.spec_to_ir(spec), indent=2, sort_keys=True) + "\n"
+        assert rendered == (_GOLDEN / "sample_spec_to_ir.json").read_text()
+
+    @pytest.mark.unit
+    def test_spec_to_ir_is_independent_of_task_code(self) -> None:
+        from molab.workflow import Task, TaskTypeRegistry
+
+        class StepV1(Task):
+            def __init__(self, value: int) -> None:
+                self.value = value
+
+            async def execute(self, ctx: object) -> int:
+                return self.value
+
+        class StepV2(Task):
+            def __init__(self, value: int) -> None:
+                self.value = value
+
+            async def execute(self, ctx: object) -> int:
+                return self.value + 1
+
+        registry_v1 = TaskTypeRegistry()
+        registry_v2 = TaskTypeRegistry()
+        registry_v1.register("test.step", StepV1)
+        registry_v2.register("test.step", StepV2)
+        document = {
+            "name": "d",
+            "task_configs": [{"task_id": "s", "task_type": "test.step", "config": {"value": 1}}],
+            "links": [],
+            "metadata": {},
+        }
+        spec_v1 = default_codec.ir_to_spec(document, registry=registry_v1)
+        spec_v2 = default_codec.ir_to_spec(document, registry=registry_v2)
+        assert spec_v1.workflow_digest != spec_v2.workflow_digest
+        dumped_v1 = json.dumps(default_codec.spec_to_ir(spec_v1), sort_keys=True)
+        dumped_v2 = json.dumps(default_codec.spec_to_ir(spec_v2), sort_keys=True)
+        assert dumped_v1 == dumped_v2
+        for digest in (spec_v1.workflow_digest, spec_v2.workflow_digest):
+            assert digest not in dumped_v1
+        assert "workflow_id" not in dumped_v1
+        assert "workflow_digest" not in dumped_v1
+
+    @pytest.mark.unit
+    def test_spec_to_ir_carries_no_identity(self) -> None:
+        _register_golden_task_types()
+        ir = json.loads((_GOLDEN / "sample_ir.json").read_text())
+        spec = default_codec.ir_to_spec(ir)
+        assert {"workflow_id", "workflow_digest"}.isdisjoint(default_codec.spec_to_ir(spec))
+
 
 class TestLinkSchema:
     """Strict typed-edge ``link.json`` schema (flowgram-workflow-canvas-01)."""
 
-    _SCHEMA_DIR = Path(__file__).resolve().parents[2] / "src" / "molexp" / "workflow" / "schema"
+    _SCHEMA_DIR = Path(__file__).resolve().parent / "fixtures" / "schema"
 
     @pytest.mark.unit
     def test_link_requires_a_valid_kind(self) -> None:

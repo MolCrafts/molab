@@ -1,0 +1,130 @@
+"""Parameter spaces for experiment hyperparameter search.
+
+Provides:
+- Params: one sweep cell (pydantic)
+- ParamSpace: abstract base class (iterate to list[Params])
+- GridSpace: exhaustive Cartesian product
+- UniformSpace: uniform random sampling
+"""
+
+from __future__ import annotations
+
+import random
+from abc import ABC, abstractmethod
+from collections.abc import Generator, Iterator, Mapping
+from itertools import product
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict
+
+
+class Params(BaseModel, Mapping[str, Any]):
+    """One sweep cell — extra fields allowed so a grid can carry any axes.
+
+    ``GridSpace`` / ``UniformSpace`` yield these; ``list(space)`` is
+    ``list[Params]``.
+    """
+
+    model_config = ConfigDict(extra="allow")
+
+    def __iter__(self) -> Iterator[str]:  # ty: ignore[invalid-method-override]
+        return iter(self.model_dump())
+
+    def __len__(self) -> int:
+        return len(self.model_dump())
+
+    def __getitem__(self, key: str) -> object:
+        data = self.model_dump()
+        if key not in data:
+            raise KeyError(key)
+        return data[key]
+
+
+class ParamSpace(ABC):
+    """Abstract base class for parameter spaces.
+
+    Iterating yields :class:`Params`; ``list(space)`` is ``list[Params]``.
+    """
+
+    @abstractmethod
+    def __iter__(self) -> Generator[Params]:
+        """Generate parameter combinations."""
+        ...
+
+    @abstractmethod
+    def __len__(self) -> int:
+        """Return the total number of parameter combinations."""
+        ...
+
+
+class GridSpace(ParamSpace):
+    """Exhaustive Cartesian product over all parameter values.
+
+    Example::
+
+        space = GridSpace({"lr": [1e-4, 5e-4], "batch": [32, 64]})
+        # yields 4 combinations
+    """
+
+    def __init__(self, param_grid: dict[str, list[Any]]) -> None:
+        scalars = [name for name, values in param_grid.items() if not isinstance(values, list)]
+        if scalars:
+            first = scalars[0]
+            raise ValueError(
+                f"GridSpace maps every axis to a *list* of values; got a scalar "
+                f"for {', '.join(repr(n) for n in scalars)} — wrap it in a list "
+                f"(e.g. {first!r}: [{param_grid[first]!r}])."
+            )
+        self.param_grid = param_grid
+        self._param_names = list(param_grid.keys())
+        self._param_values = list(param_grid.values())
+        self._total = 1
+        for values in self._param_values:
+            self._total *= len(values)
+
+    def __iter__(self) -> Generator[Params]:
+        for combination in product(*self._param_values):
+            yield Params(**dict(zip(self._param_names, combination, strict=True)))
+
+    def __len__(self) -> int:
+        return self._total
+
+    def __repr__(self) -> str:
+        return f"GridSpace({len(self)} combinations)"
+
+
+class UniformSpace(ParamSpace):
+    """Uniform random sampling from discrete value lists.
+
+    Example::
+
+        space = UniformSpace({"lr": [1e-4, 5e-4, 1e-3]}, n_samples=20, seed=42)
+    """
+
+    def __init__(
+        self,
+        param_values: dict[str, list[Any]],
+        n_samples: int,
+        seed: int | None = None,
+    ) -> None:
+        self.param_values = param_values
+        self.n_samples = n_samples
+        self.seed = seed
+
+    def __iter__(self) -> Generator[Params]:
+        rng = random.Random(self.seed)
+        for _ in range(self.n_samples):
+            cell: dict[str, Any] = {}
+            for name, values in self.param_values.items():
+                if not isinstance(values, list):
+                    raise ValueError(f"Parameter '{name}' must be a list, got {type(values)}")
+                if len(values) == 0:
+                    raise ValueError(f"Parameter '{name}' must have at least one value")
+                cell[name] = rng.choice(values)
+            yield Params(**cell)
+
+    def __len__(self) -> int:
+        return self.n_samples
+
+    def __repr__(self) -> str:
+        return f"UniformSpace({self.n_samples} samples, seed={self.seed})"

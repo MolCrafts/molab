@@ -4,34 +4,37 @@ The workflow layer describes computation. The workspace layer preserves the reco
 
 ## The Persistent Hierarchy
 
-MolExp stores state as four nested levels:
+Molab stores state as four nested levels:
 
 | Level | Role | Example |
 |---|---|---|
 | **Workspace** | Root directory | `./lab` |
 | **Project** | Groups related work | `qm9` |
 | **Experiment** | One repeatable definition | `baseline` |
-| **Run** | One concrete execution | `run-abc123` |
+| **Run** | One concrete execution | `lr=0.001` |
 
 An experiment says *what should be repeatable*. A run records *what actually happened*. That separation is the heart of the model.
 
 ```python
-import molexp as me
-from molexp.workflow import WorkflowCompiler
+import molab as me
+from molab.workflow import Workflow, WorkflowCompiler
 
-wf = WorkflowCompiler(name="baseline")
+wf = Workflow(name="baseline")
+
 
 @wf.task
 def train(lr: float) -> dict:
     return {"loss": lr * 100}
 
+
 @wf.task(depends_on=["train"])
 def report(loss: float) -> float:
     return loss
 
-# Create the hierarchy
+
+# Create the hierarchy (add_* is idempotent create-or-get)
 ws = me.Workspace("./lab", name="lab")
-exp = ws.project("qm9").experiment("baseline")
+exp = ws.add_project("qm9").add_experiment("baseline")
 ```
 
 ## Execute One Tracked Run
@@ -41,24 +44,28 @@ exp = ws.project("qm9").experiment("baseline")
 ```python
 run = exp.add_run(params={"lr": 1e-3})
 result = run.execute(wf)
-print(run.status, result.outputs["report"])  # succeeded 0.1
+print(run.executions[-1].status.value, result.outputs["report"])  # succeeded 0.1
 ```
 
-The run's directory now holds `run.json` (identity and provenance), `_ops/run.json` (status and ownership), and `executions/<exec_id>/` (per-task outputs). Read it back in a later session:
+The run's directory now holds `run.json` (logical definition only) and `executions/e01/` (the attempt: `execution.json`, `alive` heartbeat, per-task outputs under `out/` and `artifacts/`). Read it back in a later session:
 
 ```python
 same_run = exp.get_run(run.id)
-print(same_run.status, same_run.get_result("report"))  # succeeded 0.1
+print(
+    same_run.executions[-1].status.value,
+    same_run.get_result("report", execution_id=same_run.executions[-1].id),
+)  # succeeded 0.1
 ```
 
 ## Failure, Resume, Rerun
 
-A failing task raises `RunFailedError` and the run is persisted as `failed`. MolExp **never falls back silently** — each state either executes, resumes, or raises with instructions:
+A failing task raises `RunFailedError` and the run is persisted as `failed`. Molab **never falls back silently** — each state either executes, resumes, or raises with instructions:
 
 | Run status | `run.execute(wf)` behavior |
 |---|---|
 | `pending` | Execute from the top |
-| `failed` / `cancelled` | **Resume** — seed completed tasks, recompute the rest |
+| `failed` / `cancelled` | Refuses — retrying is explicit: pass `resume=True` or `rerun=True` |
+| `failed` / `cancelled` + `resume=True` | **Resume** — seed completed tasks, recompute the rest |
 | `failed` / `cancelled` + `rerun=True` | **Rerun** — fresh attempt from the top |
 | `succeeded` | Refuses — read results instead |
 | `running` | Refuses — cancel first (`run.cancel()`) |
@@ -66,7 +73,7 @@ A failing task raises `RunFailedError` and the run is persisted as `failed`. Mol
 ```python
 # docs: skip — resume/rerun only applies to failed/cancelled runs; the run above succeeded
 # Resume a failed run (reuse completed task outputs)
-run.execute(wf)
+run.execute(wf, resume=True)
 
 # Rerun from scratch in a new attempt
 run.execute(wf, rerun=True)
@@ -80,7 +87,7 @@ run.execute(wf, rerun=True, fresh=True)
 One workflow on many parameter cells. `exp.sweep()` materializes one run per cell; `RunSet.execute()` drives every pending run:
 
 ```python
-scan = ws.project("qm9").experiment("lr-scan").sweep(wf, {"lr": [1e-3, 1e-4, 1e-5]})
+scan = ws.add_project("qm9").add_experiment("lr-scan").sweep(wf, {"lr": [1e-3, 1e-4, 1e-5]})
 summary = scan.execute()
 
 # Each row: params + status + per-task outputs
@@ -96,13 +103,13 @@ print(best["lr"], best["run_id"])
 
 ## CLI Registration
 
-Bind the compiled workflow to the experiment so `molexp run` can discover it:
+Bind the compiled workflow to the experiment so `molab run` can discover it:
 
 ```python
-exp.run(wf.compile(), params={"lr": [1e-3, 5e-4]})
+exp.define(WorkflowCompiler().compile(wf), params={"lr": [1e-3, 5e-4]})
 ```
 
-Now `molexp run` owns run selection, profiles, resume flags, and scheduler-backed execution over the exact same runs. See [CLI and Profiles](cli-and-profiles.md).
+Now `molab run` owns run selection, profiles, resume flags, and scheduler-backed execution over the exact same runs. See [CLI and Profiles](cli-and-profiles.md).
 
 ## Add a Run with a Fixed ID
 

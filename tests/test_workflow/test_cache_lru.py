@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from molexp.workflow.cache import Caching
-from molexp.workflow.snapshot import TaskSnapshot
+from molab.workflow.cache import Caching
+from molab.workflow.snapshot import TaskSnapshot
 
 
 def _snapshot() -> TaskSnapshot:

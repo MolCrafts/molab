@@ -5,17 +5,11 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from molq.transport import LocalTransport, SshTransport
 
-from molexp.workspace import (
-    ComputeTarget,
-    Workspace,
-    add_target,
-    get_target,
-    list_targets,
-    remove_target,
-    to_transport,
-)
+from molab.workspace import ComputeTarget, Workspace
+from molab.workspace.fs_local import LocalFileSystem
+from molab.workspace.fs_remote import RemoteFileSystem
+from molab.workspace.targets import to_filesystem
 
 
 class TestComputeTargetValidation:
@@ -25,9 +19,9 @@ class TestComputeTargetValidation:
         with pytest.raises(ValueError, match="scratch_root"):
             ComputeTarget(name="x", scratch_root="")
 
-    def test_ssh_options_without_host_rejected(self) -> None:
-        with pytest.raises(ValueError, match="require host"):
-            ComputeTarget(name="x", scratch_root="/tmp", port=22)
+    def test_incomplete_destination_rejected(self) -> None:
+        with pytest.raises(ValueError, match="together"):
+            ComputeTarget(name="x", scratch_root="/tmp", cluster_id="files")
 
 
 class TestRegistry:
@@ -37,71 +31,57 @@ class TestRegistry:
         """A registered target survives a fresh ``Workspace`` load unchanged."""
         ws = Workspace(tmp_path)
         ws.materialize()
-        add_target(
-            ws,
+        ws.add_target(
             ComputeTarget(
                 name="hpc",
-                host="me@cluster",
-                port=2222,
-                identity_file="/k",
-                ssh_opts=["-o", "ServerAliveInterval=30"],
-                scheduler="slurm",
+                registry_id="registry",
+                cluster_id="destination",
                 scratch_root="/scratch/me",
-                default_resources={"cpus": 8, "mem": "16G"},
             ),
         )
 
         ws2 = Workspace(tmp_path)  # fresh load
-        t = get_target(ws2, "hpc")
-        assert t.host == "me@cluster"
-        assert t.port == 2222
-        assert t.identity_file == "/k"
-        assert t.ssh_opts == ["-o", "ServerAliveInterval=30"]
-        assert t.scheduler == "slurm"
-        assert t.default_resources == {"cpus": 8, "mem": "16G"}
+        t = ws2.get_target("hpc")
+        assert t.registry_id == "registry"
+        assert t.cluster_id == "destination"
+        assert t.scratch_root == "/scratch/me"
 
     def test_add_duplicate_name_rejected(self, tmp_path: Path) -> None:
         ws = Workspace(tmp_path)
         ws.materialize()
-        add_target(ws, ComputeTarget(name="a", scratch_root="/tmp"))
+        ws.add_target(ComputeTarget(name="a", scratch_root="/tmp"))
         with pytest.raises(ValueError, match="already exists"):
-            add_target(ws, ComputeTarget(name="a", scratch_root="/other"))
+            ws.add_target(ComputeTarget(name="a", scratch_root="/other"))
 
     def test_remove_drops_named_target(self, tmp_path: Path) -> None:
         ws = Workspace(tmp_path)
         ws.materialize()
-        add_target(ws, ComputeTarget(name="a", scratch_root="/tmp"))
-        add_target(ws, ComputeTarget(name="b", scratch_root="/tmp"))
-        remove_target(ws, "a")
-        assert [t.name for t in list_targets(ws)] == ["b"]
+        ws.add_target(ComputeTarget(name="a", scratch_root="/tmp"))
+        ws.add_target(ComputeTarget(name="b", scratch_root="/tmp"))
+        ws.remove_target("a")
+        assert [t.name for t in ws.list_targets()] == ["b"]
 
     def test_get_missing_raises(self, tmp_path: Path) -> None:
         ws = Workspace(tmp_path)
         ws.materialize()
         with pytest.raises(KeyError):
-            get_target(ws, "ghost")
+            ws.get_target("ghost")
 
 
-class TestToTransport:
-    """``to_transport`` maps a ``ComputeTarget``'s host axis onto a molq Transport."""
+def test_filesystem_uses_the_same_destination(molq_destination):
+    _client, registry, cluster, root = molq_destination
+    target = ComputeTarget(
+        name="hpc", registry_id=registry, cluster_id=cluster, scratch_root=str(root)
+    )
+    fs = to_filesystem(target)
+    assert isinstance(fs, RemoteFileSystem)
+    fs.write_text(root / "file", "payload")
+    assert fs.read_text(root / "file") == "payload"
+    assert isinstance(
+        to_filesystem(ComputeTarget(name="local", scratch_root=str(root))), LocalFileSystem
+    )
 
-    def test_local_target_yields_local_transport(self) -> None:
-        t = ComputeTarget(name="x", scratch_root="/tmp")
-        assert isinstance(to_transport(t), LocalTransport)
 
-    def test_remote_target_yields_ssh_transport_with_options(self) -> None:
-        t = ComputeTarget(
-            name="x",
-            host="me@h",
-            port=2222,
-            identity_file="/k",
-            ssh_opts=["-o", "X=Y"],
-            scheduler="slurm",
-            scratch_root="/s",
-        )
-        tr = to_transport(t)
-        assert isinstance(tr, SshTransport)
-        assert tr.options.host == "me@h"
-        assert tr.options.port == 2222
-        assert tr.options.identity_file == "/k"
-        assert tr.options.ssh_opts == ("-o", "X=Y")
+def test_legacy_connection_fields_are_rejected():
+    with pytest.raises(ValueError):
+        ComputeTarget(name="old", scratch_root="/tmp", host="example")

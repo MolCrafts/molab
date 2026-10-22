@@ -1,7 +1,7 @@
 """Public control-flow API — ``wf.branch`` / ``wf.loop`` / ``Next`` are blessed.
 
 ``Next`` graduated from IR-internal token to public routing return value
-(``molexp.workflow.Next``, in ``__all__`` — locked by
+(``molab.workflow.Next``, in ``__all__`` — locked by
 ``test_engine_boundary``). Here we pin the *runtime* control-flow semantics a
 branch or loop workflow must obey, built end-to-end from public imports alone:
 
@@ -18,9 +18,10 @@ from __future__ import annotations
 
 import pytest
 
-from molexp.workflow import (
+from molab.workflow import (
     Next,
     TaskContext,
+    Workflow,
     WorkflowCompiler,
     WorkflowRuntime,
 )
@@ -35,7 +36,7 @@ class TestControlFlow:
         ``ctx.inputs``; the un-routed branch target does not run."""
         seen: dict[str, object] = {}
 
-        wf = WorkflowCompiler(name="public-branch", entry="classify")
+        wf = Workflow(name="public-branch", entry="classify")
 
         @wf.task
         async def classify(ctx: TaskContext) -> tuple[dict, Next]:
@@ -52,7 +53,7 @@ class TestControlFlow:
 
         wf.branch("classify", routes={"accept": "accepted", "reject": "rejected"})
 
-        result = await WorkflowRuntime().execute(wf.compile())
+        result = await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
         assert result.status == "succeeded"
         assert seen["inputs"] == {"score": 0.9}, (
             "the branch-routed value must arrive at the target as ctx.inputs"
@@ -66,7 +67,7 @@ class TestControlFlow:
         value reaches the next iteration's body head via ``ctx.inputs``."""
         head_inputs: list[object] = []
 
-        wf = WorkflowCompiler(name="public-loop", entry="step")
+        wf = Workflow(name="public-loop", entry="step")
 
         @wf.task
         async def step(value: int | None = None) -> int:
@@ -85,7 +86,7 @@ class TestControlFlow:
 
         wf.loop(body=["step"], until="check", max_iters=10, on_exit="report")
 
-        result = await WorkflowRuntime().execute(wf.compile())
+        result = await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
         assert result.status == "succeeded"
         # First iteration has no incoming value; later ones see the previous
         # iteration's routed output as ctx.inputs (values-on-edges).

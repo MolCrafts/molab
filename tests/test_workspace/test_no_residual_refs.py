@@ -1,72 +1,130 @@
-"""Residual-reference guard for the workspace-slim-01 deletion spec.
-
-Asserts the deleted unwired subsystems leave zero trace in the shipped
-source tree: no symbol definitions, no imports, no ``__all__`` entries,
-and no orphaned module files. Scans ``src/molexp/`` only — test files
-referencing removed symbols are deleted separately.
-"""
+"""Manifest-scanner imports stay inside the asset package (arch-own-05d)."""
 
 from __future__ import annotations
 
-import importlib
+import ast
 from pathlib import Path
 
-import pytest
+SRC = Path(__file__).resolve().parents[2] / "src"
+MOLAB = SRC / "molab"
+ASSETS = MOLAB / "workspace" / "assets"
+INIT = MOLAB / "workspace" / "__init__.py"
 
-import molexp
+_FORBIDDEN_NAMES = frozenset(
+    {"AssetsView", "scan_assets", "get_asset", "find_by_content_hash", "scan", "view"}
+)
 
-SRC = Path(molexp.__file__).resolve().parent  # .../src/molexp
-
-
-def _py_files() -> list[Path]:
-    return [p for p in SRC.rglob("*.py") if "__pycache__" not in p.parts]
-
-
-# Distinctive symbols that must not appear anywhere under src/molexp/ after the cut.
-DELETED_SYMBOLS = [
-    "RunFingerprint",
-    "_hash_payload",
-    "_environment_signature",
-    "_FINGERPRINT_HASH_HEX_LEN",
-    "CheckpointState",
-    "OutputAsset",
-    "ExecutionStateAsset",
-    "_register_channel",
-    "resumed_step",
-    "checkpoint_step",
-    "last_step",
-    # workspace-slim-02: the bare-pathlib container-index mechanism — the
-    # entity *.json is the sole truth source, the catalog the derived index.
-    "_rebuild_container_index",
-    "_refresh_runs_index",
-    "_refresh_executions_index",
-    "_refresh_experiments_index",
-    "_refresh_projects_index",
-]
-
-DELETED_FILES = [
-    SRC / "workspace" / "checkpoint.py",
-    SRC / "workspace" / "resume_policy.py",
-    SRC / "workspace" / "assets" / "output.py",
-    SRC / "workspace" / "assets" / "execution.py",
-]
+# Files and symbols this spec removes. The assertions below use these tuples.
+DELETED_FILES = ("server/routes/_scope.py",)
+DELETED_SYMBOLS = ("asset_has_sidecar",)
 
 
-@pytest.mark.parametrize("symbol", DELETED_SYMBOLS)
-def test_symbol_has_zero_residue(symbol: str) -> None:
+def _allowed(path: Path) -> bool:
+    resolved = path.resolve()
+    if resolved == INIT.resolve():
+        return True
+    try:
+        resolved.relative_to(ASSETS.resolve())
+    except ValueError:
+        return False
+    return True
+
+
+def _forbidden_module(module: str | None) -> bool:
+    if module is None:
+        return False
+    parts = module.split(".")
+    return "assets" in parts and ({"scan", "view"} & set(parts))
+
+
+def _hits() -> list[str]:
+    found: list[str] = []
+    for path in MOLAB.rglob("*.py"):
+        if "__pycache__" in path.parts or _allowed(path):
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if _forbidden_module(alias.name):
+                        found.append(f"{path}:{node.lineno}: import {alias.name}")
+            elif isinstance(node, ast.ImportFrom):
+                names = [alias.name for alias in node.names]
+                if _forbidden_module(node.module) or any(
+                    name in _FORBIDDEN_NAMES for name in names
+                ):
+                    found.append(
+                        f"{path}:{node.lineno}: from {node.module} import {', '.join(names)}"
+                    )
+    return found
+
+
+def test_manifest_scanner_is_not_imported_outside_assets() -> None:
+    assert _hits() == []
+
+
+def test_scope_helper_and_sidecar_predicate_are_gone() -> None:
+    for relative in DELETED_FILES:
+        assert not (MOLAB / relative).exists(), relative
     offenders = [
-        str(p.relative_to(SRC)) for p in _py_files() if symbol in p.read_text(encoding="utf-8")
+        path
+        for path in SRC.rglob("*.py")
+        if "__pycache__" not in path.parts
+        and any(symbol in path.read_text(encoding="utf-8") for symbol in DELETED_SYMBOLS)
     ]
-    assert not offenders, f"{symbol!r} still referenced in: {offenders}"
+    assert offenders == []
 
 
-@pytest.mark.parametrize("path", DELETED_FILES)
-def test_deleted_module_absent(path: Path) -> None:
-    assert not path.exists(), f"{path} should have been deleted"
+_DELETED_ASSET_MODULES = (
+    "manifest",
+    "scan",
+    "view",
+    "accessors",
+    "data",
+    "artifact",
+    "log",
+    "checkpoint",
+    "error",
+    "_adapter",
+    "base",
+)
+_DELETED_ASSET_SYMBOLS = (
+    "ArtifactAsset",
+    "AssetManifest",
+    "AssetsView",
+    "CheckpointAsset",
+    "DataAsset",
+    "DataAssetLibrary",
+    "ErrorTraceAsset",
+    "LogAsset",
+    "Producer",
+)
 
 
-@pytest.mark.parametrize("name", ["RunFingerprint", "OutputAsset", "ExecutionStateAsset"])
-def test_public_export_removed(name: str) -> None:
-    mod = importlib.import_module("molexp.workspace")
-    assert not hasattr(mod, name), f"molexp.workspace still exports {name}"
-    assert name not in getattr(mod, "__all__", []), f"{name} still in molexp.workspace.__all__"
+def test_manifest_family_is_gone() -> None:
+    import molab.ids as ids
+    import molab.workflow.protocols as protocols
+    import molab.workspace as workspace
+    import molab.workspace.assets as assets
+    import molab.workspace.utils as utils
+
+    assert assets.__all__ == ["lineage"]
+    assert workspace.Asset is workspace.domain.Asset
+    assert "UnmigratedAssetError" in workspace.__all__
+    for name in _DELETED_ASSET_SYMBOLS:
+        assert not hasattr(workspace, name), name
+    for module in _DELETED_ASSET_MODULES:
+        assert not (ASSETS / f"{module}.py").exists(), module
+    assert not hasattr(protocols, "AssetsViewLike")
+    assert "assets" not in protocols.UpstreamViewLike.__annotations__
+    assert not hasattr(ids, "generate_asset_id")
+    assert "generate_asset_id" not in getattr(ids, "__all__", ())
+    assert not hasattr(utils, "generate_asset_id")
+
+    quoted = '"assets.json"'
+    hits = sorted(
+        path.relative_to(MOLAB).as_posix()
+        for path in MOLAB.rglob("*.py")
+        if "__pycache__" not in path.parts and quoted in path.read_text(encoding="utf-8")
+    )
+    assert hits == ["cli/migrate_cmd.py", "workspace/artifact_repository.py"]

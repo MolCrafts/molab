@@ -36,6 +36,5 @@
       "task_id": "train",
       "task_type": "golden_train"
     }
-  ],
-  "workflow_id": "<normalized>"
+  ]
 }

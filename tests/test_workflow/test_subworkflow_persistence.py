@@ -6,23 +6,25 @@ with the INNER spec's document — losing the outer graph/statuses, polluting
 resume seeds, and racing under ``wf.parallel`` fan-out. Invariant pinned here:
 after a run containing SubWorkflows (including parallel fan-out, and after an
 inner failure), ``executions/<exec_id>/workflow.json`` describes the OUTER graph
-only, with correct statuses, and resume seeding reads only outer-node outputs.
+only (its header digest is the outer workflow's), with correct statuses, and
+its recorded outputs are the outer nodes' only.
 """
 
 from __future__ import annotations
 
-import json
 import pathlib
 
 import pytest
 
-from molexp.workflow import (
+from molab.workflow import (
     SubWorkflow,
+    Workflow,
     WorkflowCompiler,
     WorkflowRuntime,
-    read_node_outputs,
+    read_journal,
+    read_outputs,
 )
-from molexp.workspace import Workspace
+from molab.workspace import Workspace
 
 INNER_TASKS = {"load", "normalize", "scale"}
 
@@ -34,9 +36,9 @@ def _new_run(tmp_path: pathlib.Path, params: dict | None = None):
     return experiment.add_run(params=params or {})
 
 
-def _build_inner() -> WorkflowCompiler:
+def _build_inner() -> Workflow:
     """A 3-task inner chain: load → normalize → scale (terminal = 1.75)."""
-    wf = WorkflowCompiler(name="inner-multi")
+    wf = Workflow(name="inner-multi")
 
     @wf.task
     async def load() -> list[float]:
@@ -54,8 +56,8 @@ def _build_inner() -> WorkflowCompiler:
     return wf
 
 
-def _build_failing_inner() -> WorkflowCompiler:
-    wf = WorkflowCompiler(name="inner-fail")
+def _build_failing_inner() -> Workflow:
+    wf = Workflow(name="inner-fail")
 
     @wf.task
     async def boom() -> None:
@@ -65,8 +67,9 @@ def _build_failing_inner() -> WorkflowCompiler:
 
 
 def _load_doc(run, execution_id: str) -> dict:
-    path = pathlib.Path(run.run_dir) / "executions" / execution_id / "workflow.json"
-    return json.loads(path.read_text())
+    doc = read_journal(run, execution_id)
+    assert doc is not None
+    return doc
 
 
 def _task_statuses(doc: dict) -> dict[str, str]:
@@ -78,10 +81,8 @@ class TestSubWorkflowPersistence:
     async def test_parent_doc_describes_outer_graph_after_success(
         self, tmp_path: pathlib.Path
     ) -> None:
-        outer = (
-            WorkflowCompiler(name="outer-doc")
-            .add(SubWorkflow(_build_inner()), name="sub")
-            .compile()
+        outer = WorkflowCompiler().compile(
+            Workflow(name="outer-doc").add(SubWorkflow(_build_inner()), name="sub")
         )
         run = _new_run(tmp_path)
         with run.start() as ctx:
@@ -95,19 +96,17 @@ class TestSubWorkflowPersistence:
         assert set(statuses) == {"sub"}
         assert not (set(statuses) & INNER_TASKS)
         assert statuses["sub"] == "completed"
-        assert doc["status"] == "succeeded"
+        assert doc["workflow_digest"] == outer.workflow_digest
 
-        # Resume seeding reads only outer-node outputs.
-        seeds = read_node_outputs(run.run_dir, result.execution_id)
-        assert set(seeds) == {"sub"}
-        assert seeds["sub"] == pytest.approx(1.75)
+        # The recorded outputs are the outer nodes' only.
+        outputs = read_outputs(run, result.execution_id)
+        assert set(outputs) == {"sub"}
+        assert outputs["sub"] == pytest.approx(1.75)
 
     @pytest.mark.asyncio
     async def test_parent_doc_intact_after_inner_failure(self, tmp_path: pathlib.Path) -> None:
-        outer = (
-            WorkflowCompiler(name="outer-doc-fail")
-            .add(SubWorkflow(_build_failing_inner()), name="sub")
-            .compile()
+        outer = WorkflowCompiler().compile(
+            Workflow(name="outer-doc-fail").add(SubWorkflow(_build_failing_inner()), name="sub")
         )
         run = _new_run(tmp_path)
         with run.start() as ctx:
@@ -119,13 +118,14 @@ class TestSubWorkflowPersistence:
         statuses = _task_statuses(doc)
         assert set(statuses) == {"sub"}  # outer graph only, even mid-failure
         assert statuses["sub"] == "failed"
-        assert doc["status"] == "failed"
+        assert doc["workflow_digest"] == outer.workflow_digest
+        assert read_outputs(run, result.execution_id) == {}
 
     @pytest.mark.asyncio
     async def test_parallel_fanout_does_not_corrupt_parent_doc(
         self, tmp_path: pathlib.Path
     ) -> None:
-        wf = WorkflowCompiler(name="outer-doc-parallel", entry="emit")
+        wf = Workflow(name="outer-doc-parallel", entry="emit")
 
         @wf.task
         async def emit() -> list[int]:
@@ -139,9 +139,10 @@ class TestSubWorkflowPersistence:
 
         wf.parallel(map_over="emit", body="sub", join="collect", max_concurrency=4)
 
+        compiled = WorkflowCompiler().compile(wf)
         run = _new_run(tmp_path)
         with run.start() as ctx:
-            result = await WorkflowRuntime().execute(wf.compile(), run_context=ctx)
+            result = await WorkflowRuntime().execute(compiled, run_context=ctx)
 
         assert result.status == "succeeded"
         doc = _load_doc(run, result.execution_id)
@@ -150,8 +151,8 @@ class TestSubWorkflowPersistence:
         assert set(statuses) == {"emit", "sub", "collect"}
         assert not (set(statuses) & INNER_TASKS)
         assert statuses == {"emit": "completed", "sub": "completed", "collect": "completed"}
-        assert doc["status"] == "succeeded"
+        assert doc["workflow_digest"] == compiled.workflow_digest
 
-        seeds = read_node_outputs(run.run_dir, result.execution_id)
-        assert set(seeds) == {"emit", "sub", "collect"}
-        assert seeds["collect"] == pytest.approx([1.75, 1.75, 1.75, 1.75])
+        outputs = read_outputs(run, result.execution_id)
+        assert set(outputs) == {"emit", "sub", "collect"}
+        assert outputs["collect"] == pytest.approx([1.75, 1.75, 1.75, 1.75])

@@ -7,27 +7,30 @@
 将以下内容复制到 `demo.py`：
 
 ```python
-import molexp as me
-from molexp.workflow import WorkflowCompiler
+import molab as me
+from molab.workflow import Workflow, WorkflowCompiler
 
 # 1. 定义工作流
-wf = WorkflowCompiler(name="sum")
+wf = Workflow(name="sum")
+
 
 @wf.task
 def fetch(scale: float = 1.0) -> dict:
     return {"values": [1.0, 4.0, 9.0], "scale": scale}
 
+
 @wf.task(depends_on=["fetch"])
 def summarize(values: list[float], scale: float = 1.0) -> float:
     return sum(values) * scale
 
+
 # 2. 创建工作区层级
 ws = me.Workspace("./lab", name="lab")
-run = ws.project("demo").experiment("sum").add_run(params={"scale": 2.0})
+run = ws.add_project("demo").add_experiment("sum").add_run(params={"scale": 2.0})
 
 # 3. 执行并读取结果
 result = run.execute(wf)
-print(run.status, result.outputs["summarize"])
+print(run.executions[-1].status.value, result.outputs["summarize"])
 ```
 
 运行它：
@@ -40,9 +43,9 @@ python demo.py
 
 ## 发生了什么
 
-**步骤 1 — 定义。** `WorkflowCompiler` 持有任务定义。`@wf.task` 将普通函数变为工作流节点。`depends_on=["fetch"]` 告诉引擎 `summarize` 在 `fetch` 之后运行并接收其输出。
+**步骤 1 — 定义。** `Workflow` 持有任务定义。`@wf.task` 将普通函数变为工作流节点。`depends_on=["fetch"]` 告诉引擎 `summarize` 在 `fetch` 之后运行并接收其输出。用 `WorkflowCompiler().compile(wf)` 编译。
 
-**步骤 2 — 创建。** `Workspace("./lab")` 在磁盘上创建目录。流畅链式调用 `.project("demo").experiment("sum").add_run(params={"scale": 2.0})` 构建持久化层级：项目分组相关工作，实验命名一个可重复定义，运行记录一次具体执行及其参数。
+**步骤 2 — 创建。** `Workspace("./lab")` 在磁盘上创建目录。链式调用 `.add_project("demo").add_experiment("sum").add_run(params={"scale": 2.0})` 构建持久化层级：项目分组相关工作，实验命名一个可重复定义，运行记录一次具体执行及其参数。`add_*` 是幂等的「创建或获取」；裸名词拼写（`ws.project(...)` / `project.experiment(...)`）是严格的 getter，节点不存在时会抛错。
 
 **步骤 3 — 执行。** `run.execute(wf)` 包办一切：编译工作流，打开运行的追踪生命周期，将运行参数绑定到根任务后执行图，将每个任务的输出持久化到运行目录，并返回结果。
 
@@ -69,19 +72,19 @@ params={"scale": 2.0}
 脚本退出后，运行仍在。打开新的 Python 会话读回：
 
 ```python
-import molexp as me
+import molab as me
 
 ws = me.Workspace("./lab", name="lab")
 same_run = ws.project("demo").experiment("sum").get_run(run.id)
-print(same_run.status)                     # succeeded
-print(same_run.get_result("summarize"))    # 28.0
+print(same_run.executions[-1].status.value)  # succeeded
+print(same_run.get_result("summarize", execution_id=same_run.executions[-1].id))  # 28.0
 ```
 
 ## 下一步
 
 - 如果工作流定义是陌生部分，继续读 [第一个工作流](first-workflow.md)。
 - 如果工作区层级是新的，读 [追踪运行](tracked-runs.md)。
-- 如果想用 `molexp run` 来驱动而不是手动调用 `run.execute`，去 [CLI 与配置文件](cli-and-profiles.md)。
+- 如果想用 `molab run` 来驱动而不是手动调用 `run.execute`，去 [CLI 与配置文件](cli-and-profiles.md)。
 - 如果更喜欢点击而非脚本，试试 [从浏览器开始](start-from-ui.md)。
 
 ## 可运行示例

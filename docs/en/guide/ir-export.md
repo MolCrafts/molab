@@ -21,10 +21,11 @@ edges missing, that is by design — switch to `to_graph_ir()`; you do not need 
 hand-patch the IR to inject them.
 
 ```python
-from molexp.workflow import (
+from molab.workflow import (
     CompiledWorkflow,
     Task,
     TaskContext,
+    Workflow,
     WorkflowCompiler,
     default_registry,
 )
@@ -37,11 +38,11 @@ class Fetch(Task):
         return {"n": 42}
 
 
-compiled = WorkflowCompiler(name="demo").add(Fetch()).compile()
+compiled = WorkflowCompiler().compile(Workflow(name="demo").add(Fetch()))
 
-graph = compiled.to_graph_ir()          # full graph (UI / observability)
+graph = compiled.to_graph_ir()  # full graph (UI / observability)
 parallel_edges = [e for e in graph.edges if e.kind == "parallel"]
 
-wire = compiled.to_ir()                 # round-trippable wire format
+wire = compiled.to_ir()  # round-trippable wire format
 rebuilt = CompiledWorkflow.from_ir(wire)
 ```

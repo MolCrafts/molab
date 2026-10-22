@@ -13,16 +13,17 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from molexp.workflow import (
+from molab.workflow import (
     CompiledWorkflow,
+    Workflow,
     WorkflowCompiler,
     WorkflowRuntime,
     default_binding_registry,
 )
-from molexp.workspace import RunStatus, Workspace
+from molab.workspace import Workspace
 
 if TYPE_CHECKING:
-    from molexp.workflow.context import TaskContext
+    from molab.workflow.context import TaskContext
 
 
 @pytest.fixture(autouse=True)
@@ -33,23 +34,23 @@ def _isolate_registry():
 
 
 def _trivial_workflow() -> CompiledWorkflow:
-    builder = WorkflowCompiler(name="trivial")
+    builder = Workflow(name="trivial")
 
     @builder.task
     async def emit(ctx: TaskContext[None, None, None]) -> int:
         return 42
 
-    return builder.compile()
+    return WorkflowCompiler().compile(builder)
 
 
 def _failing_workflow() -> CompiledWorkflow:
-    builder = WorkflowCompiler(name="failing")
+    builder = Workflow(name="failing")
 
     @builder.task
     async def boom(ctx: TaskContext[None, None, None]) -> None:
         raise RuntimeError("intentional failure")
 
-    return builder.compile()
+    return WorkflowCompiler().compile(builder)
 
 
 class TestRunOn:
@@ -60,7 +61,7 @@ class TestRunOn:
         exp = ws.add_project(name="demo").add_experiment(name="trivial-exp")
 
         runs_before = exp.list_runs()
-        result = await WorkflowRuntime().run_on(_trivial_workflow(), exp, parameters={"lr": 1e-3})
+        result = await WorkflowRuntime().run_on(_trivial_workflow(), exp, params={"lr": 1e-3})
 
         assert result.outputs.get("emit") == 42
         assert len(exp.list_runs()) == len(runs_before) + 1
@@ -87,4 +88,18 @@ class TestRunOn:
 
         runs = exp.list_runs()
         assert len(runs) == 1
-        assert runs[0].status == RunStatus.FAILED
+        assert runs[0].status_summary.by_status == {"failed": 1}
+        assert runs[0].is_retryable is True
+
+    @pytest.mark.asyncio
+    async def test_failure_message_carries_execution_error(self, tmp_path):
+        """The re-raised RuntimeError quotes the Execution error type and message."""
+        ws = Workspace(root=tmp_path, name="ws")
+        exp = ws.add_project(name="demo").add_experiment(name="failing-exp")
+
+        with pytest.raises(RuntimeError, match=r"failing.*status 'failed'") as exc:
+            await WorkflowRuntime().run_on(_failing_workflow(), exp)
+
+        err = exp.list_runs()[0].executions[-1].error
+        assert err is not None
+        assert f"{err['type']}: {err['message']}" in str(exc.value)

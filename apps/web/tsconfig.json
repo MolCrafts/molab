@@ -1,0 +1,59 @@
+{
+  "compilerOptions": {
+    "lib": [
+      "DOM",
+      "ES2020"
+    ],
+    "jsx": "react-jsx",
+    "target": "ES2020",
+    "noEmit": true,
+    "skipLibCheck": true,
+    "useDefineForClassFields": true,
+    /* modules */
+    "module": "ESNext",
+    "moduleDetection": "force",
+    "moduleResolution": "bundler",
+    "verbatimModuleSyntax": true,
+    "resolveJsonModule": true,
+    "allowImportingTsExtensions": true,
+    "noUncheckedSideEffectImports": true,
+    /* type checking */
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "paths": {
+      "@/*": [
+        "./src/*"
+      ],
+      "@molcrafts/ui/file-tree": [
+        "../../../molcrafts-ui/packages/ui/src/lib/file-tree.ts"
+      ],
+      "@molcrafts/ui-vega-lite": [
+        "../../../molcrafts-ui/packages/vega-lite/src/index.tsx"
+      ],
+      "@molcrafts/ui-vega": [
+        "../../../molcrafts-ui/packages/vega/src/index.tsx"
+      ],
+      "@schemas/*": [
+        "../src/molab/workflow/schema/*"
+      ],
+      "@molcrafts/molab-plugin": [
+        "../plugin/src/index.ts"
+      ],
+      "@molcrafts/molab-plugin/ui": [
+        "../plugin/src/ui/index.ts"
+      ],
+      "@molcrafts/molab-plugin/testing": [
+        "../plugin/src/testing.ts"
+      ],
+      "@molcrafts/molab-plugin/externals": [
+        "../plugin/src/externals.ts"
+      ]
+    }
+  },
+  "include": [
+    "src",
+    "mocks/db",
+    "mocks/handlers"
+  ]
+}

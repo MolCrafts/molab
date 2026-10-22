@@ -1,0 +1,162 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "$id": "https://molab.io/schemas/workflow/workflow.json",
+    "title": "Workflow",
+    "description": "Complete workflow definition containing tasks, links, and metadata",
+    "type": "object",
+    "properties": {
+        "name": {
+            "type": [
+                "string",
+                "null"
+            ],
+            "description": "Optional workflow name",
+            "examples": [
+                "my_workflow",
+                "production_pipeline",
+                null
+            ]
+        },
+        "task_configs": {
+            "type": "array",
+            "description": "List of task configurations in the workflow",
+            "items": {
+                "$ref": "task_config.json"
+            },
+            "default": []
+        },
+        "links": {
+            "type": "array",
+            "description": "List of links between tasks defining the workflow graph",
+            "items": {
+                "$ref": "link.json"
+            },
+            "default": []
+        },
+        "entries": {
+            "type": "array",
+            "description": "Explicit workflow entry-point task ids (wf.entry)",
+            "items": {
+                "type": "string"
+            },
+            "default": []
+        },
+        "loops": {
+            "type": "array",
+            "description": "wf.loop declarations carried for lossless round-trip",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "body": {
+                        "type": "array",
+                        "items": {
+                            "type": "string"
+                        }
+                    },
+                    "until": {
+                        "type": "string"
+                    },
+                    "max_iters": {
+                        "type": "integer"
+                    },
+                    "on_exit": {
+                        "type": "string"
+                    }
+                },
+                "required": [
+                    "body",
+                    "until",
+                    "max_iters",
+                    "on_exit"
+                ],
+                "additionalProperties": false
+            },
+            "default": []
+        },
+        "parallels": {
+            "type": "array",
+            "description": "wf.parallel declarations carried for lossless round-trip",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "map_over": {
+                        "type": "string"
+                    },
+                    "body": {
+                        "type": "string"
+                    },
+                    "join": {
+                        "type": "string"
+                    },
+                    "max_concurrency": {
+                        "type": "integer"
+                    }
+                },
+                "required": [
+                    "map_over",
+                    "body",
+                    "join",
+                    "max_concurrency"
+                ],
+                "additionalProperties": false
+            },
+            "default": []
+        },
+        "metadata": {
+            "$ref": "workflow_metadata.json",
+            "description": "Optional workflow metadata"
+        },
+        "workflow_contract": {
+            "$ref": "workflow_contract.json",
+            "description": "Optional sidecar contract describing typed task I/O, declared artifacts, and static validation checks. Absent in older IR; loaders MUST treat its absence as 'no contract declared'."
+        }
+    },
+    "required": [
+        "task_configs",
+        "links",
+        "metadata"
+    ],
+    "additionalProperties": false,
+    "examples": [
+        {
+            "name": "example_workflow",
+            "task_configs": [
+                {
+                    "task_id": "k",
+                    "task_type": "core.constant",
+                    "config": {
+                        "value": 10
+                    },
+                    "status": "pending"
+                },
+                {
+                    "task_id": "doubled",
+                    "task_type": "core.multiply",
+                    "config": {
+                        "factor": 2
+                    },
+                    "status": "pending"
+                }
+            ],
+            "links": [
+                {
+                    "source": "k",
+                    "target": "doubled",
+                    "mapping": {},
+                    "status": "pending"
+                }
+            ],
+            "metadata": {
+                "label": "Example Workflow",
+                "description": "A simple example workflow",
+                "tags": [
+                    "example",
+                    "demo"
+                ],
+                "custom": {
+                    "owner": "user1"
+                }
+            }
+        }
+    ]
+}

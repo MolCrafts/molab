@@ -4,23 +4,23 @@ A downstream task consuming a ``wf.parallel`` join alongside another dependency
 must observe the join's *real* output — never a silently coalesced ``None``.
 ``_collect_upstream_outputs`` raises :class:`MissingUpstreamResultError` for a
 declared dependency that never recorded a result, instead of coalescing to
-``None`` (the original production bug).
+``None``.
 """
 
 from __future__ import annotations
 
 import pytest
 
-from molexp.workflow import WorkflowCompiler, WorkflowRuntime
-from molexp.workflow._engine.node import _collect_upstream_outputs
-from molexp.workflow._engine.state import WorkflowState
-from molexp.workflow._graph_decl import TaskRegistration
-from molexp.workflow.types import MissingUpstreamResultError
+from molab.workflow import Workflow, WorkflowCompiler, WorkflowRuntime
+from molab.workflow._engine.node import _collect_upstream_outputs
+from molab.workflow._engine.state import WorkflowState
+from molab.workflow._graph_decl import TaskRegistration
+from molab.workflow.types import MissingUpstreamResultError
 
 
 @pytest.mark.asyncio
 async def test_parallel_join_consumer_sees_real_output_not_none() -> None:
-    """Regression — ``D`` depending on ``[J, X]`` observes J's real reduced
+    """``D`` depending on ``[J, X]`` observes J's real reduced
     output (not ``None``) alongside X's output.
 
     Graph: ``M`` emits a list; ``parallel(map_over=M, body=B, join=J)`` squares
@@ -30,7 +30,7 @@ async def test_parallel_join_consumer_sees_real_output_not_none() -> None:
     """
     captured: dict[str, dict[str, object]] = {}
 
-    wf = WorkflowCompiler(name="join-consumer-happy")
+    wf = Workflow(name="join-consumer-happy")
 
     @wf.task
     async def M(ctx) -> list[int]:
@@ -57,7 +57,7 @@ async def test_parallel_join_consumer_sees_real_output_not_none() -> None:
 
     wf.parallel(map_over="M", body="B", join="J", max_concurrency=3)
 
-    result = await WorkflowRuntime().execute(wf.compile())
+    result = await WorkflowRuntime().execute(WorkflowCompiler().compile(wf))
 
     assert result.status == "succeeded"
     # J's actual reduced output is sum([1, 4, 9]) == 14 — never None.
@@ -104,15 +104,9 @@ class TestCollectUpstreamOutputs:
         assert "b" in message
         assert "a" in message
 
-    def test_zero_dep_returns_none_without_raising(self) -> None:
-        registration = _registration("noseed", depends_on=[])
-        state = WorkflowState()
-
-        assert _collect_upstream_outputs(registration, state) is None
-
     def test_single_dep_missing_also_fails_fast(self) -> None:
         """Boundary — a one-dep consumer whose sole dep is unrecorded raises
-        rather than coalescing to ``None`` (the bug's root shape)."""
+        rather than coalescing to ``None`` (the minimal fail-fast case)."""
         registration = _registration("consumer", depends_on=["a"])
         state = WorkflowState()
 

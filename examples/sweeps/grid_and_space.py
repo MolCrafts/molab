@@ -1,6 +1,6 @@
 """Grid and random parameter sweeps — RunSet, RunSetResult, and idempotent re-declaration.
 
-Matches ``docs/guide/sweeps.md``.
+Matches ``docs/en/guide/sweeps.md``.
 
 Demonstrates:
 
@@ -23,11 +23,11 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
-import molexp as me
-from molexp.workflow import WorkflowCompiler
-from molexp.workspace.param import GridSpace, UniformSpace
+import molab as me
+from molab.param import GridSpace, UniformSpace
+from molab.workflow import Workflow, WorkflowCompiler
 
-wf = WorkflowCompiler(name="train")
+wf = Workflow(name="train")
 
 
 @wf.task
@@ -41,16 +41,16 @@ def report(loss: float, accuracy: float) -> float:
     return loss
 
 
-compiled = wf.compile()
+compiled = WorkflowCompiler().compile(wf)
 
 
 def main() -> None:
-    root = Path(tempfile.mkdtemp(prefix="molexp-sweeps-"))
+    root = Path(tempfile.mkdtemp(prefix="molab-sweeps-"))
     ws = me.Workspace(root, name="sweeps-demo")
 
     # ── 1. GridSpace — exhaustive Cartesian product ─────────────────────
     print("── GridSpace sweep ──────────────────────────────────────")
-    exp = ws.project("demo").experiment("lr-scan")
+    exp = ws.add_project("demo").add_experiment("lr-scan")
     space = GridSpace({"lr": [1e-3, 5e-4, 1e-4], "seed": [42]})
     scan = exp.sweep(wf, params=space)
     summary = scan.execute(parallel=2)
@@ -64,7 +64,7 @@ def main() -> None:
     # ── 2. Dict shorthand — same as GridSpace ──────────────────────────
     print()
     print("── Dict shorthand ───────────────────────────────────────")
-    quick = ws.project("demo").experiment("quick-sweep").sweep(wf, {"lr": [1e-2]})
+    quick = ws.add_project("demo").add_experiment("quick-sweep").sweep(wf, {"lr": [1e-2]})
     quick_result = quick.execute()
     print(f"  runs: {len(quick_result)}")
 
@@ -72,9 +72,10 @@ def main() -> None:
     print()
     print("── Idempotent re-declaration ────────────────────────────")
     again = exp.sweep(wf, params=space)
-    assert len(again) == len(scan), "re-declaring the same sweep must produce the same run count"
+    assert len(again) == 0, "re-declaring the same sweep must add no new runs"
+    assert len(exp.list_runs()) == len(scan), "run count must be unchanged"
     print(f"  first declaration:  {len(scan)} runs")
-    print(f"  second declaration: {len(again)} runs (same ids)")
+    print(f"  second declaration: {len(again)} new runs (already present)")
 
     # ── 4. Read back finished sweep ────────────────────────────────────
     print()
@@ -88,7 +89,7 @@ def main() -> None:
     print()
     print("── UniformSpace random sampling ─────────────────────────")
     uniform = UniformSpace({"lr": [1e-3, 5e-4, 1e-4, 5e-5]}, n_samples=3, seed=1)
-    rand_exp = ws.project("demo").experiment("random-scan")
+    rand_exp = ws.add_project("demo").add_experiment("random-scan")
     rand_scan = rand_exp.sweep(wf, params=uniform)
     rand_summary = rand_scan.execute()
     for row in rand_summary.to_records():
