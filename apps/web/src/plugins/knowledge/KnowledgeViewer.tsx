@@ -3,6 +3,7 @@ import { ArrowLeft, BookOpen, Download, ExternalLink, FileText, NotebookPen } fr
 import { type JSX, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { knowledgeApi } from "@/api";
+import { activeNeedsAuth, shouldShowFailure } from "@/api/errors";
 import type { NoteDetailResponse } from "@/api/generated/models/NoteDetailResponse";
 import type { ReferenceSummary } from "@/api/generated/models/ReferenceSummary";
 import { DashboardCanvas, EntityPage } from "@/app/components/entity";
@@ -49,6 +50,11 @@ export const KnowledgeViewer = ({ selection, snapshot }: RendererProps): JSX.Ele
   const queryClient = useQueryClient();
   const listQuery = useKnowledgeListQuery();
   const data = listQuery.data;
+  const needsAuth = activeNeedsAuth(snapshot.workspaces);
+  const knowledgeFailed = shouldShowFailure(listQuery.error, {
+    fetching: listQuery.isPending || listQuery.isFetching,
+    needsAuth,
+  });
 
   const relPath = selection.objectId;
 
@@ -63,7 +69,10 @@ export const KnowledgeViewer = ({ selection, snapshot }: RendererProps): JSX.Ele
   );
   const noteQuery = useKnowledgeNoteQuery(relPath, isNotePath);
   const note = noteQuery.data ?? null;
-  const noteError = noteQuery.error
+  const noteError = shouldShowFailure(noteQuery.error, {
+    fetching: noteQuery.isFetching,
+    needsAuth,
+  })
     ? noteQuery.error instanceof Error
       ? noteQuery.error.message
       : "Failed to load note."
@@ -225,10 +234,9 @@ export const KnowledgeViewer = ({ selection, snapshot }: RendererProps): JSX.Ele
     <EntityPage icon={BookOpen} title="Knowledge">
       <div className="min-h-0 flex-1 overflow-auto">
         <DashboardCanvas>
-          {listQuery.isPending ? (
+          {listQuery.isPending || (needsAuth && !data) ? (
             <WorkbenchOperationState kind="loading" title="Loading knowledge…" skeletonRows={4} />
-          ) : null}
-          {listQuery.error ? (
+          ) : knowledgeFailed ? (
             <WorkbenchOperationState
               kind="error"
               title="Could not load knowledge"

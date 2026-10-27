@@ -88,6 +88,57 @@ from .history import SYSTEM_AGENT, AgentRef, EntityRef, GitHistory, Relation
 from .naming import execution_slug
 from .schema_version import read_versioned_json, write_versioned_json
 
+# Attempts are ``e01``, ``e02``, … with no gaps (the next id is max(seq) + 1).
+# Probing this many files in one ``read_many`` covers a normal run. A longer
+# history, or a directory whose names are not ``eNN``, is listed instead.
+_ATTEMPT_PROBE = 8
+
+
+def prime_execution_records(fs: FileSystem, run_dirs: Sequence[str]) -> None:
+    """Refresh attempt records for *run_dirs* in one remote batch.
+
+    Each run contributes its ``executions/`` directory plus ``execution.json``
+    for ``e01`` through one past the last attempt the pin already knows. One
+    ``read_many`` refreshes status and discovers a new attempt. A run with no
+    ``executions/`` directory is pinned missing and is not listed. A directory
+    that exists but has no ``e01`` is left for :meth:`ExecutionRepository.list`
+    to list, because a legacy attempt name would not appear in this probe.
+
+    Local filesystems are unchanged: the pin this fills belongs to
+    :class:`~molab.workspace.fs_cached.CachedRemoteFileSystem`.
+    """
+    from .fs_cached import CachedRemoteFileSystem
+
+    if not isinstance(fs, CachedRemoteFileSystem) or not run_dirs:
+        return
+    paths: list[str] = []
+    for run_dir in run_dirs:
+        exec_dir = fs.join(run_dir, "executions")
+        paths.append(exec_dir)
+        span = _probe_span(fs, exec_dir)
+        for seq in range(1, span + 1):
+            paths.append(fs.join(exec_dir, execution_slug(seq), "execution.json"))
+    fs.read_many(paths, refresh=True)
+
+
+def _probe_span(fs: object, exec_dir: str) -> int:
+    """How many ``eNN`` files to re-read: one past the last pinned attempt."""
+    from .fs_cached import CachedRemoteFileSystem
+
+    if not isinstance(fs, CachedRemoteFileSystem):
+        return _ATTEMPT_PROBE
+    last = 0
+    for seq in range(1, _ATTEMPT_PROBE + 1):
+        kind = fs.pinned_kind(fs.join(exec_dir, execution_slug(seq), "execution.json"))
+        if kind == "file":
+            last = seq
+            continue
+        if kind == "missing":
+            return min(_ATTEMPT_PROBE, last + 1)
+        return _ATTEMPT_PROBE
+    return _ATTEMPT_PROBE
+
+
 _ALLOWED_TRANSITIONS: dict[ExecutionStatus, frozenset[ExecutionStatus]] = {
     ExecutionStatus.QUEUED: frozenset(
         {
@@ -557,6 +608,10 @@ class ExecutionRepository:
     def list(self) -> builtins.list[Execution]:
         from .fs_cached import CachedRemoteFileSystem
 
+        if isinstance(self.fs, CachedRemoteFileSystem):
+            pinned = self._pinned_attempt_paths()
+            if pinned is not None:
+                return self._load_states(pinned)
         if not self.fs.exists(self.executions_dir):
             return []
         paths = [
@@ -564,7 +619,65 @@ class ExecutionRepository:
             for entry in self.fs.scandir(self.executions_dir, with_stat=False)
             if entry.is_dir
         ]
-        if isinstance(self.fs, CachedRemoteFileSystem):
+        return self._load_states(paths)
+
+    def _pinned_attempt_paths(self) -> builtins.list[str] | None:
+        """Attempt files the pin already proves, or ``None`` when it does not.
+
+        ``None`` means the caller must list ``executions/``. An empty list
+        means the directory is known to be absent. A contiguous ``e01``…
+        prefix that ends inside the probe window is complete: the next id is
+        never skipped. A directory with no ``e01`` can still hold a legacy
+        attempt name, so that case is listed once and then served from the
+        directory pin.
+        """
+        from .fs_cached import CachedRemoteFileSystem
+
+        fs = self.fs
+        if not isinstance(fs, CachedRemoteFileSystem):
+            return None
+        exec_dir = self.executions_dir
+        kind = fs.pinned_kind(exec_dir)
+        if kind is None:
+            return None
+        if kind == "missing":
+            return []
+        if kind != "dir":
+            return None
+        paths: builtins.list[str] = []
+        for seq in range(1, _ATTEMPT_PROBE + 1):
+            path = self.state_path(execution_slug(seq))
+            file_kind = fs.pinned_kind(path)
+            if file_kind is None:
+                return None
+            if file_kind == "missing":
+                if paths:
+                    return paths
+                return self._paths_from_listing()
+            if file_kind != "file":
+                return None
+            paths.append(path)
+        return self._paths_from_listing()
+
+    def _paths_from_listing(self) -> builtins.list[str] | None:
+        from .fs_cached import CachedRemoteFileSystem
+
+        fs = self.fs
+        if not isinstance(fs, CachedRemoteFileSystem):
+            return None
+        listing = fs.pinned_listing(self.executions_dir)
+        if listing is None:
+            return None
+        return [
+            self.fs.join(self.executions_dir, entry.name, "execution.json")
+            for entry in listing
+            if entry.is_dir
+        ]
+
+    def _load_states(self, paths: builtins.list[str]) -> builtins.list[Execution]:
+        from .fs_cached import CachedRemoteFileSystem
+
+        if isinstance(self.fs, CachedRemoteFileSystem) and paths:
             self.fs.read_many(paths)
         states = [
             Execution.model_validate(read_versioned_json(path, fs=self.fs))

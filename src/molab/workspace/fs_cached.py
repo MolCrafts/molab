@@ -34,6 +34,7 @@ import io
 import json
 import logging
 import os
+import posixpath
 import shutil
 import threading
 import time
@@ -105,10 +106,69 @@ class _Entry:
 
 @dataclass(frozen=True)
 class _DirEntry:
-    """One cached listdir result."""
+    """One cached directory listing.
+
+    ``entries`` is the typed listing from ``scandir``. ``None`` means this pin
+    only has names (a ``listdir``, or a sidecar written before entries were
+    stored) and ``scandir`` must not invent types it cannot see. ``with_stat``
+    is true when ``size`` and ``mtime`` were fetched; a later ``scandir`` that
+    asks for them refetches a names-only pin.
+    """
 
     names: tuple[str, ...]
     fetched_at: float
+    entries: tuple[DirEntry, ...] | None = None
+    with_stat: bool = False
+
+
+def _dump_dir_entry(entry: _DirEntry) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "names": list(entry.names),
+        "fetched_at": entry.fetched_at,
+        "with_stat": entry.with_stat,
+    }
+    if entry.entries is not None:
+        payload["entries"] = [
+            {
+                "name": child.name,
+                "is_dir": child.is_dir,
+                "is_file": child.is_file,
+                "is_symlink": child.is_symlink,
+                "size": child.size,
+                "mtime": child.mtime,
+            }
+            for child in entry.entries
+        ]
+    return payload
+
+
+def _load_dir_entries(raw: object) -> tuple[DirEntry, ...] | None:
+    if not isinstance(raw, list):
+        return None
+    loaded: list[DirEntry] = []
+    for item in raw:
+        if not isinstance(item, dict):
+            return None
+        name = item.get("name")
+        size = item.get("size")
+        mtime = item.get("mtime")
+        if not isinstance(name, str):
+            return None
+        loaded.append(
+            DirEntry(
+                name=name,
+                is_dir=bool(item.get("is_dir")),
+                is_file=bool(item.get("is_file")),
+                is_symlink=bool(item.get("is_symlink")),
+                size=size if isinstance(size, int) and not isinstance(size, bool) else 0,
+                mtime=(
+                    float(mtime)
+                    if isinstance(mtime, int | float) and not isinstance(mtime, bool)
+                    else 0.0
+                ),
+            )
+        )
+    return tuple(loaded)
 
 
 @dataclass(frozen=True)
@@ -580,23 +640,41 @@ class CachedRemoteFileSystem:
     def scandir(self, path: PathArg, *, with_stat: bool = True) -> list[DirEntry]:
         """List a directory with per-entry type and metadata in one round-trip.
 
-        Forwarded to the inner filesystem, whose listing already carries type,
-        size and mtime; the names are recorded in the directory index so a
-        following ``listdir`` is served locally.
+        A pinned listing is served locally. The pin keeps each child's type, so
+        a later ``scandir`` does not open another remote page for a directory
+        that has not been invalidated. ``with_stat=True`` refetches a pin that
+        was taken without metadata.
         """
         key = self.resolve(path)
+        with self._lock:
+            cached = self._pinned_dir(key)
+            if cached is not None:
+                hit = self._listing_from_pin(key, cached, with_stat=with_stat)
+                if hit is not None:
+                    return hit
         with self._lock:
             generation = self._generation
         self._ensure_connected()
         entries = self._inner.scandir(key, with_stat=with_stat)
-        with self._lock:
-            if generation != self._generation:
-                return entries
-            self._dir_index[key] = _DirEntry(
-                names=tuple(e.name for e in entries), fetched_at=time.time()
-            )
-            self._persist_sidecar()
+        self._remember_listing(key, entries, generation=generation, with_stat=with_stat)
         return entries
+
+    def pinned_kind(self, path: PathArg) -> str | None:
+        """``file``, ``dir``, or ``missing`` when the pin can answer, else ``None``."""
+        with self._lock:
+            entry = self._pinned_entry(self.resolve(path))
+        return None if entry is None else entry.kind
+
+    def pinned_listing(self, path: PathArg) -> list[DirEntry] | None:
+        """The last ``scandir`` pin for *path*, or ``None`` when it has not been listed.
+
+        An empty list is a directory that was listed and had no children.
+        """
+        with self._lock:
+            cached = self._pinned_dir(self.resolve(path))
+            if cached is None or cached.entries is None:
+                return None
+            return list(cached.entries)
 
     def glob(self, path: PathArg, pattern: str) -> Iterable[str]:
         # Glob is intentionally uncached — patterns are open-ended and
@@ -662,20 +740,31 @@ class CachedRemoteFileSystem:
         return data
 
     def read_many(
-        self, paths: Sequence[str], *, max_bytes: int = 262144
+        self,
+        paths: Sequence[str],
+        *,
+        max_bytes: int = 262144,
+        refresh: bool = False,
     ) -> dict[str, bytes | Exception]:
-        """Prime semantic metadata in target-side batches while respecting cache policy."""
+        """Prime semantic metadata in target-side batches while respecting cache policy.
+
+        ``refresh=True`` re-reads every path and replaces the pin. A directory
+        path comes back as :class:`IsADirectoryError` and is pinned as a
+        directory, so a later ``is_dir`` does not stat it again.
+        """
         result: dict[str, bytes | Exception] = {}
         missing: list[str] = []
         with self._lock:
             for path in paths:
                 key = self.resolve(path)
-                entry = self._pinned_entry(key)
+                entry = None if refresh else self._pinned_entry(key)
                 mirror = self._mirror_for(key)
                 if entry is not None and entry.kind == "file" and self._local.exists(mirror):
                     result[path] = self._local.read_bytes(mirror)
                 elif entry is not None and entry.kind == "missing":
                     result[path] = FileNotFoundError(path)
+                elif entry is not None and entry.kind == "dir":
+                    result[path] = IsADirectoryError(path)
                 else:
                     missing.append(path)
         if missing:
@@ -703,7 +792,111 @@ class CachedRemoteFileSystem:
                         self._record(key, kind="file", size=len(value), mtime=0)
                     elif isinstance(value, FileNotFoundError):
                         self._record(key, kind="missing", size=0, mtime=0)
+                    elif isinstance(value, IsADirectoryError):
+                        self._record(key, kind="dir", size=0, mtime=0)
         return result
+
+    def rsync(
+        self,
+        remote_root: str,
+        *,
+        direction: str,
+        include: Sequence[str] = (),
+        exclude: Sequence[str] = (),
+        delete: bool = False,
+        dry_run: bool = False,
+        recursive: bool = True,
+    ) -> dict[str, Any]:
+        """Copy one remote path with rsync, then pin the local mirror.
+
+        ``pull`` copies the remote path into the mirror. ``push`` copies the
+        mirror back. A dry run returns rsync's output and leaves the pin
+        untouched. Any other completed transfer replaces the pin for that
+        path with what is actually in the mirror, so later reads stay local.
+        ``recursive=False`` is a single file: the mirror path stays a file.
+        """
+        if direction not in {"pull", "push"}:
+            raise ValueError("direction must be pull or push")
+        from .fs_remote import rsync_options
+
+        rsync_options(include=include, exclude=exclude, delete=delete, dry_run=dry_run)
+        root = self.resolve(remote_root)
+        self._remote_root = root
+        if not self._connected:
+            self.connect(root)
+        local = self._mirror_for(root)
+        self._ensure_mirror_dirs()
+        if recursive:
+            local.mkdir(parents=True, exist_ok=True)
+        else:
+            local.parent.mkdir(parents=True, exist_ok=True)
+        transfer = getattr(self._inner, "download" if direction == "pull" else "upload", None)
+        if not callable(transfer):
+            raise TypeError("remote filesystem has no rsync transfer")
+        result = transfer(
+            root if direction == "pull" else str(local),
+            str(local) if direction == "pull" else root,
+            recursive=recursive,
+            include=include,
+            exclude=exclude,
+            delete=delete,
+            dry_run=dry_run,
+        )
+        if not dry_run:
+            self._adopt_mirror(root)
+        output = ""
+        if isinstance(result, dict):
+            raw = result.get("output", "")
+            output = raw if isinstance(raw, str) else str(raw)
+        return {
+            "direction": direction,
+            "dryRun": dry_run,
+            "remote": root,
+            "local": str(local),
+            "output": output,
+        }
+
+    def _adopt_mirror(self, remote_root: str) -> None:
+        """Replace the pin under *remote_root* with the files now in the mirror."""
+        key = self.resolve(remote_root)
+        mirror = self._mirror_for(key)
+        with self.batched():
+            self._drop_index_under(key)
+            if mirror.exists():
+                self._record_mirror_node(key, mirror)
+
+    def _drop_index_under(self, key: str) -> None:
+        prefix = key.rstrip("/") + "/"
+        with self._lock:
+            for existing in list(self._index):
+                if existing == key or existing.startswith(prefix):
+                    del self._index[existing]
+            for existing in list(self._dir_index):
+                if existing == key or existing.startswith(prefix):
+                    del self._dir_index[existing]
+            self._persist_sidecar()
+
+    def _record_mirror_node(self, key: str, mirror: Path) -> None:
+        if mirror.is_symlink():
+            stat = mirror.lstat()
+            self._record(key, kind="file", size=stat.st_size, mtime=stat.st_mtime)
+            return
+        if mirror.is_dir():
+            children = sorted(mirror.iterdir(), key=lambda path: path.name)
+            for child in children:
+                self._record_mirror_node(posixpath.join(key, child.name), child)
+            stat = mirror.stat()
+            with self._lock:
+                self._dir_index[key] = _DirEntry(
+                    names=tuple(child.name for child in children),
+                    fetched_at=time.time(),
+                )
+                self._persist_sidecar()
+            self._record(key, kind="dir", size=0, mtime=stat.st_mtime)
+            return
+        if mirror.is_file():
+            stat = mirror.stat()
+            self._record(key, kind="file", size=stat.st_size, mtime=stat.st_mtime)
 
     def upload(
         self, local: str, remote: str, *, recursive: bool = False, exclude: Sequence[str] = ()
@@ -901,6 +1094,64 @@ class CachedRemoteFileSystem:
             return None
         return self._dir_index.get(key)
 
+    def _listing_from_pin(
+        self, key: str, cached: _DirEntry, *, with_stat: bool
+    ) -> list[DirEntry] | None:
+        if with_stat and not cached.with_stat:
+            return None
+        if cached.entries is not None:
+            return list(cached.entries)
+        synthesized: list[DirEntry] = []
+        for name in cached.names:
+            child = self._index.get(self._inner.join(key, name))
+            if child is None or child.kind not in {"dir", "file"}:
+                return None
+            synthesized.append(
+                DirEntry(
+                    name=name,
+                    is_dir=child.kind == "dir",
+                    is_file=child.kind == "file",
+                    size=child.size,
+                    mtime=child.mtime,
+                )
+            )
+        return synthesized
+
+    def _remember_listing(
+        self,
+        key: str,
+        entries: list[DirEntry],
+        *,
+        generation: int,
+        with_stat: bool,
+    ) -> None:
+        """Pin a directory listing and each child's type in one sidecar write."""
+        now = time.time()
+        with self.batched(), self._lock:
+            if generation != self._generation:
+                return
+            self._dir_index[key] = _DirEntry(
+                names=tuple(entry.name for entry in entries),
+                fetched_at=now,
+                entries=tuple(entries),
+                with_stat=with_stat,
+            )
+            self._index[key] = _Entry(size=0, mtime=0.0, fetched_at=now, kind="dir")
+            for entry in entries:
+                if entry.is_dir:
+                    kind = "dir"
+                elif entry.is_file:
+                    kind = "file"
+                else:
+                    continue
+                self._index[self._inner.join(key, entry.name)] = _Entry(
+                    size=entry.size,
+                    mtime=entry.mtime,
+                    fetched_at=now,
+                    kind=kind,
+                )
+            self._sidecar_dirty = True
+
     def _record(
         self, key: str, *, kind: str, size: int, mtime: float, generation: int | None = None
     ) -> None:
@@ -1018,7 +1269,12 @@ class CachedRemoteFileSystem:
             try:
                 names = tuple(payload.get("names", ()))
                 fetched_at = float(payload.get("fetched_at", 0.0))
-                self._dir_index[key] = _DirEntry(names=names, fetched_at=fetched_at)
+                self._dir_index[key] = _DirEntry(
+                    names=names,
+                    fetched_at=fetched_at,
+                    entries=_load_dir_entries(payload.get("entries")),
+                    with_stat=bool(payload.get("with_stat", False)),
+                )
             except (AttributeError, TypeError, ValueError):
                 continue
 
@@ -1054,10 +1310,7 @@ class CachedRemoteFileSystem:
                 "version": _SIDECAR_VERSION,
                 "cache_mode": self._cache_mode,
                 "entries": {k: asdict(v) for k, v in self._index.items()},
-                "dirs": {
-                    k: {"names": list(v.names), "fetched_at": v.fetched_at}
-                    for k, v in self._dir_index.items()
-                },
+                "dirs": {k: _dump_dir_entry(v) for k, v in self._dir_index.items()},
             }
             try:
                 atomic_write_json(self._sidecar, payload)

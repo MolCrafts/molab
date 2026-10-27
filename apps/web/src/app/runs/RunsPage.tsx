@@ -2,6 +2,7 @@ import { ListChecks, ListPlus, RefreshCw, X } from "lucide-react";
 import { type JSX, lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { workspaceApi } from "@/api";
+import { isSoftRemoteWait } from "@/api/errors";
 import { useCompareSet } from "@/app/compare";
 import { itemFromWorkspaceRunRow } from "@/app/compare/entries";
 import { EntityPage } from "@/app/components/entity";
@@ -329,7 +330,7 @@ export const RunsPage = ({ snapshot, onInspectorChange }: RunsPageProps): JSX.El
       }
     >
       <div className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
-        {error ? (
+        {error && !loading && !isSoftRemoteWait(error) ? (
           <WorkbenchOperationState
             kind="error"
             density="compact"

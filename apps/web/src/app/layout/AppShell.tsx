@@ -9,6 +9,7 @@ import {
   SheetTitle,
 } from "@molcrafts/ui";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { activeNeedsAuth, shouldShowFailure } from "@/api/errors";
 import { GlobalCommandPalette } from "@/app/entities/GlobalCommandPalette";
 import { ContextBar } from "@/app/layout/ContextBar";
 import { RemoteConnectDialog } from "@/app/layout/RemoteConnectDialog";
@@ -276,7 +277,10 @@ export const AppShell = ({
   const centerContent = (
     <div className="flex h-full min-h-0 flex-col">
       <div className="min-h-0 flex-1 overflow-hidden bg-canvas">
-        {loadError ? (
+        {shouldShowFailure(loadError, {
+          fetching: isRefreshing,
+          needsAuth: activeNeedsAuth(snapshot.workspaces),
+        }) && loadError ? (
           <WorkbenchOperationState
             kind="error"
             title="Could not load workspace"

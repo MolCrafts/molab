@@ -95,6 +95,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None]:  # noqa: ARG001
         # 2) Cancel in-flight background work owned by this process.
         for plugin in plugins:
             await _run_plugin_hook(plugin, "shutdown")
+        from molab.server.sync_schedule import stop_sync_schedules
+
+        stop_sync_schedules()
         from molab.workspace.connection import close_client
 
         close_client()

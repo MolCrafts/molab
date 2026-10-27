@@ -927,3 +927,12 @@ def refresh_workspace_cache(
         dropped=dropped,
         warnings=[f"{w.path}: {w.reason}" for w in warnings],
     )
+
+
+def _mount_sync_rule_routes() -> None:
+    from .sync_rules import router as sync_rule_router
+
+    router.include_router(sync_rule_router)
+
+
+_mount_sync_rule_routes()

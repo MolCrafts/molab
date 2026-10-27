@@ -181,17 +181,14 @@ export const buildDashboardModel = (
   }
 
   for (const workspace of snapshot.workspaces) {
-    if (!workspace.unreachable && !workspace.needsAuth) continue;
+    // A verification-code wait is the connect dialog, not a failed workspace.
+    if (workspace.needsAuth || !workspace.unreachable) continue;
     addAttention(
       {
         id: `workspace-${workspace.key}`,
         kind: "workspace",
-        title: workspace.needsAuth
-          ? `${workspace.label} needs authentication`
-          : `${workspace.label} is unreachable`,
-        detail: workspace.needsAuth
-          ? "Sign in again from Settings to resume this workspace."
-          : "Check the connection in Settings.",
+        title: `${workspace.label} is unreachable`,
+        detail: "Check the connection in Settings.",
         href: "/settings",
         actionLabel: "Open settings",
         tone: "critical",

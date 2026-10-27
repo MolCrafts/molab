@@ -11,9 +11,10 @@ def test_adapter_lists_metadata_and_reads_batches(molq_destination):
     entries = {entry.name: entry for entry in fs.scandir(root)}
     assert entries["some file"].is_file and entries["some file"].size == 7
     assert entries["directory"].is_dir
-    result = fs.read_many([str(root / "some file"), str(root / "absent")])
+    result = fs.read_many([str(root / "some file"), str(root / "absent"), str(root / "directory")])
     assert result[str(root / "some file")] == b"content"
     assert isinstance(result[str(root / "absent")], FileNotFoundError)
+    assert isinstance(result[str(root / "directory")], IsADirectoryError)
 
 
 def test_adapter_splits_only_explicit_batch_capacity_errors(molq_destination):
@@ -59,13 +60,28 @@ def test_cached_run_and_execution_listing_batches_metadata(molq_destination, tmp
     monkeypatch.setattr(client, "rpc", record)
     remote_runs = remote.list_runs()
     assert {run.id for run in remote_runs} == {run.id for run in runs}
-    assert set(requested) == {str(run.resolve() / "run.json") for run in runs}
+    asked = set(requested)
+    assert {str(run.resolve() / "run.json") for run in runs} <= asked
+    assert {str(run.resolve() / "executions") for run in runs} <= asked
+    assert {str(run.resolve() / "executions" / "e01" / "execution.json") for run in runs} <= asked
+    # The runs container is listed once. Attempt directories are probed in the
+    # same read_many, so opening the experiment does not list each one.
+    assert len(listed) == 1
+    assert listed[0].rstrip("/").endswith("/runs")
     requested.clear()
     listed.clear()
     assert all(len(run.executions) == 1 for run in remote_runs)
-    assert len(listed) == len(runs)
-    assert len(requested) == len(runs)
-    assert all(path.endswith("/execution.json") for path in requested)
+    assert listed == []
+    assert requested == []
+    remote.list_runs()
+    # run.json stays pinned. The second probe is the executions directory plus
+    # e01 and one past it, for every run, and nothing is listed again.
+    assert listed == []
+    assert len(requested) == len(runs) * 3
+    assert all(
+        path.rstrip("/").endswith("/executions") or path.endswith("/execution.json")
+        for path in requested
+    )
 
 
 def test_semantic_prefetch_batches_entity_metadata_without_payloads(

@@ -245,6 +245,7 @@ const TreeRow = ({
     // biome-ignore lint/a11y/noStaticElementInteractions: isolates contextmenu, not a click target
     <div
       data-tree-row=""
+      data-tree-id={node.id}
       onContextMenu={
         actions.length > 0
           ? (event) => {

@@ -1,6 +1,7 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { workspaceApi } from "@/api";
+import { activeNeedsAuth } from "@/api/errors";
 import { AuthGate, AuthProvider, LoginPage } from "@/app/auth";
 import { useWorkspaceTabVisible } from "@/app/dashboard/useWorkspaceTab";
 import { experimentPath, projectPath, runPath } from "@/app/entities/paths";
@@ -85,7 +86,9 @@ const WorkspaceApp = ({ pathname }: { pathname: string }): JSX.Element => {
     }
   }, [leftPanelView, navigate, pathname, workspaceTab]);
 
+  const canPrefetch = status === "ready" && !activeNeedsAuth(snapshot.workspaces);
   useEffect(() => {
+    if (!canPrefetch) return;
     prefetchPrimaryNavigationOnIdle();
     prefetchOnIdle(() => {
       prefetchRenderer("project");
@@ -93,7 +96,7 @@ const WorkspaceApp = ({ pathname }: { pathname: string }): JSX.Element => {
       prefetchRenderer("run");
       prefetchMarkdown();
     });
-  }, []);
+  }, [canPrefetch]);
 
   // A canonical deep link contains its parent ids even before the shallow
   // workspace catalog does. Hydrate that chain in dependency order so opening

@@ -118,6 +118,8 @@ class RemoteFileSystem:
                         limited.append(item["path"])
                     elif reason == "not_found":
                         result[item["path"]] = FileNotFoundError(item["path"])
+                    elif reason == "is_directory":
+                        result[item["path"]] = IsADirectoryError(item["path"])
                     elif reason == "outside_root":
                         result[item["path"]] = PermissionError(item["path"])
                     else:
@@ -209,19 +211,20 @@ class RemoteFileSystem:
         remote: str,
         *,
         recursive: bool = False,
+        include: Sequence[str] = (),
         exclude: Sequence[str] = (),
         delete: bool = False,
         dry_run: bool = False,
-    ) -> None:
+    ) -> dict[str, Any]:
         source = Path(local, molq=self._client)
         if source.is_dir() and not recursive:
             raise IsADirectoryError(local)
-        options = ["-a", *(f"--exclude={p}" for p in exclude)]
-        if delete:
-            options.append("--delete")
-        if dry_run:
-            options.append("--dry-run")
-        source.transfer(self._path(remote), *options, timeout=3600)
+        result = source.transfer(
+            self._path(remote),
+            *rsync_options(include=include, exclude=exclude, delete=delete, dry_run=dry_run),
+            timeout=3600,
+        )
+        return result if isinstance(result, dict) else {}
 
     def download(
         self,
@@ -229,16 +232,53 @@ class RemoteFileSystem:
         local: str,
         *,
         recursive: bool = False,
+        include: Sequence[str] = (),
         exclude: Sequence[str] = (),
         delete: bool = False,
         dry_run: bool = False,
-    ) -> None:
+    ) -> dict[str, Any]:
         source = self._path(remote)
         if source.is_dir() and not recursive:
             raise IsADirectoryError(remote)
-        options = ["-a", *(f"--exclude={p}" for p in exclude)]
-        if delete:
-            options.append("--delete")
-        if dry_run:
-            options.append("--dry-run")
-        source.transfer(Path(local, molq=self._client), *options, timeout=3600)
+        result = source.transfer(
+            Path(local, molq=self._client),
+            *rsync_options(include=include, exclude=exclude, delete=delete, dry_run=dry_run),
+            timeout=3600,
+        )
+        return result if isinstance(result, dict) else {}
+
+
+def rsync_options(
+    *,
+    include: Sequence[str] = (),
+    exclude: Sequence[str] = (),
+    delete: bool = False,
+    dry_run: bool = False,
+) -> list[str]:
+    """rsync argv for one transfer. Includes are listed before excludes.
+
+    A pattern is one ``--include=`` / ``--exclude=`` word. Leading ``-`` is
+    rejected so a pattern cannot become another rsync option.
+    """
+    options = [
+        "-a",
+        *_pattern_options("--include", include),
+        *_pattern_options("--exclude", exclude),
+    ]
+    if delete:
+        options.append("--delete")
+    if dry_run:
+        options.append("--dry-run")
+    return options
+
+
+def _pattern_options(flag: str, patterns: Sequence[str]) -> list[str]:
+    options: list[str] = []
+    for raw in patterns:
+        pattern = str(raw).strip()
+        if not pattern:
+            continue
+        if pattern.startswith("-") or any(char in pattern for char in "\n\r\x00"):
+            raise ValueError(f"invalid rsync pattern: {pattern!r}")
+        options.append(f"{flag}={pattern}")
+    return options

@@ -14,6 +14,7 @@ import {
   workspaceApi,
   workspacesApi,
 } from "@/api";
+import { activeNeedsAuth, isSoftRemoteWait, shouldShowFailure } from "@/api/errors";
 import {
   buildEmptySnapshot,
   mapAssets,
@@ -34,6 +35,39 @@ import {
 import type { WorkspacePath } from "@/lib/workspace-path";
 import { getWorkspaceQueryScope } from "./workspaceSwitchEvents";
 export type WorkspaceStatus = "idle" | "loading" | "ready" | "error";
+
+export interface QueryLoadState {
+  isError: boolean;
+  isPending: boolean;
+  isFetching: boolean;
+  error: unknown;
+}
+
+/**
+ * In-flight fetches and a host that still needs a verification code are not
+ * failures. A 503 while the link is down stays quiet too; the strip says so.
+ */
+export const presentWorkspaceLoad = (
+  queries: readonly QueryLoadState[],
+  needsAuth: boolean,
+): { status: WorkspaceStatus; error: Error | null } => {
+  const inFlight = queries.some((query) => query.isPending || query.isFetching);
+  if (inFlight) return { status: "loading", error: null };
+  if (needsAuth) return { status: "ready", error: null };
+  const failed = queries.find((query) => query.isError && shouldShowFailure(query.error));
+  if (!failed) return { status: "ready", error: null };
+  const error =
+    failed.error instanceof Error ? failed.error : new Error("Could not load workspace");
+  return { status: "error", error };
+};
+
+const childLoadError = (
+  query: { error?: unknown; fetching?: boolean } | undefined,
+  needsAuth: boolean,
+): string | undefined => {
+  if (!shouldShowFailure(query?.error, { fetching: query?.fetching, needsAuth })) return undefined;
+  return query?.error instanceof Error ? query.error.message : "Could not load";
+};
 
 export interface WorkspaceState {
   snapshot: WorkspaceSnapshot;
@@ -295,7 +329,12 @@ export const useWorkspaceState = (activeView?: LeftPanelView): WorkspaceState =>
   );
   const projects = useQueries({
     queries: projectIds.map(projectOptions),
-    combine: (results) => results.map((query) => ({ data: query.data, error: query.error })),
+    combine: (results) =>
+      results.map((query) => ({
+        data: query.data,
+        error: query.error,
+        fetching: query.isFetching,
+      })),
   });
   const experiments = useQueries({
     queries: experimentIds.map(([projectId, experimentId]) => ({
@@ -305,7 +344,12 @@ export const useWorkspaceState = (activeView?: LeftPanelView): WorkspaceState =>
       }) => (query.state.data?.some((run) => (run.statusSummary?.active ?? 0) > 0) ? 3000 : false),
       refetchIntervalInBackground: false,
     })),
-    combine: (results) => results.map((query) => ({ data: query.data, error: query.error })),
+    combine: (results) =>
+      results.map((query) => ({
+        data: query.data,
+        error: query.error,
+        fetching: query.isFetching,
+      })),
   });
   const snapshot = useMemo(() => {
     const next: WorkspaceSnapshot = {
@@ -315,6 +359,7 @@ export const useWorkspaceState = (activeView?: LeftPanelView): WorkspaceState =>
       workspaceRoot: tree.data ?? null,
       assets: assets.data ?? [],
     };
+    const needsAuth = activeNeedsAuth(next.workspaces);
     projectIds.forEach((id, index) => {
       const query = projects[index];
       const ws = next.workspaces.find((item) => item.active)?.key;
@@ -331,7 +376,7 @@ export const useWorkspaceState = (activeView?: LeftPanelView): WorkspaceState =>
           ? {
               ...item,
               experimentCount: query?.data?.length ?? item.experimentCount,
-              experimentsError: query?.error?.message,
+              experimentsError: childLoadError(query, needsAuth),
             }
           : item,
       );
@@ -351,7 +396,7 @@ export const useWorkspaceState = (activeView?: LeftPanelView): WorkspaceState =>
           ? {
               ...item,
               runCount: query?.data?.length ?? item.runCount,
-              runsError: query?.error?.message,
+              runsError: childLoadError(query, needsAuth),
             }
           : item,
       );
@@ -401,6 +446,7 @@ export const useWorkspaceState = (activeView?: LeftPanelView): WorkspaceState =>
         root ? mergeTreeChildren(root, path, direntsToTreeNodes(children)) : root,
       );
     } catch (error) {
+      if (isSoftRemoteWait(error)) return;
       reportStatus(error instanceof Error ? error.message : "Could not read directory", "error");
     }
   };
@@ -414,14 +460,11 @@ export const useWorkspaceState = (activeView?: LeftPanelView): WorkspaceState =>
     ...(slices.includes("workspaceTree") ? [tree] : []),
     ...(activeView === "asset" ? [assets] : []),
   ];
+  const presented = presentWorkspaceLoad(required, activeNeedsAuth(workspaces.data));
   return {
     snapshot,
-    status: required.some((query) => query.isError)
-      ? "error"
-      : required.some((query) => query.isPending || query.isFetching)
-        ? "loading"
-        : "ready",
-    error: required.find((query) => query.error)?.error ?? null,
+    status: presented.status,
+    error: presented.error,
     refresh,
     dataEpoch,
     expandDirectory,

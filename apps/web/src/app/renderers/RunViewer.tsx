@@ -7,7 +7,7 @@ import { itemKey } from "@/app/compare/types";
 import { EmptyState, EntityPage } from "@/app/components/entity";
 import { LazySurface } from "@/app/layout/LazySurface";
 import { RunExecutionsPanel } from "@/app/renderers/RunExecutionsPanel";
-import { RunOverview } from "@/app/renderers/run/RunOverview";
+import { RunOverview, RunParameters } from "@/app/renderers/run/RunOverview";
 import { type RunRendererProps, useRunViewer } from "@/app/renderers/useRunViewer";
 import { RunToolbar } from "@/app/runs/RunToolbar";
 import { useDiscoveredFileTypesForRun } from "@/app/state/useDiscoveredFileTypes";
@@ -93,11 +93,24 @@ export const RunViewer = (props: RunRendererProps): JSX.Element => {
     executionOutputs: outputs,
     executionDir,
   };
+  const openRunTab = (value: string): void => {
+    setActiveTab(value);
+    setSelection({
+      objectType: "run",
+      objectId: run.id,
+      objectView: value === "overview" ? undefined : value,
+    });
+  };
   const tabs = [
     {
       value: "overview",
       label: "Overview",
-      content: <RunOverview run={run} parameters={parameterEntries} />,
+      content: <RunOverview run={run} />,
+    },
+    {
+      value: "parameters",
+      label: parameterEntries.length > 0 ? `Parameters (${parameterEntries.length})` : "Parameters",
+      content: <RunParameters parameters={parameterEntries} />,
     },
     {
       value: "executions",
@@ -200,13 +213,13 @@ export const RunViewer = (props: RunRendererProps): JSX.Element => {
               }}
               onDispatched={(executionId) => {
                 setSelectedExecutionId(executionId);
-                setActiveTab("executions");
+                openRunTab("executions");
               }}
             />
           </>
         }
         activeTab={activeTab}
-        onActiveTabChange={setActiveTab}
+        onActiveTabChange={openRunTab}
         tabs={tabs}
       />
       {confirmDialog}

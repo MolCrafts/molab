@@ -1,7 +1,7 @@
 import { ListTodo, PanelsTopLeft, TriangleAlert } from "lucide-react";
 import { type JSX, useEffect, useMemo, useState } from "react";
 import { Link, Navigate } from "react-router-dom";
-
+import { activeNeedsAuth } from "@/api/errors";
 import { DashboardCanvas, StatusLedger } from "@/app/components/entity";
 import { DashboardAttention } from "@/app/dashboard/DashboardAttention";
 import { DashboardGrid, DashboardToolbar } from "@/app/dashboard/DashboardGrid";
@@ -52,25 +52,29 @@ export const DashboardPage = ({ snapshot }: NavigationLandingProps): JSX.Element
   const [widgets, setWidgets] = useState<DashboardWidget[]>(readLayout);
   const [arranging, setArranging] = useState(false);
   const wide = useWideDashboard();
+  const waitingForCode = activeNeedsAuth(snapshot.workspaces);
+  const reportRunsError = loading || waitingForCode ? null : error;
   const blocked = isInventoryBlocked(snapshot, {
-    runsError: error,
+    runsError: reportRunsError,
     unreachableKeys: unreachable,
   });
   const model = useMemo(
     () =>
       buildDashboardModel(snapshot, rows, {
-        runsError: error,
+        runsError: reportRunsError,
         truncated,
         unreachableKeys: unreachable,
       }),
-    [snapshot, rows, error, truncated, unreachable],
+    [snapshot, rows, reportRunsError, truncated, unreachable],
   );
-  const skeleton = showDashboardSkeleton({
-    loading,
-    rowCount: rows.length,
-    synced: lastSyncedAt !== null,
-    blocked,
-  });
+  const skeleton =
+    (waitingForCode && rows.length === 0) ||
+    showDashboardSkeleton({
+      loading,
+      rowCount: rows.length,
+      synced: lastSyncedAt !== null,
+      blocked,
+    });
   const workspaceTab = useWorkspaceTabVisible(snapshot);
   const instruments = showDashboardGrid(blocked, rows.length) && hasMeasurableExecutions(rows);
 

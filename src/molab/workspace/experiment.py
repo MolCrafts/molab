@@ -994,6 +994,12 @@ class Experiment(Folder):
             entry_path = disk.join(runs_dir, entry.name)
             if disk.exists(disk.join(entry_path, "run.json")):
                 result.append(Run.from_disk(entry_path, self))
+        if isinstance(disk, CachedRemoteFileSystem) and result:
+            from .execution_repository import prime_execution_records
+
+            # One batch for every run's attempts. Per-run listings are what
+            # makes a remote experiment take seconds to open.
+            prime_execution_records(disk, [str(run.run_dir) for run in result])
         return result
 
     def children(self, kind: str | None = None) -> list[Folder]:

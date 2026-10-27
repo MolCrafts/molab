@@ -313,7 +313,14 @@ class RunResponse(ApiModel):
     """Canonical reference. Only the server composes it."""
 
     @classmethod
-    def from_model(cls, run: Run) -> RunResponse:
+    def from_model(
+        cls,
+        run: Run,
+        *,
+        workflow_document: dict[str, Any] | None = None,
+        workflow_kind: WorkflowKind | None = None,
+        workflow_loaded: bool = False,
+    ) -> RunResponse:
         from molab.workspace.experiment import Experiment
         from molab.workspace.folder import (
             WORKSPACE_EXPERIMENT_KIND,
@@ -322,9 +329,15 @@ class RunResponse(ApiModel):
         from molab.workspace.refs import ref_of
 
         experiment = run.parent if isinstance(run.parent, Experiment) else None
-        document = None if experiment is None else experiment.workflow_document
+        # A run list passes the experiment's workflow in once. Reading it
+        # again per run re-stats the same file over SSH.
+        if workflow_loaded:
+            document = workflow_document
+            kind = workflow_kind
+        else:
+            document = None if experiment is None else experiment.workflow_document
+            kind = None if experiment is None else experiment.workflow_kind
         wf_source = json.dumps(document, sort_keys=True) if document is not None else None
-        kind = None if experiment is None else experiment.workflow_kind
         records = run.executions
         wf_snap = None
         if kind is not None and experiment is not None:

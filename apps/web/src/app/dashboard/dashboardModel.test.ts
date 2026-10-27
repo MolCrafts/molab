@@ -171,6 +171,15 @@ describe("buildDashboardModel", () => {
             unreachable: false,
             needsAuth: true,
           },
+          {
+            key: "down",
+            label: "Down lab",
+            isRemote: true,
+            path: null,
+            active: false,
+            unreachable: true,
+            needsAuth: false,
+          },
         ],
       },
       [run("failed", "failed", "2026-08-30T11:00:00Z")],
@@ -179,16 +188,19 @@ describe("buildDashboardModel", () => {
 
     expect(model.operational.map((item) => item.id)).toEqual([
       "runs-unavailable",
-      "workspace-remote",
+      "workspace-down",
       "runs-unreachable-bench",
     ]);
     expect(model.operational[0]).toMatchObject({ retry: "runs", actionLabel: "Retry" });
     expect(model.operational[1]).toMatchObject({
-      title: "Remote lab needs authentication",
-      detail: "Sign in again from Settings to resume this workspace.",
+      title: "Down lab is unreachable",
+      detail: "Check the connection in Settings.",
       href: "/settings",
       actionLabel: "Open settings",
     });
+    expect(model.operational.some((item) => item.title.includes("needs authentication"))).toBe(
+      false,
+    );
     expect(model.operational[2]).toMatchObject({
       title: "bench did not return runs",
       detail: "This workspace was left out of the run list.",

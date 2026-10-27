@@ -140,7 +140,7 @@ function connectionHeadline(args: {
   tone: string;
 } {
   if (args.needsAuth) {
-    return { label: "Verification code", tone: "text-status-warning-foreground" };
+    return { label: "Verification code", tone: "text-muted-foreground" };
   }
   if (args.unreachable) {
     return { label: "Unreachable", tone: "text-status-failed-foreground" };
@@ -199,8 +199,8 @@ export const WorkbenchStatusStrip = ({
       if (body?.phase === "done" && !cacheQuery.isError) {
         reportStatus("Remote index ready", "success");
         onRemoteIndexReady?.();
-      } else {
-        reportStatus(body?.message || "Remote indexing stopped", "warning");
+      } else if (body?.phase === "error") {
+        reportStatus(body.message || "Remote indexing stopped", "warning");
       }
     }
     wasIndexing.current = active;
@@ -297,7 +297,8 @@ export const WorkbenchStatusStrip = ({
     needsAuth,
     hasWorkspace: Boolean(activeWorkspace),
   });
-  const WorkspaceIcon = unreachable ? CloudOff : activeWorkspace?.isRemote ? Server : HardDrive;
+  const WorkspaceIcon =
+    unreachable && !needsAuth ? CloudOff : activeWorkspace?.isRemote ? Server : HardDrive;
 
   const host = activeWorkspace ? parseHostQualifiedLabel(activeWorkspace.label)?.host : null;
   const connectionLabel = activeWorkspace?.isRemote
@@ -322,7 +323,7 @@ export const WorkbenchStatusStrip = ({
               aria-label={`${connectionLabel} — ${connection.label}. Connection status`}
               title={`${connectionLabel} — ${connection.label}`}
             >
-              {unreachable ? (
+              {unreachable && !needsAuth ? (
                 <CloudOff className="size-3.5 shrink-0" aria-hidden />
               ) : activeWorkspace?.isRemote ? (
                 <ChevronsLeftRight className="size-3.5 shrink-0" aria-hidden />
@@ -330,7 +331,6 @@ export const WorkbenchStatusStrip = ({
                 <HardDrive className="size-3.5 shrink-0" aria-hidden />
               )}
               <span className="truncate">{connectionLabel}</span>
-              {needsAuth ? <AlertTriangle className="size-3 shrink-0" aria-hidden /> : null}
             </Button>
           </PopoverTrigger>
           <PopoverContent side="top" align="start" sideOffset={8} className="w-64 p-2">
@@ -338,11 +338,9 @@ export const WorkbenchStatusStrip = ({
               <WorkspaceIcon
                 className={cn(
                   "size-icon-sm flex-none",
-                  unreachable
+                  unreachable && !needsAuth
                     ? "text-status-failed-foreground"
-                    : activeWorkspace?.isRemote
-                      ? "text-status-warning-foreground"
-                      : "text-muted-foreground",
+                    : "text-muted-foreground",
                 )}
                 aria-hidden
               />

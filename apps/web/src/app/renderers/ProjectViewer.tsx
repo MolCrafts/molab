@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import { useCallback, useMemo, useState } from "react";
 import { experimentsApi, projectsApi } from "@/api";
+import { activeNeedsAuth, shouldShowFailure } from "@/api/errors";
 import { CreateRunDialog } from "@/app/components/CreateRunDialog";
 import type { DataTableColumn, DataTableRowAction } from "@/app/components/entity";
 import {
@@ -88,9 +89,14 @@ export const ProjectViewer = ({
     staleTime: 30_000,
   });
   const overviewRows = (overviewRuns.data?.runs ?? []).filter((run) => run.projectId === projectId);
+  const needsAuth = activeNeedsAuth(snapshot.workspaces);
   const projectAssets = assetsQuery.data ?? [];
-  const projectAssetsPending = assetsQuery.isPending;
-  const projectAssetsError = assetsQuery.error
+  const projectAssetsPending =
+    assetsQuery.isPending || (needsAuth && assetsQuery.data === undefined);
+  const projectAssetsError = shouldShowFailure(assetsQuery.error, {
+    fetching: assetsQuery.isFetching,
+    needsAuth,
+  })
     ? assetsQuery.error instanceof Error
       ? assetsQuery.error.message
       : "Failed to load project assets"
@@ -421,15 +427,22 @@ export const ProjectViewer = ({
                     </span>
                     <span className="tabular-nums text-foreground">{runCountValue}</span> runs
                   </p>
-                  {overviewRuns.error ? (
+                  {shouldShowFailure(overviewRuns.error, {
+                    fetching: overviewRuns.isFetching,
+                    needsAuth,
+                  }) ? (
                     <WorkbenchOperationState
                       kind="error"
                       density="compact"
                       title="Could not load project activity"
-                      detail={overviewRuns.error.message}
+                      detail={
+                        overviewRuns.error instanceof Error
+                          ? overviewRuns.error.message
+                          : "Could not load project activity"
+                      }
                       action={<WorkbenchRetryAction onClick={() => void overviewRuns.refetch()} />}
                     />
-                  ) : overviewRuns.isPending ? (
+                  ) : overviewRuns.isPending || (needsAuth && overviewRuns.data === undefined) ? (
                     <WorkbenchOperationState
                       kind="loading"
                       density="compact"

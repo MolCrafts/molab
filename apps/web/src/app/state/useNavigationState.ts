@@ -48,7 +48,9 @@ const parseObjectView = (raw: string | null): ObjectView | undefined => {
 };
 
 const parseExperimentView = (raw: string | undefined): ExperimentView | undefined => {
-  if (raw === "workflow" || raw === "runs" || raw === "notebook") return raw;
+  if (raw === "workflow" || raw === "runs" || raw === "parameters" || raw === "notebook") {
+    return raw;
+  }
   return undefined;
 };
 
@@ -102,7 +104,7 @@ export const buildSelectionFromLocation = (
   }
 
   const scopedExperimentViewMatch = pathname.match(
-    /^\/experiments\/([^/]+)\/(workflow|runs|notebook)$/,
+    /^\/experiments\/([^/]+)\/(workflow|runs|parameters|notebook)$/,
   );
   if (scopedExperimentViewMatch) {
     return {
@@ -144,7 +146,7 @@ export const buildSelectionFromLocation = (
   }
 
   const experimentViewMatch = pathname.match(
-    /^\/projects\/([^/]+)\/experiments\/([^/]+)\/(workflow|runs|notebook)$/,
+    /^\/projects\/([^/]+)\/experiments\/([^/]+)\/(workflow|runs|parameters|notebook)$/,
   );
   if (experimentViewMatch) {
     return {

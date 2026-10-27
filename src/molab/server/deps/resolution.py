@@ -50,6 +50,10 @@ def _ensure_remote_ready(workspace: ScopeRoot) -> None:
     from molab.workspace import Workspace as WorkspaceEntity
 
     fs.prepare(cast(WorkspaceEntity, workspace), block_index=False, refresh_on_open=False)
+    # Indexing is already scheduled. Path sync rules run on their own loop.
+    from molab.server.sync_schedule import ensure_sync_schedule
+
+    ensure_sync_schedule(fs, str(workspace.root))
 
 
 def _open_remote_workspace(identifier: str, *, served_key: str | None = None) -> ScopeRoot:

@@ -60,6 +60,9 @@ describe("experiment navigation", () => {
     expect(experimentPath("p 1", "e/1", "notebook")).toBe(
       "/projects/p%201/experiments/e%2F1/notebook",
     );
+    expect(experimentPath("p 1", "e/1", "parameters")).toBe(
+      "/projects/p%201/experiments/e%2F1/parameters",
+    );
   });
 
   it("redirects legacy compare URLs to /compare", () => {
@@ -81,6 +84,15 @@ describe("experiment navigation", () => {
         new URLSearchParams(),
       ),
     ).toEqual({ objectType: "experiment", objectId: "e/1", experimentView: "notebook" });
+    expect(
+      buildSelectionFromLocation(
+        "/projects/p%201/experiments/e%2F1/parameters",
+        new URLSearchParams(),
+      ),
+    ).toEqual({ objectType: "experiment", objectId: "e/1", experimentView: "parameters" });
+    expect(
+      buildSelectionFromLocation("/experiments/e%2F1/parameters", new URLSearchParams()),
+    ).toEqual({ objectType: "experiment", objectId: "e/1", experimentView: "parameters" });
   });
 
   it("routes workflow selections into their owning experiment", () => {
@@ -106,6 +118,15 @@ describe("experiment navigation", () => {
         new URLSearchParams("tab=molq"),
       ),
     ).toEqual({ objectType: "run", objectId: "r/1", objectView: "molq" });
+    expect(runPath("p 1", "e/1", "r/1", "parameters")).toBe(
+      "/projects/p%201/experiments/e%2F1/runs/r%2F1?tab=parameters",
+    );
+    expect(
+      buildSelectionFromLocation(
+        "/projects/p%201/experiments/e%2F1/runs/r%2F1",
+        new URLSearchParams("tab=parameters"),
+      ),
+    ).toEqual({ objectType: "run", objectId: "r/1", objectView: "parameters" });
     expect(
       buildSelectionFromLocation(
         "/projects/p%201/experiments/e%2F1/runs/r%2F1",

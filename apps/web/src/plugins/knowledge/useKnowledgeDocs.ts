@@ -1,6 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useCallback, useMemo } from "react";
 import { knowledgeApi } from "@/api";
+import { isSoftRemoteWait } from "@/api/errors";
 import type { DocCreateRequest } from "@/api/generated/models/DocCreateRequest";
 import type { DocSource } from "@/api/generated/models/DocSource";
 import type { NoteSummary } from "@/api/generated/models/NoteSummary";
@@ -10,6 +11,7 @@ import {
   knowledgeKeys,
   useKnowledgeListQuery,
 } from "./queries";
+
 /** Optional tag/status narrowing forwarded to `listKnowledge` (06 query support). */
 export type KnowledgeDocFilters = KnowledgeListFilters;
 
@@ -113,9 +115,12 @@ export const useKnowledgeDocs = (filters: KnowledgeDocFilters = {}): UseKnowledg
   return {
     notes: listQuery.data?.notes ?? [],
     loading: listQuery.isFetching,
-    error: listQuery.error
-      ? toMessage(listQuery.error, "Failed to load knowledge documents.")
-      : null,
+    error:
+      listQuery.isFetching || isSoftRemoteWait(listQuery.error)
+        ? null
+        : listQuery.error
+          ? toMessage(listQuery.error, "Failed to load knowledge documents.")
+          : null,
     reload,
     createDoc,
     renameDoc,
@@ -161,7 +166,12 @@ export const useKnowledgeFacets = (): UseKnowledgeFacets => {
     tags,
     statuses,
     loading: listQuery.isFetching,
-    error: listQuery.error ? toMessage(listQuery.error, "Failed to load knowledge filters.") : null,
+    error:
+      listQuery.isFetching || isSoftRemoteWait(listQuery.error)
+        ? null
+        : listQuery.error
+          ? toMessage(listQuery.error, "Failed to load knowledge filters.")
+          : null,
     reload,
   };
 };

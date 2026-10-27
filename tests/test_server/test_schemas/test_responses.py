@@ -115,6 +115,25 @@ class TestRunResponse:
         RunResponse.from_model(run)
         assert calls == [run.id]
 
+    def test_loaded_workflow_is_not_read_again(self, tmp_path, monkeypatch):
+        exp = _ws(tmp_path).add_project("p").add_experiment("e")
+        exp.bind_workflow("document", document=IR)
+        run = exp.add_run(params={"seed": 1})
+
+        def boom(self):
+            raise AssertionError("workflow document was read")
+
+        monkeypatch.setattr(type(exp), "workflow_document", property(boom))
+        body = RunResponse.from_model(
+            run,
+            workflow_document=IR,
+            workflow_kind="document",
+            workflow_loaded=True,
+        )
+        assert body.workflowSource == IR_JSON
+        assert body.workflow is not None
+        assert body.workflow.source == "workflow.ir.json"
+
     def test_ref_is_the_run_reference(self, tmp_path: Path) -> None:
         from molab.workspace.refs import ref_of
 

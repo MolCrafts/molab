@@ -1,3 +1,4 @@
+import { useQuery } from "@tanstack/react-query";
 import {
   Archive,
   Blocks,
@@ -10,6 +11,7 @@ import {
   Folder,
   FolderOpen,
   FolderPlus,
+  FolderSync,
   PlayCircle,
   RefreshCw,
   Upload,
@@ -33,7 +35,10 @@ import {
   formatQualifiedPath,
   join as joinWorkspacePath,
   type PathDisplayContext,
+  toApiPath,
 } from "@/lib/workspace-path";
+import { SyncMark, SyncRuleForm } from "./SyncRuleForm";
+import { listSyncRules, type SyncRule, syncRuleKeys } from "./syncRules";
 
 const fileKindByExtension: Record<string, FileKind> = {
   ".yml": "yaml",
@@ -79,6 +84,13 @@ interface WorkspaceSemantic {
   iconClass: string;
 }
 
+export interface SyncTarget {
+  id: string;
+  name: string;
+  path: string;
+  kind: "file" | "directory";
+}
+
 interface WorkspaceTreeActions {
   onDownload?: (path: string) => void;
   onSelect: (selection: Selection) => void;
@@ -89,6 +101,10 @@ interface WorkspaceTreeActions {
   pathContext: PathDisplayContext;
   onRefresh: () => void;
   writeDeniedReason: string | null;
+  /** Remote file trees only. Opens the sync form for this node. */
+  onSync?: (target: SyncTarget) => void;
+  rules?: readonly SyncRule[];
+  workspaceRoot?: string;
 }
 
 /**
@@ -146,6 +162,26 @@ export const buildFilesExplorerNodes = (
 
   const walk = (node: WorkspaceTreeNode): TreeNode => {
     const isFile = node.kind === "file";
+    const rootPath = actions.workspaceRoot ?? snapshot.workspaceRoot?.path ?? "";
+    const relative = toApiPath(node.path, rootPath);
+    const rule = actions.rules?.find((item) => item.path === relative);
+    const syncAction: TreeNodeAction[] = actions.onSync
+      ? [
+          {
+            id: "sync",
+            label: "Sync…",
+            icon: FolderSync,
+            separatorBefore: true,
+            onSelect: () =>
+              actions.onSync?.({
+                id: node.id,
+                name: node.name,
+                path: node.path,
+                kind: node.kind,
+              }),
+          },
+        ]
+      : [];
     const semantic = isFile ? null : detectWorkspaceSemantic(node.path, snapshot);
     const icon = semantic?.icon ?? (isFile ? FileText : Folder);
     const iconClass = semantic?.iconClass ?? (isFile ? "text-muted-foreground" : "text-foreground");
@@ -163,6 +199,9 @@ export const buildFilesExplorerNodes = (
       label: node.name,
       icon,
       iconClassName: iconClass,
+      right: rule ? (
+        <SyncMark when={rule.when} intervalMinutes={rule.intervalMinutes} />
+      ) : undefined,
       meta: semantic ? (
         <span className="uppercase tracking-tighter opacity-50 group-hover:opacity-100">
           {semantic.type.substring(0, 3)}
@@ -222,6 +261,7 @@ export const buildFilesExplorerNodes = (
               icon: Copy,
               onSelect: () => void copyText(formatQualifiedPath(node.path, actions.pathContext)),
             },
+            ...syncAction,
           ]
         : [
             ...(semantic
@@ -266,6 +306,7 @@ export const buildFilesExplorerNodes = (
               separatorBefore: true,
               onSelect: actions.onRefresh,
             },
+            ...syncAction,
           ],
       children: isFile ? undefined : node.children.map(walk),
       emptyChildLabel: !isFile
@@ -298,6 +339,21 @@ export const FilesExplorer = (props: FilesExplorerProps): JSX.Element => {
     props.snapshot.workspaces.find((workspace) => workspace.active) ??
     props.snapshot.workspaces[0] ??
     null;
+  const remoteSync = Boolean(
+    activeWorkspace?.isRemote && !activeWorkspace.unreachable && !activeWorkspace.needsAuth,
+  );
+  const rulesQuery = useQuery({
+    queryKey: syncRuleKeys.list(activeWorkspace?.key ?? "active"),
+    queryFn: listSyncRules,
+    enabled: remoteSync,
+  });
+  const workspaceKey = activeWorkspace?.key ?? "";
+  const [syncTarget, setSyncTarget] = useState<SyncTarget | null>(null);
+  const [syncWorkspace, setSyncWorkspace] = useState(workspaceKey);
+  if (syncWorkspace !== workspaceKey) {
+    setSyncWorkspace(workspaceKey);
+    setSyncTarget(null);
+  }
   const pathContext: PathDisplayContext = {
     root: getWorkspaceFs().root,
     workspace: activeWorkspace
@@ -370,7 +426,14 @@ export const FilesExplorer = (props: FilesExplorerProps): JSX.Element => {
     pathContext,
     onRefresh: props.onRefresh,
     writeDeniedReason,
+    onSync: remoteSync ? setSyncTarget : undefined,
+    rules: rulesQuery.data ?? [],
+    workspaceRoot: props.snapshot.workspaceRoot?.path ?? "",
   });
+  const syncRelative = syncTarget
+    ? toApiPath(syncTarget.path, props.snapshot.workspaceRoot?.path ?? "")
+    : "";
+  const syncRule = (rulesQuery.data ?? []).find((item) => item.path === syncRelative) ?? null;
   const actions = !hasWorkspace ? (
     <WorkbenchIconAction
       label="Open workspace"
@@ -452,6 +515,19 @@ export const FilesExplorer = (props: FilesExplorerProps): JSX.Element => {
           onExpand={fileSystem.onExpandDirectory}
         />
       </LeftExplorer>
+      {syncTarget && remoteSync ? (
+        <SyncRuleForm
+          key={syncTarget.path}
+          nodeId={syncTarget.id}
+          name={syncTarget.name}
+          relativePath={syncRelative}
+          kind={syncTarget.kind}
+          rule={syncRule}
+          rulesLoading={rulesQuery.isLoading}
+          onClose={() => setSyncTarget(null)}
+          onSynced={props.onRefresh}
+        />
+      ) : null}
       {promptDialog}
       {confirmDialog}
       {alertDialog}

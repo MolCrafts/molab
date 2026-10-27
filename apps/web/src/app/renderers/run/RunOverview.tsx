@@ -2,12 +2,11 @@ import { TriangleAlert } from "lucide-react";
 import type { JSX } from "react";
 
 import {
-  AttemptChain,
   CopyButton,
   DashboardCanvas,
-  Figure,
   formatSpan,
   Gauge,
+  InventoryCanvas,
   OverviewSheet,
   OverviewSurface,
   STATUS_INK,
@@ -20,10 +19,14 @@ import { formatRelative } from "@/lib/format-time";
 import { cn } from "@/lib/utils";
 import { KnowledgeBacklinksCard } from "@/plugins/knowledge/KnowledgeBacklinksCard";
 
-interface RunOverviewProps {
-  run: RunSummary;
-  parameters: [string, unknown][];
-}
+/** The run's parameter list. Overview does not host it. */
+export const RunParameters = ({ parameters }: { parameters: [string, unknown][] }): JSX.Element => (
+  <OverviewSurface>
+    <InventoryCanvas>
+      <PropertyGrid entries={parameters} />
+    </InventoryCanvas>
+  </OverviewSurface>
+);
 
 const instant = (value: string | null): number | null => {
   const parsed = value ? Date.parse(value) : Number.NaN;
@@ -70,7 +73,8 @@ const RunLead = ({ run }: { run: RunSummary }): JSX.Element => {
         </span>
       </p>
       <p className="pl-8 text-label text-muted-foreground">
-        <Figure>{attempts}</Figure> {attempts === 1 ? "attempt" : "attempts"}
+        <span className="tabular-nums text-foreground">{attempts}</span>{" "}
+        {attempts === 1 ? "attempt" : "attempts"}
         {when ? ` · ${run.finishedAt ? "finished" : "started"} ${formatRelative(when)}` : ""}
       </p>
     </div>
@@ -114,9 +118,8 @@ const IdentityLine = ({ label, value }: { label: string; value: string }): JSX.E
   </div>
 );
 
-/** Run-scoped intent and its attempts. Attempt outputs stay under Executions. */
-export const RunOverview = ({ run, parameters }: RunOverviewProps): JSX.Element => {
-  const attempts = run.executionHistory;
+/** The run's outcome. Parameters live on their tab; attempts live under Executions. */
+export const RunOverview = ({ run }: { run: RunSummary }): JSX.Element => {
   const failed = groupForStatus(run.status) === "failed";
   return (
     <OverviewSurface>
@@ -124,33 +127,6 @@ export const RunOverview = ({ run, parameters }: RunOverviewProps): JSX.Element 
         <OverviewSheet
           lead={<RunLead run={run} />}
           main={
-            <>
-              {attempts.length > 0 ? (
-                <Gauge
-                  title="Attempts"
-                  readout={
-                    attempts.length > 1 ? "each rule is wall-clock, to the longest" : undefined
-                  }
-                >
-                  <AttemptChain attempts={attempts} />
-                </Gauge>
-              ) : null}
-              <Gauge
-                title="Parameters"
-                readout={
-                  parameters.length > 0 ? (
-                    <>
-                      <Figure>{parameters.length}</Figure>{" "}
-                      {parameters.length === 1 ? "value" : "values"}
-                    </>
-                  ) : undefined
-                }
-              >
-                <PropertyGrid entries={parameters} />
-              </Gauge>
-            </>
-          }
-          margin={
             <>
               {failed && run.errorMessage ? (
                 <Gauge title="Error">

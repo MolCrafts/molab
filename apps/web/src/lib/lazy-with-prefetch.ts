@@ -34,7 +34,11 @@ export const prefetchLazy = (component: unknown): void => {
     "prefetch" in component &&
     typeof (component as { prefetch: unknown }).prefetch === "function"
   ) {
-    void (component as { prefetch: () => unknown }).prefetch();
+    // A warm-up miss must not surface as an uncaught error while the page is
+    // still opening. The view's own load reports it if the user opens that view.
+    void Promise.resolve((component as { prefetch: () => unknown }).prefetch()).catch(
+      () => undefined,
+    );
   }
 };
 

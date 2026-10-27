@@ -198,10 +198,24 @@ def list_runs(
     experiment = _get_experiment(workspace, project_id, experiment_id)
     if not experiment:
         raise RunNotFoundError(project_id, experiment_id, "")
-    # Fresh listdir for remote pin caches (new runs on the host).
-    runs_dir = workspace.fs.join(str(experiment.experiment_dir), "runs")
-    _invalidate_run_nav_cache(workspace, runs_dir)
-    return [RunResponse.from_model(r) for r in experiment.list_runs()]
+    # See a run directory that landed on the host since the last list.
+    # Dropping only this listing keeps pinned run.json and execution.json;
+    # wiping the whole tree made every open re-fetch over SSH.
+    fs = getattr(workspace, "fs", None)
+    if isinstance(fs, CachedRemoteFileSystem):
+        fs.invalidate_dir_listing(fs.join(str(experiment.experiment_dir), "runs"))
+    runs = experiment.list_runs()
+    document = experiment.workflow_document
+    kind = experiment.workflow_kind
+    return [
+        RunResponse.from_model(
+            run,
+            workflow_document=document,
+            workflow_kind=kind,
+            workflow_loaded=True,
+        )
+        for run in runs
+    ]
 
 
 @router.get("/{run_id}", response_model=RunResponse)

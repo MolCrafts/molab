@@ -41,7 +41,6 @@ import {
   Gauge,
   InventoryCanvas,
   MagnitudeBar,
-  OverviewList,
   OverviewSheet,
   OverviewSurface,
   quantile,
@@ -174,7 +173,9 @@ export const ExperimentViewer = ({
   const setEntityTab = useCallback(
     (value: string) => {
       const experimentView: ExperimentView =
-        value === "workflow" || value === "runs" || value === "notebook" ? value : "overview";
+        value === "workflow" || value === "runs" || value === "parameters" || value === "notebook"
+          ? value
+          : "overview";
       setSelection({ objectType: "experiment", objectId: experimentId, experimentView });
     },
     [experimentId, setSelection],
@@ -478,80 +479,48 @@ ${run.id}`}
     </Suspense>
   ) : null;
 
-  const runsComplete = experimentRunCompleteness(experiment, runs.length).runsComplete;
+  const { runsComplete, runCount } = experimentRunCompleteness(experiment, runs.length);
+  const runCountValue = runCount ?? (runs.length > 0 ? counts.total : null);
 
   // Always pass full tab bodies (EntityTabContent hides inactive with CSS).
   // Conditional `activeTab === … ? content : null` remounted Flowgram on every switch.
   const overviewContent = (
     <OverviewSurface>
       <DashboardCanvas>
+        <p className="text-label text-muted-foreground">
+          <span className="tabular-nums text-foreground">
+            {runCountValue === null ? "—" : runCountValue}
+          </span>{" "}
+          runs
+        </p>
         {counts.total > 0 ? (
           <OverviewSheet
             lead={<StatusLedger counts={counts} partial={!runsComplete} />}
             main={
-              <>
-                {sweep.length > 0 ? (
-                  <details className="min-w-0 border-t border-border pt-3">
-                    <summary className="cursor-pointer text-body font-medium text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
-                      Parameters{" "}
-                      <span className="ml-3 text-label font-normal text-muted-foreground">
-                        {sweep.length} varying{unrun > 0 ? ` · ${unrun} values not run` : ""}
-                      </span>
-                    </summary>
-                    <SweepMatrix axes={sweep} />
-                  </details>
-                ) : null}
-                {durations.length > 0 ? (
-                  <Gauge
-                    title="Run duration"
-                    readout={
-                      <>
-                        median <Figure>{formatSpan(medianSeconds)}</Figure> across{" "}
-                        <Figure>{durations.length}</Figure> finished
-                      </>
-                    }
-                  >
-                    <DurationStrip series={[{ id: experiment.id, points: durations }]} />
-                  </Gauge>
-                ) : null}
-              </>
+              durations.length > 0 ? (
+                <Gauge
+                  title="Run duration"
+                  readout={
+                    <>
+                      median <Figure>{formatSpan(medianSeconds)}</Figure> across{" "}
+                      <Figure>{durations.length}</Figure> finished
+                    </>
+                  }
+                >
+                  <DurationStrip series={[{ id: experiment.id, points: durations }]} />
+                </Gauge>
+              ) : null
             }
             margin={
-              failure || durations.length > 1 || workbench.fixedAxes.length > 0 ? (
+              failure || durations.length > 1 ? (
                 <>
                   {failure ? <FailureNote run={failure} href={runHref(failure)} /> : null}
                   <ExtremesNote points={durations} />
-                  <ConstantsNote
-                    constants={workbench.fixedAxes.map((axis) => ({
-                      key: axis.key,
-                      value: axis.values[0] ?? "",
-                    }))}
-                  />
                 </>
               ) : undefined
             }
           />
         ) : null}
-        <OverviewList title="Runs">
-          {!runsComplete && runs.length === 0 ? (
-            <p className="text-label text-muted-foreground">Loading runs…</p>
-          ) : (
-            <DataTable
-              columns={runColumns}
-              data={runs}
-              getRowKey={(run) => run.id}
-              getRowLabel={(run) => `Open run ${run.name || run.id}`}
-              onRowActivate={(run) => navigateToRun(run.id)}
-              rowActions={runRowActions}
-              empty={
-                <EmptyState
-                  title={EMPTY_COPY.runs.title}
-                  description={EMPTY_COPY.runs.description}
-                />
-              }
-            />
-          )}
-        </OverviewList>
       </DashboardCanvas>
     </OverviewSurface>
   );
@@ -696,37 +665,84 @@ ${run.id}`}
                     )}
                   </div>
                   <div className="min-h-0 flex-1 overflow-auto">
-                    <DataTable
-                      columns={tableColumns}
-                      data={runs}
-                      getRowKey={(run) => run.id}
-                      getRowLabel={(run) =>
-                        multi.enabled
-                          ? `${multi.selected.has(run.id) ? "Deselect" : "Select"} run ${run.name || run.id}`
-                          : `Open run ${run.name || run.id}`
-                      }
-                      onRowActivate={
-                        multi.enabled
-                          ? (run) =>
-                              multi.selectAt(runIndex.get(run.id) ?? 0, {
-                                shift: false,
-                                meta: true,
-                              })
-                          : (run) => navigateToRun(run.id)
-                      }
-                      rowActions={runRowActions}
-                      rowClassName={(run) =>
-                        multi.enabled && multi.selected.has(run.id) ? "bg-accent/5" : ""
-                      }
-                      empty={
-                        <EmptyState
-                          title={EMPTY_COPY.runs.title}
-                          description={EMPTY_COPY.runs.description}
-                        />
-                      }
-                    />
+                    {!runsComplete && runs.length === 0 ? (
+                      <p className="text-label text-muted-foreground">Loading runs…</p>
+                    ) : (
+                      <DataTable
+                        columns={tableColumns}
+                        data={runs}
+                        getRowKey={(run) => run.id}
+                        getRowLabel={(run) =>
+                          multi.enabled
+                            ? `${multi.selected.has(run.id) ? "Deselect" : "Select"} run ${run.name || run.id}`
+                            : `Open run ${run.name || run.id}`
+                        }
+                        onRowActivate={
+                          multi.enabled
+                            ? (run) =>
+                                multi.selectAt(runIndex.get(run.id) ?? 0, {
+                                  shift: false,
+                                  meta: true,
+                                })
+                            : (run) => navigateToRun(run.id)
+                        }
+                        rowActions={runRowActions}
+                        rowClassName={(run) =>
+                          multi.enabled && multi.selected.has(run.id) ? "bg-accent/5" : ""
+                        }
+                        empty={
+                          <EmptyState
+                            title={EMPTY_COPY.runs.title}
+                            description={EMPTY_COPY.runs.description}
+                          />
+                        }
+                      />
+                    )}
                   </div>
                 </div>
+              </InventoryCanvas>
+            </OverviewSurface>
+          ),
+        },
+        {
+          value: "parameters",
+          label:
+            sweep.length + workbench.fixedAxes.length > 0
+              ? `Parameters (${sweep.length + workbench.fixedAxes.length})`
+              : "Parameters",
+          content: (
+            <OverviewSurface>
+              <InventoryCanvas>
+                {!runsComplete && runs.length === 0 ? (
+                  <p className="text-label text-muted-foreground">Loading parameters…</p>
+                ) : sweep.length === 0 && workbench.fixedAxes.length === 0 ? (
+                  <EmptyState title="No parameters" />
+                ) : (
+                  <>
+                    {sweep.length > 0 ? (
+                      <div className="min-w-0">
+                        <p className="mb-3 text-label text-muted-foreground">
+                          <span className="tabular-nums text-foreground">{sweep.length}</span>{" "}
+                          varying
+                          {unrun > 0 ? (
+                            <>
+                              {" · "}
+                              <span className="tabular-nums text-foreground">{unrun}</span> values
+                              not run
+                            </>
+                          ) : null}
+                        </p>
+                        <SweepMatrix axes={sweep} />
+                      </div>
+                    ) : null}
+                    <ConstantsNote
+                      constants={workbench.fixedAxes.map((axis) => ({
+                        key: axis.key,
+                        value: axis.values[0] ?? "",
+                      }))}
+                    />
+                  </>
+                )}
               </InventoryCanvas>
             </OverviewSurface>
           ),
