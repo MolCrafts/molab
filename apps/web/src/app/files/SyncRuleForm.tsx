@@ -392,7 +392,7 @@ export const SyncRuleForm = ({
               onSelect={() => void commit({ ...draft(), content: "types" })}
             />
             {content === "types" ? (
-              <div className="space-y-1 pl-5">
+              <div className="space-y-1 pl-4">
                 {FILE_TYPES.map((type) => (
                   <label key={type.id} className="flex items-center gap-2">
                     <input
