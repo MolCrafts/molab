@@ -55,7 +55,7 @@ import {
 import { formatDateTime } from "@/lib/datetime";
 
 type ProjectRendererProps = ScopedRendererProps<
-  "projects" | "experiments" | "runs" | "workflows" | "assets"
+  "projects" | "experiments" | "runs" | "workflows" | "assets" | "workspaces"
 >;
 
 export const ProjectViewer = ({
