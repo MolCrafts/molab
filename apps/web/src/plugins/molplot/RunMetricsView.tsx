@@ -27,6 +27,20 @@ import {
   ChartWorkbench,
   MolplotLineChart,
 } from "@/plugins/molplot";
+import {
+  HistogramCard,
+  ImageCard,
+  JsonCard,
+  ReplayMarker,
+  TaskFilter,
+  TextCard,
+} from "@/plugins/molplot/MetricCards";
+import {
+  buildMetricCards,
+  filterByTask,
+  listTasks,
+  replayedFromOf,
+} from "@/plugins/molplot/metric-cards";
 import { readExecutionMetrics } from "@/plugins/molplot/read-metrics";
 import { STEP_INTERVAL } from "@/plugins/molplot/resolution";
 import {
@@ -40,7 +54,8 @@ import { filterSpikes, smoothEma } from "@/plugins/molplot/smoothing";
 /**
  * Coord-driven run-metrics view: reads the attempt's own files for the run named by
  * its explicit `{projectId, experimentId, runId}` props and renders a molplot
- * line chart per scalar series. It deliberately takes explicit coordinates
+ * line chart per scalar series, plus one card per key of every other record
+ * type (histogram, text, JSON, image). It deliberately takes explicit coordinates
  * rather than resolving the run from a workspace tree — so every consumer (the
  * workspace-explorer `RunMetricsTab` wrapper and the runs-dashboard
  * `RunInspector`) supplies the run identity it already holds directly.
@@ -63,6 +78,8 @@ export interface ScalarSeries {
   group: string;
   points: ScalarPoint[];
   latest: number;
+  /** Attempts some of these points were replayed from by the node cache. */
+  replayedFrom?: string[];
 }
 
 export interface RunMetricsViewProps {
@@ -71,6 +88,8 @@ export interface RunMetricsViewProps {
   experimentId: string;
   runId: string;
   executionId: string;
+  /** Open one of the attempt's images (attempt-relative path) in the image viewer. */
+  onOpenImage?: (path: string) => void;
 }
 
 const isFiniteNumber = (value: unknown): value is number => {
@@ -85,10 +104,17 @@ const parseWall = (raw?: string): number => {
 
 export const buildScalarSeries = (records: MetricRecord[]): ScalarSeries[] => {
   const grouped = new Map<string, ScalarPoint[]>();
+  const replays = new Map<string, Set<string>>();
 
   records.forEach((record, index) => {
     if (record.t !== "scalar" || !isFiniteNumber(record.v)) {
       return;
+    }
+    const source = replayedFromOf(record);
+    if (source) {
+      const sources = replays.get(record.k) ?? new Set<string>();
+      sources.add(source);
+      replays.set(record.k, sources);
     }
     const points = grouped.get(record.k) ?? [];
     const wall = parseWall(record.w);
@@ -105,11 +131,13 @@ export const buildScalarSeries = (records: MetricRecord[]): ScalarSeries[] => {
       points.sort((a, b) => a.step - b.step);
       const slash = key.indexOf("/");
       const group = slash > 0 ? key.slice(0, slash) : "";
+      const sources = replays.get(key);
       return {
         key,
         group,
         points,
         latest: points[points.length - 1]?.y ?? 0,
+        ...(sources ? { replayedFrom: [...sources].sort() } : {}),
       };
     })
     .sort((left, right) => left.key.localeCompare(right.key));
@@ -318,7 +346,10 @@ const MetricPanel = ({
         aria-pressed={selected}
         onClick={onSelect}
       >
-        <div className="truncate text-micro font-medium">{series.key}</div>
+        <div className="flex items-center gap-2">
+          <span className="min-w-0 truncate text-micro font-medium">{series.key}</span>
+          <ReplayMarker sources={series.replayedFrom ?? []} />
+        </div>
         <div className="mt-1 font-mono text-display font-semibold tabular-nums">{formatted}</div>
       </button>
     );
@@ -336,6 +367,7 @@ const MetricPanel = ({
           {series.key}
         </button>
         <div className="flex shrink-0 items-center gap-2">
+          <ReplayMarker sources={series.replayedFrom ?? []} />
           <span className="font-mono text-label">{formatted}</span>
           <WorkbenchIconAction
             onClick={() => setEnlarged(true)}
@@ -390,33 +422,6 @@ const MetricPanel = ({
         </DialogContent>
       </Dialog>
     </article>
-  );
-};
-
-const OtherRecords = ({ records }: { records: MetricRecord[] }): JSX.Element | null => {
-  const nonScalar = records.filter((record) => record.t !== "scalar").slice(-20);
-  if (nonScalar.length === 0) {
-    return null;
-  }
-
-  return (
-    <OverviewSection title="Other Events">
-      <div className="divide-y divide-border border-y border-border">
-        {nonScalar.map((record) => (
-          <div
-            key={`${record.k}:${record.t}:${record.s ?? ""}:${record.w ?? ""}`}
-            className="grid gap-1 px-3 py-2 text-body-lg md:grid-cols-4"
-          >
-            <div className="min-w-0 font-medium text-foreground">{record.k}</div>
-            <div className="text-muted-foreground">{record.t}</div>
-            <div className="text-muted-foreground">{record.s ?? "-"}</div>
-            <pre className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-label text-muted-foreground">
-              {JSON.stringify(record.v)}
-            </pre>
-          </div>
-        ))}
-      </div>
-    </OverviewSection>
   );
 };
 
@@ -567,6 +572,7 @@ export const RunMetricsView = ({
   runId,
   executionId,
   status,
+  onOpenImage,
 }: RunMetricsViewProps): JSX.Element => {
   const {
     data: { records, sources },
@@ -584,8 +590,14 @@ export const RunMetricsView = ({
   const [panelOpen, setPanelOpen] = useState(false);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [cardSettings, setCardSettings] = useState<Record<string, CardSettings>>({});
+  const [taskFilter, setTaskFilter] = useState<string | null>(null);
 
-  const scalarSeries = useMemo(() => buildScalarSeries(records), [records]);
+  const tasks = useMemo(() => listTasks(records), [records]);
+  // A task that no longer appears (another attempt, another read) is no filter.
+  const task = taskFilter !== null && tasks.includes(taskFilter) ? taskFilter : null;
+  const visible = useMemo(() => filterByTask(records, task), [records, task]);
+  const cards = useMemo(() => buildMetricCards(visible), [visible]);
+  const scalarSeries = useMemo(() => buildScalarSeries(cards.scalars), [cards.scalars]);
   const grouped = useMemo(() => groupSeries(scalarSeries), [scalarSeries]);
   const selectedSeries = scalarSeries.find((item) => item.key === selectedKey) ?? null;
 
@@ -645,10 +657,17 @@ export const RunMetricsView = ({
     <p className="text-label text-muted-foreground">Select a metric to format it.</p>
   );
 
+  const otherCards =
+    cards.histograms.length + cards.images.length + cards.texts.length + cards.jsons.length;
+
   const readSummary = (
     <>
       <span>{records.length} records</span>
       <span>{scalarSeries.length} scalars</span>
+      {cards.histograms.length > 0 && <span>{cards.histograms.length} histograms</span>}
+      {cards.images.length > 0 && <span>{cards.images.length} image keys</span>}
+      {cards.texts.length > 0 && <span>{cards.texts.length} text keys</span>}
+      {cards.jsons.length > 0 && <span>{cards.jsons.length} JSON keys</span>}
       {sources.length > 0 && (
         <span>
           {sources.length} source{sources.length === 1 ? "" : "s"}:{" "}
@@ -665,7 +684,12 @@ export const RunMetricsView = ({
     <ChartWorkbench settings={settings} open={panelOpen} onOpenChange={setPanelOpen}>
       <div className="min-h-0 min-w-0 flex-1 overflow-auto">
         <DashboardCanvas>
-          <p className="font-mono text-micro tabular-nums text-muted-foreground">{readSummary}</p>
+          <p className="flex flex-wrap gap-x-3 font-mono text-micro tabular-nums text-muted-foreground">
+            {readSummary}
+          </p>
+          {tasks.length > 0 ? (
+            <TaskFilter tasks={tasks} value={task} onChange={setTaskFilter} />
+          ) : null}
           {grouped.length > 0 ? (
             grouped.map(([groupName, items]) => (
               <OverviewSection key={groupName || "_root"} title={groupName ? groupName : "Scalars"}>
@@ -683,15 +707,59 @@ export const RunMetricsView = ({
                 </div>
               </OverviewSection>
             ))
-          ) : (
+          ) : otherCards === 0 ? (
             <OverviewSection title="Scalars">
               <div className="border-y border-dashed border-border/70 py-6 text-center text-body-lg text-muted-foreground">
-                No scalar metrics recorded.
+                {task ? `No metrics recorded by ${task}.` : "No scalar metrics recorded."}
+              </div>
+            </OverviewSection>
+          ) : null}
+
+          {cards.histograms.length > 0 && (
+            <OverviewSection title="Histograms">
+              <div className="grid gap-3 lg:grid-cols-2">
+                {cards.histograms.map((card, index) => (
+                  <HistogramCard
+                    key={card.key}
+                    card={card}
+                    color={PALETTE[index % PALETTE.length]}
+                  />
+                ))}
               </div>
             </OverviewSection>
           )}
-
-          <OtherRecords records={records} />
+          {cards.images.length > 0 && (
+            <OverviewSection title="Images">
+              <div className="grid gap-3">
+                {cards.images.map((card) => (
+                  <ImageCard
+                    key={card.key}
+                    card={card}
+                    coords={{ projectId, experimentId, runId, executionId }}
+                    onOpenImage={onOpenImage}
+                  />
+                ))}
+              </div>
+            </OverviewSection>
+          )}
+          {cards.texts.length > 0 && (
+            <OverviewSection title="Text">
+              <div className="grid gap-3 lg:grid-cols-2">
+                {cards.texts.map((card) => (
+                  <TextCard key={card.key} card={card} />
+                ))}
+              </div>
+            </OverviewSection>
+          )}
+          {cards.jsons.length > 0 && (
+            <OverviewSection title="JSON">
+              <div className="grid gap-3 lg:grid-cols-2">
+                {cards.jsons.map((card) => (
+                  <JsonCard key={card.key} card={card} />
+                ))}
+              </div>
+            </OverviewSection>
+          )}
         </DashboardCanvas>
       </div>
     </ChartWorkbench>

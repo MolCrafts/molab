@@ -63,7 +63,11 @@ export class KnowledgeService {
     }
     /**
      * Search Knowledge
-     * Search the workspace knowledge tree — wraps ``Knowledge.search``.
+     * Search registered wikis and this workspace — the CLI's ``knowledge search``.
+     *
+     * The workspace corpus goes through ``Knowledge.search`` on the workspace
+     * disk. Registered sources are fused by :meth:`KnowledgeSourceStore.search`,
+     * which is the same function the CLI calls.
      * @param q Case-insensitive needle (path/title/tags/body).
      * @param type Exact Knowledge class name.
      * @param tag Only documents carrying this tag.
@@ -124,7 +128,7 @@ export class KnowledgeService {
     }
     /**
      * Get Note
-     * Return one document's full body via ``Knowledge.open``.
+     * Return one document's full body.
      *
      * A ``.tex`` / ``.ltx`` path is the file bytes, not a Knowledge document.
      * @param path The document's workspace-relative path (its identity).

@@ -55,6 +55,8 @@ with run.start() as ctx:
     ctx.log("stdout").tail(20)  # the last 20 lines
 ```
 
+**Where it shows up.** A run's **Logs** tab shows one attempt's logs, one stream at a time: `stdout`, `stderr` (in red) or `run`. It reads each stream incrementally through `…/logs/{stream}?offset=`, polls only while the attempt is active, and follows the bottom unless you have scrolled up. A stream with nothing in it says so ("No stderr captured."). The browser keeps the last 2 MB of a stream; past that, the head is dropped and a link opens the whole `stdout.log`, `stderr.log` or `run.log`.
+
 ## Metrics
 
 `ctx.metrics` writes measurements as the computation runs, the way TensorBoard does. Each call appends one record to the attempt's `executions/eNN/artifacts/metrics.mlp.jsonl` at once, so a chart of a running attempt is current. There is one writer per attempt, and a driver script and a workflow task reach the same one.
@@ -81,6 +83,8 @@ with run.start() as ctx:
 
 Every method also takes `wall_time=` and `tags=`, and returns the record it wrote. `wall_time` defaults to now, in UTC. `image` archives the image first: `data` is a path to an existing file, or the image's bytes together with `name=`. It becomes an Artifact of the attempt with `semantic_type="molplot.image"`, and the `image_ref` record points at that Artifact's path (`artifacts/<name>`), so the image is kept with the attempt rather than referenced where it happened to be. Each image is its own Artifact, so give each one its own name. `image_ref` alone records a path and archives nothing. When the attempt exits, the WAL itself is registered as an Artifact (`semantic_type="molplot.metrics"`) if anything was written to it. `ctx.register_metric(key, value, step=None)` is still there and appends a scalar.
 
+**Where it shows up.** The run's **MolPlot** tab gives each key its own card, by record type. A scalar is a series tile with its chart. A histogram is a bar chart of the latest step, with a slider over the steps it was written at. A text key lists its entries newest first, each one folding. A JSON key shows its latest value as a folding tree, with a step picker. An image key is a gallery in step order, with the step and caption under each thumbnail; clicking one opens it in the image viewer. The thumbnails are read through the attempt's file route, so only an attempt-relative path (what `image` records) can be shown. The tab's badge counts keys of every type. Charts thin scalars and histograms to one point every 10 000 steps per key; text, JSON and image records are never thinned.
+
 ### From a workflow task
 
 A task body reaches the same writer as `ctx.metrics`:
@@ -95,15 +99,91 @@ def train(ctx, epochs: int = 10):
 
 Each record written inside a task carries `tags.task`, the task's name, so same-level tasks running in parallel each label their own records. A `task` key you pass in `tags` wins. `ctx.register_metric` keeps its deferred semantics in a task: the scalar is appended when the body returns, and it carries `tags.task` too.
 
+**Where it shows up.** When records carry `tags.task`, the MolPlot tab shows a row of task chips (`all` and one per task). Picking a task narrows every card, of every type, to the records that task wrote.
+
 Without molab (no execution is current), `ctx.metrics` keeps the records in memory instead, as `ctx.metrics.records`, and `image` records only the reference. The same body runs either way.
 
 ### Node-cache replay
 
 When an attempt runs a task, the node cache stores the metric records the task wrote alongside its result. When a later attempt hits that entry, the task does not run again, but its records are appended to the new attempt's WAL as they were (same `s` and `w`), each with `tags.replayed_from` naming the attempt that produced them. Curves of a cached attempt are therefore complete, and a chart can still tell which points were measured in this attempt. A task that writes more than 50 000 records is not replayed, and neither is an entry written before this was added.
 
+**Where it shows up.** A series or card that holds replayed records carries a small "replayed from e01" marker, naming the attempt that measured them.
+
 ## Commands
 
 `CommandTask` captures its child's stdout and stderr. Inside an execution it also appends them to `stdout.log` / `stderr.log` when the command returns, whether it succeeded or failed. The task's return value is unchanged.
+
+The child also gets the attach variables described below (`MOLAB_EXECUTION_DIR`, `MOLAB_TASK`), so a Python child that calls `molab.track()` writes metrics and artifacts into the same attempt. A key in the task's `env=` wins over them. Because `CommandTask` already archives the child's streams, the child is told so (`MOLAB_STDIO_CAPTURED=1`) and its `molab.print` lines are recorded once, through the capture.
+
+## Plain scripts and child processes
+
+Code that is not a molab task gets the same surface through `molab.track()`. It returns a tracker with `print` routing, `.metrics` (the same methods as `ctx.metrics`), `emit_artifact(data, *, name=None, media_type=None, semantic_type=None, tags=None)` and `child_env()`, and it works as a context manager in every case. It decides in this order.
+
+1. **An execution is current** (inside `run.start()`, a workflow task, or after an earlier `track()`): it returns that one, unchanged, and `with` around it does nothing.
+
+    ```python
+    with run.start() as ctx:
+        assert molab.track() is ctx
+    ```
+
+2. **The process is a child of a molab execution** (`MOLAB_EXECUTION_DIR` is set): it returns an attached tracker, current for the whole process, and `with` does nothing. Prints go to the parent attempt's `stdout.log` / `stderr.log` and metrics to its `artifacts/metrics.mlp.jsonl`, each appended with `O_APPEND`, and every record carries `tags.task` from `MOLAB_TASK`. An artifact is only *staged*: copied into `work/_molab/staged/<n>-<basename>` with one line in `work/_molab/artifacts.jsonl`. The parent records the staged artifacts at `artifacts/<name>` when it seals, with `metadata.staged_by="child"` and `metadata.task`; the child never writes `execution.json`. Attaching to a sealed attempt raises. The child re-reads the seal at most every 5 seconds before a write, and after it a print or a metric is dropped with one warning (never an exception), while `emit_artifact` raises. Launch a child from your own code by merging `child_env()` into its environment:
+
+    ```python
+    import os
+    import subprocess
+
+    import molab
+
+    with run.start() as ctx:
+        subprocess.run(
+            ["python", "train.py"],
+            env={**os.environ, **molab.current().child_env()},
+            check=True,
+        )
+    ```
+
+    and in `train.py`:
+
+    ```python
+    import molab
+    from molab import print
+
+    t = molab.track()
+    print("epoch 1")
+    t.metrics.scalar("loss", 0.31, step=1)
+    t.emit_artifact("model.pt", semantic_type="model")
+    ```
+
+3. **`project` and `experiment` are given and the working directory is inside a workspace**: it opens the experiment (by name, creating it the first time), adds a run with `params`, and enters `run.start()`. This is a live attempt in this process, and the first `with` around it seals it on exit. Without a `with` it is sealed at interpreter exit, as failed when an uncaught exception ended the script.
+
+    ```python
+    import molab
+    from molab import print
+
+    with molab.track(project="tg", experiment="cooling", params={"rate": 10}) as t:
+        print("quenching")
+        t.metrics.scalar("density", 1.02, step=0)
+    ```
+
+4. **Otherwise**: it writes the same layout into a plain directory, `./molab-track` unless you pass one, and is current for the whole process. Use this for a scratch script or an `sbatch` job you submitted by hand.
+
+    ```python
+    import molab
+    from molab import print
+
+    t = molab.track("runs/rate-10")
+    print("quenching")
+    t.metrics.scalar("density", 1.02, step=0)
+    t.emit_artifact("final.data", semantic_type="structure")
+    ```
+
+    The directory holds `stdout.log`, `stderr.log`, `artifacts/metrics.mlp.jsonl`, the staged files and their manifest under `work/_molab/`, and `work/_molab/track.json` (start time, host, pid, argv, Python, working directory). Its `finished_at` is written at interpreter exit, by `t.close()`, or when a `with` around the tracker exits. Fold it into a run afterwards:
+
+    ```bash
+    molab runs adopt tg cooling rate=10 --from runs/rate-10 --params '{"rate": 10}'
+    ```
+
+    The adopted attempt is sealed with `stdout.log` / `stderr.log` at its root, the WAL registered as the `molplot.metrics` Artifact, and each staged file at `artifacts/<name>` as an Artifact (`metadata.staged_by="offline"`). The start and finish come from `track.json` unless you pass `--started` / `--finished`. Everything else in the directory (`work/`) stays where it is. A refused adoption, for example two files landing on the same name, moves everything back. In Python the same thing is `run.adopt_execution(started_at=…, finished_at=…, tracked="runs/rate-10")`.
 
 ## Reading the logs
 

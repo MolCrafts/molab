@@ -47,6 +47,24 @@ export const runKeys = {
       executionId,
       "outputs",
     ] as const,
+  /** One log stream of one attempt, accumulated window by window (`useExecutionLog`). */
+  log: (
+    projectId: string,
+    experimentId: string,
+    runId: string,
+    executionId: string,
+    stream: "stdout" | "stderr" | "run",
+  ) =>
+    [
+      ...runKeys.all,
+      getWorkspaceQueryScope(),
+      projectId,
+      experimentId,
+      runId,
+      executionId,
+      "log",
+      stream,
+    ] as const,
   journal: (projectId: string, experimentId: string, runId: string, executionId: string) =>
     [
       ...runKeys.all,

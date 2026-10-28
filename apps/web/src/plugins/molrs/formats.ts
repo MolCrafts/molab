@@ -84,14 +84,25 @@ export const thermoRecords = (
 };
 
 /**
+ * Record types that are discrete events rather than samples on a curve.
+ *
+ * Each was written on purpose — a note, a config, an image — so there is no
+ * resolution to reduce: thinning a gallery to "one image every 10 000 steps"
+ * would just lose images. Every other type is thinned like a scalar.
+ */
+const UNTHINNED_TYPES = new Set(["text", "json", "image_ref"]);
+
+/**
  * Read molab's own metrics WAL.
  *
  * It is already in record form, so there is nothing to map — but it gets no
  * special treatment for that: it arrives through the same contribution as
  * every other format.
  *
- * Series interleave line by line, so the stride is counted **per series**;
- * striding the file would keep one key and drop the rest.
+ * Series interleave line by line, so the stride is counted **per series** —
+ * per record type *and* key, so a scalar `rdf` being thinned never drops a
+ * histogram or an image that shares its name. Striding the file would keep one
+ * key and drop the rest.
  */
 export const walRecords = (
   text: string,
@@ -113,7 +124,10 @@ export const walRecords = (
     }
     if (typeof record?.k !== "string") continue;
     if (wanted && !wanted.has(record.k)) continue;
-    if (!gate.keeps(record.k, typeof record.s === "number" ? record.s : undefined)) continue;
+    const step = typeof record.s === "number" ? record.s : undefined;
+    if (!UNTHINNED_TYPES.has(record.t) && !gate.keeps(`${record.t}\u0000${record.k}`, step)) {
+      continue;
+    }
     record.tags = { source, ...(record.tags ?? {}) };
     records.push(record);
     if (request.limit !== undefined && records.length >= request.limit) break;

@@ -3,8 +3,9 @@
  *
  * `RunViewer` (the default run renderer) and `MolqRunViewer` (the molq-backend
  * override) draw very different chrome but drive it from identical state: run
- * resolution off the snapshot, the active-tab sync, lazy stdout/stderr fetching
- * per execution, and the cancel + copy-id handlers. That logic lives
+ * resolution off the snapshot, the active-tab sync, the selected attempt's
+ * outputs (artifacts and results), and the cancel + copy-id handlers. Logs are
+ * not derived here: `RunLogsPanel` follows each stream itself. That logic lives
  * here once; each component keeps only its own layout. Run-asset counts and the
  * file-type discovery tabs are RunViewer-only and stay in that component.
  *
@@ -28,7 +29,6 @@ import { useContributionGeneration } from "@/lib/contribution-runtime";
 import { usePluginPreferencesGeneration } from "@/plugins/preferences";
 
 type RunRow = WorkspaceSnapshot["runs"][number];
-type RunLogs = { stdout?: string | null; stderr?: string | null } | null;
 export type RunRendererProps = ScopedRendererProps<
   "projects" | "experiments" | "runs" | "workflows" | "workspaces"
 >;
@@ -41,8 +41,8 @@ export interface UseRunViewer {
   selectedRunId: string;
   activeTab: string;
   setActiveTab: (tab: string) => void;
-  logs: RunLogs;
-  logsError: string | null;
+  /** Why the selected attempt's outputs could not be read. */
+  outputsError: string | null;
   outputs: ExecutionOutputsResponse | null;
   selectedExecutionId: string | null;
   setSelectedExecutionId: (id: string | null) => void;
@@ -130,11 +130,10 @@ export const useRunViewer = (props: RunRendererProps): UseRunViewer => {
     refetchIntervalInBackground: false,
   });
   const outputs = outputsQuery.data ?? null;
-  const logs: RunLogs = outputs ? { stdout: outputs.stdout, stderr: outputs.stderr } : null;
-  const logsError = outputsQuery.error
+  const outputsError = outputsQuery.error
     ? outputsQuery.error instanceof Error
       ? outputsQuery.error.message
-      : "Failed to load logs"
+      : "Failed to load outputs"
     : null;
 
   const latestExecutionId = defaultExecutionId(run?.executionHistory);
@@ -201,8 +200,7 @@ export const useRunViewer = (props: RunRendererProps): UseRunViewer => {
     selectedRunId,
     activeTab,
     setActiveTab,
-    logs,
-    logsError,
+    outputsError,
     outputs,
     selectedExecutionId,
     setSelectedExecutionId,

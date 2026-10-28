@@ -8,6 +8,7 @@ export type { ArtifactResponse } from "@/api/generated/models/ArtifactResponse";
 export type { ExecutionOutputsResponse } from "@/api/generated/models/ExecutionOutputsResponse";
 export type { RunFilesResponse } from "@/api/generated/models/RunFilesResponse";
 export type { RunFileTextResponse } from "@/api/generated/models/RunFileTextResponse";
+export type { RunLogChunkResponse } from "@/api/generated/models/RunLogChunkResponse";
 
 export const runsApi = {
   listRuns: (projectId: string, experimentId: string) =>
@@ -58,6 +59,23 @@ export const runsApi = {
     runId: string,
     executionId: string,
   ) => RunsService.getRunExecutionLogs(projectId, experimentId, runId, executionId),
+  /** One window of one log (`stdout` / `stderr` / `run`) from `offset`; pass `nextOffset` back. */
+  getRunExecutionLogChunk: (
+    projectId: string,
+    experimentId: string,
+    runId: string,
+    executionId: string,
+    stream: "stdout" | "stderr" | "run",
+    offset: number,
+  ) =>
+    RunsService.getRunExecutionLogChunk(
+      projectId,
+      experimentId,
+      runId,
+      executionId,
+      stream,
+      offset,
+    ),
   getRunExecution: (projectId: string, experimentId: string, runId: string, executionId: string) =>
     RunsService.getRunExecution(projectId, experimentId, runId, executionId),
   getRunFileText: (

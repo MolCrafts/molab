@@ -11,5 +11,6 @@ export type KnowledgeSearchRow = {
     type: string;
     tags?: Array<string>;
     snippet?: (string | null);
+    source?: string;
 };
 

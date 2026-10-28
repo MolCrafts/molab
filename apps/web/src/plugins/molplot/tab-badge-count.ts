@@ -1,11 +1,13 @@
 import type { RunTabBadgeContext } from "@/lib/contribution-types";
+import { countMetricKeys } from "@/plugins/molplot/metric-cards";
 import { readExecutionMetrics } from "@/plugins/molplot/read-metrics";
 import { STEP_INTERVAL } from "@/plugins/molplot/resolution";
 
 /**
- * How many scalar series the Metrics tab would show.
+ * How many keys the Metrics tab would show, of every record type — a scalar
+ * series, a histogram, a text log, a JSON value or an image gallery each count.
  *
- * The count of *series*, not of matched files: two logs of the same run share
+ * The count of *keys*, not of matched files: two logs of the same run share
  * their curves, and a file count would claim more than the tab displays.
  *
  * Read at the same step resolution the tab itself uses, so the badge cannot
@@ -26,13 +28,8 @@ export const resolveMolplotMetricsTabBadgeCount = async (
       },
       { stepInterval: STEP_INTERVAL },
     );
-    const keys = new Set<string>();
-    for (const record of read.records) {
-      if (record.t === "scalar" && typeof record.k === "string") {
-        keys.add(record.k);
-      }
-    }
-    return keys.size > 0 ? keys.size : null;
+    const count = countMetricKeys(read.records);
+    return count > 0 ? count : null;
   } catch {
     return null;
   }

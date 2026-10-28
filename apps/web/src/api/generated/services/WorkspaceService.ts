@@ -9,6 +9,10 @@ import type { DirectoryCreateRequest } from '../models/DirectoryCreateRequest';
 import type { FileContentResponse } from '../models/FileContentResponse';
 import type { FileContentUpdateRequest } from '../models/FileContentUpdateRequest';
 import type { ServeScopeResponse } from '../models/ServeScopeResponse';
+import type { SyncRuleListResponse } from '../models/SyncRuleListResponse';
+import type { SyncRuleResponse } from '../models/SyncRuleResponse';
+import type { SyncRuleWrite } from '../models/SyncRuleWrite';
+import type { SyncRunResponse } from '../models/SyncRunResponse';
 import type { TargetTestResponse } from '../models/TargetTestResponse';
 import type { WorkspaceContextResponse } from '../models/WorkspaceContextResponse';
 import type { WorkspaceInfoResponse } from '../models/WorkspaceInfoResponse';
@@ -566,6 +570,130 @@ export class WorkspaceService {
             },
             body: requestBody,
             mediaType: 'application/json',
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * List Sync Rules
+     * List sync rules for the active remote workspace.
+     * @param molabSession
+     * @returns SyncRuleListResponse Successful Response
+     * @throws ApiError
+     */
+    public static listSyncRules(
+        molabSession?: (string | null),
+    ): CancelablePromise<SyncRuleListResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/workspace/sync-rules',
+            cookies: {
+                'molab_session': molabSession,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * Save Sync Rule
+     * Create or replace the rule for this path. Last-run fields are kept.
+     * @param requestBody
+     * @param molabSession
+     * @returns SyncRuleResponse Successful Response
+     * @throws ApiError
+     */
+    public static saveSyncRule(
+        requestBody: SyncRuleWrite,
+        molabSession?: (string | null),
+    ): CancelablePromise<SyncRuleResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/workspace/sync-rules',
+            cookies: {
+                'molab_session': molabSession,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * Remove Sync Rule
+     * Delete one rule.
+     * @param ruleId
+     * @param molabSession
+     * @returns void
+     * @throws ApiError
+     */
+    public static removeSyncRule(
+        ruleId: string,
+        molabSession?: (string | null),
+    ): CancelablePromise<void> {
+        return __request(OpenAPI, {
+            method: 'DELETE',
+            url: '/api/workspace/sync-rules/{rule_id}',
+            path: {
+                'rule_id': ruleId,
+            },
+            cookies: {
+                'molab_session': molabSession,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * Preview Sync Rule
+     * Dry-run one rule. Files and last-run fields stay unchanged.
+     * @param ruleId
+     * @param molabSession
+     * @returns SyncRunResponse Successful Response
+     * @throws ApiError
+     */
+    public static previewSyncRule(
+        ruleId: string,
+        molabSession?: (string | null),
+    ): CancelablePromise<SyncRunResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/workspace/sync-rules/{rule_id}/preview',
+            path: {
+                'rule_id': ruleId,
+            },
+            cookies: {
+                'molab_session': molabSession,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * Run Sync Rule
+     * Copy one rule now and record the result on it.
+     * @param ruleId
+     * @param molabSession
+     * @returns SyncRunResponse Successful Response
+     * @throws ApiError
+     */
+    public static runSyncRule(
+        ruleId: string,
+        molabSession?: (string | null),
+    ): CancelablePromise<SyncRunResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/workspace/sync-rules/{rule_id}/run',
+            path: {
+                'rule_id': ruleId,
+            },
+            cookies: {
+                'molab_session': molabSession,
+            },
             errors: {
                 422: `Validation Error`,
             },

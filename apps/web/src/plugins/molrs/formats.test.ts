@@ -97,6 +97,28 @@ describe("walRecords", () => {
     expect(records.filter((r) => r.k === "energy").map((r) => r.s)).toEqual([0, 1000, 2000]);
   });
 
+  it("thins per record type and key, so thinning a scalar never drops an image", () => {
+    // A scalar and an image may share a key; one gate per (type, key) keeps
+    // the scalar's thinning from eating the image at the same steps.
+    const lines = [0, 500, 1000]
+      .flatMap((s) => [
+        JSON.stringify({ t: "scalar", k: "rdf", s, v: s }),
+        JSON.stringify({ t: "histogram", k: "rdf", s, v: { bins: [0, 1], counts: [s] } }),
+        JSON.stringify({ t: "image_ref", k: "rdf", s, v: { path: `artifacts/rdf-${s}.png` } }),
+        JSON.stringify({ t: "text", k: "rdf", s, v: `note ${s}` }),
+        JSON.stringify({ t: "json", k: "rdf", s, v: { s } }),
+      ])
+      .join("\n");
+    const records = walRecords(lines, { stepInterval: 1000 }, "x");
+    const stepsOf = (t: string) => records.filter((r) => r.t === t).map((r) => r.s);
+    expect(stepsOf("scalar")).toEqual([0, 1000]);
+    expect(stepsOf("histogram")).toEqual([0, 1000]);
+    // Discrete records are each written on purpose; none is thinned away.
+    expect(stepsOf("image_ref")).toEqual([0, 500, 1000]);
+    expect(stepsOf("text")).toEqual([0, 500, 1000]);
+    expect(stepsOf("json")).toEqual([0, 500, 1000]);
+  });
+
   it("always keeps a record that has no step", () => {
     // A one-off scalar (an atom count) is not a point on a curve; thinning it
     // away would lose the only sample there is.

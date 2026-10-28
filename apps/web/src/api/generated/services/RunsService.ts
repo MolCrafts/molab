@@ -14,7 +14,10 @@ import type { RunExecutionResponse } from '../models/RunExecutionResponse';
 import type { RunFilesResponse } from '../models/RunFilesResponse';
 import type { RunFileTextResponse } from '../models/RunFileTextResponse';
 import type { RunHarvestRequest } from '../models/RunHarvestRequest';
+import type { RunLogChunkResponse } from '../models/RunLogChunkResponse';
 import type { RunLogsResponse } from '../models/RunLogsResponse';
+import type { RunPruneRequest } from '../models/RunPruneRequest';
+import type { RunPruneResponse } from '../models/RunPruneResponse';
 import type { RunResponse } from '../models/RunResponse';
 import type { CancelablePromise } from '../core/CancelablePromise';
 import { OpenAPI } from '../core/OpenAPI';
@@ -367,6 +370,49 @@ export class RunsService {
         });
     }
     /**
+     * Get Run Execution Log Chunk
+     * Read one log (stdout, stderr or run) incrementally: at most 256 KiB from ``offset``.
+     * @param projectId
+     * @param experimentId
+     * @param runId
+     * @param executionId
+     * @param stream
+     * @param offset Byte offset to read from; pass back nextOffset.
+     * @param molabSession
+     * @returns RunLogChunkResponse Successful Response
+     * @throws ApiError
+     */
+    public static getRunExecutionLogChunk(
+        projectId: string,
+        experimentId: string,
+        runId: string,
+        executionId: string,
+        stream: 'stdout' | 'stderr' | 'run',
+        offset?: number,
+        molabSession?: (string | null),
+    ): CancelablePromise<RunLogChunkResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/projects/{project_id}/experiments/{experiment_id}/runs/{run_id}/executions/{execution_id}/logs/{stream}',
+            path: {
+                'project_id': projectId,
+                'experiment_id': experimentId,
+                'run_id': runId,
+                'execution_id': executionId,
+                'stream': stream,
+            },
+            cookies: {
+                'molab_session': molabSession,
+            },
+            query: {
+                'offset': offset,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
      * Get Run File Text
      * Return the raw text content of a file under the run directory.
      *
@@ -490,7 +536,11 @@ export class RunsService {
     }
     /**
      * Cancel Execution
-     * Cancel one explicit Execution; Run has no cancellable scalar state.
+     * Cancel one explicit Execution.
+     *
+     * The intervene verb is :func:`molab.workspace.lifecycle_ops.cancel_run`,
+     * the same function ``molab runs cancel`` calls. This route names one
+     * execution; the CLI names the run and cancels every active attempt.
      * @param projectId
      * @param experimentId
      * @param runId
@@ -654,6 +704,46 @@ export class RunsService {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/projects/{project_id}/experiments/{experiment_id}/runs/{run_id}/analyze-failure',
+            path: {
+                'project_id': projectId,
+                'experiment_id': experimentId,
+                'run_id': runId,
+            },
+            cookies: {
+                'molab_session': molabSession,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * Prune Run Route
+     * Plan or apply an execution prune.
+     *
+     * The same two functions as ``molab runs prune``:
+     * :func:`molab.workspace.prune.plan_execution_prune` and
+     * :func:`molab.workspace.prune.apply_execution_prune`.
+     * @param projectId
+     * @param experimentId
+     * @param runId
+     * @param requestBody
+     * @param molabSession
+     * @returns RunPruneResponse Successful Response
+     * @throws ApiError
+     */
+    public static pruneRunRoute(
+        projectId: string,
+        experimentId: string,
+        runId: string,
+        requestBody: RunPruneRequest,
+        molabSession?: (string | null),
+    ): CancelablePromise<RunPruneResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/projects/{project_id}/experiments/{experiment_id}/runs/{run_id}/prune',
             path: {
                 'project_id': projectId,
                 'experiment_id': experimentId,
@@ -1080,6 +1170,52 @@ export class RunsService {
         });
     }
     /**
+     * Get Run Execution Log Chunk
+     * Read one log (stdout, stderr or run) incrementally: at most 256 KiB from ``offset``.
+     * @param projectId
+     * @param experimentId
+     * @param runId
+     * @param executionId
+     * @param stream
+     * @param ws
+     * @param offset Byte offset to read from; pass back nextOffset.
+     * @param molabSession
+     * @returns RunLogChunkResponse Successful Response
+     * @throws ApiError
+     */
+    public static getRunExecutionLogChunkWs(
+        projectId: string,
+        experimentId: string,
+        runId: string,
+        executionId: string,
+        stream: 'stdout' | 'stderr' | 'run',
+        ws: string,
+        offset?: number,
+        molabSession?: (string | null),
+    ): CancelablePromise<RunLogChunkResponse> {
+        return __request(OpenAPI, {
+            method: 'GET',
+            url: '/api/workspaces/{ws}/projects/{project_id}/experiments/{experiment_id}/runs/{run_id}/executions/{execution_id}/logs/{stream}',
+            path: {
+                'project_id': projectId,
+                'experiment_id': experimentId,
+                'run_id': runId,
+                'execution_id': executionId,
+                'stream': stream,
+                'ws': ws,
+            },
+            cookies: {
+                'molab_session': molabSession,
+            },
+            query: {
+                'offset': offset,
+            },
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
      * Get Run File Text
      * Return the raw text content of a file under the run directory.
      *
@@ -1212,7 +1348,11 @@ export class RunsService {
     }
     /**
      * Cancel Execution
-     * Cancel one explicit Execution; Run has no cancellable scalar state.
+     * Cancel one explicit Execution.
+     *
+     * The intervene verb is :func:`molab.workspace.lifecycle_ops.cancel_run`,
+     * the same function ``molab runs cancel`` calls. This route names one
+     * execution; the CLI names the run and cancels every active attempt.
      * @param projectId
      * @param experimentId
      * @param runId
@@ -1390,6 +1530,49 @@ export class RunsService {
         return __request(OpenAPI, {
             method: 'POST',
             url: '/api/workspaces/{ws}/projects/{project_id}/experiments/{experiment_id}/runs/{run_id}/analyze-failure',
+            path: {
+                'project_id': projectId,
+                'experiment_id': experimentId,
+                'run_id': runId,
+                'ws': ws,
+            },
+            cookies: {
+                'molab_session': molabSession,
+            },
+            body: requestBody,
+            mediaType: 'application/json',
+            errors: {
+                422: `Validation Error`,
+            },
+        });
+    }
+    /**
+     * Prune Run Route
+     * Plan or apply an execution prune.
+     *
+     * The same two functions as ``molab runs prune``:
+     * :func:`molab.workspace.prune.plan_execution_prune` and
+     * :func:`molab.workspace.prune.apply_execution_prune`.
+     * @param projectId
+     * @param experimentId
+     * @param runId
+     * @param ws
+     * @param requestBody
+     * @param molabSession
+     * @returns RunPruneResponse Successful Response
+     * @throws ApiError
+     */
+    public static pruneRunRouteWs(
+        projectId: string,
+        experimentId: string,
+        runId: string,
+        ws: string,
+        requestBody: RunPruneRequest,
+        molabSession?: (string | null),
+    ): CancelablePromise<RunPruneResponse> {
+        return __request(OpenAPI, {
+            method: 'POST',
+            url: '/api/workspaces/{ws}/projects/{project_id}/experiments/{experiment_id}/runs/{run_id}/prune',
             path: {
                 'project_id': projectId,
                 'experiment_id': experimentId,

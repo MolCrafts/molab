@@ -1,7 +1,9 @@
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@molcrafts/ui";
 import { AlertTriangle } from "lucide-react";
-import type { JSX } from "react";
+import { type JSX, useState } from "react";
 import { EmptyState } from "@/app/components/entity";
-import type { RendererProps } from "@/app/types";
+import { ImageViewer } from "@/app/renderers/ImageViewer";
+import type { RendererProps, WorkspaceFileSelection } from "@/app/types";
 import { RunMetricsView } from "@/plugins/molplot/RunMetricsView";
 import type { DiscoveredFile } from "@/plugins/types";
 
@@ -12,12 +14,14 @@ type RunMetricsTabProps = RendererProps & { discoveredFiles?: DiscoveredFile[] }
  * the workspace `snapshot` and delegates rendering to the coord-driven
  * {@link RunMetricsView}. The metrics rendering core lives in RunMetricsView
  * so the runs-dashboard `RunInspector` can reuse it without `snapshot.runs`.
+ *
+ * An image card opens the image in the existing `ImageViewer`, addressed by
+ * the attempt directory the server reported (`executionDir`) plus the
+ * record's attempt-relative path.
  */
-export const RunMetricsTab = ({
-  selection,
-  snapshot,
-  executionId,
-}: RunMetricsTabProps): JSX.Element => {
+export const RunMetricsTab = (props: RunMetricsTabProps): JSX.Element => {
+  const { selection, snapshot, executionId, executionDir } = props;
+  const [openImage, setOpenImage] = useState<string | null>(null);
   const run = snapshot.runs.find((item) => item.id === selection.objectId) ?? null;
 
   if (!run || !executionId) {
@@ -36,14 +40,35 @@ export const RunMetricsTab = ({
     );
   }
 
+  const imageSelection: WorkspaceFileSelection | null =
+    openImage && executionDir
+      ? {
+          objectType: "workspace-file",
+          objectId: `${executionDir.replace(/\/+$/, "")}/${openImage}`,
+          filePath: `${executionDir.replace(/\/+$/, "")}/${openImage}`,
+          fileKind: "image",
+        }
+      : null;
+
   return (
-    <RunMetricsView
-      key={run.id}
-      projectId={run.projectId}
-      experimentId={run.experimentId}
-      runId={run.id}
-      executionId={executionId}
-      status={run.executionHistory.find((e) => e.executionId === executionId)?.status}
-    />
+    <>
+      <RunMetricsView
+        key={run.id}
+        projectId={run.projectId}
+        experimentId={run.experimentId}
+        runId={run.id}
+        executionId={executionId}
+        status={run.executionHistory.find((e) => e.executionId === executionId)?.status}
+        onOpenImage={executionDir ? setOpenImage : undefined}
+      />
+      <Dialog open={imageSelection !== null} onOpenChange={(open) => !open && setOpenImage(null)}>
+        <DialogContent className="flex h-[min(80vh,48rem)] w-[min(90vw,64rem)] max-w-none flex-col overflow-hidden p-0 sm:max-w-none">
+          <DialogHeader className="sr-only">
+            <DialogTitle>{openImage}</DialogTitle>
+          </DialogHeader>
+          {imageSelection ? <ImageViewer {...props} selection={imageSelection} /> : null}
+        </DialogContent>
+      </Dialog>
+    </>
   );
 };

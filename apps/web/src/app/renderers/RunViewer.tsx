@@ -7,9 +7,15 @@ import { itemKey } from "@/app/compare/types";
 import { EmptyState, EntityPage } from "@/app/components/entity";
 import { LazySurface } from "@/app/layout/LazySurface";
 import { RunExecutionsPanel } from "@/app/renderers/RunExecutionsPanel";
+import { RunLogsPanel } from "@/app/renderers/RunLogsPanel";
 import { RunOverview, RunParameters } from "@/app/renderers/run/RunOverview";
-import { type RunRendererProps, useRunViewer } from "@/app/renderers/useRunViewer";
+import {
+  defaultExecutionId,
+  type RunRendererProps,
+  useRunViewer,
+} from "@/app/renderers/useRunViewer";
 import { RunToolbar } from "@/app/runs/RunToolbar";
+import { journalRefetchInterval } from "@/app/state/entityQueries";
 import { useDiscoveredFileTypesForRun } from "@/app/state/useDiscoveredFileTypes";
 import type { RendererProps } from "@/app/types";
 import { WorkbenchAction } from "@/components/workbench";
@@ -25,7 +31,7 @@ export const RunViewer = (props: RunRendererProps): JSX.Element => {
     activeTab,
     setActiveTab,
     outputs,
-    logsError,
+    outputsError,
     selectedExecutionId,
     setSelectedExecutionId,
     attemptCount,
@@ -93,6 +99,20 @@ export const RunViewer = (props: RunRendererProps): JSX.Element => {
     executionOutputs: outputs,
     executionDir,
   };
+  const history = run.executionHistory;
+  const selectedIndex = history.findIndex((item) => item.executionId === selectedExecutionId);
+  const selectedExecution = selectedIndex >= 0 ? history[selectedIndex] : null;
+  const latestExecutionId = defaultExecutionId(history);
+  const attemptLabel = selectedExecution
+    ? `${selectedExecution.executionId} (#${selectedIndex + 1})${
+        selectedExecution.executionId === latestExecutionId ? " · latest" : ""
+      }`
+    : "no attempt";
+  const openAttemptFile = (path: string): void => {
+    if (!executionDir) return;
+    const filePath = `${executionDir.replace(/\/+$/, "")}/${path}`;
+    setSelection({ objectType: "workspace-file", objectId: filePath, filePath, fileKind: "text" });
+  };
   const openRunTab = (value: string): void => {
     setActiveTab(value);
     setSelection({
@@ -131,7 +151,7 @@ export const RunViewer = (props: RunRendererProps): JSX.Element => {
           onSelectExecution={setSelectedExecutionId}
           onInspectTask={inspectTask}
           outputs={outputs}
-          logsError={logsError}
+          logsError={outputsError}
           onPromoted={props.onRefresh}
           onOpenWorkflow={
             workflow
@@ -144,6 +164,31 @@ export const RunViewer = (props: RunRendererProps): JSX.Element => {
               : undefined
           }
         />
+      ),
+    },
+    {
+      value: "logs",
+      label: "Logs",
+      content: (
+        <div className="flex h-full flex-1 flex-col overflow-hidden bg-background text-foreground">
+          <RunLogsPanel
+            execution={
+              selectedExecution
+                ? {
+                    projectId: run.projectId,
+                    experimentId: run.experimentId,
+                    runId: run.id,
+                    executionId: selectedExecution.executionId,
+                  }
+                : null
+            }
+            live={journalRefetchInterval(selectedExecution?.status) !== false}
+            selectedExecutionId={selectedExecutionId}
+            attemptLabel={attemptLabel}
+            onViewLatest={() => setSelectedExecutionId(latestExecutionId)}
+            onOpenFile={executionDir ? openAttemptFile : undefined}
+          />
+        </div>
       ),
     },
     ...runTabContributions.map((tab) => {

@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query";
 import { Archive, File, FileOutput, Folder, Terminal } from "lucide-react";
-import { type JSX, useEffect, useState } from "react";
+import { type JSX, useState } from "react";
 import { runsApi } from "@/api";
 import { ApiError } from "@/api/generated";
 import type { ExecutionOutputsResponse } from "@/api/generated/models/ExecutionOutputsResponse";
@@ -14,6 +14,7 @@ import {
 } from "@/app/state/entityQueries";
 import { WorkbenchIconAction } from "@/components/workbench";
 import { formatBytes } from "@/lib/format-bytes";
+import { useObjectUrl } from "@/lib/use-object-url";
 
 type SelectedOutput =
   | { kind: "artifact"; id: string }
@@ -58,21 +59,6 @@ const binaryKindOf = (path: string): BinaryKind | null => {
   if (["png", "jpg", "jpeg", "gif", "webp"].includes(ext)) return "image";
   if (ext === "pdf") return "pdf";
   return null;
-};
-
-/** An object URL for a blob, revoked when the blob changes or the view unmounts. */
-const useObjectUrl = (blob: Blob | undefined): string | null => {
-  const [url, setUrl] = useState<string | null>(null);
-  useEffect(() => {
-    if (!blob) {
-      setUrl(null);
-      return;
-    }
-    const next = URL.createObjectURL(blob);
-    setUrl(next);
-    return () => URL.revokeObjectURL(next);
-  }, [blob]);
-  return url;
 };
 
 const buildFileTree = (rows: RunFileNode[], onSelect: (path: string) => void): TreeNode[] => {
