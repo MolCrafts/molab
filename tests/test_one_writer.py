@@ -11,7 +11,6 @@ ASSOCIATION_FIELDS = {
     "workflow_source",
     "workflow_type",
     "git_commit",
-    "plan_run_id",
 }
 
 _EXPERIMENT_CALLS = {"add_experiment", "set_experiment", "Experiment"}
@@ -109,13 +108,6 @@ class TestExperimentBindingWriters:
     def test_add_experiment_workflow_source_is_flagged(self) -> None:
         hits = association_writer_hits(
             ast.parse('p.add_experiment("e", workflow_source="x")'),
-            "snippet.py",
-        )
-        assert len(hits) == 1
-
-    def test_plan_run_id_assignment_is_flagged(self) -> None:
-        hits = association_writer_hits(
-            ast.parse('e.metadata.plan_run_id = "r"'),
             "snippet.py",
         )
         assert len(hits) == 1

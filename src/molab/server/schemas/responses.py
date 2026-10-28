@@ -128,7 +128,6 @@ class ExperimentResponse(ApiModel):
     workflow: str | None = None
     workflowKind: WorkflowKind | None = None
     workflowEntrypoint: str | None = None
-    planRunId: str | None = None
     gitCommit: str | None = None
     parameterSpace: dict[str, Any] = Field(default_factory=dict)
     defaultTarget: str | None = None
@@ -187,7 +186,6 @@ class ExperimentResponse(ApiModel):
             workflow=workflow,
             workflowKind=experiment.workflow_kind,
             workflowEntrypoint=entrypoint,
-            planRunId=experiment.metadata.plan_run_id,
             gitCommit=git_commit,
             parameterSpace=experiment.metadata.parameter_space,
             defaultTarget=experiment.metadata.default_target,

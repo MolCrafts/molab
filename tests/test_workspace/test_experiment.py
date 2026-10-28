@@ -330,15 +330,6 @@ class TestExperimentBindWorkflow:
             lambda: exp.bind_workflow("document", document=D1, entrypoint="a.py:f"),
         )
 
-    def test_bind_rejects_plan_run_id_keyword(self, project) -> None:
-        exp = project.add_experiment("e")
-
-        _bind_rejected(
-            exp,
-            TypeError,
-            lambda: exp.bind_workflow("code", plan_run_id="r"),  # type: ignore[call-arg]
-        )
-
     def test_bind_script_raises(self, project) -> None:
         exp = project.add_experiment("e")
 
@@ -387,18 +378,6 @@ class TestExperimentBindWorkflow:
         assert exp.workflow_document is None
         assert not (Path(exp.experiment_dir) / _IR_NAME).exists()
         assert exp.metadata.workflow_entrypoint == "/other/train.py:build"
-
-    def test_legacy_plan_run_id_survives_code_and_document_binds(self, project) -> None:
-        exp = project.add_experiment("e")
-        exp.metadata = exp.metadata.model_copy(update={"plan_run_id": "plan-1"})
-        exp.save()
-
-        exp.bind_workflow("code", entrypoint="train.py:build", document=D1)
-        assert exp.metadata.plan_run_id == "plan-1"
-        exp.bind_workflow("document", document=D1)
-
-        assert exp.metadata.plan_run_id == "plan-1"
-        assert _reload(exp).metadata.plan_run_id == "plan-1"
 
     def test_unbound_document_bind_stays_revision_1(self, project) -> None:
         exp = project.add_experiment("e")
@@ -489,31 +468,6 @@ class TestExperimentBindWorkflow:
 
         assert exp.metadata.revision == 2
         assert exp.metadata.workflow_entrypoint is None
-
-    def test_legacy_plan_run_id_only_document_bind_is_revision_1(self, project) -> None:
-        exp = project.add_experiment("e")
-        exp.metadata = exp.metadata.model_copy(update={"plan_run_id": "plan-1"})
-        exp.save()
-        assert exp.workflow_kind is None
-        revision_id = exp.metadata.revision_id
-
-        exp.bind_workflow("document", document=D1)
-
-        assert exp.metadata.revision == 1
-        assert exp.metadata.revision_id == revision_id
-
-    def test_document_with_legacy_plan_run_id_rebind_keeps_revision(self, project) -> None:
-        exp = project.add_experiment("e")
-        exp.bind_workflow("document", document=D1)
-        exp.metadata = exp.metadata.model_copy(update={"plan_run_id": "plan-1"})
-        exp.save()
-        revision = exp.metadata.revision
-        revision_id = exp.metadata.revision_id
-
-        exp.bind_workflow("document", document=D1)
-
-        assert exp.metadata.revision == revision
-        assert exp.metadata.revision_id == revision_id
 
     def test_revising_bind_records_one_experiment_revised(
         self, project, monkeypatch: pytest.MonkeyPatch

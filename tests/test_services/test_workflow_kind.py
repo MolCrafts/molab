@@ -93,24 +93,6 @@ class TestClassifyLegacyWorkflow:
         assert found.document == GRAPH_IR
         assert found.note is None
 
-    def test_entrypoint_and_plan_run_id_is_code(self, tmp_path: Path) -> None:
-        exp = _experiment(tmp_path, "entry-plan")
-        _set_metadata(exp, workflow_entrypoint=_ENTRYPOINT, plan_run_id="p1")
-
-        found = classify_legacy_workflow(exp)
-
-        assert found.kind == "code"
-
-    def test_plan_run_id_only_stays_unbound(self, tmp_path: Path) -> None:
-        exp = _experiment(tmp_path, "plan")
-        _set_metadata(exp, plan_run_id="p1")
-
-        found = classify_legacy_workflow(exp)
-
-        assert found.kind is None
-        assert found.note is not None
-        assert "legacy plan run" in found.note
-
     def test_document_file_only_is_document(self, tmp_path: Path) -> None:
         exp = _experiment(tmp_path, "document")
         _write_ir(exp, DOC_A)
@@ -174,12 +156,6 @@ class TestNeedsWorkflowKindMigration:
         reloaded = _stamp_workflow_source(exp, "train.py")
 
         assert needs_workflow_kind_migration(reloaded) is False
-
-    def test_plan_run_id_only_does_not_need_migration(self, tmp_path: Path) -> None:
-        exp = _experiment(tmp_path, "plan")
-        _set_metadata(exp, plan_run_id="p1")
-
-        assert needs_workflow_kind_migration(exp) is False
 
     def test_brand_new_experiment_does_not_need_migration(self, tmp_path: Path) -> None:
         exp = _experiment(tmp_path, "fresh")

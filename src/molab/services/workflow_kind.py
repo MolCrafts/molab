@@ -2,8 +2,8 @@
 
 One rule, shared by ``molab migrate workflow-kind`` and the server writers'
 409 gate. Read-only: nothing here writes an experiment. This module reads
-``workflow_entrypoint``, ``plan_run_id``, and ``workflow.ir.json``. A
-non-empty locator wins first; ``plan_run_id`` is not a kind.
+``workflow_entrypoint`` and ``workflow.ir.json``. A non-empty locator
+wins first.
 """
 
 from __future__ import annotations
@@ -48,11 +48,10 @@ def _classify_ir(document: dict[str, Any]) -> LegacyWorkflowClassification:
 def classify_legacy_workflow(experiment: Experiment) -> LegacyWorkflowClassification:
     """Classify *experiment* from its legacy fields. Read-only; first match wins.
 
-    A non-empty ``workflow_entrypoint`` is code, and ``plan_run_id`` is not
-    consulted for that decision. Otherwise a plan id is unrecoverable. An IR
-    object is taken only from :attr:`Experiment.workflow_document`
-    (``workflow.ir.json``). ``task_configs`` is the document kind; ``tasks``
-    is a code snapshot with no locator. Anything else is left unbound.
+    A non-empty ``workflow_entrypoint`` is code. An IR object is taken only
+    from :attr:`Experiment.workflow_document` (``workflow.ir.json``).
+    ``task_configs`` is the document kind; ``tasks`` is a code snapshot with
+    no locator. Anything else is left unbound.
 
     Args:
         experiment: Experiment to inspect. Not modified.
@@ -68,8 +67,6 @@ def classify_legacy_workflow(experiment: Experiment) -> LegacyWorkflowClassifica
             entrypoint=entrypoint,
             document=experiment.workflow_document,
         )
-    if meta.plan_run_id:
-        return LegacyWorkflowClassification(note="unrecoverable (legacy plan run)")
 
     document = experiment.workflow_document
     if document is not None:

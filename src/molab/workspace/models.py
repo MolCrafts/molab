@@ -140,8 +140,7 @@ class ExperimentMetadata(BaseModel, frozen=True):
 
     The Experiment owns its workflow association: ``workflow_kind`` plus
     exactly one reference, either the ``workflow_entrypoint`` locator or
-    the opaque IR in ``workflow.ir.json``. ``plan_run_id`` is a read-only
-    legacy field.
+    the opaque IR in ``workflow.ir.json``.
 
     ``model_config`` ignores extra fields so records written
     by older molab versions (which may carry now-removed keys like
@@ -173,10 +172,6 @@ class ExperimentMetadata(BaseModel, frozen=True):
     # HTTP API drift apart. ``None`` when the bound spec has no module-level
     # name to re-import (a promoted callable, a fixture).
     workflow_entrypoint: str | None = None
-    # Legacy, read-only: set by the plan pipeline removed in D86; nothing
-    # writes it. Surfaced as ``ExperimentResponse.planRunId`` for existing
-    # experiments.
-    plan_run_id: str | None = None
     parameter_space: dict[str, JSONValue] = Field(default_factory=dict)
 
     # Replica configuration

@@ -12,7 +12,6 @@ export type ExperimentResponse = {
     workflow?: (string | null);
     workflowKind?: ('code' | 'document' | null);
     workflowEntrypoint?: (string | null);
-    planRunId?: (string | null);
     gitCommit?: (string | null);
     parameterSpace?: Record<string, any>;
     defaultTarget?: (string | null);

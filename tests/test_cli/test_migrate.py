@@ -424,7 +424,7 @@ def _write_ir(exp: Experiment, document: dict[str, object]) -> None:
 
 
 def _kind_lab(tmp_path: Path) -> Path:
-    """Six legacy experiments: two code, one document, three unbound."""
+    """Five legacy experiments: two code, one document, two unbound."""
     root = tmp_path / "lab"
     workspace = Workspace(root, name="lab")
     project = workspace.add_project("proj")
@@ -433,10 +433,6 @@ def _kind_lab(tmp_path: Path) -> Path:
     entry.metadata = entry.metadata.model_copy(update={"workflow_entrypoint": _ENTRYPOINT})
     entry.save()
     _write_ir(entry, GRAPH_IR)
-
-    plan = project.add_experiment("plan")
-    plan.metadata = plan.metadata.model_copy(update={"plan_run_id": "p1"})
-    plan.save()
 
     document = project.add_experiment("document")
     _write_ir(document, DOC_A)
@@ -486,7 +482,7 @@ class TestMigrateWorkflowKind:
 
         assert report.code == 2
         assert report.document == 1
-        assert report.unbound == 3
+        assert report.unbound == 2
         assert report.skipped == 0
         assert _revisions(root) == before
 
@@ -494,7 +490,6 @@ class TestMigrateWorkflowKind:
         kinds = {exp.name: exp.workflow_kind for exp in project.list_experiments()}
         assert kinds == {
             "entry": "code",
-            "plan": None,
             "document": "document",
             "memo": "code",
             "handwritten": None,
@@ -502,9 +497,6 @@ class TestMigrateWorkflowKind:
         }
         assert project.get_experiment("document").workflow_document == DOC_A
         assert project.get_experiment("entry").entrypoint == _ENTRYPOINT
-        plan = project.get_experiment("plan")
-        assert plan.workflow_kind is None
-        assert any("legacy plan run" in note for note in report.notes)
 
     def test_second_pass_skips_bound_experiments(self, tmp_path: Path) -> None:
         root = _kind_lab(tmp_path)
@@ -516,7 +508,7 @@ class TestMigrateWorkflowKind:
         assert report.skipped == 3
         assert report.code == 0
         assert report.document == 0
-        assert report.unbound == 3
+        assert report.unbound == 2
         assert _ir_and_experiment_bytes(root) == before
 
     def test_dry_run_counts_and_writes_nothing(self, tmp_path: Path) -> None:
@@ -527,7 +519,7 @@ class TestMigrateWorkflowKind:
 
         assert report.code == 2
         assert report.document == 1
-        assert report.unbound == 3
+        assert report.unbound == 2
         assert report.skipped == 0
         assert report.dry_run is True
         assert _tree_bytes(root) == before
