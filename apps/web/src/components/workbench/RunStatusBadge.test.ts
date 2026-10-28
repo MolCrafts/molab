@@ -17,8 +17,6 @@ describe("normalizeRunStatus", () => {
     expect(normalizeRunStatus("skipped")).toBe("cancelled");
     expect(normalizeRunStatus("active")).toBe("ready");
     expect(normalizeRunStatus("waiting_for_review")).toBe("warning");
-    expect(normalizeRunStatus("awaiting_approval")).toBe("warning");
-    expect(normalizeRunStatus("awaiting_user")).toBe("warning");
     expect(normalizeRunStatus("paused")).toBe("warning");
   });
 

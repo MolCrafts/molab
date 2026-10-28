@@ -82,7 +82,6 @@ _CORE_PATHS = frozenset(
     {
         "/api/health",
         "/api/workspace/info",
-        "/api/workspace/copilot",
         "/api/projects",
         "/api/knowledge/search",
         "/api/projects/{project_id}/experiments/{experiment_id}/runs/{run_id}/executions",

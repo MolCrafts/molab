@@ -44,7 +44,6 @@ from ..schemas import (
     WorkspaceOpenRequest,
     WorkspaceRunRow,
     WorkspaceRunsResponse,
-    WorkspaceSummaryResponse,
     WorkspaceTargetCreateRequest,
     WorkspaceTargetListResponse,
     WorkspaceTargetResponse,
@@ -167,7 +166,7 @@ def get_workspace_context(
     """The canonical structural workspace read-model (integration.md §1).
 
     A read-only projection assembled from authoritative workspace state — the one
-    shape agents/planners/CLI/UI observe. ``ContextFocus`` is supplied by the
+    shape the CLI and UI observe. ``ContextFocus`` is supplied by the
     caller via optional query params and is never persisted. ``/runs`` remains the
     specialized detailed run view (richer per-execution rows); this endpoint is the
     canonical *structure* and stays consistent with it.
@@ -181,22 +180,6 @@ def get_workspace_context(
     focus = ContextFocus(project_id=project_id, experiment_id=experiment_id, run_id=run_id)
     context = context_with_knowledge(workspace, focus=focus)
     return WorkspaceContextResponse.from_context(context)
-
-
-@router.get("/copilot", response_model=WorkspaceSummaryResponse)
-def get_workspace_copilot(workspace=Depends(get_workspace)) -> WorkspaceSummaryResponse:  # noqa: ANN001
-    """The read-only Workspace Copilot summary — structured state + ranked next-actions.
-
-    A pure projection over the canonical ``WorkspaceContext``; it mutates nothing.
-    Next-actions are **advisory** and separated from execution — a mutating one
-    names the operation it would perform in ``op``, and whoever executes it owns
-    the policy for what that operation requires.
-    """
-    from molab.services.copilot import summarize_workspace
-    from molab.services.knowledge_context import context_with_knowledge
-
-    summary = summarize_workspace(context_with_knowledge(workspace))
-    return WorkspaceSummaryResponse.from_summary(summary)
 
 
 @router.get("/runs", response_model=WorkspaceRunsResponse)

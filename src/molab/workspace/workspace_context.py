@@ -1,8 +1,8 @@
 """``WorkspaceContext`` — the canonical workspace read-model + its assembler.
 
-`WorkspaceContext` is the single structured projection the system hands to agents,
-planners, the server, the CLI, and the UI so they reason over one shape instead of
-re-assembling workspace state three ways. It is slice 01 of the P0.2 "WorkspaceContext
+`WorkspaceContext` is the single structured projection the server, the CLI, and the
+UI read so they reason over one shape instead of re-assembling workspace state
+three ways. It is slice 01 of the P0.2 "WorkspaceContext
 — full unification" chain (`.claude/notes/integration.md` §1).
 
 Design invariants:

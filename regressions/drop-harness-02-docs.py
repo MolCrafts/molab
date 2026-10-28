@@ -26,7 +26,7 @@ goldens pin the repo files a later edit could silently regress.
    ``drop-harness-ui`` landed; since ce500be7 its sentence is asserted absent.)
 6. The three harness notes are absent; ``integration.md`` has no "harness",
    no ChangeProposal / InteractiveLoop / AgentGateway, no reference to a
-   deleted section, keeps "Workspace Copilot" + ``workspace/copilot.py`` and
+   deleted section, and
    labels its retired invariants ``*Retired (D86).*``; the notes README names
    no deleted note.
 
@@ -105,7 +105,7 @@ _DELETED_NOTES = (
     ".claude/notes/vision-gap-2026-07.md",
 )
 _INTEGRATION_ABSENT = ("ChangeProposal", "InteractiveLoop", "AgentGateway")
-_INTEGRATION_PRESENT = ("Workspace Copilot", "workspace/copilot.py", "*Retired (D86).*")
+_INTEGRATION_PRESENT = ("*Retired (D86).*",)
 _DELETED_SECTION_REF = re.compile(r"§[68]\b|§7\.[2356]\b")
 _NOTES_README_ABSENT = ("harness-plugins", "harness-goal", "vision-gap")
 

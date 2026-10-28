@@ -186,7 +186,7 @@ default_registry = TaskTypeRegistry()
 
 # ── Built-in demo tasks ────────────────────────────────────────────────────
 # Tiny, numeric, deterministic — primarily for testing the IR round-trip and
-# giving the agent a non-trivial composable starter set. Domain plugins
+# giving IR authors a non-trivial composable starter set. Domain plugins
 # (LAMMPS, VASP, molpy) register their own slugs through the same registry.
 
 

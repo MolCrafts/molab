@@ -11,7 +11,7 @@ import { request as __request } from '../core/request';
 export class RegistryService {
     /**
      * List Task Types
-     * Return every task-type slug the agent / UI can compose into IR.
+     * Return every task-type slug the UI can compose into IR.
      * @param molabSession
      * @returns TaskTypeListResponse Successful Response
      * @throws ApiError

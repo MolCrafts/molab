@@ -1,7 +1,7 @@
 """Cross-layer type aliases.
 
 Lives at the package root so that **every** molab layer (workflow,
-workspace, agent, server, plugins) can import these names without
+workspace, knowledge, services, server, cli) can import these names without
 introducing layer-cycle violations. Keep this module **free of any
 non-stdlib imports** so the layering DAG stays clean.
 """

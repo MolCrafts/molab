@@ -11,8 +11,6 @@ from pathlib import Path
 
 from molab.knowledge import Note
 from molab.server.schemas.workspace_context import WorkspaceContextResponse
-from molab.server.schemas.workspace_copilot import WorkspaceSummaryResponse
-from molab.services.copilot import summarize_workspace
 from molab.services.knowledge_context import KnowledgeContext, KnowledgeRef, context_with_knowledge
 from molab.workspace import Run, Workspace, WorkspaceContext
 from molab.workspace.validate import validate_workspace
@@ -23,6 +21,7 @@ def main() -> None:
 
     assert not hasattr(workspace, "KnowledgeRef")
     assert importlib.util.find_spec("molab.workspace.copilot") is None
+    assert importlib.util.find_spec("molab.services.copilot") is None
     assert {"knowledge", "open_questions"}.isdisjoint(WorkspaceContext.model_fields)
     assert not hasattr(Run, "NON_CONCEPT_SUBDIRS")
 
@@ -37,9 +36,6 @@ def main() -> None:
             KnowledgeRef(path="knowledges/idea.md", type="Note", title="Idea", id="idea")
         ]
         assert "open_questions" not in KnowledgeContext.model_fields
-        summary = summarize_workspace(ctx)
-        assert summary.counts["knowledge"] == 1
-        assert "open_questions" not in summary.counts
 
         (root / "leftover").mkdir()
         run = ws.add_project("p").add_experiment("e").add_run(params={"seed": 1})
@@ -64,16 +60,6 @@ def main() -> None:
         "artifacts",
         "knowledge",
         "staleOrMissing",
-    }
-    assert set(WorkspaceSummaryResponse.model_fields) == {
-        "workspace",
-        "headline",
-        "counts",
-        "failedRuns",
-        "runningRuns",
-        "healthFlags",
-        "relevantKnowledge",
-        "nextActions",
     }
     print("arch-own-06f-sever: ok")
 

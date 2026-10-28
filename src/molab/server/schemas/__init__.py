@@ -70,7 +70,6 @@ from .targets import (
     TargetTestResponse,
 )
 from .workspace_context import WorkspaceContextResponse
-from .workspace_copilot import WorkspaceSummaryResponse
 from .workspace_runs import (
     WorkspaceExecutionRow,
     WorkspaceRunRow,
@@ -151,7 +150,6 @@ __all__ = [
     "WorkspaceRunRow",
     "WorkspaceRunsResponse",
     "WorkspaceRunsStats",
-    "WorkspaceSummaryResponse",
     "WorkspaceTargetCreateRequest",
     "WorkspaceTargetListResponse",
     "WorkspaceTargetResponse",

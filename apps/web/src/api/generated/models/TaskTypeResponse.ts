@@ -3,7 +3,7 @@
 /* tslint:disable */
 /* eslint-disable */
 /**
- * Single registered task type the agent / UI can compose into IR.
+ * Single registered task type the UI can compose into IR.
  */
 export type TaskTypeResponse = {
     /**

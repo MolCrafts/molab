@@ -8,16 +8,7 @@
 
 import { strToU8, zipSync } from "fflate";
 import { HttpResponse, http } from "msw";
-import {
-  deleteFile,
-  getAllProjects,
-  getExperiment,
-  getExperimentsByProject,
-  getFile,
-  getRun,
-  getRunsByExperiment,
-  writeFile,
-} from "../db";
+import { deleteFile, getExperiment, getFile, getRun, writeFile } from "../db";
 import { workspaceRoute } from "./workspaceRoute";
 
 interface ShowcaseNote {
@@ -185,41 +176,6 @@ export const featureShowcaseHandlers = [
     HttpResponse.json({ detail: "The showcase workspace must remain served" }, { status: 409 }),
   ),
   http.get("/api/health", () => HttpResponse.json({ status: "ok", mock: true })),
-  http.get("/api/workspace/copilot", () => {
-    const runs = getAllProjects().flatMap((p) =>
-      getExperimentsByProject(p.id).flatMap((e) => getRunsByExperiment(e.id)),
-    );
-    const failed = runs.filter((r) => r.status === "failed");
-    const running = runs.filter((r) => r.status === "running");
-    const ref = (r: (typeof runs)[number]) => ({
-      id: r.id,
-      name: r.name,
-      projectId: r.projectId,
-      experimentId: r.experimentId,
-      status: r.status,
-    });
-    return HttpResponse.json({
-      workspace: { id: "mock-workspace", name: "Feature showcase", root: "/mock-workspace" },
-      headline: "Synthetic workspace examples",
-      counts: {
-        projects: getAllProjects().length,
-        runs: runs.length,
-        failed: failed.length,
-        running: running.length,
-      },
-      failedRuns: failed.map(ref),
-      runningRuns: running.map(ref),
-      healthFlags: [],
-      relevantKnowledge: [],
-      nextActions: failed.slice(0, 2).map((r) => ({
-        kind: "diagnose_failed_run",
-        target: r.id,
-        rationale: "Inspect the failed attempt and record its evidence.",
-        op: "analyze_failure",
-        advisory: true,
-      })),
-    });
-  }),
 
   http.get(workspaceRoute("/api/knowledge"), ({ request }) => {
     const url = new URL(request.url);

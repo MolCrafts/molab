@@ -19,7 +19,7 @@ router = APIRouter(tags=["registry"])
 
 @router.get("/tasks", response_model=TaskTypeListResponse)
 def list_task_types() -> TaskTypeListResponse:
-    """Return every task-type slug the agent / UI can compose into IR."""
+    """Return every task-type slug the UI can compose into IR."""
     items = [
         TaskTypeResponse(slug=slug, description=description)
         for slug, description in default_registry.items()

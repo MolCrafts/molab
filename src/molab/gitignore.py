@@ -46,9 +46,9 @@ __all__ = [
 #: The per-directory ignore file this matcher reads.
 GITIGNORE_FILENAME = ".gitignore"
 
-# Safety floor — always applied, even with no on-disk .gitignore. Keep in
-# sync with the spirit of agent tree skips (ops.structure / interactive
-# tools); this is the single server/workspace source of truth.
+# Safety floor — always applied, even with no on-disk .gitignore; this is the
+# single server/workspace source of truth. ``agent/.scratch/`` is a legacy
+# directory written before D86 removed the agent layer; tolerated, never written.
 DEFAULT_IGNORE_LINES: tuple[str, ...] = (
     ".git/",
     ".hg/",

@@ -11,7 +11,7 @@ import typer
 
 app = typer.Typer(
     name="molab",
-    help="Agent-assisted scientific-workflow platform for FAIR research",
+    help="Scientific-workflow platform for FAIR research",
     no_args_is_help=True,
 )
 
@@ -34,4 +34,4 @@ def _main(
         help="Show the molab version and exit.",
     ),
 ) -> None:
-    """Agent-assisted scientific-workflow platform for FAIR research."""
+    """Scientific-workflow platform for FAIR research."""

@@ -25,7 +25,6 @@ Molab 的 Web UI 应当是计算科学家和研究工程师的实验操作台，
 - Workflow 归入 Experiment，不再作为一级导航。
 - Activity 暂时移除；只有建立真实跨实体事件模型后，才可作为 Audit 二级页面返回。
 - 删除 Dashboard panel manager、重复状态卡、默认 Gantt 和无行动价值的分析模块。
-- 右侧面板只检查当前实体，不再永久混入 Copilot。
 - 统一 server state、数据完整性和 feature contribution 边界，使功能可以独立增加和移除。
 
 这是一项信息架构重设计，不应作为当前 Dashboard 的增量美化处理。
@@ -39,7 +38,6 @@ Molab 的 Web UI 应当是计算科学家和研究工程师的实验操作台，
 - `/runs` 已移除 Overview，默认进入 List，只保留 List 与 Timeline。
 - Activity 与 Workflows 已从一级 rail 移除；旧路由暂时保留以兼容现有入口。
 - Dashboard 使用 rail-only shell，不显示无职责的 explorer。
-- Right Inspector 不再永久挂载 Copilot。
 - 顶栏局部搜索已明确为 `Filter explorer`，Dashboard 不显示无效 filter。
 - 通用 `ContentSection` 与 `PageHeader` 已进入 `molcrafts-ui` registry，并以同源文件接入 Molab。
 - Experiment 的 Overview、Workflow、Runs、Compare 已成为 route-backed tabs；Workflow 的规范路径为
@@ -386,7 +384,6 @@ Dashboard 的 primary action MUST 根据 workspace 状态决定：
 - Gantt。
 - Dashboard panel manager。
 - Drag、resize、hide、reset layout。
-- 永久显示的 Copilot panel。
 
 ## 8. 当前功能迁移决策
 
@@ -403,7 +400,6 @@ Dashboard 的 primary action MUST 根据 workspace 状态决定：
 | 顶级 Workflows | 与 Experiment 内 workflow 重叠 | Experiment Workflow | 合并 |
 | Workspace explorer | 名称与 workspace domain 混淆 | Files | 重命名、降级 |
 | Global Assets | 与 scoped Outputs/Assets 重叠 | Secondary Assets | 降级；保留跨项目检索 |
-| Right-panel Copilot | 与 Inspector 责任冲突 | Agent / Dashboard attention | 移动 |
 | Settings explorer | 外层和内层导航嵌套 | Full-surface Settings | 重构布局 |
 
 ## 9. 关键用户工作流
@@ -624,7 +620,7 @@ Right inspector MUST 只展示当前 selection 的：
 - Provenance/relations。
 - 与当前实体直接相关的 contextual action。
 
-全局 Copilot、Dashboard summary 和跨实体 activity MUST NOT 永久挂载在 Inspector 中。
+Dashboard summary 和跨实体 activity MUST NOT 永久挂载在 Inspector 中。
 
 ### 11.7 Plugin contract
 
@@ -727,7 +723,6 @@ P3 开始前 MUST 建立：
 - 删除 KPI strip、Status mix、24h Activity、Overview Gantt 和重复 feed。
 - 使用 Attention + Active runs + Continue work 建立最小 Dashboard。
 - 从 primary rail 移除 Activity 和 Workflows。
-- 将 Copilot 从 RightPanel 移出。
 - 停止从 lazy snapshot 生成权威 aggregate。
 - 修复顶栏 Filter/command palette 语义。
 - 消除 explorer heading、breadcrumb、page title 的重复标题。
@@ -799,7 +794,6 @@ P3 开始前 MUST 建立：
 | Feature explorers | `app/projects/ProjectsExplorer.tsx`、`app/files/FilesExplorer.tsx`、`app/assets/AssetsExplorer.tsx`、`app/agent/AgentExplorer.tsx` | feature-owned tree、actions、permissions、dialogs 与 tests |
 | Center routing | `apps/web/src/app/panels/CenterPanel.tsx` | 已改为解析 lazy landing contribution 或 entity renderer slot |
 | Inspector | `apps/web/src/app/panels/RightPanel.tsx`、`panels/inspectorSurface.ts` | entity inspector 使用 registry；feature contextual surface 由 owner 注册 |
-| Copilot | `apps/web/src/app/components/CopilotPanel.tsx` | 移入 Agent/Attention，并明确写操作 |
 | Runs | `apps/web/src/app/runs/RunsPage.tsx` | List 为默认；删除 card dashboard |
 | Dashboard layout | `apps/web/src/app/runs/DashboardPanel.tsx`、`useDashboardLayout.ts` | 删除 |
 | Approvals | `apps/web/src/app/approvals/*` | feature-owned query、command、SSE invalidation、review surfaces 与测试 |
@@ -826,7 +820,6 @@ P3 开始前 MUST 建立：
 ### 17.2 功能正交性
 
 - [x] Workflow 只有一个主要编辑 surface，并归属于 Experiment。
-- [x] Right inspector 不永久渲染 Copilot。
 - [x] Run Timeline 不在 Overview 重复出现。
 - [x] Global `Go to` 与 explorer `Filter` 是两个清晰控件。
 - [x] 同一个 status aggregate 不在同一页面重复表达。

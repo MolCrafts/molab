@@ -19,7 +19,6 @@ import type { WorkspaceInfoResponse } from '../models/WorkspaceInfoResponse';
 import type { WorkspaceOpenLocalRequest } from '../models/WorkspaceOpenLocalRequest';
 import type { WorkspaceOpenRemoteRequest } from '../models/WorkspaceOpenRemoteRequest';
 import type { WorkspaceRunsResponse } from '../models/WorkspaceRunsResponse';
-import type { WorkspaceSummaryResponse } from '../models/WorkspaceSummaryResponse';
 import type { WorkspaceTargetCreateRequest } from '../models/WorkspaceTargetCreateRequest';
 import type { WorkspaceTargetListResponse } from '../models/WorkspaceTargetListResponse';
 import type { WorkspaceTargetResponse } from '../models/WorkspaceTargetResponse';
@@ -74,7 +73,7 @@ export class WorkspaceService {
      * The canonical structural workspace read-model (integration.md §1).
      *
      * A read-only projection assembled from authoritative workspace state — the one
-     * shape agents/planners/CLI/UI observe. ``ContextFocus`` is supplied by the
+     * shape the CLI and UI observe. ``ContextFocus`` is supplied by the
      * caller via optional query params and is never persisted. ``/runs`` remains the
      * specialized detailed run view (richer per-execution rows); this endpoint is the
      * canonical *structure* and stays consistent with it.
@@ -105,32 +104,6 @@ export class WorkspaceService {
                 'projectId': projectId,
                 'experimentId': experimentId,
                 'runId': runId,
-            },
-            errors: {
-                422: `Validation Error`,
-            },
-        });
-    }
-    /**
-     * Get Workspace Copilot
-     * The read-only Workspace Copilot summary — structured state + ranked next-actions.
-     *
-     * A pure projection over the canonical ``WorkspaceContext``; it mutates nothing.
-     * Next-actions are **advisory** and separated from execution — a mutating one
-     * names the operation it would perform in ``op``, and whoever executes it owns
-     * the policy for what that operation requires.
-     * @param molabSession
-     * @returns WorkspaceSummaryResponse Successful Response
-     * @throws ApiError
-     */
-    public static getWorkspaceCopilot(
-        molabSession?: (string | null),
-    ): CancelablePromise<WorkspaceSummaryResponse> {
-        return __request(OpenAPI, {
-            method: 'GET',
-            url: '/api/workspace/copilot',
-            cookies: {
-                'molab_session': molabSession,
             },
             errors: {
                 422: `Validation Error`,

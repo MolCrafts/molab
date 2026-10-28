@@ -14,7 +14,6 @@ Contents:
 - :mod:`molab.services.workflow_kind` — legacy workflow-kind classification
   (one rule for ``molab migrate workflow-kind`` and the server writers' 409 gate).
 - :mod:`molab.services.knowledge_context` — the document read-model and its producer.
-- :mod:`molab.services.copilot` — the deterministic workspace summary.
 
 Layer rules: services may import ``workflow`` / ``workspace`` / ``knowledge``
 (and cross-layer primitives); it MUST NOT import ``molab.server`` or

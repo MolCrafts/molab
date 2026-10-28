@@ -35,13 +35,9 @@ def _check_redirect_sources() -> None:
         assert "molab.workspace.bundle" not in src, module.__name__
     assert "molab.workspace.knowledge" not in inspect.getsource(knowledge_routes)
     assert "molab.workspace.knowledge" not in inspect.getsource(run_routes)
-    for handler in (
-        workspace_routes.get_workspace_context,
-        workspace_routes.get_workspace_copilot,
-    ):
-        src = inspect.getsource(handler)
-        assert "molab.services.knowledge_context" in src
-        assert "context_with_knowledge" in src
+    src = inspect.getsource(workspace_routes.get_workspace_context)
+    assert "molab.services.knowledge_context" in src
+    assert "context_with_knowledge" in src
 
 
 def main() -> None:

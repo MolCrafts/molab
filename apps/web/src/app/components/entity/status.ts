@@ -50,15 +50,11 @@ const STATUS_ALIASES: Record<string, CanonicalStatus> = {
   user_cancelled: "cancelled",
   cached: "cached",
   warning: "warning",
-  awaiting_approval: "warning",
   awaiting_review: "warning",
-  awaiting_user: "warning",
   blocked: "warning",
   conflicting: "warning",
   paused: "warning",
   stale: "warning",
-  waiting_approval: "warning",
-  waiting_for_approval: "warning",
   waiting_for_review: "warning",
 };
 

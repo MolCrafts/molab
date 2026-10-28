@@ -431,7 +431,7 @@ class UiPluginListResponse(ApiModel):
 
 
 class TaskTypeResponse(ApiModel):
-    """Single registered task type the agent / UI can compose into IR."""
+    """Single registered task type the UI can compose into IR."""
 
     slug: str = Field(..., description="Registry slug, e.g. 'core.add'")
     description: str = Field("", description="Human-readable summary")

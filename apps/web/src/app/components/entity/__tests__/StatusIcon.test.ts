@@ -22,9 +22,4 @@ describe("statusIconMeta", () => {
     expect(statusIconMeta("pending").tone).toBe("queued");
     expect(statusIconMeta("skipped").tone).toBe("cancelled");
   });
-
-  it("maps suspended agent states to warning", () => {
-    expect(statusIconMeta("waiting_approval").tone).toBe("warning");
-    expect(statusIconMeta("awaiting_user").tone).toBe("warning");
-  });
 });

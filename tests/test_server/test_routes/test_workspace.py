@@ -1,4 +1,4 @@
-"""``/api/workspace/{context,copilot}`` consume the services knowledge projection."""
+"""``/api/workspace/context`` consumes the services knowledge projection."""
 
 from __future__ import annotations
 
@@ -37,13 +37,9 @@ def _workspace_files(ws: Workspace) -> set[str]:
 
 class TestContextConsumesProjection:
     def test_consumes_services_projection(self) -> None:
-        for handler in (
-            workspace_routes.get_workspace_context,
-            workspace_routes.get_workspace_copilot,
-        ):
-            src = inspect.getsource(handler)
-            assert "context_with_knowledge" in src
-            assert "molab.services.knowledge_context" in src
+        src = inspect.getsource(workspace_routes.get_workspace_context)
+        assert "context_with_knowledge" in src
+        assert "molab.services.knowledge_context" in src
         module_src = inspect.getsource(workspace_routes)
         assert "_knowledge_refs" not in module_src
         assert "model_copy" not in module_src
@@ -71,46 +67,13 @@ class TestContextConsumesProjection:
         }
         assert body["knowledge"] == [_IDEA_GOLDEN]
 
-    def test_copilot_reports_the_same_knowledge(self, tmp_path: Path) -> None:
-        client = _client(tmp_path, with_note=True)
-        with client:
-            response = client.get("/api/workspace/copilot")
-        set_workspace_path_override(None)
-        assert response.status_code == 200, response.text
-        body = response.json()
-        assert set(body) == {
-            "workspace",
-            "headline",
-            "counts",
-            "failedRuns",
-            "runningRuns",
-            "healthFlags",
-            "relevantKnowledge",
-            "nextActions",
-        }
-        assert set(body["counts"]) == {
-            "projects",
-            "experiments",
-            "workflows",
-            "recent_runs",
-            "failed_runs",
-            "running_runs",
-            "artifacts",
-            "knowledge",
-            "health_flags",
-        }
-        assert body["relevantKnowledge"] == [_IDEA_GOLDEN]
-
     def test_empty_workspace_projects_nothing(self, tmp_path: Path) -> None:
         client = _client(tmp_path)
         with client:
             context = client.get("/api/workspace/context")
-            copilot = client.get("/api/workspace/copilot")
         set_workspace_path_override(None)
         assert context.status_code == 200, context.text
         assert context.json()["knowledge"] == []
-        assert copilot.status_code == 200, copilot.text
-        assert copilot.json()["relevantKnowledge"] == []
 
     def test_focus_writes_nothing(self, tmp_path: Path) -> None:
         ws = Workspace(tmp_path / "ws", name="lab")
