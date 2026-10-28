@@ -349,20 +349,14 @@ class TestCreateExecution:
         schema = create_app().openapi()["components"]["schemas"]["ExecutionAttemptCreateRequest"]
         assert schema["properties"]["bypassCache"]["default"] is False
 
-    def test_retry_request_is_stored_as_rerun(
-        self, served: ServedFactory, failed_run: RunFixture
-    ) -> None:
-        """arch-own-03a §1: a RETRY request is created as a RERUN."""
+    def test_retry_mode_is_rejected(self, served: ServedFactory, failed_run: RunFixture) -> None:
         ws, exp, run = failed_run
         with served(ws) as client:
             response = client.post(
                 f"{_run_url(exp, run)}/executions",
                 json={"mode": "retry", "basedOnExecutionId": "e01"},
             )
-        assert response.status_code == 201, response.text
-        body = response.json()
-        assert body["mode"] == "rerun"
-        assert body["id"] == "e02"
+        assert response.status_code == 422, response.text
 
     def test_resume_without_checkpoint_is_created(
         self, served: ServedFactory, failed_run: RunFixture

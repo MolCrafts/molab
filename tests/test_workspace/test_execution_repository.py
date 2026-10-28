@@ -360,7 +360,6 @@ def _attempt_dirs(repo: ExecutionRepository) -> set[str]:
 
 _NON_INITIAL = (
     ExecutionMode.RERUN,
-    ExecutionMode.RETRY,
     ExecutionMode.RESUME,
     ExecutionMode.REPRODUCE,
 )
@@ -374,28 +373,7 @@ _NOT_SUCCEEDED = (
 class TestExecutionRepositoryCreateModes:
     """arch-own-03a §1: one creation rule set for every Execution mode."""
 
-    # --- RETRY is stored as RERUN -----------------------------------------
-
-    def test_retry_is_stored_as_rerun(self, run: Run) -> None:
-        repo = _run_repo(run)
-        _terminal(repo, ExecutionMode.INITIAL, ExecutionStatus.FAILED)
-
-        rec = repo.create(mode=ExecutionMode.RETRY, created_by=_TEST_AGENT)
-
-        assert rec.mode is ExecutionMode.RERUN
-        assert rec.based_on_execution_id == "e01"
-        assert _raw_state(repo, rec.id)["mode"] == "rerun"
-
-    def test_retry_after_success_is_stored_as_rerun(self, run: Run) -> None:
-        repo = _run_repo(run)
-        _terminal(repo, ExecutionMode.INITIAL, ExecutionStatus.SUCCEEDED)
-
-        rec = repo.create(mode=ExecutionMode.RETRY, created_by=_TEST_AGENT)
-
-        assert rec.mode is ExecutionMode.RERUN
-        assert rec.based_on_execution_id == "e01"
-
-    def test_legacy_retry_record_still_reads(self, run: Run) -> None:
+    def test_stored_retry_mode_does_not_load(self, run: Run) -> None:
         repo = _run_repo(run)
         _terminal(repo, ExecutionMode.INITIAL, ExecutionStatus.FAILED)
         path = Path(repo.state_path("e01"))
@@ -403,10 +381,8 @@ class TestExecutionRepositoryCreateModes:
         raw["mode"] = "retry"
         path.write_text(json.dumps(raw), encoding="utf-8")
 
-        assert repo.get("e01").mode is ExecutionMode.RETRY
-        rec = repo.create(mode=ExecutionMode.RERUN, created_by=_TEST_AGENT)
-        assert rec.id == "e02"
-        assert rec.based_on_execution_id == "e01"
+        with pytest.raises(pydantic.ValidationError):
+            repo.get("e01")
 
     # --- the predecessor defaults to the latest attempt -------------------
 

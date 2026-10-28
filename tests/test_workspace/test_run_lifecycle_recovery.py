@@ -2,9 +2,8 @@
 
 A Run has no scalar status; every physical Execution is sealed independently
 as SUCCEEDED / FAILED / INTERRUPTED / CANCELLED and is immutable once sealed.
-Recovery is a *new* Execution (RERUN, based on a terminal predecessor; a
-RETRY request is stored as RERUN since arch-own-03a) — it never mutates the
-failed attempt.
+Recovery is a *new* Execution (RERUN, based on a terminal predecessor). It
+never mutates the failed attempt.
 
 Bug 1 (v2) — a failed Execution is immutable: a subsequent attempt is a new
 Execution and never flips the failed one back to ``succeeded``. There is no

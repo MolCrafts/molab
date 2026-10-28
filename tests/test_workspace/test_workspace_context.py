@@ -36,10 +36,10 @@ def _tree(root_path: object) -> set[str]:
 
 
 def _fail_then_retry(run: Run) -> None:
-    """e01 fails, e02 (a RETRY of e01) succeeds — built through the public API."""
+    """e01 fails, e02 (a rerun of e01) succeeds — built through the public API."""
     with pytest.raises(RuntimeError), run.start():
         raise RuntimeError("boom")
-    with run.start(mode=ExecutionMode.RETRY, predecessor="e01"):
+    with run.start(mode=ExecutionMode.RERUN, predecessor="e01"):
         pass
 
 

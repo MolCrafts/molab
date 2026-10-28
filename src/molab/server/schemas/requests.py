@@ -155,7 +155,7 @@ class RunAnalyzeFailureRequest(ApiModel):
 class ExecutionAttemptCreateRequest(ApiModel):
     """Create one physical attempt for an existing logical Run."""
 
-    mode: Literal["initial", "retry", "rerun", "resume", "reproduce"] = "initial"
+    mode: Literal["initial", "rerun", "resume", "reproduce"] = "initial"
     based_on_execution_id: str | None = None
     checkpoint_artifact_id: str | None = None
     bypass_cache: bool = Field(

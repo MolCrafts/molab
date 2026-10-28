@@ -42,16 +42,9 @@ class ContentRef(BaseModel):
 
 
 class ExecutionMode(StrEnum):
-    """How an attempt relates to the attempts of its run before it.
-
-    ``RETRY`` is a legacy value: records written before arch-own-03a may
-    carry ``"retry"`` and still read as ``RETRY``, but it is never created.
-    ``ExecutionRepository.create`` accepts it as input and stores it as
-    ``RERUN``.
-    """
+    """How an attempt relates to the attempts of its run before it."""
 
     INITIAL = "initial"
-    RETRY = "retry"
     RERUN = "rerun"
     RESUME = "resume"
     REPRODUCE = "reproduce"

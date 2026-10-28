@@ -437,7 +437,7 @@ class ExecutionContext:
 
     @property
     def predecessor(self) -> str | None:
-        """Selected predecessor for retry/resume/reproduction provenance."""
+        """Selected predecessor for rerun/resume/reproduce provenance."""
         return self._state.based_on_execution_id if self._state is not None else None
 
     @property

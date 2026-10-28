@@ -1253,7 +1253,7 @@ export function setRun(run: ApiRunResponse): void {
     (run.executionHistory ?? []).map((rec, index) => ({
       id: rec.executionId,
       runId: run.id,
-      mode: index ? "retry" : "initial",
+      mode: index ? "rerun" : "initial",
       status: rec.status,
       createdAt: rec.startedAt,
       startedAt: rec.status === "queued" ? null : rec.startedAt,

@@ -61,7 +61,7 @@ async def main() -> None:
     print(f"attempt 1: status={result.status}")
 
     with run.start(
-        mode=ExecutionMode.RETRY,
+        mode=ExecutionMode.RERUN,
         predecessor=first_execution_id,
         profile_config=cfg,
     ) as ctx:

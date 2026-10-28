@@ -296,11 +296,6 @@ class AdoptedArtifact(BaseModel):
     """When the artifact was produced; the attempt's finish by default."""
 
 
-def _creation_mode(mode: ExecutionMode) -> ExecutionMode:
-    """The mode a new attempt is stored with: ``retry`` becomes ``rerun``."""
-    return ExecutionMode.RERUN if mode is ExecutionMode.RETRY else mode
-
-
 def _resolve_predecessor(
     mode: ExecutionMode,
     prior: builtins.list[Execution],
@@ -309,7 +304,7 @@ def _resolve_predecessor(
     """The one predecessor rule shared by ``create`` and ``resolve_predecessor``.
 
     Args:
-        mode: The normalized mode (never ``retry``).
+        mode: The requested mode.
         prior: Every attempt of the run, ordered by ``seq``.
         based_on_execution_id: The named predecessor; ``None`` means the latest.
 
@@ -401,8 +396,6 @@ class ExecutionRepository:
         no file and no history commit.
 
         Mode rules:
-            - ``retry`` is accepted as input and stored as ``rerun``; no new
-              ``"retry"`` record is ever written (legacy ones still read).
             - No new attempt is created while any attempt of this run is
               still active (queued / running / finalizing); cancel it first.
             - A non-``initial`` mode needs a prior attempt. Without
@@ -444,7 +437,6 @@ class ExecutionRepository:
             FileExistsError: A record with the next id already exists (for
                 example a legacy directory of that name).
         """
-        mode = _creation_mode(mode)
         if mode is ExecutionMode.REPRODUCE:
             bypass_cache = True
         self.fs.mkdir(self.executions_dir, parents=True, exist_ok=True)
@@ -565,7 +557,6 @@ class ExecutionRepository:
         for src in [*(src for src, _ in planned), *(src for src, _, _ in promoted)]:
             if not src.exists():
                 raise FileNotFoundError(f"cannot adopt {src}: it does not exist")
-        mode = _creation_mode(mode)
         self.fs.mkdir(self.executions_dir, parents=True, exist_ok=True)
         with file_lock(self._create_lock()):
             prior = self.list()
@@ -670,7 +661,7 @@ class ExecutionRepository:
 
         The one predecessor rule: ``create`` applies it under its lock, and
         ``Run._create_execution`` applies it to inherit the predecessor's
-        config. ``retry`` is treated as ``rerun``.
+        config.
 
         Args:
             mode: The requested mode.
@@ -685,7 +676,7 @@ class ExecutionRepository:
                 (the predecessor included) is still active.
             KeyError: The named predecessor does not exist.
         """
-        return _resolve_predecessor(_creation_mode(mode), self.list(), based_on_execution_id)
+        return _resolve_predecessor(mode, self.list(), based_on_execution_id)
 
     # ── read ─────────────────────────────────────────────────────────────
 

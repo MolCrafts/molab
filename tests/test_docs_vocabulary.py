@@ -81,10 +81,6 @@ ALLOWED_SPANS: dict[str, tuple[str, str]] = {
         '"workflow_snapshot": None',
         "frozen hash key of compute_run_definition_hash (arch-own-04e, D45)",
     ),
-    "retry-mode": (
-        "`ExecutionMode.RETRY` is stored as `RERUN`",
-        "03a normalizes the legacy input mode to RERUN",
-    ),
     "run-exec-fields": (
         "`ErrorInfo` (removed; read `Execution.error`)",
         "D82 Removed API list entry",
@@ -275,6 +271,7 @@ class TestVocabularyDetectors:
             ("`exec-<run_id>[-N]`", "run-path-id"),
             ("`ReferenceStore`", "reference-store"),
             ("`RETRY` after a failure", "retry-mode"),
+            ("`ExecutionMode.RETRY` is stored as `RERUN`", "retry-mode"),
             ("five execution modes", "five-modes"),
             ("`--resume` reopens the existing execution", "resume-reopens"),
             (
@@ -303,7 +300,6 @@ class TestVocabularyDetectors:
             "Bundles with a mismatched version",
             "RETRYABLE_STATUSES",
             "Agent(retries=N)",
-            "`ExecutionMode.RETRY` is stored as `RERUN`",
             "[Guide](../guide/index.md)",
             "knowledges/tg-index.md",
             "├── index.md   ← workspace narrative",

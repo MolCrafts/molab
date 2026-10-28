@@ -144,7 +144,7 @@ Entering `run.start()` opens a `RunContext` which:
 5. On success, seals the execution as `succeeded` with the final timestamp.
 6. On failure, seals it as `failed` and writes `executions/<exec_id>/traceback.txt`.
 
-Every attempt appears in `run.executions`, newest last. An execution is opened with `ExecutionMode.INITIAL` the first time. A later attempt needs an explicit mode: `RERUN` after any terminal attempt, `RESUME` when the predecessor failed, was cancelled, or was interrupted, and `REPRODUCE` after a success. `ExecutionMode.RETRY` is stored as `RERUN`.
+Every attempt appears in `run.executions`, newest last. An execution is opened with `ExecutionMode.INITIAL` the first time. A later attempt needs an explicit mode: `RERUN` after any terminal attempt, `RESUME` when the predecessor failed, was cancelled, or was interrupted, and `REPRODUCE` after a success.
 
 ## Assets
 

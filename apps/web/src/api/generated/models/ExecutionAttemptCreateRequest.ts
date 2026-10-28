@@ -22,7 +22,6 @@ export type ExecutionAttemptCreateRequest = {
 export namespace ExecutionAttemptCreateRequest {
     export enum mode {
         INITIAL = 'initial',
-        RETRY = 'retry',
         RERUN = 'rerun',
         RESUME = 'resume',
         REPRODUCE = 'reproduce',

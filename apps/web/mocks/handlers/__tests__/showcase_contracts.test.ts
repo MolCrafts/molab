@@ -128,11 +128,11 @@ describe("offline showcase contracts", () => {
   it("creates and cancels a retry while keeping dashboard attempts consistent", async () => {
     const response = await request(
       `${base}/executions`,
-      post({ mode: "retry", basedOnExecutionId: "exec-run-001-01", target: "laptop" }),
+      post({ mode: "rerun", basedOnExecutionId: "exec-run-001-01", target: "laptop" }),
     );
     expect(response.status).toBe(201);
     const execution = (await response.json()) as ExecutionResponse;
-    expect(execution.mode).toBe("retry");
+    expect(execution.mode).toBe("rerun");
     expect((await request(`${base}/executions/${execution.id}/cancel`, post({}))).status).toBe(200);
     const run = await json<RunResponse>(base);
     expect(run.executions?.find((e) => e.id === execution.id)?.status).toBe("cancelled");

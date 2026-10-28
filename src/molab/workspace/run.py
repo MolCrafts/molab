@@ -764,9 +764,9 @@ class Run(Folder):
         profile); the caller's *environment* is merged in beside them.
         Start-time facts are added later, once, by whoever starts the attempt.
 
-        Mode rules live in ``ExecutionRepository.create``: ``retry`` is stored
-        as ``rerun``, a non-initial mode defaults its predecessor to the
-        latest attempt, and no attempt is created while one is active.
+        Mode rules live in ``ExecutionRepository.create``: a non-initial mode
+        defaults its predecessor to the latest attempt, and no attempt is
+        created while one is active.
         ``reproduce`` always records ``bypass_cache``.
 
         Args:
@@ -1024,9 +1024,9 @@ class Run(Folder):
         Returns:
             The QUEUED record as written.
 
-        Mode rules are ``ExecutionRepository.create``'s: ``retry`` is stored
-        as ``rerun``, a non-initial mode defaults its predecessor to the
-        latest attempt, and no attempt is created while one is active.
+        Mode rules are ``ExecutionRepository.create``'s: a non-initial mode
+        defaults its predecessor to the latest attempt, and no attempt is
+        created while one is active.
 
         Raises:
             ValueError: *environment* names a profile key, *environment* or
@@ -1136,7 +1136,7 @@ class Run(Folder):
 
         The read side of a finished run. Without *execution_id* it is the
         newest **succeeded** attempt that holds ``out/<task>``, so neither a
-        failed or cancelled retry nor a rerun served entirely from the node
+        failed or cancelled attempt nor a rerun served entirely from the node
         cache (which writes no ``out/``; its outputs name the attempt that
         computed them) shadows the data a figure was drawn from.
 

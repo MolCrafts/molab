@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from molab.server.schemas.requests import (
+    ExecutionAttemptCreateRequest,
     ExecutionCreateRequest,
     ExperimentCreateRequest,
     RunCreateRequest,
@@ -65,3 +66,14 @@ class TestRunParamRequests:
             {"projectId": "p", "experimentId": "e", "params": {"seed": 1}}
         )
         assert request.params == {"seed": 1}
+
+
+class TestExecutionAttemptCreateRequest:
+    def test_retry_mode_is_rejected(self) -> None:
+        with pytest.raises(ValidationError):
+            ExecutionAttemptCreateRequest.model_validate({"mode": "retry"})
+
+    def test_rerun_mode_is_accepted(self) -> None:
+        request = ExecutionAttemptCreateRequest.model_validate({"mode": "rerun"})
+
+        assert request.mode == "rerun"
