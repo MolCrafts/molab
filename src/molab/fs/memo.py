@@ -4,7 +4,7 @@ Why it exists
 =============
 Reading a workspace is dominated by re-reading the same small files: a Run's
 ``_ops/run.json`` is consulted by ``status`` / ``finished_at`` /
-``execution_history`` / ``is_retryable`` and each of those used to be an
+``is_retryable`` and each of those used to be an
 ``exists`` + ``open`` + ``json.load`` + pydantic validate.  On a network
 filesystem every one of those is a metadata round-trip; over SSH each is a
 full round-trip.

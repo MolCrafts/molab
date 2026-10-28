@@ -483,11 +483,6 @@ class Run(Folder):
         return [self._bound(item) for item in self._execution_repository().list()]
 
     @property
-    def execution_history(self) -> list[Execution]:
-        """Deprecated read alias; history is stored by Execution, not Run."""
-        return self.executions
-
-    @property
     def finished_at(self) -> datetime | None:
         """When the latest attempt ended — the timestamp beside :attr:`status_label`.
 

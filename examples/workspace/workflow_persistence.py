@@ -1,4 +1,4 @@
-"""What survives re-opening a run: ``run.json`` + ``execution_history``.
+"""What survives re-opening a run: the run record and its executions.
 
 Matches ``docs/en/guide/workflow-persistence.md``.
 

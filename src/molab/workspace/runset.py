@@ -242,7 +242,7 @@ class RunSet(Sequence[Run]):
 
         Reads each run's status and its latest execution's persisted
         completed-node outputs — the read-back path for a later session
-        (``experiment.runs().collect()``).
+        (``experiment.runset().collect()``).
         """
         return RunSetResult(entries=tuple(self._record_for(run) for run in self._runs))
 

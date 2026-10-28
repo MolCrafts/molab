@@ -68,7 +68,7 @@ molab run train.py --profile smoke
 molab execute path/to/<params>/
 ```
 
-`molab execute` is the worker entry point used by cluster backends. It reads `run.json` for the `script` field, re-imports the script, matches the project + experiment IDs via `find_workflow_for_run(...)`, and drives the bound `Workflow` against the existing run directory — appending a new `ExecutionRecord` to `execution_history`.
+`molab execute` is the worker entry point used by cluster backends. It reads the run record, re-imports the script, matches the project + experiment, and drives the bound `Workflow` against the existing run directory — opening a new attempt under `executions/eNN`.
 
 ## Identity and Correlation
 
@@ -121,4 +121,4 @@ Neither verb touches `pending` or `succeeded` runs, and a live `running` run mus
 
 ## Runnable Example
 
-`examples/workspace/workflow_persistence.py` runs a deliberately flaky task twice and prints the `execution_history`, `profile`, `config`, and `config_hash` fields from `run.json`.
+`examples/workspace/workflow_persistence.py` runs a deliberately flaky task twice and prints each attempt from `run.executions`, plus the run's definition hash and parameters.

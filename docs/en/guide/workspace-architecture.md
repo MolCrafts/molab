@@ -179,7 +179,7 @@ molab asset     list
 molab info      # show workspace summary
 ```
 
-`molab runs prune` interactively walks the project → experiment → run → execution tree and lets you delete per-execution records (removes `executions/<exec_id>/` and rewrites `run.execution_history`).
+`molab runs prune` walks the project → experiment → run → execution tree and deletes the chosen `executions/<exec_id>/` directory.
 
 ## Directory Layout
 

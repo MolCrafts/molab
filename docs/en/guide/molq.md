@@ -110,7 +110,7 @@ This is a key design point. Remote execution still goes through the same workflo
 - the same `Workflow`,
 - the same `RunContext`,
 - the same persisted profile config,
-- the same `execution_history` model.
+- the same per-attempt `execution.json` model.
 
 ## Responsibilities That Stay Outside the Plugin
 

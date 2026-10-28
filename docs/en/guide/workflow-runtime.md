@@ -67,7 +67,7 @@ with run.start() as ctx:  # run.start(profile_config=cfg) to attach a resolved p
     await runtime.execute(compiled, run_context=ctx)
 ```
 
-When a live `RunContext` is passed, its profile config supplies the values bound to tasks by name (the `config=` kwarg is ignored in its favor), and the run's lifecycle — status transitions, execution records, error capture — is managed by the `with run.start()` block. For the common "build a fresh run and execute on it" shape, `runtime.run_on(compiled, experiment, parameters=...)` does both steps in one call.
+When a live `RunContext` is passed, its profile config supplies the values bound to tasks by name (the `config=` kwarg is ignored in its favor), and the run's lifecycle — status transitions, execution records, error capture — is managed by the `with run.start()` block. For the common "build a fresh run and execute on it" shape, `runtime.run_on(compiled, experiment, params=...)` does both steps in one call.
 
 ## Cancellation and Failure
 

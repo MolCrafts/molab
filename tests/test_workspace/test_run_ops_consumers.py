@@ -4,8 +4,8 @@
 ``AttributeError``. The query surface is ``run.status_summary`` (a
 :class:`~molab.workspace.domain.RunStatusSummary`) and ``run.executions``
 (a list of :class:`~molab.workspace.domain.ExecutionState`).
-``Run.is_retryable`` and ``Run.execution_history`` (deprecated read alias)
-both read ``run.executions``. There is no ``ops/run.json`` sidecar.
+``Run.is_retryable`` reads ``run.executions``. There is no ``ops/run.json``
+sidecar.
 """
 
 from __future__ import annotations
@@ -37,10 +37,9 @@ class TestStatusReadsFromExecutions:
             pass
         assert other.is_retryable is False
 
-    def test_execution_history_reads_from_executions(self, run) -> None:
+    def test_executions_record_each_attempt(self, run) -> None:
         with run.start() as ctx:
             exec_id = ctx.id
 
-        assert [e.id for e in run.execution_history] == [exec_id]
         assert [e.id for e in run.executions] == [exec_id]
         assert run.executions[0].status is ExecutionStatus.SUCCEEDED

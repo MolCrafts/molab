@@ -115,7 +115,7 @@ For a workspace run, the runtime pre-sets every root task's inputs to `{"params"
 runtime = WorkflowRuntime()
 result = await runtime.execute(compiled, run_context=ctx, seed_outputs=..., cache=...)
 handle = await runtime.start(compiled)  # background, returns WorkflowExecution
-result = await runtime.run_on(compiled, experiment, parameters=...)  # fresh Run + execute
+result = await runtime.run_on(compiled, experiment, params=...)  # fresh Run + execute
 ```
 
 `seed_outputs` pre-populates already-known task outputs (the caller-driven resume path — seeded nodes skip their body but still route); unknown seed names fail fast. Resume seeds come from `read_journal(run_dir, execution_id)`, the persisted node-level state of a prior execution.

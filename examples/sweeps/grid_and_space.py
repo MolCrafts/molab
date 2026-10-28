@@ -10,7 +10,7 @@ Demonstrates:
 4. ``RunSetResult.to_records()`` — one flat dict per run.
 5. ``RunSetResult.min_by(key)`` / ``max_by(key)`` — extreme record lookup.
 6. ``UniformSpace`` — random sampling from discrete value lists.
-7. Reading back a finished sweep with ``exp.runs().collect()``.
+7. Reading back a finished sweep with ``exp.runset().collect()``.
 8. Idempotent re-declaration — same params → same run ids.
 
 Run directly::
@@ -80,7 +80,7 @@ def main() -> None:
     # ── 4. Read back finished sweep ────────────────────────────────────
     print()
     print("── Read back from disk ──────────────────────────────────")
-    collected = exp.runs().collect()
+    collected = exp.runset().collect()
     print(f"  collected {len(collected)} runs")
     for row in collected.to_records():
         print(f"    lr={row['lr']:.0e}  status={row['status']}")

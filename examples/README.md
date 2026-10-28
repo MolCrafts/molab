@@ -35,7 +35,7 @@ You can delete these freely; none of them touch `~/` or any system path.
 |---|---|---|
 | [workspace-api](../docs/guide/workspace-api.md) | `workspace/workspace_api.py` | `Workspace → Project → Experiment → Run` walk |
 | [workspace-architecture](../docs/guide/workspace-architecture.md) | `workspace/workspace_architecture.py` | What files actually land on disk |
-| [workflow-persistence](../docs/guide/workflow-persistence.md) | `workspace/workflow_persistence.py` | `run.json`, `execution_history`, `config_hash` |
+| [workflow-persistence](../docs/guide/workflow-persistence.md) | `workspace/workflow_persistence.py` | run record, executions, `config_hash` |
 | [assets](../docs/guide/assets.md) | `workspace/assets.py` | Artifact, log, checkpoint, `find_asset` |
 | [assets](../docs/guide/assets.md) | `workspace/assets_extended.py` | Error traces, checkpoint chaining, content-hash lookup, import actions |
 

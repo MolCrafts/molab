@@ -922,17 +922,6 @@ class Experiment(Folder):
 
         return RunSet(self.list_runs())
 
-    def runs(self) -> RunSet:
-        """Deprecated alias of :meth:`runset`."""
-        import warnings
-
-        warnings.warn(
-            "Experiment.runs() is deprecated; use runset()",
-            DeprecationWarning,
-            stacklevel=2,
-        )
-        return self.runset()
-
     def get_run(self, run_id: str) -> Run:
         """Get a run by its directory name (its parameters) or its UUIDv7 id."""
         return self.get_folder(run_id, cls=Run)

@@ -27,7 +27,6 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import traceback
-import warnings
 from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -750,7 +749,6 @@ class WorkflowRuntime:
         experiment: _ExperimentLike,
         *,
         params: Mapping[str, JSONValue] | None = None,
-        parameters: Mapping[str, JSONValue] | None = None,
         deps: UserDeps = None,
         profile_config: object | None = None,
         config: JSONMapping | None = None,
@@ -763,21 +761,7 @@ class WorkflowRuntime:
         :class:`~molab.workflow.binding.WorkflowBindingRegistry` (or pass
         ``experiment=`` to :meth:`WorkflowCompiler.compile`) if you need it
         recoverable after process restart.
-
-        ``parameters=`` is a deprecated alias; passing both raises ``TypeError``.
         """
-        if parameters is not None:
-            if params is not None:
-                raise TypeError(
-                    "run_on() got both 'params' and its deprecated alias "
-                    "'parameters'; pass only 'params'"
-                )
-            warnings.warn(
-                "WorkflowRuntime.run_on(parameters=...) is deprecated; use params=...",
-                DeprecationWarning,
-                stacklevel=2,
-            )
-            params = parameters
         params_dict = dict(params) if params is not None else None
         run = cast("Any", experiment).add_run(params=params_dict)
         with run.start(profile_config=profile_config) as run_ctx:
