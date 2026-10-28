@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Annotated, Any, Literal
 
-from pydantic import AliasChoices, ConfigDict, Discriminator, Field, Tag
+from pydantic import ConfigDict, Discriminator, Field, Tag, model_validator
 
 from ._wire import ApiModel
 
@@ -89,18 +89,31 @@ class ExperimentCreateRequest(ApiModel):
 # ── Run ─────────────────────────────────────────────────────────────────────
 
 
+def _reject_parameters_alias(data: object) -> object:
+    """Refuse the removed ``parameters`` request key.
+
+    The on-disk run field is still ``parameters``. The create body is
+    ``params``. Accepting the old key as an alias, or ignoring it, stores
+    an empty param dict.
+    """
+    if isinstance(data, dict) and "parameters" in data:
+        raise ValueError("unknown field 'parameters'; send 'params'")
+    return data
+
+
 class RunCreateRequest(ApiModel):
-    params: dict[str, Any] = Field(
-        default_factory=dict,
-        validation_alias=AliasChoices("params", "parameters"),
-        description="Run params ('parameters' accepted as a deprecated alias)",
-    )
+    params: dict[str, Any] = Field(default_factory=dict, description="Run params")
     target: str | None = Field(
         default=None,
         description="Declared compute-target hint (must exist in workspace registry)",
     )
 
     model_config = ConfigDict(populate_by_name=True)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _no_parameters_alias(cls, data: object) -> object:
+        return _reject_parameters_alias(data)
 
 
 class RunHarvestRequest(ApiModel):
@@ -189,11 +202,7 @@ class WorkflowDocumentRequest(ApiModel):
 class ExecutionCreateRequest(ApiModel):
     project_id: str = Field(..., description="Target project ID")
     experiment_id: str = Field(..., description="Target experiment ID")
-    params: dict[str, Any] = Field(
-        default_factory=dict,
-        validation_alias=AliasChoices("params", "parameters"),
-        description="Run params ('parameters' accepted as a deprecated alias)",
-    )
+    params: dict[str, Any] = Field(default_factory=dict, description="Run params")
     workflow_json: dict[str, Any] | None = Field(
         default=None,
         description=(
@@ -205,6 +214,11 @@ class ExecutionCreateRequest(ApiModel):
             "binding memo."
         ),
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _no_parameters_alias(cls, data: object) -> object:
+        return _reject_parameters_alias(data)
 
 
 # ── Asset ───────────────────────────────────────────────────────────────────

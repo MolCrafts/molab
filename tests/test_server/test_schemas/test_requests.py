@@ -6,7 +6,9 @@ import pytest
 from pydantic import ValidationError
 
 from molab.server.schemas.requests import (
+    ExecutionCreateRequest,
     ExperimentCreateRequest,
+    RunCreateRequest,
     WorkflowDocumentRequest,
 )
 
@@ -37,3 +39,29 @@ class TestWorkflowDocumentRequest:
         )
 
         assert request.convert_to_document is True
+
+
+class TestRunParamRequests:
+    def test_params_is_accepted(self) -> None:
+        request = RunCreateRequest.model_validate({"params": {"seed": 1}})
+
+        assert request.params == {"seed": 1}
+
+    def test_parameters_key_is_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="parameters"):
+            RunCreateRequest.model_validate({"parameters": {"seed": 1}})
+
+    def test_parameters_beside_params_is_rejected(self) -> None:
+        with pytest.raises(ValidationError, match="parameters"):
+            RunCreateRequest.model_validate({"params": {"seed": 1}, "parameters": {"seed": 2}})
+
+    def test_execution_create_rejects_parameters(self) -> None:
+        with pytest.raises(ValidationError, match="parameters"):
+            ExecutionCreateRequest.model_validate(
+                {"projectId": "p", "experimentId": "e", "parameters": {"seed": 1}}
+            )
+
+        request = ExecutionCreateRequest.model_validate(
+            {"projectId": "p", "experimentId": "e", "params": {"seed": 1}}
+        )
+        assert request.params == {"seed": 1}

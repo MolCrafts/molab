@@ -12,7 +12,7 @@ export type ExecutionCreateRequest = {
      */
     experimentId: string;
     /**
-     * Run params ('parameters' accepted as a deprecated alias)
+     * Run params
      */
     params?: Record<string, any>;
     /**

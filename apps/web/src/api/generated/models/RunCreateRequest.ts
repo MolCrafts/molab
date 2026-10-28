@@ -4,7 +4,7 @@
 /* eslint-disable */
 export type RunCreateRequest = {
     /**
-     * Run params ('parameters' accepted as a deprecated alias)
+     * Run params
      */
     params?: Record<string, any>;
     /**
