@@ -8,6 +8,6 @@ from molab.workspace.fs_remote import RemoteFileSystem
 class TestRemoteFileSystemJoin:
     def test_join_preserves_absolute_root(self) -> None:
         assert (
-            RemoteFileSystem.join("/home/jicli594/work/pinet-quant-raw", "workspace.json")
-            == "/home/jicli594/work/pinet-quant-raw/workspace.json"
+            RemoteFileSystem.join("/home/jicli594/work/pinet-quant-raw", "index.md")
+            == "/home/jicli594/work/pinet-quant-raw/index.md"
         )

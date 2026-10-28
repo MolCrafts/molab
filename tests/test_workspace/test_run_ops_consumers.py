@@ -1,4 +1,4 @@
-"""Run hot-state read accessors derive from Executions, not ``run.json``.
+"""Run hot-state read accessors derive from Executions, not the run record.
 
 ``Run.status`` (scalar) is removed in schema v2 — it raises
 ``AttributeError``. The query surface is ``run.status_summary`` (a

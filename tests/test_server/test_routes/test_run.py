@@ -21,6 +21,7 @@ from molab.workspace import Experiment, Run, Workspace
 from molab.workspace.domain import Artifact, ExecutionMode
 from molab.workspace.models import ComputeTarget
 from molab.workspace.targets import add_target
+from tests.support.records import read_record, write_record
 
 ServedFactory = Callable[..., TestClient]
 RunFixture = tuple[Workspace, Experiment, Run]
@@ -511,10 +512,9 @@ class TestDispatchToMolq:
         self, fresh_run: RunFixture, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         _ws, _exp, run = fresh_run
-        path = Path(run.run_dir) / "run.json"
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload = read_record(run.run_dir)
         payload["workflow_snapshot"] = {"entrypoint": "/x.py:wf"}
-        path.write_text(json.dumps(payload), encoding="utf-8")
+        write_record(run.run_dir, payload)
         _MolqRecorder.calls = []
         monkeypatch.setattr(run_routes, "SubmitHandler", _MolqRecorder)
         target = ComputeTarget(

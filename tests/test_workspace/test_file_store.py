@@ -51,8 +51,8 @@ class TestFileStore:
             Path(path).write_text('{"ok": true}', encoding="utf-8")
 
         monkeypatch.setattr("molab.workspace.file_store.atomic_write_json", spy)
-        FileStore(tmp_path).put("run.json", {"a": 1})
-        assert seen == [tmp_path / "run.json"]
+        FileStore(tmp_path).put("state.json", {"a": 1})
+        assert seen == [tmp_path / "state.json"]
 
     def test_put_uses_injected_filesystem(self, tmp_path: Path) -> None:
         class FakeDisk:

@@ -1,6 +1,6 @@
 """Record scientific intent — Project, Experiment revision, Run — in history.
 
-The entity JSON files are the declarations; this class only commits them so
+The ``index.md`` records are the declarations; this class only commits them so
 the workspace's git log reads as a scientific narrative rather than a series
 of anonymous file changes.
 """
@@ -48,6 +48,7 @@ class ScientificRepository:
         *,
         workspace_id: str,
         path: PathArg | None = None,
+        also: tuple[PathArg, ...] = (),
     ) -> None:
         self.history.record(
             "ProjectCreated",
@@ -60,7 +61,7 @@ class ScientificRepository:
                 ),
             ),
             summary=str(record.get("name") or record["id"]),
-            paths=(path,) if path else (),
+            paths=((path,) if path else ()) + also,
             occurred_at=_when(record, "created_at"),
         )
 
@@ -70,6 +71,7 @@ class ScientificRepository:
         *,
         project_id: str,
         path: PathArg | None = None,
+        also: tuple[PathArg, ...] = (),
     ) -> None:
         self.history.record(
             "ExperimentCreated",
@@ -83,7 +85,7 @@ class ScientificRepository:
                 ),
             ),
             summary=str(record.get("name") or record["id"]),
-            paths=(path,) if path else (),
+            paths=((path,) if path else ()) + also,
             occurred_at=_when(record, "created_at"),
         )
 
@@ -93,6 +95,7 @@ class ScientificRepository:
         *,
         project_id: str,
         path: PathArg | None = None,
+        also: tuple[PathArg, ...] = (),
     ) -> None:
         self.history.record(
             "ExperimentRevised",
@@ -106,7 +109,7 @@ class ScientificRepository:
                 Relation(predicate="partOf", object=EntityRef(id=project_id, type="project")),
             ),
             summary=f"{record.get('name') or record['id']} rev {record.get('revision', '?')}",
-            paths=(path,) if path else (),
+            paths=((path,) if path else ()) + also,
             occurred_at=_when(record, "revision_created_at"),
         )
 
@@ -116,6 +119,7 @@ class ScientificRepository:
         *,
         experiment_id: str,
         path: PathArg | None = None,
+        also: tuple[PathArg, ...] = (),
     ) -> None:
         relations = [
             Relation(
@@ -139,6 +143,6 @@ class ScientificRepository:
             agent=SYSTEM_AGENT,
             relations=tuple(relations),
             summary=name,
-            paths=(path,) if path else (),
+            paths=((path,) if path else ()) + also,
             occurred_at=_when(record, "created_at"),
         )

@@ -2,7 +2,7 @@
 
 These endpoints are the UI/API counterpart of ``molab target add/remove/list/test``.
 A target is the (Transport × Scheduler) destination a run can be submitted to.
-The workspace (``workspace.json``) is the source of truth; this router is a
+The workspace record (the root ``index.md``) is the source of truth; this router is a
 thin adapter on top of :mod:`molab.workspace.targets`.
 """  # noqa: RUF002
 

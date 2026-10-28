@@ -9,7 +9,7 @@ Design invariants:
 
 - **Pure projection.** :func:`assemble_workspace_context` is a read — it stores nothing
   new and the model is never itself canonical (authoritative state stays in the entity
-  ``*.json`` / OKF ``meta.json``).
+  ``index.md`` records).
 - **Layer-legal.** This module imports only ``workspace`` + stdlib/pydantic — never
   upstream layers (enforced by the workspace import-guard). Workflow
   *availability* is read workspace-only from the externalized ``workflow.json``.
@@ -78,7 +78,7 @@ class WorkflowRef(BaseModel, frozen=True):
 
 
 class RunRef(BaseModel, frozen=True):
-    """A run's identity + hot-state summary (from ``run.json``)."""
+    """A run's identity + hot-state summary (from its record and Executions)."""
 
     run_id: str
     experiment_id: str
@@ -155,7 +155,7 @@ def assemble_workspace_context(
 ) -> WorkspaceContext:
     """Assemble the canonical :class:`WorkspaceContext` — a pure read.
 
-    Walks the authoritative folder tree + ``run.json`` and
+    Walks the authoritative folder tree + each run record and
     composes them into one read-model. Writes nothing.
 
     Args:

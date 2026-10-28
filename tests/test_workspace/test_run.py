@@ -5,8 +5,8 @@ Logical Run identity and its physical Execution factory.
 Chain-owned test module: created by arch-own-01-cleanup; later arch-own specs
 extend it (add classes / tests here rather than creating sibling files).
 
-arch-own-01 pins the materialize ordering: mkdir -> save the entity JSON ->
-record history, so the ``RunDefined`` commit stages an existing ``run.json``
+arch-own-01 pins the materialize ordering: mkdir -> save the entity record ->
+record history, so the ``RunDefined`` commit stages an existing ``index.md`` record
 rather than an empty directory. History stays a soft dependency.
 """
 
@@ -64,7 +64,7 @@ class TestRunMaterialize:
     ) -> None:
         ws = Workspace(tmp_path, name="lab")
         experiment = ws.add_project("p").add_experiment("e", params={})
-        seen = _spy_history(monkeypatch, "run.json")
+        seen = _spy_history(monkeypatch, "index.md")
 
         experiment.add_run(params={"seed": 1})
 
@@ -643,7 +643,7 @@ def _run_load_ast() -> ast.FunctionDef:
 
 
 class TestRunLoad:
-    """Identity comes from ``run.json``; the directory name is not parsed."""
+    """Identity comes from the run's ``index.md`` record; the directory name is not parsed."""
 
     def test_load_roundtrip(self, tmp_path: Path) -> None:
         ws = Workspace(tmp_path / "lab", name="lab")

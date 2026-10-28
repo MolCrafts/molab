@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Annotated
 
 import typer
 
+from molab.workspace.entity_record import UnmigratedLayoutError
 from molab.workspace.fs import FileSystem
 from molab.workspace.target import (
     Target,
@@ -81,8 +82,8 @@ def open_workspace(
     """Resolve *target_str* and open the Workspace on the matching FileSystem.
 
     Local and remote targets share this path and explicitly bind their filesystem.
-    ``require_existing=True`` (default) fails when ``workspace.json`` is
-    missing; pass ``False`` for ``init``-style create.
+    ``require_existing=True`` (default) fails when the root ``index.md``
+    workspace record is missing; pass ``False`` for ``init``-style create.
 
     Args:
         target_str: Target spec (path, ``cluster:path`` or ``@name``).
@@ -106,9 +107,14 @@ def open_workspace(
     root_str = str(root)
 
     if require_existing:
-        marker = fs.join(root_str, "workspace.json")
+        from molab.workspace.entity_record import read_record
+        from molab.workspace.folder import WORKSPACE_ROOT_KIND
+
         try:
-            present = fs.exists(marker)
+            record = read_record(fs, root_str)
+            present = record is not None and record.type == WORKSPACE_ROOT_KIND
+        except UnmigratedLayoutError:
+            raise
         except Exception as exc:
             # Surface auth-ish transport errors with a connect hint.
             from molab.cli._common import rprint

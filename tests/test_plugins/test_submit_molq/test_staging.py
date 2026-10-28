@@ -219,7 +219,7 @@ class TestStageOut:
         remote_paths = [d[0] for d in transport.downloads]
         assert len(remote_paths) == 1
         assert remote_paths[0].endswith("/executions/exec-abc")
-        assert not any(p.endswith("/run.json") for p in remote_paths)
+        assert not any(p.endswith("/index.md") for p in remote_paths)
         assert not any(p.endswith("/alive") for p in remote_paths)
         # No ``texts`` → the remote record is unreadable → not authoritative.
         assert result is False

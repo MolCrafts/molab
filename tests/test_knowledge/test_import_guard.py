@@ -15,6 +15,9 @@ enforces is therefore scope-aware:
 - ``molab.workflow`` / ``molab.server`` / ``molab.cli`` /
   ``molab.services`` / ``molab.plugins`` / ``molab.sweep`` stay **absolutely**
   banned at any depth.
+- At module level, the only other ``molab.*`` imports are the layer-0
+  primitives in :data:`LAYER0_ALLOWED` (``molab.frontmatter`` among them: the
+  one YAML-frontmatter implementation knowledge and workspace share).
 
 This is an **AST static scan** of the package source — not a runtime
 ``sys.modules`` probe. A runtime probe is unsatisfiable: importing any
@@ -44,6 +47,17 @@ ABSOLUTE_BANS: tuple[str, ...] = (
 
 #: Allowed only inside a function body or an ``if TYPE_CHECKING:`` block.
 WORKSPACE_PREFIX = "molab.workspace"
+
+#: Layer-0 primitives knowledge may import anywhere (CLAUDE.md, knowledge charter).
+LAYER0_ALLOWED: tuple[str, ...] = (
+    "molab.fs",
+    "molab.gitignore",
+    "molab.ids",
+    "molab.path",
+    "molab.atomicio",
+    "molab._typing",
+    "molab.frontmatter",
+)
 
 
 def _is_type_checking_test(test: ast.expr) -> bool:
@@ -114,6 +128,39 @@ def test_knowledge_source_imports_no_absolutely_banned_layer() -> None:
         for lineno, module in _absolute_offenders(py.read_text(encoding="utf-8")):
             hits.append((py.name, lineno, module))
     assert hits == [], f"forbidden imports in molab.knowledge: {hits}"
+
+
+def _module_level_molab_imports(source: str) -> list[tuple[int, str]]:
+    """Absolute ``molab.*`` imports at the module's top level."""
+    found: list[tuple[int, str]] = []
+    for node in ast.parse(source).body:
+        if isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+            names = [node.module]
+        elif isinstance(node, ast.Import):
+            names = [alias.name for alias in node.names]
+        else:
+            continue
+        found.extend((node.lineno, name) for name in names if name.split(".")[0] == "molab")
+    return found
+
+
+def test_knowledge_module_level_imports_are_layer0_primitives_only() -> None:
+    hits: list[tuple[str, int, str]] = []
+    for py in _package_sources():
+        for lineno, module in _module_level_molab_imports(py.read_text(encoding="utf-8")):
+            if module.startswith("molab.knowledge"):
+                continue
+            if not any(module == p or module.startswith(p + ".") for p in LAYER0_ALLOWED):
+                hits.append((py.name, lineno, module))
+    assert hits == [], f"molab.knowledge imports a non-primitive at module level: {hits}"
+
+
+def test_frontmatter_has_one_implementation() -> None:
+    """Knowledge's frontmatter module delegates to ``molab.frontmatter``."""
+    source = (KNOWLEDGE_ROOT / "frontmatter.py").read_text(encoding="utf-8")
+    assert "from molab.frontmatter import" in source
+    assert "_parse_yaml" not in source
+    assert "_dump_yaml" not in source
 
 
 _MODULE_LEVEL_IMPORT = "from molab.workspace.base import atomic_write_json"

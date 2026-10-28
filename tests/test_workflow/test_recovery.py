@@ -9,7 +9,6 @@ reaches it through its parent and never carries a copy. A legacy run-level
 
 from __future__ import annotations
 
-import json
 import textwrap
 from pathlib import Path
 
@@ -31,6 +30,7 @@ from molab.workflow import (
 )
 from molab.workspace import Experiment, Workspace
 from molab.workspace.run import Run
+from tests.support.records import read_record, write_record
 
 _SCRIPT_MODULE = """\
 from molab.workflow import TaskContext, Workflow, WorkflowCompiler
@@ -59,11 +59,10 @@ def _bare_run(tmp_path: Path, *, entrypoint: str | None = None) -> Run:
 
 
 def _write_legacy_snapshot(run: Run, entrypoint: str) -> Run:
-    """Stamp a legacy ``workflow_snapshot`` onto ``run.json`` and reload the run."""
-    path = Path(run.run_dir) / "run.json"
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    """Stamp a legacy ``workflow_snapshot`` onto the run record and reload the run."""
+    payload = read_record(run.run_dir)
     payload["workflow_snapshot"] = {"entrypoint": entrypoint}
-    path.write_text(json.dumps(payload), encoding="utf-8")
+    write_record(run.run_dir, payload)
     return Run.load(run.run_dir)
 
 
@@ -323,10 +322,9 @@ class TestKindDispatch:
     def test_unbound_run_ignores_a_legacy_workflow_snapshot(self, tmp_path: Path) -> None:
         default_binding_registry.clear()
         _ws, _exp, run = _seed(tmp_path)
-        path = Path(run.run_dir) / "run.json"
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload = read_record(run.run_dir)
         payload["workflow_snapshot"] = {"entrypoint": f"{tmp_path / 'gone.py'}:wf"}
-        path.write_text(json.dumps(payload), encoding="utf-8")
+        write_record(run.run_dir, payload)
         reloaded = Run.load(run.run_dir)
         default_binding_registry.clear()
         with pytest.raises(WorkflowRecoveryError):
@@ -336,7 +334,7 @@ class TestKindDispatch:
         default_binding_registry.clear()
         _ws, exp, run = _seed(tmp_path)
         exp.bind_workflow("document", document=_constant_add_document())
-        experiment_json = Path(exp.experiment_dir) / "experiment.json"
+        experiment_json = Path(exp.experiment_dir) / "index.md"
         before = experiment_json.read_bytes()
         revision_id = exp.metadata.revision_id
         revision = exp.metadata.revision

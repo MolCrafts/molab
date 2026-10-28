@@ -57,17 +57,17 @@ class TestRecord:
     def test_a_fact_is_a_commit_over_the_files_it_describes(self, tmp_path):
         history = GitHistory(tmp_path)
         history.init()
-        (tmp_path / "run.json").write_text('{"id": "x"}')
+        (tmp_path / "index.md").write_text("---\nid: x\n---\n")
 
         commit = history.record(
             "RunDefined",
             subject=RUN,
             summary="dp=5_seed=42",
-            paths=(tmp_path / "run.json",),
+            paths=(tmp_path / "index.md",),
         )
 
         assert commit is not None
-        assert "run.json" in _git(tmp_path, "show", "--name-only", "--format=", commit)
+        assert "index.md" in _git(tmp_path, "show", "--name-only", "--format=", commit)
         assert _git(tmp_path, "log", "-1", "--format=%s").strip() == "RunDefined: dp=5_seed=42"
 
     def test_nothing_to_commit_records_nothing(self, tmp_path):
@@ -181,7 +181,7 @@ class TestSoftDependency:
         history.init()
         assert history.sweep("adopt existing workspace") is not None
         tracked = _git(ws.root, "ls-files")
-        assert "projects/p/experiments/e/runs/seed=1/run.json" in tracked
+        assert "projects/p/experiments/e/runs/seed=1/index.md" in tracked
 
 
 class TestBulkNeverEntersHistory:
@@ -190,14 +190,14 @@ class TestBulkNeverEntersHistory:
     def test_an_oversize_file_with_an_unlisted_extension_is_left_unstaged(self, tmp_path):
         history = GitHistory(tmp_path)
         history.init()
-        (tmp_path / "run.json").write_text('{"id": "x"}')
+        (tmp_path / "index.md").write_text("---\nid: x\n---\n")
         (tmp_path / "traj_seg001.traj").write_bytes(b"\0" * (MAX_RECORD_BYTES + 1))
 
         commit = history.sweep("adopt")
 
         tracked = _git(tmp_path, "ls-files")
         assert commit is not None
-        assert "run.json" in tracked
+        assert "index.md" in tracked
         assert "traj_seg001.traj" not in tracked
 
     def test_a_tree_of_only_bulk_records_nothing(self, tmp_path):

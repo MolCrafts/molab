@@ -1,6 +1,6 @@
-"""Lost-update protection for the ``run.json`` read-modify-write cycle.
+"""Lost-update protection for the run record read-modify-write cycle.
 
-``run.json`` is written by several uncoordinated writers (server process,
+The run record (``index.md``) is written by several uncoordinated writers (server process,
 foreground CLI, detached workers). ``Run._update_metadata`` must reload the
 on-disk state and apply the partial update under an advisory file lock, so two
 writers touching *distinct* fields never drop each other's updates. (The
@@ -10,14 +10,12 @@ writers touching *distinct* fields never drop each other's updates. (The
 
 from __future__ import annotations
 
-import json
-from pathlib import Path
-
 from molab.workspace import Workspace
+from tests.support.records import read_record
 
 
 def _read_run_json(run) -> dict:
-    return json.loads(Path(str(run.run_dir / "run.json")).read_text(encoding="utf-8"))
+    return read_record(run.run_dir)
 
 
 def _second_handle(tmp_path, run):

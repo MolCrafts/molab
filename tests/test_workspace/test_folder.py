@@ -2,9 +2,9 @@
 
 Covers the ``Folder`` lifecycle (lazy mkdir, atomic ``write_json``, id/kind
 validation, ``children`` filtering, metadata round-trip, ``delete`` / ``move_to``)
-and the one Folder type table — the filename axis this module owns
-(``register_entity_class`` / ``class_for_entity_file`` / ``entity_json_names``)
-that ``concept_from_dir`` consumes; a ``meta.json``-only directory rebuilds as a
+and the one Folder type table — record ``type`` → class, which this module
+owns (``register_entity_class`` / ``class_for_entity_type``) and
+``concept_from_dir`` consumes; a record of an unregistered type rebuilds as a
 bare ``Folder``. The folder-module import-guard subprocess lives at the bottom.
 """
 
@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import ast
 import inspect
-import json
 import subprocess
 import sys
 import time
@@ -20,27 +19,28 @@ from pathlib import Path
 
 import pytest
 
+from molab import frontmatter
 from molab.fs import LocalFileSystem
 from molab.workspace import Experiment, Project, Run, Workspace
 from molab.workspace import folder as folder_mod
 from molab.workspace.folder import (
     Folder,
     FolderMoveCollisionError,
-    class_for_entity_file,
+    class_for_entity_type,
     concept_from_dir,
-    entity_filename,
-    entity_json_names,
     register_entity_class,
 )
 
 
 # ``Folder`` has no business subclasses at this level; this private subclass
 # exists only so ``children()`` has something concrete to reconstruct. It is a
-# production-shaped registrar too, so it also proves the filename axis takes a
+# production-shaped registrar too, so it also proves the type table takes a
 # class registered from anywhere.
 @register_entity_class
 class _TestSubFolder(Folder):
     """Minimal Folder subclass used only by the children() filter test."""
+
+    _entity_kind = "test.sub-folder"
 
 
 class TestFolder:
@@ -136,20 +136,20 @@ class TestFolder:
         assert [c.metadata.name for c in parent.children(kind="test.beta")] == ["beta"]
 
     def test_save_bumps_updated_at_past_created_at(self, tmp_path: Path) -> None:
-        """``save()`` advances ``updated_at`` in ``meta.json`` (sole concept file)."""
+        """``save()`` advances ``updated_at`` in the ``index.md`` record (sole concept file)."""
         folder = Folder(parent=None, name="alpha", kind="test.root", root_path=tmp_path)
         folder.materialize()
-        meta_path = Path(folder.path) / "meta.json"
-        assert meta_path.is_file()
-        assert not (Path(folder.path) / "metadata.json").exists()
+        record_path = Path(folder.path) / "index.md"
+        assert record_path.is_file()
+        assert not (Path(folder.path) / "meta.json").exists()
 
         time.sleep(0.001)  # let the clock tick so the bump is observable
         folder.save()
 
-        raw = json.loads(meta_path.read_text())
+        raw, _body = frontmatter.split(record_path.read_text())
         assert raw["type"] == "test.root"
-        created = raw["created_at"]
-        updated = raw["updated_at"]
+        created = str(raw["created_at"])
+        updated = str(raw["updated_at"])
         assert updated > created
 
     def test_delete_removes_directory_tree(self, tmp_path: Path) -> None:
@@ -207,45 +207,35 @@ class TestFolder:
 
 
 def _marker_dir(root: Path, name: str, marker: dict[str, object]) -> Path:
-    """A bare ``meta.json``-only directory (no class-named entity JSON)."""
+    """A directory whose ``index.md`` record names an unregistered type."""
     child = Path(root) / "root" / name
     child.mkdir(parents=True, exist_ok=True)
-    (child / "meta.json").write_text(json.dumps(marker), encoding="utf-8")
+    (child / "index.md").write_text(frontmatter.dump(marker, ""), encoding="utf-8")
     return child
 
 
 class TestFolderTypeTable:
-    """The filename axis of the one Folder type table, and its ``concept_from_dir`` read."""
+    """The record-type axis of the one Folder type table, and its ``concept_from_dir`` read."""
 
-    def test_entity_filename_is_the_class_name_snake_cased(self) -> None:
-        assert entity_filename(_TestSubFolder) == "__test_sub_folder.json"
-        assert entity_filename(Workspace) == "workspace.json"
+    def test_the_four_levels_are_reachable_by_their_record_type(self) -> None:
+        assert class_for_entity_type("workspace.root") is Workspace
+        assert class_for_entity_type("workspace.project") is Project
+        assert class_for_entity_type("workspace.experiment") is Experiment
+        assert class_for_entity_type("workspace.run") is Run
 
-    def test_a_registered_class_is_reachable_by_its_entity_file(self) -> None:
-        assert class_for_entity_file(entity_filename(_TestSubFolder)) is _TestSubFolder
+    def test_a_registered_class_is_reachable_by_its_record_type(self) -> None:
+        assert class_for_entity_type("test.sub-folder") is _TestSubFolder
 
-    def test_an_unknown_entity_file_has_no_class(self) -> None:
-        assert class_for_entity_file("finding.json") is None
+    def test_an_unknown_record_type_has_no_class(self) -> None:
+        assert class_for_entity_type("finding") is None
 
-    def test_entity_json_names_leads_with_the_four_core_levels(self) -> None:
-        # Exact equality is asserted fresh-process by the 09 regression script;
-        # in-suite ``_TestSubFolder`` is registered too, so assert the prefix.
-        assert entity_json_names()[:4] == (
-            "workspace.json",
-            "project.json",
-            "experiment.json",
-            "run.json",
-        )
-
-    def test_re_registering_the_same_class_adds_no_second_name(self) -> None:
-        before = entity_json_names()
-
+    def test_re_registering_the_same_class_keeps_one_entry(self) -> None:
         register_entity_class(_TestSubFolder)
 
-        assert entity_json_names() == before
+        assert class_for_entity_type("test.sub-folder") is _TestSubFolder
 
     def test_concept_from_dir_rebuilds_every_built_in_level(self, tmp_path: Path) -> None:
-        """The four tree levels rebuild from their own entity filename — no
+        """The four tree levels rebuild from their own record type — no
         knowledge registry involved."""
         ws = Workspace(root=tmp_path / "lab")
         ws.materialize()
@@ -259,7 +249,7 @@ class TestFolderTypeTable:
         assert type(concept_from_dir(run.resolve(), exp)) is Run
 
     def test_a_directory_with_no_marker_is_not_a_folder(self, tmp_path: Path) -> None:
-        """No entity record and no ``meta.json`` → ``TypeError``, not a bare Folder."""
+        """A plain ``index.md`` with no typed record → ``TypeError``, not a bare Folder."""
         parent = Folder(name="root", kind="test.root", root_path=tmp_path)
         bare = Path(parent.path) / "bare"
         bare.mkdir(parents=True, exist_ok=True)
@@ -269,7 +259,7 @@ class TestFolderTypeTable:
             concept_from_dir(str(bare), parent)
 
     def test_a_knowledge_directory_is_not_a_folder(self, tmp_path: Path) -> None:
-        """A Knowledge document (``finding.json`` + ``index.md``, no entity record)
+        """A Knowledge document (``finding.json`` + ``index.md``, no typed record)
         is refused the same way — without knowledge's head-file list."""
         parent = Folder(name="root", kind="test.root", root_path=tmp_path)
         doc = Path(parent.path) / "finding"
@@ -280,10 +270,10 @@ class TestFolderTypeTable:
         with pytest.raises(TypeError, match="is not a Folder"):
             concept_from_dir(str(doc), parent)
 
-    def test_concept_from_dir_rebuilds_a_meta_json_only_dir_as_plain_folder(
+    def test_concept_from_dir_rebuilds_an_unregistered_type_as_plain_folder(
         self, tmp_path: Path
     ) -> None:
-        """A legacy ``meta.json``-only dir (an old agent session) rebuilds as a bare ``Folder``."""
+        """A record of an unregistered type (an old agent session) rebuilds as a bare ``Folder``."""
         parent = Folder(name="root", kind="test.root", root_path=tmp_path)
         child = _marker_dir(tmp_path, "beta", {"type": "agent.session", "id": "d"})
 
@@ -325,7 +315,7 @@ class TestFolderModuleCut:
         for name in ("read_index", "write_index", "read_meta", "from_disk", "children"):
             assert hasattr(Folder, name), f"Folder.{name} was removed with the edge cut"
         assert folder_mod.INDEX_FILENAME == "index.md"
-        assert folder_mod.META_JSON_FILENAME == "meta.json"
+        assert not hasattr(folder_mod, "META_JSON_FILENAME")
 
     def test_the_meta_json_type_table_is_gone(self) -> None:
         """Its only registrar was the agent layer removed in D86."""

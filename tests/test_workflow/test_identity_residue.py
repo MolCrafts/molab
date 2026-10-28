@@ -105,7 +105,7 @@ class TestIdentityResidue:
             scan.visit(tree)
             hits.extend(scan.hits)
             snapshots.extend(scan.snapshot_keys)
-        assert snapshots == [f"{_SRC / 'workspace' / 'run.py'}:247:compute_run_definition_hash"]
+        assert snapshots == [f"{_SRC / 'workspace' / 'run.py'}:250:compute_run_definition_hash"]
         assert hits == []
 
     def test_schema_lives_only_in_the_test_fixture(self) -> None:

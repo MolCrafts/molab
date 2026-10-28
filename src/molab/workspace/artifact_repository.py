@@ -1346,7 +1346,7 @@ def scan_asset_repositories(workspace: Workspace) -> builtins.list[AssetReposito
 
     Workspace first, then each project, then each of that project's
     experiments. Runs are not hosts: nothing writes a run-level asset.
-    A directory with no entity file is skipped. No index is built.
+    A directory with no ``index.md`` record is skipped. No index is built.
 
     Args:
         workspace: The workspace to walk.
@@ -1354,18 +1354,18 @@ def scan_asset_repositories(workspace: Workspace) -> builtins.list[AssetReposito
     Returns:
         One repository per host.
     """
+    from molab import frontmatter
+
+    from .entity_record import ENTITY_FILENAME
+    from .folder import WORKSPACE_EXPERIMENT_KIND, WORKSPACE_PROJECT_KIND
     from .naming import EXPERIMENT_CONTAINER, PROJECT_CONTAINER, RUN_CONTAINER
     from .workspace import Workspace
 
-    def _entity_id(directory: str, filename: str) -> str | None:
-        path = workspace.fs.join(directory, filename)
-        if not workspace.fs.is_file(path):
+    def _entity_id(directory: str, kind: str) -> str | None:
+        head = frontmatter.read_head(workspace.fs, workspace.fs.join(directory, ENTITY_FILENAME))
+        if not head or head.get("type") != kind:
             return None
-        try:
-            payload = json.loads(workspace.fs.read_text(path))
-        except (OSError, ValueError):
-            return None
-        found = payload.get("id") if isinstance(payload, dict) else None
+        found = head.get("id")
         return found if isinstance(found, str) else None
 
     repos: list[AssetRepository] = []
@@ -1379,7 +1379,7 @@ def scan_asset_repositories(workspace: Workspace) -> builtins.list[AssetReposito
         if parent_name == RUN_CONTAINER:
             continue
         if parent_name == PROJECT_CONTAINER:
-            project_id = _entity_id(host_s, "project.json")
+            project_id = _entity_id(host_s, WORKSPACE_PROJECT_KIND)
             if project_id is None:
                 continue
             repos.append(
@@ -1391,9 +1391,9 @@ def scan_asset_repositories(workspace: Workspace) -> builtins.list[AssetReposito
             )
             continue
         if parent_name == EXPERIMENT_CONTAINER:
-            experiment_id = _entity_id(host_s, "experiment.json")
+            experiment_id = _entity_id(host_s, WORKSPACE_EXPERIMENT_KIND)
             project_dir = str(PurePosixPath(host_s).parent.parent)
-            project_id = _entity_id(project_dir, "project.json")
+            project_id = _entity_id(project_dir, WORKSPACE_PROJECT_KIND)
             if experiment_id is None or project_id is None:
                 continue
             repos.append(

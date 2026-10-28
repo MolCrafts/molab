@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from molab.workspace.domain import ExecutionStatus
+from tests.support.records import read_record
 
 
 class TestRunCancel:
@@ -29,4 +29,4 @@ class TestRunCancel:
         assert record.executor["job_id"] == "uuid-123"
         assert record.executor["scheduler_job_id"] == "456"
         assert record.status == ExecutionStatus.CANCELLED
-        assert "executor_info" not in json.loads((Path(str(run.run_dir)) / "run.json").read_text())
+        assert "executor_info" not in read_record(Path(str(run.run_dir)))

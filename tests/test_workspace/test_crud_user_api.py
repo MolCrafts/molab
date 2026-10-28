@@ -12,11 +12,11 @@ from molab.workspace import (
 
 
 class TestWorkspaceCreateLoad:
-    def test_create_writes_workspace_json(self, tmp_path) -> None:
+    def test_create_writes_the_root_record(self, tmp_path) -> None:
         root = tmp_path / "lab"
         ws = Workspace(root, name="Lab")
         ws.materialize()
-        assert (root / "workspace.json").is_file()
+        assert (root / "index.md").is_file()
         assert ws.name == "Lab"
 
     def test_construct_existing_loads(self, tmp_path) -> None:

@@ -9,9 +9,9 @@ Behavior:
 - ``molab init host:/remote/path`` — same, over SSH transport
 - ``molab init`` — same, on the current working directory
 - Idempotent: re-running on an existing workspace leaves child state
-  (e.g. ``projects/``) intact and only refreshes ``workspace.json``.
+  (e.g. ``projects/``) intact and only refreshes the root ``index.md`` record.
 - A ``Workspace`` handle writes nothing on its own, so init materializes it
-  (``workspace.json``, id minted once) and, on a local disk, starts the git
+  (the root ``index.md`` record, id minted once) and, on a local disk, starts the git
   history with its ignore rules.
 """
 

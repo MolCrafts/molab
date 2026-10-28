@@ -199,7 +199,7 @@ def list_runs(
     if not experiment:
         raise RunNotFoundError(project_id, experiment_id, "")
     # See a run directory that landed on the host since the last list.
-    # Dropping only this listing keeps pinned run.json and execution.json;
+    # Dropping only this listing keeps pinned index.md and execution.json;
     # wiping the whole tree made every open re-fetch over SSH.
     fs = getattr(workspace, "fs", None)
     if isinstance(fs, CachedRemoteFileSystem):

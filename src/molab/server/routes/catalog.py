@@ -195,7 +195,7 @@ def _scope_for_path(workspace, target: Path) -> CatalogScopeInfo | None:  # noqa
 
     Descends ``list_projects`` / ``list_experiments`` / ``list_runs`` and
     enters only the branch whose directory contains *target*. Ids are the
-    entity JSON ids, never directory names. Compares directories; it does
+    entity record ids, never directory names. Compares directories; it does
     not resolve paths and it does not walk artifacts.
     """
     for project in workspace.list_projects():

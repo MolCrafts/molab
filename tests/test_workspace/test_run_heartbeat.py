@@ -3,7 +3,7 @@
 Ownership heartbeat is the mtime of an empty ``alive`` file inside one
 physical Execution directory, not a JSON field. ``touch_alive`` /
 ``is_alive_stale`` / ``unlink_alive`` go through ``Folder._disk()``. A missing
-``alive`` is not stale. Refreshing the heartbeat must not rewrite ``run.json``.
+``alive`` is not stale. Refreshing the heartbeat must not rewrite the run's ``index.md``.
 """
 
 from __future__ import annotations
@@ -103,12 +103,14 @@ class TestUnlinkAlive:
 
 
 class TestRefreshHeartbeat:
-    def test_heartbeat_touches_per_execution_alive_without_rewriting_run_json(self, run) -> None:
+    def test_heartbeat_touches_per_execution_alive_without_rewriting_the_run_record(
+        self, run
+    ) -> None:
         assert HEARTBEAT_INTERVAL_SECONDS == 30.0
         ctx = run.start()
         with ctx:
             alive = Path(str(run.run_dir)) / "executions" / ctx.id / "alive"
-            run_json = Path(str(run.run_dir)) / "run.json"
+            run_json = Path(str(run.run_dir)) / "index.md"
             assert alive.is_file()
             assert alive.stat().st_size == 0
             os.utime(alive, (alive.stat().st_mtime - 10.0, alive.stat().st_mtime - 10.0))

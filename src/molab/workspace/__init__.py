@@ -47,6 +47,7 @@ from .errors import (
     RunExistsError,
     RunNotFoundError,
     UnmigratedAssetError,
+    UnmigratedLayoutError,
 )
 from .experiment import Experiment
 from .file_store import FileStore
@@ -140,6 +141,7 @@ __all__ = [
     "TargetNotFound",
     "UniformSpace",
     "UnmigratedAssetError",
+    "UnmigratedLayoutError",
     "ValidationReport",
     "Violation",
     "WorkflowKind",

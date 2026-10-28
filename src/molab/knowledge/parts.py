@@ -136,7 +136,7 @@ class GeneratedParts:
         if not narrative.strip():
             raise ValueError(
                 "GeneratedParts.view requires a non-empty narrative — knowledge is "
-                "interpretation; the raw record already lives in run.json and the "
+                "interpretation; the raw record already lives in the run record and the "
                 "run's artifacts"
             )
 

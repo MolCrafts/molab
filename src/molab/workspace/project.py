@@ -28,7 +28,7 @@ from .artifact_repository import AssetRepository
 from .base import (
     _load_metadata,
     _reconstruct,
-    _save_metadata,
+    _record_payload,
 )
 from .domain import Asset, AssetScope, ImportAction
 from .errors import (
@@ -61,6 +61,7 @@ class Project(Folder):
 
     _exists_error_cls = ProjectExistsError
     _not_found_error_cls = ProjectNotFoundError
+    _entity_kind = WORKSPACE_PROJECT_KIND
 
     def __init__(
         self,
@@ -119,10 +120,8 @@ class Project(Folder):
 
     @classmethod
     def from_disk(cls, child_dir: PathArg, parent: Folder) -> Project:
-        """Load ``project.json`` and rebuild entity state. See Folder.from_disk hook docs."""
-        meta = _load_metadata(
-            ProjectMetadata, parent._disk().join(child_dir, "project.json"), fs=parent._disk()
-        )
+        """Load the ``index.md`` record and rebuild entity state. See Folder.from_disk hook docs."""
+        meta = _load_metadata(ProjectMetadata, cls._require_record(child_dir, parent).canonical)
         folder_meta = FolderMetadata(
             id=meta.id,
             name=meta.name,
@@ -226,12 +225,8 @@ class Project(Folder):
             self.metadata.model_dump(mode="json"),
             workspace_id=host.metadata.id,
             path=self.project_dir,
+            also=self._parent_index_paths(),
         )
-
-    def write_meta(self) -> str:
-        """Stamp concept ``type`` on ``project.json``."""
-        self.save()
-        return self._disk().join(self.project_dir, "project.json")
 
     def _move_target_id(self, new_name: str | None) -> str:
         """A Project keeps its UUID id across a move; only the name changes."""
@@ -239,7 +234,7 @@ class Project(Folder):
         return self._name
 
     def _sync_entity_identity(self) -> None:
-        """Mirror the human name into ``project.json`` (``move_to`` hook).
+        """Mirror the human name into the ``index.md`` record (``move_to`` hook).
 
         The UUID id (and directory basename) is stable across a move.
         """
@@ -248,10 +243,13 @@ class Project(Folder):
         )
         self.save()
 
+    def _canonical_record(self) -> dict[str, JSONValue]:
+        return _record_payload(self._entity_metadata)
+
     def save(self) -> None:
-        """Persist current metadata to disk."""
-        meta_path = self._disk().join(self.project_dir, "project.json")
-        _save_metadata(self._entity_metadata, meta_path, fs=self._disk())
+        """Persist current metadata to the ``index.md`` record, then refresh the index."""
+        self._write_record(self._canonical_record())
+        self._record_written()
 
     def import_asset(
         self,

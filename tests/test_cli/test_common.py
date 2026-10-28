@@ -1,15 +1,14 @@
 """Unit tests for the run readers in ``molab.cli._common``.
 
 Spec arch-own-02e-readers: ``run_environment`` / ``run_executor_info`` read
-the run's **latest** Execution record (``execution.json``) — never
-``run.json``. The fixture writes provenance only into the attempt record, so
-a reader that still consults ``run.json`` sees nothing.
+the run's **latest** Execution record (``execution.json``) — never the run
+record. The fixture writes provenance only into the attempt record, so a
+reader that still consults the run record sees nothing.
 """
 
 from __future__ import annotations
 
 import hashlib
-import json
 from pathlib import Path
 
 from molab.profile import ProfileConfig
@@ -17,6 +16,7 @@ from molab.workspace import Workspace
 from molab.workspace.domain import ExecutionMode
 from molab.workspace.experiment import Experiment
 from molab.workspace.run import Run
+from tests.support.records import read_record
 
 # Independent of ProfileConfig: sha256 over ``json.dumps({"nodes": 2},
 # sort_keys=True)`` (default separators ``", "`` / ``": "``).
@@ -39,7 +39,7 @@ def _run_with_record(tmp_path: Path) -> Run:
         environment={"script": "/lab/s.py"},
         executor={"backend": "molq", "scheduler": "slurm", "scheduler_job_id": "4242"},
     )
-    raw = json.loads((run.run_dir / "run.json").read_text())
+    raw = read_record(run.run_dir)
     assert not any(key in raw for key in _RUN_LEVEL_PROVENANCE)
     return run
 

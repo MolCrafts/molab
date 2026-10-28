@@ -4,14 +4,15 @@ Serves one or more directories. The first positional path is active at
 startup; the full set is exposed at ``GET /api/workspaces`` so the UI can
 switch between them (``POST /api/workspace/open``).
 
-The kind is not a flag. Molab reads the entity file in the directory:
-``workspace.json`` (or none) is a workspace, ``project.json`` a project,
-``experiment.json`` an experiment, ``run.json`` a run.
+The kind is not a flag. Molab reads the ``type`` of the directory's
+``index.md`` record: ``workspace.root`` (or no record) is a workspace,
+``workspace.project`` a project, ``workspace.experiment`` an experiment,
+``workspace.run`` a run.
 
 A directory may be:
 
-* a local path (any directory — plain folders open without writing
-  ``workspace.json``; missing dirs are created empty)
+* a local path (any directory — plain folders open without writing a
+  workspace record; missing dirs are created empty)
 * an SCP remote ``cluster:/path`` (lazy-download mirror via
   :class:`~molab.workspace.fs_cached.CachedRemoteFileSystem`)
 * a registered workspace target ``@name`` (from
@@ -109,7 +110,7 @@ def _local_served(resolved: Path, used_keys: set[str]) -> ServedWorkspace:
     if not resolved.exists():
         resolved.mkdir(parents=True, exist_ok=True)
         rprint(f"[dim]Created directory at {resolved}[/dim]")
-    # Do NOT materialize workspace.json — plain folders are valid roots.
+    # Do NOT materialize a workspace record — plain folders are valid roots.
     key = _unique_key(_slug(f"local-{resolved.name or 'ws'}"), used_keys)
     return ServedWorkspace(key=key, label=str(resolved), is_remote=False, path=str(resolved))
 
@@ -138,7 +139,7 @@ def _resolve_served(spec: str | Path, used_keys: set[str]) -> ServedWorkspace:
     """Resolve one directory spec into a :class:`ServedWorkspace`.
 
     Accepts local paths, SCP ``cluster:/path``, and registered
-    ``@workspace-target`` names. Never writes ``workspace.json`` for local
+    ``@workspace-target`` names. Never writes a workspace record for local
     roots; missing local directories are created empty.
     """
     from molab.server.deps.targets import get_workspace_target_registry
@@ -492,7 +493,7 @@ def serve(
         list[str] | None,
         typer.Argument(
             help=(
-                "Directory to open. Molab reads its entity file and serves "
+                "Directory to open. Molab reads its index.md record and serves "
                 "that level: workspace, project, experiment, or run. "
                 "Local path, cluster:/path, or @name. "
                 "Repeat to serve several; the first is active. Default: cwd."

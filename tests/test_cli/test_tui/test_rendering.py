@@ -2,14 +2,13 @@
 
 Spec arch-own-02e-readers: the panel reads status from ``Run.status_label``
 and profile / config_hash / config / script / executor from the run's latest
-Execution record. The fixture writes provenance only into that record;
-``run.json`` carries none.
+Execution record. The fixture writes provenance only into that record; the
+run record (``index.md``) carries none.
 """
 
 from __future__ import annotations
 
 import hashlib
-import json
 from pathlib import Path
 
 import pytest
@@ -20,6 +19,7 @@ from molab.cli.tui.tree_model import TreeNode
 from molab.profile import ProfileConfig
 from molab.workspace import Workspace
 from molab.workspace.run import Run
+from tests.support.records import read_record
 
 # Independent of ProfileConfig: sha256 over ``json.dumps({"nodes": 2},
 # sort_keys=True)`` (default separators ``", "`` / ``": "``).
@@ -38,7 +38,7 @@ def _run_with_record(tmp_path: Path) -> Run:
         environment={"script": "/lab/s.py"},
         executor={"backend": "molq", "scheduler": "slurm", "scheduler_job_id": "4242"},
     )
-    raw = json.loads((run.run_dir / "run.json").read_text())
+    raw = read_record(run.run_dir)
     assert not any(key in raw for key in _RUN_LEVEL_PROVENANCE)
     return run
 

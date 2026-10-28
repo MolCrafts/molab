@@ -81,7 +81,7 @@ def run_executor_info(run: Run) -> dict[str, str]:
 
     The executor facts (backend / scheduler / cluster / job ids) are recorded
     on each attempt's ``execution.json``; this reads the most recent attempt,
-    ``run.executions[-1]`` (attempts are ordered by creation). ``run.json`` is
+    ``run.executions[-1]`` (attempts are ordered by creation). The run record is
     not consulted — it holds only the run's logical definition.
 
     Args:
@@ -102,7 +102,7 @@ def run_environment(run: Run) -> dict[str, JSONValue]:
     script, ...) live on each attempt's ``execution.json``; this reads the
     most recent attempt, ``run.executions[-1]`` (attempts are ordered by
     creation), so a rerun shows the profile it was created with. There is no
-    fallback to ``run.json``.
+    fallback to the run record.
 
     Args:
         run: The workspace run to describe.

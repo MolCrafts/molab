@@ -6,13 +6,12 @@ adapter) and :mod:`molab.cli.tui` (interactive tree explorer) both
 consume these instead of carrying drifting copies.
 
 Both helpers are deliberately display-tolerant: a missing or malformed
-``run.json`` / timestamp renders as blank rather than crashing the UI.
+run record / timestamp renders as blank rather than crashing the UI.
 Failures are still surfaced on the debug log so they remain diagnosable.
 """
 
 from __future__ import annotations
 
-import json
 from datetime import datetime
 from pathlib import Path, PurePath
 
@@ -57,24 +56,21 @@ def elapsed(started: str | None, finished: str | None = None) -> str | None:
         return None
 
 
-def read_run_json(run_dir: Path | PurePath) -> dict[str, JSONValue]:
-    """Load ``run.json`` from *run_dir* without constructing a Run object.
+def read_run_record(run_dir: Path | PurePath) -> dict[str, JSONValue]:
+    """Load the canonical zone of *run_dir*'s ``index.md`` without constructing a Run.
 
-    Returns an empty dict when the file is missing or unreadable
+    Returns an empty dict when the record is missing or unreadable
     (display-tolerant); read/parse failures are logged at debug level.
     """
-    p = Path(run_dir) / "run.json"
-    if not p.exists():
-        return {}
+    from molab.workspace.entity_record import read_record
+    from molab.workspace.fs_local import LocalFileSystem
+
     try:
-        loaded = json.loads(p.read_text())
+        record = read_record(LocalFileSystem(), str(Path(run_dir)))
     except Exception:
-        logger.debug(f"read_run_json: failed to read {p}", exc_info=True)
+        logger.debug(f"read_run_record: failed to read {run_dir}", exc_info=True)
         return {}
-    if not isinstance(loaded, dict):
-        logger.debug(f"read_run_json: {p} is not a JSON object")
-        return {}
-    return loaded
+    return dict(record.canonical) if record is not None else {}
 
 
-__all__ = ["elapsed", "read_run_json"]
+__all__ = ["elapsed", "read_run_record"]

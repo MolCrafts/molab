@@ -24,7 +24,7 @@ import typer
 from typer.testing import CliRunner
 
 import molab.cli
-from molab._run_display import read_run_json
+from molab._run_display import read_run_record
 from molab.cli._common import deterministic_run_id
 from molab.cli.workspace.run import _submit_to_scheduler
 from molab.profile import ProfileConfig
@@ -41,6 +41,7 @@ from molab.workspace.experiment import Experiment
 from molab.workspace.project import Project
 from molab.workspace.run import Run
 from tests.support.journal import poison_node_output
+from tests.support.records import read_record, write_record
 
 _UUID7 = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
 
@@ -704,7 +705,7 @@ class TestRun:
         run = _only_run(tmp_path)
         assert [(e.id, e.status.value) for e in run.executions] == [("e01", "succeeded")]
         run_dir = Path(run.run_dir)
-        assert read_run_json(run_dir).get("script") is None
+        assert read_run_record(run_dir).get("script") is None
         assert not (run_dir / "source").exists()
 
     def test_profile_is_recorded_on_the_attempt(self, tmp_path: Path) -> None:
@@ -1159,21 +1160,20 @@ class TestOpenRun:
 
         run_dir = tmp_path / "stray" / "runs" / "seed=1"
         run_dir.mkdir(parents=True)
-        (run_dir / "run.json").write_text(json.dumps({"id": "r1"}), encoding="utf-8")
+        write_record(run_dir, {"type": "workspace.run", "id": "r1"})
 
         with pytest.raises(typer.Exit) as excinfo:
             _open_run(run_dir)
 
         assert excinfo.value.exit_code == 1
 
-    def test_run_json_without_id_exits_1(self, tmp_path: Path) -> None:
+    def test_run_record_without_id_exits_1(self, tmp_path: Path) -> None:
         from molab.cli.workspace.run import _open_run
 
         _ws, _project, _exp, [run] = _declared(tmp_path)
-        run_json = Path(run.run_dir) / "run.json"
-        data = json.loads(run_json.read_text(encoding="utf-8"))
+        data = read_record(run.run_dir)
         del data["id"]
-        run_json.write_text(json.dumps(data), encoding="utf-8")
+        write_record(run.run_dir, data)
 
         with pytest.raises(typer.Exit) as excinfo:
             _open_run(Path(run.run_dir))

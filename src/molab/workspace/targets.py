@@ -7,7 +7,7 @@ helpers around that list (list/get/add/remove) and the bridge functions
 molq objects used at submission time.
 
 The workspace itself is the source of truth — these functions read and write
-``workspace.json`` via the workspace's own atomic-write path.
+the root ``index.md`` record via the workspace's own atomic-write path.
 """
 
 from __future__ import annotations

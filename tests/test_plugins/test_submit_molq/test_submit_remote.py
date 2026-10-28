@@ -377,7 +377,7 @@ class TestRemoteWorkerOpensStagedAttempt:
 
         The remote host holds ``<scratch_root>/<ws>/<project>/<exp>/<run>`` —
         the run dir without ``executions/`` plus ``executions/e01/`` — and no
-        ``workspace.json`` / ``experiment.json`` above it.
+        workspace / experiment ``index.md`` record above it but the staged ones.
         """
         from molab.plugins.submit_molq.staging import stage_in
         from molab.workspace.targets import target_run_dir
@@ -422,18 +422,19 @@ class TestRemoteWorkerOpensStagedAttempt:
             cluster_id="hpc",
             scratch_root=str(tmp_path / "scratch"),
         )
-        original_experiment = (
-            Path(str(experiment.experiment_dir)) / "experiment.json"
-        ).read_bytes()
+        original_experiment = (Path(str(experiment.experiment_dir)) / "index.md").read_bytes()
         stage_in(_CopyTransport(), run, target, "e01")
         assert (
-            Path(str(experiment.experiment_dir)) / "experiment.json"
+            Path(str(experiment.experiment_dir)) / "index.md"
         ).read_bytes() == original_experiment
         staged_run_dir = Path(target_run_dir(target, ws, run))
         staged_record = staged_run_dir / "executions" / "e01" / "execution.json"
-        assert (staged_run_dir / "run.json").is_file()
+        assert (staged_run_dir / "index.md").is_file()
         assert staged_record.is_file()
-        assert any((d / "workspace.json").exists() for d in staged_run_dir.parents)
+        assert any(
+            (d / "index.md").is_file() and "type: workspace.root" in (d / "index.md").read_text()
+            for d in staged_run_dir.parents
+        )
         # Remove all original context and source: a memo or shared source path cannot hide a missing input.
         shutil.rmtree(ws.root)
         wf_file.unlink()

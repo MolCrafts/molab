@@ -12,7 +12,7 @@ Leftover ``*.mlp.zarr/`` and ``*.mlp.index.json`` are ignored.
 
 * Foreign dialects (event JSONL, CSV, LAMMPS log, TensorBoard, …) convert
   into this module's writer and land in the WAL via :class:`FileStore`.
-* A molab Run is a workspace host (``run.json`` + run-root ``alive``), not a
+* A molab Run is a workspace host (an ``index.md`` record + run-root ``alive``), not a
   MolRec record. Filename gate ``*.mlp.jsonl`` is the host surface; the WAL
   is not catalogued as an :class:`~molab.workspace.domain.Artifact`.
 * :meth:`MetricsWriter.flush` does not densify.

@@ -92,7 +92,7 @@ def atomic_write_json(path: Path, data: object) -> None:
 
     On POSIX systems, os.replace is atomic — if the process crashes
     mid-write, the original file remains intact. This prevents data
-    corruption for critical files like run.json, metadata files, and
+    corruption for critical files like ``index.md`` records, metadata files, and
     workflow-state checkpoints. Serialization goes through
     :func:`dump_canonical_json` (the one canonical byte form); the temp file
     is chmod'd ``0o600`` before the rename, matching the workspace entity
@@ -138,7 +138,7 @@ def atomic_write_text(path: Path, content: str, *, encoding: str = "utf-8") -> N
 
     Companion to :func:`atomic_write_json` for plain-text artifacts —
     markdown reports, generated source previews, log snapshots, and OKF
-    ``meta.json`` / ``index.md`` / ``log.md`` files — that are read back
+    ``index.md`` / ``log.md`` files — that are read back
     as strings rather than parsed as JSON. Same temp-file + ``os.replace``
     pattern; if the process crashes mid-write the original file remains
     intact.
@@ -250,7 +250,7 @@ def file_lock(
     did not exist.
 
     Args:
-        lock_path: Sidecar lock-file path (e.g. ``run.json.lock``).
+        lock_path: Sidecar lock-file path (e.g. ``.molab/locks/<run-id>.run.lock``).
         timeout: Seconds to wait for a contended lock.
         backend: Lock mechanism; see above.
 

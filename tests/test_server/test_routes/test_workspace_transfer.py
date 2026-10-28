@@ -112,7 +112,7 @@ def test_workspace_allowlist_is_checked_for_file_upload_and_download(tmp_path, m
         with TestClient(app) as client:
             assert (
                 client.get(
-                    "/api/workspace/file", params={"ws": "forbidden", "path": "workspace.json"}
+                    "/api/workspace/file", params={"ws": "forbidden", "path": "index.md"}
                 ).status_code
                 == 403
             )
@@ -124,7 +124,7 @@ def test_workspace_allowlist_is_checked_for_file_upload_and_download(tmp_path, m
             assert response.status_code == 403 and not (tmp_path / "workspace" / "file").exists()
             assert (
                 client.get(
-                    "/api/workspace/file", params={"ws": "allowed", "path": "workspace.json"}
+                    "/api/workspace/file", params={"ws": "allowed", "path": "index.md"}
                 ).status_code
                 == 200
             )

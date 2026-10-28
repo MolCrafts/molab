@@ -159,7 +159,7 @@ def get_active_workspace():  # noqa: ANN201
     coexist without collision. This is the request-free core used by
     :func:`get_workspace` and by direct callers that have no request.
 
-    Local roots open without requiring ``workspace.json`` (plain folders are
+    Local roots open without requiring a root ``index.md`` record (plain folders are
     valid; index views stay empty until the layout is present).
     """
     kind, identifier = _active_workspace_key()

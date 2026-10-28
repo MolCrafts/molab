@@ -218,7 +218,7 @@ class TestServeScopeHttp:
             assert opened.parent is None
             assert [item.id for item in opened.list_experiments()] == [experiment.id]
             with pytest.raises(PermissionError):
-                inner.read_text(inner.join(ws.root, "workspace.json"))
+                inner.read_text(inner.join(ws.root, "index.md"))
 
     def test_served_project_lists_itself_and_hides_the_sibling(self, client_at: tuple) -> None:
         _ws, alpha, experiment, _run, beta, open_at = client_at
@@ -382,4 +382,5 @@ class TestServeScopeHttp:
             experiments = client.get(f"/api/projects/{alpha.id}/experiments")
             assert [row["id"] for row in experiments.json()] == [experiment.id]
             assert experiments.json()[0]["projectId"] == alpha.id
-            assert not (alone / "workspace.json").exists()
+            # The copy keeps its project record; no workspace record is invented.
+            assert "workspace.root" not in (alone / "index.md").read_text()

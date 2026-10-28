@@ -19,6 +19,7 @@ from molab.cli.migrate_cmd import migrate_app, migrate_workflow_kind, migrate_wo
 from molab.workspace import Experiment, Workspace
 from molab.workspace.schema_version import MOLAB_SCHEMA_VERSION
 from molab.workspace.validate import validate_workspace
+from tests.support.records import read_record, write_record
 
 PROJECT_ID = "01a06e0a-0000-7000-8000-000000000001"
 EXPERIMENT_ID = "01a06e0a-0000-7000-8000-000000000002"
@@ -230,7 +231,8 @@ class TestSideStoresAreDropped:
         assert not list(target.rglob("projects.json"))
         assert not list(target.rglob("experiments.json"))
         assert not list(target.rglob("runs.json"))
-        assert not list(target.rglob("*.lock"))
+        # Fresh machine locks under .molab/ are not copies of the source tree.
+        assert not [p for p in target.rglob("*.lock") if ".molab" not in p.parts]
 
     def test_the_artifact_bytes_land_where_a_person_looks(
         self, legacy: Path, tmp_path: Path
@@ -443,10 +445,9 @@ def _kind_lab(tmp_path: Path) -> Path:
     _write_ir(memo, GRAPH_IR)
 
     handwritten = project.add_experiment("handwritten")
-    meta_path = Path(handwritten.experiment_dir) / "experiment.json"
-    payload = json.loads(meta_path.read_text(encoding="utf-8"))
+    payload = read_record(handwritten.experiment_dir)
     payload["workflow_source"] = "train.py"
-    meta_path.write_text(json.dumps(payload), encoding="utf-8")
+    write_record(handwritten.experiment_dir, payload)
 
     project.add_experiment("empty")
     return root
@@ -462,7 +463,7 @@ def _revisions(root: Path) -> dict[str, tuple[int, str]]:
 
 def _ir_and_experiment_bytes(root: Path) -> dict[str, bytes]:
     found: dict[str, bytes] = {}
-    for name in ("experiment.json", "workflow.ir.json"):
+    for name in ("index.md", "workflow.ir.json"):
         for path in sorted(root.rglob(name)):
             found[str(path.relative_to(root))] = path.read_bytes()
     return found
@@ -681,7 +682,8 @@ class TestMigrateKnowledge:
             "From [@derived_from run](projects/p/experiments/e/runs/seed=1).\n",
             encoding="utf-8",
         )
-        (root / "index.md").write_text("# Lab\n", encoding="utf-8")
+        assert isinstance(workspace, Workspace)
+        workspace.write_index("# Lab\n")
         refs = root / "references"
         refs.mkdir()
         (refs / "meta.json").write_text('{"type": "bundle.references"}\n', encoding="utf-8")

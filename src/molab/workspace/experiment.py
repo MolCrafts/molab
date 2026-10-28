@@ -47,9 +47,10 @@ from molab.path import Path
 from .base import (
     _load_metadata,
     _reconstruct,
-    _save_metadata,
+    _record_payload,
 )
 from .domain import AssetScope
+from .entity_record import INDEX_FILENAME, read_record
 from .errors import ExperimentExistsError, ExperimentNotFoundError
 from .folder import (
     WORKSPACE_EXPERIMENT_KIND,
@@ -95,8 +96,8 @@ def set_workflow_executor(executor: WorkflowExecutor) -> None:
     _workflow_executor = executor
 
 
-# Standalone home for a compiled workflow IR document, written alongside
-# ``experiment.json``. Kept separate (and free of the ``schema_version``
+# Standalone home for a compiled workflow IR document, written alongside the
+# experiment's ``index.md`` record. Kept separate (and free of the ``schema_version``
 # envelope) so external tooling — notably the molab VSCode preview — can read
 # and diff the raw IR directly without parsing it out of the metadata file.
 WORKFLOW_DOC_FILENAME = "workflow.ir.json"
@@ -153,6 +154,7 @@ class Experiment(Folder):
 
     _exists_error_cls = ExperimentExistsError
     _not_found_error_cls = ExperimentNotFoundError
+    _entity_kind = WORKSPACE_EXPERIMENT_KIND
 
     def __init__(
         self,
@@ -234,14 +236,12 @@ class Experiment(Folder):
 
     @classmethod
     def from_disk(cls, child_dir: PathArg, parent: Folder) -> Experiment:
-        """Load ``experiment.json`` and rebuild entity state.
+        """Load the ``index.md`` record and rebuild entity state.
 
         ``workflow.ir.json`` stays on disk. :attr:`workflow_document` reads it;
         this loader does not copy it into metadata.
         """
-        meta = _load_metadata(
-            ExperimentMetadata, parent._disk().join(child_dir, "experiment.json"), fs=parent._disk()
-        )
+        meta = _load_metadata(ExperimentMetadata, cls._require_record(child_dir, parent).canonical)
         folder_meta = FolderMetadata(
             id=meta.id,
             name=meta.name,
@@ -304,7 +304,7 @@ class Experiment(Folder):
         """The IR in ``workflow.ir.json``, or ``None`` when the file is absent.
 
         A non-object payload is ``None``. The document is opaque. This accessor
-        does not read ``experiment.json``.
+        does not read the ``index.md`` record.
         """
         doc_path = self._disk().join(self.experiment_dir, WORKFLOW_DOC_FILENAME)
         if not self._disk().is_file(doc_path):
@@ -434,12 +434,8 @@ class Experiment(Folder):
             self.metadata.model_dump(mode="json"),
             project_id=self.ancestor_id(WORKSPACE_PROJECT_KIND),
             path=self.experiment_dir,
+            also=self._parent_index_paths(),
         )
-
-    def write_meta(self) -> str:
-        """Stamp concept ``type`` on ``experiment.json``."""
-        self.save()
-        return self._disk().join(self.experiment_dir, "experiment.json")
 
     def _move_target_id(self, new_name: str | None) -> str:
         """An Experiment keeps its UUID id across a move; only the name changes."""
@@ -447,7 +443,7 @@ class Experiment(Folder):
         return self._name
 
     def _sync_entity_identity(self) -> None:
-        """Mirror the human name into ``experiment.json`` (``move_to`` hook).
+        """Mirror the human name into the ``index.md`` record (``move_to`` hook).
 
         The UUID id (and directory basename) is stable across a move. The
         definition digest follows the new name; revision is not bumped and
@@ -507,7 +503,7 @@ class Experiment(Folder):
             document: IR to fold into the hash. The default reads the current
                 ``workflow.ir.json`` when the merged kind is ``"document"``.
                 An explicit value is remembered as :attr:`_staged_document` so
-                :meth:`materialize` can write it before ``experiment.json``.
+                :meth:`materialize` can write it before the record.
         """
         staged = self._entity_metadata.model_copy(update=updates)
         if document is _CURRENT:
@@ -557,17 +553,18 @@ class Experiment(Folder):
                 path=self.experiment_dir,
             )
 
+    def _canonical_record(self) -> dict[str, JSONValue]:
+        return _record_payload(self._entity_metadata)
+
     def save(self) -> None:
-        """Persist current metadata to ``experiment.json``.
+        """Persist current metadata to the ``index.md`` record, then refresh the index.
 
         Does not write or delete ``workflow.ir.json``. That file has one writer,
-        :meth:`_write_workflow_doc`.
+        :meth:`_write_workflow_doc`. The refresh rewrites this experiment's
+        ``entrypoint`` and its row in the project.
         """
-        _save_metadata(
-            self._entity_metadata,
-            self._disk().join(self.experiment_dir, "experiment.json"),
-            fs=self._disk(),
-        )
+        self._write_record(self._canonical_record())
+        self._record_written()
 
     @property
     def _workflow_doc_path(self) -> str:
@@ -579,7 +576,7 @@ class Experiment(Folder):
 
         Args:
             document: IR object to store, or ``None`` to delete the file when
-                it exists. Does not touch ``experiment.json`` or ``workflow.json``.
+                it exists. Does not touch ``index.md`` or ``workflow.json``.
         """
         doc_path = self._workflow_doc_path
         if document is not None:
@@ -646,16 +643,20 @@ class Experiment(Folder):
         *,
         target: str | None = None,
     ) -> list[Run]:
-        """Add one fresh UUID-addressed Run per cell in a ParamSpace."""
+        """Add one fresh UUID-addressed Run per cell in a ParamSpace.
+
+        The experiment's ``index.md`` is refreshed once, after the batch.
+        """
         runs: list[Run] = []
-        for cell in space:
-            cell_params = dict(cell)
-            runs.append(
-                self.add_run(
-                    params=cast("dict[str, JSONValue]", cell_params),
-                    target=target,
+        with self._batched_index():
+            for cell in space:
+                cell_params = dict(cell)
+                runs.append(
+                    self.add_run(
+                        params=cast("dict[str, JSONValue]", cell_params),
+                        target=target,
+                    )
                 )
-            )
         return runs
 
     def ensure_run(
@@ -798,16 +799,18 @@ class Experiment(Folder):
         """
         index = self._definition_index()
         runs: list[Run] = []
-        for cell in space:
-            run, created = self._ensure_run(
-                cast("dict[str, JSONValue]", dict(cell)),
-                config_hash=None,
-                target=target,
-                inputs=(),
-                index=index,
-            )
-            if created:
-                runs.append(run)
+        # One refresh of this experiment's index.md after the batch, not per run.
+        with self._batched_index():
+            for cell in space:
+                run, created = self._ensure_run(
+                    cast("dict[str, JSONValue]", dict(cell)),
+                    config_hash=None,
+                    target=target,
+                    inputs=(),
+                    index=index,
+                )
+                if created:
+                    runs.append(run)
         return runs
 
     def define(
@@ -971,7 +974,7 @@ class Experiment(Folder):
         """List all runs by scanning the ``runs/`` directory.
 
         One ``scandir`` pass answers which entries are directories; a
-        directory counts as a run only when it holds a ``run.json``.
+        directory counts as a run only when its ``index.md`` is a run record.
 
         Returns:
             The runs, ordered by directory name.
@@ -986,14 +989,18 @@ class Experiment(Folder):
         entries = disk.scandir(runs_dir, with_stat=False)
         if isinstance(disk, CachedRemoteFileSystem):
             disk.read_many(
-                [disk.join(runs_dir, entry.name, "run.json") for entry in entries if entry.is_dir]
+                [
+                    disk.join(runs_dir, entry.name, INDEX_FILENAME)
+                    for entry in entries
+                    if entry.is_dir
+                ]
             )
         for entry in sorted(entries, key=lambda e: e.name):
             if not entry.is_dir:
                 continue
-            entry_path = disk.join(runs_dir, entry.name)
-            if disk.exists(disk.join(entry_path, "run.json")):
-                result.append(Run.from_disk(entry_path, self))
+            record = read_record(disk, disk.join(runs_dir, entry.name))
+            if record is not None and record.type == WORKSPACE_RUN_KIND:
+                result.append(Run.from_record(disk.join(runs_dir, entry.name), self, record))
         if isinstance(disk, CachedRemoteFileSystem) and result:
             from .execution_repository import prime_execution_records
 

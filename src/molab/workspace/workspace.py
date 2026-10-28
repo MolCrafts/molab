@@ -6,9 +6,9 @@ including the Workspace, exposes that disk as :attr:`Folder.fs`.
 Child Folders are locations on that disk; they resolve I/O through
 :meth:`Folder._disk` and expose user writes as :attr:`Folder.files`.
 
-Construction is in memory. A missing ``workspace.json`` gets a new
-UUIDv7 id and is written later, create-if-absent, by ``materialize``
-or the first ``add_project``. A file already on disk is kept.
+Construction is in memory. A root with no ``index.md`` record gets a new
+UUIDv7 id, written later, create-if-absent, by ``materialize`` or the first
+``add_project``. A record already on disk is kept.
 
 Child factories (``.add_project(...)``) are idempotent: they load existing
 children from disk or create + materialize new ones.
@@ -24,17 +24,14 @@ from molab._typing import JSONValue
 from molab.ids import generate_uuid7
 from molab.path import Path
 
-from .base import (
-    _load_metadata,
-    _save_metadata,
-)
+from .base import _load_metadata, _record_payload
 from .domain import AssetScope
+from .entity_record import INDEX_FILENAME, read_record, read_type
 from .errors import ProjectExistsError, ProjectNotFoundError
 from .folder import (
     WORKSPACE_PROJECT_KIND,
     WORKSPACE_ROOT_KIND,
     Folder,
-    _load_concept_marker_dict,
     register_entity_class,
 )
 from .fs import FileSystem, PathArg
@@ -117,6 +114,7 @@ class Workspace(Folder):
 
     _exists_error_cls = ProjectExistsError
     _not_found_error_cls = ProjectNotFoundError
+    _entity_kind = WORKSPACE_ROOT_KIND
 
     def __init__(
         self, root: PathArg | None = None, name: str | None = None, *, fs: FileSystem | None = None
@@ -141,9 +139,9 @@ class Workspace(Folder):
         else:
             resolved_raw = str(root)  # Remote: use path as-is (tilde handled by remote shell)
 
-        metadata_path = self.fs.join(resolved_raw, "workspace.json")
-        if self.fs.exists(metadata_path):
-            entity_meta = _load_metadata(WorkspaceMetadata, metadata_path, fs=self.fs)
+        record = read_record(self.fs, resolved_raw)
+        if record is not None and record.type == WORKSPACE_ROOT_KIND:
+            entity_meta = _load_metadata(WorkspaceMetadata, record.canonical)
         else:
             display_name = name if name is not None else self.fs.basename(resolved_raw)
             entity_meta = WorkspaceMetadata(id=generate_uuid7(), name=display_name)
@@ -183,28 +181,28 @@ class Workspace(Folder):
     def from_disk(cls, child_dir: PathArg, parent: Folder) -> Workspace:
         """Reconstruct a Workspace rooted at *child_dir* (OKF concept rebuild).
 
-        A Workspace is its own root and persists ``type`` on ``workspace.json``,
-        so the generic :meth:`Folder.from_disk` cannot rebuild it.
-        ``concept_from_dir`` reaches here when
-        ``workspace.json`` carries ``type: workspace.root``; the constructor
-        reloads that file from *child_dir* and ignores the synthetic *parent*
-        (a Workspace has none). See the Folder.from_disk hook docs.
+        A Workspace is its own root, so the generic :meth:`Folder.from_disk`
+        cannot rebuild it. ``concept_from_dir`` reaches here when the root
+        ``index.md`` carries ``type: workspace.root``; the constructor reloads
+        that record from *child_dir* and ignores the synthetic *parent* (a
+        Workspace has none). See the Folder.from_disk hook docs.
         """
         return cls(root=child_dir, fs=parent._disk())
 
     @staticmethod
     def enclosing_root(path: PathArg, *, fs: FileSystem | None = None) -> Path | None:
-        """Return the nearest ancestor-or-self of *path* that holds the workspace entity file.
+        """Return the nearest ancestor-or-self of *path* whose ``index.md`` is a workspace root.
 
-        The walk is lexical. This method reads no file, does not resolve
-        symlinks, and ignores the CLI root override. It never constructs a
-        Workspace. A relative path is walked relative to the current directory,
-        and that directory is the last candidate. An empty dirname of an
-        absolute path is the filesystem root, probed once; a parent that is
-        not a strict lexical ancestor stops the walk without being probed.
-        There is exactly one ``is_file`` probe per candidate, up to and
-        including the hit, and no ``open`` / ``read_text`` / ``scandir`` /
-        ``stat`` / ``exists``.
+        The walk is lexical. This method does not resolve symlinks, ignores the
+        CLI root override, and never constructs a Workspace. A relative path is
+        walked relative to the current directory, and that directory is the
+        last candidate. An empty dirname of an absolute path is the filesystem
+        root, probed once; a parent that is not a strict lexical ancestor stops
+        the walk without being probed. There is exactly one ``is_file`` probe
+        per candidate, up to and including the hit. A candidate that has an
+        ``index.md`` gets its head read (``read_range`` only, up to the closing
+        fence) to see whether its ``type`` is ``workspace.root``; there is no
+        ``open`` / ``read_text`` / ``scandir`` / ``stat`` / ``exists``.
 
         Args:
             path: A file or directory, in the caller's spelling.
@@ -216,7 +214,10 @@ class Workspace(Folder):
         disk = fs if fs is not None else LocalFileSystem()
         current = str(path)
         while True:
-            if disk.is_file(disk.join(current, "workspace.json")):
+            if (
+                disk.is_file(disk.join(current, INDEX_FILENAME))
+                and read_type(disk, current) == WORKSPACE_ROOT_KIND
+            ):
                 return Path(current)
             parent = disk.dirname(current)
             if parent == "" and current.startswith("/"):
@@ -249,11 +250,12 @@ class Workspace(Folder):
 
         Callers pass a root from :meth:`enclosing_root` or a Workspace's
         ``root``. This method does not check that *root* is a workspace. It
-        calls ``scandir(with_stat=False)`` only and reads no entity JSON. A
+        calls ``scandir(with_stat=False)`` only and reads no record. A
         missing container is skipped. Names starting with ``.`` are skipped.
         Siblings are sorted by name. A run directory is yielded; nothing
         inside it is listed. Every yielded path is joined from *root*, so the
-        caller's spelling is kept. The CLI root override is ignored.
+        caller's spelling is kept. The CLI root override is ignored. No record
+        is read.
 
         Args:
             root: Directory to enumerate.
@@ -284,12 +286,19 @@ class Workspace(Folder):
                 for run_name in _child_dirs(disk.join(experiment_path, RUN_CONTAINER)):
                     yield Path(disk.join(experiment_path, RUN_CONTAINER, run_name))
 
+    def _read_entity_metadata(self) -> WorkspaceMetadata | None:
+        """The workspace record on disk, or ``None`` when the root has none yet."""
+        record = read_record(self.fs, self.resolve())
+        if record is None or record.type != WORKSPACE_ROOT_KIND:
+            return None
+        return _load_metadata(WorkspaceMetadata, record.canonical)
+
     def _ensure_materialized(self) -> None:
-        meta_path = self.fs.join(self.resolve(), "workspace.json")
-        if not self.fs.exists(meta_path):
+        existing = self._read_entity_metadata()
+        if existing is None:
             self.materialize()
             return
-        self._adopt_entity_metadata(_load_metadata(WorkspaceMetadata, meta_path, fs=self.fs))
+        self._adopt_entity_metadata(existing)
 
     def _adopt_entity_metadata(self, meta: WorkspaceMetadata) -> None:
         """Take *meta* as this handle's identity (disk won a create race)."""
@@ -311,18 +320,17 @@ class Workspace(Folder):
         return _LocalPath(self.fs.join(lock_dir, "workspace.create.lock"))
 
     def _persist_if_absent(self) -> None:
-        """Write ``workspace.json`` once. A lost race reloads the winner's id."""
+        """Write the root ``index.md`` record once. A lost race reloads the winner's id."""
         from molab.atomicio import file_lock
 
-        meta_path = self.fs.join(self.resolve(), "workspace.json")
         backend = "flock" if isinstance(self.fs, LocalFileSystem) else "none"
         with file_lock(self._create_lock_path(), backend=backend):
-            if self.fs.exists(meta_path):
-                self._adopt_entity_metadata(
-                    _load_metadata(WorkspaceMetadata, meta_path, fs=self.fs)
-                )
+            existing = self._read_entity_metadata()
+            if existing is not None:
+                self._adopt_entity_metadata(existing)
                 return
-            _save_metadata(self._entity_metadata, meta_path, fs=self.fs)
+            self._write_record(self._canonical_record())
+        self._record_written()
 
     # ── Properties (entity-specific) ─────────────────────────────────────
 
@@ -459,6 +467,12 @@ class Workspace(Folder):
 
     # ── Persistence ─────────────────────────────────────────────────────
 
+    def _canonical_record(self) -> dict[str, JSONValue]:
+        return _record_payload(self._entity_metadata)
+
+    def _lock_root(self) -> Path:
+        return self.resolve()
+
     def materialize(self) -> None:
         """Write workspace scaffold to disk."""
         root_str = self.resolve()
@@ -466,23 +480,24 @@ class Workspace(Folder):
         self._persist_if_absent()
 
     def save(self) -> None:
-        """Persist current metadata to disk (includes OKF ``type``).
+        """Persist current metadata to the root ``index.md`` record.
 
-        An id already on disk is kept. A missing file is created once, the
-        same way :meth:`materialize` does.
+        An id already on disk is kept. A missing record is created once, the
+        same way :meth:`materialize` does. The index block and the narrative
+        body are kept.
         """
         from molab.atomicio import file_lock
 
-        meta_path = self.fs.join(self.resolve(), "workspace.json")
         backend = "flock" if isinstance(self.fs, LocalFileSystem) else "none"
         with file_lock(self._create_lock_path(), backend=backend):
-            if self.fs.exists(meta_path):
-                existing = _load_metadata(WorkspaceMetadata, meta_path, fs=self.fs)
+            existing = self._read_entity_metadata()
+            if existing is not None:
                 self._entity_metadata = self._entity_metadata.model_copy(
                     update={"id": existing.id, "created_at": existing.created_at}
                 )
                 self._adopt_entity_metadata(self._entity_metadata)
-            _save_metadata(self._entity_metadata, meta_path, fs=self.fs)
+            self._write_record(self._canonical_record())
+        self._record_written()
 
     def find(
         self, ref: MolabRef | str
@@ -567,32 +582,29 @@ class Workspace(Folder):
         raise RefNotFoundError(parsed, "artifact", parsed.artifact_id)
 
     def write_meta(self) -> str:
-        """Stamp concept ``type`` on ``workspace.json``."""
+        """Write the workspace record into the root ``index.md``; return its path."""
         self.save()
-        return self.fs.join(self.resolve(), "workspace.json")
-
-    def read_meta(self) -> dict[str, JSONValue]:
-        """OKF identity: ``type`` (+ lifecycle) from ``workspace.json``."""
-        raw = _load_concept_marker_dict(self._disk(), self.resolve())
-        return cast("dict[str, JSONValue]", raw) if raw is not None else {}
+        return self.fs.join(self.resolve(), INDEX_FILENAME)
 
     # ── Alternative constructors ─────────────────────────────────────────
 
     @classmethod
     def load(cls, root: PathArg, *, fs: FileSystem | None = None) -> Workspace:
-        """Load an existing workspace from disk (raises if missing)."""
+        """Load an existing workspace from disk (raises if missing).
+
+        Raises:
+            FileNotFoundError: *root* has no workspace ``index.md`` record.
+            UnmigratedLayoutError: *root* still holds a legacy JSON record.
+        """
         _fs = fs or LocalFileSystem()
-        if isinstance(_fs, LocalFileSystem):
-            root_path = _LocalPath(root).resolve()
-            metadata_file = root_path / "workspace.json"
-            if not metadata_file.exists():
-                raise FileNotFoundError(f"Workspace metadata not found at {metadata_file}")
-            return cls(root, fs=fs)
-        # RemoteFileSystem path
-        root_str = str(root)
-        metadata_path = _fs.join(root_str, "workspace.json")
-        if not _fs.exists(metadata_path):
-            raise FileNotFoundError(f"Workspace metadata not found at {metadata_path}")
+        root_str = (
+            str(_LocalPath(root).resolve()) if isinstance(_fs, LocalFileSystem) else str(root)
+        )
+        record = read_record(_fs, root_str)
+        if record is None or record.type != WORKSPACE_ROOT_KIND:
+            raise FileNotFoundError(
+                f"Workspace record not found at {_fs.join(root_str, INDEX_FILENAME)}"
+            )
         return cls(root, fs=fs)
 
     # ── Project CRUD (add / get / set / del / list) ────────────────────────

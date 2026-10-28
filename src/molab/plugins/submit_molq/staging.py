@@ -9,13 +9,13 @@ belong to molq. No transport implementation is kept in molab.
 
 The local↔remote contract is intentionally narrow:
 
-* **Stage-in** mirrors the local ``run_dir`` (run.json and the other
-  run-level files) into ``target_run_dir`` on the transport's filesystem,
+* **Stage-in** mirrors the local ``run_dir`` (its ``index.md`` record and
+  the other run-level files) into ``target_run_dir`` on the transport's filesystem,
   excluding ``executions/`` and Python bytecode, so no other attempt on the
   remote side is overwritten by a stale local copy. It then uploads the one
   attempt being submitted, ``executions/<id>/``, which carries the QUEUED
   ``execution.json`` the remote worker opens. The isolated namespace also
-  receives the selected ancestor entity files and workflow code/document;
+  receives the selected ancestor ``index.md`` records and workflow code/document;
   code bindings are rewritten only in a temporary staging copy. An existing
   Execution source snapshot takes precedence over the live entrypoint.
 * **Stage-out** pulls the remote ``executions/<id>/`` back **without** its
@@ -24,8 +24,8 @@ The local↔remote contract is intentionally narrow:
   :meth:`~molab.workspace.execution_repository.ExecutionRepository.merge_remote`.
   The plugin only moves bytes and decodes JSON; the workspace owns the record
   and decides how the worker's state and the local job ids combine. The
-  run-level ``run.json`` is never pulled (it is immutable and was uploaded by
-  stage-in), and neither is a run-root ``alive`` (the heartbeat is per
+  run-level ``index.md`` is never pulled (its record is immutable and was
+  uploaded by stage-in; the local owner rewrites its derived index), and neither is a run-root ``alive`` (the heartbeat is per
   attempt).
 
 Both operations are no-ops when the target's working dir resolves to the
@@ -51,6 +51,7 @@ from molq import MolqError
 
 from molab.ids import hash_bytes
 from molab.workspace import Workspace
+from molab.workspace.entity_record import ENTITY_FILENAME
 from molab.workspace.execution_repository import ExecutionRepository
 from molab.workspace.source_snapshot import SourceCaptureError, copy_sources, source_manifest
 from molab.workspace.targets import target_run_dir
@@ -149,9 +150,9 @@ def stage_in(
     with tempfile.TemporaryDirectory(prefix="molab-worker-") as temporary:
         bundle = Path(temporary)
         records = [
-            root / "workspace.json",
-            Path(str(project.project_dir)) / "project.json",
-            Path(str(experiment.experiment_dir)) / "experiment.json",
+            root / ENTITY_FILENAME,
+            Path(str(project.project_dir)) / ENTITY_FILENAME,
+            Path(str(experiment.experiment_dir)) / ENTITY_FILENAME,
         ]
         document = Path(str(experiment.experiment_dir)) / "workflow.ir.json"
         if document.is_file():

@@ -16,11 +16,10 @@ and mtime are unchanged.
 
 Index files are not special-cased — they are just paths.  The eager
 prefetch helper :func:`prefetch_workspace_indices` walks the workspace by
-``listdir`` plus the per-entity metadata files
-(``workspace.json`` / ``project.json`` / ``experiment.json`` / ``run.json``
-/ ``execution.json``) through :meth:`read_text`, so the navigation tree is
-populated as a side-effect of caching.  Entity ``*.json`` is the sole
-truth source.
+``listdir`` plus each level's ``index.md`` record and every
+``execution.json`` through :meth:`read_text`, so the navigation tree is
+populated as a side-effect of caching.  Those records are the sole truth
+source.
 
 Layer rule: lives in the workspace layer next to ``fs_local.py`` and
 ``fs_remote.py``; reaches only into sibling FS modules and the
@@ -46,6 +45,7 @@ from typing import IO, TYPE_CHECKING, Any
 
 from molab.atomicio import atomic_write_bytes, atomic_write_json
 
+from .entity_record import ENTITY_FILENAME
 from .execution_dirs import execution_dir_names
 from .fs import DirEntry, FileSystem, PathArg, StatResult
 from .fs_local import LocalFileSystem
@@ -73,22 +73,14 @@ logger = logging.getLogger(__name__)
 class _IndexFileNames(frozenset[str]):
     """Files whose basename identifies them as a navigation-index artefact.
 
-    Entity files and the attempt record. ``execution.json`` is listed so
+    The ``index.md`` record of every level and the attempt record. ``execution.json`` is listed so
     ``invalidate(scope="indices")`` — the ``POST /cache/refresh`` path
     (``server/routes/workspace.py``) — evicts cached attempt records; a refresh
     never replays a stale run status.
     """
 
 
-INDEX_FILE_NAMES = _IndexFileNames(
-    {
-        "workspace.json",
-        "project.json",
-        "experiment.json",
-        "run.json",
-        "execution.json",
-    }
-)
+INDEX_FILE_NAMES = _IndexFileNames({ENTITY_FILENAME, "execution.json"})
 
 _SIDECAR_FILENAME = "_index.json"
 _SIDECAR_VERSION = 1
@@ -1390,12 +1382,12 @@ def prefetch_workspace_indices(
 
     Levels (each level fully completes before the next — outer → inner):
 
-    1. **Workspace** — ``workspace.json`` + the project container listing.
-    2. **Projects** — all ``project.json`` in parallel, then each project's
-       experiment container.
-    3. **Experiments** — all ``experiment.json`` in parallel, then each
+    1. **Workspace** — the root ``index.md`` + the project container listing.
+    2. **Projects** — every project ``index.md`` in parallel, then each
+       project's experiment container.
+    3. **Experiments** — every experiment ``index.md`` in parallel, then each
        experiment's run container.
-    4. **Runs** — all ``run.json`` in parallel, then each attempt's
+    4. **Runs** — every run ``index.md`` in parallel, then each attempt's
        ``execution.json``.
 
     Concurrency is per level (default 8 workers; ``MOLAB_PREFETCH_WORKERS``
@@ -1438,8 +1430,7 @@ def prefetch_workspace_indices(
 
     with batch:
         # ── L0: workspace root (serial — tiny) ──────────────────────────
-        _safe_read(fs, fs.join(root, "workspace.json"), state, on_file=on_file)
-        _prefetch_concept_files(fs, root, state, on_file=on_file)
+        _safe_read(fs, fs.join(root, ENTITY_FILENAME), state, on_file=on_file)
         projects_dir = fs.join(root, PROJECT_CONTAINER)
         try:
             project_names = list(fs.listdir(projects_dir))
@@ -1449,14 +1440,13 @@ def prefetch_workspace_indices(
             state.add_warning(projects_dir, str(exc))
             return list(state.warnings)
 
-        # ── L1: project.json in parallel ────────────────────────────────
+        # ── L1: project index.md in parallel ────────────────────────────
         def _load_project(name: str) -> str | None:
             project_dir = fs.join(projects_dir, name)
-            meta = fs.join(project_dir, "project.json")
+            meta = fs.join(project_dir, ENTITY_FILENAME)
             ok = _safe_read(fs, meta, state, on_file=on_file) is not None
             if ok:
-                _prefetch_concept_files(fs, project_dir, state, on_file=on_file)
-                # Generic Folder mounts on the project (dirs carrying meta.json).
+                # Generic Folder mounts on the project (dirs carrying an index.md).
                 _prefetch_meta_mounts(
                     fs,
                     project_dir,
@@ -1472,7 +1462,7 @@ def prefetch_workspace_indices(
                 _load_project,
                 project_names,
                 prepare=lambda names: prime(
-                    [fs.join(projects_dir, name, "project.json") for name in names]
+                    [fs.join(projects_dir, name, ENTITY_FILENAME) for name in names]
                 ),
                 max_workers=workers,
                 force_fetch_fs=force_fs,
@@ -1502,14 +1492,13 @@ def prefetch_workspace_indices(
         ):
             exp_pairs.extend(pairs)
 
-        # ── L2: experiment.json in parallel ─────────────────────────────
+        # ── L2: experiment index.md in parallel ─────────────────────────
         def _load_experiment(pair: tuple[str, str]) -> tuple[str, str] | None:
             project_name, exp_name = pair
             experiment_dir = fs.join(projects_dir, project_name, EXPERIMENT_CONTAINER, exp_name)
-            meta = fs.join(experiment_dir, "experiment.json")
+            meta = fs.join(experiment_dir, ENTITY_FILENAME)
             ok = _safe_read(fs, meta, state, on_file=on_file) is not None
             if ok:
-                _prefetch_concept_files(fs, experiment_dir, state, on_file=on_file)
                 _prefetch_meta_mounts(
                     fs,
                     experiment_dir,
@@ -1526,7 +1515,7 @@ def prefetch_workspace_indices(
                 exp_pairs,
                 prepare=lambda pairs: prime(
                     [
-                        fs.join(projects_dir, p, EXPERIMENT_CONTAINER, e, "experiment.json")
+                        fs.join(projects_dir, p, EXPERIMENT_CONTAINER, e, ENTITY_FILENAME)
                         for p, e in pairs
                     ]
                 ),
@@ -1556,7 +1545,7 @@ def prefetch_workspace_indices(
         ):
             run_triples.extend(triples)
 
-        # ── L3: run.json in parallel (innermost — usually the bulk) ─────
+        # ── L3: run index.md in parallel (innermost — usually the bulk) ─
 
         def _load_run(triple: tuple[str, str, str]) -> list[str]:
             project_name, exp_name, run_name = triple
@@ -1568,9 +1557,8 @@ def prefetch_workspace_indices(
                 RUN_CONTAINER,
                 run_name,
             )
-            meta = fs.join(run_dir, "run.json")
+            meta = fs.join(run_dir, ENTITY_FILENAME)
             if _safe_read(fs, meta, state, on_file=on_file) is not None:
-                _prefetch_concept_files(fs, run_dir, state, on_file=on_file)
                 executions = fs.join(run_dir, "executions")
                 try:
                     entries = fs.scandir(executions, with_stat=False)
@@ -1596,7 +1584,13 @@ def prefetch_workspace_indices(
                 prepare=lambda triples: prime(
                     [
                         fs.join(
-                            projects_dir, p, EXPERIMENT_CONTAINER, e, RUN_CONTAINER, r, "run.json"
+                            projects_dir,
+                            p,
+                            EXPERIMENT_CONTAINER,
+                            e,
+                            RUN_CONTAINER,
+                            r,
+                            ENTITY_FILENAME,
                         )
                         for p, e, r in triples
                     ]
@@ -1644,15 +1638,14 @@ def _prefetch_concept_files(
     *,
     on_file: Callable[[str], None] | None = None,
 ) -> None:
-    """Pull concept identity + narrative (``meta.json`` / ``index.md``)."""
-    for name in ("meta.json", "index.md"):
-        _safe_read(
-            fs,
-            fs.join(concept_dir, name),
-            state,
-            warn_on_missing=False,
-            on_file=on_file,
-        )
+    """Pull a mount's record + narrative (its ``index.md``)."""
+    _safe_read(
+        fs,
+        fs.join(concept_dir, ENTITY_FILENAME),
+        state,
+        warn_on_missing=False,
+        on_file=on_file,
+    )
 
 
 def _prefetch_meta_mounts(
@@ -1663,10 +1656,10 @@ def _prefetch_meta_mounts(
     on_file: Callable[[str], None] | None = None,
     skip: set[str] | frozenset[str] | None = None,
 ) -> None:
-    """Prefetch ``meta.json`` / ``index.md`` Concept mounts under *parent_dir*.
+    """Prefetch ``index.md`` Concept mounts under *parent_dir*.
 
     A mount (a directory at the project or experiment level) is a sibling dir
-    carrying ``meta.json`` (plus ``index.md``). Without this, a pin-cached
+    carrying an ``index.md`` record. Without this, a pin-cached
     remote walk never sees those mounts and the tree stays empty.
     """
     skip_names = set(_meta_mount_skip())

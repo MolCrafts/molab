@@ -1,9 +1,9 @@
 """Serve-root resolution.
 
 ``molab serve`` opens one directory and that directory is the application
-root. The kind comes from the entity file already in the directory
-(``run.json``, ``experiment.json``, ``project.json``, ``workspace.json``).
-A directory with none of those opens as a workspace and nothing is written.
+root. The kind comes from the ``type`` of the ``index.md`` record already in
+the directory (a run, experiment, project, or workspace). A directory with no
+record opens as a workspace and nothing is written.
 
 Parents that exist on disk stay attached so path math and history keep
 working. The opened folder is marked as the serve boundary: listings and
@@ -23,7 +23,6 @@ if TYPE_CHECKING:
     from molab.workspace.folder import Folder
 
 _OMITTED = {"", "-"}
-_DETECT_FILES = ("run.json", "experiment.json", "project.json", "workspace.json")
 
 
 def as_folder(root: object) -> Folder:
@@ -56,19 +55,16 @@ def rank(node: object) -> int:
     }.get(str(kind), -1)
 
 
-def _class_for_filename(name: str) -> type[Folder]:
+def _class_for_type(kind: str) -> type[Folder] | None:
     from molab.workspace.experiment import Experiment
-    from molab.workspace.folder import class_for_entity_file
+    from molab.workspace.folder import class_for_entity_type
     from molab.workspace.project import Project
     from molab.workspace.run import Run
     from molab.workspace.workspace import Workspace
 
-    # Importing the entity modules registers their filenames.
+    # Importing the entity modules registers their record types.
     del Experiment, Project, Run, Workspace
-    mapped = class_for_entity_file(name)
-    if mapped is None:
-        raise KeyError(name)
-    return mapped
+    return class_for_entity_type(kind)
 
 
 def _same_id(folder: Folder, ident: str) -> bool:
@@ -235,15 +231,14 @@ def open_serve_root(path: object, *, fs: FileSystem | None = None) -> Folder:
     else:
         directory = str(path)
 
-    found_name: str | None = None
-    for name in _DETECT_FILES:
-        if disk.exists(disk.join(directory, name)):
-            found_name = name
-            break
-    if found_name is None or found_name == "workspace.json":
+    from molab.workspace.entity_record import read_record
+    from molab.workspace.folder import WORKSPACE_ROOT_KIND
+
+    record = read_record(disk, directory)
+    cls = _class_for_type(record.type) if record is not None else None
+    if cls is None or record is None or record.type == WORKSPACE_ROOT_KIND:
         return Workspace(directory, fs=disk)
 
-    cls = _class_for_filename(found_name)
     try:
         enclosing = Workspace.enclosing_root(directory, fs=disk)
     except PermissionError:

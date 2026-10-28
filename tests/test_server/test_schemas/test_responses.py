@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import time
 from datetime import UTC, datetime
 from pathlib import Path
@@ -12,6 +11,7 @@ from molab.workspace import Workspace
 from molab.workspace.domain import SourceManifest
 from molab.workspace.execution_repository import ExecutionRepository
 from molab.workspace.history import SYSTEM_AGENT
+from tests.support.records import read_record, write_record
 
 IR = {
     "name": "demo",
@@ -186,10 +186,9 @@ class TestRunResponse:
         exp = ws.add_project("p").add_experiment("e")
         exp.bind_workflow("document", document=IR)
         run = exp.add_run(params={"seed": 1})
-        path = Path(run.run_dir) / "run.json"
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload = read_record(run.run_dir)
         payload["workflow_snapshot"] = {"git_commit": "zzz"}
-        path.write_text(json.dumps(payload), encoding="utf-8")
+        write_record(run.run_dir, payload)
         fresh = Workspace(ws.root)
         reloaded = fresh.get_project("p").get_experiment("e").get_run(run.id)
         assert "zzz" not in RunResponse.from_model(reloaded).model_dump_json()

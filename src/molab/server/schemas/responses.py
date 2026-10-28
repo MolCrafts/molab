@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable
-from pathlib import Path
 from typing import Any, Literal
 
 from pydantic import Field
@@ -78,26 +77,6 @@ class WorkflowDocumentResponse(ApiModel):
     project_id: str = Field(..., description="Owning project id")
     experiment_id: str = Field(..., description="Owning experiment id")
     document: dict[str, Any] = Field(..., description="Normalized workflow IR document")
-
-
-def _read_context_results(run: Run) -> dict[str, Any]:
-    """Read a legacy results mapping if an old run record still carries one.
-
-    Current attempts keep products on the Execution. This helper only looks
-    at a leftover mapping inside ``run.json`` so an old record can still
-    answer. It does not write.
-    """
-    run_json = Path(run.run_dir / "run.json")
-    if not run_json.exists():
-        return {}
-    try:
-        with open(run_json, encoding="utf-8") as fh:  # noqa: PTH123
-            data = json.load(fh)
-    except (OSError, json.JSONDecodeError):
-        return {}
-    ctx = data.get("context") or {}
-    results = ctx.get("results") or {}
-    return dict(results) if isinstance(results, dict) else {}
 
 
 # ── Project ─────────────────────────────────────────────────────────────────

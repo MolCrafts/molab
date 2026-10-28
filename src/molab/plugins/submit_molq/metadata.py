@@ -20,7 +20,7 @@ def build_executor_info(
     job_id: str | None,
     scheduler_job_id: str | None,
 ) -> dict[str, str]:
-    """Build normalized executor metadata persisted into ``run.json``."""
+    """Build normalized executor metadata persisted on the attempt record."""
     info = {
         "backend": "molq",
         "scheduler": scheduler,

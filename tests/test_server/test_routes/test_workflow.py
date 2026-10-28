@@ -176,13 +176,13 @@ class TestPutWorkflowDocument:
     ) -> None:
         ws, exp, _run = fresh_run
         exp.bind_workflow("code", entrypoint="train.py:build", document=GRAPH)
-        entity = (exp.experiment_dir / "experiment.json").read_bytes()
+        entity = (exp.experiment_dir / "index.md").read_bytes()
         ir = (exp.experiment_dir / "workflow.ir.json").read_bytes()
         with served(ws, raise_server_exceptions=False) as client:
             response = client.put(_workflow_url(exp), json={"document": DOC_A})
         assert response.status_code == 409, response.text
         assert response.json()["error"]["details"]["workflow_kind"] == "code"
-        assert (exp.experiment_dir / "experiment.json").read_bytes() == entity
+        assert (exp.experiment_dir / "index.md").read_bytes() == entity
         assert (exp.experiment_dir / "workflow.ir.json").read_bytes() == ir
 
     def test_code_put_convert_to_document(
@@ -207,7 +207,7 @@ class TestPutWorkflowDocument:
         ws, exp, _run = fresh_run
         exp.metadata = exp.metadata.model_copy(update={"workflow_entrypoint": "wf.py:build"})
         exp.save()
-        entity = (exp.experiment_dir / "experiment.json").read_bytes()
+        entity = (exp.experiment_dir / "index.md").read_bytes()
         with served(ws, raise_server_exceptions=False) as client:
             plain = client.put(_workflow_url(exp), json={"document": DOC_A})
             converted = client.put(
@@ -217,18 +217,18 @@ class TestPutWorkflowDocument:
         assert plain.status_code == 409, plain.text
         assert "molab migrate workflow-kind" in plain.json()["error"]["message"]
         assert converted.status_code == 409, converted.text
-        assert (exp.experiment_dir / "experiment.json").read_bytes() == entity
+        assert (exp.experiment_dir / "index.md").read_bytes() == entity
         assert _reload(ws, exp).workflow_kind is None
 
     def test_bad_doc_is_400_and_writes_nothing(
         self, served: ServedFactory, fresh_run: RunFixture
     ) -> None:
         ws, exp, _run = fresh_run
-        entity = (exp.experiment_dir / "experiment.json").read_bytes()
+        entity = (exp.experiment_dir / "index.md").read_bytes()
         with served(ws, raise_server_exceptions=False) as client:
             response = client.put(_workflow_url(exp), json={"document": BAD_DOC})
         assert response.status_code == 400, response.text
-        assert (exp.experiment_dir / "experiment.json").read_bytes() == entity
+        assert (exp.experiment_dir / "index.md").read_bytes() == entity
         assert _reload(ws, exp).workflow_kind is None
 
     def test_put_clears_binding_memo(self, served: ServedFactory, fresh_run: RunFixture) -> None:

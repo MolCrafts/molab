@@ -1,7 +1,8 @@
 """Base class for workspace hierarchy nodes.
 
-Provides shared JSON persistence, metadata loading, child reconstruction,
-and child listing for Workspace, Project, Experiment, and Run.
+Provides the record payload / metadata loading shared by Workspace, Project,
+Experiment, and Run (their record is the frontmatter of ``index.md``), and
+child reconstruction.
 
 The atomic write helpers ``atomic_write_json`` / ``atomic_write_text``
 are re-exported from the cross-layer primitive :mod:`molab.atomicio`.
@@ -9,34 +10,40 @@ are re-exported from the cross-layer primitive :mod:`molab.atomicio`.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, TypeVar
+from collections.abc import Mapping
+from typing import Any, TypeVar
 
 from pydantic import BaseModel
 
 from molab.atomicio import atomic_write_json, atomic_write_text
 
-if TYPE_CHECKING:
-    from pathlib import Path
-
-    from .fs import FileSystem
-
 T = TypeVar("T")
 
 
-def _save_metadata(metadata: BaseModel, path: str | Path, *, fs: FileSystem | None = None) -> None:
-    """Write a Pydantic metadata model to a JSON file atomically."""
-    from .schema_version import write_versioned_json
+def _record_payload(metadata: BaseModel | Mapping[str, Any]) -> dict[str, Any]:
+    """The canonical zone of an ``index.md`` record for *metadata*.
 
-    write_versioned_json(path, metadata.model_dump(mode="json"), fs=fs)
+    Exactly the fields the model writes, ``type`` first, stamped with the
+    current ``schema_version``. ``datetime`` values are already ISO strings
+    (``model_dump(mode="json")``), so nothing typed reaches the YAML dumper.
+    """
+    from .schema_version import MOLAB_SCHEMA_VERSION
+
+    payload = dict(
+        metadata.model_dump(mode="json") if isinstance(metadata, BaseModel) else metadata
+    )
+    payload.pop("schema_version", None)
+    head = {"type": payload.pop("type")} if "type" in payload else {}
+    return {**head, **payload, "schema_version": MOLAB_SCHEMA_VERSION}
 
 
-def _load_metadata[T](
-    metadata_cls: type[T], path: str | Path, *, fs: FileSystem | None = None
-) -> T:
-    """Read a JSON file into a Pydantic metadata model."""
-    from .schema_version import read_versioned_json
+def _load_metadata[T](metadata_cls: type[T], canonical: Mapping[str, Any]) -> T:
+    """Validate a record's canonical zone into a Pydantic metadata model.
 
-    data = read_versioned_json(path, fs=fs)
+    The ``schema_version`` stamp is dropped, not checked (see
+    :class:`~molab.workspace.schema_version.IncompatibleSchemaError`).
+    """
+    data = {key: value for key, value in canonical.items() if key != "schema_version"}
     return metadata_cls(**data)
 
 

@@ -1,4 +1,4 @@
-"""``run.json`` holds only a run's logical definition.
+"""The run record (``index.md`` frontmatter) holds only a run's logical definition.
 
 Attempt status, ownership, time, and error live on the Execution record.
 Heartbeat is the per-Execution ``alive`` mtime — not ``heartbeat_at`` /
@@ -15,10 +15,11 @@ import molab.workspace
 import molab.workspace.models as workspace_models
 from molab.workspace.domain import ExecutionStatus
 from molab.workspace.models import RunMetadata
+from tests.support.records import read_record
 
 
 def _read_run_json(run) -> dict:
-    return json.loads(Path(str(run.run_dir / "run.json")).read_text(encoding="utf-8"))
+    return read_record(run.run_dir)
 
 
 def _ops_dirs(run) -> tuple[Path, Path]:
@@ -173,7 +174,7 @@ class TestRunMetadata:
         ops, legacy = _ops_dirs(run)
         with run.start() as ctx:
             on_disk = _read_run_json(run)
-            # Operational hot state no longer lives on run.json.
+            # Operational hot state does not live on the run record.
             assert "status" not in on_disk
             assert "owner_pid" not in on_disk
             assert "owner_host" not in on_disk

@@ -5,8 +5,8 @@ Project entity with experiment management.
 Chain-owned test module: created by arch-own-01-cleanup; later arch-own specs
 extend it (add classes / tests here rather than creating sibling files).
 
-arch-own-01 pins the materialize ordering: mkdir -> save the entity JSON ->
-record history, so the ``ProjectCreated`` commit stages an existing ``project.json``
+arch-own-01 pins the materialize ordering: mkdir -> save the entity record ->
+record history, so the ``ProjectCreated`` commit stages an existing ``index.md`` record
 rather than an empty directory. History stays a soft dependency.
 """
 
@@ -14,7 +14,6 @@ from __future__ import annotations
 
 import ast
 import hashlib
-import json
 from pathlib import Path
 from typing import cast
 
@@ -23,10 +22,11 @@ import pytest
 from molab._typing import JSONValue
 from molab.workspace import Workspace
 from molab.workspace.history import GitHistory
+from tests.support.records import read_record
 
 
 def _spy_history(monkeypatch: pytest.MonkeyPatch, entity_file: str) -> list[tuple[str, bool]]:
-    """Replace ``GitHistory.record``; log (event, entity JSON exists in paths[0])."""
+    """Replace ``GitHistory.record``; log (event, entity record exists in paths[0])."""
     seen: list[tuple[str, bool]] = []
     original = GitHistory.record
 
@@ -46,7 +46,7 @@ class TestProjectMaterialize:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         ws = Workspace(tmp_path, name="lab")
-        seen = _spy_history(monkeypatch, "project.json")
+        seen = _spy_history(monkeypatch, "index.md")
 
         ws.add_project("p")
 
@@ -86,7 +86,7 @@ def _golden(canon: str) -> str:
 
 
 def _meta_bytes(exp) -> bytes:
-    return (Path(exp.experiment_dir) / "experiment.json").read_bytes()
+    return (Path(exp.experiment_dir) / "index.md").read_bytes()
 
 
 def _ir_bytes(exp) -> bytes:
@@ -99,7 +99,7 @@ class TestProjectWorkflowDocument:
     def test_add_document_is_born_at_revision_1(
         self, project, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        seen = _spy_history(monkeypatch, "experiment.json")
+        seen = _spy_history(monkeypatch, "index.md")
 
         exp = project.add_experiment("doc", workflow_document=D1)
 
@@ -148,7 +148,7 @@ class TestProjectWorkflowDocument:
     def test_add_same_document_twice_creates_once(
         self, project, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        seen = _spy_history(monkeypatch, "experiment.json")
+        seen = _spy_history(monkeypatch, "index.md")
 
         first = project.add_experiment("doc", workflow_document=D1)
         second = project.add_experiment("doc", workflow_document=D1)
@@ -216,9 +216,7 @@ class TestProjectWorkflowDocument:
                 paths = kwargs.get("paths") or ()
                 assert isinstance(paths, tuple)
                 assert paths
-                raw = json.loads(
-                    (Path(str(paths[0])) / "experiment.json").read_text(encoding="utf-8")
-                )
+                raw = read_record(Path(str(paths[0])))
                 on_disk.append((raw["revision"], raw["description"], raw["workflow_kind"]))
             return original(self, event, **kwargs)  # type: ignore[arg-type]
 
@@ -265,12 +263,12 @@ class TestProject:
             },
         )
         revision_id = exp.metadata.revision_id
-        before = (Path(exp.experiment_dir) / "experiment.json").read_bytes()
+        before = (Path(exp.experiment_dir) / "index.md").read_bytes()
         project.set_experiment("doc")
         again = project.get_experiment("doc")
         assert again.metadata.revision == 1
         assert again.metadata.revision_id == revision_id
-        assert (Path(again.experiment_dir) / "experiment.json").read_bytes() == before
+        assert (Path(again.experiment_dir) / "index.md").read_bytes() == before
 
     def test_assets_is_scope_repository(self, project) -> None:
         assert project.assets.scope == project.scope

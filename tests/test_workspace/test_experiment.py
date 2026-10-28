@@ -5,8 +5,8 @@ Experiment entity — one directory per parameter combination.
 Chain-owned test module: created by arch-own-01-cleanup; later arch-own specs
 extend it (add classes / tests here rather than creating sibling files).
 
-arch-own-01 pins the materialize ordering: mkdir -> save the entity JSON ->
-record history, so the ``ExperimentCreated`` commit stages an existing ``experiment.json``
+arch-own-01 pins the materialize ordering: mkdir -> save the entity record ->
+record history, so the ``ExperimentCreated`` commit stages an existing ``index.md`` record
 rather than an empty directory. History stays a soft dependency.
 """
 
@@ -29,12 +29,13 @@ from molab.workspace.fs_local import LocalFileSystem
 from molab.workspace.history import GitHistory
 from molab.workspace.run import compute_run_definition_hash
 from tests.support.counting_fs import CountingFileSystem
+from tests.support.records import read_record, update_record
 
 _UUID7 = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-7[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$")
 
 
 def _spy_history(monkeypatch: pytest.MonkeyPatch, entity_file: str) -> list[tuple[str, bool]]:
-    """Replace ``GitHistory.record``; log (event, entity JSON exists in paths[0])."""
+    """Replace ``GitHistory.record``; log (event, entity record exists in paths[0])."""
     seen: list[tuple[str, bool]] = []
     original = GitHistory.record
 
@@ -54,7 +55,7 @@ class TestExperimentMaterialize:
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         project = Workspace(tmp_path, name="lab").add_project("p")
-        seen = _spy_history(monkeypatch, "experiment.json")
+        seen = _spy_history(monkeypatch, "index.md")
 
         project.add_experiment("e", params={})
 
@@ -279,7 +280,7 @@ def _write_legacy_ir(exp: Experiment, document: dict[str, JSONValue]) -> None:
 
 
 def _bind_rejected(exp: Experiment, exc: type[BaseException], call: Callable[[], None]) -> None:
-    path = Path(exp.experiment_dir) / "experiment.json"
+    path = Path(exp.experiment_dir) / "index.md"
     before = path.read_bytes()
     with pytest.raises(exc):
         call()
@@ -359,7 +360,7 @@ class TestExperimentBindWorkflow:
         exp.bind_workflow("document", document=D1)
 
         ir_path = Path(exp.experiment_dir) / _IR_NAME
-        raw = json.loads((Path(exp.experiment_dir) / "experiment.json").read_text(encoding="utf-8"))
+        raw = read_record(Path(exp.experiment_dir))
         assert json.loads(ir_path.read_text(encoding="utf-8")) == D1
         assert raw["workflow_kind"] == "document"
         assert raw["workflow_entrypoint"] is None
@@ -519,7 +520,7 @@ class TestExperimentBindWorkflow:
     ) -> None:
         exp = project.add_experiment("e")
         exp.bind_workflow("document", document=D1)
-        seen = _spy_history(monkeypatch, "experiment.json")
+        seen = _spy_history(monkeypatch, "index.md")
 
         exp.bind_workflow("document", document=D2)
 
@@ -530,7 +531,7 @@ class TestExperimentBindWorkflow:
     ) -> None:
         exp = project.add_experiment("e")
         exp.bind_workflow("document", document=D1)
-        seen = _spy_history(monkeypatch, "experiment.json")
+        seen = _spy_history(monkeypatch, "index.md")
 
         exp.bind_workflow("document", document=D1)
 
@@ -625,7 +626,7 @@ class TestExperiment:
         exp.save()
         assert path.read_bytes() == before
         assert path.stat().st_mtime_ns == mtime
-        raw = json.loads((Path(exp.experiment_dir) / "experiment.json").read_text())
+        raw = read_record(Path(exp.experiment_dir))
         assert "workflow_source" not in raw
 
     def test_code_rebind_removes_the_document(self, tmp_path: Path) -> None:
@@ -634,15 +635,15 @@ class TestExperiment:
         exp.bind_workflow("code", entrypoint="a.py:f")
         assert not (Path(exp.experiment_dir) / "workflow.ir.json").exists()
 
-    def test_legacy_experiment_json_is_not_rehydrated(self, tmp_path: Path) -> None:
+    def test_legacy_experiment_record_is_not_rehydrated(self, tmp_path: Path) -> None:
         ws = Workspace(tmp_path / "ws", name="ws")
         exp = ws.add_project("p").add_experiment("e")
-        path = Path(exp.experiment_dir) / "experiment.json"
-        raw = json.loads(path.read_text(encoding="utf-8"))
-        raw["workflow_source"] = json.dumps(_IR)
-        raw["workflow_type"] = "yaml"
-        raw["git_commit"] = "abc123"
-        path.write_text(json.dumps(raw), encoding="utf-8")
+        update_record(
+            exp.experiment_dir,
+            workflow_source=json.dumps(_IR),
+            workflow_type="yaml",
+            git_commit="abc123",
+        )
         (Path(exp.experiment_dir) / "workflow.ir.json").unlink(missing_ok=True)
         loaded = Workspace(ws.root).get_project("p").get_experiment("e")
         assert loaded.workflow_document is None

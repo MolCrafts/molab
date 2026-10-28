@@ -9,13 +9,13 @@ worthless.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
 
 from molab.workspace import Workspace
 from molab.workspace.validate import validate_workspace
+from tests.support.records import read_record, write_record
 
 
 def _workspace(tmp_path: Path) -> Workspace:
@@ -42,7 +42,7 @@ class TestValidateWorkspace:
         assert not any("ops/run.json" in v.detail for v in report.violations)
         assert report.ok
 
-    def test_missing_workspace_json_is_not_a_workspace(self, tmp_path: Path) -> None:
+    def test_missing_root_record_is_not_a_workspace(self, tmp_path: Path) -> None:
         (tmp_path / "bare").mkdir()
         report = validate_workspace(tmp_path / "bare")
         assert not report.ok
@@ -53,29 +53,78 @@ class TestValidateWorkspace:
         assert not report.ok
         assert [v.rule for v in report.errors] == ["workspace.missing"]
 
-    def test_missing_entity_file_is_an_error(self, tmp_path: Path) -> None:
+    def test_missing_record_is_an_error(self, tmp_path: Path) -> None:
         ws = _workspace(tmp_path)
-        (Path(ws.get_project("alpha").resolve()) / "project.json").unlink()
+        (Path(ws.get_project("alpha").resolve()) / "index.md").unlink()
 
         report = ws.validate()
         assert "project.entity" in {v.rule for v in report.errors}
 
-    def test_missing_concept_marker_is_an_error(self, tmp_path: Path) -> None:
+    def test_a_record_without_type_is_no_record(self, tmp_path: Path) -> None:
+        """``concept.marker`` folded into ``{level}.entity``: no ``type``, no record."""
         ws = _workspace(tmp_path)
         proj = ws.get_project("alpha")
-        entity = Path(proj.resolve()) / "project.json"
-        payload = json.loads(entity.read_text())
+        payload = read_record(proj.resolve())
         payload.pop("type", None)
-        entity.write_text(json.dumps(payload))
+        write_record(proj.resolve(), payload)
 
         report = ws.validate()
-        marker = [v for v in report.errors if v.rule == "concept.marker"]
-        assert marker and marker[0].path == f"projects/{proj._name}"
+        missing = [v for v in report.errors if v.rule == "project.entity"]
+        assert missing and missing[0].path == f"projects/{proj._name}"
+        assert "concept.marker" not in {v.rule for v in report.violations}
 
-    def test_workspace_type_on_entity_is_the_concept_marker(self, tmp_path: Path) -> None:
+    def test_a_canonical_zone_that_fails_its_model_is_an_error(self, tmp_path: Path) -> None:
         ws = _workspace(tmp_path)
+        proj = ws.get_project("alpha")
+        payload = read_record(proj.resolve())
+        payload.pop("id")
+        write_record(proj.resolve(), payload)
+
         report = ws.validate()
-        assert "concept.marker" not in {v.rule for v in report.errors}
+        assert [v.path for v in report.errors if v.rule == "index.frontmatter"] == [
+            f"projects/{proj._name}"
+        ]
+
+    def test_a_drifted_index_block_is_an_error(self, tmp_path: Path) -> None:
+        ws = _workspace(tmp_path)
+        proj = ws.get_project("alpha")
+        write_record(proj.resolve(), read_record(proj.resolve()), index={"children": []})
+
+        report = ws.validate()
+        drift = [v for v in report.errors if v.rule == "index.drift"]
+        assert [v.path for v in drift] == [f"projects/{proj._name}"]
+        assert "molab index sync" in drift[0].hint
+
+    def test_a_section_outside_the_reserved_keys_is_not_drift(self, tmp_path: Path) -> None:
+        ws = _workspace(tmp_path)
+        ws.get_project("alpha").set_index_section("notes", [{"path": "knowledges/a.md"}])
+
+        assert ws.validate().ok
+
+    def test_a_leftover_legacy_record_is_an_error(self, tmp_path: Path) -> None:
+        ws = _workspace(tmp_path)
+        proj = ws.get_project("alpha")
+        (Path(proj.resolve()) / "project.json").write_text("{}")
+
+        report = ws.validate()
+        legacy = [v for v in report.errors if v.rule == "layout.legacy_record"]
+        assert [v.path for v in legacy] == [f"projects/{proj._name}"]
+        assert "molab migrate index" in legacy[0].hint
+
+    def test_every_rule_has_a_hint(self) -> None:
+        from molab.workspace.validate import _RULE_HINTS
+
+        for rule in (
+            "workspace.entity",
+            "project.entity",
+            "experiment.entity",
+            "run.entity",
+            "index.frontmatter",
+            "index.drift",
+            "layout.legacy_record",
+        ):
+            assert rule in _RULE_HINTS
+        assert "concept.marker" not in _RULE_HINTS
 
     def test_unknown_host_directory_is_not_judged(self, tmp_path: Path) -> None:
         ws = _workspace(tmp_path)

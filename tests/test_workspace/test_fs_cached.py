@@ -391,7 +391,7 @@ class TestCachedRemoteFileSystem:
         mirror_root = tmp_path / "mirror"
         fake.dirs.add("/scratch/me")
         fake.dirs.add("/scratch/me/projects")
-        fake.files["/scratch/me/workspace.json"] = b"{}"
+        fake.files["/scratch/me/index.md"] = b"---\ntype: workspace.root\n---\n"
         first = CachedRemoteFileSystem(fake, mirror_root=mirror_root, cache_mode="pinned")
         first.connect("/scratch/me")
         first.read_bytes("/scratch/me/log.txt")
@@ -406,7 +406,7 @@ class TestCachedRemoteFileSystem:
         if second._index_thread is not None:
             second._index_thread.join(timeout=2.0)
         assert second.indexed is True
-        # Active refresh force-fetched workspace.json at least once.
+        # Active refresh force-fetched the root index.md at least once.
         assert fake.calls["read_bytes"] >= 1 or fake.calls["read_text"] >= 0
 
     @pytest.mark.unit
@@ -415,7 +415,7 @@ class TestCachedRemoteFileSystem:
 
         fake.dirs.add("/scratch/me")
         fake.dirs.add("/scratch/me/projects")
-        fake.files["/scratch/me/workspace.json"] = b'{"name":"ws"}'
+        fake.files["/scratch/me/index.md"] = b"---\nname: ws\n---\n"
         cached = CachedRemoteFileSystem(fake, mirror_root=tmp_path / "mirror", cache_mode="pinned")
         assert cached.indexed is False
         ws = SimpleNamespace(root="/scratch/me", fs=cached)
@@ -548,16 +548,16 @@ class TestCachedRemoteFileSystem:
     def test_invalidate_scope_indices_drops_only_index_files(
         self, fake: _FakeRemoteFS, tmp_path: Path
     ):
-        fake.files["/scratch/me/project.json"] = b'{"items":[]}'
+        fake.files["/scratch/me/index.md"] = b'{"items":[]}'
         fake.files["/scratch/me/runs/a/stdout.log"] = b"log bytes"
         cached = CachedRemoteFileSystem(fake, mirror_root=tmp_path / "mirror", cache_mode="pinned")
-        cached.read_bytes("/scratch/me/project.json")
+        cached.read_bytes("/scratch/me/index.md")
         cached.read_bytes("/scratch/me/runs/a/stdout.log")
 
         dropped = cached.invalidate(scope="indices")
         assert dropped == 1
         assert "/scratch/me/runs/a/stdout.log" in cached.cached_paths()
-        assert "/scratch/me/project.json" not in cached.cached_paths()
+        assert "/scratch/me/index.md" not in cached.cached_paths()
 
     @pytest.mark.unit
     def test_invalidate_scope_indices_drops_attempt_records(

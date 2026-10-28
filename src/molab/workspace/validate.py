@@ -2,7 +2,7 @@
 
 Read-only. The layout law lives in one place — the ``Folder`` family and the
 on-disk contract it derives (container subdir, human-readable directory
-names, the singular entity filename, the per-concept ``meta.json`` marker).
+names, one ``index.md`` record per level whose frontmatter carries ``type``).
 This module is that law expressed as a checker, so a tree assembled by hand,
 by an adoption tool, or by an older molab can be held to the same standard
 the writers obey.
@@ -15,23 +15,32 @@ merely incomplete one:
 * ``error``   — the layout law is violated; readers may mis-resolve the tree.
 * ``warning`` — legal but lazily-created state is absent.
 
-There is nothing derived left to disagree with: the directory tree *is* the
-index, so a level's children are exactly its entity subdirectories. What the
-checker enforces instead is that every path segment is legible — a Run's
-directory names its parameters, an Execution's names its attempt number —
-and that machine state never leaks into a scientific directory.
+The directory tree *is* the index: a level's children are exactly its entity
+subdirectories. The one derived thing is the ``index:`` block of each record
+(D89), and the checker holds it to a fresh projection of the tree
+(``index.drift``). It also enforces that every path segment is legible — a
+Run's directory names its parameters, an Execution's names its attempt
+number — and that machine state never leaks into a scientific directory.
 """
 
 from __future__ import annotations
 
-import json
 import re
 from typing import TYPE_CHECKING, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, computed_field
+from pydantic import BaseModel, ConfigDict, ValidationError, computed_field
 
+from .entity_record import (
+    ENTITY_FILENAME,
+    RESERVED_INDEX_KEYS,
+    EntityRecord,
+    legacy_record_files,
+    read_record,
+    read_type,
+)
 from .execution_dirs import execution_dir_names
 from .fs_local import LocalFileSystem
+from .models import ExperimentMetadata, ProjectMetadata, RunMetadata, WorkspaceMetadata
 from .naming import EXPERIMENT_CONTAINER, PROJECT_CONTAINER, RUN_CONTAINER
 
 if TYPE_CHECKING:
@@ -47,42 +56,48 @@ _SLUG_RE = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 _EXECUTION_RE = re.compile(r"^e\d+$")
 _LEGACY_EXECUTION_RE = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 
-#: level -> entity filename (singular — lives on the concept's own directory)
-_ENTITY_FILE: dict[str, str] = {
-    "workspace": "workspace.json",
-    "project": "project.json",
-    "experiment": "experiment.json",
-    "run": "run.json",
+#: level -> the record ``type`` its ``index.md`` carries
+_LEVEL_TYPE: dict[str, str] = {
+    "workspace": "workspace.root",
+    "project": "workspace.project",
+    "experiment": "workspace.experiment",
+    "run": "workspace.run",
+}
+#: level -> the model its canonical zone must validate against
+_LEVEL_MODEL: dict[str, type[BaseModel]] = {
+    "workspace": WorkspaceMetadata,
+    "project": ProjectMetadata,
+    "experiment": ExperimentMetadata,
+    "run": RunMetadata,
 }
 #: Stable rule id → remediation hint. Keep ids stable — callers filter /
 #: dispatch on them.
 _RULE_HINTS: dict[str, str] = {
     "workspace.missing": (
-        "Create the directory, then call materialize_workspace / "
-        "Workspace(...).materialize() so workspace.json exists "
-        "(OKF type lives on that file)."
+        "Create the directory, then call Workspace(...).materialize() so the "
+        "root index.md record (type: workspace.root) exists."
     ),
     "workspace.entity": (
-        "Not a workspace root. materialize_workspace(path=…) or "
+        "Not a workspace root: no index.md record with type workspace.root. "
         "Workspace(root).materialize(); do not nest a second workspace under "
         "an existing one — use add_project instead."
     ),
     "project.entity": (
-        "Missing project.json. Prefer add_project(name=…) (create-or-get) so "
-        "the entity file is written; hand-written dirs need project.json + meta.json."
+        "No index.md record with type workspace.project. Prefer "
+        "add_project(name=…) (create-or-get) so the record is written."
     ),
     "project.slug": (
         "Rename the directory to a kebab-case slug (e.g. mace-r2san); ids are "
         "slug(name) with no prefix."
     ),
     "experiment.entity": (
-        "Missing experiment.json. Use add_experiment(project_id, name) or "
-        "write experiment.json + meta.json under experiments/<slug>/."
+        "No index.md record with type workspace.experiment. Use "
+        "project.add_experiment(name) so the record is written."
     ),
     "experiment.slug": ("Rename the experiment directory to a kebab-case slug (no prefix)."),
     "run.entity": (
-        "Missing run.json. Scaffold with experiment.add_run(params=…); do not "
-        "leave a bare directory under runs/ without the entity file."
+        "No index.md record with type workspace.run. Scaffold with "
+        "experiment.add_run(params=…); do not leave a bare directory under runs/."
     ),
     "execution.name": (
         "Rename the attempt directory to its sequence number (e01, e02, …); "
@@ -92,9 +107,13 @@ _RULE_HINTS: dict[str, str] = {
         "Run `molab migrate layout <old> <new>` to rename legacy UUID attempt "
         "directories to e01, e02, …"
     ),
-    "concept.marker": (
-        "Stamp type on workspace.json / project.json / experiment.json / "
-        "run.json. Notes and other Folders use meta.json."
+    "index.frontmatter": (
+        "The index.md frontmatter does not validate against its level's model; "
+        "restore the fields molab wrote (git history has them)."
+    ),
+    "index.drift": ("The derived index: block disagrees with the tree; run `molab index sync`."),
+    "layout.legacy_record": (
+        "A <kind>.json / meta.json record is still on disk; run `molab migrate index`."
     ),
     "layout.stray": (
         "Only declared execution directories live under executions/<id>/; "
@@ -247,23 +266,44 @@ class _Checker:
 
     # -- per-level checks ------------------------------------------------
 
-    def _entity_has_type(self, path: str, entity: str) -> bool:
-        fpath = self._fs.join(path, entity)
-        if not self._fs.is_file(fpath):
-            return False
-        try:
-            payload = json.loads(self._fs.read_text(fpath))
-        except (OSError, ValueError):
-            return False
-        return isinstance(payload, dict) and bool(payload.get("type"))
-
     def _check_concept(self, path: str, level: str) -> None:
-        """Entity file + OKF marker for one concept directory."""
-        entity = _ENTITY_FILE[level]
-        if not self._fs.is_file(self._fs.join(path, entity)):
-            self._add(path, f"{level}.entity", f"missing {entity}")
-        if not self._entity_has_type(path, entity):
-            self._add(path, "concept.marker", f"missing type on {entity}")
+        """The ``index.md`` record of one concept directory: present, valid, in sync."""
+        legacy = legacy_record_files(self._fs, path)
+        if legacy:
+            self._add(
+                path,
+                "layout.legacy_record",
+                f"legacy record file(s) {', '.join(legacy)} still present",
+            )
+        expected = _LEVEL_TYPE[level]
+        if read_type(self._fs, path) != expected:
+            self._add(path, f"{level}.entity", f"no {ENTITY_FILENAME} record of type {expected}")
+            return
+        record = read_record(self._fs, path)
+        if record is None:  # pragma: no cover - read_type just saw it
+            return
+        self._check_record(path, level, record)
+
+    def _check_record(self, path: str, level: str, record: EntityRecord) -> None:
+        from .index_projection import project_index_at
+
+        model = _LEVEL_MODEL[level]
+        data = {k: v for k, v in record.canonical.items() if k != "schema_version"}
+        try:
+            model.model_validate(data)
+        except ValidationError as exc:
+            self._add(
+                path,
+                "index.frontmatter",
+                f"canonical zone fails {model.__name__}: {exc.error_count()} error(s)",
+            )
+        expected = project_index_at(self._fs, path, record.type, canonical=record.canonical)
+        found = {k: v for k, v in record.index.items() if k in RESERVED_INDEX_KEYS}
+        if found != expected:
+            drifted = sorted(
+                key for key in set(found) | set(expected) if found.get(key) != expected.get(key)
+            )
+            self._add(path, "index.drift", f"derived index keys differ: {', '.join(drifted)}")
 
     def _check_execution(self, path: str) -> None:
         """Every child of an execution dir is a declared attempt directory."""
@@ -312,8 +352,19 @@ class _Checker:
         if not self._fs.is_dir(root):
             self._add(root, "workspace.missing", "not a directory")
             return self._found
-        if not self._fs.is_file(self._fs.join(root, _ENTITY_FILE["workspace"])):
-            self._add(root, "workspace.entity", "missing workspace.json — not a workspace root")
+        if read_type(self._fs, root) != _LEVEL_TYPE["workspace"]:
+            legacy = legacy_record_files(self._fs, root)
+            if legacy:
+                self._add(
+                    root,
+                    "layout.legacy_record",
+                    f"legacy record file(s) {', '.join(legacy)} still present",
+                )
+            self._add(
+                root,
+                "workspace.entity",
+                f"no {ENTITY_FILENAME} record of type workspace.root — not a workspace root",
+            )
             return self._found
 
         self._check_concept(root, "workspace")

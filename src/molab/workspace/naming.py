@@ -5,7 +5,7 @@ in a paper's methods section. So the path is a *name*, not an identity: an
 Experiment directory is its slug, a Run directory is its parameters, an
 Execution directory is its attempt number.
 
-Identity stays where identity belongs: the UUIDv7 in the entity JSON's
+Identity stays where identity belongs: the UUIDv7 in the entity record's
 ``id`` field, which history and cross-entity references cite. Renaming a
 directory therefore never breaks a reference, and reading a directory
 listing tells you what was actually run.

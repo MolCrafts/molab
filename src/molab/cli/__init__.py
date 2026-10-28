@@ -58,6 +58,11 @@ from molab.cli.migrate_cmd import migrate_app  # noqa: E402
 app.add_typer(history_app, name="history")
 app.add_typer(migrate_app, name="migrate")
 
+# ── derived index.md navigation blocks (D89) ─────────────────────────────────
+from molab.cli.index_cmd import index_app  # noqa: E402
+
+app.add_typer(index_app, name="index")
+
 # ── session + config groups ──────────────────────────────────────────────────
 
 

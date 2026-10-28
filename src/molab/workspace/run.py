@@ -27,10 +27,13 @@ from molab.profile import ProfileConfig
 from .base import (
     _load_metadata,
     _reconstruct,
+    _record_payload,
 )
+from .entity_record import EntityRecord, read_record
 from .errors import RunExistsError, RunNotFoundError
 from .folder import WORKSPACE_EXPERIMENT_KIND, WORKSPACE_RUN_KIND, Folder, register_entity_class
 from .fs import PathArg
+from .fs_local import LocalFileSystem
 from .models import FolderMetadata, RunMetadata, RunStatus
 from .naming import RUN_CONTAINER, run_slug
 
@@ -277,6 +280,7 @@ class Run(Folder):
 
     _exists_error_cls = RunExistsError
     _not_found_error_cls = RunNotFoundError
+    _entity_kind = WORKSPACE_RUN_KIND
 
     def __init__(
         self,
@@ -353,10 +357,13 @@ class Run(Folder):
 
     @classmethod
     def from_disk(cls, child_dir: PathArg, parent: Folder) -> Run:
-        """Load ``run.json`` and rebuild entity state. See Folder.from_disk hook docs."""
-        meta = _load_metadata(
-            RunMetadata, parent._disk().join(child_dir, "run.json"), fs=parent._disk()
-        )
+        """Load the ``index.md`` record and rebuild entity state. See Folder.from_disk hook docs."""
+        return cls.from_record(child_dir, parent, cls._require_record(child_dir, parent))
+
+    @classmethod
+    def from_record(cls, child_dir: PathArg, parent: Folder, record: EntityRecord) -> Run:
+        """Rebuild a Run from a record its caller already read (one read per run)."""
+        meta = _load_metadata(RunMetadata, record.canonical)
         # Runs have no separate human name — ``RunMetadata`` only carries ``id``.
         folder_meta = FolderMetadata(
             id=meta.id,
@@ -598,12 +605,8 @@ class Run(Folder):
             self._definition_record(),
             experiment_id=self.ancestor_id(WORKSPACE_EXPERIMENT_KIND),
             path=self.run_dir,
+            also=self._parent_index_paths(),
         )
-
-    def write_meta(self) -> str:
-        """Stamp concept ``type`` on ``run.json``."""
-        self.save()
-        return self._disk().join(self.run_dir, "run.json")
 
     def _move_target_id(self, new_name: str | None) -> str:
         """A Run keeps its UUID id across a move; it has no human name to change."""
@@ -617,14 +620,15 @@ class Run(Folder):
 
     def save(self) -> None:
         with self._metadata_lock():
-            self._write_run_json()
+            self._write_run_record()
+        self._record_written()
 
     def persist_driver_context(self, context: dict[str, object]) -> None:
         """Reject the removed Run-level runtime state channel.
 
         Results and workflow runtime state belong to a selected Execution.
         Keeping this method as a loud tombstone prevents an older caller from
-        silently putting mutable history back into ``run.json``.
+        silently putting mutable history back into the run record.
         """
         del context
         raise RuntimeError(
@@ -637,17 +641,19 @@ class Run(Folder):
         """Load a :class:`Run` from its on-disk directory.
 
         The directory name is the run's parameters; identity is the ``id``
-        in ``run.json``. Renaming the directory still loads the same run.
+        in its ``index.md`` record. Renaming the directory still loads the
+        same run.
 
         Args:
-            run_dir: Path to the run directory (contains ``run.json``).
+            run_dir: Path to the run directory (holds the run's ``index.md``).
 
         Returns:
             Reconstructed :class:`Run` bound to its parent experiment.
 
         Raises:
-            FileNotFoundError: No ``workspace.json`` above *run_dir*, or no
-                ``run.json``.
+            FileNotFoundError: No workspace root above *run_dir*, or no run
+                record in it.
+            UnmigratedLayoutError: *run_dir* still holds a legacy JSON record.
             RunNotFoundError: No experiment in that workspace owns this run,
                 or the loaded run's directory is not *run_dir*.
         """
@@ -656,8 +662,11 @@ class Run(Folder):
         run_path = Path(str(run_dir)).resolve()
         root = Workspace.enclosing_root(run_path)
         if root is None:
-            raise FileNotFoundError(f"no workspace.json above {run_path}")
-        meta = _load_metadata(RunMetadata, run_path / "run.json")
+            raise FileNotFoundError(f"no workspace root above {run_path}")
+        record = read_record(LocalFileSystem(), str(run_path))
+        if record is None or record.type != WORKSPACE_RUN_KIND:
+            raise FileNotFoundError(f"no run record in {run_path}")
+        meta = _load_metadata(RunMetadata, record.canonical)
         ws = Workspace.load(root)
         for project in ws.list_projects():
             for experiment in project.list_experiments():
@@ -1279,7 +1288,7 @@ class Run(Folder):
 
     @contextlib.contextmanager
     def _metadata_lock(self) -> Generator[None]:
-        """Advisory inter-process lock guarding ``run.json`` read-modify-write.
+        """Advisory inter-process lock guarding the run record's read-modify-write.
 
         The lock file lives under the workspace's ``.molab/locks/`` — machine
         state never sits in a scientific directory. Degrades to a no-op when
@@ -1295,7 +1304,7 @@ class Run(Folder):
             yield
 
     def _reload_metadata_from_disk(self) -> None:
-        """Refresh in-memory metadata from ``run.json`` when it exists.
+        """Refresh in-memory metadata from the ``index.md`` record when it exists.
 
         Called under :meth:`_metadata_lock` before applying a partial
         update, so concurrent writers (server, CLI, detached workers)
@@ -1303,26 +1312,24 @@ class Run(Folder):
         writes. Missing or unreadable files keep the in-memory copy
         (first write before ``materialize()``, remote filesystems).
         """
-        path = self._disk().join(self.run_dir, "run.json")
         try:
-            if not self._disk().exists(path):
+            record = read_record(self._disk(), self.run_dir)
+            if record is None or record.type != WORKSPACE_RUN_KIND:
                 return
-            self._entity_metadata = _load_metadata(RunMetadata, path, fs=self._disk())
+            self._entity_metadata = _load_metadata(RunMetadata, record.canonical)
         except Exception:
-            _logger.debug(f"run {self.id}: could not reload run.json; keeping in-memory copy")
+            _logger.debug(f"run {self.id}: could not reload its record; keeping in-memory copy")
 
-    def _write_run_json(self, *, context: dict[str, object] | None = None) -> None:
-        """Write only logical Run definition fields to ``run.json``.
+    def _canonical_record(self) -> dict[str, JSONValue]:
+        return _record_payload(self._definition_record())
+
+    def _write_run_record(self) -> None:
+        """Write only logical Run definition fields to the ``index.md`` record.
 
         Operational state and results are persisted by an Execution, not here.
+        The derived ``index:`` block and the narrative body are kept.
         """
-        from .file_store import FileStore
-        from .schema_version import versioned_payload
-
-        fs = self._disk()
-        del context
-        payload: dict[str, object] = dict(self._definition_record())
-        FileStore(self.run_dir, fs=fs).put("run.json", versioned_payload(payload))
+        self._write_record(self._canonical_record())
 
     def _definition_record(self) -> dict[str, JSONValue]:
         """Return the portable logical definition shared by view + provenance."""
@@ -1357,4 +1364,5 @@ class Run(Folder):
         with self._metadata_lock():
             self._reload_metadata_from_disk()
             self.metadata = self.metadata.model_copy(update=updates)
-            self._write_run_json()
+            self._write_run_record()
+        self._record_written()

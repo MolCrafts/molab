@@ -30,7 +30,7 @@ class TestOpenServeRoot:
         plain.mkdir()
         root = open_serve_root(plain)
         assert root.kind == WORKSPACE_ROOT_KIND
-        assert not (plain / "workspace.json").exists()
+        assert not (plain / "index.md").exists()
 
     def test_each_level_mounts_as_itself(self, tmp_path: Path) -> None:
         ws, project, experiment, run, _beta = _lab(tmp_path)
@@ -84,7 +84,8 @@ class TestOpenServeRoot:
         root = open_serve_root(alone)
         assert root.kind == WORKSPACE_PROJECT_KIND
         assert root._parent is None
-        assert not (alone / "workspace.json").exists()
+        # The copy keeps its project record; no workspace record is invented.
+        assert "workspace.root" not in (alone / "index.md").read_text()
         assert [item.name for item in entities(root, Experiment)] == [experiment.name]
 
     def test_workspace_still_sees_every_project(self, tmp_path: Path) -> None:

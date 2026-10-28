@@ -69,7 +69,7 @@ class TestConceptRegistry:
         note = _mount(Note, tmp_path, "idea")
         assert note.path.is_file()
         assert note.frontmatter()["class"] == "Note"
-        assert not (tmp_path / "workspace.json").exists()
+        assert not (tmp_path / "index.md").exists()
 
 
 class TestNote:

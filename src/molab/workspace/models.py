@@ -99,7 +99,7 @@ class ComputeTarget(BaseModel, frozen=True):
 class WorkspaceMetadata(BaseModel, frozen=True):
     """Top-level workspace.
 
-    ``type`` is the OKF concept kind. It lives on ``workspace.json``.
+    ``type`` is the OKF concept kind. It lives in the root ``index.md`` record.
     """
 
     id: str
@@ -112,7 +112,7 @@ class WorkspaceMetadata(BaseModel, frozen=True):
 class ProjectMetadata(BaseModel, frozen=True):
     """Research project container.
 
-    ``type`` lives on ``project.json``.
+    ``type`` lives in the project's ``index.md`` record.
     """
 
     id: str
@@ -143,7 +143,7 @@ class ExperimentMetadata(BaseModel, frozen=True):
     the opaque IR in ``workflow.ir.json``. ``plan_run_id`` is a read-only
     legacy field.
 
-    ``model_config`` ignores extra fields so workspace.json files written
+    ``model_config`` ignores extra fields so records written
     by older molab versions (which may carry now-removed keys like
     ``workflow``) still load cleanly.
     """

@@ -5,7 +5,7 @@ a terminal run into a source-attributed Knowledge document mounted under the
 run's experiment.
 
 Harvesting is **interpretation, not archival**: the run's raw record already
-lives in ``run.json``/artifacts, so a harvest without a narrative is refused —
+lives in the run record / artifacts, so a harvest without a narrative is refused —
 knowledge is what the numbers *mean*. Preconditions error, never fall back:
 
 * the run must be terminal (``succeeded`` / ``failed`` / ``cancelled``) — a
@@ -73,7 +73,7 @@ def perform(
     if not narrative.strip():
         raise ValueError(
             "harvest requires a non-empty narrative — knowledge is interpretation; "
-            "the raw record already lives in run.json and the run's artifacts"
+            "the raw record already lives in the run record and the run's artifacts"
         )
 
     experiment = run.experiment

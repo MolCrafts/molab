@@ -756,7 +756,7 @@ def _open_run(run_dir: Path) -> tuple[Run, Experiment]:
     """Open the run stored at *run_dir* and its experiment.
 
     Delegates to :meth:`molab.workspace.run.Run.load`. A missing workspace,
-    a ``run.json`` with no id, or a run the workspace does not hold is exit 1.
+    a run record with no id, or a run the workspace does not hold is exit 1.
 
     Args:
         run_dir: The run's directory.
@@ -776,20 +776,18 @@ def _open_run(run_dir: Path) -> tuple[Run, Experiment]:
     try:
         run = Run.load(run_dir)
     except FileNotFoundError as exc:
-        if "workspace.json" in str(exc):
-            rprint(f"[red]Error:[/red] no workspace.json above {run_dir}.")
+        if "workspace root" in str(exc):
+            rprint(f"[red]Error:[/red] no workspace root above {run_dir}.")
         else:
-            rprint(f"[red]Error:[/red] run.json under {run_dir} has no run id.")
+            rprint(f"[red]Error:[/red] index.md under {run_dir} is not a run record.")
         raise typer.Exit(1) from None
     except ValidationError:
-        rprint(f"[red]Error:[/red] run.json under {run_dir} has no run id.")
+        rprint(f"[red]Error:[/red] index.md under {run_dir} has no run id.")
         raise typer.Exit(1) from None
     except RunNotFoundError as exc:
-        root = run_dir
-        for candidate in (run_dir, *run_dir.parents):
-            if (candidate / "workspace.json").is_file():
-                root = candidate
-                break
+        from molab.workspace import Workspace
+
+        root = Workspace.enclosing_root(run_dir) or run_dir
         rprint(f"[red]Error:[/red] could not locate run {exc.entity_id} under {root}.")
         raise typer.Exit(1) from None
     return run, run.experiment

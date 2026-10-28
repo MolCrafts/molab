@@ -1,6 +1,6 @@
 """Ingest foreign run logs into a run's host metrics buffer.
 
-A molab **Run is a host**, not a MolRec record: ``run.json`` + run-root ``alive``
+A molab **Run is a host**, not a MolRec record: an ``index.md`` record + run-root ``alive``
 are not molrec ``meta`` / ``status``, and nothing here writes those sections.
 Scientific packages follow the external molrec spec; molab does not re-host it.
 

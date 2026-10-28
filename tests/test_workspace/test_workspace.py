@@ -8,7 +8,6 @@ separation, typed-sugar slugification, ``sync_folders`` reconciliation.
 files.
 """
 
-import json
 import shutil
 from pathlib import Path
 from uuid import UUID
@@ -21,6 +20,7 @@ from molab.workspace.errors import AmbiguousRefError, RefNotFoundError
 from molab.workspace.refs import MolabRef
 from molab.workspace.workspace import set_cli_root_override
 from tests.support.counting_fs import CountingFileSystem
+from tests.support.records import read_index_block, read_record, write_record
 
 
 class TestLegacyLibraryRemoved:
@@ -33,28 +33,29 @@ class TestLegacyLibraryRemoved:
 
 class TestWorkspace:
     def test_construction_mints_an_id_until_materialize(self, tmp_path):
-        """A new workspace id is minted in memory. The file appears at materialize."""
+        """A new workspace id is minted in memory. The record appears at materialize."""
         ws = Workspace(root=tmp_path / "new", name="Lab")
-        assert not (tmp_path / "new" / "workspace.json").exists()
+        assert not (tmp_path / "new" / "index.md").exists()
         ws.materialize()
-        assert (tmp_path / "new" / "workspace.json").is_file()
+        assert (tmp_path / "new" / "index.md").is_file()
 
-    def test_materialize_creates_workspace_json(self, tmp_path):
+    def test_materialize_creates_the_root_record(self, tmp_path):
         ws = Workspace(root=tmp_path, name="Lab")
         ws.materialize()
-        assert (tmp_path / "workspace.json").exists()
+        assert (tmp_path / "index.md").exists()
+        assert not (tmp_path / "workspace.json").exists()
 
-    def test_materialize_stamps_type_on_workspace_json(self, tmp_path):
+    def test_materialize_stamps_type_on_the_root_record(self, tmp_path):
         ws = Workspace(root=tmp_path, name="Lab")
         ws.materialize()
-        data = json.loads((tmp_path / "workspace.json").read_text())
+        data = read_record(tmp_path)
         assert data["type"] == "workspace.root"
         assert ws.read_meta()["type"] == "workspace.root"
 
     def test_child_factory_auto_materializes(self, tmp_path):
         ws = Workspace(root=tmp_path, name="Lab")
         ws.add_project("first")
-        assert (tmp_path / "workspace.json").exists()
+        assert read_record(tmp_path)["type"] == "workspace.root"
 
     def test_load_preserves_identity(self, workspace):
         workspace.materialize()
@@ -63,10 +64,11 @@ class TestWorkspace:
         assert loaded.name == workspace.name
 
     def test_entity_metadata_has_no_child_lists(self, workspace):
-        """The entity ``workspace.json`` never embeds the derived child index."""
+        """The canonical zone never embeds a child list; children live in ``index:``."""
         workspace.materialize()
-        data = json.loads(Path(workspace.root / "workspace.json").read_text(encoding="utf-8"))
+        data = read_record(workspace.root)
         assert "projects" not in data
+        assert "children" not in data
 
 
 class TestProject:
@@ -92,9 +94,15 @@ class TestProject:
         ws.add_project("registered")
         orphan = tmp_path / "projects" / "orphan"
         orphan.mkdir(parents=True)
-        (orphan / "project.json").write_text(
-            '{"schema_version":3,"id":"orphan","name":"orphan","description":"",'
-            '"owner":"","tags":[],"config":{},"created_at":"2026-04-21T12:00:00"}'
+        write_record(
+            orphan,
+            {
+                "type": "workspace.project",
+                "id": "orphan",
+                "name": "orphan",
+                "created_at": "2026-04-21T12:00:00",
+                "schema_version": 3,
+            },
         )
         assert {p.name for p in ws.list_projects()} == {"orphan", "registered"}
 
@@ -208,7 +216,7 @@ class TestWorkspaceFind:
 
 
 class TestWorkspaceIdentity:
-    """A workspace id is minted once and then read back from ``workspace.json``."""
+    """A workspace id is minted once and then read back from the root ``index.md``."""
 
     def test_fresh_root_mints_uuid7_name(self, tmp_path: Path) -> None:
         root = tmp_path / "lab"
@@ -217,23 +225,25 @@ class TestWorkspaceIdentity:
         assert len(ws.id) == 36
         assert ws.name == "My Lab"
         ws._ensure_materialized()
-        payload = json.loads((root / "workspace.json").read_text())
+        payload = read_record(root)
         assert payload["id"] == ws.id
 
-    def test_handwritten_workspace_json_is_not_rewritten(self, tmp_path: Path) -> None:
+    def test_handwritten_root_record_is_not_rewritten(self, tmp_path: Path) -> None:
+        """Adding a child refreshes the derived ``index:`` block only."""
         root = tmp_path / "lab"
-        root.mkdir()
-        raw = (
-            '{"id":"test-lab","name":"Test Lab","type":"workspace.root",'
-            '"created_at":"2026-01-01T00:00:00"}'
-        )
-        path = root / "workspace.json"
-        path.write_text(raw)
-        written = path.read_bytes()
+        written = {
+            "type": "workspace.root",
+            "id": "test-lab",
+            "name": "Test Lab",
+            "created_at": "2026-01-01T00:00:00",
+        }
+        write_record(root, written, body="# Test Lab\n")
         ws = Workspace(root)
         assert ws.id == "test-lab"
         ws.add_project("p")
-        assert path.read_bytes() == written
+        assert read_record(root) == written
+        assert [row["name"] for row in read_index_block(root)["children"]] == ["p"]
+        assert (root / "index.md").read_text().endswith("---\n# Test Lab\n")
 
     def test_two_handles_on_one_fresh_root_share_one_id(self, tmp_path: Path) -> None:
         root = tmp_path / "lab"
@@ -242,15 +252,15 @@ class TestWorkspaceIdentity:
         assert first.id != second.id
         first.add_project("p")
         second.add_project("q")
-        disk_id = json.loads((root / "workspace.json").read_text())["id"]
+        disk_id = read_record(root)["id"]
         assert first.id == second.id == disk_id
         assert second.metadata.id == second.folder_metadata.id == first.id
         second.materialize()
         assert second.id == first.id
-        assert json.loads((root / "workspace.json").read_text())["id"] == first.id
+        assert read_record(root)["id"] == first.id
         second.save()
         assert second.id == first.id
-        assert json.loads((root / "workspace.json").read_text())["id"] == first.id
+        assert read_record(root)["id"] == first.id
 
     def test_save_keeps_persisted_id(self, tmp_path: Path) -> None:
         root = tmp_path / "lab"
@@ -260,7 +270,7 @@ class TestWorkspaceIdentity:
         handle = Workspace(root, name="Lab")
         handle._entity_metadata = handle._entity_metadata.model_copy(update={"id": "other"})
         handle.save()
-        assert json.loads((root / "workspace.json").read_text())["id"] == persisted
+        assert read_record(root)["id"] == persisted
         assert handle.id == persisted
 
     def test_run_constructor_rejects_workflow_snapshot(self, experiment):
@@ -271,24 +281,23 @@ class TestWorkspaceIdentity:
                 workflow_snapshot={"source": "x"},  # type: ignore[call-arg]
             )
 
-    def test_new_run_json_has_no_retired_keys(self, experiment):
+    def test_new_run_record_has_no_retired_keys(self, experiment):
         run = experiment.add_run(params={"x": 1})
-        payload = json.loads((Path(run.run_dir) / "run.json").read_text(encoding="utf-8"))
+        payload = read_record(run.run_dir)
         for key in ("workflow_snapshot", "workflow_id", "workflow_version"):
             assert key not in payload
 
-    def test_legacy_run_json_drops_retired_keys_on_rewrite(self, experiment):
+    def test_legacy_run_record_drops_retired_keys_on_rewrite(self, experiment):
         run = experiment.add_run(params={"x": 1})
-        path = Path(run.run_dir) / "run.json"
-        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload = read_record(run.run_dir)
         before = payload["definition_hash"]
         payload["workflow_snapshot"] = {"source": "legacy"}
         payload["workflow_id"] = "wf-old"
         payload["workflow_version"] = 3
-        path.write_text(json.dumps(payload), encoding="utf-8")
+        write_record(run.run_dir, payload)
         loaded = experiment.get_run(run.id)
         loaded._update_metadata(target="x")
-        rewritten = json.loads(path.read_text(encoding="utf-8"))
+        rewritten = read_record(run.run_dir)
         for key in ("workflow_snapshot", "workflow_id", "workflow_version"):
             assert key not in rewritten
         assert rewritten["definition_hash"] == before
@@ -388,7 +397,7 @@ class TestWorkspaceEnclosingRoot:
         ws = _materialized(tmp_path, "lab")
         inner = Path(ws.root) / "inner"
         inner.mkdir()
-        (inner / "workspace.json").write_text("{}\n")
+        write_record(inner, {"type": "workspace.root", "id": "inner", "name": "inner"})
 
         assert Workspace.enclosing_root(inner / "sub") == inner
 
@@ -409,7 +418,7 @@ class TestWorkspaceEnclosingRoot:
         finally:
             set_cli_root_override(None)
 
-    def test_one_is_file_per_level_and_no_other_reads(self, tmp_path: Path) -> None:
+    def test_one_is_file_per_level_and_one_head_read_per_record(self, tmp_path: Path) -> None:
         ws = _materialized(tmp_path, "lab")
         project = ws.add_project("alpha")
         experiment = project.add_experiment("sweep")
@@ -420,6 +429,9 @@ class TestWorkspaceEnclosingRoot:
         assert Workspace.enclosing_root(run.resolve(), fs=fs) == run.resolve().parents[5]
 
         assert fs.calls["is_file"] == 7
+        # run, experiment, project and root each hold an index.md; only the
+        # head is read, in one window, to see whether it is the workspace root.
+        assert fs.calls["read_range"] == 4
         assert fs.opens() == 0
         assert fs.stats() == 0
         assert fs.calls["scandir"] == 0
@@ -444,18 +456,22 @@ class TestWorkspaceEnclosingRoot:
                 self.probes.append(str(path))
                 return str(path) == self.hit
 
-        hit = _RemoteSlash("/opt/lab/workspace.json")
+            def read_range(self, path: object, offset: int, length: int) -> bytes:
+                assert str(path) == self.hit
+                return b"---\ntype: workspace.root\n---\n"[offset : offset + length]
+
+        hit = _RemoteSlash("/opt/lab/index.md")
         found = Workspace.enclosing_root("/opt/lab/projects/alpha", fs=hit)  # type: ignore[arg-type]
         assert str(found) == "/opt/lab"
         assert hit.probes == [
-            "/opt/lab/projects/alpha/workspace.json",
-            "/opt/lab/projects/workspace.json",
-            "/opt/lab/workspace.json",
+            "/opt/lab/projects/alpha/index.md",
+            "/opt/lab/projects/index.md",
+            "/opt/lab/index.md",
         ]
 
         missed = _RemoteSlash(None)
         assert Workspace.enclosing_root("/opt", fs=missed) is None  # type: ignore[arg-type]
-        assert missed.probes == ["/opt/workspace.json", "/workspace.json"]
+        assert missed.probes == ["/opt/index.md", "/index.md"]
 
 
 class TestWorkspaceMachineDir:

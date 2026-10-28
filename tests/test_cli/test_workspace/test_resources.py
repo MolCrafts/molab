@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import hashlib
 import inspect
-import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -20,6 +19,7 @@ from molab.profile import ProfileConfig
 from molab.workflow import RunFailedError, Workflow, WorkflowCompiler
 from molab.workspace import Workspace
 from molab.workspace.run import Run
+from tests.support.records import read_record
 
 
 def _failed_run(tmp_path: Path):
@@ -204,7 +204,7 @@ def _run_with_record(tmp_path: Path) -> tuple[Workspace, Run]:
         environment={"script": "/lab/s.py"},
         executor={"backend": "molq", "scheduler": "slurm", "scheduler_job_id": "4242"},
     )
-    raw = json.loads((run.run_dir / "run.json").read_text())
+    raw = read_record(run.run_dir)
     assert not any(key in raw for key in _RUN_LEVEL_PROVENANCE)
     return ws, run
 

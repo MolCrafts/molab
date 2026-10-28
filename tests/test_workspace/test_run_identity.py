@@ -11,12 +11,12 @@ depending on which door created it, which is the bug these tests lock out.
 from __future__ import annotations
 
 import ast
-import json
 from pathlib import Path
 
 from molab.ids import compute_definition_hash
 from molab.workspace import Workspace
 from molab.workspace.run import Run, compute_run_definition_hash
+from tests.support.records import read_record, write_record
 
 WORKSPACE_SRC = Path(__file__).resolve().parents[2] / "src" / "molab" / "workspace"
 
@@ -117,13 +117,12 @@ class TestIdentityIsNeverThePath:
         ws.materialize()
         experiment = ws.add_project("p").add_experiment("e")
         plain = experiment.add_run(params={"seed": 2})
-        run_json = plain.run_dir / "run.json"
-        payload = json.loads(run_json.read_text(encoding="utf-8"))
+        payload = read_record(plain.run_dir)
         assert isinstance(payload, dict)
         payload["workflow_snapshot"] = {"entrypoint": "/old/wf.py:compiled"}
         payload["workflow_id"] = "wf-old"
         payload["workflow_version"] = 3
-        run_json.write_text(json.dumps(payload), encoding="utf-8")
+        write_record(plain.run_dir, payload)
 
         loaded = Run.load(plain.run_dir)
 
@@ -141,7 +140,7 @@ class TestIdentityIsNeverThePath:
         )
 
         loaded._update_metadata(target="x")
-        rewritten = json.loads(run_json.read_text(encoding="utf-8"))
+        rewritten = read_record(plain.run_dir)
         assert isinstance(rewritten, dict)
         for name in ("workflow_snapshot", "workflow_id", "workflow_version"):
             assert name not in rewritten

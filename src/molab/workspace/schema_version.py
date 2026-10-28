@@ -1,4 +1,9 @@
-"""Workspace JSON schema versioning."""
+"""Workspace schema versioning.
+
+The stamp lands in the canonical zone of every ``index.md`` record and in each
+``execution.json``. Version 6 moved the entity records from ``<kind>.json`` /
+``meta.json`` into ``index.md`` frontmatter (D88).
+"""
 
 from __future__ import annotations
 
@@ -9,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from .fs import FileSystem
 
-MOLAB_SCHEMA_VERSION = 5
+MOLAB_SCHEMA_VERSION = 6
 
 
 def versioned_payload(payload: dict[str, Any]) -> dict[str, Any]:

@@ -2,7 +2,7 @@
 
 Harvesting is interpretation, not archival: the two preconditions (a terminal
 run, a non-empty narrative) **raise**, and the body renders the run's status,
-params and results so the document reads without opening ``run.json``. The
+params and results so the document reads without opening the run record. The
 default name is keyed on the run, so re-harvesting the same run and kind updates
 one document in place; an explicit ``name=`` allows a second take.
 """

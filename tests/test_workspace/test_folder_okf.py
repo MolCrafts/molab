@@ -3,17 +3,18 @@
 Every Folder gains a narrative ``index.md``; the markdown links in it are the
 knowledge graph, read and written through ``molab.knowledge`` (``Concept.links``
 / ``append_link``) — the workspace owns the narrative access, not the edge
-format. Workspace / Project / Experiment / Run stamp ``type`` on their entity
-JSON. Notes and other generic Folders use ``meta.json``. Run hot state lives on
-``run.json`` (not an ``ops/`` sidecar).
+format. Every Folder — Workspace / Project / Experiment / Run and a generic
+Folder alike — stamps ``type`` on the frontmatter record of that same
+``index.md`` (D88). Run hot state lives on its Executions (not an ``ops/``
+sidecar).
 """
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from molab.workspace import Workspace
+from tests.support.records import read_record
 
 
 class TestFolderOKF:
@@ -35,7 +36,7 @@ class TestFolderOKF:
         pmeta = proj.read_meta()
         assert pmeta["type"] == "workspace.project"
         run = proj.add_experiment("e").add_run()
-        assert json.loads((Path(run.resolve()) / "run.json").read_text())["type"] == "workspace.run"
+        assert read_record(Path(run.resolve()))["type"] == "workspace.run"
 
 
 class TestFolderFiles:

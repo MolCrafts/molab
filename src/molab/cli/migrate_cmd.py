@@ -3,6 +3,10 @@
 ``knowledge`` moves legacy knowledge documents into ``knowledges/<stem>.md``
 and rewrites their links. It is opt-in and supports ``--dry-run``.
 
+``index`` folds each level's ``<kind>.json`` / ``meta.json`` record into the
+frontmatter of its ``index.md`` (D88), keeping the narrative body, then
+rebuilds every derived ``index:`` block (D89). It supports ``--dry-run``.
+
 Reads a source workspace and writes a new one whose paths a person can read:
 experiments named by their name, runs named by their parameters, attempts
 numbered ``e01`` / ``e02``. Every fragment that only re-encoded something
@@ -34,17 +38,20 @@ from typing import Annotated, Any
 import typer
 
 from molab.cli._common import rprint
+from molab.frontmatter import split
 from molab.fs import DirEntry, FileSystem
 from molab.knowledge.knowledge_item import SourceRef
 from molab.services.workflow_kind import classify_legacy_workflow
 from molab.workspace import Workspace
 from molab.workspace.artifact_repository import AssetRepository
 from molab.workspace.domain import Asset, Execution
+from molab.workspace.entity_record import ENTITY_FILENAME, read_type, write_record
 from molab.workspace.execution_dirs import ARTIFACTS, OUT, WORK
 from molab.workspace.execution_repository import (
     fold_legacy_attempt,
     legacy_attempt_created_at,
 )
+from molab.workspace.fs_local import LocalFileSystem
 from molab.workspace.history import (
     MAX_RECORD_BYTES,
     AgentRef,
@@ -171,9 +178,26 @@ def _stamp(payload: dict[str, Any], **fields: object) -> dict[str, Any]:
     }
 
 
-def _write_json(path: Path, payload: dict[str, Any]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+def _legacy_body(directory: Path) -> str:
+    """The narrative of a legacy ``index.md``; an un-fenced file is all body."""
+    path = directory / ENTITY_FILENAME
+    if not path.is_file():
+        return ""
+    text = path.read_text(encoding="utf-8")
+    meta, body = split(text)
+    return body if meta.get("type") else text
+
+
+def _write_layout_record(src: Path, dst: Path, payload: dict[str, Any]) -> None:
+    """Write *dst*'s ``index.md`` record, carrying *src*'s narrative across.
+
+    The canonical zone is the stamped legacy payload, ``type`` first. The
+    write goes through the owner's ``write_record`` (atomic, new inode), so a
+    hard-linked source ``index.md`` is never written through.
+    """
+    head = {"type": payload["type"]} if "type" in payload else {}
+    canonical = {**head, **{k: v for k, v in payload.items() if k != "type"}}
+    write_record(LocalFileSystem(), str(dst), canonical=canonical, body=_legacy_body(src))
 
 
 def _cas_payload(source_root: Path, digest: str, kind: str) -> Path | None:
@@ -309,7 +333,7 @@ def _migrate_run(
     dst = runs_root / slug
     dst.mkdir(parents=True, exist_ok=True)
     definition.setdefault("id", slug)
-    _write_json(dst / "run.json", _stamp(definition, type="workspace.run"))
+    _write_layout_record(src, dst, _stamp(definition, type="workspace.run"))
     report.runs += 1
 
     src_execs = src / "executions"
@@ -345,7 +369,14 @@ def _migrate_run(
         src,
         dst,
         report,
-        skip={"run.json", "executions", "cache", "source", *(d.name for d in stray_jobs)},
+        skip={
+            "run.json",
+            ENTITY_FILENAME,
+            "executions",
+            "cache",
+            "source",
+            *(d.name for d in stray_jobs),
+        },
     )
 
 
@@ -369,13 +400,15 @@ def _migrate_experiment(
     dst.mkdir(parents=True, exist_ok=True)
     if metadata:
         metadata.setdefault("id", src.name)
-        _write_json(
-            dst / "experiment.json",
+        _write_layout_record(
+            src,
+            dst,
             _stamp(metadata, name=name, type="workspace.experiment"),
         )
     else:
-        _write_json(
-            dst / "experiment.json",
+        _write_layout_record(
+            src,
+            dst,
             _stamp(
                 {
                     "id": src.name,
@@ -403,7 +436,7 @@ def _migrate_experiment(
                 target_root=target_root,
                 report=report,
             )
-    _carry_extras(src, dst, report, skip={"experiment.json", "runs"})
+    _carry_extras(src, dst, report, skip={"experiment.json", ENTITY_FILENAME, "runs"})
 
 
 def _migrate_project(
@@ -424,7 +457,7 @@ def _migrate_project(
     taken.add(slug)
     dst = projects_root / slug
     dst.mkdir(parents=True, exist_ok=True)
-    _write_json(dst / "project.json", _stamp(metadata, name=name, type="workspace.project"))
+    _write_layout_record(src, dst, _stamp(metadata, name=name, type="workspace.project"))
     report.projects += 1
 
     exp_slugs: set[str] = set()
@@ -443,7 +476,7 @@ def _migrate_project(
                 target_root=target_root,
                 report=report,
             )
-    _carry_extras(src, dst, report, skip={"project.json", "experiments"})
+    _carry_extras(src, dst, report, skip={"project.json", ENTITY_FILENAME, "experiments"})
 
 
 def migrate_workspace(source: Path, target: Path) -> Report:
@@ -458,7 +491,7 @@ def migrate_workspace(source: Path, target: Path) -> Report:
     workspace = _read_json(source / "workspace.json")
     workspace.setdefault("id", target.name)
     workspace.setdefault("name", str(workspace["id"]))
-    _write_json(target / "workspace.json", _stamp(workspace, type="workspace.root"))
+    _write_layout_record(source, target, _stamp(workspace, type="workspace.root"))
 
     project_slugs: set[str] = set()
     projects_dir = source / "projects"
@@ -472,9 +505,12 @@ def migrate_workspace(source: Path, target: Path) -> Report:
                 target_root=target,
                 report=report,
             )
-    _carry_extras(source, target, report, skip={"workspace.json", "projects"})
+    _carry_extras(source, target, report, skip={"workspace.json", ENTITY_FILENAME, "projects"})
 
     _write_gitignore(target, report)
+    from molab.workspace.index_projection import sync_index
+
+    sync_index(Workspace(target))
     return report
 
 
@@ -846,6 +882,225 @@ def migrate_assets_cmd(
     for asset_id in report.unresolved:
         rprint(f"asset {asset_id}: source artifact no longer exists - delete or re-promote it")
     if report.unresolved:
+        raise typer.Exit(1)
+
+
+# ── migrate index (D88) ─────────────────────────────────────────────────────
+# Record files of the JSON layout. These literals exist solely so ``migrate
+# index`` can read an un-migrated tree; runtime code reads only ``index.md``.
+_LEGACY_ENTITY_FILES: dict[str, tuple[str, type[Any]]] = {}
+
+
+def _legacy_entity_files() -> dict[str, tuple[str, type[Any]]]:
+    """Legacy ``<kind>.json`` → (record ``type``, the model its old read validated)."""
+    if not _LEGACY_ENTITY_FILES:
+        from molab.workspace.models import (
+            ExperimentMetadata,
+            ProjectMetadata,
+            RunMetadata,
+            WorkspaceMetadata,
+        )
+
+        _LEGACY_ENTITY_FILES.update(
+            {
+                "workspace.json": ("workspace.root", WorkspaceMetadata),
+                "project.json": ("workspace.project", ProjectMetadata),
+                "experiment.json": ("workspace.experiment", ExperimentMetadata),
+                "run.json": ("workspace.run", RunMetadata),
+            }
+        )
+    return _LEGACY_ENTITY_FILES
+
+
+_LEGACY_META = "meta.json"
+#: A legacy knowledge references bundle carries a ``meta.json`` too; that one
+#: belongs to ``migrate knowledge`` and is left alone here.
+_KNOWLEDGE_MARKER_TYPE = "bundle.references"
+#: Directories under a host that are containers or machine state, not mounts.
+_INDEX_SKIP_DIRS = {
+    "projects",
+    "experiments",
+    "runs",
+    "executions",
+    "knowledges",
+    "assets",
+    "cache",
+    "source",
+    "__pycache__",
+}
+
+
+@dataclass
+class IndexMigrationReport:
+    """What ``migrate index`` did (or, with ``dry_run``, would do)."""
+
+    planned: list[tuple[str, tuple[str, ...]]] = field(default_factory=list)
+    written: list[str] = field(default_factory=list)
+    removed: list[str] = field(default_factory=list)
+    failed: list[tuple[str, str]] = field(default_factory=list)
+    synced: int = 0
+    commit: str | None = None
+    dry_run: bool = False
+
+
+def _index_rel(root: Path, path: Path) -> str:
+    rel = path.relative_to(root).as_posix()
+    return rel if rel != "." else "."
+
+
+def _index_candidates(root: Path) -> list[Path]:
+    """Every directory that may hold a legacy record: the hosts and their mounts."""
+    found: list[Path] = []
+    for host in Workspace.list_hosts(root):
+        host_path = Path(str(host))
+        found.append(host_path)
+        if host_path.parent.name == "runs":
+            continue
+        for child in sorted(host_path.iterdir()):
+            if (
+                child.is_dir()
+                and not child.name.startswith(".")
+                and child.name not in _INDEX_SKIP_DIRS
+                and (child / _LEGACY_META).is_file()
+            ):
+                found.append(child)
+    return found
+
+
+def _legacy_canonical(directory: Path) -> tuple[dict[str, Any] | None, tuple[str, ...], str]:
+    """``(canonical zone, legacy files, error)`` for one directory.
+
+    The canonical zone comes from the class-named record when there is one,
+    validated by the same model its old read used; otherwise from a generic
+    ``meta.json``. ``None`` with an empty error means nothing to migrate.
+    """
+    from molab.workspace.schema_version import MOLAB_SCHEMA_VERSION
+
+    present = tuple(
+        name for name in (*_legacy_entity_files(), _LEGACY_META) if (directory / name).is_file()
+    )
+    entity = next((name for name in present if name != _LEGACY_META), None)
+    if entity is not None:
+        kind, model = _legacy_entity_files()[entity]
+        data = _read_json(directory / entity)
+        if not data:
+            return None, present, f"{entity} is unreadable"
+        try:
+            validated = model(**data)
+        except Exception as exc:
+            return None, present, f"{entity} fails {model.__name__}: {exc}"
+        dumped = validated.model_dump(mode="json")
+        dumped.pop("type", None)
+        return {"type": kind, **dumped, "schema_version": MOLAB_SCHEMA_VERSION}, present, ""
+    if _LEGACY_META in present:
+        marker = _read_json(directory / _LEGACY_META)
+        kind = marker.get("type")
+        if not kind or kind == _KNOWLEDGE_MARKER_TYPE:
+            return None, (), ""
+        canonical = {
+            key: marker[key]
+            for key in ("type", "created_at", "updated_at", "extra")
+            if marker.get(key) is not None
+        }
+        return canonical, present, ""
+    return None, (), ""
+
+
+def migrate_index(workspace: Path, *, dry_run: bool = False) -> IndexMigrationReport:
+    """Fold every legacy JSON record under *workspace* into its ``index.md``.
+
+    For each directory with a ``<kind>.json`` or ``meta.json``: build the
+    canonical zone from it (validated by the model the old read used), keep
+    the existing ``index.md`` body verbatim (an un-fenced file is all body),
+    write the record through the owner's ``write_record``, then delete the
+    legacy JSON. Afterwards every derived ``index:`` block is rebuilt, and one
+    history commit covers the change (soft: no git, no commit). Idempotent.
+    A dry run reports the plan and writes nothing.
+
+    Raises:
+        typer.BadParameter: *workspace* is not a directory, or holds neither a
+            workspace record nor a legacy ``workspace.json``.
+    """
+    from molab.workspace.history import EntityRef, GitHistory
+    from molab.workspace.index_projection import sync_index
+
+    report = IndexMigrationReport(dry_run=dry_run)
+    root = workspace.expanduser().resolve()
+    if not root.is_dir():
+        raise typer.BadParameter(f"{root} is not a directory")
+    fs = LocalFileSystem()
+    if not (root / "workspace.json").is_file() and read_type(fs, str(root)) != "workspace.root":
+        raise typer.BadParameter(f"{root} is not a molab workspace")
+
+    touched: list[Path] = []
+    for directory in _index_candidates(root):
+        canonical, legacy, error = _legacy_canonical(directory)
+        rel = _index_rel(root, directory)
+        if error:
+            report.failed.append((rel, error))
+            continue
+        if canonical is None:
+            continue
+        report.planned.append((rel, legacy))
+        if dry_run:
+            continue
+        write_record(
+            fs,
+            str(directory),
+            canonical=canonical,
+            index={},
+            body=_legacy_body(directory),
+            lock_root=str(root),
+        )
+        report.written.append(f"{rel}/{ENTITY_FILENAME}" if rel != "." else ENTITY_FILENAME)
+        touched.append(directory / ENTITY_FILENAME)
+        for name in legacy:
+            (directory / name).unlink()
+            report.removed.append(f"{rel}/{name}" if rel != "." else name)
+            touched.append(directory / name)
+
+    if dry_run or any(rel == "." for rel, _error in report.failed):
+        return report
+    ws = Workspace(root)
+    report.synced = sync_index(ws)
+    touched.extend(Path(str(host)) / ENTITY_FILENAME for host in Workspace.list_hosts(root))
+    report.commit = GitHistory(root).record(
+        "IndexMigrated",
+        subject=EntityRef(id=ws.id, type="workspace"),
+        summary="migrate entity records into index.md",
+        paths=tuple(touched),
+    )
+    return report
+
+
+@migrate_app.command("index")
+def migrate_index_cmd(
+    workspace: Annotated[
+        Path,
+        typer.Argument(help="Workspace root whose records to fold into index.md"),
+    ] = Path(),
+    dry_run: Annotated[
+        bool,
+        typer.Option("--dry-run", help="Print the plan; write nothing"),
+    ] = False,
+) -> None:
+    """Fold <kind>.json / meta.json records into index.md. ``--dry-run`` writes nothing."""
+    report = migrate_index(workspace, dry_run=dry_run)
+    root = workspace.expanduser().resolve()
+    if report.dry_run:
+        rprint(f"[yellow]DRY-RUN[/yellow] index {root}")
+        for rel, legacy in report.planned:
+            rprint(f"  {rel}: {', '.join(legacy)} -> {ENTITY_FILENAME}")
+    else:
+        rprint(f"[green]OK[/green] index {root}")
+        rprint(f"records written: {len(report.written)}")
+        rprint(f"legacy files removed: {len(report.removed)}")
+        rprint(f"index blocks synced: {report.synced}")
+    for rel, error in report.failed:
+        rprint(f"[red]failed[/red] {rel}: {error}")
+    if report.commit:
+        rprint(f"commit: {report.commit}")
+    if report.failed:
         raise typer.Exit(1)
 
 

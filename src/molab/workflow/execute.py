@@ -5,7 +5,7 @@
 rerun) and then runs it. Both fold the driver dance (the attempt
 context + ``WorkflowRuntime().execute(..., run_context=ctx)`` + asyncio
 plumbing) into the same path ``molab run`` uses: the ``RunContext``
-lifecycle owns the status machine, ``run.json`` hot state and the
+lifecycle owns the status machine, the run record and the
 ``alive``-file ownership heartbeat; the workflow engine owns scheduling,
 caching and node-level persistence.
 

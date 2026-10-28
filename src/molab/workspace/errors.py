@@ -164,6 +164,23 @@ class UnmigratedAssetError(RuntimeError):
         self.workspace_root = workspace_root
 
 
+class UnmigratedLayoutError(RuntimeError):
+    """A directory still holds a JSON record and no ``index.md`` record.
+
+    The message names the directory and the migration command. Readers raise
+    this and never rewrite the file. The server maps it to HTTP 409
+    ``MIGRATION_REQUIRED``, like :class:`UnmigratedAssetError` (D83).
+    """
+
+    def __init__(self, directory: str, legacy: tuple[str, ...]) -> None:
+        super().__init__(
+            f"{directory!r} still holds {', '.join(legacy)} and no index.md record; "
+            "run `molab migrate index`"
+        )
+        self.directory = directory
+        self.legacy = legacy
+
+
 __all__ = [
     "AmbiguousRefError",
     "ExperimentExistsError",
@@ -175,4 +192,5 @@ __all__ = [
     "RunExistsError",
     "RunNotFoundError",
     "UnmigratedAssetError",
+    "UnmigratedLayoutError",
 ]

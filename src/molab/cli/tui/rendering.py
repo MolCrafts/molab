@@ -19,7 +19,7 @@ from rich.syntax import Syntax
 from rich.table import Table
 from rich.text import Text
 
-from molab._run_display import read_run_json
+from molab._run_display import read_run_record
 from molab._typing import JSONValue
 from molab.cli._common import run_environment, run_executor_info
 from molab.workspace import Experiment, Project, Run, Workspace
@@ -247,7 +247,7 @@ def _detail_experiment(node: TreeNode) -> list[RenderableType]:
 def _detail_run(node: TreeNode) -> list[RenderableType]:
     assert isinstance(node.ref, Run), "run-kind node must hold a Run"
     run = node.ref
-    data = read_run_json(run.run_dir)
+    data = read_run_record(run.run_dir)
     kv = _kv_table()
     kv.add_row("id", str(run.id))
     kv.add_row("status", run.status_label.upper())

@@ -13,7 +13,12 @@ from fastapi.responses import JSONResponse
 from molq import MolqError
 
 from molab.workflow.types import WorkflowError
-from molab.workspace.errors import AmbiguousRefError, RefNotFoundError, UnmigratedAssetError
+from molab.workspace.errors import (
+    AmbiguousRefError,
+    RefNotFoundError,
+    UnmigratedAssetError,
+    UnmigratedLayoutError,
+)
 from molab.workspace.errors import (
     ExperimentExistsError as WorkspaceExperimentExistsError,
 )
@@ -150,6 +155,22 @@ def register_exception_handlers(app: FastAPI) -> None:
         exc: UnmigratedAssetError,
     ) -> JSONResponse:
         """A scope still holds a pre-unified asset record."""
+        return JSONResponse(
+            status_code=409,
+            content={
+                "error": {
+                    "code": "MIGRATION_REQUIRED",
+                    "message": str(exc),
+                }
+            },
+        )
+
+    @app.exception_handler(UnmigratedLayoutError)
+    async def unmigrated_layout_handler(
+        request: Request,  # noqa: ARG001
+        exc: UnmigratedLayoutError,
+    ) -> JSONResponse:
+        """A directory still holds a JSON entity record instead of ``index.md``."""
         return JSONResponse(
             status_code=409,
             content={

@@ -11,6 +11,7 @@ from molab.services.workflow_kind import (
     needs_workflow_kind_migration,
 )
 from molab.workspace import Experiment, Workspace
+from tests.support.records import read_record, write_record
 
 DOC_A: dict[str, JSONValue] = {
     "workflow_id": "workflow_00000000",
@@ -73,10 +74,9 @@ def _write_ir(exp: Experiment, document: dict[str, JSONValue]) -> None:
 
 
 def _stamp_workflow_source(exp: Experiment, source: str) -> Experiment:
-    path = Path(exp.experiment_dir) / "experiment.json"
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload = read_record(exp.experiment_dir)
     payload["workflow_source"] = source
-    path.write_text(json.dumps(payload), encoding="utf-8")
+    write_record(exp.experiment_dir, payload)
     return _reload(exp)
 
 

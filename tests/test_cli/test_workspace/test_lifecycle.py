@@ -2,12 +2,11 @@
 
 Spec arch-own-02e-readers: run status counts come from ``Run.status_label``
 (keys ``pending`` + every ``ExecutionStatus`` value) and profile counts from
-the run's latest Execution environment — never from ``run.json``.
+the run's latest Execution environment — never from the run record.
 """
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -15,6 +14,7 @@ from typer.testing import CliRunner
 from molab.cli import app
 from molab.profile import ProfileConfig
 from molab.workspace import Workspace
+from tests.support.records import read_record
 
 _RUN_LEVEL_PROVENANCE = ("profile", "config_hash", "script", "executor_info")
 
@@ -29,7 +29,7 @@ def _workspace_with_record(tmp_path: Path) -> Workspace:
         environment={"script": "/lab/s.py"},
         executor={"backend": "molq", "scheduler": "slurm", "scheduler_job_id": "4242"},
     )
-    raw = json.loads((run.run_dir / "run.json").read_text())
+    raw = read_record(run.run_dir)
     assert not any(key in raw for key in _RUN_LEVEL_PROVENANCE)
     return ws
 

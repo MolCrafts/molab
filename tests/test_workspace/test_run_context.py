@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -235,20 +236,20 @@ class TestExecutionDirectories:
             assert not hasattr(ctx, "folder")
             assert not hasattr(ctx, "register_asset")
 
-    def test_platform_json_writes_go_through_filestore(self, run, monkeypatch):
-        from molab.workspace.file_store import FileStore
+    def test_the_run_record_is_written_by_its_owner(self, run, monkeypatch):
+        import molab.workspace.folder as folder_mod
 
         seen: list[str] = []
-        orig = FileStore.put
+        orig = folder_mod.write_record
 
-        def spy(self, relpath, data):
-            seen.append(Path(relpath).as_posix())
-            return orig(self, relpath, data)
+        def spy(fs, directory, **kwargs: Any):
+            seen.append(Path(str(directory)).name)
+            return orig(fs, directory, **kwargs)
 
-        monkeypatch.setattr(FileStore, "put", spy)
+        monkeypatch.setattr(folder_mod, "write_record", spy)
         run.save()
-        assert "run.json" in seen
-        assert "ops/run.json" not in seen
+        assert seen == [Path(str(run.run_dir)).name]
+        assert not (Path(str(run.run_dir)) / "ops").exists()
 
     def test_emit_artifact_does_not_rewrite_source(self, run):
         with run.start() as ctx:

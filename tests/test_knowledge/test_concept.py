@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -31,7 +30,7 @@ def _run_dir(root: Path) -> Path:
     """A workspace run directory: an entity record, no Knowledge head."""
     run_dir = root / "runs" / "run-abc123"
     run_dir.mkdir(parents=True)
-    (run_dir / "run.json").write_text(json.dumps({"type": "workspace.run", "id": "abc"}) + "\n")
+    (run_dir / "index.md").write_text("---\ntype: workspace.run\nid: abc\n---\n")
     return run_dir
 
 

@@ -1272,6 +1272,21 @@ class ExecutionRepository:
 
     def _write_state(self, state: Execution) -> None:
         _write_execution(self.fs, self.state_path(state.id), state)
+        # Every record write (create, start, seal, adopt, prune, …) refreshes
+        # the run's own ``index.md`` attempt list — never its experiment's: a
+        # parent row carries no hot state. A failed refresh is only logged.
+        from .index_projection import refresh_run_index
+
+        refresh_run_index(self.fs, self.run_dir, lock_root=self.workspace_root)
+
+
+def list_executions(fs: FileSystem, run_dir: PathArg) -> builtins.list[Execution]:
+    """Every attempt record under *run_dir*, ordered by ``seq``. Reads only.
+
+    The read side of :meth:`ExecutionRepository.list` for a caller that has a
+    run directory but no run identity (the ``index.md`` projection).
+    """
+    return ExecutionRepository(run_dir, run_dir, run_id="", project_id="", fs=fs).list()
 
 
 def _adopted_destination(dest: str) -> str:

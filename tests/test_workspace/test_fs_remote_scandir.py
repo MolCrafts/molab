@@ -61,7 +61,7 @@ def test_cached_run_and_execution_listing_batches_metadata(molq_destination, tmp
     remote_runs = remote.list_runs()
     assert {run.id for run in remote_runs} == {run.id for run in runs}
     asked = set(requested)
-    assert {str(run.resolve() / "run.json") for run in runs} <= asked
+    assert {str(run.resolve() / "index.md") for run in runs} <= asked
     assert {str(run.resolve() / "executions") for run in runs} <= asked
     assert {str(run.resolve() / "executions" / "e01" / "execution.json") for run in runs} <= asked
     # The runs container is listed once. Attempt directories are probed in the
@@ -74,7 +74,7 @@ def test_cached_run_and_execution_listing_batches_metadata(molq_destination, tmp
     assert listed == []
     assert requested == []
     remote.list_runs()
-    # run.json stays pinned. The second probe is the executions directory plus
+    # The run index.md stays pinned. The second probe is the executions directory plus
     # e01 and one past it, for every run, and nothing is listed again.
     assert listed == []
     assert len(requested) == len(runs) * 3
@@ -117,5 +117,5 @@ def test_semantic_prefetch_batches_entity_metadata_without_payloads(
     assert not warnings
     assert any(len(paths) == 3 for paths in requested)
     names = {path.rsplit("/", 1)[-1] for paths in requested for path in paths}
-    assert names == {"project.json", "experiment.json", "run.json", "execution.json"}
+    assert names == {"index.md", "execution.json"}
     assert all(len(paths) <= 128 for paths in requested)

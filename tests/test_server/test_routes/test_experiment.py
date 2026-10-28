@@ -115,7 +115,7 @@ def _open_experiment(ws, project_id: str, key: str):
 def _entity_bytes(experiment_dir: Path) -> tuple[bytes, bytes | None]:
     ir_path = experiment_dir / "workflow.ir.json"
     ir_bytes = ir_path.read_bytes() if ir_path.is_file() else None
-    return (experiment_dir / "experiment.json").read_bytes(), ir_bytes
+    return (experiment_dir / "index.md").read_bytes(), ir_bytes
 
 
 def _stamp_legacy(exp) -> None:
@@ -193,7 +193,7 @@ class TestCreateExperiment:
     ) -> None:
         ws, exp, _run = fresh_run
         bound = exp.project.add_experiment(name="bound", workflow_document=DOC_A)
-        before_json = (bound.experiment_dir / "experiment.json").read_bytes()
+        before_json = (bound.experiment_dir / "index.md").read_bytes()
         with served(ws, raise_server_exceptions=False) as client:
             response = client.post(
                 _collection_url(exp.project.id),
@@ -202,7 +202,7 @@ class TestCreateExperiment:
         assert response.status_code == 201, response.text
         reloaded = _open_experiment(ws, exp.project.id, "bound")
         assert reloaded.metadata.revision == 1
-        assert (reloaded.experiment_dir / "experiment.json").read_bytes() == before_json
+        assert (reloaded.experiment_dir / "index.md").read_bytes() == before_json
 
     def test_different_document_on_bound_experiment_is_409(self, fresh_run, served) -> None:
         ws, exp, _run = fresh_run

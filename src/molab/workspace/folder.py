@@ -14,6 +14,8 @@ import json
 import os
 import re
 import shutil
+from collections.abc import Generator, Mapping
+from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path as _StdPath
 from pathlib import PurePosixPath
@@ -23,6 +25,17 @@ from molab._typing import JSONValue
 from molab.path import Path
 
 from .base import _reconstruct
+from .entity_record import (
+    INDEX_FILENAME,
+    RESERVED_INDEX_KEYS,
+    EntityRecord,
+    UnmigratedLayoutError,
+    read_body,
+    read_record,
+    read_type,
+    update_record,
+    write_record,
+)
 from .errors import FolderMoveCollisionError
 from .fs import FileSystem, PathArg
 from .fs_local import LocalFileSystem
@@ -44,13 +57,14 @@ _KIND_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]*(?:\.[a-z0-9][a-z0-9_-]*)*$")
 _FORBIDDEN_FILE_NAMES = {".", ".."}
 _CAMEL_TO_SNAKE = re.compile(r"(?<!^)(?=[A-Z])")
 
-# ── OKF: narrative index.md + JSON concept identity ──────────────────────────
-# One structured format on disk: **JSON**. A generic Folder carries
-# ``meta.json`` (``type`` → folder-type registry; path basename = id). WPER domain records
-# use class-named entity JSON (``project.json`` / ``run.json`` / …). Narrative
-# stays in ``index.md`` (Markdown is not a data format for structured fields).
-INDEX_FILENAME = "index.md"
-META_JSON_FILENAME = "meta.json"  # generic Folder identity file (type → registry)
+# ── OKF: one index.md per Folder (D88) ────────────────────────────────────────
+# Every Folder keeps its record in the YAML frontmatter of its own ``index.md``
+# (``type`` → class registry), a derived ``index:`` block that nests the next
+# level (D89), and the narrative as the body. ``entity_record`` owns the file;
+# ``INDEX_FILENAME`` is re-exported from there.
+
+#: A section key another layer may ask the owner to write under ``index:``.
+_SECTION_KEY = re.compile(r"^[a-z][a-z0-9_]*$")
 
 
 def _parse_iso_datetime(raw: object, *, default: datetime) -> datetime:
@@ -66,11 +80,11 @@ def _parse_iso_datetime(raw: object, *, default: datetime) -> datetime:
 
 def _folder_metadata_from_marker(
     child_dir: PathArg,
-    marker: dict[str, object],
+    marker: Mapping[str, object],
 ) -> FolderMetadata:
-    """Build in-memory :class:`FolderMetadata` from ``meta.json`` + dir name.
+    """Build in-memory :class:`FolderMetadata` from a generic record + dir name.
 
-    Path basename is identity — marker ``id`` is ignored when present (legacy).
+    Path basename is identity — a record ``id`` is ignored when present (legacy).
     """
     slug = PurePosixPath(str(child_dir)).name
     kind = str(marker.get("type") or "").strip() or "concept"
@@ -91,72 +105,24 @@ def _folder_metadata_from_marker(
     )
 
 
-_CORE_ENTITY_JSON = ("workspace.json", "project.json", "experiment.json", "run.json")
-# The four levels of the tree mark their own directories: each carries a
-# ``type`` and is the level's authoritative record. The filenames are
-# declared here.
-#: Entity filename → Folder subclass, filled by :func:`register_entity_class`.
-#: The directory itself says what it is; no ``type`` field is needed.
-_ENTITY_FILE_TO_CLS: dict[str, type[Folder]] = {}
-
-
-def _snake_name(cls: type) -> str:
-    """``CamelCase`` → ``camel_case``."""
-    return _CAMEL_TO_SNAKE.sub("_", cls.__name__).lower()
-
-
-def entity_filename(cls: type) -> str:
-    """Singular class-named entity JSON (``experiment.json``, ``plan.json``)."""
-    return f"{_snake_name(cls)}.json"
+#: Record ``type`` → Folder subclass, filled by :func:`register_entity_class`.
+#: A directory says what it is through the ``type`` in its ``index.md`` head.
+_ENTITY_TYPE_TO_CLS: dict[str, type[Folder]] = {}
 
 
 def register_entity_class(cls: type[F]) -> type[F]:  # noqa: UP047
-    """Register *cls* for reconstruction from its entity filename.
+    """Register *cls* for reconstruction from its record ``type``.
 
-    The class-named record *is* the directory's identity, so this is the whole
-    of what the filename axis needs: :func:`concept_from_dir` looks the
-    filename up and hands the directory to ``cls.from_disk``.
+    *cls* declares the type it writes as ``_entity_kind``. :func:`concept_from_dir`
+    reads a directory's ``type`` and hands the directory to ``cls.from_disk``.
     """
-    _ENTITY_FILE_TO_CLS[entity_filename(cls)] = cls
+    _ENTITY_TYPE_TO_CLS[cls._entity_kind] = cls
     return cls
 
 
-def class_for_entity_file(name: str) -> type[Folder] | None:
-    """Return the Folder subclass registered for entity file *name*, if any."""
-    return _ENTITY_FILE_TO_CLS.get(name)
-
-
-def entity_json_names() -> tuple[str, ...]:
-    """Every registered entity filename, the four core levels first.
-
-    The workspace's one declaration of "this directory is an entity of mine".
-    """
-    extra = tuple(name for name in sorted(_ENTITY_FILE_TO_CLS) if name not in _CORE_ENTITY_JSON)
-    return _CORE_ENTITY_JSON + extra
-
-
-def _load_concept_marker_dict(fs: FileSystem, concept_dir: PathArg) -> dict[str, object] | None:
-    """Load concept identity: entity JSON first (``type`` optional), else Note ``meta.json``."""
-    for name in entity_json_names():
-        entity = fs.join(concept_dir, name)
-        if not fs.exists(entity):
-            continue
-        with fs.open(entity) as fh:
-            raw_entity: object = json.load(fh)
-        if not isinstance(raw_entity, dict):
-            continue
-        entity_dict = cast("dict[str, object]", raw_entity)
-        return {
-            key: entity_dict[key]
-            for key in ("type", "created_at", "updated_at", "extra")
-            if key in entity_dict
-        }
-    primary = fs.join(concept_dir, META_JSON_FILENAME)
-    if fs.exists(primary):
-        with fs.open(primary) as fh:
-            raw: object = json.load(fh)
-        return cast("dict[str, object]", raw) if isinstance(raw, dict) else None
-    return None
+def class_for_entity_type(kind: str) -> type[Folder] | None:
+    """Return the Folder subclass registered for record ``type`` *kind*, if any."""
+    return _ENTITY_TYPE_TO_CLS.get(kind)
 
 
 def _validate_kind(kind: str) -> None:
@@ -246,6 +212,8 @@ class Folder:
 
     _exists_error_cls: ClassVar[type[Exception]] = ValueError
     _not_found_error_cls: ClassVar[type[Exception]] = LookupError
+    #: The record ``type`` a registered subclass writes (``workspace.project``).
+    _entity_kind: ClassVar[str] = ""
 
     def __init__(
         self,
@@ -331,7 +299,7 @@ class Folder:
     #
     # ``resolve`` returns :class:`molab.Path` (pure POSIX math; I/O goes
     # through :meth:`_disk`). ``path`` is a :class:`pathlib.Path` for local
-    # joins like ``run.path / "run.json"``.
+    # joins like ``run.path / "index.md"``.
 
     @property
     def path(self) -> _StdPath:
@@ -426,20 +394,18 @@ class Folder:
         self._disk().atomic_write_json(fpath, data)
         return fpath
 
-    # ── OKF meta.json (sole concept identity) ──
+    # ── OKF record: index.md frontmatter (D88) ──
 
-    def write_meta(self) -> str:
-        """Write the OKF ``meta.json`` concept identity (``type`` = this kind).
+    def _lock_root(self) -> Path:
+        """Workspace root whose ``.molab/locks`` guards this record's writes."""
+        return self.asset_host().resolve()
 
-        One structured format on disk: JSON (same family as entity ``*.json``).
+    def _canonical_record(self) -> dict[str, JSONValue]:
+        """The canonical zone this Folder writes. Subclasses with a model override it.
 
         * required ``type`` — registered concept kind (path basename = id)
-        * optional ``created_at`` / ``updated_at`` — lifecycle when there is no
-          class-named entity JSON (generic :class:`Folder`)
+        * ``created_at`` / ``updated_at`` — lifecycle of a generic :class:`Folder`
         * optional ``extra`` — free-form map
-
-        Domain entities keep class-named JSON for business fields. Subclasses
-        with a rich typed head override this method.
         """
         data: dict[str, JSONValue] = {
             "type": self._kind,
@@ -448,48 +414,114 @@ class Folder:
         }
         if self._metadata.extra:
             data["extra"] = self._metadata.extra
-        fpath = self._disk().join(self.path, META_JSON_FILENAME)
-        self._disk().atomic_write_json(fpath, data)
-        return fpath
+        return data
+
+    def _write_record(self, canonical: dict[str, JSONValue]) -> str:
+        """Replace the canonical zone of ``index.md``; keep the index and body."""
+        write_record(self._disk(), self.path, canonical=canonical, lock_root=self._lock_root())
+        return self._disk().join(self.resolve(), INDEX_FILENAME)
+
+    def _record_written(self) -> None:
+        """Refresh the derived ``index:`` here and in the parent after a canonical write.
+
+        A parent batching child creation (:meth:`_batched_index`) refreshes
+        itself once at the end instead of once per child.
+        """
+        from .index_projection import refresh_index
+
+        parent = self._parent
+        deferred = parent is not None and getattr(parent, "_index_deferred", False)
+        refresh_index(self, parent=not deferred)
+
+    def _parent_index_paths(self) -> tuple[str, ...]:
+        """The parent's ``index.md``, for a history commit that follows a child write."""
+        if self._parent is None:
+            return ()
+        return (self._disk().join(self._parent.resolve(), INDEX_FILENAME),)
+
+    @contextmanager
+    def _batched_index(self) -> Generator[None]:
+        """Defer this Folder's index refresh to the end of a batch of child writes."""
+        from .index_projection import refresh_index
+
+        outer = getattr(self, "_index_deferred", False)
+        self._index_deferred = True
+        try:
+            yield
+        finally:
+            self._index_deferred = outer
+            if not outer:
+                refresh_index(self, parent=False)
+
+    def write_meta(self) -> str:
+        """Write this Folder's canonical record into ``index.md``; return its path.
+
+        Subclasses with a typed model override :meth:`_canonical_record`.
+        """
+        path = self._write_record(self._canonical_record())
+        self._record_written()
+        return path
 
     def read_meta(self) -> dict[str, JSONValue]:
-        """Read the OKF ``meta.json`` marker, or ``{}`` if absent."""
-        raw = _load_concept_marker_dict(self._disk(), self.resolve())
-        return cast("dict[str, JSONValue]", raw) if raw is not None else {}
+        """The canonical zone of ``index.md``, or ``{}`` when there is no record."""
+        record = read_record(self._disk(), self.resolve())
+        return dict(record.canonical) if record is not None else {}
+
+    def set_index_section(self, key: str, rows: list[dict[str, JSONValue]]) -> None:
+        """Ask the owner to write ``index.<key>`` in this Folder's ``index.md``.
+
+        The key is opaque to workspace: another layer names its own section
+        (spec index-md-02 wires its production caller). A refresh
+        of the reserved keys keeps the section verbatim.
+
+        Raises:
+            ValueError: *key* is not ``^[a-z][a-z0-9_]*$`` or is a reserved key
+                the owner derives from the tree.
+        """
+        if not _SECTION_KEY.fullmatch(key):
+            raise ValueError(f"index section key {key!r} must match ^[a-z][a-z0-9_]*$")
+        if key in RESERVED_INDEX_KEYS:
+            raise ValueError(f"index section key {key!r} is reserved")
+        section = [dict(row) for row in rows]
+
+        def change(current: EntityRecord) -> EntityRecord:
+            index = dict(current.index)
+            index[key] = cast("JSONValue", section)
+            return EntityRecord(canonical=current.canonical, index=index, body=current.body)
+
+        update_record(self._disk(), self.path, change, lock_root=self._lock_root())
 
     # ── OKF narrative ─────────────────────────────────────────────────────
 
     def read_index(self) -> str:
-        """Return the OKF ``index.md`` narrative, or ``""`` if absent."""
-        fpath = self._disk().join(self.resolve(), INDEX_FILENAME)
-        return self._disk().read_text(fpath) if self._disk().exists(fpath) else ""
+        """Return the narrative body of ``index.md`` (no frontmatter), or ``""``."""
+        return read_body(self._disk(), self.resolve())
 
     def write_index(self, text: str) -> str:
-        """Atomically write the OKF ``index.md`` narrative + markdown links."""
-        fpath = self._disk().join(self.path, INDEX_FILENAME)
-        self._disk().atomic_write_text(fpath, text)
-        return fpath
+        """Atomically replace the narrative body of ``index.md``; keep its frontmatter."""
+        write_record(self._disk(), self.path, body=text, lock_root=self._lock_root())
+        return self._disk().join(self.resolve(), INDEX_FILENAME)
 
     # ── Lifecycle ────────────────────────────────────────────────────────
 
     def materialize(self) -> None:
-        """Persist concept identity as ``meta.json`` (creating the dir lazily)."""
+        """Persist the record in ``index.md`` (creating the dir lazily)."""
         self._metadata = self._metadata.model_copy(update={"updated_at": datetime.now()})
         self.write_meta()
 
     def save(self) -> None:
-        """Bump ``updated_at`` and rewrite ``meta.json``."""
+        """Bump ``updated_at`` and rewrite the record."""
         self._metadata = self._metadata.model_copy(update={"updated_at": datetime.now()})
         self.write_meta()
 
     # ── Children ─────────────────────────────────────────────────────────
 
     def _try_child_folder_metadata(self, entry_path: PathArg) -> FolderMetadata | None:
-        """Load in-memory FolderMetadata from ``meta.json``."""
-        raw = _load_concept_marker_dict(self._disk(), entry_path)
-        if raw is None:
+        """Load in-memory FolderMetadata from the child's ``index.md`` record."""
+        record = read_record(self._disk(), entry_path)
+        if record is None:
             return None
-        return _folder_metadata_from_marker(entry_path, raw)
+        return _folder_metadata_from_marker(entry_path, record.canonical)
 
     def children(self, kind: str | None = None) -> list[Folder]:
         self_path = self.resolve()
@@ -591,17 +623,31 @@ class Folder:
         }
 
     @classmethod
-    def from_disk(cls, child_dir: PathArg, parent: Folder) -> Folder:
-        """Generic loader: reconstruct *child_dir* from ``meta.json``.
+    def _require_record(cls, child_dir: PathArg, parent: Folder) -> EntityRecord:
+        """*child_dir*'s record, which must carry this class's ``type``.
 
-        Concept identity is ``meta.json`` (``type`` → kind; dir name → id).
-        A dir with no marker is not a Folder: ``FileNotFoundError``.
+        Raises:
+            FileNotFoundError: No ``index.md`` record.
+            ValueError: The record names another type.
+            UnmigratedLayoutError: Only a legacy JSON record is present.
         """
         fs = parent._disk()
-        raw = _load_concept_marker_dict(fs, child_dir)
-        if raw is None:
-            raise FileNotFoundError(fs.join(child_dir, META_JSON_FILENAME))
-        child_meta = _folder_metadata_from_marker(child_dir, raw)
+        record = read_record(fs, child_dir)
+        if record is None:
+            raise FileNotFoundError(fs.join(child_dir, INDEX_FILENAME))
+        if cls._entity_kind and record.type != cls._entity_kind:
+            raise ValueError(f"{child_dir} is a {record.type!r} record, not {cls._entity_kind!r}")
+        return record
+
+    @classmethod
+    def from_disk(cls, child_dir: PathArg, parent: Folder) -> Folder:
+        """Generic loader: reconstruct *child_dir* from its ``index.md`` record.
+
+        Concept identity is the record's ``type`` (→ kind; dir name → id).
+        A dir with no record is not a Folder: ``FileNotFoundError``.
+        """
+        record = cls._require_record(child_dir, parent)
+        child_meta = _folder_metadata_from_marker(child_dir, record.canonical)
         return _reconstruct(
             cls,
             cls.base_from_disk_attrs(parent, child_meta, slug=parent._disk().basename(child_dir)),
@@ -651,8 +697,8 @@ class Folder:
         child._root_path = None
         if getattr(child, "_disk_backend", None) is not None:
             del child._disk_backend
-        child.materialize()  # base: meta.json; WPER subclasses: entity json + write_meta
-        if _load_concept_marker_dict(self._disk(), child.resolve()) is None:
+        child.materialize()  # writes the index.md record and refreshes the index
+        if read_type(self._disk(), child.resolve()) is None:
             child.write_meta()
         self._children_cache[slug] = child
         return child
@@ -718,6 +764,8 @@ class Folder:
                 continue
             try:
                 loaded = cls.from_disk(entry_path, self)
+            except UnmigratedLayoutError:
+                raise
             except (FileNotFoundError, OSError, ValueError):
                 continue
             if isinstance(loaded, cls):
@@ -736,6 +784,7 @@ class Folder:
             if self._disk().is_dir(child_dir):
                 self._disk().remove(child_dir, recursive=True)
                 self._children_cache.pop(candidate, None)
+                self._refresh_own_index()
                 return
             cached = self._children_cache.get(candidate)
             if isinstance(cached, cls):
@@ -751,12 +800,18 @@ class Folder:
 
     # ── Delete + move ────────────────────────────────────────────────────
 
+    def _refresh_own_index(self) -> None:
+        from .index_projection import refresh_index
+
+        refresh_index(self, parent=False)
+
     def delete(self) -> None:
         target = self.resolve()
         if self._disk().exists(target):
             self._disk().remove(target, recursive=True)
         if self._parent is not None:
             self._parent._children_cache.pop(self._name, None)
+            self._parent._refresh_own_index()
 
     def _sync_entity_identity(self) -> None:
         """Hook — subclasses with entity metadata mirror the folder identity.
@@ -827,46 +882,38 @@ class Folder:
         # directory from the entity id, so this must land ahead of write_meta().
         self._sync_entity_identity()
         new_parent._children_cache[target_id] = self
-        self.write_meta()
+        self.write_meta()  # refreshes this record's index and the new parent's
+        if old_parent is not None and old_parent is not new_parent:
+            old_parent._refresh_own_index()
 
 
 def concept_from_dir(child_dir: PathArg, parent: Folder) -> Folder:
-    """Reconstruct *child_dir* as its Folder subclass, from the entity filename table.
+    """Reconstruct *child_dir* as its Folder subclass, from its record ``type``.
 
-    The entity filename axis, else a bare :class:`Folder`: a filename the
-    directory carries that :func:`class_for_entity_file` knows (the four tree
-    levels, each registered by its own module) picks the subclass; a directory
-    that carries only a ``meta.json`` rebuilds as the bare :class:`Folder`. A
-    directory with no record at all is not a Folder and raises ``TypeError``.
+    A ``type`` that :func:`class_for_entity_type` knows (the four tree levels,
+    each registered by its own module) picks the subclass; any other record
+    rebuilds as the bare :class:`Folder`. A directory with no record at all is
+    not a Folder and raises ``TypeError``.
     """
     fs = parent._disk()
-    try:
-        names = fs.listdir(child_dir)
-    except OSError:
-        names = []
-    for name in names:
-        mapped = class_for_entity_file(name)
-        if mapped is not None:
-            return mapped.from_disk(child_dir, parent)
-    marker = _load_concept_marker_dict(fs, child_dir)
-    if marker is None:
-        raise TypeError(
-            f"{child_dir} is not a Folder: no entity record and no {META_JSON_FILENAME}"
-        )
+    kind = read_type(fs, child_dir)
+    if kind is None:
+        read_record(fs, child_dir)  # raises UnmigratedLayoutError on a legacy dir
+        raise TypeError(f"{child_dir} is not a Folder: no {INDEX_FILENAME} record")
+    mapped = class_for_entity_type(kind)
+    if mapped is not None:
+        return mapped.from_disk(child_dir, parent)
     return Folder.from_disk(child_dir, parent)
 
 
 __all__ = [
     "INDEX_FILENAME",
-    "META_JSON_FILENAME",
     "WORKSPACE_EXPERIMENT_KIND",
     "WORKSPACE_PROJECT_KIND",
     "WORKSPACE_ROOT_KIND",
     "WORKSPACE_RUN_KIND",
     "Folder",
-    "class_for_entity_file",
+    "class_for_entity_type",
     "concept_from_dir",
-    "entity_filename",
-    "entity_json_names",
     "register_entity_class",
 ]

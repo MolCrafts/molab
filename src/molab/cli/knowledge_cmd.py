@@ -53,7 +53,7 @@ def _load_dest_workspace(dest: Path) -> Workspace:
     """Load the destination workspace, failing with a human message.
 
     Raises:
-        typer.Exit: code 1 when *dest* holds no ``workspace.json``.
+        typer.Exit: code 1 when *dest* is not inside a workspace.
     """
     from molab.workspace import Workspace
 
