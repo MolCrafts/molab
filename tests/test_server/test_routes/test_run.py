@@ -5,6 +5,7 @@ from __future__ import annotations
 import inspect
 import json
 import re
+import sys
 from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import ClassVar, get_args
@@ -13,6 +14,7 @@ import pytest
 from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
+import molab as me
 from molab.knowledge import Report
 from molab.server.routes import run as run_routes
 from molab.server.schemas.requests import RunHarvestRequest
@@ -546,6 +548,18 @@ class TestGetExecutionOutputs:
             {"kind": item["kind"], "path": item["path"]} for item in body["evidence"]
         ]
 
+    def test_runtime_is_the_run_log_and_stdio_is_printed(
+        self, served: ServedFactory, fresh_run: RunFixture
+    ) -> None:
+        ws, exp, run = fresh_run
+        with run.start():
+            me.print("printed")
+        with served(ws) as client:
+            body = client.get(f"{_run_url(exp, run)}/executions/e01/outputs").json()
+        assert body["runtime"] == (run.execution_dir("e01") / "run.log").read_text(encoding="utf-8")
+        assert "execution finished" in body["runtime"]
+        assert body["stdout"] == "printed\n"
+
     def test_unknown_execution_is_404(self, served: ServedFactory, fresh_run: RunFixture) -> None:
         ws, exp, run = fresh_run
         _emit_metrics(run)
@@ -600,6 +614,132 @@ class TestGetExecutionOutputs:
         listed = [node["relPath"] for node in response.json()["unregistered"]]
         assert listed == ["out/figures/fig1.png"]
         assert artifact.path not in listed
+
+
+class TestExecutionLogs:
+    """``get_run_execution_logs``: the attempt's own stdio files, then legacy ones (D92)."""
+
+    def test_reads_root_stdio_written_by_molab_print(
+        self, served: ServedFactory, fresh_run: RunFixture
+    ) -> None:
+        ws, exp, run = fresh_run
+        with run.start():
+            me.print("hello out")
+            me.print("hello err", file=sys.stderr)
+        with served(ws) as client:
+            response = client.get(f"{_run_url(exp, run)}/executions/e01/logs")
+        assert response.status_code == 200, response.text
+        assert response.json() == {
+            "executionId": "e01",
+            "stdout": "hello out\n",
+            "stderr": "hello err\n",
+        }
+
+    def test_empty_stdout_falls_back_to_run_log(
+        self, served: ServedFactory, fresh_run: RunFixture
+    ) -> None:
+        ws, exp, run = fresh_run
+        with run.start():
+            pass
+        with served(ws) as client:
+            body = client.get(f"{_run_url(exp, run)}/executions/e01/logs").json()
+        assert "execution started" in body["stdout"]
+        assert body["stderr"] is None
+
+    def test_legacy_job_files_answer_when_root_files_are_absent(
+        self, served: ServedFactory, fresh_run: RunFixture
+    ) -> None:
+        ws, exp, run = fresh_run
+        with run.start():
+            pass
+        jobs = run.execution_dir("e01") / "jobs"
+        (jobs / "123").mkdir(parents=True)
+        (jobs / "123" / "stdout.log").write_text("legacy out\n", encoding="utf-8")
+        (jobs / "123.err").write_text("legacy err\n", encoding="utf-8")
+        with served(ws) as client:
+            body = client.get(f"{_run_url(exp, run)}/executions/e01/logs").json()
+        assert (body["stdout"], body["stderr"]) == ("legacy out\n", "legacy err\n")
+
+    def test_root_file_wins_over_legacy(self, served: ServedFactory, fresh_run: RunFixture) -> None:
+        ws, exp, run = fresh_run
+        with run.start():
+            me.print("new")
+        jobs = run.execution_dir("e01") / "jobs"
+        jobs.mkdir(parents=True, exist_ok=True)
+        (jobs / "123.out").write_text("old\n", encoding="utf-8")
+        with served(ws) as client:
+            body = client.get(f"{_run_url(exp, run)}/executions/e01/logs").json()
+        assert body["stdout"] == "new\n"
+
+    def test_stream_chunks_follow_by_offset(
+        self, served: ServedFactory, fresh_run: RunFixture
+    ) -> None:
+        ws, exp, run = fresh_run
+        with run.start():
+            for n in range(3):
+                me.print(f"line {n}")
+        url = f"{_run_url(exp, run)}/executions/e01/logs"  # + /{stream}
+        with served(ws) as client:
+            first = client.get(f"{url}/stdout", params={"offset": 0}).json()
+            second = client.get(f"{url}/stdout", params={"offset": 7}).json()
+            past = client.get(f"{url}/stdout", params={"offset": 99}).json()
+            bad = client.get(f"{url}/stdout", params={"offset": -1})
+        assert first == {
+            "stream": "stdout",
+            "text": "line 0\nline 1\nline 2\n",
+            "offset": 0,
+            "nextOffset": 21,
+            "size": 21,
+            "eof": True,
+        }
+        assert (second["text"], second["nextOffset"], second["eof"]) == (
+            "line 1\nline 2\n",
+            21,
+            True,
+        )
+        assert (past["text"], past["nextOffset"], past["eof"]) == ("", 99, True)
+        assert bad.status_code == 422
+
+    def test_stream_window_is_bounded_and_stops_on_a_character(
+        self, served: ServedFactory, fresh_run: RunFixture
+    ) -> None:
+        ws, exp, run = fresh_run
+        with run.start():
+            pass
+        log = run.execution_dir("e01") / "stdout.log"
+        window = run_routes._LOG_CHUNK_BYTES
+        # A 3-byte character straddles the window's end.
+        log.write_bytes(b"a" * (window - 1) + "\u20ac".encode() + b"tail\n")
+        url = f"{_run_url(exp, run)}/executions/e01/logs"  # + /{stream}
+        with served(ws) as client:
+            first = client.get(f"{url}/stdout").json()
+            rest = client.get(f"{url}/stdout", params={"offset": first["nextOffset"]}).json()
+        assert first["nextOffset"] == window - 1
+        assert first["eof"] is False
+        assert first["text"] == "a" * (window - 1)
+        assert rest["text"] == "\u20actail\n"
+        assert rest["eof"] is True
+        assert rest["size"] == log.stat().st_size
+
+    def test_stream_run_and_absent_stream(
+        self, served: ServedFactory, fresh_run: RunFixture
+    ) -> None:
+        ws, exp, run = fresh_run
+        with run.start():
+            pass
+        url = f"{_run_url(exp, run)}/executions/e01/logs"  # + /{stream}
+        with served(ws) as client:
+            run_log = client.get(f"{url}/run").json()
+            stderr = client.get(f"{url}/stderr").json()
+        assert "execution started" in run_log["text"]
+        assert stderr == {
+            "stream": "stderr",
+            "text": "",
+            "offset": 0,
+            "nextOffset": 0,
+            "size": 0,
+            "eof": True,
+        }
 
 
 class TestDownloadArtifactContent:

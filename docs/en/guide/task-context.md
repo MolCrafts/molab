@@ -68,7 +68,7 @@ with run.start() as ctx:  # run.start(profile_config=cfg) to attach a profile
     result = await WorkflowRuntime().execute(compiled, run_context=ctx)
     ctx.set_result("final_loss", result.outputs["train"])
     ctx.emit_artifact(result.outputs["train"], name="metrics.json")
-    ctx.log("runtime").append("done")
+    ctx.log("run").append("done")
 
 print(run.get_result("final_loss", execution_id=execution_id))  # public read-back on the Run entity
 ```

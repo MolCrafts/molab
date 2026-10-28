@@ -11,6 +11,10 @@ Workflow-layer conveniences are re-exported lazily at the top level —
 the ``molab.workflow`` engine machinery only at that point; plain
 ``import molab`` stays light).
 
+``molab.print`` is the builtin ``print`` that also records into the current
+execution's ``stdout.log`` / ``stderr.log``; ``molab.current()`` returns that
+execution (or ``None``). Opt in with ``from molab import print``.
+
 ``import molab`` also wires the workspace run-executor seam
 (``molab.workspace.run.set_run_executor``) with a lazy proxy, so
 ``Run.execute`` / ``Run.get_result`` / ``RunSet`` work in any process that
@@ -40,6 +44,11 @@ from molab.path import Path
 from molab.workspace.experiment import Experiment
 from molab.workspace.project import Project
 from molab.workspace.run import Run, RunContext, RunWorkflowExecutor, set_run_executor
+
+# The current execution and its stdio (D92). ``from molab import print``
+# shadows the builtin in the importing module on purpose (so does
+# ``from molab import *``); outside an execution it is the builtin.
+from molab.workspace.tracking import current, print
 from molab.workspace.workspace import Workspace
 
 if TYPE_CHECKING:
@@ -149,8 +158,10 @@ __all__ = [
     "WorkflowRuntime",
     "Workspace",
     "config",
+    "current",
     "entry",
     "get_logger",
+    "print",
     "wp",
 ]
 

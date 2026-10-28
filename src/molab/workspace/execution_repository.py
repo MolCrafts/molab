@@ -64,6 +64,7 @@ import shutil
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import UTC, datetime
 from pathlib import Path, PurePosixPath
+from types import MappingProxyType
 from typing import cast
 
 from molab._typing import JSONValue
@@ -247,6 +248,17 @@ _EVIDENCE_FILES = {
     "stderr": "stderr.log",
     "traceback": "traceback.txt",
 }
+
+#: The two stdio evidence files of one attempt, by stream: what
+#: ``molab.print`` and ``ctx.log("stdout" | "stderr")`` append to through the
+#: current execution (D92). A view of ``_EVIDENCE_FILES``, so the names have
+#: one home and seal hashes exactly the files that were written.
+STDIO_FILES: Mapping[str, str] = MappingProxyType(
+    {stream: _EVIDENCE_FILES[stream] for stream in ("stdout", "stderr")}
+)
+
+#: The attempt's own log, ``executions/eNN/run.log`` (``ctx.log("run")``).
+RUN_LOG_FILENAME: str = _EVIDENCE_FILES["runtime"]
 
 #: The record file of one attempt, ``executions/eNN/execution.json``.
 EXECUTION_RECORD_FILENAME = "execution.json"
@@ -1517,6 +1529,8 @@ def fold_legacy_attempt(
 __all__ = [
     "ATTEMPT_FILES",
     "EXECUTION_RECORD_FILENAME",
+    "RUN_LOG_FILENAME",
+    "STDIO_FILES",
     "ExecutionRepository",
     "fold_legacy_attempt",
     "legacy_attempt_created_at",

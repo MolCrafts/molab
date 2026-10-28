@@ -11,6 +11,7 @@ import typer
 
 from molab.services.agent_guide import (
     AGENT_COMMANDS,
+    AGENT_PYTHON,
     BEGIN_MARKER,
     END_MARKER,
     render_agent_guide,
@@ -56,6 +57,17 @@ class TestRender:
             options = {opt for param in leaf.params for opt in param.opts}
             flags = {token.strip("[]") for token in argv if token.lstrip("[").startswith("--")}
             assert flags <= options, (line, flags - options)
+
+    def test_every_python_line_imports(self, ws: Workspace) -> None:
+        import molab
+
+        block = render_agent_guide(ws)
+        for task, line in AGENT_PYTHON:
+            module, _, names = line.partition(" import ")
+            assert module == "from molab"
+            for name in names.split(","):
+                assert hasattr(molab, name.strip()), line
+            assert f"| {task} | `{line}` |" in block
 
     def test_the_block_is_derived_from_the_layout_constants(self, ws: Workspace) -> None:
         block = render_agent_guide(ws)

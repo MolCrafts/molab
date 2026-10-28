@@ -468,13 +468,34 @@ class RunLogsResponse(ApiModel):
     ``execution_id`` is the attempt these logs belong to; the server
     defaults to the most recent attempt when no specific execution is
     requested.  Each value is the full content of
-    ``executions/<execution_id>/{stdout,stderr}.log`` (or ``None`` if the
-    file is absent — e.g. local executions skip stdout capture).
+    ``executions/<execution_id>/{stdout,stderr}.log`` (written by
+    ``molab.print`` and ``ctx.log``, D92), falling back to a legacy
+    scheduler file under ``jobs/`` when the attempt has none, or ``None``.
+    An empty ``stdout`` falls back to the attempt's ``run.log``.
     """
 
     execution_id: str | None = None
     stdout: str | None = None
     stderr: str | None = None
+
+
+class RunLogChunkResponse(ApiModel):
+    """One byte window of one execution log, for incremental follow.
+
+    Returned by ``…/logs/{stream}?offset=…``. ``text`` decodes the bytes
+    ``[offset, next_offset)``; a multi-byte character cut by the window is
+    left for the next read, so ``next_offset`` is always a character
+    boundary. A poller passes ``next_offset`` back as ``offset``. ``size`` is
+    the file's size at read time (``0`` when the file does not exist yet);
+    ``eof`` is true when ``next_offset`` reached it.
+    """
+
+    stream: Literal["stdout", "stderr", "run"]
+    text: str
+    offset: int
+    next_offset: int
+    size: int
+    eof: bool
 
 
 class RunFileTextResponse(ApiModel):

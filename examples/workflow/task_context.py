@@ -73,7 +73,7 @@ async def main() -> None:
         # Workspace helpers are driver-side, on the RunContext.
         ctx.set_result("record", result.outputs["record"])
         ctx.emit_artifact({"value": result.outputs["record"]}, name="record.json")
-        ctx.log("runtime").append(f"value={result.outputs['record']}")
+        ctx.log("run").append(f"value={result.outputs['record']}")
 
     print(f"status:  {result.status}")
     print(f"outputs: {result.outputs}")

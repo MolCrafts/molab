@@ -22,14 +22,14 @@ with run.start() as ctx:
     artifact = ctx.emit_artifact({"loss": 0.1}, name="metrics.json")
     # artifact.run_id == run.id
     # artifact.metadata["task_id"] == "train"
-    log = ctx.log("runtime")
+    log = ctx.log("run")
     log.append("epoch 1")
     ckpt = ctx.checkpoint("epoch-1", data={"step": 1})
 ```
 
 `emit_artifact` accepts a `pathlib.Path` to an existing file (it must live inside the execution's `work/` directory), or an in-memory `dict` / `list` / `str` / `bytes` payload — in that case it writes the payload into `work/<name>` first. Every emit returns an `Artifact` carrying its `id`, `run_id`, `execution_id`, `name`, `semantic_type`, and a content digest. `set_active_task(task_id)` stamps the active task id into `artifact.metadata["task_id"]`.
 
-`ctx.log(name)` is execution evidence, not an artifact — the only valid names are `"runtime"`, `"stdout"`, and `"stderr"`. `ctx.checkpoint(...)` writes a checkpoint payload and emits it as an artifact with `semantic_type="checkpoint"`.
+`ctx.log(name)` is execution evidence, not an artifact — the only valid names are `"run"` (`run.log`), `"stdout"`, and `"stderr"` (`stdout.log` / `stderr.log`, the same files [`molab.print`](tracking.md) writes). `ctx.checkpoint(...)` writes a checkpoint payload and emits it as an artifact with `semantic_type="checkpoint"`.
 
 ## Querying artifacts
 

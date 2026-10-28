@@ -27,6 +27,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "AGENT_COMMANDS",
+    "AGENT_PYTHON",
     "BEGIN_MARKER",
     "CLAUDE_IMPORT_LINE",
     "END_MARKER",
@@ -66,6 +67,14 @@ AGENT_COMMANDS: Final[tuple[tuple[str, str], ...]] = (
     ("Rebuild every derived index block", "molab index sync"),
     ("Ask whether a write is legal", "molab check path PATH --op write --json"),
     ("Check your changes before finishing", "molab validate --new-only"),
+)
+
+#: ``(what you want to do, the Python line that does it)``, rendered in the
+#: same table after :data:`AGENT_COMMANDS`. Every name imported here exists
+#: at the top level of ``molab`` (pinned by a test).
+AGENT_PYTHON: Final[tuple[tuple[str, str], ...]] = (
+    # D92: copied into the current execution's stdout.log / stderr.log.
+    ("Print into the run's record", "from molab import print"),
 )
 
 
@@ -142,7 +151,7 @@ def _knowledge_classes() -> str:
 
 def _commands() -> str:
     lines = ["| to | run |", "|---|---|"]
-    lines.extend(f"| {task} | `{command}` |" for task, command in AGENT_COMMANDS)
+    lines.extend(f"| {task} | `{command}` |" for task, command in AGENT_COMMANDS + AGENT_PYTHON)
     return "\n".join(lines)
 
 

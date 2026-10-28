@@ -27,6 +27,7 @@ nav = [
         { "Workflow Authoring" = [
             { "Task and Actor" = "guide/task-and-actor.md" },
             { "TaskContext" = "guide/task-context.md" },
+            { "Tracking a Computation" = "guide/tracking.md" },
             { "Workflow Runtime" = "guide/workflow-runtime.md" },
             { "Control Flow" = "guide/control-flow.md" },
             { "Sub-workflows" = "guide/subworkflows.md" },

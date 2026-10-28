@@ -36,13 +36,15 @@ from .execution_dirs import (
     list_execution_dirs,
     resolve_execution_dir,
 )
-from .execution_repository import _START_TIME_KEYS, ExecutionRepository
+from .execution_repository import _START_TIME_KEYS, STDIO_FILES, ExecutionRepository
 from .file_store import FileStore
 from .history import AgentRef
 from .metrics_seam import MetricRecord, MetricsSink, create_metrics_writer
 from .run_heartbeat import HEARTBEAT_INTERVAL_SECONDS, touch_alive, unlink_alive
+from .tracking import StdioFiles, Stream, Tracker, bind, unbind
 
 if TYPE_CHECKING:
+    from contextvars import Token
     from types import TracebackType
 
     from .run import Run
@@ -181,16 +183,36 @@ def _start_executor(environment: dict[str, JSONValue]) -> dict[str, JSONValue]:
 
 
 class _BoundEvidenceLog:
-    def __init__(self, path: Path) -> None:
+    """One evidence log of an attempt: ``run.log``, ``stdout.log`` or ``stderr.log``.
+
+    ``stdout`` / ``stderr`` append through the attempt's :class:`StdioFiles`,
+    the same handles and locks ``molab.print`` uses, so a line appended here
+    never splits a printed line (D92). ``run`` keeps its own file.
+    """
+
+    def __init__(
+        self,
+        path: Path,
+        *,
+        stdio: StdioFiles | None = None,
+        stream: Stream | None = None,
+    ) -> None:
         self.path = path
+        self._stdio = stdio
+        self._stream = stream
 
     def append(self, line: str) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
         payload = line if line.endswith("\n") else line + "\n"
+        if self._stdio is not None and self._stream is not None:
+            self._stdio.write(self._stream, payload, flush=True)
+            return
+        self.path.parent.mkdir(parents=True, exist_ok=True)
         with self.path.open("a", encoding="utf-8") as handle:
             handle.write(payload)
 
     def tail(self, n: int = 100) -> list[str]:
+        if self._stdio is not None and self._stream is not None:
+            self._stdio.flush(self._stream)
         if not self.path.exists():
             return []
         return self.path.read_text(encoding="utf-8", errors="replace").splitlines()[-n:]
@@ -199,13 +221,17 @@ class _BoundEvidenceLog:
 class _ExecutionLogs:
     """Execution evidence streams; these are deliberately not Artifacts."""
 
-    def __init__(self, execution_dir: Path) -> None:
+    def __init__(self, execution_dir: Path, stdio: StdioFiles | None = None) -> None:
         self._execution_dir = execution_dir
+        self._stdio = stdio
 
     def __call__(self, name: str = "run") -> _BoundEvidenceLog:
         if name not in {"run", "stdout", "stderr"}:
             raise ValueError("Execution log name must be run, stdout, or stderr")
-        return _BoundEvidenceLog(self._execution_dir / f"{name}.log")
+        if name == "run" or self._stdio is None:
+            return _BoundEvidenceLog(self._execution_dir / f"{name}.log")
+        stream: Stream = "stdout" if name == "stdout" else "stderr"
+        return _BoundEvidenceLog(self._stdio.path(stream), stdio=self._stdio, stream=stream)
 
 
 class _CheckpointWriter:
@@ -261,6 +287,11 @@ class ExecutionContext:
     record through ``Run._create_execution`` (or, with *execution_id*, looks
     up the one already created) and then starts it; leaving it seals the
     attempt.
+
+    While entered it is the *current* execution of its context
+    (:func:`molab.workspace.tracking.current`), so ``molab.print`` copies into
+    its ``stdout.log`` / ``stderr.log``. A context entered inside another is
+    current until it exits, and then the outer one is again (D92).
 
     Args:
         run: The Run this attempt realizes.
@@ -342,6 +373,8 @@ class ExecutionContext:
         self._heartbeat_stop: threading.Event | None = None
         self._heartbeat_thread: threading.Thread | None = None
         self._metrics: MetricsSink | None = None
+        self._stdio: StdioFiles | None = None
+        self._tracking_token: Token[Tracker | None] | None = None
         workspace = run.experiment.project.workspace
         self._artifacts = ArtifactRepository(workspace.root, fs=workspace.fs)
         self._executions = ExecutionRepository(
@@ -429,7 +462,22 @@ class ExecutionContext:
 
     @property
     def log(self) -> _ExecutionLogs:
-        return _ExecutionLogs(self.execution_dir)
+        return _ExecutionLogs(self.execution_dir, self._stdio)
+
+    def write_stdio(self, stream: Stream, text: str, *, flush: bool = False) -> None:
+        """Append *text* verbatim to this attempt's ``stdout.log`` / ``stderr.log``.
+
+        The :class:`~molab.workspace.tracking.Tracker` method behind
+        ``molab.print``: one call is one locked write, so lines from parallel
+        tasks never split. Buffered; ``flush=True`` pushes it to disk, and
+        ``__exit__`` closes the files before the seal hashes them.
+
+        Raises:
+            RuntimeError: The context has not been entered.
+        """
+        if self._stdio is None:
+            raise RuntimeError("ExecutionContext has not been entered")
+        self._stdio.write(stream, text, flush=flush)
 
     @property
     def checkpoint(self) -> _CheckpointWriter:
@@ -486,11 +534,14 @@ class ExecutionContext:
         self._execution_id = state.id
         self._execution_dir = self.run.execution_dir(state.id)
         self._prepare_execution_files()
+        self._stdio = StdioFiles(self.execution_dir, STDIO_FILES)
         self.log("run").append(
             f"{datetime.now(UTC).isoformat()} execution started mode={state.mode.value}"
         )
         self._entered = True
         self._start_heartbeat()
+        # Last, so a failure above never leaves a dead context current.
+        self._tracking_token = bind(self)
         return self
 
     def __exit__(
@@ -501,6 +552,9 @@ class ExecutionContext:
     ) -> bool:
         self._stop_heartbeat()
         self._remove_heartbeat()
+        # Before the seal: it hashes stdout.log / stderr.log into the evidence,
+        # so the digests must cover the final bytes.
+        self._release_stdio()
         if exc_type is not None:
             self._write_exception(exc_type, exc_val, exc_tb)
         status = (
@@ -768,6 +822,29 @@ class ExecutionContext:
         # ``execution.json``); only the traceback text is too big for a field,
         # and it belongs in the attempt's one log.
         self.log("run").append("".join(traceback.format_exception(exc_type, exc_val, exc_tb)))
+
+    def _release_stdio(self) -> None:
+        """Stop being the current execution, then flush and close the stdio files.
+
+        Never raises, so ``__exit__`` always reaches the seal. Resetting the
+        token restores whichever execution was current before this one.
+        """
+        token, self._tracking_token = self._tracking_token, None
+        if token is not None:
+            try:
+                unbind(token)
+            except ValueError:
+                # Exited in a different context than it was entered in; the
+                # binding dies with that context.
+                _logger.warning(
+                    f"execution {self.id} exited outside the context it was entered in",
+                    exc_info=True,
+                )
+        if self._stdio is not None:
+            try:
+                self._stdio.close()
+            except Exception:
+                _logger.warning(f"could not close stdio of execution {self.id}", exc_info=True)
 
     def _emit_results(self) -> None:
         """Write in-memory results once, unless the attempt was sealed early.

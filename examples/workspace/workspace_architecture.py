@@ -40,7 +40,7 @@ async def main() -> None:
     with run.start() as ctx:
         result = await WorkflowRuntime().execute(compiled, run_context=ctx)
         ctx.emit_artifact(result.outputs["task"], name="metrics.json")
-        ctx.log("runtime").append("epoch 1 complete")
+        ctx.log("run").append("epoch 1 complete")
         ctx.checkpoint("epoch-1", data={"step": 1})
 
     print(f"workspace root: {root}\n")

@@ -223,20 +223,19 @@ class TestRefreshPoints:
 
     def test_seal_touches_only_the_run_file(self, tree) -> None:
         _ws, _project, experiment, run = tree
-        ctx = run.start()
-        ctx.__enter__()
-        experiment_index = Path(str(experiment.resolve())) / "index.md"
-        before = experiment_index.stat().st_mtime_ns
-        run_index = Path(str(run.resolve())) / "index.md"
-        run_before = run_index.read_text()
-        time.sleep(0.01)
+        with run.start() as ctx:
+            experiment_index = Path(str(experiment.resolve())) / "index.md"
+            before = experiment_index.stat().st_mtime_ns
+            run_index = Path(str(run.resolve())) / "index.md"
+            run_before = run_index.read_text()
+            time.sleep(0.01)
 
-        run._execution_repository().seal(ctx.id, ExecutionStatus.FAILED, error={"type": "Boom"})
+            run._execution_repository().seal(ctx.id, ExecutionStatus.FAILED, error={"type": "Boom"})
 
-        assert experiment_index.stat().st_mtime_ns == before
-        assert run_index.read_text() != run_before
-        assert _reserved(run)["executions"][0]["error"] == "Boom"
-        assert _reserved(run)["latest_status"] == "failed"
+            assert experiment_index.stat().st_mtime_ns == before
+            assert run_index.read_text() != run_before
+            assert _reserved(run)["executions"][0]["error"] == "Boom"
+            assert _reserved(run)["latest_status"] == "failed"
 
     def test_prune_refreshes_the_run(self, tree) -> None:
         _ws, _project, _experiment, run = tree

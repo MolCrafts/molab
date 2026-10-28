@@ -25,11 +25,16 @@ from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from mollog import get_logger
+
 from molab.workflow.task import Task
 from molab.workflow.types import CommandError
+from molab.workspace import tracking
 
 if TYPE_CHECKING:
     from molab.workflow.context import TaskContext
+
+_logger = get_logger(__name__)
 
 
 def _as_str(value: Any) -> str:  # noqa: ANN401 — duck-typed stream attr (str | bytes | None)
@@ -38,6 +43,28 @@ def _as_str(value: Any) -> str:  # noqa: ANN401 — duck-typed stream attr (str 
     if isinstance(value, bytes):
         return value.decode(errors="replace")
     return value if isinstance(value, str) else str(value)
+
+
+def _archive_stdio(stdout: str, stderr: str) -> None:
+    """Append a finished command's captured streams to the current execution.
+
+    The child's output lands in ``stdout.log`` / ``stderr.log`` beside the
+    lines ``molab.print`` wrote (D92), each stream as one write ending in a
+    newline. Outside an execution nothing is written. A failure is logged and
+    never fails the task.
+    """
+    tracker = tracking.current()
+    if tracker is None:
+        return
+    for stream, text in (("stdout", stdout), ("stderr", stderr)):
+        if not text:
+            continue
+        try:
+            tracker.write_stdio(stream, text if text.endswith("\n") else text + "\n")
+        except Exception:
+            _logger.warning(
+                f"could not record the command's {stream} in the execution", exc_info=True
+            )
 
 
 @dataclass(frozen=True)
@@ -51,6 +78,10 @@ class CommandResult:
 
 class CommandTask(Task):
     """Run one external command and fail the workflow on a non-zero return code.
+
+    Inside an execution, the command's captured stdout / stderr are also
+    appended to that execution's ``stdout.log`` / ``stderr.log`` (on success
+    and on failure); the return value is unchanged.
 
     Args:
         argv: The command + arguments to run as a subprocess. Mutually exclusive
@@ -108,6 +139,7 @@ class CommandTask(Task):
             result = CommandResult(
                 completed.returncode, _as_str(completed.stdout), _as_str(completed.stderr)
             )
+        _archive_stdio(result.stdout, result.stderr)
         if result.returncode != 0:
             raise CommandError(result.returncode, result.stdout, result.stderr)
         return result

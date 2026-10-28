@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import codecs
 import io
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import StreamingResponse
@@ -22,7 +24,11 @@ from molab.workspace import (
 )
 from molab.workspace.domain import Artifact, ExecutionMode, ExecutionStatus
 from molab.workspace.execution_dirs import JOBS, product_dirs
-from molab.workspace.execution_repository import ExecutionRepository
+from molab.workspace.execution_repository import (
+    RUN_LOG_FILENAME,
+    STDIO_FILES,
+    ExecutionRepository,
+)
 from molab.workspace.fs_cached import CachedRemoteFileSystem
 from molab.workspace.fs_tree import list_tree_children, tree_to_run_file_dicts
 from molab.workspace.history import AgentRef
@@ -47,6 +53,7 @@ from ..schemas import (
     RunFilesResponse,
     RunFileTextResponse,
     RunHarvestRequest,
+    RunLogChunkResponse,
     RunLogsResponse,
     RunResponse,
 )
@@ -397,7 +404,7 @@ def get_execution_outputs(
         executionId=execution_id,
         stdout=read_optional("stdout.log"),
         stderr=read_optional("stderr.log"),
-        runtime=read_optional("runtime.log"),
+        runtime=read_optional(RUN_LOG_FILENAME),
         artifacts=artifact_responses,
         evidence=evidence,
         unregistered=unregistered,
@@ -493,33 +500,90 @@ def create_scoped_run(
     return RunResponse.from_model(run)
 
 
-def _execution_stream(exec_dir: Path, name: str) -> Path | None:
-    """Stdout/stderr live under ``jobs/<id>/``."""
-    jobs = exec_dir / JOBS.name
-    if not jobs.is_dir():
+LogStream = Literal["stdout", "stderr", "run"]
+
+#: The most one ``…/logs/{stream}`` call returns.
+_LOG_CHUNK_BYTES = 256 * 1024
+
+_LEGACY_JOB_SUFFIX = {"stdout": ".out", "stderr": ".err"}
+"""A scheduler job's flat stream files: ``jobs/<job>.out`` / ``.err``."""
+
+_LEGACY_RUN_LOG = ("logs", "run.log")
+"""Where an older layout kept the attempt's own log."""
+
+
+def _execution_log_path(fs, exec_dir: str, stream: LogStream) -> str | None:  # noqa: ANN001
+    """The file one log *stream* of an attempt is read from, or ``None``.
+
+    The attempt's own file wins: ``stdout.log`` / ``stderr.log`` (written by
+    ``molab.print`` and ``ctx.log``, D92) or ``run.log``. Only when it is
+    absent does a legacy location answer — ``jobs/*/stdout.log`` (one
+    directory per job) or ``jobs/*.out`` / ``*.err`` for the stdio streams,
+    ``logs/run.log`` for ``run``.
+    """
+    if stream == "run":
+        candidates = [fs.join(exec_dir, RUN_LOG_FILENAME), fs.join(exec_dir, *_LEGACY_RUN_LOG)]
+    else:
+        name = STDIO_FILES[stream]
+        candidates = [fs.join(exec_dir, name)]
+        jobs = fs.join(exec_dir, JOBS.name)
+        if fs.is_dir(jobs):
+            candidates += sorted(fs.glob(jobs, f"*/{name}"))
+            candidates += sorted(fs.glob(jobs, f"*{_LEGACY_JOB_SUFFIX[stream]}"))
+    return next((path for path in candidates if fs.is_file(path)), None)
+
+
+def _read_log_text(fs, exec_dir: str, stream: LogStream) -> str | None:  # noqa: ANN001
+    path = _execution_log_path(fs, exec_dir, stream)
+    if path is None:
         return None
-    found = sorted(p for p in jobs.glob(f"*/{name}") if p.is_file() or p.is_symlink())
-    return found[0] if found else None
+    return fs.read_bytes(path).decode("utf-8", errors="replace")
 
 
-def _read_execution_logs(run, execution_id: str) -> RunLogsResponse:  # noqa: ANN001
-    exec_dir = Path(run.run_dir) / "executions" / execution_id
-    stdout: str | None = None
-    stderr: str | None = None
-    out_file = _execution_stream(exec_dir, "stdout.log")
-    err_file = _execution_stream(exec_dir, "stderr.log")
-    if out_file is not None:
-        stdout = out_file.read_text(errors="replace")
-    if err_file is not None:
-        stderr = err_file.read_text(errors="replace")
-    # Fall back to the workflow runtime log when stdout wasn't captured (e.g. an
-    # in-process / non-molq execution writes only ``logs/run.log``), so the Logs
+def _read_execution_logs(workspace, run, execution_id: str) -> RunLogsResponse:  # noqa: ANN001
+    fs = workspace.fs
+    exec_dir = _execution_repository(workspace, run).execution_dir(execution_id)
+    stdout = _read_log_text(fs, exec_dir, "stdout")
+    stderr = _read_log_text(fs, exec_dir, "stderr")
+    # Fall back to the attempt's own log when nothing was printed, so the Logs
     # panel still shows what the run did rather than "No stdout captured."
     if not stdout:
-        run_log = exec_dir / "logs" / "run.log"
-        if run_log.exists():
-            stdout = run_log.read_text(errors="replace")
+        stdout = _read_log_text(fs, exec_dir, "run") or stdout
     return RunLogsResponse(execution_id=execution_id, stdout=stdout, stderr=stderr)
+
+
+def _read_log_chunk(
+    workspace,  # noqa: ANN001
+    run,  # noqa: ANN001
+    execution_id: str,
+    stream: LogStream,
+    offset: int,
+) -> RunLogChunkResponse:
+    """Read at most ``_LOG_CHUNK_BYTES`` of one log from *offset*, through ``fs.read_range``.
+
+    A multi-byte character cut at the end of the window is not decoded;
+    ``next_offset`` stops before it, so the next read starts on a boundary.
+    """
+    fs = workspace.fs
+    exec_dir = _execution_repository(workspace, run).execution_dir(execution_id)
+    path = _execution_log_path(fs, exec_dir, stream)
+    if path is None:
+        return RunLogChunkResponse(
+            stream=stream, text="", offset=offset, next_offset=offset, size=0, eof=True
+        )
+    size = fs.getsize(path)
+    data = fs.read_range(path, offset, _LOG_CHUNK_BYTES) if offset < size else b""
+    decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+    text = decoder.decode(data, final=False)
+    next_offset = offset + len(data) - len(decoder.getstate()[0])
+    return RunLogChunkResponse(
+        stream=stream,
+        text=text,
+        offset=offset,
+        next_offset=next_offset,
+        size=size,
+        eof=next_offset >= size,
+    )
 
 
 @router.get(
@@ -537,7 +601,29 @@ def get_run_execution_logs(
     run = _get_scoped_run(workspace, project_id, experiment_id, run_id)
     if not run:
         raise RunNotFoundError(project_id, experiment_id, run_id)
-    return _read_execution_logs(run, execution_id)
+    return _read_execution_logs(workspace, run, execution_id)
+
+
+@router.get(
+    "/{run_id}/executions/{execution_id}/logs/{stream}",
+    response_model=RunLogChunkResponse,
+)
+def get_run_execution_log_chunk(
+    project_id: str,
+    experiment_id: str,
+    run_id: str,
+    execution_id: str,
+    stream: LogStream,
+    offset: int = Query(
+        default=0, ge=0, description="Byte offset to read from; pass back nextOffset."
+    ),
+    workspace=Depends(get_workspace),  # noqa: ANN001
+) -> RunLogChunkResponse:
+    """Read one log (stdout, stderr or run) incrementally: at most 256 KiB from ``offset``."""
+    run = _get_scoped_run(workspace, project_id, experiment_id, run_id)
+    if not run:
+        raise RunNotFoundError(project_id, experiment_id, run_id)
+    return _read_log_chunk(workspace, run, execution_id, stream, offset)
 
 
 @router.get(

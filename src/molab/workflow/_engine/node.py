@@ -29,6 +29,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from molab.workspace import tracking
+
 from ..context import TaskContext
 from ..outputs import RegisterArtifact, RegisterMetric
 from ..protocols import (
@@ -287,13 +289,18 @@ async def run_task_body(
 
     # Tag artifacts produced by this body with ``producer.task_id == name``
     # so the cache hook (and asset queries) can find them by producer task.
+    # One slot per execution, so same-level parallel tasks race on it; see
+    # .claude/notes/open-questions.md (remedy: read ``tracking.current_task()``).
     set_active_task = getattr(deps.run_context, "set_active_task", None)
     if callable(set_active_task):
         set_active_task(name)
 
     # Parameter binding treats an absent config as an empty one; the body-call
-    # helpers below take a non-optional mapping.
-    raw = await _invoke_body_with_ctx(registration, task_ctx, inputs, effective_config or {})
+    # helpers below take a non-optional mapping. Each node runs as its own
+    # asyncio task (or ``to_thread`` call, which copies the context), so the
+    # task scope is per body even when same-level tasks run in parallel.
+    with tracking.task_scope(name):
+        raw = await _invoke_body_with_ctx(registration, task_ctx, inputs, effective_config or {})
     from .node_cache import _upstream_asset_ids
 
     try:

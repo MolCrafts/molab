@@ -162,7 +162,7 @@ with run.start(mode=ExecutionMode.RERUN) as ctx:
     dataset = project.data_assets.get("dataset")
     result = await WorkflowRuntime().execute(compiled, run_context=ctx)
     ctx.emit_artifact(result.outputs["train"], name="metrics.json")
-    ctx.log("runtime").append("epoch 1")
+    ctx.log("run").append("epoch 1")
 ```
 
 `import_asset(name, src, action="copy", meta=None)` supports `"copy"`, `"move"`, `"symlink"`, and `"hardlink"` for ingestion.
