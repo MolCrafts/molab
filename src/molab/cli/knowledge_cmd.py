@@ -473,7 +473,8 @@ def _host(workspace: Workspace, on: str | None) -> object:
             return workspace.find(qualify_run_id(workspace, on))
         except (InvalidRefError, RefNotFoundError, AmbiguousRefError):
             pass
-    return Path(str(workspace.root)) / on
+    path = Path(str(workspace.root)) / on
+    return workspace.folder_at(path) or path
 
 
 def _document(workspace: Workspace, ref: str) -> object:
@@ -513,6 +514,10 @@ def knowledge_write(
     path: Annotated[
         Path | None, typer.Option("--path", help="Workspace root; defaults to cwd.")
     ] = None,
+    created_by: Annotated[
+        str,
+        typer.Option("--created-by", help="Author recorded in the frontmatter (a person or tool)."),
+    ] = "cli",
 ) -> None:
     """Write one knowledge document. The same verb as ``write_knowledge``."""
     from molab.knowledge.concepts import _product
@@ -536,7 +541,7 @@ def knowledge_write(
             name=name,
             of=cls,
             sources=sources,
-            created_by="cli",
+            created_by=created_by,
             text=text,
             fs=workspace.fs,
         )

@@ -581,6 +581,56 @@ class Workspace(Folder):
                 continue
         raise RefNotFoundError(parsed, "artifact", parsed.artifact_id)
 
+    def folder_at(self, path: PathArg) -> Folder | None:
+        """The workspace, project, experiment or run whose directory is *path*.
+
+        Workspace owns its layout, so this is where a directory is turned back
+        into the Folder that lives there (a caller never assembles one). The
+        walk goes down from this workspace's root one level at a time: each
+        step must name the next level's container (``projects`` /
+        ``experiments`` / ``runs``) and a child whose ``index.md`` record is of
+        that level's ``type``. A local path is resolved first, so a symlinked
+        spelling of the root still matches.
+
+        Args:
+            path: A directory, absolute or as this workspace spells it.
+
+        Returns:
+            The Folder, or ``None`` when *path* is outside this workspace or is
+            not a level directory (a container, an attempt, a plain directory,
+            a directory with no record).
+        """
+        import posixpath
+
+        from .folder import WORKSPACE_EXPERIMENT_KIND, WORKSPACE_RUN_KIND, concept_from_dir
+
+        disk = self.fs
+        local = isinstance(disk, LocalFileSystem)
+        root = posixpath.normpath(str(self.resolve()))
+        target = posixpath.normpath(disk.resolve(str(path)) if local else str(path))
+        if target == root:
+            return self
+        prefix = root.rstrip("/") + "/"
+        if not target.startswith(prefix):
+            return None
+        parts = target[len(prefix) :].split("/")
+        steps = (
+            (PROJECT_CONTAINER, WORKSPACE_PROJECT_KIND),
+            (EXPERIMENT_CONTAINER, WORKSPACE_EXPERIMENT_KIND),
+            (RUN_CONTAINER, WORKSPACE_RUN_KIND),
+        )
+        if len(parts) % 2 or len(parts) > 2 * len(steps):
+            return None
+        current: Folder = self
+        for (container, kind), index in zip(steps, range(0, len(parts), 2), strict=False):
+            if parts[index] != container:
+                return None
+            child_dir = disk.join(current.resolve(), container, parts[index + 1])
+            if read_type(disk, child_dir) != kind:
+                return None
+            current = concept_from_dir(child_dir, current)
+        return current
+
     def write_meta(self) -> str:
         """Write the workspace record into the root ``index.md``; return its path."""
         self.save()

@@ -426,6 +426,8 @@ class Concept:
     def rename(self, new_name: str, *, within: Concept | PathArg | None = None) -> None:
         """Rename this document in place and rewrite inbound links.
 
+        The host's ``index.knowledges`` section is rebuilt afterwards.
+
         Args:
             new_name: The new human name.
             within: Tree whose inbound links are rewritten.
@@ -450,6 +452,7 @@ class Concept:
         self._fs.rename(old, dst)
         self._path = dst
         _rewrite_inbound(inbound, old, dst)
+        _refresh_sections(self._fs, dst)
 
     def move_to(
         self,
@@ -460,6 +463,9 @@ class Concept:
         within: Concept | PathArg | None = None,
     ) -> None:
         """Move this document onto *host* and rewrite relative links.
+
+        The ``index.knowledges`` sections of the old and the new host are
+        rebuilt afterwards.
 
         Args:
             host: A Folder, a path, or a bare Knowledge handle.
@@ -498,11 +504,16 @@ class Concept:
             new_dir = _link_base(self)
             _retarget_links(self, lambda target: _rehome_link(target, old_dir, new_dir))
             _rewrite_inbound(inbound, old, dst)
+        _refresh_sections(self._fs, old, dst)
 
     def delete(self) -> None:
-        """Remove this document. Inbound links are left dangling."""
+        """Remove this document. Inbound links are left dangling.
+
+        The host's ``index.knowledges`` section is rebuilt afterwards.
+        """
         self._require_document("delete")
         self._fs.remove(self._path)
+        _refresh_sections(self._fs, self._path)
 
     def export(self) -> str:
         """This document's narrative, without frontmatter."""
@@ -815,6 +826,23 @@ def _knowledge_target(ref: object, *, fs: FileSystem) -> Concept:
         f"cross-reference target must be a Knowledge document, got {type(ref).__name__}; "
         "pass the Knowledge, or the path locating one"
     )
+
+
+def _refresh_sections(fs: FileSystem, *document_paths: str) -> None:
+    """Rebuild the ``index.knowledges`` section of each host these paths sit under.
+
+    Two paths on one host (a rename) rebuild it once. Never raises.
+    """
+    from .index_section import refresh_section
+    from .location import host_of
+
+    seen: set[str] = set()
+    for path in document_paths:
+        host = str(host_of(path))
+        if host in seen:
+            continue
+        seen.add(host)
+        refresh_section(path, fs=fs)
 
 
 def _record_as_dict(record: object) -> dict[str, object]:

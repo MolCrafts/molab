@@ -9,8 +9,8 @@ level       keys
 workspace   ``children`` — projects ``{name, path, id, description}``
 project     ``parent``, ``children`` — experiments ``{name, path, id,
             description, workflow_kind, entrypoint}``
-experiment  ``parent``, ``entrypoint``, ``scratch``, ``children`` — runs
-            ``{name, path, id, params}``
+experiment  ``parent``, ``entrypoint``, ``scratch`` (whether ``scratch/``
+            exists, D90), ``children`` — runs ``{name, path, id, params}``
 run         ``parent``, ``executions`` — per attempt ``{id, path, mode,
             status, started_at, finished_at, job_ids, out, artifacts,
             error}``, ``latest_status``
@@ -44,7 +44,7 @@ from .entity_record import (
     EntityRecord,
     update_record,
 )
-from .naming import EXPERIMENT_CONTAINER, PROJECT_CONTAINER, RUN_CONTAINER
+from .naming import EXPERIMENT_CONTAINER, PROJECT_CONTAINER, RUN_CONTAINER, SCRATCH_CONTAINER
 
 if TYPE_CHECKING:
     from .folder import Folder
@@ -177,9 +177,9 @@ def _experiment_keys(
     return {
         "parent": PARENT_INDEX,
         "entrypoint": entrypoint_of(directory, canonical),
-        # No scratch tier is declared yet; the key is emitted so the shape is
-        # stable when one is.
-        "scratch": False,
+        # Whether the experiment has a ``scratch/`` tier (D90). The owner does
+        # not write there, so the flag is as fresh as the last refresh.
+        "scratch": fs.is_dir(fs.join(directory, SCRATCH_CONTAINER)),
         "children": rows,
     }
 

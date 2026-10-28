@@ -35,6 +35,7 @@ from pydantic import BaseModel, ConfigDict
 from ._file_lock import FileLockTimeoutError, file_lock
 from .execution_dirs import scratch_dirs
 from .fs import PathArg
+from .naming import EXPERIMENT_CONTAINER, SCRATCH_CONTAINER
 
 logger = get_logger(__name__)
 
@@ -129,9 +130,30 @@ def _scratch_rules() -> str:
     return "\n".join(lines) + "\n"
 
 
+def _experiment_scratch_rule() -> str:
+    """The rule that keeps every experiment's ``scratch/`` out of the history (D90)."""
+    return (
+        "\n# Experiment scratch: quick tests, disposable; a result becomes a run.\n"
+        f"**/{EXPERIMENT_CONTAINER}/*/{SCRATCH_CONTAINER}/\n"
+    )
+
+
 def default_gitignore() -> str:
     """The workspace ``.gitignore``, with the scratch rules derived."""
-    return f"{_GITIGNORE_HEAD}\n{_scratch_rules()}{_GITIGNORE_BULK}"
+    return f"{_GITIGNORE_HEAD}\n{_scratch_rules()}{_experiment_scratch_rule()}{_GITIGNORE_BULK}"
+
+
+def managed_ignore_rules() -> tuple[str, ...]:
+    """Every rule line of :func:`default_gitignore`, in order, without comments."""
+    rules: list[str] = []
+    for line in default_gitignore().splitlines():
+        rule = line.strip()
+        if rule and not rule.startswith("#") and rule not in rules:
+            rules.append(rule)
+    return tuple(rules)
+
+
+_MANAGED_APPEND_HEADER = "# Added by molab: managed rules this file was missing."
 
 
 class AgentRef(BaseModel):
@@ -218,6 +240,33 @@ class GitHistory:
         if not ignore.exists():
             ignore.write_text(default_gitignore(), encoding="utf-8")
         return True
+
+    def ensure_ignore_rules(self) -> tuple[str, ...]:
+        """Make the workspace ``.gitignore`` carry every managed rule; idempotent.
+
+        An absent file is written whole (:func:`default_gitignore`). An
+        existing one keeps every line it has, and the managed rules it lacks
+        are appended under one comment, so a rule molab added later (the
+        experiment ``scratch/`` rule, D90) reaches a workspace made before
+        it. Needs no git.
+
+        Returns:
+            The rules that were added; empty when nothing changed.
+        """
+        ignore = self.root / ".gitignore"
+        if not ignore.exists():
+            self.root.mkdir(parents=True, exist_ok=True)
+            ignore.write_text(default_gitignore(), encoding="utf-8")
+            return managed_ignore_rules()
+        text = ignore.read_text(encoding="utf-8")
+        present = {line.strip() for line in text.splitlines()}
+        missing = tuple(rule for rule in managed_ignore_rules() if rule not in present)
+        if not missing:
+            return ()
+        head = text if text.endswith("\n") or not text else f"{text}\n"
+        block = "\n".join((_MANAGED_APPEND_HEADER, *missing))
+        ignore.write_text(f"{head}\n{block}\n", encoding="utf-8")
+        return missing
 
     # ── writing ──────────────────────────────────────────────────────────
 
@@ -542,6 +591,7 @@ __all__ = [
     "HistoryPushError",
     "Relation",
     "default_gitignore",
+    "managed_ignore_rules",
     "push_workspace",
 ]
 

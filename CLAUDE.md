@@ -126,7 +126,7 @@ molab's Server + CLI sit on top of **`molab.services`** (the application-service
 - **A stuck QUEUED attempt.** Submit creates the QUEUED `eNN` before submit and stages `executions/<id>/`. If the scheduler job dies before the worker starts and a terminal event is observed, the record is sealed with error type `SchedulerJobEndedBeforeStart`. If no event is observed, the record stays QUEUED. The remedy is `molab runs cancel <run-id>…` (run ids, or `--project` / `--experiment` with `--all` / `--status`), which cancels each run's active attempt, QUEUED included. The Python call is `run.cancel("eNN")`. A scheduler RESUME on a remote target recomputes, because the predecessor journal is not staged. Upgrade commands are `molab migrate assets`, `molab migrate workflow-kind`, `molab migrate knowledge`, and `molab migrate index`.
 
 **`molab.services`** — application-service layer between CLI/server and the domain layers.
-- Owns: `operator_config` (the `~/.molab/config.json` file loader and writer — load / save / set; CLI, server and `auth` read through it, only the CLI writes), `run_failure`, `auth` (filesystem users + sessions for `molab serve`), `workflow_kind` (D20), `knowledge_context`, and `copilot` (06f). This is where "Python 操作 = UI 操作" is enforced: CLI commands and server routes both call services, never each other.
+- Owns: `operator_config` (the `~/.molab/config.json` file loader and writer — load / save / set; CLI, server and `auth` read through it, only the CLI writes), `run_failure`, `auth` (filesystem users + sessions for `molab serve`), `workflow_kind` (D20), `knowledge_context`, `copilot` (06f), and the compositions workspace and knowledge cannot do themselves: `index_sync` (the full `molab index sync`), `workspace_check` (`molab check` / `molab validate`, D91) and `agent_guide` (`molab agents sync`). This is where "Python 操作 = UI 操作" is enforced: CLI commands and server routes both call services, never each other.
 - Uses: workflow, workspace. MUST NOT: import `server` / `cli` / `plugins` — enforced by `tests/test_services/test_import_guard.py` (AST scan); every lower layer's guard forbids importing `services` back.
 
 ## On-disk layout
@@ -142,12 +142,15 @@ workspace_root/
 │   └── runs/<run-id>/cache/      #   workflow node cache, per run (`run.machine_dir()`)
 ├── index.md                      # workspace RECORD (frontmatter: type workspace.root, id, …;
 │                                 #   derived `index: {children}`) + OKF narrative body
+├── AGENTS.md                     # agent guide; molab owns the `<!-- molab:begin/end -->` block (D91)
+├── CLAUDE.md                     # carries an `@AGENTS.md` line; otherwise the user's
 └── projects/<project-slug>/      # container "projects/", dir name = slug(project name)
     ├── index.md                  # project RECORD (holds the UUIDv7 `id`) + `index:` + narrative
     ├── knowledges/tg-cooling.md  # knowledge document (frontmatter class + markdown)
     └── experiments/<experiment-slug>/     # dir name = slug(experiment name)
         ├── index.md              # experiment RECORD + `index: {parent, entrypoint, scratch, children}`
         ├── workflow.py           # the experiment's own script, beside the runs it produced
+        ├── scratch/              # quick tests only: disposable, gitignored, never a child (D90)
         ├── knowledges/tg-cooling.md  # same file shape as the project-level document
         └── runs/<dp=5_seed=42>/  # dir name = the run's parameters, sorted (digest when there are none)
             ├── index.md          # run RECORD: logical definition only (params / definition_hash /
@@ -177,6 +180,10 @@ workspace_root/
 The canonical zones of the `index.md` records are the whole truth. History is the workspace's git log (`molab.workspace.GitHistory`), which records each fact in commit-message trailers and is never read to answer an operational question. A Run is immutable scientific intent (its `index.md` record = logical definition only); everything about one attempt — status, ownership, executor, environment, emitted artifacts, evidence, error, seal — is in that attempt's single `executions/eNN/execution.json`, and the owner heartbeat is the mtime of the per-Execution `alive` file.
 
 Restructuring an older workspace into this layout is `molab migrate layout <old> <new>` (`cli/migrate_cmd.py`): it renames every directory, writes each level's record as its `index.md` (carrying the old narrative across), folds each attempt's sidecars into one `execution.json`, drops what was only a copy, hard-links bulk payload, rebuilds the derived `index:` blocks, and commits the result. Folding a v5 tree's `<kind>.json` / `meta.json` records into `index.md` (keeping each narrative body, then `molab index sync`) is `molab migrate index [ROOT] [--dry-run]`. Renaming machine dirs after the molexp→molab cut is `molab migrate brand`.
+## Agents
+
+Coding agents write into a workspace directly, so molab gives them legal paths and one checker (D90, D91). The root `AGENTS.md` block is **generated** from code (`molab agents sync`, run last by `molab init`; `services/agent_guide.py`) and `CLAUDE.md` imports it; everything outside the markers is the user's. The hooks live in `MolCrafts/molcrafts-harness` and **only call `molab check`** (`check path` before a write, `check tree --snapshot` / `--since` at session start / stop); they hold no rule. **`molab check` is the rule's one home**: `services/workspace_check.py` composes the workspace validator (`validate.classify_entry` — a closed set of legal names per level, `knowledges/` declared through `extra`) and `knowledge/validate.py`, refuses a write molab owns (a record's frontmatter, an attempt's record and evidence, machine state) or a new stray, names the molab command to use instead, and holds a session only to errors it added (snapshot, else `.molab/validate-baseline.json`). The legal paths: an experiment's `scratch/` for quick tests, `molab runs adopt` for a job that ran outside molab, `molab index show|write` for a record's body, `molab knowledge write --created-by` for documents. There is no in-repo agent skill; its home is the harness.
+
 ## Packaging
 
 Python install and UI compile are **separate jobs**. Default `pip` / `uv pip` / `python -m build` **never** invoke npm.

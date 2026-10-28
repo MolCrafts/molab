@@ -14,6 +14,10 @@ When the question is about persistent state, start with [Workspace API](workspac
 
 When the question is "what did this run *mean*," go to [Knowledge and Cross-References](knowledge.md). It covers the markdown documents — notes, plans, reports, findings — that sit beside the experiments they describe, why a document's path is its identity, and how the links between documents form the project's knowledge graph.
 
+## Coding Agents
+
+When an agent such as Claude Code works in your workspace, read [Working with Coding Agents](agents.md). It covers the generated `AGENTS.md`, the legal paths an agent is given (`scratch/`, `molab runs adopt`, `molab index write`), and `molab check`, the one checker the harness hooks call.
+
 ## Operations and Scheduling
 
 When the question is about long-running services or scheduler transport, go to [Server Lifecycle](server-lifecycle.md) and [Molq Plugin](molq.md). Those pages are intentionally outside the onboarding path because they matter only after the local workflow and workspace model are already stable. Checkout vs bundled UI vs wheel: [Serve and rebuild the UI](../development/ui-serve.md).

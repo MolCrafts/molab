@@ -59,7 +59,7 @@ from .execution_context import (
     _creation_environment,
     _system_agent,
 )
-from .execution_dirs import JOBS, OUT
+from .execution_dirs import JOBS, OUT, SOURCE
 from .execution_repository import _START_TIME_KEYS, ExecutionRepository
 from .history import MOLAB_DIR, AgentRef
 from .source_snapshot import SourceCaptureError, copy_sources, source_manifest
@@ -828,6 +828,7 @@ class Run(Folder):
         products: Mapping[str, PathArg | Sequence[PathArg]] | None = None,
         jobs: Sequence[PathArg] = (),
         log: PathArg | None = None,
+        source: Sequence[PathArg] = (),
         mode: ExecutionMode = ExecutionMode.INITIAL,
         based_on_execution_id: str | None = None,
         executor: dict[str, JSONValue] | None = None,
@@ -848,6 +849,8 @@ class Run(Folder):
         - ``jobs`` — scheduler stdout/stderr and submit scripts, flat in
           ``jobs/``.
         - ``log`` — the attempt's own log, as ``run.log``.
+        - ``source`` — the script(s) the job ran, flat in ``source/``, so an
+          adopted attempt still points at its code.
 
         The record is written once, sealed, with the real start and finish
         times; with *digest* each moved path's content digest is in its
@@ -860,6 +863,7 @@ class Run(Folder):
             products: Task name -> what that task wrote.
             jobs: Scheduler evidence files.
             log: The attempt's log file.
+            source: Source files the job ran (moved into ``source/``).
             mode: How this attempt relates to earlier ones (``create``'s rules).
             based_on_execution_id: The predecessor, when *mode* needs one.
             executor: Executor facts, e.g. ``{"scheduler": "slurm", "job_ids": [...]}``.
@@ -888,6 +892,7 @@ class Run(Folder):
         moves.extend((item, f"{JOBS.name}/{Path(item).name}") for item in jobs)
         if log is not None:
             moves.append((log, "run.log"))
+        moves.extend((item, f"{SOURCE.name}/{Path(str(item)).name}") for item in source)
         state = self._execution_repository().adopt(
             status=ExecutionStatus(status),
             created_by=created_by or _system_agent(),

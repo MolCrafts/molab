@@ -717,7 +717,19 @@ class TestMigrateKnowledge:
         assert run_ref in note
         assert workspace.find(run_ref).id == run.id
         assert not (root / "cooling-rate.md").exists()
-        assert (root / "index.md").read_bytes() == index_before
+        # The root narrative is not a document: its record and body are kept.
+        # Its frontmatter gains only the index.knowledges section the new
+        # documents asked for.
+        from molab import frontmatter
+
+        meta_before, body_before = frontmatter.split(index_before.decode("utf-8"))
+        meta_after, body_after = frontmatter.split((root / "index.md").read_text(encoding="utf-8"))
+        assert body_after == body_before
+        index_after = dict(meta_after.pop("index"))
+        rows = index_after.pop("knowledges")
+        assert index_after == meta_before.pop("index")
+        assert meta_after == meta_before
+        assert "knowledges/cooling-rate.md" in [row["path"] for row in rows]
         assert ("index.md", "no knowledge class") in report.skipped
         literature = (root / "knowledges" / "k1.md").read_text(encoding="utf-8")
         assert "class: Literature" in literature

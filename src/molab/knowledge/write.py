@@ -47,7 +47,8 @@ def write_knowledge(
     no sources. A sourced class still rejects an empty source list. An existing
     document rewritten with ``text=""`` keeps its body and merges frontmatter.
     The first create inside a workspace records ``knowledge.created``; a history
-    failure never fails the write.
+    failure never fails the write. The host's ``index.knowledges`` section (in its
+    ``index.md``) is rebuilt after the write.
 
     Args:
         host: Where the document lands.
@@ -70,7 +71,8 @@ def write_knowledge(
     """
     from contextlib import suppress
 
-    from .location import _host_fs, _lookup_path, enclosing_workspace_root
+    from .index_section import refresh_section
+    from .location import _host_fs, _lookup_path, enclosing_workspace_root, host_of
 
     disk = fs if fs is not None else _host_fs(host)
     if getattr(of, "REQUIRES_SOURCES", False):
@@ -85,16 +87,20 @@ def write_knowledge(
         item.write(text, payload)
     root = enclosing_workspace_root(_lookup_path(host), fs=disk)
     _apply_cites(item, cite)
+    refresh_section(item.path, fs=disk, root=root, known_root=True)
     if created and root is not None:
         with suppress(Exception):
+            from molab.workspace.entity_record import INDEX_FILENAME
             from molab.workspace.history import EntityRef, GitHistory
 
             rel = Path(str(item.path)).relative_to(Path(str(root))).as_posix()
+            host_index = disk.join(str(host_of(item.path)), INDEX_FILENAME)
+            paths = (item.path, host_index) if disk.is_file(host_index) else (item.path,)
             GitHistory(str(root)).record(
                 "knowledge.created",
                 subject=EntityRef(id=rel, type=type(item).__name__),
                 summary=title or name,
-                paths=(item.path,),
+                paths=paths,
             )
     return item
 

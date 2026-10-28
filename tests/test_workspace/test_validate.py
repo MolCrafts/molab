@@ -14,7 +14,7 @@ from pathlib import Path
 import pytest
 
 from molab.workspace import Workspace
-from molab.workspace.validate import validate_workspace
+from molab.workspace.validate import HOST_LEVELS, classify_entry, validate_workspace
 from tests.support.records import read_record, write_record
 
 
@@ -85,15 +85,17 @@ class TestValidateWorkspace:
             f"projects/{proj._name}"
         ]
 
-    def test_a_drifted_index_block_is_an_error(self, tmp_path: Path) -> None:
+    def test_a_drifted_index_block_is_a_warning(self, tmp_path: Path) -> None:
+        # D89: molab never reads the block, so drift misleads and breaks nothing.
         ws = _workspace(tmp_path)
         proj = ws.get_project("alpha")
         write_record(proj.resolve(), read_record(proj.resolve()), index={"children": []})
 
         report = ws.validate()
-        drift = [v for v in report.errors if v.rule == "index.drift"]
+        drift = [v for v in report.warnings if v.rule == "index.drift"]
         assert [v.path for v in drift] == [f"projects/{proj._name}"]
         assert "molab index sync" in drift[0].hint
+        assert not [v for v in report.errors if v.rule == "index.drift"]
 
     def test_a_section_outside_the_reserved_keys_is_not_drift(self, tmp_path: Path) -> None:
         ws = _workspace(tmp_path)
@@ -119,26 +121,171 @@ class TestValidateWorkspace:
             "project.entity",
             "experiment.entity",
             "run.entity",
+            "run.slug",
+            "execution.name",
+            "execution.id_mismatch",
             "index.frontmatter",
             "index.drift",
             "layout.legacy_record",
+            "layout.stray",
+            "scratch.stale",
         ):
             assert rule in _RULE_HINTS
+            assert "`molab " in _RULE_HINTS[rule], rule
         assert "concept.marker" not in _RULE_HINTS
 
-    def test_unknown_host_directory_is_not_judged(self, tmp_path: Path) -> None:
+    def test_a_stray_at_every_level_is_an_error(self, tmp_path: Path) -> None:
         ws = _workspace(tmp_path)
         root = Path(ws.resolve())
         (root / "leftover-run-output").mkdir()
+        (root / "notes.txt").write_text("x")
         (root / "projects" / "alpha" / "plan").mkdir()
-        run = next(root.glob("projects/alpha/experiments/sweep/runs/*"))
-        (run / "knowledges").mkdir()
+        (root / "projects" / "stray.json").write_text("{}")
+        exp = root / "projects" / "alpha" / "experiments" / "sweep"
+        (exp / "analysis.py").write_text("print(1)")
+        (exp / "runs" / "README").write_text("x")
+        run = next(exp.glob("runs/*/"))
         (run / "ops").mkdir()
+        (run / "executions").mkdir()
+        (run / "executions" / "list.txt").write_text("x")
 
         report = ws.validate()
+        stray = sorted(v.path for v in report.errors if v.rule == "layout.stray")
 
+        run_rel = run.relative_to(root).as_posix()
+        assert stray == sorted(
+            [
+                "leftover-run-output",
+                "notes.txt",
+                "projects/alpha/plan",
+                "projects/stray.json",
+                "projects/alpha/experiments/sweep/analysis.py",
+                "projects/alpha/experiments/sweep/runs/README",
+                f"{run_rel}/ops",
+                f"{run_rel}/executions/list.txt",
+            ]
+        )
+        assert not report.ok
+
+    def test_declared_names_are_legal(self, tmp_path: Path) -> None:
+        ws = _workspace(tmp_path)
+        root = Path(ws.resolve())
+        for name in ("AGENTS.md", "CLAUDE.md", ".gitignore"):
+            (root / name).write_text("x")
+        (root / ".claude").mkdir()
+        (root / ".git").mkdir()
+        exp = root / "projects" / "alpha" / "experiments" / "sweep"
+        (exp / "workflow.py").write_text("x")
+        (exp / "scratch" / "probe").mkdir(parents=True)
+        (exp / "__pycache__").mkdir()
+        from molab.workspace.index_projection import sync_index
+
+        sync_index(ws)
+
+        report = ws.validate()
         assert report.ok, report.violations
-        assert not any(v.rule == "layout.stray" for v in report.violations)
+        assert report.warnings == ()
+
+    def test_a_container_named_by_extra_is_legal_only_through_extra(self, tmp_path: Path) -> None:
+        ws = _workspace(tmp_path)
+        run = next(Path(ws.resolve()).glob("projects/alpha/experiments/sweep/runs/*"))
+        (run / "knowledges").mkdir()
+        (Path(ws.resolve()) / "knowledges").mkdir()
+
+        bare = validate_workspace(ws)
+        assert {v.path.rsplit("/", 1)[-1] for v in bare.errors if v.rule == "layout.stray"} == {
+            "knowledges"
+        }
+        extra = {level: frozenset({"knowledges"}) for level in HOST_LEVELS}
+        assert validate_workspace(ws, extra=extra).ok
+
+    def test_a_run_dir_not_named_after_its_params_is_a_warning(self, tmp_path: Path) -> None:
+        ws = _workspace(tmp_path)
+        runs = Path(ws.resolve()) / "projects" / "alpha" / "experiments" / "sweep" / "runs"
+        assert [v for v in ws.validate().violations if v.rule == "run.slug"] == []
+        (runs / "t=1").rename(runs / "t=1-2")
+        from molab.workspace.index_projection import sync_index
+
+        sync_index(ws)
+        assert [v for v in ws.validate().violations if v.rule == "run.slug"] == []
+
+        (runs / "t=1-2").rename(runs / "renamed")
+        sync_index(ws)
+        report = ws.validate()
+        slug = [v for v in report.violations if v.rule == "run.slug"]
+        assert [(v.path.rsplit("/", 1)[-1], v.severity) for v in slug] == [("renamed", "warning")]
+        assert "molab index sync" in slug[0].hint
+
+    def test_an_attempt_dir_not_named_after_its_id_is_an_error(self, tmp_path: Path) -> None:
+        ws = _workspace(tmp_path)
+        run = ws.get_project("alpha").get_experiment("sweep").list_runs()[0]
+        with run.start():
+            pass
+        execs = Path(run.resolve()) / "executions"
+        assert [v for v in ws.validate().violations if v.rule == "execution.id_mismatch"] == []
+
+        (execs / "e01").rename(execs / "e07")
+        report = ws.validate()
+        mismatch = [v for v in report.errors if v.rule == "execution.id_mismatch"]
+        assert [v.path.rsplit("/", 1)[-1] for v in mismatch] == ["e07"]
+        assert "'e01'" in mismatch[0].detail
+
+    def test_an_old_scratch_entry_is_a_warning(self, tmp_path: Path) -> None:
+        import os
+        import time
+
+        ws = _workspace(tmp_path)
+        scratch = Path(ws.resolve()) / "projects" / "alpha" / "experiments" / "sweep" / "scratch"
+        (scratch / "fresh").mkdir(parents=True)
+        old = scratch / "old.py"
+        old.write_text("x")
+        month_ago = time.time() - 30 * 86400
+        os.utime(old, (month_ago, month_ago))
+
+        report = ws.validate()
+        stale = [v for v in report.violations if v.rule == "scratch.stale"]
+        assert [(v.path.rsplit("/", 1)[-1], v.severity) for v in stale] == [("old.py", "warning")]
+        assert "molab scratch clean" in stale[0].hint
+        assert report.ok
+
+    def test_a_scratch_flag_alone_out_of_date_is_a_warning(self, tmp_path: Path) -> None:
+        ws = _workspace(tmp_path)
+        exp = Path(ws.resolve()) / "projects" / "alpha" / "experiments" / "sweep"
+        (exp / "scratch").mkdir()
+
+        drift = [v for v in ws.validate().violations if v.rule == "index.drift"]
+        assert [(v.severity, v.detail) for v in drift] == [
+            ("warning", "derived index keys differ: scratch")
+        ]
+
+    def test_classify_entry_is_pure_and_per_level(self) -> None:
+        assert classify_entry("workspace", "projects", True) is None
+        assert classify_entry("workspace", "projects", False) == "layout.stray"
+        assert classify_entry("workspace", "index.md", False) is None
+        assert classify_entry("project", "notes.md", False) == "layout.stray"
+        assert classify_entry("experiment", "scratch", True) is None
+        assert classify_entry("experiment", "workflow.py", False) is None
+        assert classify_entry("run", "executions", True) is None
+        assert classify_entry("runs", "anything", True) is None
+        assert classify_entry("runs", "README", False) == "layout.stray"
+        assert classify_entry("executions", "e03", True) is None
+        assert (
+            classify_entry("executions", "0190f0e2-7c1a-7d4e-9b2a-3c4d5e6f7a8b", True)
+            == "execution.legacy_name"
+        )
+        assert classify_entry("executions", "attempt-1", True) == "execution.name"
+        assert classify_entry("execution", "out", True) is None
+        assert classify_entry("execution", "execution.json", False) is None
+        assert classify_entry("execution", "notes.txt", False) == "layout.stray"
+        assert classify_entry("project", "knowledges", True) == "layout.stray"
+        assert (
+            classify_entry(
+                "project", "knowledges", True, extra={"project": frozenset({"knowledges"})}
+            )
+            is None
+        )
+        with pytest.raises(ValueError, match="unknown level"):
+            classify_entry("nowhere", "x", True)
 
     def test_execution_dir_registered_after_import_is_not_a_stray(self, tmp_path: Path) -> None:
         from molab.workspace.execution_dirs import ExecutionDir, register_execution_dir

@@ -40,6 +40,7 @@ from .errors import FolderMoveCollisionError
 from .fs import FileSystem, PathArg
 from .fs_local import LocalFileSystem
 from .models import FolderMetadata
+from .naming import SCRATCH_CONTAINER
 from .utils import slugify
 
 if TYPE_CHECKING:
@@ -471,8 +472,8 @@ class Folder:
         """Ask the owner to write ``index.<key>`` in this Folder's ``index.md``.
 
         The key is opaque to workspace: another layer names its own section
-        (spec index-md-02 wires its production caller). A refresh
-        of the reserved keys keeps the section verbatim.
+        and keeps it current. A refresh of the reserved keys keeps the
+        section verbatim. :meth:`index_section` reads it back.
 
         Raises:
             ValueError: *key* is not ``^[a-z][a-z0-9_]*$`` or is a reserved key
@@ -490,6 +491,28 @@ class Folder:
             return EntityRecord(canonical=current.canonical, index=index, body=current.body)
 
         update_record(self._disk(), self.path, change, lock_root=self._lock_root())
+
+    def index_section(self, key: str) -> list[dict[str, JSONValue]] | None:
+        """The rows of ``index.<key>`` a layer asked for, or ``None`` when absent.
+
+        The reader beside :meth:`set_index_section`: the same opaque key, the
+        rows as written. A record with no such section (or no record at all)
+        returns ``None``, which a caller may treat as "never written".
+
+        Raises:
+            ValueError: *key* is not ``^[a-z][a-z0-9_]*$`` or is a reserved key.
+        """
+        if not _SECTION_KEY.fullmatch(key):
+            raise ValueError(f"index section key {key!r} must match ^[a-z][a-z0-9_]*$")
+        if key in RESERVED_INDEX_KEYS:
+            raise ValueError(f"index section key {key!r} is reserved")
+        record = read_record(self._disk(), self.resolve())
+        if record is None:
+            return None
+        rows = record.index.get(key)
+        if not isinstance(rows, list):
+            return None
+        return [dict(row) for row in rows if isinstance(row, dict)]
 
     # ── OKF narrative ─────────────────────────────────────────────────────
 
@@ -529,7 +552,8 @@ class Folder:
             return []
         result: list[Folder] = []
         for entry_name in sorted(self._disk().listdir(self_path)):
-            if entry_name in _FORBIDDEN_FILE_NAMES:
+            # ``scratch/`` is a disposable tier, never a child (D90).
+            if entry_name in _FORBIDDEN_FILE_NAMES or entry_name == SCRATCH_CONTAINER:
                 continue
             entry_path = self._disk().join(self_path, entry_name)
             if not self._disk().is_dir(entry_path):
@@ -753,7 +777,9 @@ class Folder:
             return []
         out: list[F] = []
         for entry_name in sorted(self._disk().listdir(container)):
-            if entry_name in _FORBIDDEN_FILE_NAMES:
+            # A generic Folder's container is its own directory, where an
+            # experiment keeps ``scratch/``; it is never a child (D90).
+            if entry_name in _FORBIDDEN_FILE_NAMES or entry_name == SCRATCH_CONTAINER:
                 continue
             cached = self._children_cache.get(entry_name)
             if isinstance(cached, cls):

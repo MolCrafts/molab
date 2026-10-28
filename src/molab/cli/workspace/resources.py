@@ -262,6 +262,197 @@ def run_create(
         raise typer.Exit(1)  # noqa: B904
 
 
+def _parse_params(params: str) -> dict:
+    """A ``--params`` value: a JSON file path, or a JSON object string."""
+    params_path = Path(params)
+    raw = params_path.read_text(encoding="utf-8") if params_path.exists() else params
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError:
+        rprint(f"[red]Error:[/red] Invalid JSON in parameters: {params}")
+        raise typer.Exit(1) from None
+    if not isinstance(parsed, dict):
+        rprint("[red]Error:[/red] --params must be a JSON object")
+        raise typer.Exit(1)
+    return parsed
+
+
+def _agent_ref(spec: str | None):
+    """``--created-by``: ``TYPE:ID`` (person, software, workflow, executor) or a bare person id."""
+    from molab.workspace.history import AgentRef
+
+    if spec is None:
+        return None
+    kind, sep, ident = spec.partition(":")
+    if sep and kind in {"person", "software", "workflow", "executor", "system"} and ident:
+        return AgentRef(id=ident, type=kind, name=ident)
+    return AgentRef(id=spec, type="person", name=spec)
+
+
+def _moved_times(paths: list[Path]) -> tuple[float, float] | None:
+    """Earliest and latest mtime among *paths* (and every file under a directory)."""
+    stamps: list[float] = []
+    for path in paths:
+        if path.is_dir():
+            stamps.extend(child.stat().st_mtime for child in path.rglob("*") if child.is_file())
+        if path.exists():
+            stamps.append(path.stat().st_mtime)
+    if not stamps:
+        return None
+    return min(stamps), max(stamps)
+
+
+def _iso(value: str, flag: str):
+    from datetime import datetime
+
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        rprint(f"[red]Error:[/red] {flag} is not an ISO time: {value!r}")
+        raise typer.Exit(2) from None
+    return parsed if parsed.tzinfo is not None else parsed.astimezone()
+
+
+@run_app.command("adopt")
+def run_adopt(
+    project_id: Annotated[str, typer.Argument(help="Project")],
+    experiment_id: Annotated[str, typer.Argument(help="Experiment")],
+    run_id: Annotated[str, typer.Argument(help="Run (directory name or id)")],
+    status: Annotated[
+        str, typer.Option("--status", help="How the job ended: succeeded, failed, cancelled.")
+    ] = "succeeded",
+    started: Annotated[
+        str | None, typer.Option("--started", help="ISO start time; default: earliest mtime.")
+    ] = None,
+    finished: Annotated[
+        str | None, typer.Option("--finished", help="ISO end time; default: latest mtime.")
+    ] = None,
+    product: Annotated[
+        list[str] | None,
+        typer.Option("--product", help="TASK=PATH: what a task wrote (lands in out/TASK/)."),
+    ] = None,
+    job: Annotated[
+        list[Path] | None, typer.Option("--job", help="Scheduler script / stdout / stderr.")
+    ] = None,
+    log: Annotated[Path | None, typer.Option("--log", help="The job's own log (run.log).")] = None,
+    job_id: Annotated[
+        list[str] | None, typer.Option("--job-id", help="Scheduler job id (repeatable).")
+    ] = None,
+    source: Annotated[
+        list[Path] | None, typer.Option("--source", help="A script the job ran (lands in source/).")
+    ] = None,
+    created_by: Annotated[
+        str | None,
+        typer.Option(
+            "--created-by", help="Who adopts it: TYPE:ID (e.g. software:claude) or a name."
+        ),
+    ] = None,
+    params: Annotated[
+        str | None,
+        typer.Option(
+            "--params", help="JSON or file: create the run first when RUN does not exist."
+        ),
+    ] = None,
+    json_out: Annotated[bool, typer.Option("--json", help="Print the result as JSON.")] = False,
+    target_spec: TargetOption = ".",
+) -> None:
+    """Record a finished job that ran outside molab as a sealed attempt, moving its files in.
+
+    The files are moved (renamed, same filesystem) into the run's next
+    ``executions/eNN/``: products into ``out/<task>/``, scheduler files into
+    ``jobs/``, the log as ``run.log``, scripts into ``source/``.
+    """
+    from molab.workspace import ExperimentNotFoundError, ProjectNotFoundError
+    from molab.workspace.domain import ExecutionStatus
+
+    try:
+        state = ExecutionStatus(status)
+    except ValueError:
+        rprint(f"[red]Error:[/red] unknown status {status!r}")
+        raise typer.Exit(2) from None
+    products: dict[str, list[str]] = {}
+    for spec in product or []:
+        task, sep, path = spec.partition("=")
+        if not sep or not task or not path:
+            rprint(f"[red]Error:[/red] --product takes TASK=PATH, got {spec!r}")
+            raise typer.Exit(2)
+        products.setdefault(task, []).append(path)
+    moved = [Path(path) for paths in products.values() for path in paths]
+    moved += [*(job or []), *([log] if log else []), *(source or [])]
+    for path in moved:
+        if not path.exists():
+            rprint(f"[red]Error:[/red] {path} does not exist")
+            raise typer.Exit(1)
+    times = _moved_times(moved)
+    if (started is None or finished is None) and times is None:
+        rprint("[red]Error:[/red] nothing to take times from; pass --started and --finished")
+        raise typer.Exit(2)
+    from datetime import UTC, datetime
+
+    started_at = (
+        _iso(started, "--started") if started else datetime.fromtimestamp(times[0], UTC)  # ty: ignore[not-subscriptable]
+    )
+    finished_at = (
+        _iso(finished, "--finished") if finished else datetime.fromtimestamp(times[1], UTC)  # ty: ignore[not-subscriptable]
+    )
+
+    ws = _open_ws(target_spec)
+    try:
+        experiment = ws.get_project(project_id).get_experiment(experiment_id)
+    except (ProjectNotFoundError, ExperimentNotFoundError) as exc:
+        rprint(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(1) from None
+    created = False
+    if experiment.has_run(run_id):
+        run = experiment.get_run(run_id)
+    elif params is not None:
+        run = experiment.add_run(params=_parse_params(params))
+        created = True
+    else:
+        rprint(
+            f"[red]Error:[/red] run {run_id!r} not found in {experiment_id!r}; "
+            "pass --params to create it"
+        )
+        raise typer.Exit(1)
+    try:
+        execution = run.adopt_execution(
+            status=state,
+            started_at=started_at,
+            finished_at=finished_at,
+            # One path per task keeps adopt's rule: a directory becomes out/TASK/.
+            products={
+                task: paths[0] if len(paths) == 1 else list(paths)
+                for task, paths in products.items()
+            },
+            jobs=[str(p) for p in job or []],
+            log=str(log) if log else None,
+            source=[str(p) for p in source or []],
+            executor={"job_ids": list(job_id)} if job_id else None,
+            created_by=_agent_ref(created_by),
+        )
+    except (ValueError, FileExistsError, FileNotFoundError, NotImplementedError) as exc:
+        rprint(f"[red]Error:[/red] {exc}")
+        raise typer.Exit(1) from None
+    root = Path(str(ws.resolve()))
+    run_rel = Path(str(run.resolve())).relative_to(root).as_posix()
+    payload = {
+        "run": run_rel,
+        "run_id": run.id,
+        "run_created": created,
+        "execution_id": execution.id,
+        "path": f"{run_rel}/executions/{execution.id}",
+        "status": execution.status.value,
+        "started_at": execution.started_at.isoformat() if execution.started_at else None,
+        "finished_at": execution.finished_at.isoformat() if execution.finished_at else None,
+    }
+    if json_out:
+        print(json.dumps(payload, ensure_ascii=False))
+        return
+    rprint(f"[green]OK[/green] adopted {payload['path']} ({payload['status']})")
+    if created:
+        rprint(f"  created run {run_rel}")
+
+
 @run_app.command("list")
 def run_list(
     project_id: Annotated[str, typer.Argument(help="Project ID")],

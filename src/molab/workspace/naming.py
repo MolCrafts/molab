@@ -33,6 +33,30 @@ EXPERIMENT_CONTAINER = "experiments"
 RUN_CONTAINER = "runs"
 """The container subdir holding a level's children is the child kind pluralized."""
 
+EXECUTION_CONTAINER = "executions"
+"""The subdir of a Run holding its attempts (``e01``, ``e02``, …)."""
+
+SCRATCH_CONTAINER = "scratch"
+"""An experiment's disposable tier for quick tests (D90).
+
+It sits beside ``runs/`` and holds nothing that is cited: a long job or a
+result becomes a run (``molab runs adopt`` records one that ran outside
+molab). It is gitignored, never listed as a child, and ``molab scratch
+clean`` empties it by age.
+"""
+
+ASSET_CONTAINER = "assets"
+"""The subdir holding a host's imported assets (``asset.json`` + ``versions/``)."""
+
+WORKFLOW_SCRIPT_FILENAME = "workflow.py"
+"""An experiment's own workflow script, beside the runs it produced."""
+
+AGENT_GUIDE_FILENAME = "AGENTS.md"
+"""The workspace-root guide for coding agents; molab owns one marked block of it."""
+
+CLAUDE_GUIDE_FILENAME = "CLAUDE.md"
+"""Claude Code's root memory file; molab only ensures it imports ``AGENTS.md``."""
+
 _UNSAFE = re.compile(r"[^A-Za-z0-9._=+-]+")
 _COLLAPSE = re.compile(r"_{2,}")
 
@@ -115,10 +139,16 @@ def _short(fallback: str) -> str:
 
 
 __all__ = [
+    "AGENT_GUIDE_FILENAME",
+    "ASSET_CONTAINER",
+    "CLAUDE_GUIDE_FILENAME",
+    "EXECUTION_CONTAINER",
     "EXPERIMENT_CONTAINER",
     "MAX_RUN_SLUG",
     "PROJECT_CONTAINER",
     "RUN_CONTAINER",
+    "SCRATCH_CONTAINER",
+    "WORKFLOW_SCRIPT_FILENAME",
     "disambiguate",
     "entity_slug",
     "execution_slug",

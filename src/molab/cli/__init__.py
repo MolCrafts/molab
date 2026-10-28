@@ -5,7 +5,8 @@ Top-level verbs (``run`` / ``serve`` / ``monitor`` / ``explore`` / ``context`` /
 ``init`` / ``validate``, plus the hidden molq worker entry ``execute``) and
 noun groups (``project`` / ``experiment`` /
 ``runs`` / ``asset`` / ``target`` / ``session`` / ``config`` / ``auth`` /
-``git`` / ``knowledge``) register directly on the app. Each
+``git`` / ``knowledge`` / ``index`` / ``scratch`` / ``agents`` / ``check``)
+register directly on the app. Each
 workspace-bound command resolves its execution target via
 :mod:`molab.cli._target`. There is no ``workspace`` god-group.
 """
@@ -62,6 +63,15 @@ app.add_typer(migrate_app, name="migrate")
 from molab.cli.index_cmd import index_app  # noqa: E402
 
 app.add_typer(index_app, name="index")
+
+# ── agent paths: scratch, the agent guide, the hook checks (D90 / D91) ───────
+from molab.cli.agents_cmd import agents_app  # noqa: E402
+from molab.cli.check_cmd import check_app  # noqa: E402
+from molab.cli.scratch_cmd import scratch_app  # noqa: E402
+
+app.add_typer(scratch_app, name="scratch")
+app.add_typer(agents_app, name="agents")
+app.add_typer(check_app, name="check")
 
 # ── session + config groups ──────────────────────────────────────────────────
 

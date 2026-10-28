@@ -81,6 +81,16 @@ def validate(
         "--json",
         help="Print the full ValidationReport as JSON (MCP/agent wire shape).",
     ),
+    new_only: bool = typer.Option(
+        False,
+        "--new-only",
+        help="Report only errors the workspace baseline (.molab/validate-baseline.json) lacks.",
+    ),
+    update_baseline: bool = typer.Option(
+        False,
+        "--update-baseline",
+        help="Record the current errors as the workspace baseline.",
+    ),
 ) -> None:
     """Check the workspace against the layout + OKF laws.
 
@@ -90,6 +100,11 @@ def validate(
 
     ``--json`` emits the same report dict MCP ``validate_workspace`` returns —
     ``violations[]`` with stable ``rule`` + ``hint``, plus ``next_actions``.
+
+    The report is ``services.workspace_check.check_workspace``: the layout law
+    plus the knowledge documents. ``--update-baseline`` records today's errors
+    as the workspace baseline; ``--new-only`` then reports only errors it
+    lacks (a missing baseline reports everything).
     """
     import json
 
@@ -102,7 +117,25 @@ def validate(
         rprint(f"[red]Failed to open workspace:[/red] {exc}")
         raise typer.Exit(1) from exc
 
-    report = ws.validate()
+    from molab.services.workspace_check import (
+        baseline_path,
+        check_workspace,
+        new_errors,
+        read_error_keys,
+        write_baseline,
+    )
+    from molab.workspace.validate import ValidationReport
+
+    report = check_workspace(ws)
+    if update_baseline:
+        written = write_baseline(ws, report=report)
+        if not json_out:
+            rprint(f"[green]OK[/green] baseline: {report.error_count} error(s) -> {written}")
+    if new_only:
+        known = read_error_keys(baseline_path(ws))
+        if known is not None:
+            fresh = new_errors(report, known)
+            report = ValidationReport(root=report.root, violations=(*fresh, *report.warnings))
 
     if json_out:
         # Machine report for agents / molmcp — no rich markup.

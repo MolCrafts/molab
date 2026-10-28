@@ -47,7 +47,7 @@ from .execution_dirs import ARTIFACTS, execution_dir_names
 from .fs import FileSystem, PathArg
 from .fs_local import LocalFileSystem
 from .history import SYSTEM_AGENT, AgentRef, EntityRef, GitHistory, Relation
-from .naming import entity_slug
+from .naming import ASSET_CONTAINER, entity_slug
 from .refs import MolabRef, parse_ref
 from .schema_version import versioned_payload
 
@@ -483,7 +483,7 @@ class AssetRepository:
 
     @property
     def assets_dir(self) -> str:
-        return self.fs.join(self.scope_dir, "assets")
+        return self.fs.join(self.scope_dir, ASSET_CONTAINER)
 
     def promote(
         self,

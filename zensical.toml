@@ -43,7 +43,8 @@ nav = [
         ]},
         { "Operations" = [
             { "Server Lifecycle" = "guide/server-lifecycle.md" },
-            { "Molq Plugin" = "guide/molq.md" }
+            { "Molq Plugin" = "guide/molq.md" },
+            { "Coding Agents" = "guide/agents.md" }
         ]}
     ]},
     { "Architecture" = [

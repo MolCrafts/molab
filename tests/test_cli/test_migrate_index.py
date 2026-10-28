@@ -99,7 +99,10 @@ class TestMigrateIndex:
         assert [e.id for e in experiment.list_runs()[0].executions] == ["e01"]
         mount, _ = frontmatter.split((root / "projects/alpha/researcher/index.md").read_text())
         assert mount["type"] == "agent.session"
-        assert validate_workspace(root).ok, validate_workspace(root).violations
+        # The legacy agent mount survives the migration untouched; the layout
+        # law calls it a stray (D90), and nothing else is wrong.
+        errors = [(v.rule, v.path) for v in validate_workspace(root).errors]
+        assert errors == [("layout.stray", "projects/alpha/researcher")]
         assert report.synced == 5
 
     def test_it_is_idempotent(self, tmp_path: Path) -> None:
@@ -177,6 +180,7 @@ class TestIndexSync:
         result = CliRunner().invoke(app, ["index", "sync", "-ws", str(root)])
 
         assert result.exit_code == 0, result.output
-        assert validate_workspace(root).ok
+        errors = [(v.rule, v.path) for v in validate_workspace(root).errors]
+        assert errors == [("layout.stray", "projects/alpha/researcher")]
         meta, _ = frontmatter.split(project_index.read_text())
         assert cast("dict[str, object]", meta["index"])["notes"] == [{"path": "knowledges/a.md"}]

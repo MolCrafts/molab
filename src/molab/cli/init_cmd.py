@@ -12,7 +12,8 @@ Behavior:
   (e.g. ``projects/``) intact and only refreshes the root ``index.md`` record.
 - A ``Workspace`` handle writes nothing on its own, so init materializes it
   (the root ``index.md`` record, id minted once) and, on a local disk, starts the git
-  history with its ignore rules.
+  history with its ignore rules and, last, runs ``molab agents sync`` (the
+  ``AGENTS.md`` guide block, the ``CLAUDE.md`` import, the validation baseline).
 """
 
 from __future__ import annotations
@@ -38,6 +39,7 @@ def init(
 ) -> None:
     """Initialize (or refresh) a workspace at PATH (defaults to current dir)."""
     from molab.cli._target import open_workspace
+    from molab.services.agent_guide import sync_agent_files
     from molab.workspace.fs_local import LocalFileSystem
     from molab.workspace.history import GitHistory
 
@@ -48,6 +50,8 @@ def init(
         ws.materialize()
         if isinstance(ws.fs, LocalFileSystem):
             GitHistory(ws.root).init()
+            # Last: the agent guide, ignore rules and validation baseline.
+            sync_agent_files(ws)
     except Exception as exc:
         rprint(f"[red]Failed to initialize workspace:[/red] {exc}")
         raise typer.Exit(1) from exc

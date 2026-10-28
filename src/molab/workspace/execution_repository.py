@@ -86,6 +86,7 @@ from .fs import FileSystem, PathArg
 from .fs_local import LocalFileSystem
 from .history import SYSTEM_AGENT, AgentRef, EntityRef, GitHistory, Relation
 from .naming import execution_slug
+from .run_heartbeat import ALIVE_NAME
 from .schema_version import read_versioned_json, write_versioned_json
 
 # Attempts are ``e01``, ``e02``, … with no gaps (the next id is max(seq) + 1).
@@ -246,6 +247,16 @@ _EVIDENCE_FILES = {
     "stderr": "stderr.log",
     "traceback": "traceback.txt",
 }
+
+#: The record file of one attempt, ``executions/eNN/execution.json``.
+EXECUTION_RECORD_FILENAME = "execution.json"
+
+#: Every file molab writes directly inside an attempt directory: the record,
+#: the owner heartbeat and the evidence files. Beside the declared attempt
+#: directories (``execution_dirs``) these are the only names an attempt holds.
+ATTEMPT_FILES: frozenset[str] = frozenset(
+    {EXECUTION_RECORD_FILENAME, ALIVE_NAME, *_EVIDENCE_FILES.values()}
+)
 
 
 def _creation_mode(mode: ExecutionMode) -> ExecutionMode:
@@ -1503,4 +1514,10 @@ def fold_legacy_attempt(
     return execution
 
 
-__all__ = ["ExecutionRepository", "fold_legacy_attempt", "legacy_attempt_created_at"]
+__all__ = [
+    "ATTEMPT_FILES",
+    "EXECUTION_RECORD_FILENAME",
+    "ExecutionRepository",
+    "fold_legacy_attempt",
+    "legacy_attempt_created_at",
+]
