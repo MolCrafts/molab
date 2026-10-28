@@ -27,6 +27,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "AGENT_COMMANDS",
+    "AGENT_CONTEXT",
     "AGENT_PYTHON",
     "BEGIN_MARKER",
     "CLAUDE_IMPORT_LINE",
@@ -75,6 +76,14 @@ AGENT_COMMANDS: Final[tuple[tuple[str, str], ...]] = (
 AGENT_PYTHON: Final[tuple[tuple[str, str], ...]] = (
     # D92: copied into the current execution's stdout.log / stderr.log.
     ("Print into the run's record", "from molab import print"),
+)
+
+#: ``(what you want to do, the call that does it)`` on the ``ctx`` molab hands
+#: the code — ``run.start()``'s or a workflow task's — rendered after
+#: :data:`AGENT_PYTHON`. Every call resolves on both contexts (pinned by a test).
+AGENT_CONTEXT: Final[tuple[tuple[str, str], ...]] = (
+    # D93: written live into executions/eNN/artifacts/metrics.mlp.jsonl.
+    ("Record training data", "ctx.metrics.scalar(...)"),
 )
 
 
@@ -151,7 +160,8 @@ def _knowledge_classes() -> str:
 
 def _commands() -> str:
     lines = ["| to | run |", "|---|---|"]
-    lines.extend(f"| {task} | `{command}` |" for task, command in AGENT_COMMANDS + AGENT_PYTHON)
+    rows = AGENT_COMMANDS + AGENT_PYTHON + AGENT_CONTEXT
+    lines.extend(f"| {task} | `{command}` |" for task, command in rows)
     return "\n".join(lines)
 
 

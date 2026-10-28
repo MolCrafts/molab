@@ -57,6 +57,8 @@ from .state import WorkflowDeps, WorkflowState
 _UNRESOLVED_CONFIG: Any = object()
 
 if TYPE_CHECKING:
+    from molab.workspace.metrics_seam import MetricRecord
+
     from .._graph_decl import TaskRegistration
     from ..compiled import CompiledWorkflow
     from ..protocols import JSONMapping
@@ -209,6 +211,7 @@ async def run_task_body(
     element: TaskInput = NO_OUTPUT,
     delivered: TaskInput = NO_OUTPUT,
     effective_config: JSONMapping | None = _UNRESOLVED_CONFIG,
+    keep_metrics: bool = False,
 ) -> TaskOutput:
     """Invoke one task's body against a freshly-built context.
 
@@ -228,6 +231,12 @@ async def run_task_body(
     ``dependent_params`` overlay), passed by the cached path so the user's
     ``dependent_params`` function runs once per execution; left unset it is
     resolved here. A ``wf.parallel`` element always uses ``deps.config``.
+
+    The body and the promotion of its deferred markers run in the task's
+    scope (``tracking.task_scope``), so every metric record and artifact
+    they produce names this task. The execution keeps the task's metric
+    records for the node cache; *keep_metrics* leaves them for the cached
+    path to take (:func:`take_task_metrics`), otherwise they are dropped here.
     """
     registration = deps.registration_by_name.get(name)
     if registration is None:
@@ -287,10 +296,9 @@ async def run_task_body(
         workdir=_workdir_for(deps, name),
     )
 
-    # Tag artifacts produced by this body with ``producer.task_id == name``
-    # so the cache hook (and asset queries) can find them by producer task.
-    # One slot per execution, so same-level parallel tasks race on it; see
-    # .claude/notes/open-questions.md (remedy: read ``tracking.current_task()``).
+    # The execution's fallback producer slot. Artifacts are stamped from the
+    # task scope below, which is per body; the slot only covers an emit
+    # outside any task scope.
     set_active_task = getattr(deps.run_context, "set_active_task", None)
     if callable(set_active_task):
         set_active_task(name)
@@ -298,16 +306,47 @@ async def run_task_body(
     # Parameter binding treats an absent config as an empty one; the body-call
     # helpers below take a non-optional mapping. Each node runs as its own
     # asyncio task (or ``to_thread`` call, which copies the context), so the
-    # task scope is per body even when same-level tasks run in parallel.
-    with tracking.task_scope(name):
-        raw = await _invoke_body_with_ctx(registration, task_ctx, inputs, effective_config or {})
-    from .node_cache import _upstream_asset_ids
-
+    # task scope is per body even when same-level tasks run in parallel. It
+    # covers ``_promote_outputs`` too, so deferred markers name this task.
     try:
-        consumed = _upstream_asset_ids(deps, registration)
+        with tracking.task_scope(name):
+            raw = await _invoke_body_with_ctx(
+                registration, task_ctx, inputs, effective_config or {}
+            )
+            from .node_cache import _upstream_asset_ids
+
+            try:
+                consumed = _upstream_asset_ids(deps, registration)
+            except Exception:
+                consumed = ()
+            return _promote_outputs(raw, deps.run_context, task_ctx, consumed=consumed)
+    finally:
+        if not keep_metrics:
+            take_task_metrics(deps.run_context, name)
+
+
+def take_task_metrics(run_context: object, name: str) -> list[MetricRecord] | None:
+    """Pop the metric records task *name* wrote in *run_context*'s execution.
+
+    Returns:
+        The records, or ``None`` when there is no execution, it keeps no
+        records, or the task went past the capture cap.
+    """
+    if run_context is None:
+        return None
+    try:
+        metrics = getattr(run_context, "metrics", None)
     except Exception:
-        consumed = ()
-    return _promote_outputs(raw, deps.run_context, task_ctx, consumed=consumed)
+        return None
+    take = getattr(metrics, "take_task_records", None)
+    if not callable(take):
+        return None
+    try:
+        records = take(name)
+    except Exception:
+        # Called from ``finally``; must never mask the body's own exception.
+        return None
+    return records if isinstance(records, list) else None
 
 
 def _promote_outputs(

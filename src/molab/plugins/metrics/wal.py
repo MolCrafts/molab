@@ -1,9 +1,9 @@
 """Run-local host metrics: JSONL WAL under an attempt's ``artifacts/`` (``.mlp.jsonl``).
 
-On-disk layout under a run / execution root (see
+On-disk layout under an execution root (see
 :mod:`molab.plugins.metrics.mlp_names`)::
 
-    artifacts/<stem>.mlp.jsonl   # append-only WAL — the persist surface
+    executions/eNN/artifacts/<stem>.mlp.jsonl   # append-only WAL — the persist surface
 
 Default writer stem is ``metrics`` → ``artifacts/metrics.mlp.jsonl``.
 Leftover ``*.mlp.zarr/`` and ``*.mlp.index.json`` are ignored.
@@ -30,7 +30,7 @@ import math
 import threading
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import cast
 
@@ -353,6 +353,11 @@ class MetricsWriter:
 
     The versioned tier on purpose: the metrics WAL is small and is the
     record of what the run measured, so it belongs in the history.
+
+    A record's ``w`` defaults to the current time in UTC
+    (``datetime.now(UTC).isoformat()``, with a ``+00:00`` offset). A
+    ``wall_time`` passed in is written as given, and readers keep accepting
+    naive timestamps written before D93.
     """
 
     def __init__(
@@ -462,7 +467,7 @@ class MetricsWriter:
         self, record: MetricRecord, *, tags: dict[str, JSONValue] | None = None
     ) -> MetricRecord:
         payload: MetricRecord = {key: value for key, value in record.items() if value is not None}
-        payload.setdefault("w", datetime.now().isoformat())
+        payload.setdefault("w", datetime.now(UTC).isoformat())
         if tags is not None:
             payload["tags"] = tags
 
@@ -488,7 +493,7 @@ class MetricsWriter:
                 payload: MetricRecord = {
                     key: value for key, value in record.items() if value is not None
                 }
-                payload.setdefault("w", datetime.now().isoformat())
+                payload.setdefault("w", datetime.now(UTC).isoformat())
                 if tags is not None:
                     payload["tags"] = tags
                 payload = validate_record(payload)
@@ -506,7 +511,7 @@ def _format_wall_time(wall_time: str | datetime | None) -> str:
         return wall_time.isoformat()
     if isinstance(wall_time, str):
         return wall_time
-    return datetime.now().isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 __all__ = [

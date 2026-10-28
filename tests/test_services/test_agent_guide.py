@@ -11,6 +11,7 @@ import typer
 
 from molab.services.agent_guide import (
     AGENT_COMMANDS,
+    AGENT_CONTEXT,
     AGENT_PYTHON,
     BEGIN_MARKER,
     END_MARKER,
@@ -67,6 +68,23 @@ class TestRender:
             assert module == "from molab"
             for name in names.split(","):
                 assert hasattr(molab, name.strip()), line
+            assert f"| {task} | `{line}` |" in block
+
+    def test_every_context_call_resolves_on_both_contexts(self, ws: Workspace) -> None:
+        from molab.workflow import TaskContext
+        from molab.workspace.execution_context import ExecutionContext
+        from molab.workspace.tracking import BufferedMetrics, TrackedMetrics
+
+        assert isinstance(ExecutionContext.metrics, property)
+        assert isinstance(TaskContext.metrics, property)
+        block = render_agent_guide(ws)
+        for task, line in AGENT_CONTEXT:
+            head, _, args = line.partition("(")
+            assert args == "...)", line
+            root, attribute, method = head.split(".")
+            assert (root, attribute) == ("ctx", "metrics"), line
+            assert callable(getattr(TrackedMetrics, method)), line
+            assert callable(getattr(BufferedMetrics, method)), line
             assert f"| {task} | `{line}` |" in block
 
     def test_the_block_is_derived_from_the_layout_constants(self, ws: Workspace) -> None:

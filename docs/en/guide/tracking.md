@@ -1,6 +1,6 @@
 # Tracking a Computation
 
-A computation leaves more behind than its return value. What it prints is part of the record, and molab keeps it with the attempt that produced it. Each execution manages its own stdio: while an attempt runs, it is the *current execution* of the code inside it, and what that code prints through `molab.print` is appended to the attempt's `stdout.log` and `stderr.log`.
+A computation leaves more behind than its return value. What it prints and what it measures are part of the record, and molab keeps both with the attempt that produced them. Each execution manages its own stdio: while an attempt runs, it is the *current execution* of the code inside it, and what that code prints through `molab.print` is appended to the attempt's `stdout.log` and `stderr.log`.
 
 ## The current execution
 
@@ -54,6 +54,52 @@ with run.start() as ctx:
     ctx.log("stdout").append("epoch 1")
     ctx.log("stdout").tail(20)  # the last 20 lines
 ```
+
+## Metrics
+
+`ctx.metrics` writes measurements as the computation runs, the way TensorBoard does. Each call appends one record to the attempt's `executions/eNN/artifacts/metrics.mlp.jsonl` at once, so a chart of a running attempt is current. There is one writer per attempt, and a driver script and a workflow task reach the same one.
+
+```python
+with run.start() as ctx:
+    for step in range(100):
+        loss = train_one_step()
+        ctx.metrics.scalar("loss", loss, step)
+    ctx.metrics.histogram("forces", bins=[0.0, 0.5, 1.0], counts=[12, 3], step=99)
+    ctx.metrics.text("note", "lr halved at step 50", step=50)
+    ctx.metrics.json("config", {"lr": 1e-3, "batch": 32})
+    ctx.metrics.image("rdf", Path("rdf.png"), step=99, caption="g(r)")
+```
+
+| method | record `t` | value `v` |
+|---|---|---|
+| `scalar(key, value, step=None)` | `scalar` | a finite number |
+| `histogram(key, bins, counts, step=None)` | `histogram` | `{"bins": [...], "counts": [...]}` |
+| `text(key, text, step=None)` | `text` | a string |
+| `json(key, value, step=None)` | `json` | any JSON value |
+| `image_ref(key, path, step=None, caption=None)` | `image_ref` | `{"path": ..., "caption": ...}` |
+| `image(key, data, step=None, caption=None, name=None)` | `image_ref` | as above, for an archived copy |
+
+Every method also takes `wall_time=` and `tags=`, and returns the record it wrote. `wall_time` defaults to now, in UTC. `image` archives the image first: `data` is a path to an existing file, or the image's bytes together with `name=`. It becomes an Artifact of the attempt with `semantic_type="molplot.image"`, and the `image_ref` record points at that Artifact's path (`artifacts/<name>`), so the image is kept with the attempt rather than referenced where it happened to be. Each image is its own Artifact, so give each one its own name. `image_ref` alone records a path and archives nothing. When the attempt exits, the WAL itself is registered as an Artifact (`semantic_type="molplot.metrics"`) if anything was written to it. `ctx.register_metric(key, value, step=None)` is still there and appends a scalar.
+
+### From a workflow task
+
+A task body reaches the same writer as `ctx.metrics`:
+
+```python
+@wf.task
+def train(ctx, epochs: int = 10):
+    for epoch in range(epochs):
+        ctx.metrics.scalar("loss", fit_one_epoch(), epoch)
+    return {"epochs": epochs}
+```
+
+Each record written inside a task carries `tags.task`, the task's name, so same-level tasks running in parallel each label their own records. A `task` key you pass in `tags` wins. `ctx.register_metric` keeps its deferred semantics in a task: the scalar is appended when the body returns, and it carries `tags.task` too.
+
+Without molab (no execution is current), `ctx.metrics` keeps the records in memory instead, as `ctx.metrics.records`, and `image` records only the reference. The same body runs either way.
+
+### Node-cache replay
+
+When an attempt runs a task, the node cache stores the metric records the task wrote alongside its result. When a later attempt hits that entry, the task does not run again, but its records are appended to the new attempt's WAL as they were (same `s` and `w`), each with `tags.replayed_from` naming the attempt that produced them. Curves of a cached attempt are therefore complete, and a chart can still tell which points were measured in this attempt. A task that writes more than 50 000 records is not replayed, and neither is an entry written before this was added.
 
 ## Commands
 

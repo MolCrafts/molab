@@ -5,12 +5,13 @@ are not molrec ``meta`` / ``status``, and nothing here writes those sections.
 Scientific packages follow the external molrec spec; molab does not re-host it.
 
 What this module produces is the run-local **metrics surface**: JSONL WAL
-(``out/metrics.mlp.jsonl``) via :class:`~molab.plugins.metrics.MetricsWriter`.
+(``executions/eNN/artifacts/metrics.mlp.jsonl``) via
+:class:`~molab.plugins.metrics.MetricsWriter`.
 Foreign dialects (CSV, LAMMPS, TensorBoard, event JSONL) are equal sources.
 
 **Additive.** Source artifacts are never deleted, rewritten, moved, or
 truncated — metrics are written beside them, so an unwanted ingest is undone
-by removing ``out/metrics.mlp.jsonl``.
+by removing ``artifacts/metrics.mlp.jsonl``.
 
 **Never fails the caller.** A converter that cannot run (missing optional
 dependency, unreadable file, unmapped CSV) is recorded as a skip with its
@@ -93,7 +94,8 @@ def ingest_run(
 ) -> IngestResult:
     """Turn a run's foreign logs into its host metrics buffer.
 
-    Writes ``out/metrics.mlp.jsonl`` — no ``meta`` / ``status`` sections,
+    Writes ``artifacts/metrics.mlp.jsonl`` under *run_dir* (an attempt's
+    ``executions/eNN/``) — no ``meta`` / ``status`` sections,
     because a Run is a host, not a record. Persisting is optional: a chart
     reads the sources directly (see :mod:`.sources`), so ingest is for when
     records should outlive the log they came from.

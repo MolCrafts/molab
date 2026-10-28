@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import platform
@@ -39,9 +40,19 @@ from .execution_dirs import (
 from .execution_repository import _START_TIME_KEYS, STDIO_FILES, ExecutionRepository
 from .file_store import FileStore
 from .history import AgentRef
-from .metrics_seam import MetricRecord, MetricsSink, create_metrics_writer
+from .metrics_seam import MetricRecord, create_metrics_writer
 from .run_heartbeat import HEARTBEAT_INTERVAL_SECONDS, touch_alive, unlink_alive
-from .tracking import StdioFiles, Stream, Tracker, bind, unbind
+from .tracking import (
+    StdioFiles,
+    Stream,
+    TrackedMetrics,
+    Tracker,
+    bind,
+    current_task,
+    enter_task,
+    exit_task,
+    unbind,
+)
 
 if TYPE_CHECKING:
     from contextvars import Token
@@ -372,9 +383,10 @@ class ExecutionContext:
         self._emit_lock = threading.Lock()
         self._heartbeat_stop: threading.Event | None = None
         self._heartbeat_thread: threading.Thread | None = None
-        self._metrics: MetricsSink | None = None
+        self._metrics: TrackedMetrics | None = None
         self._stdio: StdioFiles | None = None
         self._tracking_token: Token[Tracker | None] | None = None
+        self._task_token: Token[str | None] | None = None
         workspace = run.experiment.project.workspace
         self._artifacts = ArtifactRepository(workspace.root, fs=workspace.fs)
         self._executions = ExecutionRepository(
@@ -484,15 +496,25 @@ class ExecutionContext:
         return _CheckpointWriter(self)
 
     @property
-    def metrics(self) -> MetricsSink:
+    def metrics(self) -> TrackedMetrics:
+        """This attempt's metrics, written live to ``artifacts/metrics.mlp.jsonl`` (D93).
+
+        ``scalar`` / ``histogram`` / ``text`` / ``image_ref`` / ``json``, plus
+        ``image`` (archived as an Artifact, then referenced). A record
+        written inside a workflow task carries ``tags.task``. Built on first
+        use; the WAL file appears with the first record.
+        """
         if self._metrics is None:
             # Into the versioned tier: a metrics WAL is small and is the
             # record of what the run measured. Appended through a store
             # rooted at the attempt so the tier is part of the path.
             store = FileStore(self.execution_dir, fs=self.run._disk())
-            self._metrics = create_metrics_writer(
+            sink = create_metrics_writer(
                 self.execution_dir,
                 lambda name, line: store.append(Path(ARTIFACTS.name) / name, line),
+            )
+            self._metrics = TrackedMetrics(
+                sink, emit_artifact=self.emit_artifact, execution_dir=self.execution_dir
             )
         return self._metrics
 
@@ -511,6 +533,13 @@ class ExecutionContext:
         return self.get_dir(OUT.name, task_name)
 
     def set_active_task(self, task_id: str | None) -> None:
+        """The producer task stamped on an artifact emitted outside a task scope.
+
+        A private seam: the engine stamps through
+        :func:`molab.workspace.tracking.task_scope`, which is per task even
+        when same-level tasks run in parallel, and :meth:`_emit` reads that
+        first. This slot is the fallback when no task scope is active.
+        """
         self._active_task_id = task_id
 
     def __enter__(self) -> ExecutionContext:
@@ -540,8 +569,10 @@ class ExecutionContext:
         )
         self._entered = True
         self._start_heartbeat()
-        # Last, so a failure above never leaves a dead context current.
+        # Last, so a failure above never leaves a dead context current. No
+        # task is current in a fresh execution, even one started in a task.
         self._tracking_token = bind(self)
+        self._task_token = enter_task(None)
         return self
 
     def __exit__(
@@ -565,7 +596,8 @@ class ExecutionContext:
         if self._metrics is not None:
             self._metrics.flush()
             metrics_path = self.get_dir(ARTIFACTS.name) / "metrics.mlp.jsonl"
-            if metrics_path.is_file():
+            # Any record type written in this process registers the WAL.
+            if self._metrics.touched and metrics_path.is_file():
                 self.emit_artifact(
                     metrics_path,
                     media_type="application/x-ndjson",
@@ -656,8 +688,11 @@ class ExecutionContext:
         combined_metadata: dict[str, JSONValue] = dict(metadata or {})
         if tags:
             combined_metadata["tags"] = cast("JSONValue", dict(tags))
-        if self._active_task_id:
-            combined_metadata["task_id"] = self._active_task_id
+        # The task scope is per task body, so it is right under parallelism;
+        # the slot is only the fallback outside one.
+        task_id = current_task() or self._active_task_id
+        if task_id:
+            combined_metadata["task_id"] = task_id
         if inputs:
             self._executions.add_observed_inputs(self.id, inputs)
         with self._emit_lock:
@@ -829,6 +864,11 @@ class ExecutionContext:
         Never raises, so ``__exit__`` always reaches the seal. Resetting the
         token restores whichever execution was current before this one.
         """
+        task_token, self._task_token = self._task_token, None
+        if task_token is not None:
+            # As below: exited in another context, the scope dies with it.
+            with contextlib.suppress(ValueError):
+                exit_task(task_token)
         token, self._tracking_token = self._tracking_token, None
         if token is not None:
             try:

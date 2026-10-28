@@ -2,7 +2,8 @@
 
 Owns the molplot filename contract (:mod:`.mlp_names`) and the JSONL WAL
 writer / reader (:mod:`.wal`). A molab Run is a **host**, not a MolRec
-record; the only metrics persist surface is ``out/<stem>.mlp.jsonl``,
+record; the only metrics persist surface is
+``executions/eNN/artifacts/<stem>.mlp.jsonl``,
 and leftover ``*.mlp.zarr/`` / ``*.mlp.index.json`` are ignored.
 
 Importing this package registers the writer factory on

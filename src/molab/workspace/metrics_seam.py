@@ -11,7 +11,7 @@ performs that import, so any ``import molab`` process is wired.
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from datetime import datetime
 from pathlib import Path
 from typing import Protocol
@@ -26,7 +26,13 @@ MetricsAppend = Callable[[str | Path, str], object]
 
 
 class MetricsSink(Protocol):
-    """What workspace needs from a run metrics writer."""
+    """What workspace needs from a run metrics writer (D93).
+
+    The five WAL record types — ``scalar`` / ``histogram`` / ``text`` /
+    ``image_ref`` / ``json`` — with the plugin writer's exact signatures, plus
+    ``log_many`` (the node-cache replay appends recorded events as they are)
+    and ``flush``. Each record method returns the record it appended.
+    """
 
     def scalar(
         self,
@@ -37,6 +43,52 @@ class MetricsSink(Protocol):
         wall_time: str | datetime | None = None,
         tags: dict[str, JSONValue] | None = None,
     ) -> MetricRecord: ...
+
+    def histogram(
+        self,
+        key: str,
+        bins: list[int | float],
+        counts: list[int | float],
+        step: int | float | None = None,
+        *,
+        wall_time: str | datetime | None = None,
+        tags: dict[str, JSONValue] | None = None,
+    ) -> MetricRecord: ...
+
+    def text(
+        self,
+        key: str,
+        text: str,
+        step: int | float | None = None,
+        *,
+        wall_time: str | datetime | None = None,
+        tags: dict[str, JSONValue] | None = None,
+    ) -> MetricRecord: ...
+
+    def image_ref(
+        self,
+        key: str,
+        path: str | Path,
+        step: int | float | None = None,
+        *,
+        caption: str | None = None,
+        wall_time: str | datetime | None = None,
+        tags: dict[str, JSONValue] | None = None,
+    ) -> MetricRecord: ...
+
+    def json(
+        self,
+        key: str,
+        value: JSONValue,
+        step: int | float | None = None,
+        *,
+        wall_time: str | datetime | None = None,
+        tags: dict[str, JSONValue] | None = None,
+    ) -> MetricRecord: ...
+
+    def log_many(
+        self, records: Iterable[MetricRecord], *, tags: dict[str, JSONValue] | None = None
+    ) -> int: ...
 
     def flush(self) -> None: ...
 

@@ -5,7 +5,7 @@ A molab **Run is a host**, not a MolRec record. Nothing here writes molrec
 molrec spec; molab does not ship a molrec module.
 
 What these tools produce is the run-local metrics surface: a JSONL **WAL**
-at ``out/metrics.mlp.jsonl``. That is what ``GET …/runs/{id}/metrics``
+at ``executions/eNN/artifacts/metrics.mlp.jsonl``. That is what ``GET …/runs/{id}/metrics``
 and the UI read. Leftover zarr / index files are ignored.
 
 Public surface::

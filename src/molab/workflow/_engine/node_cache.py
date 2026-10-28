@@ -2,9 +2,9 @@
 
 Wraps :func:`molab.workflow._engine.node.run_task_body` with the
 cache get/put dance: collect + JSON-safe the inputs, look up by
-``(snapshot, inputs)``, re-register cached artifacts on a hit, and store the
-result + produced-artifact manifest on a miss. Kept apart from the dispatch
-core in :mod:`.node`.
+``(snapshot, inputs)``, re-register cached artifacts and replay the task's
+metric records on a hit, and store the result + produced-artifact manifest +
+metric records on a miss. Kept apart from the dispatch core in :mod:`.node`.
 
 The cache ``inputs`` payload covers every runtime input of a task: upstream
 outputs, engine-injected root inputs (run params), a trigger-delivered value
@@ -23,9 +23,11 @@ from typing import cast
 
 from mollog import get_logger
 
+from molab.workspace import tracking
+
 from ..protocols import JSONMapping, JSONValue, TaskInput, TaskOutput
 from ..types import UnknownTaskError
-from .node import NO_OUTPUT, _collect_upstream_outputs, run_task_body
+from .node import NO_OUTPUT, _collect_upstream_outputs, run_task_body, take_task_metrics
 from .node_params import _resolve_dependent_params
 from .state import WorkflowDeps, WorkflowState
 
@@ -291,6 +293,27 @@ def _restore_cached_files(
             logger.debug(f"cache: restore of {name!r} skipped")
 
 
+def _replay_cached_metrics(deps: WorkflowDeps, name: str, payload: Mapping[str, object]) -> None:
+    """Append a cache entry's metric records to the current attempt (D93).
+
+    Each record keeps its ``w`` / ``s`` / tags and gains
+    ``tags.replayed_from`` (the attempt that produced the entry). An entry
+    without ``metrics`` (written before D93, or by a task past the capture
+    cap) replays nothing. A failure is logged and never fails the hit.
+    """
+    records = payload.get("metrics")
+    producer = payload.get("producer_execution")
+    if not isinstance(records, list) or not records or not isinstance(producer, str):
+        return
+    try:
+        metrics = getattr(deps.run_context, "metrics", None)
+        replay = getattr(metrics, "replay", None)
+        if callable(replay):
+            replay(records, replayed_from=producer)
+    except Exception:
+        logger.warning(f"cache: metric replay for task {name!r} skipped", exc_info=True)
+
+
 async def run_task_body_cached(
     name: str,
     deps: WorkflowDeps,
@@ -311,12 +334,14 @@ async def run_task_body_cached(
       canonicalized out) — as the cache ``inputs`` payload. The profile name
       and the execution location are not part of the key;
     * ``cache.get`` → on HIT, re-register the cached artifact manifest into
-      the current run and return the recorded ``result`` WITHOUT running the
-      body (the per-task body counter must not increment);
+      the current run, replay the cached metric records (tagged
+      ``replayed_from``), and return the recorded ``result`` WITHOUT running
+      the body (the per-task body counter must not increment);
     * on MISS, run the body, assemble the produced-artifact manifest, and
-      ``cache.put({"result": raw, "artifacts": manifest})``. Non-JSON-safe
-      inputs / results degrade gracefully — the body still runs and the put
-      is skipped.
+      ``cache.put({"result": raw, "files": manifest})``, plus ``"metrics"``
+      and ``"producer_execution"`` when the task wrote metric records under
+      the capture cap. Non-JSON-safe inputs / results degrade gracefully —
+      the body still runs and the put is skipped.
 
     The returned raw value is routed by the caller through the SAME
     ``_classify_return`` path as a plain return, so branch / End semantics
@@ -347,31 +372,46 @@ async def run_task_body_cached(
         except Exception:
             payload = None
         if payload is not None:
-            files = payload.get("files", payload.get("artifacts", []))
-            if isinstance(files, list):
-                set_active = getattr(deps.run_context, "set_active_task", None)
-                if callable(set_active):
-                    set_active(name)
-                try:
-                    consumed = _upstream_asset_ids(deps, registration)
-                except Exception:
-                    consumed = ()
-                _restore_cached_files(
-                    deps,
-                    [a for a in files if isinstance(a, dict)],
-                    consumed=consumed,
-                )
+            # The hit's restored artifacts name this task, like a body's.
+            with tracking.task_scope(name):
+                files = payload.get("files", payload.get("artifacts", []))
+                if isinstance(files, list):
+                    set_active = getattr(deps.run_context, "set_active_task", None)
+                    if callable(set_active):
+                        set_active(name)
+                    try:
+                        consumed = _upstream_asset_ids(deps, registration)
+                    except Exception:
+                        consumed = ()
+                    _restore_cached_files(
+                        deps,
+                        [a for a in files if isinstance(a, dict)],
+                        consumed=consumed,
+                    )
+                _replay_cached_metrics(deps, name, payload)
             return payload.get("result")
 
-    raw = await run_task_body(
-        name, deps, state, delivered=delivered, effective_config=effective_config
-    )
+    try:
+        raw = await run_task_body(
+            name,
+            deps,
+            state,
+            delivered=delivered,
+            effective_config=effective_config,
+            keep_metrics=True,
+        )
+    finally:
+        # Always popped, so a failed body leaves nothing behind.
+        records = take_task_metrics(deps.run_context, name)
 
     if cacheable and _is_json_safe(raw):
         produced = _task_artifacts(deps, name)
         _put_file_blobs(deps, produced)
         manifest = _project_artifacts(produced)
         result_payload = cast("dict[str, JSONValue]", {"result": raw, "files": manifest})
+        if records and deps.execution_id is not None:
+            result_payload["metrics"] = cast("JSONValue", records)
+            result_payload["producer_execution"] = deps.execution_id
         try:
             cache.put(snapshot, cache_inputs, result_payload)
         except Exception as exc:

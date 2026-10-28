@@ -30,6 +30,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from molab.workspace import tracking
+from molab.workspace.tracking import BufferedMetrics, TrackedMetrics
+
 from .outputs import RegisterArtifact, RegisterMetric
 from .protocols import JSONMapping
 
@@ -41,8 +44,9 @@ class TaskContext[StateT, InputT]:
     typed parameters by name (``async def task(ctx, sigma: float = 1.0)``; the
     engine fills ``sigma`` from {upstream task outputs keyed by task name} |
     {run sweep params} | {build config}, falling back to the declared default).
-    ``ctx`` exposes ``workdir`` plus the deferred ``register_artifact`` /
-    ``register_metric`` verbs (there is no ``ctx.inputs`` / ``ctx.config``).
+    ``ctx`` exposes ``workdir``, the live ``metrics``, plus the deferred
+    ``register_artifact`` / ``register_metric`` verbs (there is no
+    ``ctx.inputs`` / ``ctx.config``).
 
     Attributes:
         workdir: Content-addressed scratch directory for THIS task — a bare
@@ -59,7 +63,8 @@ class TaskContext[StateT, InputT]:
     _config: JSONMapping
     _workdir: Path | None
     _pending: list[RegisterArtifact | RegisterMetric]
-    __slots__ = ("_config", "_inputs", "_pending", "_workdir")
+    _buffered: BufferedMetrics | None
+    __slots__ = ("_buffered", "_config", "_inputs", "_pending", "_workdir")
 
     def __init__(
         self,
@@ -71,6 +76,7 @@ class TaskContext[StateT, InputT]:
         object.__setattr__(self, "_config", config if config is not None else {})
         object.__setattr__(self, "_workdir", workdir)
         object.__setattr__(self, "_pending", [])
+        object.__setattr__(self, "_buffered", None)
 
     @property
     def workdir(self) -> Path | None:
@@ -82,6 +88,28 @@ class TaskContext[StateT, InputT]:
         survive as private slots only so engine-internal adapters can read them.
         """
         return self._workdir
+
+    @property
+    def metrics(self) -> TrackedMetrics | BufferedMetrics:
+        """Write metrics live, TensorBoard-style (D93).
+
+        ``scalar`` / ``histogram`` / ``text`` / ``image_ref`` / ``json`` /
+        ``image``. Under an execution this is the execution's own writer
+        (``molab.workspace.tracking.current().metrics``): each record lands in
+        ``executions/eNN/artifacts/metrics.mlp.jsonl`` when it is written,
+        tagged ``tags.task`` with this task's name, and a node-cache hit
+        replays the task's records into the new attempt. Without molab it is
+        a :class:`~molab.workspace.tracking.BufferedMetrics` that keeps the
+        records in memory (``.records``), so the same body runs anywhere.
+        """
+        tracker = tracking.current()
+        if tracker is not None:
+            return tracker.metrics
+        buffered = self._buffered
+        if buffered is None:
+            buffered = BufferedMetrics()
+            object.__setattr__(self, "_buffered", buffered)
+        return buffered
 
     def register_artifact(
         self,

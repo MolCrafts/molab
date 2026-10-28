@@ -18,6 +18,7 @@ The guide tells an agent to start at `./index.md`. Each `index.md` frontmatter i
 | write a knowledge document | `molab knowledge write NAME TEXT --on HOST --class CLASS --created-by AGENT` |
 | rebuild the derived index blocks | `molab index sync` |
 | print into the run's record | `from molab import print` ([Tracking a Computation](tracking.md)) |
+| record training data | `ctx.metrics.scalar(...)` ([Tracking a Computation](tracking.md#metrics)) |
 
 `scratch/` is for quick tests only. Nothing in it is cited and it stays out of git. It is never listed as a child, and `molab validate` warns about entries older than 14 days. A long job, or anything a result depends on, becomes a run. When that job has already finished outside molab, `molab runs adopt` moves its files into the run's next attempt (`executions/eNN/`: products under `out/<task>/`, scheduler files under `jobs/`, the log as `run.log`, scripts under `source/`) and seals the record with the real start and end times. `--params` creates the run first when it does not exist yet. `molab scratch clean --older-than 7d` empties old scratch entries, and `--dry-run` lists them without deleting anything.
 
