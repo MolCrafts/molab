@@ -130,7 +130,6 @@ Attaching a workflow to a tracked `Workspace` experiment (`ws.add_project(...).a
 | [molcfg](https://github.com/MolCrafts/molcfg)   | Layered configuration library |
 | [mollog](https://github.com/MolCrafts/mollog)   | Structured logging, stdlib-compatible |
 | [molhub](https://github.com/MolCrafts/molhub)   | Molecular dataset hub |
-| [molmcp](https://github.com/MolCrafts/molmcp)   | MCP server for the ecosystem |
 | [molrec](https://github.com/MolCrafts/molrec)   | Atomistic record specification |
 
 ## Contributing

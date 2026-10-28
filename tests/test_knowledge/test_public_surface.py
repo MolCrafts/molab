@@ -3,7 +3,7 @@
 A public name is defined **in** ``molab.knowledge``: no name is handed over from
 ``molab.workspace``. Retired product names and ``ConceptNotFoundError`` are that layer's own internal
 parts, not ``__all__``. The names a caller is allowed to import are pinned below
-(see :class:`TestPublicAll` and :class:`TestTheNamesMolmcpImports`).
+(see :class:`TestPublicAll` and :class:`TestPublicImports`).
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from molab.knowledge.sources import (
 from molab.workspace import Workspace
 
 #: ``module path`` → the attribute a caller imports from it.
-MOLMCP_IMPORTS: tuple[tuple[str, str], ...] = (
+PUBLIC_IMPORTS: tuple[tuple[str, str], ...] = (
     ("molab.knowledge.sources", "KnowledgeSourceStore"),
     ("molab.knowledge.sources", "SourceNotFoundError"),
     ("molab.knowledge", "Knowledge"),
@@ -109,10 +109,10 @@ def _workspace_hits(root: Path, query: str):
     )
 
 
-class TestTheNamesMolmcpImports:
-    @pytest.mark.parametrize(("module", "name"), MOLMCP_IMPORTS)
-    def test_the_name_resolves_at_the_path_molmcp_spells(self, module: str, name: str) -> None:
-        # An alias counts: molmcp imports by path, so a rename must leave one.
+class TestPublicImports:
+    @pytest.mark.parametrize(("module", "name"), PUBLIC_IMPORTS)
+    def test_the_name_resolves_at_the_path_a_caller_spells(self, module: str, name: str) -> None:
+        # An alias counts: callers import by path, so a rename must leave one.
         assert hasattr(importlib.import_module(module), name)
 
     def test_not_found_is_a_lookup_error(self) -> None:
@@ -124,7 +124,7 @@ class TestTheNamesMolmcpImports:
 
 
 class TestTheRefFormat:
-    """``"<source>:<ref>"`` is how molmcp addresses a document across turns."""
+    """``"<source>:<ref>"`` addresses a document across turns."""
 
     def test_a_named_source_prefixes_its_name(self) -> None:
         # Pinned at ``SourcedHit.ref`` — the one place the format is defined.
@@ -143,8 +143,8 @@ class TestTheRefFormat:
         assert hit.ref == "lab:knowledges/tg-cooling.md"
 
     def test_the_active_workspace_is_the_unnamed_source(self, wiki: Path) -> None:
-        # A bare ref (no prefix) means "the workspace" — molmcp's read() relies
-        # on this to accept a workspace-relative path with no source.
+        # A bare ref (no prefix) means "the workspace": a read accepts a
+        # workspace-relative path with no source.
         [hit] = _workspace_hits(wiki, "cooling")
 
         assert [hit.ref] == ["knowledges/tg-cooling.md"]
@@ -157,9 +157,8 @@ class TestTheRefFormat:
         assert Note(wiki / rel).exists()
 
 
-class TestTheSearchHitFieldsMolmcpReads:
-    def test_every_field_the_search_tool_emits_is_present(self, wiki: Path) -> None:
-        # Mirrors the dict built at molmcp knowledge.py:131-138.
+class TestTheSearchHitFields:
+    def test_every_field_a_search_hit_carries_is_present(self, wiki: Path) -> None:
         [hit] = Knowledge(wiki).search("cooling").hits
 
         assert hit.entry.path == "knowledges/tg-cooling.md"
@@ -171,7 +170,7 @@ class TestTheSearchHitFieldsMolmcpReads:
 
 
 class TestTheInformationARefMustYield:
-    """What molmcp needs off a resolved document, however it comes to be spelled.
+    """What a caller needs off a resolved document, however it comes to be spelled.
 
     The accessors are named once, here. The refactor replaces these seven method
     calls with attribute reads on an eager value; when it does, this is the only

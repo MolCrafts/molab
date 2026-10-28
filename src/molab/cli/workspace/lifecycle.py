@@ -79,7 +79,7 @@ def validate(
     json_out: bool = typer.Option(
         False,
         "--json",
-        help="Print the full ValidationReport as JSON (MCP/agent wire shape).",
+        help="Print the full ValidationReport as JSON (agent wire shape).",
     ),
     new_only: bool = typer.Option(
         False,
@@ -98,8 +98,8 @@ def validate(
     drops straight into a pre-commit hook or CI step. ``--strict`` also fails
     on warnings (lazily-created state that is absent but legal).
 
-    ``--json`` emits the same report dict MCP ``validate_workspace`` returns —
-    ``violations[]`` with stable ``rule`` + ``hint``, plus ``next_actions``.
+    ``--json`` emits ``Workspace.validate().to_dict()`` — ``violations[]``
+    with stable ``rule`` + ``hint``, plus ``next_actions``.
 
     The report is ``services.workspace_check.check_workspace``: the layout law
     plus the knowledge documents. ``--update-baseline`` records today's errors
@@ -138,7 +138,7 @@ def validate(
             report = ValidationReport(root=report.root, violations=(*fresh, *report.warnings))
 
     if json_out:
-        # Machine report for agents / molmcp — no rich markup.
+        # Machine report — no rich markup.
         print(json.dumps(report.to_dict(), indent=2, ensure_ascii=False))
         if report.errors or (strict and report.warnings):
             raise typer.Exit(1)

@@ -385,5 +385,5 @@ class SourcedHit(BaseModel, frozen=True):
         return f"{self.source}:{self.hit.entry.path}" if self.source else self.hit.entry.path
 
 
-#: Reciprocal-rank-fusion constant. The same value molmcp uses for the same job.
+#: Reciprocal-rank-fusion constant.
 RRF_K = 60
