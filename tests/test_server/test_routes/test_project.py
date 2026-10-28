@@ -128,9 +128,7 @@ class TestDownloadProjectAsset:
 
 
 class TestLegacyProjectAsset:
-    def test_unmigrated_record_is_409_until_rewrite(
-        self, served, fresh_run, tmp_path: Path
-    ) -> None:
+    def test_unmigrated_record_is_409(self, served, fresh_run, tmp_path: Path) -> None:
         from tests.support.legacy_assets import LEGACY_ID, write_legacy_data_asset
 
         ws, exp, _run = fresh_run
@@ -155,15 +153,7 @@ class TestLegacyProjectAsset:
         assert listed.json()["error"]["code"] == "MIGRATION_REQUIRED"
         assert got.json()["error"]["code"] == "MIGRATION_REQUIRED"
         assert downloaded.json()["error"]["code"] == "MIGRATION_REQUIRED"
-
-        project.assets.rewrite_legacy()
-        with served(ws) as client:
-            listed = client.get(f"/api/projects/{project.id}/assets")
-            downloaded = client.get(f"/api/projects/{project.id}/assets/{LEGACY_ID}/download")
-        assert listed.status_code == 200, listed.text
-        assert any(item["id"] == LEGACY_ID for item in listed.json())
-        assert downloaded.status_code == 200, downloaded.text
-        assert downloaded.content == HELLO
+        assert "molab migrate" not in listed.json()["error"]["message"]
 
 
 def test_asset_download_reads_bounded_ranges(served, fresh_run, tmp_path, monkeypatch):

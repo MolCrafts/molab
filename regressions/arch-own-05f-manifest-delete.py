@@ -79,18 +79,10 @@ def main() -> None:
         try:
             ws.assets.list()
         except UnmigratedAssetError as exc:
-            assert "molab migrate assets" in str(exc)
+            assert exc.reason == "data-import record"
+            assert "molab migrate" not in str(exc)
         else:
             raise AssertionError("list() accepted a legacy record")
-
-        report = ws.assets.rewrite_legacy()
-        assert len(report.rewritten) == 1
-        assert report.rewritten[0].endswith(LEGACY_ID)
-        assert report.unresolved == ()
-        assert sorted(item.title for item in ws.assets.list()) == ["greeting", "legacy-data"]
-        assert ws.assets.versions(LEGACY_ID)[0].id == f"{LEGACY_ID}-v001"
-        assert Path(ws.assets.payload_path(LEGACY_ID)).read_bytes() == LEGACY
-        assert ws.assets.rewrite_legacy().rewritten == ()
 
         for module in _DELETED:
             assert importlib.util.find_spec(f"molab.workspace.assets.{module}") is None

@@ -2,8 +2,8 @@
 
 Kind-dispatched resolution: a document experiment runs from workflow.ir.json
 with the memo cleared, a package-root code locator loads under its own name
-without writing ``__pycache__``, and an unbound experiment names
-``molab migrate workflow-kind``.
+without writing ``__pycache__``, and an unbound experiment asks for
+``workflow=`` or a bind.
 
 Expected stdout (exactly this line, exit code 0):
 
@@ -46,15 +46,15 @@ def main() -> None:
         ws = Workspace(tmp / "ws", name="ws")
         exp = ws.add_project("p").add_experiment("calc")
         exp.bind_workflow("document", document=_IR)
-        before = (exp.experiment_dir / "experiment.json").read_bytes()
         run = exp.add_run(params={"seed": 1})
+        before = (exp.experiment_dir / "index.md").read_bytes()
         default_binding_registry.clear()
 
         assert can_recover_workflow(run) is True
         compiled = compiled_workflow_for_run(run)
         assert sorted(compiled.registration_by_name) == ["a", "b", "c"]
         assert execute_run(compiled, run).outputs["c"] == 5.0
-        assert (exp.experiment_dir / "experiment.json").read_bytes() == before
+        assert (exp.experiment_dir / "index.md").read_bytes() == before
 
         run2 = exp.add_run(params={"seed": 2})
         run2.execute()
@@ -83,7 +83,8 @@ def main() -> None:
             message = str(exc)
         else:
             raise AssertionError("compiled_workflow_for_run did not raise")
-        assert "molab migrate workflow-kind" in message, message
+        assert "pass workflow=" in message, message
+        assert "molab migrate" not in message, message
 
     print("arch-own-04c-resolve: ok")
 

@@ -56,7 +56,7 @@ dataset = ws.data_assets.import_asset("lig-library", "ligands.csv")
 project_dataset = ws.project("demo").data_assets.import_asset("lig-subset", "ligands.csv")
 ```
 
-The import stores the payload under `<scope>/assets/<asset_id>/` and writes `asset.json` plus `versions/vNNN.json`. `data_assets` is that same repository. Look up imported data by name (`ws.data_assets.get("lig-library")`). `promote` copies a run artifact into that repository. Until `molab migrate assets` has run once, a leftover legacy record raises `UnmigratedAssetError` and every asset read answers 409 `MIGRATION_REQUIRED`.
+The import stores the payload under `<scope>/assets/<asset_id>/` and writes `asset.json` plus `versions/vNNN.json`. `data_assets` is that same repository. Look up imported data by name (`ws.data_assets.get("lig-library")`). `promote` copies a run artifact into that repository. A leftover record that predates the unified asset schema raises `UnmigratedAssetError`, and every asset read answers 409 `MIGRATION_REQUIRED`. It is not rewritten.
 
 ## Concurrency and atomicity
 

@@ -11,8 +11,6 @@ Contents:
 - :mod:`molab.services.run_failure` — failure analysis for a finished run.
 - :mod:`molab.services.auth` — filesystem users + sessions for
   ``molab serve`` HTTP auth (CLI ``molab auth`` and the server share it).
-- :mod:`molab.services.workflow_kind` — legacy workflow-kind classification
-  (one rule for ``molab migrate workflow-kind`` and the server writers' 409 gate).
 - :mod:`molab.services.knowledge_context` — the document read-model and its producer.
 
 Layer rules: services may import ``workflow`` / ``workspace`` / ``knowledge``

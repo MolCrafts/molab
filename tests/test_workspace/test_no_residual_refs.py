@@ -127,4 +127,4 @@ def test_manifest_family_is_gone() -> None:
         for path in MOLAB.rglob("*.py")
         if "__pycache__" not in path.parts and quoted in path.read_text(encoding="utf-8")
     )
-    assert hits == ["cli/migrate_cmd.py", "workspace/artifact_repository.py"]
+    assert hits == []

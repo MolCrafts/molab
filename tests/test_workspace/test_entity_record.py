@@ -140,7 +140,8 @@ class TestUnmigratedLayout:
             read_record(_FS, tmp_path)
 
         assert caught.value.legacy == (legacy,)
-        assert "molab migrate index" in str(caught.value)
+        assert "index.md" in str(caught.value)
+        assert "molab migrate" not in str(caught.value)
 
     def test_the_error_is_the_workspace_error(self) -> None:
         assert UnmigratedLayoutError is ExportedError

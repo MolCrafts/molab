@@ -32,9 +32,7 @@ from molab.workspace.history import AgentRef
 from molab.workspace.schema_version import MOLAB_SCHEMA_VERSION
 from tests.test_workspace.asset_writer_cases import (
     ImportAssetCases,
-    MigrateLegacyCases,
     RegisterInPlaceCases,
-    RewriteLegacyCases,
     record_dir,
 )
 
@@ -750,18 +748,10 @@ class TestAssetRepositoryRegisterInPlace(RegisterInPlaceCases):
     """arch-own-05e register_in_place cases."""
 
 
-class TestAssetRepositoryRewriteLegacy(RewriteLegacyCases):
-    """arch-own-05e rewrite_legacy cases."""
-
-
-class TestMigrateLegacyAssets(MigrateLegacyCases):
-    """arch-own-05e migrate_legacy_assets cases."""
-
-
 class TestAssetRepositoryUnmigrated:
-    """A legacy record makes the whole scope unreadable until rewrite_legacy."""
+    """A legacy record makes the whole scope unreadable."""
 
-    def test_data_import_record_blocks_the_scope_until_rewrite(self, tmp_path: Path) -> None:
+    def test_data_import_record_blocks_the_scope(self, tmp_path: Path) -> None:
         from tests.support.legacy_assets import LEGACY_ID, write_legacy_data_asset
 
         ws = Workspace(tmp_path / "lab", name="lab")
@@ -782,29 +772,14 @@ class TestAssetRepositoryUnmigrated:
             ws.assets.list()
         assert listed.value.reason == "data-import record"
         assert listed.value.path.endswith(f"assets/{LEGACY_ID}/asset.json")
-        assert "molab migrate assets" in str(listed.value)
-        assert str(ws.root) in str(listed.value)
+        assert listed.value.workspace_root == str(ws.root)
+        assert "molab migrate" not in str(listed.value)
         with pytest.raises(UnmigratedAssetError):
             ws.assets.get(LEGACY_ID)
         with pytest.raises(UnmigratedAssetError):
             ws.assets.get(unified.id)
         with pytest.raises(UnmigratedAssetError):
             ws.assets._slug_of(LEGACY_ID)
-
-        ws.assets.rewrite_legacy()
-        assert len(ws.assets.list()) == 2
-        assert ws.assets.get(LEGACY_ID).title == "legacy-data"
-        version = ws.assets.versions(LEGACY_ID)[0]
-        assert version.id == f"{LEGACY_ID}-v001"
-        assert version.version == 1
-        assert isinstance(version.origin, ImportOrigin)
-        assert version.origin.kind == "import"
-        assert version.origin.action == "copy"
-        assert version.origin.location == f"assets/{LEGACY_ID}/payload"
-        assert version.origin.uri == "/data/legacy.bin"
-        assert version.content is None
-        assert Path(ws.assets.payload_path(LEGACY_ID)).read_bytes() == payload
-        assert record_dir(ws.assets, LEGACY_ID).as_posix().endswith(f"assets/{LEGACY_ID}")
 
     def test_find_slug_checks_every_record(self, tmp_path: Path) -> None:
         from tests.support.legacy_assets import LEGACY_ID, write_legacy_data_asset

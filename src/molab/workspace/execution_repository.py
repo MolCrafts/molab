@@ -46,20 +46,12 @@ never a start-time key: a cluster scheduler's job id only exists once the job
 has been submitted, which is normally after creation and before start.
 Lifecycle fields (status, seal,
 evidence, artifacts) change only through their own verbs.
-
-Legacy attempts. ``fold_legacy_attempt`` builds a current-schema record from
-an old layout's scattered *sidecars* (small JSON files an older layout kept
-beside ``execution.json``: ``environment.json``, ``exception.json``,
-``job.json``) for ``molab migrate layout``. It writes through the same
-``_write_execution`` as the repository, so this module is the only writer of
-``execution.json``.
 """
 
 from __future__ import annotations
 
 import builtins
 import hashlib
-import json
 import shutil
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import UTC, datetime
@@ -86,10 +78,10 @@ from .domain import (
     RunStatusSummary,
     SourceManifest,
 )
-from .execution_dirs import ARTIFACTS, OUT, execution_dir_names, prunable_dirs
+from .execution_dirs import ARTIFACTS, execution_dir_names, prunable_dirs
 from .fs import FileSystem, PathArg
 from .fs_local import LocalFileSystem
-from .history import SYSTEM_AGENT, AgentRef, EntityRef, GitHistory, Relation
+from .history import AgentRef, EntityRef, GitHistory, Relation
 from .naming import execution_slug
 from .run_heartbeat import ALIVE_NAME
 from .schema_version import read_versioned_json, write_versioned_json
@@ -203,8 +195,7 @@ _PROVENANCE_FIELDS: frozenset[str] = _CREATION_PROVENANCE_FIELDS | _START_PROVEN
 ``create`` writes the creation-time ones and ``start`` the start-time ones
 (``started_at``, the merged ``environment``, ``workflow_digest``). ``seal``
 also writes one: an attempt sealed straight from QUEUED never started, so
-``seal`` fills ``started_at`` with ``created_at``. (``fold_legacy_attempt``
-builds a whole record from scratch and is not an update.)
+``seal`` fills ``started_at`` with ``created_at``.
 """
 
 _IMMUTABLE_FIELDS: frozenset[str] = _IDENTITY_FIELDS | _POST_SEAL_FIELDS | _PROVENANCE_FIELDS
@@ -1424,169 +1415,6 @@ def _write_execution(fs: FileSystem, path: str | Path, state: Execution) -> None
     write_versioned_json(path, state.model_dump(mode="json"), fs=fs)
 
 
-# ── legacy attempts (``molab migrate layout``) ──────────────────────────────
-
-
-def _read_legacy(path: Path, fs: FileSystem | None = None) -> dict[str, object]:
-    """Read a legacy sidecar without its ``schema_version``.
-
-    Missing, unreadable, or not a JSON object reads as ``{}``.
-    """
-    disk = fs or LocalFileSystem()
-    if not disk.is_file(path):
-        return {}
-    try:
-        with disk.open(str(path)) as handle:
-            data = json.load(handle)
-    except (OSError, ValueError):
-        return {}
-    if not isinstance(data, dict):
-        return {}
-    data.pop("schema_version", None)
-    return data
-
-
-def legacy_attempt_created_at(attempt_dir: Path) -> str:
-    """Return a legacy attempt's ``created_at`` string, for ordering attempts.
-
-    ``molab migrate layout`` sorts a run's legacy attempts by this value
-    before numbering them. Unlike ``fold_legacy_attempt`` it takes no ``fs``
-    and always reads the local disk.
-
-    Args:
-        attempt_dir: The legacy attempt directory holding ``execution.json``.
-
-    Returns:
-        The ``created_at`` value as written, or ``""`` when the file is
-        missing or the value is not a string.
-    """
-    value = _read_legacy(attempt_dir / "execution.json").get("created_at")
-    return value if isinstance(value, str) else ""
-
-
-def fold_legacy_attempt(
-    src: Path,
-    dst: Path,
-    *,
-    seq: int,
-    run_id: str,
-    project_id: str,
-    artifacts: Sequence[tuple[Mapping[str, object], str]] = (),
-    fs: FileSystem | None = None,
-) -> Execution:
-    """Fold an old layout's attempt sidecars into one current-schema record.
-
-    A *sidecar* is one of the small JSON files an older layout kept beside
-    an attempt's legacy state file (``execution.json``). Reads that state
-    file plus ``environment.json``, ``exception.json`` and ``job.json`` under
-    ``src`` (a missing or unreadable one reads as empty), builds the record
-    through ``Execution.model_validate`` and writes ``dst/execution.json``
-    through ``_write_execution``. The rules are the ones
-    ``molab migrate layout`` always applied:
-
-    - The id is ``execution_slug(seq)``. ``mode`` defaults to ``initial`` for
-      seq 1 and ``rerun`` otherwise. ``based_on_execution_id`` is the previous
-      slug only when seq > 1 and the source named a predecessor.
-    - ``created_at`` defaults to now; ``started_at`` defaults to ``created_at``.
-    - ``error`` is the state's error, else the ``exception.json`` payload.
-    - ``executor`` is the state's executor, else ``{"job": <job.json>}``.
-    - ``environment`` is the state's, else ``environment.json`` with its
-      ``{"environment": ...}`` wrapper removed.
-    - An attempt with no recorded status is ``interrupted``, never
-      ``succeeded``: the migration does not invent a result the source tree
-      does not claim. ``sealed_at`` is ``finished_at`` only when the attempt
-      was sealed or is terminal, so a terminal attempt with no
-      ``finished_at`` (including the defaulted ``interrupted`` one) folds to
-      an unsealed record.
-    - Each artifact is rebound to this attempt (``execution_id`` / ``run_id``
-      / ``project_id``), its ``path`` is the execution-relative ``out_rel``
-      (``artifacts/<name>``), and a missing ``source_path`` defaults to
-      ``out/<name>``.
-    - ``bypass_cache``, ``source`` and ``workflow_digest`` are left at their
-      defaults; an old layout recorded none of them.
-
-    No history is recorded here; ``molab migrate layout`` commits once at the
-    end. The caller has already hard-linked the bytes into ``dst``.
-
-    Args:
-        src: The legacy attempt directory.
-        dst: The target attempt directory (``.../executions/e01``).
-        seq: The attempt's 1-based sequence number within its Run.
-        run_id: The id of the Run the attempt belongs to.
-        project_id: The id of the Project the Run belongs to.
-        artifacts: Pairs of (legacy ``artifact.json`` record, path of its bytes
-            relative to ``dst``, e.g. ``"artifacts/metrics.jsonl"``).
-        fs: The filesystem both trees live on; defaults to the local disk.
-
-    Returns:
-        The record as written.
-
-    Raises:
-        pydantic.ValidationError: The folded record is not a valid
-            ``Execution``; nothing is written.
-    """
-    disk = fs or LocalFileSystem()
-    state = _read_legacy(src / "execution.json", disk)
-    environment = _read_legacy(src / "environment.json", disk)
-    exception = _read_legacy(src / "exception.json", disk)
-    job = _read_legacy(src / "job.json", disk)
-    slug = execution_slug(seq)
-
-    folded_artifacts: list[dict[str, object]] = []
-    for legacy, out_rel in artifacts:
-        record = {key: value for key, value in legacy.items() if key != "schema_version"}
-        name = str(record.get("name") or Path(out_rel).name)
-        record["name"] = name
-        record["path"] = out_rel
-        record.setdefault("source_path", f"{OUT.name}/{Path(name).name}")
-        record["execution_id"] = slug
-        record["run_id"] = run_id
-        record["project_id"] = project_id
-        folded_artifacts.append(record)
-
-    created_value = state.get("created_at")
-    created = created_value if isinstance(created_value, str) else datetime.now(UTC).isoformat()
-    error = state.get("error") or (exception or None)
-    executor = state.get("executor") or ({"job": job} if job else {})
-    wrapped = environment.get("environment")
-    if isinstance(wrapped, dict):
-        environment = wrapped
-    if environment and not state.get("environment"):
-        state["environment"] = environment
-    # An attempt with no state file never recorded how it ended. That is
-    # "interrupted", never "succeeded".
-    status = str(state.get("status") or "interrupted")
-    sealed = state.get("sealed_event_id") is not None or status in TERMINAL_EXECUTION_STATUSES
-    record = {
-        "id": slug,
-        "seq": seq,
-        "run_id": run_id,
-        "project_id": project_id,
-        "mode": state.get("mode") or ("initial" if seq == 1 else "rerun"),
-        "status": status,
-        "created_at": created,
-        "started_at": state.get("started_at") or created,
-        "finished_at": state.get("finished_at"),
-        "created_by": state.get("created_by") or SYSTEM_AGENT.model_dump(mode="json"),
-        "based_on_execution_id": execution_slug(seq - 1)
-        if seq > 1 and state.get("based_on_execution_id")
-        else None,
-        "checkpoint_artifact_id": state.get("checkpoint_artifact_id"),
-        "executor": executor,
-        "environment": state.get("environment") or {},
-        "observed_input_ids": state.get("observed_input_ids") or [],
-        "artifacts": folded_artifacts,
-        "evidence": [],
-        "declaration_diff": {},
-        "error": error,
-        "sealed_at": state.get("finished_at") if sealed else None,
-        "sealed_commit": None,
-    }
-    execution = Execution.model_validate(record)
-    _write_execution(disk, dst / "execution.json", execution)
-    return execution
-
-
 __all__ = [
     "ATTEMPT_FILES",
     "EXECUTION_RECORD_FILENAME",
@@ -1594,6 +1422,4 @@ __all__ = [
     "STDIO_FILES",
     "AdoptedArtifact",
     "ExecutionRepository",
-    "fold_legacy_attempt",
-    "legacy_attempt_created_at",
 ]

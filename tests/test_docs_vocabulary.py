@@ -105,13 +105,8 @@ SRC_RETIRED: dict[str, re.Pattern[str]] = {
     "five-modes": re.compile(r"\bfive (execution )?modes\b", re.IGNORECASE),
 }
 
-# Filled with the migrate_cmd.py legacy readers that still name old shapes.
-# Each reason names the legacy shape that reader still has to mention.
-SRC_ALLOWLIST: dict[tuple[str, str], str] = {
-    ("cli/migrate_cmd.py", "<module-docstring>"): (
-        "migrate layout still names the derived children index it drops"
-    ),
-}
+# Source lines that must name a retired shape. Empty: no reader still has to.
+SRC_ALLOWLIST: dict[tuple[str, str], str] = {}
 
 _MIGRATE_MARK = "`molab migrate"
 
@@ -366,11 +361,11 @@ _LEGACY_X = "children index"
 def cmd():
     typer.Option(help="children index")
 '''
-        allow = {("cli/migrate_cmd.py", "_LEGACY_X"): "reads the legacy children index"}
-        hits = _source_offenders(text, "cli/migrate_cmd.py", allow)
-        assert hits == ["cli/migrate_cmd.py:6: children-index"]
-        stale = _allowlist_stale({("cli/migrate_cmd.py", "missing_symbol"): "reads fresh.json"})
-        assert stale == ["cli/migrate_cmd.py:missing_symbol: not a module-level symbol"]
+        allow = {("workspace/errors.py", "_LEGACY_X"): "reads the legacy children index"}
+        hits = _source_offenders(text, "workspace/errors.py", allow)
+        assert hits == ["workspace/errors.py:6: children-index"]
+        stale = _allowlist_stale({("workspace/errors.py", "missing_symbol"): "reads fresh.json"})
+        assert stale == ["workspace/errors.py:missing_symbol: not a module-level symbol"]
 
     def test_tables_name_real_keys(self) -> None:
         assert set(ALLOWED_SPANS) <= set(RETIRED)

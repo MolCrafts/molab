@@ -154,8 +154,8 @@ class TestPlanExecutionPrune:
         assert len(seeded.executions) == 4
 
     def test_selecting_a_terminal_unsealed_execution_refuses(self, seeded: Run) -> None:
-        # A terminal status with no seal is real: ``molab migrate layout``
-        # writes ``status="interrupted"`` with ``sealed_at`` possibly None.
+        # A terminal status with no seal is real: a hand-written record can
+        # store ``status="interrupted"`` with ``sealed_at`` None.
         # ``mark_pruned`` needs a seal, so plan must refuse before apply
         # could remove the bytes.
         repo = _repo(seeded)

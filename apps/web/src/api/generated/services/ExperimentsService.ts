@@ -46,8 +46,7 @@ export class ExperimentsService {
      *
      * An existing experiment is returned unchanged when it is already bound to
      * that same normalized document (idempotent 201, no write). A different
-     * binding, a non-document kind, or a missing document is 409. A legacy
-     * experiment that still needs ``molab migrate workflow-kind`` is 409.
+     * binding, a non-document kind, or a missing document is 409.
      * Nothing is written on 409. A missing or unknown ``default_target`` is 422.
      * @param projectId
      * @param requestBody
@@ -203,8 +202,7 @@ export class ExperimentsService {
      *
      * An existing experiment is returned unchanged when it is already bound to
      * that same normalized document (idempotent 201, no write). A different
-     * binding, a non-document kind, or a missing document is 409. A legacy
-     * experiment that still needs ``molab migrate workflow-kind`` is 409.
+     * binding, a non-document kind, or a missing document is 409.
      * Nothing is written on 409. A missing or unknown ``default_target`` is 422.
      * @param projectId
      * @param ws

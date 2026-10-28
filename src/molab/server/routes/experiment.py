@@ -20,10 +20,7 @@ from ..schemas import (
     ExperimentResponse,
     MessageResponse,
 )
-from ..workflow_documents import (
-    compile_workflow_document,
-    require_migrated_workflow_binding,
-)
+from ..workflow_documents import compile_workflow_document
 
 router = APIRouter(prefix="/projects/{project_id}/experiments", tags=["experiments"])
 
@@ -70,8 +67,7 @@ def create_experiment(
 
     An existing experiment is returned unchanged when it is already bound to
     that same normalized document (idempotent 201, no write). A different
-    binding, a non-document kind, or a missing document is 409. A legacy
-    experiment that still needs ``molab migrate workflow-kind`` is 409.
+    binding, a non-document kind, or a missing document is 409.
     Nothing is written on 409. A missing or unknown ``default_target`` is 422.
     """
     project = workspace.get_project(project_id)
@@ -86,7 +82,6 @@ def create_experiment(
         _spec, normalized = compile_workflow_document(req.workflow_source)
         if project.has_experiment(req.name):
             existing = project.get_experiment(req.name)
-            require_migrated_workflow_binding(existing)
             bound = existing.workflow_document
             differs = (
                 existing.workflow_kind != "document"

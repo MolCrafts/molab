@@ -1,8 +1,7 @@
 """Workflow document routes.
 
 ``PUT`` compiles an IR and records it with ``Experiment.bind_workflow`` for
-the document kind. A legacy experiment is 409 until ``molab migrate
-workflow-kind`` runs, even when ``convertToDocument`` is set. A code-kind
+the document kind. An unbound experiment is bound as a document. A code-kind
 experiment is 409 unless the body sets ``convertToDocument``. After a
 successful bind the route drops any in-process binding memo and does not
 install a new one.
@@ -26,10 +25,7 @@ from molab.workspace import (
 from ..dependencies import get_workspace
 from ..exceptions import ConflictError, ExperimentNotFoundError
 from ..schemas import WorkflowDocumentRequest, WorkflowDocumentResponse
-from ..workflow_documents import (
-    compile_workflow_document,
-    require_migrated_workflow_binding,
-)
+from ..workflow_documents import compile_workflow_document
 
 router = APIRouter(
     prefix="/projects/{project_id}/experiments/{experiment_id}/workflow",
@@ -58,12 +54,11 @@ def put_workflow_document(
 ) -> WorkflowDocumentResponse:
     """Bind a normalized workflow IR as the document kind.
 
-    Legacy experiments are 409 (migrate first). Code-kind experiments are
+    An unbound experiment is bound as a document. Code-kind experiments are
     409 unless ``convertToDocument`` is set. Invalid IR, including an
     unregistered ``task_type``, is 400. Nothing is written on 409 or 400.
     """
     experiment = _resolve_experiment(workspace, project_id, experiment_id)
-    require_migrated_workflow_binding(experiment)
     _spec, normalized = compile_workflow_document(payload.document)
     kind = experiment.workflow_kind
     if kind == "code" and not payload.convert_to_document:

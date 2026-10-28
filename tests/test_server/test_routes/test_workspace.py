@@ -195,13 +195,7 @@ class TestWorkspaceInfo:
             blocked = client.get("/api/workspace/info")
         assert blocked.status_code == 409, blocked.text
         assert blocked.json()["error"]["code"] == "MIGRATION_REQUIRED"
-        assert "molab migrate assets" in blocked.json()["error"]["message"]
-
-        ws.assets.rewrite_legacy()
-        with served(ws) as client:
-            response = client.get("/api/workspace/info")
-        assert response.status_code == 200, response.text
-        assert response.json()["assetCount"] == 1
+        assert "molab migrate" not in blocked.json()["error"]["message"]
 
 
 class TestReadWorkspaceFileBlob:

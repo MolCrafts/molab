@@ -1,7 +1,7 @@
 """Identity after arch-own-04e.
 
-Documents bound raw by 04b `molab migrate workflow-kind` still carry workflow_id,
-so their one revision bump lands at the first PUT after this spec.
+Documents that still carry workflow_id get their one revision bump at the
+first PUT after this spec.
 
 Golden (captured, not recomputed): ``compute_run_definition_hash`` still inserts
 the frozen key ``workflow_snapshot: None``. Provenance: arch-own-04e-identity

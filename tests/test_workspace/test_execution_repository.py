@@ -42,7 +42,7 @@ from molab.workspace.domain import (
 )
 from molab.workspace.execution_repository import ExecutionRepository
 from molab.workspace.history import AgentRef
-from molab.workspace.schema_version import MOLAB_SCHEMA_VERSION, read_versioned_json
+from molab.workspace.schema_version import MOLAB_SCHEMA_VERSION
 
 _TEST_AGENT = AgentRef(id="test", type="person", name="test")
 _FIXED_TIME = datetime(2026, 1, 1, tzinfo=UTC)
@@ -291,13 +291,8 @@ class TestExecutionRepositoryMarkPruned:
 # persists ``bypass_cache`` / ``source``; ``start`` admits only a QUEUED record
 # under the state lock and merges start-time facts without overwriting
 # creation-time ones; ``update_operational`` refuses the union of identity,
-# post-seal and provenance fields; ``fold_legacy_attempt`` builds a
-# current-schema record through the model. Symbols introduced by 02a are
+# post-seal and provenance fields. Symbols introduced by 02a are
 # imported inside each test so every test fails for its own reason.
-
-
-_LEGACY_AGENT = {"id": "molab", "type": "system", "name": "Molab"}
-_LEGACY_CREATED = "2026-09-04T22:09:31.925482Z"
 
 
 def _run_repo(run: Run) -> ExecutionRepository:
@@ -772,158 +767,6 @@ class TestExecutionRepositoryUpdateOperational:
         assert _CREATION_FIELDS == _IDENTITY_FIELDS | _CREATION_PROVENANCE_FIELDS
 
 
-def _write(path: Path, payload: dict[str, object]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(payload), encoding="utf-8")
-
-
-def _legacy_src(tmp_path: Path) -> Path:
-    """A legacy attempt dir: state + environment + exception sidecars."""
-    src = tmp_path / "old"
-    src.mkdir()
-    _write(
-        src / "execution.json",
-        {
-            "schema_version": 2,
-            "id": "old-exec",
-            "run_id": "old-run",
-            "project_id": "old-p",
-            "mode": "initial",
-            "status": "failed",
-            "created_at": _LEGACY_CREATED,
-            "finished_at": "2026-09-04T22:10:21.113655Z",
-            "created_by": _LEGACY_AGENT,
-        },
-    )
-    _write(src / "environment.json", {"schema_version": 2, "environment": {"host": "n226"}})
-    _write(src / "exception.json", {"type": "ImportError", "message": "boom"})
-    return src
-
-
-def _legacy_artifact() -> dict[str, object]:
-    return {
-        "schema_version": 2,
-        "id": "a1",
-        "execution_id": "old-exec",
-        "run_id": "old-run",
-        "project_id": "old-p",
-        "name": "metrics.jsonl",
-        "content": {"digest": "sha256:" + "c" * 64, "size": 9, "kind": "file"},
-        "created_at": "2026-09-04T22:10:20.775525Z",
-        "created_by": _LEGACY_AGENT,
-        "source_path": "work/metrics.jsonl",
-    }
-
-
-def _dst(root: Path) -> Path:
-    """The target attempt dir; the CLI has created it (and linked bytes) before folding."""
-    dst = root / "runs" / "dp=5" / "executions" / "e01"
-    dst.mkdir(parents=True)
-    return dst
-
-
-class TestFoldLegacyAttempt:
-    def test_folds_to_current_schema(self, tmp_path: Path) -> None:
-        from molab.workspace.execution_repository import (
-            fold_legacy_attempt,
-        )
-
-        src = _legacy_src(tmp_path)
-        root = tmp_path / "lab"
-        dst = _dst(root)
-        _write(dst / "artifacts" / "metrics.jsonl", {"loss": 1})
-
-        ex = fold_legacy_attempt(
-            src,
-            dst,
-            seq=1,
-            run_id="r1",
-            project_id="p1",
-            artifacts=[(_legacy_artifact(), "artifacts/metrics.jsonl")],
-        )
-
-        raw = json.loads((dst / "execution.json").read_text(encoding="utf-8"))
-        assert raw["schema_version"] == MOLAB_SCHEMA_VERSION
-        assert Execution.model_validate(read_versioned_json(dst / "execution.json")) == ex
-
-        # hard-coded golden: HEAD 56d5b466 cli/migrate_cmd.py fold rules
-        assert (ex.id, ex.seq, ex.run_id, ex.project_id) == ("e01", 1, "r1", "p1")
-        assert ex.mode is ExecutionMode.INITIAL
-        assert ex.status is ExecutionStatus.FAILED
-        created = datetime(2026, 9, 4, 22, 9, 31, 925482, tzinfo=UTC)
-        finished = datetime(2026, 9, 4, 22, 10, 21, 113655, tzinfo=UTC)
-        assert ex.created_at == ex.started_at == created
-        assert ex.sealed_at == ex.finished_at == finished
-        assert ex.environment == {"host": "n226"}
-        assert ex.error == {"type": "ImportError", "message": "boom"}
-        assert ex.executor == {}
-        assert ex.based_on_execution_id is None
-
-        assert len(ex.artifacts) == 1
-        art = ex.artifacts[0]
-        assert art.path == "artifacts/metrics.jsonl"
-        assert art.execution_id == "e01"
-        assert art.run_id == "r1"
-        assert art.project_id == "p1"
-        assert art.source_path == "work/metrics.jsonl"
-
-    def test_missing_state_is_interrupted(self, tmp_path: Path) -> None:
-        from molab.workspace.execution_repository import (
-            fold_legacy_attempt,
-        )
-
-        src = tmp_path / "old"
-        src.mkdir()
-        root = tmp_path / "lab"
-        dst = _dst(root)
-
-        ex = fold_legacy_attempt(src, dst, seq=2, run_id="r1", project_id="p1")
-
-        assert ex.status is ExecutionStatus.INTERRUPTED
-        assert ex.mode is ExecutionMode.RERUN
-        assert ex.sealed_at is None
-        assert ex.based_on_execution_id is None
-        assert ex.artifacts == ()
-        raw = json.loads((dst / "execution.json").read_text(encoding="utf-8"))
-        assert raw["schema_version"] == MOLAB_SCHEMA_VERSION
-
-    def test_rejected_record_writes_nothing(self, tmp_path: Path) -> None:
-        from molab.workspace.execution_repository import (
-            fold_legacy_attempt,
-        )
-
-        src = _legacy_src(tmp_path)
-        state = json.loads((src / "execution.json").read_text(encoding="utf-8"))
-        state["status"] = "exploded"
-        _write(src / "execution.json", state)
-        root = tmp_path / "lab"
-        dst = _dst(root)
-
-        with pytest.raises(pydantic.ValidationError):
-            fold_legacy_attempt(src, dst, seq=1, run_id="r1", project_id="p1")
-
-        assert (dst / "execution.json").exists() is False
-
-
-class TestLegacyAttemptCreatedAt:
-    def test_reads_legacy_created_at(self, tmp_path: Path) -> None:
-        from molab.workspace.execution_repository import (
-            legacy_attempt_created_at,
-        )
-
-        src = _legacy_src(tmp_path)
-        assert legacy_attempt_created_at(src) == _LEGACY_CREATED
-
-    def test_empty_dir_is_empty_string(self, tmp_path: Path) -> None:
-        from molab.workspace.execution_repository import (
-            legacy_attempt_created_at,
-        )
-
-        empty = tmp_path / "empty"
-        empty.mkdir()
-        assert legacy_attempt_created_at(empty) == ""
-
-
 # ── arch-own-02a-record review fixes ─────────────────────────────────────
 #
 # ``start`` is the only way into RUNNING and the only writer of start-time
@@ -993,42 +836,6 @@ class TestUpdateOperationalAllowList:
             repo.update_operational(state.id, **updates)
 
         assert _raw_state(repo, state.id) == before
-
-
-class TestFoldLegacyAttemptReview:
-    def test_non_dict_state_folds_as_missing(self, tmp_path: Path) -> None:
-        from molab.workspace.execution_repository import fold_legacy_attempt
-
-        src = tmp_path / "old"
-        src.mkdir()
-        (src / "execution.json").write_text("[]", encoding="utf-8")
-        root = tmp_path / "lab"
-        dst = _dst(root)
-
-        ex = fold_legacy_attempt(src, dst, seq=1, run_id="r1", project_id="p1")
-
-        assert ex.status is ExecutionStatus.INTERRUPTED
-        assert ex.sealed_at is None
-
-    def test_accepts_filesystem(self, tmp_path: Path) -> None:
-        from molab.workspace.execution_repository import fold_legacy_attempt
-        from molab.workspace.fs_local import LocalFileSystem
-
-        src = _legacy_src(tmp_path)
-        root = tmp_path / "lab"
-        dst = _dst(root)
-
-        ex = fold_legacy_attempt(
-            src,
-            dst,
-            seq=1,
-            run_id="r1",
-            project_id="p1",
-            fs=LocalFileSystem(),
-        )
-
-        assert ex.status is ExecutionStatus.FAILED
-        assert (dst / "execution.json").is_file()
 
 
 # ── arch-own-02d-submit ──────────────────────────────────────────────────

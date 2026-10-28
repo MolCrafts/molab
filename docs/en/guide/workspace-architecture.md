@@ -209,13 +209,11 @@ molab info      # show workspace summary
                             └── out/<task>/
 ```
 
-## Upgrading an existing workspace
+## Old layouts are not upgraded
 
-Run these once on a tree that predates the current layout:
+This release reads the current layout. A leftover legacy asset record raises `UnmigratedAssetError` and asset reads answer 409 `MIGRATION_REQUIRED`. A directory that still holds a `<kind>.json` or `meta.json` record and no `index.md` raises `UnmigratedLayoutError`. An experiment with no `workflow_kind` stays unbound until `bind_workflow`.
 
-- `molab migrate assets` — until this has run, any leftover legacy asset record makes asset reads answer 409 `MIGRATION_REQUIRED`.
-- `molab migrate workflow-kind` — records whether each experiment runs code or a graph document.
-- `molab migrate knowledge` — moves old documents into `<host>/knowledges/<slug>.md`.
+Old knowledge trees are not imported. A document is `<host>/knowledges/<slug>.md`.
 
 A registered wiki whose documents sit under `<wiki>/knowledges/` must re-register that directory as its source root: `molab knowledge sources remove <name>`, then `molab knowledge sources add <name> <wiki>/knowledges`.
 

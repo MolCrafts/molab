@@ -336,7 +336,7 @@ def refresh_run_index(fs: FileSystem, run_dir: PathArg, *, lock_root: PathArg | 
 def sync_index(folder: Folder) -> int:
     """Rebuild every reserved key under *folder*, bottom-up. Returns records visited.
 
-    The full rebuild ``molab index sync`` and ``molab migrate index`` run.
+    The full rebuild ``molab index sync`` runs.
     Children are refreshed before their parent, so a parent row reads the
     child's final head.
     """

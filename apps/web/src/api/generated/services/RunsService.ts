@@ -768,8 +768,7 @@ export class RunsService {
      * created, so the run records the revision from that binding. A document
      * experiment must already carry the same normalized IR; a difference is
      * 409 (``PUT .../workflow`` first). A code experiment is 409; convert it
-     * with ``PUT .../workflow`` and ``convertToDocument``. A legacy experiment
-     * that still needs ``molab migrate workflow-kind`` is 409. This route
+     * with ``PUT .../workflow`` and ``convertToDocument``. This route
      * never writes the in-process binding memo.
      * @param requestBody
      * @param molabSession
@@ -1598,8 +1597,7 @@ export class RunsService {
      * created, so the run records the revision from that binding. A document
      * experiment must already carry the same normalized IR; a difference is
      * 409 (``PUT .../workflow`` first). A code experiment is 409; convert it
-     * with ``PUT .../workflow`` and ``convertToDocument``. A legacy experiment
-     * that still needs ``molab migrate workflow-kind`` is 409. This route
+     * with ``PUT .../workflow`` and ``convertToDocument``. This route
      * never writes the in-process binding memo.
      * @param ws
      * @param requestBody

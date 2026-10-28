@@ -1,7 +1,7 @@
 """arch-own-05c-asset-model: one Asset schema, public API only.
 
-New imports use a UUIDv7 version id (arch-own-05e). The ``<id>-v001`` id belongs
-to ``rewrite_legacy`` of an old ``asset_id`` record, not to ``import_asset``.
+New imports use a UUIDv7 version id (arch-own-05e). ``import_asset`` does not
+mint an ``<id>-v001`` version id.
 """
 
 from __future__ import annotations

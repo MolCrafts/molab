@@ -8,7 +8,7 @@ Three pieces of data, all written atomically (temp file + `os.rename`):
 
 ### 1. `Experiment.workflow_kind`
 
-`Experiment.bind_workflow` is the only writer. `code` names an entrypoint; `document` stores the graph. An experiment that has not been migrated answers 409 until `molab migrate workflow-kind` runs. `workflow_digest` lives on the Execution and in the journal header, not in the document.
+`Experiment.bind_workflow` is the only writer. `code` names an entrypoint; `document` stores the graph. An experiment with no `workflow_kind` is unbound until something calls `bind_workflow`. `workflow_digest` lives on the Execution and in the journal header, not in the document.
 
 ```json
 {

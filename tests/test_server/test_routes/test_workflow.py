@@ -201,24 +201,19 @@ class TestPutWorkflowDocument:
         assert bound.metadata.workflow_entrypoint is None
         assert bound.metadata.revision == 2
 
-    def test_legacy_put_is_409_even_with_convert(
+    def test_unbound_entrypoint_put_binds_document(
         self, served: ServedFactory, fresh_run: RunFixture
     ) -> None:
         ws, exp, _run = fresh_run
         exp.metadata = exp.metadata.model_copy(update={"workflow_entrypoint": "wf.py:build"})
         exp.save()
-        entity = (exp.experiment_dir / "index.md").read_bytes()
-        with served(ws, raise_server_exceptions=False) as client:
+        with served(ws) as client:
             plain = client.put(_workflow_url(exp), json={"document": DOC_A})
-            converted = client.put(
-                _workflow_url(exp),
-                json={"document": DOC_A, "convertToDocument": True},
-            )
-        assert plain.status_code == 409, plain.text
-        assert "molab migrate workflow-kind" in plain.json()["error"]["message"]
-        assert converted.status_code == 409, converted.text
-        assert (exp.experiment_dir / "index.md").read_bytes() == entity
-        assert _reload(ws, exp).workflow_kind is None
+        assert plain.status_code == 200, plain.text
+        bound = _reload(ws, exp)
+        assert bound.workflow_kind == "document"
+        assert bound.metadata.workflow_entrypoint is None
+        assert bound.metadata.revision == 2
 
     def test_bad_doc_is_400_and_writes_nothing(
         self, served: ServedFactory, fresh_run: RunFixture

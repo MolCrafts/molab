@@ -19,7 +19,8 @@ no plugin at all, and no core seam survives that only the harness used.
    ``agent`` / ``curate`` / ``harness`` / ``mcp``.
 6. ``molab.workflow`` has no ``set_workflow_recoverer``; recovering a run whose
    experiment records no binding raises ``WorkflowRecoveryError`` naming
-   ``molab migrate workflow-kind`` and the run id, and never ``molab plan``.
+   ``pass workflow=`` and the run id, and never ``molab plan`` or
+   ``molab migrate``.
 7. ``molab.services.operator_config`` keeps ``load_operator_config`` but not
    ``bridge_operator_config``; ``molab.knowledge`` has no ``PLAN_BOOK_NAME``.
 8. A one-task workflow defined with ``params={"seed": [0]}`` executes through
@@ -145,9 +146,10 @@ def _check_recovery(ws: Workspace) -> None:
     else:
         raise AssertionError("compiled_workflow_for_run did not raise")
     print(f"recovery error: {message}", file=sys.stderr)
-    assert "molab migrate workflow-kind" in message, message
+    assert "pass workflow=" in message, message
     assert run.id in message, message
     assert "molab plan" not in message, message
+    assert "molab migrate" not in message, message
 
 
 def _check_script_run(ws: Workspace) -> None:

@@ -116,8 +116,8 @@ _LEVEL_MODEL: dict[str, type[BaseModel]] = {
     "experiment": ExperimentMetadata,
     "run": RunMetadata,
 }
-#: Stable rule id → remediation hint naming the molab command to use. Keep
-#: ids stable — callers filter / dispatch on them.
+#: Stable rule id → remediation hint. A hint names the molab command to use
+#: when one exists. Keep ids stable — callers filter / dispatch on them.
 _RULE_HINTS: dict[str, str] = {
     "workspace.missing": "Create the workspace with `molab init <path>`.",
     "workspace.entity": (
@@ -156,8 +156,8 @@ _RULE_HINTS: dict[str, str] = {
         "`molab runs adopt`."
     ),
     "execution.legacy_name": (
-        "Run `molab migrate layout <old> <new>` to rename legacy UUID attempt "
-        "directories to e01, e02, …"
+        "A UUID attempt directory is not an attempt id. Record an outside job "
+        "with `molab runs adopt`; molab does not rename it."
     ),
     "execution.id_mismatch": (
         "Rename the attempt directory back to the id in its execution.json. "
@@ -171,7 +171,8 @@ _RULE_HINTS: dict[str, str] = {
     ),
     "index.drift": "The derived index: block disagrees with the tree; run `molab index sync`.",
     "layout.legacy_record": (
-        "A <kind>.json / meta.json record is still on disk; run `molab migrate index`."
+        "A <kind>.json / meta.json file is not a molab record. molab reads "
+        "index.md. Remove the leftover file."
     ),
     "layout.stray": (
         "Only declared names live at each level (an execution holds its declared "
@@ -431,8 +432,8 @@ class _Checker:
                     child,
                     rule,
                     (
-                        f"{entry.name!r} is a legacy attempt UUID; run `molab migrate layout` "
-                        "to rename it to eNN"
+                        f"{entry.name!r} is a legacy attempt UUID, not an attempt "
+                        "number (e01, e02, …)"
                     ),
                     severity="warning",
                 )

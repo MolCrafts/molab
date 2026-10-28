@@ -1,7 +1,6 @@
 """Appending inside a hard-linked archive must not reach back into its source.
 
-``molab migrate`` builds an archive by hard-linking bulk payload, which makes
-it cheap but means a migrated file and its original are the *same* file. An
+A hard-linked archive makes a copied file and its original the *same* file. An
 appender that does not break the link first writes through into the source
 tree — which is how an ingest run silently grew a 242-byte file in the archive
 into 72 MB in both places.

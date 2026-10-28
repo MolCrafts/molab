@@ -10,9 +10,10 @@ only here. The experiment owns the association. Dispatch follows
 - ``document`` always decodes ``workflow.ir.json``. The memo is never
   consulted, because nothing can invalidate it across processes.
 
-An experiment written before workflow kinds fails with
-:class:`WorkflowRecoveryError` naming ``molab migrate workflow-kind``. This
-module does not guess a kind and does not write the experiment.
+An experiment with no ``workflow_kind`` fails with
+:class:`WorkflowRecoveryError`. The remedy is to pass ``workflow=`` or to
+bind a workflow. This module does not guess a kind and does not write
+the experiment.
 """
 
 from __future__ import annotations
@@ -117,12 +118,11 @@ def _resolve(experiment: Experiment, run: Run | None) -> CompiledWorkflow:
     bound = _memo(experiment)
     if bound is not None:
         return bound
-    root = experiment.project.workspace.root
     run_id = f" run {run.id}" if run is not None else ""
     raise WorkflowRecoveryError(
         f"no workflow bound to experiment {experiment.id}{run_id}: "
-        f"workflow_kind=None. pass workflow=... to run it in-process, or run "
-        f"`molab migrate workflow-kind {root}`"
+        "workflow_kind=None. pass workflow=... to run it in-process, or "
+        "bind a workflow on the experiment"
     )
 
 

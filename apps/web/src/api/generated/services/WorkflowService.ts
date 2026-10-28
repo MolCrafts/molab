@@ -12,7 +12,7 @@ export class WorkflowService {
      * Put Workflow Document
      * Bind a normalized workflow IR as the document kind.
      *
-     * Legacy experiments are 409 (migrate first). Code-kind experiments are
+     * An unbound experiment is bound as a document. Code-kind experiments are
      * 409 unless ``convertToDocument`` is set. Invalid IR, including an
      * unregistered ``task_type``, is 400. Nothing is written on 409 or 400.
      * @param projectId
@@ -78,7 +78,7 @@ export class WorkflowService {
      * Put Workflow Document
      * Bind a normalized workflow IR as the document kind.
      *
-     * Legacy experiments are 409 (migrate first). Code-kind experiments are
+     * An unbound experiment is bound as a document. Code-kind experiments are
      * 409 unless ``convertToDocument`` is set. Invalid IR, including an
      * unregistered ``task_type``, is 400. Nothing is written on 409 or 400.
      * @param projectId

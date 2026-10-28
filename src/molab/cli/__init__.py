@@ -54,10 +54,8 @@ app.add_typer(target_app, name="target")
 
 # ── git checkpoint projection group ──────────────────────────────────────────
 from molab.cli.history_cmd import history_app  # noqa: E402
-from molab.cli.migrate_cmd import migrate_app  # noqa: E402
 
 app.add_typer(history_app, name="history")
-app.add_typer(migrate_app, name="migrate")
 
 # ── derived index.md navigation blocks (D89) ─────────────────────────────────
 from molab.cli.index_cmd import index_app  # noqa: E402

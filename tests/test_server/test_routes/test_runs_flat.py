@@ -147,15 +147,15 @@ class TestCreateRun:
         assert reloaded.metadata.workflow_kind == "code"
         assert reloaded.metadata.workflow_entrypoint == "train.py:build"
 
-    def test_legacy_entrypoint_rejects_document_post(self, fresh_run, served) -> None:
+    def test_unbound_entrypoint_with_workflow_json_binds_document(self, fresh_run, served) -> None:
         ws, exp, _run = fresh_run
         _persist_legacy_entrypoint(exp)
         response = _post_run(served, ws, exp, workflow=DOC_A)
-        assert response.status_code == 409
-        assert "molab migrate workflow-kind" in response.json()["error"]["message"]
+        assert response.status_code == 201, response.text
         reloaded = _reload(ws, exp)
-        assert reloaded.metadata.workflow_kind is None
-        assert reloaded.metadata.workflow_entrypoint == "wf.py:build"
+        assert reloaded.metadata.workflow_kind == "document"
+        assert reloaded.metadata.workflow_entrypoint is None
+        assert reloaded.metadata.revision == 2
 
     def test_legacy_entrypoint_without_workflow_json_creates_run(self, fresh_run, served) -> None:
         ws, exp, _run = fresh_run

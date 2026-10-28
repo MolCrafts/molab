@@ -216,8 +216,10 @@ class TestNeitherShape:
         with pytest.raises(WorkflowRecoveryError) as excinfo:
             compiled_workflow_for_run(run)
         message = str(excinfo.value)
-        assert "molab migrate workflow-kind" in message
+        assert "pass workflow=" in message
+        assert "bind a workflow" in message
         assert run.id in message
+        assert "molab migrate" not in message
         assert "molab plan" not in message
 
 
@@ -347,9 +349,9 @@ class TestKindDispatch:
 class TestUnmigratedExperiment:
     """Kind stays ``None`` even when a legacy entrypoint is sitting on the metadata."""
 
-    def test_error_names_migrate_workflow_kind(self, tmp_path: Path) -> None:
+    def test_error_names_the_bind_remedy(self, tmp_path: Path) -> None:
         default_binding_registry.clear()
-        ws, exp, run = _seed(tmp_path)
+        _ws, exp, run = _seed(tmp_path)
         assert exp.workflow_kind is None
         exp.metadata = exp.metadata.model_copy(
             update={"workflow_entrypoint": _script_entrypoint(tmp_path)}
@@ -360,10 +362,11 @@ class TestUnmigratedExperiment:
         with pytest.raises(WorkflowRecoveryError) as excinfo:
             compiled_workflow_for_run(run)
         message = str(excinfo.value)
-        assert "molab migrate workflow-kind" in message
+        assert "pass workflow=" in message
+        assert "bind a workflow" in message
         assert "workflow_kind" in message
         assert run.id in message
-        assert str(ws.root) in message
+        assert "molab migrate" not in message
         assert "molab plan" not in message
 
     def test_can_recover_workflow_is_false(self, tmp_path: Path) -> None:

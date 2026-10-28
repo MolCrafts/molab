@@ -161,8 +161,7 @@ def _dispatch_to_molq(target, run, execution_id: str | None = None) -> None:  # 
     if not can_recover_workflow(run):
         kind = run.experiment.workflow_kind
         if kind is None:
-            root = run.experiment.project.workspace.root
-            remedy = f"run `molab migrate workflow-kind {root}`"
+            remedy = "pass workflow= or bind a workflow on the experiment"
         elif kind == "code":
             remedy = "run the experiment's defining script to bind a code locator"
         else:

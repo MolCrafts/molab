@@ -97,4 +97,6 @@ class TestRegisterExceptionHandlers:
         assert response.status_code == 409
         error = response.json()["error"]
         assert error["code"] == "MIGRATION_REQUIRED"
-        assert "molab migrate assets /w" in error["message"]
+        assert "data-import record" in error["message"]
+        assert "/w/assets/x/asset.json" in error["message"]
+        assert "molab migrate" not in error["message"]

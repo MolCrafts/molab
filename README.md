@@ -61,7 +61,7 @@ pip install "git+https://github.com/MolCrafts/molab"
 uv pip install "git+https://github.com/MolCrafts/molab"
 ```
 
-Existing workspaces that still have `.molexp/` or `~/.molexp` must run `molab migrate brand` once before using this release.
+Existing workspaces that still have `.molexp/` or `~/.molexp` are not upgraded. This release reads `.molab/`.
 
 Requires Python >= 3.12. Core depends on `pydantic`, `pyyaml`, `typer`, `rich`, `fastapi`, `uvicorn`, `zarr`, and the MolCrafts libraries `mollog`, `molcfg`, `molq`, and `molpy` (the workflow engine is self-owned — `pydantic-graph` is no longer a dependency). Optional extras: `molcrafts-molab[tensorboard]` adds the TensorBoard scalar reader; `molcrafts-molab[all]` bundles the optional extras, and `molcrafts-molab[dev]` pulls everything for development.
 

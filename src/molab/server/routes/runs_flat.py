@@ -14,10 +14,7 @@ from molab.workspace import (
 from ..dependencies import get_workspace
 from ..exceptions import ConflictError, ExperimentNotFoundError, ProjectNotFoundError
 from ..schemas import ExecutionCreateRequest, RunResponse
-from ..workflow_documents import (
-    compile_workflow_document,
-    require_migrated_workflow_binding,
-)
+from ..workflow_documents import compile_workflow_document
 
 flat_router = APIRouter(prefix="/runs", tags=["runs"])
 
@@ -34,8 +31,7 @@ def create_run(
     created, so the run records the revision from that binding. A document
     experiment must already carry the same normalized IR; a difference is
     409 (``PUT .../workflow`` first). A code experiment is 409; convert it
-    with ``PUT .../workflow`` and ``convertToDocument``. A legacy experiment
-    that still needs ``molab migrate workflow-kind`` is 409. This route
+    with ``PUT .../workflow`` and ``convertToDocument``. This route
     never writes the in-process binding memo.
     """
     try:
@@ -49,7 +45,6 @@ def create_run(
         raise ExperimentNotFoundError(request.project_id, request.experiment_id) from None
 
     if request.workflow_json is not None:
-        require_migrated_workflow_binding(experiment)
         _spec, normalized = compile_workflow_document(request.workflow_json)
         kind = experiment.workflow_kind
         if kind is None:

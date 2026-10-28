@@ -504,7 +504,7 @@ class TestDispatchToMolq:
 
         assert _MolqRecorder.calls == [None]
 
-    def test_unbound_snapshot_is_422_naming_migrate(
+    def test_unbound_snapshot_is_422(
         self, fresh_run: RunFixture, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         _ws, _exp, run = fresh_run
@@ -522,7 +522,8 @@ class TestDispatchToMolq:
 
         assert excinfo.value.status_code == 422
         detail = str(excinfo.value.detail)
-        assert "molab migrate workflow-kind" in detail
+        assert "bind a workflow" in detail
+        assert "molab migrate" not in detail
         assert "molab plan" not in detail
         assert _MolqRecorder.calls == []
 

@@ -51,5 +51,4 @@ class TestPreviewDatasetPath:
             response = client.get(f"/api/assets/{LEGACY_ID}/preview")
         assert response.status_code == 409, response.text
         assert response.json()["error"]["code"] == "MIGRATION_REQUIRED"
-        ws.assets.rewrite_legacy()
-        assert _resolve_dataset_path(ws, LEGACY_ID) == Path(ws.assets.payload_path(LEGACY_ID))
+        assert "molab migrate" not in response.json()["error"]["message"]

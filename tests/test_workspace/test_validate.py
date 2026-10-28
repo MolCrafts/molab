@@ -111,7 +111,8 @@ class TestValidateWorkspace:
         report = ws.validate()
         legacy = [v for v in report.errors if v.rule == "layout.legacy_record"]
         assert [v.path for v in legacy] == [f"projects/{proj._name}"]
-        assert "molab migrate index" in legacy[0].hint
+        assert "index.md" in legacy[0].hint
+        assert "molab migrate" not in legacy[0].hint
 
     def test_every_rule_has_a_hint(self) -> None:
         from molab.workspace.validate import _RULE_HINTS
@@ -126,12 +127,15 @@ class TestValidateWorkspace:
             "execution.id_mismatch",
             "index.frontmatter",
             "index.drift",
-            "layout.legacy_record",
             "layout.stray",
             "scratch.stale",
         ):
             assert rule in _RULE_HINTS
             assert "`molab " in _RULE_HINTS[rule], rule
+        # A leftover <kind>.json is not upgraded. The hint says to remove it.
+        legacy = _RULE_HINTS["layout.legacy_record"]
+        assert "index.md" in legacy
+        assert "molab migrate" not in legacy
         assert "concept.marker" not in _RULE_HINTS
 
     def test_a_stray_at_every_level_is_an_error(self, tmp_path: Path) -> None:
@@ -322,8 +326,10 @@ class TestValidateWorkspace:
         assert named == []
         assert len(legacy) == 1
         assert legacy[0].severity == "warning"
-        assert "molab migrate layout" in legacy[0].detail
-        assert "molab migrate layout" in legacy[0].hint
+        assert "e01" in legacy[0].detail
+        assert "molab runs adopt" in legacy[0].hint
+        assert "molab migrate" not in legacy[0].detail
+        assert "molab migrate" not in legacy[0].hint
         assert report.ok is True
 
     def test_non_attempt_name_is_flagged(self, tmp_path: Path) -> None:

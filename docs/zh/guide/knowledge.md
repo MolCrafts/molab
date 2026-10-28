@@ -184,17 +184,9 @@ for hit in wiki.search("cooling").hits:
 `molab knowledge sources remove <name>`，然后
 `molab knowledge sources add <name> <wiki>/knowledges`。
 
-## 迁移已有的树
+## 当前文档
 
-`molab migrate knowledge [WORKSPACE]` 是显式命令。它把遗留文档移成 `<host>/knowledges/<stem>.md`，并保留原来的 stem：
-
-- `molab migrate knowledge` 读取宿主目录下、frontmatter 的 `class` 能对上知识类的 `*.md`；
-- `molab migrate knowledge` 读取 `references/<key>.md`，以及 `references/<key>/literature.json` 加 `index.md`；
-- `molab migrate knowledge` 读取目录形态 `knowledges/<id>/<class>.json` 加 `index.md`。
-
-指向项目、实验、运行、执行和产物的相对链接会改写成实体引用。文档之间的链接会按新位置重算，迁移之后仍然打得开。frontmatter 里能够定性的 `sources:` 行折进带角色的链接。解析不到或有歧义的行留在 frontmatter 里，报告会逐条列出。名字已经被占用时落到 `<stem>-2`、`<stem>-3`……两份正文都保留。附件以及其他没有点名的文件留在原地，并记入 leftovers。
-
-`--dry-run` 打印同一份计划，不写任何字节。真正执行时只对碰到的路径做一次 `knowledge.migrated` 提交。再跑一次会报告没有变化。
+知识文档是 `<host>/knowledges/<slug>.md`。旧的目录形态和 `references/` 布局不再导入。
 
 ## 下一步
 

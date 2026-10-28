@@ -273,126 +273,6 @@ class ArtifactRepository:
         return self.fs.read_bytes(location)
 
 
-def _legacy_tree_size(fs: FileSystem, path: str) -> int:
-    """Sum of file sizes under *path*, via ``scandir`` and without hashing."""
-    total = 0
-    for entry in fs.scandir(path, with_stat=True):
-        if entry.is_dir and not entry.is_symlink:
-            total += _legacy_tree_size(fs, fs.join(path, entry.name))
-        elif entry.is_file:
-            total += entry.size
-    return total
-
-
-def _legacy_content(fs: FileSystem, payload: str, digest: str | None) -> ContentRef | None:
-    """Measure a legacy payload's size without hashing it again.
-
-    Args:
-        fs: Filesystem the payload lives on.
-        payload: Absolute path of the bytes.
-        digest: Stored content hash, or ``None`` when the import stored none.
-
-    Returns:
-        A content reference using *digest* and the measured size, or ``None``
-        when there is no digest or the bytes are gone.
-    """
-    if digest is None or payload == "":
-        return None
-    try:
-        info = fs.stat(payload)
-    except FileNotFoundError:
-        return None
-    if info.is_dir:
-        return ContentRef(digest=digest, size=_legacy_tree_size(fs, payload), kind="directory")
-    if not info.is_file:
-        return None
-    return ContentRef(digest=digest, size=info.size, kind="file")
-
-
-def _legacy_posix(value: object) -> str:
-    if not isinstance(value, str) or value == "":
-        return ""
-    return value.replace("\\", "/")
-
-
-def _legacy_data_asset(
-    raw: dict[str, object],
-    *,
-    scope: AssetScope,
-    fs: FileSystem,
-    scope_dir: str,
-) -> tuple[Asset, AssetVersion]:
-    """Map one ``asset_id`` record (no ``id``) onto an Asset and its ``v001`` import.
-
-    Migration only. :meth:`AssetRepository.rewrite_legacy` is the caller.
-    Readers do not use this.
-
-    Args:
-        raw: Parsed ``asset.json`` with ``asset_id`` and no ``id``.
-        scope: Scope that owns the directory.
-        fs: Filesystem the bytes are on.
-        scope_dir: Scope directory *path* is relative to.
-
-    Returns:
-        The synthesized asset and its single import version.
-
-    Raises:
-        ValueError: The record has no ``asset_id``.
-    """
-    asset_id = raw.get("asset_id")
-    if not isinstance(asset_id, str) or asset_id == "":
-        raise ValueError("legacy asset record has no asset_id")
-    external = raw.get("external_uri")
-    source = raw.get("source_path")
-    if isinstance(external, str) and external:
-        uri = external
-        location: str | None = None
-        payload = external
-    else:
-        uri = source if isinstance(source, str) else ""
-        location = _legacy_posix(raw.get("path")) or None
-        payload = fs.join(scope_dir, location) if location else ""
-    producer = raw.get("producer")
-    input_ids: tuple[str, ...] = ()
-    if isinstance(producer, dict):
-        raw_inputs = producer.get("inputs")
-        if isinstance(raw_inputs, list) and all(isinstance(item, str) for item in raw_inputs):
-            input_ids = tuple(item for item in raw_inputs if isinstance(item, str))
-    name = raw.get("name")
-    tags_raw = raw.get("tags")
-    digest = raw.get("content_hash")
-    asset = Asset.model_validate(
-        {
-            "id": asset_id,
-            "scope": scope,
-            "title": name if isinstance(name, str) else "",
-            "tags": tags_raw if isinstance(tags_raw, dict) else {},
-            "created_at": raw.get("created_at"),
-            "created_by": SYSTEM_AGENT,
-        }
-    )
-    version = AssetVersion.model_validate(
-        {
-            "id": f"{asset_id}-v001",
-            "asset_id": asset_id,
-            "version": 1,
-            "created_at": raw.get("created_at"),
-            "created_by": SYSTEM_AGENT,
-            "origin": {
-                "kind": "import",
-                "uri": uri,
-                "action": raw.get("import_action"),
-                "location": location,
-                "input_ids": input_ids,
-            },
-            "content": _legacy_content(
-                fs, payload, digest if isinstance(digest, str) and digest else None
-            ),
-        }
-    )
-    return asset, version
-
-
 def _legacy_asset_reason(raw: dict[str, object]) -> str | None:
     """Why *raw* ``asset.json`` is not the unified record, or ``None``.
 
@@ -417,30 +297,6 @@ def _legacy_version_reason(raw: dict[str, object]) -> str | None:
     return None
 
 
-class LegacyRewrite(BaseModel):
-    """What :meth:`AssetRepository.rewrite_legacy` rewrote or could not qualify."""
-
-    model_config = ConfigDict(frozen=True)
-
-    rewritten: tuple[str, ...]
-    unresolved: tuple[str, ...]
-
-
-class LegacyAssetMigration(BaseModel):
-    """What :func:`migrate_legacy_assets` rewrote, removed, and committed.
-
-    Paths are POSIX paths relative to the workspace root.
-    """
-
-    model_config = ConfigDict(frozen=True)
-
-    dry_run: bool
-    rewritten: tuple[str, ...]
-    unresolved: tuple[str, ...]
-    manifests_removed: tuple[str, ...]
-    commit: str | None
-
-
 def _same_content(held: ContentRef | None, incoming: ContentRef | None) -> bool:
     """True when both sides name the same non-empty content digest."""
     if held is None or incoming is None:
@@ -455,7 +311,8 @@ class AssetRepository:
     file per version. Listing assets is listing that directory; there is no
     derived index to fall out of step with it. A record that still uses an
     ``asset_id`` key, a persisted ``project_id`` or ``scope``, or a version
-    without a qualified ``origin`` is unreadable until :meth:`rewrite_legacy`.
+    without a qualified ``origin`` is unreadable. Readers refuse it and do
+    not rewrite the file.
     """
 
     def __init__(
@@ -1098,155 +955,6 @@ class AssetRepository:
                 matched = slug
         return matched
 
-    def _fold_legacy_record(
-        self,
-        raw: dict[str, object],
-        version_raws: builtins.list[dict[str, object]],
-    ) -> tuple[Asset, builtins.list[AssetVersion]]:
-        """Turn one legacy directory's dicts into unified models.
-
-        An ``asset_id`` record (no ``id``) becomes one import version; leftover
-        version files are ignored. Any other legacy record drops ``project_id``
-        and ``scope`` on the asset, drops ``path`` and ``source_artifact_id``
-        on each version, and qualifies a missing artifact ``ref``.
-
-        Raises:
-            ValueError: An artifact origin cannot be qualified.
-            ValidationError: The folded dict is not the unified schema.
-        """
-        if _legacy_asset_reason(raw) == "data-import record":
-            asset, version = _legacy_data_asset(
-                raw, scope=self.scope, fs=self.fs, scope_dir=self.scope_dir
-            )
-            return asset, [version]
-        cleaned = {key: value for key, value in raw.items() if key not in {"project_id", "scope"}}
-        asset = Asset.model_validate({**cleaned, "scope": self.scope})
-        return asset, [self._upgrade_version(item) for item in version_raws]
-
-    def _upgrade_version(self, raw: dict[str, object]) -> AssetVersion:
-        """Fold one version dict onto :class:`AssetVersion`.
-
-        A missing ``origin`` is built from ``source_artifact_id``. An artifact
-        origin with an empty ``ref`` is qualified before validation, because
-        ``ref`` is required.
-        """
-        cleaned = {
-            key: value for key, value in raw.items() if key not in {"path", "source_artifact_id"}
-        }
-        origin = cleaned.get("origin")
-        if not isinstance(origin, dict):
-            source = raw.get("source_artifact_id")
-            if not isinstance(source, str) or source == "":
-                raise ValueError("legacy version has no artifact id")
-            cleaned["origin"] = {
-                "kind": "artifact",
-                "artifact_id": source,
-                "ref": str(self._qualify_artifact(source, self.scope.project_id)),
-            }
-        elif origin.get("kind") == "artifact" and not origin.get("ref"):
-            artifact_id = origin.get("artifact_id")
-            if not isinstance(artifact_id, str) or artifact_id == "":
-                raise ValueError("legacy version has no artifact id")
-            cleaned["origin"] = {
-                **origin,
-                "ref": str(self._qualify_artifact(artifact_id, self.scope.project_id)),
-            }
-        return AssetVersion.model_validate(cleaned)
-
-    def rewrite_legacy(self, *, dry_run: bool = False) -> LegacyRewrite:
-        """Rewrite legacy asset records in this scope to the unified schema.
-
-        Ids, directory names, and payload bytes stay. An artifact origin
-        whose ``ref`` is missing is qualified through :meth:`_qualify_artifact`.
-        When ``_qualify_artifact`` cannot find that artifact, the asset id is
-        reported in ``unresolved`` and the record is left untouched. A record
-        that is not the unified schema raises ``ValidationError`` instead of
-        being reported as a missing artifact. A dry run takes no lock and
-        writes nothing.
-
-        Args:
-            dry_run: Classify only.
-
-        Returns:
-            Absolute directories that were (or would be) rewritten, and asset
-            ids whose artifact origin could not be qualified.
-
-        Raises:
-            NotImplementedError: A real run on a non-local filesystem.
-        """
-        if not dry_run:
-            self._require_local()
-
-        def _apply() -> LegacyRewrite:
-            rewritten: list[str] = []
-            unresolved: list[str] = []
-            if not self.fs.exists(self.assets_dir):
-                return LegacyRewrite(rewritten=(), unresolved=())
-            for slug in sorted(self._slugs()):
-                directory = self.fs.join(self.assets_dir, slug)
-                record_path = self.fs.join(directory, "asset.json")
-                if not self.fs.exists(record_path):
-                    continue
-                raw = self._read(record_path)
-                version_raws = self._raw_versions(directory)
-                legacy = _legacy_asset_reason(raw) is not None or any(
-                    _legacy_version_reason(item) is not None for item in version_raws
-                )
-                if not legacy:
-                    continue
-                asset_id = raw.get("id")
-                if not isinstance(asset_id, str) or asset_id == "":
-                    asset_id = raw.get("asset_id")
-                if not isinstance(asset_id, str) or asset_id == "":
-                    raise ValueError(f"legacy asset record {record_path} has no asset id")
-                try:
-                    asset, versions = self._fold_legacy_record(raw, version_raws)
-                except ValueError as exc:
-                    if not str(exc).startswith("Artifact ") or "is not readable" not in str(exc):
-                        raise
-                    unresolved.append(asset_id)
-                    continue
-                rewritten.append(directory)
-                if dry_run:
-                    continue
-                self._write_rewritten(directory, asset, versions)
-            return LegacyRewrite(rewritten=tuple(rewritten), unresolved=tuple(unresolved))
-
-        if dry_run:
-            return _apply()
-        with self._assets_lock():
-            return _apply()
-
-    def _raw_versions(self, directory: str) -> builtins.list[dict[str, object]]:
-        base = self.fs.join(directory, "versions")
-        if not self.fs.exists(base):
-            return []
-        return [self._read(path) for path in sorted(self.fs.glob(base, "*.json"))]
-
-    def _write_rewritten(
-        self,
-        directory: str,
-        asset: Asset,
-        versions: builtins.list[AssetVersion],
-    ) -> None:
-        base = self.fs.join(directory, "versions")
-        self.fs.mkdir(base, parents=True, exist_ok=True)
-        written: set[str] = set()
-        for version in versions:
-            name = f"v{version.version:03d}.json"
-            written.add(name)
-            self.fs.atomic_write_json(
-                self.fs.join(base, name),
-                versioned_payload(version.model_dump(mode="json")),
-            )
-        for path in self.fs.glob(base, "*.json"):
-            if self.fs.basename(path) not in written:
-                self.fs.remove(path)
-        self.fs.atomic_write_json(
-            self.fs.join(directory, "asset.json"),
-            versioned_payload(asset.model_dump(mode="json")),
-        )
-
     def _slug_of(self, asset_id: str) -> str:
         """Directory name of the record whose ``id`` is *asset_id*.
 
@@ -1406,95 +1114,12 @@ def scan_asset_repositories(workspace: Workspace) -> builtins.list[AssetReposito
     return repos
 
 
-#: Only the migration uses this name, to recognize an unmigrated tree.
-_LEGACY_ASSET_MANIFEST = "assets.json"
-
-
-def migrate_legacy_assets(workspace: Workspace, *, dry_run: bool = False) -> LegacyAssetMigration:
-    """Rewrite legacy asset records and drop dead ``assets.json`` manifests.
-
-    The owner of the migration. One git commit covers every path it touches
-    when anything changed and history is enabled. A dry run writes nothing.
-
-    Args:
-        workspace: Workspace to migrate.
-        dry_run: Classify and report only.
-
-    Returns:
-        Relative paths, unresolved asset ids, and the commit sha if one was made.
-
-    Raises:
-        NotImplementedError: *workspace* is not on a local filesystem.
-    """
-    if not isinstance(workspace.fs, LocalFileSystem):
-        raise NotImplementedError("asset import/migration is local-filesystem only")
-    rewritten_abs: list[str] = []
-    unresolved: list[str] = []
-    for repository in scan_asset_repositories(workspace):
-        report = repository.rewrite_legacy(dry_run=dry_run)
-        rewritten_abs.extend(report.rewritten)
-        unresolved.extend(report.unresolved)
-    removed_abs: list[str] = []
-    for directory in _manifest_dirs(workspace):
-        manifest = workspace.fs.join(directory, _LEGACY_ASSET_MANIFEST)
-        if workspace.fs.exists(manifest):
-            removed_abs.append(manifest)
-            if not dry_run:
-                workspace.fs.remove(manifest)
-    commit = None
-    if not dry_run and (rewritten_abs or removed_abs):
-        commit = GitHistory(workspace.root).record(
-            "AssetsMigrated",
-            subject=EntityRef(id=workspace.id, type="workspace"),
-            summary=(
-                f"{len(rewritten_abs)} asset record(s) rewritten, "
-                f"{len(removed_abs)} manifest(s) removed"
-            ),
-            paths=(*rewritten_abs, *removed_abs),
-        )
-    return LegacyAssetMigration(
-        dry_run=dry_run,
-        rewritten=tuple(_workspace_posix(workspace, path) for path in rewritten_abs),
-        unresolved=tuple(unresolved),
-        manifests_removed=tuple(_workspace_posix(workspace, path) for path in removed_abs),
-        commit=commit,
-    )
-
-
-def _manifest_dirs(workspace: Workspace) -> list[str]:
-    """Scope, run, and execution directories that may hold a dead manifest."""
-    dirs = [str(workspace.root)]
-    for project in workspace.list_projects():
-        dirs.append(str(project.project_dir))
-        for experiment in project.list_experiments():
-            dirs.append(str(experiment.experiment_dir))
-            for run in experiment.list_runs():
-                dirs.append(str(run.run_dir))
-                for execution in run.executions:
-                    dirs.append(str(run.execution_dir(execution.id)))
-    return dirs
-
-
-def _workspace_posix(workspace: Workspace, path: str) -> str:
-    root = Path(str(workspace.root))
-    candidate = Path(path)
-    if not candidate.is_absolute():
-        candidate = root / candidate
-    try:
-        return candidate.relative_to(root).as_posix()
-    except ValueError:
-        return candidate.resolve().relative_to(root.resolve()).as_posix()
-
-
 __all__ = [
     "RESERVED_ARTIFACT_DIR",
     "ArtifactLocation",
     "ArtifactRepository",
     "AssetRepository",
-    "LegacyAssetMigration",
-    "LegacyRewrite",
     "content_ref",
-    "migrate_legacy_assets",
     "scan_artifacts",
     "scan_asset_repositories",
     "walk_artifacts",

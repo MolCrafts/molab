@@ -1,11 +1,8 @@
 """Public-API goldens for arch-own-04d-readers.
 
 This spec deletes the legacy experiment fields ``workflow_source``,
-``workflow_type`` and ``git_commit``. An old workspace must run arch-own-04b's
-``molab migrate workflow-kind`` first. That command classifies each experiment
-and reports how many unbound experiments carried a non-IR ``workflow_source``
-that this upgrade drops. Step 5 shows that drop: a handwritten
-``workflow_source`` is ignored on load.
+``workflow_type`` and ``git_commit``. An old workspace is not upgraded.
+Step 5 shows the drop: a handwritten ``workflow_source`` is ignored on load.
 
 Expected stdout (exactly this line, exit code 0):
 
@@ -61,10 +58,14 @@ def main() -> None:
         assert (Path(after.experiment_dir) / "workflow.ir.json").is_file()
 
         legacy = project.add_experiment("old")
-        path = Path(legacy.experiment_dir) / "experiment.json"
-        payload = json.loads(path.read_text(encoding="utf-8"))
-        payload["workflow_source"] = "train.py"
-        path.write_text(json.dumps(payload), encoding="utf-8")
+        record = Path(legacy.experiment_dir) / "index.md"
+        text = record.read_text(encoding="utf-8")
+        end = text.find("\n---", 3)
+        assert end > 0
+        record.write_text(
+            text[:end] + "\nworkflow_source: train.py" + text[end:],
+            encoding="utf-8",
+        )
         (Path(legacy.experiment_dir) / "workflow.json").write_text(json.dumps(IR), encoding="utf-8")
         stale = Workspace(ws.root).get_project("p").get_experiment("old")
         assert stale.workflow_kind is None

@@ -6,12 +6,10 @@ import tempfile
 from pathlib import Path
 
 from fastapi.testclient import TestClient
-from typer.testing import CliRunner
 
 import molab.entry  # noqa: F401  (registers Experiment.define)
-from molab.cli import app
 from molab.server.app import create_app
-from molab.server.dependencies import reset_workspace_cache, set_workspace_path_override
+from molab.server.dependencies import set_workspace_path_override
 from molab.workflow import Task, TaskContext, Workflow, WorkflowCompiler
 from molab.workspace import Workspace
 
@@ -190,24 +188,12 @@ def main() -> None:
                 )
                 legacy.save()
                 legacy_url = f"/api/projects/{project.id}/experiments/{legacy.id}/workflow"
-                blocked = client.put(legacy_url, json={"document": DOC_A})
-                message = blocked.json().get("error", {}).get("message", "")
-                _check(blocked.status_code == 409, f"legacy {blocked.status_code} {blocked.text}")
-                _check("molab migrate workflow-kind" in message, message)
-
-                result = CliRunner().invoke(app, ["migrate", "workflow-kind", str(root)])
-                _check(
-                    result.exit_code == 0,
-                    f"migrate {result.exit_code} {result.stdout} {result.stderr}",
-                )
+                bound = client.put(legacy_url, json={"document": DOC_A})
+                _check(bound.status_code == 200, f"unbound {bound.status_code} {bound.text}")
                 legacy = Workspace.load(root).get_project("p").get_experiment("legacy")
-                _check(legacy.workflow_kind == "code", f"migrated {legacy.workflow_kind}")
-                _check(legacy.metadata.revision == 1, "migrated rev")
-                reset_workspace_cache()
-                after = client.put(legacy_url, json={"document": DOC_A, "convertToDocument": True})
-                _check(after.status_code == 200, f"after {after.status_code} {after.text}")
-                legacy = Workspace.load(root).get_project("p").get_experiment("legacy")
-                _check(legacy.metadata.revision == 2, f"after rev {legacy.metadata.revision}")
+                _check(legacy.workflow_kind == "document", f"bound {legacy.workflow_kind}")
+                _check(legacy.metadata.workflow_entrypoint is None, "entrypoint cleared")
+                _check(legacy.metadata.revision == 2, f"bound rev {legacy.metadata.revision}")
         finally:
             set_workspace_path_override(None)
     print("arch-own-04b-writers: ok")

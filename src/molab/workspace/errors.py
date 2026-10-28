@@ -150,15 +150,12 @@ class FolderMoveCollisionError(ValueError):
 class UnmigratedAssetError(RuntimeError):
     """An on-disk asset record predates the unified schema.
 
-    The message names the record and the migration command. Readers raise
+    The message names the record and why it is unreadable. Readers raise
     this and never rewrite the file.
     """
 
     def __init__(self, path: str, reason: str, *, workspace_root: str) -> None:
-        super().__init__(
-            f"asset record {path!r} predates the unified asset schema ({reason}); "
-            f"run `molab migrate assets {workspace_root}`"
-        )
+        super().__init__(f"asset record {path!r} predates the unified asset schema ({reason})")
         self.path = path
         self.reason = reason
         self.workspace_root = workspace_root
@@ -167,16 +164,13 @@ class UnmigratedAssetError(RuntimeError):
 class UnmigratedLayoutError(RuntimeError):
     """A directory still holds a JSON record and no ``index.md`` record.
 
-    The message names the directory and the migration command. Readers raise
+    The message names the directory and the leftover files. Readers raise
     this and never rewrite the file. The server maps it to HTTP 409
     ``MIGRATION_REQUIRED``, like :class:`UnmigratedAssetError` (D83).
     """
 
     def __init__(self, directory: str, legacy: tuple[str, ...]) -> None:
-        super().__init__(
-            f"{directory!r} still holds {', '.join(legacy)} and no index.md record; "
-            "run `molab migrate index`"
-        )
+        super().__init__(f"{directory!r} still holds {', '.join(legacy)} and no index.md record")
         self.directory = directory
         self.legacy = legacy
 

@@ -27,8 +27,8 @@ def _unshare(target: Path) -> None:
 
     A hard-linked file is the *same* file under two names, so appending to it
     inside a workspace also appends to whatever else points at that inode —
-    which is exactly how an archive built with hard links (``molab migrate``)
-    stops being a snapshot of its source. Replacing the file with a private
+    which is exactly how a hard-linked archive stops being a snapshot of
+    its source. Replacing the file with a private
     copy first costs one copy the first time and nothing after.
     """
     try:
