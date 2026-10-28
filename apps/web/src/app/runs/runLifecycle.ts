@@ -53,8 +53,9 @@ export function canStart(status: string): boolean {
   return status.toLowerCase() === "pending";
 }
 
+/** Queued, pending, running, and finalizing — the same set the server will stop. */
 export function canCancel(status: string): boolean {
-  return status.toLowerCase() === "running";
+  return ACTIVE_STATUSES.has(status.toLowerCase());
 }
 
 export function canResume(status: string): boolean {

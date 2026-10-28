@@ -32,18 +32,33 @@ export default defineConfig(({ command }) => {
     resolve: {
       alias: {
         '@molcrafts/molrs': resolveMolrs(),
-        '@molcrafts/ui/file-tree': path.resolve(
-          __dirname,
-          '../../../molcrafts-ui/packages/ui/src/lib/file-tree.ts',
-        ),
-        '@molcrafts/ui-vega-lite': path.resolve(
-          __dirname,
-          '../../../molcrafts-ui/packages/vega-lite/src/index.tsx',
-        ),
-        '@molcrafts/ui-vega': path.resolve(
-          __dirname,
-          '../../../molcrafts-ui/packages/vega/src/index.tsx',
-        ),
+        // Sibling checkouts win. This tree has no `molcrafts-ui/packages/*`,
+        // so the published packages (and the in-repo markdown stand-in) are
+        // what the dev server actually resolves.
+        '@molcrafts/ui/file-tree': existsSync(
+          path.resolve(__dirname, '../../../molcrafts-ui/packages/ui/src/lib/file-tree.ts'),
+        )
+          ? path.resolve(__dirname, '../../../molcrafts-ui/packages/ui/src/lib/file-tree.ts')
+          : path.resolve(__dirname, '../../node_modules/@molcrafts/ui/dist/lib/file-tree.js'),
+        ...(existsSync(
+          path.resolve(__dirname, '../../../molcrafts-ui/packages/vega-lite/src/index.tsx'),
+        )
+          ? {
+              '@molcrafts/ui-vega-lite': path.resolve(
+                __dirname,
+                '../../../molcrafts-ui/packages/vega-lite/src/index.tsx',
+              ),
+            }
+          : {}),
+        ...(existsSync(path.resolve(__dirname, '../../../molcrafts-ui/packages/vega/src/index.tsx'))
+          ? {
+              '@molcrafts/ui-vega': path.resolve(
+                __dirname,
+                '../../../molcrafts-ui/packages/vega/src/index.tsx',
+              ),
+            }
+          : {}),
+        '@molcrafts/ui-markdown': path.resolve(__dirname, 'src/vendor/ui-markdown.tsx'),
         react: path.resolve(__dirname, '../../node_modules/react'),
         'react-dom': path.resolve(__dirname, '../../node_modules/react-dom'),
         // Dynamic import("vega") inside the wrapper must use this app's copy.

@@ -29,6 +29,7 @@ import { usePermissions } from "@/app/auth";
 import { HarvestDialog } from "@/app/components/HarvestDialog";
 import {
   bypassCacheFor,
+  canCancel,
   canHarvest,
   defaultExecutionMode,
   type ExecutionModeValue,
@@ -68,8 +69,7 @@ export function RunToolbar({
     () => executionModeOptions({ attempts, basedOnStatus }),
     [attempts, basedOnStatus],
   );
-  const canCancelSelected =
-    selectedExecution?.status === "queued" || selectedExecution?.status === "running";
+  const canCancelSelected = selectedExecution ? canCancel(selectedExecution.status) : false;
   const [open, setOpen] = useState(false);
   const [mode, setMode] = useState<ExecutionModeValue>(defaultExecutionMode(modeOptions));
   const [bypassCache, setBypassCache] = useState(false);
@@ -254,9 +254,9 @@ export function RunToolbar({
         />
       )}
 
-      {canCancelSelected && (
+      {selectedExecution && canCancelSelected && (
         <WorkbenchIconAction
-          label="Cancel selected execution"
+          label={`Stop ${selectedExecution.executionId}`}
           deniedReason={writeDeniedReason}
           className="text-destructive hover:bg-destructive/10 hover:text-destructive"
           onClick={() => void onCancel()}

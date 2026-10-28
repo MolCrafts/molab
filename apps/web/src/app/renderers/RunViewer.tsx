@@ -105,7 +105,15 @@ export const RunViewer = (props: RunRendererProps): JSX.Element => {
     {
       value: "overview",
       label: "Overview",
-      content: <RunOverview run={run} />,
+      content: (
+        <RunOverview
+          run={run}
+          onOpenExecution={(executionId) => {
+            setSelectedExecutionId(executionId);
+            openRunTab("executions");
+          }}
+        />
+      ),
     },
     {
       value: "parameters",

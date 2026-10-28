@@ -31,8 +31,8 @@ export const parseWorkflowIr = parseTaskGraphIr;
 
 interface WorkflowGraphProps {
   ir: TaskGraphJson;
-  /** Optional fixed height for the inline render area (default 280px). */
-  height?: number;
+  /** Fixed pixel height, or a CSS height such as `100%` (default 280). */
+  height?: number | string;
   className?: string;
   /** Called with the task id when a node is clicked. */
   onNodeClick?: (taskId: string) => void;

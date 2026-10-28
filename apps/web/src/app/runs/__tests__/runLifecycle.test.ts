@@ -2,6 +2,7 @@ import { describe, expect, it } from "@rstest/core";
 import {
   bypassCacheFor,
   canAnalyzeFailure,
+  canCancel,
   canHarvest,
   canReproduce,
   canRerun,
@@ -82,6 +83,17 @@ describe("bypassCacheFor", () => {
     expect(bypassCacheFor("rerun", true)).toBe(true);
     expect(bypassCacheFor("rerun", false)).toBe(false);
     expect(bypassCacheFor("initial", false)).toBe(false);
+  });
+});
+
+describe("canCancel", () => {
+  it("stops an active attempt, including queued and finalizing", () => {
+    for (const status of ["queued", "pending", "running", "finalizing", "QUEUED"]) {
+      expect(canCancel(status)).toBe(true);
+    }
+    for (const status of ["succeeded", "failed", "cancelled", "interrupted", "skipped"]) {
+      expect(canCancel(status)).toBe(false);
+    }
   });
 });
 

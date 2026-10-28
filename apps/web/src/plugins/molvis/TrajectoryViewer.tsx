@@ -65,7 +65,7 @@ export const TrajectoryViewer = ({
 
     const run = async (): Promise<void> => {
       try {
-        const { mountMolvis, loadFileContent, loadZarrSource } = await loadMolvisCore();
+        const { mountMolvis, loadFileContent, loadDirectory } = await loadMolvisCore();
         if (cancelled) return;
 
         const app = mountMolvis(container) as unknown as MolvisHandle;
@@ -83,8 +83,8 @@ export const TrajectoryViewer = ({
           const storeRoot = zarrStoreRoot(fileRelPath);
           const source = scopedZarrSource(workspaceZarrSource(executionDir), storeRoot);
           const storeName = storeRoot.split("/").pop() || fileName;
-          if (loadZarrSource) {
-            await loadZarrSource(molvisApp, source, storeName);
+          if (loadDirectory) {
+            await loadDirectory(molvisApp, source, storeName);
           } else {
             const files = await collectZarrStore(source);
             await loadFileContent(molvisApp, files, storeName);

@@ -56,7 +56,7 @@ const bytesToBase64 = (bytes: Uint8Array): string => {
   return btoa(binary);
 };
 
-/** Fallback when molvis has not yet exported ``loadZarrSource``. */
+/** Fallback when this stage build has no directory ingress. */
 export const collectZarrStore = async (
   source: ZarrDirectorySource,
 ): Promise<Record<string, string>> => {

@@ -12,7 +12,6 @@
  * callers can still early-return their own "run not found" chrome afterwards.
  */
 
-import { Code as InlineCode } from "@molcrafts/ui";
 import { useQuery } from "@tanstack/react-query";
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import { runsApi } from "@/api";
@@ -175,17 +174,10 @@ export const useRunViewer = (props: RunRendererProps): UseRunViewer => {
     );
     if (!run || !execution || !canCancel(execution.status)) return;
     const confirmed = await confirm({
-      title: "Cancel execution?",
-      description: (
-        <>
-          Stop{" "}
-          <InlineCode className="rounded-control bg-muted px-1 py-1 text-label">
-            {execution.executionId}
-          </InlineCode>
-          ?
-        </>
-      ),
-      confirmLabel: "Cancel",
+      title: `Stop ${execution.executionId}?`,
+      description: "The attempt stops. Dismiss leaves it running.",
+      confirmLabel: `Stop ${execution.executionId}`,
+      cancelLabel: "Keep running",
       destructive: true,
     });
     if (!confirmed) return;
@@ -193,9 +185,9 @@ export const useRunViewer = (props: RunRendererProps): UseRunViewer => {
       await runsApi.cancelExecution(run.projectId, run.experimentId, run.id, execution.executionId);
       onRefresh();
     } catch (error) {
-      console.error("Failed to cancel run:", error);
+      console.error("Failed to stop execution:", error);
       void alert({
-        title: "Cancel failed",
+        title: "Stop failed",
         description: error instanceof Error ? error.message : String(error),
       });
     }

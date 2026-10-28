@@ -1,17 +1,22 @@
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@molcrafts/ui";
 import { useQuery } from "@tanstack/react-query";
-import { Network } from "lucide-react";
+import { Network, TriangleAlert } from "lucide-react";
 import { type JSX, type ReactNode, useMemo } from "react";
 import type { ExecutionOutputsResponse } from "@/api/generated/models/ExecutionOutputsResponse";
 import {
   CopyButton,
   EmptyState,
+  formatSpan,
   InventoryCanvas,
   OverviewSurface,
-  StatusIcon,
 } from "@/app/components/entity";
 import { listExecutionColumns, listExecutionDetails } from "@/app/registry";
 import { formatDuration } from "@/app/renderers/dashboardData";
+import {
+  failedTask,
+  failureHeadline,
+  failureRecovery,
+  preferredFailureOutput,
+} from "@/app/renderers/run/executionFailure";
 import { RunExecutionOutputs } from "@/app/renderers/run/RunExecutionOutputs";
 import { groupForStatus } from "@/app/runs/statusGroups";
 import { executionJournalQueryOptions, journalRefetchInterval } from "@/app/state/entityQueries";
@@ -33,6 +38,15 @@ const stringValue = (value: unknown): string | null =>
 const instant = (value: string | null | undefined): number | null => {
   const parsed = value ? Date.parse(value) : Number.NaN;
   return Number.isFinite(parsed) ? parsed : null;
+};
+
+/** Wall time of one attempt. In-flight work counts up to now. */
+const attemptElapsed = (execution: ExecutionRecordSummary): string | null => {
+  const startIso = execution.startedAt ?? execution.createdAt;
+  const start = instant(startIso);
+  if (start === null) return null;
+  if (execution.finishedAt) return formatDuration(startIso, execution.finishedAt);
+  return formatSpan((Date.now() - start) / 1000);
 };
 
 /** Shared time domain for the attempt bars — every attempt of one Run. */
@@ -74,7 +88,7 @@ const AttemptBar = ({
   execution: ExecutionRecordSummary;
   window: AttemptWindow | null;
 }): JSX.Element => {
-  const duration = formatDuration(execution.startedAt, execution.finishedAt);
+  const duration = attemptElapsed(execution);
   const start = instant(execution.startedAt ?? execution.createdAt);
   const end = instant(execution.finishedAt) ?? Date.now();
   const group = groupForStatus(execution.status);
@@ -180,6 +194,14 @@ export const RunExecutionsPanel = ({
       : "Failed to load execution workflow"
     : null;
   const graphLoading = journal.isLoading;
+  const taskFailure = failedTask(graph);
+  const headline = selected
+    ? failureHeadline({ status: selected.status, error: selected.error, task: taskFailure })
+    : null;
+  const failureSelection = headline
+    ? preferredFailureOutput(taskFailure?.id ?? null, outputs)
+    : null;
+  const recovery = headline ? failureRecovery(failureSelection) : null;
 
   const attemptSpan = attemptWindow(history);
   const row = selected ? executionRow(selected, run.id) : null;
@@ -199,96 +221,95 @@ export const RunExecutionsPanel = ({
     );
   }
 
+  const startedLabel = selected ? formatDateTime(selected.startedAt ?? selected.createdAt) : null;
+  const durationLabel = selected ? attemptElapsed(selected) : null;
+
   return (
-    <OverviewSurface>
-      <InventoryCanvas>
-        <section className="space-y-3">
-          <h2 className="text-body-lg font-medium text-foreground">
+    <OverviewSurface className="overflow-hidden" surfaceClassName="flex h-full min-h-0 flex-col">
+      <div className="grid h-full min-h-0 grid-rows-[minmax(0,16rem)_minmax(0,1fr)] lg:grid-cols-[minmax(18rem,24rem)_minmax(0,1fr)] lg:grid-rows-1">
+        <section
+          aria-label="Executions"
+          className="flex min-h-0 flex-col border-b border-border lg:border-r lg:border-b-0"
+        >
+          <h2 className="flex shrink-0 items-baseline gap-2 border-b border-border px-3 py-2 text-body font-medium text-foreground">
             Executions
-            <span className="ml-2 font-mono text-micro font-normal text-muted-foreground">
+            <span className="font-mono text-micro font-normal text-muted-foreground">
               {history.length}
             </span>
           </h2>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-14">#</TableHead>
-                <TableHead className="w-24">State</TableHead>
-                <TableHead>Execution</TableHead>
-                <TableHead className="w-24">Mode</TableHead>
-                <TableHead className="w-40">Started</TableHead>
-                <TableHead className="w-52">Timeline</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {history.map((execution, index) => {
-                const active = execution.executionId === selectedExecutionId;
-                const select = (): void => onSelectExecution(execution.executionId);
-                return (
-                  <TableRow
-                    key={execution.executionId}
-                    tabIndex={0}
+          <ul className="min-h-0 flex-1 overflow-auto">
+            {history.map((execution, index) => {
+              const active = execution.executionId === selectedExecutionId;
+              return (
+                <li key={execution.executionId} className="border-b border-border">
+                  <button
+                    type="button"
                     aria-label={`Select execution ${execution.executionId}`}
                     aria-current={active ? "true" : undefined}
                     className={cn(
-                      "cursor-pointer transition-colors hover:bg-interactive/50",
+                      "flex w-full flex-col gap-1.5 px-3 py-2 text-left",
+                      "hover:bg-interactive/50",
                       "focus-visible:bg-interactive/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring",
-                      active && "bg-muted/40",
+                      active && "bg-accent/5",
                     )}
-                    onClick={select}
-                    onKeyDown={(event) => {
-                      if (
-                        event.target !== event.currentTarget ||
-                        (event.key !== "Enter" && event.key !== " ")
-                      ) {
-                        return;
-                      }
-                      event.preventDefault();
-                      select();
-                    }}
-                    data-state={active ? "selected" : undefined}
+                    onClick={() => onSelectExecution(execution.executionId)}
                   >
-                    <TableCell className="font-mono text-label text-muted-foreground">
-                      <span className="inline-flex items-center gap-2">
-                        <StatusIcon status={execution.status} />
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span className="shrink-0 font-mono text-label text-muted-foreground">
                         {index + 1}
                       </span>
-                    </TableCell>
-                    <TableCell>
+                      <span className="min-w-0 flex-1 truncate font-mono text-label text-foreground">
+                        {execution.executionId}
+                      </span>
                       <RunStatusBadge status={execution.status} size="sm" />
-                    </TableCell>
-                    <TableCell className="font-mono text-label">{execution.executionId}</TableCell>
-                    <TableCell className="text-label text-muted-foreground">
-                      {execution.mode}
-                    </TableCell>
-                    <TableCell className="text-label text-muted-foreground">
-                      {formatDateTime(execution.startedAt ?? execution.createdAt)}
-                    </TableCell>
-                    <TableCell>
-                      <AttemptBar execution={execution} window={attemptSpan} />
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
+                    </span>
+                    <span className="flex min-w-0 items-center gap-2 text-label text-muted-foreground">
+                      <span className="shrink-0">{execution.mode}</span>
+                      <span className="min-w-0 truncate">
+                        {formatDateTime(execution.startedAt ?? execution.createdAt)}
+                      </span>
+                    </span>
+                    <AttemptBar execution={execution} window={attemptSpan} />
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
         </section>
 
-        {!selected ? (
-          <section className="border-t border-border py-8">
-            <EmptyState
-              title="Select an execution"
-              description="Execution details, outputs, environment, and plugin tools require an explicit physical attempt."
-            />
-          </section>
-        ) : (
-          <>
-            <section className="space-y-3">
-              <div className="flex items-baseline justify-between gap-2">
-                <h2 className="text-body-lg font-medium text-foreground">
-                  Execution #{selectedIndex + 1}
-                </h2>
-                <div className="flex items-center gap-1">
+        <div className="flex h-full min-h-0 flex-col overflow-auto">
+          {!selected ? (
+            <div className="flex h-full items-center justify-center px-4 py-8">
+              <EmptyState
+                title="Select an execution"
+                description="Workflow, outputs, and executor details belong to one attempt."
+              />
+            </div>
+          ) : (
+            <>
+              <header className="flex shrink-0 items-start justify-between gap-3 px-4 pt-3">
+                <div className="min-w-0 space-y-1">
+                  <div className="flex min-w-0 flex-wrap items-center gap-2">
+                    <h2 className="font-mono text-body-lg font-medium text-foreground">
+                      {selected.executionId}
+                    </h2>
+                    <RunStatusBadge status={selected.status} size="sm" />
+                    <span className="font-mono text-label text-muted-foreground">
+                      #{selectedIndex + 1}
+                    </span>
+                  </div>
+                  <p className="text-label text-muted-foreground">
+                    {selected.mode}
+                    {startedLabel ? ` · started ${startedLabel}` : ""}
+                    {selected.finishedAt ? ` · ended ${formatDateTime(selected.finishedAt)}` : ""}
+                    {durationLabel ? ` · ${durationLabel}` : ""}
+                    {selected.basedOnExecutionId ? ` · from ${selected.basedOnExecutionId}` : ""}
+                    {selected.checkpointArtifactId
+                      ? ` · checkpoint ${selected.checkpointArtifactId}`
+                      : ""}
+                  </p>
+                </div>
+                <div className="flex shrink-0 items-center gap-1">
                   <CopyButton value={selected.executionId} label="execution ID" />
                   {workflow && onOpenWorkflow && (
                     <WorkbenchIconAction label="Open workflow definition" onClick={onOpenWorkflow}>
@@ -296,97 +317,110 @@ export const RunExecutionsPanel = ({
                     </WorkbenchIconAction>
                   )}
                 </div>
-              </div>
-              <PropertyRows
-                entries={[
-                  { label: "State", value: <RunStatusBadge status={selected.status} size="sm" /> },
-                  { label: "Mode", value: selected.mode },
-                  { label: "Created", value: formatDateTime(selected.createdAt) },
-                  {
-                    label: "Start",
-                    value: selected.startedAt ? formatDateTime(selected.startedAt) : "—",
-                  },
-                  {
-                    label: "End",
-                    value: selected.finishedAt ? formatDateTime(selected.finishedAt) : "—",
-                  },
-                  ...(selected.basedOnExecutionId
-                    ? [{ label: "Based on", value: selected.basedOnExecutionId }]
-                    : []),
-                  ...(selected.checkpointArtifactId
-                    ? [{ label: "Checkpoint", value: selected.checkpointArtifactId }]
-                    : []),
-                ]}
-              />
-            </section>
+              </header>
 
-            {row && columns.length > 0 && (
-              <section className="space-y-3">
-                <h2 className="text-body-lg font-medium text-foreground">Executor</h2>
-                <PropertyRows
-                  entries={columns.map((column) => {
-                    const Cell = column.Cell;
-                    return { label: column.header, value: <Cell execution={row} /> };
-                  })}
-                />
-              </section>
-            )}
-
-            {row &&
-              details.map((detail) => {
-                const Detail = detail.Component;
-                return (
-                  <section key={detail.id} className="space-y-3">
-                    <h2 className="text-body-lg font-medium text-foreground">{detail.title}</h2>
-                    <Detail execution={row} runId={run.id} />
-                  </section>
-                );
-              })}
-
-            <section className="space-y-3">
-              <h2 className="text-body-lg font-medium text-foreground">Outputs</h2>
-              <RunExecutionOutputs
-                outputs={outputs}
-                error={logsError}
-                projectId={run.projectId}
-                experimentId={run.experimentId}
-                runId={run.id}
-                selectedExecutionId={selectedExecutionId}
-                onPromoted={onPromoted}
-              />
-            </section>
-
-            <section className="space-y-3">
-              <h2 className="text-body-lg font-medium text-foreground">Workflow</h2>
-              {graph ? (
-                <div className="overflow-hidden border border-border bg-canvas">
-                  <WorkflowGraph
-                    ir={graph}
-                    height={420}
-                    onNodeClick={(taskId) => onInspectTask(taskId, run.id)}
+              {headline ? (
+                <p
+                  role="alert"
+                  className="mx-4 mt-3 flex shrink-0 items-start gap-2 border border-border px-3 py-2"
+                >
+                  <TriangleAlert
+                    className="mt-px size-icon-sm shrink-0 text-status-failed-foreground"
+                    aria-hidden
                   />
+                  <span className="min-w-0 break-words text-label text-foreground">
+                    <span className="font-mono">{headline}</span>
+                    {recovery ? (
+                      <span className="mt-1 block text-muted-foreground">{recovery}</span>
+                    ) : null}
+                  </span>
+                </p>
+              ) : null}
+
+              <div className="grid min-h-[32rem] flex-1 grid-rows-[minmax(16rem,1fr)_minmax(16rem,1fr)] lg:min-h-[16rem] lg:grid-cols-2 lg:grid-rows-1">
+                <section
+                  aria-label="Workflow"
+                  className="flex min-h-0 flex-col border-b border-border px-4 py-3 lg:border-r lg:border-b-0"
+                >
+                  <h3 className="shrink-0 pb-2 text-body-lg font-medium text-foreground">
+                    Workflow
+                  </h3>
+                  <div className="min-h-0 flex-1">
+                    {graph ? (
+                      <WorkflowGraph
+                        ir={graph}
+                        height="100%"
+                        className="h-full"
+                        onNodeClick={(taskId) => onInspectTask(taskId, run.id)}
+                      />
+                    ) : graphError ? (
+                      <WorkbenchOperationState
+                        kind="error"
+                        density="compact"
+                        title="Could not load workflow"
+                        detail={graphError}
+                      />
+                    ) : graphLoading ? (
+                      <WorkbenchOperationState
+                        kind="loading"
+                        density="compact"
+                        title="Loading workflow…"
+                        skeletonRows={3}
+                      />
+                    ) : (
+                      <p className="py-6 text-label text-muted-foreground">No workflow snapshot.</p>
+                    )}
+                  </div>
+                </section>
+
+                <section aria-label="Outputs" className="flex min-h-0 flex-col px-4 py-3">
+                  <h3 className="shrink-0 pb-2 text-body-lg font-medium text-foreground">
+                    Outputs
+                  </h3>
+                  <div className="min-h-0 flex-1">
+                    <RunExecutionOutputs
+                      fill
+                      preferred={failureSelection}
+                      outputs={outputs}
+                      error={logsError}
+                      projectId={run.projectId}
+                      experimentId={run.experimentId}
+                      runId={run.id}
+                      selectedExecutionId={selected.executionId}
+                      onPromoted={onPromoted}
+                    />
+                  </div>
+                </section>
+              </div>
+
+              {(columns.length > 0 || details.length > 0) && row ? (
+                <div className="flex shrink-0 flex-col gap-6 px-4 pt-2 pb-3">
+                  {columns.length > 0 && (
+                    <section className="space-y-2">
+                      <h3 className="text-body-lg font-medium text-foreground">Executor</h3>
+                      <PropertyRows
+                        entries={columns.map((column) => {
+                          const Cell = column.Cell;
+                          return { label: column.header, value: <Cell execution={row} /> };
+                        })}
+                      />
+                    </section>
+                  )}
+                  {details.map((detail) => {
+                    const Detail = detail.Component;
+                    return (
+                      <section key={detail.id} className="space-y-2">
+                        <h3 className="text-body-lg font-medium text-foreground">{detail.title}</h3>
+                        <Detail execution={row} runId={run.id} />
+                      </section>
+                    );
+                  })}
                 </div>
-              ) : graphError ? (
-                <WorkbenchOperationState
-                  kind="error"
-                  density="compact"
-                  title="Could not load workflow"
-                  detail={graphError}
-                />
-              ) : graphLoading ? (
-                <WorkbenchOperationState
-                  kind="loading"
-                  density="compact"
-                  title="Loading workflow…"
-                  skeletonRows={3}
-                />
-              ) : (
-                <p className="py-6 text-label text-muted-foreground">No workflow snapshot.</p>
-              )}
-            </section>
-          </>
-        )}
-      </InventoryCanvas>
+              ) : null}
+            </>
+          )}
+        </div>
+      </div>
     </OverviewSurface>
   );
 };

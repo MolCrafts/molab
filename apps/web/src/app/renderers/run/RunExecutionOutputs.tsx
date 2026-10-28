@@ -27,6 +27,13 @@ interface RunExecutionOutputsProps {
   experimentId: string;
   runId: string;
   selectedExecutionId: string | null;
+  /** Fill the parent instead of the fixed chart height. */
+  fill?: boolean;
+  /**
+   * Open this output until the user picks one for the current execution.
+   * A later click wins, and survives switching away and back.
+   */
+  preferred?: SelectedOutput | null;
   onPromoted?: () => void;
 }
 
@@ -106,16 +113,20 @@ export const RunExecutionOutputs = ({
   experimentId,
   runId,
   selectedExecutionId,
+  fill = false,
+  preferred = null,
   onPromoted,
 }: RunExecutionOutputsProps): JSX.Element => {
   const [picked, setPicked] = useState<{
     executionId: string;
     selected: SelectedOutput;
   } | null>(null);
-  const selected =
+  const userPick =
     picked && selectedExecutionId !== null && picked.executionId === selectedExecutionId
       ? picked.selected
       : null;
+  const selected = userPick ?? (selectedExecutionId !== null ? preferred : null);
+  const frameClass = fill ? "h-full min-h-0" : "h-chart-lg";
   const choose = (next: SelectedOutput): void => {
     if (!selectedExecutionId) return;
     setPicked({ executionId: selectedExecutionId, selected: next });
@@ -172,7 +183,9 @@ export const RunExecutionOutputs = ({
 
   if (!selectedExecutionId) {
     return (
-      <div className="flex h-chart-lg items-center justify-center rounded-md border border-border bg-canvas">
+      <div
+        className={`flex ${frameClass} items-center justify-center rounded-md border border-border bg-canvas`}
+      >
         <EmptyState title="Select an execution" description="Outputs belong to one execution." />
       </div>
     );
@@ -249,7 +262,9 @@ export const RunExecutionOutputs = ({
     : undefined;
 
   return (
-    <div className="grid h-chart-lg min-h-0 grid-cols-[minmax(240px,34%)_1fr] overflow-hidden rounded-md border border-border bg-canvas">
+    <div
+      className={`grid ${frameClass} min-h-0 grid-cols-[minmax(240px,34%)_1fr] overflow-hidden rounded-md border border-border bg-canvas`}
+    >
       <div className="min-h-0 overflow-auto border-r border-border p-2">
         <TreeView
           nodes={nodes}
