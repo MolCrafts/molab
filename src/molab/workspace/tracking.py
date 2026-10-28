@@ -25,33 +25,56 @@ over its one WAL writer. It tags a record written inside a task with
 replay them on a hit. Off-workspace, a task gets a :class:`BufferedMetrics`
 with the same methods, which only keeps the records in memory.
 
-Stdlib only (plus ``mollog`` and the stdlib-only ``metrics_seam``), so
-``import molab`` stays light.
+Code that is not a molab task (D94): :func:`track` returns the current
+execution, or an :class:`AttachedTracker` in a child process molab started
+(``MOLAB_EXECUTION_DIR``), or a live execution of a run it opens, or an
+:class:`OfflineTracker` that writes the same layout into a plain directory.
+A child and an offline script never write ``execution.json``: their stdio
+and metrics land at their final paths, and an artifact is only *staged*
+(``work/_molab/staged/`` plus one line in ``work/_molab/artifacts.jsonl``).
+The owner folds the manifest at seal; ``molab runs adopt --from`` folds an
+offline directory.
+
+Stdlib only at import (plus ``mollog``, ``molab.atomicio`` and the
+stdlib-only ``metrics_seam`` / ``execution_dirs``), so ``import molab``
+stays light.
 """
 
 from __future__ import annotations
 
+import atexit
 import builtins
+import json
 import mimetypes
+import os
+import platform
+import shutil
 import sys
 import threading
-from collections.abc import Callable, Generator, Iterable, Mapping
+import time
+import warnings
+from collections.abc import Callable, Generator, Iterable, Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from pathlib import Path
-from typing import IO, TYPE_CHECKING, Literal, Protocol, runtime_checkable
+from pathlib import Path, PurePosixPath
+from typing import IO, TYPE_CHECKING, Literal, Protocol, Self, runtime_checkable
 
 from mollog import get_logger
 
 from molab._typing import JSONValue
+from molab.atomicio import atomic_write_json
 
-from .metrics_seam import MetricRecord, MetricsSink
+from .execution_dirs import ARTIFACTS, WORK
+from .metrics_seam import MetricRecord, MetricsSink, create_metrics_writer
 
 if TYPE_CHECKING:
     from _typeshed import SupportsWrite
 
     from .domain import Artifact
+    from .execution_context import ExecutionContext
+    from .fs import PathArg
 
 _logger = get_logger(__name__)
 
@@ -87,8 +110,21 @@ class Tracker(Protocol):
         name: str | None = None,
         media_type: str | None = None,
         semantic_type: str | None = None,
-    ) -> Artifact:
-        """Archive *data* as an Artifact of the attempt."""
+        tags: dict[str, str] | None = None,
+    ) -> Artifact | StagedArtifact:
+        """Archive *data* as an Artifact of the attempt.
+
+        The owning process records it at once; a child or an offline script
+        stages it for the owner (:class:`StagedArtifact`).
+        """
+        ...
+
+    def child_env(self) -> dict[str, str]:
+        """The environment a subprocess needs to attach to this attempt (D94).
+
+        ``MOLAB_EXECUTION_DIR`` (absolute) and ``MOLAB_TASK`` (the current
+        task, or empty). Merge it over ``os.environ`` for the child.
+        """
         ...
 
 
@@ -98,10 +134,25 @@ _CURRENT: ContextVar[Tracker | None] = ContextVar("molab_current_execution", def
 _TASK: ContextVar[str | None] = ContextVar("molab_current_task", default=None)
 """The workflow task this context runs inside, or ``None``."""
 
+_PROCESS: Tracker | None = None
+"""The tracker :func:`track` bound for the whole process (cases 2 and 4), or ``None``.
+
+Consulted only when no execution is current in the context, so a
+``run.start()`` inside a tracked script is still current for its body.
+"""
+
+_process_lock = threading.Lock()
+
 
 def current() -> Tracker | None:
-    """The current execution, or ``None`` outside one."""
-    return _CURRENT.get()
+    """The current execution, or ``None`` outside one.
+
+    The execution entered in this context wins; otherwise the tracker
+    :func:`track` bound for this process (an attached child, an offline
+    script).
+    """
+    tracker = _CURRENT.get()
+    return tracker if tracker is not None else _PROCESS
 
 
 def current_task() -> str | None:
@@ -234,9 +285,15 @@ def _wall_time(wall_time: str | datetime | None) -> str:
     return datetime.now(UTC).isoformat()
 
 
-def _with_task(tags: dict[str, JSONValue] | None) -> dict[str, JSONValue] | None:
-    """*tags* plus ``task`` when a task scope is active; an explicit ``task`` wins."""
-    task = _TASK.get()
+def _with_task(
+    tags: dict[str, JSONValue] | None, default: str | None = None
+) -> dict[str, JSONValue] | None:
+    """*tags* plus ``task`` when a task scope is active; an explicit ``task`` wins.
+
+    *default* names the task outside a task scope: an attached child's
+    ``MOLAB_TASK``.
+    """
+    task = _TASK.get() or default
     if task is None:
         return tags
     merged: dict[str, JSONValue] = {"task": task}
@@ -248,8 +305,12 @@ def _with_task(tags: dict[str, JSONValue] | None) -> dict[str, JSONValue] | None
 class _MetricsFront:
     """The five record types over one :class:`MetricsSink`, tagged with the task."""
 
-    def __init__(self, sink: MetricsSink) -> None:
+    def __init__(self, sink: MetricsSink, *, task: str | None = None) -> None:
         self._sink = sink
+        self._task = task
+
+    def _tags(self, tags: dict[str, JSONValue] | None) -> dict[str, JSONValue] | None:
+        return _with_task(tags, self._task)
 
     def _wrote(self, record: MetricRecord) -> MetricRecord:
         """Called with every record this front appended; returns it."""
@@ -266,7 +327,7 @@ class _MetricsFront:
     ) -> MetricRecord:
         """Append one number, ``t="scalar"``."""
         return self._wrote(
-            self._sink.scalar(key, value, step, wall_time=wall_time, tags=_with_task(tags))
+            self._sink.scalar(key, value, step, wall_time=wall_time, tags=self._tags(tags))
         )
 
     def histogram(
@@ -282,7 +343,7 @@ class _MetricsFront:
         """Append one distribution, ``t="histogram"`` with ``v={bins, counts}``."""
         return self._wrote(
             self._sink.histogram(
-                key, bins, counts, step, wall_time=wall_time, tags=_with_task(tags)
+                key, bins, counts, step, wall_time=wall_time, tags=self._tags(tags)
             )
         )
 
@@ -297,7 +358,7 @@ class _MetricsFront:
     ) -> MetricRecord:
         """Append one string, ``t="text"``."""
         return self._wrote(
-            self._sink.text(key, text, step, wall_time=wall_time, tags=_with_task(tags))
+            self._sink.text(key, text, step, wall_time=wall_time, tags=self._tags(tags))
         )
 
     def image_ref(
@@ -313,7 +374,7 @@ class _MetricsFront:
         """Append a reference to an image file, ``t="image_ref"`` with ``v={path, caption}``."""
         return self._wrote(
             self._sink.image_ref(
-                key, path, step, caption=caption, wall_time=wall_time, tags=_with_task(tags)
+                key, path, step, caption=caption, wall_time=wall_time, tags=self._tags(tags)
             )
         )
 
@@ -328,7 +389,7 @@ class _MetricsFront:
     ) -> MetricRecord:
         """Append any JSON value, ``t="json"``."""
         return self._wrote(
-            self._sink.json(key, value, step, wall_time=wall_time, tags=_with_task(tags))
+            self._sink.json(key, value, step, wall_time=wall_time, tags=self._tags(tags))
         )
 
     def flush(self) -> None:
@@ -357,16 +418,20 @@ class TrackedMetrics(_MetricsFront):
         execution_dir: The attempt's directory. An image file outside it is
             archived from a copy of its bytes, since an Artifact is a product
             of the attempt.
+        task: The task a record is tagged with outside a task scope (an
+            attached child's ``MOLAB_TASK``, D94). Such records are not kept
+            for the node cache: only the owner's task scope captures.
     """
 
     def __init__(
         self,
         sink: MetricsSink,
         *,
-        emit_artifact: Callable[..., Artifact] | None = None,
+        emit_artifact: Callable[..., Artifact | StagedArtifact] | None = None,
         execution_dir: Path | None = None,
+        task: str | None = None,
     ) -> None:
-        super().__init__(sink)
+        super().__init__(sink, task=task)
         self._emit_artifact = emit_artifact
         self._execution_dir = execution_dir
         self._lock = threading.Lock()
@@ -646,6 +711,717 @@ class BufferedMetrics(_MetricsFront):
         return self.image_ref(key, path, step, caption=caption, tags=tags)
 
 
+# ── molab.track(): plain scripts and child processes (D94) ────────────────
+
+#: The environment variable naming the attempt a child attaches to (absolute).
+EXECUTION_DIR_ENV = "MOLAB_EXECUTION_DIR"
+
+#: The environment variable naming the task that started a child.
+TASK_ENV = "MOLAB_TASK"
+
+#: Set (non-empty) by ``CommandTask``, which captures the child's stdout and
+#: stderr and archives them itself; an attached child then copies no print,
+#: so no line lands twice.
+STDIO_CAPTURED_ENV = "MOLAB_STDIO_CAPTURED"
+
+#: Where :func:`track` writes when nothing else applies.
+DEFAULT_TRACK_DIR = "molab-track"
+
+#: How often, at most, an attached child re-reads the seal before a write.
+SEAL_CHECK_SECONDS = 5.0
+
+#: The ``semantic_type`` of a metrics WAL registered as an Artifact.
+METRICS_SEMANTIC_TYPE = "molplot.metrics"
+
+#: ``work/_molab/``: what a child or an offline script leaves for the owner.
+#: The same reserved name as ``artifacts/_molab/``
+#: (``artifact_repository.RESERVED_ARTIFACT_DIR``).
+TRACK_DIR = PurePosixPath(WORK.name, "_molab")
+
+#: Staged artifact bytes, ``work/_molab/staged/<n>-<basename>``.
+STAGED_DIR = TRACK_DIR / "staged"
+
+#: The staging manifest: one JSON line per staged artifact.
+MANIFEST = TRACK_DIR / "artifacts.jsonl"
+
+#: An offline directory's own record: start / finish times and the process.
+TRACK_RECORD = TRACK_DIR / "track.json"
+
+
+@dataclass(frozen=True)
+class StagedArtifact:
+    """An artifact a child or an offline script staged for the owner to record.
+
+    Attributes:
+        name: The Artifact's name; it is recorded at ``artifacts/<name>``.
+        path: That eventual path, relative to the attempt (``artifacts/<name>``),
+            so an ``image_ref`` written now points where the image will be.
+        staged: Where the bytes wait, relative to the tracked directory.
+        media_type: The media type to record.
+        semantic_type: The semantic type to record.
+        tags: Tags, recorded as ``metadata.tags``.
+        task: The task that staged it (``MOLAB_TASK``), if any.
+        created_at: When it was staged (ISO, UTC).
+    """
+
+    name: str
+    path: str
+    staged: str
+    media_type: str | None = None
+    semantic_type: str | None = None
+    tags: dict[str, str] = field(default_factory=dict)
+    task: str | None = None
+    created_at: str = ""
+
+    def to_line(self) -> str:
+        """The manifest line, ending in a newline."""
+        record = {
+            "staged": self.staged,
+            "name": self.name,
+            "media_type": self.media_type,
+            "semantic_type": self.semantic_type,
+            "tags": self.tags,
+            "task": self.task,
+            "created_at": self.created_at,
+        }
+        return json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n"
+
+    @classmethod
+    def from_line(cls, line: str) -> StagedArtifact:
+        """Parse one manifest line.
+
+        Raises:
+            ValueError: The line is not a manifest entry, or its ``staged``
+                path is not under ``work/_molab/staged/``.
+        """
+        try:
+            raw = json.loads(line)
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"not JSON: {exc}") from None
+        if not isinstance(raw, dict):
+            raise ValueError("not a JSON object")
+        staged, name = raw.get("staged"), raw.get("name")
+        if not isinstance(staged, str) or not isinstance(name, str):
+            raise ValueError("an entry needs string 'staged' and 'name'")
+        rel = PurePosixPath(staged)
+        if rel.is_absolute() or ".." in rel.parts or rel.parent != STAGED_DIR:
+            raise ValueError(f"staged path {staged!r} is not under {STAGED_DIR}/")
+        _check_artifact_name(name, raw.get("semantic_type"))
+        tags = raw.get("tags")
+
+        def _text(key: str) -> str | None:
+            value = raw.get(key)
+            return value if isinstance(value, str) and value else None
+
+        return cls(
+            name=name,
+            path=PurePosixPath(ARTIFACTS.name, name).as_posix(),
+            staged=staged,
+            media_type=_text("media_type"),
+            semantic_type=_text("semantic_type"),
+            tags={str(k): str(v) for k, v in tags.items()} if isinstance(tags, dict) else {},
+            task=_text("task"),
+            created_at=_text("created_at") or "",
+        )
+
+    @property
+    def created_time(self) -> datetime | None:
+        """:attr:`created_at` as a datetime, or ``None`` when missing or not ISO."""
+        return _parse_time(self.created_at)
+
+    def metadata(self, staged_by: str) -> dict[str, JSONValue]:
+        """The Artifact metadata the owner records: ``staged_by``, the task, the tags."""
+        meta: dict[str, JSONValue] = {"staged_by": staged_by}
+        if self.task:
+            # ``task_id`` is the producer key the server and the cache read.
+            meta["task"] = self.task
+            meta["task_id"] = self.task
+        if self.tags:
+            meta["tags"] = dict(self.tags)
+        return meta
+
+
+def _check_artifact_name(name: str, semantic_type: object) -> None:
+    """Refuse a name ``artifacts/<name>`` cannot hold, as ``emit_artifact`` does.
+
+    Raises:
+        ValueError: *name* is empty, absolute, has ``..``, lands in the
+            reserved ``artifacts/_molab/``, or the type is the reserved result.
+    """
+    rel = PurePosixPath(name)
+    if not name or rel.is_absolute() or ".." in rel.parts or rel.as_posix() != name:
+        raise ValueError(f"artifact name must be a plain relative path: {name!r}")
+    if rel.parts[0] == TRACK_DIR.name or semantic_type == "result":
+        raise ValueError("artifacts/_molab/ and semantic_type 'result' are reserved for molab")
+
+
+def manifest_entries(directory: Path) -> Iterator[tuple[int, StagedArtifact | ValueError]]:
+    """Each line of *directory*'s staging manifest, parsed or with why it is not.
+
+    Yields ``(line number, entry or error)``; blank lines are skipped. Nothing
+    when there is no manifest.
+    """
+    path = directory / MANIFEST
+    if not path.is_file():
+        return
+    text = path.read_text(encoding="utf-8", errors="replace")
+    for number, line in enumerate(text.splitlines(), start=1):
+        if not line.strip():
+            continue
+        try:
+            yield number, StagedArtifact.from_line(line)
+        except ValueError as exc:
+            yield number, exc
+
+
+@dataclass(frozen=True)
+class TrackedDirectory:
+    """What an offline :func:`track` directory holds, for ``runs adopt --from``.
+
+    Attributes:
+        root: The directory.
+        stdio: Stream -> its existing log file (``stdout.log`` / ``stderr.log``).
+        metrics: The ``artifacts/*.mlp.jsonl`` WALs.
+        artifacts: The staged artifacts, in manifest order.
+        started_at: ``track.json``'s start, if recorded.
+        finished_at: ``track.json``'s finish, if recorded.
+    """
+
+    root: Path
+    stdio: dict[str, Path]
+    metrics: tuple[Path, ...]
+    artifacts: tuple[StagedArtifact, ...]
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+
+    def files(self) -> list[Path]:
+        """Every file an adoption moves."""
+        return [
+            *self.stdio.values(),
+            *self.metrics,
+            *(self.root / entry.staged for entry in self.artifacts),
+        ]
+
+
+def _parse_time(value: object) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo is not None else parsed.astimezone()
+
+
+def read_tracked(directory: PathArg) -> TrackedDirectory:
+    """Read an offline :func:`track` directory without changing it.
+
+    Raises:
+        FileNotFoundError: *directory* is not a directory.
+        ValueError: A manifest line is malformed.
+    """
+    from .execution_repository import STDIO_FILES
+
+    root = Path(str(directory))
+    if not root.is_dir():
+        raise FileNotFoundError(f"{root} is not a directory")
+    stdio = {stream: root / name for stream, name in STDIO_FILES.items() if (root / name).is_file()}
+    metrics_dir = root / ARTIFACTS.name
+    metrics = (
+        tuple(sorted(p for p in metrics_dir.glob("*.mlp.jsonl") if p.is_file()))
+        if metrics_dir.is_dir()
+        else ()
+    )
+    entries: list[StagedArtifact] = []
+    for number, entry in manifest_entries(root):
+        if isinstance(entry, ValueError):
+            raise ValueError(f"{root / MANIFEST}:{number}: {entry}")
+        entries.append(entry)
+    started = finished = None
+    record = root / TRACK_RECORD
+    if record.is_file():
+        try:
+            raw = json.loads(record.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as exc:
+            raise ValueError(f"{record}: not JSON: {exc}") from None
+        if isinstance(raw, dict):
+            started = _parse_time(raw.get("started_at"))
+            finished = _parse_time(raw.get("finished_at"))
+    return TrackedDirectory(
+        root=root,
+        stdio=stdio,
+        metrics=metrics,
+        artifacts=tuple(entries),
+        started_at=started,
+        finished_at=finished,
+    )
+
+
+class _AppendFiles:
+    """Unbuffered ``O_APPEND`` writers: one descriptor and one lock per file.
+
+    Each write is one ``os.write`` of the whole text, so lines from the owner
+    and from other children appending to the same file never interleave
+    within a write on a local filesystem.
+    """
+
+    _FLAGS = os.O_WRONLY | os.O_APPEND | os.O_CREAT | getattr(os, "O_BINARY", 0)
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._files: dict[Path, tuple[int, threading.Lock]] = {}
+
+    def write(self, path: Path, text: str) -> None:
+        data = text.encode("utf-8", errors="replace")
+        with self._lock:
+            entry = self._files.get(path)
+            if entry is None:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                entry = (os.open(path, self._FLAGS, 0o644), threading.Lock())
+                self._files[path] = entry
+        fd, lock = entry
+        with lock:
+            view = memoryview(data)
+            while view:
+                view = view[os.write(fd, view) :]
+
+    def close(self) -> None:
+        with self._lock:
+            files, self._files = self._files, {}
+        for fd, _lock in files.values():
+            os.close(fd)
+
+
+class _StagingTracker:
+    """The tracking surface of a process that does not own the attempt (D94).
+
+    stdio goes to ``<dir>/stdout.log`` / ``stderr.log`` and metrics to
+    ``<dir>/artifacts/<stem>.mlp.jsonl`` (through the seam), both appended
+    with ``O_APPEND``. An artifact is copied into
+    ``<dir>/work/_molab/staged/<n>-<basename>`` and announced by one line in
+    ``<dir>/work/_molab/artifacts.jsonl``. Nothing here writes
+    ``execution.json``.
+    """
+
+    #: ``metadata.staged_by`` of what this tracker stages.
+    staged_by = "child"
+
+    def __init__(self, directory: Path, *, task: str | None) -> None:
+        from .execution_repository import STDIO_FILES
+
+        self._dir = directory
+        self._task = task
+        self._stdio_paths: dict[str, Path] = {
+            stream: directory / name for stream, name in STDIO_FILES.items()
+        }
+        self._files = _AppendFiles()
+        self._stage_lock = threading.Lock()
+        self._metrics: TrackedMetrics | None = None
+        self._copy_stdio = not os.environ.get(STDIO_CAPTURED_ENV)
+        self._claim_with = False
+        self._withs: list[bool] = []
+
+    @property
+    def execution_dir(self) -> Path:
+        """The directory this tracker writes into."""
+        return self._dir
+
+    @property
+    def task(self) -> str | None:
+        """The task this process runs for (``MOLAB_TASK``), if any."""
+        return self._task
+
+    def _writable(self) -> bool:
+        """Whether a write may land now."""
+        return True
+
+    def write_stdio(self, stream: Stream, text: str, *, flush: bool = False) -> None:  # noqa: ARG002 — unbuffered
+        """Append *text* to ``stdout.log`` / ``stderr.log`` in one write.
+
+        Nothing is copied when the parent captures this process's streams
+        (``MOLAB_STDIO_CAPTURED``) or once the attempt is sealed.
+        """
+        if not self._copy_stdio or not self._writable():
+            return
+        self._files.write(self._stdio_paths[stream], text)
+
+    def _append_wal(self, name: str | Path, line: str) -> None:
+        if not self._writable():
+            return
+        self._files.write(
+            self._dir / ARTIFACTS.name / name, line if line.endswith("\n") else line + "\n"
+        )
+
+    @property
+    def metrics(self) -> TrackedMetrics:
+        """Metrics appended live to ``<dir>/artifacts/metrics.mlp.jsonl``."""
+        if self._metrics is None:
+            sink = create_metrics_writer(self._dir, self._append_wal)
+            self._metrics = TrackedMetrics(
+                sink, emit_artifact=self.emit_artifact, execution_dir=self._dir, task=self._task
+            )
+        return self._metrics
+
+    def emit_artifact(
+        self,
+        data: object,
+        *,
+        name: str | None = None,
+        media_type: str | None = None,
+        semantic_type: str | None = None,
+        tags: dict[str, str] | None = None,
+    ) -> StagedArtifact:
+        """Stage *data* for the owner to record as ``artifacts/<name>``.
+
+        The same forms as ``ExecutionContext.emit_artifact``: a path to a file
+        or directory (copied, so later changes to it are not recorded), or
+        bytes / a dict or list (as JSON) / anything else (as text) with
+        *name*.
+
+        Raises:
+            ValueError: In-memory data without *name*; a name
+                ``artifacts/<name>`` cannot hold; a name already staged here.
+            FileNotFoundError: A path that does not exist.
+            RuntimeError: The attempt is sealed.
+        """
+        if not self._writable():
+            raise RuntimeError(f"cannot stage an artifact: the attempt at {self._dir} is sealed")
+        source: Path | None = None
+        if isinstance(data, Path):
+            source = data
+            if not source.exists():
+                raise FileNotFoundError(source)
+        elif isinstance(data, str) and Path(data).exists():
+            source = Path(data)
+        elif name is None:
+            raise ValueError("emit_artifact requires name for in-memory data")
+        label = name if name is not None else source.name if source is not None else ""
+        _check_artifact_name(label, semantic_type)
+        task = current_task() or self._task
+        with self._stage_lock:
+            if any(
+                isinstance(entry, StagedArtifact) and entry.name == label
+                for _, entry in manifest_entries(self._dir)
+            ):
+                raise ValueError(
+                    f"artifact {label!r} is already staged; stage it under another name"
+                )
+            is_dir = source is not None and source.is_dir()
+            target = self._reserve(PurePosixPath(label).name, is_dir=is_dir)
+            try:
+                if source is None:
+                    _write_data(target, data)
+                elif is_dir:
+                    shutil.copytree(source, target, dirs_exist_ok=True)
+                else:
+                    shutil.copyfile(source, target)
+            except BaseException:
+                if target.is_dir():
+                    shutil.rmtree(target, ignore_errors=True)
+                else:
+                    target.unlink(missing_ok=True)
+                raise
+            staged = StagedArtifact(
+                name=label,
+                path=PurePosixPath(ARTIFACTS.name, label).as_posix(),
+                staged=target.relative_to(self._dir).as_posix(),
+                media_type=media_type,
+                semantic_type=semantic_type,
+                tags=dict(tags or {}),
+                task=task,
+                created_at=datetime.now(UTC).isoformat(),
+            )
+            self._files.write(self._dir / MANIFEST, staged.to_line())
+        return staged
+
+    def _reserve(self, basename: str, *, is_dir: bool) -> Path:
+        """Claim ``staged/<n>-<basename>`` exclusively, even against other processes."""
+        staged_dir = self._dir / STAGED_DIR
+        staged_dir.mkdir(parents=True, exist_ok=True)
+        n = sum(1 for _ in staged_dir.iterdir()) + 1
+        while True:
+            candidate = staged_dir / f"{n}-{basename}"
+            try:
+                if is_dir:
+                    candidate.mkdir()
+                else:
+                    os.close(os.open(candidate, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o644))
+            except FileExistsError:
+                n += 1
+                continue
+            return candidate
+
+    def child_env(self) -> dict[str, str]:
+        """``MOLAB_EXECUTION_DIR`` and ``MOLAB_TASK`` for a subprocess of this one."""
+        return {EXECUTION_DIR_ENV: str(self._dir), TASK_ENV: current_task() or self._task or ""}
+
+    def close(self) -> None:
+        """Close the open files and stop being this process's tracker. Idempotent."""
+        _unbind_process(self)
+        self._files.close()
+
+    def __enter__(self) -> Self:
+        self._withs.append(self._claim_with)
+        self._claim_with = False
+        return self
+
+    def __exit__(self, *exc_info: object) -> bool:
+        if self._withs and self._withs.pop():
+            self.close()
+        return False
+
+
+def _write_data(target: Path, data: object) -> None:
+    """Write in-memory *data* the way ``ExecutionContext.emit_artifact`` does."""
+    if isinstance(data, (bytes, bytearray)):
+        target.write_bytes(bytes(data))
+    elif isinstance(data, (dict, list)):
+        target.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
+    else:
+        target.write_text(str(data), encoding="utf-8")
+
+
+def _read_sealed(record: Path) -> str | None:
+    """The seal of an attempt record (``sealed_at``), or ``None`` when open or unreadable."""
+    try:
+        raw = json.loads(record.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    sealed = raw.get("sealed_at") if isinstance(raw, dict) else None
+    return sealed if isinstance(sealed, str) and sealed else None
+
+
+class AttachedTracker(_StagingTracker):
+    """A child process writing into its parent's attempt (D94).
+
+    :func:`track` returns one when ``MOLAB_EXECUTION_DIR`` is set. stdio and
+    metrics land at their final paths; artifacts are staged, and the owner
+    records them when it seals. A metric record carries ``tags.task`` from
+    ``MOLAB_TASK``. ``with`` is a no-op.
+
+    The seal is re-read at most every :data:`SEAL_CHECK_SECONDS` before a
+    write. After it, a print or a metric is dropped (one ``RuntimeWarning``,
+    never an exception), and ``emit_artifact`` raises.
+
+    Under an offline directory (``work/_molab/track.json``, no
+    ``execution.json``) there is no seal to check.
+
+    Args:
+        execution_dir: The attempt (or offline) directory.
+        task: The task that started this process.
+
+    Raises:
+        RuntimeError: The directory has no ``execution.json`` (and is not an
+            offline directory), or the attempt is already sealed.
+    """
+
+    def __init__(self, execution_dir: PathArg, *, task: str | None = None) -> None:
+        from .execution_repository import EXECUTION_RECORD_FILENAME
+
+        directory = Path(str(execution_dir)).absolute()
+        record = directory / EXECUTION_RECORD_FILENAME
+        self._record_path: Path | None = None
+        if record.is_file():
+            sealed = _read_sealed(record)
+            if sealed is not None:
+                raise RuntimeError(
+                    f"cannot attach to {directory}: the attempt was sealed at {sealed}"
+                )
+            self._record_path = record
+        elif not (directory / TRACK_RECORD).is_file():
+            raise RuntimeError(
+                f"cannot attach to {directory}: it has no {EXECUTION_RECORD_FILENAME}"
+            )
+        super().__init__(directory, task=task or None)
+        self._checked_at = time.monotonic()
+        self._sealed = False
+
+    def _writable(self) -> bool:
+        if self._record_path is None:
+            return True
+        if self._sealed:
+            return False
+        now = time.monotonic()
+        if now - self._checked_at < SEAL_CHECK_SECONDS:
+            return True
+        self._checked_at = now
+        if _read_sealed(self._record_path) is None:
+            return True
+        self._sealed = True
+        warnings.warn(
+            f"the attempt at {self._dir} is sealed; molab drops this process's later "
+            "prints and metrics",
+            RuntimeWarning,
+            stacklevel=2,
+        )
+        return False
+
+
+class OfflineTracker(_StagingTracker):
+    """A script with no molab around it, writing the attempt layout into a directory (D94).
+
+    ``stdout.log`` / ``stderr.log``, ``artifacts/metrics.mlp.jsonl``, the staged
+    artifacts and their manifest, plus ``work/_molab/track.json``
+    (``started_at``, host, pid, argv, python, cwd), whose ``finished_at`` is
+    written by :meth:`close`, at interpreter exit, or when the first ``with``
+    around it exits. ``molab runs adopt P E RUN --from DIR`` folds the
+    directory into a sealed attempt.
+
+    A directory written before keeps its first ``started_at``: it is one
+    attempt, adopted once.
+
+    Args:
+        directory: Where to write; created when missing.
+    """
+
+    staged_by = "offline"
+
+    def __init__(self, directory: PathArg = DEFAULT_TRACK_DIR) -> None:
+        root = Path(str(directory)).absolute()
+        root.mkdir(parents=True, exist_ok=True)
+        super().__init__(root, task=None)
+        self._closed = False
+        self._claim_with = True
+        started = datetime.now(UTC).isoformat()
+        previous = _read_track_record(root / TRACK_RECORD)
+        if previous is not None and isinstance(previous.get("started_at"), str):
+            started = str(previous["started_at"])
+        self._track: dict[str, JSONValue] = {
+            "started_at": started,
+            "finished_at": None,
+            "host": platform.node(),
+            "pid": os.getpid(),
+            "argv": list(sys.argv),
+            "python": sys.version,
+            "cwd": str(Path.cwd()),
+        }
+        self._write_record()
+        atexit.register(self.close)
+
+    def _write_record(self) -> None:
+        path = self._dir / TRACK_RECORD
+        path.parent.mkdir(parents=True, exist_ok=True)
+        atomic_write_json(path, self._track)
+
+    def close(self) -> None:
+        """Write ``finished_at`` and close the files. Idempotent."""
+        if self._closed:
+            return
+        self._closed = True
+        atexit.unregister(self.close)
+        try:
+            self._track["finished_at"] = datetime.now(UTC).isoformat()
+            self._write_record()
+        finally:
+            super().close()
+
+
+def _read_track_record(path: Path) -> dict[str, JSONValue] | None:
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return raw if isinstance(raw, dict) else None
+
+
+def _bind_process(tracker: Tracker) -> None:
+    global _PROCESS
+    with _process_lock:
+        _PROCESS = tracker
+
+
+def _unbind_process(tracker: Tracker) -> None:
+    global _PROCESS
+    with _process_lock:
+        if _PROCESS is tracker:
+            _PROCESS = None
+
+
+def _void_claim(tracker: Tracker) -> None:
+    """A tracker handed out again by :func:`track` is borrowed: its ``with`` ends nothing."""
+    if isinstance(tracker, _StagingTracker):
+        tracker._claim_with = False
+        return
+    from .execution_context import ExecutionContext
+
+    if isinstance(tracker, ExecutionContext):
+        tracker._release_track_claim()
+
+
+def _open_run(
+    root: Path, project: str, experiment: str, params: dict[str, JSONValue] | None
+) -> ExecutionContext:
+    from .workspace import Workspace
+
+    workspace = Workspace(root)
+    run = workspace.add_project(project).add_experiment(experiment).add_run(params=params)
+    return run.start()._enter_for_track()
+
+
+def track(
+    dir: PathArg | None = None,
+    *,
+    project: str | None = None,
+    experiment: str | None = None,
+    params: dict[str, JSONValue] | None = None,
+) -> Tracker:
+    """The tracking surface for code that is not a molab task (D94).
+
+    Decided in this order:
+
+    1. An execution is current (``run.start()``, a workflow task, an earlier
+       ``track()``): that one, unchanged.
+    2. ``MOLAB_EXECUTION_DIR`` is set (a child of a molab execution): an
+       :class:`AttachedTracker` on it, current for this process.
+    3. *project* and *experiment* are given and the working directory is
+       inside a workspace: the experiment is opened (idempotent on its name),
+       a run is added with *params*, and its ``run.start()`` is entered and
+       returned — a live attempt, sealed when the first ``with`` around it
+       exits (or at interpreter exit, failed when an uncaught exception ended
+       the script).
+    4. Otherwise: an :class:`OfflineTracker` writing into *dir*
+       (``./molab-track`` by default), current for this process. Adopt it
+       later with ``molab runs adopt P E RUN --from DIR``.
+
+    Every result works as a context manager; for cases 1 and 2 ``with`` is a
+    no-op.
+
+    Args:
+        dir: The offline directory (case 4 only).
+        project: The project of a new run (case 3).
+        experiment: The experiment of a new run (case 3).
+        params: The new run's parameters (case 3).
+
+    Raises:
+        ValueError: Only one of *project* / *experiment* is given.
+        RuntimeError: ``MOLAB_EXECUTION_DIR`` names a sealed or missing attempt.
+    """
+    tracker = current()
+    if tracker is not None:
+        _void_claim(tracker)
+        return tracker
+    if (project is None) != (experiment is None):
+        raise ValueError("molab.track: pass both project and experiment, or neither")
+    attached_dir = os.environ.get(EXECUTION_DIR_ENV)
+    if attached_dir:
+        attached = AttachedTracker(attached_dir, task=os.environ.get(TASK_ENV) or None)
+        _bind_process(attached)
+        return attached
+    if project is not None and experiment is not None:
+        from .workspace import Workspace
+
+        root = Workspace.enclosing_root(Path.cwd())
+        if root is not None:
+            return _open_run(Path(root), project, experiment, params)
+        _logger.info(
+            f"molab.track: {Path.cwd()} is not inside a workspace; tracking offline "
+            f"into {dir if dir is not None else DEFAULT_TRACK_DIR}"
+        )
+    offline = OfflineTracker(dir if dir is not None else DEFAULT_TRACK_DIR)
+    _bind_process(offline)
+    return offline
+
+
 _warn_lock = threading.Lock()
 _warned = False
 
@@ -692,7 +1468,7 @@ def print(
     # typeshed overloads ``print`` on ``flush`` (a flushable file when it is
     # true); the arguments are forwarded unchanged, so the call is the user's.
     builtins.print(*values, sep=sep, end=end, file=file, flush=flush)  # ty: ignore[no-matching-overload]
-    tracker = _CURRENT.get()
+    tracker = current()
     if tracker is None:
         return
     stream = _stream_of(file)
@@ -708,11 +1484,25 @@ def print(
 
 
 __all__ = [
+    "DEFAULT_TRACK_DIR",
+    "EXECUTION_DIR_ENV",
     "IMAGE_SEMANTIC_TYPE",
+    "MANIFEST",
+    "METRICS_SEMANTIC_TYPE",
+    "SEAL_CHECK_SECONDS",
+    "STAGED_DIR",
+    "STDIO_CAPTURED_ENV",
+    "TASK_ENV",
     "TASK_RECORD_CAP",
+    "TRACK_DIR",
+    "TRACK_RECORD",
+    "AttachedTracker",
     "BufferedMetrics",
+    "OfflineTracker",
+    "StagedArtifact",
     "StdioFiles",
     "Stream",
+    "TrackedDirectory",
     "TrackedMetrics",
     "Tracker",
     "bind",
@@ -720,7 +1510,10 @@ __all__ = [
     "current_task",
     "enter_task",
     "exit_task",
+    "manifest_entries",
     "print",
+    "read_tracked",
     "task_scope",
+    "track",
     "unbind",
 ]

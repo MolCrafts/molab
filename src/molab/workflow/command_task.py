@@ -20,6 +20,7 @@ Two construction paths, exactly one supplied:
 
 from __future__ import annotations
 
+import os
 import subprocess
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -83,6 +84,14 @@ class CommandTask(Task):
     appended to that execution's ``stdout.log`` / ``stderr.log`` (on success
     and on failure); the return value is unchanged.
 
+    Inside an execution the argv subprocess also gets the execution's
+    ``child_env()`` (``MOLAB_EXECUTION_DIR`` / ``MOLAB_TASK``), so a Python
+    child calling ``molab.track()`` attaches to it: its metrics land in the
+    attempt's WAL and its artifacts are recorded at seal (D94). A key in
+    *env* wins over them. The child is also told its streams are captured
+    (``MOLAB_STDIO_CAPTURED``), so its ``molab.print`` lines are archived
+    once, through the capture.
+
     Args:
         argv: The command + arguments to run as a subprocess. Mutually exclusive
             with *runner*.
@@ -90,6 +99,8 @@ class CommandTask(Task):
             ``.stdout`` / ``.stderr``. Mutually exclusive with *argv*.
         cwd: Working directory for the argv subprocess (ignored for *runner*).
         env: Environment mapping for the argv subprocess (ignored for *runner*).
+            Inside an execution it is laid over the attach variables; without
+            it the subprocess inherits ``os.environ`` plus those variables.
         timeout: Optional wall-clock timeout (seconds) for the argv subprocess.
 
     Raises:
@@ -132,7 +143,7 @@ class CommandTask(Task):
                 capture_output=True,
                 text=True,
                 cwd=self._cwd,
-                env=self._env,
+                env=self._child_env(),
                 timeout=self._timeout,
                 check=False,
             )
@@ -143,3 +154,13 @@ class CommandTask(Task):
         if result.returncode != 0:
             raise CommandError(result.returncode, result.stdout, result.stderr)
         return result
+
+    def _child_env(self) -> dict[str, str] | None:
+        """The argv subprocess's environment: *env* over the attach variables."""
+        tracker = tracking.current()
+        if tracker is None:
+            return self._env
+        attach = {**tracker.child_env(), tracking.STDIO_CAPTURED_ENV: "1"}
+        if self._env is None:
+            return {**os.environ, **attach}
+        return {**attach, **self._env}

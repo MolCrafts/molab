@@ -63,6 +63,10 @@ AGENT_COMMANDS: Final[tuple[tuple[str, str], ...]] = (
         "Write a knowledge document",
         "molab knowledge write NAME TEXT --on HOST --class CLASS --created-by AGENT",
     ),
+    (
+        "Record a script's offline tracking directory",
+        "molab runs adopt PROJECT EXPERIMENT RUN --from DIR [--params '{...}']",
+    ),
     ("Import external data", "molab asset import TITLE PATH --project PROJECT"),
     ("Empty old scratch entries", "molab scratch clean --older-than 7d"),
     ("Rebuild every derived index block", "molab index sync"),
@@ -76,6 +80,8 @@ AGENT_COMMANDS: Final[tuple[tuple[str, str], ...]] = (
 AGENT_PYTHON: Final[tuple[tuple[str, str], ...]] = (
     # D92: copied into the current execution's stdout.log / stderr.log.
     ("Print into the run's record", "from molab import print"),
+    # D94: a plain script or child process gets the same surface.
+    ("Track a plain script or child process", "from molab import track"),
 )
 
 #: ``(what you want to do, the call that does it)`` on the ``ctx`` molab hands

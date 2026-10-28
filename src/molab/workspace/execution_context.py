@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import atexit
 import contextlib
 import json
 import os
@@ -43,14 +44,22 @@ from .history import AgentRef
 from .metrics_seam import MetricRecord, create_metrics_writer
 from .run_heartbeat import HEARTBEAT_INTERVAL_SECONDS, touch_alive, unlink_alive
 from .tracking import (
+    EXECUTION_DIR_ENV,
+    MANIFEST,
+    METRICS_SEMANTIC_TYPE,
+    STAGED_DIR,
+    TASK_ENV,
+    StagedArtifact,
     StdioFiles,
     Stream,
     TrackedMetrics,
     Tracker,
     bind,
+    current,
     current_task,
     enter_task,
     exit_task,
+    manifest_entries,
     unbind,
 )
 
@@ -304,6 +313,11 @@ class ExecutionContext:
     its ``stdout.log`` / ``stderr.log``. A context entered inside another is
     current until it exits, and then the outer one is again (D92).
 
+    A ``with`` on the context while it is entered and current (``molab.track()``
+    hands it out again) borrows it: entering and leaving does nothing. A child
+    process attaches through :meth:`child_env`; what it staged under
+    ``work/_molab/`` is recorded when this context exits, before the seal (D94).
+
     Args:
         run: The Run this attempt realizes.
         profile_config: The active profile; ``None`` means empty and unnamed
@@ -387,6 +401,9 @@ class ExecutionContext:
         self._stdio: StdioFiles | None = None
         self._tracking_token: Token[Tracker | None] | None = None
         self._task_token: Token[str | None] | None = None
+        self._track_claim = False
+        self._seal_at_exit_registered = False
+        self._borrows = 0
         workspace = run.experiment.project.workspace
         self._artifacts = ArtifactRepository(workspace.root, fs=workspace.fs)
         self._executions = ExecutionRepository(
@@ -491,6 +508,24 @@ class ExecutionContext:
             raise RuntimeError("ExecutionContext has not been entered")
         self._stdio.write(stream, text, flush=flush)
 
+    def child_env(self) -> dict[str, str]:
+        """The environment a subprocess needs to attach to this attempt (D94).
+
+        ``MOLAB_EXECUTION_DIR`` (absolute) and ``MOLAB_TASK`` (the current
+        task, or empty). In the child, ``molab.track()`` then returns an
+        attached tracker: its prints and metrics land in this attempt's files,
+        and its artifacts are recorded when this context exits::
+
+            subprocess.run(cmd, env={**os.environ, **ctx.child_env()})
+
+        Raises:
+            RuntimeError: The context has not been entered.
+        """
+        return {
+            EXECUTION_DIR_ENV: str(self.execution_dir.absolute()),
+            TASK_ENV: current_task() or "",
+        }
+
     @property
     def checkpoint(self) -> _CheckpointWriter:
         return _CheckpointWriter(self)
@@ -544,6 +579,14 @@ class ExecutionContext:
 
     def __enter__(self) -> ExecutionContext:
         if self._entered:
+            if self._track_claim:
+                # The ``with`` around ``molab.track(project=…, experiment=…)``:
+                # entered already, and this ``with``'s exit seals it.
+                self._track_claim = False
+                return self
+            if current() is self:
+                self._borrows += 1
+                return self
             raise RuntimeError("ExecutionContext cannot be entered twice")
         state: Execution
         if self._explicit_execution_id is not None:
@@ -581,6 +624,13 @@ class ExecutionContext:
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> bool:
+        if self._borrows:
+            self._borrows -= 1
+            return False
+        if self._seal_at_exit_registered:
+            atexit.unregister(self._seal_at_exit)
+            self._seal_at_exit_registered = False
+        self._track_claim = False
         self._stop_heartbeat()
         self._remove_heartbeat()
         # Before the seal: it hashes stdout.log / stderr.log into the evidence,
@@ -593,16 +643,8 @@ class ExecutionContext:
             if exc_type is not None or self._failure is not None
             else ExecutionStatus.SUCCEEDED
         )
-        if self._metrics is not None:
-            self._metrics.flush()
-            metrics_path = self.get_dir(ARTIFACTS.name) / "metrics.mlp.jsonl"
-            # Any record type written in this process registers the WAL.
-            if self._metrics.touched and metrics_path.is_file():
-                self.emit_artifact(
-                    metrics_path,
-                    media_type="application/x-ndjson",
-                    semantic_type="molplot.metrics",
-                )
+        self._fold_staged()
+        self._register_metrics()
         self._emit_results()
         self.log("run").append(
             f"{datetime.now(UTC).isoformat()} execution finished status={status.value}"
@@ -621,6 +663,38 @@ class ExecutionContext:
         exc_tb: TracebackType | None,
     ) -> bool:
         return self.__exit__(exc_type, exc_val, exc_tb)
+
+    def _enter_for_track(self) -> ExecutionContext:
+        """Enter for ``molab.track(project=…, experiment=…)`` (D94).
+
+        The first ``with`` around the returned context adopts this entry and
+        seals on exit. Without one, the attempt is sealed at interpreter exit.
+        """
+        self.__enter__()
+        self._track_claim = True
+        atexit.register(self._seal_at_exit)
+        self._seal_at_exit_registered = True
+        return self
+
+    def _release_track_claim(self) -> None:
+        """Handed out again by ``molab.track()``: a ``with`` now only borrows."""
+        self._track_claim = False
+
+    def _seal_at_exit(self) -> None:
+        """Seal an attempt ``molab.track()`` entered and no ``with`` exited.
+
+        An uncaught exception that ended the script (``sys.last_exc``) seals
+        it failed; otherwise it succeeded.
+        """
+        self._seal_at_exit_registered = False
+        if not self._entered:
+            return
+        self._borrows = 0
+        error = getattr(sys, "last_exc", None)
+        if isinstance(error, BaseException):
+            self.__exit__(type(error), error, error.__traceback__)
+        else:
+            self.__exit__(None, None, None)
 
     def emit_artifact(
         self,
@@ -885,6 +959,81 @@ class ExecutionContext:
                 self._stdio.close()
             except Exception:
                 _logger.warning(f"could not close stdio of execution {self.id}", exc_info=True)
+
+    def _register_metrics(self) -> None:
+        """Register the metrics WAL as an Artifact when anything wrote to it.
+
+        Written in this process (any record type), or by a child attached to
+        this attempt (the file exists and is not empty, D94). An attempt
+        sealed early is left untouched, with one ``run.log`` line.
+        """
+        if self._metrics is not None:
+            self._metrics.flush()
+        metrics_path = self.execution_dir / ARTIFACTS.name / "metrics.mlp.jsonl"
+        if not metrics_path.is_file():
+            return
+        touched = self._metrics is not None and self._metrics.touched
+        if not touched and metrics_path.stat().st_size == 0:
+            return
+        if self._executions.get(self.id).sealed:
+            self.log("run").append(
+                f"metrics not recorded: Execution {self.id} was sealed before exit"
+            )
+            return
+        self.emit_artifact(
+            metrics_path,
+            media_type="application/x-ndjson",
+            semantic_type=METRICS_SEMANTIC_TYPE,
+        )
+
+    def _fold_staged(self) -> None:
+        """Record what child processes staged under ``work/_molab/`` (D94).
+
+        Each manifest entry's bytes move from ``work/_molab/staged/`` to
+        ``artifacts/<name>`` and are recorded through :meth:`emit_artifact`
+        with their name, types and tags, plus ``metadata.task`` and
+        ``metadata.staged_by="child"``. An entry that cannot be recorded is
+        logged in ``run.log`` and does not fail the attempt.
+        """
+        entries = list(manifest_entries(self.execution_dir))
+        if not entries:
+            return
+        if self._executions.get(self.id).sealed:
+            self.log("run").append(
+                f"staged artifacts not recorded: Execution {self.id} was sealed before exit"
+            )
+            return
+        self.set_active_task(None)
+        for number, entry in entries:
+            try:
+                if isinstance(entry, ValueError):
+                    raise entry
+                self._fold_one(entry)
+            except Exception as exc:
+                self.log("run").append(
+                    f"staged artifact {MANIFEST}:{number} not recorded: {type(exc).__name__}: {exc}"
+                )
+
+    def _fold_one(self, entry: StagedArtifact) -> None:
+        staged = self.execution_dir / entry.staged
+        if staged.parent != self.execution_dir / STAGED_DIR or not staged.exists():
+            raise FileNotFoundError(f"{entry.staged} is not a staged file")
+        target = self.execution_dir / entry.path
+        if target.exists():
+            raise FileExistsError(f"{entry.path} already exists")
+        target.parent.mkdir(parents=True, exist_ok=True)
+        staged.rename(target)
+        try:
+            self.emit_artifact(
+                target,
+                name=entry.name,
+                media_type=entry.media_type,
+                semantic_type=entry.semantic_type,
+                metadata=entry.metadata("child"),
+            )
+        except BaseException:
+            target.rename(staged)
+            raise
 
     def _emit_results(self) -> None:
         """Write in-memory results once, unless the attempt was sealed early.

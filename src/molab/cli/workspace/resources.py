@@ -341,6 +341,14 @@ def run_adopt(
     source: Annotated[
         list[Path] | None, typer.Option("--source", help="A script the job ran (lands in source/).")
     ] = None,
+    tracked: Annotated[
+        Path | None,
+        typer.Option(
+            "--from",
+            help="A molab.track() directory: its stdout/stderr, metrics and staged "
+            "artifacts; its track.json gives the default times.",
+        ),
+    ] = None,
     created_by: Annotated[
         str | None,
         typer.Option(
@@ -360,10 +368,13 @@ def run_adopt(
 
     The files are moved (renamed, same filesystem) into the run's next
     ``executions/eNN/``: products into ``out/<task>/``, scheduler files into
-    ``jobs/``, the log as ``run.log``, scripts into ``source/``.
+    ``jobs/``, the log as ``run.log``, scripts into ``source/``. ``--from DIR``
+    folds a ``molab.track()`` directory: ``stdout.log`` / ``stderr.log`` at the
+    attempt root, its metrics and staged artifacts registered in ``artifacts/``.
     """
     from molab.workspace import ExperimentNotFoundError, ProjectNotFoundError
     from molab.workspace.domain import ExecutionStatus
+    from molab.workspace.tracking import TrackedDirectory, read_tracked
 
     try:
         state = ExecutionStatus(status)
@@ -383,18 +394,33 @@ def run_adopt(
         if not path.exists():
             rprint(f"[red]Error:[/red] {path} does not exist")
             raise typer.Exit(1)
+    layout: TrackedDirectory | None = None
+    if tracked is not None:
+        try:
+            layout = read_tracked(tracked)
+        except (FileNotFoundError, ValueError) as exc:
+            rprint(f"[red]Error:[/red] --from: {exc}")
+            raise typer.Exit(1) from None
+        moved += layout.files()
     times = _moved_times(moved)
-    if (started is None or finished is None) and times is None:
-        rprint("[red]Error:[/red] nothing to take times from; pass --started and --finished")
-        raise typer.Exit(2)
     from datetime import UTC, datetime
 
+    # Explicit flags win; then the tracked directory's own record; then mtimes.
     started_at = (
-        _iso(started, "--started") if started else datetime.fromtimestamp(times[0], UTC)  # ty: ignore[not-subscriptable]
+        _iso(started, "--started")
+        if started
+        else (layout.started_at if layout is not None else None)
+        or (datetime.fromtimestamp(times[0], UTC) if times is not None else None)
     )
     finished_at = (
-        _iso(finished, "--finished") if finished else datetime.fromtimestamp(times[1], UTC)  # ty: ignore[not-subscriptable]
+        _iso(finished, "--finished")
+        if finished
+        else (layout.finished_at if layout is not None else None)
+        or (datetime.fromtimestamp(times[1], UTC) if times is not None else None)
     )
+    if started_at is None or finished_at is None:
+        rprint("[red]Error:[/red] nothing to take times from; pass --started and --finished")
+        raise typer.Exit(2)
 
     ws = _open_ws(target_spec)
     try:
@@ -429,6 +455,7 @@ def run_adopt(
             source=[str(p) for p in source or []],
             executor={"job_ids": list(job_id)} if job_id else None,
             created_by=_agent_ref(created_by),
+            tracked=tracked,
         )
     except (ValueError, FileExistsError, FileNotFoundError, NotImplementedError) as exc:
         rprint(f"[red]Error:[/red] {exc}")

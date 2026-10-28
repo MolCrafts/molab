@@ -14,6 +14,8 @@ the ``molab.workflow`` engine machinery only at that point; plain
 ``molab.print`` is the builtin ``print`` that also records into the current
 execution's ``stdout.log`` / ``stderr.log``; ``molab.current()`` returns that
 execution (or ``None``). Opt in with ``from molab import print``.
+``molab.track()`` gives a plain script or a child process the same surface
+(D94).
 
 ``import molab`` also wires the workspace run-executor seam
 (``molab.workspace.run.set_run_executor``) with a lazy proxy, so
@@ -48,7 +50,7 @@ from molab.workspace.run import Run, RunContext, RunWorkflowExecutor, set_run_ex
 # The current execution and its stdio (D92). ``from molab import print``
 # shadows the builtin in the importing module on purpose (so does
 # ``from molab import *``); outside an execution it is the builtin.
-from molab.workspace.tracking import current, print
+from molab.workspace.tracking import current, print, track
 from molab.workspace.workspace import Workspace
 
 if TYPE_CHECKING:
@@ -162,6 +164,7 @@ __all__ = [
     "entry",
     "get_logger",
     "print",
+    "track",
     "wp",
 ]
 

@@ -67,12 +67,16 @@ from pathlib import Path, PurePosixPath
 from types import MappingProxyType
 from typing import cast
 
+from pydantic import BaseModel, ConfigDict, Field
+
 from molab._typing import JSONValue
+from molab.ids import generate_uuid7
 
 from ._file_lock import file_lock
-from .artifact_repository import ArtifactRepository, content_ref
+from .artifact_repository import RESERVED_ARTIFACT_DIR, ArtifactRepository, content_ref
 from .domain import (
     ACTIVE_EXECUTION_STATUSES,
+    RESULT_SEMANTIC_TYPE,
     TERMINAL_EXECUTION_STATUSES,
     Artifact,
     EvidenceRef,
@@ -82,7 +86,7 @@ from .domain import (
     RunStatusSummary,
     SourceManifest,
 )
-from .execution_dirs import OUT, execution_dir_names, prunable_dirs
+from .execution_dirs import ARTIFACTS, OUT, execution_dir_names, prunable_dirs
 from .fs import FileSystem, PathArg
 from .fs_local import LocalFileSystem
 from .history import SYSTEM_AGENT, AgentRef, EntityRef, GitHistory, Relation
@@ -269,6 +273,27 @@ EXECUTION_RECORD_FILENAME = "execution.json"
 ATTEMPT_FILES: frozenset[str] = frozenset(
     {EXECUTION_RECORD_FILENAME, ALIVE_NAME, *_EVIDENCE_FILES.values()}
 )
+
+
+class AdoptedArtifact(BaseModel):
+    """A file an adoption moves to ``artifacts/<name>`` and records as an Artifact.
+
+    ``ExecutionRepository.adopt(artifacts=…)`` takes these: the owner moves
+    the bytes, hashes them where they land and writes the Artifact into the
+    sealed record, so nothing else writes ``execution.json`` (D94).
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    source: str
+    """Where the bytes are now."""
+    name: str
+    """The Artifact's name; the bytes land at ``artifacts/<name>``."""
+    media_type: str | None = None
+    semantic_type: str | None = None
+    metadata: dict[str, JSONValue] = Field(default_factory=dict)
+    created_at: datetime | None = None
+    """When the artifact was produced; the attempt's finish by default."""
 
 
 def _creation_mode(mode: ExecutionMode) -> ExecutionMode:
@@ -469,6 +494,7 @@ class ExecutionRepository:
         environment: dict[str, JSONValue] | None = None,
         error: dict[str, JSONValue] | None = None,
         digest: bool = True,
+        artifacts: Sequence[AdoptedArtifact] = (),
     ) -> Execution:
         """Record an attempt that already ran outside molab, sealed in one write.
 
@@ -488,6 +514,10 @@ class ExecutionRepository:
         renamed back and the attempt directory removed: a refused adoption
         leaves the source as it was and writes no record.
 
+        Each of *artifacts* is moved the same way to ``artifacts/<name>`` and
+        recorded on the sealed record as an Artifact (its content hashed where
+        it landed), so the adopted attempt carries them like an emitted one.
+
         Mode rules are ``create``'s.
 
         Args:
@@ -502,13 +532,15 @@ class ExecutionRepository:
             environment: Environment facts (python, package versions).
             error: The failure, for a failed attempt.
             digest: Whether to hash every moved path into the record.
+            artifacts: Files to record as Artifacts of the attempt.
 
         Returns:
             The sealed record as written.
 
         Raises:
             ValueError: *status* is not terminal, a destination is not inside
-                a declared attempt directory, or the mode rules refuse.
+                a declared attempt directory, an artifact name is reserved
+                (``_molab/``, the result type), or the mode rules refuse.
             FileExistsError: A destination already exists.
             FileNotFoundError: A source does not exist.
             NotImplementedError: The workspace filesystem is not local.
@@ -518,7 +550,19 @@ class ExecutionRepository:
         if not isinstance(self.fs, LocalFileSystem):
             raise NotImplementedError("adopting an attempt moves local bytes; the disk is remote")
         planned = [(Path(str(src)), _adopted_destination(dest)) for src, dest in moves]
-        for src, _ in planned:
+        for item in artifacts:
+            if (
+                PurePosixPath(item.name).parts[:1] == (RESERVED_ARTIFACT_DIR,)
+                or item.semantic_type == RESULT_SEMANTIC_TYPE
+            ):
+                raise ValueError(
+                    "artifacts/_molab/ and semantic_type 'result' are reserved for molab"
+                )
+        promoted = [
+            (Path(item.source), _adopted_destination(f"{ARTIFACTS.name}/{item.name}"), item)
+            for item in artifacts
+        ]
+        for src in [*(src for src, _ in planned), *(src for src, _, _ in promoted)]:
             if not src.exists():
                 raise FileNotFoundError(f"cannot adopt {src}: it does not exist")
         mode = _creation_mode(mode)
@@ -540,6 +584,31 @@ class ExecutionRepository:
             done: list[tuple[Path, Path]] = []
             try:
                 adopted: list[EvidenceRef] = []
+                recorded: list[Artifact] = []
+                for src, dest, item in promoted:
+                    target = attempt / dest
+                    if target.exists():
+                        raise FileExistsError(f"{dest} is adopted twice")
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    src.rename(target)
+                    done.append((src, target))
+                    recorded.append(
+                        Artifact(
+                            id=generate_uuid7(),
+                            execution_id=slug,
+                            run_id=self.run_id,
+                            project_id=self.project_id,
+                            name=item.name,
+                            content=content_ref(self.fs, target),
+                            created_at=item.created_at or finished_at,
+                            created_by=created_by,
+                            path=dest,
+                            source_path=dest,
+                            media_type=item.media_type,
+                            semantic_type=item.semantic_type,
+                            metadata=dict(item.metadata),
+                        )
+                    )
                 for src, dest in planned:
                     target = attempt / dest
                     if target.exists():
@@ -572,6 +641,7 @@ class ExecutionRepository:
                     based_on_execution_id=predecessor.id if predecessor else None,
                     executor=executor or {},
                     environment=environment or {},
+                    artifacts=tuple(recorded),
                     evidence=(*self._collect_evidence(slug), *adopted),
                     error=error,
                     sealed_at=now,
@@ -1531,6 +1601,7 @@ __all__ = [
     "EXECUTION_RECORD_FILENAME",
     "RUN_LOG_FILENAME",
     "STDIO_FILES",
+    "AdoptedArtifact",
     "ExecutionRepository",
     "fold_legacy_attempt",
     "legacy_attempt_created_at",

@@ -836,6 +836,7 @@ class Run(Folder):
         error: dict[str, JSONValue] | None = None,
         created_by: AgentRef | None = None,
         digest: bool = True,
+        tracked: PathArg | None = None,
     ) -> Execution:
         """Record a finished attempt that ran outside molab, moving its bytes in.
 
@@ -851,6 +852,14 @@ class Run(Folder):
         - ``log`` — the attempt's own log, as ``run.log``.
         - ``source`` — the script(s) the job ran, flat in ``source/``, so an
           adopted attempt still points at its code.
+        - ``tracked`` — a ``molab.track()`` offline directory (D94): its
+          ``stdout.log`` / ``stderr.log`` land at the attempt root, each
+          ``artifacts/*.mlp.jsonl`` in ``artifacts/`` as a ``molplot.metrics``
+          Artifact, and each staged artifact at ``artifacts/<name>`` as an
+          Artifact (``metadata.staged_by="offline"``). The rest of the
+          directory stays where it is. Its ``track.json`` times are only read
+          by ``molab runs adopt --from``; here *started_at* / *finished_at*
+          are always the caller's.
 
         The record is written once, sealed, with the real start and finish
         times; with *digest* each moved path's content digest is in its
@@ -871,12 +880,14 @@ class Run(Folder):
             error: The failure, for a failed attempt.
             created_by: Who adopts it; defaults to this process.
             digest: Whether to hash every moved path into the record.
+            tracked: A ``molab.track()`` offline directory to fold in.
 
         Returns:
             The sealed record.
 
         Raises:
-            ValueError: *status* is not terminal, or the mode rules refuse.
+            ValueError: *status* is not terminal, the mode rules refuse, or
+                *tracked* has a malformed manifest line.
             FileExistsError: Two sources land on the same destination.
             FileNotFoundError: A source does not exist.
         """
@@ -893,6 +904,34 @@ class Run(Folder):
         if log is not None:
             moves.append((log, "run.log"))
         moves.extend((item, f"{SOURCE.name}/{Path(str(item)).name}") for item in source)
+        # Function-body imports keep this module's line layout stable.
+        from .execution_repository import STDIO_FILES, AdoptedArtifact
+        from .tracking import METRICS_SEMANTIC_TYPE, OfflineTracker, read_tracked
+
+        artifacts: list[AdoptedArtifact] = []
+        if tracked is not None:
+            layout = read_tracked(tracked)
+            moves.extend((str(path), STDIO_FILES[stream]) for stream, path in layout.stdio.items())
+            artifacts.extend(
+                AdoptedArtifact(
+                    source=str(path),
+                    name=path.name,
+                    media_type="application/x-ndjson",
+                    semantic_type=METRICS_SEMANTIC_TYPE,
+                )
+                for path in layout.metrics
+            )
+            artifacts.extend(
+                AdoptedArtifact(
+                    source=str(layout.root / entry.staged),
+                    name=entry.name,
+                    media_type=entry.media_type,
+                    semantic_type=entry.semantic_type,
+                    metadata=entry.metadata(OfflineTracker.staged_by),
+                    created_at=entry.created_time,
+                )
+                for entry in layout.artifacts
+            )
         state = self._execution_repository().adopt(
             status=ExecutionStatus(status),
             created_by=created_by or _system_agent(),
@@ -905,6 +944,7 @@ class Run(Folder):
             environment=environment,
             error=error,
             digest=digest,
+            artifacts=artifacts,
         )
         return self._bound(state)
 
