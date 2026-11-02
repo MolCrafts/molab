@@ -247,7 +247,7 @@ export const RunExecutionsPanel = ({
                     aria-label={`Select execution ${execution.executionId}`}
                     aria-current={active ? "true" : undefined}
                     className={cn(
-                      "flex w-full flex-col gap-1.5 px-3 py-2 text-left",
+                      "flex w-full flex-col gap-2 px-3 py-2 text-left",
                       "hover:bg-interactive/50",
                       "focus-visible:bg-interactive/50 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-ring",
                       active && "bg-accent/5",

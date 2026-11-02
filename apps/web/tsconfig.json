@@ -2,7 +2,7 @@
   "compilerOptions": {
     "lib": [
       "DOM",
-      "ES2020"
+      "ES2022"
     ],
     "jsx": "react-jsx",
     "target": "ES2020",
@@ -26,7 +26,12 @@
         "./src/*"
       ],
       "@molcrafts/ui/file-tree": [
-        "../../../molcrafts-ui/packages/ui/src/lib/file-tree.ts"
+        "../../../molcrafts-ui/packages/ui/src/lib/file-tree.ts",
+        "./src/vendor/ui-file-tree.ts"
+      ],
+      "@molcrafts/ui-markdown": [
+        "../../../molcrafts-ui/packages/markdown/src/index.ts",
+        "./src/vendor/ui-markdown.tsx"
       ],
       "@molcrafts/ui-vega-lite": [
         "../../../molcrafts-ui/packages/vega-lite/src/index.tsx"
