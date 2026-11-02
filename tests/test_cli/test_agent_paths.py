@@ -229,6 +229,7 @@ class TestCheckJson:
         "reason",
         "command",
         "path",
+        "root",
         "issues",
     }
 
@@ -244,6 +245,7 @@ class TestCheckJson:
 
         verdict = json.loads(result.stdout)
         assert set(verdict) == self.KEYS
+        assert verdict["root"] == os.path.realpath(lab)
         assert verdict["allowed"] is False
         assert verdict["rule"] == "layout.legacy_record"
         assert "run.json is not a file in molab" in verdict["reason"]
@@ -253,12 +255,15 @@ class TestCheckJson:
         target = lab / "projects" / "alpha" / "experiments" / "sweep" / "scratch" / "t.py"
         verdict = json.loads(_invoke("check", "path", str(target), "--json").stdout)
         assert verdict["allowed"] is True
+        assert verdict["root"] == os.path.realpath(lab)
         outside = json.loads(_invoke("check", "path", "/nonexistent/x", "--json").stdout)
         assert outside["in_workspace"] is False and outside["allowed"] is True
+        assert outside["root"] is None
 
     def test_check_tree_snapshot_then_since(self, lab: Path) -> None:
         taken = json.loads(_invoke("check", "tree", str(lab), "--snapshot", "s1", "--json").stdout)
         assert set(taken) == self.KEYS and taken["allowed"] is True
+        assert taken["root"] == os.path.realpath(lab)
 
         (lab / "projects" / "alpha" / "x.py").write_text("x")
         since = json.loads(_invoke("check", "tree", str(lab), "--since", "s1", "--json").stdout)
