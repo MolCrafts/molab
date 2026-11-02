@@ -1,14 +1,14 @@
 """The molab adapter consumes paginated public file APIs with an explicit scope."""
 
-from molab.workspace.fs_remote import RemoteFileSystem
+from molab.workspace.fs_remote import RemoteFS
 
 
 def test_adapter_lists_metadata_and_reads_batches(molq_destination):
     client, _, cluster, root = molq_destination
     (root / "some file").write_bytes(b"content")
     (root / "directory").mkdir()
-    fs = RemoteFileSystem(client, cluster, str(root))
-    entries = {entry.name: entry for entry in fs.scandir(root)}
+    fs = RemoteFS(client, cluster, str(root))
+    entries = {entry.name: entry for entry in fs.ls(root, A=True, l=True)}
     assert entries["some file"].is_file and entries["some file"].size == 7
     assert entries["directory"].is_dir
     result = fs.read_many([str(root / "some file"), str(root / "absent"), str(root / "directory")])
@@ -24,13 +24,13 @@ def test_adapter_splits_only_explicit_batch_capacity_errors(molq_destination):
         path = root / str(i)
         path.write_bytes(bytes([i]) * 200000)
         paths.append(str(path))
-    fs = RemoteFileSystem(client, cluster, str(root))
+    fs = RemoteFS(client, cluster, str(root))
     assert fs.read_many(paths) == {path: bytes([i]) * 200000 for i, path in enumerate(paths)}
 
 
 def test_cached_run_and_execution_listing_batches_metadata(molq_destination, tmp_path, monkeypatch):
     from molab.workspace import Workspace
-    from molab.workspace.fs_cached import CachedRemoteFileSystem
+    from molab.workspace.fs_cached import CachedRemoteFS
     from molab.workspace.scope import open_serve_root
 
     client, _, cluster, root = molq_destination
@@ -42,8 +42,8 @@ def test_cached_run_and_execution_listing_batches_metadata(molq_destination, tmp
     for run in runs:
         with run.start() as context:
             context.mark_succeeded()
-    fs = CachedRemoteFileSystem(
-        RemoteFileSystem(client, cluster, str(project.resolve())), mirror_root=tmp_path / "mirror"
+    fs = CachedRemoteFS(
+        RemoteFS(client, cluster, str(project.resolve())), mirror_root=tmp_path / "mirror"
     )
     remote = open_serve_root(str(project.resolve()), fs=fs).list_experiments()[0]
     requested = []
@@ -88,7 +88,7 @@ def test_semantic_prefetch_batches_entity_metadata_without_payloads(
     molq_destination, tmp_path, monkeypatch
 ):
     from molab.workspace import Workspace
-    from molab.workspace.fs_cached import CachedRemoteFileSystem, prefetch_workspace_indices
+    from molab.workspace.fs_cached import CachedRemoteFS, prefetch_workspace_indices
 
     client, _, cluster, root = molq_destination
     local = Workspace(root)
@@ -109,9 +109,7 @@ def test_semantic_prefetch_batches_entity_metadata_without_payloads(
         return rpc(method, **params)
 
     monkeypatch.setattr(client, "rpc", record_rpc)
-    fs = CachedRemoteFileSystem(
-        RemoteFileSystem(client, cluster, str(root)), mirror_root=tmp_path / "mirror"
-    )
+    fs = CachedRemoteFS(RemoteFS(client, cluster, str(root)), mirror_root=tmp_path / "mirror")
     remote = Workspace(str(root), fs=fs)
     warnings = prefetch_workspace_indices(remote, max_workers=2)
     assert not warnings

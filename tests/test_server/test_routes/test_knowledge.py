@@ -159,19 +159,19 @@ class TestListKnowledge:
         assert any(row["name"] == "idea" and row.get("cls") == "Note" for row in body["notes"])
 
     def test_list_reads_the_workspace_disk(self, served: ServedFactory, lab: RunFixture) -> None:
-        from molab.fs import LocalFileSystem
+        from molab.fs import LocalFS
         from molab.server.deps.resolution import get_workspace
         from tests.support.counting_fs import CountingFileSystem
 
         ws, _exp, _run = lab
-        fs = CountingFileSystem(LocalFileSystem())
+        fs = CountingFileSystem(LocalFS())
         with served(ws) as client:
             client.app.dependency_overrides[get_workspace] = lambda: Workspace(ws.root, fs=fs)
             fs.reset()
             response = client.get("/api/knowledge")
         assert response.status_code == 200, response.text
         assert fs.for_basename("idea.md", "read_text") > 0
-        assert fs.calls["scandir"] > 0
+        assert fs.calls["ls"] > 0
         assert "fs=workspace.fs" in inspect.getsource(knowledge_routes.list_knowledge)
 
 
@@ -193,12 +193,12 @@ class TestSearchKnowledge:
         assert hits
 
     def test_search_reads_the_workspace_disk(self, served: ServedFactory, lab: RunFixture) -> None:
-        from molab.fs import LocalFileSystem
+        from molab.fs import LocalFS
         from molab.server.deps.resolution import get_workspace
         from tests.support.counting_fs import CountingFileSystem
 
         ws, _exp, _run = lab
-        fs = CountingFileSystem(LocalFileSystem())
+        fs = CountingFileSystem(LocalFS())
         with served(ws) as client:
             client.app.dependency_overrides[get_workspace] = lambda: Workspace(ws.root, fs=fs)
             fs.reset()

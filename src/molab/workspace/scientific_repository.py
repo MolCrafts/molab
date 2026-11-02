@@ -12,7 +12,7 @@ from datetime import UTC, datetime
 from molab._typing import JSONValue
 
 from .fs import FileSystem, PathArg
-from .fs_local import LocalFileSystem
+from .fs_local import LocalFS
 from .history import SYSTEM_AGENT, EntityRef, GitHistory, Relation
 
 __all__ = ["SYSTEM_AGENT", "ScientificRepository"]
@@ -39,7 +39,7 @@ class ScientificRepository:
         history: GitHistory | None = None,
     ) -> None:
         self.root = str(workspace_root)
-        self.fs = fs or LocalFileSystem()
+        self.fs = fs or LocalFS()
         self.history = history or GitHistory(self.root)
 
     def record_project(

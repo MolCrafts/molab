@@ -42,7 +42,7 @@ from molab.ids import compute_content_hash, hash_bytes
 from .domain import SourceFile, SourceManifest
 from .file_store import FileStore
 from .fs import FileSystem, PathArg
-from .fs_local import LocalFileSystem
+from .fs_local import LocalFS
 
 __all__ = ["SourceCaptureError", "copy_sources", "local_import_digest", "source_manifest"]
 
@@ -256,7 +256,7 @@ def copy_sources(
     """
     origin = Path(manifest.locator).parent
     store = FileStore(execution_dir, fs=fs)
-    disk = fs if fs is not None else LocalFileSystem()
+    disk = fs if fs is not None else LocalFS()
     for entry in manifest.files:
         relpath = f"source/{entry.name}"
         try:

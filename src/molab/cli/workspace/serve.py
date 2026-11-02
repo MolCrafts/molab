@@ -14,7 +14,7 @@ A directory may be:
 * a local path (any directory — plain folders open without writing a
   workspace record; missing dirs are created empty)
 * an SCP remote ``cluster:/path`` (lazy-download mirror via
-  :class:`~molab.workspace.fs_cached.CachedRemoteFileSystem`)
+  :class:`~molab.workspace.fs_cached.CachedRemoteFS`)
 * a registered workspace target ``@name`` (from
   ``~/.molab/workspace_targets.json``)
 

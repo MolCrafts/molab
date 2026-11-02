@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from molab.server.app import create_app
 from molab.server.deps.resolution import _ensure_remote_ready
 from molab.server.sync_schedule import SyncSchedule, ensure_sync_schedule, stop_sync_schedules
-from molab.workspace.fs_cached import CachedRemoteFileSystem
+from molab.workspace.fs_cached import CachedRemoteFS
 from molab.workspace.sync_rules import exclusive_transfer, record_result, upsert_rule
 
 
@@ -67,7 +67,7 @@ def test_linking_a_remote_root_starts_the_schedule(tmp_path, monkeypatch) -> Non
         return SimpleNamespace()
 
     monkeypatch.setattr("molab.server.sync_schedule.ensure_sync_schedule", record)
-    fs = CachedRemoteFileSystem(object(), mirror_root=tmp_path / "mirror")
+    fs = CachedRemoteFS(object(), mirror_root=tmp_path / "mirror")
     fs.prepare = lambda *_args, **_kwargs: []  # type: ignore[method-assign]
     _ensure_remote_ready(SimpleNamespace(fs=fs, root="/remote/lab"))
     _ensure_remote_ready(SimpleNamespace(fs=object(), root="/local"))

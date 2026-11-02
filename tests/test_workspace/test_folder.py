@@ -20,7 +20,7 @@ from pathlib import Path
 import pytest
 
 from molab import frontmatter
-from molab.fs import LocalFileSystem
+from molab.fs import LocalFS
 from molab.workspace import Experiment, Project, Run, Workspace
 from molab.workspace import folder as folder_mod
 from molab.workspace.folder import (
@@ -367,7 +367,7 @@ class TestFolderFs:
     """``Folder.fs`` is the public read-only disk accessor."""
 
     def test_a_project_and_a_run_share_the_injected_disk(self, tmp_path: Path) -> None:
-        disk = LocalFileSystem()
+        disk = LocalFS()
         ws = Workspace(tmp_path / "lab", name="Lab", fs=disk)
         project = ws.add_project("p")
         run = project.add_experiment("e").add_run(params={"seed": 1})
@@ -378,13 +378,13 @@ class TestFolderFs:
     def test_an_unmounted_folder_uses_the_local_filesystem(self, tmp_path: Path) -> None:
         folder = Folder(name="x", kind="t", root_path=tmp_path)
 
-        assert isinstance(folder.fs, LocalFileSystem)
+        assert isinstance(folder.fs, LocalFS)
 
     def test_assigning_fs_raises(self, tmp_path: Path) -> None:
         folder = Folder(name="x", kind="t", root_path=tmp_path)
 
         with pytest.raises(AttributeError):
-            folder.fs = LocalFileSystem()  # type: ignore[misc]
+            folder.fs = LocalFS()  # type: ignore[misc]
 
     def test_workspace_does_not_override_fs(self) -> None:
         assert "fs" not in Workspace.__dict__

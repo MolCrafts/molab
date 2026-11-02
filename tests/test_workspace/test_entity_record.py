@@ -15,7 +15,7 @@ from typing import cast
 import pytest
 
 from molab._typing import JSONValue
-from molab.fs import LocalFileSystem
+from molab.fs import LocalFS
 from molab.workspace import Workspace
 from molab.workspace.entity_record import (
     KEEP,
@@ -27,7 +27,7 @@ from molab.workspace.entity_record import (
 )
 from molab.workspace.errors import UnmigratedLayoutError as ExportedError
 
-_FS = LocalFileSystem()
+_FS = LocalFS()
 _CANONICAL: dict[str, JSONValue] = {"type": "workspace.project", "id": "p1", "name": "alpha"}
 
 
@@ -91,13 +91,13 @@ class TestZones:
 
 
 def _write_body(root: str, directory: str, worker: int, rounds: int) -> None:
-    fs = LocalFileSystem()
+    fs = LocalFS()
     for i in range(rounds):
         write_record(fs, directory, body=f"# body {worker}-{i}\n", lock_root=root)
 
 
 def _write_index(root: str, directory: str, worker: int, rounds: int) -> None:
-    fs = LocalFileSystem()
+    fs = LocalFS()
     for i in range(rounds):
         write_record(fs, directory, index={"children": [{"n": f"{worker}-{i}"}]}, lock_root=root)
 

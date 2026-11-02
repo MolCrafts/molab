@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from molab.fs import LocalFileSystem
+from molab.fs import LocalFS
 from molab.knowledge import Knowledge, Note
 from molab.knowledge.retrieval import bm25f_rank, tokenize
 from tests.support.counting_fs import CountingFileSystem
@@ -128,7 +128,7 @@ class TestSearchReadsEachBodyOnce:
     def test_four_documents_are_read_once_each(self, tmp_path: Path) -> None:
         for index in range(4):
             Note(tmp_path / f"n{index}").write(f"# N{index}\n\nalpha body {index}\n")
-        fs = CountingFileSystem(LocalFileSystem())
+        fs = CountingFileSystem(LocalFS())
         fs.reset()
 
         Knowledge(tmp_path, fs=fs).search("alpha")

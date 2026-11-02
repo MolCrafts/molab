@@ -11,7 +11,7 @@ full round-trip.
 
 ``StatMemo`` turns a repeated read into **one ``stat``**: a memoized value is
 served when the file's ``(size, mtime)`` is unchanged, re-loaded otherwise.
-Through :class:`~molab.workspace.fs_cached.CachedRemoteFileSystem` a ``stat``
+Through :class:`~molab.workspace.fs_cached.CachedRemoteFS` a ``stat``
 of a pinned entry is a local index lookup, so the same policy is free on a
 remote workspace — no separate "pin" mode is needed.
 

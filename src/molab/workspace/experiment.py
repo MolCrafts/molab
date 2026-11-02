@@ -583,7 +583,7 @@ class Experiment(Folder):
             self._disk().atomic_write_json(doc_path, document)
             return
         if self._disk().is_file(doc_path):
-            self._disk().remove(doc_path)
+            self._disk().rm(doc_path)
 
     # ── Run CRUD: typed semantic sugar over generic Folder CRUD ────────────
 
@@ -962,21 +962,21 @@ class Experiment(Folder):
     def list_runs(self) -> list[Run]:
         """List all runs by scanning the ``runs/`` directory.
 
-        One ``scandir`` pass answers which entries are directories; a
+        One ``ls(A=True, l=True)`` answers which entries are directories; a
         directory counts as a run only when its ``index.md`` is a run record.
 
         Returns:
             The runs, ordered by directory name.
         """
-        from .fs_cached import CachedRemoteFileSystem
+        from .fs_cached import CachedRemoteFS
 
         result: list[Run] = []
         disk = self._disk()
         runs_dir = disk.join(self.experiment_dir, RUN_CONTAINER)
         if not disk.is_dir(runs_dir):
             return result
-        entries = disk.scandir(runs_dir, with_stat=False)
-        if isinstance(disk, CachedRemoteFileSystem):
+        entries = disk.ls(runs_dir, A=True, l=True)
+        if isinstance(disk, CachedRemoteFS):
             disk.read_many(
                 [
                     disk.join(runs_dir, entry.name, INDEX_FILENAME)
@@ -990,7 +990,7 @@ class Experiment(Folder):
             record = read_record(disk, disk.join(runs_dir, entry.name))
             if record is not None and record.type == WORKSPACE_RUN_KIND:
                 result.append(Run.from_record(disk.join(runs_dir, entry.name), self, record))
-        if isinstance(disk, CachedRemoteFileSystem) and result:
+        if isinstance(disk, CachedRemoteFS) and result:
             from .execution_repository import prime_execution_records
 
             # One batch for every run's attempts. Per-run listings are what

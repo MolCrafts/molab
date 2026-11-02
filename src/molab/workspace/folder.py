@@ -19,7 +19,7 @@ from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path as _StdPath
 from pathlib import PurePosixPath
-from typing import TYPE_CHECKING, ClassVar, TypeVar, cast
+from typing import TYPE_CHECKING, ClassVar, Literal, TypeVar, cast, overload
 
 from molab._typing import JSONValue
 from molab.path import Path
@@ -37,8 +37,8 @@ from .entity_record import (
     write_record,
 )
 from .errors import FolderMoveCollisionError
-from .fs import FileSystem, PathArg
-from .fs_local import LocalFileSystem
+from .fs import DirEntry, FileSystem, PathArg
+from .fs_local import LocalFS
 from .models import FolderMetadata
 from .naming import SCRATCH_CONTAINER
 from .utils import slugify
@@ -239,7 +239,7 @@ class Folder:
         if fs is not None:
             self._disk_backend = fs
         elif parent is None:
-            self._disk_backend = LocalFileSystem()
+            self._disk_backend = LocalFS()
         else:
             self._disk_backend = None
         self._metadata = FolderMetadata(id=derived_id, name=name, kind=kind)
@@ -276,7 +276,7 @@ class Folder:
             if backend is not None:
                 return backend
             node = node._parent
-        return LocalFileSystem()
+        return LocalFS()
 
     @property
     def fs(self) -> FileSystem:
@@ -288,6 +288,51 @@ class Folder:
             The same filesystem object :meth:`_disk` returns.
         """
         return self._disk()
+
+    @overload
+    def ls(
+        self,
+        path: str = ".",
+        *,
+        a: bool = False,
+        A: bool = False,
+        l: Literal[True],  # noqa: E741
+    ) -> list[DirEntry]: ...
+
+    @overload
+    def ls(
+        self,
+        path: str = ".",
+        *,
+        a: bool = False,
+        A: bool = False,
+        l: Literal[False] = False,  # noqa: E741
+    ) -> list[str]: ...
+
+    def ls(
+        self,
+        path: str = ".",
+        *,
+        a: bool = False,
+        A: bool = False,
+        l: bool = False,  # noqa: E741
+    ) -> list[str] | list[DirEntry]:
+        """List *path* on this folder's disk. ``.`` is the folder itself.
+
+        Flags match :meth:`FileSystem.ls`: plain ``ls()`` hides dotfiles,
+        ``A=True`` is ``ls -A``, ``a=True`` is ``ls -a``, ``l=True`` is ``ls -l``.
+        A local folder and a remote folder take the same call.
+        """
+        disk = self._disk()
+        root = str(self.resolve())
+        raw = (path or ".").strip() or "."
+        if raw in {".", ""}:
+            target = root
+        elif disk.is_absolute(raw):
+            target = raw
+        else:
+            target = disk.join(root, raw)
+        return disk.ls(target, a=a, A=A, l=l)
 
     @property
     def files(self) -> FileStore:
@@ -551,13 +596,14 @@ class Folder:
         if not self._disk().is_dir(self_path):
             return []
         result: list[Folder] = []
-        for entry_name in sorted(self._disk().listdir(self_path)):
+        for entry in self._disk().ls(self_path, A=True, l=True):
             # ``scratch/`` is a disposable tier, never a child (D90).
+            entry_name = entry.name
             if entry_name in _FORBIDDEN_FILE_NAMES or entry_name == SCRATCH_CONTAINER:
                 continue
-            entry_path = self._disk().join(self_path, entry_name)
-            if not self._disk().is_dir(entry_path):
+            if not entry.is_dir:
                 continue
+            entry_path = self._disk().join(self_path, entry_name)
             child_meta = self._try_child_folder_metadata(entry_path)
             if child_meta is None:
                 continue
@@ -776,18 +822,19 @@ class Folder:
         if not self._disk().is_dir(container):
             return []
         out: list[F] = []
-        for entry_name in sorted(self._disk().listdir(container)):
+        for entry in self._disk().ls(container, A=True, l=True):
             # A generic Folder's container is its own directory, where an
             # experiment keeps ``scratch/``; it is never a child (D90).
+            entry_name = entry.name
             if entry_name in _FORBIDDEN_FILE_NAMES or entry_name == SCRATCH_CONTAINER:
+                continue
+            if not entry.is_dir:
                 continue
             cached = self._children_cache.get(entry_name)
             if isinstance(cached, cls):
                 out.append(cached)
                 continue
             entry_path = self._disk().join(container, entry_name)
-            if not self._disk().is_dir(entry_path):
-                continue
             try:
                 loaded = cls.from_disk(entry_path, self)
             except UnmigratedLayoutError:
@@ -808,7 +855,7 @@ class Folder:
                 continue
             child_dir = cls.child_dir(self, candidate)
             if self._disk().is_dir(child_dir):
-                self._disk().remove(child_dir, recursive=True)
+                self._disk().rm(child_dir, recursive=True)
                 self._children_cache.pop(candidate, None)
                 self._refresh_own_index()
                 return
@@ -834,7 +881,7 @@ class Folder:
     def delete(self) -> None:
         target = self.resolve()
         if self._disk().exists(target):
-            self._disk().remove(target, recursive=True)
+            self._disk().rm(target, recursive=True)
         if self._parent is not None:
             self._parent._children_cache.pop(self._name, None)
             self._parent._refresh_own_index()
@@ -867,9 +914,7 @@ class Folder:
         # move_to uses OS-level ``shutil.move`` (local paths only). On a
         # remote-backed folder that would silently operate on the wrong (local)
         # path, so refuse it with a clear error instead.
-        if not isinstance(self._disk(), LocalFileSystem) or not isinstance(
-            new_parent._disk(), LocalFileSystem
-        ):
+        if not isinstance(self._disk(), LocalFS) or not isinstance(new_parent._disk(), LocalFS):
             raise NotImplementedError(
                 "move_to is only supported for local-filesystem folders "
                 "(it uses OS-level shutil.move); remote-backed folders cannot be moved."

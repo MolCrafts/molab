@@ -43,7 +43,7 @@ import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from molab.fs import LocalFileSystem
+from molab.fs import LocalFS
 from molab.workspace.experiment import set_workflow_executor
 
 if TYPE_CHECKING:
@@ -87,7 +87,7 @@ def _registry_key(workspace: Workspace) -> Path | int:
     Returns:
         The resolved root for a local workspace, else the object's ``id``.
     """
-    if isinstance(workspace.fs, LocalFileSystem):
+    if isinstance(workspace.fs, LocalFS):
         return Path(workspace.root).resolve()
     return id(workspace)
 

@@ -20,8 +20,8 @@ from molab.server.deps.scope_root import ScopeRoot
 from molab.services.auth import AuthError, AuthUser, get_auth_service, is_auth_enabled
 from molab.workspace import ContextFocus, Run
 from molab.workspace.folder import WORKSPACE_EXPERIMENT_KIND, WORKSPACE_PROJECT_KIND
-from molab.workspace.fs_cached import CachedRemoteFileSystem, prefetch_workspace_indices
-from molab.workspace.fs_local import LocalFileSystem
+from molab.workspace.fs_cached import CachedRemoteFS, prefetch_workspace_indices
+from molab.workspace.fs_local import LocalFS
 from molab.workspace.scope import as_folder, descendants, display_name, open_serve_root
 
 from ..dependencies import (
@@ -89,15 +89,15 @@ def resolve_workspace_path_via_fs(workspace, path_str: str) -> str:  # noqa: ANN
 
     Works for both local and remote workspaces by going through
     ``workspace.fs`` rather than ``pathlib.Path``.  For pure local
-    workspaces (``fs is LocalFileSystem``) it preserves the existing
+    workspaces (``fs is LocalFS``) it preserves the existing
     ``Path.resolve()`` containment check so symlink escapes are still
     caught.  For any non-local backend (e.g. a remote workspace wrapped
-    in :class:`CachedRemoteFileSystem`) it does string-level
+    in :class:`CachedRemoteFS`) it does string-level
     containment against the remote root.
     """
     fs = workspace.fs
     root = str(workspace.root)
-    if isinstance(fs, LocalFileSystem):
+    if isinstance(fs, LocalFS):
         resolved = resolve_workspace_path(Path(root).resolve(), path_str)
         return str(resolved)
 
@@ -145,7 +145,7 @@ def get_serve_scope(workspace=Depends(get_workspace)) -> ServeScopeResponse:  # 
 def get_workspace_info(workspace=Depends(get_workspace)) -> WorkspaceInfoResponse:  # noqa: ANN001
     """Get workspace information."""
     fs = getattr(workspace, "fs", None)
-    is_cached = isinstance(fs, CachedRemoteFileSystem)
+    is_cached = isinstance(fs, CachedRemoteFS)
     return WorkspaceInfoResponse(
         root=str(workspace.root),
         projectCount=len(workspace.list_projects()),
@@ -256,7 +256,7 @@ def list_workspace_files(
     """Return a nested file tree rooted at the requested path.
 
     Routes through ``workspace.fs`` so remote workspaces (and the
-    :class:`CachedRemoteFileSystem` mirror) work the same as local ones.
+    :class:`CachedRemoteFS` mirror) work the same as local ones.
 
     With ``include=catalog``, file nodes that match a registered asset
     are enriched with ``assetId``, ``assetKind``, ``producerRunId`` and
@@ -278,14 +278,14 @@ def list_workspace_files(
     # Remote pin-until-refresh can freeze a directory listing as empty after a
     # race / early list. Explicit files API calls are expand/refresh — drop the
     # pin for *this* path so the walk re-listdir from SSH (children still pin).
-    if isinstance(fs, CachedRemoteFileSystem):
+    if isinstance(fs, CachedRemoteFS):
         fs.invalidate_dir_listing(requested)
 
     # Remote trees pay one SSH RTT per node. A deep walk over hundreds of run
     # dirs (trajectory.pt etc.) freezes the UI bootstrap. Cap remote depth
     # server-side; clients expand path-by-path for deeper levels.
     effective_depth = max_depth
-    if isinstance(fs, CachedRemoteFileSystem) and max_depth > 4:
+    if isinstance(fs, CachedRemoteFS) and max_depth > 4:
         effective_depth = 4
 
     # gitignore matcher is path-string based against the workspace root.
@@ -317,7 +317,7 @@ def list_workspace_files(
     # Catalog enrichment is local-path keyed; skip on non-local FS for now
     # (remote asset scans still work via the catalog API, not inline chips).
     asset_index_by_abs: dict[str, dict] = {}
-    if "catalog" in include_set and isinstance(fs, LocalFileSystem):
+    if "catalog" in include_set and isinstance(fs, LocalFS):
         from molab.workspace.artifact_repository import scan_asset_repositories, walk_artifacts
         from molab.workspace.errors import AmbiguousRefError, RefNotFoundError
 
@@ -384,7 +384,7 @@ def read_workspace_file(
     """Read a text file from the workspace.
 
     Routes through ``workspace.fs`` so remote workspaces (and the
-    :class:`CachedRemoteFileSystem` mirror) take effect.
+    :class:`CachedRemoteFS` mirror) take effect.
     """
     target = resolve_workspace_path_via_fs(workspace, path)
     fs = workspace.fs
@@ -411,7 +411,7 @@ def read_workspace_file_blob(
     """Read a binary file from the workspace.
 
     Routes through ``workspace.fs`` so remote workspaces (and the
-    :class:`CachedRemoteFileSystem` mirror) take effect.
+    :class:`CachedRemoteFS` mirror) take effect.
     """
     target = resolve_workspace_path_via_fs(workspace, path)
     fs = workspace.fs
@@ -464,10 +464,10 @@ async def upload_workspace_file(
                 await run_in_threadpool(upload, str(local), staged)
             else:
                 await run_in_threadpool(shutil.copyfile, local, staged)
-            await run_in_threadpool(fs.rename, staged, target)
+            await run_in_threadpool(fs.mv, staged, target)
         finally:
             with contextlib.suppress(OSError, MolqError):
-                await run_in_threadpool(fs.remove, staged)
+                await run_in_threadpool(fs.rm, staged)
 
 
 def _asset_count(root: object) -> int:
@@ -611,7 +611,7 @@ def open_workspace(
     host = cast(WorkspaceEntity, workspace)
     # Linking a remote always force-refreshes (async). UI polls
     # GET /api/workspace/cache/status for the file-count progress bar.
-    if isinstance(fs, CachedRemoteFileSystem):
+    if isinstance(fs, CachedRemoteFS):
         warnings = fs.prepare(host, block_index=False, refresh_on_open=True)
         project_count = len(workspace.list_projects()) if fs.indexed else 0
         asset_count = _asset_count(workspace) if fs.indexed else 0
@@ -770,7 +770,7 @@ def test_workspace_target(
                 checks=checks,
                 error="file round-trip mismatch",
             )
-        fs.remove(probe_path)
+        fs.rm(probe_path)
         checks.append(TargetTestCheck(label="file round-trip", ok=True))
     except Exception as exc:
         checks.append(
@@ -794,7 +794,7 @@ def test_workspace_target(
 # Remote-workspace cache control
 # ============================================================================
 #
-# The active workspace's :class:`CachedRemoteFileSystem` mirrors remote
+# The active workspace's :class:`CachedRemoteFS` mirrors remote
 # bytes locally.  These endpoints let the UI invalidate or refresh the
 # mirror without having to re-open the workspace.  Local workspaces have
 # no cache; the endpoints respond ``409 Conflict`` rather than 404 so the
@@ -837,9 +837,9 @@ class CacheStatusResponse(BaseModel):
     message: str = ""
 
 
-def _require_cached_fs(workspace) -> CachedRemoteFileSystem:  # noqa: ANN001
+def _require_cached_fs(workspace) -> CachedRemoteFS:  # noqa: ANN001
     fs = getattr(workspace, "fs", None)
-    if not isinstance(fs, CachedRemoteFileSystem):
+    if not isinstance(fs, CachedRemoteFS):
         raise HTTPException(
             status_code=409,
             detail="Active workspace has no cache (local workspaces are not cached).",
@@ -855,7 +855,7 @@ def workspace_cache_status(workspace=Depends(get_workspace)) -> CacheStatusRespo
     status strip polls this while ``phase`` is ``counting`` / ``fetching``.
     """
     fs = getattr(workspace, "fs", None)
-    if not isinstance(fs, CachedRemoteFileSystem):
+    if not isinstance(fs, CachedRemoteFS):
         return CacheStatusResponse(cached=False, phase="idle", message="")
     progress = fs.progress
     return CacheStatusResponse(

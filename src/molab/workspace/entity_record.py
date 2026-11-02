@@ -29,7 +29,7 @@ from molab._typing import JSONValue
 
 from .errors import UnmigratedLayoutError
 from .fs import FileSystem, PathArg
-from .fs_local import LocalFileSystem
+from .fs_local import LocalFS
 
 #: The one file that holds a Folder's record, index and narrative.
 ENTITY_FILENAME: Final = "index.md"
@@ -45,8 +45,9 @@ RESERVED_INDEX_KEYS: Final = frozenset(
     {"parent", "children", "entrypoint", "scratch", "executions", "latest_status"}
 )
 
-#: Record files of the JSON layout this replaced. Only the
-#: :class:`UnmigratedLayoutError` detector names them; nothing reads them.
+#: Record files of the JSON layout this replaced. Readers only detect them
+#: (:class:`UnmigratedLayoutError`) and do not parse them. ``molab init``
+#: rewrites a wrong record into ``index.md`` and deletes these files.
 LEGACY_RECORD_FILES: Final = (
     "workspace.json",
     "project.json",
@@ -89,7 +90,7 @@ def _record_path(fs: FileSystem, directory: PathArg) -> str:
 def legacy_record_files(fs: FileSystem, directory: PathArg) -> tuple[str, ...]:
     """The legacy JSON record files present in *directory* (one listing)."""
     try:
-        names = {entry.name for entry in fs.scandir(directory, with_stat=False)}
+        names = {entry.name for entry in fs.ls(directory, A=True, l=True)}
     except OSError:
         return ()
     return tuple(name for name in LEGACY_RECORD_FILES if name in names)
@@ -163,7 +164,7 @@ def read_body(fs: FileSystem, directory: PathArg) -> str:
 
 
 def _lock_backend(fs: FileSystem) -> str:
-    return "flock" if isinstance(fs, LocalFileSystem) else "none"
+    return "flock" if isinstance(fs, LocalFS) else "none"
 
 
 @contextlib.contextmanager

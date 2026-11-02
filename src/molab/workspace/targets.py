@@ -153,12 +153,12 @@ def target_definition(target: ComputeTarget) -> dict[str, object]:
 def to_filesystem(target: ComputeTarget) -> FileSystem:
     """Create the existing FileSystem adapter over the registered destination."""
     from .connection import get_client
-    from .fs_local import LocalFileSystem
-    from .fs_remote import RemoteFileSystem
+    from .fs_local import LocalFS
+    from .fs_remote import RemoteFS
 
     if target.cluster_id is None:
-        return LocalFileSystem()
-    return RemoteFileSystem(get_client(target.registry_id), target.cluster_id, target.scratch_root)
+        return LocalFS()
+    return RemoteFS(get_client(target.registry_id), target.cluster_id, target.scratch_root)
 
 
 def target_run_dir(target: ComputeTarget, ws: Workspace, run: Run) -> str:

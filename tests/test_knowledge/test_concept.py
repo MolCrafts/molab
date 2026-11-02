@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from molab.fs import LocalFileSystem
+from molab.fs import LocalFS
 from molab.knowledge.concept import (
     Concept,
     Knowledge,
@@ -226,10 +226,10 @@ class TestHostConstruction:
         assert Note(experiment, "x").fs is experiment.fs
 
     def test_a_path_host_yields_the_local_filesystem(self, tmp_path: Path) -> None:
-        assert isinstance(Note(tmp_path / "wiki", "x").fs, LocalFileSystem)
+        assert isinstance(Note(tmp_path / "wiki", "x").fs, LocalFS)
 
     def test_an_explicit_fs_wins_over_the_hosts_disk(self, tmp_path: Path) -> None:
-        disk = LocalFileSystem()
+        disk = LocalFS()
 
         assert Note(tmp_path / "wiki", "x", fs=disk).fs is disk
 
@@ -699,7 +699,7 @@ class TestBacklinksTo:
         found = backlinks_to(
             ["molab:experiment/E1/run/R1"],
             within=ws.root,
-            fs=LocalFileSystem(),
+            fs=LocalFS(),
         )
 
         assert [(link.source.path, link.role) for link in found] == [(note.path, "derived_from")]
@@ -714,7 +714,7 @@ class TestBacklinksTo:
         note.write("# A\n")
         append_link(note, note, role="cites")
 
-        found = backlinks_to([str(note.path)], within=ws.root, fs=LocalFileSystem())
+        found = backlinks_to([str(note.path)], within=ws.root, fs=LocalFS())
 
         assert len(found) == 1
         assert note.backlinks() == []
@@ -730,7 +730,7 @@ class TestBacklinksTo:
         found = backlinks_to(
             ["molab:experiment/E1/run/R1"],
             within=ws.root,
-            fs=LocalFileSystem(),
+            fs=LocalFS(),
         )
 
         assert [(link.source.path, link.role) for link in found] == [(note.path, "derived_from")]
@@ -966,7 +966,7 @@ class TestRemoveLegacyFiles:
         left = remove_legacy_files(
             directory,
             ["observation.json", "index.md"],
-            fs=LocalFileSystem(),
+            fs=LocalFS(),
         )
 
         assert left == ["fig.png"]
@@ -981,7 +981,7 @@ class TestRemoveLegacyFiles:
         directory.mkdir()
         (directory / "index.md").write_text("x")
 
-        assert remove_legacy_files(directory, ["index.md"], fs=LocalFileSystem()) == []
+        assert remove_legacy_files(directory, ["index.md"], fs=LocalFS()) == []
         assert not directory.exists()
 
     def test_absent_names_are_ignored(self, tmp_path: Path) -> None:
@@ -991,7 +991,7 @@ class TestRemoveLegacyFiles:
         directory.mkdir()
         (directory / "a.txt").write_text("a")
 
-        assert remove_legacy_files(directory, ["missing.txt"], fs=LocalFileSystem()) == ["a.txt"]
+        assert remove_legacy_files(directory, ["missing.txt"], fs=LocalFS()) == ["a.txt"]
 
     def test_a_slash_in_the_name_is_refused(self, tmp_path: Path) -> None:
         from molab.knowledge.concept import remove_legacy_files
@@ -1000,7 +1000,7 @@ class TestRemoveLegacyFiles:
         directory.mkdir()
 
         with pytest.raises(ValueError):
-            remove_legacy_files(directory, ["a/b"], fs=LocalFileSystem())
+            remove_legacy_files(directory, ["a/b"], fs=LocalFS())
 
     def test_a_subdirectory_is_kept(self, tmp_path: Path) -> None:
         from molab.knowledge.concept import remove_legacy_files
@@ -1009,7 +1009,7 @@ class TestRemoveLegacyFiles:
         (directory / "nested").mkdir(parents=True)
         (directory / "nested" / "x").write_text("x")
 
-        left = remove_legacy_files(directory, ["nested"], fs=LocalFileSystem())
+        left = remove_legacy_files(directory, ["nested"], fs=LocalFS())
 
         assert left == ["nested"]
         assert (directory / "nested" / "x").is_file()
@@ -1075,9 +1075,9 @@ class TestKnowledgeRootHandle:
             assert not hasattr(Concept, name)
 
     def test_a_note_type_does_not_read_the_file(self, tmp_path: Path) -> None:
-        from molab.fs.local import LocalFileSystem
+        from molab.fs.local import LocalFS
 
-        class _Counting(LocalFileSystem):
+        class _Counting(LocalFS):
             def __init__(self) -> None:
                 self.reads = 0
 

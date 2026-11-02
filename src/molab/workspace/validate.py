@@ -49,7 +49,7 @@ from .entity_record import (
     read_type,
 )
 from .execution_dirs import execution_dir_names
-from .fs_local import LocalFileSystem
+from .fs_local import LocalFS
 from .history import MOLAB_DIR
 from .models import ExperimentMetadata, ProjectMetadata, RunMetadata, WorkspaceMetadata
 from .naming import (
@@ -412,9 +412,9 @@ class _Checker:
         )
 
     def _entries(self, path: str) -> list[DirEntry]:
-        """Every entry of *path*, by name; one ``scandir`` pass."""
+        """Every entry of *path*, by name; one ``ls -Al``."""
         try:
-            entries = self._fs.scandir(path, with_stat=False)
+            entries = self._fs.ls(path, A=True, l=True)
         except OSError:
             return []
         return sorted(entries, key=lambda entry: entry.name)
@@ -650,7 +650,7 @@ def validate_workspace(
     if isinstance(root, Workspace):
         disk = fs or getattr(root, "fs", None)
         return validate_workspace(root.resolve(), fs=disk, extra=extra, now=now)
-    filesystem = fs or LocalFileSystem()
+    filesystem = fs or LocalFS()
     resolved = filesystem.resolve(root)
     checker = _Checker(resolved, filesystem, extra or _NO_EXTRA, now or datetime.now(UTC))
     violations = checker.run()

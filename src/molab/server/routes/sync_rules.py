@@ -12,7 +12,7 @@ from pydantic import Field
 
 from molab.server.deps.scope_root import ScopeRoot
 from molab.server.schemas._wire import ApiModel
-from molab.workspace.fs_cached import CachedRemoteFileSystem
+from molab.workspace.fs_cached import CachedRemoteFS
 from molab.workspace.sync_rules import (
     SyncBusyError,
     SyncFailedError,
@@ -70,9 +70,9 @@ class SyncRunResponse(ApiModel):
     dry_run: bool
 
 
-def _require_cached_fs(workspace: object) -> CachedRemoteFileSystem:
+def _require_cached_fs(workspace: object) -> CachedRemoteFS:
     fs = getattr(workspace, "fs", None)
-    if not isinstance(fs, CachedRemoteFileSystem):
+    if not isinstance(fs, CachedRemoteFS):
         raise HTTPException(
             status_code=409,
             detail="Active workspace has no cache (local workspaces are not cached).",

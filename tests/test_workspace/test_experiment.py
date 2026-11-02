@@ -25,7 +25,7 @@ import pytest
 
 from molab._typing import JSONValue
 from molab.workspace import Experiment, GridSpace, Run, Workspace
-from molab.workspace.fs_local import LocalFileSystem
+from molab.workspace.fs_local import LocalFS
 from molab.workspace.history import GitHistory
 from molab.workspace.run import compute_run_definition_hash
 from tests.support.counting_fs import CountingFileSystem
@@ -214,10 +214,10 @@ class TestExperimentFindRun:
 
 
 class TestExperimentListRuns:
-    """arch-own-02b review handoff: the runs container is walked with ``scandir``."""
+    """The runs container is one ``ls -Al``."""
 
-    def test_list_runs_uses_scandir_not_listdir(self, tmp_path: Path) -> None:
-        fs = CountingFileSystem(LocalFileSystem())
+    def test_list_runs_is_one_long_listing(self, tmp_path: Path) -> None:
+        fs = CountingFileSystem(LocalFS())
         experiment = (
             Workspace(tmp_path, name="lab", fs=fs).add_project("p").add_experiment("e", params={})
         )
@@ -228,8 +228,7 @@ class TestExperimentListRuns:
         runs = experiment.list_runs()
 
         assert len(runs) == 3
-        assert fs.for_basename("runs", "listdir") == 0, dict(fs.calls)
-        assert fs.for_basename("runs", "scandir") == 1, dict(fs.calls)
+        assert fs.for_basename("runs", "ls") == 1, dict(fs.calls)
 
 
 # arch-own-04a fixtures. Digest is hashlib of the canon, not compute_definition_hash.

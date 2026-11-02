@@ -45,7 +45,7 @@ from .domain import (
 from .errors import UnmigratedAssetError
 from .execution_dirs import ARTIFACTS, execution_dir_names
 from .fs import FileSystem, PathArg
-from .fs_local import LocalFileSystem
+from .fs_local import LocalFS
 from .history import SYSTEM_AGENT, AgentRef, EntityRef, GitHistory, Relation
 from .naming import ASSET_CONTAINER, entity_slug
 from .refs import MolabRef, parse_ref
@@ -104,7 +104,7 @@ class ArtifactRepository:
         history: GitHistory | None = None,
     ) -> None:
         self.root = str(workspace_root)
-        self.fs = fs or LocalFileSystem()
+        self.fs = fs or LocalFS()
         self.history = history or GitHistory(self.root)
 
     def emit(
@@ -165,9 +165,9 @@ class ArtifactRepository:
         self.fs.mkdir(self.fs.dirname(out_path), parents=True, exist_ok=True)
         if self.fs.resolve(out_path) != source_path:
             if self.fs.is_dir(source_path):
-                self.fs.copytree(source_path, out_path)
+                self.fs.cp(source_path, out_path, recursive=True)
             else:
-                self.fs.copy(source_path, out_path)
+                self.fs.cp(source_path, out_path)
 
         now = datetime.now(UTC)
         artifact = Artifact(
@@ -468,7 +468,7 @@ class AssetRepository:
             return self._register_locked(name, source, relative.as_posix(), meta or {})
 
     def _require_local(self) -> None:
-        if not isinstance(self.fs, LocalFileSystem):
+        if not isinstance(self.fs, LocalFS):
             raise NotImplementedError("asset import/migration is local-filesystem only")
 
     def _assets_lock(self) -> AbstractContextManager[None]:
@@ -513,7 +513,7 @@ class AssetRepository:
             self._write_import(asset_root, asset, version)
         except Exception:
             if self.fs.exists(asset_root):
-                self.fs.remove(asset_root, recursive=True)
+                self.fs.rm(asset_root, recursive=True)
             raise
         self._record_import(asset, version, slug, action, input_ids, asset_root)
         return asset
@@ -540,7 +540,7 @@ class AssetRepository:
             self._write_import(asset_root, asset, version)
         except Exception:
             if self.fs.exists(asset_root):
-                self.fs.remove(asset_root, recursive=True)
+                self.fs.rm(asset_root, recursive=True)
             raise
         self._record_import(asset, version, slug, "reference", (), asset_root)
         return asset
@@ -928,7 +928,7 @@ class AssetRepository:
             return set()
         return {
             name
-            for name in self.fs.listdir(self.assets_dir)
+            for name in self.fs.ls(self.assets_dir, A=True)
             if self.fs.is_dir(self.fs.join(self.assets_dir, name))
         }
 

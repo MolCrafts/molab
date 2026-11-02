@@ -11,7 +11,7 @@ This module sits in ``molab.server`` (Layer 4) and intentionally does
 not import ``molab.workflow``.  It reaches downward
 into ``molab.workspace`` for two pieces: ``atomic_write_json`` (the
 cross-layer atomic-I/O primitive) and the ``FileSystem`` /
-``RemoteFileSystem`` types used by
+``RemoteFS`` types used by
 :func:`target_to_filesystem_for_workspace_target`.
 """
 
@@ -166,11 +166,11 @@ def target_to_filesystem_for_workspace_target(target: WorkspaceTarget) -> FileSy
     import hashlib
 
     from molab.workspace.connection import get_client
-    from molab.workspace.fs_cached import CachedRemoteFileSystem
-    from molab.workspace.fs_remote import RemoteFileSystem
+    from molab.workspace.fs_cached import CachedRemoteFS
+    from molab.workspace.fs_remote import RemoteFS
 
     client = get_client(target.registry_id)
-    inner = RemoteFileSystem(client, target.cluster_id, target.root_path)
+    inner = RemoteFS(client, target.cluster_id, target.root_path)
     identity = hashlib.sha256(
         f"{target.registry_id}\0{target.cluster_id}\0{target.root_path}".encode()
     ).hexdigest()
@@ -179,4 +179,4 @@ def target_to_filesystem_for_workspace_target(target: WorkspaceTarget) -> FileSy
         if target.cache_dir
         else default_remote_cache_dir(identity)
     )
-    return CachedRemoteFileSystem(inner, mirror_root=mirror_root, cache_mode=target.cache_mode)
+    return CachedRemoteFS(inner, mirror_root=mirror_root, cache_mode=target.cache_mode)

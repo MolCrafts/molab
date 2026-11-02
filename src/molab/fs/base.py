@@ -1,7 +1,7 @@
 """FileSystem abstraction — the workspace layer speaks this, never raw pathlib.
 
-Two implementations: LocalFileSystem (wraps pathlib/os/shutil) and
-RemoteFileSystem (uses the public molq file and transfer APIs).
+Two implementations: LocalFS (wraps pathlib/os/shutil) and
+RemoteFS (uses the public molq file and transfer APIs).
 
 All path arguments are interpreted on this filesystem.  ``str`` and any
 :class:`os.PathLike[str]` (notably :class:`molab.Path` /
@@ -15,7 +15,7 @@ import contextlib
 import os
 from collections.abc import Generator, Iterable
 from dataclasses import dataclass
-from typing import IO, Any, Protocol, runtime_checkable
+from typing import IO, Any, Literal, Protocol, overload, runtime_checkable
 
 PathArg = str | os.PathLike[str]
 """Anything that ``os.fspath()`` can turn into a POSIX path string.
@@ -37,17 +37,12 @@ class StatResult:
 
 @dataclass(frozen=True, slots=True)
 class DirEntry:
-    """One child of a directory, as returned by :meth:`FileSystem.scandir`.
-
-    The bulk counterpart to ``listdir`` + per-entry ``is_dir`` / ``stat``.
-    One local ``os.scandir`` pass — or one remote round-trip — answers what
-    the per-path Protocol needs N+1 calls for.
+    """One row of ``ls -l`` (:meth:`FileSystem.ls` with ``l=True``).
 
     ``is_dir`` / ``is_file`` follow symlinks (``os.DirEntry`` semantics), so a
-    symlink to a directory reports ``is_dir=True, is_symlink=True``; a broken
-    or looping link reports both False with ``is_symlink=True``. ``size`` and
-    ``mtime`` describe the *target* and are ``0`` / ``0.0`` when the listing
-    was taken with ``with_stat=False``.
+    symlink to a directory reports ``is_dir=True, is_symlink=True``. A broken
+    or looping link reports both False with ``is_symlink=True``, and ``size``
+    / ``mtime`` stay ``0`` / ``0.0``. ``size`` and ``mtime`` describe the target.
     """
 
     name: str
@@ -58,11 +53,52 @@ class DirEntry:
     mtime: float = 0.0
 
 
+def select_ls_names(names: Iterable[str], *, a: bool, A: bool) -> list[str]:
+    """Apply ``ls`` / ``ls -a`` / ``ls -A`` to real child names.
+
+    *names* is the directory's children. ``.`` and ``..`` are not children;
+    ``a=True`` adds them. ``A=True`` keeps other hidden names. ``a`` wins when
+    both are set, matching GNU ``ls``.
+    """
+    show_hidden = a or A
+    out = [
+        name
+        for name in names
+        if name not in {".", ".."} and (show_hidden or not name.startswith("."))
+    ]
+    if a:
+        out.extend((".", ".."))
+    return sorted(out)
+
+
+def select_ls_entries(
+    entries: Iterable[DirEntry],
+    *,
+    a: bool,
+    A: bool,
+    dot: DirEntry | None = None,
+    dotdot: DirEntry | None = None,
+) -> list[DirEntry]:
+    """Apply ``ls -l`` flags to real child entries. ``a=True`` appends *dot* and *dotdot*."""
+    show_hidden = a or A
+    out = [
+        entry
+        for entry in entries
+        if entry.name not in {".", ".."} and (show_hidden or not entry.name.startswith("."))
+    ]
+    if a:
+        out.append(dot if dot is not None else DirEntry(name=".", is_dir=True, is_file=False))
+        out.append(
+            dotdot if dotdot is not None else DirEntry(name="..", is_dir=True, is_file=False)
+        )
+    return sorted(out, key=lambda entry: entry.name)
+
+
 @runtime_checkable
 class FileSystem(Protocol):
     """Where files and directories actually live.
 
-    Implementations: LocalFileSystem (stdlib), RemoteFileSystem (the public molq SDK).
+    Implementations: LocalFS (stdlib), RemoteFS (the public molq SDK).
     Third-party plugins may implement this Protocol without importing workspace internals.
     """
 
@@ -83,28 +119,56 @@ class FileSystem(Protocol):
     # ── Directory operations ─────────────────────────────────────────────
 
     def mkdir(self, path: PathArg, *, parents: bool = True, exist_ok: bool = True) -> None: ...
-    def listdir(self, path: PathArg) -> list[str]: ...
-    def glob(self, path: PathArg, pattern: str) -> Iterable[str]: ...
-    def rglob(self, path: PathArg, pattern: str) -> Iterable[str]: ...
 
-    def scandir(self, path: PathArg, *, with_stat: bool = True) -> list[DirEntry]:
-        """List *path*'s children with their type (and size/mtime) in one pass.
+    @overload
+    def ls(
+        self,
+        path: PathArg,
+        *,
+        a: bool = False,
+        A: bool = False,
+        l: Literal[True],  # noqa: E741
+    ) -> list[DirEntry]: ...
 
-        A ``list``, not an iterator: the remote implementation has to fetch the
-        whole listing anyway, and the cached layer pins it. Order is
-        unspecified — callers that need determinism sort by ``name``. ``.`` and
-        ``..`` are never included.
+    @overload
+    def ls(
+        self,
+        path: PathArg,
+        *,
+        a: bool = False,
+        A: bool = False,
+        l: Literal[False] = False,  # noqa: E741
+    ) -> list[str]: ...
 
-        ``with_stat=False`` lets an implementation skip per-entry metadata
-        (``size``/``mtime`` come back zeroed) while still reporting ``is_dir``
-        and ``is_file`` exactly; implementations for which metadata is free
-        (one remote listing carries it) may ignore the flag.
+    def ls(
+        self,
+        path: PathArg,
+        *,
+        a: bool = False,
+        A: bool = False,
+        l: bool = False,  # noqa: E741
+    ) -> list[str] | list[DirEntry]:
+        """List *path* the way ``ls`` does.
+
+        ``ls()`` returns sorted names and hides a name that starts with ``.``.
+        ``a=True`` is ``ls -a``: hidden names, plus ``.`` and ``..``. ``A=True``
+        is ``ls -A``: hidden names, without ``.`` and ``..``. When both are set,
+        ``a`` wins. ``l=True`` is ``ls -l`` and returns :class:`DirEntry` rows
+        (type, size, mtime) instead of names. A long listing is one pass: the
+        remote implementation fetches the page once, and the cached layer pins it.
+
+        A walk that used to call ``listdir`` and then ``is_dir`` on each child
+        asks for ``A=True, l=True`` — every real child, with its type — and does
+        not hide a dotfile the walk still has to reject itself.
 
         Raises:
             FileNotFoundError: *path* does not exist.
             NotADirectoryError: *path* exists but is not a directory.
         """
         ...
+
+    def glob(self, path: PathArg, pattern: str) -> Iterable[str]: ...
+    def rglob(self, path: PathArg, pattern: str) -> Iterable[str]: ...
 
     def read_range(self, path: PathArg, offset: int, length: int) -> bytes:
         """Read bytes ``[offset, offset + length)`` without loading the file.
@@ -134,10 +198,22 @@ class FileSystem(Protocol):
 
     # ── Mutations ────────────────────────────────────────────────────────
 
-    def rename(self, src: PathArg, dst: PathArg) -> None: ...
-    def remove(self, path: PathArg, *, recursive: bool = False) -> None: ...
-    def copy(self, src: PathArg, dst: PathArg) -> None: ...
-    def copytree(self, src: PathArg, dst: PathArg, *, dirs_exist_ok: bool = False) -> None: ...
+    def mv(self, src: PathArg, dst: PathArg) -> None: ...
+
+    def rm(self, path: PathArg, *, recursive: bool = False) -> None:
+        """Remove *path*. ``recursive=True`` is ``rm -r``."""
+        ...
+
+    def cp(
+        self, src: PathArg, dst: PathArg, *, recursive: bool = False, dirs_exist_ok: bool = False
+    ) -> None:
+        """Copy *src* to *dst*. A directory requires ``recursive=True`` (``cp -r``).
+
+        Raises:
+            IsADirectoryError: *src* is a directory and *recursive* is false.
+            FileExistsError: *recursive* is true, *dst* exists, and *dirs_exist_ok* is false.
+        """
+        ...
 
     # ── Metadata ─────────────────────────────────────────────────────────
 
@@ -149,7 +225,9 @@ class FileSystem(Protocol):
 
     # ── Symlinks ─────────────────────────────────────────────────────────
 
-    def symlink(self, src: PathArg, dst: PathArg) -> None: ...
+    def ln(self, src: PathArg, dst: PathArg) -> None:
+        """Create a symlink at *dst* pointing at *src* (``ln -s``)."""
+        ...
 
     # ── Atomic I/O ───────────────────────────────────────────────────────
 
@@ -163,7 +241,7 @@ class FileSystem(Protocol):
 def bulk(fs: FileSystem) -> Generator[None]:
     """Group many operations on *fs* into one batch, when it supports batching.
 
-    ``CachedRemoteFileSystem`` re-serializes its whole index sidecar on every
+    ``CachedRemoteFS`` re-serializes its whole index sidecar on every
     recorded entry; a walk that touches N paths therefore writes O(N²) bytes
     unless it runs inside that class's ``batched()`` context. Wrapping a walker
     in ``bulk(fs)`` gets that batching where it exists and costs nothing where

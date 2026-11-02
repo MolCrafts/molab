@@ -22,7 +22,7 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from molab.fs import FileSystem, LocalFileSystem, PathArg
+from molab.fs import FileSystem, LocalFS, PathArg
 from molab.ids import slugify
 
 from .naming import KNOWLEDGE_CONTAINER, as_knowledge_file
@@ -204,13 +204,13 @@ def _host_fs(host: PathArg | Folder | Concept) -> FileSystem:
         host: A path, a workspace Folder, or a bare Knowledge handle.
 
     Returns:
-        The host's own disk, or :class:`~molab.fs.LocalFileSystem` for a path.
+        The host's own disk, or :class:`~molab.fs.LocalFS` for a path.
 
     Raises:
         TypeError: If *host* is not a recognised host.
     """
     if isinstance(host, (str, os.PathLike)):
-        return LocalFileSystem()
+        return LocalFS()
     from molab.workspace import Folder
 
     if isinstance(host, Folder):

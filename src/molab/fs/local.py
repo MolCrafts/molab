@@ -1,4 +1,4 @@
-"""LocalFileSystem — wraps pathlib, os, and shutil behind the FileSystem Protocol."""
+"""LocalFS — wraps pathlib, os, and shutil behind the FileSystem Protocol."""
 
 from __future__ import annotations
 
@@ -9,12 +9,12 @@ import stat as stat_module
 import tempfile
 from collections.abc import Iterable
 from pathlib import Path
-from typing import IO, Any
+from typing import IO, Any, Literal, overload
 
-from .base import DirEntry, FileSystem, PathArg, StatResult
+from .base import DirEntry, FileSystem, PathArg, StatResult, select_ls_entries, select_ls_names
 
 
-class LocalFileSystem:
+class LocalFS:
     """Concrete FileSystem backed by the local filesystem via stdlib.
 
     Accepts ``str`` or any :class:`os.PathLike[str]` (incl. :class:`molab.Path`);
@@ -64,41 +64,62 @@ class LocalFileSystem:
     def mkdir(path: PathArg, *, parents: bool = True, exist_ok: bool = True) -> None:
         Path(path).mkdir(parents=parents, exist_ok=exist_ok)
 
+    @overload
     @staticmethod
-    def listdir(path: PathArg) -> list[str]:
-        # os.listdir, not Path.iterdir: iterdir builds a Path per entry and
-        # discards the scandir metadata, which nothing here needs.
-        return os.listdir(path)  # noqa: PTH208
+    def ls(
+        path: PathArg,
+        *,
+        a: bool = False,
+        A: bool = False,
+        l: Literal[True],  # noqa: E741
+    ) -> list[DirEntry]: ...
+
+    @overload
+    @staticmethod
+    def ls(
+        path: PathArg,
+        *,
+        a: bool = False,
+        A: bool = False,
+        l: Literal[False] = False,  # noqa: E741
+    ) -> list[str]: ...
 
     @staticmethod
-    def scandir(path: PathArg, *, with_stat: bool = True) -> list[DirEntry]:
-        """One ``os.scandir`` pass; ``d_type`` answers is_dir/is_file for free.
+    def ls(
+        path: PathArg,
+        *,
+        a: bool = False,
+        A: bool = False,
+        l: bool = False,  # noqa: E741
+    ) -> list[str] | list[DirEntry]:
+        """``ls``. Names only unless ``l=True``, which is one ``os.scandir`` pass.
 
         A raced deletion mid-walk yields an entry with every flag False rather
         than raising — the directory listing as a whole is still valid.
         """
+        if not l:
+            return select_ls_names(os.listdir(path), a=a, A=A)  # noqa: PTH208
         entries: list[DirEntry] = []
         with os.scandir(path) as it:
-            for e in it:
+            for entry in it:
                 try:
-                    is_symlink = e.is_symlink()
-                    is_dir = e.is_dir()
-                    is_file = e.is_file()
+                    is_symlink = entry.is_symlink()
+                    is_dir = entry.is_dir()
+                    is_file = entry.is_file()
                     size = 0
                     mtime = 0.0
-                    if with_stat and (is_dir or is_file):
-                        st = e.stat()
+                    if is_dir or is_file:
+                        st = entry.stat()
                         size = st.st_size
                         mtime = st.st_mtime
                 except OSError:
-                    # Entry vanished, or a broken/looping symlink.
                     entries.append(
-                        DirEntry(name=e.name, is_dir=False, is_file=False, is_symlink=True)
+                        DirEntry(name=entry.name, is_dir=False, is_file=False, is_symlink=True)
                     )
                     continue
                 entries.append(
                     DirEntry(
-                        name=e.name,
+                        name=entry.name,
                         is_dir=is_dir,
                         is_file=is_file,
                         is_symlink=is_symlink,
@@ -106,7 +127,11 @@ class LocalFileSystem:
                         mtime=mtime,
                     )
                 )
-        return entries
+        dot = dotdot = None
+        if a:
+            dot = _dot_entry(path, ".")
+            dotdot = _dot_entry(Path(path).parent, "..")
+        return select_ls_entries(entries, a=a, A=A, dot=dot, dotdot=dotdot)
 
     @staticmethod
     def glob(path: PathArg, pattern: str) -> Iterable[str]:
@@ -163,11 +188,11 @@ class LocalFileSystem:
     # ── Mutations ────────────────────────────────────────────────────────
 
     @staticmethod
-    def rename(src: PathArg, dst: PathArg) -> None:
+    def mv(src: PathArg, dst: PathArg) -> None:
         os.rename(src, dst)  # noqa: PTH104
 
     @staticmethod
-    def remove(path: PathArg, *, recursive: bool = False) -> None:
+    def rm(path: PathArg, *, recursive: bool = False) -> None:
         p = Path(path)
         if not p.exists():
             return
@@ -177,13 +202,16 @@ class LocalFileSystem:
             p.unlink()
 
     @staticmethod
-    def copy(src: PathArg, dst: PathArg) -> None:
+    def cp(
+        src: PathArg, dst: PathArg, *, recursive: bool = False, dirs_exist_ok: bool = False
+    ) -> None:
+        if Path(src).is_dir():
+            if not recursive:
+                raise IsADirectoryError(os.fspath(src))
+            shutil.copytree(src, dst, dirs_exist_ok=dirs_exist_ok)
+            return
         Path(dst).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dst)
-
-    @staticmethod
-    def copytree(src: PathArg, dst: PathArg, *, dirs_exist_ok: bool = False) -> None:
-        shutil.copytree(src, dst, dirs_exist_ok=dirs_exist_ok)
 
     # ── Metadata ─────────────────────────────────────────────────────────
 
@@ -227,7 +255,7 @@ class LocalFileSystem:
     # ── Symlinks ─────────────────────────────────────────────────────────
 
     @staticmethod
-    def symlink(src: PathArg, dst: PathArg) -> None:
+    def ln(src: PathArg, dst: PathArg) -> None:
         Path(dst).symlink_to(src)
 
     # ── Atomic I/O ───────────────────────────────────────────────────────
@@ -256,6 +284,17 @@ class LocalFileSystem:
             raise
 
 
+def _dot_entry(path: PathArg, name: str) -> DirEntry:
+    st = os.stat(path)  # noqa: PTH116
+    return DirEntry(
+        name=name,
+        is_dir=stat_module.S_ISDIR(st.st_mode),
+        is_file=stat_module.S_ISREG(st.st_mode),
+        size=st.st_size,
+        mtime=st.st_mtime,
+    )
+
+
 # Verify structural conformance at import time — no runtime cost after first import.
-_local_fs = LocalFileSystem()
-assert isinstance(_local_fs, FileSystem), "LocalFileSystem must satisfy the FileSystem Protocol"
+_local_fs = LocalFS()
+assert isinstance(_local_fs, FileSystem), "LocalFS must satisfy the FileSystem Protocol"

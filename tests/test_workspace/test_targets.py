@@ -7,8 +7,8 @@ from pathlib import Path
 import pytest
 
 from molab.workspace import ComputeTarget, Workspace
-from molab.workspace.fs_local import LocalFileSystem
-from molab.workspace.fs_remote import RemoteFileSystem
+from molab.workspace.fs_local import LocalFS
+from molab.workspace.fs_remote import RemoteFS
 from molab.workspace.targets import to_filesystem
 
 
@@ -74,12 +74,10 @@ def test_filesystem_uses_the_same_destination(molq_destination):
         name="hpc", registry_id=registry, cluster_id=cluster, scratch_root=str(root)
     )
     fs = to_filesystem(target)
-    assert isinstance(fs, RemoteFileSystem)
+    assert isinstance(fs, RemoteFS)
     fs.write_text(root / "file", "payload")
     assert fs.read_text(root / "file") == "payload"
-    assert isinstance(
-        to_filesystem(ComputeTarget(name="local", scratch_root=str(root))), LocalFileSystem
-    )
+    assert isinstance(to_filesystem(ComputeTarget(name="local", scratch_root=str(root))), LocalFS)
 
 
 def test_legacy_connection_fields_are_rejected():

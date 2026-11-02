@@ -33,7 +33,7 @@ from .entity_record import EntityRecord, read_record
 from .errors import RunExistsError, RunNotFoundError
 from .folder import WORKSPACE_EXPERIMENT_KIND, WORKSPACE_RUN_KIND, Folder, register_entity_class
 from .fs import PathArg
-from .fs_local import LocalFileSystem
+from .fs_local import LocalFS
 from .models import FolderMetadata, RunMetadata, RunStatus
 from .naming import RUN_CONTAINER, run_slug
 
@@ -658,7 +658,7 @@ class Run(Folder):
         root = Workspace.enclosing_root(run_path)
         if root is None:
             raise FileNotFoundError(f"no workspace root above {run_path}")
-        record = read_record(LocalFileSystem(), str(run_path))
+        record = read_record(LocalFS(), str(run_path))
         if record is None or record.type != WORKSPACE_RUN_KIND:
             raise FileNotFoundError(f"no run record in {run_path}")
         meta = _load_metadata(RunMetadata, record.canonical)

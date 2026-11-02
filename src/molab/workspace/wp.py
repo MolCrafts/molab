@@ -22,7 +22,9 @@ Example::
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal, overload
+
+from molab.fs import DirEntry
 
 if TYPE_CHECKING:
     from molab.workspace.fs import FileSystem
@@ -39,9 +41,36 @@ class WorkspacePaths:
 
     # ── public verbs ────────────────────────────────────────────────────
 
-    def ls(self, path: str = ".") -> list[str]:
-        """List directory entries (relative to workspace root by default)."""
-        return ls(self._ws, path)
+    @overload
+    def ls(
+        self,
+        path: str = ".",
+        *,
+        a: bool = False,
+        A: bool = False,
+        l: Literal[True],  # noqa: E741
+    ) -> list[DirEntry]: ...
+
+    @overload
+    def ls(
+        self,
+        path: str = ".",
+        *,
+        a: bool = False,
+        A: bool = False,
+        l: Literal[False] = False,  # noqa: E741
+    ) -> list[str]: ...
+
+    def ls(
+        self,
+        path: str = ".",
+        *,
+        a: bool = False,
+        A: bool = False,
+        l: bool = False,  # noqa: E741
+    ) -> list[str] | list[DirEntry]:
+        """List *path* through the workspace filesystem. Flags match ``ls``."""
+        return ls(self._ws, path, a=a, A=A, l=l)
 
     def mkdir(self, path: str, *, parents: bool = True, exist_ok: bool = True) -> str:
         """Create a directory under the workspace; return its abs path."""
@@ -67,13 +96,42 @@ class WorkspacePaths:
 # ── free functions (``me.wp.mv(ws, …)``) ─────────────────────────────────
 
 
-def ls(workspace: Workspace, path: str = ".") -> list[str]:
-    """List directory entries under *workspace*."""
+@overload
+def ls(
+    workspace: Workspace,
+    path: str = ".",
+    *,
+    a: bool = False,
+    A: bool = False,
+    l: Literal[True],  # noqa: E741
+) -> list[DirEntry]: ...
+
+
+@overload
+def ls(
+    workspace: Workspace,
+    path: str = ".",
+    *,
+    a: bool = False,
+    A: bool = False,
+    l: Literal[False] = False,  # noqa: E741
+) -> list[str]: ...
+
+
+def ls(
+    workspace: Workspace,
+    path: str = ".",
+    *,
+    a: bool = False,
+    A: bool = False,
+    l: bool = False,  # noqa: E741
+) -> list[str] | list[DirEntry]:
+    """List *path* under *workspace* through its filesystem. Flags match ``ls``."""
     fs = _fs(workspace)
     target = _abs(workspace, path)
     if not fs.is_dir(target):
         raise NotADirectoryError(target)
-    return sorted(fs.listdir(target))
+    return fs.ls(target, a=a, A=A, l=l)
 
 
 def mkdir(
@@ -104,7 +162,7 @@ def mv(workspace: Workspace, src: str, dst: str) -> str:
     parent = fs.dirname(dst_abs)
     if parent and not fs.exists(parent):
         fs.mkdir(parent, parents=True, exist_ok=True)
-    fs.rename(src_abs, dst_abs)
+    fs.mv(src_abs, dst_abs)
     return dst_abs
 
 
@@ -125,9 +183,9 @@ def cp(workspace: Workspace, src: str, dst: str, *, recursive: bool = True) -> s
     if fs.is_dir(src_abs):
         if not recursive:
             raise IsADirectoryError(f"{src_abs} is a directory; pass recursive=True")
-        fs.copytree(src_abs, dst_abs, dirs_exist_ok=False)
+        fs.cp(src_abs, dst_abs, recursive=True)
     else:
-        fs.copy(src_abs, dst_abs)
+        fs.cp(src_abs, dst_abs)
     return dst_abs
 
 
@@ -139,11 +197,12 @@ def rm(workspace: Workspace, path: str, *, recursive: bool = False) -> None:
         raise FileNotFoundError(target)
     if fs.is_dir(target) and not recursive:
         # Non-empty dirs fail on most backends without recursive; empty ones
-        # still need recursive=False support — FileSystem.remove handles it.
-        children = fs.listdir(target)
+        # still need recursive=False support — FileSystem.rm handles it.
+        # ``ls -A`` counts dotfiles, so a directory of only hidden names is not empty.
+        children = fs.ls(target, A=True)
         if children:
             raise OSError(f"directory not empty: {target} (pass recursive=True)")
-    fs.remove(target, recursive=recursive or fs.is_dir(target))
+    fs.rm(target, recursive=recursive or fs.is_dir(target))
 
 
 # ── helpers ─────────────────────────────────────────────────────────────

@@ -84,7 +84,7 @@ def _child_heads(
     """``(dir name, frontmatter head)`` of each child record of *kind*, by name."""
     parent = fs.join(directory, container)
     try:
-        entries = fs.scandir(parent, with_stat=False)
+        entries = fs.ls(parent, A=True, l=True)
     except OSError:
         return []
     found: list[tuple[str, dict[str, object]]] = []
@@ -186,7 +186,7 @@ def _experiment_keys(
 
 def _subdir_names(fs: FileSystem, directory: str) -> list[str]:
     try:
-        entries = fs.scandir(directory, with_stat=False)
+        entries = fs.ls(directory, A=True, l=True)
     except OSError:
         return []
     return sorted(e.name for e in entries if e.is_dir and not e.name.startswith("."))

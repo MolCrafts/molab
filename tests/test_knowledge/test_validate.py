@@ -14,7 +14,7 @@ from molab.knowledge import Finding, Note, SourceRef
 from molab.knowledge.index_section import rebuild_sections, section_rows
 from molab.knowledge.validate import RULE_HINTS, validate_knowledge
 from molab.knowledge.write import write_knowledge
-from molab.workspace.fs_local import LocalFileSystem
+from molab.workspace.fs_local import LocalFS
 
 
 def _rules(lab: Any) -> list[tuple[str, str, str]]:
@@ -81,7 +81,7 @@ class TestSection:
         (container / "data.csv").write_text("a,b\n")
         (container / "sub").mkdir()
 
-        assert section_rows(str(lab.root), fs=LocalFileSystem()) == []
+        assert section_rows(str(lab.root), fs=LocalFS()) == []
 
 
 class TestValidateKnowledge:

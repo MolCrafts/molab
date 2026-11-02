@@ -10,7 +10,7 @@ molq owns registered destinations, generic authentication and bounded filesystem
 - Existing files.* and Path remain canonical. files.list gains with_stat/limit/after (256 default, 512 maximum); files.read_many accepts up to 128 paths, 256 KiB each and 512 KiB aggregate. Output stays within the 1 MiB frame. No silent truncation or per-file remote round trips masquerading as batch I/O.
 - Optional root constraints reject traversal and escaping symlinks on the target. Add recursive remove, chmod, symlink and bounded transfer deadlines. Files do not instantiate Scheduler.
 - connections.authenticate accepts a destination and one OTP; use one bounded attempt, private OpenSSH control paths and identical connection arguments for authentication and subsequent operations. Never expose codes in logs, argv, registry or configuration; do not close user masters. No ControlMaster prerequisite for key authentication.
-- RemoteFileSystem becomes a public molq API adapter. A service-owned explicit stdio client is opened/closed with molab. No implicit client. Remote syntax follows molq.Path cluster:path.
+- RemoteFS becomes a public molq API adapter. A service-owned explicit stdio client is opened/closed with molab. No implicit client. Remote syntax follows molq.Path cluster:path.
 - Cache keys include registry/cluster/root. Pinned cache refreshes explicitly; strict reads fetch content rather than treating equal size/mtime as proof of freshness.
 - Web upload/download use bounded streams or disk staging. No whole-file buffering for large files. Preserve OUTCOME_UNKNOWN; never automatically resend mutations.
 
@@ -34,7 +34,7 @@ Previous read-only audit: molab targeted suite 121 passed, 1 xfailed; molq Pytho
 ## Implementation notes and local review
 
 - molq owns scoped path resolution, bounded pagination/batches, chmod/symlink/recursive remove, transfer deadlines and one-response authentication. Generated sync/async/TypeScript contracts were regenerated from their existing sources. Native checks acquire cluster concurrency before target-side validation.
-- molab's RemoteFileSystem uses the public SDK only. Removed OpenSsh, custom rsync/shell operations, fake transport/session ownership and the obsolete molq dashboard dependency. The terminal monitor reuses molab's TreeMonitor. CLI addresses resolve registered destination prefixes; browser forms choose registry destinations.
+- molab's RemoteFS uses the public SDK only. Removed OpenSsh, custom rsync/shell operations, fake transport/session ownership and the obsolete molq dashboard dependency. The terminal monitor reuses molab's TreeMonitor. CLI addresses resolve registered destination prefixes; browser forms choose registry destinations.
 - Every submitted execution stores registry ID, canonical cluster ID and scratch root before staging. Reconciliation uses that snapshot even when the named target is removed or reconfigured. Uncertain submission/return transfer is retained and does not enter an automatic mutation retry loop.
 - Cancellation and observation call the application-owned client directly with the stored JobRef registry. Removed the borrowed-client forwarding context manager and the CLI scheduler/default-cluster cancellation fallback. A missing JobRef produces a warning instead of guessing a destination.
 - The Web service owns and closes an explicit stdio client. File listing, editor writes, directory creation, raw uploads and attachment downloads use the scoped FileSystem. Upload bodies stage on disk (8 GiB cap); downloads read at most 256 KiB per chunk. Workspace allowlists and role permissions apply to these routes.
@@ -118,7 +118,7 @@ Validation for the chrome change: 17 serve-scope tests, 27 focused Web tests, Py
 
 ### Loading fix and shallow remote navigation
 
-The subsequent loading investigation traced project listing to `ExperimentResponse.from_model`: every experiment eagerly read every run to compute a navigation count. Shallow responses now use the existing nullable `runCount` contract; detail responses still supply exact counts and run rows. Only the listed experiments' workflow documents are primed through `CachedRemoteFileSystem.read_many` and the public molq batch API. Arrhenius returned all 16 experiments in a measured 0.92 seconds after this change, and the browser rendered the complete experiment table and explorer entries.
+The subsequent loading investigation traced project listing to `ExperimentResponse.from_model`: every experiment eagerly read every run to compute a navigation count. Shallow responses now use the existing nullable `runCount` contract; detail responses still supply exact counts and run rows. Only the listed experiments' workflow documents are primed through `CachedRemoteFS.read_many` and the public molq batch API. Arrhenius returned all 16 experiments in a measured 0.92 seconds after this change, and the browser rendered the complete experiment table and explorer entries.
 
 Remote hover/focus intent no longer starts project/run scans, and project assets are fetched only when the Assets tab is opened. Explicit clicks and expansion still load entity data. Failed experiment requests retain their error in the existing snapshot and render the shared retry/error UI instead of inferring an endless loading state from a stale count.
 

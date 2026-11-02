@@ -72,4 +72,4 @@ def is_alive_stale(run: Run, execution_id: str) -> bool:
 
 def unlink_alive(run: Run, execution_id: str) -> None:
     """Remove the Execution's ``alive`` file; missing is a no-op."""
-    run._disk().remove(_alive_path(run, execution_id))
+    run._disk().rm(_alive_path(run, execution_id))

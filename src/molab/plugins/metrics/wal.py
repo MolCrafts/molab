@@ -47,7 +47,7 @@ from molab.plugins.metrics.mlp_names import (
 from molab.workspace.execution_dirs import ARTIFACTS, product_dirs
 from molab.workspace.file_store import FileStore
 from molab.workspace.fs import FileSystem
-from molab.workspace.fs_local import LocalFileSystem
+from molab.workspace.fs_local import LocalFS
 
 # Re-export naming constants so existing ``from metrics import …`` call sites
 # and docs can cite one module. Prefer :mod:`mlp_names` for new code.
@@ -74,7 +74,7 @@ class MetricReadResult:
 
 
 def _default_fs() -> FileSystem:
-    return LocalFileSystem()
+    return LocalFS()
 
 
 def _discover_named(
@@ -90,7 +90,7 @@ def _discover_named(
     if not fs.exists(root):
         return None
     try:
-        names = fs.listdir(root)
+        names = fs.ls(root, A=True)
     except OSError:
         return None
     preferred = f"{prefer_stem}{suffix}"
@@ -119,7 +119,7 @@ def _metrics_roots(run_dir: Path | str, fs: FileSystem) -> list[str]:
     execs = fs.join(root, "executions")
     if fs.is_dir(execs):
         try:
-            names = fs.listdir(execs)
+            names = fs.ls(execs, A=True)
         except OSError:
             names = []
         for name in sorted(names):

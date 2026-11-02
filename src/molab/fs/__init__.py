@@ -2,17 +2,17 @@
 
 Where files and directories actually live. A :class:`FileSystem` is a
 ``runtime_checkable`` Protocol with two first-party implementations:
-:class:`LocalFileSystem` (stdlib) and, in the workspace layer,
-``RemoteFileSystem`` / ``CachedRemoteFileSystem`` (molq-backed SSH mirrors).
+:class:`LocalFS` (stdlib) and, in the workspace layer,
+``RemoteFS`` / ``CachedRemoteFS`` (molq-backed SSH mirrors).
 
 It sits at the package root — beside ``path`` / ``ids`` / ``atomicio`` — rather
 than inside ``workspace`` because **two** bottom layers speak it:
 ``molab.workspace`` (the Folder family) and ``molab.knowledge`` (the OKF
 Concept bundle, which must work on a plain directory with no workspace in
-sight). One Protocol and one ``LocalFileSystem`` class shared by both is
+sight). One Protocol and one ``LocalFS`` class shared by both is
 load-bearing, not tidiness: ``Folder.move_to`` gates on
-``isinstance(self._fs, LocalFileSystem)``, so a second, parallel
-``LocalFileSystem`` would make that check silently False for a perfectly local
+``isinstance(self._fs, LocalFS)``, so a second, parallel
+``LocalFS`` would make that check silently False for a perfectly local
 tree.
 
 Only the Protocol and the stdlib implementation are eager here. The molq-backed
@@ -22,7 +22,7 @@ plain directory imports stdlib and nothing else.
 """
 
 from .base import DirEntry, FileSystem, PathArg, StatResult, bulk
-from .local import LocalFileSystem
+from .local import LocalFS
 from .memo import StatMemo
 from .profile import (
     LOCAL_FAST_PROFILE,
@@ -49,7 +49,7 @@ __all__ = [
     "FileSystem",
     "FsKind",
     "FsProfile",
-    "LocalFileSystem",
+    "LocalFS",
     "PathArg",
     "StatMemo",
     "StatResult",

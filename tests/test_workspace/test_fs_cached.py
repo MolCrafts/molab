@@ -1,4 +1,4 @@
-"""Unit tests for :class:`CachedRemoteFileSystem`.
+"""Unit tests for :class:`CachedRemoteFS`.
 
 Drives a fake :class:`FileSystem` that records call counts so we can
 assert "second read is mirror-served, zero inner calls".  No SSH.
@@ -15,8 +15,9 @@ from typing import IO, Any
 
 import pytest
 
+from molab.fs.base import select_ls_entries, select_ls_names
 from molab.workspace.fs import DirEntry, StatResult
-from molab.workspace.fs_cached import CachedRemoteFileSystem
+from molab.workspace.fs_cached import CachedRemoteFS
 
 
 class _FakeRemoteFS:
@@ -96,12 +97,12 @@ class _FakeRemoteFS:
         self.files[str(path)] = content
 
     # ── Mutations ──
-    def rename(self, src: str, dst: str) -> None:
-        self._hit("rename")
+    def mv(self, src: str, dst: str) -> None:
+        self._hit("mv")
         self.files[str(dst)] = self.files.pop(str(src))
 
-    def remove(self, path: str, *, recursive: bool = False) -> None:
-        self._hit("remove")
+    def rm(self, path: str, *, recursive: bool = False) -> None:
+        self._hit("rm")
         key = str(path)
         if recursive:
             for k in list(self.files):
@@ -112,46 +113,48 @@ class _FakeRemoteFS:
             self.files.pop(key, None)
             self.dirs.discard(key)
 
-    def copy(self, src: str, dst: str) -> None:
-        self._hit("copy")
+    def cp(
+        self, src: str, dst: str, *, recursive: bool = False, dirs_exist_ok: bool = False
+    ) -> None:
+        self._hit("cp")
+        if recursive:
+            prefix = str(src).rstrip("/") + "/"
+            for k, v in list(self.files.items()):
+                if k.startswith(prefix):
+                    self.files[str(dst).rstrip("/") + "/" + k[len(prefix) :]] = v
+            return
         self.files[str(dst)] = self.files[str(src)]
-
-    def copytree(self, src: str, dst: str, *, dirs_exist_ok: bool = False) -> None:
-        self._hit("copytree")
-        prefix = str(src).rstrip("/") + "/"
-        for k, v in list(self.files.items()):
-            if k.startswith(prefix):
-                self.files[str(dst).rstrip("/") + "/" + k[len(prefix) :]] = v
 
     # ── Dir ops ──
     def mkdir(self, path: str, *, parents: bool = True, exist_ok: bool = True) -> None:
         self._hit("mkdir")
         self.dirs.add(str(path))
 
-    def listdir(self, path: str) -> list[str]:
-        self._hit("listdir")
-        prefix = str(path).rstrip("/") + "/"
-        names: set[str] = set()
-        for k in (*self.files.keys(), *self.dirs):
-            if k.startswith(prefix):
-                tail = k[len(prefix) :]
-                names.add(tail.split("/", 1)[0])
-        return sorted(names)
-
-    def scandir(self, path: str, *, with_stat: bool = True) -> list[DirEntry]:
-        self._hit("scandir")
+    def ls(
+        self,
+        path: str,
+        *,
+        a: bool = False,
+        A: bool = False,
+        l: bool = False,  # noqa: E741
+    ) -> list[str] | list[DirEntry]:
+        """Names match the old ``listdir`` prefix scan. ``l=True`` matches ``scandir``."""
+        self._hit("ls")
         key = str(path).rstrip("/")
-        if key in self.files:
-            raise NotADirectoryError(key)
-        if key not in self.dirs:
-            raise FileNotFoundError(key)
+        if l:
+            if key in self.files and key not in self.dirs:
+                raise NotADirectoryError(key)
+            if key not in self.dirs:
+                raise FileNotFoundError(key)
         prefix = key + "/"
         names: set[str] = set()
         for child in (*self.files, *self.dirs):
             if child.startswith(prefix):
                 names.add(child[len(prefix) :].split("/", 1)[0])
+        if not l:
+            return select_ls_names(names, a=a, A=A)
         entries: list[DirEntry] = []
-        for name in sorted(names):
+        for name in names:
             child = prefix + name
             is_dir = child in self.dirs
             is_file = child in self.files
@@ -160,11 +163,11 @@ class _FakeRemoteFS:
                     name=name,
                     is_dir=is_dir,
                     is_file=is_file,
-                    size=len(self.files[child]) if is_file and with_stat else 0,
-                    mtime=42.0 if with_stat and (is_dir or is_file) else 0.0,
+                    size=len(self.files[child]) if is_file else 0,
+                    mtime=42.0 if is_dir or is_file else 0.0,
                 )
             )
-        return entries
+        return select_ls_entries(entries, a=a, A=A)
 
     def read_many(
         self, paths: Sequence[str], *, max_bytes: int = 262144
@@ -213,8 +216,8 @@ class _FakeRemoteFS:
         self._hit("getsize")
         return len(self.files[str(path)])
 
-    def symlink(self, src: str, dst: str) -> None:
-        self._hit("symlink")
+    def ln(self, src: str, dst: str) -> None:
+        self._hit("ln")
 
     # ── Atomic I/O ──
     def atomic_write_json(self, path: str, data: object) -> None:
@@ -237,16 +240,16 @@ def fake() -> _FakeRemoteFS:
 
 
 @pytest.fixture
-def cached(fake: _FakeRemoteFS, tmp_path: Path) -> CachedRemoteFileSystem:
-    return CachedRemoteFileSystem(fake, mirror_root=tmp_path / "mirror", cache_mode="pinned")
+def cached(fake: _FakeRemoteFS, tmp_path: Path) -> CachedRemoteFS:
+    return CachedRemoteFS(fake, mirror_root=tmp_path / "mirror", cache_mode="pinned")
 
 
-class TestCachedRemoteFileSystem:
+class TestCachedRemoteFS:
     # ── Core read caching ────────────────────────────────────────────────
 
     @pytest.mark.unit
     def test_first_read_fetches_inner_second_read_hits_mirror(
-        self, cached: CachedRemoteFileSystem, fake: _FakeRemoteFS
+        self, cached: CachedRemoteFS, fake: _FakeRemoteFS
     ):
         first = cached.read_bytes("/scratch/me/log.txt")
         second = cached.read_bytes("/scratch/me/log.txt")
@@ -256,7 +259,7 @@ class TestCachedRemoteFileSystem:
 
     @pytest.mark.unit
     def test_mirror_layout_strips_leading_slash(
-        self, cached: CachedRemoteFileSystem, fake: _FakeRemoteFS, tmp_path: Path
+        self, cached: CachedRemoteFS, fake: _FakeRemoteFS, tmp_path: Path
     ):
         cached.read_bytes("/scratch/me/log.txt")
         expected = tmp_path / "mirror" / "files" / "scratch" / "me" / "log.txt"
@@ -267,7 +270,7 @@ class TestCachedRemoteFileSystem:
 
     @pytest.mark.unit
     def test_missing_short_circuits_subsequent_exists(
-        self, cached: CachedRemoteFileSystem, fake: _FakeRemoteFS
+        self, cached: CachedRemoteFS, fake: _FakeRemoteFS
     ):
         assert cached.exists("/scratch/me/nope") is False
         fake.calls.clear()
@@ -275,14 +278,14 @@ class TestCachedRemoteFileSystem:
         assert fake.calls["exists"] == 0
 
     @pytest.mark.unit
-    def test_read_missing_propagates_filenotfound(self, cached: CachedRemoteFileSystem):
+    def test_read_missing_propagates_filenotfound(self, cached: CachedRemoteFS):
         with pytest.raises(FileNotFoundError):
             cached.read_bytes("/scratch/me/nope")
 
     # ── Invalidation on write / rename ───────────────────────────────────
 
     @pytest.mark.unit
-    def test_write_invalidates_cache(self, cached: CachedRemoteFileSystem, fake: _FakeRemoteFS):
+    def test_write_invalidates_cache(self, cached: CachedRemoteFS, fake: _FakeRemoteFS):
         cached.read_bytes("/scratch/me/log.txt")
         cached.write_text("/scratch/me/log.txt", "new content")
         fake.calls.clear()
@@ -290,11 +293,9 @@ class TestCachedRemoteFileSystem:
         assert fake.calls["read_bytes"] == 1, "must re-fetch after write"
 
     @pytest.mark.unit
-    def test_rename_invalidates_both_ends(
-        self, cached: CachedRemoteFileSystem, fake: _FakeRemoteFS
-    ):
+    def test_rename_invalidates_both_ends(self, cached: CachedRemoteFS, fake: _FakeRemoteFS):
         cached.read_bytes("/scratch/me/log.txt")
-        cached.rename("/scratch/me/log.txt", "/scratch/me/log2.txt")
+        cached.mv("/scratch/me/log.txt", "/scratch/me/log2.txt")
         fake.calls.clear()
         assert cached.read_bytes("/scratch/me/log2.txt") == b"hello"
         assert fake.calls["read_bytes"] == 1
@@ -304,7 +305,7 @@ class TestCachedRemoteFileSystem:
     @pytest.mark.unit
     def test_strict_reads_same_size_same_mtime_changes(self, fake: _FakeRemoteFS, tmp_path: Path):
         """Strict fetches content even though this fake's metadata is unchanged."""
-        cached = CachedRemoteFileSystem(fake, mirror_root=tmp_path / "mirror", cache_mode="strict")
+        cached = CachedRemoteFS(fake, mirror_root=tmp_path / "mirror", cache_mode="strict")
         cached.connect("/scratch/me")
         assert cached.read_bytes("/scratch/me/log.txt") == b"hello"
         fake.files["/scratch/me/log.txt"] = b"world"
@@ -314,7 +315,7 @@ class TestCachedRemoteFileSystem:
 
     @pytest.mark.unit
     def test_ttl_zero_redownloads_when_mtime_changes(self, fake: _FakeRemoteFS, tmp_path: Path):
-        cached = CachedRemoteFileSystem(fake, mirror_root=tmp_path / "mirror", cache_mode="strict")
+        cached = CachedRemoteFS(fake, mirror_root=tmp_path / "mirror", cache_mode="strict")
         cached.connect("/scratch/me")
         cached.read_bytes("/scratch/me/log.txt")
         fake.files["/scratch/me/log.txt"] = b"goodbye"
@@ -338,7 +339,7 @@ class TestCachedRemoteFileSystem:
         self, fake: _FakeRemoteFS, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ):
         """Positive ttl = pin-until-refresh: age does not force remote I/O."""
-        cached = CachedRemoteFileSystem(fake, mirror_root=tmp_path / "mirror", cache_mode="pinned")
+        cached = CachedRemoteFS(fake, mirror_root=tmp_path / "mirror", cache_mode="pinned")
         base = time.time()
         monkeypatch.setattr("molab.workspace.fs_cached.time.time", lambda: base)
         cached.connect("/scratch/me")
@@ -363,11 +364,11 @@ class TestCachedRemoteFileSystem:
         mirror_root = tmp_path / "mirror"
         fake.dirs.add("/scratch/me")
         fake.dirs.add("/scratch/me/projects")
-        first = CachedRemoteFileSystem(fake, mirror_root=mirror_root, cache_mode="pinned")
+        first = CachedRemoteFS(fake, mirror_root=mirror_root, cache_mode="pinned")
         first.connect("/scratch/me")
         first.read_bytes("/scratch/me/log.txt")
 
-        second = CachedRemoteFileSystem(fake, mirror_root=mirror_root, cache_mode="pinned")
+        second = CachedRemoteFS(fake, mirror_root=mirror_root, cache_mode="pinned")
         assert second.indexed is True
         ws = SimpleNamespace(root="/scratch/me", fs=second)
         fake.calls.clear()
@@ -392,11 +393,11 @@ class TestCachedRemoteFileSystem:
         fake.dirs.add("/scratch/me")
         fake.dirs.add("/scratch/me/projects")
         fake.files["/scratch/me/index.md"] = b"---\ntype: workspace.root\n---\n"
-        first = CachedRemoteFileSystem(fake, mirror_root=mirror_root, cache_mode="pinned")
+        first = CachedRemoteFS(fake, mirror_root=mirror_root, cache_mode="pinned")
         first.connect("/scratch/me")
         first.read_bytes("/scratch/me/log.txt")
 
-        second = CachedRemoteFileSystem(fake, mirror_root=mirror_root, cache_mode="pinned")
+        second = CachedRemoteFS(fake, mirror_root=mirror_root, cache_mode="pinned")
         ws = SimpleNamespace(root="/scratch/me", fs=second)
         # Pin read works before/during refresh.
         assert second.read_bytes("/scratch/me/log.txt") == b"hello"
@@ -416,7 +417,7 @@ class TestCachedRemoteFileSystem:
         fake.dirs.add("/scratch/me")
         fake.dirs.add("/scratch/me/projects")
         fake.files["/scratch/me/index.md"] = b"---\nname: ws\n---\n"
-        cached = CachedRemoteFileSystem(fake, mirror_root=tmp_path / "mirror", cache_mode="pinned")
+        cached = CachedRemoteFS(fake, mirror_root=tmp_path / "mirror", cache_mode="pinned")
         assert cached.indexed is False
         ws = SimpleNamespace(root="/scratch/me", fs=cached)
         warnings = cached.prepare(ws, block_index=False)  # type: ignore[arg-type]
@@ -428,7 +429,7 @@ class TestCachedRemoteFileSystem:
 
     @pytest.mark.unit
     def test_force_fetch_bypasses_pin_for_refresh_thread(self, fake: _FakeRemoteFS, tmp_path: Path):
-        cached = CachedRemoteFileSystem(fake, mirror_root=tmp_path / "mirror", cache_mode="pinned")
+        cached = CachedRemoteFS(fake, mirror_root=tmp_path / "mirror", cache_mode="pinned")
         cached.connect("/scratch/me")
         cached.read_bytes("/scratch/me/log.txt")
         fake.files["/scratch/me/log.txt"] = b"updated"
@@ -450,7 +451,7 @@ class TestCachedRemoteFileSystem:
         """ThreadPool workers must inherit force_fetch (TLS is not shared)."""
         from molab.workspace.fs_cached import _parallel_map
 
-        cached = CachedRemoteFileSystem(fake, mirror_root=tmp_path / "mirror", cache_mode="pinned")
+        cached = CachedRemoteFS(fake, mirror_root=tmp_path / "mirror", cache_mode="pinned")
         cached.connect("/scratch/me")
         for i in range(4):
             path = f"/scratch/me/p{i}.json"
@@ -470,7 +471,7 @@ class TestCachedRemoteFileSystem:
     def test_sidecar_ancient_fetched_at_still_pinned(self, fake: _FakeRemoteFS, tmp_path: Path):
         """Prior-session wall-clock ages must not force SSH on next open."""
         mirror_root = tmp_path / "mirror"
-        first = CachedRemoteFileSystem(fake, mirror_root=mirror_root, cache_mode="pinned")
+        first = CachedRemoteFS(fake, mirror_root=mirror_root, cache_mode="pinned")
         first.connect("/scratch/me")
         first.read_bytes("/scratch/me/log.txt")
         import json as _json
@@ -483,7 +484,7 @@ class TestCachedRemoteFileSystem:
             payload["fetched_at"] = 1.0
         sidecar.write_text(_json.dumps(raw), encoding="utf-8")
 
-        second = CachedRemoteFileSystem(fake, mirror_root=mirror_root, cache_mode="pinned")
+        second = CachedRemoteFS(fake, mirror_root=mirror_root, cache_mode="pinned")
         fake.calls.clear()
         assert second.read_bytes("/scratch/me/log.txt") == b"hello"
         assert fake.calls["read_bytes"] == 0
@@ -494,11 +495,11 @@ class TestCachedRemoteFileSystem:
     @pytest.mark.unit
     def test_sidecar_round_trip_across_instances(self, fake: _FakeRemoteFS, tmp_path: Path):
         mirror_root = tmp_path / "mirror"
-        first = CachedRemoteFileSystem(fake, mirror_root=mirror_root, cache_mode="pinned")
+        first = CachedRemoteFS(fake, mirror_root=mirror_root, cache_mode="pinned")
         first.read_bytes("/scratch/me/log.txt")
         assert fake.calls["read_bytes"] == 1
 
-        second = CachedRemoteFileSystem(fake, mirror_root=mirror_root, cache_mode="pinned")
+        second = CachedRemoteFS(fake, mirror_root=mirror_root, cache_mode="pinned")
         # Cached_paths should include the entry from the first instance.
         assert "/scratch/me/log.txt" in second.cached_paths()
         fake.calls.clear()
@@ -512,7 +513,7 @@ class TestCachedRemoteFileSystem:
         """A brand-new remote has no _index.json — connect materialises one."""
         mirror_root = tmp_path / "fresh-mirror"
         fake.dirs.add("/scratch/me")
-        cached = CachedRemoteFileSystem(fake, mirror_root=mirror_root, cache_mode="pinned")
+        cached = CachedRemoteFS(fake, mirror_root=mirror_root, cache_mode="pinned")
         # Init creates mirror dirs but does not invent a sidecar until connect/write.
         assert mirror_root.is_dir()
         assert cached.connected is False
@@ -529,7 +530,7 @@ class TestCachedRemoteFileSystem:
         import shutil
 
         mirror_root = tmp_path / "mirror"
-        cached = CachedRemoteFileSystem(fake, mirror_root=mirror_root, cache_mode="pinned")
+        cached = CachedRemoteFS(fake, mirror_root=mirror_root, cache_mode="pinned")
         cached.read_bytes("/scratch/me/log.txt")
         assert (mirror_root / "_index.json").is_file()
 
@@ -550,7 +551,7 @@ class TestCachedRemoteFileSystem:
     ):
         fake.files["/scratch/me/index.md"] = b'{"items":[]}'
         fake.files["/scratch/me/runs/a/stdout.log"] = b"log bytes"
-        cached = CachedRemoteFileSystem(fake, mirror_root=tmp_path / "mirror", cache_mode="pinned")
+        cached = CachedRemoteFS(fake, mirror_root=tmp_path / "mirror", cache_mode="pinned")
         cached.read_bytes("/scratch/me/index.md")
         cached.read_bytes("/scratch/me/runs/a/stdout.log")
 
@@ -567,7 +568,7 @@ class TestCachedRemoteFileSystem:
 
         fake.files["/scratch/me/executions/e01/execution.json"] = b"{}"
         fake.files["/scratch/me/executions/e01/run.log"] = b"log"
-        cached = CachedRemoteFileSystem(fake, mirror_root=tmp_path / "mirror", cache_mode="pinned")
+        cached = CachedRemoteFS(fake, mirror_root=tmp_path / "mirror", cache_mode="pinned")
         cached.read_bytes("/scratch/me/executions/e01/execution.json")
         cached.read_bytes("/scratch/me/executions/e01/run.log")
 
@@ -580,7 +581,7 @@ class TestCachedRemoteFileSystem:
     @pytest.mark.unit
     def test_invalidate_scope_all_clears_everything(self, fake: _FakeRemoteFS, tmp_path: Path):
         fake.files["/scratch/me/extra.txt"] = b"x"
-        cached = CachedRemoteFileSystem(fake, mirror_root=tmp_path / "mirror", cache_mode="pinned")
+        cached = CachedRemoteFS(fake, mirror_root=tmp_path / "mirror", cache_mode="pinned")
         cached.read_bytes("/scratch/me/log.txt")
         cached.read_bytes("/scratch/me/extra.txt")
 
@@ -596,7 +597,7 @@ class TestCachedRemoteFileSystem:
     @pytest.mark.unit
     def test_invalidate_specific_path(self, fake: _FakeRemoteFS, tmp_path: Path):
         fake.files["/scratch/me/extra.txt"] = b"x"
-        cached = CachedRemoteFileSystem(fake, mirror_root=tmp_path / "mirror", cache_mode="pinned")
+        cached = CachedRemoteFS(fake, mirror_root=tmp_path / "mirror", cache_mode="pinned")
         cached.read_bytes("/scratch/me/log.txt")
         cached.read_bytes("/scratch/me/extra.txt")
 
@@ -605,16 +606,14 @@ class TestCachedRemoteFileSystem:
         assert "/scratch/me/log.txt" not in cached.cached_paths()
 
     @pytest.mark.unit
-    def test_invalidate_rejects_unknown_scope(self, cached: CachedRemoteFileSystem):
+    def test_invalidate_rejects_unknown_scope(self, cached: CachedRemoteFS):
         with pytest.raises(ValueError, match="unknown scope"):
             cached.invalidate(scope="bogus")
 
     # ── Stat caching ─────────────────────────────────────────────────────
 
     @pytest.mark.unit
-    def test_stat_serves_from_cache_after_read(
-        self, cached: CachedRemoteFileSystem, fake: _FakeRemoteFS
-    ):
+    def test_stat_serves_from_cache_after_read(self, cached: CachedRemoteFS, fake: _FakeRemoteFS):
         cached.read_bytes("/scratch/me/log.txt")
         fake.calls.clear()
         info = cached.stat("/scratch/me/log.txt")
@@ -625,7 +624,7 @@ class TestCachedRemoteFileSystem:
 
     @pytest.mark.unit
     def test_path_ops_delegate_to_inner_without_io(self, fake: _FakeRemoteFS, tmp_path: Path):
-        cached = CachedRemoteFileSystem(fake, mirror_root=tmp_path / "mirror", cache_mode="pinned")
+        cached = CachedRemoteFS(fake, mirror_root=tmp_path / "mirror", cache_mode="pinned")
         cached.join("/a", "b", "c")
         cached.dirname("/a/b/c")
         cached.basename("/a/b/c")
@@ -689,14 +688,14 @@ def test_directory_rename_evicts_descendants(cached, fake, monkeypatch):
     def move(src, dst):
         fake.files[dst + "/child"] = fake.files.pop(src + "/child")
 
-    monkeypatch.setattr(fake, "rename", move)
-    cached.rename("/old", "/new")
+    monkeypatch.setattr(fake, "mv", move)
+    cached.mv("/old", "/new")
     with pytest.raises(FileNotFoundError):
         cached.read_bytes("/old/child")
     assert cached.read_bytes("/new/child") == b"old"
 
 
-@pytest.mark.parametrize("operation", ["exists", "listdir"])
+@pytest.mark.parametrize("operation", ["exists", "ls"])
 def test_mkdir_rejects_observations_started_before_creation(cached, fake, monkeypatch, operation):
     from concurrent.futures import ThreadPoolExecutor
     from threading import Event
@@ -705,8 +704,8 @@ def test_mkdir_rejects_observations_started_before_creation(cached, fake, monkey
     original = getattr(fake, operation)
     target = "/scratch/me/new" if operation == "exists" else "/scratch/me"
 
-    def delayed(path):
-        result = original(path)
+    def delayed(path, **kwargs: object):
+        result = original(path, **kwargs)
         entered.set()
         assert release.wait(5)
         return result
@@ -722,14 +721,14 @@ def test_mkdir_rejects_observations_started_before_creation(cached, fake, monkey
         pending.result()
     monkeypatch.setattr(fake, operation, original)
     assert cached.exists("/scratch/me/new")
-    assert "new" in cached.listdir("/scratch/me")
+    assert "new" in cached.ls("/scratch/me", A=True)
 
 
 def test_mkdir_does_not_resurrect_parent_listing_on_reopen(cached, fake):
-    assert "new" not in cached.listdir("/scratch/me")
+    assert "new" not in cached.ls("/scratch/me", A=True)
     cached.mkdir("/scratch/me/new")
-    reopened = CachedRemoteFileSystem(fake, mirror_root=cached.mirror_root)
-    assert "new" in reopened.listdir("/scratch/me")
+    reopened = CachedRemoteFS(fake, mirror_root=cached.mirror_root)
+    assert "new" in reopened.ls("/scratch/me", A=True)
 
 
 def test_pinned_batch_and_write_do_not_race_mirror_eviction(cached, fake, monkeypatch):
@@ -787,7 +786,7 @@ class _RsyncFS(_FakeRemoteFS):
 
 def test_pull_pins_rsynced_bytes_without_another_read(tmp_path: Path) -> None:
     inner = _RsyncFS()
-    cached = CachedRemoteFileSystem(inner, mirror_root=tmp_path / "mirror")
+    cached = CachedRemoteFS(inner, mirror_root=tmp_path / "mirror")
     result = cached.rsync(
         "/lab/nve",
         direction="pull",
@@ -802,12 +801,12 @@ def test_pull_pins_rsynced_bytes_without_another_read(tmp_path: Path) -> None:
     before = inner.calls["read_bytes"]
     assert cached.read_bytes("/lab/nve/note.md") == b"hello"
     assert inner.calls["read_bytes"] == before
-    assert cached.listdir("/lab/nve") == ["experiments", "note.md"]
+    assert cached.ls("/lab/nve", A=True) == ["experiments", "note.md"]
 
 
 def test_rsync_dry_run_leaves_the_pin_empty(tmp_path: Path) -> None:
     inner = _RsyncFS()
-    cached = CachedRemoteFileSystem(inner, mirror_root=tmp_path / "mirror")
+    cached = CachedRemoteFS(inner, mirror_root=tmp_path / "mirror")
     result = cached.rsync("/lab/nve", direction="pull", dry_run=True)
     assert result["output"] == "would copy note.md"
     assert inner.transfers[0][3]["dry_run"] is True
@@ -817,7 +816,7 @@ def test_rsync_dry_run_leaves_the_pin_empty(tmp_path: Path) -> None:
 
 def test_rsync_push_uses_upload(tmp_path: Path) -> None:
     inner = _RsyncFS()
-    cached = CachedRemoteFileSystem(inner, mirror_root=tmp_path / "mirror")
+    cached = CachedRemoteFS(inner, mirror_root=tmp_path / "mirror")
     result = cached.rsync("/lab/nve", direction="push", delete=True)
     assert result["output"] == "pushed"
     assert inner.transfers[0][0] == "upload"
@@ -827,7 +826,7 @@ def test_rsync_push_uses_upload(tmp_path: Path) -> None:
 def test_file_rsync_does_not_make_a_directory_at_the_file_path(tmp_path: Path) -> None:
     inner = _RsyncFS()
     inner.files["/lab/nve/note.md"] = b"hello"
-    cached = CachedRemoteFileSystem(inner, mirror_root=tmp_path / "mirror")
+    cached = CachedRemoteFS(inner, mirror_root=tmp_path / "mirror")
     cached.rsync("/lab/nve/note.md", direction="pull", recursive=False, dry_run=True)
     assert inner.transfers[0][3]["recursive"] is False
     local = Path(inner.transfers[0][2])
@@ -836,7 +835,7 @@ def test_file_rsync_does_not_make_a_directory_at_the_file_path(tmp_path: Path) -
 
 
 def test_rsync_rejects_a_pattern_that_looks_like_an_option(tmp_path: Path) -> None:
-    cached = CachedRemoteFileSystem(_RsyncFS(), mirror_root=tmp_path / "mirror")
+    cached = CachedRemoteFS(_RsyncFS(), mirror_root=tmp_path / "mirror")
     with pytest.raises(ValueError, match="invalid rsync pattern"):
         cached.rsync("/lab/nve", direction="pull", include=["--delete"])
 
@@ -868,42 +867,42 @@ def test_observation_during_write_is_evicted_after_commit(cached, fake, monkeypa
     assert cached.read_bytes(key) == b"new"
 
 
-def test_scandir_is_served_from_the_pin(cached, fake):
+def test_long_listing_is_served_from_the_pin(cached, fake):
     fake.dirs.add("/scratch/me/child")
-    first = cached.scandir("/scratch/me")
+    first = cached.ls("/scratch/me", A=True, l=True)
     assert {entry.name: entry.is_dir for entry in first} == {"log.txt": False, "child": True}
-    assert fake.calls["scandir"] == 1
-    second = cached.scandir("/scratch/me")
+    assert fake.calls["ls"] == 1
+    second = cached.ls("/scratch/me", A=True, l=True)
     assert [entry.name for entry in second] == [entry.name for entry in first]
-    assert fake.calls["scandir"] == 1
+    assert fake.calls["ls"] == 1
 
 
-def test_scandir_with_stat_refetches_a_names_only_pin(cached, fake):
-    cached.scandir("/scratch/me", with_stat=False)
-    assert fake.calls["scandir"] == 1
-    cached.scandir("/scratch/me", with_stat=True)
-    assert fake.calls["scandir"] == 2
-    cached.scandir("/scratch/me", with_stat=True)
-    assert fake.calls["scandir"] == 2
-    assert cached.scandir("/scratch/me", with_stat=True)[0].mtime == 42.0
+def test_long_listing_refetches_a_names_only_pin(cached, fake):
+    cached.ls("/scratch/me", A=True)
+    assert fake.calls["ls"] == 1
+    cached.ls("/scratch/me", A=True, l=True)
+    assert fake.calls["ls"] == 2
+    cached.ls("/scratch/me", A=True, l=True)
+    assert fake.calls["ls"] == 2
+    assert cached.ls("/scratch/me", A=True, l=True)[0].mtime == 42.0
 
 
-def test_scandir_pin_survives_reopen(cached, fake):
-    cached.scandir("/scratch/me", with_stat=True)
-    reopened = CachedRemoteFileSystem(fake, mirror_root=cached.mirror_root)
-    assert fake.calls["scandir"] == 1
-    assert [entry.name for entry in reopened.scandir("/scratch/me")] == ["log.txt"]
-    assert fake.calls["scandir"] == 1
+def test_long_listing_pin_survives_reopen(cached, fake):
+    cached.ls("/scratch/me", A=True, l=True)
+    reopened = CachedRemoteFS(fake, mirror_root=cached.mirror_root)
+    assert fake.calls["ls"] == 1
+    assert [entry.name for entry in reopened.ls("/scratch/me", A=True, l=True)] == ["log.txt"]
+    assert fake.calls["ls"] == 1
 
 
 def test_invalidate_dir_listing_keeps_file_bytes(cached, fake):
     assert cached.read_bytes("/scratch/me/log.txt") == b"hello"
-    cached.scandir("/scratch/me")
+    cached.ls("/scratch/me", A=True, l=True)
     cached.invalidate_dir_listing("/scratch/me")
     assert cached.read_bytes("/scratch/me/log.txt") == b"hello"
     assert fake.calls["read_bytes"] == 1
-    cached.scandir("/scratch/me")
-    assert fake.calls["scandir"] == 2
+    cached.ls("/scratch/me", A=True, l=True)
+    assert fake.calls["ls"] == 2
 
 
 def test_read_many_pins_a_directory_until_refresh(cached, fake):
@@ -934,7 +933,7 @@ def _queued_execution_bytes(tmp_path: Path, *, execution_id: str = "e01", seq: i
     return (json.dumps(payload) + "\n").encode()
 
 
-def _remote_run(tmp_path: Path, fake: _FakeRemoteFS, cached: CachedRemoteFileSystem, name: str):
+def _remote_run(tmp_path: Path, fake: _FakeRemoteFS, cached: CachedRemoteFS, name: str):
     from molab.workspace.execution_repository import ExecutionRepository
 
     run_dir = cached.join("lab", "runs", name)
@@ -959,7 +958,7 @@ def test_primed_attempts_list_without_a_remote_listing(tmp_path, fake, cached):
     assert fake.calls["read_many"] == 1
     found = repo.list()
     assert [item.id for item in found] == ["e01"]
-    assert fake.calls["scandir"] == 0
+    assert fake.calls["ls"] == 0
     assert fake.calls["exists"] == 0
     assert fake.calls["read_bytes"] == 0
     assert fake.calls["read_many"] == 1
@@ -974,7 +973,7 @@ def test_missing_executions_directory_lists_nothing(tmp_path, fake, cached):
         tmp_path / "host", run_dir, run_id="run-1", project_id="proj-1", fs=cached
     )
     assert repo.list() == []
-    assert fake.calls["scandir"] == 0
+    assert fake.calls["ls"] == 0
     assert fake.calls["exists"] == 0
 
 
@@ -989,9 +988,9 @@ def test_empty_executions_directory_is_listed_once(tmp_path, fake, cached):
         tmp_path / "host", run_dir, run_id="run-1", project_id="proj-1", fs=cached
     )
     assert repo.list() == []
-    assert fake.calls["scandir"] == 1
+    assert fake.calls["ls"] == 1
     assert repo.list() == []
-    assert fake.calls["scandir"] == 1
+    assert fake.calls["ls"] == 1
 
 
 def test_legacy_attempt_name_is_listed_once_when_e01_is_absent(tmp_path, fake, cached):
@@ -1007,9 +1006,9 @@ def test_legacy_attempt_name_is_listed_once_when_e01_is_absent(tmp_path, fake, c
         tmp_path / "host", run_dir, run_id="run-1", project_id="proj-1", fs=cached
     )
     assert [item.id for item in repo.list()] == ["e01"]
-    assert fake.calls["scandir"] == 1
+    assert fake.calls["ls"] == 1
     assert [item.id for item in repo.list()] == ["e01"]
-    assert fake.calls["scandir"] == 1
+    assert fake.calls["ls"] == 1
 
 
 def test_a_new_attempt_appears_on_the_next_probe(tmp_path, fake, cached):
@@ -1027,25 +1026,25 @@ def test_a_new_attempt_appears_on_the_next_probe(tmp_path, fake, cached):
     found = repo.list()
     assert [item.id for item in found] == ["e01", "e02"]
     assert found[0].environment["marker"] == "fresh"
-    assert fake.calls["scandir"] == 0
+    assert fake.calls["ls"] == 0
 
 
 @pytest.mark.parametrize("operation", ["mkdir", "atomic_write_text"])
 def test_parent_creation_evicts_ancestor_negative_pins(tmp_path, operation):
-    from molab.workspace.fs_local import LocalFileSystem
+    from molab.workspace.fs_local import LocalFS
 
     root = tmp_path / "remote"
     root.mkdir()
-    fs = CachedRemoteFileSystem(LocalFileSystem(), mirror_root=tmp_path / "mirror")
+    fs = CachedRemoteFS(LocalFS(), mirror_root=tmp_path / "mirror")
     parent = root / "new"
     assert not fs.exists(parent)
-    assert fs.listdir(root) == []
+    assert fs.ls(root, A=True) == []
     if operation == "mkdir":
         fs.mkdir(parent / "deep", parents=True)
     else:
         fs.atomic_write_text(parent / "deep" / "file", "data")
     assert fs.exists(parent)
-    assert fs.listdir(root) == ["new"]
-    reopened = CachedRemoteFileSystem(LocalFileSystem(), mirror_root=fs.mirror_root)
+    assert fs.ls(root, A=True) == ["new"]
+    reopened = CachedRemoteFS(LocalFS(), mirror_root=fs.mirror_root)
     assert reopened.exists(parent)
-    assert reopened.listdir(root) == ["new"]
+    assert reopened.ls(root, A=True) == ["new"]

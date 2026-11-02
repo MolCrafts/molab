@@ -25,7 +25,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from molab.fs import FileSystem, LocalFileSystem, PathArg
+from molab.fs import FileSystem, LocalFS, PathArg
 
 from .naming import KNOWLEDGE_CONTAINER, is_knowledge_file
 
@@ -144,7 +144,7 @@ def validate_knowledge(
         workspace = root
         disk = fs or root.fs
     else:
-        disk = fs or LocalFileSystem()
+        disk = fs or LocalFS()
         try:
             workspace = Workspace.load(root, fs=disk)
         except FileNotFoundError:
@@ -155,7 +155,7 @@ def validate_knowledge(
         host = str(host_path)
         container = disk.join(host, KNOWLEDGE_CONTAINER)
         try:
-            entries = disk.scandir(container, with_stat=False)
+            entries = disk.ls(container, A=True, l=True)
         except OSError:
             entries = []
         for entry in sorted(entries, key=lambda item: item.name):

@@ -200,8 +200,8 @@ class TestServeScopeHttp:
     ) -> None:
         from molq import Molq
 
-        from molab.workspace.fs_cached import CachedRemoteFileSystem
-        from molab.workspace.fs_remote import RemoteFileSystem
+        from molab.workspace.fs_cached import CachedRemoteFS
+        from molab.workspace.fs_remote import RemoteFS
         from molab.workspace.scope import open_serve_root
 
         ws, project, experiment, _run, _beta, _open_at = client_at
@@ -210,8 +210,8 @@ class TestServeScopeHttp:
             cluster = mq.clusters.register(
                 name="scoped", scheduler="shell", target_root=str(tmp_path)
             )
-            inner = RemoteFileSystem(mq, cluster.name, directory)
-            fs = CachedRemoteFileSystem(inner, mirror_root=tmp_path / "mirror")
+            inner = RemoteFS(mq, cluster.name, directory)
+            fs = CachedRemoteFS(inner, mirror_root=tmp_path / "mirror")
             opened = open_serve_root(directory, fs=fs)
             assert opened.kind == WORKSPACE_PROJECT_KIND
             assert opened.id == project.id
@@ -273,8 +273,8 @@ class TestServeScopeHttp:
 
         from molab.server.deps.scope_root import ScopeRoot
         from molab.server.routes.experiment import list_experiments
-        from molab.workspace.fs_cached import CachedRemoteFileSystem
-        from molab.workspace.fs_remote import RemoteFileSystem
+        from molab.workspace.fs_cached import CachedRemoteFS
+        from molab.workspace.fs_remote import RemoteFS
         from molab.workspace.scope import open_serve_root
 
         _ws, project, experiment, _run, _beta, _open_at = client_at
@@ -283,8 +283,8 @@ class TestServeScopeHttp:
             cluster = mq.clusters.register(
                 name="batch", scheduler="shell", target_root=str(tmp_path)
             )
-            fs = CachedRemoteFileSystem(
-                RemoteFileSystem(mq, cluster.name, directory), mirror_root=tmp_path / "mirror"
+            fs = CachedRemoteFS(
+                RemoteFS(mq, cluster.name, directory), mirror_root=tmp_path / "mirror"
             )
             root = ScopeRoot(open_serve_root(directory, fs=fs))
             requested = []

@@ -10,7 +10,7 @@ import typer
 from molab.cli._app import app
 from molab.cli._common import rprint
 from molab.cli._target import TargetOption, resolve_workspace_target
-from molab.workspace.fs_remote import RemoteFileSystem
+from molab.workspace.fs_remote import RemoteFS
 from molab.workspace.target import LocalTarget
 
 
@@ -45,7 +45,7 @@ def sync(
         rprint("Local workspace files are already on disk.")
         return
 
-    assert isinstance(transport, RemoteFileSystem)
+    assert isinstance(transport, RemoteFS)
     local_path = Path(source).resolve() if source else Path.cwd()
     remote_path = target.path
 
@@ -93,7 +93,7 @@ def push(
         rprint("[yellow]push is only meaningful for remote targets.[/yellow]")
         return
 
-    assert isinstance(transport, RemoteFileSystem)
+    assert isinstance(transport, RemoteFS)
     local_path = Path(local).expanduser().resolve()
     if not local_path.exists():
         rprint(f"[red]Error:[/red] Local path not found: {local_path}")
@@ -129,9 +129,9 @@ def pull(
         rprint("[yellow]pull is only meaningful for remote targets.[/yellow]")
         return
 
-    assert isinstance(transport, RemoteFileSystem)
+    assert isinstance(transport, RemoteFS)
     remote_path = remote if remote.startswith("/") else f"{target.path.rstrip('/')}/{remote}"
-    assert isinstance(transport, RemoteFileSystem)
+    assert isinstance(transport, RemoteFS)
     local_path = str(Path(local).expanduser().resolve()) if local else str(Path.cwd())
 
     rprint(f"[dim]Downloading {target}:{remote_path} → {local_path}...[/dim]")

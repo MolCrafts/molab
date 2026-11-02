@@ -8,14 +8,16 @@ import os
 import posixpath
 from collections.abc import Iterable, Sequence
 from pathlib import PurePosixPath
-from typing import IO, Any
+from typing import IO, Any, Literal, overload
 
 from molq import Molq, MolqError, Path
+
+from molab.fs.base import select_ls_entries, select_ls_names
 
 from .fs import DirEntry, PathArg, StatResult
 
 
-class RemoteFileSystem:
+class RemoteFS:
     """A destination-bound filesystem; molq owns transport and native operations."""
 
     def __init__(self, client: Molq, cluster_id: str, root: str) -> None:
@@ -59,7 +61,7 @@ class RemoteFileSystem:
     def mkdir(self, path: PathArg, *, parents: bool = True, exist_ok: bool = True) -> None:
         self._path(path).mkdir(parents=parents, exist_ok=exist_ok)
 
-    def scandir(self, path: PathArg, *, with_stat: bool = True) -> list[DirEntry]:
+    def _list_entries(self, path: PathArg, *, with_stat: bool) -> list[DirEntry]:
         entries: list[DirEntry] = []
         after = None
         while True:
@@ -79,8 +81,51 @@ class RemoteFileSystem:
             if after is None:
                 return entries
 
-    def listdir(self, path: PathArg) -> list[str]:
-        return [e.name for e in self.scandir(path, with_stat=False)]
+    def _dot_entry(self, path: PathArg, name: str) -> DirEntry:
+        st = self.stat(path)
+        return DirEntry(
+            name=name, is_dir=st.is_dir, is_file=st.is_file, size=st.size, mtime=st.mtime
+        )
+
+    @overload
+    def ls(
+        self,
+        path: PathArg,
+        *,
+        a: bool = False,
+        A: bool = False,
+        l: Literal[True],  # noqa: E741
+    ) -> list[DirEntry]: ...
+
+    @overload
+    def ls(
+        self,
+        path: PathArg,
+        *,
+        a: bool = False,
+        A: bool = False,
+        l: Literal[False] = False,  # noqa: E741
+    ) -> list[str]: ...
+
+    def ls(
+        self,
+        path: PathArg,
+        *,
+        a: bool = False,
+        A: bool = False,
+        l: bool = False,  # noqa: E741
+    ) -> list[str] | list[DirEntry]:
+        raw = self._list_entries(path, with_stat=l)
+        if not l:
+            return select_ls_names((entry.name for entry in raw), a=a, A=A)
+        dot = dotdot = None
+        if a:
+            dot = self._dot_entry(path, ".")
+            parent = self.dirname(path)
+            if parent in {"", "."}:
+                parent = os.fspath(path)
+            dotdot = self._dot_entry(parent, "..")
+        return select_ls_entries(raw, a=a, A=A, dot=dot, dotdot=dotdot)
 
     def glob(self, path: PathArg, pattern: str) -> Iterable[str]:
         return (p.as_posix() for p in self._path(path).glob(pattern))
@@ -149,10 +194,10 @@ class RemoteFileSystem:
         target.write_bytes(content)
         target.chmod(mode)
 
-    def rename(self, src: PathArg, dst: PathArg) -> None:
+    def mv(self, src: PathArg, dst: PathArg) -> None:
         self._path(src).rename(self._path(dst))
 
-    def remove(self, path: PathArg, *, recursive: bool = False) -> None:
+    def rm(self, path: PathArg, *, recursive: bool = False) -> None:
         target = self._path(path)
         if recursive:
             target.remove(recursive=True)
@@ -161,13 +206,16 @@ class RemoteFileSystem:
         else:
             target.unlink(missing_ok=True)
 
-    def copy(self, src: PathArg, dst: PathArg) -> None:
-        self._path(src).transfer(self._path(dst), "-aL", timeout=3600)
-
-    def copytree(self, src: PathArg, dst: PathArg, *, dirs_exist_ok: bool = False) -> None:
-        if not dirs_exist_ok and self.exists(dst):
-            raise FileExistsError(os.fspath(dst))
-        self._path(src).transfer(self._path(dst), "-aL", timeout=3600)
+    def cp(
+        self, src: PathArg, dst: PathArg, *, recursive: bool = False, dirs_exist_ok: bool = False
+    ) -> None:
+        source = self._path(src)
+        if source.is_dir():
+            if not recursive:
+                raise IsADirectoryError(os.fspath(src))
+            if not dirs_exist_ok and self.exists(dst):
+                raise FileExistsError(os.fspath(dst))
+        source.transfer(self._path(dst), "-aL", timeout=3600)
 
     def stat(self, path: PathArg) -> StatResult:
         s = self._path(path).stat()
@@ -192,7 +240,7 @@ class RemoteFileSystem:
     def chmod(self, path: PathArg, mode: int) -> None:
         self._path(path).chmod(mode)
 
-    def symlink(self, src: PathArg, dst: PathArg) -> None:
+    def ln(self, src: PathArg, dst: PathArg) -> None:
         self._path(dst).symlink_to(self._path(src))
 
     def atomic_write_json(self, path: PathArg, data: object) -> None:

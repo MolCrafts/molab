@@ -15,13 +15,15 @@ from typing import IO, Any
 
 import pytest
 
+from molab.fs import DirEntry
+from molab.fs.base import select_ls_entries, select_ls_names
 from molab.workspace import Workspace
 from molab.workspace.fs import StatResult
 from molab.workspace.fs_cached import (
-    CachedRemoteFileSystem,
+    CachedRemoteFS,
     prefetch_workspace_indices,
 )
-from molab.workspace.fs_local import LocalFileSystem
+from molab.workspace.fs_local import LocalFS
 
 
 class _ScriptedFS:
@@ -113,15 +115,37 @@ class _ScriptedFS:
     def mkdir(self, path: str, *, parents: bool = True, exist_ok: bool = True) -> None:
         self.dirs.add(str(path))
 
-    def listdir(self, path: str) -> list[str]:
-        self.calls["listdir"] += 1
-        prefix = str(path).rstrip("/") + "/"
+    def ls(
+        self,
+        path: str,
+        *,
+        a: bool = False,
+        A: bool = False,
+        l: bool = False,  # noqa: E741
+    ) -> list[str] | list[DirEntry]:
+        self.calls["ls"] += 1
+        key = str(path).rstrip("/")
+        if key in self.files and key not in self.dirs:
+            raise NotADirectoryError(key)
+        prefix = key + "/"
         names: set[str] = set()
-        for k in (*self.files.keys(), *self.dirs):
-            if k.startswith(prefix):
-                tail = k[len(prefix) :]
-                names.add(tail.split("/", 1)[0])
-        return sorted(names)
+        for child in (*self.files, *self.dirs):
+            if child.startswith(prefix):
+                names.add(child[len(prefix) :].split("/", 1)[0])
+        if not l:
+            return select_ls_names(names, a=a, A=A)
+        entries = [
+            DirEntry(
+                name=name,
+                is_dir=any(
+                    item.startswith(prefix + name + "/") for item in (*self.files, *self.dirs)
+                )
+                or (prefix + name) in self.dirs,
+                is_file=(prefix + name) in self.files,
+            )
+            for name in names
+        ]
+        return select_ls_entries(entries, a=a, A=A)
 
     def glob(self, path: str, pattern: str) -> list[str]:
         return []
@@ -162,7 +186,7 @@ class _ScriptedFS:
 def _seed_workspace(fs: _ScriptedFS, root: str) -> None:
     """Build a 2-project workspace; ``beta``'s experiment ``index.md`` read errors.
 
-    Child names are discovered via ``listdir`` over the seeded child dirs —
+    Child names are discovered via ``ls`` over the seeded child dirs —
     each level's ``index.md`` record is the sole truth source.  The
     parent-path ``*.json`` is read only to warm the cache, so no separate
     children-index payload is seeded.
@@ -185,7 +209,7 @@ def scripted(tmp_path: Path):
     fs = _ScriptedFS()
     root = "/scratch/me/workspace"
     _seed_workspace(fs, root)
-    cached = CachedRemoteFileSystem(fs, mirror_root=tmp_path / "mirror", cache_mode="pinned")
+    cached = CachedRemoteFS(fs, mirror_root=tmp_path / "mirror", cache_mode="pinned")
     # Synthesize a Workspace-shaped object with just the attributes prefetch needs.
     ws = SimpleNamespace(root=root, fs=cached)
     return ws, cached, fs
@@ -241,7 +265,7 @@ class TestPrefetchWorkspaceIndices:
         (run_dir / "executions" / attempt).mkdir()
         (run_dir / "executions" / attempt / "execution.json").write_text("{}\n", encoding="utf-8")
         (run_dir / "executions" / "notes.txt").write_text("stray\n", encoding="utf-8")
-        disk = CountingFileSystem(LocalFileSystem())
+        disk = CountingFileSystem(LocalFS())
 
         warnings = prefetch_workspace_indices(SimpleNamespace(root=str(ws.root), fs=disk))
 
@@ -264,7 +288,7 @@ class TestPrefetchWorkspaceIndices:
         fs.files[f"{root}/projects/alpha/researcher/index.md"] = b"# researcher\n"
         fs.dirs.add(f"{root}/projects/alpha/researcher")
 
-        cached = CachedRemoteFileSystem(fs, mirror_root=tmp_path / "mirror", cache_mode="pinned")
+        cached = CachedRemoteFS(fs, mirror_root=tmp_path / "mirror", cache_mode="pinned")
         ws = SimpleNamespace(root=root, fs=cached)
 
         warnings = prefetch_workspace_indices(ws)
@@ -307,7 +331,7 @@ class TestPrefetchWorkspaceIndices:
         fs.dirs.add(f"{root}/projects")
         fs.dirs.add(f"{root}/projects/gamma")
 
-        cached = CachedRemoteFileSystem(fs, mirror_root=tmp_path / "mirror", cache_mode="pinned")
+        cached = CachedRemoteFS(fs, mirror_root=tmp_path / "mirror", cache_mode="pinned")
         ws = SimpleNamespace(root=root, fs=cached)
 
         warnings = prefetch_workspace_indices(ws)
@@ -343,9 +367,7 @@ class TestPrefetchWorkspaceIndices:
         assert (root / "projects" / proj._name / "experiments" / exp._name).is_dir()
 
         # Observe the prefetch through a fresh cached remote FS over the same disk.
-        cached = CachedRemoteFileSystem(
-            LocalFileSystem(), mirror_root=tmp_path / "mirror", cache_mode="pinned"
-        )
+        cached = CachedRemoteFS(LocalFS(), mirror_root=tmp_path / "mirror", cache_mode="pinned")
         nav = SimpleNamespace(root=str(root), fs=cached)
         warnings = prefetch_workspace_indices(nav)
         assert warnings == [], warnings

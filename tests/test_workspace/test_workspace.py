@@ -14,7 +14,7 @@ from uuid import UUID
 
 import pytest
 
-from molab.fs import LocalFileSystem
+from molab.fs import LocalFS
 from molab.workspace import Experiment, GridSpace, Project, Run, Workspace
 from molab.workspace.errors import AmbiguousRefError, RefNotFoundError
 from molab.workspace.refs import MolabRef
@@ -423,7 +423,7 @@ class TestWorkspaceEnclosingRoot:
         project = ws.add_project("alpha")
         experiment = project.add_experiment("sweep")
         run = experiment.add_run(params={"seed": 1})
-        fs = CountingFileSystem(LocalFileSystem())
+        fs = CountingFileSystem(LocalFS())
         fs.reset()
 
         assert Workspace.enclosing_root(run.resolve(), fs=fs) == run.resolve().parents[5]
@@ -434,7 +434,7 @@ class TestWorkspaceEnclosingRoot:
         assert fs.calls["read_range"] == 4
         assert fs.opens() == 0
         assert fs.stats() == 0
-        assert fs.calls["scandir"] == 0
+        assert fs.calls["ls"] == 0
         assert fs.calls["exists"] == 0
 
     def test_an_empty_remote_dirname_probes_the_filesystem_root(self) -> None:
@@ -571,24 +571,24 @@ class TestWorkspaceListHosts:
         assert hosts[0] == ws_b.root
         assert all(not str(host).startswith(str(ws_a.root)) for host in hosts)
 
-    def test_listing_is_scandir_only(self, tmp_path: Path) -> None:
+    def test_listing_is_one_ls_per_container(self, tmp_path: Path) -> None:
         ws = _materialized(tmp_path, "lab")
         for project_name in ("a", "b"):
             project = ws.add_project(project_name)
             experiment = project.add_experiment("e")
             experiment.add_run(params={"seed": 1})
             experiment.add_run(params={"seed": 2})
-        fs = CountingFileSystem(LocalFileSystem())
+        fs = CountingFileSystem(LocalFS())
         fs.reset()
 
         list(Workspace.list_hosts(ws.root, fs=fs))
 
-        assert fs.calls["scandir"] == 5
+        assert fs.calls["ls"] == 5
         assert fs.opens() == 0
         assert fs.probes() == 0
         assert fs.stats() == 0
         assert all(
-            kwargs.get("with_stat") is False
+            kwargs.get("A") is True and kwargs.get("l") is True
             for _name, _path, kwargs in fs.log
-            if _name == "scandir"
+            if _name == "ls"
         )

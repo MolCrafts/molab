@@ -14,7 +14,7 @@ from typing import cast
 import pytest
 
 from molab import frontmatter
-from molab.fs import FileSystem, LocalFileSystem
+from molab.fs import FileSystem, LocalFS
 from tests.support.counting_fs import CountingFileSystem
 
 _TRICKY: dict[str, object] = {
@@ -126,7 +126,7 @@ class TestReadHead:
     def test_reads_the_head_without_the_body(self, tmp_path: Path) -> None:
         path = tmp_path / "index.md"
         path.write_text(frontmatter.dump({"type": "t", "id": "x"}, "x" * 200_000))
-        fs = CountingFileSystem(LocalFileSystem())
+        fs = CountingFileSystem(LocalFS())
 
         assert frontmatter.read_head(cast("FileSystem", fs), path) == {"type": "t", "id": "x"}
         assert fs.opens() == 0
@@ -137,14 +137,14 @@ class TestReadHead:
         rows = [{"name": f"run-{i}", "path": f"runs/run-{i}/index.md"} for i in range(500)]
         path.write_text(frontmatter.dump({"type": "t", "index": {"children": rows}}, "body"))
 
-        head = frontmatter.read_head(LocalFileSystem(), path)
+        head = frontmatter.read_head(LocalFS(), path)
 
         assert head is not None
         index = cast("dict[str, list[object]]", head["index"])
         assert len(index["children"]) == 500
 
     def test_missing_unfenced_and_unterminated_files_have_no_head(self, tmp_path: Path) -> None:
-        fs = LocalFileSystem()
+        fs = LocalFS()
         (tmp_path / "plain.md").write_text("# no head\n")
         (tmp_path / "open.md").write_text("---\ntype: t\n")
 
@@ -156,4 +156,4 @@ class TestReadHead:
         path = tmp_path / "index.md"
         path.write_text("---\nkey: [unterminated\n---\nbody\n")
 
-        assert frontmatter.read_head(LocalFileSystem(), path) == {}
+        assert frontmatter.read_head(LocalFS(), path) == {}

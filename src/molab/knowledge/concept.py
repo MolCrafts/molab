@@ -23,7 +23,7 @@ from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, ClassVar, NamedTuple
 
-from molab.fs import FileSystem, LocalFileSystem, PathArg
+from molab.fs import FileSystem, LocalFS, PathArg
 
 from .edges import (
     DEFAULT_EDGE_ROLE,
@@ -104,7 +104,7 @@ class Concept:
             type: Declared type; defaults to :attr:`DEFAULT_TYPE`.
             fs: The filesystem to read and write through; defaults to the
                 host's own disk (never the local one) in the *name* form, and
-                to :class:`~molab.fs.LocalFileSystem` otherwise.
+                to :class:`~molab.fs.LocalFS` otherwise.
 
         Raises:
             TypeError: If *name* is given and *path* is not a recognised host —
@@ -124,7 +124,7 @@ class Concept:
                 from .naming import as_knowledge_file
 
                 raw = as_knowledge_file(raw)
-            disk = fs if fs is not None else LocalFileSystem()
+            disk = fs if fs is not None else LocalFS()
         self._fs: FileSystem = disk
         self._path = raw
         self._type = type if type is not None else self.DEFAULT_TYPE
@@ -221,7 +221,7 @@ class Concept:
             containers = [self._path]
         for container in containers:
             try:
-                entries = self._fs.scandir(container, with_stat=False)
+                entries = self._fs.ls(container, A=True, l=True)
             except (OSError, ValueError):
                 continue
             files = sorted(
@@ -449,7 +449,7 @@ class Concept:
             raise FileExistsError(f"cannot rename {self._path!r} to {dst!r}: destination exists")
         inbound = self.backlinks(within=within)
         old = self._path
-        self._fs.rename(old, dst)
+        self._fs.mv(old, dst)
         self._path = dst
         _rewrite_inbound(inbound, old, dst)
         _refresh_sections(self._fs, dst)
@@ -498,7 +498,7 @@ class Concept:
             inbound = self.backlinks(within=within)
             old_dir = _link_base(self)
         self._fs.mkdir(self._fs.dirname(dst), parents=True, exist_ok=True)
-        self._fs.rename(old, dst)
+        self._fs.mv(old, dst)
         self._path = dst
         if relink and inbound is not None:
             new_dir = _link_base(self)
@@ -512,7 +512,7 @@ class Concept:
         The host's ``index.knowledges`` section is rebuilt afterwards.
         """
         self._require_document("delete")
-        self._fs.remove(self._path)
+        self._fs.rm(self._path)
         _refresh_sections(self._fs, self._path)
 
     def export(self) -> str:
@@ -1032,8 +1032,8 @@ def remove_legacy_files(
     for name in names:
         path = fs.join(directory, name)
         if fs.is_file(path):
-            fs.remove(path)
-    remaining = fs.listdir(directory)
+            fs.rm(path)
+    remaining = fs.ls(directory, A=True)
     if not remaining:
         Path(os.fspath(directory)).rmdir()
         return []

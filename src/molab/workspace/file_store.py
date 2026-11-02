@@ -19,7 +19,7 @@ from pathlib import Path, PurePosixPath
 from molab.atomicio import atomic_write_bytes, atomic_write_json, atomic_write_text
 
 from .fs import FileSystem
-from .fs_local import LocalFileSystem
+from .fs_local import LocalFS
 
 
 def _unshare(target: Path) -> None:
@@ -57,7 +57,7 @@ class FileStore:
         fs: FileSystem | None = None,
     ) -> None:
         self._root = fspath(root)
-        self._fs: FileSystem = fs if fs is not None else LocalFileSystem()
+        self._fs: FileSystem = fs if fs is not None else LocalFS()
 
     @property
     def root(self) -> str:
@@ -81,7 +81,7 @@ class FileStore:
     def put(self, relpath: str | Path, data: _PutData) -> Path:
         """Atomically write *data* at *relpath*. Returns the destination path."""
         target = self.resolve(relpath)
-        if isinstance(self._fs, LocalFileSystem):
+        if isinstance(self._fs, LocalFS):
             if isinstance(data, (bytes, bytearray)):
                 atomic_write_bytes(target, bytes(data))
             elif isinstance(data, Path):
@@ -121,7 +121,7 @@ class FileStore:
             OSError: *src* is on another filesystem (``EXDEV``); a cross-device
                 move would be a copy, and this verb never copies.
         """
-        if not isinstance(self._fs, LocalFileSystem):
+        if not isinstance(self._fs, LocalFS):
             raise NotImplementedError("FileStore.move_in renames local paths; the disk is remote")
         source = Path(fspath(src))
         if not source.exists() and not source.is_symlink():
@@ -150,7 +150,7 @@ class FileStore:
     def append_many(self, relpath: str | Path, lines: Iterable[str]) -> Path:
         """Append every line in one open — the bulk path, unshared once."""
         target = self.resolve(relpath)
-        if isinstance(self._fs, LocalFileSystem):
+        if isinstance(self._fs, LocalFS):
             target.parent.mkdir(parents=True, exist_ok=True)
             _unshare(target)
             with target.open("a", encoding="utf-8") as fh:
@@ -165,7 +165,7 @@ class FileStore:
         """Append *line* (a trailing newline is added if missing)."""
         target = self.resolve(relpath)
         payload = line if line.endswith("\n") else line + "\n"
-        if isinstance(self._fs, LocalFileSystem):
+        if isinstance(self._fs, LocalFS):
             target.parent.mkdir(parents=True, exist_ok=True)
             _unshare(target)
             with target.open("a", encoding="utf-8") as fh:

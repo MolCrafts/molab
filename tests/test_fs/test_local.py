@@ -1,4 +1,4 @@
-"""``LocalFileSystem`` syscall budgets and type reporting.
+"""``LocalFS`` syscall budgets and type reporting.
 
 The counts matter, not just the answers: every ``stat`` is a round-trip on the
 network mounts molab runs on, so "one stat per stat" is a contract, not an
@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from molab.fs import LocalFileSystem
+from molab.fs import LocalFS
 
 
 class _StatCounter:
@@ -55,7 +55,7 @@ class TestStatSyscallBudget:
         target.write_text("x")
         counter = _StatCounter(monkeypatch)
 
-        result = LocalFileSystem().stat(target)
+        result = LocalFS().stat(target)
 
         assert (counter.stat, counter.path_type_checks) == (1, 0), (
             "stat must not re-probe the type with is_dir/is_file — that is two "
@@ -70,12 +70,12 @@ class TestStatSyscallBudget:
         target.write_text("x")
         counter = _StatCounter(monkeypatch)
 
-        LocalFileSystem().lstat(target)
+        LocalFS().lstat(target)
 
         assert (counter.lstat, counter.path_type_checks) == (1, 0)
 
     def test_stat_reports_directories(self, tmp_path: Path) -> None:
-        result = LocalFileSystem().stat(tmp_path)
+        result = LocalFS().stat(tmp_path)
         assert result.is_dir and not result.is_file
 
 
@@ -86,7 +86,7 @@ class TestLstatSymlinkSemantics:
         link = tmp_path / "link"
         link.symlink_to(target)
 
-        fs = LocalFileSystem()
+        fs = LocalFS()
         assert fs.stat(link).is_file, "stat follows the link"
         # lstat describes the symlink itself, which is neither a dir nor a
         # regular file; the old body called Path.is_file() and followed it.
@@ -94,12 +94,13 @@ class TestLstatSymlinkSemantics:
         assert not fs.lstat(link).is_dir
 
 
-class TestScandirWithStat:
-    def test_with_stat_false_skips_entry_stat_calls(
+class TestLs:
+    def test_names_do_not_stat_each_entry(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         for i in range(5):
             (tmp_path / f"f{i}.txt").write_text("x")
+        (tmp_path / ".hidden").write_text("h")
         seen: list[str] = []
         real = os.DirEntry.stat
 
@@ -109,24 +110,15 @@ class TestScandirWithStat:
 
         monkeypatch.setattr(os.DirEntry, "stat", counted, raising=False)
 
-        entries = LocalFileSystem().scandir(tmp_path, with_stat=False)
+        assert LocalFS().ls(tmp_path) == ["f0.txt", "f1.txt", "f2.txt", "f3.txt", "f4.txt"]
+        assert ".hidden" in LocalFS().ls(tmp_path, A=True)
+        assert seen == [], "plain ls and ls -A must not stat each entry"
 
-        assert len(entries) == 5
-        assert seen == [], "with_stat=False must not stat each entry"
-        assert all(e.size == 0 and e.mtime == 0.0 for e in entries)
-        assert all(e.is_file for e in entries), "type must stay exact without stat"
-
-    def test_with_stat_true_fills_size_and_mtime(self, tmp_path: Path) -> None:
+    def test_long_listing_fills_size_and_mtime(self, tmp_path: Path) -> None:
         (tmp_path / "a.txt").write_text("12345")
-        entry = LocalFileSystem().scandir(tmp_path)[0]
+        entry = LocalFS().ls(tmp_path, l=True)[0]
+        assert entry.name == "a.txt"
         assert entry.size == 5 and entry.mtime > 0
-
-
-class TestListdir:
-    def test_returns_plain_names(self, tmp_path: Path) -> None:
-        (tmp_path / "a.txt").write_text("x")
-        (tmp_path / "d").mkdir()
-        assert sorted(LocalFileSystem().listdir(tmp_path)) == ["a.txt", "d"]
 
 
 class TestReadRangeMemory:
@@ -135,6 +127,6 @@ class TestReadRangeMemory:
         with big.open("wb") as fh:
             fh.truncate(200 * 1024 * 1024)  # Sparse: 200 MB that costs no disk.
 
-        chunk = LocalFileSystem().read_range(big, 100 * 1024 * 1024, 64)
+        chunk = LocalFS().read_range(big, 100 * 1024 * 1024, 64)
 
         assert len(chunk) == 64, "a range read must not scale with the file"

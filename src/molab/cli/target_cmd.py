@@ -142,7 +142,7 @@ def test_cmd(
             if fs.read_text(probe) != "molab target probe\n":
                 raise OSError("File round-trip payload mismatch")
         finally:
-            fs.remove(probe)
+            fs.rm(probe)
     except (KeyError, ValueError, OSError) as exc:
         rprint(f"[red]Target check failed:[/red] {exc}")
         raise typer.Exit(1) from exc

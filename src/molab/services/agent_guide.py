@@ -280,13 +280,13 @@ def sync_agent_files(ws: Workspace) -> AgentSyncResult:
     Raises:
         NotImplementedError: *ws* is not on the local filesystem.
     """
-    from molab.workspace.fs_local import LocalFileSystem
+    from molab.workspace.fs_local import LocalFS
     from molab.workspace.history import GitHistory
     from molab.workspace.naming import AGENT_GUIDE_FILENAME, CLAUDE_GUIDE_FILENAME
 
     from .workspace_check import baseline_path, write_baseline
 
-    if not isinstance(ws.fs, LocalFileSystem):
+    if not isinstance(ws.fs, LocalFS):
         raise NotImplementedError("molab agents sync writes local files; the workspace is remote")
     root = Path(str(ws.resolve()))
     agents = root / AGENT_GUIDE_FILENAME

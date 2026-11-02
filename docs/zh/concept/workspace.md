@@ -53,7 +53,7 @@ workspace_root/
                 └── jobs/
 ```
 
-没有 children-index 文件。`ls` 就是索引；`index:` 块只是 molab 与之保持同步的便利副本。在 `index.md` 记录之前写成的工作区（带 `workspace.json` / `project.json` / `experiment.json` / `run.json` / `meta.json`）会被拒绝（`UnmigratedLayoutError`）。molab 只读 `index.md`。
+没有 children-index 文件。`ls` 就是索引；`index:` 块只是 molab 与之保持同步的便利副本。目录里还留着 `workspace.json` / `project.json` / `experiment.json` / `run.json` / `meta.json`、又没有当前 `index.md` 记录时，读取会拒绝（`UnmigratedLayoutError`）。`molab init` 把这份记录，以及格式不对的 `index:` 块，重写成当前的 `index.md`，并删掉旧的 meta 文件。molab 只读 `index.md`。
 
 内置知识每份文档落成一个 markdown 文件 —— `knowledges/<name>.md`，知识类名写在文件的 `class:` frontmatter 里。`.md` 是落盘形态；`.mdx` 只在读取时被接受。格式归 `molab.knowledge` 所有，它拥有每一份知识文档；工作区只把它当作树里的一个文件，自身从不提及 knowledge。
 

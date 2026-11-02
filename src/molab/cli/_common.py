@@ -51,7 +51,7 @@ def get_workspace(
 ) -> Workspace:
     """Load the workspace at *path* (default: current directory).
 
-    Pass *fs* for remote roots (``RemoteFileSystem``).  Without *fs*, the
+    Pass *fs* for remote roots (``RemoteFS``).  Without *fs*, the
     local filesystem is used — the historical local-only behaviour.
     """
     if fs is not None:

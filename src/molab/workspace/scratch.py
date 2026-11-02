@@ -77,7 +77,7 @@ class ScratchCleanPlan(BaseModel):
 def newest_mtime(fs: FileSystem, path: PathArg) -> float:
     """The newest mtime of *path* and, for a directory, everything under it.
 
-    One ``scandir(with_stat=True)`` per directory. Symlinks are not followed
+    One ``ls(A=True, l=True)`` per directory. Symlinks are not followed
     into, so a link loop cannot hang the walk. A path that vanishes mid-walk
     contributes nothing.
     """
@@ -89,7 +89,7 @@ def newest_mtime(fs: FileSystem, path: PathArg) -> float:
     while pending:
         current = pending.pop()
         try:
-            entries = fs.scandir(current, with_stat=True)
+            entries = fs.ls(current, A=True, l=True)
         except OSError:
             continue
         for entry in entries:
@@ -106,7 +106,7 @@ def scratch_entries(fs: FileSystem, experiment_dir: PathArg) -> list[tuple[str, 
     """
     scratch = fs.join(experiment_dir, SCRATCH_CONTAINER)
     try:
-        entries = fs.scandir(scratch, with_stat=False)
+        entries = fs.ls(scratch, A=True, l=True)
     except OSError:
         return []
     found: list[tuple[str, str, float]] = []
@@ -185,7 +185,7 @@ def apply_scratch_clean(workspace: Workspace, plan: ScratchCleanPlan) -> int:
             continue
         if datetime.fromtimestamp(newest_mtime(fs, path), UTC) >= plan.cutoff:
             continue
-        fs.remove(path, recursive=fs.is_dir(path))
+        fs.rm(path, recursive=fs.is_dir(path))
         removed += 1
         if entry.experiment not in touched:
             touched.append(entry.experiment)

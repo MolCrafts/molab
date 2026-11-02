@@ -67,7 +67,7 @@ class FakeTransport:
     def chmod(self, path: str, mode: int) -> None:
         return None
 
-    def remove(self, path: str, *, recursive: bool = False) -> None:
+    def rm(self, path: str, *, recursive: bool = False) -> None:
         return None
 
     def upload(

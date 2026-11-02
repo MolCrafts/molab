@@ -58,3 +58,28 @@ class TestWorkspacePaths:
         assert not (Path(ws.resolve()) / "stash" / "copy.txt").exists()
         ws.wp.rm("stash", recursive=True)
         assert not (Path(ws.resolve()) / "stash").exists()
+
+    def test_folder_and_wp_ls_use_the_filesystem(self, tmp_path: Path) -> None:
+        from molab.fs import DirEntry, LocalFS
+        from tests.support.counting_fs import CountingFileSystem
+
+        fs = CountingFileSystem(LocalFS())
+        ws = Workspace(tmp_path / "lab", fs=fs)
+        ws.materialize()
+        project = ws.add_project("demo")
+        experiment = project.add_experiment("nve")
+        root = Path(project.resolve())
+        (root / "visible.txt").write_text("v")
+        (root / ".hidden").write_text("h")
+        fs.reset()
+
+        assert "visible.txt" in project.ls()
+        assert ".hidden" not in project.ls()
+        assert ".hidden" in project.ls(A=True)
+        listed = experiment.ls(l=True)
+        assert listed
+        assert all(isinstance(entry, DirEntry) for entry in listed)
+        names = ws.wp.ls("projects/demo")
+        assert "visible.txt" in names
+        assert ".hidden" not in names
+        assert fs.calls["ls"] >= 4

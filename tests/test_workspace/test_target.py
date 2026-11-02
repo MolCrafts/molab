@@ -4,8 +4,8 @@ import pytest
 from molq import MolqError
 
 from molab.workspace import ComputeTarget, Workspace
-from molab.workspace.fs_local import LocalFileSystem
-from molab.workspace.fs_remote import RemoteFileSystem
+from molab.workspace.fs_local import LocalFS
+from molab.workspace.fs_remote import RemoteFS
 from molab.workspace.target import (
     LocalTarget,
     RemoteTarget,
@@ -18,7 +18,7 @@ from molab.workspace.target import (
 
 def test_local_addresses_and_builtin_target(tmp_path):
     target, fs = resolve_target(str(tmp_path))
-    assert isinstance(target, LocalTarget) and isinstance(fs, LocalFileSystem)
+    assert isinstance(target, LocalTarget) and isinstance(fs, LocalFS)
     assert target.path == tmp_path
     ws = Workspace(tmp_path)
     target, fs = resolve_target("@local", ws)
@@ -46,7 +46,7 @@ def test_registered_destination_address_and_workspace_reference(molq_destination
         )
     )
     resolved, fs = resolve_target("@compute", ws)
-    assert resolved.cluster_id == target.cluster_id and isinstance(fs, RemoteFileSystem)
+    assert resolved.cluster_id == target.cluster_id and isinstance(fs, RemoteFS)
     with pytest.raises(MolqError) as error:
         parse_target("unregistered-ssh-host:/tmp")
     assert error.value.kind == "CLUSTER_NOT_FOUND"

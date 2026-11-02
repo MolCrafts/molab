@@ -29,8 +29,12 @@ Every answer is a :class:`Verdict`, whose JSON is the harness contract::
         "reason": str,
         "command": str | null,
         "path": str | null,
+        "root": str | null,
         "issues": [{"rule", "severity", "path", "hint"}, ...],
     }
+
+``root`` is the workspace directory with symlinks resolved, so a hook can
+tell two paths belong to one workspace. It is null outside a workspace.
 
 Machine state (snapshots, the baseline) lives under the workspace's
 ``.molab/``; snapshots older than :data:`SNAPSHOT_TTL` are dropped whenever
@@ -113,6 +117,7 @@ class Verdict(BaseModel):
     reason: str = ""
     command: str | None = None
     path: str | None = None
+    root: str | None = None
     issues: tuple[CheckIssue, ...] = ()
 
 
@@ -253,6 +258,7 @@ def since(ws: Workspace, name: str | None) -> Verdict:
 
 
 def _since(ws: Workspace, name: str | None) -> Verdict:
+    root = _root_id(ws.resolve())
     keys: set[tuple[str, str]] | None = None
     source = ""
     if name is not None:
@@ -262,11 +268,14 @@ def _since(ws: Workspace, name: str | None) -> Verdict:
         keys = read_error_keys(baseline_path(ws))
         source = "the workspace baseline"
     if keys is None:
-        return Verdict(in_workspace=True, allowed=True, reason=_NO_SNAPSHOT)
+        return Verdict(in_workspace=True, allowed=True, reason=_NO_SNAPSHOT, root=root)
     fresh = new_errors(check_workspace(ws), keys)
     if not fresh:
         return Verdict(
-            in_workspace=True, allowed=True, reason=f"no new layout errors since {source}"
+            in_workspace=True,
+            allowed=True,
+            reason=f"no new layout errors since {source}",
+            root=root,
         )
     return Verdict(
         in_workspace=True,
@@ -274,6 +283,7 @@ def _since(ws: Workspace, name: str | None) -> Verdict:
         rule=fresh[0].rule,
         reason=f"{len(fresh)} new layout error(s) since {source}; fix them before finishing.",
         command="molab validate",
+        root=root,
         issues=_issues(fresh),
     )
 
@@ -284,6 +294,14 @@ def _since(ws: Workspace, name: str | None) -> Verdict:
 def _absolute(path: str | os.PathLike[str]) -> str:
     """*path* made absolute against the cwd, lexically: symlinks keep their spelling."""
     return posixpath.normpath(posixpath.join(str(Path.cwd()), os.fspath(path)))
+
+
+def _root_id(path: str | os.PathLike[str]) -> str:
+    """The workspace directory with symlinks resolved, for a hook's identity key."""
+    try:
+        return os.path.realpath(os.fspath(path))
+    except OSError:
+        return os.fspath(path)
 
 
 def _open(directory: str, fs: FileSystem) -> Workspace | None:
@@ -314,12 +332,13 @@ def check_tree(
     Returns:
         The verdict. Outside a workspace, ``in_workspace=False`` and allowed.
     """
-    from molab.workspace.fs_local import LocalFileSystem
+    from molab.workspace.fs_local import LocalFS
 
-    fs = LocalFileSystem()
+    fs = LocalFS()
     ws = _open(_absolute(directory), fs)
     if ws is None:
         return Verdict(in_workspace=False, allowed=True, reason="not inside a molab workspace")
+    root = _root_id(ws.resolve())
     if snapshot is not None:
         report = check_workspace(ws)
         written = _take_snapshot(ws, snapshot, report=report)
@@ -329,6 +348,7 @@ def check_tree(
             allowed=True,
             reason=f"snapshot {snapshot_name(snapshot)!r}: {report.error_count} error(s) recorded",
             path=rel,
+            root=root,
         )
     if since is not None:
         return _since(ws, since)
@@ -341,6 +361,7 @@ def check_tree(
         rule=report.errors[0].rule if report.errors else None,
         reason=report.summary(),
         command=None if report.ok else "molab validate",
+        root=root,
         issues=_issues((*report.errors, *report.warnings)),
     )
 
@@ -386,12 +407,15 @@ class _PathCheck:
         self.exists = exists
         self.content = content
         self.rel = "/".join(parts)
+        self.workspace = _root_id(root)
         self.names: dict[str, str] = {}
 
     # -- answers ----------------------------------------------------------
 
     def allow(self, reason: str) -> Verdict:
-        return Verdict(in_workspace=True, allowed=True, reason=reason, path=self.rel)
+        return Verdict(
+            in_workspace=True, allowed=True, reason=reason, path=self.rel, root=self.workspace
+        )
 
     def deny(self, rule: str, reason: str, command: str) -> Verdict:
         return Verdict(
@@ -401,6 +425,7 @@ class _PathCheck:
             reason=reason,
             command=command,
             path=self.rel,
+            root=self.workspace,
         )
 
     # -- command spellings ------------------------------------------------
@@ -633,11 +658,11 @@ def check_path(
         ValueError: *op* is not ``write`` or ``edit``.
     """
     from molab.workspace import Workspace
-    from molab.workspace.fs_local import LocalFileSystem
+    from molab.workspace.fs_local import LocalFS
 
     if op not in ("write", "edit"):
         raise ValueError(f"op must be 'write' or 'edit', got {op!r}")
-    fs = LocalFileSystem()
+    fs = LocalFS()
     target = _absolute(path)
     root = Workspace.enclosing_root(target, fs=fs)
     if root is None:
@@ -649,6 +674,12 @@ def check_path(
         )
     rel = posixpath.relpath(target, str(root))
     if rel == ".":
-        return Verdict(in_workspace=True, allowed=True, reason="the workspace root", path=".")
+        return Verdict(
+            in_workspace=True,
+            allowed=True,
+            reason="the workspace root",
+            path=".",
+            root=_root_id(root),
+        )
     walk = _PathCheck(fs, str(root), rel.split("/"), fs.exists(target), content)
     return walk.run()

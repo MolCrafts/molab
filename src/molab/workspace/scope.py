@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, cast
 
 from molab.path import Path
 from molab.workspace.fs import FileSystem
-from molab.workspace.fs_local import LocalFileSystem
+from molab.workspace.fs_local import LocalFS
 
 if TYPE_CHECKING:
     from molab.workspace.folder import Folder
@@ -225,8 +225,8 @@ def open_serve_root(path: object, *, fs: FileSystem | None = None) -> Folder:
     from molab.workspace.folder import Folder
     from molab.workspace.workspace import Workspace
 
-    disk = fs if fs is not None else LocalFileSystem()
-    if isinstance(disk, LocalFileSystem):
+    disk = fs if fs is not None else LocalFS()
+    if isinstance(disk, LocalFS):
         directory = disk.resolve(str(path))
     else:
         directory = str(path)

@@ -29,7 +29,7 @@ from molab.workspace.execution_repository import (
     STDIO_FILES,
     ExecutionRepository,
 )
-from molab.workspace.fs_cached import CachedRemoteFileSystem
+from molab.workspace.fs_cached import CachedRemoteFS
 from molab.workspace.fs_tree import list_tree_children, tree_to_run_file_dicts
 from molab.workspace.history import AgentRef
 from molab.workspace.targets import get_target
@@ -191,7 +191,7 @@ def _invalidate_run_nav_cache(workspace, run_or_exp_path: str) -> None:  # noqa:
     ``*.mlp.jsonl`` / run dirs until an explicit refresh.
     """
     fs = getattr(workspace, "fs", None)
-    if isinstance(fs, CachedRemoteFileSystem):
+    if isinstance(fs, CachedRemoteFS):
         fs.invalidate(run_or_exp_path)
 
 
@@ -208,7 +208,7 @@ def list_runs(
     # Dropping only this listing keeps pinned index.md and execution.json;
     # wiping the whole tree made every open re-fetch over SSH.
     fs = getattr(workspace, "fs", None)
-    if isinstance(fs, CachedRemoteFileSystem):
+    if isinstance(fs, CachedRemoteFS):
         fs.invalidate_dir_listing(fs.join(str(experiment.experiment_dir), "runs"))
     runs = experiment.list_runs()
     document = experiment.workflow_document

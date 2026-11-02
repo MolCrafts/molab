@@ -9,8 +9,8 @@ from molq import Molq
 from molab.server.app import create_app
 from molab.server.dependencies import get_workspace
 from molab.workspace import Workspace
-from molab.workspace.fs_cached import CachedRemoteFileSystem
-from molab.workspace.fs_remote import RemoteFileSystem
+from molab.workspace.fs_cached import CachedRemoteFS
+from molab.workspace.fs_remote import RemoteFS
 from molab.workspace.sync_rules import exclusive_transfer
 
 
@@ -23,8 +23,8 @@ def remote_client(tmp_path, monkeypatch):
         cluster = molq.clusters.register(
             name="files", scheduler="shell", target_root=str(tmp_path / "jobs")
         )
-        inner = RemoteFileSystem(molq, cluster.name, str(root))
-        fs = CachedRemoteFileSystem(inner, mirror_root=tmp_path / "mirror")
+        inner = RemoteFS(molq, cluster.name, str(root))
+        fs = CachedRemoteFS(inner, mirror_root=tmp_path / "mirror")
         remote = Workspace(str(root), fs=fs)
         monkeypatch.setattr("molab.workspace.connection.get_client", lambda _registry=None: molq)
         app = create_app(serve_static=False)

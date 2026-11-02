@@ -180,7 +180,7 @@ def plan_execution_prune(
     for rec in selected:
         execution_dir = repo.execution_dir(rec.id)
         try:
-            listing = fs.scandir(execution_dir, with_stat=False)
+            listing = fs.ls(execution_dir, A=True, l=True)
         except FileNotFoundError:
             listing = []
         present = tuple(
@@ -253,7 +253,7 @@ def apply_execution_prune(run: Run, plan: ExecutionPrunePlan) -> int:
         for name in entry.dirs:
             path = fs.join(execution_dir, name)
             if fs.exists(path):
-                fs.remove(path, recursive=True)
+                fs.rm(path, recursive=True)
                 removed_dirs += 1
         repo.mark_pruned(entry.execution_id, entry.dirs)
     return removed_dirs

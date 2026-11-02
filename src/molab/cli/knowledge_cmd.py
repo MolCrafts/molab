@@ -134,11 +134,11 @@ def _workspace_root(path: Path | None) -> Path | None:
     condition here, not an error. A directory inside a workspace is not
     promoted to that workspace: the path itself has to be the root.
     """
-    from molab.fs import LocalFileSystem
+    from molab.fs import LocalFS
     from molab.workspace import Workspace
 
     root = path or Path.cwd()
-    found = Workspace.enclosing_root(root, fs=LocalFileSystem())
+    found = Workspace.enclosing_root(root, fs=LocalFS())
     if found is None or os.path.normpath(str(found)) != os.path.normpath(str(root)):
         return None
     return Path(str(found))
@@ -263,14 +263,14 @@ def knowledge_init(
     the tree root. A directory inside a workspace is refused: knowledge there
     lives on a host. Idempotent: an existing tree is left alone.
     """
-    from molab.fs import LocalFileSystem
+    from molab.fs import LocalFS
     from molab.knowledge import Knowledge, Note
     from molab.knowledge.location import bare_container
     from molab.knowledge.write import write_knowledge
 
     target = directory.expanduser().resolve()
     target.mkdir(parents=True, exist_ok=True)
-    disk = LocalFileSystem()
+    disk = LocalFS()
     try:
         bare_container(target, fs=disk)
     except TypeError as exc:

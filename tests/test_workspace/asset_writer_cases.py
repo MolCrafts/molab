@@ -18,7 +18,7 @@ from molab.workspace.artifact_repository import (
     content_ref,
 )
 from molab.workspace.domain import Asset
-from molab.workspace.fs_local import LocalFileSystem
+from molab.workspace.fs_local import LocalFS
 from molab.workspace.history import GitHistory
 from molab.workspace.schema_version import MOLAB_SCHEMA_VERSION
 from tests.support.legacy_assets import (
@@ -38,9 +38,9 @@ MISSING_ART = "0190ffff-0000-7000-8000-000000000000"
 
 
 class _NonLocal:
-    """A filesystem that delegates every call and is not a LocalFileSystem."""
+    """A filesystem that delegates every call and is not a LocalFS."""
 
-    def __init__(self, inner: LocalFileSystem) -> None:
+    def __init__(self, inner: LocalFS) -> None:
         self._inner = inner
 
     def __getattr__(self, name: str):
@@ -230,7 +230,7 @@ class ImportAssetCases:
     def test_non_local_filesystem_raises_before_write(self, tmp_path: Path) -> None:
         root = tmp_path / "ws"
         root.mkdir()
-        ws = Workspace(root, name="lab", fs=_NonLocal(LocalFileSystem()))
+        ws = Workspace(root, name="lab", fs=_NonLocal(LocalFS()))
         with pytest.raises(NotImplementedError):
             ws.assets.import_asset("greeting", _src(tmp_path))
         assert not (root / "assets").exists()

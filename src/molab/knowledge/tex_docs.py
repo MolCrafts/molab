@@ -61,7 +61,7 @@ def iter_tex_documents(root: PathArg, fs: FileSystem) -> Iterator[str]:
         for container in containers:
             directory = fs.join(str(host), container)
             try:
-                entries = fs.scandir(directory, with_stat=False)
+                entries = fs.ls(directory, A=True, l=True)
             except (OSError, ValueError):
                 continue
             files = sorted(

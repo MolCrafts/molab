@@ -30,7 +30,16 @@ from molab.services.workspace_check import (
 )
 from molab.workspace import Workspace
 
-VERDICT_KEYS = {"in_workspace", "allowed", "rule", "reason", "command", "path", "issues"}
+VERDICT_KEYS = {
+    "in_workspace",
+    "allowed",
+    "rule",
+    "reason",
+    "command",
+    "path",
+    "root",
+    "issues",
+}
 ISSUE_KEYS = {"rule", "severity", "path", "hint"}
 
 
@@ -75,20 +84,27 @@ class TestVerdictShape:
         assert isinstance(refused["reason"], str)
         assert isinstance(refused["command"], str)
         assert refused["path"] == "projects/alpha/experiments/sweep/analysis.py"
+        assert refused["root"] == os.path.realpath(lab["root"])
         assert refused["issues"] == []
 
         (lab["exp"] / "stray.txt").write_text("x")
         tree = check_tree(lab["root"]).model_dump(mode="json")
         assert set(tree) == VERDICT_KEYS
         assert tree["allowed"] is False
+        assert tree["root"] == os.path.realpath(lab["root"])
         assert tree["issues"]
         assert all(set(issue) == ISSUE_KEYS for issue in tree["issues"])
 
     def test_outside_a_workspace_everything_is_allowed(self, tmp_path: Path) -> None:
         verdict = _verdict(tmp_path / "anything.json")
-        assert (verdict.in_workspace, verdict.allowed, verdict.rule) == (False, True, None)
+        assert (verdict.in_workspace, verdict.allowed, verdict.rule, verdict.root) == (
+            False,
+            True,
+            None,
+            None,
+        )
         tree = check_tree(tmp_path)
-        assert (tree.in_workspace, tree.allowed) == (False, True)
+        assert (tree.in_workspace, tree.allowed, tree.root) == (False, True, None)
 
 
 class TestCheckPathDeny:

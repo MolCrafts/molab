@@ -1,7 +1,7 @@
 """Single filesystem tree walk — local and remote share one implementation.
 
 Routes and UI discovery must not re-implement ``Path.iterdir`` vs
-``workspace.fs.listdir``. Every recursive listing goes through
+``FileSystem.ls``. Every recursive listing goes through
 :func:`list_tree_children`.
 """
 
@@ -100,7 +100,7 @@ def list_tree_children(
         visited.add(real)
 
         try:
-            names = fs.listdir(node_path)
+            names = fs.ls(node_path, A=True)
         except OSError:
             names = []
 
@@ -122,7 +122,7 @@ def list_tree_children(
         return []
 
     try:
-        top_names = fs.listdir(root_norm)
+        top_names = fs.ls(root_norm, A=True)
     except OSError:
         return []
 

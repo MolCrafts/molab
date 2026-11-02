@@ -4,10 +4,10 @@ Used by the syscall-budget tests to lock statements such as "listing 1000
 runs opens at most 1000 files and never calls ``exists``". It delegates every
 attribute to the wrapped filesystem via ``__getattr__`` (the pattern from
 ``tests/test_agent/test_remote_session.py``), so it works with
-``LocalFileSystem``, the in-memory fakes and ``CachedRemoteFileSystem`` alike.
+``LocalFS``, the in-memory fakes and ``CachedRemoteFS`` alike.
 
-It is not a ``LocalFileSystem`` subclass, but it *reports* the wrapped
-class through ``__class__`` so every ``isinstance(fs, LocalFileSystem)`` gate
+It is not a ``LocalFS`` subclass, but it *reports* the wrapped
+class through ``__class__`` so every ``isinstance(fs, LocalFS)`` gate
 (``Workspace`` root resolution, the workspace-events remote-root guard,
 ``Folder.move_to``) sees through the wrapper — otherwise a counting workspace
 would silently be treated as remote and the measured paths would differ from

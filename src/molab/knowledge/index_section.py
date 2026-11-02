@@ -27,7 +27,7 @@ import logging
 from typing import TYPE_CHECKING
 
 from molab._typing import JSONValue
-from molab.fs import FileSystem, LocalFileSystem, PathArg
+from molab.fs import FileSystem, LocalFS, PathArg
 
 from .naming import KNOWLEDGE_CONTAINER, is_knowledge_file
 
@@ -68,7 +68,7 @@ def section_rows(host_dir: PathArg, *, fs: FileSystem) -> list[dict[str, JSONVal
 
     container = fs.join(host_dir, KNOWLEDGE_CONTAINER)
     try:
-        entries = fs.scandir(container, with_stat=False)
+        entries = fs.ls(container, A=True, l=True)
     except OSError:
         return []
     rows: list[dict[str, JSONValue]] = []
@@ -145,7 +145,7 @@ def refresh_section(
     """
     from .location import host_of
 
-    disk = fs if fs is not None else LocalFileSystem()
+    disk = fs if fs is not None else LocalFS()
     try:
         path = str(document_path)
         if disk.basename(disk.dirname(path)) != KNOWLEDGE_CONTAINER:

@@ -553,10 +553,10 @@ class TestRunResults:
         assert run.results(eid) == {"x": 1}
 
     def test_reads_through_workspace_fs(self, tmp_path: Path) -> None:
-        from molab.workspace.fs_local import LocalFileSystem
+        from molab.workspace.fs_local import LocalFS
         from tests.support.counting_fs import CountingFileSystem
 
-        fs = CountingFileSystem(LocalFileSystem())
+        fs = CountingFileSystem(LocalFS())
         ws = Workspace(tmp_path / "ws", name="lab", fs=fs)
         run = ws.add_project("p").add_experiment("e").add_run(params={"x": 1})
         with run.start() as ctx:

@@ -12,7 +12,7 @@ import time
 
 import pytest
 
-from molab.fs import LocalFileSystem, StatMemo
+from molab.fs import LocalFS, StatMemo
 from tests.support.counting_fs import CountingFileSystem
 
 
@@ -25,7 +25,7 @@ def _write(path: str, text: str, *, mtime: float | None = None) -> None:
 
 @pytest.fixture
 def fs() -> CountingFileSystem:
-    return CountingFileSystem(LocalFileSystem())
+    return CountingFileSystem(LocalFS())
 
 
 class TestStatMemo:

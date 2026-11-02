@@ -2,7 +2,7 @@
 remote workspaces.
 
 Wraps an inner :class:`~molab.workspace.fs.FileSystem` (only meaningful
-for :class:`~molab.workspace.fs_remote.RemoteFileSystem`) and maintains
+for :class:`~molab.workspace.fs_remote.RemoteFS`) and maintains
 a server-side mirror under ``<mirror_root>/files/...``.
 
 **Pin-until-refresh policy** (default): once a path is in the local
@@ -16,7 +16,7 @@ and mtime are unchanged.
 
 Index files are not special-cased — they are just paths.  The eager
 prefetch helper :func:`prefetch_workspace_indices` walks the workspace by
-``listdir`` plus each level's ``index.md`` record and every
+``ls -A`` plus each level's ``index.md`` record and every
 ``execution.json`` through :meth:`read_text`, so the navigation tree is
 populated as a side-effect of caching.  Those records are the sole truth
 source.
@@ -41,14 +41,15 @@ from collections.abc import Callable, Generator, Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import IO, TYPE_CHECKING, Any
+from typing import IO, TYPE_CHECKING, Any, Literal, overload
 
 from molab.atomicio import atomic_write_bytes, atomic_write_json
+from molab.fs.base import select_ls_entries, select_ls_names
 
 from .entity_record import ENTITY_FILENAME
 from .execution_dirs import execution_dir_names
 from .fs import DirEntry, FileSystem, PathArg, StatResult
-from .fs_local import LocalFileSystem
+from .fs_local import LocalFS
 from .naming import EXPERIMENT_CONTAINER, PROJECT_CONTAINER, RUN_CONTAINER
 
 if TYPE_CHECKING:  # pragma: no cover - typing only
@@ -56,7 +57,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing only
 
 __all__ = [
     "INDEX_FILE_NAMES",
-    "CachedRemoteFileSystem",
+    "CachedRemoteFS",
     "IndexProgress",
     "PrefetchWarning",
     "prefetch_workspace_indices",
@@ -100,11 +101,11 @@ class _Entry:
 class _DirEntry:
     """One cached directory listing.
 
-    ``entries`` is the typed listing from ``scandir``. ``None`` means this pin
-    only has names (a ``listdir``, or a sidecar written before entries were
-    stored) and ``scandir`` must not invent types it cannot see. ``with_stat``
-    is true when ``size`` and ``mtime`` were fetched; a later ``scandir`` that
-    asks for them refetches a names-only pin.
+    ``entries`` is the typed listing from ``ls -l``. ``None`` means this pin
+    only has names (``ls`` without ``-l``, or a sidecar written before entries
+    were stored) and a long listing must not invent types it cannot see.
+    ``with_stat`` is true when ``size`` and ``mtime`` were fetched; ``ls -l``
+    refetches a names-only pin.
     """
 
     names: tuple[str, ...]
@@ -201,7 +202,7 @@ class IndexProgress:
         }
 
 
-class CachedRemoteFileSystem:
+class CachedRemoteFS:
     """Lazy-download mirror over any :class:`FileSystem`.
 
     **Default (``cache_mode="pinned"``)**: pin-until-refresh.  Any path present
@@ -236,7 +237,7 @@ class CachedRemoteFileSystem:
         if cache_mode not in {"pinned", "strict"}:
             raise ValueError("cache_mode must be pinned or strict")
         self._inner = inner
-        self._local = LocalFileSystem()
+        self._local = LocalFS()
         self._mirror_root = Path(mirror_root)
         self._files_root = self._mirror_root / "files"
         self._cache_mode = cache_mode
@@ -393,7 +394,7 @@ class CachedRemoteFileSystem:
 
     @contextlib.contextmanager
     def force_fetch(self) -> Generator[None]:
-        """Bypass pin for this thread — every read/listdir hits the remote.
+        """Bypass pin for this thread — every read and ``ls`` hits the remote.
 
         Used by active refreshes. Concurrent UI threads keep serving the
         pinned mirror (their ``_tls.force_fetch`` stays false).
@@ -612,44 +613,81 @@ class CachedRemoteFileSystem:
         with self._mutation(key, recursive=False):
             self._inner.mkdir(key, parents=parents, exist_ok=exist_ok)
 
-    def listdir(self, path: PathArg) -> list[str]:
-        with self._lock:
-            key = self.resolve(path)
-            cached = self._pinned_dir(key)
-            if cached is not None:
-                return list(cached.names)
-        with self._lock:
-            generation = self._generation
-        self._ensure_connected()
-        names = self._inner.listdir(key)
-        with self._lock:
-            if generation != self._generation:
-                return names
-            self._dir_index[key] = _DirEntry(names=tuple(names), fetched_at=time.time())
-            self._persist_sidecar()
-        return names
+    @overload
+    def ls(
+        self,
+        path: PathArg,
+        *,
+        a: bool = False,
+        A: bool = False,
+        l: Literal[True],  # noqa: E741
+    ) -> list[DirEntry]: ...
 
-    def scandir(self, path: PathArg, *, with_stat: bool = True) -> list[DirEntry]:
-        """List a directory with per-entry type and metadata in one round-trip.
+    @overload
+    def ls(
+        self,
+        path: PathArg,
+        *,
+        a: bool = False,
+        A: bool = False,
+        l: Literal[False] = False,  # noqa: E741
+    ) -> list[str]: ...
 
-        A pinned listing is served locally. The pin keeps each child's type, so
-        a later ``scandir`` does not open another remote page for a directory
-        that has not been invalidated. ``with_stat=True`` refetches a pin that
-        was taken without metadata.
+    def ls(
+        self,
+        path: PathArg,
+        *,
+        a: bool = False,
+        A: bool = False,
+        l: bool = False,  # noqa: E741
+    ) -> list[str] | list[DirEntry]:
+        """``ls`` against the pin, then the inner filesystem.
+
+        The pin stores every real child (``ls -A``), and the flags are applied
+        on the way out. A names-only pin answers ``l=False``. ``l=True``
+        refetches a pin that has no size or mtime. ``.`` and ``..`` are not pinned.
         """
         key = self.resolve(path)
         with self._lock:
             cached = self._pinned_dir(key)
-            if cached is not None:
-                hit = self._listing_from_pin(key, cached, with_stat=with_stat)
+            if cached is not None and not l:
+                return select_ls_names(cached.names, a=a, A=A)
+            if cached is not None and l:
+                hit = self._listing_from_pin(key, cached, with_stat=True)
                 if hit is not None:
-                    return hit
+                    return self._finish_long(key, hit, a=a, A=A)
         with self._lock:
             generation = self._generation
         self._ensure_connected()
-        entries = self._inner.scandir(key, with_stat=with_stat)
-        self._remember_listing(key, entries, generation=generation, with_stat=with_stat)
-        return entries
+        if l:
+            entries = self._inner.ls(key, A=True, l=True)
+            self._remember_listing(key, entries, generation=generation, with_stat=True)
+            return self._finish_long(key, entries, a=a, A=A)
+        names = self._inner.ls(key, A=True)
+        with self._lock:
+            if generation != self._generation:
+                return select_ls_names(names, a=a, A=A)
+            self._dir_index[key] = _DirEntry(names=tuple(names), fetched_at=time.time())
+            self._persist_sidecar()
+        return select_ls_names(names, a=a, A=A)
+
+    def _finish_long(
+        self, key: str, entries: list[DirEntry], *, a: bool, A: bool
+    ) -> list[DirEntry]:
+        dot = dotdot = None
+        if a:
+            dot = self._dot_from_stat(key, ".")
+            parent = self._inner.dirname(key)
+            if parent in {"", "."}:
+                parent = key
+            dotdot = self._dot_from_stat(parent, "..")
+        return select_ls_entries(entries, a=a, A=A, dot=dot, dotdot=dotdot)
+
+    def _dot_from_stat(self, path: str, name: str) -> DirEntry:
+        st = self.stat(path)
+        return DirEntry(
+            name=name, is_dir=st.is_dir, is_file=st.is_file, size=st.size, mtime=st.mtime
+        )
 
     def pinned_kind(self, path: PathArg) -> str | None:
         """``file``, ``dir``, or ``missing`` when the pin can answer, else ``None``."""
@@ -658,7 +696,7 @@ class CachedRemoteFileSystem:
         return None if entry is None else entry.kind
 
     def pinned_listing(self, path: PathArg) -> list[DirEntry] | None:
-        """The last ``scandir`` pin for *path*, or ``None`` when it has not been listed.
+        """The last long-listing pin for *path*, or ``None`` when it has not been listed.
 
         An empty list is a directory that was listed and had no children.
         """
@@ -899,7 +937,7 @@ class CachedRemoteFileSystem:
             if callable(upload):
                 upload(local, remote, recursive=recursive, exclude=exclude)
             else:
-                self._inner.copy(local, remote)
+                self._inner.cp(local, remote)
 
     def open(self, path: PathArg, mode: str = "r", encoding: str = "utf-8") -> IO[Any]:
         if mode not in {"r", "rt", "rb"}:
@@ -924,26 +962,23 @@ class CachedRemoteFileSystem:
 
     # ── Mutations ───────────────────────────────────────────────────────
 
-    def rename(self, src: PathArg, dst: PathArg) -> None:
+    def mv(self, src: PathArg, dst: PathArg) -> None:
         src_key = self.resolve(src)
         dst_key = self.resolve(dst)
         with self._mutation(src_key, dst_key, recursive=True):
-            self._inner.rename(src_key, dst_key)
+            self._inner.mv(src_key, dst_key)
 
-    def remove(self, path: PathArg, *, recursive: bool = False) -> None:
+    def rm(self, path: PathArg, *, recursive: bool = False) -> None:
         key = self.resolve(path)
         with self._mutation(key, recursive=recursive):
-            self._inner.remove(key, recursive=recursive)
+            self._inner.rm(key, recursive=recursive)
 
-    def copy(self, src: PathArg, dst: PathArg) -> None:
+    def cp(
+        self, src: PathArg, dst: PathArg, *, recursive: bool = False, dirs_exist_ok: bool = False
+    ) -> None:
         dst_key = self.resolve(dst)
-        with self._mutation(dst_key, recursive=True):
-            self._inner.copy(src, dst_key)
-
-    def copytree(self, src: PathArg, dst: PathArg, *, dirs_exist_ok: bool = False) -> None:
-        dst_key = self.resolve(dst)
-        with self._mutation(dst_key, recursive=True):
-            self._inner.copytree(src, dst_key, dirs_exist_ok=dirs_exist_ok)
+        with self._mutation(dst_key, recursive=recursive):
+            self._inner.cp(src, dst_key, recursive=recursive, dirs_exist_ok=dirs_exist_ok)
 
     # ── Metadata ────────────────────────────────────────────────────────
 
@@ -983,10 +1018,10 @@ class CachedRemoteFileSystem:
 
     # ── Symlinks ────────────────────────────────────────────────────────
 
-    def symlink(self, src: PathArg, dst: PathArg) -> None:
+    def ln(self, src: PathArg, dst: PathArg) -> None:
         dst_key = self.resolve(dst)
         with self._mutation(dst_key, recursive=True):
-            self._inner.symlink(src, dst_key)
+            self._inner.ln(src, dst_key)
 
     # ── Atomic I/O ──────────────────────────────────────────────────────
 
@@ -1005,7 +1040,7 @@ class CachedRemoteFileSystem:
     def invalidate_dir_listing(self, path: PathArg) -> None:
         """Drop only the pinned *directory names* for *path* (not file bytes).
 
-        Used by the workspace files API so an expand/list always re-listdir
+        Used by the workspace files API so an expand/list always re-lists
         from remote. Pin-until-refresh is fine for file contents; empty dir
         pins are not — a folder listed before children existed stays "Empty"
         in the UI until this pin is cleared.
@@ -1208,7 +1243,7 @@ class CachedRemoteFileSystem:
                     if recursive and self._local.is_dir(mirror_path):
                         shutil.rmtree(mirror_path)
                     else:
-                        self._local.remove(mirror_path)
+                        self._local.rm(mirror_path)
             self._persist_sidecar()
             return dropped
 
@@ -1339,7 +1374,7 @@ def _parallel_map[T, R](
     items: Sequence[T],
     *,
     max_workers: int,
-    force_fetch_fs: CachedRemoteFileSystem | None = None,
+    force_fetch_fs: CachedRemoteFS | None = None,
     prepare: Callable[[Sequence[T]], None] | None = None,
 ) -> list[R]:
     """Map *fn* over *items*, parallel when ``max_workers > 1`` and |items| > 1.
@@ -1391,8 +1426,8 @@ def prefetch_workspace_indices(
        ``execution.json``.
 
     Concurrency is per level (default 8 workers; ``MOLAB_PREFETCH_WORKERS``
-    or *max_workers*).  When the FS is a :class:`CachedRemoteFileSystem`,
-    call under :meth:`~CachedRemoteFileSystem.force_fetch` so an **active**
+    or *max_workers*).  When the FS is a :class:`CachedRemoteFS`,
+    call under :meth:`~CachedRemoteFS.force_fetch` so an **active**
     refresh re-pulls remote bytes instead of replaying the pin.
 
     *on_file* is invoked once per successfully force-fetched file path
@@ -1411,8 +1446,8 @@ def prefetch_workspace_indices(
     workers = _prefetch_workers(max_workers)
     # Propagate active-refresh force_fetch into worker threads (TLS is not
     # inherited by ThreadPoolExecutor workers).
-    force_fs: CachedRemoteFileSystem | None = None
-    if isinstance(fs, CachedRemoteFileSystem) and getattr(fs._tls, "force_fetch", False):
+    force_fs: CachedRemoteFS | None = None
+    if isinstance(fs, CachedRemoteFS) and getattr(fs._tls, "force_fetch", False):
         force_fs = fs
 
     batch = (
@@ -1433,7 +1468,7 @@ def prefetch_workspace_indices(
         _safe_read(fs, fs.join(root, ENTITY_FILENAME), state, on_file=on_file)
         projects_dir = fs.join(root, PROJECT_CONTAINER)
         try:
-            project_names = list(fs.listdir(projects_dir))
+            project_names = list(fs.ls(projects_dir, A=True))
         except FileNotFoundError:
             return list(state.warnings)
         except Exception as exc:
@@ -1470,12 +1505,12 @@ def prefetch_workspace_indices(
             if n
         ]
 
-        # ── L1b: listdir experiments/ per project (parallel) ────────────
+        # ── L1b: ls experiments/ per project (parallel) ─────────────────
         def _list_experiments(project_name: str) -> list[tuple[str, str]]:
             project_dir = fs.join(projects_dir, project_name)
             experiments_dir = fs.join(project_dir, EXPERIMENT_CONTAINER)
             try:
-                names = fs.listdir(experiments_dir)
+                names = fs.ls(experiments_dir, A=True)
             except FileNotFoundError:
                 return []
             except Exception as exc:
@@ -1525,13 +1560,13 @@ def prefetch_workspace_indices(
             if p
         ]
 
-        # ── L2b: listdir runs/ per experiment (parallel) ────────────────
+        # ── L2b: ls runs/ per experiment (parallel) ─────────────────────
         def _list_runs(pair: tuple[str, str]) -> list[tuple[str, str, str]]:
             project_name, exp_name = pair
             experiment_dir = fs.join(projects_dir, project_name, EXPERIMENT_CONTAINER, exp_name)
             runs_dir = fs.join(experiment_dir, RUN_CONTAINER)
             try:
-                names = fs.listdir(runs_dir)
+                names = fs.ls(runs_dir, A=True)
             except FileNotFoundError:
                 return []
             except Exception as exc:
@@ -1561,7 +1596,7 @@ def prefetch_workspace_indices(
             if _safe_read(fs, meta, state, on_file=on_file) is not None:
                 executions = fs.join(run_dir, "executions")
                 try:
-                    entries = fs.scandir(executions, with_stat=False)
+                    entries = fs.ls(executions, A=True, l=True)
                 except FileNotFoundError:
                     return []
                 except Exception as exc:
@@ -1666,7 +1701,7 @@ def _prefetch_meta_mounts(
     if skip:
         skip_names |= set(skip)
     try:
-        names = list(fs.listdir(parent_dir))
+        names = list(fs.ls(parent_dir, A=True))
     except FileNotFoundError:
         return
     except Exception as exc:

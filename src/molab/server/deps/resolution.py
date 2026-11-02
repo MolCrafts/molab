@@ -41,10 +41,10 @@ def _ensure_remote_ready(workspace: ScopeRoot) -> None:
     :class:`ConnectionError` / transport errors — callers convert to
     :class:`RemoteWorkspaceUnreachableError` (soft JSON, no stack spam).
     """
-    from molab.workspace.fs_cached import CachedRemoteFileSystem
+    from molab.workspace.fs_cached import CachedRemoteFS
 
     fs = getattr(workspace, "fs", None)
-    if not isinstance(fs, CachedRemoteFileSystem):
+    if not isinstance(fs, CachedRemoteFS):
         return
     # Async force-refresh on link — progress is polled by the status strip.
     from molab.workspace import Workspace as WorkspaceEntity

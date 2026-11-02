@@ -10,7 +10,7 @@ import logging
 from types import MappingProxyType
 from typing import TYPE_CHECKING, ClassVar
 
-from molab.fs import FileSystem, LocalFileSystem, PathArg
+from molab.fs import FileSystem, LocalFS, PathArg
 
 from .concept import Concept
 from .knowledge_item import SourceRef
@@ -246,7 +246,7 @@ def _open_document(path: PathArg, *, fs: FileSystem | None = None) -> Concept:
     from .frontmatter import split_frontmatter
     from .naming import as_knowledge_file, is_knowledge_file
 
-    disk = fs if fs is not None else LocalFileSystem()
+    disk = fs if fs is not None else LocalFS()
     raw = str(path)
     if not is_knowledge_file(raw):
         md = as_knowledge_file(raw)
@@ -280,7 +280,7 @@ def _write_document(path: PathArg, text: str, *, fs: FileSystem | None = None) -
     if not isinstance(class_name, str) or class_name == "":
         raise ValueError("knowledge document requires a frontmatter class")
     klass = _product(class_name)
-    disk = fs if fs is not None else LocalFileSystem()
+    disk = fs if fs is not None else LocalFS()
     if issubclass(klass, _SourcedKnowledge):
         handle = klass.__new__(klass)
         Concept.__init__(handle, str(path), fs=disk)

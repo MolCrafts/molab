@@ -36,13 +36,13 @@ from molab.workspace.domain import (
     ExecutionStatus,
 )
 from molab.workspace.execution_context import ExecutionContext
-from molab.workspace.fs_local import LocalFileSystem
+from molab.workspace.fs_local import LocalFS
 from tests.support.counting_fs import CountingFileSystem
 
 
 class TestExecutionContextHeartbeat:
     def test_alive_goes_through_workspace_fs(self, tmp_path: Path) -> None:
-        fs = CountingFileSystem(LocalFileSystem())
+        fs = CountingFileSystem(LocalFS())
         ws = Workspace(tmp_path, fs=fs)
         experiment = ws.add_project("p").add_experiment("e", params={})
         run = experiment.add_run(params={"seed": 1})
@@ -51,16 +51,16 @@ class TestExecutionContextHeartbeat:
         with run.start() as ctx:
             execution_id = ctx.id
             assert fs.for_basename("alive", "touch") == 1
-            assert fs.for_basename("alive", "remove") == 0
+            assert fs.for_basename("alive", "rm") == 0
 
-        assert fs.for_basename("alive", "remove") == 1
+        assert fs.for_basename("alive", "rm") == 1
         assert execution_id == "e01"
         assert not (Path(str(run.run_dir)) / "executions" / "e01" / "alive").exists()
 
     def test_failed_alive_remove_still_seals(self, tmp_path: Path) -> None:
         # A remote workspace can fail to remove ``alive``; that is a stale
         # heartbeat file, never a reason to skip the seal.
-        fs = _AliveRemoveFails(LocalFileSystem())
+        fs = _AliveRemoveFails(LocalFS())
         ws = Workspace(tmp_path, fs=fs)
         experiment = ws.add_project("p").add_experiment("e", params={})
         run = experiment.add_run(params={"seed": 1})
@@ -68,14 +68,14 @@ class TestExecutionContextHeartbeat:
         with run.start() as ctx:
             execution_id = ctx.id
 
-        assert fs.for_basename("alive", "remove") == 1
+        assert fs.for_basename("alive", "rm") == 1
         assert execution_id == "e01"
         [execution] = run.executions
         assert execution.status is ExecutionStatus.SUCCEEDED
         assert execution.sealed
 
     def test_failed_alive_remove_does_not_mask_body_error(self, tmp_path: Path) -> None:
-        fs = _AliveRemoveFails(LocalFileSystem())
+        fs = _AliveRemoveFails(LocalFS())
         ws = Workspace(tmp_path, fs=fs)
         experiment = ws.add_project("p").add_experiment("e", params={})
         run = experiment.add_run(params={"seed": 1})
@@ -434,14 +434,14 @@ class TestProfileConfigHash:
 
 
 class _AliveRemoveFails(CountingFileSystem):
-    """Counting wrapper whose ``remove`` of the ``alive`` file raises."""
+    """Counting wrapper whose ``rm`` of the ``alive`` file raises."""
 
-    def remove(self, path: object, *args: object, **kwargs: object) -> None:
+    def rm(self, path: object, *args: object, **kwargs: object) -> None:
         if str(path).rsplit("/", 1)[-1] == "alive":
-            self.calls["remove"] += 1
-            self.by_basename[("remove", "alive")] += 1
+            self.calls["rm"] += 1
+            self.by_basename[("rm", "alive")] += 1
             raise OSError("remote remove failed")
-        self._wrap("remove", self._inner.remove)(path, *args, **kwargs)
+        self._wrap("rm", self._inner.rm)(path, *args, **kwargs)
 
 
 class TestExecutionContextEmitArtifact:

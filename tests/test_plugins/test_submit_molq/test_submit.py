@@ -168,7 +168,7 @@ class RecordingTransport:
     def chmod(self, path: str, mode: int) -> None:
         del path, mode
 
-    def remove(self, path: str, *, recursive: bool = False) -> None:
+    def rm(self, path: str, *, recursive: bool = False) -> None:
         del path, recursive
 
     def upload(

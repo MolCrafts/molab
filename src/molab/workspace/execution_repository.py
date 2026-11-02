@@ -80,7 +80,7 @@ from .domain import (
 )
 from .execution_dirs import ARTIFACTS, execution_dir_names, prunable_dirs
 from .fs import FileSystem, PathArg
-from .fs_local import LocalFileSystem
+from .fs_local import LocalFS
 from .history import AgentRef, EntityRef, GitHistory, Relation
 from .naming import execution_slug
 from .run_heartbeat import ALIVE_NAME
@@ -103,11 +103,11 @@ def prime_execution_records(fs: FileSystem, run_dirs: Sequence[str]) -> None:
     to list, because a legacy attempt name would not appear in this probe.
 
     Local filesystems are unchanged: the pin this fills belongs to
-    :class:`~molab.workspace.fs_cached.CachedRemoteFileSystem`.
+    :class:`~molab.workspace.fs_cached.CachedRemoteFS`.
     """
-    from .fs_cached import CachedRemoteFileSystem
+    from .fs_cached import CachedRemoteFS
 
-    if not isinstance(fs, CachedRemoteFileSystem) or not run_dirs:
+    if not isinstance(fs, CachedRemoteFS) or not run_dirs:
         return
     paths: list[str] = []
     for run_dir in run_dirs:
@@ -121,9 +121,9 @@ def prime_execution_records(fs: FileSystem, run_dirs: Sequence[str]) -> None:
 
 def _probe_span(fs: object, exec_dir: str) -> int:
     """How many ``eNN`` files to re-read: one past the last pinned attempt."""
-    from .fs_cached import CachedRemoteFileSystem
+    from .fs_cached import CachedRemoteFS
 
-    if not isinstance(fs, CachedRemoteFileSystem):
+    if not isinstance(fs, CachedRemoteFS):
         return _ATTEMPT_PROBE
     last = 0
     for seq in range(1, _ATTEMPT_PROBE + 1):
@@ -344,7 +344,7 @@ class ExecutionRepository:
         self.run_dir = str(run_dir)
         self.run_id = run_id
         self.project_id = project_id
-        self.fs = fs or LocalFileSystem()
+        self.fs = fs or LocalFS()
         self.history = history or GitHistory(self.workspace_root)
         self.artifacts = artifacts or ArtifactRepository(
             self.workspace_root, fs=self.fs, history=self.history
@@ -530,7 +530,7 @@ class ExecutionRepository:
         """
         if status not in TERMINAL_EXECUTION_STATUSES:
             raise ValueError(f"cannot adopt an attempt in non-terminal status {status.value!r}")
-        if not isinstance(self.fs, LocalFileSystem):
+        if not isinstance(self.fs, LocalFS):
             raise NotImplementedError("adopting an attempt moves local bytes; the disk is remote")
         planned = [(Path(str(src)), _adopted_destination(dest)) for src, dest in moves]
         for item in artifacts:
@@ -681,9 +681,9 @@ class ExecutionRepository:
         return state
 
     def list(self) -> builtins.list[Execution]:
-        from .fs_cached import CachedRemoteFileSystem
+        from .fs_cached import CachedRemoteFS
 
-        if isinstance(self.fs, CachedRemoteFileSystem):
+        if isinstance(self.fs, CachedRemoteFS):
             pinned = self._pinned_attempt_paths()
             if pinned is not None:
                 return self._load_states(pinned)
@@ -691,7 +691,7 @@ class ExecutionRepository:
             return []
         paths = [
             self.fs.join(self.executions_dir, entry.name, "execution.json")
-            for entry in self.fs.scandir(self.executions_dir, with_stat=False)
+            for entry in self.fs.ls(self.executions_dir, A=True, l=True)
             if entry.is_dir
         ]
         return self._load_states(paths)
@@ -706,10 +706,10 @@ class ExecutionRepository:
         attempt name, so that case is listed once and then served from the
         directory pin.
         """
-        from .fs_cached import CachedRemoteFileSystem
+        from .fs_cached import CachedRemoteFS
 
         fs = self.fs
-        if not isinstance(fs, CachedRemoteFileSystem):
+        if not isinstance(fs, CachedRemoteFS):
             return None
         exec_dir = self.executions_dir
         kind = fs.pinned_kind(exec_dir)
@@ -735,10 +735,10 @@ class ExecutionRepository:
         return self._paths_from_listing()
 
     def _paths_from_listing(self) -> builtins.list[str] | None:
-        from .fs_cached import CachedRemoteFileSystem
+        from .fs_cached import CachedRemoteFS
 
         fs = self.fs
-        if not isinstance(fs, CachedRemoteFileSystem):
+        if not isinstance(fs, CachedRemoteFS):
             return None
         listing = fs.pinned_listing(self.executions_dir)
         if listing is None:
@@ -750,9 +750,9 @@ class ExecutionRepository:
         ]
 
     def _load_states(self, paths: builtins.list[str]) -> builtins.list[Execution]:
-        from .fs_cached import CachedRemoteFileSystem
+        from .fs_cached import CachedRemoteFS
 
-        if isinstance(self.fs, CachedRemoteFileSystem) and paths:
+        if isinstance(self.fs, CachedRemoteFS) and paths:
             self.fs.read_many(paths)
         states = [
             Execution.model_validate(read_versioned_json(path, fs=self.fs))

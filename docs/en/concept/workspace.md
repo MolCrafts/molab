@@ -74,7 +74,7 @@ workspace_root/
                 └── jobs/
 ```
 
-There is no children-index file. `ls` is the index; the `index:` block is a convenience copy that molab keeps in step with it. A workspace written before the `index.md` records (with `workspace.json` / `project.json` / `experiment.json` / `run.json` / `meta.json`) is refused (`UnmigratedLayoutError`). molab reads `index.md`.
+There is no children-index file. `ls` is the index; the `index:` block is a convenience copy that molab keeps in step with it. Readers refuse a directory that still has `workspace.json` / `project.json` / `experiment.json` / `run.json` / `meta.json` and no current `index.md` record (`UnmigratedLayoutError`). `molab init` rewrites that record, and a wrong `index:` block, into the current `index.md` and deletes the old meta file. molab reads `index.md`.
 
 Built-in knowledge lands as one markdown file per document — `knowledges/<name>.md`, with the Knowledge class named in the file's `class:` frontmatter. `.md` is the form that is written; `.mdx` is accepted on read only. The format belongs to `molab.knowledge`, which owns every knowledge document; the workspace treats it as a file in its tree and never names knowledge itself.
 

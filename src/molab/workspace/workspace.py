@@ -35,7 +35,7 @@ from .folder import (
     register_entity_class,
 )
 from .fs import FileSystem, PathArg
-from .fs_local import LocalFileSystem
+from .fs_local import LocalFS
 from .models import FolderMetadata, WorkspaceMetadata
 from .naming import EXPERIMENT_CONTAINER, PROJECT_CONTAINER, RUN_CONTAINER
 from .project import Project
@@ -119,13 +119,13 @@ class Workspace(Folder):
     def __init__(
         self, root: PathArg | None = None, name: str | None = None, *, fs: FileSystem | None = None
     ) -> None:
-        self._disk_backend = fs or LocalFileSystem()
+        self._disk_backend = fs or LocalFS()
 
         # Root precedence (local only). An explicit ``-ws`` override is STRONG
         # and wins over a script-passed root; an inferred override is WEAK and
         # only fills in when ``root`` is omitted. With no override, the passed
         # root is used as-is; with neither root nor override we fail fast.
-        local = isinstance(self.fs, LocalFileSystem)
+        local = isinstance(self.fs, LocalFS)
         override = _cli_root_override if local else None
         if override is not None and (root is None or override[1]):
             resolved_raw = str(override[0])
@@ -202,7 +202,7 @@ class Workspace(Folder):
         per candidate, up to and including the hit. A candidate that has an
         ``index.md`` gets its head read (``read_range`` only, up to the closing
         fence) to see whether its ``type`` is ``workspace.root``; there is no
-        ``open`` / ``read_text`` / ``scandir`` / ``stat`` / ``exists``.
+        ``open`` / ``read_text`` / ``ls`` / ``stat`` / ``exists``.
 
         Args:
             path: A file or directory, in the caller's spelling.
@@ -211,7 +211,7 @@ class Workspace(Folder):
         Returns:
             The enclosing root, keeping the caller's spelling, or ``None``.
         """
-        disk = fs if fs is not None else LocalFileSystem()
+        disk = fs if fs is not None else LocalFS()
         current = str(path)
         while True:
             if (
@@ -250,7 +250,7 @@ class Workspace(Folder):
 
         Callers pass a root from :meth:`enclosing_root` or a Workspace's
         ``root``. This method does not check that *root* is a workspace. It
-        calls ``scandir(with_stat=False)`` only and reads no record. A
+        calls ``ls(A=True, l=True)`` once per container and reads no record. A
         missing container is skipped. Names starting with ``.`` are skipped.
         Siblings are sorted by name. A run directory is yielded; nothing
         inside it is listed. Every yielded path is joined from *root*, so the
@@ -264,13 +264,13 @@ class Workspace(Folder):
         Yields:
             ``root``, then project, experiment and run directories in pre-order.
         """
-        disk = fs if fs is not None else LocalFileSystem()
+        disk = fs if fs is not None else LocalFS()
         root_s = str(root)
         yield Path(root_s)
 
         def _child_dirs(container: str) -> list[str]:
             try:
-                entries = disk.scandir(container, with_stat=False)
+                entries = disk.ls(container, A=True, l=True)
             except OSError:
                 return []
             return sorted(
@@ -323,7 +323,7 @@ class Workspace(Folder):
         """Write the root ``index.md`` record once. A lost race reloads the winner's id."""
         from molab.atomicio import file_lock
 
-        backend = "flock" if isinstance(self.fs, LocalFileSystem) else "none"
+        backend = "flock" if isinstance(self.fs, LocalFS) else "none"
         with file_lock(self._create_lock_path(), backend=backend):
             existing = self._read_entity_metadata()
             if existing is not None:
@@ -488,7 +488,7 @@ class Workspace(Folder):
         """
         from molab.atomicio import file_lock
 
-        backend = "flock" if isinstance(self.fs, LocalFileSystem) else "none"
+        backend = "flock" if isinstance(self.fs, LocalFS) else "none"
         with file_lock(self._create_lock_path(), backend=backend):
             existing = self._read_entity_metadata()
             if existing is not None:
@@ -605,7 +605,7 @@ class Workspace(Folder):
         from .folder import WORKSPACE_EXPERIMENT_KIND, WORKSPACE_RUN_KIND, concept_from_dir
 
         disk = self.fs
-        local = isinstance(disk, LocalFileSystem)
+        local = isinstance(disk, LocalFS)
         root = posixpath.normpath(str(self.resolve()))
         target = posixpath.normpath(disk.resolve(str(path)) if local else str(path))
         if target == root:
@@ -646,10 +646,8 @@ class Workspace(Folder):
             FileNotFoundError: *root* has no workspace ``index.md`` record.
             UnmigratedLayoutError: *root* still holds a legacy JSON record.
         """
-        _fs = fs or LocalFileSystem()
-        root_str = (
-            str(_LocalPath(root).resolve()) if isinstance(_fs, LocalFileSystem) else str(root)
-        )
+        _fs = fs or LocalFS()
+        root_str = str(_LocalPath(root).resolve()) if isinstance(_fs, LocalFS) else str(root)
         record = read_record(_fs, root_str)
         if record is None or record.type != WORKSPACE_ROOT_KIND:
             raise FileNotFoundError(

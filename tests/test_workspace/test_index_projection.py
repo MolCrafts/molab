@@ -18,10 +18,10 @@ from molab.workspace import Experiment, Project, Run, Workspace
 from molab.workspace.domain import ExecutionStatus
 from molab.workspace.entity_record import RESERVED_INDEX_KEYS, read_record
 from molab.workspace.folder import Folder
-from molab.workspace.fs_local import LocalFileSystem
+from molab.workspace.fs_local import LocalFS
 from molab.workspace.index_projection import project_index, sync_index
 
-_FS = LocalFileSystem()
+_FS = LocalFS()
 
 
 def _reserved(folder: Folder) -> dict:

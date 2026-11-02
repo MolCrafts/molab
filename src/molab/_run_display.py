@@ -63,10 +63,10 @@ def read_run_record(run_dir: Path | PurePath) -> dict[str, JSONValue]:
     (display-tolerant); read/parse failures are logged at debug level.
     """
     from molab.workspace.entity_record import read_record
-    from molab.workspace.fs_local import LocalFileSystem
+    from molab.workspace.fs_local import LocalFS
 
     try:
-        record = read_record(LocalFileSystem(), str(Path(run_dir)))
+        record = read_record(LocalFS(), str(Path(run_dir)))
     except Exception:
         logger.debug(f"read_run_record: failed to read {run_dir}", exc_info=True)
         return {}

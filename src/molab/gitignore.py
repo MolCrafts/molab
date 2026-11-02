@@ -34,7 +34,7 @@ from pathlib import PurePosixPath
 from pathspec import GitIgnoreSpec
 
 from molab.fs.base import FileSystem, PathArg
-from molab.fs.local import LocalFileSystem
+from molab.fs.local import LocalFS
 
 __all__ = [
     "DEFAULT_IGNORE_LINES",
@@ -78,7 +78,7 @@ class GitIgnoreMatcher:
 
     def __init__(self, root: PathArg, *, fs: FileSystem | None = None) -> None:
         self._root = os.fspath(root)
-        self._fs: FileSystem = fs if fs is not None else LocalFileSystem()
+        self._fs: FileSystem = fs if fs is not None else LocalFS()
         # (base_rel, spec) — base_rel is '' for root-level rules; nested
         # patterns apply relative to their owning directory.
         self._layers: list[tuple[str, GitIgnoreSpec]] = [

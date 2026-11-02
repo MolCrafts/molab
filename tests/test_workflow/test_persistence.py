@@ -17,7 +17,7 @@ from pathlib import Path
 import pytest
 
 import molab.workflow
-from molab.fs import LocalFileSystem
+from molab.fs import LocalFS
 from molab.workflow import (
     Next,
     Workflow,
@@ -284,7 +284,7 @@ class TestMarkWorkflowFinished:
 
 class TestReadJournal:
     def test_reads_through_workspace_fs(self, tmp_path: Path) -> None:
-        fs = CountingFileSystem(LocalFileSystem())
+        fs = CountingFileSystem(LocalFS())
         run = _run(tmp_path, fs=fs)
         compiled = _ab()
         _execute(run, compiled)

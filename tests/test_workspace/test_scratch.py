@@ -87,9 +87,9 @@ class TestScratchClean:
         (deep / "g").write_text("fresh")
         os.utime(tmp_path / "a", (time.time() - 30 * 86400,) * 2)
 
-        from molab.workspace.fs_local import LocalFileSystem
+        from molab.workspace.fs_local import LocalFS
 
-        assert newest_mtime(LocalFileSystem(), str(tmp_path / "a")) > time.time() - 60
+        assert newest_mtime(LocalFS(), str(tmp_path / "a")) > time.time() - 60
 
     def test_plan_selects_old_top_level_entries_and_writes_nothing(self, tmp_path: Path) -> None:
         ws, exp = _experiment(tmp_path)
